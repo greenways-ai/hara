@@ -128,6 +128,64 @@ public class HirArtifactTest {
   }
 
   @Test
+  public void goldenBytesLockThePortableFormat() {
+    // One form per opcode (0-17). Any change to the byte layout, the opcode
+    // numbering, or the canonical collection ordering must update this golden
+    // value and spec/hara/hir.md together.
+    Object[] forms =
+        new Object[] {
+          null,
+          false,
+          true,
+          42L,
+          2.5d,
+          new java.math.BigInteger("123456789012345678901234567890"),
+          new java.math.BigDecimal("3.14159"),
+          "hárà",
+          'x',
+          hara.lang.data.Symbol.create("my.ns", "my-sym"),
+          hara.lang.data.Keyword.create("kw"),
+          hara.lang.data.List.Standard.from(null, new Object[] {1L, "a"}),
+          hara.lang.data.Vector.Standard.from(null, new Object[] {1L, "a"}),
+          hara.lang.data.Map.Standard.from(null, new Object[] {2L, "b", 1L, "a"}),
+          hara.lang.data.Set.Standard.from(null, new Object[] {2L, 1L}),
+          hara.lang.data.OrderedMap.Standard.from(null, new Object[] {2L, "b", 1L, "a"}),
+          hara.lang.data.OrderedSet.Standard.from(null, new Object[] {2L, 1L}),
+          java.util.regex.Pattern.compile("a+b")
+        };
+    byte[] expected =
+        hexBytes(
+            "48495200000100010000014b7640e14591506ea3c5e004467edc15b2ea8bb319"
+                + "3b48a4596d99c242ca5531a000000001740000000174e3b0c44298fc1c149afb"
+                + "f4c8996fb92427ae41e4649b934ca495991b7852b85500000012000102030000"
+                + "00000000002a044004000000000000050000001e313233343536373839303132"
+                + "3334353637383930313233343536373839300600000007332e31343135390700"
+                + "00000668c3a172c3a008000000780901000000056d792e6e73000000066d792d"
+                + "73796d000a00000000026b77000b000000020300000000000000010700000001"
+                + "61000c00000002030000000000000001070000000161000d0000000203000000"
+                + "0000000001070000000161030000000000000002070000000162000e00000002"
+                + "030000000000000001030000000000000002000f000000020300000000000000"
+                + "0207000000016203000000000000000107000000016100100000000203000000"
+                + "0000000002030000000000000001001100000003612b62");
+    byte[] encoded = HirArtifact.encode("t", "t", new byte[0], forms);
+    assertArrayEquals(expected, encoded);
+
+    // The golden artifact must also remain decodable.
+    HirArtifact.Module module = HirArtifact.decode(expected);
+    assertEquals("t", module.namespace);
+    assertEquals(18, module.forms.length);
+    assertEquals("a+b", ((java.util.regex.Pattern) module.forms[17]).pattern());
+  }
+
+  private static byte[] hexBytes(String hex) {
+    byte[] bytes = new byte[hex.length() / 2];
+    for (int i = 0; i < bytes.length; i++) {
+      bytes[i] = (byte) Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+    }
+    return bytes;
+  }
+
+  @Test
   public void foundationArtifactIsDeterministicAndRoundTripsForms() throws Exception {
     Path source = Path.of("lib/src/std/lib/foundation.hal");
     byte[] sourceBytes = Files.readAllBytes(source);

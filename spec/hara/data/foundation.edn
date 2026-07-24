@@ -67,7 +67,14 @@
 
   :macros
   #{->
-    ->>}
+    ->>
+    if-let
+    when-let
+    if-not
+    cond->
+    cond->>
+    code-line
+    code-column}
 
   :reader-literals
   {:regex
@@ -76,10 +83,31 @@
 
   :builtin-symbols
   {:numeric
-   #{+ - * / mod = not= < <= > >=}
+   #{+ - * / mod = not= < <= > >= compare}
 
    :invocation
-   #{apply}
+   #{apply
+     gensym}
+
+   :state
+   #{atom
+     atom?
+     deref
+     reset!
+     swap!
+     compare-and-set!
+     add-watch
+     remove-watch
+     get-watches}
+
+   :predicates
+   #{nil? boolean? true? false?
+     number? integer? decimal?
+     string? char? keyword? symbol?
+     collection? sequential? list? vector? tuple? queue? map? set? map-entry?
+     array? object? bytes? promise? coroutine? atom?
+     callable? iterable? iterator? counted? indexed? associative?
+     derefable? watchable?}
 
    :evaluation
    #{eval
@@ -284,7 +312,12 @@
     val
     keys
     vals
-    juxt}}
+    juxt
+    T F NIL U Z Y
+    min max sort sort-by
+    butlast drop-last take-last split-at split-with partition-by take-nth
+    into distinct distinct? zipmap merge-with group-by frequencies
+    partial}}
 
  :protocols
  {:IFind
@@ -297,7 +330,60 @@
    "has? distinguishes a missing key from a key whose associated value is nil."}}
 
  :semantics
- {:map
+ {:combinators
+  {T :constant-true
+   F :constant-false
+   NIL :constant-nil
+   U :self-application
+   Z :eager-fixed-point
+   Y {:kind :classical-fixed-point
+      :warning :diverges-under-ordinary-eager-use}}
+
+  :comparison
+  {:compare {:arglists [[left right]]
+             :result #{-1 0 1}
+             :orderable #{numbers strings characters keywords symbols booleans sequential-values}
+             :sequential :lexicographic
+             :unrelated-values :error}
+   :sort {:stable true
+          :input :ordered-collection
+          :output :preserve-input-origin
+          :unordered-input :error}
+   :sort-by {:stable true :key-evaluations :implementation-defined}}
+
+  :atoms
+  {:operations #{atom atom? deref reset! swap! compare-and-set!
+                 add-watch remove-watch get-watches}
+   :watch-callback [key reference old-value new-value]
+   :validation :before-commit
+   :notification :exactly-once-after-successful-commit
+   :failed-cas-notifies false
+   :swap-function-may-repeat true
+   :watch-error {:state :remains-committed :propagation :caller}}
+
+  :macro-context
+  {:gensym {:arglists [[] [prefix]] :returns :unique-unqualified-symbol}
+   :syntax-quote-auto-gensym {:suffix "#" :scope :one-expansion}
+   :&form :complete-invocation-with-source-metadata
+   :&env {:representation :immutable-hara-map
+          :keys #{:ns :locals :aliases :file :line :column}
+          :host-objects false}
+   :source-location-macros #{code-line code-column}}
+
+  :collection-extensions
+  {:origin-preserving #{butlast drop-last take-last take-nth distinct sort sort-by}
+   :pair-results #{split-at split-with}
+   :map-results #{zipmap merge-with group-by frequencies}
+   :into :destination-governs-origin}
+
+  :errors-current
+  {:runtime-errors :hara-exception
+   :explicit-throw :thrown-value-wrapper
+   :ex-info :legacy-java-ex-info
+   :ordinary-runtime-errors-catchable false
+   :host-class-leak ex-class}
+
+  :map
   {:direct
    {:arglists [[function source]
                [function source & sources]]
@@ -519,7 +605,7 @@
    :required "Read regex literals into an immutable Hara regex value containing source, flags, and a portable parsed representation."}
 
   {:id :regex/hir
-   :current "HirArtifact has no opcode for a portable regex value."
+   :current "HirArtifact encodes flagless JVM regex values portably as a pattern string (opcode 17, spec/hara/hir.md) and rejects flagged patterns. There is still no Hara regex value carrying source, flags, and dialect."
    :required "Add deterministic HIR encoding and decoding for the Hara regex source, flags, and dialect/version."}
 
   {:id :regex/jvm-adapter
@@ -544,7 +630,11 @@
 
   {:id :conformance/regex-parity
    :current "No shared JVM/Polis regex conformance matrix exists."
-   :required "Add cases for literals, escaping, captures, no-match, repeated matches, flags, replacement templates, Unicode, unsupported constructs, and target parity."}]
+   :required "Add cases for literals, escaping, captures, no-match, repeated matches, flags, replacement templates, Unicode, unsupported constructs, and target parity."}
+
+  {:id :errors/unified-value
+   :current "Runtime HaraException failures are not caught by Hara try; explicit throw and ex-info use separate wrappers, and ex-class exposes JVM class names."
+   :required "Normalize reader, analyzer, runtime, promise, coroutine, file, native, and explicit failures into one host-neutral Hara error value and catch mechanism."}]
 
  :implementation-notes
  ["The current JVM implementation does not yet conform to this draft."
@@ -555,4 +645,5 @@
   "Iterator mechanics may remain JVM-backed, but iter-* names are not public language symbols."
   "Direct map is eager and origin-preserving; the unary map transform is lazy."
   "mapv is intentionally absent rather than retained as a compatibility alias."
+  "HIR plain maps and sets encode in the canonical unsigned lexicographic order of their encoded bytes; ordered maps and sets keep insertion order (spec/hara/hir.md)."
   "Filesystem loading, namespace reflection, and general host interop are outside this boundary."]}

@@ -42,3 +42,66 @@ On the 2026-07-25 direct-lowerer development run (30 in-process samples), source
 bytes. With a reused Polyglot engine, HIR loading had a 1.228 ms median (3.168x versus the
 cold-engine source lane). These are directional development figures, not cross-machine release
 claims.
+
+## Byte format (version 1)
+
+All integers are big-endian. A `string` is a 4-byte length followed by that many UTF-8 bytes.
+A `count` is a 4-byte signed integer limited to 1,000,000 items. A `nullable-string` is a
+boolean flag followed by a `string` when the flag is set.
+
+Envelope:
+
+| Field | Type |
+|-------|------|
+| magic | `48 49 52 00` ("HIR\0") |
+| format version | u16, currently `1` |
+| capability flags | u16, `1` = executable foundation |
+| payload length | u32 |
+| payload SHA-256 | 32 bytes |
+| payload | payload-length bytes |
+
+Payload:
+
+| Field | Type |
+|-------|------|
+| namespace | string |
+| resource | string |
+| source SHA-256 | 32 bytes |
+| form count | count |
+| forms | form-count values |
+
+Every value is prefixed with a one-byte opcode:
+
+| Opcode | Value | Payload |
+|--------|-------|---------|
+| 0 | nil | — |
+| 1 | false | — |
+| 2 | true | — |
+| 3 | long | 8 bytes |
+| 4 | double | 8 bytes IEEE 754 |
+| 5 | big-integer | decimal string |
+| 6 | big-decimal | decimal string |
+| 7 | string | string |
+| 8 | character | u32 code point |
+| 9 | symbol | nullable-string namespace, string name, metadata |
+| 10 | keyword | nullable-string namespace, string name, metadata |
+| 11 | list | count, items, metadata |
+| 12 | vector | count, items, metadata |
+| 13 | map | count, key/value pairs, metadata |
+| 14 | set | count, items, metadata |
+| 15 | ordered map | count, key/value pairs in insertion order, metadata |
+| 16 | ordered set | count, items in insertion order, metadata |
+| 17 | regex | pattern string |
+
+Metadata is a boolean flag; when set, a single map value follows.
+
+Canonical ordering: plain map and set entries are written in the unsigned lexicographic order
+of their encoded key or element bytes, so the artifact never depends on host collection
+iteration order. Ordered maps and sets keep insertion order because order is semantic there.
+Decoders must accept entries in any order.
+
+Regex values encode only the pattern string, which any host can recompile. Patterns created
+with host-specific flags cannot be represented; encoders must reject them.
+
+`HirArtifactTest.goldenBytesLockThePortableFormat` locks this layout with a golden byte
+vector covering every opcode.
