@@ -1,0 +1,91 @@
+<svg class="hara-scene-svg" viewBox="0 0 1440 810" preserveAspectRatio="xMidYMid slice" role="presentation">
+  <defs>
+    <linearGradient id="hara-sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#020408"/>
+      <stop offset=".6" stop-color="#04060c"/>
+      <stop offset="1" stop-color="#071019"/>
+    </linearGradient>
+    <linearGradient id="hara-horizon" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#41f5e4" stop-opacity="0"/>
+      <stop offset=".5" stop-color="#41f5e4" stop-opacity=".32"/>
+      <stop offset="1" stop-color="#41f5e4" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="hara-disc-glow" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#41f5e4" stop-opacity=".12"/>
+      <stop offset=".6" stop-color="#41f5e4" stop-opacity=".04"/>
+      <stop offset="1" stop-color="#41f5e4" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <g class="hara-scene__layer" style="--hara-depth:9">
+    <rect x="-90" y="-90" width="1620" height="990" fill="url(#hara-sky)"/>
+  </g>
+
+  <g class="hara-scene__layer" style="--hara-depth:8">
+    <g class="hara-twinkle-a"><circle cx="120" cy="90" r="1.1" fill="#dfe9ff" opacity=".55"/><circle cx="340" cy="180" r=".8" fill="#41f5e4" opacity=".6"/><circle cx="590" cy="70" r="1" fill="#b8c8e8" opacity=".5"/><circle cx="830" cy="150" r=".9" fill="#dfe9ff" opacity=".65"/><circle cx="1180" cy="80" r="1.2" fill="#dfe9ff" opacity=".5"/><circle cx="1380" cy="210" r=".8" fill="#41f5e4" opacity=".55"/><circle cx="60" cy="300" r=".9" fill="#b8c8e8" opacity=".45"/><circle cx="1420" cy="330" r="1" fill="#dfe9ff" opacity=".5"/></g>
+    <g class="hara-twinkle-b"><circle cx="230" cy="260" r="1" fill="#dfe9ff" opacity=".6"/><circle cx="470" cy="120" r=".8" fill="#dfe9ff" opacity=".5"/><circle cx="700" cy="230" r="1.1" fill="#41f5e4" opacity=".5"/><circle cx="960" cy="90" r=".9" fill="#b8c8e8" opacity=".55"/><circle cx="1260" cy="160" r="1" fill="#dfe9ff" opacity=".6"/><circle cx="150" cy="380" r=".8" fill="#41f5e4" opacity=".4"/><circle cx="1330" cy="60" r="1.1" fill="#dfe9ff" opacity=".45"/></g>
+    <g class="hara-twinkle-c"><circle cx="410" cy="330" r=".9" fill="#b8c8e8" opacity=".5"/><circle cx="640" cy="40" r="1" fill="#dfe9ff" opacity=".55"/><circle cx="890" cy="300" r=".8" fill="#dfe9ff" opacity=".45"/><circle cx="1100" cy="240" r="1.2" fill="#41f5e4" opacity=".5"/><circle cx="90" cy="170" r=".9" fill="#dfe9ff" opacity=".5"/><circle cx="1240" cy="360" r=".8" fill="#b8c8e8" opacity=".4"/></g>
+  </g>
+
+  <g class="hara-scene__layer" style="--hara-depth:7">
+    <circle cx="1000" cy="250" r="310" fill="url(#hara-disc-glow)"/>
+    <g class="hara-disc">
+      <circle cx="1000" cy="250" r="205" fill="none" stroke="#41f5e4" stroke-opacity=".3" stroke-width="1.5" stroke-dasharray="64 26 8 26"/>
+      <circle cx="1000" cy="250" r="172" fill="none" stroke="#41f5e4" stroke-opacity=".12" stroke-width="1"/>
+    </g>
+    <rect x="-90" y="426" width="1620" height="68" fill="url(#hara-horizon)"/>
+    <line x1="-90" y1="460" x2="1530" y2="460" stroke="#41f5e4" stroke-opacity=".5" stroke-width="1.2"/>
+  </g>
+
+  <g class="hara-scene__layer" style="--hara-depth:6">
+    <path class="hara-trail hara-trail--cyan" d="M-90 442 H1530" fill="none" stroke="#41f5e4" stroke-width="2"/>
+    <path class="hara-trail hara-trail--violet" d="M-90 452 H1530" fill="none" stroke="#9c7bff" stroke-width="1.4"/>
+    <path class="hara-trail hara-trail--magenta" d="M1530 474 H-90" fill="none" stroke="#ff2e88" stroke-width="2"/>
+  </g>
+
+  <g class="hara-scene__layer" style="--hara-depth:3">
+    <rect x="-90" y="460" width="1620" height="440" fill="#03060c" opacity=".85"/>
+    <g stroke="#41f5e4" stroke-width="1">
+      <line x1="288" y1="461" x2="-2400" y2="810" opacity=".09"/>
+      <line x1="324" y1="461" x2="-2140" y2="810" opacity=".09"/>
+      <line x1="360" y1="461" x2="-1880" y2="810" opacity=".09"/>
+      <line x1="396" y1="461" x2="-1620" y2="810" opacity=".09"/>
+      <line x1="432" y1="461" x2="-1360" y2="810" opacity=".22"/>
+      <line x1="468" y1="461" x2="-1100" y2="810" opacity=".09"/>
+      <line x1="504" y1="461" x2="-840" y2="810" opacity=".09"/>
+      <line x1="540" y1="461" x2="-580" y2="810" opacity=".09"/>
+      <line x1="576" y1="461" x2="-320" y2="810" opacity=".22"/>
+      <line x1="612" y1="461" x2="-60" y2="810" opacity=".09"/>
+      <line x1="648" y1="461" x2="200" y2="810" opacity=".09"/>
+      <line x1="684" y1="461" x2="460" y2="810" opacity=".09"/>
+      <line x1="720" y1="461" x2="720" y2="810" opacity=".22"/>
+      <line x1="756" y1="461" x2="980" y2="810" opacity=".09"/>
+      <line x1="792" y1="461" x2="1240" y2="810" opacity=".09"/>
+      <line x1="828" y1="461" x2="1500" y2="810" opacity=".09"/>
+      <line x1="864" y1="461" x2="1760" y2="810" opacity=".22"/>
+      <line x1="900" y1="461" x2="2020" y2="810" opacity=".09"/>
+      <line x1="936" y1="461" x2="2280" y2="810" opacity=".09"/>
+      <line x1="972" y1="461" x2="2540" y2="810" opacity=".09"/>
+      <line x1="1008" y1="461" x2="2800" y2="810" opacity=".22"/>
+      <line x1="1044" y1="461" x2="3060" y2="810" opacity=".09"/>
+      <line x1="1080" y1="461" x2="3320" y2="810" opacity=".09"/>
+      <line x1="1116" y1="461" x2="3580" y2="810" opacity=".09"/>
+      <line x1="1152" y1="461" x2="3840" y2="810" opacity=".09"/>
+    </g>
+    <g stroke="#41f5e4" stroke-width="1">
+      <line x1="-90" y1="470" x2="1530" y2="470" opacity=".07"/>
+      <line x1="-90" y1="484" x2="1530" y2="484" opacity=".08"/>
+      <line x1="-90" y1="502" x2="1530" y2="502" opacity=".10"/>
+      <line x1="-90" y1="526" x2="1530" y2="526" opacity=".12"/>
+      <line x1="-90" y1="556" x2="1530" y2="556" opacity=".15"/>
+      <line x1="-90" y1="594" x2="1530" y2="594" opacity=".18"/>
+      <line x1="-90" y1="642" x2="1530" y2="642" opacity=".22"/>
+      <line x1="-90" y1="702" x2="1530" y2="702" opacity=".26"/>
+    </g>
+  </g>
+
+  <g class="hara-scene__layer" style="--hara-depth:1">
+    <line x1="-90" y1="776" x2="1530" y2="776" stroke="#41f5e4" stroke-opacity=".35" stroke-width="1.5"/>
+    <path class="hara-trail hara-trail--cyan hara-trail--slow" d="M-90 776 H1530" fill="none" stroke="#8ffff2" stroke-width="2.5"/>
+  </g>
+</svg>

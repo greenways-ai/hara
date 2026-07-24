@@ -531,6 +531,30 @@ body {
   50% { opacity: .25; }
 }
 
+/* identity disc — slow rotation */
+.hara-disc {
+  transform-origin: 1000px 250px;
+  animation: hara-spin 90s linear infinite;
+}
+
+@keyframes hara-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* light-cycle trails */
+.hara-trail {
+  stroke-dasharray: 180 1700;
+  animation: hara-trail-run 8s linear infinite;
+}
+
+.hara-trail--violet { animation-duration: 12s; animation-delay: -4s; opacity: .7; }
+.hara-trail--magenta { animation-duration: 10s; animation-delay: -2.5s; animation-direction: reverse; }
+.hara-trail--slow { animation-duration: 16s; }
+
+@keyframes hara-trail-run {
+  to { stroke-dashoffset: -1880; }
+}
+
 /* hero text, below the scene */
 
 .hara-home-intro {
@@ -644,6 +668,83 @@ body {
   line-height: 1.6;
 }
 
+/* home sections below the card grid */
+
+.hara-home-section {
+  margin-top: 90px;
+}
+
+.hara-home-section > .hara-kicker {
+  display: block;
+  margin-bottom: 18px;
+}
+
+/* mock REPL console */
+.hara-console-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: .6rem 1rem;
+  border-bottom: 1px solid var(--hara-line);
+  font-family: var(--hara-mono);
+  font-size: .62rem;
+  letter-spacing: .18em;
+  color: var(--hara-muted);
+  background: rgba(3, 5, 10, .6);
+}
+
+.hara-console-head .hara-index {
+  color: var(--hara-cyan);
+}
+
+.hara-tty {
+  margin: 0;
+  padding: 1.1rem 1.2rem;
+  font-family: var(--hara-mono);
+  font-size: .74rem;
+  line-height: 1.8;
+  color: var(--hara-text);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.hara-tty-p {
+  color: var(--hara-cyan);
+  text-shadow: 0 0 10px rgba(65, 245, 228, .55);
+}
+
+.hara-tty-v {
+  color: var(--hara-green);
+}
+
+.hara-tty-o {
+  color: var(--hara-faint);
+  font-style: italic;
+}
+
+.hara-console .hara-strip {
+  border-bottom: 0;
+}
+
+/* closing call to action */
+.hara-cta {
+  padding: 3rem;
+  text-align: center;
+}
+
+.hara-cta p {
+  color: var(--hara-muted);
+  font-size: 1.05rem;
+  margin: 1rem 0 0;
+}
+
+.hara-cta .hara-home-actions {
+  margin-bottom: 0;
+}
+
 /* ------------------------------------------------------ motion + mobile */
 
 @media (prefers-reduced-motion: reduce) {
@@ -653,7 +754,9 @@ body {
 
   .hara-twinkle-a,
   .hara-twinkle-b,
-  .hara-twinkle-c {
+  .hara-twinkle-c,
+  .hara-disc,
+  .hara-trail {
     animation: none;
   }
 }
