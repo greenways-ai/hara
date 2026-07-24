@@ -58,7 +58,7 @@ hide:
     <p>The grid is patient. Bring a form, leave with a system.</p>
     <div class="hara-home-actions">
       <a class="md-button md-button--primary" href="user-guide/">Start building</a>
-      <a class="md-button" href="books/the-little-book-of-hal/">The Little Book of HAL</a>
+      <a class="md-button" href="the-little-book-of-hal/">The Little Book of HAL</a>
     </div>
   </div>
 </div>
