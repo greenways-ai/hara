@@ -85,14 +85,15 @@ and zip libraries. For example, `str/trim`, `bytes/count`, and `zip/zipper` work
 `:require`. You can still require these namespaces under descriptive aliases, as the service
 example does.
 
-Use `:intrinsics` to remove or rename generated aliases:
+Use `(:config {:intrinsics ...})` to remove or rename generated aliases:
 
 ```clojure
 (ns compact.app
-  (:intrinsics
-    {:exclude [socket]
-     :aliases {string text
-               promise async}}))
+  (:config
+    {:intrinsics
+     {:exclude [socket]
+      :alias {string text
+              promise async}}}))
 ```
 
 Excluding an alias does not remove core constructors such as `bytes`, and it does not revoke a host

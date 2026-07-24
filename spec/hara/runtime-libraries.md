@@ -15,14 +15,16 @@ Every namespace receives these aliases by default:
 | `block/` | `std.lib.block` | source-preserving Hara blocks |
 | `zip/` | `std.lib.zip` | persistent tree zipper navigation |
 
-`(ns app)` and `(ns app (:intrinsics :all))` are equivalent. Aliases can be excluded or renamed:
+`(ns app)` and `(ns app (:config {:intrinsics :all}))` are equivalent. Aliases can be excluded
+or renamed through the singular `:alias` option:
 
 ```clojure
 (ns app
-  (:intrinsics
-    {:exclude [bytes]
-     :aliases {string text
-               promise async}}))
+  (:config
+    {:intrinsics
+     {:exclude [bytes]
+      :alias {string text
+              promise async}}}))
 ```
 
 Exclusion only removes the qualified alias. It does not remove core constructors such as `bytes`.
@@ -30,9 +32,12 @@ Generated namespaces also work with ordinary namespace clauses:
 
 ```clojure
 (ns app
-  (:intrinsics {:exclude [string]})
+  (:config {:intrinsics {:exclude [string]}})
   (:require [std.lib.string :as text :refer [trim]]))
 ```
+
+Standalone `:intrinsics` and `:builtins` clauses are not valid; foundation configuration only
+lives inside the single optional `:config` map.
 
 The core constructors are `str`, `promise`, `bytes`, `array`, and `object`. Core also provides
 signed 32-bit `bit-and`, `bit-or`, `bit-xor`, `bit-not`, `bit-shift-left`, and

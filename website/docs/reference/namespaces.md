@@ -17,8 +17,9 @@ Var metadata and the REPL for exact documentation and arglists.
 | `std.lib.zip` | `zip/` | Persistent tree zipper navigation | `zipper`, `step-left`, `step-right`, `step-inside`, `step-outside` |
 | `std.lib.walk` | explicit `require` | Persistent recursive traversal and key transformation | `walk`, `prewalk`, `postwalk`, `keywordize-keys` |
 
-`(ns app)` and `(ns app (:intrinsics :all))` install the same default aliases. Intrinsic aliases
-can be excluded or renamed without removing their underlying provider namespaces.
+`(ns app)` and `(ns app (:config {:intrinsics :all}))` install the same default aliases. Intrinsic
+aliases can be excluded or renamed through `(:config {:intrinsics ...})` without removing their
+underlying provider namespaces.
 
 ## Opt-in provider libraries
 

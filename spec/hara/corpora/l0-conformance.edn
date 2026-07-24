@@ -135,7 +135,7 @@
    :expect {:value 8 :type :integer}}
   {:id :module/core-iterator-aliases
    :class :module
-   :source "(load-resource \"std/lib/foundation.hal\") (+ (iter-next (map inc [3])) (iter-next (filter (fn [x] (= x 2)) [1 2])) (nth (iter-next (partition-pair [4 5])) 1))"
+   :source "(load-resource \"std/lib/foundation.hal\") (+ (first (map inc [3])) (iter-next (filter (fn [x] (= x 2)) [1 2])) (nth (iter-next (partition-pair [4 5])) 1))"
    :expect {:value 11 :type :integer}}
   {:id :module/core-predicate-reductions
    :class :module
@@ -147,7 +147,7 @@
    :expect {:value 4 :type :integer}}
   {:id :module/core-navigation
    :class :module
-   :source "(load-resource \"std/lib/foundation.hal\") (+ (last [1 2 3]) (iter-next (vals {:a 1})) (if (protocol-call IFind has? {:a nil} :a) 1 0))"
+   :source "(load-resource \"std/lib/foundation.hal\") (+ (last [1 2 3]) (first (vals {:a 1})) (if (protocol-call IFind has? {:a nil} :a) 1 0))"
    :expect {:value 5 :type :integer}}
   {:id :collection/ordinary-dissoc-navigation
    :class :collection
@@ -167,7 +167,7 @@
    :expect {:value 3 :type :integer}}
   {:id :iterator/core-multi-map
    :class :iterator
-   :source "(load-resource \"std/lib/foundation.hal\") (+ (iter-next (map + [1 2] [3 4])) (iter-next (map + [1] [2 3])))"
+   :source "(load-resource \"std/lib/foundation.hal\") (+ (first (map + [1 2] [3 4])) (first (map + [1] [2 3])))"
    :expect {:value 7 :type :integer}}
   {:id :iterator/core-composition
    :class :iterator
@@ -269,6 +269,82 @@
    :source "(host-call nil \"value\")"
    :expect {:error :unbound-symbol
             :message "Unbound symbol: host-call"}}
+  {:id :namespace/config-intrinsics-all
+   :class :namespace
+   :source "(ns app (:config {:intrinsics :all})) (bytes/count (str/encode \"x\"))"
+   :expect {:value 1 :type :integer}}
+  {:id :namespace/config-exclude-and-alias
+   :class :namespace
+   :source "(ns app (:config {:intrinsics {:exclude [bytes] :alias {string text}}})) (text/to-upper \"hara\")"
+   :expect {:value "HARA" :type :string}}
+  {:id :namespace/config-exclude-removes-alias
+   :class :namespace
+   :source "(ns app (:config {:intrinsics {:exclude [bytes]}})) (bytes/count (bytes 1))"
+   :expect {:error :unbound-symbol
+            :message "Unbound symbol: bytes/count"}}
+  {:id :namespace/standalone-intrinsics-invalid
+   :class :namespace
+   :source "(ns app (:intrinsics :all))"
+   :expect {:error :invalid-ns-clause
+            :message ":intrinsics is valid only inside ns :config"}}
+  {:id :namespace/standalone-builtins-invalid
+   :class :namespace
+   :source "(ns app (:builtins [inc]))"
+   :expect {:error :invalid-ns-clause
+            :message ":builtins is valid only inside ns :config"}}
+  {:id :namespace/duplicate-config
+   :class :namespace
+   :source "(ns app (:config {}) (:config {}))"
+   :expect {:error :invalid-ns-clause
+            :message "ns accepts only one :config clause"}}
+  {:id :namespace/unknown-config-key
+   :class :namespace
+   :source "(ns app (:config {:unexpected true}))"
+   :expect {:error :invalid-ns-config
+            :message "Unsupported :config option: :unexpected"}}
+  {:id :namespace/unknown-intrinsics-option
+   :class :namespace
+   :source "(ns app (:config {:intrinsics {:unexpected true}}))"
+   :expect {:error :invalid-ns-config
+            :message "Unsupported :config :intrinsics option: :unexpected"}}
+  {:id :namespace/unknown-intrinsic-library
+   :class :namespace
+   :source "(ns app (:config {:intrinsics {:exclude [unknown]}}))"
+   :expect {:error :invalid-ns-config
+            :message "Unknown intrinsic library"}}
+  {:id :namespace/exclude-alias-conflict
+   :class :namespace
+   :source "(ns app (:config {:intrinsics {:exclude [bytes] :alias {bytes data}}}))"
+   :expect {:error :invalid-ns-config
+            :message "both excluded and aliased"}}
+  {:id :namespace/alias-collision
+   :class :namespace
+   :source "(ns app (:config {:intrinsics {:alias {string data bytes data}}}))"
+   :expect {:error :invalid-ns-config
+            :message "Duplicate intrinsic alias target"}}
+  {:id :namespace/blank-suppresses-referral
+   :class :namespace
+   :source "(ns app (:config {:blank true})) inc"
+   :expect {:error :unbound-symbol
+            :message "Unbound symbol: inc"}}
+  {:id :namespace/blank-keeps-special-forms-and-aliases
+   :class :namespace
+   :source "(ns app (:config {:blank true})) (if true (bytes/count (str/encode \"xy\")) 0)"
+   :expect {:value 2 :type :integer}}
+  {:id :namespace/builtins-require-registered-exports
+   :class :namespace
+   :source "(ns app (:config {:builtins [inc]}))"
+   :expect {:error :invalid-ns-config
+            :message "No host builtins are registered for namespace: app"}}
+  {:id :namespace/builtins-missing-export
+   :class :namespace
+   :source "(ns std.lib.foundation (:config {:builtins [definitely-missing]}))"
+   :expect {:error :invalid-ns-config
+            :message "Missing builtin export: std.lib.foundation/definitely-missing"}}
+  {:id :namespace/builtins-activation-idempotent
+   :class :namespace
+   :source "(ns std.lib.foundation (:config {:builtins [count]})) (std.lib.foundation/count [41 42])"
+   :expect {:value 2 :type :integer}}
   {:id :unsupported/ratio
    :class :unsupported
    :source "1/2"

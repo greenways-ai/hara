@@ -29,7 +29,9 @@ public class HaraGeneratedLibrariesTest {
       assertEquals(
           1,
           context
-              .eval(HaraLanguage.ID, "(ns app (:intrinsics :all)) (bytes/count (str/encode \"x\"))")
+              .eval(
+                  HaraLanguage.ID,
+                  "(ns app (:config {:intrinsics :all})) (bytes/count (str/encode \"x\"))")
               .asLong());
     }
   }
@@ -207,7 +209,7 @@ public class HaraGeneratedLibrariesTest {
           context
               .eval(
                   HaraLanguage.ID,
-                  "(ns app (:intrinsics {:exclude [bytes] :aliases {string text}})) "
+                  "(ns app (:config {:intrinsics {:exclude [bytes] :alias {string text}}})) "
                       + "(text/to-upper \"hara\")")
               .asString());
       PolyglotException missing =
@@ -227,7 +229,7 @@ public class HaraGeneratedLibrariesTest {
           context
               .eval(
                   HaraLanguage.ID,
-                  "(ns app (:intrinsics {:exclude [string]}) "
+                  "(ns app (:config {:intrinsics {:exclude [string]}}) "
                       + "(:require [std.lib.string :as text :refer [trim]])) "
                       + "(trim (text/trim \" x \"))")
               .asString());
@@ -256,19 +258,23 @@ public class HaraGeneratedLibrariesTest {
   public void intrinsicsRejectUnknownConflictingAndDuplicateConfiguration() {
     try (Context context = context()) {
       assertErrorContains(
-          context, "(ns a (:intrinsics {:exclude [unknown]}))", "Unknown intrinsic library");
+          context,
+          "(ns a (:config {:intrinsics {:exclude [unknown]}}))",
+          "Unknown intrinsic library");
       assertErrorContains(
           context,
-          "(ns b (:intrinsics {:exclude [bytes] :aliases {bytes data}}))",
+          "(ns b (:config {:intrinsics {:exclude [bytes] :alias {bytes data}}}))",
           "both excluded and aliased");
       assertErrorContains(
           context,
-          "(ns c (:intrinsics {:aliases {string data bytes data}}))",
-          "Namespace alias already refers");
+          "(ns c (:config {:intrinsics {:alias {string data bytes data}}}))",
+          "Duplicate intrinsic alias target");
       assertErrorContains(
-          context, "(ns d (:intrinsics :all) (:intrinsics :all))", "only one :intrinsics clause");
+          context, "(ns d (:config {}) (:config {}))", "only one :config clause");
       assertErrorContains(
-          context, "(ns e (:intrinsics {:unexpected true}))", "Unsupported :intrinsics option");
+          context,
+          "(ns e (:config {:intrinsics {:unexpected true}}))",
+          "Unsupported :config :intrinsics option");
     }
   }
 
