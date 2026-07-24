@@ -11,8 +11,8 @@ Tracking: GitHub issue #180.
 
 ## Runtime embedding
 
-The extension ships the actual Rust hara evaluator — `wasm/src/core.rs`,
-`kernel`, `lang`, `task`, `fiber` — built by the `wasm/raw` crate into
+The extension ships the actual Rust hara evaluator — `rust/src/core.rs`,
+`kernel`, `lang`, `task`, `fiber` — built by the `rust/raw` crate into
 `hara_wasm_raw.wasm` and vendored into `chrome-hara/vendor/` by
 `scripts/sync-runtime.mjs`. It runs in a Web Worker spawned by the DevTools
 panel. The REPL's evals, fibers, promise suspension, and `require` machinery
@@ -30,7 +30,7 @@ plain Node.js.
 ```
                         ┌──────────────────────────────────────────┐
                         │   SHARED RUST SOURCE (100% reused)        │
-                        │   wasm/src/core.rs · kernel · lang ·      │
+                        │   rust/src/core.rs · kernel · lang ·      │
                         │   task · fiber · hta.rs                   │
                         │   (eval, fibers, promises, require,       │
                         │    host/call special form)                │
@@ -39,7 +39,7 @@ plain Node.js.
                                 ▼                      ▼
               ┌──────────────────────────┐ ┌──────────────────────────┐
               │ RAW HTA BUILD            │ │ WASM-BINDGEN BUILD        │
-              │ wasm/raw →               │ │ wasm → hara_wasm.js/pkg   │
+              │ rust/raw →               │ │ wasm → hara_wasm.js/pkg   │
               │ hara_wasm_raw.wasm       │ │ Runtime class             │
               │ C ABI: hta_start/        │ │ sync eval() → String      │
               │ deliver/next_event       │ │ foundation bootstrapped   │
@@ -51,7 +51,7 @@ plain Node.js.
                       ▼              ▼                ▼
      ┌────────────────────┐ ┌───────────────┐ ┌───────────────────────┐
      │ CHROME-HARA        │ │ HTA SMOKE     │ │ PLAYGROUND            │
-     │ (this extension)   │ │ wasm/web/     │ │ wasm/web/             │
+     │ (this extension)   │ │ rust/web/     │ │ rust/web/             │
      │                    │ │ hta-browser.* │ │ playground.js         │
      │ vendor/ = copied:  │ │               │ │ index.html            │
      │  hta.js            │ │ sha256        │ │                       │
@@ -86,7 +86,7 @@ Summary of the split:
 
 - **Reused 1:1** — the entire Rust evaluator source, the raw wasm artifact,
   `hta.js` (HTA1 codec, `HtaContext`, manifest loader), `hta-worker.js`.
-  Zero changes to `wasm/web/`; its tests pass untouched.
+  Zero changes to `rust/web/`; its tests pass untouched.
 - **Reused by pattern** — the fiber-suspending host/call demo from
   `hta-browser.js` became the port-forwarding Proxy bridge; the playground's
   textarea-REPL idea became an async DevTools panel.
@@ -122,7 +122,7 @@ chrome-hara bridge (node): RESP TCP server ⟷ WS ⟷ extension
   CSP `extension_pages: script-src 'self' 'wasm-unsafe-eval'`.
 - `(require [chrome.api :as api])` works because core eval gained a
   thread-local namespace-source provider (`with_namespace_source` in
-  `wasm/src/core.rs`) and the raw runtime gained a `register-resource`
+  `rust/src/core.rs`) and the raw runtime gained a `register-resource`
   HTA target; the panel registers `src/hara/api.hal` at startup.
 - Home directory: `showDirectoryPicker()` + a require preloader that
   resolves `ns.name` → `<home>/<source-path>/ns/name.hal` (`-` → `_`,

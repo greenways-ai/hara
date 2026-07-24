@@ -17,7 +17,7 @@ import org.junit.Test;
 public class HirArtifactTest {
   @Test
   public void foundationArtifactIsDeterministicAndRoundTripsForms() throws Exception {
-    Path source = Path.of("implementation/src/std/lib/foundation.hal");
+    Path source = Path.of("lib/src/std/lib/foundation.hal");
     byte[] sourceBytes = Files.readAllBytes(source);
     Object[] forms =
         HaraLanguage.readAll(
@@ -82,7 +82,7 @@ public class HirArtifactTest {
           Main.run(
               new String[] {
                 "compile-hir",
-                "implementation/src/std/lib/foundation.hal",
+                "lib/src/std/lib/foundation.hal",
                 "--output",
                 output.toString()
               },

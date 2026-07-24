@@ -1,10 +1,10 @@
 # Foundation HIR
 
 `std.lib.foundation` has a build-time binary artifact at `std/lib/foundation.hir`. The artifact is
-generated from `implementation/src/std/lib/foundation.hal` during Maven's `compile` phase:
+generated from `lib/src/std/lib/foundation.hal` during Maven's `compile` phase:
 
 ```shell
-hara compile-hir implementation/src/std/lib/foundation.hal \
+hara compile-hir lib/src/std/lib/foundation.hal \
   --output target/classes/std/lib/foundation.hir
 ```
 
