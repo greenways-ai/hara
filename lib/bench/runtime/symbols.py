@@ -9,8 +9,8 @@ import re
 import subprocess
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-SPEC = ROOT / "spec/hara"
+ROOT = Path(__file__).resolve().parents[3]
+SPEC = ROOT / "spec/hara/data"
 DOC = ROOT / "docs/reference/clojure-core-compatibility.md"
 CLJ_SPECIALS = {"def", "if", "do", "let", "quote", "var", "fn", "loop", "recur", "throw", "try", "new", "set!", "monitor-enter", "monitor-exit", "catch", "finally"}
 HARA_SPECIALS = {"def", "if", "do", "let", "quote", "var", "fn", "loop", "recur", "throw", "try", "catch", "finally", "binding", "defn", "defmacro", "defprotocol", "extend-type", "defstruct", "defmulti", "defmethod", "ns"}
@@ -36,8 +36,8 @@ def clojure_symbols():
 
 
 def hara_symbols():
-    cp = str(ROOT / "target/classes")
-    cp_file = ROOT / "target/hara-runtime-classpath.txt"
+    cp = str(ROOT / "java/target/classes")
+    cp_file = ROOT / "java/target/hara-runtime-classpath.txt"
     if cp_file.exists(): cp += os.pathsep + cp_file.read_text().strip()
     values = set()
     for namespace in ("std.lib.foundation", "hara.lang.intrinsic"):
@@ -49,8 +49,8 @@ def hara_symbols():
 
 
 def rust_symbols():
-    core = (ROOT / "wasm/src/core.rs").read_text()
-    foundation = (ROOT / "implementation/src/std/lib/foundation.hal").read_text()
+    core = (ROOT / "rust/src/core.rs").read_text()
+    foundation = (ROOT / "lib/src/std/lib/foundation.hal").read_text()
     names = set(re.findall(r'native_function\("([^"]+)"', core))
     names |= set(re.findall(r'^\(defn?\s+([^\s\[]+)', foundation, re.MULTILINE))
     names.add("IFind/has?")

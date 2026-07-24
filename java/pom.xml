@@ -112,7 +112,7 @@
 			<resource>
 				<directory>${project.basedir}/..</directory>
 				<includes>
-					<include>spec/hara/l0-conformance.edn</include>
+					<include>spec/hara/corpora/l0-conformance.edn</include>
 				</includes>
 			</resource>
 			<resource>

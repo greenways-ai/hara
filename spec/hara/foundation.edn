@@ -1,11 +1,57 @@
 {:spec/version "0.1"
  :spec/status :draft
  :language "hara-l0"
- :namespace std.lib.foundation
+ :namespace std.foundation
 
  ;; This file is the editable design authority for the JVM bootstrap boundary.
  ;; A symbol is not part of the boundary merely because HaraContext installs it.
  ;; Conformance cases and implementations should be reconciled with this file.
+ :namespace-contract
+ {:clauses #{:config :require :flavor :import}
+  :config
+  {:cardinality :zero-or-one
+   :keys
+   {:blank {:type :boolean
+            :default false
+            :semantics :suppress-automatic-foundation-referral}
+    :builtins {:type :vector-of-unique-unqualified-symbols
+               :default []
+               :selection :exact
+               :allow-all false
+               :namespace :declaring-namespace
+               :metadata #{:doc :arglists :kind}}
+    :intrinsics {:type [:or
+                        :all
+                        {:exclude :vector-of-unique-library-symbols
+                         :alias :library-to-unqualified-alias-map}]
+                 :default :all}}
+   :unknown-keys :error
+   :validation :before-namespace-mutation
+   :standalone-builtins-clause false
+   :standalone-intrinsics-clause false}
+  :blank {:foundation-referral false
+          :special-forms true
+          :intrinsic-aliases :configured-independently
+          :erase-owned-definitions false}
+  :builtins {:registration :runtime-provider
+             :activation :source-declared
+             :arbitrary-host-access false
+             :missing-export :error
+             :namespace-mismatch :error
+             :binding-conflict :error
+             :repeated-identical-activation :idempotent}
+  :intrinsics
+  {:libraries
+   {string {:namespace std.foundation.string :default-alias str}
+    bytes {:namespace std.foundation.bytes :default-alias bytes}
+    promise {:namespace std.foundation.promise :default-alias promise}
+    coroutine {:namespace std.foundation.coroutine :default-alias coroutine}
+    file {:namespace std.foundation.file :default-alias file}
+    os {:namespace std.foundation.os :default-alias os}}
+   :exclude :removes-automatic-alias-only
+   :explicit-require-after-exclusion true
+   :alias-option :alias}}
+
  :boundary
  {:special-forms
   #{quote
@@ -37,7 +83,8 @@
 
    :evaluation
    #{eval
-     read-string}
+     read-string
+     read-forms}
 
    :regex
    #{re-pattern
@@ -126,8 +173,8 @@
   ;; Portable libraries backed by runtime facilities that Hara does not expose
   ;; through general host or implementation-language interop.
   :runtime-libraries
-  {std.lib.coroutine
-   {:alias co
+  {std.foundation.coroutine
+   {:alias coroutine
     :symbols
     #{create
       resume
@@ -137,7 +184,7 @@
       close
       await}}
 
-   std.lib.string
+   std.foundation.string
    {:alias str
     :symbols
     #{length
@@ -168,7 +215,7 @@
       encode-utf8
       decode-utf8}}
 
-   std.lib.bytes
+   std.foundation.bytes
    {:alias bytes
     :symbols
     #{count
@@ -179,7 +226,7 @@
       u8
       s8}}
 
-   std.lib.promise
+   std.foundation.promise
    {:alias promise
     :symbols
     #{run
@@ -192,7 +239,19 @@
       value
       cancel
       native?
-      delay}}}
+      delay}}
+
+   std.foundation.file
+   {:alias file
+    :capability :file
+    :symbols #{resolve read write exists? list mkdir delete}}
+
+   std.foundation.os
+   {:alias os
+    :symbols
+    #{platform arch cwd env getenv spawn process? process-alive?
+      process-write process-close-input process-stdout process-stderr
+      process-wait process-kill}}}
 
   ;; These are ordinary Hara definitions built only from the boundary above.
   :foundation-symbols
@@ -276,6 +335,12 @@
     :returns :form
     :multiple-forms :error}
 
+   :read-forms
+   {:arglists [[source]]
+    :returns :forms
+    :input :string
+    :file-io false}
+
    :eval
    {:arglists [[form]]
     :namespace :current
@@ -312,7 +377,69 @@
    :portable-flags
    #{:case-insensitive
      :multiline
-     :dotall}}}
+     :dotall}}
+
+  :file
+  {:resolve {:arglists [[root path]]
+             :evaluation :synchronous
+             :returns :normalized-path-string
+             :touches-filesystem false}
+   :operations
+   {read {:arglists [[path]] :returns :promise-of-bytes}
+    write {:arglists [[path bytes]]
+           :returns :promise-of-nil
+           :creates-missing-parents false
+           :existing-target :overwrite}
+    exists? {:arglists [[path]] :returns :promise-of-boolean}
+    list {:arglists [[path]]
+          :returns :promise-of-sorted-normalized-child-path-vector}
+    mkdir {:arglists [[path]]
+           :returns :promise-of-nil
+           :parents true
+           :existing-directory :success}
+    delete {:arglists [[path]]
+            :returns :promise-of-nil
+            :recursive false}}
+   :capability :file}
+
+  :os
+  {:identity
+   {platform {:arglists [[]]
+              :returns #{:linux :macos :windows :unknown}}
+    arch {:arglists [[]] :returns :normalized-architecture-keyword}
+    cwd {:arglists [[]] :returns :normalized-path-string}
+    env {:arglists [[]] :returns :string-to-string-map}
+    getenv {:arglists [[name]] :returns :string-or-nil}}
+   :process
+   {:capability :process
+    :shell-command-strings false
+    :argv :non-empty-vector-of-strings
+    :spawn-options {:cwd :string :env :string-to-string-map}
+    :handle :opaque
+    :functions
+    {spawn {:arglists [[argv] [argv options]] :returns :process}
+     process? {:arglists [[value]] :returns :boolean}
+     process-alive? {:arglists [[process]] :returns :boolean}
+     process-write {:arglists [[process bytes]]
+                    :returns :promise-of-nil
+                    :destination :stdin}
+     process-close-input {:arglists [[process]] :returns :promise-of-nil}
+     process-stdout {:arglists [[process]]
+                     :returns :promise-of-bytes
+                     :settles :eof}
+     process-stderr {:arglists [[process]]
+                     :returns :promise-of-bytes
+                     :settles :eof}
+     process-wait {:arglists [[process]]
+                   :returns :promise-of-integer-exit-code
+                   :repeatable true}
+     process-kill {:arglists [[process]]
+                   :returns :nil
+                   :mode :force
+                   :dead-process :success}}
+    :output-draining :concurrent-from-spawn
+    :excluded #{shell inherited-io os-signals incremental-streams
+                clipboard notifications url-helpers tmux}}}}
 
  :excluded-symbols
  #{mapv
@@ -341,10 +468,51 @@
    iter-every?
    iter-any?}
 
+ :implementation-status
+ {:jvm
+  {:core-namespace std.lib.foundation
+   :automatic-referrals #{hara.lang.intrinsic std.lib.foundation}
+   :automatic-aliases
+   {str std.lib.string
+    promise std.lib.promise
+    bytes std.lib.bytes
+    socket std.lib.socket
+    file std.lib.file
+    block std.lib.block
+    zip std.lib.zip}
+   :ns-clauses #{:intrinsics :require :flavor :import}
+   :config-clause false
+   :builtins-clause false
+   :intrinsics-option :aliases
+   :provider-activation :whole-provider
+   :export-metadata #{:name :kind :doc :arglists :intrinsic}
+   :coroutine-access :explicit-require
+   :file-symbols #{resolve read write}}}
+
  :implementation-issues
  [{:id :evaluation/read-string
    :current "The JVM exposes eval and read-forms, but no single-form read-string builtin."
    :required "Expose read-string through the Hara reader, preserve form metadata, and reject trailing non-whitespace forms."}
+
+  {:id :namespace/config
+   :current "The JVM accepts standalone :intrinsics and has no :config or :builtins clause."
+   :required "Parse and validate one :config map before applying core referrals, builtin activation, or intrinsic aliases."}
+
+  {:id :namespace/builtin-activation
+   :current "HaraStaticLibrary installs every @HaraExport method when its provider is installed."
+   :required "Catalog host exports separately and activate only the exact symbols declared by the namespace's :config :builtins vector."}
+
+  {:id :namespace/foundation-family
+   :current "The JVM publishes foundational libraries under std.lib.* and automatically aliases socket, block, and zip."
+   :required "Publish the six separate libraries under std.foundation.*, remove legacy foundational aliases, and keep non-foundation std.lib.* libraries explicit."}
+
+  {:id :file/small-filesystem
+   :current "std.lib.file exposes resolve, read, and write."
+   :required "Move it to std.foundation.file and add promise-based exists?, list, mkdir, and non-recursive delete with the specified deterministic behavior."}
+
+  {:id :os/process
+   :current "There is no guest-visible portable OS/process foundation namespace."
+   :required "Add std.foundation.os with normalized host identity and capability-gated argv-only buffered process operations using explicit process-* names."}
 
   {:id :regex/reader-value
    :current "hara.kernel.base.Parser compiles regex literals directly to java.util.regex.Pattern."
@@ -380,6 +548,10 @@
 
  :implementation-notes
  ["The current JVM implementation does not yet conform to this draft."
+  "Foundation bootstrap uses (:config {:blank true ...}); blank suppresses core referral but not configured intrinsic aliases."
+  "Standalone :builtins and :intrinsics clauses are intentionally invalid."
+  "The intrinsic remapping option is singular :alias."
+  "Host export catalogs do not grant arbitrary JVM interop or runtime capabilities."
   "Iterator mechanics may remain JVM-backed, but iter-* names are not public language symbols."
   "Direct map is eager and origin-preserving; the unary map transform is lazy."
   "mapv is intentionally absent rather than retained as a compatibility alias."
