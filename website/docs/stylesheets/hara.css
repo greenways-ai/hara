@@ -578,16 +578,6 @@ body {
   50% { opacity: .25; }
 }
 
-/* identity disc — slow rotation */
-.hara-disc {
-  transform-origin: 1010px 165px;
-  animation: hara-spin 90s linear infinite;
-}
-
-@keyframes hara-spin {
-  to { transform: rotate(360deg); }
-}
-
 /* light-cycle trails */
 .hara-trail {
   stroke-dasharray: 180 1700;
@@ -648,8 +638,14 @@ body {
 
 .hara-home-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 14px;
+}
+
+@media (max-width: 1000px) {
+  .hara-home-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .hara-home-card {
@@ -807,7 +803,6 @@ body {
   .hara-twinkle-a,
   .hara-twinkle-b,
   .hara-twinkle-c,
-  .hara-disc,
   .hara-trail {
     animation: none;
   }

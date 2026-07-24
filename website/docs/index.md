@@ -13,20 +13,25 @@ hide:
 </div>
 
 <div class="hara-home-grid">
-  <a class="hara-home-card" href="user-guide/">
-    <span class="hara-card-index">01 / LANGUAGE</span>
+  <a class="hara-home-card" href="reference/l0-language/">
+    <span class="hara-card-index">01 / SMALL</span>
     <strong>Small core.<br><em>Wide horizon.</em></strong>
-    <span>Learn the values, forms, protocols, promises, and explicit boundaries.</span>
+    <span>A handful of forms, designed once and held — values, protocols, promises, explicit boundaries.</span>
+  </a>
+  <a class="hara-home-card" href="reference/runtime-benchmarks/">
+    <span class="hara-card-index">02 / FAST</span>
+    <strong>JIT-warm.<br><em>Wasm-quick.</em></strong>
+    <span>Truffle compiles hot paths on the JVM; the Rust runtime keeps wasm eval near-native.</span>
+  </a>
+  <a class="hara-home-card" href="development/">
+    <span class="hara-card-index">03 / EMBEDDABLE</span>
+    <strong>Drops in<br><em>anywhere.</em></strong>
+    <span>A JVM library, a browser module, a Chrome panel — the same language behind every host.</span>
   </a>
   <a class="hara-home-card" href="reference/extensions-contract/">
-    <span class="hara-card-index">02 / EXTENSIONS</span>
+    <span class="hara-card-index">04 / WASM NATIVE</span>
     <strong>One require.<br><em>Any world.</em></strong>
-    <span>Load portable WASM extensions without changing the Hara call site.</span>
-  </a>
-  <a class="hara-home-card" href="javadocs/">
-    <span class="hara-card-index">03 / RUNTIME</span>
-    <strong>Build systems<br><em>that stay alive.</em></strong>
-    <span>Explore the Truffle runtime, embedding boundary, and Java API.</span>
+    <span>Portable wasm extensions load by namespace — no changes at the call site.</span>
   </a>
 </div>
 

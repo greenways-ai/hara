@@ -29,8 +29,8 @@
   resize();
 
   const project = (k, t) => {
-    const x = 720 + k * (36 + 264 * t);
-    const y = 325 + 485 * t;
+    const x = 720 + k * (36 + 304 * t);
+    const y = 140 + 670 * t;
     return [offX + x * scale, offY + y * scale];
   };
 
