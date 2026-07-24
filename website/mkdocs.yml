@@ -43,6 +43,7 @@ plugins:
   - monorepo
 nav:
   - Home: index.md
+  - Studio: studio.md
   - Learn:
       - User guide: user-guide.md
       - Getting started: getting-started.md
