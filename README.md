@@ -30,10 +30,15 @@ Truffle parser / AST
   [`hara-chrome`](apps/hara-chrome/) (Chrome DevTools extension),
   [`hara-vscode`](apps/hara-vscode/), [`hara-emacs`](apps/hara-emacs/), and the
   planned [`hara-lsp`](apps/hara-lsp/) language server.
-- [`docs/`](website/docs/) — documentation content (published via mkdocs).
-- [`website/`](website/) — site infrastructure: mkdocs config, theme
-  overrides, and the landing page.
-- [`spec/`](spec/hara/) — normative language, runtime, and extension specs.
+- [`website/`](website/) — the published site: mkdocs config, theme
+  overrides, landing page, and the documentation content itself in
+  [`website/docs/`](website/docs/). Apps and books plug in as sub-sites
+  (monorepo plugin).
+- [`docs/`](docs/) — working documents (not published): design notes and
+  `docs/superpowers/` plans/specs.
+- [`spec/`](spec/hara/) — normative specs: prose (`.md`), machine-checked
+  corpora ([`spec/hara/corpora/`](spec/hara/corpora/)), and spec-shaped
+  data ([`spec/hara/data/`](spec/hara/data/)).
 - [`books/`](books/) — planned book series (*The Little Book of HAL*).
 - [`registry/`](registry/) — planned hara wasm extension registry.
 - [`scripts/`](scripts/) — repo-level build/benchmark scripts.
