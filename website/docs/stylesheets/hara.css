@@ -1,64 +1,481 @@
+/* Hara — Tron-noir design system
+   Detail-driven UI: hairlines, corner ticks, bracketed labels, numbered
+   indices, neon glow on near-black. Dark-only. */
+
+/* ---------------------------------------------------------------- tokens */
+
 :root {
+  /* noir base scale */
+  --hara-abyss: #03050a;
+  --hara-bg: #05070d;
+  --hara-panel: #0a0f18;
+  --hara-raised: #0e1522;
+  --hara-overlay: #121b2c;
+
+  /* neon accents */
   --hara-cyan: #41f5e4;
+  --hara-cyan-bright: #8ffff2;
+  --hara-magenta: #ff2e88;
+  --hara-green: #3dff9e;
   --hara-violet: #9c7bff;
   --hara-amber: #ffbd68;
-  --hara-bg: #05070d;
-  --hara-panel: #0b101b;
+
+  /* text */
+  --hara-text: #d7e6ef;
   --hara-muted: #8b9bad;
+  --hara-faint: #5b6b7c;
+
+  /* hairlines + glows */
+  --hara-line: rgba(65, 245, 228, .14);
+  --hara-line-strong: rgba(65, 245, 228, .38);
+  --hara-glow-cyan: 0 0 12px rgba(65, 245, 228, .22);
+  --hara-glow-magenta: 0 0 12px rgba(255, 46, 136, .22);
+
+  /* detail type */
+  --hara-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+/* mkdocs-material slate scheme -> noir */
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: var(--hara-bg);
+  --md-default-fg-color: var(--hara-panel);
+  --md-default-fg-color--light: var(--hara-raised);
+  --md-default-fg-color--lightest: var(--hara-overlay);
+  --md-primary-fg-color: var(--hara-abyss);
+  --md-primary-fg-color--light: var(--hara-panel);
+  --md-accent-fg-color: var(--hara-cyan);
+  --md-typeset-color: var(--hara-text);
+  --md-typeset-a-color: var(--hara-cyan);
+  --md-code-bg-color: var(--hara-abyss);
+  --md-code-fg-color: var(--hara-text);
+  --md-footer-bg-color: var(--hara-abyss);
+  --md-footer-fg-color: var(--hara-muted);
+  --md-footer-fg-color--light: var(--hara-faint);
+  --md-footer-fg-color--lighter: var(--hara-faint);
+  --md-shadow-z1: 0 0 .2rem rgba(0, 0, 0, .6), 0 0 .05rem rgba(65, 245, 228, .15);
+  --md-shadow-z2: 0 .2rem .5rem rgba(0, 0, 0, .5), 0 0 .05rem rgba(65, 245, 228, .12);
+  --hsl-cyan: 174 90% 61%;
+  --md-accent-fg-color--transparent: hsla(174, 90%, 61%, .12);
 }
 
 body {
   background: var(--hara-bg);
 }
 
+::selection {
+  background: rgba(65, 245, 228, .28);
+  color: #eafcff;
+}
+
+/* ------------------------------------------------------- chrome surfaces */
+
 .md-header {
-  background: rgba(5, 7, 13, .86);
+  background: rgba(3, 5, 10, .88);
   backdrop-filter: blur(14px);
-  border-bottom: 1px solid rgba(65, 245, 228, .16);
+  border-bottom: 1px solid var(--hara-line);
+  box-shadow: 0 1px 0 rgba(65, 245, 228, .05), 0 8px 30px rgba(0, 0, 0, .45);
+  color: var(--hara-text);
+}
+
+.md-header__title,
+.md-header__option,
+.md-header .md-icon {
+  color: var(--hara-text);
 }
 
 .md-tabs {
-  background: rgba(5, 7, 13, .7);
+  background: rgba(3, 5, 10, .72);
+  border-bottom: 1px solid var(--hara-line);
+  color: var(--hara-muted);
 }
 
+.md-tabs__link--active,
+.md-tabs__link:hover {
+  color: var(--hara-cyan);
+  text-shadow: 0 0 10px rgba(65, 245, 228, .45);
+}
+
+.md-tabs__item {
+  height: auto;
+}
+
+/* faint engineering grid over the main canvas */
 .md-main {
-  background: linear-gradient(rgba(65, 245, 228, .035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(65, 245, 228, .035) 1px, transparent 1px);
+  background:
+    linear-gradient(rgba(65, 245, 228, .03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(65, 245, 228, .03) 1px, transparent 1px);
   background-size: 64px 64px;
+}
+
+.md-main__inner {
+  margin-top: 1.6rem;
 }
 
 .md-content__inner {
   max-width: 980px;
 }
 
+/* sidebar + toc: hairline structure, cyan active state */
+.md-sidebar {
+  background: transparent;
+}
+
+.md-sidebar__scrollwrap {
+  border-right: 1px solid var(--hara-line);
+}
+
+.md-nav__link {
+  color: var(--hara-muted);
+  border-left: 1px solid transparent;
+  transition: color .15s, border-color .15s, text-shadow .15s;
+}
+
+.md-nav__link:hover {
+  color: var(--hara-text);
+}
+
+.md-nav__link--active,
+.md-nav__link[aria-current="page"] {
+  color: var(--hara-cyan);
+  border-left-color: var(--hara-cyan);
+  text-shadow: 0 0 10px rgba(65, 245, 228, .35);
+}
+
+.md-nav__title {
+  color: var(--hara-faint);
+  font-family: var(--hara-mono);
+  font-size: .62rem;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+}
+
+.md-nav--secondary .md-nav__link {
+  font-size: .68rem;
+}
+
+/* footer */
+.md-footer {
+  background: var(--hara-abyss);
+  border-top: 1px solid var(--hara-line);
+}
+
+.md-footer-meta {
+  background: transparent;
+  border-top: 1px solid rgba(65, 245, 228, .07);
+}
+
+/* ------------------------------------------------------------ typography */
+
+.md-typeset {
+  color: var(--hara-text);
+  font-size: .82rem;
+  line-height: 1.75;
+}
+
 .md-typeset h1,
 .md-typeset h2 {
   letter-spacing: -.045em;
+  color: var(--hara-cyan);
+  text-shadow: 0 0 24px rgba(65, 245, 228, .18);
 }
 
 .md-typeset h1 {
-  color: var(--hara-cyan);
+  font-weight: 700;
+}
+
+.md-typeset h2 {
+  margin-top: 2.4em;
+  padding-top: .8em;
+  border-top: 1px solid var(--hara-line);
+  font-weight: 600;
+}
+
+.md-typeset h3,
+.md-typeset h4 {
+  color: var(--hara-text);
+  letter-spacing: -.02em;
 }
 
 .md-typeset a {
   color: var(--hara-cyan);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(65, 245, 228, .25);
+  transition: color .15s, border-color .15s, text-shadow .15s;
 }
 
-.md-button {
-  border-color: rgba(65, 245, 228, .42);
+.md-typeset a:hover {
+  color: var(--hara-magenta);
+  border-bottom-color: var(--hara-magenta);
+  text-shadow: 0 0 10px rgba(255, 46, 136, .4);
+}
+
+.md-typeset hr {
+  border: 0;
+  height: 1px;
+  background: var(--hara-line);
+  position: relative;
+  margin: 3em 0;
+}
+
+.md-typeset hr::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -2.5px;
+  width: 6px;
+  height: 6px;
+  background: var(--hara-cyan);
+  transform: translateX(-50%) rotate(45deg);
+  box-shadow: var(--hara-glow-cyan);
+}
+
+.md-typeset strong {
+  color: var(--hara-cyan-bright);
+}
+
+.md-typeset blockquote {
+  border-left: 1px solid var(--hara-line-strong);
+  color: var(--hara-muted);
+  background: rgba(10, 15, 24, .5);
+  padding: .8rem 1.2rem;
+}
+
+/* ---------------------------------------------------------- code, tables */
+
+.md-typeset code {
+  background: var(--hara-raised);
+  border: 1px solid rgba(65, 245, 228, .12);
+  border-radius: 2px;
+  color: var(--hara-cyan-bright);
+  font-family: var(--hara-mono);
+  font-size: .78em;
+}
+
+.md-typeset pre {
+  background: var(--hara-abyss);
+  border: 1px solid var(--hara-line);
+  border-radius: 2px;
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, .5), 0 0 0 1px rgba(0, 0, 0, .4);
+}
+
+.md-typeset pre:hover {
+  border-color: var(--hara-line-strong);
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, .5), var(--hara-glow-cyan);
+}
+
+.md-typeset pre > code {
+  background: transparent;
+  border: 0;
+  color: var(--hara-text);
+  font-size: .78rem;
+  line-height: 1.7;
+}
+
+/* syntax accents inside highlighted blocks */
+.md-typeset .highlight .c,
+.md-typeset .highlight .c1,
+.md-typeset .highlight .cm {
+  color: var(--hara-faint);
+  font-style: italic;
+}
+
+.md-typeset .highlight .k,
+.md-typeset .highlight .kd,
+.md-typeset .highlight .kn {
+  color: var(--hara-magenta);
+}
+
+.md-typeset .highlight .s,
+.md-typeset .highlight .s1,
+.md-typeset .highlight .s2 {
+  color: var(--hara-green);
+}
+
+.md-typeset .highlight .nf,
+.md-typeset .highlight .nv {
+  color: var(--hara-cyan);
+}
+
+.md-typeset .highlight .mi,
+.md-typeset .highlight .mf,
+.md-typeset .highlight .no {
+  color: var(--hara-violet);
+}
+
+/* hara.js adds this on first click into a code block */
+.hara-code-touched {
+  box-shadow: inset 0 0 0 1px var(--hara-line-strong);
+}
+
+.md-typeset table:not([class]) {
+  background: var(--hara-panel);
+  border: 1px solid var(--hara-line);
+  font-size: .74rem;
+}
+
+.md-typeset table:not([class]) th {
+  font-family: var(--hara-mono);
+  font-size: .62rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--hara-cyan);
+  background: var(--hara-abyss);
+  border-bottom: 1px solid var(--hara-line-strong);
+}
+
+.md-typeset table:not([class]) td {
+  border-top: 1px solid rgba(65, 245, 228, .08);
+}
+
+.md-typeset table:not([class]) tr:hover td {
+  background: rgba(65, 245, 228, .04);
+}
+
+/* ----------------------------------------------------------- admonitions */
+
+.md-typeset .admonition,
+.md-typeset details {
+  background: var(--hara-panel);
+  border: 1px solid var(--hara-line);
+  border-left: 2px solid var(--hara-cyan);
   border-radius: 0;
+  box-shadow: none;
+}
+
+.md-typeset .admonition-title,
+.md-typeset summary {
+  background: var(--hara-abyss);
+  border-bottom: 1px solid var(--hara-line);
+  font-family: var(--hara-mono);
+  font-size: .66rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--hara-cyan);
+}
+
+.md-typeset .admonition-title::before,
+.md-typeset summary::before {
+  left: .8rem;
+}
+
+.md-typeset .warning.admonition,
+.md-typeset details.warning {
+  border-left-color: var(--hara-amber);
+}
+
+.md-typeset .warning .admonition-title,
+.md-typeset details.warning > summary {
+  color: var(--hara-amber);
+}
+
+.md-typeset .danger.admonition,
+.md-typeset details.danger {
+  border-left-color: var(--hara-magenta);
+}
+
+.md-typeset .danger .admonition-title,
+.md-typeset details.danger > summary {
+  color: var(--hara-magenta);
+}
+
+/* -------------------------------------------------------- detail widgets */
+
+/* bracketed monospace kicker: [ 01 / RUNTIME ] */
+.hara-kicker {
+  font-family: var(--hara-mono);
+  font-size: .62rem;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--hara-cyan);
+  text-shadow: 0 0 12px rgba(65, 245, 228, .35);
+}
+
+.hara-kicker::before { content: '[ '; color: var(--hara-faint); }
+.hara-kicker::after  { content: ' ]'; color: var(--hara-faint); }
+
+/* numbered index marker */
+.hara-index {
+  font-family: var(--hara-mono);
+  font-size: .6rem;
+  letter-spacing: .18em;
+  color: var(--hara-faint);
+}
+
+/* hairline frame with corner ticks */
+.hara-frame {
+  position: relative;
+  border: 1px solid var(--hara-line);
+  background: linear-gradient(160deg, rgba(14, 21, 34, .85), rgba(5, 7, 13, .9));
+}
+
+.hara-frame::before,
+.hara-frame::after {
+  content: '';
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--hara-cyan);
+  transition: box-shadow .2s;
+}
+
+.hara-frame::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
+.hara-frame::after  { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+
+.hara-frame:hover::before,
+.hara-frame:hover::after {
+  box-shadow: var(--hara-glow-cyan);
+}
+
+/* horizontal status strip */
+.hara-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  border-top: 1px solid var(--hara-line);
+  border-bottom: 1px solid var(--hara-line);
+}
+
+.hara-strip > span {
+  font-family: var(--hara-mono);
+  font-size: .6rem;
+  letter-spacing: .18em;
+  color: var(--hara-faint);
+  padding: .55em 1.2em;
+  border-right: 1px solid var(--hara-line);
+}
+
+.hara-strip > span:last-child { border-right: 0; }
+.hara-strip > span b { color: var(--hara-cyan); font-weight: 400; }
+
+/* -------------------------------------------------------------- buttons */
+
+.md-button {
+  font-family: var(--hara-mono);
+  font-size: .66rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  border: 1px solid var(--hara-line-strong);
+  border-radius: 0;
+  color: var(--hara-cyan);
+  transition: box-shadow .2s, border-color .2s, color .2s;
+}
+
+.md-button:hover {
+  border-color: var(--hara-cyan);
+  box-shadow: var(--hara-glow-cyan);
 }
 
 .md-button--primary {
   background: var(--hara-cyan);
   color: #041011 !important;
+  border-color: var(--hara-cyan);
 }
 
-.md-typeset code {
-  border-radius: 2px;
+.md-button--primary:hover {
+  box-shadow: 0 0 22px rgba(65, 245, 228, .5);
 }
 
-/* Landing page */
+/* --------------------------------------------------------- landing page */
 
 .hara-home {
   max-width: 1180px;
@@ -66,7 +483,7 @@ body {
   padding: 0 0 5vh;
 }
 
-/* Animated moon scenescape hero (parallax layers, see hara.js) */
+/* hero scene (parallax layers driven by hara.js via --hara-depth) */
 
 .hara-scene {
   position: relative;
@@ -75,7 +492,8 @@ body {
   height: 72vh;
   min-height: 430px;
   overflow: hidden;
-  background: var(--hara-bg);
+  background: var(--hara-abyss);
+  border-bottom: 1px solid var(--hara-line);
 }
 
 .hara-scene-svg {
@@ -86,7 +504,7 @@ body {
   display: block;
 }
 
-/* Fade the scene into the page background below */
+/* fade scene into page background */
 .hara-scene::after {
   content: '';
   position: absolute;
@@ -96,7 +514,7 @@ body {
   pointer-events: none;
 }
 
-/* Larger --hara-depth = farther away = moves less */
+/* larger --hara-depth = farther away = moves less */
 .hara-scene__layer {
   transform: translate3d(
     calc(var(--hara-mx, 0) * (10 - var(--hara-depth)) * -5px),
@@ -105,48 +523,15 @@ body {
   will-change: transform;
 }
 
-.hara-twinkle-a {
-  animation: hara-twinkle 3.6s ease-in-out infinite;
-}
-
-.hara-twinkle-b {
-  animation: hara-twinkle 5.2s ease-in-out -1.4s infinite;
-}
-
-.hara-twinkle-c {
-  animation: hara-twinkle 4.4s ease-in-out -2.6s infinite;
-}
+.hara-twinkle-a { animation: hara-twinkle 3.6s ease-in-out infinite; }
+.hara-twinkle-b { animation: hara-twinkle 5.2s ease-in-out -1.4s infinite; }
+.hara-twinkle-c { animation: hara-twinkle 4.4s ease-in-out -2.6s infinite; }
 
 @keyframes hara-twinkle {
-  50% {
-    opacity: .25;
-  }
+  50% { opacity: .25; }
 }
 
-.hara-moon-halo {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: hara-halo 7s ease-in-out infinite alternate;
-}
-
-@keyframes hara-halo {
-  to {
-    opacity: .65;
-    transform: scale(1.045);
-  }
-}
-
-.hara-haze {
-  animation: hara-drift 28s ease-in-out infinite alternate;
-}
-
-@keyframes hara-drift {
-  to {
-    transform: translateX(36px);
-  }
-}
-
-/* Hero text, below the scene */
+/* hero text, below the scene */
 
 .hara-home-intro {
   text-align: center;
@@ -154,7 +539,8 @@ body {
 }
 
 .hara-home-kicker {
-  font: 11px monospace;
+  font-family: var(--hara-mono);
+  font-size: 11px;
   letter-spacing: .18em;
   color: var(--hara-cyan);
 }
@@ -165,11 +551,13 @@ body {
   letter-spacing: -.08em;
   margin: 28px 0;
   color: #edf6ff;
+  text-shadow: 0 0 60px rgba(65, 245, 228, .12);
 }
 
 .hara-home h1 em {
   color: var(--hara-cyan);
   font-style: normal;
+  text-shadow: 0 0 40px rgba(65, 245, 228, .45);
 }
 
 .hara-home-lede {
@@ -200,21 +588,44 @@ body {
   padding: 25px;
   color: inherit !important;
   text-decoration: none !important;
-  border: 1px solid rgba(65, 245, 228, .2);
-  background: linear-gradient(135deg, rgba(12, 24, 37, .9), rgba(7, 12, 20, .8));
+  border: 1px solid var(--hara-line);
+  background: linear-gradient(160deg, rgba(14, 21, 34, .85), rgba(5, 7, 13, .9));
+  position: relative;
   transition: transform .2s, border-color .2s, box-shadow .2s;
 }
 
+/* corner ticks on cards */
+.hara-home-card::before,
+.hara-home-card::after {
+  content: '';
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--hara-cyan);
+  opacity: .55;
+  transition: opacity .2s, box-shadow .2s;
+}
+
+.hara-home-card::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
+.hara-home-card::after  { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+
 .hara-home-card:hover {
   transform: translateY(-5px);
-  border-color: var(--hara-cyan);
+  border-color: var(--hara-line-strong);
   box-shadow: 0 0 30px rgba(65, 245, 228, .12);
 }
 
+.hara-home-card:hover::before,
+.hara-home-card:hover::after {
+  opacity: 1;
+  box-shadow: var(--hara-glow-cyan);
+}
+
 .hara-card-index {
-  font: 10px monospace;
-  color: var(--hara-cyan);
+  font-family: var(--hara-mono);
+  font-size: 10px;
   letter-spacing: .15em;
+  color: var(--hara-cyan);
 }
 
 .hara-home-card strong {
@@ -233,6 +644,8 @@ body {
   line-height: 1.6;
 }
 
+/* ------------------------------------------------------ motion + mobile */
+
 @media (prefers-reduced-motion: reduce) {
   .hara-scene__layer {
     transform: none;
@@ -240,9 +653,7 @@ body {
 
   .hara-twinkle-a,
   .hara-twinkle-b,
-  .hara-twinkle-c,
-  .hara-moon-halo,
-  .hara-haze {
+  .hara-twinkle-c {
     animation: none;
   }
 }
