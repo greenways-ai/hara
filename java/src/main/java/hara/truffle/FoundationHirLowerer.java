@@ -7,6 +7,7 @@ import hara.lang.data.Keyword;
 import hara.lang.data.List;
 import hara.lang.data.Symbol;
 import hara.lang.data.types.ILinearType;
+import hara.lang.data.types.ISetType;
 import hara.lang.data.types.IMapType;
 import hara.truffle.node.HaraExpressionNode;
 import hara.truffle.node.HaraNodes;
@@ -85,12 +86,16 @@ final class FoundationHirLowerer {
     }
     return switch (symbol.getName()) {
       case "quote" -> lowerQuote(list);
+      case "syntax-quote" -> lowerSyntaxQuote(list);
       case "if" -> lowerIf(list);
       case "let" -> lowerLet(list);
       case "loop" -> lowerLoop(list);
       case "recur" -> lowerRecur(list);
       case "fn" -> lowerFn(list);
       case "defn" -> lowerDefn(list);
+      case "defn-" -> lowerPrivateDefn(list);
+      case "declare" -> lowerDeclare(list);
+      case "defmacro" -> lowerDefMacro(list);
       case "ns" -> lowerNamespace(list);
       case "+" -> lowerAdd(list);
       case "-" -> lowerVariadicNumeric(list, HaraNodes.Numeric.Operator.SUBTRACT, 0L);
@@ -133,6 +138,82 @@ final class FoundationHirLowerer {
   private HaraExpressionNode lowerQuote(List<?> form) {
     requireCount(form, 2, "quote");
     return new HaraNodes.Literal(form.nth(1));
+  }
+
+  private HaraExpressionNode lowerSyntaxQuote(List<?> form) {
+    requireCount(form, 2, "syntax-quote");
+    ArrayList<HaraExpressionNode> unquotes = new ArrayList<>();
+    Object template =
+        syntaxQuoteTemplate(form.nth(1), unquotes, new LinkedHashMap<>());
+    if (template instanceof HaraNodes.SyntaxQuote.Unquote) {
+      fail("unquote-splicing is only valid inside a collection");
+    }
+    return new HaraNodes.SyntaxQuote(
+        template, unquotes.toArray(new HaraExpressionNode[0]));
+  }
+
+  @SuppressWarnings({"rawtypes", "unchecked"})
+  private Object syntaxQuoteTemplate(
+      Object value,
+      ArrayList<HaraExpressionNode> unquotes,
+      Map<Symbol, Integer> autoGensyms) {
+    if (value instanceof Symbol symbol) {
+      if (symbol.getNamespace() == null && symbol.getName().endsWith("#")) {
+        int index =
+            autoGensyms.computeIfAbsent(symbol, ignored -> autoGensyms.size());
+        String prefix = symbol.getName().substring(0, symbol.getName().length() - 1);
+        return new HaraNodes.SyntaxQuote.AutoGensym(index, prefix);
+      }
+      return value;
+    }
+    if (value instanceof List<?> list) {
+      if (syntaxForm(list, "unquote") || syntaxForm(list, "unquote-splicing")) {
+        requireCount(list, 2, ((Symbol) list.nth(0)).getName());
+        int index = unquotes.size();
+        unquotes.add(lower(list.nth(1)));
+        return new HaraNodes.SyntaxQuote.Unquote(
+            index, syntaxForm(list, "unquote-splicing"));
+      }
+      ArrayList<Object> output = new ArrayList<>();
+      for (Object item : list) {
+        output.add(syntaxQuoteTemplate(item, unquotes, autoGensyms));
+      }
+      return hara.lang.data.List.Standard.from(list.meta(), output.toArray());
+    }
+    if (value instanceof hara.lang.data.Vector<?> vector) {
+      ArrayList<Object> output = new ArrayList<>();
+      for (Object item : vector) {
+        output.add(syntaxQuoteTemplate(item, unquotes, autoGensyms));
+      }
+      return hara.lang.data.Vector.Standard.from(vector.meta(), output.toArray());
+    }
+    if (value instanceof ISetType<?> set) {
+      ArrayList<Object> output = new ArrayList<>();
+      for (Object item : set) {
+        output.add(syntaxQuoteTemplate(item, unquotes, autoGensyms));
+      }
+      return hara.lang.data.Set.Standard.from(set.meta(), output.toArray());
+    }
+    if (value instanceof IMapType<?, ?> map) {
+      ArrayList<Object> output = new ArrayList<>();
+      for (Object entryValue : map) {
+        java.util.Map.Entry<?, ?> entry = (java.util.Map.Entry<?, ?>) entryValue;
+        output.add(syntaxQuoteTemplate(entry.getKey(), unquotes, autoGensyms));
+        output.add(syntaxQuoteTemplate(entry.getValue(), unquotes, autoGensyms));
+      }
+      if (value instanceof hara.lang.data.OrderedMap) {
+        return hara.lang.data.OrderedMap.Standard.from(map.meta(), output.toArray());
+      }
+      return hara.lang.data.Map.Standard.from(map.meta(), output.toArray());
+    }
+    return value;
+  }
+
+  private boolean syntaxForm(List<?> form, String name) {
+    return form.count() > 0
+        && form.nth(0) instanceof Symbol symbol
+        && symbol.getNamespace() == null
+        && name.equals(symbol.getName());
   }
 
   private HaraExpressionNode lowerIf(List<?> form) {
@@ -340,6 +421,96 @@ final class FoundationHirLowerer {
                 Keyword.create("arglists"),
                 hara.lang.data.Vector.Standard.from(null, signatures));
     return new HaraNodes.DefineGlobal(name.withMeta(metadata), function);
+  }
+
+  @SuppressWarnings("unchecked")
+  private HaraExpressionNode lowerPrivateDefn(List<?> form) {
+    if (form.count() < 4 || !(form.nth(1) instanceof Symbol)) {
+      fail("defn- expects a name, parameters, and body");
+    }
+    Symbol name = (Symbol) form.nth(1);
+    IMapType<Object, Object> metadata =
+        name.meta() instanceof IMapType<?, ?>
+            ? (IMapType<Object, Object>) name.meta()
+            : hara.lang.data.Map.Standard.EMPTY;
+    Object[] values = new Object[(int) form.count()];
+    values[0] = Symbol.create("defn");
+    values[1] = name.withMeta((IMapType<Object, Object>) metadata.assoc(Keyword.create("private"), Boolean.TRUE));
+    for (int index = 2; index < form.count(); index++) values[index] = form.nth(index);
+    return lowerDefn(hara.lang.data.List.Standard.from(form.meta(), values));
+  }
+
+  private HaraExpressionNode lowerDeclare(List<?> form) {
+    if (form.count() < 2) fail("declare expects at least one symbol");
+    for (int index = 1; index < form.count(); index++) {
+      if (!(form.nth(index) instanceof Symbol symbol) || symbol.getNamespace() != null) {
+        fail("declare expects unqualified symbols");
+      }
+      context.declareCurrent((Symbol) form.nth(index));
+    }
+    return new HaraNodes.Literal(null);
+  }
+
+  private HaraExpressionNode lowerDefMacro(List<?> form) {
+    if (form.count() < 4 || !(form.nth(1) instanceof Symbol)) {
+      fail("defmacro expects a name, parameter vector, and body");
+    }
+    Symbol rawName = (Symbol) form.nth(1);
+    Symbol name = definitionSymbol(rawName, form);
+    int parametersIndex = 2;
+    String doc = null;
+    if (form.nth(parametersIndex) instanceof String value) {
+      doc = value;
+      parametersIndex++;
+    }
+    IMapType<?, ?> attributes = null;
+    if (parametersIndex < form.count() && form.nth(parametersIndex) instanceof IMapType<?, ?> value) {
+      attributes = value;
+      parametersIndex++;
+    }
+    if (parametersIndex >= form.count() || !bindingVector(form.nth(parametersIndex))
+        || parametersIndex + 1 >= form.count()) {
+      fail("defmacro expects a parameter vector and body");
+    }
+    Object[] body = bodyForms(form, parametersIndex + 1);
+    IMapType<Object, Object> metadata =
+        name.meta() instanceof IMapType<?, ?>
+            ? (IMapType<Object, Object>) name.meta()
+            : hara.lang.data.Map.Standard.EMPTY;
+    if (attributes != null) {
+      for (Object value : attributes) {
+        java.util.Map.Entry<?, ?> entry = (java.util.Map.Entry<?, ?>) value;
+        metadata = (IMapType<Object, Object>) metadata.assoc(entry.getKey(), entry.getValue());
+      }
+    }
+    if (doc != null) metadata = (IMapType<Object, Object>) metadata.assoc(Keyword.create("doc"), doc);
+    metadata =
+        (IMapType<Object, Object>) metadata
+            .assoc(Keyword.create("arglists"),
+                hara.lang.data.Vector.Standard.from(null, form.nth(parametersIndex)))
+            .assoc(Keyword.create("macro"), Boolean.TRUE);
+    if (!locals.isEmpty()) fail("defmacro is only valid at namespace scope");
+    ILinearType<?> parameters = (ILinearType<?>) form.nth(parametersIndex);
+    ArrayList<Object> compiledParameters = new ArrayList<>();
+    compiledParameters.add(Symbol.create("&form"));
+    compiledParameters.add(Symbol.create("&env"));
+    for (Object parameter : parameters) compiledParameters.add(parameter);
+    HaraExpressionNode compiled =
+        lowerFunction(
+            hara.lang.data.Vector.Standard.from(null, compiledParameters.toArray()), body);
+    if (!(compiled instanceof HaraNodes.FunctionLiteral)) {
+      fail("defmacro body did not compile to a Hara function");
+    }
+    HaraNodes.FunctionLiteral function = (HaraNodes.FunctionLiteral) compiled;
+    Symbol definition = name.withMeta(metadata);
+    context.defineMacro(
+        definition,
+        new HaraMacro(
+            context,
+            context.currentNamespaceName(),
+            definition,
+            function.instantiateWithoutClosure()));
+    return new HaraNodes.Literal(null);
   }
 
   private HaraExpressionNode lowerNamespace(List<?> form) {

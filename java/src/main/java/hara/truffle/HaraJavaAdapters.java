@@ -412,7 +412,13 @@ public final class HaraJavaAdapters {
         (receiver, arguments) -> {
           IWatch watch = (IWatch) receiver;
           Object callback = arguments[1];
-          watch.addWatch(arguments[0], entry -> invokeCallback(callback, new Object[] {entry}));
+          watch.addWatch(
+              arguments[0],
+              entry ->
+                  invokeCallback(
+                      callback,
+                      new Object[] {arguments[0], receiver, ((IWatch.WatchEntry) entry).oldVal(),
+                          ((IWatch.WatchEntry) entry).newVal()}));
           return receiver;
         });
     protocol.extend(

@@ -137,6 +137,8 @@ final class HaraAnalyzer {
       switch (name) {
         case "quote":
           return analyzeQuote(list);
+        case "syntax-quote":
+          return analyzeSyntaxQuote(list);
         case "do":
           return analyzeDo(list, 1);
         case "if":
@@ -193,10 +195,6 @@ final class HaraAnalyzer {
           return analyzeExtendType(list);
         case "defmacro":
           return analyzeDefMacro(list);
-        case "macroexpand-1":
-          return analyzeMacroExpand(list, false);
-        case "macroexpand":
-          return analyzeMacroExpand(list, true);
         case "new":
           return analyzeNativeNew(list);
         case "ns":
@@ -325,6 +323,82 @@ final class HaraAnalyzer {
   private HaraExpressionNode analyzeQuote(List<?> form) {
     requireCount(form, 2, "quote");
     return new HaraNodes.Literal(form.nth(1));
+  }
+
+  private HaraExpressionNode analyzeSyntaxQuote(List<?> form) {
+    requireCount(form, 2, "syntax-quote");
+    ArrayList<HaraExpressionNode> unquotes = new ArrayList<>();
+    Object template =
+        syntaxQuoteTemplate(form.nth(1), unquotes, new LinkedHashMap<>());
+    if (template instanceof HaraNodes.SyntaxQuote.Unquote) {
+      throw error("unquote-splicing is only valid inside a collection");
+    }
+    return new HaraNodes.SyntaxQuote(
+        template, unquotes.toArray(new HaraExpressionNode[0]));
+  }
+
+  @SuppressWarnings({"rawtypes", "unchecked"})
+  private Object syntaxQuoteTemplate(
+      Object value,
+      ArrayList<HaraExpressionNode> unquotes,
+      Map<Symbol, Integer> autoGensyms) {
+    if (value instanceof Symbol symbol) {
+      if (symbol.getNamespace() == null && symbol.getName().endsWith("#")) {
+        int index =
+            autoGensyms.computeIfAbsent(symbol, ignored -> autoGensyms.size());
+        String prefix = symbol.getName().substring(0, symbol.getName().length() - 1);
+        return new HaraNodes.SyntaxQuote.AutoGensym(index, prefix);
+      }
+      return value;
+    }
+    if (value instanceof List<?> list) {
+      if (syntaxForm(list, "unquote") || syntaxForm(list, "unquote-splicing")) {
+        requireCount(list, 2, ((Symbol) list.nth(0)).getName());
+        int index = unquotes.size();
+        unquotes.add(analyze(list.nth(1)));
+        return new HaraNodes.SyntaxQuote.Unquote(
+            index, syntaxForm(list, "unquote-splicing"));
+      }
+      ArrayList<Object> output = new ArrayList<>();
+      for (Object item : list) {
+        output.add(syntaxQuoteTemplate(item, unquotes, autoGensyms));
+      }
+      return hara.lang.data.List.Standard.from(list.meta(), output.toArray());
+    }
+    if (value instanceof hara.lang.data.Vector<?> vector) {
+      ArrayList<Object> output = new ArrayList<>();
+      for (Object item : vector) {
+        output.add(syntaxQuoteTemplate(item, unquotes, autoGensyms));
+      }
+      return hara.lang.data.Vector.Standard.from(vector.meta(), output.toArray());
+    }
+    if (value instanceof ISetType<?> set) {
+      ArrayList<Object> output = new ArrayList<>();
+      for (Object item : set) {
+        output.add(syntaxQuoteTemplate(item, unquotes, autoGensyms));
+      }
+      return hara.lang.data.Set.Standard.from(set.meta(), output.toArray());
+    }
+    if (value instanceof IMapType<?, ?> map) {
+      ArrayList<Object> output = new ArrayList<>();
+      for (Object entryValue : map) {
+        java.util.Map.Entry<?, ?> entry = (java.util.Map.Entry<?, ?>) entryValue;
+        output.add(syntaxQuoteTemplate(entry.getKey(), unquotes, autoGensyms));
+        output.add(syntaxQuoteTemplate(entry.getValue(), unquotes, autoGensyms));
+      }
+      if (value instanceof hara.lang.data.OrderedMap) {
+        return hara.lang.data.OrderedMap.Standard.from(map.meta(), output.toArray());
+      }
+      return hara.lang.data.Map.Standard.from(map.meta(), output.toArray());
+    }
+    return value;
+  }
+
+  private boolean syntaxForm(List<?> form, String name) {
+    return form.count() > 0
+        && form.nth(0) instanceof Symbol symbol
+        && symbol.getNamespace() == null
+        && name.equals(symbol.getName());
   }
 
   private HaraExpressionNode analyzeDo(List<?> form, int start) {
@@ -1505,7 +1579,7 @@ final class HaraAnalyzer {
       throw error("defmacro expects a name, parameter vector, and body");
     }
 
-    Object parameters = form.nth(parametersIndex);
+    ILinearType<?> parameters = (ILinearType<?>) form.nth(parametersIndex);
     Object[] body = new Object[(int) form.count() - parametersIndex - 1];
     for (int i = parametersIndex + 1; i < form.count(); i++) {
       body[i - parametersIndex - 1] = form.nth(i);
@@ -1532,9 +1606,27 @@ final class HaraAnalyzer {
                     Keyword.create("arglists"),
                     hara.lang.data.Vector.Standard.from(null, parameters))
                 .assoc(Keyword.create("macro"), Boolean.TRUE);
+    if (!locals.isEmpty() || !enclosingLocals.isEmpty()) {
+      throw error("defmacro is only valid at namespace scope");
+    }
+    ArrayList<Object> compiledParameters = new ArrayList<>();
+    compiledParameters.add(Symbol.create("&form"));
+    compiledParameters.add(Symbol.create("&env"));
+    for (Object parameter : parameters) compiledParameters.add(parameter);
+    HaraExpressionNode compiled =
+        analyzeFunction(
+            hara.lang.data.Vector.Standard.from(null, compiledParameters.toArray()), body);
+    if (!(compiled instanceof HaraNodes.FunctionLiteral function)) {
+      throw error("defmacro body did not compile to a Hara function");
+    }
     Symbol definition = symbol.withMeta(metadata);
     context.defineMacro(
-        definition, new HaraMacro(definition, (ILinearType<?>) parameters, body));
+        definition,
+        new HaraMacro(
+            context,
+            context.currentNamespaceName(),
+            definition,
+            function.instantiateWithoutClosure()));
     return new HaraNodes.Literal(null);
   }
 
@@ -1592,13 +1684,43 @@ final class HaraAnalyzer {
     if (locals.containsKey(operator) || enclosingLocals.containsKey(operator)) {
       return form;
     }
-    if (operator.getNamespace() != null || "defmacro".equals(operator.getName())) {
+    if ("defmacro".equals(operator.getName())) {
       return form;
     }
     if ("->".equals(operator.getName())) return expandThread(list, false);
     if ("->>".equals(operator.getName())) return expandThread(list, true);
     HaraMacro macro = context.resolveMacro(operator);
-    return macro == null ? form : macro.expand(list);
+    return macro == null ? form : macro.expand(list, macroEnvironment(list));
+  }
+
+  private Object macroEnvironment(List<?> invocation) {
+    ArrayList<Object> localEntries = new ArrayList<>();
+    for (Symbol local : enclosingLocals.keySet()) {
+      localEntries.add(local);
+      localEntries.add(Boolean.TRUE);
+    }
+    for (Symbol local : locals.keySet()) {
+      localEntries.add(local);
+      localEntries.add(Boolean.TRUE);
+    }
+    ArrayList<Object> entries = new ArrayList<>();
+    entries.add(Keyword.create("ns"));
+    entries.add(Symbol.create(context.currentNamespaceName()));
+    entries.add(Keyword.create("locals"));
+    entries.add(hara.lang.data.Map.Standard.from(null, localEntries.toArray()));
+    entries.add(Keyword.create("aliases"));
+    entries.add(context.macroAliases());
+    Object metadata = invocation.meta();
+    if (metadata instanceof IMapType<?, ?> span) {
+      for (String key : new String[] {"file", "line", "column"}) {
+        Object value = ((IMapType) span).lookup(Keyword.create(key));
+        if (value != null) {
+          entries.add(Keyword.create(key));
+          entries.add(value);
+        }
+      }
+    }
+    return hara.lang.data.Map.Standard.from(null, entries.toArray());
   }
 
   private Object expandThread(List<?> form, boolean last) {

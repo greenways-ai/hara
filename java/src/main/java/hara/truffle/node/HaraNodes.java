@@ -18,7 +18,12 @@ import hara.lang.base.Eq;
 import hara.lang.base.primitive.Cast;
 import hara.lang.base.primitive.Num;
 import hara.lang.data.Symbol;
+import hara.lang.data.types.ILinearType;
+import hara.lang.data.types.IMapType;
+import hara.lang.data.types.ISetType;
 import hara.lang.protocol.IFn;
+import hara.lang.protocol.IMetadata;
+import hara.lang.protocol.IObjType;
 import hara.truffle.HaraBox;
 import hara.truffle.HaraContext;
 import hara.truffle.HaraException;
@@ -31,6 +36,7 @@ import hara.truffle.HaraStruct;
 import hara.truffle.HaraType;
 import hara.truffle.HaraVar;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 
 public final class HaraNodes {
@@ -76,6 +82,117 @@ public final class HaraNodes {
     @Override
     public Object execute(VirtualFrame frame) {
       return value;
+    }
+  }
+
+  /** Builds syntax-quoted Hara data while evaluating only explicit unquotes. */
+  public static final class SyntaxQuote extends HaraExpressionNode {
+    public static final class Unquote {
+      private final int index;
+      private final boolean splice;
+
+      public Unquote(int index, boolean splice) {
+        this.index = index;
+        this.splice = splice;
+      }
+    }
+
+    public static final class AutoGensym {
+      private final int index;
+      private final String prefix;
+
+      public AutoGensym(int index, String prefix) {
+        this.index = index;
+        this.prefix = prefix;
+      }
+    }
+
+    private final Object template;
+    @Children private final HaraExpressionNode[] unquotes;
+
+    public SyntaxQuote(Object template, HaraExpressionNode[] unquotes) {
+      this.template = template;
+      this.unquotes = unquotes;
+    }
+
+    @Override
+    public Object execute(VirtualFrame frame) {
+      Object[] values = new Object[unquotes.length];
+      for (int index = 0; index < unquotes.length; index++) {
+        values[index] = unquotes[index].execute(frame);
+      }
+      return materialize(template, values, new HashMap<>());
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private Object materialize(
+        Object value, Object[] values, java.util.Map<Integer, Symbol> gensyms) {
+      if (value instanceof Unquote unquote) {
+        if (unquote.splice) {
+          throw new HaraException("unquote-splicing is only valid inside a collection", this);
+        }
+        return values[unquote.index];
+      }
+      if (value instanceof AutoGensym auto) {
+        return gensyms.computeIfAbsent(
+            auto.index, ignored -> HaraLanguage.currentContext().gensym(auto.prefix));
+      }
+      if (value instanceof hara.lang.data.List<?> list) {
+        ArrayList<Object> output = new ArrayList<>();
+        for (Object item : list) append(output, item, values, gensyms);
+        return hara.lang.data.List.Standard.from(metadata(list), output.toArray());
+      }
+      if (value instanceof hara.lang.data.Vector<?> vector) {
+        ArrayList<Object> output = new ArrayList<>();
+        for (Object item : vector) append(output, item, values, gensyms);
+        return hara.lang.data.Vector.Standard.from(metadata(vector), output.toArray());
+      }
+      if (value instanceof ISetType<?> set) {
+        ArrayList<Object> output = new ArrayList<>();
+        for (Object item : set) append(output, item, values, gensyms);
+        return hara.lang.data.Set.Standard.from(metadata(set), output.toArray());
+      }
+      if (value instanceof IMapType<?, ?> map) {
+        ArrayList<Object> output = new ArrayList<>();
+        for (Object entryValue : map) {
+          java.util.Map.Entry<?, ?> entry = (java.util.Map.Entry<?, ?>) entryValue;
+          output.add(materializeMapEntry(entry.getKey(), values, gensyms));
+          output.add(materializeMapEntry(entry.getValue(), values, gensyms));
+        }
+        if (value instanceof hara.lang.data.OrderedMap) {
+          return hara.lang.data.OrderedMap.Standard.from(metadata(map), output.toArray());
+        }
+        return hara.lang.data.Map.Standard.from(metadata(map), output.toArray());
+      }
+      return value;
+    }
+
+    private Object materializeMapEntry(
+        Object value, Object[] values, java.util.Map<Integer, Symbol> gensyms) {
+      if (value instanceof Unquote unquote && unquote.splice) {
+        throw new HaraException("unquote-splicing is not valid in a map entry", this);
+      }
+      return materialize(value, values, gensyms);
+    }
+
+    private void append(
+        ArrayList<Object> output,
+        Object value,
+        Object[] values,
+        java.util.Map<Integer, Symbol> gensyms) {
+      if (value instanceof Unquote unquote && unquote.splice) {
+        Object expanded = values[unquote.index];
+        if (!(expanded instanceof ILinearType<?> sequence)) {
+          throw new HaraException("unquote-splicing expects a sequential value", this);
+        }
+        for (Object item : sequence) output.add(item);
+        return;
+      }
+      output.add(materialize(value, values, gensyms));
+    }
+
+    private IMetadata metadata(Object value) {
+      return value instanceof IObjType object ? object.meta() : null;
     }
   }
 
@@ -1807,6 +1924,13 @@ public final class HaraNodes {
       this.minimumArity = minimumArity;
       this.variadic = variadic;
       this.captures = captures;
+    }
+
+    public HaraFunction instantiateWithoutClosure() {
+      if (captures) {
+        throw new HaraException("Top-level compiled function unexpectedly captures lexical state");
+      }
+      return new HaraFunction(callTarget, minimumArity, variadic, null);
     }
 
     @Override

@@ -33,7 +33,9 @@ public interface Atom<V> {
 
     @Override
     public V reset(V newVal) {
-      _state.set(newVal);
+      validate(newVal);
+      V oldVal = _state.getAndSet(newVal);
+      notifyWatches(oldVal, newVal);
       return newVal;
     }
 
