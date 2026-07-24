@@ -30,13 +30,13 @@
 
   const project = (k, t) => {
     const x = 720 + k * (36 + 304 * t);
-    const y = 140 + 670 * t;
+    const y = -160 + 970 * t;
     return [offX + x * scale, offY + y * scale];
   };
 
   /* arena in normalized units: x = k (lateral), y = t * T_SCALE (depth) */
   const T_SCALE = 28;
-  const X_MIN = -13, X_MAX = 13, Y_MIN = 0.06 * T_SCALE, Y_MAX = 0.98 * T_SCALE;
+  const X_MIN = -13, X_MAX = 13, Y_MIN = 0.18 * T_SCALE, Y_MAX = 0.98 * T_SCALE;
   const SPEED = 2.1;            // normalized units / s
   const EPS = 0.38;             // collision distance
   const LOOKAHEAD = 1.7;
