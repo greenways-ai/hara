@@ -17,9 +17,9 @@ import tempfile
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-CORPUS = ROOT / "bench/runtime/workloads.json"
-RESULTS = ROOT / "bench/results/reference.json"
+ROOT = Path(__file__).resolve().parents[3]
+CORPUS = ROOT / "lib/bench/runtime/workloads.json"
+RESULTS = ROOT / "lib/bench/results/reference.json"
 REPORT = ROOT / "docs/reference/runtime-benchmarks.md"
 PROFILES = {
     "smoke": {"startup_samples": 2, "windows": 3, "calls": 1},
@@ -46,8 +46,8 @@ def classpaths():
     clojure = local / "clojure/1.12.5/clojure-1.12.5.jar"
     spec = local / "spec.alpha/0.5.238/spec.alpha-0.5.238.jar"
     core_spec = local / "core.specs.alpha/0.4.74/core.specs.alpha-0.4.74.jar"
-    cp_file = ROOT / "target/hara-runtime-classpath.txt"
-    truffle = str(ROOT / "target/classes")
+    cp_file = ROOT / "java/target/hara-runtime-classpath.txt"
+    truffle = str(ROOT / "java/target/classes")
     if cp_file.exists():
         truffle += os.pathsep + cp_file.read_text().strip()
     return os.pathsep.join(map(str, (clojure, spec, core_spec))), truffle
@@ -59,8 +59,8 @@ def encoded(source):
 
 def adapters():
     clj_cp, truffle_cp = classpaths()
-    clj_script = str(ROOT / "bench/runtime/clojure_runner.clj")
-    node_script = str(ROOT / "bench/runtime/node_runner.mjs")
+    clj_script = str(ROOT / "lib/bench/runtime/clojure_runner.clj")
+    node_script = str(ROOT / "lib/bench/runtime/node_runner.mjs")
     glue = ROOT / "target/wasm-bindgen/hara_wasm.js"
 
     def common(command, runtime, workload, windows, calls, source_encoding="base64"):
@@ -80,7 +80,7 @@ def adapters():
             [str(ROOT / "target/hara-truffle"), "benchmark"],
             "hara-native-image", w, n, c),
         "hara-rust-native": lambda w, n, c: common(
-            [str(ROOT / "wasm/target/release/hara-runtime-benchmark")],
+            [str(ROOT / "rust/target/release/hara-runtime-benchmark")],
             "hara-rust-native", w, n, c, "hex"),
         "hara-wasm-node": lambda w, n, c: common(
             ["node", node_script], "hara-wasm-node", w, n, c),
@@ -90,17 +90,17 @@ def adapters():
 def build(include_native):
     if include_native:
         run([str(ROOT / "scripts/build-truffle-native")], timeout=1200)
-    run(["mvn", "-q", "-Ptruffle", "-DskipTests", "compile",
-         "dependency:build-classpath", "-Dmdep.outputFile=target/hara-runtime-classpath.txt"],
+    run(["mvn", "-q", "-f", "java/pom.xml", "-Ptruffle", "-DskipTests", "compile",
+         "dependency:build-classpath", "-Dmdep.outputFile=java/target/hara-runtime-classpath.txt"],
         timeout=300)
-    run(["cargo", "build", "--manifest-path", "wasm/Cargo.toml", "--release",
+    run(["cargo", "build", "--manifest-path", "rust/Cargo.toml", "--release",
          "--bin", "hara-runtime-benchmark"], timeout=600)
     if shutil.which("wasm-bindgen"):
-        run(["cargo", "build", "--manifest-path", "wasm/Cargo.toml", "--release",
+        run(["cargo", "build", "--manifest-path", "rust/Cargo.toml", "--release",
              "--target", "wasm32-unknown-unknown", "--lib"], timeout=600)
         (ROOT / "target/wasm-bindgen").mkdir(parents=True, exist_ok=True)
         run(["wasm-bindgen", "--target", "nodejs", "--out-dir", "target/wasm-bindgen",
-             "wasm/target/wasm32-unknown-unknown/release/hara_wasm.wasm"], timeout=300)
+             "rust/target/wasm32-unknown-unknown/release/hara_wasm.wasm"], timeout=300)
 
 
 def percentile(values, fraction):
@@ -150,8 +150,8 @@ def payload_sizes(glue):
         Path.home() / ".m2/repository/org/clojure/clojure/1.12.5/clojure-1.12.5.jar",
         Path.home() / ".m2/repository/org/clojure/spec.alpha/0.5.238/spec.alpha-0.5.238.jar",
         Path.home() / ".m2/repository/org/clojure/core.specs.alpha/0.4.74/core.specs.alpha-0.4.74.jar"]
-    cp_file = ROOT / "target/hara-runtime-classpath.txt"
-    truffle_files = [ROOT / "target/classes"]
+    cp_file = ROOT / "java/target/hara-runtime-classpath.txt"
+    truffle_files = [ROOT / "java/target/classes"]
     if cp_file.exists():
         truffle_files += [Path(value) for value in cp_file.read_text().strip().split(os.pathsep)]
     paths = {
@@ -159,8 +159,8 @@ def payload_sizes(glue):
         "bb": [Path(shutil.which("bb") or "")],
         "hara-truffle": truffle_files,
         "hara-native-image": [ROOT / "target/hara-truffle"],
-        "hara-rust-native": [ROOT / "wasm/target/release/hara-runtime-benchmark"],
-        "hara-wasm-node": [ROOT / "wasm/target/wasm32-unknown-unknown/release/hara_wasm.wasm", glue],
+        "hara-rust-native": [ROOT / "rust/target/release/hara-runtime-benchmark"],
+        "hara-wasm-node": [ROOT / "rust/target/wasm32-unknown-unknown/release/hara_wasm.wasm", glue],
     }
     def size(path):
         if path.is_file(): return path.stat().st_size

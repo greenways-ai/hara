@@ -6,12 +6,12 @@ MAVEN ?= mvn
 CARGO ?= cargo
 ARGS ?=
 
-TRUFFLE_JAR := target/hara-truffle.jar
+TRUFFLE_JAR := java/target/hara-truffle.jar
 TRUFFLE_NATIVE := target/hara-truffle
-RUST_MANIFEST := wasm/Cargo.toml
-RUST_DEBUG := wasm/target/debug/hara
-RUST_RELEASE := wasm/target/release/hara
-WASM_RAW := wasm/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm
+RUST_MANIFEST := rust/Cargo.toml
+RUST_DEBUG := rust/target/debug/hara
+RUST_RELEASE := rust/target/release/hara
+WASM_RAW := rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm
 
 .PHONY: help all build-all test-all clean \
         java java-offline java-headless java-build \
@@ -41,15 +41,15 @@ help: ## Show the available runtime targets
 	@echo 'Examples'
 	@echo
 	@echo '  make java ARGS="eval '\''(+ 19 23)'\''"'
-	@echo '  make rust ARGS="run examples/hello.hal"'
+	@echo '  make rust ARGS="run lib/examples/hello.hal"'
 	@echo '  make rust ARGS="remote 127.0.0.1:1311"'
 
 all: help
 
 java-build: $(TRUFFLE_JAR) ## Build the JVM Truffle runtime
 
-$(TRUFFLE_JAR): pom.xml
-	$(MAVEN) -Ptruffle -DskipTests package
+$(TRUFFLE_JAR): java/pom.xml
+	$(MAVEN) -f java/pom.xml -Ptruffle -DskipTests package
 
 java: java-build ## Run the JVM Truffle runtime
 	./hara $(ARGS)
@@ -80,7 +80,7 @@ rust-release: rust-build-release ## Run optimized Rust native
 
 native-image: $(TRUFFLE_NATIVE) ## Build the GraalVM native-image runtime
 
-$(TRUFFLE_NATIVE): pom.xml scripts/build-truffle-native
+$(TRUFFLE_NATIVE): java/pom.xml scripts/build-truffle-native
 	scripts/build-truffle-native
 
 native-image-run: native-image ## Run the GraalVM native-image runtime
@@ -97,10 +97,10 @@ wasm-build: ## Build the raw WASM module
 build-all: java-build rust-build-release wasm-build ## Build all portable runtime artifacts
 
 test-all: ## Run Java and Rust tests
-	$(MAVEN) -q test
+	$(MAVEN) -q -f java/pom.xml test
 	$(CARGO) test --manifest-path $(RUST_MANIFEST)
 
 clean: ## Remove generated build output
-	$(MAVEN) clean
+	$(MAVEN) -f java/pom.xml clean
 	$(CARGO) clean --manifest-path $(RUST_MANIFEST)
-	$(CARGO) clean --manifest-path wasm/raw/Cargo.toml
+	$(CARGO) clean --manifest-path rust/raw/Cargo.toml
