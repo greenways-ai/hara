@@ -4,10 +4,6 @@ package hara.truffle;
 public final class StdLibFoundationSequence {
   private StdLibFoundationSequence() {}
 
-  @HaraExport(
-      name = "map",
-      doc = "Returns a lazy sequence produced by applying function to each input.",
-      arglists = {"[function]", "[function value & rest]"})
   public static Object map(HaraContext context, Object[] values) {
     return context.mapValues(values);
   }

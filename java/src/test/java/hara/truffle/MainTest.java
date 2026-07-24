@@ -88,7 +88,7 @@ public class MainTest {
         Main.run(
             new String[] {"--offline", "repl"},
             new ByteArrayInputStream(
-                "(inc 1)\n(map inc [1 2 3])\n".getBytes(StandardCharsets.UTF_8)),
+                "(inc 1)\n((map inc) [1 2 3])\n".getBytes(StandardCharsets.UTF_8)),
             new PrintStream(output, true, StandardCharsets.UTF_8),
             new PrintStream(error, true, StandardCharsets.UTF_8));
 

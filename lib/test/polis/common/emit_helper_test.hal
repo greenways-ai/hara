@@ -64,7 +64,7 @@
 ^{:refer polis.common.emit-helper/basic-typed-args :added "4.0"}
 (fact "typed args without grammar checks"
 
-  (mapv (juxt meta identity)
+  (map (juxt meta identity)
         (basic-typed-args '(:int i, :const :int j)))
   => '[[{:- [:int]} i]
        [{:- [:const :int]} j]])

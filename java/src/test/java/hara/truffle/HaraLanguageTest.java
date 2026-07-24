@@ -92,8 +92,8 @@ public class HaraLanguageTest {
               .asLong());
       assertEquals(3, context.eval(HaraLanguage.ID, "(last [1 2 3])").asLong());
       assertEquals(1, context.eval(HaraLanguage.ID, "(first (reverse [3 2 1]))").asLong());
-      assertEquals(":a", context.eval(HaraLanguage.ID, "(iter-next (keys {:a 1}))").toString());
-      assertEquals(1, context.eval(HaraLanguage.ID, "(iter-next (vals {:a 1}))").asLong());
+      assertEquals(":a", context.eval(HaraLanguage.ID, "(first (keys {:a 1}))").toString());
+      assertEquals(1, context.eval(HaraLanguage.ID, "(first (vals {:a 1}))").asLong());
       assertTrue(
           context.eval(HaraLanguage.ID, "(protocol-call IFind has? {:a nil} :a)").asBoolean());
       assertTrue(
@@ -139,8 +139,8 @@ public class HaraLanguageTest {
               .asLong());
       assertTrue(context.eval(HaraLanguage.ID, "(not-empty [1])").hasArrayElements());
       assertTrue(context.eval(HaraLanguage.ID, "(not-empty [])").isNull());
-      assertEquals(4, context.eval(HaraLanguage.ID, "(iter-next (map inc [3]))").asLong());
-      assertEquals(4, context.eval(HaraLanguage.ID, "(iter-next (map + [1 2] [3 4]))").asLong());
+      assertEquals(4, context.eval(HaraLanguage.ID, "(first (map inc [3]))").asLong());
+      assertEquals(4, context.eval(HaraLanguage.ID, "(first (map + [1 2] [3 4]))").asLong());
       assertEquals(
           2,
           context.eval(HaraLanguage.ID, "(iter-next (filter (fn [x] (= x 2)) [1 2 3]))").asLong());
@@ -168,15 +168,16 @@ public class HaraLanguageTest {
   public void supportsLazySeqBoundariesAndSourceAwareTransforms() {
     try (Context context = context()) {
       context.eval(HaraLanguage.ID, "(load-resource \"std/lib/foundation.hal\")");
-      assertTrue(context.eval(HaraLanguage.ID, "(seq? (map inc [1 2 3]))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(vector? (map inc [1 2 3]))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(iter? ((map inc) [1 2 3]))").asBoolean());
       assertEquals(2, context.eval(HaraLanguage.ID, "(first (map inc [1 2 3]))").asLong());
       assertEquals(2, context.eval(HaraLanguage.ID, "(first ((map inc) [1 2 3]))").asLong());
       assertEquals(2, context.eval(HaraLanguage.ID, "(first ((map inc) (seq [1 2 3])))").asLong());
-      assertEquals(2, context.eval(HaraLanguage.ID, "(first (seq (map inc) [1 2 3]))").asLong());
+      assertEquals(2, context.eval(HaraLanguage.ID, "(first ((map inc) [1 2 3]))").asLong());
       assertEquals(
           3,
           context
-              .eval(HaraLanguage.ID, "(first (seq (comp (map inc) (map inc)) [1 2 3]))")
+              .eval(HaraLanguage.ID, "(first ((comp (map inc) (map inc)) [1 2 3]))")
               .asLong());
       assertEquals(
           3,
