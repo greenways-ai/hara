@@ -16,6 +16,101 @@ import org.junit.Test;
 
 public class HirArtifactTest {
   @Test
+  public void mapsAndSetsEncodeInCanonicalOrder() {
+    byte[] mapA =
+        HirArtifact.encode(
+            "t",
+            "t",
+            new byte[0],
+            new Object[] {
+              hara.lang.data.Map.Standard.from(null, new Object[] {"b", 2L, "a", 1L, "c", 3L})
+            });
+    byte[] mapB =
+        HirArtifact.encode(
+            "t",
+            "t",
+            new byte[0],
+            new Object[] {
+              hara.lang.data.Map.Standard.from(null, new Object[] {"c", 3L, "a", 1L, "b", 2L})
+            });
+    assertArrayEquals(mapA, mapB);
+
+    byte[] setA =
+        HirArtifact.encode(
+            "t",
+            "t",
+            new byte[0],
+            new Object[] {hara.lang.data.Set.Standard.from(null, new Object[] {3L, 1L, 2L})});
+    byte[] setB =
+        HirArtifact.encode(
+            "t",
+            "t",
+            new byte[0],
+            new Object[] {hara.lang.data.Set.Standard.from(null, new Object[] {2L, 3L, 1L})});
+    assertArrayEquals(setA, setB);
+
+    // Entry order in the payload follows the canonical encoded-byte order, not
+    // the host map/set iteration order. For longs 1, 100, -1 the canonical order
+    // is 1 < 100 < -1 (unsigned lexicographic on the 8-byte big-endian encoding).
+    byte[] one = {3, 0, 0, 0, 0, 0, 0, 0, 1};
+    byte[] hundred = {3, 0, 0, 0, 0, 0, 0, 0, 100};
+    byte[] minusOne = {3, -1, -1, -1, -1, -1, -1, -1, -1};
+
+    byte[] mapEncoded =
+        HirArtifact.encode(
+            "t",
+            "t",
+            new byte[0],
+            new Object[] {
+              hara.lang.data.Map.Standard.from(
+                  null, new Object[] {1L, "a", -1L, "b", 100L, "c"})
+            });
+    assertTrue(indexOf(mapEncoded, one) >= 0);
+    assertTrue(indexOf(mapEncoded, one) < indexOf(mapEncoded, hundred));
+    assertTrue(indexOf(mapEncoded, hundred) < indexOf(mapEncoded, minusOne));
+
+    byte[] setEncoded =
+        HirArtifact.encode(
+            "t",
+            "t",
+            new byte[0],
+            new Object[] {hara.lang.data.Set.Standard.from(null, new Object[] {1L, -1L, 100L})});
+    assertTrue(indexOf(setEncoded, one) >= 0);
+    assertTrue(indexOf(setEncoded, one) < indexOf(setEncoded, hundred));
+    assertTrue(indexOf(setEncoded, hundred) < indexOf(setEncoded, minusOne));
+
+    // Ordered collections keep insertion order: it is semantic there.
+    byte[] orderedA =
+        HirArtifact.encode(
+            "t",
+            "t",
+            new byte[0],
+            new Object[] {
+              hara.lang.data.OrderedMap.Standard.from(null, new Object[] {"b", 2L, "a", 1L})
+            });
+    byte[] orderedB =
+        HirArtifact.encode(
+            "t",
+            "t",
+            new byte[0],
+            new Object[] {
+              hara.lang.data.OrderedMap.Standard.from(null, new Object[] {"a", 1L, "b", 2L})
+            });
+    assertTrue(!java.util.Arrays.equals(orderedA, orderedB));
+  }
+
+  private static int indexOf(byte[] haystack, byte[] needle) {
+    outer:
+    for (int i = 0; i + needle.length <= haystack.length; i++) {
+      for (int j = 0; j < needle.length; j++) {
+        if (haystack[i + j] != needle[j]) continue outer;
+      }
+      return i;
+    }
+    return -1;
+  }
+
+  @Test
   public void foundationArtifactIsDeterministicAndRoundTripsForms() throws Exception {
     Path source = Path.of("lib/src/std/lib/foundation.hal");
     byte[] sourceBytes = Files.readAllBytes(source);
@@ -135,7 +230,7 @@ public class HirArtifactTest {
                       + " (assoc-in {} [:a :b] 42)"
                       + " (vec (range 4))"
                       + " (vec (repeat 3 7))"
-                      + " ((map inc) [1 2])"
+                      + " (vec ((map inc) [1 2]))"
                       + " ((juxt inc dec) 8)]")
               .toString());
       assertEquals(

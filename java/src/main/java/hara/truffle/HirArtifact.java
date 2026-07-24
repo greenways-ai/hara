@@ -185,19 +185,19 @@ final class HirArtifact {
       writeMetadata(output, vector);
     } else if (value instanceof hara.lang.data.OrderedMap<?, ?> map) {
       output.writeByte(ORDERED_MAP);
-      writeMap(output, map);
+      writeMap(output, map, false);
       writeMetadata(output, map);
     } else if (value instanceof IMapType<?, ?> map) {
       output.writeByte(MAP);
-      writeMap(output, map);
+      writeMap(output, map, true);
       writeMetadata(output, (IObjType) map);
     } else if (value instanceof hara.lang.data.OrderedSet<?> set) {
       output.writeByte(ORDERED_SET);
-      writeSet(output, set);
+      writeSet(output, set, false);
       writeMetadata(output, set);
     } else if (value instanceof ISetType<?> set) {
       output.writeByte(SET);
-      writeSet(output, set);
+      writeSet(output, set, true);
       writeMetadata(output, (IObjType) set);
     } else {
       throw new HaraException(
@@ -265,13 +265,29 @@ final class HirArtifact {
     return values;
   }
 
-  private static void writeMap(DataOutputStream output, IMapType<?, ?> map) throws IOException {
+  private static void writeMap(DataOutputStream output, IMapType<?, ?> map, boolean canonical)
+      throws IOException {
     writeCount(output, Math.toIntExact(map.count()));
+    int count = Math.toIntExact(map.count());
+    if (!canonical) {
+      // Ordered maps: entry order is semantic, keep iteration order.
+      for (Object item : map) {
+        Entry<?, ?> entry = (Entry<?, ?>) item;
+        writeValue(output, entry.getKey());
+        writeValue(output, entry.getValue());
+      }
+      return;
+    }
+    byte[][] encodedKeys = new byte[count][];
+    byte[][] encodedEntries = new byte[count][];
+    int index = 0;
     for (Object item : map) {
       Entry<?, ?> entry = (Entry<?, ?>) item;
-      writeValue(output, entry.getKey());
-      writeValue(output, entry.getValue());
+      encodedKeys[index] = encodeValue(entry.getKey());
+      encodedEntries[index] = concat(encodedKeys[index], encodeValue(entry.getValue()));
+      index++;
     }
+    for (int order : sortedOrder(encodedKeys)) output.write(encodedEntries[order]);
   }
 
   private static Object[] readEntries(DataInputStream input) throws IOException {
@@ -281,9 +297,44 @@ final class HirArtifact {
     return entries;
   }
 
-  private static void writeSet(DataOutputStream output, ISetType<?> set) throws IOException {
+  private static void writeSet(DataOutputStream output, ISetType<?> set, boolean canonical)
+      throws IOException {
     writeCount(output, Math.toIntExact(set.count()));
-    for (Object value : set) writeValue(output, value);
+    if (!canonical) {
+      // Ordered sets: element order is semantic, keep iteration order.
+      for (Object value : set) writeValue(output, value);
+      return;
+    }
+    byte[][] encodedValues = new byte[Math.toIntExact(set.count())][];
+    int index = 0;
+    for (Object value : set) encodedValues[index++] = encodeValue(value);
+    for (int order : sortedOrder(encodedValues)) output.write(encodedValues[order]);
+  }
+
+  // Canonical collection ordering: entries are sorted by the unsigned
+  // lexicographic order of their canonical encodings, so the artifact does
+  // not depend on any host map/set iteration order.
+  private static byte[] encodeValue(Object value) throws IOException {
+    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    try (DataOutputStream output = new DataOutputStream(bytes)) {
+      writeValue(output, value);
+    }
+    return bytes.toByteArray();
+  }
+
+  private static byte[] concat(byte[] first, byte[] second) {
+    byte[] both = Arrays.copyOf(first, first.length + second.length);
+    System.arraycopy(second, 0, both, first.length, second.length);
+    return both;
+  }
+
+  private static int[] sortedOrder(byte[][] encoded) {
+    Integer[] order = new Integer[encoded.length];
+    for (int index = 0; index < order.length; index++) order[index] = index;
+    Arrays.sort(order, (a, b) -> Arrays.compareUnsigned(encoded[a], encoded[b]));
+    int[] result = new int[order.length];
+    for (int index = 0; index < order.length; index++) result[index] = order[index];
+    return result;
   }
 
   private static void writeNamespaced(DataOutputStream output, String namespace, String name)
