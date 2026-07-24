@@ -8,8 +8,8 @@ hide:
 ---
 
 <div class="hara-home-actions">
-  <a class="md-button md-button--primary" href="user-guide/">Start building</a>
-  <a class="md-button" href="development/">Read the developer guide</a>
+  <a class="md-button md-button--primary" href="studio/">Try Hara</a>
+  <a class="md-button" href="user-guide/">Start building</a>
 </div>
 
 <div class="hara-home-grid">
@@ -31,33 +31,36 @@ hide:
 </div>
 
 <div class="hara-home-section">
-  <div class="hara-kicker">04 / LIVE SESSION</div>
+  <div class="hara-kicker">04 / TRY HARA</div>
   <div class="hara-frame hara-console">
     <div class="hara-console-head">
-      <span>REPL — HARA/WASM</span>
+      <span>REPL — ONE REQUIRE, ANY WORLD</span>
       <span class="hara-index">TTY/00 · LIVE</span>
     </div>
-    <pre class="hara-tty"><span class="hara-tty-p">hara ›</span> (ns live.system
-          (:require [std.lib.promise :as promise]))
-
-<span class="hara-tty-p">hara ›</span> (promise/then (promise/run discover) render)
+    <pre class="hara-tty"><span class="hara-tty-p">hara ›</span> (require '[demo.000-answer-42 :as answer])  <span class="hara-tty-o">;; core wasm · abi core.v1</span>
+<span class="hara-tty-v">=&gt; :loaded</span>
+<span class="hara-tty-p">hara ›</span> (answer/add 19 23)
+<span class="hara-tty-v">=&gt; 42</span>
+<span class="hara-tty-p">hara ›</span> (require '[crypto.hash.sha256 :as sha])       <span class="hara-tty-o">;; wasm · abi hta.v1</span>
+<span class="hara-tty-v">=&gt; :loaded</span>
+<span class="hara-tty-p">hara ›</span> (sha/digest (.bytes "grid"))
 <span class="hara-tty-v">=&gt; #&lt;promise :pending&gt;</span>
-<span class="hara-tty-o">;; the system stays up. the code keeps moving.</span></pre>
+<span class="hara-tty-p">hara ›</span> (require '[chrome.api :as api])               <span class="hara-tty-o">;; host extension</span>
+<span class="hara-tty-v">=&gt; :loaded</span></pre>
     <div class="hara-strip">
-      <span>RUNTIME <b>WASM</b></span>
-      <span>EVAL <b>0.4MS</b></span>
+      <span>CORE.V1 <b>LOADED</b></span>
+      <span>HTA.V1 <b>LOADED</b></span>
+      <span>HOST <b>LOADED</b></span>
       <span>STATE <b>LIVE</b></span>
-      <span>UPTIME <b>∞</b></span>
     </div>
   </div>
 </div>
 
 <div class="hara-home-section">
   <div class="hara-frame hara-cta">
-    <div class="hara-kicker">05 / ENTER THE GRID</div>
-    <p>The grid is patient. Bring a form, leave with a system.</p>
+    <div class="hara-kicker">05 / TRY HARA</div>
     <div class="hara-home-actions">
-      <a class="md-button md-button--primary" href="user-guide/">Start building</a>
+      <a class="md-button md-button--primary" href="studio/">Try Hara</a>
       <a class="md-button" href="the-little-book-of-hal/">The Little Book of HAL</a>
     </div>
   </div>

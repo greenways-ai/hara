@@ -70,11 +70,16 @@ body {
 /* ------------------------------------------------------- chrome surfaces */
 
 .md-header {
-  background: rgba(3, 5, 10, .88);
-  backdrop-filter: blur(14px);
-  border-bottom: 1px solid var(--hara-line);
-  box-shadow: 0 1px 0 rgba(65, 245, 228, .05), 0 8px 30px rgba(0, 0, 0, .45);
+  background: transparent;
+  backdrop-filter: none;
+  border-bottom: 0;
+  box-shadow: none;
   color: var(--hara-text);
+}
+
+.md-header[data-md-state="shadow"] {
+  background: transparent;
+  box-shadow: none;
 }
 
 .md-header__title,
@@ -84,7 +89,7 @@ body {
 }
 
 .md-tabs {
-  background: rgba(3, 5, 10, .72);
+  background: transparent;
   border-bottom: 1px solid var(--hara-line);
   color: var(--hara-muted);
 }
@@ -575,7 +580,7 @@ body {
 
 /* identity disc — slow rotation */
 .hara-disc {
-  transform-origin: 1000px 250px;
+  transform-origin: 1010px 165px;
   animation: hara-spin 90s linear infinite;
 }
 
@@ -781,6 +786,11 @@ body {
   color: var(--hara-muted);
   font-size: 1.05rem;
   margin: 1rem 0 0;
+}
+
+.hara-cta .hara-kicker {
+  display: block;
+  margin-bottom: 1.4rem;
 }
 
 .hara-cta .hara-home-actions {

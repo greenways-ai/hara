@@ -29,15 +29,15 @@
   resize();
 
   const project = (k, t) => {
-    const x = 720 + k * (36 + 224 * t);
-    const y = 461 + 349 * t;
+    const x = 720 + k * (36 + 264 * t);
+    const y = 325 + 485 * t;
     return [offX + x * scale, offY + y * scale];
   };
 
   /* arena in normalized units: x = k (lateral), y = t * T_SCALE (depth) */
   const T_SCALE = 28;
   const X_MIN = -13, X_MAX = 13, Y_MIN = 0.06 * T_SCALE, Y_MAX = 0.98 * T_SCALE;
-  const SPEED = 2.6;            // normalized units / s
+  const SPEED = 2.1;            // normalized units / s
   const EPS = 0.38;             // collision distance
   const LOOKAHEAD = 1.7;
   const ROUND_MS = 55000;
@@ -147,20 +147,20 @@
         i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy);
       });
       ctx.strokeStyle = c.color;
-      ctx.globalAlpha = 0.15 * alpha;
-      ctx.lineWidth = 5.5;
+      ctx.globalAlpha = 0.07 * alpha;
+      ctx.lineWidth = 4.5;
       ctx.stroke();
-      ctx.globalAlpha = 0.85 * alpha;
-      ctx.lineWidth = 1.6;
+      ctx.globalAlpha = 0.45 * alpha;
+      ctx.lineWidth = 1.3;
       ctx.stroke();
       if (c.alive) {
         const [hx, hy] = project(c.x, c.y / T_SCALE);
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = 0.9;
         ctx.shadowColor = c.color;
-        ctx.shadowBlur = 14;
-        ctx.fillStyle = '#eafcff';
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = c.color;
         ctx.beginPath();
-        ctx.arc(hx, hy, 3.2, 0, Math.PI * 2);
+        ctx.arc(hx, hy, 2.6, 0, Math.PI * 2);
         ctx.fill();
         ctx.shadowBlur = 0;
       }
