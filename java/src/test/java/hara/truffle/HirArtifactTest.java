@@ -111,6 +111,23 @@ public class HirArtifactTest {
   }
 
   @Test
+  public void regexValuesRoundTripPortably() {
+    java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("a+b");
+    HirArtifact.Module module =
+        HirArtifact.decode(HirArtifact.encode("t", "t", new byte[0], new Object[] {pattern}));
+    assertTrue(module.forms[0] instanceof java.util.regex.Pattern);
+    assertEquals("a+b", ((java.util.regex.Pattern) module.forms[0]).pattern());
+
+    java.util.regex.Pattern flagged =
+        java.util.regex.Pattern.compile("a+b", java.util.regex.Pattern.CASE_INSENSITIVE);
+    HaraException error =
+        assertThrows(
+            HaraException.class,
+            () -> HirArtifact.encode("t", "t", new byte[0], new Object[] {flagged}));
+    assertTrue(error.getMessage().contains("regex flags"));
+  }
+
+  @Test
   public void foundationArtifactIsDeterministicAndRoundTripsForms() throws Exception {
     Path source = Path.of("lib/src/std/lib/foundation.hal");
     byte[] sourceBytes = Files.readAllBytes(source);

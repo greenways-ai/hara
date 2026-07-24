@@ -51,6 +51,7 @@ final class HirArtifact {
   private static final int SET = 14;
   private static final int ORDERED_MAP = 15;
   private static final int ORDERED_SET = 16;
+  private static final int REGEX = 17;
 
   private HirArtifact() {}
 
@@ -199,6 +200,13 @@ final class HirArtifact {
       output.writeByte(SET);
       writeSet(output, set, true);
       writeMetadata(output, (IObjType) set);
+    } else if (value instanceof java.util.regex.Pattern pattern) {
+      if (pattern.flags() != 0) {
+        throw new HaraException(
+            "Unsupported portable HIR regex flags: " + pattern.flags() + " for " + pattern);
+      }
+      output.writeByte(REGEX);
+      writeString(output, pattern.pattern());
     } else {
       throw new HaraException(
           "Unsupported portable HIR constant: " + value.getClass().getName());
@@ -248,6 +256,7 @@ final class HirArtifact {
         yield withMetadata(
             hara.lang.data.OrderedSet.Standard.from(null, values), readMetadata(input));
       }
+      case REGEX -> java.util.regex.Pattern.compile(readString(input));
       default -> throw invalid("unknown value opcode");
     };
   }
