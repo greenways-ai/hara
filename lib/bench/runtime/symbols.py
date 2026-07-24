@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 SPEC = ROOT / "spec/hara/data"
-DOC = ROOT / "docs/reference/clojure-core-compatibility.md"
+DOC = ROOT / "website/docs/reference/clojure-core-compatibility.md"
 CLJ_SPECIALS = {"def", "if", "do", "let", "quote", "var", "fn", "loop", "recur", "throw", "try", "new", "set!", "monitor-enter", "monitor-exit", "catch", "finally"}
 HARA_SPECIALS = {"def", "if", "do", "let", "quote", "var", "fn", "loop", "recur", "throw", "try", "catch", "finally", "binding", "defn", "defmacro", "defprotocol", "extend-type", "defstruct", "defmulti", "defmethod", "ns"}
 

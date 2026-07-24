@@ -1,1 +1,2 @@
 mkdocs-material>=9.5,<10
+mkdocs-monorepo-plugin>=1.1,<2

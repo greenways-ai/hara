@@ -3,7 +3,7 @@ site_description: A live language for systems that stay alive.
 site_url: https://hoebat.github.io/hara.lang/
 repo_url: https://github.com/hoebat/hara.lang
 repo_name: hoebat/hara.lang
-docs_dir: ../docs
+docs_dir: docs
 theme:
   name: material
   custom_dir: overrides
@@ -49,6 +49,9 @@ markdown_extensions:
   - pymdownx.emoji
   - toc:
       permalink: true
+plugins:
+  - search
+  - monorepo
 nav:
   - Home: index.md
   - Learn:
@@ -61,15 +64,24 @@ nav:
       - Testing namespaces: walkthroughs/testing.md
   - Build:
       - Developer guide: development.md
+      - Foundation porting: foundation-porting.md
       - Java API: javadocs.md
   - Reference:
       - L0 language: reference/l0-language.md
+      - Builtins: builtins.md
       - Namespace catalog: reference/namespaces.md
       - Runtime libraries: reference/runtime-libraries.md
       - Extensions: reference/extensions-contract.md
       - Extension overview: reference/extensions.md
       - REPL UX: reference/repl.md
+      - RESP protocol: reference/resp-protocol.md
       - Native flavors: reference/native-flavors.md
       - JVM flavor: reference/jvm-flavor.md
       - Xtalk equivalence: reference/xtalk-equivalence.md
       - Rust/WASM runtime: reference/rust-runtime.md
+      - Clojure core compatibility: reference/clojure-core-compatibility.md
+      - Runtime benchmarks: reference/runtime-benchmarks.md
+  - Apps:
+      - hara-chrome: '!include ../apps/hara-chrome/mkdocs.yml'
+  - Books:
+      - The Little Book of HAL: '!include ../books/the-little-book-of-hal/mkdocs.yml'

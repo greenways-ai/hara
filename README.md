@@ -30,7 +30,7 @@ Truffle parser / AST
   [`hara-chrome`](apps/hara-chrome/) (Chrome DevTools extension),
   [`hara-vscode`](apps/hara-vscode/), [`hara-emacs`](apps/hara-emacs/), and the
   planned [`hara-lsp`](apps/hara-lsp/) language server.
-- [`docs/`](docs/) — documentation content (published via mkdocs).
+- [`docs/`](website/docs/) — documentation content (published via mkdocs).
 - [`website/`](website/) — site infrastructure: mkdocs config, theme
   overrides, and the landing page.
 - [`spec/`](spec/hara/) — normative language, runtime, and extension specs.
@@ -42,11 +42,11 @@ Truffle parser / AST
 
 ## Start here
 
-- [User guide](docs/user-guide.md) — install, run, evaluate, use the REPL, and write Hara.
-- [Namespaces and modules](docs/namespaces.md) — organize projects, require code, and control aliases.
-- [Namespace catalog](docs/reference/namespaces.md) — discover every shipped namespace family.
-- [Developer guide](docs/development.md) — build, test, debug, and contribute.
-- [Java API and Javadocs](docs/javadocs.md) — public entry points and generated API docs.
+- [User guide](website/docs/user-guide.md) — install, run, evaluate, use the REPL, and write Hara.
+- [Namespaces and modules](website/docs/namespaces.md) — organize projects, require code, and control aliases.
+- [Namespace catalog](website/docs/reference/namespaces.md) — discover every shipped namespace family.
+- [Developer guide](website/docs/development.md) — build, test, debug, and contribute.
+- [Java API and Javadocs](website/docs/javadocs.md) — public entry points and generated API docs.
 - [Language specification](spec/hara/l0-language.md) — normative L0 behavior.
 - [Runtime libraries](spec/hara/runtime-libraries.md) — the portable library contract.
 - [Rust/WASM mapping](spec/hara/rust-runtime.md) — the cross-runtime value, provider, and conformance design.
@@ -68,7 +68,7 @@ mvn -f java/pom.xml -Ptruffle package
 The `hara` command starts the JLine REPL in the shared `ROOT` session and exposes that same
 session through RESP on `127.0.0.1:1311`. Use `--offline` to start without the listener,
 `headless` for a listener without terminal UI, and `remote HOST:PORT` for a client connection. The CLI also supports `run <file>`, `stdin`, and `help`. For a native-image build, see the
-[developer guide](docs/development.md); native mode intentionally removes dynamic JVM services.
+[developer guide](website/docs/development.md); native mode intentionally removes dynamic JVM services.
 
 Per-component builds:
 

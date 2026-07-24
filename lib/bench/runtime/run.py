@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 CORPUS = ROOT / "lib/bench/runtime/workloads.json"
 RESULTS = ROOT / "lib/bench/results/reference.json"
-REPORT = ROOT / "docs/reference/runtime-benchmarks.md"
+REPORT = ROOT / "website/docs/reference/runtime-benchmarks.md"
 PROFILES = {
     "smoke": {"startup_samples": 2, "windows": 3, "calls": 1},
     "standard": {"startup_samples": 30, "windows": 60, "calls": 10},

@@ -274,7 +274,7 @@
 						<configuration>
 							<target>
 								<concat destfile="${project.build.directory}/reports/apidocs/stylesheet.css" append="true">
-									<fileset dir="${project.basedir}/../docs" includes="javadoc-theme.css"/>
+									<fileset dir="${project.basedir}/../website/docs" includes="javadoc-theme.css"/>
 								</concat>
 							</target>
 						</configuration>
