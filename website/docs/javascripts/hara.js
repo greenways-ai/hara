@@ -43,9 +43,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }, {passive: true});
   }
 
+  const fixed = scene.hasAttribute('data-hara-fixed');
+
   const readScroll = () => {
-    const rect = scene.getBoundingClientRect();
-    targetScroll = Math.min(1, Math.max(0, -rect.top / (rect.height || 1)));
+    if (fixed) {
+      // fixed background: progress over the first viewport of page scroll
+      targetScroll = Math.min(1, Math.max(0, window.scrollY / (window.innerHeight || 1)));
+    } else {
+      const rect = scene.getBoundingClientRect();
+      targetScroll = Math.min(1, Math.max(0, -rect.top / (rect.height || 1)));
+    }
     kick();
   };
   window.addEventListener('scroll', readScroll, {passive: true});

@@ -1,16 +1,14 @@
 site_name: Hara
 site_description: A live language for systems that stay alive.
 site_url: https://hoebat.github.io/hara.lang/
-repo_url: https://github.com/hoebat/hara.lang
-repo_name: hoebat/hara.lang
 docs_dir: docs
 theme:
   name: material
   custom_dir: overrides
   language: en
   font: false
-  favicon: assets/hara-mark.png
-  logo: assets/hara-mark.png
+  favicon: assets/hara-mark.svg
+  logo: assets/hara-mark.svg
   features:
     - navigation.tabs
     - navigation.sections
@@ -27,6 +25,7 @@ extra_css:
   - stylesheets/hara.css
 extra_javascript:
   - javascripts/hara.js
+  - javascripts/game.js
 markdown_extensions:
   - admonition
   - attr_list

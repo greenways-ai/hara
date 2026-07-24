@@ -1,28 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <radialGradient id="hara-mark-body" cx="38%" cy="32%" r="85%">
-      <stop offset="0%" stop-color="#31445f"/>
-      <stop offset="55%" stop-color="#182537"/>
-      <stop offset="100%" stop-color="#0b101b"/>
-    </radialGradient>
-    <radialGradient id="hara-mark-glow" cx="50%" cy="50%" r="50%">
-      <stop offset="78%" stop-color="#41f5e4" stop-opacity="0"/>
-      <stop offset="96%" stop-color="#41f5e4" stop-opacity=".28"/>
+    <radialGradient id="hara-mark-core" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#41f5e4" stop-opacity=".16"/>
+      <stop offset="60%" stop-color="#41f5e4" stop-opacity=".05"/>
       <stop offset="100%" stop-color="#41f5e4" stop-opacity="0"/>
     </radialGradient>
-    <clipPath id="hara-mark-disc"><circle cx="256" cy="256" r="196"/></clipPath>
   </defs>
-  <circle cx="256" cy="256" r="244" fill="url(#hara-mark-glow)"/>
-  <circle cx="256" cy="256" r="196" fill="url(#hara-mark-body)"/>
-  <g clip-path="url(#hara-mark-disc)">
-    <circle cx="178" cy="168" r="36" fill="#0e1723"/>
-    <circle cx="178" cy="168" r="36" fill="none" stroke="#3b5170" stroke-width="5"/>
-    <circle cx="316" cy="240" r="26" fill="#0e1723"/>
-    <circle cx="316" cy="240" r="26" fill="none" stroke="#3b5170" stroke-width="5"/>
-    <circle cx="222" cy="330" r="44" fill="#0e1723"/>
-    <circle cx="222" cy="330" r="44" fill="none" stroke="#3b5170" stroke-width="5"/>
-    <circle cx="352" cy="344" r="16" fill="#0e1723"/>
-    <circle cx="352" cy="344" r="16" fill="none" stroke="#3b5170" stroke-width="4"/>
-    <circle cx="298" cy="298" r="196" fill="none" stroke="#41f5e4" stroke-width="9"/>
-  </g>
+  <rect width="512" height="512" rx="96" fill="#05070d"/>
+  <circle cx="256" cy="256" r="232" fill="url(#hara-mark-core)"/>
+  <circle cx="256" cy="256" r="170" fill="none" stroke="#41f5e4" stroke-opacity=".9" stroke-width="14" stroke-dasharray="64 26 10 26"/>
+  <circle cx="256" cy="256" r="128" fill="none" stroke="#41f5e4" stroke-opacity=".35" stroke-width="6"/>
+  <circle cx="256" cy="256" r="10" fill="#8ffff2"/>
 </svg>
