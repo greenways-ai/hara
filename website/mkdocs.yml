@@ -20,20 +20,9 @@ theme:
     - content.code.copy
     - content.code.annotate
   palette:
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
+    - scheme: slate
       primary: black
       accent: cyan
-      toggle:
-        icon: material/weather-sunny
-        name: Use light mode
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: black
-      accent: cyan
-      toggle:
-        icon: material/weather-night
-        name: Use dark mode
 extra_css:
   - stylesheets/hara.css
 extra_javascript:
