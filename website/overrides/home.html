@@ -2,14 +2,59 @@
 {% block header %}{% endblock %}
 {% block tabs %}{% endblock %}
 {% block container %}
+<header id="hara-console" class="hara-system-bar" data-hara-component="console"
+        data-md-component="header">
+  <a class="hara-system-brand" href="{{ config.site_url | default(nav.homepage.url, true) }}">
+    <img src="{{ config.theme.logo | url }}" alt="">
+    <span>HARA<span class="hara-system-brand__os">//OS</span></span>
+  </a>
+  <div class="hara-system-context" aria-hidden="true">
+    <span>WORKSPACE</span>
+    <b>HOME</b>
+  </div>
+  <nav class="hara-system-commands" aria-label="Quick commands">
+    <button type="button" data-console-command="(+ 19 23)">ADD <b>42</b></button>
+    <button type="button" data-console-command="(let (x 7) (* x 6))">BIND <b>42</b></button>
+    <button type="button" data-console-command="(if true 1 0)">BRANCH <b>1</b></button>
+  </nav>
+  <div class="hara-system-runtime">
+    <span class="hara-system-led" data-runtime-led></span>
+    <span data-status="runtime">WASM · LOADING</span>
+  </div>
+  <button class="hara-system-log-toggle" type="button" data-console-toggle
+          aria-expanded="false" aria-controls="hara-system-console">
+    LOG <span data-console-count>0</span>
+  </button>
+  <section id="hara-system-console" class="hara-system-console" data-console-panel
+           aria-label="Hara evaluation log" aria-hidden="true">
+    <div class="hara-system-console__head">
+      <span>SYSTEM LOG / HARA.WASM</span>
+      <button type="button" data-console-close aria-label="Close evaluation log">×</button>
+    </div>
+    <div class="hara-console-log" data-console-log role="log" aria-live="polite">
+      <div class="hara-console-line hara-tty-o">;; runtime boot requested</div>
+    </div>
+    <label class="hara-console-entry">
+      <span class="hara-tty-p">hara ›</span>
+      <input class="hara-console-input" data-console-input type="text"
+             placeholder="(let (x 19) (+ x 23))" autocomplete="off"
+             spellcheck="false" aria-label="Hara eval input">
+    </label>
+    <div class="hara-strip">
+      <span>FILE <b data-status="file">—</b></span>
+      <span>SOCKET <b data-status="socket">—</b></span>
+      <span>STATE <b data-status="state">BOOT</b></span>
+    </div>
+  </section>
+</header>
 <div class="hara-home-wrap">
 <section class="hara-home-intro">
   <div class="hara-home-title">
     <div class="hara-home-kicker">FAST · EMBEDDABLE · WASM NATIVE</div>
     <h1>HARA</h1>
     <div class="hara-home-hero-line">
-      <p class="hara-home-tagline">Elegant Weapons for the Agentic Age.</p>
-      <a class="hara-start" href="#hara-console">START</a>
+      <p class="hara-home-tagline">Modern Weapons for the Agentic Age.</p>
+      <a class="hara-start" href="#hara-console" data-hara-start data-console-command="(+ 19 23)">START</a>
     </div>
   </div>
 </section>

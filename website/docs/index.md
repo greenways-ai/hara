@@ -68,42 +68,9 @@ hide:
   </a>
 </div>
 
-<div class="hara-home-section hara-glass hara-glass--dark">
-  <div class="hara-kicker">04 / TRY HARA</div>
-  <div id="hara-console" class="hara-frame hara-console" data-hara-component="console">
-    <div class="hara-console-head">
-      <span>REPL — LIVE EVAL · HARA.WASM</span>
-      <span class="hara-index">TTY/00 · LIVE</span>
-    </div>
-    <div class="hara-console-log" data-console-log>
-      <pre class="hara-tty"><span class="hara-tty-o">;; the real runtime — every form below evaluates in your browser</span>
-<span class="hara-tty-p">hara ›</span> (+ 19 23)
-<span class="hara-tty-v">=&gt; 42</span></pre>
-    </div>
-    <div class="hara-console-entry">
-      <span class="hara-tty-p">hara ›</span>
-      <input class="hara-console-input" data-console-input type="text"
-             placeholder="(let (x 19) (+ x 23))" autocomplete="off"
-             spellcheck="false" aria-label="hara eval input">
-    </div>
-    <div class="hara-command-deck" aria-label="Hara commands">
-      <span class="hara-command-label">COMMANDS</span>
-      <button type="button" class="hara-command" data-console-command="(+ 19 23)">ADD / 42</button>
-      <button type="button" class="hara-command" data-console-command="(let (x 7) (* x 6))">BIND / 42</button>
-      <button type="button" class="hara-command" data-console-command="(if true 1 0)">BRANCH / 1</button>
-    </div>
-    <div class="hara-strip">
-      <span>RUNTIME <b data-status="runtime">WASM · LOADING</b></span>
-      <span>FILE <b data-status="file">—</b></span>
-      <span>SOCKET <b data-status="socket">—</b></span>
-      <span>STATE <b data-status="state">BOOT</b></span>
-    </div>
-  </div>
-</div>
-
 <div class="hara-home-section hara-glass hara-glass--light">
   <div class="hara-frame hara-cta">
-    <div class="hara-kicker">05 / TRY HARA</div>
+    <div class="hara-kicker">04 / EXPLORE</div>
     <div class="hara-home-actions">
       <a class="md-button md-button--primary" href="studio/">Try Hara</a>
       <a class="md-button" href="the-little-book-of-hal/">The Little Book of HAL</a>

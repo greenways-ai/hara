@@ -558,6 +558,238 @@ body {
   min-width: 0;
 }
 
+/* home system panel: fixed OS-like command surface + wasm evaluation log */
+
+.hara-system-bar {
+  position: fixed;
+  z-index: 20;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 52px;
+  display: grid;
+  grid-template-columns: auto auto 1fr auto auto;
+  align-items: stretch;
+  color: var(--hara-text);
+  background: rgba(3, 5, 10, .88);
+  border-bottom: 1px solid var(--hara-line-strong);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, .3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  backdrop-filter: blur(18px) saturate(1.3);
+}
+
+.hara-system-brand,
+.hara-system-context,
+.hara-system-runtime,
+.hara-system-log-toggle {
+  border-right: 1px solid var(--hara-line);
+}
+
+.hara-system-brand {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: 0 1rem;
+  color: var(--hara-text) !important;
+  border-bottom: 0 !important;
+  font-family: var(--hara-mono);
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .14em;
+}
+
+.hara-system-brand img {
+  width: 22px;
+  height: 22px;
+}
+
+.hara-system-brand__os {
+  color: var(--hara-cyan);
+}
+
+.hara-system-context,
+.hara-system-runtime {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: 0 .9rem;
+  font-family: var(--hara-mono);
+  font-size: .55rem;
+  letter-spacing: .12em;
+  color: var(--hara-faint);
+}
+
+.hara-system-context b,
+.hara-system-runtime span:last-child {
+  color: var(--hara-muted);
+}
+
+.hara-system-commands {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.hara-system-commands::-webkit-scrollbar {
+  display: none;
+}
+
+.hara-system-commands button,
+.hara-system-log-toggle,
+.hara-system-console__head button {
+  color: var(--hara-muted);
+  background: transparent;
+  border: 0;
+  font-family: var(--hara-mono);
+  cursor: pointer;
+}
+
+.hara-system-commands button {
+  min-width: 108px;
+  padding: 0 .9rem;
+  border-right: 1px solid var(--hara-line);
+  font-size: .56rem;
+  letter-spacing: .13em;
+  transition: color .15s, background .15s;
+}
+
+.hara-system-commands button b {
+  margin-left: .35rem;
+  color: var(--hara-cyan);
+}
+
+.hara-system-commands button:hover,
+.hara-system-commands button:focus-visible {
+  color: var(--hara-cyan-bright);
+  background: rgba(65, 245, 228, .08);
+  outline: none;
+}
+
+.hara-system-led {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--hara-amber);
+  box-shadow: 0 0 9px rgba(255, 189, 104, .7);
+  animation: hara-system-boot 1s steps(2, end) infinite;
+}
+
+.hara-system-led.is-ready {
+  background: var(--hara-green);
+  box-shadow: 0 0 9px rgba(61, 255, 158, .75);
+  animation: none;
+}
+
+.hara-system-led.is-error {
+  background: var(--hara-magenta);
+  box-shadow: 0 0 9px rgba(255, 46, 136, .75);
+  animation: none;
+}
+
+@keyframes hara-system-boot {
+  50% { opacity: .3; }
+}
+
+.hara-system-log-toggle {
+  min-width: 92px;
+  border-right: 0;
+  padding: 0 1rem;
+  font-size: .58rem;
+  letter-spacing: .14em;
+}
+
+.hara-system-log-toggle span {
+  display: inline-grid;
+  place-items: center;
+  min-width: 19px;
+  height: 19px;
+  margin-left: .4rem;
+  color: var(--hara-abyss);
+  background: var(--hara-cyan);
+  border-radius: 10px;
+}
+
+.hara-system-log-toggle:hover,
+.hara-system-log-toggle:focus-visible,
+.hara-system-bar.is-console-open .hara-system-log-toggle {
+  color: var(--hara-cyan);
+  background: rgba(65, 245, 228, .08);
+  outline: none;
+}
+
+.hara-system-log-toggle.has-activity span {
+  animation: hara-log-activity .65s ease-out;
+}
+
+@keyframes hara-log-activity {
+  50% { box-shadow: 0 0 22px rgba(65, 245, 228, .9); transform: scale(1.15); }
+}
+
+.hara-system-console {
+  position: absolute;
+  top: calc(100% + 1px);
+  right: 0;
+  width: min(560px, calc(100vw - 20px));
+  max-height: min(520px, calc(100vh - 72px));
+  display: flex;
+  flex-direction: column;
+  background: rgba(3, 5, 10, .96);
+  border: 1px solid var(--hara-line-strong);
+  border-top: 0;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, .55), var(--hara-glow-cyan);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px);
+  transform-origin: top right;
+  transition: opacity .16s ease, transform .16s ease, visibility .16s;
+}
+
+.hara-system-bar.is-console-open .hara-system-console {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.hara-system-console__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 38px;
+  padding-left: 1rem;
+  color: var(--hara-faint);
+  border-bottom: 1px solid var(--hara-line);
+  font-family: var(--hara-mono);
+  font-size: .58rem;
+  letter-spacing: .16em;
+}
+
+.hara-system-console__head button {
+  align-self: stretch;
+  width: 42px;
+  color: var(--hara-muted);
+  border-left: 1px solid var(--hara-line);
+  font-size: 1rem;
+}
+
+.hara-system-console__head button:hover,
+.hara-system-console__head button:focus-visible {
+  color: var(--hara-cyan);
+  background: rgba(65, 245, 228, .08);
+  outline: none;
+}
+
+.hara-system-console .hara-console-log {
+  min-height: 190px;
+  flex: 1;
+  padding: .8rem 0;
+}
+
+.hara-system-console .hara-strip {
+  border-bottom: 0;
+}
+
 /* hero text: left-aligned glass panel in the first screen over the grid;
    TRY HARA sits at the side on wide screens, under the title on mobile */
 
@@ -692,27 +924,21 @@ body {
 }
 
 .hara-start {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: clamp(150px, 18vw, 180px);
-  min-height: clamp(72px, 8vw, 86px);
-  padding: clamp(.8rem, 1.5vw, 1rem) clamp(1.2rem, 2vw, 1.8rem);
-  color: #061316;
   display: table-cell;
-  width: 1%;
   vertical-align: middle;
-  position: relative;
-  left: -14px;
+  min-width: clamp(180px, 22vw, 260px);
+  min-height: clamp(96px, 11vw, 124px);
+  padding: clamp(.9rem, 2vw, 1.4rem) clamp(1.4rem, 3vw, 2.4rem);
+  color: #061316;
   font-family: var(--hara-mono);
-  font-size: 1rem;
+  font-size: clamp(1.15rem, 2.2vw, 1.7rem);
   font-weight: 700;
   letter-spacing: .22em;
   text-align: center;
   text-decoration: none !important;
   border: 0 !important;
   outline: none;
-  border-radius: 22px;
+  border-radius: 26px;
   background: linear-gradient(105deg,
     #f4fbff 0%, #b8f8ee 28%, #41f5e4 52%, #37b6ff 78%, #8a6bff 105%);
   background-size: 220% 100%;
@@ -1126,6 +1352,30 @@ body {
 }
 
 @media (max-width: 900px) {
+  .hara-system-bar {
+    grid-template-columns: auto 1fr auto;
+  }
+
+  .hara-system-context,
+  .hara-system-runtime {
+    display: none;
+  }
+
+  .hara-system-brand {
+    padding-inline: .75rem;
+  }
+
+  .hara-system-commands button {
+    min-width: 86px;
+    padding-inline: .55rem;
+  }
+
+  .hara-system-console {
+    width: 100vw;
+    max-height: calc(100vh - 52px);
+    right: 0;
+  }
+
   .hara-home-intro {
     flex-direction: column;
     justify-content: center;
@@ -1183,6 +1433,32 @@ body {
   .hara-home-actions .md-button {
     width: 220px;
     text-align: center;
+  }
+}
+
+@media (max-width: 560px) {
+  .hara-system-brand {
+    width: 49px;
+    padding: 0 13px;
+    overflow: hidden;
+  }
+
+  .hara-system-brand span {
+    display: none;
+  }
+
+  .hara-system-commands button {
+    min-width: 76px;
+    font-size: .52rem;
+  }
+
+  .hara-system-commands button b {
+    display: none;
+  }
+
+  .hara-system-log-toggle {
+    min-width: 72px;
+    padding-inline: .55rem;
   }
 }
 
