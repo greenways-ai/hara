@@ -57,6 +57,15 @@ ElDoc stays silent until the current buffer has explicitly connected to Hara.
 Run tests with:
 
 ```sh
+cd apps/hara-emacs
+make test        # run the ERT suite
+make compile     # byte-compile hara-mode.el
+make upgrade     # update the package-vc checkout in ~/.emacs.d/elpa
+```
+
+Or directly:
+
+```sh
 emacs -Q --batch -L apps/hara-emacs -L apps/hara-emacs/test \
   -l hara-mode-test.el -f ert-run-tests-batch-and-exit
 ```
