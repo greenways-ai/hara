@@ -45,7 +45,8 @@ hide:
   </div>
 </div>
 
-<div class="hara-home-grid">
+<div class="hara-home-section hara-glass hara-glass--dark">
+  <div class="hara-home-grid">
   <a class="hara-home-card" href="reference/l0-language/">
     <span class="hara-card-index">01 / SMALL</span>
     <strong>Small core.<br><em>Wide horizon.</em></strong>
@@ -66,6 +67,7 @@ hide:
     <strong>One require.<br><em>Any world.</em></strong>
     <span>Portable wasm extensions load by namespace — no changes at the call site.</span>
   </a>
+  </div>
 </div>
 
 <div class="hara-home-section hara-glass hara-glass--light">
