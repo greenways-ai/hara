@@ -12,6 +12,7 @@
      /rust/hta.js               HTA codec + HtaContext
      /rust/hta-worker.js        kernel worker script
      /rust/studio/*.js          broker, host services, boot template, UI
+     /rust/studio/studio.css    studio styles (@imported by hara.css)
      /rust/studio/hal/*.hal     store/fs/space/boot resources              */
 
 const siteRoot = new URL("../", import.meta.url);

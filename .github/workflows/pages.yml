@@ -71,7 +71,7 @@ jobs:
           cp rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm site-build/rust/hara.wasm
           cp rust/web/hta.js rust/web/hta-worker.js site-build/rust/
           mkdir -p site-build/rust/studio/hal
-          cp rust/web/studio/boot.js rust/web/studio/broker.js rust/web/studio/host-services.js rust/web/studio/ui.js site-build/rust/studio/
+          cp rust/web/studio/boot.js rust/web/studio/broker.js rust/web/studio/host-services.js rust/web/studio/ui.js rust/web/studio/studio.css site-build/rust/studio/
           cp rust/web/studio/hal/*.hal site-build/rust/studio/hal/
 
       - name: Add Java API documentation

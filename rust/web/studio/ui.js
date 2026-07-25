@@ -6,7 +6,7 @@ import { defaultBootstrap } from "./boot.js";
  * the whole studio DOM inside `root` (no dependency on surrounding page
  * markup), so the same mounting code serves the mkdocs website page now and
  * the hara-chrome panel later. Styling comes from the `.hara-studio-*`
- * classes (website/docs/stylesheets/hara.css); hosts provide the stylesheet.
+ * classes (rust/web/studio/studio.css); hosts provide the stylesheet.
  *
  * All hara interaction goes through `broker.eval` — the UI never touches
  * IndexedDB or the worker directly. Panes: file tree, writable editor
