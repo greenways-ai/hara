@@ -6,6 +6,7 @@ on:
     paths:
       - "spec/hara/**"
       - "website/**"
+      - "apps/hara-emacs/**"
       - "java/pom.xml"
       - "rust/**"
       - ".github/workflows/pages.yml"
@@ -51,7 +52,7 @@ jobs:
         run: mvn -q -f java/pom.xml -Pjavadoc javadoc:javadoc
 
       - name: Build MkDocs site
-        run: mkdocs build --strict -f website/mkdocs.yml --site-dir site-build
+        run: mkdocs build --strict -f website/mkdocs.yml --site-dir ../site-build
 
       - name: Build Rust WASM package
         run: |
