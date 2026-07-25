@@ -2,10 +2,8 @@
 
 (def canvas-selector "#scene-canvas")
 (def cell-size 8)
-(def cols 160)
-(def rows 100)
 
-(def state (atom {:grid [] :seed 12345}))
+(def state (atom {:grid [] :seed 12345 :cols 0 :rows 0}))
 
 (defn rand []
   "Linear congruential PRNG; returns a float in [0,1)."
@@ -14,22 +12,30 @@
     (swap! state assoc :seed next)
     (/ next 2147483648)))
 
-(defn make-row []
+(defn make-row [cols]
   (loop [x 0
          row []]
     (if (= x cols)
       row
       (recur (+ x 1) (conj row 0)))))
 
-(defn make-grid []
+(defn make-grid [cols rows]
   (loop [y 0
          grid []]
     (if (= y rows)
       grid
-      (recur (+ y 1) (conj grid (make-row))))))
+      (recur (+ y 1) (conj grid (make-row cols))))))
+
+(defn grid-dims []
+  "Return [cols rows] derived from the live canvas CSS-pixel size."
+  (let [size (canvas/size canvas-selector)
+        w (nth size 0)
+        h (nth size 1)]
+    [(int (/ w cell-size)) (int (/ h cell-size))]))
 
 (defn setup []
-  (swap! state assoc :grid (make-grid)))
+  (let [[cols rows] (grid-dims)]
+    (swap! state assoc :grid (make-grid cols rows) :cols cols :rows rows)))
 
 (defn heat-color [h]
   (cond
@@ -41,8 +47,19 @@
     :else      "#ffffff"))
 
 (defn tick [dt-ms zoom pan-x pan-y]
-  (canvas/clear canvas-selector)
-  (let [old-grid (:grid @state)
+  (let [[cols rows]
+        (let [size (canvas/size canvas-selector)
+              w (nth size 0)
+              h (nth size 1)
+              new-cols (int (/ w cell-size))
+              new-rows (int (/ h cell-size))]
+          (if (or (not= new-cols (:cols @state))
+                  (not= new-rows (:rows @state)))
+            (let [g (make-grid new-cols new-rows)]
+              (swap! state assoc :grid g :cols new-cols :rows new-rows)
+              [new-cols new-rows])
+            [(:cols @state) (:rows @state)]))
+        old-grid (:grid @state)
         new-grid
         (loop [y 0
                grid []]
@@ -65,6 +82,7 @@
                                                   cooled (* avg 0.92)]
                                               (if (> cooled 1.0) 1.0 cooled))))))))))]
     (swap! state assoc :grid new-grid)
+    (canvas/clear canvas-selector)
     (loop [y 0]
       (if (= y rows)
         nil

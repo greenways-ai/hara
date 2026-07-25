@@ -62,6 +62,12 @@
   };
 
   const canvas = {
+    size: (selector) => {
+      const el = one(selector);
+      // CSS-pixel dimensions; the prepared context is scaled by devicePixelRatio
+      // so hara draws in these units.
+      return [el.clientWidth, el.clientHeight];
+    },
     clear: (selector) => {
       const el = one(selector);
       ctx2d(selector).clearRect(0, 0, el.width, el.height);

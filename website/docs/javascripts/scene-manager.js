@@ -57,9 +57,11 @@ async function initManager() {
         `${RUNNER_URL}?scene=${encodeURIComponent(sceneId)}`,
         document.baseURI,
       ).href;
+      iframe.addEventListener('load', () => {
+        postCamera(iframe, camera);
+      });
       mount.appendChild(iframe);
       this.currentSceneId = sceneId;
-      postCamera(iframe, camera);
       return this;
     },
 
@@ -83,6 +85,7 @@ async function initManager() {
 
   window.addEventListener('message', (event) => {
     if (!event.data || event.data.type !== 'hara:scene-status') return;
+    if (event.source !== iframe?.contentWindow) return;
     document.dispatchEvent(new CustomEvent('hara:scene-status', { detail: event.data }));
   });
 
