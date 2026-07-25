@@ -1,0 +1,397 @@
+(ns scenes.tron (:require [host.browser.canvas :as canvas]))
+
+(def canvas-selector "#scene-canvas")
+(def scale 6)
+(def arena-min -25)
+(def arena-max 24)
+(def arena-size 50)
+(def offset 25)
+(def base-size 5)
+(def tail-max 120)
+(def ai-interval 150)
+(def reset-delay 2000)
+(def colors ["#41f5e4" "#ff2e88" "#9c7bff" "#f5d742"])
+
+(def state (atom {:cycles [] :territory [] :zones [] :seed 12345 :last-ai 0 :reset-timer 0}))
+
+;; ---------------------------------------------------------------------------
+;; random
+;; ---------------------------------------------------------------------------
+
+(defn rand []
+  "Linear congruential PRNG; returns an integer in [0, 2^31)."
+  (let [s (:seed @state)
+        next (mod (+ (* s 1103515245) 12345) 2147483648)]
+    (swap! state assoc :seed next)
+    next))
+
+(defn rand-n [n]
+  "Random integer in [0, n)."
+  (mod (rand) n))
+
+(defn one-in [n]
+  "True with probability 1/n."
+  (= 0 (mod (rand) n)))
+
+;; ---------------------------------------------------------------------------
+;; geometry / grid
+;; ---------------------------------------------------------------------------
+
+(defn in-arena? [x y]
+  (and (>= x arena-min) (<= x arena-max) (>= y arena-min) (<= y arena-max)))
+
+(defn gx [x] (+ x offset))
+(defn gy [y] (+ y offset))
+
+(defn make-grid [v]
+  "Create a 50x50 grid filled with v."
+  (loop [y 0 grid []]
+    (if (= y arena-size)
+      grid
+      (recur (+ y 1)
+             (conj grid (loop [x 0 row []]
+                          (if (= x arena-size)
+                            row
+                            (recur (+ x 1) (conj row v)))))))))
+
+;; ---------------------------------------------------------------------------
+;; zones and bases
+;; ---------------------------------------------------------------------------
+
+(defn make-zones []
+  "Five objective zones: four corner zones and one central zone."
+  [{:x-min -23 :x-max -18 :y-min -23 :y-max -18 :bonus 5}
+   {:x-min 18 :x-max 23 :y-min -23 :y-max -18 :bonus 5}
+   {:x-min -23 :x-max -18 :y-min 18 :y-max 23 :bonus 5}
+   {:x-min 18 :x-max 23 :y-min 18 :y-max 23 :bonus 5}
+   {:x-min -8 :x-max 8 :y-min -8 :y-max 8 :bonus 10}])
+
+(defn in-zone? [z x y]
+  (and (>= x (:x-min z)) (<= x (:x-max z))
+       (>= y (:y-min z)) (<= y (:y-max z))))
+
+(defn make-bases []
+  "Four corner starting bases."
+  [{:x-min arena-min :x-max (+ arena-min base-size -1)
+    :y-min arena-min :y-max (+ arena-min base-size -1)}
+   {:x-min (- arena-max base-size -1) :x-max arena-max
+    :y-min arena-min :y-max (+ arena-min base-size -1)}
+   {:x-min arena-min :x-max (+ arena-min base-size -1)
+    :y-min (- arena-max base-size -1) :y-max arena-max}
+   {:x-min (- arena-max base-size -1) :x-max arena-max
+    :y-min (- arena-max base-size -1) :y-max arena-max}])
+
+;; ---------------------------------------------------------------------------
+;; cycles
+;; ---------------------------------------------------------------------------
+
+(defn make-cycle [index]
+  {:x 0 :y 0 :dx 0 :dy 0
+   :color (nth colors index)
+   :color-index index
+   :alive false
+   :score 0
+   :trail []})
+
+(defn place-cycle [cycle base base-index]
+  "Place a cycle at a random cell inside its base, facing toward the arena center."
+  (let [x (+ (:x-min base) (rand-n base-size))
+        y (+ (:y-min base) (rand-n base-size))
+        inward-x (if (or (= base-index 0) (= base-index 2)) 1 -1)
+        inward-y (if (< base-index 2) 1 -1)
+        dx (if (= 0 (rand-n 2)) inward-x 0)
+        dy (if (= 0 dx) inward-y 0)]
+    (assoc (assoc (assoc (assoc (assoc cycle
+                                       :x x) :y y) :dx dx) :dy dy) :alive true)))
+
+(defn make-cycles [bases]
+  (loop [i 0 cs []]
+    (if (= i 4)
+      cs
+      (recur (+ i 1) (conj cs (place-cycle (make-cycle i) (nth bases i) i))))))
+
+;; ---------------------------------------------------------------------------
+;; collision / occupancy
+;; ---------------------------------------------------------------------------
+
+(defn blocked? [grid x y]
+  (or (not (in-arena? x y))
+      (not= -1 (get-in grid [(gy y) (gx x)]))))
+
+(defn build-occupancy [cycles]
+  "Grid of color-indexes for every trail cell and current head."
+  (loop [cs cycles grid (make-grid -1)]
+    (if (empty? cs)
+      grid
+      (let [c (first cs)]
+        (if (:alive c)
+          (let [with-head (assoc-in grid [(gy (:y c)) (gx (:x c))] (:color-index c))
+                g (loop [trail (:trail c) g with-head]
+                    (if (empty? trail)
+                      g
+                      (let [p (first trail)
+                            px (nth p 0)
+                            py (nth p 1)]
+                        (recur (rest trail) (assoc-in g [(gy py) (gx px)] (:color-index c))))))]
+            (recur (rest cs) g))
+          (recur (rest cs) grid))))))
+
+;; ---------------------------------------------------------------------------
+;; movement and scoring
+;; ---------------------------------------------------------------------------
+
+(defn zone-bonus [x y zones]
+  "Sum of objective-zone bonuses for cell (x, y)."
+  (loop [zs zones bonus 0]
+    (if (empty? zs)
+      bonus
+      (let [z (first zs)]
+        (if (in-zone? z x y)
+          (recur (rest zs) (+ bonus (:bonus z)))
+          (recur (rest zs) bonus))))))
+
+(defn claim-cell [cycle x y territory zones]
+  "Claim a cell and return [updated-cycle updated-territory]."
+  (let [idx-x (gx x)
+        idx-y (gy y)
+        old-owner (get-in territory [idx-y idx-x])
+        delta (+ (if (= old-owner -1) 1 3)
+                 (zone-bonus x y zones))]
+    [(assoc (assoc cycle :score (+ (:score cycle) delta)) :color-index (:color-index cycle))
+     (assoc-in territory [idx-y idx-x] (:color-index cycle))]))
+
+(defn trim-trail [trail]
+  "Keep at most tail-max segments, dropping oldest."
+  (if (> (count trail) tail-max)
+    (vec (rest trail))
+    trail))
+
+(defn move-cycles [cycles territory zones]
+  "Move all alive cycles, handle wall/trail collisions, and update territory."
+  (let [occ (build-occupancy cycles)]
+    (loop [cs cycles
+           new-cycles []
+           new-territory territory]
+      (if (empty? cs)
+        {:cycles new-cycles :territory new-territory}
+        (let [c (first cs)]
+          (if (not (:alive c))
+            (recur (rest cs) (conj new-cycles c) new-territory)
+            (let [nx (+ (:x c) (:dx c))
+                  ny (+ (:y c) (:dy c))]
+              (if (blocked? occ nx ny)
+                (recur (rest cs) (conj new-cycles (assoc c :alive false)) new-territory)
+                (let [[updated-c claimed-t] (claim-cell c nx ny new-territory zones)
+                      moved (assoc (assoc (assoc updated-c :x nx) :y ny) :trail (trim-trail (conj (:trail c) [(:x c) (:y c)])))]
+                  (recur (rest cs) (conj new-cycles moved) claimed-t))))))))))
+
+(defn resolve-head-collision [cycles]
+  "Kill cycles that ended up on the same cell."
+  (let [positions (loop [cs cycles pos {}]
+                    (if (empty? cs)
+                      pos
+                      (let [c (first cs)]
+                        (if (:alive c)
+                          (let [key [(:x c) (:y c)]
+                                existing (get pos key [])]
+                            (recur (rest cs) (assoc pos key (conj existing c))))
+                          (recur (rest cs) pos)))))]
+    (loop [cs cycles result []]
+      (if (empty? cs)
+        result
+        (let [c (first cs)]
+          (if (and (:alive c) (> (count (get positions [(:x c) (:y c)])) 1))
+            (recur (rest cs) (conj result (assoc c :alive false)))
+            (recur (rest cs) (conj result c))))))))
+
+;; ---------------------------------------------------------------------------
+;; AI
+;; ---------------------------------------------------------------------------
+
+(defn turn-left [dx dy]
+  [dy (- dx)])
+
+(defn turn-right [dx dy]
+  [(- dy) dx])
+
+(defn unblocked-dir? [grid x y dx dy]
+  (not (blocked? grid (+ x dx) (+ y dy))))
+
+(defn think-cycle [cycle grid]
+  "Pick a direction: prefer straight, turn if blocked, occasionally turn randomly."
+  (let [x (:x cycle)
+        y (:y cycle)
+        dx (:dx cycle)
+        dy (:dy cycle)
+        straight-free (unblocked-dir? grid x y dx dy)
+        [ldx ldy] (turn-left dx dy)
+        [rdx rdy] (turn-right dx dy)
+        left-free (unblocked-dir? grid x y ldx ldy)
+        right-free (unblocked-dir? grid x y rdx rdy)]
+    (if straight-free
+      (if (one-in 10)
+        (cond (and left-free right-free) (if (= 0 (rand-n 2)) [ldx ldy] [rdx rdy])
+              left-free [ldx ldy]
+              right-free [rdx rdy]
+              :else [dx dy])
+        [dx dy])
+      (cond left-free [ldx ldy]
+            right-free [rdx rdy]
+            :else [dx dy]))))
+
+(defn think-all [cycles]
+  "Recompute direction for every alive cycle."
+  (let [occ (build-occupancy cycles)]
+    (loop [cs cycles result []]
+      (if (empty? cs)
+        result
+        (let [c (first cs)]
+          (if (:alive c)
+            (let [[ndx ndy] (think-cycle c occ)]
+              (recur (rest cs) (conj result (assoc (assoc c :dx ndx) :dy ndy))))
+            (recur (rest cs) (conj result c))))))))
+
+;; ---------------------------------------------------------------------------
+;; rendering helpers
+;; ---------------------------------------------------------------------------
+
+(defn tx [x zoom pan-x]
+  (+ pan-x (* (+ x offset) scale zoom)))
+
+(defn ty [y zoom pan-y]
+  (+ pan-y (* (+ y offset) scale zoom)))
+
+(defn ts [s zoom]
+  (* s scale zoom))
+
+(defn draw-arena [zoom pan-x pan-y]
+  (canvas/rect canvas-selector
+               (tx arena-min zoom pan-x)
+               (ty arena-min zoom pan-y)
+               (ts arena-size zoom)
+               (ts arena-size zoom)
+               "rgba(8,18,28,0.85)")
+  (canvas/line canvas-selector
+               (tx arena-min zoom pan-x)
+               (ty arena-min zoom pan-y)
+               (tx arena-max zoom pan-x)
+               (ty arena-min zoom pan-y)
+               "rgba(65,245,228,0.35)")
+  (canvas/line canvas-selector
+               (tx arena-max zoom pan-x)
+               (ty arena-min zoom pan-y)
+               (tx arena-max zoom pan-x)
+               (ty arena-max zoom pan-y)
+               "rgba(65,245,228,0.35)")
+  (canvas/line canvas-selector
+               (tx arena-max zoom pan-x)
+               (ty arena-max zoom pan-y)
+               (tx arena-min zoom pan-x)
+               (ty arena-max zoom pan-y)
+               "rgba(65,245,228,0.35)")
+  (canvas/line canvas-selector
+               (tx arena-min zoom pan-x)
+               (ty arena-max zoom pan-y)
+               (tx arena-min zoom pan-x)
+               (ty arena-min zoom pan-y)
+               "rgba(65,245,228,0.35)"))
+
+(defn draw-zone [z zoom pan-x pan-y]
+  (let [w (+ 1 (- (:x-max z) (:x-min z)))
+        h (+ 1 (- (:y-max z) (:y-min z)))]
+    (canvas/rect canvas-selector
+                 (tx (:x-min z) zoom pan-x)
+                 (ty (:y-min z) zoom pan-y)
+                 (ts w zoom)
+                 (ts h zoom)
+                 "rgba(65,245,228,0.06)")))
+
+(defn draw-base [b zoom pan-x pan-y]
+  (let [w (+ 1 (- (:x-max b) (:x-min b)))
+        h (+ 1 (- (:y-max b) (:y-min b)))]
+    (canvas/rect canvas-selector
+                 (tx (:x-min b) zoom pan-x)
+                 (ty (:y-min b) zoom pan-y)
+                 (ts w zoom)
+                 (ts h zoom)
+                 "rgba(65,245,228,0.04)")))
+
+(defn draw-trail [cycle zoom pan-x pan-y]
+  (let [color (:color cycle)
+        points (conj (:trail cycle) [(:x cycle) (:y cycle)])]
+    (loop [ps points]
+      (if (< (count ps) 2)
+        nil
+        (let [a (first ps)
+              b (second ps)]
+          (canvas/line canvas-selector
+                       (tx (nth a 0) zoom pan-x)
+                       (ty (nth a 1) zoom pan-y)
+                       (tx (nth b 0) zoom pan-x)
+                       (ty (nth b 1) zoom pan-y)
+                       color)
+          (recur (rest ps)))))))
+
+(defn draw-head [cycle zoom pan-x pan-y]
+  (canvas/circle canvas-selector
+                 (tx (:x cycle) zoom pan-x)
+                 (ty (:y cycle) zoom pan-y)
+                 (ts 0.6 zoom)
+                 "#ffffff"))
+
+;; ---------------------------------------------------------------------------
+;; lifecycle
+;; ---------------------------------------------------------------------------
+
+(defn setup []
+  (let [bases (make-bases)
+        zones (make-zones)
+        cycles (make-cycles bases)]
+    (swap! state assoc
+           :cycles cycles
+           :territory (make-grid -1)
+           :zones zones
+           :last-ai 0
+           :reset-timer 0)))
+
+(defn tick [dt-ms zoom pan-x pan-y]
+  (let [st @state
+        cycles (:cycles st)
+        territory (:territory st)
+        zones (:zones st)
+        last-ai (:last-ai st)
+        reset-timer (:reset-timer st)
+        alive (filter (fn [c] (:alive c)) cycles)]
+    (canvas/clear canvas-selector)
+    (draw-arena zoom pan-x pan-y)
+    (loop [zs zones]
+      (if (empty? zs)
+        nil
+        (do (draw-zone (first zs) zoom pan-x pan-y)
+            (recur (rest zs)))))
+    (loop [bs (make-bases)]
+      (if (empty? bs)
+        nil
+        (do (draw-base (first bs) zoom pan-x pan-y)
+            (recur (rest bs)))))
+    (if (and (<= (count alive) 1) (> (count cycles) 0))
+      (if (>= reset-timer reset-delay)
+        (setup)
+        (swap! state assoc :reset-timer (+ reset-timer dt-ms)))
+      (let [new-last-ai (+ last-ai dt-ms)
+            updated-cycles (if (>= new-last-ai ai-interval)
+                             (think-all cycles)
+                             cycles)
+            moved (move-cycles updated-cycles territory zones)
+            resolved (resolve-head-collision (:cycles moved))]
+        (swap! state assoc
+               :cycles resolved
+               :territory (:territory moved)
+               :last-ai (if (>= new-last-ai ai-interval) 0 new-last-ai)
+               :reset-timer 0)))
+    (loop [cs (:cycles @state)]
+      (if (empty? cs)
+        nil
+        (do (draw-trail (first cs) zoom pan-x pan-y)
+            (draw-head (first cs) zoom pan-x pan-y)
+            (recur (rest cs)))))))
