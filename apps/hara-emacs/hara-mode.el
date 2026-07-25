@@ -704,6 +704,24 @@ so a partial name is never evaluated."
     (hara-eval-region (car bounds) (cdr bounds))))
 
 ;;;###autoload
+(defun hara-eval-last-sexp-and-insert ()
+  "Evaluate the form preceding point and insert its result at point."
+  (interactive)
+  (let ((bounds (hara--last-sexp-bounds))
+        (insertion-point (point))
+        (buffer (current-buffer)))
+    (hara--request (hara--connection) "EVAL"
+                   (list (buffer-substring-no-properties (car bounds) (cdr bounds)))
+                   (lambda (value)
+                     (when (buffer-live-p buffer)
+                       (with-current-buffer buffer
+                         (save-excursion
+                           (goto-char insertion-point)
+                           (insert value)))))
+                   (lambda (error)
+                     (hara--show-error error)))))
+
+;;;###autoload
 (defun hara-eval-defun ()
   "Evaluate the current top-level form."
   (interactive)
@@ -968,6 +986,7 @@ so a partial name is never evaluated."
     (define-key map (kbd "C-c C-j") #'hara-jack-in)
     (define-key map (kbd "C-c C-z") #'hara-repl)
     (define-key map (kbd "C-c C-e") #'hara-eval-last-sexp)
+    (define-key map (kbd "C-c C-i") #'hara-eval-last-sexp-and-insert)
     (define-key map (kbd "C-c C-c") #'hara-eval-defun)
     (define-key map (kbd "C-c C-r") #'hara-eval-region)
     (define-key map (kbd "C-c C-k") #'hara-eval-buffer)

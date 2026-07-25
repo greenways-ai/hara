@@ -38,6 +38,7 @@ installed artifact. New-server endpoint publication may wait up to `hara-server-
 Common commands:
 
 - `C-c C-e`: evaluate the preceding form
+- `C-c C-i`: evaluate the preceding form and insert the result at point
 - `C-c C-c`: evaluate the top-level form
 - `C-c C-r`: evaluate the region
 - `C-c C-k`: evaluate the buffer

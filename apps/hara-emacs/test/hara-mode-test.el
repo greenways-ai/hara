@@ -283,4 +283,22 @@
       (should (equal (buffer-substring-no-properties (car bounds) (cdr bounds))
                      "str/encode")))))
 
+(ert-deftest hara-eval-last-sexp-and-inserts-result ()
+  "Eval-and-insert should insert the runtime result at point."
+  (with-temp-buffer
+    (hara-mode)
+    (insert "(+ 1 2) ")
+    (let* ((process (make-pipe-process :name "hara-insert-test"
+                                       :command '("cat") :noquery t))
+           (hara--connection
+            (hara--make-connection :process process
+                                   :pending (make-hash-table :test #'equal))))
+      (unwind-protect
+          (cl-letf (((symbol-function 'hara--request)
+                     (lambda (_connection _command _arguments success _error)
+                       (funcall success "3"))))
+            (hara-eval-last-sexp-and-insert)
+            (should (string= (buffer-string) "(+ 1 2) 3")))
+        (delete-process process)))))
+
 ;;; hara-mode-test.el ends here
