@@ -57,7 +57,7 @@
   let runtime = null;
   const ready = (async () => {
     try {
-      const url = new URL('rust/pkg/hara_wasm.js', document.baseURI).href;
+      const url = new URL('/rust/pkg/hara_wasm.js', location.origin).href;
       const mod = await import(url);
       await mod.default();
       runtime = mod.Runtime.core();
