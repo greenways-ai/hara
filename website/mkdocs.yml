@@ -44,7 +44,9 @@ plugins:
   - search
   - monorepo
 nav:
-  - Play: index.md
+  - Play:
+      - Play: index.md
+      - Studio: studio.md
   - Learn:
       - Overview: learn.md
       - User guide: user-guide.md

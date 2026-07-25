@@ -1,4 +1,5 @@
-<header class="hara-system-bar" data-hara-component="console" data-md-component="header">
+<header class="hara-system-bar" data-hara-component="console" data-md-component="header"
+        data-wasm-url="{{ 'rust/pkg/hara_wasm.js' | url }}">
   <a class="hara-system-brand" href="{{ config.site_url | default(nav.homepage.url, true) }}">
     <svg class="hara-system-apple" viewBox="0 0 24 24" aria-hidden="true">
       <defs>
@@ -13,10 +14,10 @@
   </a>
 
   <nav class="hara-system-nav" aria-label="Primary">
-    <a href="{{ nav.homepage.url | url }}">Play</a>
-    <a href="{{ 'learn' | url }}">Learn</a>
-    <a href="{{ 'kernel' | url }}">Kernel</a>
-    <a href="{{ 'reference/l0-language' | url }}">Docs</a>
+    <a class="hara-system-nav__link hara-system-nav__link--hide-mobile" href="{{ nav.homepage.url | url }}">Play</a>
+    <a class="hara-system-nav__link" href="{{ 'learn' | url }}">Learn</a>
+    <a class="hara-system-nav__link hara-system-nav__link--hide-mobile" href="{{ 'kernel' | url }}">Kernel</a>
+    <a class="hara-system-nav__link" href="{{ 'reference/l0-language' | url }}">Docs</a>
   </nav>
 
   <div class="hara-system-palette">
@@ -30,9 +31,23 @@
     <span class="hara-system-led" data-runtime-led></span>
   </div>
 
+  <label class="hara-system-search-toggle" for="__search" aria-label="Search">
+    {% include ".icons/material/magnify.svg" %}
+  </label>
+  {% include "partials/search.html" %}
+
   <button class="hara-system-log-toggle" type="button" data-console-toggle
           aria-expanded="false" aria-controls="hara-system-console">
     LOG <span data-console-count>0</span>
+  </button>
+
+  <button class="hara-system-palette-toggle-mobile" type="button" data-palette-toggle
+          aria-expanded="false" aria-label="Open command palette">
+    <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
+      <rect x="1" y="3" width="10" height="1.5" rx="0.75"/>
+      <rect x="1" y="7.25" width="14" height="1.5" rx="0.75"/>
+      <rect x="1" y="11.5" width="8" height="1.5" rx="0.75"/>
+    </svg>
   </button>
 
   <button class="hara-system-panel-toggle" type="button" data-panel-toggle
@@ -89,9 +104,9 @@
       <div class="hara-system-panel__section">
         <span class="hara-system-panel__section-title">Apps</span>
         <a class="hara-system-tile" href="{{ 'hara-chrome' | url }}">hara-chrome</a>
-        <a class="hara-system-tile" href="{{ 'hara-emacs' | url }}">hara-emacs</a>
-        <a class="hara-system-tile" href="{{ 'hara-vscode' | url }}">hara-vscode</a>
-        <a class="hara-system-tile" href="#">hara-lsp</a>
+        <a class="hara-system-tile" href="{{ 'hara-for-emacs' | url }}">hara-for-emacs</a>
+        <span class="hara-system-tile hara-system-tile--disabled">hara-vscode</span>
+        <span class="hara-system-tile hara-system-tile--disabled">hara-lsp</span>
       </div>
       <div class="hara-system-panel__section">
         <span class="hara-system-panel__section-title">Books</span>
@@ -104,4 +119,17 @@
       </div>
     </div>
   </aside>
+
+  <div class="hara-system-palette-sheet" data-palette-sheet aria-hidden="true">
+    <div class="hara-system-palette-sheet__head">
+      <span>HARA COMMAND PALETTE</span>
+      <button type="button" data-palette-close aria-label="Close command palette">×</button>
+    </div>
+    <div class="hara-system-palette hara-system-palette--mobile">
+      <span class="hara-system-palette__prompt">>_</span>
+      <input type="text" data-console-palette
+             placeholder="try a hara form" autocomplete="off"
+             spellcheck="false" aria-label="Hara command palette">
+    </div>
+  </div>
 </header>

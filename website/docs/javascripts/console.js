@@ -22,6 +22,9 @@
   const panelToggle = document.querySelector('[data-panel-toggle]');
   const panelClose = document.querySelector('[data-panel-close]');
   const systemPanel = document.querySelector('[data-system-panel]');
+  const paletteToggle = document.querySelector('[data-palette-toggle]');
+  const paletteClose = document.querySelector('[data-palette-close]');
+  const paletteSheet = document.querySelector('[data-palette-sheet]');
   const hero = document.querySelector('.hara-home-intro');
   let entries = 0;
 
@@ -57,7 +60,8 @@
   let runtime = null;
   const ready = (async () => {
     try {
-      const url = new URL('/rust/pkg/hara_wasm.js', location.origin).href;
+      const wasmUrl = root.dataset.wasmUrl || '/rust/pkg/hara_wasm.js';
+      const url = new URL(wasmUrl, location.href).href;
       const mod = await import(url);
       await mod.default();
       runtime = mod.Runtime.core();
@@ -147,6 +151,26 @@
     panelClose.addEventListener('click', () => setPanelOpen(false));
   }
 
+  const setPaletteOpen = (open) => {
+    document.body.classList.toggle('is-palette-open', open);
+    if (paletteSheet) paletteSheet.setAttribute('aria-hidden', String(!open));
+    if (paletteToggle) paletteToggle.setAttribute('aria-expanded', String(open));
+    if (open) {
+      const mobileInput = paletteSheet && paletteSheet.querySelector('[data-console-palette]');
+      if (mobileInput) mobileInput.focus();
+    }
+  };
+
+  if (paletteToggle) {
+    paletteToggle.addEventListener('click', () => {
+      setPaletteOpen(!document.body.classList.contains('is-palette-open'));
+    });
+  }
+
+  if (paletteClose) {
+    paletteClose.addEventListener('click', () => setPaletteOpen(false));
+  }
+
   const setIntroOpen = (open) => {
     if (intro) intro.classList.toggle('is-open', open);
     if (hero) hero.classList.toggle('is-faded', open);
@@ -167,6 +191,10 @@
   if (toggle || panel || systemPanel) {
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
+        if (document.body.classList.contains('is-palette-open')) {
+          setPaletteOpen(false);
+          return;
+        }
         if (intro && intro.classList.contains('is-open')) {
           setIntroOpen(false);
           return;

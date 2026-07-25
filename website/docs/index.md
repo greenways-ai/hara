@@ -74,7 +74,7 @@ hide:
   <div class="hara-frame hara-cta">
     <div class="hara-kicker">04 / EXPLORE</div>
     <div class="hara-home-actions">
-      <a class="md-button md-button--primary" href="#">Try Hara</a>
+      <a class="md-button md-button--primary" href="studio/">Try Hara</a>
       <a class="md-button" href="the-little-book-of-hal/">The Little Book of HAL</a>
     </div>
   </div>
