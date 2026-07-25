@@ -3,17 +3,34 @@
 #
 # The backend is selected with HARA_BACKEND (truffle, native, rust).
 # It defaults to the Truffle jar, which is the most compatible runtime.
+#
+# Freshly-built artifacts in the repo are preferred over installed copies in
+# ~/.local, so `make bin-build` alone is enough to pick up source changes.
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BACKEND="${HARA_BACKEND:-truffle}"
 
 if [ "$BACKEND" = "truffle" ]; then
-    HARA_RUNTIME_JAR="${HARA_RUNTIME_JAR:-${HOME}/.local/share/hara-mode/hara-truffle.jar}"
+    if [ -z "$HARA_RUNTIME_JAR" ]; then
+        if [ -r "$REPO_ROOT/java/target/hara-truffle.jar" ]; then
+            HARA_RUNTIME_JAR="$REPO_ROOT/java/target/hara-truffle.jar"
+        else
+            HARA_RUNTIME_JAR="${HOME}/.local/share/hara-mode/hara-truffle.jar"
+        fi
+    fi
     if [ ! -r "$HARA_RUNTIME_JAR" ]; then
         echo "Hara runtime JAR not found: $HARA_RUNTIME_JAR" >&2
-        echo "Build and install it with: make -C /path/to/apps/hara-emacs bin-install-truffle" >&2
+        echo "Build it with: make -C /path/to/apps/hara-emacs bin-build-truffle" >&2
         exit 1
     fi
     exec java -jar "$HARA_RUNTIME_JAR" "$@"
+fi
+
+if [ -x "$REPO_ROOT/target/hara-truffle" ] && [ "$BACKEND" = "native" ]; then
+    exec "$REPO_ROOT/target/hara-truffle" "$@"
+elif [ -x "$REPO_ROOT/rust/target/release/hara" ] && [ "$BACKEND" = "rust" ]; then
+    exec "$REPO_ROOT/rust/target/release/hara" "$@"
 fi
 
 BIN="${HOME}/.local/bin/hara-${BACKEND}"
