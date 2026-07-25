@@ -64,7 +64,7 @@ function wireStatusLed() {
   const led = document.getElementById('hara-wasm-led');
   if (!led) return;
   document.addEventListener('hara:scene-status', (event) => {
-    const status = event.detail?.status || 'booting';
+    const status = event.detail?.state || 'booting';
     led.className = '';
     led.classList.add(status);
   });
