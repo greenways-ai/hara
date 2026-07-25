@@ -4,6 +4,17 @@
 completion, Xref navigation, Imenu, sessions, project-aware server startup, and a REPL. Its core
 uses built-in Emacs APIs; the optional documentation popup uses `eldoc-box`.
 
+Install from GitHub with `package-vc` (Emacs 29.1+):
+
+```elisp
+(package-vc-install
+ '(hara-mode :url "https://github.com/hoebat/hara.lang"
+             :lisp-dir "apps/hara-emacs"))
+(require 'hara-mode)
+```
+
+Or use a plain checkout:
+
 ```elisp
 (add-to-list 'load-path "/path/to/hara.lang/apps/hara-emacs")
 (require 'hara-mode)
