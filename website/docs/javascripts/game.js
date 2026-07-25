@@ -42,12 +42,14 @@
   const T_SCALE = 28;
   const X_MIN = -2.2, X_MAX = 2.2, Y_MIN = 0.30 * T_SCALE, Y_MAX = 0.90 * T_SCALE;
   /* per-axis speeds tuned so screen speed is equal in both directions
-     (lateral ~120 viewBox px/s at mid depth, depth the same) */
-  const SPEED_K = 0.55;         // k units / s
-  const SPEED_T = 0.124;        // t units / s
+     (lateral ~165 viewBox px/s at mid depth, depth the same) */
+  const SPEED_K = 0.75;         // k units / s
+  const SPEED_T = 0.17;         // t units / s
   const BOOST_MAX = 2.4;        // seconds of straight drift that build boost
-  const BOOST_GAIN = 0.5;       // speed multiplier gained per boosted second
-  const ROUND_MS = 55000;
+  const BOOST_GAIN = 0.55;      // speed multiplier gained per boosted second
+  const LOOK_T = 0.55;          // seconds of travel the AI looks ahead
+  const DOOM_SPACE = 50;        // a pocket this small is not worth circling
+  const ROUND_MS = 40000;
   const COLORS = ['#41f5e4', '#ff2e88', '#9c7bff'];
   const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
@@ -62,7 +64,6 @@
     boost: 0,
     alive: true,
     respawnIn: 0,
-    fearless: false,
   });
 
   const cycles = COLORS.map(spawn);
@@ -166,8 +167,19 @@
     return count;
   };
 
+  /* walk the grid from (x1,y1) to (x2,y2); true if the path hits a marked
+     cell or leaves the arena */
+  const rayBlocked = (g, x1, y1, x2, y2) => {
+    const len = Math.hypot(x2 - x1, y2 - y1);
+    const steps = Math.max(1, Math.ceil(len / (CELL * 0.5)));
+    for (let i = 1; i <= steps; i++) {
+      const idx = cellOf(x1 + ((x2 - x1) * i) / steps, y1 + ((y2 - y1) * i) / steps);
+      if (idx < 0 || g[idx]) return true;
+    }
+    return false;
+  };
+
   const think = (c) => {
-    if (Math.random() < 0.004) c.fearless = !c.fearless;
     const g = buildGrid(c);
     const [dx, dy] = c.dir;
     const cands = [[dx, dy], [dy, -dx], [-dy, dx]]; /* straight, left, right */
@@ -183,24 +195,25 @@
     const ix = hunting ? prey.x + prey.dir[0] * SPEED_K * 3 : 0;
     const iy = hunting ? prey.y + prey.dir[1] * SPEED_T * T_SCALE * 3 : 0;
 
-    let best = null, bestScore = -1;
+    /* lookahead scales with actual speed on each axis, so reaction time is
+       constant no matter how fast the cycle is drifting */
+    const mult = 1 + c.boost * BOOST_GAIN;
+    let best = null, bestScore = -1, bestRoom = 0;
     for (const d of cands) {
-      const nx = c.x + d[0] * 0.7, ny = c.y + d[1] * 0.7;
-      const oob = outOfBounds(nx, ny);
-      if (oob && !c.fearless) continue;
-      const idx = cellOf(nx, ny);
-      /* out of bounds is a dead end even for a fearless cycle: score it
-         as a last resort, never as open space */
-      const space = idx < 0 ? 0 : flood(g, idx, FLOOD_CAP);
+      const nx = c.x + d[0] * SPEED_K * mult * LOOK_T;
+      const ny = c.y + d[1] * SPEED_T * T_SCALE * mult * LOOK_T;
+      if (outOfBounds(nx, ny) || rayBlocked(g, c.x, c.y, nx, ny)) continue;
+      const space = flood(g, cellOf(nx, ny), FLOOD_CAP);
       if (space < MIN_SPACE) continue;
       let score = space;
       /* keep the line: straight drift keeps the speed boost */
       if (d[0] === dx && d[1] === dy) score += 25;
       if (hunting) score += Math.max(0, 70 - Math.hypot(nx - ix, ny - iy) * 10);
       score += Math.random() * 10;
-      if (score > bestScore) { bestScore = score; best = d; }
+      if (score > bestScore) { bestScore = score; bestRoom = space; best = d; }
     }
-    if (!best) {
+    /* doomed: boxed in with nowhere worth going — die now, don't circle */
+    if (!best || bestRoom < DOOM_SPACE) {
       crash(c);
       return;
     }
@@ -363,7 +376,7 @@
   };
 
   let last = performance.now();
-  let aiAcc = 0, roundAcc = 0;
+  let aiAcc = 0, roundAcc = 0, winAcc = 0;
 
   const frame = (now) => {
     const dt = Math.min(0.05, (now - last) / 1000);
@@ -380,11 +393,24 @@
       debris.length = 0;
       roundAcc = 0;
     }
-    /* round over: everyone is dead — clear the field and start fresh */
-    if (cycles.every((c) => !c.alive)) {
+    /* round over when everyone is dead, or when only one survivor remains —
+       give the winner a short lap, then clear the field and start fresh */
+    const alive = cycles.filter((c) => c.alive).length;
+    if (alive === 0) {
       debris.length = 0;
       cycles.forEach(respawn);
       roundAcc = 0;
+      winAcc = 0;
+    } else if (alive === 1) {
+      winAcc += dt;
+      if (winAcc > 2.5) {
+        debris.length = 0;
+        cycles.forEach(respawn);
+        roundAcc = 0;
+        winAcc = 0;
+      }
+    } else {
+      winAcc = 0;
     }
     draw(now);
     window.requestAnimationFrame(frame);
