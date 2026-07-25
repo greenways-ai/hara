@@ -74,5 +74,6 @@ nav:
       - Runtime benchmarks: reference/runtime-benchmarks.md
   - Apps:
       - hara-chrome: '!include ../apps/hara-chrome/mkdocs.yml'
+      - hara-emacs: '!include ../apps/hara-emacs/mkdocs.yml'
   - Books:
       - The Little Book of HAL: '!include ../books/the-little-book-of-hal/mkdocs.yml'
