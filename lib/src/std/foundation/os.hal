@@ -1,0 +1,42 @@
+;; ============================================================================
+;; std.foundation.os — portable host identity and process boundary.
+;;
+;; Pure activation declaration: every public Var is a host builtin; kind,
+;; docstring, and arglists come from the host export catalog (@HaraExport).
+;; Schema annotations for these symbols belong in std.typed.core-sigs
+;; (spec/hara/data/typed.edn).
+;;
+;; Contract (spec/hara/data/foundation.edn, :semantics :os):
+;;   * platform returns :linux, :macos, :windows, or :unknown; arch is a
+;;     normalized keyword; cwd is a normalized path string; env is a
+;;     string-to-string map; getenv returns a string or nil.
+;;   * Process operations require the :process capability. argv is always a
+;;     non-empty vector of strings, passed directly to the host process API —
+;;     never interpreted as a shell command.
+;;   * Standard output and error are drained concurrently from spawn, so a
+;;     child cannot deadlock on a full pipe.
+;;   * process-stdout and process-stderr settle to the complete bytes at EOF;
+;;     process-wait settles to the integer exit code. Repeated calls observe
+;;     the same settled results. process-kill is forceful and idempotent for
+;;     an exited process.
+;;   * Outside the boundary: shell strings, inherited I/O, OS signals,
+;;     incremental stream iterators, clipboard, notifications, URL helpers.
+;;
+;; Authority: spec/hara/data/foundation.edn (:runtime-libraries std.foundation.os)
+;; ============================================================================
+(ns std.foundation.os
+  (:config
+   {:builtins [platform
+               arch
+               cwd
+               env
+               getenv
+               spawn
+               process?
+               process-alive?
+               process-write
+               process-close-input
+               process-stdout
+               process-stderr
+               process-wait
+               process-kill]}))

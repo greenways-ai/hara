@@ -1,0 +1,25 @@
+;; ============================================================================
+;; std.foundation.coroutine — portable coroutine library (foundation boundary).
+;;
+;; Pure activation declaration: every public Var is a host builtin; kind,
+;; docstring, and arglists come from the host export catalog (@HaraExport).
+;; Schema annotations for these symbols belong in std.typed.core-sigs
+;; (spec/hara/data/typed.edn).
+;;
+;; Contract:
+;;   * create builds a suspended coroutine; resume steps it past the next
+;;     yield; status reports :suspended, :running, or :done.
+;;   * close releases a live coroutine; await bridges a coroutine to a
+;;     promise.
+;;
+;; Authority: spec/hara/data/foundation.edn (:runtime-libraries std.foundation.coroutine)
+;; ============================================================================
+(ns std.foundation.coroutine
+  (:config
+   {:builtins [create
+               resume
+               yield
+               status
+               coroutine?
+               close
+               await]}))

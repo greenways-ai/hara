@@ -1,0 +1,30 @@
+;; ============================================================================
+;; std.foundation.promise — portable promise library (foundation boundary).
+;;
+;; Pure activation declaration: every public Var is a host builtin; kind,
+;; docstring, and arglists come from the host export catalog (@HaraExport).
+;; Schema annotations for these symbols belong in std.typed.core-sigs
+;; (spec/hara/data/typed.edn).
+;;
+;; Contract:
+;;   * Promises are the single async boundary; run/then/catch/finally compose
+;;     without exposing host executors.
+;;   * state and value are non-blocking observers; cancel is best-effort.
+;;   * native? reports host-promise interop provenance; delay defers
+;;     evaluation into the promise scheduler.
+;;
+;; Authority: spec/hara/data/foundation.edn (:runtime-libraries std.foundation.promise)
+;; ============================================================================
+(ns std.foundation.promise
+  (:config
+   {:builtins [run
+               new
+               all
+               then
+               catch
+               finally
+               state
+               value
+               cancel
+               native?
+               delay]}))

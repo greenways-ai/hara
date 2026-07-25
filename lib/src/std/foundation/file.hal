@@ -1,0 +1,30 @@
+;; ============================================================================
+;; std.foundation.file — small portable filesystem boundary.
+;;
+;; Pure activation declaration: every public Var is a host builtin; kind,
+;; docstring, and arglists come from the host export catalog (@HaraExport).
+;; Schema annotations for these symbols belong in std.typed.core-sigs
+;; (spec/hara/data/typed.edn).
+;;
+;; Contract (spec/hara/data/foundation.edn, :semantics :file):
+;;   * Every operation except resolve touches the filesystem, returns a
+;;     promise, and requires the :file capability.
+;;   * (resolve root path) is synchronous, touches nothing, and returns a
+;;     normalized path string.
+;;   * write overwrites or creates the target; it does NOT create missing
+;;     parent directories.
+;;   * list returns normalized child paths in deterministic sorted order.
+;;   * mkdir creates missing parents and succeeds when the directory exists.
+;;   * delete removes a file or an empty directory; it is never recursive.
+;;
+;; Authority: spec/hara/data/foundation.edn (:runtime-libraries std.foundation.file)
+;; ============================================================================
+(ns std.foundation.file
+  (:config
+   {:builtins [resolve
+               read
+               write
+               exists?
+               list
+               mkdir
+               delete]}))

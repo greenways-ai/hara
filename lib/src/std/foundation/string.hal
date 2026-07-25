@@ -1,0 +1,47 @@
+;; ============================================================================
+;; std.foundation.string — portable string library (foundation boundary).
+;;
+;; This namespace is a pure activation declaration: every public Var is a host
+;; builtin activated by the :builtins clause below. Kind, docstring, and
+;; arglists come from the host export catalog (@HaraExport); no Hara-level
+;; definitions live here. Schema annotations for these symbols belong in
+;; std.typed.core-sigs (spec/hara/data/typed.edn).
+;;
+;; Contract (spec/hara/data/foundation.edn, :semantics :string):
+;;   * All indexes and offsets are Unicode code points, not UTF-16 units:
+;;     length, char-at, slice, index-of, last-index-of, and regex offsets.
+;;   * split, replace, and replace-first treat their pattern argument as a
+;;     literal string, not a regex.
+;;   * encode-utf8 / decode-utf8 convert between strings and byte vectors.
+;;
+;; Authority: spec/hara/data/foundation.edn (:runtime-libraries std.foundation.string)
+;; ============================================================================
+(ns std.foundation.string
+  (:config
+   {:builtins [length
+               blank?
+               includes?
+               starts-with?
+               ends-with?
+               char-at
+               slice
+               index-of
+               last-index-of
+               join
+               split
+               split-lines
+               repeat
+               replace
+               replace-first
+               trim
+               trim-left
+               trim-right
+               upper
+               lower
+               capitalize
+               decapitalize
+               pad-left
+               pad-right
+               reverse
+               encode-utf8
+               decode-utf8]}))
