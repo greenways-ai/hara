@@ -93,7 +93,6 @@
     "defproject",
     "defprotocol",
     "defrecord",
-    "defstruct",
     "dissoc",
     "do",
     "double",

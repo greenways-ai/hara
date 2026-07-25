@@ -16,10 +16,11 @@
     dpr = Math.min(2, window.devicePixelRatio || 1);
     canvas.width = Math.round(vw * dpr);
     canvas.height = Math.round(vh * dpr);
-    /* isometric: floor diamond spans 100 units wide, 50 units tall on screen */
-    isoScale = Math.min(vw / 110, vh / 70) * dpr;
-    cx = (vw * dpr) / 2;
-    cy = (vh * dpr) / 2 + 10 * isoScale;
+    /* isometric: 30x30 arena, zoomed in ~2x so the diamond fills the upper
+       half of the hero while keeping all four corner bases on screen. */
+    isoScale = Math.min(vw / 75, vh / 47) * dpr;
+    cx = (vw * dpr) * 0.45;
+    cy = (vh * dpr) * 0.30;
   };
   window.addEventListener('resize', resize);
   resize();
@@ -27,16 +28,16 @@
   /* ----------------------------------------------------------------------
      arena and movement
      ---------------------------------------------------------------------- */
-  const X_MIN = -25, X_MAX = 25;
-  const Y_MIN = -25, Y_MAX = 25;
+  const X_MIN = -15, X_MAX = 15;
+  const Y_MIN = -15, Y_MAX = 15;
   const SPEED = 2.0;
   const BOOST_MAX = 1.5;
   const BOOST_GAIN = 0.25;
   const LOOK_T = 0.6;
   const AI_MS = 40;
   const WALL_H = 1.0;
-  const TAIL_CAP = 30;
-  const MAX_TAIL_LENGTH = 120;
+  const TAIL_CAP = 20;
+  const MAX_TAIL_LENGTH = 60;
   const TAIL_LIFE = 8;
   const CELL = 1.0;
   const GRID_W = Math.ceil((X_MAX - X_MIN) / CELL);
@@ -56,17 +57,17 @@
 
   const ZONES = [
     /* home zones — index matches base/corner; cannot be claimed by home player */
-    { name: 'TL home', xMin: -18, xMax: -10, yMin: -18, yMax: -10, home: 0 },
-    { name: 'TR home', xMin: 10, xMax: 18, yMin: -18, yMax: -10, home: 1 },
-    { name: 'BL home', xMin: -18, xMax: -10, yMin: 10, yMax: 18, home: 2 },
-    { name: 'BR home', xMin: 10, xMax: 18, yMin: 10, yMax: 18, home: 3 },
+    { name: 'TL home', xMin: -12, xMax: -8, yMin: -12, yMax: -8, home: 0 },
+    { name: 'TR home', xMin: 8, xMax: 12, yMin: -12, yMax: -8, home: 1 },
+    { name: 'BL home', xMin: -12, xMax: -8, yMin: 8, yMax: 12, home: 2 },
+    { name: 'BR home', xMin: 8, xMax: 12, yMin: 8, yMax: 12, home: 3 },
     /* edge zones */
-    { name: 'top edge', xMin: -4, xMax: 4, yMin: -22, yMax: -14 },
-    { name: 'bottom edge', xMin: -4, xMax: 4, yMin: 14, yMax: 22 },
-    { name: 'left edge', xMin: -22, xMax: -14, yMin: -4, yMax: 4 },
-    { name: 'right edge', xMin: 14, xMax: 22, yMin: -4, yMax: 4 },
+    { name: 'top edge', xMin: -3, xMax: 3, yMin: -14, yMax: -11 },
+    { name: 'bottom edge', xMin: -3, xMax: 3, yMin: 11, yMax: 14 },
+    { name: 'left edge', xMin: -14, xMax: -11, yMin: -3, yMax: 3 },
+    { name: 'right edge', xMin: 11, xMax: 14, yMin: -3, yMax: 3 },
     /* center zone */
-    { name: 'center', xMin: -4, xMax: 4, yMin: -4, yMax: 4 }
+    { name: 'center', xMin: -3, xMax: 3, yMin: -3, yMax: 3 }
   ];
 
   const SCORE_CLAIM = 50;
@@ -471,7 +472,7 @@
     const nowS = now / 1000;
     const prims = [];
 
-    /* arena floor */
+    /* arena floor — dark, low-contrast so the hero text stays legible */
     const floor = [
       [X_MIN, Y_MIN, 0],
       [X_MAX, Y_MIN, 0],
@@ -479,17 +480,17 @@
       [X_MIN, Y_MAX, 0]
     ];
     isoPoly(floor);
-    ctx.fillStyle = '#1d3a4d';
+    ctx.fillStyle = 'rgba(16, 38, 56, .72)';
     ctx.fill();
-    ctx.strokeStyle = '#7ad0e6';
-    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = 'rgba(65, 245, 228, .45)';
+    ctx.lineWidth = 2;
     ctx.stroke();
 
     /* subtle isometric grid on the floor */
     ctx.save();
-    ctx.strokeStyle = '#5a9db8';
-    ctx.lineWidth = 1.2;
-    ctx.globalAlpha = 0.8;
+    ctx.strokeStyle = 'rgba(65, 245, 228, .22)';
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.9;
     for (let x = X_MIN; x <= X_MAX; x += 5) {
       ctx.beginPath();
       const [x0, y0] = project(x, Y_MIN, 0);
@@ -506,11 +507,16 @@
     }
     ctx.restore();
 
-    /* zones */
+    /* zones — dark, muted fills; owned zones glow softly with the cycle color */
     for (const z of ZONES) {
-      const color = z.owner >= 0 ? COLORS[z.owner] : (z.home !== undefined ? '#5a85a8' : '#4a7a9c');
-      const alpha = z.owner >= 0 ? 0.45 : 0.25;
+      const color = z.owner >= 0 ? COLORS[z.owner] : (z.home !== undefined ? 'rgba(30, 55, 72, .25)' : 'rgba(22, 45, 60, .18)');
+      const alpha = z.owner >= 0 ? 0.12 : 0.08;
       drawZone(z, color, alpha, now);
+    }
+
+    /* corner bases — faint outline so all four starting areas are readable */
+    for (const b of BASES) {
+      drawZone(b, 'rgba(65, 245, 228, .12)', 0.10, now);
     }
 
     /* collect wall primitives */

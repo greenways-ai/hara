@@ -280,7 +280,7 @@
 
   {:id :dogfood/false-positives
    :current "The linter does not exist."
-   :required "Analyze lib/src/std/lib/foundation.hal and lib/src/polis/common/ with zero findings before declaring the launch checks stable."}
+   :required "Analyze lib/src/std/lib/foundation.hal and lib/src/talo/common/ with zero findings before declaring the launch checks stable."}
 
   {:id :macros/bootstrap-set
    :current "The built-in rewrite tier covers nothing yet."

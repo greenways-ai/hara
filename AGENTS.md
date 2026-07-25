@@ -12,7 +12,9 @@ component map and `website/docs/development.md` for the developer guide.
   browser loaders plus the shared studio environment (`rust/web/studio/`,
   mounted by the website studio page and the hara-chrome panel).
 - `lib/` — hara-language sources (`lib/src`, `lib/test`), examples
-  (`lib/examples/`), benchmarks (`lib/bench/`)
+  (`lib/examples/`), benchmarks (`lib/bench/`). Notable namespaces:
+  `std.foundation`, the `talo.*` compiler port, and the `std.ledger.*`
+  consensus-free executable-chain experiments.
 - `apps/` — `hara-chrome`, `hara-vscode`, `hara-emacs`, `hara-lsp` (planned)
 - `website/` — the published site, content included: `website/docs/` is the
   mkdocs docs_dir; infra (mkdocs.yml, overrides/, landing page) alongside.

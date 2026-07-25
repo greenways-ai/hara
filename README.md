@@ -23,7 +23,7 @@ Truffle parser / AST
 - [`rust/`](rust/) — the Rust/embedding runtime: native CLI, wasm builds, web
   loader, and in-tree wasm extensions (`rust/extensions/`).
 - [`lib/`](lib/) — hara-language source and workloads: the std foundation and
-  Polis compiler port (`lib/src`, `lib/test`), demo projects
+  Talo compiler port (`lib/src`, `lib/test`), demo projects
   ([`lib/examples/`](lib/examples/)), and benchmark suites
   ([`lib/bench/`](lib/bench/)).
 - [`apps/`](apps/) — editor and browser apps:

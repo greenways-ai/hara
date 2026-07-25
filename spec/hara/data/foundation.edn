@@ -612,8 +612,8 @@
    :current "regexp? and test matching inspect java.util.regex.Pattern directly."
    :required "Compile and cache a private JVM Pattern behind the Hara regex value; never expose Pattern or Matcher to guest code."}
 
-  {:id :regex/polis-lowering
-   :current "Polis recognizes a regex token, but its xtalk string operations do not share one regex contract across targets."
+  {:id :regex/talo-lowering
+   :current "Talo recognizes a regex token, but its xtalk string operations do not share one regex contract across targets."
    :required "Lower the Hara regex representation and replacement templates per target, rejecting unsupported portable-v1 constructs explicitly."}
 
   {:id :regex/lua
@@ -626,10 +626,10 @@
 
   {:id :string/unicode-indexing
    :current "JVM length, char, substring, and regex offsets expose UTF-16 code-unit indexes."
-   :required "Implement length, char-at, slice, search offsets, and regex offsets in Unicode code points across JVM and Polis targets."}
+   :required "Implement length, char-at, slice, search offsets, and regex offsets in Unicode code points across JVM and Talo targets."}
 
   {:id :conformance/regex-parity
-   :current "No shared JVM/Polis regex conformance matrix exists."
+   :current "No shared JVM/Talo regex conformance matrix exists."
    :required "Add cases for literals, escaping, captures, no-match, repeated matches, flags, replacement templates, Unicode, unsupported constructs, and target parity."}
 
   {:id :errors/unified-value

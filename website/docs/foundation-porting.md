@@ -1,7 +1,7 @@
-# Polis Foundation `.hal` Port
+# Talo Foundation `.hal` Port
 
 This ledger tracks semantic decisions while porting `foundation-base/src/hara`
-to the `polis.*` transpiler library.
+to the `talo.*` transpiler library.
 An entry marked `pending` must not be implemented with changed behavior until it
 has been reviewed.
 
@@ -11,23 +11,23 @@ has been reviewed.
 |---|---|---|
 | Project and namespace loader | complete | Self-contained examples live under `lib/bench/<NUM>-<GROUP>` |
 | Common grammar foundation | complete | Grammar specification, macros, xtalk profiles/system, and aggregate grammar have translated facts |
-| `polis.typed` | pending | Does not include `hara.model` |
+| `talo.typed` | pending | Does not include `hara.model` |
 | Common preprocess and emit | in progress | `preprocess-base` is complete; `emit-rewrite` follows the typed slice |
-| `polis.common.book*` | in progress | `book-entry` and `book-meta` are dependency-complete record slices |
-| Remaining `polis.lang` | pending | Split by library, rewrite, compiler, and runtime layers |
+| `talo.common.book*` | in progress | `book-entry` and `book-meta` are dependency-complete record slices |
+| Remaining `talo.lang` | pending | Split by library, rewrite, compiler, and runtime layers |
 
 ## Source convention
 
-Polis is a self-contained Hara project under `lib/`. Production
-namespaces live under `lib/src/polis`; translated tests live under
-`lib/test/polis`. Namespace roots are mapped predictably:
+Talo is a self-contained Hara project under `lib/`. Production
+namespaces live under `lib/src/talo`; translated tests live under
+`lib/test/talo`. Namespace roots are mapped predictably:
 
-| Foundation | Polis |
+| Foundation | Talo |
 |---|---|
-| `hara.common.*` | `polis.common.*` |
-| `hara.typed.*` | `polis.typed.*` |
-| `hara.lang.book*` | `polis.common.book*` |
-| transpiler-focused `hara.lang.*` | `polis.lang.*` |
+| `hara.common.*` | `talo.common.*` |
+| `hara.typed.*` | `talo.typed.*` |
+| `hara.lang.book*` | `talo.common.book*` |
+| transpiler-focused `hara.lang.*` | `talo.lang.*` |
 
 Benchmarks consume these packaged namespaces and do not contain substitute
 implementations.
@@ -47,7 +47,7 @@ implementations.
 The following adaptations preserve observable Foundation behavior while using
 the portable Hara runtime:
 
-| Foundation construct | Polis implementation | Reason |
+| Foundation construct | Talo implementation | Reason |
 |---|---|---|
 | Nested argument destructuring in helper definitions | Explicit `first`, `second`, `drop`, and indexed access | Hara does not yet support every nested Clojure binding pattern |
 | `list` and syntax-quoted generated forms | Persistent lists assembled with `cons` | Hara does not expose Clojure's `list`, and syntax quote is not a runtime function |
@@ -70,7 +70,7 @@ the portable Hara runtime:
 | Metadata-bearing symbol equality | Symbol equality and hashing ignore metadata | Matches Clojure/Foundation value semantics and allows copied metadata assertions to compare unchanged |
 | Macro parameter destructuring | Bind the vector parameter and select its first value inside `with:macro-opts` | Hara macro parameters currently support symbols and `&`, so the public call shape remains unchanged while the implementation avoids nested parameter destructuring |
 | `std.lib.walk` | Lazy Java-backed static library over persistent Hara collections | Supplies the Foundation traversal contract without mutable host collections escaping; map/set implementations and metadata are preserved |
-| `volatile!` used as a local traversal flag | Hara `atom`, `reset!`, and `deref` | `polis.common.preprocess-input` needs local mutable state only while checking whether a template expression can be evaluated |
+| `volatile!` used as a local traversal flag | Hara `atom`, `reset!`, and `deref` | `talo.common.preprocess-input` needs local mutable state only while checking whether a template expression can be evaluated |
 | Host form `eval` during preprocessing | Core Hara `eval` evaluates the readable Hara form in the active namespace | Preserves persisted template behavior while keeping evaluation inside the Hara runtime rather than invoking Clojure/JVM evaluation |
 | Foundation `std.lib.impl/defimpl` for `BookEntry` | Native Hara `defrecord` with the same fields and constructors | Preserves lookup, construction, and type checks without introducing an implementation-only compatibility namespace; custom Foundation record printing remains unavailable |
 | `std.lib.template/$` in copied record-construction facts | Explicit persistent target forms assembled with `list` | Hara does not ship the Foundation template namespace; the test functions retain the same generated forms without adding a compatibility-only public namespace |

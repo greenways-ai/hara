@@ -99,8 +99,8 @@ body {
 .md-main:has(.hara-home)::before {
   background: radial-gradient(
     ellipse 95% 75% at 50% 42%,
-    rgba(5, 7, 13, .78) 0%,
-    rgba(5, 7, 13, .28) 100%);
+    rgba(5, 7, 13, .55) 0%,
+    rgba(5, 7, 13, .82) 100%);
 }
 
 /* fixed site-wide backdrop for the light-cycle game (overrides/main.html);
@@ -1755,7 +1755,7 @@ body.is-palette-open .hara-system-palette-sheet {
 
   .hara-system-palette,
   .hara-system-log-toggle,
-  .hara-system-nav__link--hide-mobile {
+  .hara-system-nav .hara-system-nav__link--hide-mobile {
     display: none;
   }
 

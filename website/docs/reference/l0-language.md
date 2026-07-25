@@ -39,7 +39,7 @@ The core special forms are `quote`, `if`, `do`, `when`, `when-not`, `and`,
 `or`, `cond`, `let`, `letfn`, `binding`, `loop`, `recur`, `fn`, `def`,
 `defn`, `defn-`, `declare`, `defmulti`, `defmethod`, `var`, `deref`, `set!`,
 `throw`, `try`, `ns`, `in-ns`, `require`, `refer`, `use`, `alias`,
-`defstruct`, `defprotocol`, `extend-type`, `protocol-call`, `field`, and
+`defrecord`, `defprotocol`, `extend-type`, `protocol-call`, `field`, and
 `apply`. `defn` is the only function-definition form; there is no `defn.xt`.
 
 The ordinary collection functions `count`, `get`, `assoc`, `conj`, `cons`,
@@ -59,7 +59,7 @@ Functions support fixed arities, variadic parameter vectors using a final
 `&` binding, and multiple arity clauses. Exact arities take precedence over a
 variadic fallback. `apply` spreads the final sequential argument into the
 call. Invocation supports Hara functions, protocol `IFn` implementations,
-multifunctions, and `defstruct` constructors.
+multifunctions, and `defrecord` constructors.
 
 The packaged `std/foundation.hal` bootstrap defines `nil?`, `false?`, `true?`,
 `empty?`, `first`, `second`, `rest`, and `not-empty` using ordinary L0 forms
@@ -245,7 +245,7 @@ implementations; `protocol-call` performs dispatch. Dispatch supports Hara
 values, adapted Java values, primitives, nil, and foreign values. Replacing a
 method or extension invalidates affected dispatch assumptions.
 
-`defstruct` creates immutable `HaraStruct` values. Struct metadata is separate
+`defrecord` creates immutable `HaraStruct` values. Struct metadata is separate
 from fields and survives `with-meta`; metadata does not affect value equality
 or hashing. `IFn` is a language protocol and can be extended to structs.
 `defmulti`/`defmethod` dispatch by Hara equality and support `:default`.
@@ -290,4 +290,4 @@ category, source/setup, and expected value, type, readable form, or error.
 Implementations classify mismatches as a bug, a capability difference, or an
 approved specification revision. The current intentional differences from
 Clojure are: no mandatory ISeq/Seq, no ratios, no transducers/
-`transduce`/`eduction`, no `defrecord`, no `deftype`, and no `defn.xt`.
+`transduce`/`eduction`, no Clojure-style host record contract (`defrecord` is the primitive struct form), no `deftype`, and no `defn.xt`.

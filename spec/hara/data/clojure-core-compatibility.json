@@ -728,7 +728,7 @@
           "implementation"
         ],
         "hara": "defrecord",
-        "summary": "Hara has no Clojure JVM record/class contract; portable immutable domain values use defstruct and protocols."
+        "summary": "Hara has no Clojure JVM record/class contract; portable immutable domain values use defrecord and protocols."
       },
       {
         "clojure": "eval",
@@ -783,7 +783,7 @@
       "defmulti",
       "defn",
       "defprotocol",
-      "defstruct",
+      "defrecord",
       "dissoc",
       "do",
       "double",

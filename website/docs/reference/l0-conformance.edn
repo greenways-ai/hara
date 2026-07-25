@@ -74,7 +74,7 @@
   {:id :runtime/metadata
    :class :runtime
    :source "(protocol-call ILookup lookup (protocol-call IObjType meta (protocol-call IObjType with-meta (Person \"Ada\") {:doc \"person\"})) :doc)"
-   :setup "(defstruct Person [name])"
+   :setup "(defrecord Person [name])"
    :expect {:value "person" :type :string}}
   {:id :runtime/dynamic-binding
    :class :runtime
@@ -248,7 +248,7 @@
   {:id :protocol/struct-extension
    :class :protocol
    :source "(protocol-call ICount count (Box 4))"
-   :setup "(defstruct Box [size]) (extend-type Box ICount (count [self] (field self :size)))"
+   :setup "(defrecord Box [size]) (extend-type Box ICount (count [self] (field self :size)))"
    :expect {:value 4 :type :integer}}
   {:id :protocol/multimethod
    :class :protocol
