@@ -18,6 +18,8 @@
 
 (declare-function eldoc-box-help-at-point "eldoc-box")
 (declare-function projectile-register-project-type "projectile")
+(defvar projectile-project-root-files)
+(defvar projectile-project-root-files-bottom-up)
 
 (defgroup hara nil "Hara language tooling." :group 'languages)
 
@@ -1012,6 +1014,8 @@ so a partial name is never evaluated."
 
 ;;;###autoload
 (with-eval-after-load 'projectile
+  (add-to-list 'projectile-project-root-files "project.hal")
+  (add-to-list 'projectile-project-root-files-bottom-up "project.hal")
   (projectile-register-project-type
    'hara '("project.hal")
    :src-dir "src/"

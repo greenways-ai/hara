@@ -230,4 +230,57 @@
         (should (= (xref-file-location-line location) 12))
         (should (= (xref-file-location-column location) 2))))))
 
+(ert-deftest hara-symbol-at-point-handles-hara-symbol-constituents ()
+  "Symbol extraction must include all hara identifier characters."
+  (with-temp-buffer
+    (hara-mode)
+    (insert "(get *answer* :key) (<= 1 2) std.lib.foundation/map (str/encode x)")
+    (dolist (expected '("get" "*answer*" ":key" "<=" "std.lib.foundation/map" "str/encode"))
+      (goto-char (point-min))
+      (search-forward expected)
+      (goto-char (match-beginning 0))
+      (forward-char (max 1 (/ (length expected) 2)))
+      (should (equal (hara--symbol-at-point) expected)))))
+
+(ert-deftest hara-last-sexp-bounds-completes-partial-symbol ()
+  "Evaluating mid-symbol must send the full symbol, not a fragment."
+  (with-temp-buffer
+    (hara-mode)
+    (insert "(mapv inc xs)")
+    (goto-char (point-min))
+    (search-forward "mapv")
+    (goto-char (match-beginning 0))
+    (forward-char 2)
+    (let ((bounds (hara--last-sexp-bounds)))
+      (should (equal (buffer-substring-no-properties (car bounds) (cdr bounds))
+                     "mapv")))
+    ;; After a complete form, the whole form is selected.
+    (goto-char (point-max))
+    (let ((bounds (hara--last-sexp-bounds)))
+      (should (equal (buffer-substring-no-properties (car bounds) (cdr bounds))
+                     "(mapv inc xs)")))))
+
+(ert-deftest hara-symbol-at-point-works-in-dotted-names ()
+  "Point inside a dotted namespace segment should return the full symbol."
+  (with-temp-buffer
+    (hara-mode)
+    (insert "(std.lib/map 1 2)")
+    (goto-char (point-min))
+    (should (search-forward "lib"))
+    (goto-char (match-beginning 0))
+    (forward-char 1)
+    (should (equal (hara--symbol-at-point) "std.lib/map"))))
+
+(ert-deftest hara-last-sexp-bounds-handles-dotted-symbol-midpoint ()
+  (with-temp-buffer
+    (hara-mode)
+    (insert "(str/encode x)")
+    (goto-char (point-min))
+    (search-forward "encode")
+    (goto-char (match-beginning 0))
+    (forward-char 3)
+    (let ((bounds (hara--last-sexp-bounds)))
+      (should (equal (buffer-substring-no-properties (car bounds) (cdr bounds))
+                     "str/encode")))))
+
 ;;; hara-mode-test.el ends here
