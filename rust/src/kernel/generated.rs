@@ -15,6 +15,8 @@ pub struct GeneratedNamespaceConfig {
     aliases: HashMap<String, String>,
     refers: HashMap<String, String>,
     required_namespaces: Vec<String>,
+    builtins: Vec<String>,
+    blank: bool,
 }
 
 impl GeneratedNamespaceConfig {
@@ -27,6 +29,8 @@ impl GeneratedNamespaceConfig {
             aliases,
             refers: HashMap::new(),
             required_namespaces: Vec::new(),
+            builtins: Vec::new(),
+            blank: false,
         }
     }
 
@@ -41,14 +45,29 @@ impl GeneratedNamespaceConfig {
         let mut excluded = HashSet::new();
         let mut overrides = HashMap::new();
         let mut requires = Vec::new();
+        let mut builtins = Vec::new();
+        let mut blank = false;
         let mut intrinsics_seen = false;
+        let mut config_seen = false;
 
         for clause in clauses {
             let values = list(clause, "ns clauses must be non-empty lists")?;
             let head = values.first().ok_or("ns clauses must be non-empty lists")?;
             let name = keyword(head, "ns clause must start with a keyword")?;
             match name {
+                "config" => {
+                    if config_seen {
+                        return Err("ns accepts only one :config clause".into());
+                    }
+                    config_seen = true;
+                    if values.len() != 2 {
+                        return Err(":config expects one map".into());
+                    }
+                    parse_config(&values[1], &mut builtins, &mut blank, &mut excluded, &mut overrides)?;
+                }
                 "intrinsics" => {
+                    // Legacy top-level :intrinsics is accepted for backward compatibility,
+                    // but the spec places it inside :config.
                     if intrinsics_seen {
                         return Err("ns accepts only one :intrinsics clause".into());
                     }
@@ -75,6 +94,8 @@ impl GeneratedNamespaceConfig {
         }
 
         let mut config = Self::default();
+        config.builtins = builtins;
+        config.blank = blank;
         for (library, namespace, default_alias) in LIBRARIES {
             if excluded.contains(*library) {
                 continue;
@@ -92,6 +113,14 @@ impl GeneratedNamespaceConfig {
 
     pub fn required_namespaces(&self) -> &[String] {
         &self.required_namespaces
+    }
+
+    pub fn builtins(&self) -> &[String] {
+        &self.builtins
+    }
+
+    pub fn blank(&self) -> bool {
+        self.blank
     }
 
     pub fn rewrite(&self, form: Form) -> Form {
@@ -230,6 +259,47 @@ impl GeneratedNamespaceConfig {
     }
 }
 
+fn parse_config(
+    form: &Form,
+    builtins: &mut Vec<String>,
+    blank: &mut bool,
+    excluded: &mut HashSet<String>,
+    overrides: &mut HashMap<String, String>,
+) -> Result<(), String> {
+    let options = match form {
+        Form::Map(options) => options,
+        _ => return Err(":config expects one map".into()),
+    };
+    for (key, value) in options {
+        match keyword(key, ":config keys must be unqualified keywords")? {
+            "blank" => {
+                *blank = match value {
+                    Form::Bool(value) => *value,
+                    _ => return Err(":config :blank expects a boolean".into()),
+                };
+            }
+            "builtins" => {
+                let mut seen = HashSet::new();
+                for item in vector(value, ":config :builtins expects a vector of symbols")? {
+                    let name = symbol(item, ":config :builtins expects unqualified symbols")?;
+                    if name.contains('/') {
+                        return Err(":config :builtins expects unqualified symbols".into());
+                    }
+                    if !seen.insert(name) {
+                        return Err(format!("Duplicate builtin declaration: {name}"));
+                    }
+                    builtins.push(name.into());
+                }
+            }
+            "intrinsics" => {
+                parse_intrinsics(value, excluded, overrides)?;
+            }
+            other => return Err(format!("Unsupported :config option: :{other}")),
+        }
+    }
+    Ok(())
+}
+
 fn parse_intrinsics(
     form: &Form,
     excluded: &mut HashSet<String>,
@@ -317,7 +387,7 @@ fn library(value: &str) -> Result<&str, String> {
 }
 fn normalize_namespace(value: &str) -> &str {
     match value {
-        "core" | "hara.lib.core" => "std.lib.foundation",
+        "core" | "hara.lib.core" => "std.foundation",
         "hara.lib.string" => "std.lib.string",
         "hara.lib.promise" => "std.lib.promise",
         "hara.lib.bytes" => "std.lib.bytes",
@@ -328,17 +398,17 @@ fn normalize_namespace(value: &str) -> &str {
 }
 fn known_namespace(value: &str) -> bool {
     let value = normalize_namespace(value);
-    value == "std.lib.foundation"
+    value == "std.foundation"
         || LIBRARIES
             .iter()
             .any(|(_, namespace, _)| *namespace == value)
 }
 fn canonical(namespace: &str, method: &str) -> String {
-    if namespace == "std.lib.foundation" {
-        return format!("std.lib.foundation/{method}");
+    if namespace == "std.foundation" {
+        return format!("std.foundation/{method}");
     }
     match (normalize_namespace(namespace), method) {
-        ("std.lib.foundation", method) => method.into(),
+        ("std.foundation", method) => method.into(),
         ("std.lib.string", "len") => "str/count".into(),
         ("std.lib.string", "to-upper") => "str/upper".into(),
         ("std.lib.string", "to-lower") => "str/lower".into(),
@@ -380,5 +450,25 @@ mod tests {
         )
         .unwrap_err()
         .contains("missing generated namespace"));
+    }
+
+    #[test]
+    fn parses_config_clause_with_builtins_blank_and_intrinsics() {
+        let forms = parse_forms(
+            "(:config {:blank true \
+                       :builtins [+ - = count get] \
+                       :intrinsics {:exclude [bytes]}})",
+        )
+        .unwrap();
+        let config = GeneratedNamespaceConfig::configure(&forms).unwrap();
+        assert!(config.blank());
+        assert_eq!(config.builtins(), &["+", "-", "=", "count", "get"]);
+        // bytes excluded, so the default alias should not rewrite the symbol.
+        assert_eq!(
+            config
+                .rewrite(parse_forms("bytes").unwrap().remove(0))
+                .to_string(),
+            "bytes"
+        );
     }
 }
