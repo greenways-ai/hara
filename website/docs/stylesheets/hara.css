@@ -473,16 +473,17 @@ body {
   top: 0;
   left: 0;
   right: 0;
-  height: 52px;
+  height: 48px;
   display: grid;
   grid-template-columns: auto auto 1fr auto auto auto;
   align-items: stretch;
+  box-sizing: border-box;
   color: #c6d4e3;
-  background: rgba(3, 5, 10, .88);
-  border-bottom: 1px solid var(--hara-line-strong);
+  background: rgba(3, 5, 10, .82);
+  border-bottom: 1px solid var(--hara-line);
   box-shadow: 0 12px 36px rgba(0, 0, 0, .3);
-  -webkit-backdrop-filter: blur(18px) saturate(1.3);
-  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  backdrop-filter: blur(20px) saturate(1.3);
 }
 
 .hara-system-brand,
@@ -524,6 +525,75 @@ body {
 
 .hara-system-brand__os {
   color: var(--hara-cyan);
+}
+
+.hara-system-nav {
+  display: flex;
+  align-items: stretch;
+}
+
+.hara-system-nav a {
+  display: flex;
+  align-items: center;
+  padding: 0 .85rem;
+  color: #aabaca;
+  font-family: var(--hara-mono);
+  font-size: .58rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: color .15s, background .15s;
+}
+
+.hara-system-nav a:hover,
+.hara-system-nav a:focus-visible {
+  color: var(--hara-cyan-bright);
+  background: rgba(65, 245, 228, .08);
+  outline: none;
+}
+
+.hara-system-palette {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  justify-self: center;
+  min-width: 280px;
+  max-width: 520px;
+  width: 40vw;
+  padding: 0 .75rem;
+  margin: 6px 0;
+  color: #8b9db0;
+  background: rgba(2, 4, 8, .55);
+  border: 1px solid var(--hara-line);
+  border-radius: 6px;
+  font-family: var(--hara-mono);
+  font-size: .62rem;
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.hara-system-palette:focus-within {
+  border-color: rgba(65, 245, 228, .45);
+  box-shadow: 0 0 12px rgba(65, 245, 228, .12);
+}
+
+.hara-system-palette__prompt {
+  color: var(--hara-cyan);
+}
+
+.hara-system-palette input {
+  flex: 1;
+  min-width: 0;
+  color: #c6d4e3;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  letter-spacing: .02em;
+  outline: none;
+}
+
+.hara-system-palette input::placeholder {
+  color: #5a6f82;
 }
 
 .hara-system-context,
@@ -626,9 +696,13 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 52px;
-  border-right: 0;
+  width: 44px;
+  margin-right: 8px;
+  border: 0;
   border-left: 1px solid var(--hara-line);
+  background: transparent;
+  color: #aabaca;
+  cursor: pointer;
 }
 
 .hara-system-panel-toggle svg {
@@ -648,7 +722,7 @@ body.is-panel-open .hara-system-panel-toggle {
 .hara-system-panel {
   position: fixed;
   z-index: 19;
-  top: 52px;
+  top: 48px;
   right: 0;
   bottom: 0;
   width: min(360px, 85vw);
