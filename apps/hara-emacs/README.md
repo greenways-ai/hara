@@ -87,3 +87,29 @@ Or directly:
 emacs -Q --batch -L apps/hara-emacs -L apps/hara-emacs/test \
   -l hara-mode-test.el -f ert-run-tests-batch-and-exit
 ```
+
+## Troubleshooting
+
+### `EVAL_ERROR: No host builtins are registered for namespace: std.foundation`
+
+This almost always means hara-mode is using a stale runtime jar/binary. The
+launcher prefers freshly-built artifacts in the repo root, then falls back to
+`~/.local`. To fix:
+
+```sh
+cd apps/hara-emacs
+make bin-build-truffle   # or make bin-build for the default backend
+make bin-install-truffle # update the fallback jar in ~/.local
+make upgrade             # update the package-vc checkout in ~/.emacs.d/elpa
+```
+
+Then restart Emacs (or run `M-x package-vc-upgrade RET hara-mode RET`).
+
+To see exactly which binary/jar the launcher picked, run it with diagnostics:
+
+```sh
+HARA_DIAGNOSTICS=1 ~/.emacs.d/elpa/hara-mode/apps/hara-emacs/bin/hara eval '(+ 1 2)'
+```
+
+In Emacs, `M-x hara-jack-in` logs the resolved command to the message area.
+Check `M-x describe-variable RET hara-command RET` to see what is configured.

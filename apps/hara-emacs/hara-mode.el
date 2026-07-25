@@ -28,8 +28,47 @@
            (let ((bin (expand-file-name "bin/hara" (file-name-directory load-file-name))))
              (and (file-executable-p bin) bin)))
       "hara")
-  "Hara executable used by `hara-jack-in'."
+  "Hara executable used by `hara-jack-in'.
+If you customize this, hara-mode will use your value exactly. Otherwise it
+tries to find a package-local `bin/hara' launcher and falls back to a `hara'
+executable on `exec-path'."
   :type 'string)
+
+(defun hara--package-bin ()
+  "Return the path to the package-local bin/hara launcher, if any."
+  (when-let ((file (or (and (boundp 'load-file-name) load-file-name)
+                       (locate-library "hara-mode"))))
+    (let ((bin (expand-file-name "bin/hara" (file-name-directory file))))
+      (and (file-executable-p bin) bin))))
+
+(defun hara--find-in-ancestors (start relative-path)
+  "Search upward from START for RELATIVE-PATH and return its absolute path."
+  (let ((dir (file-name-as-directory start))
+        found)
+    (while (and dir (not found))
+      (let ((candidate (expand-file-name relative-path dir)))
+        (if (file-exists-p candidate)
+            (setq found candidate)
+          (let ((parent (file-name-directory (directory-file-name dir))))
+            (setq dir (if (equal parent dir) nil parent))))))
+    found))
+
+(defun hara--resolve-command ()
+  "Return the executable to use for launching the Hara server.
+Prefer, in order:
+1. An absolute, executable `hara-command'.
+2. A `hara' script in the current project root or its ancestors.
+3. The package-local `bin/hara' wrapper.
+4. The raw `hara-command' value."
+  (cond
+   ((and (file-name-absolute-p hara-command)
+         (file-executable-p hara-command))
+    hara-command)
+   ((when-let ((root (hara--project-file-root)))
+      (or (hara--find-in-ancestors root "hara")
+          (hara--find-in-ancestors root "apps/hara-emacs/bin/hara"))))
+   ((hara--package-bin))
+   (t hara-command)))
 
 (defcustom hara-host "127.0.0.1"
   "Configured Hara RESP host."
@@ -399,16 +438,18 @@ Return (VALUE . NEXT-OFFSET), or signal `hara-resp-incomplete'."
                                                 (directory-file-name root)))))
          (_ (with-current-buffer buffer (erase-buffer)))
          (default-directory root)
+         (command (hara--resolve-command))
          (process
           (make-process
            :name (format "hara-server-%s"
                          (substring (secure-hash 'sha1 root) 0 8))
            :buffer buffer
-           :command (list hara-command "--host" "127.0.0.1"
+           :command (list command "--host" "127.0.0.1"
                           "--port" "0" "headless")
            :coding 'utf-8 :noquery t
            :connection-type 'pipe))
          endpoint)
+    (message "Starting Hara server: %s" command)
     (set-process-filter process #'hara--server-process-filter)
     (let ((deadline (+ (float-time) hara-server-start-timeout)))
       (while (and (not (setq endpoint (process-get process 'hara-endpoint)))
