@@ -44,21 +44,19 @@ plugins:
   - search
   - monorepo
 nav:
-  - Home: index.md
-  - Studio: studio.md
+  - Play: index.md
   - Learn:
+      - Overview: learn.md
       - User guide: user-guide.md
       - Getting started: getting-started.md
       - Namespaces and modules: namespaces.md
-  - Walkthroughs:
-      - Namespace project: walkthroughs/service-project.md
-      - Library namespaces: walkthroughs/libraries.md
-      - Testing namespaces: walkthroughs/testing.md
-  - Build:
-      - Developer guide: development.md
-      - Foundation porting: foundation-porting.md
-      - Java API: javadocs.md
-  - Reference:
+      - Walkthroughs:
+          - Namespace project: walkthroughs/service-project.md
+          - Library namespaces: walkthroughs/libraries.md
+          - Testing namespaces: walkthroughs/testing.md
+  - Kernel: kernel.md
+  - Docs:
+      - Overview: reference/index.md
       - L0 language: reference/l0-language.md
       - Builtins: builtins.md
       - Namespace catalog: reference/namespaces.md
@@ -73,6 +71,9 @@ nav:
       - Rust/WASM runtime: reference/rust-runtime.md
       - Clojure core compatibility: reference/clojure-core-compatibility.md
       - Runtime benchmarks: reference/runtime-benchmarks.md
+      - Developer guide: development.md
+      - Foundation porting: foundation-porting.md
+      - Java API: javadocs.md
   - Apps:
       - hara-chrome: '!include ../apps/hara-chrome/mkdocs.yml'
       - hara-emacs: '!include ../apps/hara-emacs/mkdocs.yml'
