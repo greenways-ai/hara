@@ -1,6 +1,11 @@
 # hara-chrome
 
 Chrome (MV3) extension embedding the hara wasm runtime in a DevTools panel.
+The panel mounts the shared studio environment (`rust/web/studio/` — kernel
+broker, spaces/fs over IndexedDB, studio UI), with the chrome-specific powers
+layered on top: `chrome.api` host calls route to the background service
+worker, and home-directory / run-file actions live in the strip above the
+studio. REPL and RESP evals go to the active kernel.
 
 ## Build
 

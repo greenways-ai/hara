@@ -102,9 +102,11 @@ Summary of the split:
 ```
 ┌─ chrome-hara (MV3 extension) ──────────────────────────────────────┐
 │ DevTools panel page (extension page)                               │
-│   REPL UI ── hara worker (hta-worker.js + hara.wasm)               │
+│   studio UI (mountStudio) ── KernelBroker                          │
 │        │        ▲ host/call events                                 │
-│        │   HtaContext (hostCalls → Port messaging)                 │
+│        │   kernels: hta-worker.js + hara.wasm (one worker each)    │
+│        │   hostCalls = studio services (IndexedDB/fetch, in-panel) │
+│        │             merged over port proxy (chrome.*, hara/echo)  │
 │        ▼        │                                                  │
 │ Service worker: chrome.* host-call implementations                 │
 │   chrome.debugger.attach/sendCommand, tabs, generic chrome proxy   │
@@ -114,10 +116,13 @@ Summary of the split:
 chrome-hara bridge (node): RESP TCP server ⟷ WS ⟷ extension
 ```
 
-- The panel hosts the wasm worker (MV3 service workers cannot spawn nested
-  workers) and the REPL; the service worker owns `chrome.debugger` and the
-  generic `chrome.*` proxy. Host calls travel over a long-lived
-  `chrome.runtime` Port. Panel lifetime = automation session lifetime.
+- The panel hosts the wasm workers (MV3 service workers cannot spawn nested
+  workers) and mounts the shared studio environment (`rust/web/studio/`):
+  a `KernelBroker` owns one worker per kernel, and `mountStudio` renders
+  the space/file/editor/REPL UI. The service worker owns `chrome.debugger`
+  and the generic `chrome.*` proxy; only those calls travel over the
+  long-lived `chrome.runtime` Port — the studio store/http/json services
+  are answered in-panel. Panel lifetime = automation session lifetime.
 - Manifest: `devtools_page`, permissions `debugger`, `tabs`, `storage`;
   CSP `extension_pages: script-src 'self' 'wasm-unsafe-eval'`.
 - `(require [chrome.api :as api])` works because core eval gained a

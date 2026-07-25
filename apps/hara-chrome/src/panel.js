@@ -1,5 +1,7 @@
-import { HtaContext } from "../vendor/hta.js";
-import { createHostCalls } from "./host-bridge.js";
+import { createBrowserBroker } from "../vendor/studio/broker.js";
+import { createHostServices } from "../vendor/studio/host-services.js";
+import { mountStudio } from "../vendor/studio/ui.js";
+import { createHostCalls, mergeHostCalls } from "./host-bridge.js";
 import { preloadRequires, parseSourcePaths, chooseHome, restoreHome } from "./home.js";
 import { connectResp } from "./resp-client.js";
 
@@ -8,26 +10,49 @@ const tabId = params.has("tabId")
   ? Number(params.get("tabId"))
   : globalThis.chrome?.devtools?.inspectedWindow?.tabId;
 
-const worker = new Worker(chrome.runtime.getURL("vendor/hta-worker.js"), { type: "module" });
-const moduleBytes = new Uint8Array(
-  await (await fetch(chrome.runtime.getURL("vendor/hara.wasm"))).arrayBuffer(),
-);
-const port = chrome.runtime.connect({ name: "hara-host" });
-const context = new HtaContext({ worker, moduleBytes, hostCalls: createHostCalls(port) });
-
-function evalSource(source) {
-  return context.call("eval", [source]);
+const asset = (path) => chrome.runtime.getURL(path);
+async function fetchText(path) {
+  const response = await fetch(asset(path));
+  if (!response.ok) throw new Error(`fetch ${path} failed: ${response.status}`);
+  return response.text();
 }
 
-const apiSource = await (
-  await fetch(chrome.runtime.getURL("src/hara/api.hal"))
-).text();
-await context.call("register-resource", ["chrome.api", apiSource]);
+// Host calls: the studio services (store/http/json, answered in-panel) own
+// their keys; every other service/method (chrome.*, hara/echo) falls through
+// to the background service worker over the port.
+const port = chrome.runtime.connect({ name: "hara-host" });
+const hostCalls = mergeHostCalls(createHostServices(), createHostCalls(port));
+
+const moduleBytes = new Uint8Array(
+  await (await fetch(asset("vendor/hara.wasm"))).arrayBuffer(),
+);
+
+// Registered into every kernel at boot: the studio hal libs plus the
+// chrome.api bindings.
+const resources = { "chrome.api": await fetchText("src/hara/api.hal") };
+for (const name of ["store", "fs", "space", "boot"]) {
+  resources[`studio.${name}`] = await fetchText(`vendor/studio/hal/${name}.hal`);
+}
+
+const broker = createBrowserBroker({
+  workerUrl: asset("vendor/hta-worker.js"),
+  moduleBytes,
+  hostCalls,
+  resources,
+});
+const studio = mountStudio(document.getElementById("hara-studio-mount"), { broker });
+
+function evalSource(source) {
+  return broker.eval(studio.state.kernel, source);
+}
 
 let homeDir = null;
 let homeSourcePaths = ["."];
-const loadedResources = new Set(["chrome.api"]);
-const register = (ns, text) => context.call("register-resource", [ns, text]);
+const loadedResources = new Set(Object.keys(resources));
+const register = async (ns, text) => {
+  const kernel = await broker.require(studio.state.kernel);
+  return kernel.context.call("register-resource", [ns, text]);
+};
 
 async function preload(source) {
   if (!homeDir) return;
@@ -54,29 +79,9 @@ async function setHome(dir) {
   }
 }
 
-window.hara = { context, evalSource, preload, setHome, tabId };
+window.hara = { broker, studio, evalSource, preload, setHome, tabId };
 
 if (params.has("resp")) connectResp(params.get("resp"), evalSource);
-
-const input = document.getElementById("input");
-const output = document.getElementById("output");
-function print(text) {
-  output.textContent += `${text}\n`;
-  output.scrollTop = output.scrollHeight;
-}
-input.addEventListener("keydown", async (event) => {
-  if (event.key !== "Enter" || !event.ctrlKey) return;
-  event.preventDefault();
-  const source = input.value;
-  input.value = "";
-  print(`hara=> ${source}`);
-  try {
-    await preload(source);
-    print(String(await evalSource(source)));
-  } catch (error) {
-    print(`error: ${error?.message ?? error}`);
-  }
-});
 
 document.getElementById("home-button").addEventListener("click", async () => {
   try { setHome(await chooseHome()); } catch { /* picker cancelled */ }
@@ -88,10 +93,10 @@ document.getElementById("run-file-button").addEventListener("click", async () =>
     });
     const source = await (await fileHandle.getFile()).text();
     await preload(source);
-    print(`hara=> ${fileHandle.name}`);
-    print(String(await evalSource(source)));
+    studio.logNote(`hara=> ${fileHandle.name}`);
+    studio.logValue(await evalSource(source));
   } catch (error) {
-    if (error?.name !== "AbortError") print(`error: ${error?.message ?? error}`);
+    if (error?.name !== "AbortError") studio.logError(error);
   }
 });
 setHome(await restoreHome());

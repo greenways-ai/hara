@@ -65,3 +65,17 @@ export function createHostCalls(port) {
     },
   });
 }
+
+/**
+ * Merge a concrete hostCalls map (e.g. the studio `createHostServices()`
+ * output) with a dynamic fallback (e.g. the port proxy from
+ * `createHostCalls`). A plain spread cannot do this — the fallback Proxy has
+ * no enumerable own keys, so `{ ...services, ...portCalls }` would silently
+ * drop every chrome.* call. Lookup order: primary's own keys win, anything
+ * else falls through to the fallback.
+ */
+export function mergeHostCalls(primary, fallback) {
+  return new Proxy(primary, {
+    get: (target, key) => (key in target ? target[key] : fallback[key]),
+  });
+}
