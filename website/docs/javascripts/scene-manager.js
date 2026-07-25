@@ -90,6 +90,11 @@ async function initManager() {
   });
 
   window.haraSceneManager = manager;
+
+  if (manifest && manifest.scenes && manifest.scenes.length > 0) {
+    manager.load(manifest.scenes[0].id);
+  }
+
   return manager;
 }
 
