@@ -85,13 +85,13 @@ public class StdRespClientTest {
 
       String source =
           "(require 'std.resp.client) "
-              + "(require 'std.lib.bytes) "
+              + "(require 'std.foundation.bytes) "
               + "(let [c (std.resp.client/connect \"127.0.0.1\" "
               + server.getLocalPort()
               + " {:decode-bulk :bytes})"
               + "      out (std.resp.client/pipeline c [[\"ECHO\" \"ab\"] [\"ECHO\" \"xyz\"]])]"
               + " (std.resp.client/close c)"
-              + " [(std.lib.bytes/count (nth out 0)) (std.lib.bytes/count (nth out 1))])";
+              + " [(std.foundation.bytes/count (nth out 0)) (std.foundation.bytes/count (nth out 1))])";
       assertEquals("[2 3]", context.eval(HaraLanguage.ID, source).toString());
       peer.get(5, TimeUnit.SECONDS);
     }

@@ -1,7 +1,7 @@
 (ns polis.common.util
   (:require [polis.common.provenance :as provenance]
             [std.lib.context :as context]
-            [std.lib.string :as string]))
+            [std.foundation.string :as string]))
 
 (defn sym-id
   "Gets the unqualified symbol id."

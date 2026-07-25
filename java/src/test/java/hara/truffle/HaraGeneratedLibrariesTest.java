@@ -230,7 +230,7 @@ public class HaraGeneratedLibrariesTest {
               .eval(
                   HaraLanguage.ID,
                   "(ns app (:config {:intrinsics {:exclude [string]}}) "
-                      + "(:require [std.lib.string :as text :refer [trim]])) "
+                      + "(:require [std.foundation.string :as text :refer [trim]])) "
                       + "(trim (text/trim \" x \"))")
               .asString());
     }
@@ -243,14 +243,14 @@ public class HaraGeneratedLibrariesTest {
           -1,
           context
               .eval(
-                  HaraLanguage.ID, "(ns app (:require [std.lib.foundation :as core])) (core/bit-not 0)")
+                  HaraLanguage.ID, "(ns app (:require [std.foundation :as core])) (core/bit-not 0)")
               .asLong());
       assertEquals(
           1,
-          context.eval(HaraLanguage.ID, "(std.lib.foundation/count [1])").asLong());
+          context.eval(HaraLanguage.ID, "(std.foundation/count [1])").asLong());
       assertEquals(
           42,
-          context.eval(HaraLanguage.ID, "((std.lib.foundation/comp2 inc inc) 40)").asLong());
+          context.eval(HaraLanguage.ID, "((std.foundation/comp2 inc inc) 40)").asLong());
     }
   }
 

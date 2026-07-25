@@ -9,7 +9,7 @@ import org.graalvm.polyglot.Value;
 
 /** Fork-friendly benchmark for source versus HIR foundation loading. */
 final class FoundationHirBenchmark {
-  private static final String PROBE = "(std.lib.foundation/get-in {:a {:b 42}} [:a :b])";
+  private static final String PROBE = "(std.foundation/get-in {:a {:b 42}} [:a :b])";
 
   private FoundationHirBenchmark() {}
 

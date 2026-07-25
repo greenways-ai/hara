@@ -1,6 +1,6 @@
 (ns polis.common.emit-helper
   (:require [polis.common.util :as util]
-            [std.lib.string :as string]))
+            [std.foundation.string :as string]))
 
 (defn default-emit-fn
   "the default emit function"

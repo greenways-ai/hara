@@ -99,7 +99,7 @@ To cut a release:
   (`spec/hara/corpora/...`, `lib/examples/...`, `website/docs/...`).
 - The JVM runtime embeds `lib/src/**/*.hal` (std foundation) as classpath
   resources via `java/pom.xml`; the Rust runtime embeds
-  `lib/src/std/lib/foundation.hal` via `include_str!` in `rust/src/lib.rs`.
+  `lib/src/std/foundation.hal` via `include_str!` in `rust/src/lib.rs`.
 - `target/` at the repo root is CI scratch/build artifacts; Maven output is
   `java/target/`. Both are gitignored.
 - The pages deploy (`.github/workflows/pages.yml`) also ships the raw HTA

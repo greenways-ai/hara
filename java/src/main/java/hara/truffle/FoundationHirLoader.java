@@ -27,7 +27,7 @@ final class FoundationHirLoader {
         return Attempt.missing();
       }
       module = cachedModule(input);
-      if (!"std.lib.foundation".equals(module.namespace)
+      if (!"std.foundation".equals(module.namespace)
           || !resourceName.equals(module.resource)) {
         throw new HaraException(
             "HIR module identity mismatch: "

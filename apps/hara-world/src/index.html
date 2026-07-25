@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#dfe7dc">
+  <meta name="description" content="A secured collaborative AI workroom in your browser.">
+  <title>Greenways OS — Private AI workrooms</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="menubar">
+    <button class="wordmark" type="button" data-action="about" aria-label="About Greenways OS">
+      <span class="wordmark__mark">g</span><strong>Greenways OS</strong>
+    </button>
+    <nav aria-label="Application menus">
+      <details class="menu">
+        <summary>File</summary>
+        <div class="menu__popover">
+          <button type="button" data-action="import">Import documents <kbd>⌘O</kbd></button>
+          <button type="button" data-action="sample">Add example collection</button>
+          <hr>
+          <button type="button" data-action="export">Export portable workroom</button>
+        </div>
+      </details>
+      <details class="menu">
+        <summary>Workroom</summary>
+        <div class="menu__popover">
+          <button type="button" data-action="create-room">Create secured workroom</button>
+          <button type="button" data-action="copy-invite">Copy invitation</button>
+          <button type="button" data-action="share">Share selected documents</button>
+        </div>
+      </details>
+      <details class="menu">
+        <summary>Agent</summary>
+        <div class="menu__popover">
+          <button type="button" data-action="run-agent">Run private task <kbd>⌘↵</kbd></button>
+          <button type="button" data-action="ask-peer">Ask peer to contribute</button>
+          <hr>
+          <button type="button" data-action="agent-settings">Model connection…</button>
+        </div>
+      </details>
+      <details class="menu">
+        <summary>Tools</summary>
+        <div class="menu__popover">
+          <button type="button" data-action="show-permissions">Capability inspector</button>
+          <button type="button" data-action="show-console">Hara console</button>
+          <button type="button" data-action="verify-log">Verify activity chain</button>
+        </div>
+      </details>
+      <details class="menu">
+        <summary>Window</summary>
+        <div class="menu__popover">
+          <button type="button" data-window="library">Data Library</button>
+          <button type="button" data-window="workroom">Workroom</button>
+          <button type="button" data-window="agent">Private Agent</button>
+          <button type="button" data-window="permissions">Permissions</button>
+        </div>
+      </details>
+    </nav>
+    <div class="menubar__status">
+      <span class="privacy-pill"><i></i> LOCAL FIRST</span>
+      <button type="button" class="status-button" data-action="activity">
+        Activity <b data-log-count>0</b>
+      </button>
+      <span data-clock>--:--</span>
+    </div>
+  </header>
+
+  <main class="desktop">
+    <section class="desktop-intro" aria-labelledby="desktop-title">
+      <p>PRIVATE / PROGRAMMABLE / TOGETHER</p>
+      <h1 id="desktop-title">Your data.<br>Your agents.<br><em>Your rules.</em></h1>
+      <span>Bring documents and collaborators into a secured AI workroom without giving either one the rest of your computer.</span>
+    </section>
+
+    <section class="window library-window" data-window-panel="library">
+      <header class="window__titlebar">
+        <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+        <strong>Data Library</strong>
+        <span data-document-count>0 ITEMS</span>
+      </header>
+      <div class="window__toolbar">
+        <button type="button" data-action="import">＋ Import</button>
+        <button type="button" data-action="sample">Example data</button>
+        <span class="toolbar-spacer"></span>
+        <span class="secure-label">Stored on this device</span>
+      </div>
+      <div class="library" data-library>
+        <div class="empty-state">
+          <span class="empty-state__icon">⌁</span>
+          <strong>Nothing has entered this workroom.</strong>
+          <p>Import local documents or start with a harmless example collection.</p>
+          <button class="primary" type="button" data-action="sample">Add example collection</button>
+        </div>
+      </div>
+      <footer class="window__status">
+        <span><i class="status-dot status-dot--green"></i> ENCRYPTED LOCAL VAULT</span>
+        <span>SELECTED <b data-selected-count>0</b></span>
+      </footer>
+    </section>
+
+    <section class="window workroom-window" data-window-panel="workroom">
+      <header class="window__titlebar">
+        <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+        <strong>Secured Workroom</strong>
+        <span data-room-label>LOCAL</span>
+      </header>
+      <div class="workroom-hero">
+        <div class="identity-orb" aria-hidden="true"><span>YOU</span></div>
+        <div class="trust-line"><i></i><i></i><i></i></div>
+        <div class="identity-orb identity-orb--peer" data-peer-orb><span>PEER</span></div>
+      </div>
+      <div class="identity-grid">
+        <article>
+          <small>THIS BROWSER</small>
+          <strong data-local-id>CREATING IDENTITY…</strong>
+          <span>Device key · owner</span>
+        </article>
+        <article>
+          <small>COLLABORATOR</small>
+          <strong data-peer-id>NOT CONNECTED</strong>
+          <span data-peer-note>Nothing shared</span>
+        </article>
+      </div>
+      <div class="invite-panel">
+        <label for="invite-url">PRIVATE INVITATION</label>
+        <input id="invite-url" data-invite readonly value="Create a workroom to invite someone">
+        <div>
+          <button class="primary" type="button" data-action="create-room">Create workroom</button>
+          <button type="button" data-action="copy-invite">Copy link</button>
+          <button type="button" data-action="share">Share selected</button>
+        </div>
+      </div>
+      <footer class="window__status">
+        <span><i class="status-dot" data-mesh-dot></i> <b data-mesh-status>OFFLINE</b></span>
+        <span>MEMBERSHIP <b>INVITE ONLY</b></span>
+      </footer>
+    </section>
+
+    <section class="window agent-window" data-window-panel="agent">
+      <header class="window__titlebar">
+        <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+        <strong>Private Agent</strong>
+        <span data-agent-mode>LOCAL / EPHEMERAL</span>
+      </header>
+      <div class="agent-card">
+        <div class="agent-card__head">
+          <div class="agent-avatar">AI</div>
+          <div>
+            <strong data-model-label>Greenways Local Reader</strong>
+            <span><i class="status-dot status-dot--green"></i> Does not retain context</span>
+          </div>
+          <button type="button" data-action="agent-settings">Configure</button>
+        </div>
+        <label for="task-objective">WHAT SHOULD THE AGENT DO?</label>
+        <textarea id="task-objective" data-objective>Organize these documents into themes and identify useful connections.</textarea>
+        <div class="context-summary">
+          <span>CONTEXT</span>
+          <b data-context-summary>No documents selected</b>
+        </div>
+        <button class="run-button" type="button" data-action="run-agent">
+          <span>Run with selected documents</span><kbd>⌘ ↵</kbd>
+        </button>
+      </div>
+      <div class="result" data-result hidden>
+        <header><span>AGENT RESULT</span><button type="button" data-action="save-result">Save to library</button></header>
+        <div data-result-body></div>
+      </div>
+      <footer class="window__status">
+        <span>HARA <b data-runtime-status>BOOTING</b></span>
+        <span>MODEL MEMORY <b>SESSION ONLY</b></span>
+      </footer>
+    </section>
+
+    <section class="window permissions-window is-minimized" data-window-panel="permissions">
+      <header class="window__titlebar">
+        <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+        <strong>Capability Inspector</strong>
+        <span>EXPLICIT AUTHORITY</span>
+      </header>
+      <div class="permissions-body">
+        <p>Nothing in this workroom receives ambient access. Every external effect crosses the browser capability broker.</p>
+        <div class="capability-row">
+          <span class="capability-icon">D</span><div><strong>Selected documents</strong><small>Read · once · current task</small></div><b data-cap-docs>NONE</b>
+        </div>
+        <div class="capability-row">
+          <span class="capability-icon">N</span><div><strong>Network endpoint</strong><small>Call · once · configured model</small></div><b data-cap-network>DENIED</b>
+        </div>
+        <div class="capability-row">
+          <span class="capability-icon">W</span><div><strong>Workroom changes</strong><small>Propose only · user approval required</small></div><b>GUARDED</b>
+        </div>
+      </div>
+    </section>
+
+    <section class="window console-window is-minimized" data-window-panel="console">
+      <header class="window__titlebar">
+        <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+        <strong>Hara Session</strong>
+        <span>COORDINATION ENGINE</span>
+      </header>
+      <div class="console-log" data-console-log>
+        <div><i>;;</i> Hara executes policy and coordination, never ambient browser effects.</div>
+      </div>
+      <form class="console-entry" data-console-form>
+        <span>hara ›</span>
+        <input data-console-input value="(+ 19 23)" autocomplete="off" spellcheck="false" aria-label="Hara expression">
+        <button type="submit">Evaluate</button>
+      </form>
+    </section>
+
+    <aside class="activity-drawer" data-activity-drawer aria-hidden="true">
+      <header>
+        <div><small>LOCAL AUDIT TRAIL</small><strong>Activity</strong></div>
+        <button type="button" data-action="activity" aria-label="Close activity">×</button>
+      </header>
+      <div class="audit-integrity">
+        <i class="status-dot status-dot--green"></i>
+        <span><strong data-chain-status>CHAIN READY</strong><small>Events contain metadata, never document contents.</small></span>
+      </div>
+      <div class="activity-list" data-activity-list></div>
+      <footer>
+        <button type="button" data-action="verify-log">Verify chain</button>
+        <button type="button" data-action="export">Export workroom</button>
+      </footer>
+    </aside>
+
+    <nav class="dock" aria-label="Open windows">
+      <button type="button" data-window="library"><span>▤</span><small>Library</small></button>
+      <button type="button" data-window="workroom"><span>◎</span><small>Workroom</small></button>
+      <button type="button" data-window="agent"><span>✦</span><small>Agent</small></button>
+      <button type="button" data-window="permissions"><span>⌾</span><small>Access</small></button>
+      <button type="button" data-window="console"><span>›_</span><small>Hara</small></button>
+    </nav>
+  </main>
+
+  <input data-file-input type="file" accept=".txt,.md,.json,.csv,.hal,text/*" multiple hidden>
+
+  <dialog data-permission-dialog>
+    <form method="dialog">
+      <span class="dialog-kicker">CAPABILITY REQUEST</span>
+      <h2>Allow this private task?</h2>
+      <p data-permission-description></p>
+      <div class="grant-summary" data-grant-summary></div>
+      <p class="dialog-note">The grant expires when this task finishes. The agent cannot inspect other documents, keys, browser tabs, or network destinations.</p>
+      <menu>
+        <button value="deny">Deny</button>
+        <button class="primary" value="allow">Allow once</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog data-agent-dialog>
+    <form method="dialog" data-agent-form>
+      <span class="dialog-kicker">PRIVATE AI CONNECTION</span>
+      <h2>Choose where inference happens</h2>
+      <label class="radio-card">
+        <input type="radio" name="agent-mode" value="local" checked>
+        <span><strong>Local reader</strong><small>Runs in this page. No prompt leaves the browser.</small></span>
+      </label>
+      <label class="radio-card">
+        <input type="radio" name="agent-mode" value="remote">
+        <span><strong>Verified zero-retention endpoint</strong><small>Connect directly with your own API key.</small></span>
+      </label>
+      <div class="remote-fields" data-remote-fields hidden>
+        <label>HTTPS API endpoint<input name="endpoint" type="url" placeholder="https://provider.example/v1/chat/completions"></label>
+        <label>Model name<input name="model" placeholder="private-model"></label>
+        <label>API key<input name="api-key" type="password" autocomplete="off" placeholder="Held in memory for this tab only"></label>
+        <label class="check-row"><input name="zero-retention" type="checkbox"> I have verified this endpoint’s zero-retention terms.</label>
+      </div>
+      <p class="dialog-note">Greenways never stores the API key. An external provider’s retention behavior is governed by that provider, not by Greenways.</p>
+      <menu>
+        <button value="cancel">Cancel</button>
+        <button class="primary" value="save">Use this model</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <div class="toast" data-toast hidden></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

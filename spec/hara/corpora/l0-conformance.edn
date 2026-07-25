@@ -119,7 +119,7 @@
    :expect {:value 42 :type :integer}}
   {:id :module/refer
    :class :module
-   :source "(require \"std/lib/foundation.hal\" {:refer [inc]}) (inc 41)"
+   :source "(require \"std/foundation.hal\" {:refer [inc]}) (inc 41)"
    :expect {:value 42 :type :integer}}
   {:id :module/refer-macros
    :class :module
@@ -127,27 +127,27 @@
    :expect {:value 42 :type :integer}}
   {:id :module/core-bootstrap
    :class :module
-   :source "(load-resource \"std/lib/foundation.hal\") ((comp2 inc inc) 40)"
+   :source "(load-resource \"std/foundation.hal\") ((comp2 inc inc) 40)"
    :expect {:value 42 :type :integer}}
   {:id :module/core-collection-helpers
    :class :module
-   :source "(load-resource \"std/lib/foundation.hal\") (+ (first [1 2]) (second [2 3]) (first (rest [3 4])))"
+   :source "(load-resource \"std/foundation.hal\") (+ (first [1 2]) (second [2 3]) (first (rest [3 4])))"
    :expect {:value 8 :type :integer}}
   {:id :module/core-iterator-aliases
    :class :module
-   :source "(load-resource \"std/lib/foundation.hal\") (+ (first (map inc [3])) (iter-next (filter (fn [x] (= x 2)) [1 2])) (nth (iter-next (partition-pair [4 5])) 1))"
+   :source "(load-resource \"std/foundation.hal\") (+ (first (map inc [3])) (iter-next (filter (fn [x] (= x 2)) [1 2])) (nth (iter-next (partition-pair [4 5])) 1))"
    :expect {:value 11 :type :integer}}
   {:id :module/core-predicate-reductions
    :class :module
-   :source "(load-resource \"std/lib/foundation.hal\") (+ (if (every? (fn [x] (> x 0)) [1 2]) 1 0) (if (any? (fn [x] (= x 2)) [1 2]) 2 0) (if (protocol-call IFind has? {:a nil} :a) 2 0))"
+   :source "(load-resource \"std/foundation.hal\") (+ (if (every? (fn [x] (> x 0)) [1 2]) 1 0) (if (any? (fn [x] (= x 2)) [1 2]) 2 0) (if (protocol-call IFind has? {:a nil} :a) 2 0))"
    :expect {:value 5 :type :integer}}
   {:id :module/core-nested-updates
    :class :module
-   :source "(load-resource \"std/lib/foundation.hal\") (get-in (update-in (assoc-in {} [:a :b] 2) [:a :b] + 2) [:a :b])"
+   :source "(load-resource \"std/foundation.hal\") (get-in (update-in (assoc-in {} [:a :b] 2) [:a :b] + 2) [:a :b])"
    :expect {:value 4 :type :integer}}
   {:id :module/core-navigation
    :class :module
-   :source "(load-resource \"std/lib/foundation.hal\") (+ (last [1 2 3]) (first (vals {:a 1})) (if (protocol-call IFind has? {:a nil} :a) 1 0))"
+   :source "(load-resource \"std/foundation.hal\") (+ (last [1 2 3]) (first (vals {:a 1})) (if (protocol-call IFind has? {:a nil} :a) 1 0))"
    :expect {:value 5 :type :integer}}
   {:id :collection/ordinary-dissoc-navigation
    :class :collection
@@ -155,23 +155,23 @@
    :expect {:value 4 :type :integer}}
   {:id :module/core-generators
    :class :module
-   :source "(load-resource \"std/lib/foundation.hal\") (+ (iter-next (range 2 4)) (iter-next (iterate inc 4)) (iter-next (repeat 1 3)))"
+   :source "(load-resource \"std/foundation.hal\") (+ (iter-next (range 2 4)) (iter-next (iterate inc 4)) (iter-next (repeat 1 3)))"
    :expect {:value 9 :type :integer}}
   {:id :iterator/core-while-combinators
    :class :iterator
-   :source "(load-resource \"std/lib/foundation.hal\") (+ (iter-next (take-while (fn [x] (< x 3)) [1 2 3])) (iter-next (drop-while (fn [x] (< x 3)) [1 2 3])))"
+   :source "(load-resource \"std/foundation.hal\") (+ (iter-next (take-while (fn [x] (< x 3)) [1 2 3])) (iter-next (drop-while (fn [x] (< x 3)) [1 2 3])))"
    :expect {:value 4 :type :integer}}
   {:id :iterator/core-partition
    :class :iterator
-   :source "(load-resource \"std/lib/foundation.hal\") (+ (nth (iter-next (partition-all 2 [1 2 3])) 1) (nth (iter-next (partition 2 [1 2 3])) 0))"
+   :source "(load-resource \"std/foundation.hal\") (+ (nth (iter-next (partition-all 2 [1 2 3])) 1) (nth (iter-next (partition 2 [1 2 3])) 0))"
    :expect {:value 3 :type :integer}}
   {:id :iterator/core-multi-map
    :class :iterator
-   :source "(load-resource \"std/lib/foundation.hal\") (+ (first (map + [1 2] [3 4])) (first (map + [1] [2 3])))"
+   :source "(load-resource \"std/foundation.hal\") (+ (first (map + [1 2] [3 4])) (first (map + [1] [2 3])))"
    :expect {:value 7 :type :integer}}
   {:id :iterator/core-composition
    :class :iterator
-   :source "(load-resource \"std/lib/foundation.hal\") (+ (iter-next (interpose 0 [1 2])) (iter-next (interleave [1 2] [3 4])) (iter-next (iter-drop 1 (interleave [1 2] [3 4]))))"
+   :source "(load-resource \"std/foundation.hal\") (+ (iter-next (interpose 0 [1 2])) (iter-next (interleave [1 2] [3 4])) (iter-next (iter-drop 1 (interleave [1 2] [3 4]))))"
    :expect {:value 5 :type :integer}}
   {:id :iterator/reduce
    :class :iterator
@@ -183,7 +183,7 @@
    :expect {:value 7 :type :integer}}
   {:id :module/classpath-require
    :class :module
-   :source "(require \"std/lib/foundation.hal\") ((comp2 inc inc) 40)"
+   :source "(require \"std/foundation.hal\") ((comp2 inc inc) 40)"
    :expect {:value 42 :type :integer}}
   {:id :collection/bytes
    :class :collection
@@ -338,12 +338,12 @@
             :message "No host builtins are registered for namespace: app"}}
   {:id :namespace/builtins-missing-export
    :class :namespace
-   :source "(ns std.lib.foundation (:config {:builtins [definitely-missing]}))"
+   :source "(ns std.foundation (:config {:builtins [definitely-missing]}))"
    :expect {:error :invalid-ns-config
-            :message "Missing builtin export: std.lib.foundation/definitely-missing"}}
+            :message "Missing builtin export: std.foundation/definitely-missing"}}
   {:id :namespace/builtins-activation-idempotent
    :class :namespace
-   :source "(ns std.lib.foundation (:config {:builtins [count]})) (std.lib.foundation/count [41 42])"
+   :source "(ns std.foundation (:config {:builtins [count]})) (std.foundation/count [41 42])"
    :expect {:value 2 :type :integer}}
   {:id :unsupported/ratio
    :class :unsupported

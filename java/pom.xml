@@ -166,9 +166,9 @@
 							<mainClass>hara.truffle.Main</mainClass>
 							<arguments>
 								<argument>compile-hir</argument>
-								<argument>${project.basedir}/../lib/src/std/lib/foundation.hal</argument>
+								<argument>${project.basedir}/../lib/src/std/foundation.hal</argument>
 								<argument>--output</argument>
-								<argument>${project.build.outputDirectory}/std/lib/foundation.hir</argument>
+								<argument>${project.build.outputDirectory}/std/foundation.hir</argument>
 							</arguments>
 						</configuration>
 					</execution>

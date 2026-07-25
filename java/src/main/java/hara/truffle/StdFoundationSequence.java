@@ -1,8 +1,8 @@
 package hara.truffle;
 
 /** Optimized public sequence operations backed by the Truffle iterator runtime. */
-public final class StdLibFoundationSequence {
-  private StdLibFoundationSequence() {}
+public final class StdFoundationSequence {
+  private StdFoundationSequence() {}
 
   public static Object map(HaraContext context, Object[] values) {
     return context.mapValues(values);

@@ -412,8 +412,6 @@
       const oldDir = c.dir.slice();
       c.dir = best.slice();
       c.boost = 0;
-      c.colorIndex = (c.colorIndex + 1) % COLORS.length;
-      c.color = COLORS[c.colorIndex];
       turnEvents.push({
         cycle: c,
         x: c.x,
@@ -564,9 +562,12 @@
      ---------------------------------------------------------------------- */
   const startRound = () => {
     shuffleCorners();
+    const colorOrder = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
     debris.length = 0;
     turnEvents.length = 0;
-    cycles.forEach((c) => {
+    cycles.forEach((c, i) => {
+      c.colorIndex = colorOrder[i];
+      c.color = COLORS[c.colorIndex];
       placeInCorner(c);
       c.score = 0;
     });

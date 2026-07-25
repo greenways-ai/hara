@@ -79,6 +79,8 @@ pub struct Function {
     native: Option<Rc<dyn Fn(Vec<Value>) -> Result<Value, String>>>,
     /// Arity clauses for multi-arity `defn`/`fn` dispatchers; empty otherwise.
     clauses: Vec<Rc<Function>>,
+    /// Whether this function is a macro expander.
+    is_macro: bool,
 }
 
 impl std::fmt::Debug for Function {
@@ -199,12 +201,190 @@ pub(crate) fn native_function(
         name: Some(name.into()),
         native: Some(Rc::new(callback)),
         clauses: Vec::new(),
+        is_macro: false,
     }))
+}
+
+pub fn with_macros<R>(
+    macros: Rc<RefCell<HashMap<(String, String), Rc<Function>>>>,
+    operation: impl FnOnce() -> R,
+) -> R {
+    ACTIVE_MACROS.with(|active| {
+        let previous = active.replace(Some(macros));
+        let result = operation();
+        active.replace(previous);
+        result
+    })
+}
+
+fn register_macro(namespace: &str, name: &str, function: Rc<Function>) -> Result<(), String> {
+    ACTIVE_MACROS.with(|active| {
+        active
+            .try_borrow_mut()
+            .map_err(|_| "macro registry is busy".into())
+            .and_then(|mut opt| {
+                if let Some(macros) = opt.as_ref() {
+                    macros
+                        .try_borrow_mut()
+                        .map_err(|_| "macro registry is busy".into())
+                        .map(|mut macros| {
+                            macros.insert((namespace.into(), name.into()), function);
+                        })
+                } else {
+                    Err("macro registry is unavailable".into())
+                }
+            })
+    })
+}
+
+fn resolve_macro_in(namespace: &str, name: &str) -> Option<Rc<Function>> {
+    ACTIVE_MACROS.with(|active| {
+        active
+            .borrow()
+            .as_ref()
+            .and_then(|macros| macros.borrow().get(&(namespace.into(), name.into())).cloned())
+    })
+}
+
+fn resolve_macro(name: &str) -> Option<Rc<Function>> {
+    let current = namespace_registry()
+        .map(|registry| registry.current().name().as_str().to_owned())
+        .ok()?;
+    resolve_macro_in(&current, name)
+        .or_else(|| resolve_macro_in("std.foundation", name))
+}
+
+fn gensym(prefix: &str) -> String {
+    let index = GENSYM_COUNTER.with(|counter| {
+        let value = counter.get();
+        counter.set(value + 1);
+        value
+    });
+    format!("{prefix}{index}")
+}
+
+fn form_to_value(form: &Form) -> Result<Value, String> {
+    literal_value(form)
+}
+
+fn value_to_form(value: &Value) -> Result<Form, String> {
+    match value {
+        Value::Nil => Ok(Form::Nil),
+        Value::Bool(value) => Ok(Form::Bool(*value)),
+        Value::Number(value) => Ok(Form::Number(*value)),
+        Value::Float(value) => Ok(Form::Float(*value)),
+        Value::BigInteger(value) => Ok(Form::BigInteger(value.clone())),
+        Value::Decimal(value) => Ok(Form::Decimal(value.clone())),
+        Value::Character(value) => Ok(Form::Character(*value)),
+        Value::String(value) => Ok(Form::String(value.clone())),
+        Value::Keyword(value) => Ok(Form::Keyword(value.get_name().into())),
+        Value::Symbol(value) => Ok(Form::Symbol(value.get_name().into())),
+        Value::Tagged(value) => Ok(Form::Tagged(
+            value.tag().get_name().into(),
+            Box::new(value_to_form(value.form())?),
+        )),
+        Value::List(values) => Ok(Form::List(
+            values.iter().map(|v| value_to_form(v)).collect::<Result<_, _>>()?,
+        )),
+        Value::Queue(values) => Ok(Form::List(
+            values.iter().map(|v| value_to_form(v)).collect::<Result<_, _>>()?,
+        )),
+        Value::Cons(values) => Ok(Form::List(
+            values.iter().map(|v| value_to_form(&v)).collect::<Result<_, _>>()?,
+        )),
+        Value::Vector(values) => Ok(Form::Vector(
+            values.iter().map(|v| value_to_form(v)).collect::<Result<_, _>>()?,
+        )),
+        Value::Tuple(values) => Ok(Form::Vector(
+            values.iter().map(|v| value_to_form(v)).collect::<Result<_, _>>()?,
+        )),
+        Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_) => Ok(Form::Set(
+            set_items(value)
+                .unwrap()
+                .iter()
+                .copied()
+                .map(value_to_form)
+                .collect::<Result<_, _>>()?,
+        )),
+        Value::Map(_) | Value::OrderedMap(_) | Value::SortedMap(_) | Value::Trie(_) => Ok(Form::Map(
+            map_entries(value)
+                .unwrap()
+                .into_iter()
+                .map(|(key, value)| -> Result<(Form, Form), String> {
+                    Ok((value_to_form(&key)?, value_to_form(&value)?))
+                })
+                .collect::<Result<_, _>>()?,
+        )),
+        value => Err(format!("cannot use {} as code", portable_type_name(value))),
+    }
+}
+
+fn macro_environment() -> Result<Value, String> {
+    let namespace = namespace_registry()?.current().name().as_str().to_owned();
+    let entries = vec![
+        (Value::Keyword(Keyword::from("ns")), Value::Symbol(Symbol::from(namespace))),
+        (Value::Keyword(Keyword::from("locals")), Value::OrderedMap(Box::new(POrderedMap::new()))),
+        (Value::Keyword(Keyword::from("aliases")), Value::OrderedMap(Box::new(POrderedMap::new()))),
+    ];
+    Ok(Value::OrderedMap(Box::new(POrderedMap::from_iter(entries))))
+}
+
+fn macroexpand_call(
+    name: &str,
+    invocation: &[Form],
+    env: &mut HashMap<String, Value>,
+) -> Result<Option<Form>, String> {
+    let function = match resolve_macro(name) {
+        Some(function) => function,
+        None => return Ok(None),
+    };
+    let mut arguments = Vec::with_capacity(invocation.len() + 1);
+    arguments.push(form_to_value(&Form::List(invocation.to_vec()))?);
+    arguments.push(macro_environment()?);
+    for form in &invocation[1..] {
+        arguments.push(form_to_value(form)?);
+    }
+    let expansion = call_function(&function, arguments)?;
+    Ok(Some(value_to_form(&expansion)?))
+}
+
+fn macro_clause_with_implicit_params(clause: &Form) -> Result<Form, String> {
+    match clause {
+        Form::List(parts) if !parts.is_empty() => {
+            let params = match &parts[0] {
+                Form::Vector(params) => params,
+                _ => return Err("macro arity must start with a parameter vector".into()),
+            };
+            let mut implicit = vec![Form::Symbol("&form".into()), Form::Symbol("&env".into())];
+            implicit.extend_from_slice(params);
+            let mut new_parts = vec![Form::Vector(implicit)];
+            new_parts.extend_from_slice(&parts[1..]);
+            Ok(Form::List(new_parts))
+        }
+        _ => Err("macro arity must be a list".into()),
+    }
+}
+
+fn macroexpand_once(form: &Form, env: &mut HashMap<String, Value>) -> Result<Form, String> {
+    match form {
+        Form::List(values) if !values.is_empty() => {
+            if let Form::Symbol(name) = &values[0] {
+                if let Some(expanded) = macroexpand_call(name, values, env)? {
+                    return Ok(expanded);
+                }
+            }
+            Ok(form.clone())
+        }
+        _ => Ok(form.clone()),
+    }
 }
 
 thread_local! {
     static TRACE_ENABLED: Cell<bool> = const { Cell::new(false) };
     static TRACE_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    static ACTIVE_MACROS: RefCell<Option<Rc<RefCell<HashMap<(String, String), Rc<Function>>>>>> =
+        const { RefCell::new(None) };
+    static GENSYM_COUNTER: Cell<u64> = const { Cell::new(0) };
 }
 
 struct TraceGuard {
@@ -3243,6 +3423,23 @@ fn iterator_values(value: Value) -> Result<Vec<Value>, String> {
     }
 }
 
+fn iterator_to_vec(value: Value) -> Result<Vec<Value>, String> {
+    if let Value::Iterator(_) = &value {
+        if !iterator_is_finite(&value) {
+            return Err("cannot materialize an infinite iterator".into());
+        }
+        let mut output = Vec::new();
+        loop {
+            match iterator_next(&value) {
+                Ok(value) => output.push(value),
+                Err(_) => break,
+            }
+        }
+        return Ok(output);
+    }
+    iterator_values(value)
+}
+
 fn make_iterator(value: Value) -> Result<Value, String> {
     match &value {
         Value::Iterator(_) => Ok(value),
@@ -3641,6 +3838,22 @@ fn collection_empty(value: Value) -> Result<Value, String> {
     match value {
         Value::Iterator(iterator) => Ok(Value::Bool(!iterator.borrow().has_next())),
         value => Ok(Value::Bool(iterator_values(value)?.is_empty())),
+    }
+}
+
+fn collection_empty_value(value: Value) -> Result<Value, String> {
+    match value {
+        Value::Nil => Ok(Value::Nil),
+        Value::List(_) => Ok(Value::List(PList::new())),
+        Value::Cons(_) | Value::Queue(_) => Ok(Value::List(PList::new())),
+        Value::Vector(_) | Value::Tuple(_) => Ok(Value::Vector(PVector::new())),
+        Value::Map(_) | Value::OrderedMap(_) | Value::SortedMap(_) | Value::Trie(_) => {
+            Ok(Value::OrderedMap(Box::new(POrderedMap::new())))
+        }
+        Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_) => {
+            Ok(Value::OrderedSet(Box::new(POrderedSet::new())))
+        }
+        value => Err(format!("empty expects a collection, got {}", portable_type_name(&value))),
     }
 }
 
@@ -4078,6 +4291,7 @@ fn generated_function(
         name: None,
         native: None,
         clauses: Vec::new(),
+        is_macro: false,
     }))
 }
 
@@ -4132,6 +4346,7 @@ fn multi_arity_function(
     name: &str,
     clauses: &[Form],
     captured: &HashMap<String, Value>,
+    is_macro: bool,
 ) -> Result<Value, String> {
     let mut functions = Vec::with_capacity(clauses.len());
     for clause in clauses {
@@ -4148,6 +4363,7 @@ fn multi_arity_function(
             name: Some(name.into()),
             native: None,
             clauses: Vec::new(),
+            is_macro,
         }));
     }
     if functions.is_empty() {
@@ -4171,6 +4387,7 @@ fn multi_arity_function(
             })?;
             call_function(&function, arguments)
         })),
+        is_macro,
     })))
 }
 
@@ -4605,6 +4822,28 @@ fn eval_basic_object_form(
             let metadata = eval(&forms[2], env)?;
             protocol_with_meta(&[value, metadata])
         }
+        "macroexpand-1" => {
+            if forms.len() != 2 {
+                return Err("macroexpand-1 expects one form".into());
+            }
+            let value = eval(&forms[1], env)?;
+            let form = value_to_form(&value)?;
+            let expanded = macroexpand_once(&form, env)?;
+            form_to_value(&expanded)
+        }
+        "gensym" => {
+            let prefix = if forms.len() == 1 {
+                "G__".into()
+            } else if forms.len() == 2 {
+                match eval(&forms[1], env)? {
+                    Value::String(prefix) => prefix,
+                    value => return Err(format!("gensym expects a string prefix, got {}", portable_type_name(&value))),
+                }
+            } else {
+                return Err("gensym expects zero or one arguments".into());
+            };
+            Ok(Value::Symbol(Symbol::from(gensym(&prefix))))
+        }
         _ => unreachable!("eval_basic_object_form called for an unknown operation"),
     }
 }
@@ -4791,6 +5030,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     name: None,
                     native: None,
                     clauses: Vec::new(),
+                    is_macro: false,
                 })))
             }
             Form::Symbol(n) if n == "eval" => {
@@ -4812,7 +5052,8 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 Ok(Value::Var(cell))
             }
             Form::Symbol(n)
-                if ["type", "compare", "hash", "meta", "with-meta"].contains(&n.as_str()) =>
+                if ["type", "compare", "hash", "meta", "with-meta", "macroexpand-1", "gensym"]
+                    .contains(&n.as_str()) =>
             {
                 eval_basic_object_form(n, fs, env)
             }
@@ -4986,6 +5227,88 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 Ok(value)
             }
+            Form::Symbol(n) if n == "declare" => {
+                if fs.len() < 2 {
+                    return Err("declare expects at least one symbol".into());
+                }
+                for form in &fs[1..] {
+                    let name = match form {
+                        Form::Symbol(name) => name.clone(),
+                        _ => return Err("declare expects symbols".into()),
+                    };
+                    let cell = match env.get(&name) {
+                        Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
+                        _ => KernelVar::new(name.clone(), Value::Nil),
+                    };
+                    cell.set_origin(definition_origin());
+                    env.insert(name, Value::Var(cell));
+                }
+                Ok(Value::Nil)
+            }
+            Form::Symbol(n) if n == "defmacro" => {
+                if fs.len() < 4 {
+                    return Err("defmacro expects a name, parameters, and a body".into());
+                }
+                let (name, metadata) = binding_symbol(&fs[1], "defmacro name")?;
+                if let Some(value) = protected_fallback_binding(env, &name) {
+                    return Ok(value);
+                }
+                let cell = match env.get(&name) {
+                    Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
+                    _ => KernelVar::new(name.clone(), Value::Nil),
+                };
+                if metadata.is_some() {
+                    cell.set_hara_metadata(metadata);
+                }
+                env.insert(name.clone(), Value::Var(cell.clone()));
+                let mut rest = &fs[2..];
+                if matches!(rest.first(), Some(Form::String(_))) {
+                    rest = &rest[1..];
+                }
+                if matches!(rest.first(), Some(Form::Map(_))) {
+                    rest = &rest[1..];
+                }
+                if rest.is_empty() {
+                    return Err("defmacro expects a name, parameters, and a body".into());
+                }
+                let function = if matches!(rest.first(), Some(Form::Vector(_))) {
+                    let params = match &rest[0] {
+                        Form::Vector(params) => params,
+                        _ => unreachable!(),
+                    };
+                    let mut macro_params =
+                        vec![Form::Symbol("&form".into()), Form::Symbol("&env".into())];
+                    macro_params.extend_from_slice(params);
+                    let (params, variadic) = function_parts(&Form::Vector(macro_params))?;
+                    Value::Function(Rc::new(Function {
+                        params,
+                        variadic,
+                        body: rest[1..].to_vec(),
+                        captured: Rc::new(RefCell::new(env.clone())),
+                        name: Some(name.clone()),
+                        native: None,
+                        clauses: Vec::new(),
+                        is_macro: true,
+                    }))
+                } else {
+                    let clauses = rest
+                        .iter()
+                        .map(macro_clause_with_implicit_params)
+                        .collect::<Result<Vec<_>, _>>()?;
+                    multi_arity_function(&name, &clauses, env, true)?
+                };
+                if let Value::Function(ref function) = function {
+                    let namespace = namespace_registry()?
+                        .current()
+                        .name()
+                        .as_str()
+                        .to_owned();
+                    register_macro(&namespace, &name, function.clone())?;
+                }
+                cell.reset_value(function.clone());
+                cell.set_origin(definition_origin());
+                Ok(function)
+            }
             Form::Symbol(n) if n == "defn" || n == "defn-" => {
                 if fs.len() < 4 {
                     return Err("defn expects a name, parameters, and a body".into());
@@ -5024,9 +5347,10 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         name: Some(name.clone()),
                         native: None,
                         clauses: Vec::new(),
+                        is_macro: false,
                     }))
                 } else {
-                    multi_arity_function(&name, rest, env)?
+                    multi_arity_function(&name, rest, env, false)?
                 };
                 cell.reset_value(function.clone());
                 cell.set_origin(definition_origin());
@@ -5041,6 +5365,14 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     }
                 }
                 Ok(result)
+            }
+            Form::Symbol(n) if n == "declare" => {
+                for form in &fs[1..] {
+                    if !matches!(form, Form::Symbol(_)) {
+                        return Err("declare expects symbols".into());
+                    }
+                }
+                Ok(Value::Nil)
             }
             Form::Symbol(n) if n == "=" => {
                 if fs.len() < 3 {
@@ -5294,6 +5626,16 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             }
             Form::Symbol(n) if ["list", "vector", "pair", "tup"].contains(&n.as_str()) => {
                 eval_sequential_constructor(n, &fs[1..], env)
+            }
+            Form::Symbol(n) if n == "vec" => {
+                if fs.len() != 2 {
+                    return Err("vec expects one argument".into());
+                }
+                let value = eval(&fs[1], env)?;
+                Ok(match iterator_to_vec(value) {
+                    Ok(values) => Value::Vector(PVector::from_iter(values)),
+                    Err(error) => return Err(error),
+                })
             }
             Form::Symbol(n)
                 if [
@@ -6077,6 +6419,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     name: None,
                     native: None,
                     clauses: Vec::new(),
+                    is_macro: false,
                 })))
             }
             Form::Symbol(n) if n == "complement" => {
@@ -6267,6 +6610,28 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("empty? expects one argument".into());
                 }
                 collection_empty(eval(&fs[1], env)?)
+            }
+            Form::Symbol(n) if n == "empty" => {
+                if fs.len() != 2 {
+                    return Err("empty expects one argument".into());
+                }
+                collection_empty_value(eval(&fs[1], env)?)
+            }
+            Form::Symbol(n) if ["list?", "vector?", "map?", "set?"].contains(&n.as_str()) => {
+                if fs.len() != 2 {
+                    return Err(format!("{n} expects one argument"));
+                }
+                let value = eval(&fs[1], env)?;
+                Ok(Value::Bool(match n.as_str() {
+                    "list?" => matches!(value, Value::List(_) | Value::Cons(_) | Value::Queue(_)),
+                    "vector?" => matches!(value, Value::Vector(_) | Value::Tuple(_)),
+                    "map?" => matches!(
+                        value,
+                        Value::Map(_) | Value::OrderedMap(_) | Value::SortedMap(_) | Value::Trie(_)
+                    ),
+                    "set?" => matches!(value, Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_)),
+                    _ => unreachable!(),
+                }))
             }
             Form::Symbol(n) if n == "not-empty" => {
                 if fs.len() != 2 {
@@ -6552,6 +6917,11 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 arithmetic(if n == "mod" { "%" } else { n }, &fs[1..], env)
             }
             _ => {
+                if let Form::Symbol(name) = &fs[0] {
+                    if let Some(expanded) = macroexpand_call(name, fs, env)? {
+                        return eval(&expanded, env);
+                    }
+                }
                 let function = eval(&fs[0], env)?;
                 let arguments = fs[1..]
                     .iter()

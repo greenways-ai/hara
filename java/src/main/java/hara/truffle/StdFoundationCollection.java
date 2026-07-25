@@ -3,8 +3,8 @@ package hara.truffle;
 import hara.lang.data.Symbol;
 
 /** Optimized public collection operations shared by core and HAL libraries. */
-public final class StdLibFoundationCollection {
-  private StdLibFoundationCollection() {}
+public final class StdFoundationCollection {
+  private StdFoundationCollection() {}
 
   @HaraExport(
       name = "remove",

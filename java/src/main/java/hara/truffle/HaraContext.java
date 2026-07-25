@@ -27,15 +27,9 @@ import hara.lang.protocol.IDerefTimeout;
 import hara.lang.protocol.IDisplay;
 import hara.lang.protocol.ICount;
 import hara.lang.protocol.INth;
-import hara.lang.test.HaraTestRegistry;
-import hara.lang.test.HaraTestResult;
-import hara.lang.test.HaraMatcher;
-import hara.lang.task.Task;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -92,25 +86,19 @@ public final class HaraContext {
           "new",
           "ns");
   private static final String INTRINSIC_NAMESPACE = "hara.lang.intrinsic";
-  private static final String FOUNDATION_NAMESPACE = "std.lib.foundation";
+  private static final String FOUNDATION_NAMESPACE = "std.foundation";
   private static final Map<String, String> GENERATED_LIBRARIES =
       Map.of(
-          "string", "std.lib.string",
-          "promise", "std.lib.promise",
-          "bytes", "std.lib.bytes",
-          "socket", "std.lib.socket",
-          "file", "std.lib.file",
-          "block", "std.lib.block",
-          "zip", "std.lib.zip");
+          "string", "std.foundation.string",
+          "promise", "std.foundation.promise",
+          "bytes", "std.foundation.bytes",
+          "file", "std.foundation.file");
   private static final Map<String, String> DEFAULT_LIBRARY_ALIASES =
       Map.of(
           "string", "str",
           "promise", "promise",
           "bytes", "bytes",
-          "socket", "socket",
-          "file", "file",
-          "block", "block",
-          "zip", "zip");
+          "file", "file");
   private static final Set<String> MARKER_METHOD_NAMES =
       Set.of(
           "get",
@@ -160,7 +148,6 @@ public final class HaraContext {
   private boolean collectingBuiltins;
   private String collectingBuiltinNamespace;
   private final HaraProtocol ifnProtocol;
-  private final HaraTestRegistry testRegistry = new HaraTestRegistry();
   private final AtomicLong gensymCounter = new AtomicLong();
   private final Map<Object, LinkedHashMap<Object, Object>> guestWatches =
       Collections.synchronizedMap(new IdentityHashMap<>());
@@ -187,7 +174,7 @@ public final class HaraContext {
     installProjectMacro();
     installRecordMacro();
     installNativeLibraries();
-    libraryLoader.installEagerJava(this);
+    collectBuiltins(FOUNDATION_NAMESPACE, () -> libraryLoader.installEagerJava(this));
     currentNamespace = namespace("user");
     initializeUserNamespace(currentNamespace);
   }
@@ -361,10 +348,6 @@ public final class HaraContext {
     }
   }
 
-  HaraTestRegistry testRegistry() {
-    return testRegistry;
-  }
-
   @SuppressWarnings("unchecked")
   <T> T libraryState(String name, Supplier<T> factory) {
     return (T) libraryStates.computeIfAbsent(name, ignored -> factory.get());
@@ -532,7 +515,7 @@ public final class HaraContext {
 
   private void applyGeneratedRequire(Object specValue, Map<String, String> namespaceAliases) {
     if (!(specValue instanceof ILinearType<?>)) {
-      throw new HaraException(":require expects vectors such as [std.lib.string :as str]");
+      throw new HaraException(":require expects vectors such as [std.foundation.string :as str]");
     }
     ILinearType<?> spec = (ILinearType<?>) specValue;
     if (spec.count() == 0 || !(spec.nth(0) instanceof Symbol)) {
@@ -893,18 +876,7 @@ public final class HaraContext {
     if (symbol.getNamespace() != null && !symbol.getNamespace().equals(currentNamespace.name())) {
       throw new HaraException("Cannot define a var in another namespace: " + symbol.display());
     }
-    IMetadata metadata = symbol.meta();
-    if (metadata == null && value instanceof Task task) {
-      java.util.ArrayList<Object> entries = new java.util.ArrayList<>();
-      Object doc = task.config().get("doc");
-      if (doc != null) { entries.add(Keyword.create("doc")); entries.add(doc); }
-      if (task.arglists() != null) {
-        entries.add(Keyword.create("arglists"));
-        entries.add(task.arglists());
-      }
-      if (!entries.isEmpty()) metadata = hara.lang.data.Map.Standard.from(null, entries.toArray());
-    }
-    return currentNamespace.define(symbol.getName(), value, metadata, definitionOrigin);
+    return currentNamespace.define(symbol.getName(), value, symbol.meta(), definitionOrigin);
   }
 
   public HaraProtocol ifnProtocol() {
@@ -1020,11 +992,6 @@ public final class HaraContext {
     String namespaceName = namespace == null ? currentNamespace.name() : namespace;
     Map<String, HaraMacro> namespaceMacros = macros.get(namespaceName);
     HaraMacro macro = namespaceMacros == null ? null : namespaceMacros.get(symbol.getName());
-    if (macro == null && namespace == null && "fact".equals(symbol.getName())) {
-      libraryLoader.ensure(this, "code.test");
-      namespaceMacros = macros.get(namespaceName);
-      macro = namespaceMacros == null ? null : namespaceMacros.get(symbol.getName());
-    }
     if (macro == null && namespace == null) {
       Map<String, HaraMacro> foundationMacros = macros.get(FOUNDATION_NAMESPACE);
       macro = foundationMacros == null ? null : foundationMacros.get(symbol.getName());
@@ -1231,7 +1198,7 @@ public final class HaraContext {
     target.define("promise?", new UnaryBuiltin("promise?", value ->
         HaraBox.unwrap(value) instanceof HaraPromise));
     target.define("coroutine?", new UnaryBuiltin("coroutine?", value ->
-        HaraBox.unwrap(value) instanceof StdLibCoroutine.HaraCoroutine));
+        HaraBox.unwrap(value) instanceof StdFoundationCoroutine.HaraCoroutine));
     target.define("callable?", new UnaryBuiltin("callable?", this::isFunctionValue));
     target.define("iterator?", new UnaryBuiltin("iterator?", value ->
         HaraBox.unwrap(value) instanceof Iterator<?>));
@@ -1979,7 +1946,7 @@ public final class HaraContext {
   }
 
   private void defineStringLibrary() {
-    HaraNamespace string = namespace("std.lib.string");
+    HaraNamespace string = namespace("std.foundation.string");
     string.define(
         "len", new UnaryBuiltin("str/len", value -> (long) stringValue(value, "str/len").length()));
     string.define("comp", new VariadicBuiltin("str/comp", this::stringCompare));
@@ -2051,7 +2018,7 @@ public final class HaraContext {
   }
 
   private void defineBytesLibrary() {
-    HaraNamespace bytes = namespace("std.lib.bytes");
+    HaraNamespace bytes = namespace("std.foundation.bytes");
     bytes.define(
         "count",
         new UnaryBuiltin("bytes/count", value -> (long) bytesValue(value, "bytes/count").length));
@@ -2071,7 +2038,7 @@ public final class HaraContext {
   }
 
   private void definePromiseLibrary() {
-    HaraNamespace promise = namespace("std.lib.promise");
+    HaraNamespace promise = namespace("std.foundation.promise");
     promise.define("run", new UnaryBuiltin("promise/run", this::promiseRun));
     promise.define("new", new UnaryBuiltin("promise/new", this::promiseNew));
     promise.define("all", new UnaryBuiltin("promise/all", this::promiseAll));
@@ -2096,45 +2063,15 @@ public final class HaraContext {
     promise.define("delay", new VariadicBuiltin("promise/delay", this::promiseDelay));
   }
 
-  void installHandleLibrary() {
-    withDefinitionOrigin(HaraVar.Origin.JAVA_LIBRARY, this::defineHandleLibrary);
-  }
-
-  private void defineHandleLibrary() {
-    HaraNamespace handle = namespace("std.lib.handle");
-    handle.define(
-        "release",
-        new UnaryBuiltin(
-            "handle/release",
-            value -> {
-              Object input = HaraBox.unwrap(value);
-              if (!(input instanceof HtaHandle))
-                throw new HaraException("handle/release expects an HTA handle");
-              ((HtaHandle) input).close();
-              return HaraNull.SINGLETON;
-            }));
-  }
-
   void installFileLibrary() {
     withDefinitionOrigin(HaraVar.Origin.JAVA_LIBRARY, this::defineFileLibrary);
   }
 
   private void defineFileLibrary() {
-    HaraNamespace file = namespace("std.lib.file");
+    HaraNamespace file = namespace("std.foundation.file");
     file.define("resolve", new VariadicBuiltin("file/resolve", this::fileResolve));
     file.define("read", new UnaryBuiltin("file/read", this::fileRead));
     file.define("write", new VariadicBuiltin("file/write", this::fileWrite));
-  }
-
-  void installSocketLibrary() {
-    withDefinitionOrigin(HaraVar.Origin.JAVA_LIBRARY, this::defineSocketLibrary);
-  }
-
-  private void defineSocketLibrary() {
-    HaraNamespace socket = namespace("std.lib.socket");
-    socket.define("connect", new VariadicBuiltin("socket/connect", this::socketConnect));
-    socket.define("send", new VariadicBuiltin("socket/send", this::socketSend));
-    socket.define("close", new UnaryBuiltin("socket/close", this::socketClose));
   }
 
   private static int int32(Object value, String operation) {
@@ -2486,12 +2423,6 @@ public final class HaraContext {
     }
   }
 
-  void requireSocketIO(String operation) {
-    if (!environment.isSocketIOAllowed()) {
-      throw new HaraException(operation + " is unsupported or network access is denied");
-    }
-  }
-
   private Object fileResolve(Object[] values) {
     requireFileIO("file/resolve");
     if (values.length != 2) throw new HaraException("file/resolve expects a root and path");
@@ -2535,53 +2466,6 @@ public final class HaraContext {
                         throw new CompletionException(error);
                       }
                     })));
-  }
-
-  private Object socketConnect(Object[] values) {
-    requireSocketIO("socket/connect");
-    if (values.length != 4) {
-      throw new HaraException("socket/connect expects a host, port, options, and callback");
-    }
-    String host = stringValue(values[0], "socket/connect");
-    int port = ((Number) HaraBox.unwrap(values[1])).intValue();
-    try {
-      Socket socket = new Socket();
-      socket.connect(new InetSocketAddress(host, port));
-      return invokeCallable(values[3], new Object[] {null, new HaraSocket(socket)});
-    } catch (IOException error) {
-      return invokeCallable(values[3], new Object[] {error.getMessage(), null});
-    }
-  }
-
-  private Object socketSend(Object[] values) {
-    requireSocketIO("socket/send");
-    if (values.length != 2 || !(HaraBox.unwrap(values[0]) instanceof HaraSocket)) {
-      throw new HaraException("socket/send expects a socket connection and bytes");
-    }
-    HaraSocket connection = (HaraSocket) HaraBox.unwrap(values[0]);
-    byte[] contents = bytesValue(values[1], "socket/send").clone();
-    try {
-      connection.socket.getOutputStream().write(contents);
-      connection.socket.getOutputStream().flush();
-      return (long) contents.length;
-    } catch (IOException error) {
-      throw new HaraException("socket/send failed: " + error.getMessage());
-    }
-  }
-
-  private Object socketClose(Object value) {
-    requireSocketIO("socket/close");
-    Object input = HaraBox.unwrap(value);
-    if (!(input instanceof HaraSocket)) {
-      throw new HaraException("socket/close expects a socket connection");
-    }
-    HaraSocket connection = (HaraSocket) input;
-    try {
-      connection.socket.close();
-      return null;
-    } catch (IOException error) {
-      throw new HaraException("socket/close failed: " + error.getMessage());
-    }
   }
 
   public Object invokeMarkerMethod(Object receiverValue, String method, Object[] arguments) {
@@ -4291,19 +4175,6 @@ public final class HaraContext {
     @Override
     public String toString() {
       return future.isDone() ? "#<promise realized>" : "#<promise pending>";
-    }
-  }
-
-  private static final class HaraSocket {
-    private final Socket socket;
-
-    private HaraSocket(Socket socket) {
-      this.socket = socket;
-    }
-
-    @Override
-    public String toString() {
-      return "#<socket " + socket.getRemoteSocketAddress() + ">";
     }
   }
 

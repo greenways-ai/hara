@@ -26,8 +26,8 @@ import java.util.Map.Entry;
 final class HirArtifact {
   static final int FORMAT_VERSION = 1;
   static final int EXECUTABLE_FOUNDATION_FLAG = 1;
-  static final String FOUNDATION_RESOURCE = "std/lib/foundation.hal";
-  static final String FOUNDATION_HIR_RESOURCE = "std/lib/foundation.hir";
+  static final String FOUNDATION_RESOURCE = "std/foundation.hal";
+  static final String FOUNDATION_HIR_RESOURCE = "std/foundation.hir";
 
   private static final byte[] MAGIC = {'H', 'I', 'R', 0};
   private static final int HASH_BYTES = 32;

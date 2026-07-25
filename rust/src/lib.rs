@@ -16,11 +16,12 @@ pub mod task;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod wasmtime_provider;
 use crate::kernel::Form;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 
-const FOUNDATION_FALLBACK: &str = include_str!("../../lib/src/std/lib/foundation.hal");
+const FOUNDATION_FALLBACK: &str = include_str!("../../lib/src/std/foundation.hal");
 
 fn ignore_socket_event(_event: core::SocketEvent) {}
 
@@ -87,6 +88,7 @@ pub struct Runtime {
     resources: HashMap<String, String>,
     loaded_resources: HashSet<String>,
     namespace_registry: kernel::NamespaceRegistry<core::Value>,
+    macros: Rc<RefCell<HashMap<(String, String), Rc<core::Function>>>>,
     generated_configs: HashMap<String, kernel::GeneratedNamespaceConfig>,
     #[cfg(not(target_arch = "wasm32"))]
     extension_roots: Vec<std::path::PathBuf>,
@@ -94,9 +96,8 @@ pub struct Runtime {
 
 #[wasm_bindgen]
 impl Runtime {
-    #[wasm_bindgen(constructor)]
-    pub fn new() -> Runtime {
-        let mut runtime = Runtime {
+    fn empty() -> Runtime {
+        Runtime {
             env: HashMap::new(),
             protocols: core::ProtocolRegistry::core(),
             extensions: core::ExtensionRegistry::new(),
@@ -105,24 +106,37 @@ impl Runtime {
             resources: HashMap::new(),
             loaded_resources: HashSet::new(),
             namespace_registry: kernel::NamespaceRegistry::new("user"),
+            macros: Rc::new(RefCell::new(HashMap::new())),
             generated_configs: HashMap::from([(
                 "user".into(),
                 kernel::GeneratedNamespaceConfig::defaults(),
             )]),
             #[cfg(not(target_arch = "wasm32"))]
             extension_roots: native_extension::configured_roots(),
-        };
+        }
+    }
+
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Runtime {
+        let mut runtime = Runtime::empty();
         runtime
             .bootstrap_foundation()
-            .expect("embedded std.lib.foundation fallback must be valid");
+            .expect("embedded std.foundation fallback must be valid");
         runtime
     }
 
+    /// Creates the portable L0 evaluator without loading the language-level
+    /// foundation. This is useful for small embedded surfaces whose commands
+    /// only require core forms and should become interactive immediately.
+    pub fn core() -> Runtime {
+        Runtime::empty()
+    }
+
     fn refer_foundation_into(&mut self, namespace: &str) {
-        if namespace == "std.lib.foundation" {
+        if namespace == "std.foundation" {
             return;
         }
-        let Some(foundation) = self.namespace_registry.find("std.lib.foundation") else {
+        let Some(foundation) = self.namespace_registry.find("std.foundation") else {
             return;
         };
         let target = self.namespace_registry.find_or_create(namespace);
@@ -169,7 +183,7 @@ impl Runtime {
                         })?;
                     let required_extensions = config.required_namespaces().to_vec();
                     for target in required_extensions {
-                        if target.starts_with("std.lib.") {
+                        if target == "std.foundation" || target.starts_with("std.lib.") {
                             continue;
                         }
                         #[cfg(not(target_arch = "wasm32"))]
@@ -193,13 +207,15 @@ impl Runtime {
                 self.providers.socket(),
                 || {
                     core::with_promise_provider(self.providers.promise(), || {
-                        core::with_namespace_registry(&self.namespace_registry, || {
-                            core::with_protocols(&self.protocols, || {
-                                if traced {
-                                    core::eval_traced(&resolved, &mut self.env)
-                                } else {
-                                    core::eval(&resolved, &mut self.env)
-                                }
+                        core::with_macros(self.macros.clone(), || {
+                            core::with_namespace_registry(&self.namespace_registry, || {
+                                core::with_protocols(&self.protocols, || {
+                                    if traced {
+                                        core::eval_traced(&resolved, &mut self.env)
+                                    } else {
+                                        core::eval(&resolved, &mut self.env)
+                                    }
+                                })
                             })
                         })
                     })
@@ -677,6 +693,24 @@ mod tests {
         );
         runtime.install_loopback_socket_provider();
         assert!(runtime.socket_supported());
+    }
+
+    #[test]
+    fn runtime_core_evaluates_embedded_commands() {
+        let mut runtime = Runtime::core();
+        assert_eq!(runtime.eval_text("(+ 19 23)").unwrap(), "42");
+        assert_eq!(runtime.eval_text("(let (x 7) (* x 6))").unwrap(), "42");
+        assert_eq!(runtime.eval_text("(if true 1 0)").unwrap(), "1");
+    }
+
+    #[test]
+    fn threading_macros_expand_finite_iterator_clauses() {
+        let mut runtime = Runtime::new();
+        assert_eq!(runtime.eval_text("(cond-> 1 (= 1 1) inc)").unwrap(), "2");
+        assert_eq!(runtime.eval_text("(cond-> 1 (= 1 2) inc)").unwrap(), "1");
+        assert_eq!(runtime.eval_text("(cond->> 1 (= 1 1) inc)").unwrap(), "2");
+        assert_eq!(runtime.eval_text("(cond->> 1 (= 1 2) inc)").unwrap(), "1");
+        assert_eq!(runtime.eval_text("(vec (drop 2 [1 2 3 4]))").unwrap(), "[3 4]");
     }
 
     #[test]
@@ -1397,7 +1431,7 @@ mod tests {
         let mut runtime = Runtime::new();
         let foundation = runtime
             .namespace_registry
-            .find("std.lib.foundation")
+            .find("std.foundation")
             .expect("foundation is bootstrapped");
         let canonical = foundation
             .resolve(&crate::lang::data::Symbol::parse("identity"))
@@ -1429,7 +1463,7 @@ mod tests {
         assert!(!canonical.same_identity(&local));
         assert_eq!(
             runtime
-                .eval_text("(std.lib.foundation/identity 42)")
+                .eval_text("(std.foundation/identity 42)")
                 .unwrap(),
             "42"
         );
@@ -1440,7 +1474,7 @@ mod tests {
         let mut runtime = Runtime::new();
         let foundation = runtime
             .namespace_registry
-            .find_or_create("std.lib.foundation");
+            .find_or_create("std.foundation");
         let native = foundation.intern_with_origin(
             "optimized",
             core::Value::Number(7),
@@ -1448,7 +1482,7 @@ mod tests {
         );
         let identity = native.identity_address();
         core::with_definition_origin(kernel::VarOrigin::HalFallback, || {
-            runtime.eval_text("(ns std.lib.foundation) (def optimized 9)")
+            runtime.eval_text("(ns std.foundation) (def optimized 9)")
         })
         .unwrap();
         let refreshed = foundation
@@ -2964,6 +2998,12 @@ mod tests {
     fn arithmetic() {
         let mut runtime = Runtime::new();
         assert_eq!(runtime.eval_text("(+ 19 23)").unwrap(), "42");
+    }
+
+    #[test]
+    fn declare_noop() {
+        let mut runtime = Runtime::new();
+        assert_eq!(runtime.eval_text("(declare x)").unwrap(), "nil");
     }
 
     #[test]

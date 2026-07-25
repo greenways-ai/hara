@@ -61,7 +61,7 @@ variadic fallback. `apply` spreads the final sequential argument into the
 call. Invocation supports Hara functions, protocol `IFn` implementations,
 multifunctions, and `defstruct` constructors.
 
-The packaged `std/lib/foundation.hal` bootstrap defines `nil?`, `false?`, `true?`,
+The packaged `std/foundation.hal` bootstrap defines `nil?`, `false?`, `true?`,
 `empty?`, `first`, `second`, `rest`, and `not-empty` using ordinary L0 forms
 and iterator operations. `rest` returns a lazy `Seq`, or nil when no values
 remain. There is no separate `next` operation.
@@ -266,7 +266,7 @@ Already compiled Truffle call targets are immutable; a newly compiled source
 observes a reloaded macro/module definition.
 
 The packaged L0 bootstrap is intentionally small and language-level: its
-current functions are defined in `std/lib/foundation.hal`. The complete Foundation
+current functions are defined in `std/foundation.hal`. The complete Foundation
 stdlib and KMI/L1 port are later migration work, not hidden Java semantics.
 
 ## 9. Host and Native Image boundary

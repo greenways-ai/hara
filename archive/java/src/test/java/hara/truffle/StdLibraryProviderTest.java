@@ -187,26 +187,26 @@ public class StdLibraryProviderTest {
 
   @Test
   public void providersDeclareCanonicalNamespacesAndStableOrder() {
-    HaraLibraryProvider foundation = new StdLibFoundationLibraryProvider();
-    HaraLibraryProvider string = new StdLibStringLibraryProvider();
-    HaraLibraryProvider bytes = new StdLibBytesLibraryProvider();
-    HaraLibraryProvider promise = new StdLibPromiseLibraryProvider();
+    HaraLibraryProvider foundation = new StdFoundationLibraryProvider();
+    HaraLibraryProvider string = new StdFoundationStringLibraryProvider();
+    HaraLibraryProvider bytes = new StdFoundationBytesLibraryProvider();
+    HaraLibraryProvider promise = new StdFoundationPromiseLibraryProvider();
     HaraLibraryProvider handle = new StdLibHandleLibraryProvider();
-    HaraLibraryProvider file = new StdLibFileLibraryProvider();
+    HaraLibraryProvider file = new StdFoundationFileLibraryProvider();
     HaraLibraryProvider socket = new StdLibSocketLibraryProvider();
     HaraLibraryProvider block = new StdBlockLibraryProvider();
     HaraLibraryProvider zip = new StdZipLibraryProvider();
     HaraLibraryProvider context = new StdLibContextLibraryProvider();
     HaraLibraryProvider task = new StdLibTaskLibraryProvider();
     HaraLibraryProvider resp = new StdRespClientLibraryProvider();
-    assertEquals("std.lib.foundation", foundation.namespace());
-    assertEquals("std/lib/foundation.hal", foundation.fallbackResource());
+    assertEquals("std.foundation", foundation.namespace());
+    assertEquals("std/foundation.hal", foundation.fallbackResource());
     assertTrue(foundation.eager());
-    assertEquals("std.lib.string", string.namespace());
-    assertEquals("std.lib.bytes", bytes.namespace());
-    assertEquals("std.lib.promise", promise.namespace());
+    assertEquals("std.foundation.string", string.namespace());
+    assertEquals("std.foundation.bytes", bytes.namespace());
+    assertEquals("std.foundation.promise", promise.namespace());
     assertEquals("std.lib.handle", handle.namespace());
-    assertEquals("std.lib.file", file.namespace());
+    assertEquals("std.foundation.file", file.namespace());
     assertEquals("std.lib.socket", socket.namespace());
     assertEquals("std.lib.block", block.namespace());
     assertEquals("std.lib.zip", zip.namespace());

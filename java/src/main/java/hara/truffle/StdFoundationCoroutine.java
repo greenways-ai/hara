@@ -5,9 +5,9 @@ import hara.lang.protocol.IDeref;
 import java.util.concurrent.SynchronousQueue;
 import org.graalvm.nativeimage.ImageInfo;
 
-/** Static Java implementation exported exclusively as std.lib.coroutine/*. */
-public final class StdLibCoroutine {
-  private StdLibCoroutine() {}
+/** Static Java implementation exported exclusively as std.foundation.coroutine/*. */
+public final class StdFoundationCoroutine {
+  private StdFoundationCoroutine() {}
 
   private static final ThreadLocal<HaraCoroutine> CURRENT = new ThreadLocal<>();
 

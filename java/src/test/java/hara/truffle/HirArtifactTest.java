@@ -187,7 +187,7 @@ public class HirArtifactTest {
 
   @Test
   public void foundationArtifactIsDeterministicAndRoundTripsForms() throws Exception {
-    Path source = Path.of("lib/src/std/lib/foundation.hal");
+    Path source = Path.of("lib/src/std/foundation.hal");
     byte[] sourceBytes = Files.readAllBytes(source);
     Object[] forms =
         HaraLanguage.readAll(
@@ -196,14 +196,14 @@ public class HirArtifactTest {
 
     byte[] first =
         HirArtifact.encode(
-            "std.lib.foundation", HirArtifact.FOUNDATION_RESOURCE, sourceBytes, forms);
+            "std.foundation", HirArtifact.FOUNDATION_RESOURCE, sourceBytes, forms);
     byte[] second =
         HirArtifact.encode(
-            "std.lib.foundation", HirArtifact.FOUNDATION_RESOURCE, sourceBytes, forms);
+            "std.foundation", HirArtifact.FOUNDATION_RESOURCE, sourceBytes, forms);
     assertArrayEquals(first, second);
 
     HirArtifact.Module decoded = HirArtifact.decode(first);
-    assertEquals("std.lib.foundation", decoded.namespace);
+    assertEquals("std.foundation", decoded.namespace);
     assertEquals(HirArtifact.FOUNDATION_RESOURCE, decoded.resource);
     assertEquals(forms.length, decoded.forms.length);
     for (int index = 0; index < forms.length; index++) {
@@ -213,12 +213,12 @@ public class HirArtifactTest {
 
   @Test
   public void rejectsCorruptAndTruncatedArtifacts() throws Exception {
-    byte[] source = "(ns std.lib.foundation)".getBytes(StandardCharsets.UTF_8);
+    byte[] source = "(ns std.foundation)".getBytes(StandardCharsets.UTF_8);
     Object[] forms =
         HaraLanguage.readAll(new String(source, StandardCharsets.UTF_8), "foundation.hal");
     byte[] artifact =
         HirArtifact.encode(
-            "std.lib.foundation", HirArtifact.FOUNDATION_RESOURCE, source, forms);
+            "std.foundation", HirArtifact.FOUNDATION_RESOURCE, source, forms);
 
     byte[] corrupt = artifact.clone();
     corrupt[corrupt.length - 1] ^= 1;
@@ -252,14 +252,14 @@ public class HirArtifactTest {
           Main.run(
               new String[] {
                 "compile-hir",
-                "lib/src/std/lib/foundation.hal",
+                "lib/src/std/foundation.hal",
                 "--output",
                 output.toString()
               },
               new PrintStream(stdout, true, StandardCharsets.UTF_8),
               new PrintStream(stderr, true, StandardCharsets.UTF_8));
       assertEquals(stderr.toString(StandardCharsets.UTF_8), 0, status);
-      assertEquals("std.lib.foundation", HirArtifact.decode(Files.readAllBytes(output)).namespace);
+      assertEquals("std.foundation", HirArtifact.decode(Files.readAllBytes(output)).namespace);
     } finally {
       Files.deleteIfExists(output);
     }
@@ -289,12 +289,12 @@ public class HirArtifactTest {
       assertEquals(
           42,
           context
-              .eval(HaraLanguage.ID, "((std.lib.foundation/comp2 inc inc) 40)")
+              .eval(HaraLanguage.ID, "((std.foundation/comp2 inc inc) 40)")
               .asLong());
       assertEquals(
           "[2 3]",
           context
-              .eval(HaraLanguage.ID, "(vec (std.lib.foundation/map inc [1 2]))")
+              .eval(HaraLanguage.ID, "(vec (std.foundation/map inc [1 2]))")
               .toString());
       assertEquals(
           "[42 {:a {:b 42}} [0 1 2 3] [7 7 7] [2 3] [9 7]]",

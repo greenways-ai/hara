@@ -8,13 +8,13 @@ import java.nio.charset.StandardCharsets;
 import org.graalvm.polyglot.Context;
 import org.junit.Test;
 
-public class StdLibFoundationTest {
+public class StdFoundationTest {
   @Test
   public void halFoundationOwnsMapAndFillsPortableSymbols() {
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
       assertEquals(
           42,
-          context.eval(HaraLanguage.ID, "((std.lib.foundation/comp2 inc inc) 40)").asLong());
+          context.eval(HaraLanguage.ID, "((std.foundation/comp2 inc inc) 40)").asLong());
       assertEquals(
           "[2 3 4]",
           context.eval(HaraLanguage.ID, "(map inc [1 2 3])").toString());
@@ -32,11 +32,11 @@ public class StdLibFoundationTest {
   public void fallbackReloadRefreshesHalFoundation() {
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
       long revision =
-          context.eval(HaraLanguage.ID, "(module-revision \"std/lib/foundation.hal\")").asLong();
-      context.eval(HaraLanguage.ID, "(require 'std.lib.foundation {:reload true})");
+          context.eval(HaraLanguage.ID, "(module-revision \"std/foundation.hal\")").asLong();
+      context.eval(HaraLanguage.ID, "(require 'std.foundation {:reload true})");
       assertEquals(
           revision + 1,
-          context.eval(HaraLanguage.ID, "(module-revision \"std/lib/foundation.hal\")").asLong());
+          context.eval(HaraLanguage.ID, "(module-revision \"std/foundation.hal\")").asLong());
       assertEquals(
           "[2 3 4]", context.eval(HaraLanguage.ID, "(map inc [1 2 3])").toString());
     }
@@ -150,11 +150,12 @@ public class StdLibFoundationTest {
   public void optimizedOperationsMatchTheirHalDefinitions() throws Exception {
     String source;
     try (InputStream input =
-        StdLibFoundationTest.class.getClassLoader().getResourceAsStream("std/lib/foundation.hal")) {
+        StdFoundationTest.class.getClassLoader().getResourceAsStream("std/foundation.hal")) {
       assertTrue("missing foundation fallback resource", input != null);
       source =
           new String(input.readAllBytes(), StandardCharsets.UTF_8)
-              .replace("(ns std.lib.foundation)", "(ns testing.foundation-fallback)");
+              .replace("ns std.foundation", "ns testing.foundation-fallback")
+              .replaceAll("(?s)\\(:config.*?\\]\\}\\)", "");
     }
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
       context.eval(HaraLanguage.ID, source);
@@ -163,7 +164,7 @@ public class StdLibFoundationTest {
           context
               .eval(
                   HaraLanguage.ID,
-                  "[(std.lib.foundation/map inc [1 2 3]) "
+                  "[(std.foundation/map inc [1 2 3]) "
                       + " (testing.foundation-fallback/map inc [1 2 3])]")
               .toString());
       assertEquals(
@@ -171,7 +172,7 @@ public class StdLibFoundationTest {
           context
               .eval(
                   HaraLanguage.ID,
-                  "[(std.lib.foundation/reduce + 0 [1 2 3 4]) "
+                  "[(std.foundation/reduce + 0 [1 2 3 4]) "
                       + " (testing.foundation-fallback/reduce + 0 [1 2 3 4])]")
               .toString());
     }

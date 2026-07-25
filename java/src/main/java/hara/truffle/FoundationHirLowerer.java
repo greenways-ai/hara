@@ -19,7 +19,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Direct node lowerer for the closed std.lib.foundation bootstrap subset.
+ * Direct node lowerer for the closed std.foundation bootstrap subset.
  *
  * <p>This is intentionally not a general Hara analyzer. Unsupported forms fail artifact loading,
  * allowing auto mode to use source and making strict mode expose compiler/runtime skew.

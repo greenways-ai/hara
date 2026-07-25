@@ -1,6 +1,6 @@
 (ns services.api
   (:require [services.worker :as worker]
-            [std.lib.string :as string]))
+            [std.foundation.string :as string]))
 
 (defn normalize-route
   "Normalizes a route received at the service boundary."

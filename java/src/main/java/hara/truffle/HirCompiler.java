@@ -23,9 +23,9 @@ final class HirCompiler {
               new String(sourceBytes, StandardCharsets.UTF_8),
               HirArtifact.FOUNDATION_RESOURCE);
       String namespace = HirArtifact.declaredNamespace(forms);
-      if (!"std.lib.foundation".equals(namespace)) {
+      if (!"std.foundation".equals(namespace)) {
         throw new HaraException(
-            "foundation HIR compiler expected std.lib.foundation, received " + namespace);
+            "foundation HIR compiler expected std.foundation, received " + namespace);
       }
       byte[] artifact =
           HirArtifact.encode(namespace, HirArtifact.FOUNDATION_RESOURCE, sourceBytes, forms);

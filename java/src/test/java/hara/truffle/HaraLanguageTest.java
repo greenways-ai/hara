@@ -66,7 +66,7 @@ public class HaraLanguageTest {
       assertEquals(
           42,
           context
-              .eval(HaraLanguage.ID, "(load-resource \"std/lib/foundation.hal\") ((comp2 inc inc) 40)")
+              .eval(HaraLanguage.ID, "(load-resource \"std/foundation.hal\") ((comp2 inc inc) 40)")
               .asLong());
       assertEquals(42, context.eval(HaraLanguage.ID, "((comp3 inc inc inc) 39)").asLong());
       assertTrue(context.eval(HaraLanguage.ID, "((complement (fn [x] (= x 1))) 2)").asBoolean());
@@ -167,7 +167,7 @@ public class HaraLanguageTest {
   @Test
   public void supportsLazySeqBoundariesAndSourceAwareTransforms() {
     try (Context context = context()) {
-      context.eval(HaraLanguage.ID, "(load-resource \"std/lib/foundation.hal\")");
+      context.eval(HaraLanguage.ID, "(load-resource \"std/foundation.hal\")");
       assertTrue(context.eval(HaraLanguage.ID, "(vector? (map inc [1 2 3]))").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(iter? ((map inc) [1 2 3]))").asBoolean());
       assertEquals(2, context.eval(HaraLanguage.ID, "(first (map inc [1 2 3]))").asLong());
@@ -192,16 +192,16 @@ public class HaraLanguageTest {
       assertEquals(
           42,
           context
-              .eval(HaraLanguage.ID, "(require \"std/lib/foundation.hal\") ((comp2 inc inc) 40)")
+              .eval(HaraLanguage.ID, "(require \"std/foundation.hal\") ((comp2 inc inc) 40)")
               .asLong());
       assertEquals(42, context.eval(HaraLanguage.ID, "((comp3 inc inc inc) 39)").asLong());
       assertEquals(
-          1, context.eval(HaraLanguage.ID, "(module-revision \"std/lib/foundation.hal\")").asLong());
-      context.eval(HaraLanguage.ID, "(require \"std/lib/foundation.hal\" {:reload true})");
+          1, context.eval(HaraLanguage.ID, "(module-revision \"std/foundation.hal\")").asLong());
+      context.eval(HaraLanguage.ID, "(require \"std/foundation.hal\" {:reload true})");
       assertEquals(
           2,
           context
-              .eval(HaraLanguage.ID, "(module-revision \"classpath:std/lib/foundation.hal\")")
+              .eval(HaraLanguage.ID, "(module-revision \"classpath:std/foundation.hal\")")
               .asLong());
     }
   }

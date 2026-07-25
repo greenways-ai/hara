@@ -2,7 +2,7 @@
   (:require [polis.common.grammar-macro :as grammar-macro]
             [polis.common.grammar-spec :as spec]
             [polis.common.grammar-xtalk-system :as xtalk-system]
-            [std.lib.string :as string]))
+            [std.foundation.string :as string]))
 
 (defn key-member?
   [value key]

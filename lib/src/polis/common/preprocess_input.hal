@@ -2,8 +2,8 @@
   (:require [polis.common.preprocess-base :as preprocess-base]
             [polis.common.util :as util]
             [std.lib.context :as ptr]
-            [std.lib.foundation :as foundation]
-            [std.lib.string :as string]
+            [std.foundation :as foundation]
+            [std.foundation.string :as string]
             [std.lib.walk :as walk]))
 
 (defn to-input-form

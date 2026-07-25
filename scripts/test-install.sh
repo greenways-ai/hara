@@ -70,7 +70,7 @@ check "default install dir is \$HOME/.local/bin" test -x "$TEST_HOME/.local/bin/
 
 # --- 3. checksum mismatch aborts --------------------------------------------
 cp "$WORK/release/SHA256SUMS" "$WORK/release/SHA256SUMS.good"
-sed -i 's/^./0/' "$WORK/release/SHA256SUMS"
+sed -i 's/^./X/' "$WORK/release/SHA256SUMS"
 OUT=$({ run_installer HARA_INSTALL_DIR="$WORK/bin-badsum"; } && echo "EXIT:0" || echo "EXIT:$?")
 mv "$WORK/release/SHA256SUMS.good" "$WORK/release/SHA256SUMS"
 case "$OUT" in
