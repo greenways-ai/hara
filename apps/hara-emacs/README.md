@@ -63,6 +63,24 @@ make compile     # byte-compile hara-mode.el
 make upgrade     # update the package-vc checkout in ~/.emacs.d/elpa
 ```
 
+Build and install a Hara runtime (defaults to the Truffle jar):
+
+```sh
+cd apps/hara-emacs
+make bin-build            # compile the Truffle runtime jar
+make bin-install          # install Truffle launcher + jar to ~/.local
+make bin-build-native     # build GraalVM native image
+make bin-install-native   # install native binary as ~/.local/bin/hara-native
+make bin-build-rust       # build Rust release binary
+make bin-install-rust     # install Rust binary as ~/.local/bin/hara-rust
+make bin-clean            # remove installed binaries and jar
+```
+
+The Emacs package ships with `apps/hara-emacs/bin/hara`, which `hara-mode`
+auto-detects and uses as `hara-command`. It runs the Truffle jar by default;
+set `HARA_BACKEND=rust` (or `native`) to switch backends, or customize
+`hara-command` directly.
+
 Or directly:
 
 ```sh

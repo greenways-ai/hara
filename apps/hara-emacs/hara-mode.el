@@ -23,7 +23,11 @@
 
 (defgroup hara nil "Hara language tooling." :group 'languages)
 
-(defcustom hara-command "hara"
+(defcustom hara-command
+  (or (and (boundp 'load-file-name) load-file-name
+           (let ((bin (expand-file-name "bin/hara" (file-name-directory load-file-name))))
+             (and (file-executable-p bin) bin)))
+      "hara")
   "Hara executable used by `hara-jack-in'."
   :type 'string)
 
