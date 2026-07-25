@@ -1,9 +1,10 @@
 {#-
-  Site-wide theme extension: injects the fixed Tron grid background (scene +
-  light-cycle game canvas) behind every page. Page templates extending
-  main.html (home.html, studio.html) inherit this automatically.
+  Site-wide theme extension: universal glass system bar + fixed Tron grid background.
 -#}
 {% extends "base.html" %}
+{% block header %}
+  {% include "partials/system-bar.html" %}
+{% endblock %}
 {% block site_nav %}
 <div class="hara-bg" data-hara-component="parallax" data-hara-fixed aria-hidden="true">
   <canvas class="hara-game" data-hara-component="game"></canvas>
