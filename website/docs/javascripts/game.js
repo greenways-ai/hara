@@ -57,14 +57,13 @@
   const COLORS = ['#41f5e4', '#ff2e88', '#9c7bff', '#f5d742'];
   const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
-  /* four corners in normalized arena space */
-  const CORNER_W = (X_MAX - X_MIN) * 0.38;
-  const CORNER_H = (Y_MAX - Y_MIN) * 0.38;
+  /* four equal square corners in normalized arena space */
+  const ZONE_SIZE = 2.0;
   const CORNERS = [
-    { xMin: X_MIN, xMax: X_MIN + CORNER_W, yMin: Y_MIN, yMax: Y_MIN + CORNER_H },          // 0 TL
-    { xMin: X_MAX - CORNER_W, xMax: X_MAX, yMin: Y_MIN, yMax: Y_MIN + CORNER_H },          // 1 TR
-    { xMin: X_MIN, xMax: X_MIN + CORNER_W, yMax: Y_MAX, yMin: Y_MAX - CORNER_H },          // 2 BL
-    { xMin: X_MAX - CORNER_W, xMax: X_MAX, yMax: Y_MAX, yMin: Y_MAX - CORNER_H }           // 3 BR
+    { xMin: X_MIN, xMax: X_MIN + ZONE_SIZE, yMin: Y_MIN, yMax: Y_MIN + ZONE_SIZE },          // 0 TL
+    { xMin: X_MAX - ZONE_SIZE, xMax: X_MAX, yMin: Y_MIN, yMax: Y_MIN + ZONE_SIZE },          // 1 TR
+    { xMin: X_MIN, xMax: X_MIN + ZONE_SIZE, yMax: Y_MAX, yMin: Y_MAX - ZONE_SIZE },          // 2 BL
+    { xMin: X_MAX - ZONE_SIZE, xMax: X_MAX, yMax: Y_MAX, yMin: Y_MAX - ZONE_SIZE }           // 3 BR
   ];
   const DIAGONAL = { 0: 3, 3: 0, 1: 2, 2: 1 };
   const CENTER = { xMin: -0.6, xMax: 0.6, yMin: (Y_MIN + Y_MAX) / 2 - 2.5, yMax: (Y_MIN + Y_MAX) / 2 + 2.5 };
@@ -505,13 +504,13 @@
     return (9 + 24 * t) * scale;
   };
 
-  const drawCornerGlow = (z, color, now) => {
+  const drawCornerGlow = (z, color, now, underAttack) => {
     const [x1, y1] = project(z.xMin, z.yMin / T_SCALE);
     const [x2, y2] = project(z.xMax, z.yMax / T_SCALE);
-    const pulse = 0.35 + 0.15 * Math.sin(now / 800);
+    const alpha = underAttack ? 0.35 + 0.2 * Math.sin(now / 250) : 0.12;
     ctx.strokeStyle = color;
-    ctx.globalAlpha = pulse;
-    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = underAttack ? 2 : 1;
     ctx.strokeRect(x1, y2, x2 - x1, y1 - y2);
     ctx.globalAlpha = 1;
   };
@@ -522,11 +521,22 @@
     ctx.lineJoin = 'miter';
     const nowS = now / 1000;
 
-    /* target corner glows and shared center glow */
-    drawCornerGlow(CENTER, '#8ffff2', now);
+    /* shared center glow: always faint */
+    drawCornerGlow(CENTER, '#8ffff2', now, false);
+
+    /* target corner glows: pulse only when that specific corner is under attack */
+    const attacked = new Set();
     for (const c of cycles) {
       if (!c.alive) continue;
-      drawCornerGlow(CORNERS[c.targetCorner], c.color, now);
+      for (const o of cycles) {
+        if (o !== c && o.alive && inZone(o.x, o.y, CORNERS[c.targetCorner])) {
+          attacked.add(c.targetCorner);
+        }
+      }
+    }
+    for (const c of cycles) {
+      if (!c.alive) continue;
+      drawCornerGlow(CORNERS[c.targetCorner], c.color, now, attacked.has(c.targetCorner));
     }
 
     const segs = [];
