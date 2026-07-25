@@ -1348,19 +1348,55 @@ final class HaraAnalyzer {
 
     ILinearType<?> fields = (ILinearType<?>) form.nth(2);
     String[] fieldNames = new String[(int) fields.count()];
+    Symbol[] fieldSymbols = new Symbol[fieldNames.length];
     Set<String> seen = new HashSet<>();
     for (int i = 0; i < fieldNames.length; i++) {
       Object field = fields.nth(i);
       if (!(field instanceof Symbol) || ((Symbol) field).getNamespace() != null) {
         throw error("defstruct field names must be unqualified symbols");
       }
-      fieldNames[i] = ((Symbol) field).getName();
+      Symbol fieldSymbol = (Symbol) field;
+      fieldNames[i] = fieldSymbol.getName();
+      fieldSymbols[i] = fieldSymbol;
       if (!seen.add(fieldNames[i])) {
         throw error("Duplicate defstruct field: " + fieldNames[i]);
       }
     }
-    return new HaraNodes.DefineGlobal(
-        symbol, new HaraNodes.Literal(new HaraType(symbol.getName(), fieldNames)));
+
+    HaraExpressionNode typeDefinition =
+        new HaraNodes.DefineGlobal(
+            symbol, new HaraNodes.Literal(new HaraType(symbol.getName(), fieldNames)));
+
+    Object[] positionalArgs = new Object[fieldSymbols.length + 1];
+    positionalArgs[0] = Symbol.create(symbol.getName());
+    System.arraycopy(fieldSymbols, 0, positionalArgs, 1, fieldSymbols.length);
+    HaraExpressionNode arrowConstructor =
+        new HaraNodes.DefineGlobal(
+            Symbol.create("->" + symbol.getName()),
+            analyzeFunction(
+                hara.lang.data.Vector.Standard.from(null, (Object[]) fieldSymbols),
+                new Object[] {List.Standard.from(null, positionalArgs)}));
+
+    Symbol recordMap = Symbol.create("record-map");
+    Object[] mapArgs = new Object[fieldNames.length + 1];
+    mapArgs[0] = Symbol.create(symbol.getName());
+    for (int i = 0; i < fieldNames.length; i++) {
+      mapArgs[i + 1] =
+          List.Standard.from(
+              null,
+              Symbol.create("get"),
+              recordMap,
+              Keyword.create(fieldNames[i]));
+    }
+    HaraExpressionNode mapConstructor =
+        new HaraNodes.DefineGlobal(
+            Symbol.create("map->" + symbol.getName()),
+            analyzeFunction(
+                hara.lang.data.Vector.Standard.from(null, recordMap),
+                new Object[] {List.Standard.from(null, mapArgs)}));
+
+    return new HaraNodes.Do(
+        new HaraExpressionNode[] {typeDefinition, arrowConstructor, mapConstructor});
   }
 
   private HaraExpressionNode analyzeField(List<?> form) {
@@ -1430,8 +1466,8 @@ final class HaraAnalyzer {
       throw error("extend-type expects a type, protocol, and method implementations");
     }
     Object protocol = form.nth(2);
-    if (!(protocol instanceof Symbol) || ((Symbol) protocol).getNamespace() != null) {
-      throw error("extend-type protocol must be an unqualified symbol");
+    if (!(protocol instanceof Symbol)) {
+      throw error("extend-type protocol must be a symbol");
     }
     HaraNodes.ProtocolMethodImplementation[] methods =
         new HaraNodes.ProtocolMethodImplementation[(int) form.count() - 3];

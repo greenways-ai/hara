@@ -172,7 +172,6 @@ public final class HaraContext {
               });
         });
     installProjectMacro();
-    installRecordMacro();
     installNativeLibraries();
     collectBuiltins(FOUNDATION_NAMESPACE, () -> libraryLoader.installEagerJava(this));
     currentNamespace = namespace("user");
@@ -1051,57 +1050,6 @@ public final class HaraContext {
                               List.Standard.from(null, Symbol.create("quote"), name));
               return List.Standard.from(
                   null, Symbol.create("def"), Symbol.create("project"), descriptor);
-            }));
-  }
-
-  private void installRecordMacro() {
-    defineIntrinsicMacro(
-        Symbol.create("defrecord"),
-        HaraMacro.nativeMacro(
-            Symbol.create("defrecord"),
-            invocation -> {
-              if (invocation.count() != 3
-                  || !(invocation.nth(1) instanceof Symbol name)
-                  || name.getNamespace() != null
-                  || !(invocation.nth(2) instanceof ILinearType<?> fields)) {
-                throw new HaraException(
-                    "defrecord expects an unqualified name and field vector");
-              }
-              ArrayList<Object> positional = new ArrayList<>();
-              positional.add(Symbol.create(name.getName()));
-              ArrayList<Object> mapArguments = new ArrayList<>();
-              for (Object value : fields) {
-                if (!(value instanceof Symbol field) || field.getNamespace() != null) {
-                  throw new HaraException(
-                      "defrecord field names must be unqualified symbols");
-                }
-                mapArguments.add(
-                    List.Standard.from(
-                        null,
-                        Symbol.create("get"),
-                        Symbol.create("record-map"),
-                        Keyword.create(field.getName())));
-              }
-              positional.addAll(mapArguments);
-              Object mapConstructor =
-                  List.Standard.from(
-                      null,
-                      Symbol.create("defn"),
-                      Symbol.create("map->" + name.getName()),
-                      hara.lang.data.Vector.Standard.from(
-                          null, Symbol.create("record-map")),
-                      List.Standard.from(null, positional.toArray()));
-              return List.Standard.from(
-                  null,
-                  Symbol.create("do"),
-                  List.Standard.from(
-                      null, Symbol.create("defstruct"), name, fields),
-                  List.Standard.from(
-                      null,
-                      Symbol.create("def"),
-                      Symbol.create("->" + name.getName()),
-                      name),
-                  mapConstructor);
             }));
   }
 

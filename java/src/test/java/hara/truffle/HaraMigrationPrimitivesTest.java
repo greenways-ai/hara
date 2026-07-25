@@ -15,14 +15,14 @@ import org.junit.Test;
 
 public class HaraMigrationPrimitivesTest {
   @Test
-  public void defrecordDefinesPositionalAndMapConstructors() {
+  public void defstructDefinesPositionalAndMapConstructors() {
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
       assertEquals(
           3,
           context
               .eval(
                   HaraLanguage.ID,
-                  "(defrecord Point [x y]) "
+                  "(defstruct Point [x y]) "
                       + "(+ (field (->Point 1 2) :x) "
                       + "   (field (map->Point {:x 2 :y 4}) :x))")
               .asInt());
@@ -35,8 +35,8 @@ public class HaraMigrationPrimitivesTest {
       Value result =
           context.eval(
               HaraLanguage.ID,
-              "(defrecord Point [x y]) "
-                  + "(defrecord Other [x y]) "
+              "(defstruct Point [x y]) "
+                  + "(defstruct Other [x y]) "
                   + "[(instance? Point (->Point 1 2)) "
                   + " (instance? Other (->Point 1 2)) "
                   + " (instance? Point {:x 1 :y 2})]");
