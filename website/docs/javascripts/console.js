@@ -9,8 +9,8 @@
 
   const log = root.querySelector('[data-console-log]');
   const input = root.querySelector('[data-console-input]');
-  const paletteInput = document.querySelector('[data-console-palette]');
-  const commands = root.querySelectorAll('[data-console-command]');
+  const paletteInputs = document.querySelectorAll('[data-console-palette]');
+  const commands = document.querySelectorAll('[data-console-command]:not([data-hara-start])');
   const start = document.querySelector('[data-hara-start]');
   const panel = root.querySelector('[data-console-panel]');
   const toggle = root.querySelector('[data-console-toggle]');
@@ -105,14 +105,14 @@
     await evaluate(source);
   });
 
-  if (paletteInput) {
+  paletteInputs.forEach((paletteInput) => {
     paletteInput.addEventListener('keydown', async (event) => {
       if (event.key !== 'Enter') return;
       const source = paletteInput.value.trim();
       paletteInput.value = '';
       await evaluate(source);
     });
-  }
+  });
 
   commands.forEach((button) => {
     button.addEventListener('click', () => evaluate(button.dataset.consoleCommand));

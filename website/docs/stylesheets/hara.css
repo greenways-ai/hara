@@ -992,6 +992,76 @@ body.is-panel-open .hara-system-panel {
   filter: drop-shadow(0 0 8px rgba(65, 245, 228, .1));
 }
 
+.hara-home-playground {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: min(560px, 86vw);
+}
+
+.hara-home-palette {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  width: 100%;
+  padding: .9rem 1rem;
+  background: rgba(2, 4, 8, .72);
+  border: 1px solid var(--hara-line-strong);
+  border-radius: 10px;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  font-family: var(--hara-mono);
+  font-size: .95rem;
+  color: #c6d4e3;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .25);
+}
+
+.hara-home-palette__prompt {
+  color: var(--hara-cyan);
+  font-weight: 700;
+}
+
+.hara-home-palette input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  outline: none;
+  caret-color: var(--hara-cyan);
+}
+
+.hara-home-palette input::placeholder {
+  color: #5a6f82;
+}
+
+.hara-home-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: .6rem;
+}
+
+.hara-home-chips button {
+  padding: .35rem .7rem;
+  background: rgba(65, 245, 228, .08);
+  border: 1px solid rgba(65, 245, 228, .25);
+  border-radius: 999px;
+  color: var(--hara-cyan-bright);
+  font-family: var(--hara-mono);
+  font-size: .65rem;
+  letter-spacing: .04em;
+  cursor: pointer;
+  transition: background .15s, box-shadow .15s;
+}
+
+.hara-home-chips button:hover {
+  background: rgba(65, 245, 228, .16);
+  box-shadow: 0 0 12px rgba(65, 245, 228, .15);
+}
+
 .hara-home-hero-line {
   display: none;
 }

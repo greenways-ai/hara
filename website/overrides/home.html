@@ -7,7 +7,23 @@
     <h1>HARA</h1>
     <p class="hara-home-tagline">A Modern Lisp for the Agentic Age.</p>
   </div>
-  <a class="hara-start" href="#hara-console" data-hara-start data-console-command="(+ 19 23)">START</a>
+
+  <div class="hara-home-playground">
+    <div class="hara-home-palette">
+      <span class="hara-home-palette__prompt">hara ›</span>
+      <input type="text" data-console-palette
+             placeholder="(+ 19 23)" autocomplete="off"
+             spellcheck="false" aria-label="Try Hara">
+    </div>
+    <div class="hara-home-chips">
+      <button type="button" data-console-command="(+ 19 23)">math</button>
+      <button type="button" data-console-command="(map inc [1 2 3])">lists</button>
+      <button type="button" data-console-command="(osc 440)">sound</button>
+      <button type="button" data-console-command="(agent :wander)">agent</button>
+    </div>
+  </div>
+
+  <a class="hara-start" href="#" data-hara-start data-console-command="(+ 19 23)">START</a>
 </section>
 <dialog class="hara-intro-window" data-intro-window aria-label="Getting started">
   <div class="hara-intro-window__head">
