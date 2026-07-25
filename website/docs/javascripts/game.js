@@ -288,6 +288,7 @@
   const crash = (c, nowS) => {
     c.alive = false;
     c.respawnIn = rand(1.0, 2.2);
+    c.deathDot = { x: c.x, y: c.y, color: c.color, born: nowS };
     /* finalize the run up to the crash point as a segment */
     if (Math.hypot(c.x - c.lastTurn[0], c.y - c.lastTurn[1]) > 0.01) {
       c.segments.push({
@@ -307,6 +308,7 @@
     const pool = free.length ? free : [0, 1, 2, 3];
     c.corner = pool[Math.floor(Math.random() * pool.length)];
     c.targetCorner = DIAGONAL[c.corner];
+    c.deathDot = null;
     placeInCorner(c);
   };
 
@@ -592,6 +594,23 @@
       ctx.fill();
       ctx.shadowBlur = 0;
     });
+
+    /* death dots: keep the head visible where a cycle crashed */
+    cycles.forEach((c) => {
+      if (!c.deathDot) return;
+      const fade = Math.max(0, 1 - (nowS - c.deathDot.born) / 5);
+      if (fade <= 0) return;
+      const [hx, hy] = project(c.deathDot.x, c.deathDot.y / T_SCALE);
+      const top = hy - heightAt(c.deathDot.y);
+      ctx.globalAlpha = fade;
+      ctx.shadowColor = c.deathDot.color;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = '#eafcff';
+      ctx.beginPath();
+      ctx.arc(hx, top, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    });
     ctx.globalAlpha = 1;
   };
 
@@ -632,7 +651,7 @@
     const alive = cycles.filter((c) => c.alive).length;
     if (alive <= 1) {
       winAcc += dt;
-      if (winAcc > 1.5) {
+      if (winAcc > 5.0) {
         startRound();
         winAcc = 0;
       }
