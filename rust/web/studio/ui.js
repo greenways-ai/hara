@@ -399,7 +399,8 @@ class StudioController {
       this.logError(new Error("space names cannot contain '/'"));
       return;
     }
-    await this.task(() => this.evalStudio(`(boot/boot! ${JSON.stringify(trimmed)})`));
+    const booted = await this.task(() => this.evalStudio(`(boot/boot! ${JSON.stringify(trimmed)})`));
+    if (booted === undefined) return;
     this.state.space = trimmed;
     this.clearEditor();
     this.renderSpaceSelect(await this.task(() => this.listSpaces()) ?? [trimmed]);
@@ -477,7 +478,10 @@ class StudioController {
       return;
     }
     if (!window.confirm(`Close kernel ${name}? Its in-memory state is lost.`)) return;
+    // broker.close resolves undefined on success too, so confirm the close
+    // by checking the kernel is actually gone before switching back.
     await this.task(() => this.broker.close(name));
+    if (this.broker.list().includes(name)) return;
     this.state.kernel = "ROOT";
     this.refreshKernelSelect();
     this.renderStatus();
@@ -564,6 +568,13 @@ class StudioController {
       )
     );
     if (ok === undefined) return;
+    // The file is created either way; only switch to it when any unsaved
+    // edits in the currently open file may go (same guard as file/space
+    // switching).
+    if (!this.confirmDiscard()) {
+      await this.refreshFiles();
+      return;
+    }
     this.state.dirty = false;
     await this.refreshFiles();
     await this.openFile(path);
