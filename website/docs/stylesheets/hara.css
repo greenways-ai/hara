@@ -1014,6 +1014,73 @@ body {
   border-bottom: 1px solid var(--hara-line);
 }
 
+/* live-wasm additions: switchers, writable editor, actions, errors */
+
+.hara-studio-steps {
+  align-items: center;
+}
+
+.hara-studio-step.hara-studio-label,
+.hara-studio-step.hara-studio-label:hover {
+  cursor: default;
+  color: var(--hara-faint);
+  background: transparent;
+  text-shadow: none;
+}
+
+.hara-studio-select {
+  align-self: center;
+  background: var(--hara-abyss);
+  color: var(--hara-cyan);
+  border: 1px solid var(--hara-line);
+  font-family: var(--hara-mono);
+  font-size: .62rem;
+  letter-spacing: .14em;
+  padding: .25em .5em;
+  margin: 0 .6em;
+  max-width: 180px;
+}
+
+.hara-studio-select option {
+  background: var(--hara-panel);
+  color: var(--hara-text);
+}
+
+.hara-studio-action {
+  cursor: pointer;
+  transition: color .15s, text-shadow .15s;
+}
+
+.hara-studio-action:hover {
+  color: var(--hara-cyan);
+  text-shadow: 0 0 10px rgba(65, 245, 228, .45);
+}
+
+.hara-studio-tree-body {
+  overflow-y: auto;
+}
+
+textarea.hara-studio-editor {
+  resize: none;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+  caret-color: var(--hara-cyan);
+}
+
+.hara-studio-dirty {
+  color: var(--hara-amber);
+  margin-right: .6em;
+}
+
+.hara-tty-e {
+  color: var(--hara-magenta);
+}
+
+.hara-studio-pane-head .hara-studio-action {
+  margin-left: .9em;
+}
+
 @media (max-width: 900px) {
   .hara-studio {
     width: 100%;
