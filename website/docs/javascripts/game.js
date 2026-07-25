@@ -34,9 +34,10 @@
     return [offX + x * scale, offY + y * scale];
   };
 
-  /* arena in normalized units: x = k (lateral), y = t * T_SCALE (depth) */
+  /* contained arena in normalized units: x = k (lateral), y = t * T_SCALE
+     (depth); the boundary is drawn as visible walls the cycles run into */
   const T_SCALE = 28;
-  const X_MIN = -13, X_MAX = 13, Y_MIN = 0.18 * T_SCALE, Y_MAX = 0.98 * T_SCALE;
+  const X_MIN = -8, X_MAX = 8, Y_MIN = 0.28 * T_SCALE, Y_MAX = 0.92 * T_SCALE;
   const SPEED = 2.1;            // normalized units / s
   const EPS = 0.38;             // collision distance
   const LOOKAHEAD = 1.7;
@@ -48,13 +49,14 @@
 
   const spawn = (color) => ({
     color,
-    x: rand(X_MIN + 3, X_MAX - 3),
-    y: rand(Y_MIN + 3, Y_MAX - 3),
+    x: rand(X_MIN + 2.5, X_MAX - 2.5),
+    y: rand(Y_MIN + 2.5, Y_MAX - 2.5),
     dir: DIRS[Math.floor(Math.random() * 4)].slice(),
     wall: [],
     alive: true,
     fade: 1,
     respawnIn: 0,
+    fearless: false,
   });
 
   const cycles = COLORS.map(spawn);
@@ -70,8 +72,11 @@
     return Math.hypot(px - cx, py - cy);
   };
 
+  const outOfBounds = (x, y) => x < X_MIN || x > X_MAX || y < Y_MIN || y > Y_MAX;
+
+  /* cycle walls only; the arena boundary is separate so a fearless cycle
+     can choose to run straight into it */
   const hitWall = (x, y, self) => {
-    if (x < X_MIN || x > X_MAX || y < Y_MIN || y > Y_MAX) return true;
     for (const c of cycles) {
       const w = c.wall;
       /* ignore the fresh end of our own wall */
@@ -85,22 +90,26 @@
     return false;
   };
 
-  const clearance = (x, y, dir) => {
+  const blockedAt = (x, y, self, fearless) =>
+    (!fearless && outOfBounds(x, y)) || hitWall(x, y, self);
+
+  const clearance = (x, y, dir, fearless) => {
     for (let d = 0.5; d <= 9; d += 0.5) {
-      if (hitWall(x + dir[0] * d, y + dir[1] * d, null)) return d;
+      if (blockedAt(x + dir[0] * d, y + dir[1] * d, null, fearless)) return d;
     }
     return 9;
   };
 
   const think = (c) => {
+    if (Math.random() < 0.03) c.fearless = !c.fearless;
     const [dx, dy] = c.dir;
-    const blocked = hitWall(c.x + dx * LOOKAHEAD, c.y + dy * LOOKAHEAD, c);
+    const blocked = blockedAt(c.x + dx * LOOKAHEAD, c.y + dy * LOOKAHEAD, c, c.fearless);
     const whim = Math.random() < 0.22;
     if (!blocked && !whim) return;
     const left = [dy, -dx];
     const right = [-dy, dx];
-    const cl = clearance(c.x, c.y, left);
-    const cr = clearance(c.x, c.y, right);
+    const cl = clearance(c.x, c.y, left, c.fearless);
+    const cr = clearance(c.x, c.y, right, c.fearless);
     if (blocked && cl < 0.8 && cr < 0.8) {
       crash(c);
       return;
@@ -112,6 +121,8 @@
     c.alive = false;
     c.respawnIn = rand(1.2, 2.6);
   };
+
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
   const update = (dt) => {
     for (const c of cycles) {
@@ -127,6 +138,14 @@
       }
       c.x += c.dir[0] * SPEED * dt;
       c.y += c.dir[1] * SPEED * dt;
+      if (outOfBounds(c.x, c.y)) {
+        /* ran into the arena wall: the trail ends at the boundary */
+        c.x = clamp(c.x, X_MIN, X_MAX);
+        c.y = clamp(c.y, Y_MIN, Y_MAX);
+        c.wall.push([c.x, c.y]);
+        crash(c);
+        continue;
+      }
       const w = c.wall;
       const last = w[w.length - 1];
       if (Math.hypot(c.x - last[0], c.y - last[1]) > 0.08) w.push([c.x, c.y]);
@@ -138,6 +157,20 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, vw, vh);
     ctx.lineJoin = 'miter';
+    /* arena boundary walls, under the cycle trails */
+    ctx.beginPath();
+    [[X_MIN, Y_MIN], [X_MAX, Y_MIN], [X_MAX, Y_MAX], [X_MIN, Y_MAX], [X_MIN, Y_MIN]]
+      .forEach(([x, y], i) => {
+        const [sx, sy] = project(x, y / T_SCALE);
+        i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy);
+      });
+    ctx.strokeStyle = '#8ffff2';
+    ctx.globalAlpha = 0.08;
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    ctx.globalAlpha = 0.4;
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
     for (const c of cycles) {
       const alpha = c.fade;
       if (alpha <= 0 || c.wall.length < 2) continue;
