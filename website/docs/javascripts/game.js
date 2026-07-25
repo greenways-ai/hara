@@ -48,6 +48,7 @@
   const AI_MS = 40;
   const ROUND_MS = 45000;
   const TAIL_CAP = 30;
+  const MAX_TAIL_LENGTH = 14; /* normalized units; old trail drops off so the tail follows the head */
   const DEBRIS_LIFE = 5;
   const SCORE_SURVIVAL_PER_S = 0.5;
 
@@ -252,10 +253,25 @@
     c.dir = pickCornerDir(c, g);
   };
 
+  const tailLength = (c) => {
+    let len = 0;
+    for (const s of c.segments) len += segLength(s);
+    return len;
+  };
+
+  const trimTail = (c) => {
+    while (c.segments.length > 1 && tailLength(c) > MAX_TAIL_LENGTH) {
+      c.segments.shift();
+    }
+    while (c.segments.length > TAIL_CAP) {
+      c.segments.shift();
+    }
+  };
+
   const commitSegment = (c) => {
     const seg = { a: [c.lastTurn[0], c.lastTurn[1]], b: [c.x, c.y] };
     c.segments.push(seg);
-    if (c.segments.length > TAIL_CAP) c.segments.shift();
+    trimTail(c);
     c.lastTurn = [c.x, c.y];
 
     /* territory scoring: length inside target corner */
@@ -271,7 +287,7 @@
     /* finalize the run up to the crash point as a segment */
     if (Math.hypot(c.x - c.lastTurn[0], c.y - c.lastTurn[1]) > 0.01) {
       c.segments.push({ a: [c.lastTurn[0], c.lastTurn[1]], b: [c.x, c.y] });
-      if (c.segments.length > TAIL_CAP) c.segments.shift();
+      trimTail(c);
     }
     if (c.segments.length) debris.push({ color: c.color, segments: c.segments, born: performance.now() / 1000 });
   };
