@@ -18,6 +18,9 @@
       },
       {
         "pattern": "META-INF/hara/extensions/.*\\.wasm"
+      },
+      {
+        "pattern": "META-INF/services/.*"
       }
     ]
   }

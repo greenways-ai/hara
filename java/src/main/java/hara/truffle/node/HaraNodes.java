@@ -121,10 +121,16 @@ public final class HaraNodes {
       for (int index = 0; index < unquotes.length; index++) {
         values[index] = unquotes[index].execute(frame);
       }
+      return materializeTemplate(template, values);
+    }
+
+    @TruffleBoundary
+    private Object materializeTemplate(Object template, Object[] values) {
       return materialize(template, values, new HashMap<>());
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
+    @TruffleBoundary
     private Object materialize(
         Object value, Object[] values, java.util.Map<Integer, Symbol> gensyms) {
       if (value instanceof Unquote unquote) {

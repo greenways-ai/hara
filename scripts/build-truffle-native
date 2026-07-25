@@ -19,9 +19,20 @@ if [[ "${HARA_NATIVE_USE_FALLBACK_RUNTIME:-false}" == "true" ]]; then
   NATIVE_IMAGE_OPTIONS+=(-Dtruffle.UseFallbackRuntime=true)
 fi
 
+# Build a classpath that excludes wasm-language; its bundled native-image
+# properties require GraalVM options (VectorAPISupport) newer than the
+# installed native-image, so WASM extensions are JVM-only for now.
+NATIVE_IMAGE_CP="$ROOT/java/target/classes"
+for jar in "$DEPENDENCIES"/*.jar; do
+  case "$(basename "$jar")" in
+    wasm-language-*) continue ;;
+  esac
+  NATIVE_IMAGE_CP="$NATIVE_IMAGE_CP:$jar"
+done
+
 native-image \
   "${NATIVE_IMAGE_OPTIONS[@]}" \
-  -cp "$ROOT/java/target/classes:$DEPENDENCIES/*" \
+  -cp "$NATIVE_IMAGE_CP" \
   -H:Class=hara.truffle.Main \
   --initialize-at-build-time=hara.truffle.HaraFunctionGen,hara.truffle.HaraBoxGen,hara.truffle.HaraNullGen,hara.truffle.HaraVarGen,hara.truffle.HaraProtocolGen,hara.truffle.HaraStructGen,hara.truffle.HaraTypeGen,hara.truffle.HaraMemberNamesGen,hara.truffle.HaraHashEntryGen,hara.truffle.HaraMultiFunctionGen,hara.truffle.HaraDecimalGen,hara.truffle.HaraBigIntegerGen,hara.truffle.HaraIteratorGen \
   -o "$ROOT/target/hara-truffle"
