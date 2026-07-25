@@ -61,3 +61,21 @@ test("http/get rejects with the status code on HTTP errors", async () => {
   const host = createHostServices({ dbName: "test-http-error", fetch });
   await assert.rejects(host["http/get"]("https://example.test/missing"), /404/);
 });
+
+test("json/parse decodes JSON text into maps, arrays, and scalars", async () => {
+  const host = createHostServices({ dbName: "test-json" });
+  const value = await host["json/parse"](
+    '{"name":"x","count":2,"flag":true,"missing":null,"files":[{"path":"/a.hal"}]}'
+  );
+  assert.ok(value instanceof Map);
+  assert.equal(value.get("name"), "x");
+  assert.equal(value.get("count"), 2);
+  assert.equal(value.get("flag"), true);
+  assert.equal(value.get("missing"), null);
+  assert.deepEqual(value.get("files"), [new Map([["path", "/a.hal"]])]);
+});
+
+test("json/parse rejects invalid JSON", async () => {
+  const host = createHostServices({ dbName: "test-json-bad" });
+  await assert.rejects(host["json/parse"]("{nope"));
+});

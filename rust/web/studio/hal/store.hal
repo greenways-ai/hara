@@ -1,0 +1,23 @@
+; Key/value store bindings for studio kernels. Loaded as a registered
+; resource; use via (require [studio.store :as store]).
+; All keys and values are plain strings — decodeHta yields keywords as opaque
+; objects that IndexedDB rejects, so never pass keywords across host/call.
+(ns studio.store)
+
+(defn call
+  ([method] (deref (host/call "store" method)))
+  ([method a] (deref (host/call "store" method a)))
+  ([method a b] (deref (host/call "store" method a b))))
+
+(defn get [key]
+  (call "get" key))
+
+(defn put! [key value]
+  (call "put" key value))
+
+(defn del! [key]
+  (call "del" key))
+
+(defn keys
+  ([] (call "keys"))
+  ([prefix] (call "keys" prefix)))

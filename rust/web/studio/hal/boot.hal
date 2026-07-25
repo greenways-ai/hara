@@ -1,0 +1,14 @@
+; Default bootstrap entry point for studio kernels: (boot/boot! "<space>")
+; ensures the space exists and reports a small summary. Use via
+; (require [studio.boot :as boot]).
+(ns studio.boot
+  (:require [studio.space :as space]))
+
+(defn boot! [name]
+  (let [created (not (space/exists? name))]
+    ; let takes a single body form in this dialect — sequence with do.
+    (do
+      (if created (space/create! name) nil)
+      {:space name
+       :created created
+       :files (count (space/files name))})))

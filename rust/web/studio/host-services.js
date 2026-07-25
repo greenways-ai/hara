@@ -49,8 +49,20 @@ export function createHostServices(options = {}) {
       const response = await fetchImpl(url);
       if (!response.ok) throw new Error(`http/get failed with status ${response.status}`);
       return response.text();
-    }
+    },
+    "json/parse": async (text) => fromJson(JSON.parse(text))
   };
+}
+
+// Decoded shape: objects -> Maps with string keys, arrays -> arrays, scalars
+// pass through (null -> nil on the hara side). String keys keep host-call
+// arguments and store keys free of opaque keyword objects.
+function fromJson(value) {
+  if (Array.isArray(value)) return value.map(fromJson);
+  if (value !== null && typeof value === "object") {
+    return new Map(Object.entries(value).map(([key, item]) => [key, fromJson(item)]));
+  }
+  return value;
 }
 
 async function request(store, method, ...arguments_) {
