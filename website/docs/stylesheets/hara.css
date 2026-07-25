@@ -486,13 +486,6 @@ body {
   backdrop-filter: blur(20px) saturate(1.3);
 }
 
-.hara-system-brand,
-.hara-system-context,
-.hara-system-runtime,
-.hara-system-log-toggle {
-  border-right: 1px solid var(--hara-line);
-}
-
 .hara-system-brand {
   display: flex;
   align-items: center;
