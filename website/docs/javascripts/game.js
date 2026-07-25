@@ -1,10 +1,9 @@
-/* Hara grid game — ambient light cycles riding the perspective floor of the
-   fixed background (.hara-bg). Cycles move slowly, use real segment
-   intersection collision, navigate toward waypoints, and react when rivals
-   turn. Drifting in a straight line still builds a small speed boost; turning
-   resets it. Positions are kept in a normalized arena space (k, t*T_SCALE) and
-   projected with a fan geometry (vanishing point 720,461; lateral spacing 36 at
-   the horizon growing to 260 at the bottom). */
+/* Hara grid game — lightweight 4-player Tron.
+   Cycles spawn in random corners, race to the diagonally opposite corner,
+   fence off territory there, and score by survival plus fenced area.
+   Tails are capped to 30 segments and dead walls fade quickly so the arena
+   never clogs. Positions are kept in normalized arena space (k, t*T_SCALE)
+   and projected with a fan geometry. */
 (() => {
   const canvas = document.querySelector('[data-hara-component="game"]');
   if (!canvas) return;
@@ -12,7 +11,7 @@
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
-  /* cover-fit of the 1440x810 scene viewBox (preserveAspectRatio slice) */
+  /* cover-fit of the 1440x810 scene viewBox */
   const VB_W = 1440, VB_H = 810;
   let vw = 0, vh = 0, dpr = 1, scale = 1, offX = 0, offY = 0;
 
@@ -35,26 +34,43 @@
     return [offX + x * scale, offY + y * scale];
   };
 
-  /* arena in normalized units: x = k (lateral), y = t * T_SCALE (depth). */
+  /* ----------------------------------------------------------------------
+     arena and movement
+     ---------------------------------------------------------------------- */
   const T_SCALE = 28;
   const X_MIN = -2.2, X_MAX = 2.2;
   const Y_MIN = 0.30 * T_SCALE, Y_MAX = 0.90 * T_SCALE;
-  const SPEED_K = 0.55;         // k units / s  (lateral)
-  const SPEED_T = 0.085;        // t units / s  (depth, multiplied by T_SCALE for y/s)
-  const BOOST_MAX = 2.4;        // seconds of straight drift that build boost
-  const BOOST_GAIN = 0.25;      // speed multiplier gained per boosted second
-  const LOOK_T = 0.55;          // seconds of travel the AI looks ahead
-  const AI_MS = 40;             // milliseconds between AI ticks
-  const ROUND_MS = 60000;
-  const COLORS = ['#41f5e4', '#ff2e88', '#9c7bff'];
+  const SPEED_K = 0.55;
+  const SPEED_T = 0.085;
+  const BOOST_MAX = 2.4;
+  const BOOST_GAIN = 0.25;
+  const LOOK_T = 0.5;
+  const AI_MS = 40;
+  const ROUND_MS = 45000;
+  const TAIL_CAP = 30;
+  const DEBRIS_LIFE = 5;
+  const SCORE_SURVIVAL_PER_S = 0.5;
+
+  const COLORS = ['#41f5e4', '#ff2e88', '#9c7bff', '#f5d742'];
   const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+  /* four corners in normalized arena space */
+  const CORNER_W = (X_MAX - X_MIN) * 0.38;
+  const CORNER_H = (Y_MAX - Y_MIN) * 0.38;
+  const CORNERS = [
+    { xMin: X_MIN, xMax: X_MIN + CORNER_W, yMin: Y_MIN, yMax: Y_MIN + CORNER_H },          // 0 TL
+    { xMin: X_MAX - CORNER_W, xMax: X_MAX, yMin: Y_MIN, yMax: Y_MIN + CORNER_H },          // 1 TR
+    { xMin: X_MIN, xMax: X_MIN + CORNER_W, yMax: Y_MAX, yMin: Y_MAX - CORNER_H },          // 2 BL
+    { xMin: X_MAX - CORNER_W, xMax: X_MAX, yMax: Y_MAX, yMin: Y_MAX - CORNER_H }           // 3 BR
+  ];
+  const DIAGONAL = { 0: 3, 3: 0, 1: 2, 2: 1 };
 
   const rand = (a, b) => a + Math.random() * (b - a);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const outOfBounds = (x, y) => x < X_MIN || x > X_MAX || y < Y_MIN || y > Y_MAX;
 
   /* ----------------------------------------------------------------------
-     geometry: segment intersection for real collision detection
+     geometry: segment intersection for real collision
      ---------------------------------------------------------------------- */
   const orient = (a, b, c) =>
     (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
@@ -85,14 +101,16 @@
     return [a[0] + t * d1x, a[1] + t * d1y];
   };
 
+  const segLength = (s) => Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]);
+
   /* ----------------------------------------------------------------------
-     coarse occupancy grid for pathfinding (AI only)
+     occupancy grid for pathfinding
      ---------------------------------------------------------------------- */
   const CELL = 0.15;
   const GX = Math.ceil((X_MAX - X_MIN) / CELL);
   const GY = Math.ceil((Y_MAX - Y_MIN) / CELL);
-  const FLOOD_CAP = 600;
-  const MIN_SPACE = 8;
+  const FLOOD_CAP = 500;
+  const MIN_SPACE = 6;
 
   const cellOf = (x, y) => {
     const cx = Math.floor((x - X_MIN) / CELL);
@@ -105,7 +123,7 @@
     const cy = Math.floor((y - Y_MIN) / CELL);
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
-        if (Math.abs(dx) + Math.abs(dy) > 1) continue; /* cross, not corners */
+        if (Math.abs(dx) + Math.abs(dy) > 1) continue;
         const nx = cx + dx, ny = cy + dy;
         if (nx >= 0 && nx < GX && ny >= 0 && ny < GY) g[ny * GX + nx] = 1;
       }
@@ -120,13 +138,8 @@
     }
   };
 
-  const markWall = (g, w, hx, hy) => {
-    for (let i = 0; i < w.length - 1; i++) {
-      markSeg(g, w[i][0], w[i][1], w[i + 1][0], w[i + 1][1]);
-    }
-    if (hx !== null && w.length) {
-      markSeg(g, w[w.length - 1][0], w[w.length - 1][1], hx, hy);
-    }
+  const markSegments = (g, segs) => {
+    for (const s of segs) markSeg(g, s.a[0], s.a[1], s.b[0], s.b[1]);
   };
 
   const buildGrid = (self) => {
@@ -134,18 +147,15 @@
     for (const c of cycles) {
       if (!c.alive && c !== self) continue;
       if (c === self) {
-        /* ignore the tail we are currently extending */
-        const w = c.wall;
-        for (let i = 0; i < w.length - 2; i++) {
-          markSeg(g, w[i][0], w[i][1], w[i + 1][0], w[i + 1][1]);
-        }
+        /* exclude current run and the segment it is extending from */
+        const segs = c.segments;
+        for (let i = 0; i < segs.length - 1; i++) markSeg(g, segs[i].a[0], segs[i].a[1], segs[i].b[0], segs[i].b[1]);
       } else {
-        markWall(g, c.wall, c.x, c.y);
+        markSegments(g, c.segments);
+        if (c.alive) markSeg(g, c.lastTurn[0], c.lastTurn[1], c.x, c.y);
       }
     }
-    for (const d of debris) {
-      markWall(g, d.wall, null, null);
-    }
+    for (const d of debris) markSegments(g, d.segments);
     return g;
   };
 
@@ -178,11 +188,149 @@
   };
 
   /* ----------------------------------------------------------------------
-     cycles, debris, turn events
+     game state
      ---------------------------------------------------------------------- */
   const debris = [];
-  const DEBRIS_CAP = 2400;
-  const turnEvents = []; /* { cycle, x, y, oldDir, newDir, time } */
+  const turnEvents = [];
+
+  const inZone = (x, y, z) => x >= z.xMin && x <= z.xMax && y >= z.yMin && y <= z.yMax;
+
+  const shuffleCorners = () => {
+    const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
+    cycles.forEach((c, i) => {
+      c.corner = order[i];
+      c.targetCorner = DIAGONAL[c.corner];
+    });
+  };
+
+  const pickCornerDir = (c, g) => {
+    const zone = CORNERS[c.corner];
+    const cx = (zone.xMin + zone.xMax) / 2;
+    const cy = (zone.yMin + zone.yMax) / 2;
+    let best = DIRS[0], bestSpace = -1;
+    for (const d of DIRS) {
+      const nx = c.x + d[0] * SPEED_K * 0.6;
+      const ny = c.y + d[1] * SPEED_T * T_SCALE * 0.6;
+      if (outOfBounds(nx, ny)) continue;
+      const idx = cellOf(nx, ny);
+      const space = idx < 0 ? 0 : flood(g, idx, 200);
+      /* prefer direction away from corner center so they leave the corner */
+      const away = d[0] * (c.x - cx) + d[1] * (c.y - cy);
+      const score = space + away * 0.5;
+      if (score > bestSpace) { bestSpace = score; best = d; }
+    }
+    return best.slice();
+  };
+
+  const spawn = (colorIndex) => ({
+    color: COLORS[colorIndex],
+    colorIndex,
+    corner: 0,
+    targetCorner: 0,
+    x: 0, y: 0,
+    lastTurn: [0, 0],
+    dir: [1, 0],
+    segments: [],
+    boost: 0,
+    alive: true,
+    respawnIn: 0,
+    score: 0,
+    aggression: Math.random() < 0.5 ? 0.8 : 0.2,
+  });
+
+  const cycles = COLORS.map((_, i) => spawn(i));
+
+  const placeInCorner = (c) => {
+    const z = CORNERS[c.corner];
+    c.x = rand(z.xMin + 0.3, z.xMax - 0.3);
+    c.y = rand(z.yMin + 0.3, z.yMax - 0.3);
+    c.lastTurn = [c.x, c.y];
+    c.segments = [];
+    c.boost = 0;
+    c.alive = true;
+    const g = buildGrid(null);
+    c.dir = pickCornerDir(c, g);
+  };
+
+  const commitSegment = (c) => {
+    const seg = { a: [c.lastTurn[0], c.lastTurn[1]], b: [c.x, c.y] };
+    c.segments.push(seg);
+    if (c.segments.length > TAIL_CAP) c.segments.shift();
+    c.lastTurn = [c.x, c.y];
+
+    /* territory scoring: length inside target corner */
+    const tz = CORNERS[c.targetCorner];
+    if (inZone(seg.a[0], seg.a[1], tz) && inZone(seg.b[0], seg.b[1], tz)) {
+      c.score += segLength(seg) * 10;
+    }
+  };
+
+  const crash = (c) => {
+    c.alive = false;
+    c.respawnIn = rand(1.0, 2.2);
+    /* finalize the run up to the crash point as a segment */
+    if (Math.hypot(c.x - c.lastTurn[0], c.y - c.lastTurn[1]) > 0.01) {
+      c.segments.push({ a: [c.lastTurn[0], c.lastTurn[1]], b: [c.x, c.y] });
+      if (c.segments.length > TAIL_CAP) c.segments.shift();
+    }
+    if (c.segments.length) debris.push({ color: c.color, segments: c.segments, born: performance.now() / 1000 });
+  };
+
+  const respawn = (c) => {
+    /* pick a random corner, preferring one not currently occupied by a live cycle */
+    const occupied = new Set(cycles.filter((o) => o.alive && o !== c).map((o) => o.corner));
+    const free = [0, 1, 2, 3].filter((i) => !occupied.has(i));
+    const pool = free.length ? free : [0, 1, 2, 3];
+    c.corner = pool[Math.floor(Math.random() * pool.length)];
+    c.targetCorner = DIAGONAL[c.corner];
+    placeInCorner(c);
+  };
+
+  /* ----------------------------------------------------------------------
+     collision detection
+     ---------------------------------------------------------------------- */
+  const checkCollision = (c, px, py) => {
+    const segA = [px, py];
+    const segB = [c.x, c.y];
+    for (const other of cycles) {
+      const isSelf = other === c;
+      const segs = other.segments;
+      const limit = isSelf ? Math.max(0, segs.length - 1) : segs.length;
+      for (let i = 0; i < limit; i++) {
+        if (segIntersect(segA, segB, segs[i].a, segs[i].b)) {
+          return lineIntersect(segA, segB, segs[i].a, segs[i].b) ||
+            [(segA[0] + segB[0]) / 2, (segA[1] + segB[1]) / 2];
+        }
+      }
+      if (!isSelf && other.alive) {
+        if (segIntersect(segA, segB, other.lastTurn, [other.x, other.y])) {
+          return lineIntersect(segA, segB, other.lastTurn, [other.x, other.y]) ||
+            [(segA[0] + segB[0]) / 2, (segA[1] + segB[1]) / 2];
+        }
+      }
+    }
+    for (const d of debris) {
+      for (const s of d.segments) {
+        if (segIntersect(segA, segB, s.a, s.b)) {
+          return lineIntersect(segA, segB, s.a, s.b) ||
+            [(segA[0] + segB[0]) / 2, (segA[1] + segB[1]) / 2];
+        }
+      }
+    }
+    return null;
+  };
+
+  /* ----------------------------------------------------------------------
+     AI
+     ---------------------------------------------------------------------- */
+  const pathCrossesTurn = (c, d, e) => {
+    const mult = 1 + c.boost * BOOST_GAIN;
+    const nx = c.x + d[0] * SPEED_K * mult * LOOK_T;
+    const ny = c.y + d[1] * SPEED_T * T_SCALE * mult * LOOK_T;
+    const tx = e.x + e.newDir[0] * SPEED_K * mult * LOOK_T;
+    const ty = e.y + e.newDir[1] * SPEED_T * T_SCALE * mult * LOOK_T;
+    return segIntersect([c.x, c.y], [nx, ny], [e.x, e.y], [tx, ty]);
+  };
 
   const findNearestOpponent = (c) => {
     let best = null, bestD = Infinity;
@@ -194,200 +342,17 @@
     return best;
   };
 
-  const pickInitialDir = (x, y, g) => {
-    let best = DIRS[0], bestSpace = -1;
-    for (const d of DIRS) {
-      const nx = x + d[0] * SPEED_K * 0.8;
-      const ny = y + d[1] * SPEED_T * T_SCALE * 0.8;
-      if (outOfBounds(nx, ny)) continue;
-      const idx = cellOf(nx, ny);
-      const space = idx < 0 ? 0 : flood(g, idx, 200);
-      if (space > bestSpace) { bestSpace = space; best = d; }
-    }
-    return best.slice();
-  };
-
-  const spawn = (color) => ({
-    color,
-    x: rand(X_MIN * 0.6, X_MAX * 0.6),
-    y: rand(Y_MIN + 2, Y_MAX - 2),
-    dir: DIRS[Math.floor(Math.random() * 4)].slice(),
-    wall: [],
-    boost: 0,
-    alive: true,
-    respawnIn: 0,
-    target: { x: 0, y: 0 },
-    aggression: Math.random() < 0.5 ? 0.85 : 0.15,
-  });
-
-  const cycles = COLORS.map(spawn);
-
-  const pickTarget = (c) => {
-    const prey = findNearestOpponent(c);
-    const candidates = [];
-    for (let i = 0; i < 10; i++) {
-      candidates.push({
-        x: rand(X_MIN * 0.85, X_MAX * 0.85),
-        y: rand(Y_MIN + 1.5, Y_MAX - 1.5)
-      });
-    }
-    if (prey) {
-      const dx = c.x - prey.x;
-      const dy = c.y - prey.y;
-      const d = Math.hypot(dx, dy) || 1;
-      if (c.aggression > 0.5) {
-        /* intercept where the prey is heading */
-        candidates.push({
-          x: clamp(prey.x + prey.dir[0] * SPEED_K * 2.5, X_MIN, X_MAX),
-          y: clamp(prey.y + prey.dir[1] * SPEED_T * T_SCALE * 2.5, Y_MIN, Y_MAX)
-        });
-      } else {
-        /* flee to the opposite side */
-        candidates.push({
-          x: clamp(c.x + dx / d * 4, X_MIN, X_MAX),
-          y: clamp(c.y + dy / d * 4, Y_MIN, Y_MAX)
-        });
-      }
-    }
-
-    const g = buildGrid(c);
-    let best = null, bestScore = -Infinity;
-    for (const t of candidates) {
-      const tx = clamp(t.x, X_MIN, X_MAX);
-      const ty = clamp(t.y, Y_MIN, Y_MAX);
-      const idx = cellOf(tx, ty);
-      const space = idx < 0 ? 0 : flood(g, idx, FLOOD_CAP);
-      let score = space * 2;
-      score -= Math.hypot(tx - c.x, ty - c.y) * 0.6;
-      if (c.aggression > 0.5 && prey) {
-        score += Math.max(0, 10 - Math.hypot(tx - prey.x, ty - prey.y)) * 4;
-      } else if (c.aggression < 0.5 && prey) {
-        score += Math.hypot(tx - prey.x, ty - prey.y) * 0.4;
-      }
-      if (rayBlocked(g, c.x, c.y, tx, ty)) score -= 30;
-      if (score > bestScore) { bestScore = score; best = { x: tx, y: ty }; }
-    }
-    c.target = best || { x: rand(X_MIN * 0.6, X_MAX * 0.6), y: rand(Y_MIN + 2, Y_MAX - 2) };
-  };
-
-  /* initialize positions and directions safely */
-  cycles.forEach((c) => {
-    c.wall.push([c.x, c.y]);
-    const g = buildGrid(null);
-    c.dir = pickInitialDir(c.x, c.y, g);
-    pickTarget(c);
-  });
-
-  const crash = (c) => {
-    c.alive = false;
-    c.respawnIn = rand(1.2, 2.6);
-    const lastP = c.wall[c.wall.length - 1];
-    if (!lastP || Math.hypot(c.x - lastP[0], c.y - lastP[1]) > 0.01) {
-      c.wall.push([c.x, c.y]);
-    }
-    if (c.wall.length > 1) debris.push({ color: c.color, wall: c.wall });
-    let total = 0;
-    for (const d of debris) total += d.wall.length;
-    while (total > DEBRIS_CAP && debris.length) {
-      total -= debris.shift().wall.length;
-    }
-  };
-
-  const respawn = (c) => {
-    let bestSpot = null, bestScore = -Infinity;
-    for (let i = 0; i < 40; i++) {
-      const x = rand(X_MIN * 0.7, X_MAX * 0.7);
-      const y = rand(Y_MIN + 2, Y_MAX - 2);
-      const idx = cellOf(x, y);
-      if (idx < 0) continue;
-      const g = buildGrid(null);
-      if (g[idx]) continue;
-      const space = flood(g, idx, FLOOD_CAP);
-      /* check that at least one direction is immediately clear */
-      let bestDirSpace = 0;
-      for (const d of DIRS) {
-        const nx = x + d[0] * SPEED_K * 0.8;
-        const ny = y + d[1] * SPEED_T * T_SCALE * 0.8;
-        if (outOfBounds(nx, ny)) continue;
-        const nidx = cellOf(nx, ny);
-        const nspace = nidx < 0 ? 0 : flood(g, nidx, 200);
-        if (nspace > bestDirSpace) bestDirSpace = nspace;
-      }
-      let score = space * 0.6 + bestDirSpace;
-      score += Math.min(x - X_MIN, X_MAX - x);
-      score += Math.min(y - Y_MIN, Y_MAX - y);
-      if (score > bestScore) { bestScore = score; bestSpot = { x, y }; }
-      if (space >= FLOOD_CAP && bestDirSpace >= 100) break;
-    }
-    if (!bestSpot || bestScore < 50) {
-      c.respawnIn = 0.5;
-      return;
-    }
-    const fresh = spawn(c.color);
-    fresh.x = bestSpot.x;
-    fresh.y = bestSpot.y;
-    fresh.wall = [[bestSpot.x, bestSpot.y]];
-    const g = buildGrid(null);
-    fresh.dir = pickInitialDir(bestSpot.x, bestSpot.y, g);
-    Object.assign(c, fresh);
-    pickTarget(c);
-  };
-
-  /* ----------------------------------------------------------------------
-     continuous collision detection
-     ---------------------------------------------------------------------- */
-  const checkCollision = (c, px, py) => {
-    const segA = [px, py];
-    const segB = [c.x, c.y];
-    for (const other of cycles) {
-      const w = other.wall;
-      const isSelf = other === c;
-      const segCount = w.length - 1;
-      const limit = isSelf ? Math.max(0, segCount - 1) : segCount;
-      for (let i = 0; i < limit; i++) {
-        if (segIntersect(segA, segB, w[i], w[i + 1])) {
-          return lineIntersect(segA, segB, w[i], w[i + 1]) ||
-            [(segA[0] + segB[0]) / 2, (segA[1] + segB[1]) / 2];
-        }
-      }
-      if (!isSelf && other.alive && w.length) {
-        if (segIntersect(segA, segB, w[w.length - 1], [other.x, other.y])) {
-          return lineIntersect(segA, segB, w[w.length - 1], [other.x, other.y]) ||
-            [(segA[0] + segB[0]) / 2, (segA[1] + segB[1]) / 2];
-        }
-      }
-    }
-    for (const d of debris) {
-      const w = d.wall;
-      for (let i = 0; i < w.length - 1; i++) {
-        if (segIntersect(segA, segB, w[i], w[i + 1])) {
-          return lineIntersect(segA, segB, w[i], w[i + 1]) ||
-            [(segA[0] + segB[0]) / 2, (segA[1] + segB[1]) / 2];
-        }
-      }
-    }
-    return null;
-  };
-
-  /* ----------------------------------------------------------------------
-     AI: waypoint routing with turn-event reaction and aggression
-     ---------------------------------------------------------------------- */
-  const pathCrossesTurn = (c, d, e) => {
-    const mult = 1 + c.boost * BOOST_GAIN;
-    const nx = c.x + d[0] * SPEED_K * mult * LOOK_T;
-    const ny = c.y + d[1] * SPEED_T * T_SCALE * mult * LOOK_T;
-    const tx = e.x + e.newDir[0] * SPEED_K * mult * LOOK_T;
-    const ty = e.y + e.newDir[1] * SPEED_T * T_SCALE * mult * LOOK_T;
-    return segIntersect([c.x, c.y], [nx, ny], [e.x, e.y], [tx, ty]);
-  };
-
   const think = (c, nowS) => {
     if (!c.alive) return;
     const g = buildGrid(c);
     const [dx, dy] = c.dir;
-    const cands = [[dx, dy], [dy, -dx], [-dy, dx]]; /* straight, left, right */
+    const cands = [[dx, dy], [dy, -dx], [-dy, dx]];
+    const target = CORNERS[c.targetCorner];
+    const tx = (target.xMin + target.xMax) / 2;
+    const ty = (target.yMin + target.yMax) / 2;
+    const inTarget = inZone(c.x, c.y, target);
     const prey = findNearestOpponent(c);
-    const recentTurns = turnEvents.filter((e) => e.time > nowS - 1.2 && e.cycle !== c);
+    const recentTurns = turnEvents.filter((e) => e.time > nowS - 1.0 && e.cycle !== c);
 
     let best = null, bestScore = -Infinity;
     for (const d of cands) {
@@ -399,23 +364,28 @@
       const space = idx < 0 ? 0 : flood(g, idx, FLOOD_CAP);
       if (space < MIN_SPACE) continue;
 
-      const before = Math.hypot(c.target.x - c.x, c.target.y - c.y);
-      const after = Math.hypot(c.target.x - nx, c.target.y - ny);
-      let score = (before - after) * 12;
-      score += space * 0.4;
-      if (d[0] === dx && d[1] === dy) score += 10;     /* keep boost */
-      if (space < 20) score -= 25;                     /* avoid tight pockets */
+      let score = 0;
+      if (inTarget) {
+        /* fence mode: stay inside the target corner and make tight loops */
+        const stay = inZone(nx, ny, target) ? 20 : -10;
+        score += stay;
+        score += space * 0.3;
+      } else {
+        /* race mode: move toward target corner */
+        const before = Math.hypot(tx - c.x, ty - c.y);
+        const after = Math.hypot(tx - nx, ty - ny);
+        score += (before - after) * 15;
+        score += space * 0.4;
+      }
+      if (d[0] === dx && d[1] === dy) score += 8;
+      if (space < 15) score -= 20;
 
-      /* react to rivals that just turned across our path */
       for (const e of recentTurns) {
-        if (pathCrossesTurn(c, d, e)) score -= 35;
+        if (pathCrossesTurn(c, d, e)) score -= 30;
       }
 
-      /* aggression tweaks */
       if (c.aggression > 0.5 && prey) {
-        score += Math.max(0, 8 - Math.hypot(nx - prey.x, ny - prey.y)) * 3;
-      } else if (c.aggression < 0.5 && prey) {
-        score += Math.hypot(nx - prey.x, ny - prey.y) * 0.3;
+        score += Math.max(0, 8 - Math.hypot(nx - prey.x, ny - prey.y)) * 2;
       }
 
       score += Math.random() * 2;
@@ -423,26 +393,27 @@
     }
 
     if (!best) {
-      /* emergency fallback: any direction that is not immediately blocked */
+      let fallback = null, fallbackSpace = -1;
       for (const d of cands) {
         const nx = c.x + d[0] * SPEED_K * LOOK_T;
         const ny = c.y + d[1] * SPEED_T * T_SCALE * LOOK_T;
-        if (!outOfBounds(nx, ny) && !rayBlocked(g, c.x, c.y, nx, ny)) {
-          best = d; break;
-        }
+        if (outOfBounds(nx, ny) || rayBlocked(g, c.x, c.y, nx, ny)) continue;
+        const idx = cellOf(nx, ny);
+        const space = idx < 0 ? 0 : flood(g, idx, FLOOD_CAP);
+        if (space > fallbackSpace) { fallbackSpace = space; fallback = d; }
       }
+      best = fallback;
     }
 
-    if (!best) {
-      crash(c);
-      return;
-    }
+    if (!best) return;
 
     if (best[0] !== dx || best[1] !== dy) {
-      c.wall.push([c.x, c.y]);
+      commitSegment(c);
       const oldDir = c.dir.slice();
       c.dir = best.slice();
       c.boost = 0;
+      c.colorIndex = (c.colorIndex + 1) % COLORS.length;
+      c.color = COLORS[c.colorIndex];
       turnEvents.push({
         cycle: c,
         x: c.x,
@@ -452,15 +423,14 @@
         time: nowS
       });
     }
-
-    if (Math.hypot(c.target.x - c.x, c.target.y - c.y) < 1.0) {
-      pickTarget(c);
-    }
   };
 
+  /* ----------------------------------------------------------------------
+     update loop
+     ---------------------------------------------------------------------- */
   const update = (dt, nowS) => {
-    /* prune old turn events */
-    while (turnEvents.length && turnEvents[0].time < nowS - 2.0) turnEvents.shift();
+    while (turnEvents.length && turnEvents[0].time < nowS - 1.5) turnEvents.shift();
+    while (debris.length && debris[0].born < nowS - DEBRIS_LIFE) debris.shift();
 
     for (const c of cycles) {
       if (!c.alive) {
@@ -468,6 +438,7 @@
         if (c.respawnIn <= 0) respawn(c);
         continue;
       }
+      c.score += SCORE_SURVIVAL_PER_S * dt;
       c.boost = Math.min(BOOST_MAX, c.boost + dt);
       const mult = 1 + c.boost * BOOST_GAIN;
       const px = c.x, py = c.y;
@@ -477,7 +448,6 @@
       if (outOfBounds(c.x, c.y)) {
         c.x = clamp(c.x, X_MIN, X_MAX);
         c.y = clamp(c.y, Y_MIN, Y_MAX);
-        c.wall.push([c.x, c.y]);
         crash(c);
         continue;
       }
@@ -486,7 +456,6 @@
       if (hit) {
         c.x = hit[0];
         c.y = hit[1];
-        c.wall.push([c.x, c.y]);
         crash(c);
       }
     }
@@ -500,25 +469,42 @@
     return (9 + 24 * t) * scale;
   };
 
+  const drawCornerGlow = (z, color, now) => {
+    const [x1, y1] = project(z.xMin, z.yMin / T_SCALE);
+    const [x2, y2] = project(z.xMax, z.yMax / T_SCALE);
+    const pulse = 0.35 + 0.15 * Math.sin(now / 800);
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = pulse;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x1, y2, x2 - x1, y1 - y2);
+    ctx.globalAlpha = 1;
+  };
+
   const draw = (now) => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, vw, vh);
     ctx.lineJoin = 'miter';
+    const nowS = now / 1000;
+
+    /* target corner glows */
+    for (const c of cycles) {
+      if (!c.alive) continue;
+      drawCornerGlow(CORNERS[c.targetCorner], c.color, now);
+    }
 
     const segs = [];
     for (const d of debris) {
-      const w = d.wall;
-      for (let i = 0; i < w.length - 1; i++) {
-        segs.push({ a: w[i], b: w[i + 1], color: d.color, alpha: 0.72 });
+      const fade = Math.max(0, 1 - (nowS - d.born) / DEBRIS_LIFE);
+      for (const s of d.segments) {
+        segs.push({ a: s.a, b: s.b, color: d.color, alpha: 0.65 * fade });
       }
     }
     for (const c of cycles) {
-      const w = c.wall;
-      for (let i = 0; i < w.length - 1; i++) {
-        segs.push({ a: w[i], b: w[i + 1], color: c.color, alpha: 1 });
+      for (const s of c.segments) {
+        segs.push({ a: s.a, b: s.b, color: c.color, alpha: 1 });
       }
-      if (c.alive && w.length) {
-        segs.push({ a: w[w.length - 1], b: [c.x, c.y], color: c.color, alpha: 1 });
+      if (c.alive) {
+        segs.push({ a: c.lastTurn, b: [c.x, c.y], color: c.color, alpha: 1 });
       }
     }
     segs.sort((s1, s2) => (s1.a[1] + s1.b[1]) - (s2.a[1] + s2.b[1]));
@@ -549,24 +535,12 @@
       ctx.stroke();
     }
 
-    /* target markers */
-    cycles.forEach((c) => {
-      if (!c.alive) return;
-      const [tx, ty] = project(c.target.x, c.target.y / T_SCALE);
-      ctx.strokeStyle = c.color;
-      ctx.globalAlpha = 0.22;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(tx, ty, 5, 0, Math.PI * 2);
-      ctx.stroke();
-    });
-
     /* heads */
     cycles.forEach((c, ci) => {
       if (!c.alive) return;
       const [hx, hy] = project(c.x, c.y / T_SCALE);
       const top = hy - heightAt(c.y);
-      const phase = ((now / 1000) * 0.9 + ci * 0.33) % 1;
+      const phase = ((now / 1000) * 0.9 + ci * 0.25) % 1;
       ctx.strokeStyle = c.color;
       ctx.globalAlpha = 0.55 * (1 - phase);
       ctx.lineWidth = 1.2;
@@ -585,6 +559,24 @@
     ctx.globalAlpha = 1;
   };
 
+  /* ----------------------------------------------------------------------
+     round lifecycle
+     ---------------------------------------------------------------------- */
+  const startRound = () => {
+    shuffleCorners();
+    debris.length = 0;
+    turnEvents.length = 0;
+    cycles.forEach((c) => {
+      placeInCorner(c);
+      c.score = 0;
+    });
+  };
+
+  startRound();
+
+  /* expose state for the UI */
+  window.__haraGame = { cycles, corners: CORNERS };
+
   let last = performance.now();
   let aiAcc = 0, roundAcc = 0, winAcc = 0;
 
@@ -600,21 +592,15 @@
     }
     roundAcc += dt * 1000;
     if (roundAcc > ROUND_MS) {
-      cycles.forEach((c) => c.alive && crash(c));
-      debris.length = 0;
-      roundAcc = 0;
-    }
-    const alive = cycles.filter((c) => c.alive).length;
-    if (alive === 0) {
-      debris.length = 0;
-      cycles.forEach(respawn);
+      startRound();
       roundAcc = 0;
       winAcc = 0;
-    } else if (alive === 1) {
+    }
+    const alive = cycles.filter((c) => c.alive).length;
+    if (alive <= 1) {
       winAcc += dt;
-      if (winAcc > 2.5) {
-        debris.length = 0;
-        cycles.forEach(respawn);
+      if (winAcc > 1.5) {
+        startRound();
         roundAcc = 0;
         winAcc = 0;
       }
