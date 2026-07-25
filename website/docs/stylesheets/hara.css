@@ -480,9 +480,9 @@ body {
   right: 0;
   height: 52px;
   display: grid;
-  grid-template-columns: auto auto 1fr auto auto;
+  grid-template-columns: auto auto 1fr auto auto auto;
   align-items: stretch;
-  color: var(--hara-text);
+  color: #c6d4e3;
   background: rgba(3, 5, 10, .88);
   border-bottom: 1px solid var(--hara-line-strong);
   box-shadow: 0 12px 36px rgba(0, 0, 0, .3);
@@ -510,9 +510,21 @@ body {
   letter-spacing: .14em;
 }
 
-.hara-system-brand img {
+.hara-system-brand img,
+.hara-system-apple {
   width: 22px;
   height: 22px;
+}
+
+.hara-system-apple {
+  fill: url(#appleGrad);
+  filter: drop-shadow(0 0 5px rgba(65, 245, 228, .5));
+  animation: hara-apple-glow 3s ease-in-out infinite;
+}
+
+@keyframes hara-apple-glow {
+  0%, 100% { filter: drop-shadow(0 0 5px rgba(65, 245, 228, .5)); }
+  50% { filter: drop-shadow(0 0 12px rgba(65, 245, 228, .85)); }
 }
 
 .hara-system-brand__os {
@@ -528,12 +540,12 @@ body {
   font-family: var(--hara-mono);
   font-size: .55rem;
   letter-spacing: .12em;
-  color: var(--hara-faint);
+  color: #8b9db0;
 }
 
 .hara-system-context b,
 .hara-system-runtime span:last-child {
-  color: var(--hara-muted);
+  color: #c6d4e3;
 }
 
 .hara-system-commands {
@@ -549,8 +561,9 @@ body {
 
 .hara-system-commands button,
 .hara-system-log-toggle,
-.hara-system-console__head button {
-  color: var(--hara-muted);
+.hara-system-console__head button,
+.hara-system-panel-toggle {
+  color: #aabaca;
   background: transparent;
   border: 0;
   font-family: var(--hara-mono);
@@ -572,7 +585,9 @@ body {
 }
 
 .hara-system-commands button:hover,
-.hara-system-commands button:focus-visible {
+.hara-system-commands button:focus-visible,
+.hara-system-panel-toggle:hover,
+.hara-system-panel-toggle:focus-visible {
   color: var(--hara-cyan-bright);
   background: rgba(65, 245, 228, .08);
   outline: none;
@@ -610,6 +625,135 @@ body {
   padding: 0 1rem;
   font-size: .58rem;
   letter-spacing: .14em;
+}
+
+.hara-system-panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  border-right: 0;
+  border-left: 1px solid var(--hara-line);
+}
+
+.hara-system-panel-toggle svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.hara-system-panel-toggle:hover,
+.hara-system-panel-toggle:focus-visible,
+body.is-panel-open .hara-system-panel-toggle {
+  color: var(--hara-cyan);
+  background: rgba(65, 245, 228, .08);
+  outline: none;
+}
+
+.hara-system-panel {
+  position: fixed;
+  z-index: 19;
+  top: 52px;
+  right: 0;
+  bottom: 0;
+  width: min(360px, 85vw);
+  display: flex;
+  flex-direction: column;
+  background: rgba(3, 5, 10, .96);
+  border-left: 1px solid var(--hara-line-strong);
+  box-shadow: -20px 0 60px rgba(0, 0, 0, .45);
+  transform: translateX(100%);
+  transition: transform .35s cubic-bezier(.34, 1.56, .64, 1), visibility .35s;
+  visibility: hidden;
+}
+
+body.is-panel-open .hara-system-panel {
+  transform: translateX(0);
+  visibility: visible;
+}
+
+.hara-system-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  padding-left: 1.2rem;
+  color: var(--hara-faint);
+  border-bottom: 1px solid var(--hara-line);
+  font-family: var(--hara-mono);
+  font-size: .58rem;
+  letter-spacing: .16em;
+}
+
+.hara-system-panel__head button {
+  align-self: stretch;
+  width: 48px;
+  color: var(--hara-muted);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--hara-line);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.hara-system-panel__head button:hover,
+.hara-system-panel__head button:focus-visible {
+  color: var(--hara-cyan);
+  background: rgba(65, 245, 228, .08);
+  outline: none;
+}
+
+.hara-system-panel__body {
+  flex: 1;
+  padding: 1.2rem;
+  overflow-y: auto;
+}
+
+.hara-system-tile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .9rem 1rem;
+  margin-bottom: .7rem;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 8px;
+  font-family: var(--hara-mono);
+  font-size: .62rem;
+  letter-spacing: .12em;
+}
+
+.hara-system-tile__label {
+  color: var(--hara-muted);
+  text-transform: uppercase;
+}
+
+.hara-system-tile__value {
+  color: var(--hara-cyan);
+}
+
+.hara-system-panel__section {
+  margin-top: 1.2rem;
+}
+
+.hara-system-panel__section-title {
+  display: block;
+  margin-bottom: .7rem;
+  color: var(--hara-faint);
+  font-family: var(--hara-mono);
+  font-size: .55rem;
+  letter-spacing: .14em;
+}
+
+.hara-system-notify {
+  padding: .75rem 1rem;
+  margin-bottom: .5rem;
+  color: var(--hara-text);
+  background: rgba(65, 245, 228, .06);
+  border-left: 2px solid var(--hara-cyan);
+  border-radius: 0 6px 6px 0;
+  font-family: var(--hara-mono);
+  font-size: .68rem;
 }
 
 .hara-system-log-toggle span {
@@ -725,6 +869,13 @@ body {
     inset 0 1px 0 rgba(237, 246, 255, .07),
     inset 0 0 80px rgba(65, 245, 228, .04),
     0 30px 80px rgba(0, 0, 0, .45);
+  transition: opacity .5s ease, transform .5s ease;
+}
+
+.hara-home-intro.is-faded {
+  opacity: 0;
+  transform: scale(0.98);
+  pointer-events: none;
 }
 
 .hara-home-title {
@@ -869,6 +1020,91 @@ body {
   box-shadow: 0 0 26px rgba(65, 245, 228, .65), 0 0 68px rgba(156, 123, 255, .38);
 }
 
+.hara-intro-window {
+  position: fixed;
+  z-index: 25;
+  top: 50%;
+  left: 50%;
+  width: min(520px, 90vw);
+  padding: 0;
+  margin: 0;
+  color: var(--hara-text);
+  background: rgba(3, 5, 10, .96);
+  border: 1px solid var(--hara-line-strong);
+  border-radius: 14px;
+  box-shadow: 0 40px 100px rgba(0, 0, 0, .6), var(--hara-glow-cyan);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.7);
+  pointer-events: none;
+  transition: opacity .35s ease, transform .45s cubic-bezier(.34, 1.56, .64, 1);
+}
+
+.hara-intro-window.is-open {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+  pointer-events: auto;
+}
+
+.hara-intro-window__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .9rem 1.1rem;
+  color: var(--hara-faint);
+  border-bottom: 1px solid var(--hara-line);
+  font-family: var(--hara-mono);
+  font-size: .58rem;
+  letter-spacing: .16em;
+}
+
+.hara-intro-window__head button {
+  width: 34px;
+  height: 34px;
+  color: var(--hara-muted);
+  background: transparent;
+  border: 1px solid var(--hara-line);
+  border-radius: 50%;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.hara-intro-window__head button:hover,
+.hara-intro-window__head button:focus-visible {
+  color: var(--hara-cyan);
+  border-color: var(--hara-cyan);
+  outline: none;
+}
+
+.hara-intro-window__body {
+  padding: 1.4rem 1.6rem;
+  font-size: .95rem;
+  line-height: 1.6;
+}
+
+.hara-intro-window__body p {
+  margin: 0 0 .8rem;
+}
+
+.hara-intro-window__body ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.hara-intro-window__body li {
+  margin-bottom: .5rem;
+}
+
+.hara-intro-window__body b {
+  color: var(--hara-cyan);
+  font-weight: 600;
+}
+
+.hara-intro-window__foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 1.6rem 1.4rem;
+}
+
 @keyframes hara-start-pulse {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.035); }
@@ -1001,6 +1237,43 @@ body {
 
 .hara-glass--dark-soft {
   background: linear-gradient(145deg, rgba(3, 5, 10, .88), rgba(8, 12, 18, .78));
+}
+
+/* ensure text stays legible on dark glass */
+.hara-glass--dark,
+.hara-glass--dark-soft {
+  color: var(--hara-text);
+}
+
+.hara-glass--dark .hara-kicker,
+.hara-glass--dark-soft .hara-kicker {
+  color: var(--hara-cyan);
+  text-shadow: 0 0 12px rgba(65, 245, 228, .35);
+}
+
+.hara-glass--dark .hara-console-head,
+.hara-glass--dark-soft .hara-console-head,
+.hara-glass--dark .hara-demo-note,
+.hara-glass--dark-soft .hara-demo-note,
+.hara-glass--dark .hara-strip > span,
+.hara-glass--dark-soft .hara-strip > span,
+.hara-glass--dark .hara-index,
+.hara-glass--dark-soft .hara-index {
+  color: #9aaaba;
+}
+
+.hara-glass--dark .hara-home-card span:last-child,
+.hara-glass--dark-soft .hara-home-card span:last-child {
+  color: var(--hara-muted);
+}
+
+.hara-glass--dark .hara-console-head,
+.hara-glass--dark-soft .hara-console-head,
+.hara-glass--dark .hara-console-entry,
+.hara-glass--dark-soft .hara-console-entry,
+.hara-glass--dark .hara-strip,
+.hara-glass--dark-soft .hara-strip {
+  border-color: rgba(255, 255, 255, .10);
 }
 
 /* frames inside a glass panel inherit the panel's surface */

@@ -16,6 +16,12 @@
   const close = root.querySelector('[data-console-close]');
   const count = root.querySelector('[data-console-count]');
   const led = root.querySelector('[data-runtime-led]');
+  const intro = document.querySelector('[data-intro-window]');
+  const introClose = document.querySelectorAll('[data-intro-close]');
+  const panelToggle = document.querySelector('[data-panel-toggle]');
+  const panelClose = document.querySelector('[data-panel-close]');
+  const systemPanel = document.querySelector('[data-system-panel]');
+  const hero = document.querySelector('.hara-home-intro');
   let entries = 0;
 
   const status = (key, value) => {
@@ -112,19 +118,55 @@
     });
   }
 
-  if (toggle || panel) {
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && root.classList.contains('is-console-open')) {
-        setOpen(false);
-        if (toggle) toggle.focus();
-      }
+  const setPanelOpen = (open) => {
+    document.body.classList.toggle('is-panel-open', open);
+    if (systemPanel) systemPanel.setAttribute('aria-hidden', String(!open));
+    if (panelToggle) panelToggle.setAttribute('aria-expanded', String(open));
+  };
+
+  if (panelToggle) {
+    panelToggle.addEventListener('click', () => {
+      setPanelOpen(!document.body.classList.contains('is-panel-open'));
     });
   }
+
+  if (panelClose) {
+    panelClose.addEventListener('click', () => setPanelOpen(false));
+  }
+
+  const setIntroOpen = (open) => {
+    if (intro) intro.classList.toggle('is-open', open);
+    if (hero) hero.classList.toggle('is-faded', open);
+  };
+
+  introClose.forEach((btn) => {
+    btn.addEventListener('click', () => setIntroOpen(false));
+  });
 
   if (start) {
     start.addEventListener('click', (event) => {
       event.preventDefault();
       evaluate(start.dataset.consoleCommand);
+      setIntroOpen(true);
+    });
+  }
+
+  if (toggle || panel || systemPanel) {
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        if (intro && intro.classList.contains('is-open')) {
+          setIntroOpen(false);
+          return;
+        }
+        if (document.body.classList.contains('is-panel-open')) {
+          setPanelOpen(false);
+          return;
+        }
+        if (root.classList.contains('is-console-open')) {
+          setOpen(false);
+          if (toggle) toggle.focus();
+        }
+      }
     });
   }
 })();
