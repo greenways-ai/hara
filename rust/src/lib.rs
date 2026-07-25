@@ -90,6 +90,8 @@ pub struct Runtime {
     namespace_registry: kernel::NamespaceRegistry<core::Value>,
     macros: Rc<RefCell<HashMap<(String, String), Rc<core::Function>>>>,
     generated_configs: HashMap<String, kernel::GeneratedNamespaceConfig>,
+    #[cfg(target_arch = "wasm32")]
+    host_handler: Option<js_sys::Function>,
     #[cfg(not(target_arch = "wasm32"))]
     extension_roots: Vec<std::path::PathBuf>,
 }
@@ -111,6 +113,8 @@ impl Runtime {
                 "user".into(),
                 kernel::GeneratedNamespaceConfig::defaults(),
             )]),
+            #[cfg(target_arch = "wasm32")]
+            host_handler: None,
             #[cfg(not(target_arch = "wasm32"))]
             extension_roots: native_extension::configured_roots(),
         }
@@ -171,7 +175,9 @@ impl Runtime {
                     let roots = self.extension_roots.clone();
                     let config =
                         kernel::GeneratedNamespaceConfig::configure_with(&values[2..], |target| {
-                            if self.wasm_extensions.contains_key(target) {
+                            if self.resources.contains_key(target)
+                                || self.wasm_extensions.contains_key(target)
+                            {
                                 return true;
                             }
                             #[cfg(not(target_arch = "wasm32"))]
@@ -184,6 +190,15 @@ impl Runtime {
                     let required_extensions = config.required_namespaces().to_vec();
                     for target in required_extensions {
                         if target == "std.foundation" || target.starts_with("std.lib.") {
+                            continue;
+                        }
+                        if self.resources.contains_key(&target) {
+                            if !self.loaded_resources.contains(&target) {
+                                let source =
+                                    self.resources.get(&target).cloned().unwrap_or_default();
+                                self.eval_text(&source)?;
+                                self.loaded_resources.insert(target);
+                            }
                             continue;
                         }
                         #[cfg(not(target_arch = "wasm32"))]
@@ -202,6 +217,7 @@ impl Runtime {
                 .cloned()
                 .unwrap_or_else(kernel::GeneratedNamespaceConfig::defaults);
             let resolved = config.rewrite(form);
+            let namespace_source = self.namespace_source();
             result = core::with_capability_providers(
                 self.providers.file(),
                 self.providers.socket(),
@@ -209,12 +225,31 @@ impl Runtime {
                     core::with_promise_provider(self.providers.promise(), || {
                         core::with_macros(self.macros.clone(), || {
                             core::with_namespace_registry(&self.namespace_registry, || {
-                                core::with_protocols(&self.protocols, || {
-                                    if traced {
-                                        core::eval_traced(&resolved, &mut self.env)
-                                    } else {
-                                        core::eval(&resolved, &mut self.env)
-                                    }
+                                core::with_namespace_source(namespace_source, || {
+                                    core::with_protocols(&self.protocols, || {
+                                        #[cfg(target_arch = "wasm32")]
+                                        if let Some(handler) = &self.host_handler {
+                                            let handler = handler.clone();
+                                            return core::with_host_calls(
+                                                host_call_bridge(handler),
+                                                || {
+                                                    if traced {
+                                                        core::eval_traced(
+                                                            &resolved,
+                                                            &mut self.env,
+                                                        )
+                                                    } else {
+                                                        core::eval(&resolved, &mut self.env)
+                                                    }
+                                                },
+                                            );
+                                        }
+                                        if traced {
+                                            core::eval_traced(&resolved, &mut self.env)
+                                        } else {
+                                            core::eval(&resolved, &mut self.env)
+                                        }
+                                    })
                                 })
                             })
                         })
@@ -329,6 +364,12 @@ impl Runtime {
     pub fn install_loopback_socket_provider(&mut self) {
         self.providers
             .install_socket(core::LoopbackSocketProvider::default());
+    }
+
+    /// Installs the JS host handler that backs the `host/call` special form.
+    #[cfg(target_arch = "wasm32")]
+    pub fn install_host_handler(&mut self, handler: js_sys::Function) {
+        self.host_handler = Some(handler);
     }
 
     pub fn file_resolve(&self, root: &str, path: &str) -> Result<String, JsValue> {
@@ -557,6 +598,11 @@ impl Runtime {
             .cancel(request)
     }
 
+    fn namespace_source(&self) -> Rc<dyn Fn(&str) -> Option<String>> {
+        let resources = self.resources.clone();
+        Rc::new(move |name: &str| resources.get(name).cloned())
+    }
+
     fn load_wasm_extension_namespace(&mut self, name: &str) -> Result<String, String> {
         let bindings = self
             .wasm_extensions
@@ -578,6 +624,150 @@ impl Runtime {
         self.refresh_qualified_bindings();
         Ok(":loaded".into())
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn js_error_string(error: JsValue) -> String {
+    if let Some(message) = error.as_string() {
+        return message;
+    }
+    js_sys::Reflect::get(&error, &JsValue::from_str("message"))
+        .ok()
+        .and_then(|message| message.as_string())
+        .unwrap_or_else(|| format!("{error:?}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn host_key_to_string(key: &core::Value) -> String {
+    match key {
+        core::Value::String(text) => text.clone(),
+        core::Value::Keyword(keyword) => keyword.as_str().to_owned(),
+        core::Value::Symbol(symbol) => symbol.as_str().to_owned(),
+        other => other.display(),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn host_seq_to_js<'a>(values: impl Iterator<Item = &'a core::Value>) -> Result<JsValue, String> {
+    let array = js_sys::Array::new();
+    for value in values {
+        array.push(&value_to_js(value)?);
+    }
+    Ok(array.into())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn value_to_js(value: &core::Value) -> Result<JsValue, String> {
+    match value {
+        core::Value::Nil => Ok(JsValue::NULL),
+        core::Value::Bool(flag) => Ok(JsValue::from_bool(*flag)),
+        core::Value::Number(number) => Ok(JsValue::from_f64(*number as f64)),
+        core::Value::Float(number) => Ok(JsValue::from_f64(*number)),
+        core::Value::String(text) => Ok(JsValue::from_str(text)),
+        core::Value::Keyword(keyword) => Ok(JsValue::from_str(keyword.as_str())),
+        core::Value::Symbol(symbol) => Ok(JsValue::from_str(symbol.as_str())),
+        core::Value::Bytes(bytes) => Ok(js_sys::Uint8Array::from(&bytes[..]).into()),
+        core::Value::Vector(values) => host_seq_to_js(values.iter()),
+        core::Value::List(values) => host_seq_to_js(values.iter()),
+        core::Value::Set(values) => host_seq_to_js(values.iter()),
+        core::Value::OrderedSet(values) => host_seq_to_js(values.iter()),
+        core::Value::Map(values) => {
+            let object = js_sys::Object::new();
+            for (key, value) in values.iter() {
+                js_sys::Reflect::set(
+                    &object,
+                    &JsValue::from_str(&host_key_to_string(key)),
+                    &value_to_js(value)?,
+                )
+                .map_err(js_error_string)?;
+            }
+            Ok(object.into())
+        }
+        core::Value::OrderedMap(values) => {
+            let object = js_sys::Object::new();
+            for entry in values.iter() {
+                js_sys::Reflect::set(
+                    &object,
+                    &JsValue::from_str(&host_key_to_string(&entry.0)),
+                    &value_to_js(&entry.1)?,
+                )
+                .map_err(js_error_string)?;
+            }
+            Ok(object.into())
+        }
+        other => Err(format!(
+            "host/call type-not-transportable: {}",
+            other.display()
+        )),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn js_to_value(value: &JsValue) -> Result<core::Value, String> {
+    use crate::lang::data::{OrderedMap as POrderedMap, Vector as PVector};
+    use wasm_bindgen::JsCast;
+
+    if value.is_null() || value.is_undefined() {
+        return Ok(core::Value::Nil);
+    }
+    if let Some(flag) = value.as_bool() {
+        return Ok(core::Value::Bool(flag));
+    }
+    if let Some(number) = value.as_f64() {
+        if number.fract() == 0.0 && number >= i64::MIN as f64 && number <= i64::MAX as f64 {
+            return Ok(core::Value::Number(number as i64));
+        }
+        return Ok(core::Value::Float(number));
+    }
+    if let Some(text) = value.as_string() {
+        return Ok(core::Value::String(text));
+    }
+    if value.is_instance_of::<js_sys::Uint8Array>() {
+        return Ok(core::Value::Bytes(js_sys::Uint8Array::new(value).to_vec()));
+    }
+    if js_sys::Array::is_array(value) {
+        let array = js_sys::Array::from(value);
+        let mut items = Vec::with_capacity(array.length() as usize);
+        for index in 0..array.length() {
+            items.push(js_to_value(&array.get(index))?);
+        }
+        return Ok(core::Value::Vector(PVector::from_iter(items)));
+    }
+    if value.is_object() {
+        let entries = js_sys::Object::entries(value.unchecked_ref::<js_sys::Object>());
+        let mut items = Vec::with_capacity(entries.length() as usize);
+        for index in 0..entries.length() {
+            let entry = js_sys::Array::from(&entries.get(index));
+            let key = entry.get(0).as_string().unwrap_or_default();
+            let item = js_to_value(&entry.get(1))?;
+            items.push((core::Value::String(key), item));
+        }
+        return Ok(core::Value::OrderedMap(Box::new(POrderedMap::from_iter(
+            items,
+        ))));
+    }
+    Err("host/call type-not-transportable: unsupported JS result".into())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn host_call_bridge(
+    handler: js_sys::Function,
+) -> Rc<dyn Fn(String, String, Vec<core::Value>) -> Result<core::Value, String>> {
+    Rc::new(move |service, method, args| {
+        let js_args = js_sys::Array::new();
+        for value in &args {
+            js_args.push(&value_to_js(value)?);
+        }
+        let result = handler
+            .call3(
+                &JsValue::NULL,
+                &JsValue::from(service),
+                &JsValue::from(method),
+                js_args.as_ref(),
+            )
+            .map_err(js_error_string)?;
+        js_to_value(&result)
+    })
 }
 
 #[wasm_bindgen]
@@ -900,6 +1090,46 @@ mod tests {
             "7"
         );
         assert_eq!(runtime.eval_text("(helper)").unwrap(), "7");
+    }
+
+    #[test]
+    fn host_local_macro_bridges_aliased_calls_to_the_special_form() {
+        let mut runtime = Runtime::new();
+        runtime.register_resource(
+            "host.local",
+            "(ns host.local) (defmacro call [service method & args] `(host/call ~service ~method ~@args))",
+        );
+        let error = runtime
+            .eval_text(
+                "(ns user (:require [host.local :as host])) (host/call \"browser.dom\" \"set-text\" \"#sel\" \"hi\")",
+            )
+            .unwrap_err();
+        assert!(
+            error.contains("host/call is unavailable"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn host_browser_defns_route_through_host_local_macro() {
+        let mut runtime = Runtime::new();
+        runtime.register_resource(
+            "host.local",
+            "(ns host.local) (defmacro call [service method & args] `(host/call ~service ~method ~@args))",
+        );
+        runtime.register_resource(
+            "host.browser.dom",
+            "(ns host.browser.dom (:require [host.local :as host])) (defn set-text [selector text] (host/call \"browser.dom\" \"set-text\" selector text))",
+        );
+        let error = runtime
+            .eval_text(
+                "(ns user (:require [host.browser.dom :as dom])) (dom/set-text \"#sel\" \"hi\")",
+            )
+            .unwrap_err();
+        assert!(
+            error.contains("host/call is unavailable"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

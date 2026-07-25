@@ -28,6 +28,7 @@ extra_javascript:
   - javascripts/game.js
   - javascripts/demo.js
   - javascripts/console.js
+  - javascripts/page-host.js
 markdown_extensions:
   - admonition
   - attr_list

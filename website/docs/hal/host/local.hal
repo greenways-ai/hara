@@ -1,0 +1,9 @@
+(ns host.local)
+
+;; host/call is a special form, not a var, so it cannot be referred or
+;; applied. This macro re-emits the literal symbol: alias rewriting turns a
+;; caller's (host/call ...) into host.local/call, and this expands it back.
+;; host.local has no "host" alias of its own, so the syntax-quoted symbol
+;; survives rewriting untouched.
+(defmacro call [service method & args]
+  `(host/call ~service ~method ~@args))

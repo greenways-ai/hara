@@ -1,0 +1,7 @@
+(ns host.browser.audio (:require [host.local :as host]))
+
+(defn note [freq secs gain]
+  (host/call "browser.audio" "note" freq secs gain))
+
+(defn stop []
+  (host/call "browser.audio" "stop"))

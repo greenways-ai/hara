@@ -1,0 +1,18 @@
+(ns host.browser.wasm (:require [host.local :as host]))
+
+(defn load [url]
+  (host/call "browser.wasm" "load" url))
+
+;; variadic, so it defers to the raw form; rewriting qualifies the head to
+;; host.local/call, which expands once more to the literal host/call.
+(defmacro call [id export & args]
+  `(host/call "browser.wasm" "call" ~id ~export ~@args))
+
+(defn mem-read-f32 [id ptr len]
+  (host/call "browser.wasm" "mem-read-f32" id ptr len))
+
+(defn mem-read-u8 [id ptr len]
+  (host/call "browser.wasm" "mem-read-u8" id ptr len))
+
+(defn unload [id]
+  (host/call "browser.wasm" "unload" id))

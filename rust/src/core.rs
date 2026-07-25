@@ -247,6 +247,9 @@ fn resolve_macro_in(namespace: &str, name: &str) -> Option<Rc<Function>> {
 }
 
 fn resolve_macro(name: &str) -> Option<Rc<Function>> {
+    if let Some((namespace, local)) = name.split_once('/') {
+        return resolve_macro_in(namespace, local);
+    }
     let current = namespace_registry()
         .map(|registry| registry.current().name().as_str().to_owned())
         .ok()?;
@@ -277,8 +280,8 @@ fn value_to_form(value: &Value) -> Result<Form, String> {
         Value::Decimal(value) => Ok(Form::Decimal(value.clone())),
         Value::Character(value) => Ok(Form::Character(*value)),
         Value::String(value) => Ok(Form::String(value.clone())),
-        Value::Keyword(value) => Ok(Form::Keyword(value.get_name().into())),
-        Value::Symbol(value) => Ok(Form::Symbol(value.get_name().into())),
+        Value::Keyword(value) => Ok(Form::Keyword(value.as_str().into())),
+        Value::Symbol(value) => Ok(Form::Symbol(value.as_str().into())),
         Value::Tagged(value) => Ok(Form::Tagged(
             value.tag().get_name().into(),
             Box::new(value_to_form(value.form())?),

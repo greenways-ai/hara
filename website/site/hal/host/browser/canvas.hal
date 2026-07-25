@@ -1,0 +1,13 @@
+(ns host.browser.canvas (:require [host.local :as host]))
+
+(defn clear [selector]
+  (host/call "browser.canvas" "clear" selector))
+
+(defn rect [selector x y w h color]
+  (host/call "browser.canvas" "rect" selector x y w h color))
+
+(defn circle [selector x y r color]
+  (host/call "browser.canvas" "circle" selector x y r color))
+
+(defn line [selector x1 y1 x2 y2 color]
+  (host/call "browser.canvas" "line" selector x1 y1 x2 y2 color))

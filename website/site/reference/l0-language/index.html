@@ -1,0 +1,2492 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A live language for systems that stay alive.">
+      
+      
+      
+        <link rel="canonical" href="https://hoebat.github.io/hara.lang/reference/l0-language/">
+      
+      
+        <link rel="prev" href="../../javadocs/">
+      
+      
+        <link rel="next" href="../../builtins/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/hara-mark.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>L0 language - Hara</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/hara.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#hara-l0-language-contract" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Hara" class="md-header__button md-logo" aria-label="Hara" data-md-component="logo">
+      
+  <img src="../../assets/hara-mark.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Hara
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              L0 language
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="cyan"  aria-hidden="true"  type="radio" name="__palette" id="__palette_0">
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../studio/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Studio
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../user-guide/" class="md-tabs__link">
+          
+  
+  
+  Learn
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../walkthroughs/service-project/" class="md-tabs__link">
+          
+  
+  
+  Walkthroughs
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../development/" class="md-tabs__link">
+          
+  
+  
+  Build
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../hara-chrome/" class="md-tabs__link">
+          
+  
+  
+  Apps
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../the-little-book-of-hal/" class="md-tabs__link">
+          
+  
+  
+  Books
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+<div class="hara-bg" data-hara-component="parallax" data-hara-fixed aria-hidden="true">
+  <canvas class="hara-game" data-hara-component="game"></canvas>
+</div>
+
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Hara" class="md-nav__button md-logo" aria-label="Hara" data-md-component="logo">
+      
+  <img src="../../assets/hara-mark.svg" alt="logo">
+
+    </a>
+    Hara
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../studio/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Studio
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Learn
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Learn
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../namespaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Namespaces and modules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Walkthroughs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Walkthroughs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../walkthroughs/service-project/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Namespace project
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../walkthroughs/libraries/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Library namespaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../walkthroughs/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing namespaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Build
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Build
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../foundation-porting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Foundation porting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../javadocs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Java API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    L0 language
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    L0 language
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-source-and-reader" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Source and reader
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-values-and-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Values and evaluation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-exceptions-and-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Exceptions and cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-persistent-collections-and-iteration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Persistent collections and iteration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-explicit-marker-values-and-bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Explicit marker values and bytes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-numbers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Numbers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-protocols-structs-and-multimethods" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Protocols, structs, and multimethods
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Protocols, structs, and multimethods">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-collection-operation-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Collection operation matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-protocol-dispatch-and-language-extensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Protocol dispatch and language extensions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-vars-namespaces-macros-and-modules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Vars, namespaces, macros, and modules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-host-and-native-image-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Host and Native Image boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-conformance-and-intentional-differences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Conformance and intentional differences
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../builtins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Builtins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../namespaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Namespace catalog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../runtime-libraries/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime libraries
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extensions-contract/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extensions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extensions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extension overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../repl/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    REPL UX
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../resp-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RESP protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../native-flavors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Native flavors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../jvm-flavor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JVM flavor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../xtalk-equivalence/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Xtalk equivalence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rust-runtime/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rust/WASM runtime
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../clojure-core-compatibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clojure core compatibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../runtime-benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Runtime benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Apps
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Apps
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_7_1" id="__nav_7_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    hara-chrome
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_7_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    hara-chrome
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../hara-chrome/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_7_2" id="__nav_7_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    hara-emacs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_7_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    hara-emacs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../hara-for-emacs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Books
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Books
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_8_1" id="__nav_8_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The Little Book of HAL
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_8_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    The Little Book of HAL
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../the-little-book-of-hal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Introduction
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-source-and-reader" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Source and reader
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-values-and-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Values and evaluation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-exceptions-and-cleanup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Exceptions and cleanup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-persistent-collections-and-iteration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Persistent collections and iteration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-explicit-marker-values-and-bytes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Explicit marker values and bytes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-numbers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Numbers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-protocols-structs-and-multimethods" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Protocols, structs, and multimethods
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="7. Protocols, structs, and multimethods">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#71-collection-operation-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.1 Collection operation matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#72-protocol-dispatch-and-language-extensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7.2 Protocol dispatch and language extensions
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-vars-namespaces-macros-and-modules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Vars, namespaces, macros, and modules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-host-and-native-image-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Host and Native Image boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-conformance-and-intentional-differences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Conformance and intentional differences
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="hara-l0-language-contract">Hara L0 language contract<a class="headerlink" href="#hara-l0-language-contract" title="Permanent link">&para;</a></h1>
+<p>Version: <code>0.1</code></p>
+<p>This document is the normative, implementation-independent contract for the
+Truffle-hosted Hara L0 runtime. The executable examples and expected values
+are maintained in <a href="../l0-conformance.edn"><code>l0-conformance.edn</code></a>. An implementation
+may use different storage or compiler techniques, but it must preserve the
+observable behavior described here.</p>
+<h2 id="1-source-and-reader">1. Source and reader<a class="headerlink" href="#1-source-and-reader" title="Permanent link">&para;</a></h2>
+<p>Hara source is read as immutable forms. Whitespace, commas, and semicolon
+comments are discarded. Multiple forms may occur in one source. Supported
+literal forms are nil, booleans, strings, characters, symbols, keywords,
+integers, floating-point values, <code>N</code>-suffixed big integers, <code>M</code>-suffixed
+big decimals, lists, vectors, maps, sets, quote, syntax-quote, unquote,
+unquote-splicing, deref, metadata, and discard (<code>#_</code>).</p>
+<p>Collections require matching delimiters. EOF, mismatched delimiters, invalid
+dispatch, incomplete reader prefixes, invalid escapes, and invalid numeric
+tokens are reader errors. Reader errors include the source name, line, and
+column when a source name is available. Leading whitespace is not part of a
+form's source span.</p>
+<p>Aggregate forms may carry <code>:line</code>, <code>:column</code>, <code>:end-line</code>, and <code>:end-column</code>
+metadata. This metadata is diagnostic information and does not change value
+equality or symbol/keyword identity. Readable immutable values use canonical
+printing and must round-trip through the reader. Ratios are rejected.</p>
+<h2 id="2-values-and-evaluation">2. Values and evaluation<a class="headerlink" href="#2-values-and-evaluation" title="Permanent link">&para;</a></h2>
+<p>Nil and <code>false</code> are falsey; every other value, including zero, the empty
+collection, and the empty string, is truthy. Expressions evaluate from left to
+right. A <code>do</code> form returns its final expression, and a source containing
+multiple top-level forms returns the final result.</p>
+<p>The core special forms are <code>quote</code>, <code>if</code>, <code>do</code>, <code>when</code>, <code>when-not</code>, <code>and</code>,
+<code>or</code>, <code>cond</code>, <code>let</code>, <code>letfn</code>, <code>binding</code>, <code>loop</code>, <code>recur</code>, <code>fn</code>, <code>def</code>,
+<code>defn</code>, <code>defn-</code>, <code>declare</code>, <code>defmulti</code>, <code>defmethod</code>, <code>var</code>, <code>deref</code>, <code>set!</code>,
+<code>throw</code>, <code>try</code>, <code>ns</code>, <code>in-ns</code>, <code>require</code>, <code>refer</code>, <code>use</code>, <code>alias</code>,
+<code>defstruct</code>, <code>defprotocol</code>, <code>extend-type</code>, <code>protocol-call</code>, <code>field</code>, and
+<code>apply</code>. <code>defn</code> is the only function-definition form; there is no <code>defn.xt</code>.</p>
+<p>The ordinary collection functions <code>count</code>, <code>get</code>, <code>assoc</code>, <code>conj</code>, <code>cons</code>,
+<code>nth</code>, and <code>empty</code> are protocol-backed language functions. <code>cons</code> follows the
+public <code>(cons item collection)</code> argument order; the other update/lookup
+functions place the collection first. These functions use the same context-
+local protocol registry as <code>protocol-call</code>, so language-defined extensions are
+visible without requiring Java interface implementation.</p>
+<p><code>let</code> initializers are evaluated in parallel against the enclosing lexical
+environment. <code>letfn</code> installs all local function bindings before evaluating
+the body, so self-recursion and mutual recursion work. Closures capture the
+lexical values they reference. <code>recur</code> is valid only in tail position and
+must match the enclosing <code>loop</code> or function arity.</p>
+<p>Functions support fixed arities, variadic parameter vectors using a final
+<code>&amp;</code> binding, and multiple arity clauses. Exact arities take precedence over a
+variadic fallback. <code>apply</code> spreads the final sequential argument into the
+call. Invocation supports Hara functions, protocol <code>IFn</code> implementations,
+multifunctions, and <code>defstruct</code> constructors.</p>
+<p>The packaged <code>std/foundation.hal</code> bootstrap defines <code>nil?</code>, <code>false?</code>, <code>true?</code>,
+<code>empty?</code>, <code>first</code>, <code>second</code>, <code>rest</code>, and <code>not-empty</code> using ordinary L0 forms
+and iterator operations. <code>rest</code> returns a lazy <code>Seq</code>, or nil when no values
+remain. There is no separate <code>next</code> operation.</p>
+<p>The same bootstrap provides ordinary names <code>map</code>, <code>filter</code>, <code>take</code>, <code>drop</code>,
+<code>mapcat</code>, <code>keep</code>, <code>cycle</code>, <code>zip</code>, and <code>partition-pair</code>; these return lazy
+<code>Seq</code> values. Their <code>iter-*</code> counterparts return raw one-shot iterators.
+<code>map</code> is also a transform constructor: <code>((map f) collection)</code> is eager for
+ordinary collections and lazy for an existing <code>Seq</code> or iterator. <code>seq</code> makes
+the boundary explicit, so <code>(seq transform source)</code> is always lazy. Predicate
+reductions <code>every?</code> and <code>any?</code> consume an iterator lazily until their result is
+known.</p>
+<p>The bootstrap also provides <code>get-in</code>, <code>assoc-in</code>, <code>update</code>, and <code>update-in</code> for
+persistent nested values. These are ordinary <code>.hal</code> functions built on the
+collection protocol functions; they do not introduce mutable update semantics.</p>
+<p>Collection navigation also includes <code>last</code>, <code>reverse</code>, <code>key</code>, <code>val</code>, <code>keys</code>,
+and <code>vals</code>. Membership is protocol-based: use <code>IFind/find</code> to retrieve an
+entry and <code>IFind/has?</code> to distinguish absence from a present nil value.
+<code>keys</code> and <code>vals</code> return lazy <code>Seq</code> values, while <code>reverse</code> returns a
+persistent list and does not mutate its input.</p>
+<p><code>reduce</code> eagerly consumes an iterator with either <code>(reduce function value)</code>
+or <code>(reduce function initial value)</code>. The two-argument form uses the first
+source element as its accumulator and rejects an empty source; the three-
+argument form returns the initial value for an empty source. The callback is an
+ordinary Hara function receiving accumulator and element.</p>
+<p>Destructuring supports nested positional vector patterns, vector rest
+bindings, map <code>:keys</code>, <code>:strs</code>, <code>:syms</code>, <code>:as</code>, and <code>:or</code> patterns in function,
+<code>let</code>, and <code>loop</code> bindings. Missing sequential or map values produce nil
+unless a map default applies.</p>
+<h2 id="3-exceptions-and-cleanup">3. Exceptions and cleanup<a class="headerlink" href="#3-exceptions-and-cleanup" title="Permanent link">&para;</a></h2>
+<p><code>throw</code> propagates a guest value. <code>try</code> supports ordered typed catch clauses
+and an optional <code>finally</code>; typed catches match Hara struct types and the
+documented scalar/generic exception categories. Unmatched guest values
+propagate. <code>finally</code> executes during normal completion and exception
+unwinding. Arity, unbound symbol, invalid form, reader, protocol, and
+interop failures are stable Hara errors and retain source sections where the
+offending form has a source span.</p>
+<h2 id="4-persistent-collections-and-iteration">4. Persistent collections and iteration<a class="headerlink" href="#4-persistent-collections-and-iteration" title="Permanent link">&para;</a></h2>
+<p>Lists, vectors, maps, sets, queues, tuples, ordered collections, and sorted
+collections are persistent values. Literal <code>[]</code>, <code>{}</code>, lists, and sets never
+become mutable merely because they cross a host boundary. Protocol operations
+such as count, lookup, nth, assoc, dissoc, conj, cons, first, and
+empty preserve the collection-family rules tested by the conformance suites.</p>
+<p>The ordinary <code>dissoc</code> function accepts a collection followed by one or more
+keys and returns persistent updates. <code>peek</code> and <code>pop</code> expose first-element
+navigation through the collection protocol; they never mutate the input.</p>
+<p>The bootstrap provides lazy <code>range</code>, <code>repeat</code>, <code>repeatedly</code>, and <code>iterate</code>
+generators. These return <code>Seq</code> values; their <code>iter-*</code> primitives return raw
+iterators. Infinite forms remain lazy until consumed by <code>take</code>, <code>iter-next</code>, or
+another iterator operation.</p>
+<p><code>take-while</code> and <code>drop-while</code> are lazy iterator combinators. They evaluate
+predicates only as demand advances and close their source when it is exhausted
+or the stopping predicate is reached.</p>
+<p><code>partition-all</code> emits lazy persistent vector chunks and retains a final partial
+chunk; <code>partition</code> emits only complete chunks and discards an unmatched tail.
+Both require a positive chunk size.</p>
+<p><code>map</code> and <code>iter-map</code> accept one or more sources. With multiple sources they
+advance them in lockstep and stop at the shortest source, invoking the function
+with one value from each source.</p>
+<p><code>interpose</code> lazily inserts a separator between source values. <code>interleave</code>
+round-robins multiple sources and stops when the shortest source is exhausted.</p>
+<p>Hara is iterator-first. It does not require Clojure <code>ISeq</code>/<code>Seq</code> semantics.
+The core iterator forms are:</p>
+<ul>
+<li><code>iter</code>, <code>iter-has?</code>, <code>iter-next</code>, and <code>iter-close</code>;</li>
+<li>lazy <code>concat</code>, <code>iter-map</code>, <code>iter-filter</code>, <code>iter-take</code>, <code>iter-drop</code>, and
+  <code>iter-zip</code>, <code>iter-cycle</code>, <code>iter-partition-pair</code>, <code>iter-mapcat</code>, and
+  <code>iter-keep</code>.</li>
+</ul>
+<p><code>iter-cycle</code> re-acquires a replayable source only after its current iteration
+is exhausted. <code>iter-partition-pair</code> emits two-element persistent vectors and
+drops an unmatched final element.</p>
+<p>Iterator sources are acquired only when demanded. <code>iter-next</code> reports a stable
+exhaustion error, and closing a wrapper closes its acquired source iterators.
+The language does not include mandatory transducers, <code>transduce</code>, or
+<code>eduction</code>.</p>
+<h2 id="5-explicit-marker-values-and-bytes">5. Explicit marker values and bytes<a class="headerlink" href="#5-explicit-marker-values-and-bytes" title="Permanent link">&para;</a></h2>
+<p>Persistent literals remain distinct from target-like mutable values:</p>
+<ul>
+<li><code>array</code> creates a mutable indexed marker.</li>
+<li><code>object</code> creates a mutable string-keyed marker.</li>
+</ul>
+<p>Only values created by these markers accept restricted dot calls. Array methods
+are <code>get</code>, <code>set</code>, <code>push-first</code>, <code>push-last</code>, <code>pop-first</code>, <code>pop-last</code>, <code>insert</code>,
+<code>remove</code>, <code>clone</code>, <code>slice</code>, <code>map</code>, <code>filter</code>, <code>fold-left</code>, and <code>fold-right</code>.
+Object methods are <code>has?</code>, <code>get</code>, <code>set</code>, <code>delete</code>, <code>clone</code>, <code>assign</code>, <code>keys</code>,
+<code>vals</code>, and <code>pairs</code>. A call has the form <code>(. target (method arguments...))</code> and
+does not expose host members or reflection. Marker arrays also implement the
+ordinary <code>ICount</code> and <code>INth</code> collection protocols. Mutable values have identity
+semantics and are not specified as thread-safe.</p>
+<p>Bytes are an ordinary value category constructed with <code>(bytes ...)</code>. Elements
+use signed-byte storage and accept the checked <code>-128..255</code> input domain.
+Operations live in <code>std.lib.bytes</code>: <code>bytes/count</code>, <code>bytes/get</code>, <code>bytes/set</code>,
+<code>bytes/copy</code>, <code>bytes/slice</code>, <code>bytes/u8</code>, and <code>bytes/s8</code>. <code>bytes/get</code> returns an
+unsigned element in the range <code>0..255</code> and accepts an optional fallback for an
+invalid index; without a fallback it reports a bounds error. Protocol
+<code>INth/nth</code> exposes the signed stored element. <code>bytes/set</code> mutates and returns
+the same byte array after checked conversion. Copy and
+slice allocate independent storage. Readable bytes print as <code>(bytes ...)</code>,
+and equality/hashing use byte content. Raw connector transport preserves
+bytes as bytes.</p>
+<h2 id="6-numbers">6. Numbers<a class="headerlink" href="#6-numbers" title="Permanent link">&para;</a></h2>
+<p>The numeric categories are fixed-width integral values, floating-point values,
+<code>java.math.BigInteger</code>, and <code>java.math.BigDecimal</code>. Arithmetic promotes to a
+representation capable of preserving the operation result; primitive pairs
+use specialized Truffle paths and big-number cases use generic fallback.
+<code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, and <code>mod</code> are variadic with the documented identities and
+unary behavior and are also callable Vars, so they can be passed to functions
+such as <code>reduce</code>. Division is ratio-free: <code>(/ 2)</code> evaluates to integer <code>0</code>.
+Division or remainder by zero is an error. Numeric equality and hashing
+normalize equivalent integral/decimal representations, decimal scale, and
+signed zero according to the conformance cases. NaN and infinities are valid
+floating values with the specified comparison behavior.</p>
+<p>The comparison and equality operators <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>=</code>, and <code>not=</code> are
+also callable Vars. They require at least two arguments and apply pairwise from
+left to right, so they can be passed to iterator consumers such as <code>reduce</code>.</p>
+<p>Ratios, implicit complex numbers, and an implicit irrational-number tower are
+not L0 numeric categories. They may be explicit library or host values later.</p>
+<h2 id="7-protocols-structs-and-multimethods">7. Protocols, structs, and multimethods<a class="headerlink" href="#7-protocols-structs-and-multimethods" title="Permanent link">&para;</a></h2>
+<h3 id="71-collection-operation-matrix">7.1 Collection operation matrix<a class="headerlink" href="#71-collection-operation-matrix" title="Permanent link">&para;</a></h3>
+<p>The collection profile distinguishes language values from dispatch categories. A
+Java object participates only when it implements a Hara protocol adapter; being
+a <code>java.util.Collection</code> does not implicitly grant language operations. Foreign
+polyglot values likewise require an explicit protocol extension.</p>
+<table>
+<thead>
+<tr>
+<th>Receiver family</th>
+<th>Lookup / invocation</th>
+<th>Persistent update</th>
+<th>Count / empty</th>
+<th>Indexed access</th>
+<th>Iteration</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Persistent maps (HAMT, ordered, sorted, trie)</td>
+<td>keys preserve present-<code>nil</code> versus missing fallback; maps are callable</td>
+<td><code>assoc</code>/<code>dissoc</code> return the same concrete family and preserve the original</td>
+<td>supported; <code>empty</code> preserves the family</td>
+<td>unsupported unless the concrete ordered/sorted contract declares it</td>
+<td>entries are Hara <code>IPair</code> values</td>
+</tr>
+<tr>
+<td>Persistent sets (HAMT, ordered, sorted)</td>
+<td>callable membership returns the stored value or fallback</td>
+<td><code>conj</code>/removal return the same family and preserve the original</td>
+<td>supported; <code>empty</code> preserves the family</td>
+<td>ordered/sorted forms expose only their declared indexed contract</td>
+<td>yields unique values</td>
+</tr>
+<tr>
+<td>Vector</td>
+<td>callable <code>nth</code></td>
+<td><code>assoc</code> and <code>conj</code> return a new vector</td>
+<td>supported</td>
+<td>supported; negative and past-end indexes fail</td>
+<td>insertion order</td>
+</tr>
+<tr>
+<td>List</td>
+<td>lookup and <code>nth</code> through its sequential contract</td>
+<td><code>cons</code>/<code>push-first</code> prepend; navigation returns new lists</td>
+<td>supported</td>
+<td>supported by its declared sequential contract</td>
+<td>head to tail</td>
+</tr>
+<tr>
+<td>Queue</td>
+<td>sequential lookup</td>
+<td><code>conj</code>/<code>push-last</code> enqueue and preserve the original</td>
+<td>supported</td>
+<td>supported by its declared sequential contract</td>
+<td>head to tail</td>
+</tr>
+<tr>
+<td>Tuple</td>
+<td>callable <code>nth</code></td>
+<td>fixed-arity operations return the canonical resulting tuple arity</td>
+<td>supported; empty is canonical <code>Tup0</code></td>
+<td>supported</td>
+<td>tuple order</td>
+</tr>
+<tr>
+<td>Mutable Hara collections and <code>array</code>/<code>object</code> markers</td>
+<td>supported only by their declared protocols or restricted dot methods</td>
+<td>mutation returns the same identity and is immediately visible</td>
+<td>declared collection protocols only</td>
+<td>arrays support indexed access; objects use string keys</td>
+<td>declared protocol only</td>
+</tr>
+<tr>
+<td>Bytes</td>
+<td>byte lookup supports a fallback; <code>INth</code> exposes signed storage</td>
+<td><code>bytes/set</code> mutates the byte buffer and returns its identity</td>
+<td>count supported</td>
+<td>checked bounds</td>
+<td>byte order</td>
+</tr>
+<tr>
+<td><code>nil</code></td>
+<td>lookup returns <code>nil</code> or the supplied fallback</td>
+<td><code>conj</code> creates a singleton list; <code>assoc</code> is unsupported</td>
+<td>count is zero and empty is <code>nil</code></td>
+<td>unsupported</td>
+<td>empty iterator where explicitly requested</td>
+</tr>
+<tr>
+<td>Primitive scalar</td>
+<td>no collection lookup or update</td>
+<td>unsupported</td>
+<td>unsupported unless explicitly extended</td>
+<td>unsupported</td>
+<td>unsupported</td>
+</tr>
+<tr>
+<td>Foreign polyglot value</td>
+<td>only explicitly installed foreign extensions</td>
+<td>only explicitly installed foreign extensions</td>
+<td>only explicitly installed foreign extensions</td>
+<td>only explicitly installed foreign extensions</td>
+<td>only explicitly installed foreign extensions</td>
+</tr>
+</tbody>
+</table>
+<p>Duplicate map keys retain one entry with the last associated value. Duplicate set
+items retain one value. Invalid indexes and missing protocol implementations are
+errors identifying the protocol/method, receiver category, and searched dispatch
+path. Mutable and persistent operations must never silently cross their identity
+boundary.</p>
+<p>Hara remains iterator-first: this matrix does not imply Clojure <code>ISeq</code>,
+transducers, <code>transduce</code>, or <code>eduction</code> semantics.</p>
+<h3 id="72-protocol-dispatch-and-language-extensions">7.2 Protocol dispatch and language extensions<a class="headerlink" href="#72-protocol-dispatch-and-language-extensions" title="Permanent link">&para;</a></h3>
+<p>Protocols are language descriptors with context-local dispatch registries.
+Java interfaces are optional adapters and fast paths, not the language
+definition. <code>defprotocol</code> declares methods; <code>extend-type</code> installs language
+implementations; <code>protocol-call</code> performs dispatch. Dispatch supports Hara
+values, adapted Java values, primitives, nil, and foreign values. Replacing a
+method or extension invalidates affected dispatch assumptions.</p>
+<p><code>defstruct</code> creates immutable <code>HaraStruct</code> values. Struct metadata is separate
+from fields and survives <code>with-meta</code>; metadata does not affect value equality
+or hashing. <code>IFn</code> is a language protocol and can be extended to structs.
+<code>defmulti</code>/<code>defmethod</code> dispatch by Hara equality and support <code>:default</code>.</p>
+<h2 id="8-vars-namespaces-macros-and-modules">8. Vars, namespaces, macros, and modules<a class="headerlink" href="#8-vars-namespaces-macros-and-modules" title="Permanent link">&para;</a></h2>
+<p>Definitions live in namespace Vars. <code>var</code>, <code>deref</code>, <code>set!</code>, <code>alter-var-root</code>,
+and <code>binding</code> implement root and dynamic binding behavior. Dynamic bindings
+are restored after normal completion and guest errors. Namespace aliases and
+referred Vars preserve live Var identity.</p>
+<p><code>defmacro</code> runs in the context-local compile-time registry. Syntax-quote,
+unquote, unquote-splicing, variadic macros, <code>macroexpand-1</code>, and recursive
+<code>macroexpand</code> are supported. Literal <code>require</code> loads filesystem or packaged
+<code>.hal</code> modules during analysis when necessary, supports aliases, <code>:refer</code>,
+<code>:refer-macros</code>, and <code>:reload</code>, and rolls back failed loads transactionally.
+Already compiled Truffle call targets are immutable; a newly compiled source
+observes a reloaded macro/module definition.</p>
+<p>The packaged L0 bootstrap is intentionally small and language-level: its
+current functions are defined in <code>std/foundation.hal</code>. The complete Foundation
+stdlib and KMI/L1 port are later migration work, not hidden Java semantics.</p>
+<h2 id="9-host-and-native-image-boundary">9. Host and Native Image boundary<a class="headerlink" href="#9-host-and-native-image-boundary" title="Permanent link">&para;</a></h2>
+<p>Level 0 has no guest-visible JVM or general host interop. <code>host-symbol</code>,
+<code>host-get</code>, and <code>host-call</code> are unbound symbols. Polyglot array/member access is
+available only for values that explicitly expose that interop; guest dot calls
+remain restricted to <code>array</code> and <code>object</code> markers.
+Native Image must include the same language resources and supported adapters;
+reflection, generated classes, mutable classpaths, and unrestricted host
+loading are not required by the core profile.</p>
+<p>The JVM and Native Image profiles must execute the same conformance manifest.
+Native Image startup, binary size, reachability/build-report, and benchmark
+results are release evidence rather than language semantics.</p>
+<h2 id="10-conformance-and-intentional-differences">10. Conformance and intentional differences<a class="headerlink" href="#10-conformance-and-intentional-differences" title="Permanent link">&para;</a></h2>
+<p><code>l0-conformance.edn</code> is the stable executable corpus. Each case has an ID,
+category, source/setup, and expected value, type, readable form, or error.
+Implementations classify mismatches as a bug, a capability difference, or an
+approved specification revision. The current intentional differences from
+Clojure are: no mandatory ISeq/Seq, no ratios, no transducers/
+<code>transduce</code>/<code>eduction</code>, no <code>defrecord</code>, no <code>deftype</code>, and no <code>defn.xt</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "search.highlight", "search.suggest", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../../javascripts/hara.js"></script>
+      
+        <script src="../../javascripts/game.js"></script>
+      
+        <script src="../../javascripts/demo.js"></script>
+      
+        <script src="../../javascripts/console.js"></script>
+      
+    
+  </body>
+</html>

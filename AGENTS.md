@@ -48,6 +48,8 @@ cargo test --manifest-path rust/Cargo.toml
 cargo test --manifest-path rust/raw/Cargo.toml
 bash rust/scripts/check-layout.sh
 bash scripts/build-hara-wasm-raw             # raw wasm extension artifact
+bash scripts/build-hara-wasm-web             # browser runtime → website/docs/rust/pkg/
+bash scripts/build-demo-synth-wasm           # demo synth → website/docs/assets/wasm/
 cd rust/web && npm ci && npm run test:hta    # browser loader tests
 cd rust/web && npm run test:studio           # studio node tests (broker, hal, UI)
 ```

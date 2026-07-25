@@ -1,0 +1,25 @@
+(ns host.browser.dom (:require [host.local :as host]))
+
+(defn count [selector]
+  (host/call "browser.dom" "count" selector))
+
+(defn text [selector]
+  (host/call "browser.dom" "text" selector))
+
+(defn set-text [selector text]
+  (host/call "browser.dom" "set-text" selector text))
+
+(defn set-html [selector html]
+  (host/call "browser.dom" "set-html" selector html))
+
+(defn set-style [selector k v]
+  (host/call "browser.dom" "set-style" selector k v))
+
+(defn set-attr [selector k v]
+  (host/call "browser.dom" "set-attr" selector k v))
+
+(defn add-class [selector k]
+  (host/call "browser.dom" "add-class" selector k))
+
+(defn remove-class [selector k]
+  (host/call "browser.dom" "remove-class" selector k))
