@@ -46,11 +46,13 @@
   const BOOST_GAIN = 0.25;
   const LOOK_T = 0.5;
   const AI_MS = 40;
-  const ROUND_MS = 45000;
   const TAIL_CAP = 30;
-  const MAX_TAIL_LENGTH = 14; /* normalized units; old trail drops off so the tail follows the head */
+  const MAX_TAIL_LENGTH = 16; /* normalized units */
+  const TAIL_LIFE = 8; /* seconds before a trail segment fades away */
   const DEBRIS_LIFE = 5;
   const SCORE_SURVIVAL_PER_S = 0.5;
+  const SCORE_CENTER_PER_S = 8;
+  const SCORE_INVASION_PER_S = -6;
 
   const COLORS = ['#41f5e4', '#ff2e88', '#9c7bff', '#f5d742'];
   const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -65,6 +67,7 @@
     { xMin: X_MAX - CORNER_W, xMax: X_MAX, yMax: Y_MAX, yMin: Y_MAX - CORNER_H }           // 3 BR
   ];
   const DIAGONAL = { 0: 3, 3: 0, 1: 2, 2: 1 };
+  const CENTER = { xMin: -0.6, xMax: 0.6, yMin: (Y_MIN + Y_MAX) / 2 - 2.5, yMax: (Y_MIN + Y_MAX) / 2 + 2.5 };
 
   const rand = (a, b) => a + Math.random() * (b - a);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -259,37 +262,42 @@
     return len;
   };
 
-  const trimTail = (c) => {
+  const trimTail = (c, nowS) => {
     while (c.segments.length > 1 && tailLength(c) > MAX_TAIL_LENGTH) {
       c.segments.shift();
     }
     while (c.segments.length > TAIL_CAP) {
       c.segments.shift();
     }
-  };
-
-  const commitSegment = (c) => {
-    const seg = { a: [c.lastTurn[0], c.lastTurn[1]], b: [c.x, c.y] };
-    c.segments.push(seg);
-    trimTail(c);
-    c.lastTurn = [c.x, c.y];
-
-    /* territory scoring: length inside target corner */
-    const tz = CORNERS[c.targetCorner];
-    if (inZone(seg.a[0], seg.a[1], tz) && inZone(seg.b[0], seg.b[1], tz)) {
-      c.score += segLength(seg) * 10;
+    while (c.segments.length && c.segments[0].born < nowS - TAIL_LIFE) {
+      c.segments.shift();
     }
   };
 
-  const crash = (c) => {
+  const commitSegment = (c, nowS) => {
+    const seg = {
+      a: [c.lastTurn[0], c.lastTurn[1]],
+      b: [c.x, c.y],
+      born: nowS
+    };
+    c.segments.push(seg);
+    trimTail(c, nowS);
+    c.lastTurn = [c.x, c.y];
+  };
+
+  const crash = (c, nowS) => {
     c.alive = false;
     c.respawnIn = rand(1.0, 2.2);
     /* finalize the run up to the crash point as a segment */
     if (Math.hypot(c.x - c.lastTurn[0], c.y - c.lastTurn[1]) > 0.01) {
-      c.segments.push({ a: [c.lastTurn[0], c.lastTurn[1]], b: [c.x, c.y] });
-      trimTail(c);
+      c.segments.push({
+        a: [c.lastTurn[0], c.lastTurn[1]],
+        b: [c.x, c.y],
+        born: nowS
+      });
+      trimTail(c, nowS);
     }
-    if (c.segments.length) debris.push({ color: c.color, segments: c.segments, born: performance.now() / 1000 });
+    if (c.segments.length) debris.push({ color: c.color, segments: c.segments, born: nowS });
   };
 
   const respawn = (c) => {
@@ -363,12 +371,22 @@
     const g = buildGrid(c);
     const [dx, dy] = c.dir;
     const cands = [[dx, dy], [dy, -dx], [-dy, dx]];
-    const target = CORNERS[c.targetCorner];
-    const tx = (target.xMin + target.xMax) / 2;
-    const ty = (target.yMin + target.yMax) / 2;
-    const inTarget = inZone(c.x, c.y, target);
     const prey = findNearestOpponent(c);
     const recentTurns = turnEvents.filter((e) => e.time > nowS - 1.0 && e.cycle !== c);
+
+    /* choose objective: defend target quadrant if invaded, otherwise race to center */
+    const tz = CORNERS[c.targetCorner];
+    let invader = null, invaderD = Infinity;
+    for (const o of cycles) {
+      if (o === c || !o.alive) continue;
+      if (inZone(o.x, o.y, tz)) {
+        const d = Math.hypot(o.x - c.x, o.y - c.y);
+        if (d < invaderD) { invaderD = d; invader = o; }
+      }
+    }
+    const target = invader || CENTER;
+    const tx = (target.xMin + target.xMax) / 2;
+    const ty = (target.yMin + target.yMax) / 2;
 
     let best = null, bestScore = -Infinity;
     for (const d of cands) {
@@ -380,21 +398,15 @@
       const space = idx < 0 ? 0 : flood(g, idx, FLOOD_CAP);
       if (space < MIN_SPACE) continue;
 
-      let score = 0;
-      if (inTarget) {
-        /* fence mode: stay inside the target corner and make tight loops */
-        const stay = inZone(nx, ny, target) ? 20 : -10;
-        score += stay;
-        score += space * 0.3;
-      } else {
-        /* race mode: move toward target corner */
-        const before = Math.hypot(tx - c.x, ty - c.y);
-        const after = Math.hypot(tx - nx, ty - ny);
-        score += (before - after) * 15;
-        score += space * 0.4;
-      }
+      const before = Math.hypot(tx - c.x, ty - c.y);
+      const after = Math.hypot(tx - nx, ty - ny);
+      let score = (before - after) * (invader ? 18 : 15);
+      score += space * 0.5;
       if (d[0] === dx && d[1] === dy) score += 8;
       if (space < 15) score -= 20;
+
+      /* once near the center, prefer staying there */
+      if (!invader && inZone(nx, ny, CENTER)) score += 15;
 
       for (const e of recentTurns) {
         if (pathCrossesTurn(c, d, e)) score -= 30;
@@ -424,7 +436,7 @@
     if (!best) return;
 
     if (best[0] !== dx || best[1] !== dy) {
-      commitSegment(c);
+      commitSegment(c, nowS);
       const oldDir = c.dir.slice();
       c.dir = best.slice();
       c.boost = 0;
@@ -453,6 +465,14 @@
         continue;
       }
       c.score += SCORE_SURVIVAL_PER_S * dt;
+      if (inZone(c.x, c.y, CENTER)) c.score += SCORE_CENTER_PER_S * dt;
+      const tz = CORNERS[c.targetCorner];
+      for (const o of cycles) {
+        if (o !== c && o.alive && inZone(o.x, o.y, tz)) {
+          c.score += SCORE_INVASION_PER_S * dt;
+        }
+      }
+      trimTail(c, nowS);
       c.boost = Math.min(BOOST_MAX, c.boost + dt);
       const mult = 1 + c.boost * BOOST_GAIN;
       const px = c.x, py = c.y;
@@ -462,7 +482,7 @@
       if (outOfBounds(c.x, c.y)) {
         c.x = clamp(c.x, X_MIN, X_MAX);
         c.y = clamp(c.y, Y_MIN, Y_MAX);
-        crash(c);
+        crash(c, nowS);
         continue;
       }
 
@@ -470,7 +490,7 @@
       if (hit) {
         c.x = hit[0];
         c.y = hit[1];
-        crash(c);
+        crash(c, nowS);
       }
     }
   };
@@ -500,7 +520,8 @@
     ctx.lineJoin = 'miter';
     const nowS = now / 1000;
 
-    /* target corner glows */
+    /* target corner glows and shared center glow */
+    drawCornerGlow(CENTER, '#8ffff2', now);
     for (const c of cycles) {
       if (!c.alive) continue;
       drawCornerGlow(CORNERS[c.targetCorner], c.color, now);
@@ -515,7 +536,8 @@
     }
     for (const c of cycles) {
       for (const s of c.segments) {
-        segs.push({ a: s.a, b: s.b, color: c.color, alpha: 1 });
+        const fade = Math.max(0, 1 - (nowS - s.born) / TAIL_LIFE);
+        segs.push({ a: s.a, b: s.b, color: c.color, alpha: fade });
       }
       if (c.alive) {
         segs.push({ a: c.lastTurn, b: [c.x, c.y], color: c.color, alpha: 1 });
@@ -595,7 +617,7 @@
   window.__haraGame = { cycles, corners: CORNERS };
 
   let last = performance.now();
-  let aiAcc = 0, roundAcc = 0, winAcc = 0;
+  let aiAcc = 0, winAcc = 0;
 
   const frame = (now) => {
     const dt = Math.min(0.05, (now - last) / 1000);
@@ -607,18 +629,11 @@
       cycles.forEach((c) => c.alive && think(c, nowS));
       aiAcc -= AI_MS;
     }
-    roundAcc += dt * 1000;
-    if (roundAcc > ROUND_MS) {
-      startRound();
-      roundAcc = 0;
-      winAcc = 0;
-    }
     const alive = cycles.filter((c) => c.alive).length;
     if (alive <= 1) {
       winAcc += dt;
       if (winAcc > 1.5) {
         startRound();
-        roundAcc = 0;
         winAcc = 0;
       }
     } else {
