@@ -69,6 +69,22 @@ mkdocs build --strict -f website/mkdocs.yml
    `website/mkdocs.yml`).
 3. Verify with `mkdocs build --strict -f website/mkdocs.yml`.
 
+## Releasing the hara CLI
+
+`scripts/install.sh` is the user-facing installer (`curl | sh`); it downloads
+prebuilt binaries from GitHub releases. Test it locally with
+`sh scripts/test-install.sh` (needs
+`cargo build --release --manifest-path rust/Cargo.toml --bin hara` first).
+
+To cut a release:
+
+1. Bump `version` in `rust/Cargo.toml` and commit.
+2. `git tag vX.Y.Z && git push origin vX.Y.Z` (tag version must match
+   `rust/Cargo.toml`).
+3. `.github/workflows/release.yml` builds Linux x86_64 + macOS arm64/x86_64
+   binaries, publishes the GitHub release (prerelease while 0.x), and
+   smoke-tests `scripts/install.sh` against it.
+
 ## Conventions
 
 - Maven runs from the repo root via `-f java/pom.xml`; Surefire's working

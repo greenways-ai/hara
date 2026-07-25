@@ -43,13 +43,13 @@
   const X_MIN = -2.2, X_MAX = 2.2, Y_MIN = 0.30 * T_SCALE, Y_MAX = 0.90 * T_SCALE;
   /* per-axis speeds tuned so screen speed is equal in both directions
      (lateral ~165 viewBox px/s at mid depth, depth the same) */
-  const SPEED_K = 0.75;         // k units / s
-  const SPEED_T = 0.17;         // t units / s
+  const SPEED_K = 1.12;         // k units / s
+  const SPEED_T = 0.255;        // t units / s
   const BOOST_MAX = 2.4;        // seconds of straight drift that build boost
   const BOOST_GAIN = 0.55;      // speed multiplier gained per boosted second
   const LOOK_T = 0.55;          // seconds of travel the AI looks ahead
-  const DOOM_SPACE = 50;        // a pocket this small is not worth circling
-  const ROUND_MS = 40000;
+  const DOOM_SPACE = 12;        // keep turning through tight pockets
+  const ROUND_MS = 60000;
   const COLORS = ['#41f5e4', '#ff2e88', '#9c7bff'];
   const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
@@ -309,7 +309,7 @@
     for (const d of debris) {
       const w = d.wall;
       for (let i = 0; i < w.length - 1; i++) {
-        segs.push({ a: w[i], b: w[i + 1], color: d.color, alpha: 0.45 });
+        segs.push({ a: w[i], b: w[i + 1], color: d.color, alpha: 0.72 });
       }
     }
     for (const c of cycles) {
@@ -343,8 +343,8 @@
       ctx.moveTo(x1, y1 - h1);
       ctx.lineTo(x2, y2 - h2);
       ctx.strokeStyle = s.color;
-      ctx.globalAlpha = 0.13 * s.alpha;
-      ctx.lineWidth = 6;
+      ctx.globalAlpha = 0.2 * s.alpha;
+      ctx.lineWidth = 8;
       ctx.stroke();
       ctx.globalAlpha = 0.8 * s.alpha;
       ctx.lineWidth = 2;

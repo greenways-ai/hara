@@ -24,6 +24,12 @@ const FOUNDATION_FALLBACK: &str = include_str!("../../lib/src/std/lib/foundation
 
 fn ignore_socket_event(_event: core::SocketEvent) {}
 
+#[wasm_bindgen(start)]
+pub fn init_wasm() {
+    #[cfg(target_arch = "wasm32")]
+    console_error_panic_hook::set_once();
+}
+
 #[wasm_bindgen]
 pub struct PromiseHandle {
     promise: core::Promise,

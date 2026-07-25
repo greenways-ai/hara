@@ -26,6 +26,8 @@ extra_css:
 extra_javascript:
   - javascripts/hara.js
   - javascripts/game.js
+  - javascripts/demo.js
+  - javascripts/console.js
 markdown_extensions:
   - admonition
   - attr_list

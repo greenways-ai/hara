@@ -1,5 +1,18 @@
 # Getting started
 
+## Install the hara CLI
+
+Linux (x86_64) and macOS (arm64, x86_64):
+
+```shell
+curl -fsSL https://raw.githubusercontent.com/hoebat/hara.lang/main/scripts/install.sh | sh
+```
+
+This installs the native `hara` binary to `~/.local/bin` — no JVM required. Override the
+location with `HARA_INSTALL_DIR`, pin a specific release with `HARA_VERSION=v0.1.0`.
+
+The sections below build the Java/Truffle runtime from source instead.
+
 ## 1. Install prerequisites
 
 Install JDK 21 and Maven, then verify:

@@ -4986,7 +4986,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 Ok(value)
             }
-            Form::Symbol(n) if n == "defn" => {
+            Form::Symbol(n) if n == "defn" || n == "defn-" => {
                 if fs.len() < 4 {
                     return Err("defn expects a name, parameters, and a body".into());
                 }
@@ -5002,19 +5002,31 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     cell.set_hara_metadata(metadata);
                 }
                 env.insert(name.clone(), Value::Var(cell.clone()));
-                let function = if matches!(&fs[2], Form::Vector(_)) {
-                    let (params, variadic) = function_parts(&fs[2])?;
+                // Optional docstring and attr-map sit between the name and
+                // the parameter vector (or arity clauses).
+                let mut rest = &fs[2..];
+                if matches!(rest.first(), Some(Form::String(_))) {
+                    rest = &rest[1..];
+                }
+                if matches!(rest.first(), Some(Form::Map(_))) {
+                    rest = &rest[1..];
+                }
+                if rest.is_empty() {
+                    return Err("defn expects a name, parameters, and a body".into());
+                }
+                let function = if matches!(rest.first(), Some(Form::Vector(_))) {
+                    let (params, variadic) = function_parts(&rest[0])?;
                     Value::Function(Rc::new(Function {
                         params,
                         variadic,
-                        body: fs[3..].to_vec(),
+                        body: rest[1..].to_vec(),
                         captured: Rc::new(RefCell::new(env.clone())),
                         name: Some(name.clone()),
                         native: None,
                         clauses: Vec::new(),
                     }))
                 } else {
-                    multi_arity_function(&name, &fs[2..], env)?
+                    multi_arity_function(&name, rest, env)?
                 };
                 cell.reset_value(function.clone());
                 cell.set_origin(definition_origin());

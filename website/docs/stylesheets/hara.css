@@ -154,6 +154,10 @@ body {
   margin-top: 1.6rem;
 }
 
+.md-main__inner:has(.hara-home) {
+  margin-top: 0;
+}
+
 .md-content__inner {
   max-width: 980px;
 }
@@ -290,7 +294,7 @@ body {
 .md-typeset code {
   background: var(--hara-raised);
   border: 1px solid rgba(65, 245, 228, .12);
-  border-radius: 2px;
+  border-radius: 14px;
   color: var(--hara-cyan-bright);
   font-family: var(--hara-mono);
   font-size: .78em;
@@ -567,7 +571,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 5vw;
-  padding: 8vh 6vw;
+  padding: 8vh 3vw;
   text-align: left;
   background:
     linear-gradient(160deg, rgba(20, 30, 48, .14), rgba(6, 9, 16, .20) 60%, rgba(10, 16, 26, .12));
@@ -580,41 +584,170 @@ body {
 }
 
 .hara-home-title {
-  flex: 1;
+  flex: 0 1 auto;
+  display: table;
+  width: max-content;
   max-width: none;
 }
 
 .hara-home-kicker {
   font-family: var(--hara-mono);
-  font-size: clamp(.6rem, .55rem + .35vw, .78rem);
+  font-size: .78rem;
   letter-spacing: .18em;
   color: var(--hara-cyan);
 }
 
 .hara-home-title h1 {
+  display: block;
   font-size: clamp(4.5rem, 14vw, 11rem);
   line-height: .9;
   letter-spacing: .06em;
   margin: 28px 0 10px;
   background: linear-gradient(105deg,
     #f4fbff 0%, #b8f8ee 28%, #41f5e4 52%, #37b6ff 78%, #8a6bff 105%);
+  background-size: 220% 100%;
+  background-position: 0% 50%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  -webkit-text-fill-color: transparent;
   filter: drop-shadow(0 0 34px rgba(65, 245, 228, .3));
+  animation: hara-wordmark-shimmer 18s ease-in-out infinite;
+}
+
+@keyframes hara-wordmark-shimmer {
+  0%, 8% { background-position: 0% 50%; }
+  50%, 58% { background-position: 100% 50%; }
+  92%, 100% { background-position: 0% 50%; }
 }
 
 .hara-home-tagline {
-  font-size: clamp(1.05rem, .85rem + 1.4vw, 1.9rem);
-  letter-spacing: -.02em;
-  color: #2bb3a6;
-  text-shadow: 0 0 18px rgba(65, 245, 228, .22);
   margin: 0;
+  font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  font-size: 1.2rem;
+  font-style: italic;
+  font-weight: 500;
+  letter-spacing: -.045em;
+  background: linear-gradient(105deg, #41f5e4 0%, #58c9dd 35%, #9c7bff 72%, #4b247a 100%);
+  background-size: 180% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 16px rgba(65, 245, 228, .16));
+}
+
+.hara-home-hero-line {
+  display: table;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.hara-home-tagline {
+  display: table-cell;
+  vertical-align: middle;
+  padding-right: 2rem;
 }
 
 .hara-home-intro .hara-home-actions {
-  margin: 0;
-  flex-shrink: 0;
+  justify-content: flex-start;
+  margin: 28px 0 0;
+}
+
+.hara-home-intro .md-button--primary {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
+  min-width: 190px;
+  padding: 1rem 1.5rem;
+  color: #eafcff !important;
+  background: linear-gradient(145deg, rgba(255, 255, 255, .2), rgba(65, 245, 228, .12));
+  border: 1px solid rgba(143, 255, 242, .52);
+  -webkit-backdrop-filter: blur(12px) saturate(1.35);
+  backdrop-filter: blur(12px) saturate(1.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .3), 0 0 24px rgba(65, 245, 228, .16);
+}
+
+.hara-home-intro .md-button--primary::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  width: 18px;
+  height: 18px;
+  top: 50%;
+  right: -10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff 0 8%, #a5fff5 25%, #41f5e4 52%, rgba(65, 245, 228, 0) 74%);
+  transform: translateY(-50%) scale(1);
+  box-shadow: 0 0 10px 3px rgba(65, 245, 228, .6), 0 0 28px 8px rgba(65, 245, 228, .22);
+  transition: transform .9s cubic-bezier(.16, 1, .3, 1), box-shadow .9s ease;
+  animation: hara-cta-orb 4.5s ease-in-out infinite;
+}
+
+.hara-home-intro .md-button--primary:hover::before {
+  transform: translateY(-50%) scale(2.45);
+  box-shadow: 0 0 14px 5px rgba(65, 245, 228, .8), 0 0 42px 16px rgba(65, 245, 228, .38), 0 0 80px 22px rgba(156, 123, 255, .18);
+  animation: none;
+}
+
+.hara-start {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: clamp(150px, 18vw, 180px);
+  min-height: clamp(72px, 8vw, 86px);
+  padding: clamp(.8rem, 1.5vw, 1rem) clamp(1.2rem, 2vw, 1.8rem);
+  color: #061316;
+  display: table-cell;
+  width: 1%;
+  vertical-align: middle;
+  position: relative;
+  left: -14px;
+  font-family: var(--hara-mono);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: .22em;
+  text-align: center;
+  text-decoration: none !important;
+  border: 0 !important;
+  outline: none;
+  border-radius: 22px;
+  background: linear-gradient(105deg,
+    #f4fbff 0%, #b8f8ee 28%, #41f5e4 52%, #37b6ff 78%, #8a6bff 105%);
+  background-size: 220% 100%;
+  background-position: 0% 50%;
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
+  box-shadow: 0 0 18px rgba(65, 245, 228, .42), 0 0 42px rgba(156, 123, 255, .2);
+  opacity: .62;
+  transition: transform .9s cubic-bezier(.16, 1, .3, 1), letter-spacing .9s cubic-bezier(.16, 1, .3, 1), opacity .7s ease, filter .9s ease, box-shadow .9s ease;
+  animation: hara-start-pulse 4.5s ease-in-out infinite,
+    hara-wordmark-shimmer 18s ease-in-out infinite;
+}
+
+.hara-start:hover {
+  color: #061316;
+  letter-spacing: .08em;
+  transform: scale(1.1) translateY(-3px);
+  opacity: 1;
+  filter: brightness(1.22) saturate(1.15);
+  box-shadow: 0 0 26px rgba(65, 245, 228, .65), 0 0 68px rgba(156, 123, 255, .38);
+}
+
+@keyframes hara-start-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.035); }
+}
+
+@keyframes hara-cta-orb {
+  0%, 100% { transform: translateY(-50%) scale(.92); opacity: .82; }
+  50% { transform: translateY(-50%) scale(1.16); opacity: 1; }
+}
+
+.hara-home-intro .md-button--primary:hover {
+  background: linear-gradient(145deg, rgba(255, 255, 255, .3), rgba(65, 245, 228, .2));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .4), 0 0 30px rgba(65, 245, 228, .32);
 }
 
 .hara-home-actions {
@@ -650,6 +783,16 @@ body {
   position: relative;
   transition: transform .2s, border-color .2s, box-shadow .2s;
 }
+
+.hara-home-card:nth-child(even) {
+  color: #0a141d !important;
+  background: linear-gradient(145deg, rgba(255, 255, 255, .82), rgba(212, 232, 235, .52));
+  border-color: rgba(255, 255, 255, .42);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  backdrop-filter: blur(12px) saturate(1.2);
+}
+
+.hara-home-card:nth-child(even) span:last-child { color: #425260; }
 
 /* corner ticks on cards */
 .hara-home-card::before,
@@ -708,9 +851,59 @@ body {
   margin: 90px auto 0;
 }
 
+/* Alternating glass surfaces keep the landing page legible over the moving
+   Tron field while giving each section its own visual temperature. */
+.hara-glass {
+  padding: clamp(1.25rem, 3vw, 2.5rem);
+  border: 1px solid rgba(255, 255, 255, .16);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  backdrop-filter: blur(12px) saturate(1.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16), 0 24px 70px rgba(0, 0, 0, .28);
+}
+
+.hara-glass--dark {
+  background: linear-gradient(145deg, rgba(3, 5, 10, .78), rgba(13, 20, 31, .58));
+}
+
+.hara-glass--dark-soft {
+  background: linear-gradient(145deg, rgba(3, 5, 10, .58), rgba(13, 20, 31, .42));
+}
+
+.hara-glass--light {
+  color: #081019;
+  background: linear-gradient(145deg, rgba(255, 255, 255, .84), rgba(210, 232, 235, .56));
+  border-color: rgba(255, 255, 255, .48);
+}
+
+.hara-glass--light .hara-kicker,
+.hara-glass--light .hara-console-head,
+.hara-glass--light .hara-demo-note,
+.hara-glass--light .hara-strip > span {
+  color: #425260;
+}
+
+.hara-glass--light .hara-console-head,
+.hara-glass--light .hara-console-entry,
+.hara-glass--light .hara-strip {
+  border-color: rgba(8, 16, 25, .18);
+}
+
+.hara-glass--light .hara-tty,
+.hara-glass--light .hara-console-line {
+  color: #172733;
+}
+
+.hara-glass--light .hara-tty-o { color: #61717c; }
+
+.hara-glass--light .hara-console-input { color: #087f75; }
+
 .hara-home-section > .hara-kicker {
   display: block;
   margin-bottom: 18px;
+}
+
+.hara-home > .hara-home-section:first-child {
+  margin-top: 0;
 }
 
 /* mock REPL console */
@@ -763,6 +956,138 @@ body {
   border-bottom: 0;
 }
 
+/* live console (home page, wasm runtime) */
+
+.hara-console-log {
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.hara-console-line {
+  padding: 0 1.2rem;
+  font-family: var(--hara-mono);
+  font-size: .74rem;
+  line-height: 1.8;
+  color: var(--hara-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.hara-console-line--error,
+.hara-console-err {
+  color: #ff7b93;
+}
+
+.hara-console-entry {
+  display: flex;
+  align-items: baseline;
+  gap: .6em;
+  padding: .6rem 1.2rem;
+  border-top: 1px solid var(--hara-line);
+  background: rgba(3, 5, 10, .6);
+  font-family: var(--hara-mono);
+  font-size: .74rem;
+}
+
+.hara-console-input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--hara-cyan-bright);
+  font-family: var(--hara-mono);
+  font-size: .74rem;
+  caret-color: var(--hara-cyan);
+}
+
+.hara-console-input::placeholder {
+  color: var(--hara-faint);
+}
+
+.hara-command-deck {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .55rem;
+  padding: .7rem 1.2rem;
+  border-top: 1px solid var(--hara-line);
+  background: rgba(3, 5, 10, .34);
+}
+
+.hara-command-label,
+.hara-command {
+  font-family: var(--hara-mono);
+  font-size: .58rem;
+  letter-spacing: .14em;
+}
+
+.hara-command-label {
+  margin-right: .35rem;
+  color: var(--hara-faint);
+}
+
+.hara-command {
+  padding: .5rem .7rem;
+  color: var(--hara-cyan);
+  background: rgba(65, 245, 228, .05);
+  border: 1px solid var(--hara-line);
+  cursor: pointer;
+  transition: color .25s ease, background .4s ease, border-color .4s ease, box-shadow .5s ease, transform .5s cubic-bezier(.16, 1, .3, 1);
+}
+
+.hara-command:hover,
+.hara-command:focus-visible {
+  color: #061316;
+  background: var(--hara-cyan);
+  border-color: var(--hara-cyan);
+  box-shadow: 0 0 18px rgba(65, 245, 228, .35);
+  transform: translateY(-2px);
+}
+
+/* home demo panels (wasm sound demos) */
+
+.hara-demo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 900px) {
+  .hara-demo-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.hara-demo-canvas {
+  display: block;
+  width: 100%;
+  height: 220px;
+  background: rgba(3, 5, 10, .6);
+}
+
+.hara-demo-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: .8rem 1rem;
+}
+
+.hara-demo-actions .md-button {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.hara-demo-note {
+  font-family: var(--hara-mono);
+  font-size: .62rem;
+  letter-spacing: .12em;
+  color: var(--hara-faint);
+}
+
+.hara-demo .hara-strip {
+  border-bottom: 0;
+}
+
 /* closing call to action */
 .hara-cta {
   padding: 3rem;
@@ -790,17 +1115,60 @@ body {
   .hara-scene__layer {
     transform: none;
   }
+
+  .hara-home-title h1 {
+    animation: none;
+  }
+
+  .hara-start {
+    animation: none;
+  }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 900px) {
   .hara-home-intro {
     flex-direction: column;
     justify-content: center;
     gap: 6vh;
+    text-align: center;
+    padding-inline: 5vw;
   }
 
   .hara-home-title {
+    display: block;
+    width: 100%;
     max-width: none;
+  }
+
+  .hara-home-title h1 {
+    font-size: clamp(4.5rem, 14vw, 8rem);
+  }
+
+  .hara-home-tagline {
+    font-size: 1rem;
+  }
+
+  .hara-home-hero-line {
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .hara-home-tagline {
+    display: block;
+    padding-right: 0;
+  }
+
+  .hara-start {
+    display: inline-flex;
+    width: auto;
+  }
+
+  .hara-home-intro .hara-home-actions {
+    justify-content: center;
+    flex-direction: row;
+    align-items: center;
   }
 
   .hara-home-grid {

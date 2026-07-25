@@ -60,3 +60,7 @@ parse_jacoco.py
 
 # local worktrees
 .worktrees/
+
+# generated wasm-bindgen runtime for the site (scripts/build-hara-wasm-web;
+# the deployed site gets a fresh copy from pages.yml)
+website/docs/rust/pkg/

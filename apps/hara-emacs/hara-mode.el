@@ -17,6 +17,7 @@
 (require 'xref)
 
 (declare-function eldoc-box-help-at-point "eldoc-box")
+(declare-function projectile-register-project-type "projectile")
 
 (defgroup hara nil "Hara language tooling." :group 'languages)
 
@@ -681,13 +682,24 @@ Return (VALUE . NEXT-OFFSET), or signal `hara-resp-incomplete'."
   (interactive)
   (hara-eval-region (point-min) (point-max)))
 
+(defun hara--last-sexp-bounds ()
+  "Return (START . END) of the form preceding point.
+When point is inside or before a symbol, the symbol is completed first
+so a partial name is never evaluated."
+  (cons (save-excursion
+          (skip-syntax-forward "w_")
+          (backward-sexp)
+          (point))
+        (save-excursion
+          (skip-syntax-forward "w_")
+          (point))))
+
 ;;;###autoload
 (defun hara-eval-last-sexp ()
   "Evaluate the form preceding point."
   (interactive)
-  (let ((end (point))
-        (start (save-excursion (backward-sexp) (point))))
-    (hara-eval-region start end)))
+  (let ((bounds (hara--last-sexp-bounds)))
+    (hara-eval-region (car bounds) (cdr bounds))))
 
 ;;;###autoload
 (defun hara-eval-defun ()
@@ -707,7 +719,7 @@ Return (VALUE . NEXT-OFFSET), or signal `hara-resp-incomplete'."
     (condition-case error
         (let ((end (point))
               (start (save-excursion
-                       (skip-syntax-backward "w_./*+!?<>=:-")
+                       (skip-syntax-backward "w_")
                        (point))))
           (list start end
                 (hara--request-sync
@@ -720,10 +732,10 @@ Return (VALUE . NEXT-OFFSET), or signal `hara-resp-incomplete'."
 
 (defun hara--symbol-at-point ()
   (let ((start (save-excursion
-                 (skip-syntax-backward "w_./*+!?<>=:-")
+                 (skip-syntax-backward "w_")
                  (point)))
         (end (save-excursion
-               (skip-syntax-forward "w_./*+!?<>=:-")
+               (skip-syntax-forward "w_")
                (point))))
     (unless (= start end)
       (buffer-substring-no-properties start end))))
@@ -934,9 +946,9 @@ Return (VALUE . NEXT-OFFSET), or signal `hara-resp-incomplete'."
     (modify-syntax-entry ?\; "<" table)
     (modify-syntax-entry ?\n ">" table)
     (modify-syntax-entry ?\" "\"" table)
-    (modify-syntax-entry ?- "_" table)
-    (modify-syntax-entry ?? "_" table)
-    (modify-syntax-entry ?! "_" table)
+    ;; Hara symbol constituents beyond word characters.
+    (dolist (char (string-to-list "-_*+!?<>=/.:&%$"))
+      (modify-syntax-entry char "_" table))
     table))
 
 (defconst hara-font-lock-keywords
@@ -997,6 +1009,14 @@ Return (VALUE . NEXT-OFFSET), or signal `hara-resp-incomplete'."
 
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.hal\\'" . hara-mode))
+
+;;;###autoload
+(with-eval-after-load 'projectile
+  (projectile-register-project-type
+   'hara '("project.hal")
+   :src-dir "src/"
+   :test-dir "test/"
+   :test-suffix "_test"))
 
 (provide 'hara-mode)
 ;;; hara-mode.el ends here

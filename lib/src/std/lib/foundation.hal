@@ -798,19 +798,19 @@
    true) for value and its condition/step clause pairs."
   [value clauses last?]
   (if (= 0 (count clauses))
-    value
+      value
     (let [condition (first clauses)
           step (second clauses)
           remaining (vec (drop 2 clauses))
           result-symbol (gensym "result")
           threaded (if last?
-                     (thread-last-form result-symbol step)
+                       (thread-last-form result-symbol step)
                      (thread-first-form result-symbol step))]
       (list 'let [result-symbol value]
-            (list 'if
-                  condition
-                  (conditional-thread-form threaded remaining last?)
-                  (conditional-thread-form result-symbol remaining last?))))))
+             (list 'if
+                    condition
+                    (conditional-thread-form threaded remaining last?)
+                    (conditional-thread-form result-symbol remaining last?))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Macros
@@ -857,3 +857,4 @@
 (defmacro code-column
   "Expands to the column number of the invocation form."
   [] (get (meta &form) :column))
+

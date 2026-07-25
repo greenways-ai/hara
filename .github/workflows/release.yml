@@ -1,0 +1,121 @@
+name: Release hara CLI
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to rebuild/release (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Resolve tag and verify it matches rust/Cargo.toml
+      id: meta
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          TAG="${{ inputs.tag }}"
+          git fetch --tags origin
+          git rev-parse --verify "refs/tags/$TAG" >/dev/null
+        else
+          TAG="${GITHUB_REF#refs/tags/}"
+        fi
+        VERSION="${TAG#v}"
+        CRATE_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -n 1)
+        if [ "$VERSION" != "$CRATE_VERSION" ]; then
+          echo "tag version '$VERSION' does not match rust/Cargo.toml version '$CRATE_VERSION'" >&2
+          exit 1
+        fi
+        echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: guard
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+        - { os: macos-13,       target: x86_64-apple-darwin }
+        - { os: macos-latest,   target: aarch64-apple-darwin }
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+    - name: Build release binary
+      run: cargo build --release --manifest-path rust/Cargo.toml --target ${{ matrix.target }} --bin hara
+    - name: Smoke-test binary
+      run: |
+        BIN=rust/target/${{ matrix.target }}/release/hara
+        OUTPUT=$("$BIN" eval '(+ 19 23)')
+        [ "$OUTPUT" = "42" ] || { echo "unexpected eval output: $OUTPUT" >&2; exit 1; }
+    - name: Package tarball
+      run: |
+        TAG="${{ needs.guard.outputs.tag }}"
+        DEST="hara-$TAG-${{ matrix.target }}.tar.gz"
+        tar -czf "$DEST" -C rust/target/${{ matrix.target }}/release hara
+        echo "asset=$DEST" >> "$GITHUB_ENV"
+    - uses: actions/upload-artifact@v4
+      with:
+        name: release-${{ matrix.target }}
+        path: ${{ env.asset }}
+
+  release:
+    needs: [guard, build]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: release-*
+        path: dist
+        merge-multiple: true
+    - name: Create checksums
+      run: |
+        cd dist
+        sha256sum hara-*.tar.gz > SHA256SUMS
+    - name: Create GitHub release
+      run: |
+        TAG="${{ needs.guard.outputs.tag }}"
+        VERSION="${{ needs.guard.outputs.version }}"
+        FLAGS=""
+        case "$VERSION" in 0.*) FLAGS="--prerelease" ;; esac
+        gh release create "$TAG" \
+          --title "hara $TAG" \
+          --notes "Prebuilt hara native CLI. Install with:
+        
+            curl -fsSL https://raw.githubusercontent.com/hoebat/hara.lang/main/scripts/install.sh | sh
+        " \
+          $FLAGS \
+          dist/hara-*.tar.gz dist/SHA256SUMS
+
+  smoke-install:
+    needs: [guard, release]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install via scripts/install.sh
+      run: |
+        TAG="${{ needs.guard.outputs.tag }}"
+        INSTALL_DIR="$RUNNER_TEMP/hara-bin"
+        HARA_VERSION="$TAG" HARA_INSTALL_DIR="$INSTALL_DIR" sh scripts/install.sh
+        OUTPUT=$("$INSTALL_DIR/hara" eval '(+ 19 23)')
+        [ "$OUTPUT" = "42" ] || { echo "unexpected eval output: $OUTPUT" >&2; exit 1; }

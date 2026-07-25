@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+MANIFEST="$ROOT/rust/extensions/demo-synth/Cargo.toml"
+OUT_DIR="$ROOT/website/docs/assets/wasm"
+
+cargo build --manifest-path "$MANIFEST" --target wasm32-unknown-unknown --release
+
+mkdir -p "$OUT_DIR"
+cp "$ROOT/rust/extensions/demo-synth/target/wasm32-unknown-unknown/release/hara_demo_synth.wasm" \
+   "$OUT_DIR/demo-synth.wasm"
+echo "Built $OUT_DIR/demo-synth.wasm"
