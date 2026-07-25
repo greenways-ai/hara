@@ -392,6 +392,8 @@
     (loop [cs (:cycles @state)]
       (if (empty? cs)
         nil
-        (do (draw-trail (first cs) zoom pan-x pan-y)
-            (draw-head (first cs) zoom pan-x pan-y)
-            (recur (rest cs)))))))
+        (let [c (first cs)]
+          (draw-trail c zoom pan-x pan-y)
+          (if (:alive c)
+            (draw-head c zoom pan-x pan-y))
+          (recur (rest cs)))))))

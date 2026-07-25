@@ -47,7 +47,7 @@
         phase (:phase st)
         timer (:note-timer st)
         new-phase (+ phase (* dt wave-speed))
-        new-phase-wrapped (if (> new-phase 1.0) (- new-phase 1.0) new-phase)
+        new-phase-wrapped (mod new-phase 1.0)
         new-timer (+ timer dt-ms)]
     (canvas/clear canvas-selector)
     (if (>= new-timer note-interval)
