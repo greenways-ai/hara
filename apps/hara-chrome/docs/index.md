@@ -9,8 +9,10 @@ panel REPL and exposes the Chrome API to hara:
 
 Features:
 
-- **Panel REPL** — the raw hara wasm runtime in a Web Worker; host calls
-  round-trip to the service worker where real `chrome.*` calls execute.
+- **Panel studio** — the shared hara studio environment (kernel broker,
+  spaces/files over IndexedDB, editor + REPL) running the raw hara wasm
+  runtime in Web Workers; `chrome.*` host calls round-trip to the service
+  worker where real Chrome API calls execute.
 - **`chrome.api`** — the full Chrome API surface, callable from hara
   (including `chrome.debugger`/CDP for automation scripts).
 - **Home directory** — pick a local directory and `load`/`require` `.hal`

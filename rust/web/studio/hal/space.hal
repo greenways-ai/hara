@@ -1,0 +1,83 @@
+; Space lifecycle on top of studio.store and studio.fs. A space is a meta
+; entry at spaces/<name>/meta plus its files (see studio.fs). Use via
+; (require [studio.space :as space]).
+(ns studio.space
+  (:require [studio.store :as store]
+            [studio.fs :as fs]))
+
+(defn meta-key [name]
+  (str "spaces/" name "/meta"))
+
+(defn create! [name]
+  (store/put! (meta-key name) (str "space:" name)))
+
+(defn exists? [name]
+  (not (nil? (store/get (meta-key name)))))
+
+(defn files [name]
+  (fs/list name "/"))
+
+(defn tree [name]
+  (fs/list name "/"))
+
+(defn http-get [url]
+  (deref (host/call "http" "get" url)))
+
+(defn json-parse [text]
+  (deref (host/call "json" "parse" text)))
+
+; Space name from a store key: "spaces/<name>/..." -> "<name>".
+(defn space-name [key]
+  (let [rest (str/substring key (str/count "spaces/"))]
+    (str/substring rest 0 (str/index-of rest "/"))))
+
+; Every space mentioned by any spaces/<name>/... key, whether the name comes
+; from a meta entry or a file written before the space was created.
+(defn list-spaces []
+  (loop [it (iter (store/keys "spaces/"))
+         acc {}]
+    (if (iter-has? it)
+      (recur it (assoc acc (space-name (iter-next it)) true))
+      (keys acc))))
+
+(defn listing-url [repo ref]
+  (str "https://data.jsdelivr.com/v1/packages/gh/" repo "@" ref))
+
+(defn file-url [repo ref path]
+  (str "https://cdn.jsdelivr.net/gh/" repo "@" ref path))
+
+; Flattens the jsDelivr tree listing into a list of file paths. The listing
+; arrives via json/parse: maps with string keys, vectors for arrays.
+(defn collect-files [entries acc]
+  (loop [it (iter entries)
+         out acc]
+    (if (iter-has? it)
+      (let [entry (iter-next it)]
+        (if (= (get entry "type") "directory")
+          (recur it (collect-files (get entry "files") out))
+          (recur it (conj out (get entry "name")))))
+      out)))
+
+(defn fetch-file [repo ref path]
+  (try
+    (http-get (file-url repo ref path))
+    (catch error
+      (throw (str "import-github! failed to fetch " path)))))
+
+(defn import-github!
+  ([space repo] (import-github! space repo {:ref "main"}))
+  ([space repo opts]
+   (let [ref (get opts :ref "main")
+         listing (json-parse (http-get (listing-url repo ref)))
+         paths (reverse (collect-files (get listing "files") (quote ())))]
+     ; let takes a single body form in this dialect — sequence with do.
+     (do
+       (create! space)
+       (loop [it (iter paths)
+              imported 0]
+         (if (iter-has? it)
+           (let [path (iter-next it)]
+             (do
+               (fs/write! space path (fetch-file repo ref path))
+               (recur it (+ imported 1))))
+           {:space space :repo repo :ref ref :imported imported}))))))

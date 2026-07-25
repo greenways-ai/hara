@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,4 +22,20 @@ for (const [from, to] of files) {
   }
   copyFileSync(from, to);
   console.log(`synced ${path.basename(to)}`);
+}
+
+// Studio environment (broker, host services, boot template, UI, styles, hal
+// libs): copied preserving the layout — vendor/studio/*.js import "../hta.js"
+// and the panel fetches vendor/studio/hal/*.hal as kernel resources.
+const studio = path.join(repo, "rust/web/studio");
+for (const [sub, filter] of [
+  ["", (name) => name.endsWith(".js") || name.endsWith(".css")],
+  ["hal", (name) => name.endsWith(".hal")],
+]) {
+  const out = path.join(vendor, "studio", sub);
+  mkdirSync(out, { recursive: true });
+  for (const name of readdirSync(path.join(studio, sub)).filter(filter)) {
+    copyFileSync(path.join(studio, sub, name), path.join(out, name));
+    console.log(`synced studio/${sub ? `${sub}/` : ""}${name}`);
+  }
 }

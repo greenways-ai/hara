@@ -6,6 +6,7 @@
     "build:noir": "vite build --config vite.noir.config.js && vite build --config vite.noir-node.config.js && node package-noir-extension.mjs",
     "test:noir": "npm run build:noir && node --test noir-loader.test.js",
     "test:hta": "node --test hta.test.js",
+    "test:studio": "node --test studio-host-services.test.mjs studio-broker.test.mjs studio-hal.test.mjs studio-ui.test.mjs",
     "test:browser": "playwright test"
   },
   "dependencies": {

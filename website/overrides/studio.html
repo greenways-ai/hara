@@ -2,82 +2,24 @@
 {% block tabs %}{% endblock %}
 {% block container %}
 <!--
-  Hara Studio — teaching environment shell (UI first).
+  Hara Studio — live teaching environment.
 
-  Wasm wiring points (runtime not yet linked):
-    [data-hara-studio="editor"]  readonly view now; becomes the wasm-backed
-                                 editor buffer (loader: rust/web/hta.js + hara.wasm,
-                                 deployed under site-build/rust/ by pages.yml)
-    [data-hara-studio="repl-log"] / [data-hara-studio="repl-input"]
-                                 echo-only now; becomes the live wasm REPL
-    [data-hara-studio="file-tree"] mock lesson files; becomes the virtual FS
-                                 rooted at the configured home directory
+  The whole UI is built by the shared studio component
+  (rust/web/studio/ui.js, deployed under /rust/studio/ by pages.yml) inside
+  the mount point below; website/docs/javascripts/studio.js is the thin
+  bootstrap that fetches the raw wasm module + studio hal resources, creates
+  the kernel broker, and mounts the UI. Styling comes from
+  rust/web/studio/studio.css (@imported by stylesheets/hara.css).
 -->
-<div class="hara-studio" data-hara-studio="shell">
-  <div class="hara-studio-head">
-    <span class="hara-kicker">HARA STUDIO</span>
-    <span class="hara-index">ENV/00 · TEACHING BUILD</span>
-  </div>
-
-  <div class="hara-studio-steps" data-hara-studio="steps">
-    <span class="hara-studio-step is-active" data-file="01-intro.hal">01 / INTRO</span>
-    <span class="hara-studio-step" data-file="02-values.hal">02 / VALUES</span>
-    <span class="hara-studio-step" data-file="03-functions.hal">03 / FUNCTIONS</span>
-    <span class="hara-studio-step" data-file="04-promises.hal">04 / PROMISES</span>
-  </div>
-
-  <div class="hara-studio-main">
-    <aside class="hara-frame hara-studio-tree" data-hara-studio="file-tree">
-      <div class="hara-studio-pane-head"><span>FILES</span><span class="hara-index">~/lessons</span></div>
-      <div class="hara-studio-tree-group">LESSONS</div>
-      <div class="hara-studio-file is-active" data-file="01-intro.hal"><span class="hara-index">01</span> intro.hal</div>
-      <div class="hara-studio-file" data-file="02-values.hal"><span class="hara-index">02</span> values.hal</div>
-      <div class="hara-studio-file" data-file="03-functions.hal"><span class="hara-index">03</span> functions.hal</div>
-      <div class="hara-studio-file" data-file="04-promises.hal"><span class="hara-index">04</span> promises.hal</div>
-      <div class="hara-studio-tree-group">PLAYGROUND</div>
-      <div class="hara-studio-file" data-file="scratch.hal"><span class="hara-index">&#9674;</span> scratch.hal</div>
-    </aside>
-
-    <section class="hara-frame hara-studio-editor-wrap">
-      <div class="hara-studio-pane-head">
-        <span data-hara-studio="editor-name">01-intro.hal</span>
-        <span class="hara-index">READONLY · WASM PENDING</span>
+<div id="hara-studio-mount" data-hara-studio="mount">
+  <noscript>
+    <div class="hara-studio">
+      <div class="hara-studio-head">
+        <span class="hara-kicker">HARA STUDIO</span>
+        <span class="hara-index">JAVASCRIPT REQUIRED</span>
       </div>
-      <pre class="hara-studio-editor" data-hara-studio="editor">;; 01 / INTRO — everything is a form
-;;
-;; A form evaluates to a value. Try one in
-;; the console below.
-
-(ns lessons.intro)
-
-(+ 1 2 3)</pre>
-    </section>
-
-    <section class="hara-frame hara-studio-repl">
-      <div class="hara-studio-pane-head">
-        <span>CONSOLE</span>
-        <span class="hara-index">TTY/01 · MOCK</span>
-      </div>
-      <div class="hara-studio-repl-log" data-hara-studio="repl-log">
-        <div class="hara-tty-o">;; hara studio — wasm runtime not yet linked</div>
-        <div><span class="hara-tty-p">hara ›</span> (+ 1 2 3)</div>
-        <div class="hara-tty-v">=&gt; 6</div>
-      </div>
-      <div class="hara-studio-repl-entry">
-        <span class="hara-tty-p">hara ›</span>
-        <input class="hara-studio-repl-input" data-hara-studio="repl-input"
-               type="text" placeholder="(your first form)" autocomplete="off"
-               spellcheck="false" aria-label="REPL input">
-      </div>
-    </section>
-  </div>
-
-  <div class="hara-strip hara-studio-status" data-hara-studio="status">
-    <span>RUNTIME <b>WASM · PENDING</b></span>
-    <span>HOME <b>~/lessons</b></span>
-    <span>FILES <b>5</b></span>
-    <span>STATE <b>IDLE</b></span>
-  </div>
+    </div>
+  </noscript>
 </div>
-<script src="{{ 'javascripts/studio.js' | url }}"></script>
+<script type="module" src="{{ 'javascripts/studio.js' | url }}"></script>
 {% endblock %}

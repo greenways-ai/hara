@@ -1,0 +1,38 @@
+; Virtual filesystem scoped to a space, on top of studio.store. Files live
+; under the key prefix spaces/<space>/files/<path>; directories are implicit
+; in paths (no mkdir bookkeeping). Use via (require [studio.fs :as fs]).
+;
+; Dialect notes (raw wasm foundation): no map/filter/conj-on-vector/reduce —
+; collect with loop/recur over iter, conj onto a list, then reverse. Never
+; return a lazy seq from eval (the HTA encoder hangs on it); lists and
+; vectors encode fine.
+(ns studio.fs
+  (:require [studio.store :as store]))
+
+(defn file-key [space path]
+  (str "spaces/" space "/files/" path))
+
+(defn write! [space path content]
+  (store/put! (file-key space path) content))
+
+(defn read [space path]
+  (store/get (file-key space path)))
+
+(defn delete! [space path]
+  (store/del! (file-key space path)))
+
+(defn exists? [space path]
+  (not (nil? (read space path))))
+
+(defn list [space dir]
+  (let [prefix (file-key space "")
+        dir-prefix (if (= dir "/") "/" (str dir "/"))
+        keys (store/keys prefix)]
+    (loop [it (iter keys)
+           acc (quote ())]
+      (if (iter-has? it)
+        (let [path (str/substring (iter-next it) (str/count prefix))]
+          (if (str/starts-with? path dir-prefix)
+            (recur it (conj acc path))
+            (recur it acc)))
+        (reverse acc)))))
