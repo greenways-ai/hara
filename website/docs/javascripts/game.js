@@ -1,8 +1,10 @@
 /* Hara grid game — ambient light cycles riding the perspective floor of the
    fixed background (.hara-bg). Cycles move in the floor plane, turn at right
-   angles, leave persistent walls, avoid collisions, crash and respawn.
-   Positions are kept in a normalized arena space (k, t*T_SCALE) and projected
-   with the same fan geometry as grid-scene.html (vanishing point 720,461;
+   angles, leave persistent walls, and steer by flood-fill pathfinding: they
+   turn when a wall or trail blocks them and hunt each other, cutting across
+   rival paths to force kills. Drifting in a straight line builds speed;
+   turning resets it. Positions are kept in a normalized arena space
+   (k, t*T_SCALE) and projected with a fan geometry (vanishing point 720,461;
    lateral spacing 36 at the horizon growing to 260 at the bottom). */
 (() => {
   const canvas = document.querySelector('[data-hara-component="game"]');
@@ -35,12 +37,16 @@
   };
 
   /* contained arena in normalized units: x = k (lateral), y = t * T_SCALE
-     (depth); the boundary is drawn as visible walls the cycles run into */
+     (depth). Sized to read as a square on screen; the boundary is an
+     invisible wall the cycles crash into */
   const T_SCALE = 28;
-  const X_MIN = -8, X_MAX = 8, Y_MIN = 0.28 * T_SCALE, Y_MAX = 0.92 * T_SCALE;
-  const SPEED = 2.1;            // normalized units / s
-  const EPS = 0.38;             // collision distance
-  const LOOKAHEAD = 1.7;
+  const X_MIN = -2.2, X_MAX = 2.2, Y_MIN = 0.30 * T_SCALE, Y_MAX = 0.90 * T_SCALE;
+  /* per-axis speeds tuned so screen speed is equal in both directions
+     (lateral ~120 viewBox px/s at mid depth, depth the same) */
+  const SPEED_K = 0.55;         // k units / s
+  const SPEED_T = 0.124;        // t units / s
+  const BOOST_MAX = 2.4;        // seconds of straight drift that build boost
+  const BOOST_GAIN = 0.5;       // speed multiplier gained per boosted second
   const ROUND_MS = 55000;
   const COLORS = ['#41f5e4', '#ff2e88', '#9c7bff'];
   const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -49,12 +55,12 @@
 
   const spawn = (color) => ({
     color,
-    x: rand(X_MIN + 2.5, X_MAX - 2.5),
-    y: rand(Y_MIN + 2.5, Y_MAX - 2.5),
+    x: rand(X_MIN * 0.6, X_MAX * 0.6),
+    y: rand(Y_MIN + 2, Y_MAX - 2),
     dir: DIRS[Math.floor(Math.random() * 4)].slice(),
     wall: [],
+    boost: 0,
     alive: true,
-    fade: 1,
     respawnIn: 0,
     fearless: false,
   });
@@ -62,82 +68,205 @@
   const cycles = COLORS.map(spawn);
   cycles.forEach((c) => c.wall.push([c.x, c.y]));
 
-  /* distance from point p to segment ab */
-  const segDist = (px, py, ax, ay, bx, by) => {
-    const dx = bx - ax, dy = by - ay;
-    const len2 = dx * dx + dy * dy;
-    let u = len2 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
-    u = Math.max(0, Math.min(1, u));
-    const cx = ax + u * dx, cy = ay + u * dy;
-    return Math.hypot(px - cx, py - cy);
-  };
+  /* walls of dead cycles: they stay on the field (drawn dimmer, still
+     lethal) until the round reset, so the arena fills up as kills land */
+  const debris = [];
+  const DEBRIS_CAP = 2400; /* max debris points kept */
 
   const outOfBounds = (x, y) => x < X_MIN || x > X_MAX || y < Y_MIN || y > Y_MAX;
 
-  /* cycle walls only; the arena boundary is separate so a fearless cycle
-     can choose to run straight into it */
-  const hitWall = (x, y, self) => {
-    for (const c of cycles) {
-      const w = c.wall;
-      /* ignore the fresh end of our own wall */
-      const end = c === self ? w.length - 8 : w.length - 1;
-      for (let i = 0; i < end; i++) {
-        const a = w[i], b = w[i + 1];
-        if (!b) break;
-        if (segDist(x, y, a[0], a[1], b[0], b[1]) < EPS) return true;
-      }
-    }
-    return false;
+  /* ---- pathfinding: coarse occupancy grid + flood fill ----------------
+     The arena is rasterized into cells (wall points plus a one-cell margin
+     for collision distance). A cycle evaluates straight/left/right by flood
+     filling the free space reachable from a step in that direction, and
+     steers toward the roomiest option — turning only when a wall or trail
+     genuinely blocks it. */
+
+  const CELL = 0.15;
+  const GX = Math.ceil((X_MAX - X_MIN) / CELL);
+  const GY = Math.ceil((Y_MAX - Y_MIN) / CELL);
+  const FLOOD_CAP = 400;
+  const MIN_SPACE = 25; /* candidates with less room than this are suicide */
+
+  const cellOf = (x, y) => {
+    const cx = Math.floor((x - X_MIN) / CELL);
+    const cy = Math.floor((y - Y_MIN) / CELL);
+    return (cx < 0 || cx >= GX || cy < 0 || cy >= GY) ? -1 : cy * GX + cx;
   };
 
-  const blockedAt = (x, y, self, fearless) =>
-    (!fearless && outOfBounds(x, y)) || hitWall(x, y, self);
-
-  const clearance = (x, y, dir, fearless) => {
-    for (let d = 0.5; d <= 9; d += 0.5) {
-      if (blockedAt(x + dir[0] * d, y + dir[1] * d, null, fearless)) return d;
+  const mark = (g, x, y) => {
+    const cx = Math.floor((x - X_MIN) / CELL);
+    const cy = Math.floor((y - Y_MIN) / CELL);
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (Math.abs(dx) + Math.abs(dy) > 1) continue; /* cross, not corners */
+        const nx = cx + dx, ny = cy + dy;
+        if (nx >= 0 && nx < GX && ny >= 0 && ny < GY) g[ny * GX + nx] = 1;
+      }
     }
-    return 9;
+  };
+
+  /* walls are polylines with points only at turns, so mark along the
+     segments, not just the points */
+  const markSeg = (g, ax, ay, bx, by) => {
+    const len = Math.hypot(bx - ax, by - ay);
+    const steps = Math.max(1, Math.ceil(len / (CELL * 0.5)));
+    for (let i = 0; i <= steps; i++) {
+      mark(g, ax + ((bx - ax) * i) / steps, ay + ((by - ay) * i) / steps);
+    }
+  };
+
+  /* mark a whole wall polyline */
+  const markWall = (g, w, hx, hy) => {
+    for (let i = 0; i < w.length - 1; i++) {
+      markSeg(g, w[i][0], w[i][1], w[i + 1][0], w[i + 1][1]);
+    }
+    /* live cycles: the current run from the last turn to the head */
+    if (hx !== null && w.length) {
+      markSeg(g, w[w.length - 1][0], w[w.length - 1][1], hx, hy);
+    }
+  };
+
+  const buildGrid = (self) => {
+    const g = new Uint8Array(GX * GY);
+    for (const c of cycles) {
+      if (!c.alive) continue;
+      /* ignore the fresh end of our own wall (last turn + current run) */
+      if (c === self) {
+        const w = c.wall;
+        for (let i = 0; i < w.length - 2; i++) {
+          markSeg(g, w[i][0], w[i][1], w[i + 1][0], w[i + 1][1]);
+        }
+      } else {
+        markWall(g, c.wall, c.x, c.y);
+      }
+    }
+    for (const d of debris) {
+      markWall(g, d.wall, null, null);
+    }
+    return g;
+  };
+
+  /* free cells reachable from start, capped */
+  const flood = (g, start, cap) => {
+    if (start < 0 || g[start]) return 0;
+    const seen = new Uint8Array(g);
+    const stack = [start];
+    seen[start] = 1;
+    let count = 0;
+    while (stack.length && count < cap) {
+      const i = stack.pop();
+      count++;
+      const cx = i % GX, cy = (i - cx) / GX;
+      if (cx > 0 && !seen[i - 1]) { seen[i - 1] = 1; stack.push(i - 1); }
+      if (cx < GX - 1 && !seen[i + 1]) { seen[i + 1] = 1; stack.push(i + 1); }
+      if (cy > 0 && !seen[i - GX]) { seen[i - GX] = 1; stack.push(i - GX); }
+      if (cy < GY - 1 && !seen[i + GX]) { seen[i + GX] = 1; stack.push(i + GX); }
+    }
+    return count;
   };
 
   const think = (c) => {
-    if (Math.random() < 0.03) c.fearless = !c.fearless;
+    if (Math.random() < 0.004) c.fearless = !c.fearless;
+    const g = buildGrid(c);
     const [dx, dy] = c.dir;
-    const blocked = blockedAt(c.x + dx * LOOKAHEAD, c.y + dy * LOOKAHEAD, c, c.fearless);
-    const whim = Math.random() < 0.22;
-    if (!blocked && !whim) return;
-    const left = [dy, -dx];
-    const right = [-dy, dx];
-    const cl = clearance(c.x, c.y, left, c.fearless);
-    const cr = clearance(c.x, c.y, right, c.fearless);
-    if (blocked && cl < 0.8 && cr < 0.8) {
+    const cands = [[dx, dy], [dy, -dx], [-dy, dx]]; /* straight, left, right */
+
+    /* hunt: aim to cut across the nearest opponent's projected path */
+    let prey = null, preyD = Infinity;
+    for (const o of cycles) {
+      if (o === c || !o.alive) continue;
+      const d = Math.hypot(o.x - c.x, o.y - c.y);
+      if (d < preyD) { preyD = d; prey = o; }
+    }
+    const hunting = prey && preyD < 9;
+    const ix = hunting ? prey.x + prey.dir[0] * SPEED_K * 3 : 0;
+    const iy = hunting ? prey.y + prey.dir[1] * SPEED_T * T_SCALE * 3 : 0;
+
+    let best = null, bestScore = -1;
+    for (const d of cands) {
+      const nx = c.x + d[0] * 0.7, ny = c.y + d[1] * 0.7;
+      const oob = outOfBounds(nx, ny);
+      if (oob && !c.fearless) continue;
+      const idx = cellOf(nx, ny);
+      /* out of bounds is a dead end even for a fearless cycle: score it
+         as a last resort, never as open space */
+      const space = idx < 0 ? 0 : flood(g, idx, FLOOD_CAP);
+      if (space < MIN_SPACE) continue;
+      let score = space;
+      /* keep the line: straight drift keeps the speed boost */
+      if (d[0] === dx && d[1] === dy) score += 25;
+      if (hunting) score += Math.max(0, 70 - Math.hypot(nx - ix, ny - iy) * 10);
+      score += Math.random() * 10;
+      if (score > bestScore) { bestScore = score; best = d; }
+    }
+    if (!best) {
       crash(c);
       return;
     }
-    c.dir = (cl >= cr ? left : right).slice();
+    if (best[0] !== dx || best[1] !== dy) {
+      /* wall points are recorded at turns only */
+      c.wall.push([c.x, c.y]);
+      c.dir = best.slice();
+      c.boost = 0;
+    }
   };
 
   const crash = (c) => {
     c.alive = false;
     c.respawnIn = rand(1.2, 2.6);
+    /* close the polyline at the death point, then keep the wall on the
+       field as debris */
+    const lastP = c.wall[c.wall.length - 1];
+    if (!lastP || Math.hypot(c.x - lastP[0], c.y - lastP[1]) > 0.01) {
+      c.wall.push([c.x, c.y]);
+    }
+    if (c.wall.length > 1) debris.push({ color: c.color, wall: c.wall });
+    let total = 0;
+    for (const d of debris) total += d.wall.length;
+    while (total > DEBRIS_CAP && debris.length) {
+      total -= debris.shift().wall.length;
+    }
   };
 
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
+  /* respawn at the roomiest spot on the field; if the whole field is
+     walled in, stay dead and wait for the round reset */
+  const respawn = (c) => {
+    const g = buildGrid(null);
+    let bestSpace = -1, bx = 0, by = 0;
+    for (let i = 0; i < 12; i++) {
+      const x = rand(X_MIN * 0.6, X_MAX * 0.6);
+      const y = rand(Y_MIN + 2, Y_MAX - 2);
+      const idx = cellOf(x, y);
+      const space = idx < 0 ? 0 : flood(g, idx, FLOOD_CAP);
+      if (space > bestSpace) { bestSpace = space; bx = x; by = y; }
+      if (space >= FLOOD_CAP) break;
+    }
+    if (bestSpace < 150) {
+      c.respawnIn = 1.2;
+      return;
+    }
+    const fresh = spawn(c.color);
+    fresh.x = bx;
+    fresh.y = by;
+    fresh.wall.push([bx, by]);
+    Object.assign(c, fresh);
+  };
+
   const update = (dt) => {
     for (const c of cycles) {
       if (!c.alive) {
-        c.fade = Math.max(0, c.fade - dt / 1.6);
         c.respawnIn -= dt;
-        if (c.respawnIn <= 0) {
-          const fresh = spawn(c.color);
-          fresh.wall.push([fresh.x, fresh.y]);
-          Object.assign(c, fresh);
-        }
+        if (c.respawnIn <= 0) respawn(c);
         continue;
       }
-      c.x += c.dir[0] * SPEED * dt;
-      c.y += c.dir[1] * SPEED * dt;
+      /* tron rule: drifting in a straight line builds speed; turning resets */
+      c.boost = Math.min(BOOST_MAX, c.boost + dt);
+      const mult = 1 + c.boost * BOOST_GAIN;
+      c.x += c.dir[0] * SPEED_K * mult * dt;
+      c.y += c.dir[1] * SPEED_T * T_SCALE * mult * dt;
       if (outOfBounds(c.x, c.y)) {
         /* ran into the arena wall: the trail ends at the boundary */
         c.x = clamp(c.x, X_MIN, X_MAX);
@@ -146,58 +275,90 @@
         crash(c);
         continue;
       }
-      const w = c.wall;
-      const last = w[w.length - 1];
-      if (Math.hypot(c.x - last[0], c.y - last[1]) > 0.08) w.push([c.x, c.y]);
-      if (w.length > 1600) w.splice(0, 200);
     }
   };
 
-  const draw = () => {
+  /* wall height in screen px for a floor point at normalized depth y;
+     walls rise off the grid and grow as they come toward the viewer */
+  const heightAt = (y) => {
+    const t = y / T_SCALE;
+    return (9 + 24 * t) * scale;
+  };
+
+  const draw = (now) => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, vw, vh);
     ctx.lineJoin = 'miter';
-    /* arena boundary walls, under the cycle trails */
-    ctx.beginPath();
-    [[X_MIN, Y_MIN], [X_MAX, Y_MIN], [X_MAX, Y_MAX], [X_MIN, Y_MAX], [X_MIN, Y_MIN]]
-      .forEach(([x, y], i) => {
-        const [sx, sy] = project(x, y / T_SCALE);
-        i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy);
-      });
-    ctx.strokeStyle = '#8ffff2';
-    ctx.globalAlpha = 0.08;
-    ctx.lineWidth = 5;
-    ctx.stroke();
-    ctx.globalAlpha = 0.4;
-    ctx.lineWidth = 1.4;
-    ctx.stroke();
-    for (const c of cycles) {
-      const alpha = c.fade;
-      if (alpha <= 0 || c.wall.length < 2) continue;
-      ctx.beginPath();
-      c.wall.forEach(([x, y], i) => {
-        const [sx, sy] = project(x, y / T_SCALE);
-        i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy);
-      });
-      ctx.strokeStyle = c.color;
-      ctx.globalAlpha = 0.07 * alpha;
-      ctx.lineWidth = 4.5;
-      ctx.stroke();
-      ctx.globalAlpha = 0.45 * alpha;
-      ctx.lineWidth = 1.3;
-      ctx.stroke();
-      if (c.alive) {
-        const [hx, hy] = project(c.x, c.y / T_SCALE);
-        ctx.globalAlpha = 0.9;
-        ctx.shadowColor = c.color;
-        ctx.shadowBlur = 8;
-        ctx.fillStyle = c.color;
-        ctx.beginPath();
-        ctx.arc(hx, hy, 2.6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
+
+    /* collect wall segments (live cycles + debris), far first for
+       painter's order; the arena boundary stays invisible */
+    const segs = [];
+    for (const d of debris) {
+      const w = d.wall;
+      for (let i = 0; i < w.length - 1; i++) {
+        segs.push({ a: w[i], b: w[i + 1], color: d.color, alpha: 0.45 });
       }
     }
+    for (const c of cycles) {
+      const w = c.wall;
+      for (let i = 0; i < w.length - 1; i++) {
+        segs.push({ a: w[i], b: w[i + 1], color: c.color, alpha: 1 });
+      }
+      /* the current run: from the last turn to the head */
+      if (c.alive && w.length) {
+        segs.push({ a: w[w.length - 1], b: [c.x, c.y], color: c.color, alpha: 1 });
+      }
+    }
+    segs.sort((s1, s2) => (s1.a[1] + s1.b[1]) - (s2.a[1] + s2.b[1]));
+
+    /* 3D extrusion: each segment is a quad from the floor up to a top edge */
+    for (const s of segs) {
+      const [x1, y1] = project(s.a[0], s.a[1] / T_SCALE);
+      const [x2, y2] = project(s.b[0], s.b[1] / T_SCALE);
+      const h1 = heightAt(s.a[1]);
+      const h2 = heightAt(s.b[1]);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.lineTo(x2, y2 - h2);
+      ctx.lineTo(x1, y1 - h1);
+      ctx.closePath();
+      ctx.fillStyle = s.color;
+      ctx.globalAlpha = 0.15 * s.alpha;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(x1, y1 - h1);
+      ctx.lineTo(x2, y2 - h2);
+      ctx.strokeStyle = s.color;
+      ctx.globalAlpha = 0.13 * s.alpha;
+      ctx.lineWidth = 6;
+      ctx.stroke();
+      ctx.globalAlpha = 0.8 * s.alpha;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    /* heads: bright tracking dot with a sonar pulse on top of the wall */
+    cycles.forEach((c, ci) => {
+      if (!c.alive) return;
+      const [hx, hy] = project(c.x, c.y / T_SCALE);
+      const top = hy - heightAt(c.y);
+      const phase = ((now / 1000) * 0.9 + ci * 0.33) % 1;
+      ctx.strokeStyle = c.color;
+      ctx.globalAlpha = 0.55 * (1 - phase);
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(hx, top, 4 + phase * 15, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.shadowColor = c.color;
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = '#eafcff';
+      ctx.beginPath();
+      ctx.arc(hx, top, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    });
     ctx.globalAlpha = 1;
   };
 
@@ -216,9 +377,16 @@
     roundAcc += dt * 1000;
     if (roundAcc > ROUND_MS) {
       cycles.forEach((c) => c.alive && crash(c));
+      debris.length = 0;
       roundAcc = 0;
     }
-    draw();
+    /* round over: everyone is dead — clear the field and start fresh */
+    if (cycles.every((c) => !c.alive)) {
+      debris.length = 0;
+      cycles.forEach(respawn);
+      roundAcc = 0;
+    }
+    draw(now);
     window.requestAnimationFrame(frame);
   };
   window.requestAnimationFrame(frame);

@@ -1,14 +1,24 @@
 {% extends "main.html" %}
 {% block header %}{% endblock %}
 {% block tabs %}{% endblock %}
-{% block content %}
-<div class="hara-home">
-  <section class="hara-home-intro">
+{% block container %}
+<div class="hara-home-wrap">
+<section class="hara-home-intro">
+  <div class="hara-home-title">
     <div class="hara-home-kicker">A LISP / SMALL · FAST · EMBEDDABLE · WASM NATIVE</div>
     <h1>HARA</h1>
     <p class="hara-home-tagline">An elegant weapon for the agentic age.</p>
-    <p class="hara-home-lede">Hara is a small, fast Lisp for live systems. Embed it in a JVM service, a browser tab, or a Chrome panel — one language, wasm at the core — and change the shape of a running program without losing the thread.</p>
-  </section>
-  {{ page.content }}
+  </div>
+  <div class="hara-home-actions">
+    <a class="md-button md-button--primary" href="studio/">Try Hara</a>
+  </div>
+</section>
+<div class="md-content" data-md-component="content">
+  <article class="md-content__inner md-typeset">
+    <div class="hara-home">
+      {{ page.content }}
+    </div>
+  </article>
+</div>
 </div>
 {% endblock %}

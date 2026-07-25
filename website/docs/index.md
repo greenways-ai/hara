@@ -7,11 +7,6 @@ hide:
   - feedback
 ---
 
-<div class="hara-home-actions">
-  <a class="md-button md-button--primary" href="studio/">Try Hara</a>
-  <a class="md-button" href="user-guide/">Start building</a>
-</div>
-
 <div class="hara-home-grid">
   <a class="hara-home-card" href="reference/l0-language/">
     <span class="hara-card-index">01 / SMALL</span>
