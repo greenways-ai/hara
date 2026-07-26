@@ -155,6 +155,16 @@ impl Runtime {
         core::with_definition_origin(kernel::VarOrigin::HalFallback, || {
             self.eval_text(FOUNDATION_FALLBACK)
         })?;
+        for (name, source) in [
+            ("std.foundation.string", include_str!("../../lib/src/std/foundation/string.hal")),
+            ("std.foundation.promise", include_str!("../../lib/src/std/foundation/promise.hal")),
+            ("std.foundation.bytes", include_str!("../../lib/src/std/foundation/bytes.hal")),
+            ("std.foundation.coroutine", include_str!("../../lib/src/std/foundation/coroutine.hal")),
+            ("std.foundation.file", include_str!("../../lib/src/std/foundation/file.hal")),
+            ("std.foundation.os", include_str!("../../lib/src/std/foundation/os.hal")),
+        ] {
+            self.register_resource(name, source);
+        }
         self.refer_foundation_into("user");
         self.use_namespace("user");
         Ok(())
@@ -163,6 +173,22 @@ impl Runtime {
     fn eval_text_mode(&mut self, source: &str, traced: bool) -> Result<String, String> {
         self.refresh_qualified_bindings();
         let forms = kernel::parse_forms(source)?;
+        let result = self.eval_forms(forms, traced)?;
+        self.save_namespace();
+        self.refresh_qualified_bindings();
+        Ok(result)
+    }
+
+    pub fn eval_hir(&mut self, bytes: &[u8]) -> Result<String, String> {
+        self.refresh_qualified_bindings();
+        let module = kernel::hir::decode_hir(bytes)?;
+        let result = self.eval_forms(module.forms, false)?;
+        self.save_namespace();
+        self.refresh_qualified_bindings();
+        Ok(result)
+    }
+
+    fn eval_forms(&mut self, forms: Vec<Form>, traced: bool) -> Result<String, String> {
         let mut result = core::Value::Nil;
         for form in forms {
             if let Form::List(values) = &form {
@@ -189,7 +215,10 @@ impl Runtime {
                         })?;
                     let required_extensions = config.required_namespaces().to_vec();
                     for target in required_extensions {
-                        if target == "std.foundation" || target.starts_with("std.lib.") {
+                        if target == "std.foundation"
+                            || target.starts_with("std.lib.")
+                            || target.starts_with("std.foundation.")
+                        {
                             continue;
                         }
                         if self.resources.contains_key(&target) {
@@ -211,51 +240,44 @@ impl Runtime {
                     continue;
                 }
             }
+            if let Form::List(values) = &form {
+                if matches!(values.first(), Some(Form::Symbol(name)) if name == "require") {
+                    let current = self.current_namespace();
+                    let mut config = self
+                        .generated_configs
+                        .get(&current)
+                        .cloned()
+                        .unwrap_or_else(kernel::GeneratedNamespaceConfig::defaults);
+                    {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        let roots = self.extension_roots.clone();
+                        let available = |target: &str| {
+                            if self.resources.contains_key(target)
+                                || self.wasm_extensions.contains_key(target)
+                            {
+                                return true;
+                            }
+                            #[cfg(not(target_arch = "wasm32"))]
+                            {
+                                return native_extension::package_exists(target, &roots);
+                            }
+                            #[cfg(target_arch = "wasm32")]
+                            false
+                        };
+                        for spec in &values[1..] {
+                            config.apply_require(spec, &available)?;
+                        }
+                    }
+                    self.generated_configs.insert(current, config);
+                }
+            }
             let config = self
                 .generated_configs
                 .get(&self.current_namespace())
                 .cloned()
                 .unwrap_or_else(kernel::GeneratedNamespaceConfig::defaults);
             let resolved = config.rewrite(form);
-            let namespace_source = self.namespace_source();
-            result = core::with_capability_providers(
-                self.providers.file(),
-                self.providers.socket(),
-                || {
-                    core::with_promise_provider(self.providers.promise(), || {
-                        core::with_macros(self.macros.clone(), || {
-                            core::with_namespace_registry(&self.namespace_registry, || {
-                                core::with_namespace_source(namespace_source, || {
-                                    core::with_protocols(&self.protocols, || {
-                                        #[cfg(target_arch = "wasm32")]
-                                        if let Some(handler) = &self.host_handler {
-                                            let handler = handler.clone();
-                                            return core::with_host_calls(
-                                                host_call_bridge(handler),
-                                                || {
-                                                    if traced {
-                                                        core::eval_traced(
-                                                            &resolved,
-                                                            &mut self.env,
-                                                        )
-                                                    } else {
-                                                        core::eval(&resolved, &mut self.env)
-                                                    }
-                                                },
-                                            );
-                                        }
-                                        if traced {
-                                            core::eval_traced(&resolved, &mut self.env)
-                                        } else {
-                                            core::eval(&resolved, &mut self.env)
-                                        }
-                                    })
-                                })
-                            })
-                        })
-                    })
-                },
-            )?;
+            result = self.eval_form(resolved, traced)?;
             if matches!(result, core::Value::Recur(_)) {
                 return Err("recur must be inside loop".into());
             }
@@ -269,6 +291,68 @@ impl Runtime {
 
     fn eval_text(&mut self, source: &str) -> Result<String, String> {
         self.eval_text_mode(source, false)
+    }
+
+    fn eval_form(&mut self, form: Form, traced: bool) -> Result<core::Value, String> {
+        let namespace_source = self.namespace_source();
+        if traced {
+            return core::with_capability_providers(
+                self.providers.file(),
+                self.providers.socket(),
+                || {
+                    core::with_promise_provider(self.providers.promise(), || {
+                        core::with_macros(self.macros.clone(), || {
+                            core::with_namespace_registry(&self.namespace_registry, || {
+                                core::with_namespace_source(namespace_source, || {
+                                    core::with_protocols(&self.protocols, || {
+                                        #[cfg(target_arch = "wasm32")]
+                                        if let Some(handler) = &self.host_handler {
+                                            let handler = handler.clone();
+                                            return core::with_host_calls(
+                                                host_call_bridge(handler),
+                                                || core::eval_traced(&form, &mut self.env),
+                                            );
+                                        }
+                                        core::eval_traced(&form, &mut self.env)
+                                    })
+                                })
+                            })
+                        })
+                    })
+                },
+            );
+        }
+        let env = self.env.clone();
+        let (result, fiber) = core::with_capability_providers(
+            self.providers.file(),
+            self.providers.socket(),
+            || {
+                core::with_promise_provider(self.providers.promise(), || {
+                    core::with_macros(self.macros.clone(), || {
+                        core::with_namespace_registry(&self.namespace_registry, || {
+                            core::with_namespace_source(namespace_source, || {
+                                core::with_protocols(&self.protocols, || -> Result<(Result<core::Value, String>, core::EvalFiber), String> {
+                                    let mut fiber =
+                                        core::EvalFiber::start_forms(vec![form], env)?;
+                                    #[cfg(target_arch = "wasm32")]
+                                    if let Some(handler) = &self.host_handler {
+                                        let handler = handler.clone();
+                                        let result = core::with_host_calls(
+                                            host_call_bridge(handler),
+                                            || fiber.drive_sync(),
+                                        );
+                                        return Ok((result, fiber));
+                                    }
+                                    Ok((fiber.drive_sync(), fiber))
+                                })
+                            })
+                        })
+                    })
+                })
+            },
+        )?;
+        self.env = fiber.environment();
+        result
     }
 
     fn refresh_qualified_bindings(&mut self) {
@@ -1230,7 +1314,7 @@ mod tests {
     #[test]
     fn generated_namespace_require_never_falls_back_to_registered_source() {
         let mut runtime = Runtime::new();
-        runtime.register_resource("std.lib.string", "(def poisoned 42)");
+        runtime.register_resource("std.foundation.string", "(def poisoned 42)");
         assert_eq!(
             runtime
                 .eval_text("(ns app (:require [hara.lib.string :as text])) (text/trim \" x \")")
@@ -2352,43 +2436,6 @@ mod tests {
     }
 
     #[test]
-    fn generated_string_library_covers_the_portable_surface() {
-        let mut runtime = Runtime::new();
-        let cases = [
-            (r#"(str/len "hé")"#, "2"),
-            (r#"(str/comp "a" "b")"#, "-1"),
-            (r#"(str/lt? "a" "b")"#, "true"),
-            (r#"(str/gt? "b" "a")"#, "true"),
-            (r#"(str/pad-left "7" 3 "0")"#, r#""007""#),
-            (r#"(str/pad-right "7" 3 "0")"#, r#""700""#),
-            (r#"(str/starts-with? "hara" "ha")"#, "true"),
-            (r#"(str/ends-with? "hara" "ra")"#, "true"),
-            (r#"(str/char "h😀" 1)"#, r#""😀""#),
-            (r#"(. (str/split "a,b,c" ",") (get 1))"#, r#""b""#),
-            (r#"(str/join "-" ["a" "b"])"#, r#""a-b""#),
-            (r#"(str/index-of "a😀b" "b")"#, "2"),
-            (r#"(str/substring "a😀b" 1 2)"#, r#""😀""#),
-            (r#"(str/to-fixed 1 2)"#, r#""1.00""#),
-            (r#"(str/replace "a-b-a" "a" "x")"#, r#""x-b-x""#),
-            (r#"(str/trim-left "  a  ")"#, r#""a  ""#),
-            (r#"(str/trim-right "  a  ")"#, r#""  a""#),
-            (r#"(str/to-upper "Hara")"#, r#""HARA""#),
-            (r#"(str/to-lower "Hara")"#, r#""hara""#),
-        ];
-        for (source, expected) in cases {
-            assert_eq!(runtime.eval_text(source).unwrap(), expected, "{source}");
-        }
-        assert!(runtime
-            .eval_text(r#"(str/substring "abc" 2 1)"#)
-            .unwrap_err()
-            .contains("out of bounds"));
-        assert!(runtime
-            .eval_text(r#"(str/char "a" 1)"#)
-            .unwrap_err()
-            .contains("out of bounds"));
-    }
-
-    #[test]
     fn byte_buffers_preserve_signed_storage_and_unsigned_reads() {
         let mut runtime = Runtime::new();
         assert_eq!(
@@ -3358,9 +3405,111 @@ mod tests {
             .eval_text("(do (def plain 1) (binding [plain 2] plain))")
             .unwrap_err()
             .contains("dynamic Var"));
-        assert!(runtime
+        let err = runtime
             .eval_text("(do (def ^:dynamic *left* 1) (binding [*left* 2 plain 3] *left*))")
-            .is_err());
+            .unwrap_err();
+        eprintln!("ERROR: {err}");
+        assert!(err.contains("dynamic Var") || err.contains("name must be"));
         assert_eq!(runtime.eval_text("*left*").unwrap(), "1");
+    }
+    #[test]
+    fn coroutine_introspection_works_in_cli_path() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime.eval_text("(std.foundation.coroutine/status (std.foundation.coroutine/create (fn [x] x)))").unwrap(),
+            ":suspended"
+        );
+        assert_eq!(
+            runtime.eval_text("(std.foundation.coroutine/coroutine? (std.foundation.coroutine/create (fn [] 1)))").unwrap(),
+            "true"
+        );
+        assert_eq!(
+            runtime.eval_text("(std.foundation.coroutine/coroutine? 42)").unwrap(),
+            "false"
+        );
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime.eval_text("(def c (std.foundation.coroutine/create (fn [] 1))) (std.foundation.coroutine/status (std.foundation.coroutine/close c))").unwrap(),
+            ":dead"
+        );
+        assert!(runtime
+            .eval_text("(std.foundation.coroutine/resume c)")
+            .unwrap_err()
+            .contains("cannot resume a dead coroutine"));
+        assert!(runtime
+            .eval_text("(std.foundation.coroutine/yield 1)")
+            .unwrap_err()
+            .contains("coroutine/yield used outside of a coroutine"));
+        assert_eq!(
+            runtime.eval_text("(std.foundation.coroutine/await (promise/run (fn [] 1)))").unwrap(),
+            "1"
+        );
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn coroutine_suspending_forms_error_in_traced_path() {
+        let mut runtime = Runtime::new();
+        assert!(runtime
+            .eval_native_traced("(def c (std.foundation.coroutine/create (fn [] 1))) (std.foundation.coroutine/resume c)")
+            .unwrap_err()
+            .contains("fiber evaluator"));
+        assert!(runtime
+            .eval_native_traced("(std.foundation.coroutine/yield 1)")
+            .unwrap_err()
+            .contains("fiber evaluator"));
+        assert!(runtime
+            .eval_native_traced("(std.foundation.coroutine/await (promise/run (fn [] 1)))")
+            .unwrap_err()
+            .contains("fiber evaluator"));
+    }
+    #[test]
+    fn fiber_cli_path_evaluates_coroutine_resume_and_yield() {
+        let mut runtime = Runtime::new();
+        runtime.eval_text("(require [std.foundation.coroutine :as c])").unwrap();
+        assert_eq!(
+            runtime.eval_text("(do (def co (c/create (fn [x] (let [y (c/yield (* x 2))] (+ y 1))))) (c/resume co 21))").unwrap(),
+            "42"
+        );
+        assert_eq!(runtime.eval_text("(c/resume co 20)").unwrap(), "21");
+    }
+    #[test]
+    fn fiber_cli_path_awaits_promise_inside_coroutine() {
+        let mut runtime = Runtime::new();
+        runtime.eval_text("(require [std.foundation.coroutine :as c])").unwrap();
+        assert_eq!(
+            runtime.eval_text("(def co (c/create (fn [] (c/await (promise/run (fn [] 42)))))) (c/resume co)").unwrap(),
+            "42"
+        );
+    }
+    #[test]
+    fn coroutine_namespace_can_be_required_and_aliased() {
+        let mut runtime = Runtime::new();
+        assert_eq!(runtime.eval_text("(require 'std.foundation.coroutine) :loaded").unwrap(), ":loaded");
+        assert_eq!(
+            runtime.eval_text("(coroutine/status (coroutine/create (fn [x] x)))").unwrap(),
+            ":suspended"
+        );
+        assert_eq!(
+            runtime.eval_text("(require [std.foundation.coroutine :as co]) (co/coroutine? (co/create (fn [] 1)))").unwrap(),
+            "true"
+        );
+    }
+    #[test]
+    fn coroutine_default_alias_is_co() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime.eval_text("(require 'std.foundation.coroutine) (co/status (co/create (fn [] 1)))").unwrap(),
+            ":suspended"
+        );
+    }
+    #[test]
+    fn eval_hir_runs_encoded_library() {
+        use crate::kernel::hir::encode_hir_module;
+
+        let source = "(ns demo)\n(def answer 42)\nanswer";
+        let forms = kernel::parse_forms(source).unwrap();
+        let artifact = encode_hir_module("demo", "demo.hal", source, forms);
+        let mut runtime = Runtime::new();
+        assert_eq!(runtime.eval_hir(&artifact).unwrap(), "42");
     }
 }

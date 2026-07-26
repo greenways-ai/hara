@@ -14,7 +14,7 @@
     {"clojure": "some", "hara": "any?", "dimensions": ["name", "return-value"], "summary": "Hara any? returns a boolean existential result; Clojure some returns the first truthy predicate result."},
     {"clojure": "empty?", "hara": "empty?", "dimensions": ["accepted-inputs", "evaluation"], "summary": "Hara checks through the iterator protocol and may inspect a one-shot iterator; Clojure uses seq semantics."},
     {"clojure": "let", "hara": "let", "dimensions": ["binding-evaluation"], "summary": "Hara evaluates initializers against the enclosing lexical environment in parallel; Clojure let bindings are sequential."},
-    {"clojure": "defrecord", "hara": "defrecord", "dimensions": ["host-types", "interop", "implementation"], "summary": "Hara has no Clojure JVM record/class contract; portable immutable domain values use defrecord and protocols."},
+    {"clojure": "defrecord", "hara": "defstruct", "dimensions": ["host-types", "interop", "implementation"], "summary": "Hara has no Clojure JVM record/class contract; portable immutable domain values use defstruct and protocols."},
     {"clojure": "eval", "hara": "eval", "dimensions": ["host", "capability", "environment"], "summary": "Hara evaluates through its context-local language runtime and does not expose Clojure compiler/JVM eval semantics."}
   ]
 }

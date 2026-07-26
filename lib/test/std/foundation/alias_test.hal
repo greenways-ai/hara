@@ -1,0 +1,22 @@
+(ns std.foundation.alias-test
+  (:require [std.lib.test :as test]))
+
+(def results
+  [(test/check "str/trim default alias works without require"
+               (str/trim "  hara  ")
+               "hara")
+   (test/check "bytes/get default alias works without require"
+               (bytes/get (bytes -1) 0)
+               255)
+   (test/check "promise/native? default alias works without require"
+               (promise/native? (promise/new (fn [resolve reject] (resolve 1))))
+               true)
+   (test/check ":config {:intrinsics :all} keeps every default alias"
+               (do (ns app (:config {:intrinsics :all}))
+                   (let [result (bytes/count (str/encode "x"))]
+                     (ns std.foundation.alias-test
+                       (:require [std.lib.test :as test]))
+                     result))
+               1)])
+
+(test/print-results results)

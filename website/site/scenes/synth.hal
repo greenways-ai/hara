@@ -1,0 +1,75 @@
+(ns scenes.synth (:require [host.browser.canvas :as canvas] [host.browser.audio :as audio]))
+
+(def canvas-selector "#scene-canvas")
+(def note-interval 500)
+(def wave-samples 80)
+(def wave-width 400.0)
+(def wave-amplitude 80.0)
+(def wave-speed 1.5)
+
+;; C-major pentatonic frequencies.
+(def notes [261.63 293.66 329.63 392.00 440.00 523.25])
+
+(def state (atom {:phase 0.0 :note-timer 0 :seed 12345}))
+
+;; ---------------------------------------------------------------------------
+;; helpers
+;; ---------------------------------------------------------------------------
+
+(defn rand []
+  "Linear congruential PRNG; returns an integer in [0, 2^31)."
+  (let [s (:seed @state)
+        next (mod (+ (* s 1103515245) 12345) 2147483648)]
+    (swap! state assoc :seed next)
+    next))
+
+(defn rand-n [n]
+  "Random integer in [0, n)."
+  (mod (rand) n))
+
+(defn tri [phase]
+  "Triangle wave in [0,1) -> [-1,1]."
+  (let [p (if (> phase 1.0) (- phase 1.0) phase)]
+    (if (< p 0.5)
+      (- (* 4.0 p) 1.0)
+      (- 3.0 (* 4.0 p)))))
+
+;; ---------------------------------------------------------------------------
+;; lifecycle
+;; ---------------------------------------------------------------------------
+
+(defn setup []
+  (swap! state assoc :phase 0.0 :note-timer 0 :seed 12345))
+
+(defn tick [dt-ms zoom pan-x pan-y]
+  (let [dt (/ dt-ms 1000.0)
+        st @state
+        phase (:phase st)
+        timer (:note-timer st)
+        new-phase (+ phase (* dt wave-speed))
+        new-phase-wrapped (mod new-phase 1.0)
+        new-timer (+ timer dt-ms)]
+    (canvas/clear canvas-selector)
+    (if (>= new-timer note-interval)
+      (do
+        ;; Audio contexts may be suspended until a user gesture; the host
+        ;; call is safe and simply stays silent when the context is blocked.
+        (audio/note (nth notes (rand-n (count notes))) 0.15 0.04)
+        (swap! state assoc :phase new-phase-wrapped :note-timer 0))
+      (swap! state assoc :phase new-phase-wrapped :note-timer new-timer)))
+  (let [st @state
+        phase (:phase st)
+        step (/ wave-width wave-samples)]
+    (loop [i 0]
+      (if (>= i wave-samples)
+        nil
+        (let [lx (- (* i step) (/ wave-width 2.0))
+              ly (* wave-amplitude (tri (+ phase (/ i 20.0))))
+              sx (+ pan-x (* lx zoom))
+              sy (+ pan-y (* ly zoom))
+              nlx (- (* (+ i 1) step) (/ wave-width 2.0))
+              nly (* wave-amplitude (tri (+ phase (/ (+ i 1) 20.0))))
+              nsx (+ pan-x (* nlx zoom))
+              nsy (+ pan-y (* nly zoom))]
+          (canvas/line canvas-selector sx sy nsx nsy "#00f0ff")
+          (recur (+ i 1)))))))

@@ -1,0 +1,55 @@
+(ns std.ledger.chain-test
+  (:require [std.ledger.chain :as chain]
+            [std.ledger.protocol :as protocol]))
+
+(defn- check
+  "Returns a test result map."
+  [name actual expected]
+  {:name name
+   :pass (= actual expected)
+   :actual actual
+   :expected expected})
+
+(def results
+  (let [genesis (chain/create {:counter 0})
+        c (chain/append genesis
+                        :alice
+                        1000
+                        (chain/tx (assoc state :counter (inc (:counter state)))))
+        bs (chain/blocks c)
+        genesis-block (first (chain/blocks genesis))]
+    [(check "genesis state" (chain/state genesis) {:counter 0})
+     (check "genesis index" (get genesis-block :index) 0)
+     (check "genesis actor" (get genesis-block :actor) :std.ledger/genesis)
+     (check "genesis has no source"
+            (nil? (get genesis-block :source))
+            true)
+     (check "append updates state" (chain/state c) {:counter 1})
+     (check "fresh chain is valid" (chain/valid? c) true)
+     (check "tampered state is invalid"
+            (chain/valid?
+             (assoc c
+                    :blocks
+                    [(first bs)
+                     (assoc (second bs) :state {:counter 99})]))
+            false)
+     (check "tampered source is invalid"
+            (chain/valid?
+             (assoc c
+                    :blocks
+                    [(first bs)
+                     (assoc (second bs)
+                            :source
+                            '(fn [state ctx] (assoc state :counter 99)))]))
+            false)
+     (check "tx macro expands to quoted fn"
+            (macroexpand '(chain/tx (assoc state :x 1)))
+            '(quote (fn [state ctx] (assoc state :x 1))))
+     (check "protocol dispatch computes block hash"
+            (number? (protocol-call protocol/IHashable content-hash (first bs)))
+            true)
+     (check "protocol dispatch replays block"
+            (protocol-call protocol/IReplayable replay (second bs) {:counter 0})
+            {:counter 1})]))
+
+(pr-str results)

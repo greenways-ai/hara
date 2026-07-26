@@ -30,7 +30,7 @@ runtime validation against schemas, editor diagnostics plumbing.
   tools.reader. Hara can mirror that architecture one-for-one, and writing it in hara dogfoods
   `std.lib.foundation` and keeps the analyzer portable across the Truffle, legacy-kernel, and
   wasm runtimes (the wasm parity harness already exists).
-- **`polis.typed` is adjacent, not a prerequisite**: the pending port of Clojure `hara.typed`
+- **`talo.typed` is adjacent, not a prerequisite**: the pending port of Clojure `hara.typed`
   models typed declarations for the transpiler's emit-rewrite decisions. Its records may later
   become the linter's type representation, but blocking linting on that port delays all
   user-visible value.
@@ -192,7 +192,7 @@ Exactly two things are adopted from it:
   `[:=> [:cat …] ret]`.
 - **The map normal form** — types normalize to `{:kind …}` maps (§4.2) rather than staying
   as bare vectors. Uniform to consume, extensible by adding keys, and it matches the
-  representation the eventual `polis.typed` port will already understand.
+  representation the eventual `talo.typed` port will already understand.
 
 Everything else stays divergent, deliberately: unnamespaced primitives plus the hara-only
 types (`:set :atom :bytes :promise`); `[:vector]`/`[:map]` composites (no `:array`/`:tuple`/
@@ -302,12 +302,12 @@ a project executes its registered check namespaces.
 
 ## 7. Error handling and portability constraints
 
-- Follow the polis porting adaptations (`website/docs/foundation-porting.md`): materialize lazy
+- Follow the talo porting adaptations (`website/docs/foundation-porting.md`): materialize lazy
   iterators with `vec` before repeated traversal (hara iterators are one-shot); no host
   interop in `std.typed.*` beyond `read-forms`/`macroexpand`; metadata mutation via
   `protocol-call`.
 - `read-forms` is capability-gated (`requireHalPath`, `requireFileIO`) — the linter needs
-  file-I/O capability, same as the polis source loader.
+  file-I/O capability, same as the talo source loader.
 - Keep the library free of Truffle-only values so the wasm runtime can eventually run it
   through the existing parity harness.
 
@@ -319,10 +319,10 @@ a project executes its registered check namespaces.
   signature application).
 - **Core-sigs sync test**: a fact that diffs `std.typed.core-sigs` keys against the core
   namespace's publics, so a builtin added without a signature fails the build.
-- JUnit wrapper `StdTypedSourceTest` mirroring `PolisSourceTest`, running
+- JUnit wrapper `StdTypedSourceTest` mirroring `TaloSourceTest`, running
   `(code.test/run {:namespace …})` over `std.typed.*`.
 - **Dogfood gate**: the linter run over `lib/src/std/lib/foundation.hal` and
-  `lib/src/polis/common/` must report zero findings; the signature table is tuned
+  `lib/src/talo/common/` must report zero findings; the signature table is tuned
   until this holds.
 
 ## 9. Phasing
@@ -337,7 +337,7 @@ a project executes its registered check namespaces.
 7. `StdTypedSourceTest` wired into `mvn test`.
 8. Dogfood gate green.
 9. Follow-up (separate plan): hook registry + custom checks + `:lint` config (§6); RESP/
-   editor diagnostics surface for vscode-hara and emacs-hara; convergence with `polis.typed`
+   editor diagnostics surface for vscode-hara and emacs-hara; convergence with `talo.typed`
    records if/when that port lands; runtime validation (`std.typed.validate`) consuming the
    same schemas.
 
@@ -346,7 +346,7 @@ a project executes its registered check namespaces.
 - **Java-side pass beside `HaraAnalyzer`** — faster and close to the live var registry, but
   Truffle-only (kernel and wasm would need duplicates), no dogfooding, and type logic in Java
   iterates slowly. Rejected.
-- **Port `polis.typed` first** — would unblock the transpiler's emit-rewrite and give one type
+- **Port `talo.typed` first** — would unblock the transpiler's emit-rewrite and give one type
   representation for both consumers, but `hara.typed` was built for emit decisions, not lint
   findings, and it delays any user-visible linting by a full port. Deferred to a later
   convergence step.

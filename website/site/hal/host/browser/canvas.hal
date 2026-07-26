@@ -11,3 +11,6 @@
 
 (defn line [selector x1 y1 x2 y2 color]
   (host/call "browser.canvas" "line" selector x1 y1 x2 y2 color))
+
+(defn size [selector]
+  (host/call "browser.canvas" "size" selector))

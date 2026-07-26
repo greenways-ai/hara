@@ -1,0 +1,59 @@
+;; ============================================================================
+;; std.ledger.common — data types and map-like protocol extensions for the
+;; consensus-free ledger chain.
+;; ============================================================================
+(ns std.ledger.common)
+
+(defstruct Block
+  [index
+   prev-hash
+   actor
+   timestamp
+   source
+   state
+   hash])
+
+(defstruct Chain
+  [blocks
+   state])
+
+(defn block-get
+  "Looks up a known keyword field on a Block."
+  [b k]
+  (cond (= k :index)     (field b :index)
+        (= k :prev-hash) (field b :prev-hash)
+        (= k :actor)     (field b :actor)
+        (= k :timestamp) (field b :timestamp)
+        (= k :source)    (field b :source)
+        (= k :state)     (field b :state)
+        (= k :hash)      (field b :hash)
+        :else            nil))
+
+(defn chain-get
+  "Looks up a known keyword field on a Chain."
+  [c k]
+  (cond (= k :blocks) (field c :blocks)
+        (= k :state)  (field c :state)
+        :else         nil))
+
+(defn block-assoc
+  "Returns a new Block with the given keyword field replaced."
+  [b k v]
+  (std.ledger.common/Block
+   (if (= k :index)     v (field b :index))
+   (if (= k :prev-hash) v (field b :prev-hash))
+   (if (= k :actor)     v (field b :actor))
+   (if (= k :timestamp) v (field b :timestamp))
+   (if (= k :source)    v (field b :source))
+   (if (= k :state)     v (field b :state))
+   (if (= k :hash)      v (field b :hash))))
+
+(defn chain-assoc
+  "Returns a new Chain with the given keyword field replaced."
+  [c k v]
+  (std.ledger.common/Chain
+   (if (= k :blocks) v (field c :blocks))
+   (if (= k :state)  v (field c :state))))
+
+;; Map-backed defstruct makes the explicit ILookup/IAssoc extensions redundant.
+;; block-get/chain-get/block-assoc/chain-assoc are still used internally by chain.hal.

@@ -83,24 +83,25 @@ automatically aliased:
 | `std.lib.handle` | releases opaque HTA extension handles |
 | `std.lib.context` | context registries, runtime spaces, lifecycles, and pointers |
 | `std.lib.task` | task definitions, invocation, selection, and bulk processing |
-| `std.lib.coroutine` | Lua-style coroutines: create, resume, yield, status, close, await |
+| `std.foundation.coroutine` | Lua-style coroutines: create, resume, yield, status, close, await |
 | `code.test` | facts, fixtures, matchers, and structured test execution |
 
 These providers are installed lazily under their canonical public namespace. Their implementation
 classes and helper namespaces are not guest-visible API. Requiring a provider does not grant file,
 network, process, reflection, classpath, or compilation authority.
 
-`std.lib.coroutine` provides Lua-style coroutines on the Truffle runtime. `create` wraps a
-function without starting it; `resume` starts or continues a coroutine and returns the yielded
-or final value; `yield` suspends the current coroutine from any call depth and returns the next
-resume's arguments; `status` reports `:suspended`, `:running`, or `:dead`. With multiple values,
-`yield` and resume arguments pack into vectors (single values pass through as-is). Errors inside
-a body rethrow at the resume site and leave the coroutine `:dead`. `close` unwinds a suspended
-coroutine, running its `finally` clauses. `await` blocks the coroutine until a promise settles.
-A single coroutine is not safe for concurrent `resume`/`close` calls from multiple threads;
-resume is synchronous and single-resumer by design.
-Var bindings established around a `resume` do not propagate into the coroutine body. Coroutines
-are currently Truffle-only; the Rust runtime does not implement them yet.
+`std.foundation.coroutine` provides Lua-style coroutines on the Truffle and Rust runtimes.
+`create` wraps a function without starting it; `resume` starts or continues a coroutine and
+returns the yielded or final value; `yield` suspends the current coroutine from any call depth
+and returns the next resume's arguments; `status` reports `:suspended`, `:running`, or `:dead`.
+With multiple values, `yield` and resume arguments pack into vectors (single values pass through
+as-is). Errors inside a body rethrow at the resume site and leave the coroutine `:dead`. `close`
+unwinds a suspended coroutine, running its `finally` clauses. `await` blocks the coroutine until
+a promise settles. Plain `(yield p)` hands a promise object out to the resumer without awaiting
+it; use `(yield (await p))` to suspend until the promise settles and then yield its value. A
+single coroutine is not safe for concurrent `resume`/`close` calls from multiple threads; resume
+is synchronous and single-resumer by design. Var bindings established around a `resume` do not
+propagate into the coroutine body.
 
 `std.resp.client` is a separate, explicitly required blocking RESP2 client. It exposes `connect`,
 `call`, `write`, `read`, `pipeline`, `open?`, and `close`; connections require network capability.

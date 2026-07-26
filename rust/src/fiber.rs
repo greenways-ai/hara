@@ -1,10 +1,226 @@
 use super::*;
+use crate::lang::data::{OrderedMap, OrderedSet};
+
+#[path = "fiber/coroutine.rs"]
+mod coroutine;
+#[cfg(test)]
+#[path = "fiber/coroutine_tests.rs"]
+mod coroutine_tests;
+
+/// Core special forms that must be routed through the synchronous `eval` path
+/// because they need unevaluated arguments, structural handling, or namespace
+/// side effects. Forms with dedicated CPS arms in `list` are listed here too
+/// so that they do not accidentally reach `application`, but the dedicated arms
+/// take precedence.
+const SYNC_SPECIAL_FORMS: &[&str] = &[
+    ".",
+    "alter-var-root",
+    "apply",
+    "binding",
+    "declare",
+    "def",
+    "defmacro",
+    "defn",
+    "defn-",
+    "do",
+    "deref",
+    "eval",
+    "fn",
+    "fn*",
+    "if",
+    "let",
+    "loop",
+    "ns",
+    "protocol-call",
+    "recur",
+    "require",
+    "set!",
+    "syntax-quote",
+    "throw",
+    "try",
+    "var",
+    "var/set",
+];
+
+/// All names that `core::eval` handles as special forms. Used in `application`
+/// to ensure runtime builtins take precedence over foundation redefinitions
+/// without forcing the whole call through the synchronous path (which would
+/// break nested `deref`/`yield`/`await`).
+const CORE_SPECIAL_FORMS: &[&str] = &[
+    "=",
+    "+",
+    "-",
+    "*",
+    "/",
+    "%",
+    "mod",
+    "<",
+    ">",
+    "<=",
+    ">=",
+    ".",
+    "alter-var-root",
+    "any?",
+    "apply",
+    "array",
+    "assoc",
+    "assoc-in",
+    "binding",
+    "bit-and",
+    "bit-or",
+    "bit-xor",
+    "bit-not",
+    "bit-shift-left",
+    "bit-shift-right",
+    "bytes",
+    "bytes/copy",
+    "bytes/count",
+    "bytes/get",
+    "bytes/set",
+    "bytes/s8",
+    "bytes/slice",
+    "bytes/u8",
+    "comp",
+    "comp2",
+    "comp3",
+    "complement",
+    "concat",
+    "conj",
+    "cons",
+    "constantly",
+    "count",
+    "cycle",
+    "declare",
+    "def",
+    "defmacro",
+    "defn",
+    "defn-",
+    "dissoc",
+    "deref",
+    "do",
+    "drop",
+    "empty",
+    "empty?",
+    "eval",
+    "even?",
+    "every?",
+    "false?",
+    "file/read",
+    "file/resolve",
+    "file/write",
+    "filter",
+    "first",
+    "fn",
+    "fn*",
+    "get",
+    "get-in",
+    "host/call",
+    "identity",
+    "if",
+    "interleave",
+    "interpose",
+    "iter",
+    "iter-close",
+    "iter-cycle",
+    "iter-drop",
+    "iter-has?",
+    "iter-interleave",
+    "iter-interpose",
+    "iter-iterate",
+    "iter-keep",
+    "iter-map",
+    "iter-mapcat",
+    "iter-next",
+    "iter-partition-pair",
+    "iter-repeatedly",
+    "iter-constantly",
+    "iter-filter",
+    "iter-take",
+    "iter-zip",
+    "iter?",
+    "keep",
+    "key",
+    "keys",
+    "keyword",
+    "last",
+    "let",
+    "list",
+    "list?",
+    "loop",
+    "map",
+    "map?",
+    "mapcat",
+    "mod",
+    "neg?",
+    "nil?",
+    "ns",
+    "nth",
+    "not",
+    "not-empty",
+    "object",
+    "odd?",
+    "pair",
+    "partition-pair",
+    "pointer",
+    "pos?",
+    "promise",
+    "promise/adopt",
+    "promise/all",
+    "promise/cancel",
+    "promise/delay",
+    "promise/native?",
+    "promise/new",
+    "promise/reject",
+    "promise/resolve",
+    "promise/run",
+    "promise/state",
+    "promise/value",
+    "protocol-call",
+    "range",
+    "recur",
+    "repeat",
+    "repeatedly",
+    "require",
+    "rest",
+    "reverse",
+    "second",
+    "seq",
+    "seq?",
+    "set",
+    "set!",
+    "set?",
+    "socket/close",
+    "socket/connect",
+    "socket/send",
+    "str",
+    "str/decode",
+    "str/encode",
+    "symbol",
+    "take",
+    "throw",
+    "true?",
+    "try",
+    "tup",
+    "update",
+    "update-in",
+    "val",
+    "vals",
+    "var",
+    "var/set",
+    "vec",
+    "vector",
+    "vector?",
+    "zero?",
+    "zip",
+    "__map-transform",
+];
 
 type Cont = Box<dyn FnOnce(Result<Value, String>) -> Step>;
-type Resume = Box<dyn FnOnce(PromiseState) -> Step>;
-enum Step {
+pub type Resume = Box<dyn FnOnce(PromiseState) -> Step>;
+pub enum Step {
     Done(Result<Value, String>),
     Wait(Promise, Resume),
+    Yield(Value, Box<dyn FnOnce(Value) -> Step>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,6 +241,9 @@ pub struct EvalFiber {
 impl EvalFiber {
     pub fn start(source: &str, env: HashMap<String, Value>) -> Result<Self, String> {
         let forms = parse_forms(source)?;
+        Self::start_forms(forms, env)
+    }
+    pub fn start_forms(forms: Vec<Form>, env: HashMap<String, Value>) -> Result<Self, String> {
         let env = Rc::new(RefCell::new(env));
         let step = forms_cps(
             Rc::new(forms),
@@ -77,6 +296,35 @@ impl EvalFiber {
         self.state = EvalFiberState::Cancelled;
         true
     }
+    pub fn drive_sync(&mut self) -> Result<Value, String> {
+        loop {
+            match self.state() {
+                EvalFiberState::Completed(v) => return Ok(v),
+                EvalFiberState::Failed(e) => return Err(e),
+                EvalFiberState::Cancelled => return Err("eval cancelled".into()),
+                EvalFiberState::Running => return Err("fiber is running".into()),
+                EvalFiberState::Suspended => {
+                    let Some(pending) = self.pending() else {
+                        return Err("fiber suspended without promise".into());
+                    };
+                    match pending.state() {
+                        PromiseState::Fulfilled(v) => {
+                            self.resume(PromiseState::Fulfilled(v));
+                        }
+                        PromiseState::Rejected(e) => {
+                            self.resume(PromiseState::Rejected(e));
+                        }
+                        PromiseState::Pending => {
+                            return Err(
+                                "deref cannot block on a pending promise outside an HTA fiber"
+                                    .into(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
     fn accept(&mut self, step: Step) {
         match step {
             Step::Done(Ok(v)) => self.state = EvalFiberState::Completed(v),
@@ -85,6 +333,9 @@ impl EvalFiber {
                 self.pending = Some(p);
                 self.resume = Some(r);
                 self.state = EvalFiberState::Suspended;
+            }
+            Step::Yield(_, _) => {
+                self.state = EvalFiberState::Failed("coroutine/yield used outside of a coroutine".into());
             }
         }
     }
@@ -147,11 +398,11 @@ fn one(form: Form, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step {
                 env,
                 Box::new(move |r| {
                     k(r.map(|v| {
-                        Value::Map(
+                        Value::OrderedMap(Box::new(
                             v.chunks_exact(2)
                                 .map(|p| (p[0].clone(), p[1].clone()))
-                                .collect(),
-                        )
+                                .collect::<OrderedMap<Value, Value>>(),
+                        ))
                     }))
                 }),
             )
@@ -161,7 +412,13 @@ fn one(form: Form, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step {
             0,
             Vec::new(),
             env,
-            Box::new(move |r| k(r.map(|v| Value::Set(unique_values(v).into())))),
+            Box::new(move |r| {
+                k(r.map(|v| {
+                    Value::OrderedSet(Box::new(
+                        unique_values(v).into_iter().collect::<OrderedSet<Value>>(),
+                    ))
+                }))
+            }),
         ),
         Form::Vector(v) => values_cps(
             Rc::new(v),
@@ -195,11 +452,42 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
             if v.len() != 2 {
                 return k(Err("deref expects a var".into()));
             }
+            if let Form::Symbol(name) = &v[1] {
+                let target = {
+                    let env = env.borrow();
+                    match env.get(name) {
+                        Some(Value::Var(cell)) => Some(Value::Var(cell.clone())),
+                        Some(Value::Atom(cell)) => Some(Value::Atom(cell.clone())),
+                        Some(Value::Promise(p)) => Some(Value::Promise(p.clone())),
+                        _ => None,
+                    }
+                };
+                if let Some(target) = target {
+                    return match target {
+                        Value::Var(x) => k(Ok(x.deref_value())),
+                        Value::Atom(x) => k(Ok(x.deref_value())),
+                        Value::Promise(p) => match p.state() {
+                            PromiseState::Fulfilled(x) => k(Ok(x)),
+                            PromiseState::Rejected(e) => k(Err(e)),
+                            PromiseState::Pending => Step::Wait(
+                                p,
+                                Box::new(move |s| match s {
+                                    PromiseState::Fulfilled(x) => k(Ok(x)),
+                                    PromiseState::Rejected(e) => k(Err(e)),
+                                    PromiseState::Pending => k(Err("fiber resumed pending".into())),
+                                }),
+                            ),
+                        },
+                        _ => unreachable!(),
+                    };
+                }
+            }
             one(
                 v[1].clone(),
                 env,
                 Box::new(move |r| match r {
                     Ok(Value::Var(x)) => k(Ok(x.deref_value())),
+                    Ok(Value::Atom(x)) => k(Ok(x.deref_value())),
                     Ok(Value::Promise(p)) => match p.state() {
                         PromiseState::Fulfilled(x) => k(Ok(x)),
                         PromiseState::Rejected(e) => k(Err(e)),
@@ -258,10 +546,15 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
                 }),
             )
         }
+        Some("std.foundation.coroutine/create") => coroutine::create_form(v, env, k),
+        Some("std.foundation.coroutine/coroutine?") => coroutine::predicate_form(v, env, k),
+        Some("std.foundation.coroutine/status") => coroutine::status_form(v, env, k),
+        Some("std.foundation.coroutine/close") => coroutine::close_form(v, env, k),
+        Some("std.foundation.coroutine/resume") => coroutine::resume_form(v, env, k),
+        Some("std.foundation.coroutine/yield") => coroutine::yield_form(v, env, k),
+        Some("std.foundation.coroutine/await") => coroutine::await_form(v, env, k),
         Some("def") | Some("set!") | Some("var/set") => bind_form(v, env, k),
-        Some("fn") | Some("defn") | Some("var") | Some("ns") | Some("require") => {
-            sync(Form::List(v), env, k)
-        }
+        Some(name) if SYNC_SPECIAL_FORMS.contains(&name) => sync(Form::List(v), env, k),
         _ => application(v, env, k),
     }
 }
@@ -273,7 +566,7 @@ fn bindings(forms: &[Form], op: &str) -> Result<Vec<Form>, String> {
         _ => return Err(format!("{op} expects bindings")),
     };
     if v.len() % 2 != 0 {
-        return Err(format!("{op} bindings require pairs"));
+        return Err(format!("{op} bindings require name/value pairs"));
     }
     Ok(v)
 }
@@ -398,9 +691,16 @@ fn bind_form(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) ->
         Form::Symbol(n) => n.clone(),
         _ => unreachable!(),
     };
-    let name = match &v[1] {
-        Form::Symbol(n) => n.clone(),
-        _ => return k(Err("binding name must be a symbol".into())),
+    let (name, metadata) = match &v[1] {
+        Form::Symbol(n) => (n.clone(), None),
+        Form::Metadata(meta, value) => match value.as_ref() {
+            Form::Symbol(n) => match crate::core::metadata_from_form(meta) {
+                Ok(metadata) => (n.clone(), Some(metadata)),
+                Err(error) => return k(Err(error)),
+            },
+            _ => return k(Err(format!("{op} name must be a symbol"))),
+        },
+        _ => return k(Err(format!("{op} name must be a symbol"))),
     };
     let e = env.clone();
     one(
@@ -410,19 +710,42 @@ fn bind_form(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) ->
             Ok(x) => {
                 let mut env = e.borrow_mut();
                 if op == "def" {
-                    if let Some(Value::Var(c)) = env.get(&name) {
-                        c.reset_value(x.clone());
+                    if let Some(protected) = crate::core::protected_fallback_binding(&env, &name) {
+                        drop(env);
+                        return k(Ok(protected));
+                    }
+                    let origin = crate::core::definition_origin();
+                    if let Some(Value::Var(var)) = env.get(&name) {
+                        if crate::core::binding_is_local(var) {
+                            var.reset_value(x.clone());
+                            var.set_origin(origin);
+                            if let Some(meta) = metadata {
+                                var.set_hara_metadata(Some(meta));
+                            }
+                        } else {
+                            let var = crate::kernel::Var::new(name.clone(), x.clone());
+                            var.set_origin(origin);
+                            if let Some(meta) = &metadata {
+                                var.set_hara_metadata(Some(meta.clone()));
+                            }
+                            env.insert(name.clone(), Value::Var(var));
+                        }
                     } else {
-                        env.insert(
-                            name.clone(),
-                            Value::Var(crate::kernel::Var::new(name, x.clone())),
-                        );
+                        let var = crate::kernel::Var::new(name.clone(), x.clone());
+                        var.set_origin(origin);
+                        if let Some(meta) = &metadata {
+                            var.set_hara_metadata(Some(meta.clone()));
+                        }
+                        env.insert(name.clone(), Value::Var(var));
                     }
                 } else {
                     let Some(c) = binding_var(&mut env, &name) else {
                         return k(Err(format!("unbound var: {name}")));
                     };
                     c.reset_value(x.clone());
+                    if let Some(meta) = metadata {
+                        c.set_hara_metadata(Some(meta));
+                    }
                 }
                 drop(env);
                 k(Ok(x))
@@ -514,10 +837,25 @@ fn temp() -> String {
     })
 }
 fn application(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step {
-    let f = match &v[0] {
-        Form::Symbol(n) => binding_value(&env.borrow(), n),
+    if let Some(Form::Symbol(n)) = v.first() {
+        if crate::core::resolve_macro(n).is_some() {
+            let r = {
+                let mut env = env.borrow_mut();
+                eval(&Form::List(v), &mut env)
+            };
+            return k(r);
+        }
+    }
+    let head_symbol = match &v[0] {
+        Form::Symbol(n) => Some(n.as_str()),
         _ => None,
     };
+    if let Some(name) = head_symbol {
+        if CORE_SPECIAL_FORMS.contains(&name) {
+            return eval_special_form(v, env, k);
+        }
+    }
+    let f = head_symbol.and_then(|n| binding_value(&env.borrow(), n));
     if let Some(Value::Function(f)) = f {
         return values_cps(
             Rc::new(v[1..].to_vec()),
@@ -530,6 +868,13 @@ fn application(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) 
             }),
         );
     }
+    eval_special_form(v, env, k)
+}
+fn eval_special_form(
+    v: Vec<Form>,
+    env: Rc<RefCell<HashMap<String, Value>>>,
+    k: Cont,
+) -> Step {
     let op = v[0].clone();
     let e = env.clone();
     values_cps(
@@ -567,6 +912,9 @@ fn call(f: Rc<Function>, args: Vec<Value>, k: Cont) -> Step {
             )));
         };
         return call(clause, args, k);
+    }
+    if f.native.is_some() {
+        return k(crate::core::call_function(&f, args));
     }
     if f.variadic.is_none() && f.params.len() != args.len() {
         return k(Err(format!(
@@ -659,3 +1007,5 @@ mod tests {
         );
     }
 }
+
+

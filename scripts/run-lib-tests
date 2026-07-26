@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+FRAMEWORK="lib/test/std/lib/test.hal"
+FAILURES=0
+PASSED=0
+TOTAL=0
+
+run_file() {
+    local file="$1"
+    local output
+    local status=0
+    output=$("$REPO_ROOT/hara" run "$file" 2>&1) || status=$?
+
+    if [ "$status" -ne 0 ]; then
+        echo "FAIL  $file (exit $status)"
+        echo "$output" | tail -n 5 | sed 's/^/      /'
+        return 1
+    fi
+
+    # The test file should pr-str a vector of result maps as its final output.
+    # Look for any :pass false in the output vector.
+    local last_vector
+    last_vector=$(echo "$output" | grep '^\[' | tail -n 1)
+
+    if [ -z "$last_vector" ]; then
+        echo "FAIL  $file (no result vector found)"
+        echo "$output" | tail -n 5 | sed 's/^/      /'
+        return 1
+    fi
+
+    if echo "$last_vector" | grep -q ':pass false'; then
+        echo "FAIL  $file"
+        echo "$last_vector" | sed 's/^/      /'
+        return 1
+    fi
+
+    if echo "$last_vector" | grep -q ':pass true'; then
+        local count
+        count=$(echo "$last_vector" | grep -o ':pass true' | wc -l)
+        echo "PASS  $file ($count checks)"
+        return 0
+    fi
+
+    echo "FAIL  $file (result vector has no :pass markers)"
+    echo "$last_vector" | sed 's/^/      /'
+    return 1
+}
+
+for file in $(find lib/test -name '*.hal' | sort); do
+    if [ "$file" = "$FRAMEWORK" ]; then
+        continue
+    fi
+    TOTAL=$((TOTAL + 1))
+    if run_file "$file"; then
+        PASSED=$((PASSED + 1))
+    else
+        FAILURES=$((FAILURES + 1))
+    fi
+done
+
+echo ""
+echo "lib/test summary: $PASSED passed, $FAILURES failed, $TOTAL total"
+
+if [ "$FAILURES" -ne 0 ]; then
+    exit 1
+fi

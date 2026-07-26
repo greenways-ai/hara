@@ -3,11 +3,12 @@ use std::collections::{HashMap, HashSet};
 use super::Form;
 
 const LIBRARIES: &[(&str, &str, &str)] = &[
-    ("string", "std.lib.string", "str"),
-    ("promise", "std.lib.promise", "promise"),
-    ("bytes", "std.lib.bytes", "bytes"),
-    ("socket", "std.lib.socket", "socket"),
-    ("file", "std.lib.file", "file"),
+    ("string", "std.foundation.string", "str"),
+    ("promise", "std.foundation.promise", "promise"),
+    ("bytes", "std.foundation.bytes", "bytes"),
+    ("socket", "std.foundation.socket", "socket"),
+    ("file", "std.foundation.file", "file"),
+    ("coroutine", "std.foundation.coroutine", "co"),
 ];
 
 #[derive(Debug, Clone, Default)]
@@ -21,10 +22,12 @@ pub struct GeneratedNamespaceConfig {
 
 impl GeneratedNamespaceConfig {
     pub fn defaults() -> Self {
-        let aliases = LIBRARIES
+        let mut aliases: HashMap<String, String> = LIBRARIES
             .iter()
             .map(|(_, namespace, alias)| ((*alias).into(), (*namespace).into()))
             .collect();
+        // Allow both the spec alias (coroutine) and the user-facing short alias (co).
+        aliases.insert("coroutine".into(), "std.foundation.coroutine".into());
         Self {
             aliases,
             refers: HashMap::new(),
@@ -202,20 +205,32 @@ impl GeneratedNamespaceConfig {
         Ok(())
     }
 
-    fn apply_require(
+    pub fn apply_require(
         &mut self,
         form: &Form,
         available: &impl Fn(&str) -> bool,
     ) -> Result<(), String> {
-        let spec = vector(
-            form,
-            ":require expects vectors such as [hara.lib.string :as str]",
-        )?;
-        let target = match spec.first() {
-            Some(Form::Symbol(target)) => target.as_str(),
-            _ => return Err(":require namespace must be a symbol".into()),
+        let (target, options) = match form {
+            Form::Vector(items) => {
+                let target = match items.first() {
+                    Some(Form::Symbol(target)) => target.as_str(),
+                    _ => return Err(":require namespace must be a symbol".into()),
+                };
+                (normalize_namespace(target), &items[1..])
+            }
+            Form::List(items)
+                if items.len() == 2
+                    && matches!(&items[0], Form::Symbol(q) if q == "quote")
+                    && matches!(&items[1], Form::Symbol(_)) =>
+            {
+                let target = match &items[1] {
+                    Form::Symbol(target) => target.as_str(),
+                    _ => unreachable!(),
+                };
+                (normalize_namespace(target), &[][..])
+            }
+            _ => return Err(":require expects vectors such as [hara.lib.string :as str]".into()),
         };
-        let target = normalize_namespace(target);
         if !known_namespace(target) && !available(target) {
             return Err(format!(
                 "Cannot require missing generated namespace: {target}"
@@ -224,10 +239,10 @@ impl GeneratedNamespaceConfig {
         if !self.required_namespaces.iter().any(|value| value == target) {
             self.required_namespaces.push(target.into());
         }
-        if (spec.len() - 1) % 2 != 0 {
+        if options.len() % 2 != 0 {
             return Err(format!("Malformed :require options for {target}"));
         }
-        for option in spec[1..].chunks(2) {
+        for option in options.chunks(2) {
             let name = keyword(&option[0], "Malformed :require options")?;
             match name {
                 "as" => {
@@ -388,17 +403,18 @@ fn library(value: &str) -> Result<&str, String> {
 fn normalize_namespace(value: &str) -> &str {
     match value {
         "core" | "hara.lib.core" => "std.foundation",
-        "hara.lib.string" => "std.lib.string",
-        "hara.lib.promise" => "std.lib.promise",
-        "hara.lib.bytes" => "std.lib.bytes",
-        "hara.lib.socket" => "std.lib.socket",
-        "hara.lib.file" => "std.lib.file",
+        "hara.lib.string" => "std.foundation.string",
+        "hara.lib.promise" => "std.foundation.promise",
+        "hara.lib.bytes" => "std.foundation.bytes",
+        "hara.lib.socket" => "std.foundation.socket",
+        "hara.lib.file" => "std.foundation.file",
         value => value,
     }
 }
 fn known_namespace(value: &str) -> bool {
     let value = normalize_namespace(value);
     value == "std.foundation"
+        || value == "std.foundation.coroutine"
         || LIBRARIES
             .iter()
             .any(|(_, namespace, _)| *namespace == value)
@@ -409,14 +425,31 @@ fn canonical(namespace: &str, method: &str) -> String {
     }
     match (normalize_namespace(namespace), method) {
         ("std.foundation", method) => method.into(),
+        ("std.foundation.coroutine", method) => format!("std.foundation.coroutine/{method}"),
+        ("std.foundation.string", "length") | ("std.foundation.string", "len") => {
+            "str/count".into()
+        }
+        ("std.foundation.string", "char-at") => "str/char".into(),
+        ("std.foundation.string", "slice") => "str/substring".into(),
+        ("std.foundation.string", "encode-utf8") => "str/encode".into(),
+        ("std.foundation.string", "decode-utf8") => "str/decode".into(),
+        ("std.foundation.string", "to-upper") => "str/upper".into(),
+        ("std.foundation.string", "to-lower") => "str/lower".into(),
+        ("std.foundation.string", method) => format!("str/{method}"),
         ("std.lib.string", "len") => "str/count".into(),
         ("std.lib.string", "to-upper") => "str/upper".into(),
         ("std.lib.string", "to-lower") => "str/lower".into(),
         ("std.lib.string", method) => format!("str/{method}"),
+        ("std.foundation.promise", "then") => "promise/then".into(),
+        ("std.foundation.promise", "catch") => "promise/catch".into(),
+        ("std.foundation.promise", method) => format!("promise/{method}"),
+        ("std.foundation.bytes", method) => format!("bytes/{method}"),
+        ("std.foundation.file", method) => format!("file/{method}"),
         ("std.lib.promise", "then") => "promise/map".into(),
         ("std.lib.promise", "catch") => "promise/recover".into(),
         ("std.lib.promise", method) => format!("promise/{method}"),
         ("std.lib.bytes", method) => format!("bytes/{method}"),
+        ("std.foundation.socket", method) => format!("socket/{method}"),
         ("std.lib.socket", method) => format!("socket/{method}"),
         ("std.lib.file", method) => format!("file/{method}"),
         (namespace, method) => format!("{namespace}/{method}"),

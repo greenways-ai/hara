@@ -127,9 +127,7 @@ fn run(options: Options) -> Result<(), String> {
                 .command
                 .get(1)
                 .ok_or_else(|| "run requires a file path".to_owned())?;
-            let source =
-                fs::read_to_string(path).map_err(|error| format!("cannot read {path}: {error}"))?;
-            direct_eval(&options, &source)
+            run_file(&options, path)
         }
         Some("stdin") => {
             let mut source = String::new();
@@ -162,7 +160,27 @@ fn direct_eval(options: &Options, source: &str) -> Result<(), String> {
     if options.native_sockets {
         runtime.install_native_socket_provider();
     }
-    println!("{}", runtime.eval_native_traced(source)?);
+    println!("{}", runtime.eval_native(source)?);
+    Ok(())
+}
+
+fn run_file(options: &Options, path: &str) -> Result<(), String> {
+    let bytes = fs::read(path).map_err(|error| format!("cannot read {path}: {error}"))?;
+    let is_hir = path.ends_with(".hir") || bytes.starts_with(b"HIR\0");
+    let mut runtime = Runtime::new();
+    if let Some(root) = &options.root {
+        runtime.install_native_file_provider(root.to_string_lossy().as_ref());
+    }
+    if options.native_sockets {
+        runtime.install_native_socket_provider();
+    }
+    if is_hir {
+        println!("{}", runtime.eval_hir(&bytes)?);
+    } else {
+        let source = String::from_utf8(bytes)
+            .map_err(|error| format!("{path} is not valid UTF-8: {error}"))?;
+        println!("{}", runtime.eval_native(&source)?);
+    }
     Ok(())
 }
 

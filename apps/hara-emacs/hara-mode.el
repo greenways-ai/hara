@@ -920,7 +920,7 @@ so a partial name is never evaluated."
 
 (defconst hara-imenu-generic-expression
   '(("Definitions"
-     "^(\\(?:def\\|defn-?\\|defmacro\\|defmulti\\|defprotocol\\|defrecord\\|defstruct\\)\\s-+\\([^][(){}[:space:]]+\\)"
+     "^(\\(?:def\\|defn-?\\|defmacro\\|defmulti\\|defprotocol\\|defstruct\\)\\s-+\\([^][(){}[:space:]]+\\)"
      1)))
 
 ;;;###autoload
@@ -1020,10 +1020,10 @@ so a partial name is never evaluated."
   `((,(regexp-opt
        '("def" "defn" "defmacro" "defmulti" "defmethod" "fn" "let" "loop"
          "recur" "if" "when" "cond" "case" "do" "try" "catch" "finally"
-         "throw" "ns" "require" "in-ns" "protocol" "deftype" "defrecord")
+         "throw" "ns" "require" "in-ns" "protocol" "defstruct")
        'symbols)
      . font-lock-keyword-face)
-    ("(\\(?:def\\|defn\\|defmacro\\|defmulti\\|defprotocol\\)\\s-+\\(\\(?:\\sw\\|\\s_\\)+\\)"
+    ("(\\(?:def\\|defn\\|defmacro\\|defmulti\\|defprotocol\\|defstruct\\)\\s-+\\(\\(?:\\sw\\|\\s_\\)+\\)"
      1 font-lock-function-name-face)))
 
 (defvar hara-mode-map

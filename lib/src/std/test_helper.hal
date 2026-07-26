@@ -1,0 +1,24 @@
+(ns std.test-helper)
+
+(defn check
+  "Returns a test result map."
+  [name actual expected]
+  {:name name
+   :pass (= actual expected)
+   :actual actual
+   :expected expected})
+
+(defmacro check-error
+  "Returns a passing result if `form` throws, failing otherwise."
+  [name form]
+  `(check ~name (try (do ~form false) (catch Exception e# true)) true))
+
+(defn passed?
+  "True if a result map passed."
+  [result]
+  (:pass result))
+
+(defn print-results
+  "Prints the result vector so the runner can parse it."
+  [results]
+  (pr-str results))

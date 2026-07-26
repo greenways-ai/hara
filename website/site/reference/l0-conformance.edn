@@ -7,7 +7,7 @@
    :no-transducers
    :no-transduce
    :no-eduction
-   :no-defrecord
+   :no-defstruct
    :no-deftype
    :no-defn-xt}
  :cases

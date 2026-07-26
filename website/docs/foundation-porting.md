@@ -36,7 +36,7 @@ implementations.
 
 | Area | Original behavior | Missing or different facility | Proposed direction | Decision |
 |---|---|---|---|---|
-| Typed records | Five Clojure records represent typed declarations | Native Hara record declaration was missing | Native `defrecord`, `->Record`, and `map->Record` constructors | implemented |
+| Typed records | Five Clojure records represent typed declarations | Native Hara record declaration was missing | Native `defstruct`, `->Record`, and `map->Record` constructors | implemented |
 | Namespace analysis | Uses `ns-publics`, `ns-aliases`, `ns-name`, and `requiring-resolve` | Hara exposed only part of this introspection | Narrow deterministic namespace primitives; publics exclude referred Vars | implemented |
 | Source analysis | Uses tools.reader with file, line, and column metadata | Hara parser did not expose a multi-form analysis API | Capability-checked `read-forms` preserving file and source spans | implemented |
 | Parallel work | Some later language/runtime paths use futures and parallel task processing | Hara promises differ from Clojure futures | No sequential fallback until separately approved | pending |
@@ -72,7 +72,7 @@ the portable Hara runtime:
 | `std.lib.walk` | Lazy Java-backed static library over persistent Hara collections | Supplies the Foundation traversal contract without mutable host collections escaping; map/set implementations and metadata are preserved |
 | `volatile!` used as a local traversal flag | Hara `atom`, `reset!`, and `deref` | `talo.common.preprocess-input` needs local mutable state only while checking whether a template expression can be evaluated |
 | Host form `eval` during preprocessing | Core Hara `eval` evaluates the readable Hara form in the active namespace | Preserves persisted template behavior while keeping evaluation inside the Hara runtime rather than invoking Clojure/JVM evaluation |
-| Foundation `std.lib.impl/defimpl` for `BookEntry` | Native Hara `defrecord` with the same fields and constructors | Preserves lookup, construction, and type checks without introducing an implementation-only compatibility namespace; custom Foundation record printing remains unavailable |
+| Foundation `std.lib.impl/defimpl` for `BookEntry` | Native Hara `defstruct` with the same fields and constructors | Preserves lookup, construction, and type checks without introducing an implementation-only compatibility namespace; custom Foundation record printing remains unavailable |
 | `std.lib.template/$` in copied record-construction facts | Explicit persistent target forms assembled with `list` | Hara does not ship the Foundation template namespace; the test functions retain the same generated forms without adding a compatibility-only public namespace |
 
 Translated `code.test` files are copied from Foundation by default. Namespace

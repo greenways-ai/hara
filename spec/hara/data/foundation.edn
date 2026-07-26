@@ -63,6 +63,7 @@
     fn
     def
     defn
+    defstruct
     ns}
 
   :macros
@@ -645,5 +646,6 @@
   "Iterator mechanics may remain JVM-backed, but iter-* names are not public language symbols."
   "Direct map is eager and origin-preserving; the unary map transform is lazy."
   "mapv is intentionally absent rather than retained as a compatibility alias."
+  "defstruct is the canonical typed-struct special form; defrecord is not present."
   "HIR plain maps and sets encode in the canonical unsigned lexicographic order of their encoded bytes; ordered maps and sets keep insertion order (spec/hara/hir.md)."
   "Filesystem loading, namespace reflection, and general host interop are outside this boundary."]}

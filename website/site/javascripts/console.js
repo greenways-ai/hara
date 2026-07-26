@@ -9,7 +9,8 @@
 
   const log = root.querySelector('[data-console-log]');
   const input = root.querySelector('[data-console-input]');
-  const commands = root.querySelectorAll('[data-console-command]');
+  const paletteInputs = document.querySelectorAll('[data-console-palette]');
+  const commands = document.querySelectorAll('[data-console-command]:not([data-hara-start])');
   const start = document.querySelector('[data-hara-start]');
   const panel = root.querySelector('[data-console-panel]');
   const toggle = root.querySelector('[data-console-toggle]');
@@ -21,6 +22,9 @@
   const panelToggle = document.querySelector('[data-panel-toggle]');
   const panelClose = document.querySelector('[data-panel-close]');
   const systemPanel = document.querySelector('[data-system-panel]');
+  const paletteToggle = document.querySelector('[data-palette-toggle]');
+  const paletteClose = document.querySelector('[data-palette-close]');
+  const paletteSheet = document.querySelector('[data-palette-sheet]');
   const hero = document.querySelector('.hara-home-intro');
   let entries = 0;
 
@@ -56,7 +60,8 @@
   let runtime = null;
   const ready = (async () => {
     try {
-      const url = new URL('rust/pkg/hara_wasm.js', document.baseURI).href;
+      const wasmUrl = root.dataset.wasmUrl || '/rust/pkg/hara_wasm.js';
+      const url = new URL(wasmUrl, location.href).href;
       const mod = await import(url);
       await mod.default();
       runtime = mod.Runtime.core();
@@ -68,6 +73,9 @@
       status('state', 'READY');
       if (led) led.classList.add('is-ready');
       print([['hara-tty-o', `;; hara.wasm ${mod.version().replace('hara-wasm/', '')} ready`]]);
+      // page-host.js listens for this to register the .hal host namespaces
+      // and install the host/call handler before the first user eval.
+      document.dispatchEvent(new CustomEvent('hara:runtime-ready', { detail: { runtime } }));
     } catch (err) {
       console.error('[hara console]', err);
       status('runtime', 'WASM · ERROR');
@@ -99,6 +107,15 @@
     const source = input.value.trim();
     input.value = '';
     await evaluate(source);
+  });
+
+  paletteInputs.forEach((paletteInput) => {
+    paletteInput.addEventListener('keydown', async (event) => {
+      if (event.key !== 'Enter') return;
+      const source = paletteInput.value.trim();
+      paletteInput.value = '';
+      await evaluate(source);
+    });
   });
 
   commands.forEach((button) => {
@@ -134,6 +151,26 @@
     panelClose.addEventListener('click', () => setPanelOpen(false));
   }
 
+  const setPaletteOpen = (open) => {
+    document.body.classList.toggle('is-palette-open', open);
+    if (paletteSheet) paletteSheet.setAttribute('aria-hidden', String(!open));
+    if (paletteToggle) paletteToggle.setAttribute('aria-expanded', String(open));
+    if (open) {
+      const mobileInput = paletteSheet && paletteSheet.querySelector('[data-console-palette]');
+      if (mobileInput) mobileInput.focus();
+    }
+  };
+
+  if (paletteToggle) {
+    paletteToggle.addEventListener('click', () => {
+      setPaletteOpen(!document.body.classList.contains('is-palette-open'));
+    });
+  }
+
+  if (paletteClose) {
+    paletteClose.addEventListener('click', () => setPaletteOpen(false));
+  }
+
   const setIntroOpen = (open) => {
     if (intro) intro.classList.toggle('is-open', open);
     if (hero) hero.classList.toggle('is-faded', open);
@@ -154,6 +191,10 @@
   if (toggle || panel || systemPanel) {
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
+        if (document.body.classList.contains('is-palette-open')) {
+          setPaletteOpen(false);
+          return;
+        }
         if (intro && intro.classList.contains('is-open')) {
           setIntroOpen(false);
           return;

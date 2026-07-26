@@ -1,0 +1,87 @@
+(ns std.foundation.string-test
+  (:require [std.lib.test :as test]))
+
+(def results
+  [(test/check "len"
+               (str/len "hara")
+               4)
+   (test/check "len-unicode"
+               (str/len "hé")
+               2)
+   (test/check "comp"
+               (str/comp "a" "b")
+               -1)
+   (test/check "lt?"
+               (str/lt? "a" "b")
+               true)
+   (test/check "gt?"
+               (str/gt? "b" "a")
+               true)
+   (test/check "pad-left"
+               (str/pad-left "x" 3 "0")
+               "00x")
+   (test/check "pad-right"
+               (str/pad-right "x" 3 "0")
+               "x00")
+   (test/check "starts-with?"
+               (str/starts-with? "hara" "ha")
+               true)
+   (test/check "ends-with?"
+               (str/ends-with? "hara" "ra")
+               true)
+   (test/check "char"
+               (str/char "hara" 1)
+               "a")
+   (test/check "split"
+               (nth (str/split "a,b" ",") 1)
+               "b")
+   (test/check "split-three"
+               (nth (str/split "a,b,c" ",") 1)
+               "b")
+   (test/check "join"
+               (str/join "," ["a" "b"])
+               "a,b")
+   (test/check "index-of"
+               (str/index-of "ababa" "ba" 2)
+               3)
+   (test/check "substring"
+               (str/substring "hara" 1 3)
+               "ar")
+   (test/check "to-upper"
+               (str/to-upper "hara")
+               "HARA")
+   (test/check "to-lower"
+               (str/to-lower "HARA")
+               "hara")
+   (test/check "to-fixed"
+               (str/to-fixed 1.25 2)
+               "1.25")
+   (test/check "to-fixed-integer"
+               (str/to-fixed 1 2)
+               "1.00")
+   (test/check "replace"
+               (str/replace "hara" "a" "x")
+               "hxrx")
+   (test/check "replace-all-occurrences"
+               (str/replace "a-b-a" "a" "x")
+               "x-b-x")
+   (test/check "trim"
+               (str/trim " x ")
+               "x")
+   (test/check "trim-left"
+               (str/trim-left " x ")
+               "x ")
+   (test/check "trim-left-multi"
+               (str/trim-left "  a  ")
+               "a  ")
+   (test/check "trim-right"
+               (str/trim-right " x ")
+               " x")
+   (test/check "trim-right-multi"
+               (str/trim-right "  a  ")
+               "  a")
+   (test/check "encode/decode round-trip"
+               (str/decode (str/encode "hé"))
+               "hé")])
+
+(test/print-results results)

@@ -65,3 +65,4 @@ parse_jacoco.py
 # the deployed site gets a fresh copy from pages.yml)
 website/docs/rust/pkg/
 apps/hara-world/runtime/
+/.venv-docs

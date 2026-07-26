@@ -259,7 +259,7 @@ status. Its status data should record:
 - which exports are installed directly or through providers;
 - current public symbols that are outside the target boundary;
 - missing target symbols and semantic mismatches;
-- JVM/Polis parity issues, including regexp and Unicode behavior.
+- JVM/Talo parity issues, including regexp and Unicode behavior.
 
 An implementation is not conformant merely because `HaraContext` happens to define a symbol.
 The EDN inventory and conformance cases are the authority.
@@ -281,4 +281,4 @@ The runtime-library suite must cover:
 - file capability denial and the complete small filesystem contract;
 - process capability denial, argv preservation, byte-oriented standard I/O, exit codes,
   repeated observations, and process termination;
-- JVM/Polis conformance for every portable operation.
+- JVM/Talo conformance for every portable operation.

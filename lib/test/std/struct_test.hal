@@ -1,0 +1,20 @@
+(ns std.struct-test
+  (:require [std.lib.test :as test]))
+
+(defstruct Point [x y])
+
+(def results
+  [(test/check "keyword field lookup" (:x (Point 1 2)) 1)
+   (test/check "get field" (get (Point 1 2) :y) 2)
+   (test/check "get missing with fallback" (get (Point 1 2) :z :missing) :missing)
+   (test/check "assoc updates field" (:x (assoc (Point 1 2) :x 10)) 10)
+   (test/check "count" (count (Point 1 2)) 2)
+   (test/check "keys" (first (keys (Point 1 2))) :x)
+   (test/check "vals" (first (vals (Point 1 2))) 1)
+   (test/check "dissoc drops field" (get (dissoc (Point 1 2) :x) :y) 2)
+   (test/check "extend-type override"
+               (do (extend-type Point ICount (count [p] 2))
+                   (count (Point 1 2)))
+               2)])
+
+(test/print-results results)

@@ -1,0 +1,162 @@
+(ns talo.common.provenance)
+
+(def +field-keys+
+  [:polis/phase
+   :polis/subsystem
+   :polis/lang
+   :polis/module
+   :polis/namespace
+   :polis/entry
+   :polis/symbol
+   :polis/line
+   :polis/form])
+
+(defn module-id
+  [module]
+  (cond (map? module)
+        (:id module)
+
+        :else
+        module))
+
+(defn namespace-id
+  [namespace]
+  (cond (and (symbol? namespace)
+             (the-ns namespace))
+        (ns-name namespace)
+
+        :else
+        namespace))
+
+(defn line-of
+  [value]
+  (cond (nil? value)
+        nil
+
+        (map? value)
+        (or (:line value)
+            (line-of (:entry value))
+            (line-of (:form value))
+            (:line (meta value)))
+
+        :else
+        (:line (meta value))))
+
+(defn compact
+  [m]
+  (reduce-kv (fn [acc k v]
+               (if (nil? v)
+                 acc
+                 (assoc acc k v)))
+             {}
+             m))
+
+(defn frame
+  [data]
+  (let [inner (or (:polis/provenance data) {})]
+    (let [base (merge (select-keys inner +field-keys+)
+                      (select-keys data +field-keys+))]
+      (if (empty? base)
+        {}
+        (let [line (or (:polis/line base)
+                       (line-of (:polis/entry base))
+                       (line-of (:polis/form base))
+                       (line-of data))]
+          (compact
+           (assoc base
+                  :polis/module (module-id (:polis/module base))
+                  :polis/namespace (namespace-id (:polis/namespace base))
+                  :polis/line line)))))))
+
+(defn provenance
+  [& inputs]
+  (apply merge
+         {}
+         (remove empty?
+                 (map (fn [input]
+                        (if (map? input) (frame input) {}))
+                      inputs))))
+
+(defn provenance-stack
+  [data]
+  (let [stack (:polis/provenance-stack data)]
+    (cond (seq stack)
+          (vec (remove empty? (map frame stack)))
+
+          (map? data)
+          (let [single (frame data)]
+            (if (empty? single)
+              []
+              [single]))
+
+          :else
+          [])))
+
+(defn same-site?
+  [left right]
+  (= (select-keys left [:polis/phase
+                        :polis/subsystem
+                        :polis/module
+                        :polis/namespace
+                        :polis/line])
+     (select-keys right [:polis/phase
+                         :polis/subsystem
+                         :polis/module
+                         :polis/namespace
+                         :polis/line])))
+
+(defn append-frame
+  [stack current]
+  (cond (empty? current)
+        stack
+
+        (and (seq stack)
+             (same-site? (peek stack) current))
+        stack
+
+        :else
+        (conj stack current)))
+
+(defn with-provenance
+  [mopts & inputs]
+  (let [merged (apply provenance (:polis/provenance mopts) inputs)]
+    (if (empty? merged)
+      mopts
+      (assoc mopts :polis/provenance merged))))
+
+(defn error-with-provenance
+  [message data t]
+  (let [cause-data (ex-data t)]
+    (let [current (frame data)]
+      (let [inner-stack (provenance-stack cause-data)]
+        (let [stack (append-frame (vec inner-stack) current)]
+          (let [merged (if (seq stack)
+                         (reduce merge {} (reverse stack))
+                         {})]
+            (let [wrapped? (:polis/wrapped cause-data)
+                  plain-data (dissoc data
+                                     :polis/provenance
+                                     :polis/provenance-stack)]
+              (let [payload-0 (merge cause-data plain-data merged)]
+                (let [payload-1 (if (seq merged)
+                                  (assoc payload-0 :polis/provenance merged)
+                                  payload-0)]
+                  (let [payload-2 (if (seq stack)
+                                    (assoc payload-1 :polis/provenance-stack stack)
+                                    payload-1)]
+                    (let [payload-3 (assoc payload-2
+                                           :polis/wrapped true
+                                           :polis/cause-class (ex-class t)
+                                           :polis/cause-message (ex-message t))]
+                      (let [payload (if (and cause-data (not wrapped?))
+                                      (assoc payload-3 :polis/cause-data cause-data)
+                                      payload-3)]
+                        (ex-info (if (ex-message t)
+                                   (str message ": " (ex-message t))
+                                   message)
+                                 payload
+                                 t)))))))))))))
+
+(defn throw-with-provenance
+  [message data t]
+  (throw (error-with-provenance message data t)))

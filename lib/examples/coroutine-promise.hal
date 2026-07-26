@@ -1,0 +1,27 @@
+(require 'std.foundation.coroutine)
+
+;; Coroutines can yield plain values, promises, or awaited promise values.
+;; The difference matters when building schedulers or async generators.
+
+;; Plain yield hands the promise object to the resumer.
+(def c-obj (std.foundation.coroutine/create
+             (fn []
+               (let [p (promise/run (fn [] 42))]
+                 (std.foundation.coroutine/yield p)))))
+
+;; Compose yield with await to yield the resolved value directly.
+(def c-val (std.foundation.coroutine/create
+             (fn []
+               (let [p (promise/run (fn [] 42))]
+                 (std.foundation.coroutine/yield (std.foundation.coroutine/await p))))))
+
+;; Both produce 42, but the first requires dereferencing the yielded promise.
+(def result
+  [(promise/value (std.foundation.coroutine/resume c-obj))
+   (std.foundation.coroutine/resume c-val)])
+
+;; Close the suspended coroutines so the runtime can shut down cleanly.
+(std.foundation.coroutine/close c-obj)
+(std.foundation.coroutine/close c-val)
+
+result

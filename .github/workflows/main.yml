@@ -73,6 +73,9 @@ jobs:
     - name: Build and test with Maven
       run: mvn -B -Ptruffle package --file java/pom.xml
 
+    - name: Run library .hal tests
+      run: ./scripts/run-lib-tests
+
     - name: Run JVM L0 conformance corpus
       run: mvn -B -Ptruffle -Dtest=hara.truffle.HaraL0ConformanceTest test --file java/pom.xml
 

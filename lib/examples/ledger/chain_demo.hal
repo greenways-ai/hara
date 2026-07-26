@@ -1,0 +1,21 @@
+(ns example.ledger.chain-demo
+  (:require [std.ledger.chain :as chain]))
+
+(let [genesis (chain/create {:counter 0 :log []})
+      c1 (chain/append genesis
+                       :alice
+                       1000
+                       (chain/tx
+                         (assoc state :counter (inc (:counter state)))))
+      c2 (chain/append c1
+                       :bob
+                       1001
+                       (chain/tx
+                         (assoc state
+                                :log
+                                (conj (:log state)
+                                      {:who (:actor ctx)
+                                       :when (:timestamp ctx)}))))]
+  (pr-str {:state (chain/state c2)
+            :block-count (count (chain/blocks c2))
+            :valid? (chain/valid? c2)}))

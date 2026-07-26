@@ -19,7 +19,7 @@ use std::rc::Rc;
 
 #[path = "fiber.rs"]
 mod fiber;
-pub use fiber::{EvalFiber, EvalFiberState};
+pub use fiber::{EvalFiber, EvalFiberState, Step};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionValue {
@@ -66,6 +66,7 @@ pub enum Value {
     Var(KernelVar<Value>),
     Namespace(Rc<crate::kernel::Namespace<Value>>),
     Extension(ExtensionValue),
+    Coroutine(Rc<Coroutine>),
     Nil,
 }
 
@@ -92,6 +93,51 @@ impl std::fmt::Debug for Function {
             .field("name", &self.name)
             .field("native", &self.native.is_some())
             .finish()
+    }
+}
+
+/// State of a portable coroutine value.
+pub enum CoroutineState {
+    /// The body has not started yet; stores the body function.
+    New(Value),
+    /// Parked at a yield/await; stores the continuation that resumes the body.
+    Suspended(Box<dyn FnOnce(Value) -> Step>),
+    /// Currently executing on a fiber.
+    Running,
+    /// Completed, closed, or killed by an error.
+    Dead,
+}
+
+impl std::fmt::Debug for CoroutineState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::New(_) => formatter.debug_tuple("New").finish(),
+            Self::Suspended(_) => formatter.debug_tuple("Suspended").finish(),
+            Self::Running => formatter.write_str("Running"),
+            Self::Dead => formatter.write_str("Dead"),
+        }
+    }
+}
+
+/// A re-entrant coroutine implemented with the fiber/CPS evaluator.
+pub struct Coroutine {
+    pub state: RefCell<CoroutineState>,
+}
+
+impl std::fmt::Debug for Coroutine {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Coroutine")
+            .field("state", &self.state.borrow())
+            .finish()
+    }
+}
+
+impl Coroutine {
+    pub fn new(body: Value) -> Self {
+        Self {
+            state: RefCell::new(CoroutineState::New(body)),
+        }
     }
 }
 
@@ -246,7 +292,7 @@ fn resolve_macro_in(namespace: &str, name: &str) -> Option<Rc<Function>> {
     })
 }
 
-fn resolve_macro(name: &str) -> Option<Rc<Function>> {
+pub(crate) fn resolve_macro(name: &str) -> Option<Rc<Function>> {
     if let Some((namespace, local)) = name.split_once('/') {
         return resolve_macro_in(namespace, local);
     }
@@ -846,6 +892,7 @@ impl PartialEq for Value {
             (Value::Var(a), Value::Var(b)) => a.same_identity(b),
             (Value::Namespace(a), Value::Namespace(b)) => a.same_identity(b),
             (Value::Extension(a), Value::Extension(b)) => a == b,
+            (Value::Coroutine(a), Value::Coroutine(b)) => Rc::ptr_eq(a, b),
             (Value::Nil, Value::Nil) => true,
             _ => false,
         }
@@ -908,6 +955,7 @@ impl Ord for Value {
                 Value::Var(_) => 23,
                 Value::Namespace(_) => 24,
                 Value::Extension(_) => 25,
+                Value::Coroutine(_) => 30,
             }
         }
         rank(self)
@@ -1067,6 +1115,14 @@ impl Value {
             Self::Var(value) => value.display(),
             Self::Namespace(value) => format!("#namespace[{}]", value.name().as_str()),
             Self::Extension(value) => format!("#ht[:handle {}]", value.handle),
+            Self::Coroutine(value) => {
+                let status = match &*value.state.borrow() {
+                    CoroutineState::New(_) | CoroutineState::Suspended(_) => "suspended",
+                    CoroutineState::Running => "running",
+                    CoroutineState::Dead => "dead",
+                };
+                format!("#<coroutine {status}>")
+            }
             Self::Nil => "nil".into(),
         }
     }
@@ -1103,6 +1159,7 @@ impl Value {
                 Value::Var(_) => 17,
                 Value::Namespace(_) => 27,
                 Value::Extension(_) => 18,
+                Value::Coroutine(_) => 29,
                 Value::Nil => 19,
                 Value::Float(_) => 20,
                 Value::BigInteger(_) => 21,
@@ -1179,6 +1236,9 @@ impl Value {
                     v.provider.hash(state);
                     v.type_name.hash(state);
                     v.handle.hash(state);
+                }
+                Value::Coroutine(v) => {
+                    Rc::as_ptr(v).hash(state);
                 }
                 Value::Nil => {}
             }
@@ -1295,17 +1355,17 @@ pub fn with_definition_origin<R>(origin: VarOrigin, operation: impl FnOnce() -> 
     })
 }
 
-fn definition_origin() -> VarOrigin {
+pub(crate) fn definition_origin() -> VarOrigin {
     ACTIVE_DEFINITION_ORIGIN.with(Cell::get)
 }
 
-fn binding_is_local(var: &KernelVar<Value>) -> bool {
+pub(crate) fn binding_is_local(var: &KernelVar<Value>) -> bool {
     namespace_registry()
         .map(|registry| var.symbol().get_namespace() == Some(registry.current().name().as_str()))
         .unwrap_or(true)
 }
 
-fn protected_fallback_binding(env: &HashMap<String, Value>, name: &str) -> Option<Value> {
+pub(crate) fn protected_fallback_binding(env: &HashMap<String, Value>, name: &str) -> Option<Value> {
     if definition_origin() != VarOrigin::HalFallback {
         return None;
     }
@@ -2142,6 +2202,7 @@ fn portable_type_name(value: &Value) -> &str {
         Value::Var(_) => "var",
         Value::Namespace(_) => "namespace",
         Value::Extension(_) => "extension",
+        Value::Coroutine(_) => "coroutine",
     }
 }
 
@@ -2175,6 +2236,28 @@ pub fn receiver_category(value: &Value) -> &'static str {
         Value::Var(_) => "var",
         Value::Namespace(_) => "namespace",
         Value::Extension(_) => "extension",
+        Value::Coroutine(_) => "coroutine",
+    }
+}
+
+fn coroutine_status(coroutine: &Coroutine) -> Value {
+    let state = coroutine.state.borrow();
+    Value::Keyword(Keyword::from(match &*state {
+        CoroutineState::New(_) | CoroutineState::Suspended(_) => "suspended",
+        CoroutineState::Running => "running",
+        CoroutineState::Dead => "dead",
+    }))
+}
+
+fn coroutine_close(coroutine: &Coroutine) -> Result<(), String> {
+    let mut state = coroutine.state.borrow_mut();
+    match &*state {
+        CoroutineState::Dead => Ok(()),
+        CoroutineState::Running => Err("coroutine/close: cannot close a running coroutine".into()),
+        _ => {
+            *state = CoroutineState::Dead;
+            Ok(())
+        }
     }
 }
 
@@ -4117,7 +4200,7 @@ fn metadata_value(form: &Form) -> Result<MetadataValue, String> {
     }
 }
 
-fn metadata_from_form(form: &Form) -> Result<Rc<Metadata>, String> {
+pub(crate) fn metadata_from_form(form: &Form) -> Result<Rc<Metadata>, String> {
     let MetadataValue::Map(entries) = metadata_value(form)? else {
         return Err("reader metadata must be a map".into());
     };
@@ -4452,7 +4535,7 @@ fn call_value(callable: Value, arguments: Vec<Value>) -> Result<Value, String> {
     }
 }
 
-fn call_function(function: &Function, arguments: Vec<Value>) -> Result<Value, String> {
+pub(crate) fn call_function(function: &Function, arguments: Vec<Value>) -> Result<Value, String> {
     if let Some(native) = &function.native {
         if function.variadic.is_none() && function.params.len() != arguments.len() {
             return Err(format!(
@@ -4617,19 +4700,32 @@ fn eval_require_spec(
     env: &mut HashMap<String, Value>,
     form: &Form,
 ) -> Result<(), String> {
-    let spec = match form {
-        Form::Vector(items) => items,
+    let (target, options) = match form {
+        Form::Vector(items) => {
+            let target = match items.first() {
+                Some(Form::Symbol(target)) => target.clone(),
+                _ => return Err("require namespace must be a symbol".into()),
+            };
+            (target, &items[1..])
+        }
+        Form::List(items)
+            if items.len() == 2
+                && matches!(&items[0], Form::Symbol(q) if q == "quote")
+                && matches!(&items[1], Form::Symbol(_)) =>
+        {
+            let target = match &items[1] {
+                Form::Symbol(target) => target.clone(),
+                _ => unreachable!(),
+            };
+            (target, &[][..])
+        }
         _ => return Err("require expects vectors such as [chrome.api :as api]".into()),
     };
-    let target = match spec.first() {
-        Some(Form::Symbol(target)) => target.clone(),
-        _ => return Err("require namespace must be a symbol".into()),
-    };
     ensure_namespace(registry, env, &target)?;
-    if (spec.len() - 1) % 2 != 0 {
+    if options.len() % 2 != 0 {
         return Err(format!("Malformed require options for {target}"));
     }
-    for option in spec[1..].chunks(2) {
+    for option in options.chunks(2) {
         let name = match &option[0] {
             Form::Keyword(keyword) => keyword.as_str(),
             _ => return Err("Malformed require options".into()),
@@ -4694,6 +4790,17 @@ fn eval_namespace_form(fs: &[Form], env: &mut HashMap<String, Value>) -> Result<
                 if matches!(clause_forms.first(), Some(Form::Keyword(k)) if k == "require") =>
             {
                 eval_require_specs(&registry, env, &clause_forms[1..])?;
+            }
+            Form::List(clause_forms)
+                if matches!(
+                    clause_forms.first(),
+                    Some(Form::Keyword(k)) if k == "config" || k == "intrinsics"
+                ) =>
+            {
+                // :config and :intrinsics are processed by the generated-namespace
+                // machinery for top-level ns forms. For ns forms loaded from source
+                // files (e.g. runtime-library activation declarations), they are
+                // metadata-only and can be ignored here.
             }
             _ => return Err("unsupported ns clause (only :require is supported)".into()),
         }
@@ -5392,6 +5499,57 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 ))
             }
             Form::Symbol(n) if n == "ns" || n == "require" => eval_namespace_form(fs, env),
+            Form::Symbol(n) if n == "std.foundation.coroutine/create" => {
+                if fs.len() != 2 {
+                    return Err("coroutine/create expects one function".into());
+                }
+                let body = eval(&fs[1], env)?;
+                match body {
+                    Value::Function(_) => {
+                        Ok(Value::Coroutine(Rc::new(Coroutine::new(body))))
+                    }
+                    _ => Err("coroutine/create expects a function".into()),
+                }
+            }
+            Form::Symbol(n) if n == "std.foundation.coroutine/coroutine?" => {
+                if fs.len() != 2 {
+                    return Err("coroutine/coroutine? expects one value".into());
+                }
+                Ok(Value::Bool(matches!(
+                    eval(&fs[1], env)?,
+                    Value::Coroutine(_)
+                )))
+            }
+            Form::Symbol(n) if n == "std.foundation.coroutine/status" => {
+                if fs.len() != 2 {
+                    return Err("coroutine/status expects one coroutine".into());
+                }
+                match eval(&fs[1], env)? {
+                    Value::Coroutine(coroutine) => Ok(coroutine_status(&coroutine)),
+                    _ => Err("coroutine/status expects a coroutine".into()),
+                }
+            }
+            Form::Symbol(n) if n == "std.foundation.coroutine/close" => {
+                if fs.len() != 2 {
+                    return Err("coroutine/close expects one coroutine".into());
+                }
+                match eval(&fs[1], env)? {
+                    Value::Coroutine(coroutine) => {
+                        coroutine_close(&coroutine)?;
+                        Ok(Value::Coroutine(coroutine))
+                    }
+                    _ => Err("coroutine/close expects a coroutine".into()),
+                }
+            }
+            Form::Symbol(n) if n == "std.foundation.coroutine/resume" => {
+                Err("coroutine/resume requires the fiber evaluator".into())
+            }
+            Form::Symbol(n) if n == "std.foundation.coroutine/yield" => {
+                Err("coroutine/yield requires the fiber evaluator".into())
+            }
+            Form::Symbol(n) if n == "std.foundation.coroutine/await" => {
+                Err("coroutine/await requires the fiber evaluator".into())
+            }
             Form::Symbol(n) if matches!(env.get(n), Some(Value::Var(var)) if (binding_is_local(var) || var.origin() == VarOrigin::RustLibrary) && matches!(var.deref_value(), Value::Function(_))) =>
             {
                 let function = binding_value(env, n).expect("function binding was checked");

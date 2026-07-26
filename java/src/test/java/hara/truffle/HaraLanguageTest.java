@@ -582,29 +582,6 @@ public class HaraLanguageTest {
   }
 
   @Test
-  public void defstructValuesBehaveLikePersistentMaps() {
-    try (Context context = context()) {
-      context.eval(HaraLanguage.ID, "(defstruct Point [x y])");
-      assertEquals(1, context.eval(HaraLanguage.ID, "(:x (Point 1 2))").asLong());
-      assertEquals(2, context.eval(HaraLanguage.ID, "(get (Point 1 2) :y)").asLong());
-      assertEquals(
-          ":missing", context.eval(HaraLanguage.ID, "(get (Point 1 2) :z :missing)").toString());
-      assertEquals(10, context.eval(HaraLanguage.ID, "(:x (assoc (Point 1 2) :x 10))").asLong());
-      assertEquals(2, context.eval(HaraLanguage.ID, "(count (Point 1 2))").asLong());
-      assertEquals(":x", context.eval(HaraLanguage.ID, "(first (keys (Point 1 2)))").toString());
-      assertEquals(1, context.eval(HaraLanguage.ID, "(first (vals (Point 1 2)))").asLong());
-      assertEquals(2, context.eval(HaraLanguage.ID, "(get (dissoc (Point 1 2) :x) :y)").asLong());
-      assertTrue(
-          context
-              .eval(
-                  HaraLanguage.ID,
-                  "(extend-type Point ICount (count [p] 2)) (count (Point 1 2))")
-              .asLong()
-              == 2);
-    }
-  }
-
-  @Test
   public void storesLexicalBindingsInFrames() {
     try (Context context = context()) {
       assertEquals(5, context.eval(HaraLanguage.ID, "(let [x 2 y 3] (+ x y))").asLong());

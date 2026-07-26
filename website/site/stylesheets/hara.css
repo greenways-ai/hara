@@ -99,8 +99,8 @@ body {
 .md-main:has(.hara-home)::before {
   background: radial-gradient(
     ellipse 95% 75% at 50% 42%,
-    rgba(5, 7, 13, .78) 0%,
-    rgba(5, 7, 13, .28) 100%);
+    rgba(5, 7, 13, .55) 0%,
+    rgba(5, 7, 13, .82) 100%);
 }
 
 /* fixed site-wide backdrop for the light-cycle game (overrides/main.html);
@@ -119,11 +119,6 @@ body {
   width: 100%;
   height: 100%;
   pointer-events: none;
-  /* glued to the depth-3 floor layer so cycles ride the grid */
-  transform: translate3d(
-    calc(var(--hara-mx, 0) * 7 * -5px),
-    calc(var(--hara-my, 0) * 7 * -3.5px + var(--hara-scroll, 0) * 7 * 12px),
-    0);
 }
 
 .md-main__inner {
@@ -478,23 +473,17 @@ body {
   top: 0;
   left: 0;
   right: 0;
-  height: 52px;
+  height: 48px;
   display: grid;
   grid-template-columns: auto auto 1fr auto auto auto;
   align-items: stretch;
+  box-sizing: border-box;
   color: #c6d4e3;
-  background: rgba(3, 5, 10, .88);
-  border-bottom: 1px solid var(--hara-line-strong);
+  background: rgba(3, 5, 10, .82);
+  border-bottom: 1px solid var(--hara-line);
   box-shadow: 0 12px 36px rgba(0, 0, 0, .3);
-  -webkit-backdrop-filter: blur(18px) saturate(1.3);
-  backdrop-filter: blur(18px) saturate(1.3);
-}
-
-.hara-system-brand,
-.hara-system-context,
-.hara-system-runtime,
-.hara-system-log-toggle {
-  border-right: 1px solid var(--hara-line);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  backdrop-filter: blur(20px) saturate(1.3);
 }
 
 .hara-system-brand {
@@ -531,7 +520,75 @@ body {
   color: var(--hara-cyan);
 }
 
-.hara-system-context,
+.hara-system-nav {
+  display: flex;
+  align-items: stretch;
+}
+
+.hara-system-nav a {
+  display: flex;
+  align-items: center;
+  padding: 0 .85rem;
+  color: #aabaca;
+  font-family: var(--hara-mono);
+  font-size: .58rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: color .15s, background .15s;
+}
+
+.hara-system-nav a:hover,
+.hara-system-nav a:focus-visible {
+  color: var(--hara-cyan-bright);
+  background: rgba(65, 245, 228, .08);
+  outline: none;
+}
+
+.hara-system-palette {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  justify-self: center;
+  min-width: 280px;
+  max-width: 520px;
+  width: 40vw;
+  padding: 0 .75rem;
+  margin: 6px 0;
+  color: #8b9db0;
+  background: rgba(2, 4, 8, .55);
+  border: 1px solid var(--hara-line);
+  border-radius: 6px;
+  font-family: var(--hara-mono);
+  font-size: .62rem;
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.hara-system-palette:focus-within {
+  border-color: rgba(65, 245, 228, .45);
+  box-shadow: 0 0 12px rgba(65, 245, 228, .12);
+}
+
+.hara-system-palette__prompt {
+  color: var(--hara-cyan);
+}
+
+.hara-system-palette input {
+  flex: 1;
+  min-width: 0;
+  color: #c6d4e3;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  letter-spacing: .02em;
+  outline: none;
+}
+
+.hara-system-palette input::placeholder {
+  color: #5a6f82;
+}
+
 .hara-system-runtime {
   display: flex;
   align-items: center;
@@ -543,23 +600,10 @@ body {
   color: #8b9db0;
 }
 
-.hara-system-context b,
 .hara-system-runtime span:last-child {
   color: #c6d4e3;
 }
 
-.hara-system-commands {
-  display: flex;
-  align-items: stretch;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.hara-system-commands::-webkit-scrollbar {
-  display: none;
-}
-
-.hara-system-commands button,
 .hara-system-log-toggle,
 .hara-system-console__head button,
 .hara-system-panel-toggle {
@@ -570,22 +614,6 @@ body {
   cursor: pointer;
 }
 
-.hara-system-commands button {
-  min-width: 108px;
-  padding: 0 .9rem;
-  border-right: 1px solid var(--hara-line);
-  font-size: .56rem;
-  letter-spacing: .13em;
-  transition: color .15s, background .15s;
-}
-
-.hara-system-commands button b {
-  margin-left: .35rem;
-  color: var(--hara-cyan);
-}
-
-.hara-system-commands button:hover,
-.hara-system-commands button:focus-visible,
 .hara-system-panel-toggle:hover,
 .hara-system-panel-toggle:focus-visible {
   color: var(--hara-cyan-bright);
@@ -631,9 +659,13 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 52px;
-  border-right: 0;
+  width: 44px;
+  margin-right: 8px;
+  border: 0;
   border-left: 1px solid var(--hara-line);
+  background: transparent;
+  color: #aabaca;
+  cursor: pointer;
 }
 
 .hara-system-panel-toggle svg {
@@ -650,10 +682,43 @@ body.is-panel-open .hara-system-panel-toggle {
   outline: none;
 }
 
+.hara-system-search-toggle,
+.hara-system-palette-toggle-mobile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  color: #aabaca;
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--hara-line);
+  cursor: pointer;
+}
+
+.hara-system-search-toggle svg,
+.hara-system-palette-toggle-mobile svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.hara-system-search-toggle:hover,
+.hara-system-search-toggle:focus-visible,
+.hara-system-palette-toggle-mobile:hover,
+.hara-system-palette-toggle-mobile:focus-visible {
+  color: var(--hara-cyan);
+  background: rgba(65, 245, 228, .08);
+  outline: none;
+}
+
+.hara-system-palette-toggle-mobile {
+  display: none;
+}
+
 .hara-system-panel {
   position: fixed;
   z-index: 19;
-  top: 52px;
+  top: 48px;
   right: 0;
   bottom: 0;
   width: min(360px, 85vw);
@@ -670,6 +735,66 @@ body.is-panel-open .hara-system-panel-toggle {
 body.is-panel-open .hara-system-panel {
   transform: translateX(0);
   visibility: visible;
+}
+
+.hara-system-palette-sheet {
+  position: fixed;
+  z-index: 18;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: rgba(3, 5, 10, .96);
+  border-top: 1px solid var(--hara-line-strong);
+  box-shadow: 0 -20px 60px rgba(0, 0, 0, .45);
+  transform: translateY(100%);
+  transition: transform .35s cubic-bezier(.34, 1.56, .64, 1), visibility .35s;
+  visibility: hidden;
+}
+
+body.is-palette-open .hara-system-palette-sheet {
+  transform: translateY(0);
+  visibility: visible;
+}
+
+.hara-system-palette-sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding-left: 1rem;
+  color: var(--hara-faint);
+  border-bottom: 1px solid var(--hara-line);
+  font-family: var(--hara-mono);
+  font-size: .58rem;
+  letter-spacing: .16em;
+}
+
+.hara-system-palette-sheet__head button {
+  align-self: stretch;
+  width: 44px;
+  color: var(--hara-muted);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--hara-line);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.hara-system-palette-sheet__head button:hover,
+.hara-system-palette-sheet__head button:focus-visible {
+  color: var(--hara-cyan);
+  background: rgba(65, 245, 228, .08);
+  outline: none;
+}
+
+.hara-system-palette-sheet .hara-system-palette {
+  margin: .75rem 1rem 1.25rem;
+  width: auto;
+  max-width: none;
+  min-width: 0;
 }
 
 .hara-system-panel__head {
@@ -730,6 +855,13 @@ body.is-panel-open .hara-system-panel {
 
 .hara-system-tile__value {
   color: var(--hara-cyan);
+}
+
+.hara-system-tile--disabled {
+  color: var(--hara-faint);
+  background: rgba(255, 255, 255, .03);
+  border-color: rgba(255, 255, 255, .05);
+  cursor: not-allowed;
 }
 
 .hara-system-panel__section {
@@ -859,7 +991,7 @@ body.is-panel-open .hara-system-panel {
   align-items: center;
   justify-content: space-between;
   gap: 5vw;
-  padding: 8vh 3vw;
+  padding: 8vh 6vw;
   text-align: left;
   background:
     linear-gradient(160deg, rgba(20, 30, 48, .14), rgba(6, 9, 16, .20) 60%, rgba(10, 16, 26, .12));
@@ -917,17 +1049,87 @@ body.is-panel-open .hara-system-panel {
 .hara-home-tagline {
   margin: 0;
   font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
-  font-size: 1.2rem;
+  font-size: 1.35rem;
   font-style: italic;
   font-weight: 500;
-  letter-spacing: -.045em;
-  background: linear-gradient(105deg, #41f5e4 0%, #58c9dd 35%, #9c7bff 72%, #4b247a 100%);
+  letter-spacing: -.035em;
+  background: linear-gradient(105deg, #2a8f8a 0%, #3a7a99 35%, #6a5aa8 72%, #2c1a4a 100%);
   background-size: 180% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
   -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 0 16px rgba(65, 245, 228, .16));
+  filter: drop-shadow(0 0 8px rgba(65, 245, 228, .1));
+}
+
+.hara-home-playground {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: min(560px, 86vw);
+}
+
+.hara-home-palette {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  width: 100%;
+  padding: .9rem 1rem;
+  background: rgba(2, 4, 8, .72);
+  border: 1px solid var(--hara-line-strong);
+  border-radius: 10px;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  font-family: var(--hara-mono);
+  font-size: .95rem;
+  color: #c6d4e3;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .25);
+}
+
+.hara-home-palette__prompt {
+  color: var(--hara-cyan);
+  font-weight: 700;
+}
+
+.hara-home-palette input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  outline: none;
+  caret-color: var(--hara-cyan);
+}
+
+.hara-home-palette input::placeholder {
+  color: #5a6f82;
+}
+
+.hara-home-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: .6rem;
+}
+
+.hara-home-chips button {
+  padding: .35rem .7rem;
+  background: rgba(65, 245, 228, .08);
+  border: 1px solid rgba(65, 245, 228, .25);
+  border-radius: 999px;
+  color: var(--hara-cyan-bright);
+  font-family: var(--hara-mono);
+  font-size: .65rem;
+  letter-spacing: .04em;
+  cursor: pointer;
+  transition: background .15s, box-shadow .15s;
+}
+
+.hara-home-chips button:hover {
+  background: rgba(65, 245, 228, .16);
+  box-shadow: 0 0 12px rgba(65, 245, 228, .15);
 }
 
 .hara-home-hero-line {
@@ -985,9 +1187,9 @@ body.is-panel-open .hara-system-panel {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: clamp(180px, 22vw, 260px);
-  min-height: clamp(96px, 11vw, 124px);
-  padding: clamp(.9rem, 2vw, 1.4rem) clamp(1.4rem, 3vw, 2.4rem);
+  min-width: clamp(200px, 24vw, 300px);
+  min-height: clamp(108px, 12vw, 140px);
+  padding: clamp(1rem, 2.2vw, 1.6rem) clamp(1.6rem, 3.2vw, 2.6rem);
   color: #061316;
   font-family: var(--hara-mono);
   font-size: clamp(1.15rem, 2.2vw, 1.7rem);
@@ -1005,7 +1207,7 @@ body.is-panel-open .hara-system-panel {
   -webkit-backdrop-filter: blur(14px) saturate(1.4);
   backdrop-filter: blur(14px) saturate(1.4);
   box-shadow: 0 0 18px rgba(65, 245, 228, .42), 0 0 42px rgba(156, 123, 255, .2);
-  opacity: .62;
+  opacity: .82;
   transition: transform .9s cubic-bezier(.16, 1, .3, 1), letter-spacing .9s cubic-bezier(.16, 1, .3, 1), opacity .7s ease, filter .9s ease, box-shadow .9s ease;
   animation: hara-start-pulse 4.5s ease-in-out infinite,
     hara-wordmark-shimmer 18s ease-in-out infinite;
@@ -1548,21 +1750,21 @@ body.is-panel-open .hara-system-panel {
 
 @media (max-width: 900px) {
   .hara-system-bar {
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto auto auto auto auto auto;
   }
 
-  .hara-system-context,
-  .hara-system-runtime {
+  .hara-system-palette,
+  .hara-system-log-toggle,
+  .hara-system-nav .hara-system-nav__link--hide-mobile {
     display: none;
+  }
+
+  .hara-system-palette-toggle-mobile {
+    display: inline-flex;
   }
 
   .hara-system-brand {
     padding-inline: .75rem;
-  }
-
-  .hara-system-commands button {
-    min-width: 86px;
-    padding-inline: .55rem;
   }
 
   .hara-system-console {
@@ -1639,15 +1841,6 @@ body.is-panel-open .hara-system-panel {
   }
 
   .hara-system-brand span {
-    display: none;
-  }
-
-  .hara-system-commands button {
-    min-width: 76px;
-    font-size: .52rem;
-  }
-
-  .hara-system-commands button b {
     display: none;
   }
 

@@ -2,6 +2,8 @@
 pub mod form;
 #[path = "kernel/generated.rs"]
 pub mod generated;
+#[path = "kernel/hir.rs"]
+pub mod hir;
 #[path = "kernel/namespace.rs"]
 pub mod namespace;
 #[path = "kernel/parser.rs"]

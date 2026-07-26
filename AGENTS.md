@@ -39,6 +39,7 @@ Java/Truffle runtime:
 mvn -f java/pom.xml -Ptruffle package        # build + full test suite
 mvn -f java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraL0ConformanceTest test
 ./hara eval '(+ 19 23)'                      # CLI smoke test (shaded jar)
+./scripts/run-lib-tests                      # library .hal test harness
 bash scripts/build-truffle-native            # native-image build (target/hara-truffle)
 target/hara-truffle eval '(+ 19 23)'         # native-image smoke test
 ```
