@@ -7,75 +7,73 @@ hide:
   - feedback
 ---
 
-<div class="hara-home-section hara-glass hara-glass--dark-soft">
-  <div class="hara-kicker">00 / DEMOS</div>
-  <div class="hara-demo-grid">
-    <div class="hara-frame hara-demo" data-hara-demo="synth">
-      <div class="hara-console-head">
-        <span>SYNTH — WASM · SELF-HOSTED</span>
-        <span class="hara-index">DEMO/01</span>
-      </div>
-      <canvas class="hara-demo-canvas" data-demo-canvas></canvas>
-      <div class="hara-demo-actions">
-        <button type="button" class="md-button md-button--primary" data-demo-run>Run</button>
-        <span class="hara-demo-note">demo-synth.wasm · rust/extensions/demo-synth</span>
-      </div>
-      <div class="hara-strip">
-        <span>WASM <b data-status="wasm">IDLE</b></span>
-        <span>AUDIO <b data-status="audio">IDLE</b></span>
-        <span>STATE <b data-status="state">IDLE</b></span>
-      </div>
-    </div>
-    <div class="hara-frame hara-demo" data-hara-demo="csound">
-      <div class="hara-console-head">
-        <span>CSOUND — WASM · FROM CDN</span>
-        <span class="hara-index">DEMO/02</span>
-      </div>
-      <canvas class="hara-demo-canvas" data-demo-canvas></canvas>
-      <div class="hara-demo-actions">
-        <button type="button" class="md-button md-button--primary" data-demo-run>Run</button>
-        <span class="hara-demo-note">@csound/browser · jsdelivr</span>
-      </div>
-      <div class="hara-strip">
-        <span>WASM <b data-status="wasm">IDLE</b></span>
-        <span>AUDIO <b data-status="audio">IDLE</b></span>
-        <span>STATE <b data-status="state">IDLE</b></span>
-      </div>
-    </div>
+<section class="hara-home-section hara-home-intro">
+  <p class="hara-label">01 / WHY HARA</p>
+  <div>
+    <h2>One language. Clear boundaries.</h2>
+    <p>Hara keeps its core deliberately small. Host access, files, sockets and other effects are explicit capabilities rather than ambient magic, making programs easier to move, embed and reason about.</p>
   </div>
-</div>
+</section>
 
-<div class="hara-home-section hara-glass hara-glass--dark">
-  <div class="hara-home-grid">
-  <a class="hara-home-card" href="reference/l0-language/">
-    <span class="hara-card-index">01 / SMALL</span>
-    <strong>Small core.<br><em>Wide horizon.</em></strong>
-    <span>A handful of forms, designed once and held — values, protocols, promises, explicit boundaries.</span>
-  </a>
-  <a class="hara-home-card" href="reference/runtime-benchmarks/">
-    <span class="hara-card-index">02 / FAST</span>
-    <strong>JIT-warm.<br><em>Wasm-quick.</em></strong>
-    <span>Truffle compiles hot paths on the JVM; the Rust runtime keeps wasm eval near-native.</span>
-  </a>
-  <a class="hara-home-card" href="development/">
-    <span class="hara-card-index">03 / EMBEDDABLE</span>
-    <strong>Drops in<br><em>anywhere.</em></strong>
-    <span>A JVM library, a browser module, a Chrome panel — the same language behind every host.</span>
-  </a>
-  <a class="hara-home-card" href="reference/extensions-contract/">
-    <span class="hara-card-index">04 / WASM NATIVE</span>
-    <strong>One require.<br><em>Any world.</em></strong>
-    <span>Portable wasm extensions load by namespace — no changes at the call site.</span>
-  </a>
+<section class="hara-home-section">
+  <p class="hara-label">02 / THE SHAPE</p>
+  <div class="hara-feature-grid">
+    <article>
+      <span>01</span>
+      <h3>Compact L0 core</h3>
+      <p>Functions, persistent collections, protocols, promises and explicit mutable markers form a focused language surface.</p>
+    </article>
+    <article>
+      <span>02</span>
+      <h3>Runtime-neutral contracts</h3>
+      <p>The same value model and library boundaries are specified across Truffle, Rust and WebAssembly hosts.</p>
+    </article>
+    <article>
+      <span>03</span>
+      <h3>Built for embedding</h3>
+      <p>Use Hara from a CLI, a JVM application, a browser module, an editor or a purpose-built host.</p>
+    </article>
+    <article>
+      <span>04</span>
+      <h3>Live development</h3>
+      <p>A shared REPL session, RESP transport and editor integrations keep evaluation close to the running system.</p>
+    </article>
   </div>
-</div>
+</section>
 
-<div class="hara-home-section hara-glass hara-glass--light">
-  <div class="hara-frame hara-cta">
-    <div class="hara-kicker">04 / EXPLORE</div>
-    <div class="hara-home-actions">
-      <a class="md-button md-button--primary" href="studio/">Try Hara</a>
-      <a class="md-button" href="the-little-book-of-hal/">The Little Book of HAL</a>
-    </div>
+<section class="hara-home-section hara-quickstart">
+  <div>
+    <p class="hara-label">03 / QUICK START</p>
+    <h2>From source to REPL.</h2>
+    <p>Build the Truffle runtime with JDK 21 and Maven, evaluate a form, then enter the shared interactive session.</p>
   </div>
-</div>
+  <pre><code>mvn -f java/pom.xml -Ptruffle package
+./hara eval '(+ 19 23)'
+./hara</code></pre>
+</section>
+
+<section class="hara-home-section hara-paths">
+  <p class="hara-label">04 / GO DEEPER</p>
+  <div class="hara-path-grid">
+    <a href="user-guide/">
+      <span>Learn</span>
+      <strong>User guide</strong>
+      <p>Install, evaluate, use the REPL and write Hara programs.</p>
+    </a>
+    <a href="reference/l0-language/">
+      <span>Specify</span>
+      <strong>L0 language</strong>
+      <p>Read the normative core language behaviour and data model.</p>
+    </a>
+    <a href="reference/rust-runtime/">
+      <span>Embed</span>
+      <strong>Rust and WASM</strong>
+      <p>Understand cross-runtime values, providers and conformance.</p>
+    </a>
+    <a href="development/">
+      <span>Contribute</span>
+      <strong>Developer guide</strong>
+      <p>Build, test, benchmark and extend the implementation.</p>
+    </a>
+  </div>
+</section>
