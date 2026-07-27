@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#020408">
   <meta name="description" content="Hara is a small, fast Lisp that runs live in your browser.">
-  <meta property="og:title" content="HARA — Lisp for the Agentic Age">
+  <meta property="og:title" content="Hara - A Modern Lisp for the Agentic Age">
   <meta property="og:description" content="Write Hara in the browser and render it live.">
   <meta property="og:type" content="website">
   <meta property="og:image" content="https://www.hara-lang.org/og-hara-ribbon.png">
@@ -14,7 +14,7 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://www.hara-lang.org/og-hara-ribbon.png">
   <link rel="icon" href="./assets/hara-favicon.svg" type="image/svg+xml">
-  <title>HARA — Lisp for the Agentic Age</title>
+  <title>Hara - A Modern Lisp for the Agentic Age</title>
   <link rel="stylesheet" href="./vendor/hara-ui/tokens.css">
   <link rel="stylesheet" href="./vendor/hara-ui/components.css">
   <link rel="stylesheet" href="./app.css">
@@ -202,11 +202,14 @@
               <button type="button" data-window-close aria-label="Close Editor">×</button>
             </div>
           </div>
+          <nav class="hara-tabs editor-tabs" aria-label="Workspace panels">
+            <button class="hara-tab" type="button" data-focus-window="editor" aria-selected="true">source</button>
+            <button class="hara-tab" type="button" data-focus-window="canvas" aria-selected="false">canvas</button>
+            <button class="hara-tab" type="button" data-focus-window="files" aria-selected="false">files</button>
+          </nav>
           <div class="window-toolbar editor-toolbar">
-            <span>CLOJURE MODE // HARA L0</span>
             <div>
-              <button type="button" class="paredit-button" data-paredit aria-pressed="true">PAREDIT // ON</button>
-              <button type="button" data-diff aria-pressed="false">STRUCT DIFF</button>
+              <button type="button" class="paredit-button" data-paredit aria-pressed="true">PAREDIT ON</button>
               <button type="button" data-save disabled>SAVE</button>
               <button type="button" class="run-button" data-run disabled>
                 <span aria-hidden="true">▶</span> RUN FILE

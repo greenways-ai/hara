@@ -355,6 +355,9 @@ function focusWindow(windowNode) {
   windowNode.classList.remove("is-hidden");
   windowNode.classList.add("is-focused");
   windowNode.style.zIndex = String(state.zIndex);
+  for (const tab of queryAll("[data-focus-window]")) {
+    tab.setAttribute("aria-selected", String(tab.dataset.focusWindow === windowNode.dataset.window));
+  }
   saveWindows();
 }
 
@@ -537,6 +540,12 @@ function installLauncher() {
       elements.launcherToggle.focus();
     }
   });
+}
+
+function installWorkspaceTabs() {
+  for (const tab of queryAll("[data-focus-window]")) {
+    tab.addEventListener("click", () => openWindow(tab.dataset.focusWindow));
+  }
 }
 
 async function deployTemplate(name) {
@@ -1417,10 +1426,10 @@ function installEditor() {
   elements.paredit.addEventListener("click", () => {
     const enabled = elements.paredit.getAttribute("aria-pressed") !== "true";
     elements.paredit.setAttribute("aria-pressed", String(enabled));
-    elements.paredit.textContent = enabled ? "PAREDIT // ON" : "PAREDIT // OFF";
+    elements.paredit.textContent = enabled ? "PAREDIT ON" : "PAREDIT OFF";
     toast(enabled ? "PAREDIT ENABLED" : "PAREDIT DISABLED");
   });
-  elements.diff.addEventListener("click", () => {
+  if (elements.diff) elements.diff.addEventListener("click", () => {
     const visible = elements.structuralDiff.hidden;
     elements.structuralDiff.hidden = !visible;
     elements.diff.setAttribute("aria-pressed", String(visible));
@@ -1433,6 +1442,7 @@ function installEditor() {
 
 installWorkspaceNavigation();
 installLauncher();
+installWorkspaceTabs();
 installHelp();
 installWindowManager();
 installEditor();
