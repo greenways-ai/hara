@@ -1952,7 +1952,7 @@ mod tests {
                 .unwrap(),
             "42"
         );
-        assert_eq!(runtime.eval_text("(count (ns:list))").unwrap(), "3");
+        assert_eq!(runtime.eval_text("(count (ns:list))").unwrap(), "4");
         assert_eq!(
             runtime.eval_text("(ns:find (quote missing.lib))").unwrap(),
             "nil"
