@@ -97,6 +97,7 @@ const elements = {
   fileTree: query("[data-file-tree]"),
   fileCount: query("[data-file-count]"),
   editor: query("[data-editor]"),
+  codeHighlight: query("[data-code-highlight]"),
   editorTitle: query("[data-editor-title]"),
   editorStatus: query("[data-editor-status]"),
   lineNumbers: query("[data-line-numbers]"),
@@ -407,6 +408,7 @@ async function openFile(path, force = false) {
   elements.editorStatus.textContent = "READY";
   localStorage.setItem(ACTIVE_FILE_KEY, path);
   updateEditorChrome();
+  syncHighlight();
   openWindow("editor");
 }
 
@@ -434,6 +436,47 @@ function resultLabel(value) {
   try { return JSON.stringify(value).slice(0, 90); } catch { return String(value).slice(0, 90); }
 }
 
+function html(value) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+function highlightHara(source) {
+  let output = "";
+  let depth = 0;
+  let string = false;
+  let comment = false;
+  let escaped = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (comment) { output += `<span class="comment">${html(character)}</span>`; if (character === "\n") comment = false; continue; }
+    if (string) {
+      output += `<span class="string">${html(character)}</span>`;
+      if (!escaped && character === '"') string = false;
+      escaped = !escaped && character === "\\";
+      continue;
+    }
+    if (character === ";") { comment = true; output += '<span class="comment">;</span>'; continue; }
+    if (character === '"') { string = true; escaped = false; output += '<span class="string">"</span>'; continue; }
+    if ("([{".includes(character)) { output += `<span class="paren-${depth % 6}">${character}</span>`; depth += 1; continue; }
+    if (")] }".replace(" ", "").includes(character)) {
+      depth -= 1;
+      output += `<span class="${depth < 0 ? "unmatched" : `paren-${depth % 6}`}">${character}</span>`;
+      continue;
+    }
+    if (character === ":") {
+      const match = source.slice(index).match(/^:[A-Za-z*+!?._/-]+/);
+      if (match) { output += `<span class="keyword">${html(match[0])}</span>`; index += match[0].length - 1; continue; }
+    }
+    output += html(character);
+  }
+  return output;
+}
+
+function syncHighlight() {
+  elements.codeHighlight.innerHTML = highlightHara(elements.editor.value);
+  elements.codeHighlight.style.transform = `translate(${-elements.editor.scrollLeft}px, ${-elements.editor.scrollTop}px)`;
+}
+
 function positionEditorOverlay(node, offset) {
   const source = elements.editor.value.slice(0, offset);
   const line = source.split("\n").length - 1;
@@ -443,8 +486,10 @@ function positionEditorOverlay(node, offset) {
 }
 
 function showInlineEval(form, label, error = false) {
-  elements.inlineEval.textContent = `⇒ ${label}`;
+  const source = form.source.replace(/\s+/g, " ").trim().slice(0, 58);
+  elements.inlineEval.textContent = error ? `ERROR ${source} — ${label}` : `${source}  ⇒  ${label}`;
   elements.inlineEval.classList.toggle("is-error", error);
+  elements.inlineEval.classList.remove("is-pending");
   elements.inlineEval.hidden = false;
   positionEditorOverlay(elements.inlineEval, form.end ?? elements.editor.selectionEnd);
 }
@@ -509,6 +554,11 @@ async function evaluateForm() {
     return;
   }
   elements.editorStatus.textContent = "EVALUATING FORM";
+  elements.inlineEval.textContent = `EVAL ${form.source.replace(/\s+/g, " ").trim().slice(0, 72)}`;
+  elements.inlineEval.classList.remove("is-error");
+  elements.inlineEval.classList.add("is-pending");
+  elements.inlineEval.hidden = false;
+  positionEditorOverlay(elements.inlineEval, form.end ?? elements.editor.selectionEnd);
   const started = performance.now();
   try {
     const result = await state.broker.eval(ROOT, form.source);
@@ -643,6 +693,7 @@ function installFileActions() {
     state.activeFile = null;
     state.dirty = false;
     elements.editor.value = "";
+    syncHighlight();
     localStorage.removeItem(ACTIVE_FILE_KEY);
     await listFiles();
     updateEditorChrome();
@@ -682,7 +733,8 @@ async function bootRuntime() {
     }
     state.broker = createBrowserBroker({
       workerUrl: new URL("hta-worker.js", runtimeBase),
-      sharedWorkerUrl: new URL("hta-shared-worker.js", runtimeBase),
+      sharedWorkerUrl: new URLSearchParams(location.search).has("shared-runtime")
+        ? new URL("hta-shared-worker.js", runtimeBase) : undefined,
       moduleBytes,
       hostCalls: createHostServices({ dbName: "hara-www" }),
       resources
@@ -696,6 +748,7 @@ async function bootRuntime() {
     const path = state.files.includes(preferred) ? preferred :
       state.files.includes("/sketches/neon-orbit.hal") ? "/sketches/neon-orbit.hal" : state.files[0];
     if (path) await openFile(path, true);
+    syncHighlight();
   } catch (error) {
     console.error("[hara www]", error);
     setRuntimeStatus("WASM // ERROR", "error");
@@ -709,9 +762,11 @@ function installEditor() {
     state.dirty = true;
     updateEditorChrome();
     updateCompletions();
+    syncHighlight();
   });
   elements.editor.addEventListener("scroll", () => {
     elements.lineNumbers.scrollTop = elements.editor.scrollTop;
+    syncHighlight();
     if (!elements.inlineEval.hidden) positionEditorOverlay(elements.inlineEval, elements.editor.selectionEnd);
     if (!elements.completions.hidden) renderCompletions();
   });
