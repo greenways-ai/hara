@@ -27,6 +27,8 @@ jobs:
         uses: actions/configure-pages@v5
         with:
           static_site_generator: ""
+      - name: Configure custom domain
+        run: echo "www.hara-lang.org" > ./website/CNAME
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
