@@ -14,6 +14,7 @@ mkdir -p "$OUT/runtime/studio/hal"
 cp "$ROOT/website/index.html" \
    "$ROOT/website/app.css" \
    "$ROOT/website/app.js" \
+   "$ROOT/website/creative.js" \
    "$ROOT/website/editor.js" \
    "$ROOT/website/og.png" \
    "$ROOT/website/scene.js" \

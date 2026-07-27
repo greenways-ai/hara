@@ -1,5 +1,6 @@
 import { renderScene, validateScene } from "./scene.js";
 import { startTron } from "./tron.js";
+import { CreativeRuntime, normalizeCreative } from "./creative.js";
 import { applyParedit, barfForward, insertIndent, killToFormEnd, localFormAt, slurpForward, structuralAlign } from "./editor.js";
 
 const SPACE = "home";
@@ -57,6 +58,17 @@ const DEFAULT_FILES = new Map([
   [:circle 610 130 11 "#f5d742"]
   [:circle 880 120 11 "#bafff8"]]}
 `],
+  ["/sketches/rigged-cube.hal", `;; Creative scenes share the same local form evaluation workflow.
+{:creative/version 1
+ :background "#020408"
+ :entities [{:id "mesh/hero"
+             :mesh {:primitive :box}
+             :material {:color "#41f5e4"}
+             :transform {:rotation [0 0 0]}
+             :rig {:bones [{:id "bone/root" :length 1}
+                           {:id "bone/arm" :parent "bone/root" :length 1}]}}]
+ :audio {:tempo 120 :midi true :voices []}}
+`],
   ["/README.hal", `;; HARA VISUAL LAB
 ;;
 ;; Open a sketch from /sketches and press Run.
@@ -84,6 +96,7 @@ const state = {
   dirty: false,
   savedSource: "",
   lastScene: null,
+  creativeRuntime: null,
   editorPrefix: null,
   editorPrefixTimer: null,
   evalRange: null,
@@ -115,6 +128,7 @@ const elements = {
   completions: query("[data-hal-completions]"),
   structuralDiff: query("[data-structural-diff]"),
   outputCanvas: query("[data-output-canvas]"),
+  creativeCanvas: query("[data-creative-canvas]"),
   canvasEmpty: query("[data-canvas-empty]"),
   canvasStatus: query("[data-canvas-status]"),
   canvasSize: query("[data-canvas-size]"),
@@ -715,6 +729,8 @@ function readSceneLiteral(source) {
 }
 
 function showScene(scene, started, target) {
+  elements.creativeCanvas.hidden = true;
+  elements.outputCanvas.hidden = false;
   state.lastScene = scene;
   query('[data-window="canvas"]').classList.remove("is-hidden");
   drawLastScene();
@@ -724,6 +740,19 @@ function showScene(scene, started, target) {
   elements.editorStatus.textContent = `${target} RENDERED`;
   if (innerWidth <= 900) focusWindow(query('[data-window="canvas"]'));
   toast(`${target} RENDERED`);
+}
+
+function showCreative(scene, started, target) {
+  state.creativeRuntime ??= new CreativeRuntime(elements.creativeCanvas);
+  elements.outputCanvas.hidden = true;
+  elements.creativeCanvas.hidden = false;
+  state.creativeRuntime.render(scene);
+  query('[data-window="canvas"]').classList.remove("is-hidden");
+  elements.canvasEmpty.classList.add("is-hidden");
+  elements.canvasStatus.textContent = `3D // ${Math.round(performance.now() - started)} MS`;
+  elements.canvasSize.textContent = `${scene.entities.length} ENTITY${scene.entities.length === 1 ? "" : "IES"}`;
+  elements.editorStatus.textContent = `${target} CREATIVE`;
+  toast(`${target} CREATIVE SCENE`);
 }
 
 function hideCompletions() {
@@ -845,11 +874,18 @@ async function evaluateForm(form = null, target = "FORM") {
       syncHighlight();
       showScene(scene, started, target);
     } catch {
-      const label = resultLabel(result);
-      elements.editorStatus.textContent = `EVAL // ${label}`;
-      state.evalRange = null;
-      syncHighlight();
-      showInlineEval(form, label);
+      try {
+        const creative = normalizeCreative(result);
+        state.evalRange = null;
+        syncHighlight();
+        showCreative(creative, started, target);
+      } catch {
+        const label = resultLabel(result);
+        elements.editorStatus.textContent = `EVAL // ${label}`;
+        state.evalRange = null;
+        syncHighlight();
+        showInlineEval(form, label);
+      }
     }
   } catch (error) {
     const message = errorText(error);
