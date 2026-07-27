@@ -1,52 +1,53 @@
 {% extends "main.html" %}
-{% block header %}{% endblock %}
-{% block tabs %}{% endblock %}
-{% block site_nav %}{% endblock %}
-
-{% block extrahead %}
-  {{ super() }}
-  <link rel="stylesheet" href="stylesheets/home.css">
-{% endblock %}
-
 {% block container %}
-<div id="hara-home">
-  <div id="hara-scene-mount"></div>
-
-  <nav id="hara-scene-dots" aria-label="Scenes"></nav>
-
-  <div id="hara-scene-controls">
-    <span id="hara-wasm-led" title="WASM status"></span>
-    <button id="hara-zoom-out" aria-label="Zoom out">−</button>
-    <button id="hara-zoom-in" aria-label="Zoom in">+</button>
-    <div class="hara-pan-pad">
-      <button id="hara-pan-up" aria-label="Pan up">↑</button>
-      <button id="hara-pan-left" aria-label="Pan left">←</button>
-      <button id="hara-pan-right" aria-label="Pan right">→</button>
-      <button id="hara-pan-down" aria-label="Pan down">↓</button>
-    </div>
-    <button id="hara-toggle-editor" aria-label="Editor">editor</button>
-    <button id="hara-toggle-repl" aria-label="REPL">repl</button>
+<div class="hara-home-wrap">
+<section class="hara-home-intro">
+  <div class="hara-home-title">
+    <div class="hara-home-kicker">FAST · EMBEDDABLE · WASM NATIVE</div>
+    <h1>HARA</h1>
+    <p class="hara-home-tagline">A Modern Lisp for the Agentic Age.</p>
   </div>
 
-  <aside id="hara-editor-panel">
-    <button id="hara-editor-close" aria-label="Close editor">×</button>
-    <div id="hara-editor-toolbar">
-      <button id="hara-editor-run" type="button">Run</button>
-      <button id="hara-editor-download" type="button">Download</button>
-      <button id="hara-editor-fork" type="button">Fork</button>
+  <div class="hara-home-playground">
+    <div class="hara-home-palette">
+      <span class="hara-home-palette__prompt">hara ›</span>
+      <input type="text" data-console-palette
+             placeholder="(+ 19 23)" autocomplete="off"
+             spellcheck="false" aria-label="Try Hara">
     </div>
-    <div id="hara-editor-mount"></div>
-  </aside>
+    <div class="hara-home-chips">
+      <button type="button" data-console-command="(+ 19 23)">math</button>
+      <button type="button" data-console-command="(map inc [1 2 3])">lists</button>
+      <button type="button" data-console-command="(osc 440)">sound</button>
+      <button type="button" data-console-command="(agent :wander)">agent</button>
+    </div>
+  </div>
 
-  <section id="hara-repl-panel">
-    <button id="hara-repl-close" aria-label="Close REPL">×</button>
-    <pre id="hara-repl-log"></pre>
-    <input id="hara-repl-input" placeholder="(+ 19 23)">
-  </section>
+  <a class="hara-start" href="#" data-hara-start data-console-command="(+ 19 23)">START</a>
+</section>
+<dialog class="hara-intro-window" data-intro-window aria-label="Getting started">
+  <div class="hara-intro-window__head">
+    <span>HARA</span>
+    <button type="button" data-intro-close aria-label="Close instructions">×</button>
+  </div>
+  <div class="hara-intro-window__body">
+    <p>Welcome to the grid.</p>
+    <ul>
+      <li>Type Hara forms into the command palette at the top of the page.</li>
+      <li>Open <b>LOG</b> to see every evaluation stream in real time.</li>
+      <li>Open the <b>apps panel</b> for runtime status and links.</li>
+    </ul>
+  </div>
+  <div class="hara-intro-window__foot">
+    <button type="button" class="md-button md-button--primary" data-intro-close>Got it</button>
+  </div>
+</dialog>
+<div class="md-content" data-md-component="content">
+  <article class="md-content__inner md-typeset">
+    <div class="hara-home">
+      {{ page.content }}
+    </div>
+  </article>
 </div>
-
-<script type="module" src="javascripts/scene-manager.js"></script>
-<script type="module" src="javascripts/home-repl.js"></script>
-<script type="module" src="javascripts/home-editor.js"></script>
-<script type="module" src="javascripts/home.js"></script>
+</div>
 {% endblock %}
