@@ -1,6 +1,6 @@
 import { renderScene, validateScene } from "./scene.js";
 import { startTron } from "./tron.js";
-import { applyParedit, insertIndent, localFormAt } from "./editor.js";
+import { applyParedit, barfForward, insertIndent, killToFormEnd, localFormAt, slurpForward, structuralAlign } from "./editor.js";
 
 const SPACE = "home";
 const ROOT = "ROOT";
@@ -82,7 +82,12 @@ const state = {
   files: [],
   activeFile: null,
   dirty: false,
+  savedSource: "",
   lastScene: null,
+  editorPrefix: null,
+  editorPrefixTimer: null,
+  evalRange: null,
+  editorHistory: { past: [], future: [], current: null, replaying: false },
   zIndex: 10,
   workspace: Number(localStorage.getItem(WORKSPACE_KEY)) === 1 ? 1 : 0
 };
@@ -105,8 +110,10 @@ const elements = {
   save: query("[data-save]"),
   run: query("[data-run]"),
   paredit: query("[data-paredit]"),
+  diff: query("[data-diff]"),
   inlineEval: query("[data-inline-eval]"),
   completions: query("[data-hal-completions]"),
+  structuralDiff: query("[data-structural-diff]"),
   outputCanvas: query("[data-output-canvas]"),
   canvasEmpty: query("[data-canvas-empty]"),
   canvasStatus: query("[data-canvas-status]"),
@@ -339,14 +346,6 @@ function installLauncher() {
   });
 }
 
-function studioSource(form) {
-  return `(do (require [studio.space :as space]) (require [studio.fs :as fs]) ${form})`;
-}
-
-function evalStudio(form) {
-  return state.broker.eval(ROOT, studioSource(form));
-}
-
 async function installPatchWorkbench() {
   if (!elements.patchWorkbench) return;
   const { createWorkbench } = await import("./vendor/hara-ui/workbench.js");
@@ -366,6 +365,14 @@ async function installPatchWorkbench() {
   elements.patchWorkbench.addEventListener("hara:workbench-layout-change", () => {
     elements.patchStatus.textContent = "LAYOUT // UPDATED";
   });
+}
+
+function studioSource(form) {
+  return `(do (require [studio.space :as space]) (require [studio.fs :as fs]) ${form})`;
+}
+
+function evalStudio(form) {
+  return state.broker.eval(ROOT, studioSource(form));
 }
 
 async function listFiles() {
@@ -414,9 +421,126 @@ function updateEditorChrome() {
   elements.editor.disabled = !state.activeFile;
   elements.save.disabled = !state.activeFile;
   elements.run.disabled = !state.activeFile;
-  const count = elements.editor.value.split("\n").length;
-  elements.lineNumbers.textContent = Array.from({ length: count }, (_, index) => index + 1).join("\n");
+  renderLineNumbers();
   renderFiles();
+}
+
+function changedLineNumbers(previous, current) {
+  const before = previous.split("\n");
+  const after = current.split("\n");
+  let prefix = 0;
+  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix += 1;
+  let suffix = 0;
+  while (suffix < before.length - prefix && suffix < after.length - prefix &&
+         before.at(-1 - suffix) === after.at(-1 - suffix)) suffix += 1;
+  return new Set(Array.from({ length: Math.max(0, after.length - prefix - suffix) }, (_, index) => prefix + index));
+}
+
+function renderLineNumbers() {
+  const lines = elements.editor.value.split("\n");
+  const changed = changedLineNumbers(state.savedSource, elements.editor.value);
+  elements.lineNumbers.innerHTML = lines.map((_, index) =>
+    `<span class="${changed.has(index) ? "is-changed" : ""}">${index + 1}</span>`
+  ).join("\n");
+}
+
+function topLevelForms(source) {
+  const balanced = (() => {
+    const stack = [], found = [];
+    let string = false, comment = false, escaped = false;
+    const pairs = { "(": ")", "[": "]", "{": "}" };
+    for (let index = 0; index < source.length; index += 1) {
+      const character = source[index];
+      if (comment) { if (character === "\n") comment = false; continue; }
+      if (string) { if (!escaped && character === '"') string = false; escaped = !escaped && character === "\\"; continue; }
+      if (character === ";") { comment = true; continue; }
+      if (character === '"') { string = true; escaped = false; continue; }
+      if (pairs[character]) stack.push({ opener: character, start: index });
+      else if (stack.length && pairs[stack.at(-1).opener] === character) {
+        const form = stack.pop();
+        found.push({ start: form.start, end: index + 1 });
+      }
+    }
+    return found;
+  })();
+  return balanced.filter((form) => !balanced.some((outer) => outer !== form && outer.start < form.start && form.end < outer.end))
+    .sort((left, right) => left.start - right.start)
+    .map((form) => source.slice(form.start, form.end));
+}
+
+function structuralDiffText() {
+  const before = topLevelForms(state.savedSource);
+  const after = topLevelForms(elements.editor.value);
+  const added = Math.max(0, after.length - before.length);
+  const removed = Math.max(0, before.length - after.length);
+  const changed = Math.min(before.length, after.length) - before.filter((form, index) => form === after[index]).length;
+  const lines = changedLineNumbers(state.savedSource, elements.editor.value);
+  const title = `STRUCTURAL DIFF // ${changed + added + removed ? "CHANGED" : "CLEAN"}`;
+  const forms = [`~ ${changed} CHANGED`, `+ ${added} ADDED`, `- ${removed} REMOVED`];
+  const lineLabel = lines.size ? `CHANGED LINES // ${[...lines].map((line) => line + 1).join(", ")}` : "CHANGED LINES // —";
+  return [title, ...forms, lineLabel].join("\n");
+}
+
+function updateStructuralDiff() {
+  elements.structuralDiff.textContent = structuralDiffText();
+}
+
+function editorSnapshot() {
+  return {
+    value: elements.editor.value,
+    start: elements.editor.selectionStart,
+    end: elements.editor.selectionEnd
+  };
+}
+
+function sameSnapshot(left, right) {
+  return left?.value === right?.value && left?.start === right?.start && left?.end === right?.end;
+}
+
+function resetEditorHistory() {
+  state.editorHistory = { past: [], future: [], current: editorSnapshot(), replaying: false };
+}
+
+function recordEditorChange() {
+  const history = state.editorHistory;
+  if (history.replaying) return;
+  const next = editorSnapshot();
+  if (sameSnapshot(history.current, next)) return;
+  if (history.current) history.past.push(history.current);
+  history.future = [];
+  history.current = next;
+}
+
+function restoreEditorSnapshot(snapshot) {
+  const history = state.editorHistory;
+  history.replaying = true;
+  elements.editor.value = snapshot.value;
+  elements.editor.setSelectionRange(snapshot.start, snapshot.end);
+  history.current = snapshot;
+  history.replaying = false;
+  state.dirty = true;
+  updateEditorChrome();
+  updateCompletions();
+  syncHighlight();
+  updateStructuralDiff();
+}
+
+function undoEditor() {
+  const history = state.editorHistory;
+  const previous = history.past.pop();
+  if (!previous) return false;
+  if (history.current) history.future.push(history.current);
+  restoreEditorSnapshot(previous);
+  return true;
+}
+
+function redoEditor() {
+  const history = state.editorHistory;
+  const next = history.future.pop();
+  if (!next) return false;
+  if (history.current) history.past.push(history.current);
+  restoreEditorSnapshot(next);
+  return true;
 }
 
 async function openFile(path, force = false) {
@@ -428,10 +552,13 @@ async function openFile(path, force = false) {
   state.activeFile = path;
   state.dirty = false;
   elements.editor.value = content == null ? "" : String(content);
+  state.savedSource = elements.editor.value;
+  resetEditorHistory();
   elements.editorStatus.textContent = "READY";
   localStorage.setItem(ACTIVE_FILE_KEY, path);
   updateEditorChrome();
   syncHighlight();
+  updateStructuralDiff();
   openWindow("editor");
 }
 
@@ -442,8 +569,10 @@ async function saveFile(showToast = true) {
     `(fs/write! ${JSON.stringify(SPACE)} ${JSON.stringify(state.activeFile)} ${JSON.stringify(elements.editor.value)})`
   );
   state.dirty = false;
+  state.savedSource = elements.editor.value;
   elements.editorStatus.textContent = "SAVED";
   updateEditorChrome();
+  updateStructuralDiff();
   if (showToast) toast(`SAVED ${state.activeFile}`);
   return true;
 }
@@ -469,28 +598,29 @@ function highlightHara(source) {
   let string = false;
   let comment = false;
   let escaped = false;
+  const target = (index) => state.evalRange && index >= state.evalRange.start && index < state.evalRange.end ? " eval-target" : "";
   for (let index = 0; index < source.length; index += 1) {
     const character = source[index];
-    if (comment) { output += `<span class="comment">${html(character)}</span>`; if (character === "\n") comment = false; continue; }
+    if (comment) { output += `<span class="comment${target(index)}">${html(character)}</span>`; if (character === "\n") comment = false; continue; }
     if (string) {
-      output += `<span class="string">${html(character)}</span>`;
+      output += `<span class="string${target(index)}">${html(character)}</span>`;
       if (!escaped && character === '"') string = false;
       escaped = !escaped && character === "\\";
       continue;
     }
-    if (character === ";") { comment = true; output += '<span class="comment">;</span>'; continue; }
-    if (character === '"') { string = true; escaped = false; output += '<span class="string">"</span>'; continue; }
-    if ("([{".includes(character)) { output += `<span class="paren-${depth % 6}">${character}</span>`; depth += 1; continue; }
+    if (character === ";") { comment = true; output += `<span class="comment${target(index)}">;</span>`; continue; }
+    if (character === '"') { string = true; escaped = false; output += `<span class="string${target(index)}">"</span>`; continue; }
+    if ("([{".includes(character)) { output += `<span class="paren-${depth % 6}${target(index)}">${character}</span>`; depth += 1; continue; }
     if (")] }".replace(" ", "").includes(character)) {
       depth -= 1;
-      output += `<span class="${depth < 0 ? "unmatched" : `paren-${depth % 6}`}">${character}</span>`;
+      output += `<span class="${depth < 0 ? "unmatched" : `paren-${depth % 6}`}${target(index)}">${character}</span>`;
       continue;
     }
     if (character === ":") {
       const match = source.slice(index).match(/^:[A-Za-z*+!?._/-]+/);
-      if (match) { output += `<span class="keyword">${html(match[0])}</span>`; index += match[0].length - 1; continue; }
+      if (match) { output += `<span class="keyword${target(index)}">${html(match[0])}</span>`; index += match[0].length - 1; continue; }
     }
-    output += html(character);
+    output += target(index) ? `<span class="eval-target">${html(character)}</span>` : html(character);
   }
   return output;
 }
@@ -509,12 +639,91 @@ function positionEditorOverlay(node, offset) {
 }
 
 function showInlineEval(form, label, error = false) {
-  const source = form.source.replace(/\s+/g, " ").trim().slice(0, 58);
-  elements.inlineEval.textContent = error ? `ERROR ${source} — ${label}` : `${source}  ⇒  ${label}`;
+  elements.inlineEval.textContent = error ? `ERROR => ${label}` : `=> ${label}`;
   elements.inlineEval.classList.toggle("is-error", error);
   elements.inlineEval.classList.remove("is-pending");
   elements.inlineEval.hidden = false;
   positionEditorOverlay(elements.inlineEval, form.end ?? elements.editor.selectionEnd);
+}
+
+function readSceneLiteral(source) {
+  let cursor = 0;
+  const space = () => {
+    while (cursor < source.length) {
+      if (/\s/.test(source[cursor])) { cursor += 1; continue; }
+      if (source[cursor] === ";") {
+        const newline = source.indexOf("\n", cursor);
+        cursor = newline === -1 ? source.length : newline + 1;
+        continue;
+      }
+      break;
+    }
+  };
+  const token = () => {
+    const start = cursor;
+    while (cursor < source.length && !/\s/.test(source[cursor]) && !"{}[]".includes(source[cursor])) cursor += 1;
+    return source.slice(start, cursor);
+  };
+  const value = () => {
+    space();
+    const character = source[cursor];
+    if (character === "{") {
+      cursor += 1;
+      const map = new Map();
+      for (;;) {
+        space();
+        if (source[cursor] === "}") { cursor += 1; return map; }
+        const key = value();
+        space();
+        if (source[cursor] === "}") throw new Error("scene map value missing");
+        map.set(key, value());
+      }
+    }
+    if (character === "[") {
+      cursor += 1;
+      const items = [];
+      for (;;) {
+        space();
+        if (source[cursor] === "]") { cursor += 1; return items; }
+        if (cursor >= source.length) throw new Error("unterminated scene vector");
+        items.push(value());
+      }
+    }
+    if (character === '"') {
+      const start = cursor;
+      cursor += 1;
+      let escaped = false;
+      while (cursor < source.length) {
+        const next = source[cursor++];
+        if (!escaped && next === '"') return JSON.parse(source.slice(start, cursor));
+        escaped = !escaped && next === "\\";
+      }
+      throw new Error("unterminated scene string");
+    }
+    const next = token();
+    if (next === "nil") return null;
+    if (next === "true") return true;
+    if (next === "false") return false;
+    if (/^-?\d+(?:\.\d+)?$/.test(next)) return Number(next);
+    if (next.startsWith(":")) return next;
+    throw new Error("not a declarative scene");
+  };
+  const result = value();
+  space();
+  if (cursor !== source.length) throw new Error("trailing scene source");
+  return result;
+}
+
+function showScene(scene, started, target) {
+  state.lastScene = scene;
+  query('[data-window="canvas"]').classList.remove("is-hidden");
+  drawLastScene();
+  elements.canvasEmpty.classList.add("is-hidden");
+  elements.canvasStatus.textContent = `FRAME // ${Math.round(performance.now() - started)} MS`;
+  elements.canvasSize.textContent = `${scene.width} × ${scene.height}`;
+  elements.editorStatus.textContent = `${target} RENDERED`;
+  if (innerWidth <= 900) focusWindow(query('[data-window="canvas"]'));
+  toast(`${target} RENDERED`);
 }
 
 function hideCompletions() {
@@ -566,50 +775,119 @@ function acceptCompletion(index = completionState.index) {
   hideCompletions();
 }
 
-async function evaluateForm() {
+function formAtSelection() {
+  const start = elements.editor.selectionStart;
+  const end = elements.editor.selectionEnd;
+  const selection = elements.editor.value.slice(start, end).trim();
+  return selection ? { source: selection, start, end } : localFormAt(elements.editor.value, start);
+}
+
+function haraLiteral(value) {
+  if (value == null) return "nil";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return `[${value.map(haraLiteral).join(" ")}]`;
+  if (value instanceof Set) return `#{${[...value].map(haraLiteral).join(" ")}}`;
+  if (value instanceof Map) return `{${[...value].map(([key, entry]) => `${haraLiteral(key)} ${haraLiteral(entry)}`).join(" ")}}`;
+  if (value?.constructor?.name === "HtaKeyword") return `:${value.name}`;
+  if (value?.constructor?.name === "HtaSymbol") return value.name;
+  return String(value);
+}
+
+async function evaluateAndInsert() {
+  const form = formAtSelection();
+  if (!form?.source) return;
+  elements.editorStatus.textContent = "EVALUATING FOR INSERT";
+  try {
+    const result = await state.broker.eval(ROOT, form.source);
+    const replacement = haraLiteral(result);
+    elements.editor.setRangeText(replacement, form.start, form.end, "end");
+    elements.editor.dispatchEvent(new Event("input", { bubbles: true }));
+    elements.editorStatus.textContent = "RESULT INSERTED";
+    showInlineEval({ end: form.start + replacement.length }, resultLabel(result));
+  } catch (error) {
+    const message = errorText(error);
+    elements.editorStatus.textContent = `ERROR // ${message}`;
+    showInlineEval(form, message, true);
+  }
+}
+
+async function evaluateForm(form = null, target = "FORM") {
   if (!state.activeFile) return;
   elements.run.disabled = true;
-  const selection = elements.editor.value.slice(elements.editor.selectionStart, elements.editor.selectionEnd).trim();
-  const form = selection ? { source: selection } : localFormAt(elements.editor.value, elements.editor.selectionStart);
+  if (!form) {
+    form = formAtSelection();
+  }
   if (!form?.source) {
     elements.editorStatus.textContent = "NO FORM AT CURSOR";
     elements.run.disabled = false;
     return;
   }
-  elements.editorStatus.textContent = "EVALUATING FORM";
-  elements.inlineEval.textContent = `EVAL ${form.source.replace(/\s+/g, " ").trim().slice(0, 72)}`;
-  elements.inlineEval.classList.remove("is-error");
-  elements.inlineEval.classList.add("is-pending");
-  elements.inlineEval.hidden = false;
-  positionEditorOverlay(elements.inlineEval, form.end ?? elements.editor.selectionEnd);
+  elements.editorStatus.textContent = `EVALUATING ${target}`;
+  state.evalRange = { start: form.start, end: form.end };
+  syncHighlight();
+  elements.inlineEval.hidden = true;
   const started = performance.now();
   try {
+    try {
+      const literalScene = validateScene(readSceneLiteral(form.source));
+      state.evalRange = null;
+      syncHighlight();
+      showScene(literalScene, started, target);
+      return;
+    } catch {
+      // Non-literal programs continue through the Hara runtime below.
+    }
     const result = await state.broker.eval(ROOT, form.source);
     try {
       const scene = validateScene(result);
-      state.lastScene = scene;
-      query('[data-window="canvas"]').classList.remove("is-hidden");
-      drawLastScene();
-      elements.canvasEmpty.classList.add("is-hidden");
-      elements.canvasStatus.textContent = `FRAME // ${Math.round(performance.now() - started)} MS`;
-      elements.canvasSize.textContent = `${scene.width} × ${scene.height}`;
-      elements.editorStatus.textContent = "FORM RENDERED";
-      if (innerWidth <= 900) focusWindow(query('[data-window="canvas"]'));
-      toast("FORM RENDERED");
+      state.evalRange = null;
+      syncHighlight();
+      showScene(scene, started, target);
     } catch {
       const label = resultLabel(result);
       elements.editorStatus.textContent = `EVAL // ${label}`;
+      state.evalRange = null;
+      syncHighlight();
       showInlineEval(form, label);
     }
   } catch (error) {
     const message = errorText(error);
     elements.editorStatus.textContent = `ERROR // ${message}`;
+    state.evalRange = null;
+    syncHighlight();
     showInlineEval(form, message, true);
     elements.canvasStatus.textContent = "FRAME // LAST GOOD";
     toast(message, true);
   } finally {
     elements.run.disabled = false;
   }
+}
+
+function evaluateFile() {
+  return evaluateForm({
+    source: elements.editor.value,
+    start: 0,
+    end: elements.editor.value.length
+  }, "FILE");
+}
+
+function clearEditorPrefix() {
+  clearTimeout(state.editorPrefixTimer);
+  state.editorPrefixTimer = null;
+  state.editorPrefix = null;
+}
+
+function startEditorPrefix(prefix, fallback = null) {
+  clearEditorPrefix();
+  state.editorPrefix = prefix;
+  if (!fallback) return;
+  state.editorPrefixTimer = setTimeout(() => {
+    if (state.editorPrefix === prefix) {
+      clearEditorPrefix();
+      fallback?.();
+    }
+  }, 700);
 }
 
 function normalizePath(value) {
@@ -668,17 +946,18 @@ function installFileActions() {
       title: "NEW HARA FILE",
       label: "PATH",
       value: "/sketches/untitled.hal",
-      message: "Paths must end in .hal"
+      message: ".hal is added automatically"
     });
     if (raw == null) return;
-    const path = normalizePath(raw);
+    const normalized = normalizePath(raw);
+    const path = normalized && (normalized.toLowerCase().endsWith(".hal") ? normalized : `${normalized}.hal`);
     if (!path) return toast("INVALID HARA FILE PATH", true);
     if (state.files.includes(path)) return toast("FILE ALREADY EXISTS", true);
     const content = `;; ${path}\n\n{:version 1\n :width 960\n :height 600\n :background "#020408"\n :commands []}\n`;
     await evalStudio(`(fs/write! ${JSON.stringify(SPACE)} ${JSON.stringify(path)} ${JSON.stringify(content)})`);
     await listFiles();
     await openFile(path, true);
-    await evaluateForm();
+    await evaluateFile();
   });
 
   query("[data-file-rename]").addEventListener("click", async () => {
@@ -705,6 +984,7 @@ function installFileActions() {
     localStorage.setItem(ACTIVE_FILE_KEY, nextPath);
     await listFiles();
     updateEditorChrome();
+    updateStructuralDiff();
     toast(`RENAMED ${oldPath}`);
   });
 
@@ -782,10 +1062,14 @@ async function bootRuntime() {
 
 function installEditor() {
   elements.editor.addEventListener("input", () => {
+    state.evalRange = null;
+    elements.inlineEval.hidden = true;
+    recordEditorChange();
     state.dirty = true;
     updateEditorChrome();
     updateCompletions();
     syncHighlight();
+    updateStructuralDiff();
   });
   elements.editor.addEventListener("scroll", () => {
     elements.lineNumbers.scrollTop = elements.editor.scrollTop;
@@ -794,6 +1078,37 @@ function installEditor() {
     if (!elements.completions.hidden) renderCompletions();
   });
   elements.editor.addEventListener("keydown", (event) => {
+    const modifier = event.metaKey || event.ctrlKey;
+    if (state.editorPrefix === "insert" && event.key.toLowerCase() === "e") {
+      clearEditorPrefix();
+      event.preventDefault();
+      evaluateAndInsert();
+      return;
+    }
+    if (state.editorPrefix === "run" && event.key.toLowerCase() === "e" && !event.repeat) {
+      clearEditorPrefix();
+      event.preventDefault();
+      evaluateFile();
+      return;
+    }
+    if (state.editorPrefixTimer) {
+      clearEditorPrefix();
+    }
+    if (event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "x") {
+      event.preventDefault();
+      startEditorPrefix("insert", () => {});
+      return;
+    }
+    if (modifier && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      if (event.shiftKey) redoEditor(); else undoEditor();
+      return;
+    }
+    if (modifier && event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      redoEditor();
+      return;
+    }
     if (!elements.completions.hidden) {
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
@@ -809,13 +1124,30 @@ function installEditor() {
       }
       if (event.key === "Escape") hideCompletions();
     }
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+    if (modifier && event.key.toLowerCase() === "s") {
       event.preventDefault();
       saveFile();
     }
-    if ((event.metaKey || event.ctrlKey) && (event.key === "Enter" || event.key.toLowerCase() === "e")) {
+    if (modifier && event.key.toLowerCase() === "e") {
+      event.preventDefault();
+      startEditorPrefix("run");
+      return;
+    }
+    if (modifier && event.key === "Enter") {
       event.preventDefault();
       evaluateForm();
+    }
+    if (elements.paredit.getAttribute("aria-pressed") === "true" && event.ctrlKey && !event.metaKey && !event.altKey &&
+        event.key.toLowerCase() === "k" && killToFormEnd(elements.editor)) {
+      event.preventDefault();
+      return;
+    }
+    if (elements.paredit.getAttribute("aria-pressed") === "true" && event.ctrlKey && !event.metaKey && !event.altKey) {
+      const structuralEdit = event.key === "ArrowRight" ? slurpForward : event.key === "ArrowLeft" ? barfForward : null;
+      if (structuralEdit?.(elements.editor)) {
+        event.preventDefault();
+        return;
+      }
     }
     if (elements.paredit.getAttribute("aria-pressed") === "true" &&
         !event.metaKey && !event.ctrlKey && !event.altKey &&
@@ -825,7 +1157,14 @@ function installEditor() {
     }
     if (event.key === "Tab") {
       event.preventDefault();
-      insertIndent(elements.editor, event.shiftKey);
+      if (event.shiftKey) insertIndent(elements.editor, true);
+      else structuralAlign(elements.editor);
+    }
+  });
+  elements.editor.addEventListener("keyup", (event) => {
+    if (event.key === "Control" && state.editorPrefix === "run") {
+      clearEditorPrefix();
+      evaluateForm();
     }
   });
   elements.paredit.addEventListener("click", () => {
@@ -834,9 +1173,15 @@ function installEditor() {
     elements.paredit.textContent = enabled ? "PAREDIT // ON" : "PAREDIT // OFF";
     toast(enabled ? "PAREDIT ENABLED" : "PAREDIT DISABLED");
   });
+  elements.diff.addEventListener("click", () => {
+    const visible = elements.structuralDiff.hidden;
+    elements.structuralDiff.hidden = !visible;
+    elements.diff.setAttribute("aria-pressed", String(visible));
+    if (visible) updateStructuralDiff();
+  });
   elements.editor.addEventListener("blur", () => setTimeout(hideCompletions, 120));
   elements.save.addEventListener("click", () => saveFile());
-  elements.run.addEventListener("click", evaluateForm);
+  elements.run.addEventListener("click", evaluateFile);
 }
 
 startTron(query("[data-tron]"));

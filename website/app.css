@@ -347,6 +347,15 @@ body[data-workspace="1"] .workspace-track { transform: translate3d(-100vw, 0, 0)
   transition: transform .5s cubic-bezier(.16, 1, .3, 1), opacity .3s, letter-spacing .5s;
 }
 
+.start-mark {
+  width: 2.8em;
+  height: 2.25em;
+  flex: 0 0 auto;
+  background: linear-gradient(145deg, #f4ffff 0%, #39f4e5 38%, #3b9cff 68%, #8854ff 100%);
+  -webkit-mask: url("./assets/hara-rings.svg") center / contain no-repeat;
+  mask: url("./assets/hara-rings.svg") center / contain no-repeat;
+}
+
 .start-button i { font-size: 1.8em; font-style: normal; font-weight: 300; }
 
 .start-button:hover {
@@ -649,6 +658,27 @@ body[data-workspace="1"] .workspace-track { transform: translate3d(-100vw, 0, 0)
   user-select: none;
 }
 
+.line-numbers .is-changed { color: var(--amber); }
+.line-numbers .is-changed::before { content: "◆ "; color: var(--pink); }
+
+.structural-diff {
+  position: absolute;
+  z-index: 5;
+  top: .7rem;
+  right: .7rem;
+  width: min(280px, calc(100% - 1.4rem));
+  max-height: calc(100% - 1.4rem);
+  overflow: auto;
+  padding: .7rem .8rem;
+  color: var(--text);
+  background: rgba(3, 11, 18, .97);
+  border: 1px solid rgba(65, 245, 228, .34);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, .48);
+  font: .58rem/1.65 "SFMono-Regular", Consolas, monospace;
+  letter-spacing: .05em;
+  white-space: pre-wrap;
+}
+
 .editor-surface textarea {
   grid-column: 2;
   grid-row: 1;
@@ -697,6 +727,7 @@ body[data-workspace="1"] .workspace-track { transform: translate3d(-100vw, 0, 0)
 .code-highlight .string { color: #f5d742; }
 .code-highlight .keyword { color: #9c7bff; }
 .code-highlight .unmatched { color: #ff2e88; background: rgba(255, 46, 136, .15); }
+.code-highlight .eval-target { background: rgba(65, 245, 228, .12); box-shadow: inset 0 -1px 0 rgba(65, 245, 228, .34); }
 
 .inline-eval {
   position: absolute;

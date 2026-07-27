@@ -2015,6 +2015,50 @@ public final class HaraContext {
     withDefinitionOrigin(HaraVar.Origin.JAVA_LIBRARY, this::defineFileLibrary);
   }
 
+  void installJsonLibrary() {
+    withDefinitionOrigin(HaraVar.Origin.JAVA_LIBRARY, this::defineJsonLibrary);
+  }
+
+  private void defineJsonLibrary() {
+    HaraNamespace json = namespace("std.foundation.json");
+    json.define(
+        "read",
+        new UnaryBuiltin(
+            "json/read",
+            value -> {
+              if (!(HaraBox.unwrap(value) instanceof String source)) {
+                throw new HaraException("json/read expects a string");
+              }
+              try {
+                return hara.verify.json.StrictJson.parse(source);
+              } catch (IllegalArgumentException error) {
+                throw new HaraException("json/read: " + error.getMessage());
+              }
+            }));
+    json.define(
+        "write",
+        new UnaryBuiltin(
+            "json/write",
+            value -> {
+              try {
+                return StdJson.write(HaraBox.unwrap(value));
+              } catch (IllegalArgumentException error) {
+                throw new HaraException("json/write: " + error.getMessage());
+              }
+            }));
+    json.define(
+        "write-pp",
+        new UnaryBuiltin(
+            "json/write-pp",
+            value -> {
+              try {
+                return StdJson.writePretty(HaraBox.unwrap(value));
+              } catch (IllegalArgumentException error) {
+                throw new HaraException("json/write-pp: " + error.getMessage());
+              }
+            }));
+  }
+
   private void defineFileLibrary() {
     HaraNamespace file = namespace("std.foundation.file");
     file.define("resolve", new VariadicBuiltin("file/resolve", this::fileResolve));

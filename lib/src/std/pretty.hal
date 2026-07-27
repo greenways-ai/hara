@@ -1,0 +1,7 @@
+;; std.pretty — minimal portable readable formatting.
+(ns std.pretty)
+
+(defn pprint-str
+  "Returns the canonical readable representation of value."
+  [value]
+  (pr-str value))

@@ -1,5 +1,6 @@
 #![allow(clippy::too_many_lines)] // Temporary compatibility facade during Java-port split.
 mod core;
+mod json;
 pub mod extension;
 pub mod hta;
 pub mod kernel;
@@ -163,9 +164,21 @@ impl Runtime {
             ("std.foundation.file", include_str!("../../lib/src/std/foundation/file.hal")),
             ("std.foundation.os", include_str!("../../lib/src/std/foundation/os.hal")),
             ("std.foundation.socket", include_str!("../../lib/src/std/foundation/socket.hal")),
+            ("std.pretty", include_str!("../../lib/src/std/pretty.hal")),
         ] {
             self.register_resource(name, source);
         }
+        let json = self.namespace_registry.find_or_create("std.foundation.json");
+        json.intern("read", core::native_function("json/read", 1, |arguments| match arguments.as_slice() {
+            [core::Value::String(source)] => json::read(source),
+            _ => Err("json/read expects a string".into()),
+        }));
+        json.intern("write", core::native_function("json/write", 1, |arguments| {
+            json::write(&arguments[0]).map(core::Value::String)
+        }));
+        json.intern("write-pp", core::native_function("json/write-pp", 1, |arguments| {
+            json::write_pretty(&arguments[0]).map(core::Value::String)
+        }));
         self.refer_foundation_into("user");
         self.use_namespace("user");
         Ok(())
@@ -1326,6 +1339,30 @@ mod tests {
             .eval_text("poisoned")
             .unwrap_err()
             .contains("unbound symbol"));
+    }
+
+    #[test]
+    fn strict_json_and_pretty_libraries_match_the_portable_contract() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text("(std.foundation.json/read \"[null,true,-2,\\\"x\\\",[3],{\\\"a\\\":4}]\")")
+                .unwrap(),
+            "[nil true -2 \"x\" [3] {\"a\" 4}]"
+        );
+        assert_eq!(
+            runtime.eval_text("(std.foundation.json/write {\"a\" 1 \"b\" [true nil]})").unwrap(),
+            "\"{\\\"a\\\":1,\\\"b\\\":[true,null]}\""
+        );
+        assert_eq!(
+            runtime.eval_text("(std.foundation.json/write-pp {\"a\" 1})").unwrap(),
+            "\"{\\n  \\\"a\\\": 1\\n}\""
+        );
+        assert!(runtime.eval_text("(std.foundation.json/read \"1.5\")").unwrap_err().contains("signed 64-bit integers"));
+        assert_eq!(
+            runtime.eval_text("(do (require 'std.pretty) (std.pretty/pprint-str {:a [1 2]}))").unwrap(),
+            "\"{:a [1 2]}\""
+        );
     }
 
     #[test]

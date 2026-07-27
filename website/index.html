@@ -11,7 +11,7 @@
   <meta property="og:image" content="https://www.hara-lang.org/og.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://www.hara-lang.org/og.png">
-  <link rel="icon" href="./vendor/hara-ui/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="./assets/hara-rings-favicon.svg" type="image/svg+xml">
   <title>HARA — Lisp for the Agentic Age</title>
   <link rel="stylesheet" href="./vendor/hara-ui/tokens.css">
   <link rel="stylesheet" href="./vendor/hara-ui/components.css">
@@ -109,6 +109,7 @@
           <p class="welcome-tagline">Lisp for the Agentic Age.</p>
         </div>
         <button class="start-button" type="button" data-start>
+          <span class="start-mark" aria-hidden="true"></span>
           <span>START</span>
           <i aria-hidden="true">→</i>
         </button>
@@ -170,9 +171,10 @@
             <span>CLOJURE MODE // HARA L0</span>
             <div>
               <button type="button" class="paredit-button" data-paredit aria-pressed="true">PAREDIT // ON</button>
+              <button type="button" data-diff aria-pressed="false">STRUCT DIFF</button>
               <button type="button" data-save disabled>SAVE</button>
               <button type="button" class="run-button" data-run disabled>
-                <span aria-hidden="true">▶</span> EVAL FORM
+                <span aria-hidden="true">▶</span> RUN FILE
               </button>
             </div>
           </div>
@@ -184,10 +186,11 @@
                       aria-label="Hara source editor" disabled></textarea>
             <output class="inline-eval" data-inline-eval aria-live="polite" hidden></output>
             <div class="hal-completions" data-hal-completions role="listbox" aria-label="HAL form completions" hidden></div>
+            <output class="structural-diff" data-structural-diff aria-live="polite" hidden></output>
           </label>
           <div class="window-status">
             <span data-editor-status>WAITING FOR RUNTIME</span>
-            <span>CTRL-E EVAL · CTRL-S SAVE · TAB INDENT</span>
+            <span>HOLD CTRL: E FORM · E E FILE · X E INSERT · CTRL-S SAVE</span>
           </div>
         </section>
 

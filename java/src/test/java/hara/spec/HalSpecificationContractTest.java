@@ -20,8 +20,10 @@ import org.junit.Test;
 public class HalSpecificationContractTest {
   private static final Path METASPEC = Path.of("specs/metaspec/draft/hal-metaspec.edn");
   private static final Path LANGSPEC = Path.of("specs/language/draft/hal-langspec.edn");
-  private static final Path L0_CORPUS = Path.of("specs/language/draft/conformance/l0.edn");
-  private static final Path READER_CORPUS = Path.of("specs/language/draft/conformance/reader.edn");
+  private static final Path L0_CORPUS =
+      Path.of("specs/language/draft/conformance/l0.edn");
+  private static final Path READER_CORPUS =
+      Path.of("specs/language/draft/conformance/reader.edn");
   private static final Path PARITY_CORPUS =
       Path.of("specs/language/draft/conformance/parity/jvm-truffle.edn");
 
@@ -30,10 +32,14 @@ public class HalSpecificationContractTest {
     IMapType metaspec = readMap(METASPEC);
     IMapType langspec = readMap(LANGSPEC);
 
-    assertEquals(Keyword.create("hal", "metaspec"), metaspec.lookup(key("document", "id")));
-    assertEquals(Keyword.create("language-metaspec"), metaspec.lookup(key("document", "type")));
-    assertEquals(Keyword.create("hal", "language"), langspec.lookup(key("document", "id")));
-    assertEquals(Keyword.create("language-spec"), langspec.lookup(key("document", "type")));
+    assertEquals(
+        Keyword.create("hal", "metaspec"), metaspec.lookup(key("document", "id")));
+    assertEquals(
+        Keyword.create("language-metaspec"), metaspec.lookup(key("document", "type")));
+    assertEquals(
+        Keyword.create("hal", "language"), langspec.lookup(key("document", "id")));
+    assertEquals(
+        Keyword.create("language-spec"), langspec.lookup(key("document", "type")));
     assertEquals(Keyword.create("draft"), langspec.lookup(key("document", "status")));
 
     IMapType conformsTo = map(langspec, key("spec", "conforms-to"));
@@ -45,7 +51,7 @@ public class HalSpecificationContractTest {
     assertEquals(METASPEC, declaredMetaspec);
     assertEquals(
         metaspec.lookup(key("document", "version")),
-        conformsTo.lookup(key("document", "version")));
+        conformsTo.lookup(Keyword.create("version")));
 
     ILinearType sections = linear(langspec, key("spec", "sections"));
     ILinearType sectionOrder = linear(langspec, key("spec", "section-order"));
@@ -66,7 +72,8 @@ public class HalSpecificationContractTest {
             Keyword.create("hal", "reader"), caseIds(READER_CORPUS),
             Keyword.create("hal", "parity"), caseIds(PARITY_CORPUS));
     Set<Object> requirementIds = new HashSet<>();
-    collectRequirements(linear(langspec, key("spec", "invariants")), requirementIds, suiteCases);
+    collectRequirements(
+        linear(langspec, key("spec", "invariants")), requirementIds, suiteCases);
     for (int i = 0; i < sections.count(); i++) {
       IMapType section = (IMapType) sections.nth(i);
       collectRequirements(
@@ -100,8 +107,10 @@ public class HalSpecificationContractTest {
       }
     }
 
-    assertReferencesResolve(linear(langspec, key("spec", "conformance")), referencesById);
-    assertReferencesResolve(linear(langspec, key("spec", "provenance")), referencesById);
+    assertReferencesResolve(
+        linear(langspec, key("spec", "conformance")), referencesById);
+    assertReferencesResolve(
+        linear(langspec, key("spec", "provenance")), referencesById);
   }
 
   private static IMapType readMap(Path path) throws Exception {

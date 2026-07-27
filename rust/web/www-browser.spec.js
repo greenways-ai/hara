@@ -27,5 +27,17 @@ runtimeTest("www evaluates the default Hara sketch into the canvas", async ({ pa
   await page.locator("[data-run]").click();
   await expect(page.locator("[data-canvas-empty]")).toHaveClass(/is-hidden/);
   await expect(page.locator("[data-canvas-status]")).toContainText("FRAME //");
-  await expect(page.locator("[data-editor-status]")).toHaveText("FORM RENDERED");
+  await expect(page.locator("[data-editor-status]")).toHaveText("FILE RENDERED");
+});
+
+runtimeTest("www evaluates scalars through the SharedWorker runtime", async ({ page }) => {
+  await page.goto("/target/www/?shared-runtime=1");
+  await expect(page.locator("[data-runtime-label]")).toHaveText("WASM // LIVE", { timeout: 60000 });
+
+  await page.locator("[data-editor]").fill("(+ 19 23)");
+  await page.locator("[data-run]").click();
+
+  await expect(page.locator("[data-inline-eval]")).toHaveText("=> 42");
+  await expect(page.locator("[data-editor-status]")).toHaveText("EVAL // 42");
+  await expect(page.locator("[data-run]")).toBeEnabled();
 });
