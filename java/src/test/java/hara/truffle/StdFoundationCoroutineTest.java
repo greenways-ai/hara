@@ -160,7 +160,7 @@ public class StdFoundationCoroutineTest {
       context.eval(
           HaraLanguage.ID,
           "(def c-reject (std.foundation.coroutine/create"
-              + " (fn [] (std.foundation.coroutine/await (promise/run (fn [] (/ 1 0)))))))");
+              + " (fn [] (std.foundation.coroutine/await (promise (fn [] (/ 1 0)))))))");
       PolyglotException error =
           assertThrows(
               PolyglotException.class,

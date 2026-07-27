@@ -43,6 +43,10 @@ cp "$ROOT/lib/src/std/substrate/protocol.hal" \
    "$ROOT/lib/src/std/substrate/frame.hal" \
    "$OUT/runtime/std/substrate/"
 cp "$ROOT/website/assets/hara-amp/"* "$OUT/assets/hara-amp/"
+cp "$ROOT/website/assets/hara-mark.svg" \
+   "$ROOT/website/assets/hara-favicon.svg" \
+   "$OUT/assets/"
+cp "$ROOT/website/og-hara-ribbon.png" "$OUT/"
 cp "$ROOT/website/examples/hara-amp/project.edn" \
    "$ROOT/website/examples/hara-amp/workspace.edn" \
    "$OUT/examples/hara-amp/"

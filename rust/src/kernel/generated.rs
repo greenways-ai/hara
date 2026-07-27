@@ -432,15 +432,15 @@ fn canonical(namespace: &str, method: &str) -> String {
     match (normalize_namespace(namespace), method) {
         ("std.foundation", method) => method.into(),
         ("std.foundation.coroutine", method) => format!("std.foundation.coroutine/{method}"),
-        ("std.foundation.string", "length") | ("std.foundation.string", "len") => {
-            "str/count".into()
+        ("std.foundation.string", "len") | ("std.foundation.string", "count") => {
+            "str/length".into()
         }
-        ("std.foundation.string", "char-at") => "str/char".into(),
-        ("std.foundation.string", "slice") => "str/substring".into(),
-        ("std.foundation.string", "encode-utf8") => "str/encode".into(),
-        ("std.foundation.string", "decode-utf8") => "str/decode".into(),
+        ("std.foundation.string", "char") => "str/char-at".into(),
+        ("std.foundation.string", "substring") => "str/slice".into(),
         ("std.foundation.string", "to-upper") => "str/upper".into(),
         ("std.foundation.string", "to-lower") => "str/lower".into(),
+        ("std.foundation.string", "encode") => "str/encode-utf8".into(),
+        ("std.foundation.string", "decode") => "str/decode-utf8".into(),
         ("std.foundation.string", method) => format!("str/{method}"),
         ("std.lib.string", "len") => "str/count".into(),
         ("std.lib.string", "to-upper") => "str/upper".into(),
@@ -451,8 +451,8 @@ fn canonical(namespace: &str, method: &str) -> String {
         ("std.foundation.promise", method) => format!("promise/{method}"),
         ("std.foundation.bytes", method) => format!("bytes/{method}"),
         ("std.foundation.file", method) => format!("file/{method}"),
-        ("std.lib.promise", "then") => "promise/map".into(),
-        ("std.lib.promise", "catch") => "promise/recover".into(),
+        ("std.lib.promise", "then") => "promise/then".into(),
+        ("std.lib.promise", "catch") => "promise/catch".into(),
         ("std.lib.promise", method) => format!("promise/{method}"),
         ("std.lib.bytes", method) => format!("bytes/{method}"),
         ("std.foundation.socket", method) => format!("socket/{method}"),

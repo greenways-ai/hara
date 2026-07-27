@@ -284,7 +284,7 @@ fn await_returns_settled_promise_value() {
 fn await_rethrows_promise_rejection() {
     let mut f = EvalFiber::start(
         "(do (def c (std.foundation.coroutine/create \
-         (fn [] (std.foundation.coroutine/await (promise/run (fn [] (/ 1 0))))))) \
+         (fn [] (std.foundation.coroutine/await (promise (fn [] (/ 1 0))))))) \
          (std.foundation.coroutine/resume c))",
         HashMap::new(),
     )
@@ -298,7 +298,7 @@ fn await_rethrows_promise_rejection() {
 #[test]
 fn yield_passes_promise_object_without_awaiting() {
     let mut f = EvalFiber::start(
-        "(do (def p (promise)) \
+        "(do (def p (promise/new (fn [resolve reject] nil))) \
          (def c (std.foundation.coroutine/create \
            (fn [] (std.foundation.coroutine/yield p)))) \
          [(std.foundation.coroutine/resume c) \
@@ -325,7 +325,7 @@ fn yield_passes_promise_object_without_awaiting() {
 #[test]
 fn yield_awaits_promise_when_composed_with_await() {
     let mut f = EvalFiber::start(
-        "(do (def p (promise)) \
+        "(do (def p (promise/new (fn [resolve reject] nil))) \
          (def c (std.foundation.coroutine/create \
            (fn [] (std.foundation.coroutine/yield (std.foundation.coroutine/await p))))) \
          (std.foundation.coroutine/resume c))",

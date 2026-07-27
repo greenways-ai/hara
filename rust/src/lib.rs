@@ -543,6 +543,50 @@ impl Runtime {
             .map_err(|error| JsValue::from_str(&format!("file/{}", error.code())))
     }
 
+    pub fn file_exists(&self, path: &str) -> Result<PromiseHandle, JsValue> {
+        let provider = self
+            .providers
+            .file()
+            .ok_or_else(|| JsValue::from_str("file/unsupported"))?;
+        provider
+            .exists(path)
+            .map(PromiseHandle::from_promise)
+            .map_err(|error| JsValue::from_str(&format!("file/{}", error.code())))
+    }
+
+    pub fn file_list(&self, path: &str) -> Result<PromiseHandle, JsValue> {
+        let provider = self
+            .providers
+            .file()
+            .ok_or_else(|| JsValue::from_str("file/unsupported"))?;
+        provider
+            .list(path)
+            .map(PromiseHandle::from_promise)
+            .map_err(|error| JsValue::from_str(&format!("file/{}", error.code())))
+    }
+
+    pub fn file_mkdir(&self, path: &str) -> Result<PromiseHandle, JsValue> {
+        let provider = self
+            .providers
+            .file()
+            .ok_or_else(|| JsValue::from_str("file/unsupported"))?;
+        provider
+            .mkdir(path)
+            .map(PromiseHandle::from_promise)
+            .map_err(|error| JsValue::from_str(&format!("file/{}", error.code())))
+    }
+
+    pub fn file_delete(&self, path: &str) -> Result<PromiseHandle, JsValue> {
+        let provider = self
+            .providers
+            .file()
+            .ok_or_else(|| JsValue::from_str("file/unsupported"))?;
+        provider
+            .delete(path)
+            .map(PromiseHandle::from_promise)
+            .map_err(|error| JsValue::from_str(&format!("file/{}", error.code())))
+    }
+
     pub fn extension_available(&self, name: &str) -> bool {
         self.extensions.contains(name) || self.wasm_extensions.contains_key(name)
     }
@@ -1076,6 +1120,48 @@ mod tests {
             .eval_text("(file/resolve \"/sandbox\" \"../escape\")")
             .unwrap_err()
             .contains("file/denied"));
+        assert_eq!(
+            runtime
+                .eval_text("(deref (file/exists? \"/sandbox/data.bin\"))")
+                .unwrap(),
+            "true"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(deref (file/exists? \"/sandbox/missing.bin\"))")
+                .unwrap(),
+            "false"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(deref (file/write \"/sandbox/list/a.bin\" (bytes 1)))")
+                .unwrap(),
+            "nil"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(deref (file/write \"/sandbox/list/b.bin\" (bytes 2)))")
+                .unwrap(),
+            "nil"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(count (deref (file/list \"/sandbox/list\")))")
+                .unwrap(),
+            "2"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(deref (file/delete \"/sandbox/data.bin\"))")
+                .unwrap(),
+            "nil"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(deref (file/exists? \"/sandbox/data.bin\"))")
+                .unwrap(),
+            "false"
+        );
     }
 
     #[test]
@@ -2063,7 +2149,7 @@ mod tests {
                 .unwrap(),
             "42"
         );
-        assert_eq!(runtime.eval_text("(count (ns:list))").unwrap(), "3");
+        assert_eq!(runtime.eval_text("(count (ns:list))").unwrap(), "4");
         assert_eq!(
             runtime.eval_text("(ns:find (quote missing.lib))").unwrap(),
             "nil"
@@ -2344,122 +2430,65 @@ mod tests {
     }
 
     #[test]
-    fn promise_values_are_composable_and_settle_once() {
+    fn promise_constructors_and_composition() {
         let mut runtime = Runtime::new();
         assert_eq!(
-            runtime.eval_text("(promise/state (promise))").unwrap(),
-            ":pending"
+            runtime
+                .eval_text("(deref (promise/new (fn [resolve reject] (resolve 42))))")
+                .unwrap(),
+            "42"
         );
         assert_eq!(
+            runtime.eval_text("(deref (promise (fn [] 40)))").unwrap(),
+            "40"
+        );
+        assert_eq!(
+            runtime.eval_text("(deref (promise/from 42))").unwrap(),
+            "42"
+        );
+        assert_eq!(
+            runtime.eval_text("(promise? (promise/from 1))").unwrap(),
+            "true"
+        );
+        assert_eq!(runtime.eval_text("(promise? 1)").unwrap(), "false");
+        assert_eq!(
             runtime
-                .eval_text("(let (p (promise)) (do (promise/resolve p 42) (promise/value p)))")
+                .eval_text("(deref (promise/then (promise (fn [] 40)) (fn [x] (+ x 2))))")
                 .unwrap(),
             "42"
         );
         assert_eq!(
             runtime
                 .eval_text(
-                    r#"(let (p (promise)) (do (promise/reject p "boom") (promise/state p)))"#
+                    "(deref (promise/catch (promise (fn [] (throw :bad))) (fn [error] 7)))"
                 )
                 .unwrap(),
-            ":rejected"
+            "7"
         );
-        assert_eq!(runtime.eval_text("(let (p (promise)) (let (q (promise)) (do (promise/resolve q 7) (promise/adopt p q) (promise/value p))))").unwrap(), "7");
         assert_eq!(
             runtime
-                .eval_text("(let (p (promise)) (do (promise/resolve p 1) (promise/resolve p 2)))")
-                .unwrap_err(),
-            "promise is already settled"
-        );
-    }
-
-    #[test]
-    fn promises_support_map_recover_and_finally() {
-        let mut runtime = Runtime::new();
-        assert_eq!(
-            runtime
-                .eval_text(
-                    "(promise/state (promise/map (promise/resolve (promise) 41) (fn [x] (+ x 1))))"
-                )
+                .eval_text("(deref (promise/finally (promise (fn [] 4)) (fn [] 99)))")
                 .unwrap(),
-            ":fulfilled"
+            "4"
         );
-        assert_eq!(runtime.eval_text("(promise/value (promise/recover (promise/reject (promise) :bad) (fn [x] (str x :ok))))").unwrap(), "\":bad:ok\"");
         assert_eq!(
             runtime
-                .eval_text(
-                    "(promise/value (promise/finally (promise/resolve (promise) 42) (fn [] 0)))"
-                )
+                .eval_text("(. (deref (promise/all [(promise (fn [] 1)) 2 (promise (fn [] 3))])) (get 1))")
                 .unwrap(),
-            "42"
+            "2"
         );
-        assert_eq!(runtime.eval_text("(let (source (promise) mapped (promise/map source (fn [x] (+ x 1)))) (do (promise/resolve source 41) (promise/value mapped)))").unwrap(), "42");
-        assert_eq!(runtime.eval_text("(let (source (promise) recovered (promise/recover source (fn [x] (str x :ok)))) (do (promise/reject source :bad) (promise/value recovered)))").unwrap(), "\":bad:ok\"");
-        assert_eq!(runtime.eval_text("(let (source (promise) final (promise/finally source (fn [] 0))) (do (promise/resolve source 42) (promise/value final)))").unwrap(), "42");
-        assert_eq!(runtime.eval_text("(let (source (promise) final (promise/finally source (fn [] (throw :cleanup)))) (do (promise/resolve source 42) (promise/value final)))").unwrap_err(), "thrown: :cleanup");
         assert_eq!(
             runtime
-                .eval_text("(promise/state (promise/cancel (promise)))")
+                .eval_text("(deref (promise (fn [] (promise (fn [] 9)))))")
                 .unwrap(),
-            ":cancelled"
+            "9"
         );
         assert_eq!(
             runtime
-                .eval_text("(promise/value (promise/cancel (promise)))")
-                .unwrap_err(),
-            "cancelled"
+                .eval_text("(deref (promise/delay 0 (fn [] 5)))")
+                .unwrap(),
+            "5"
         );
-    }
-
-    #[test]
-    fn generated_promise_library_matches_the_portable_contract() {
-        let mut runtime = Runtime::new();
-        let cases = [
-            (
-                "(promise/value (promise/new (fn [resolve reject] (resolve 42))))",
-                "42",
-            ),
-            ("(promise/value (promise/run (fn [] 40)))", "40"),
-            (
-                "(promise/value (promise/then (promise/run (fn [] 40)) (fn [x] (+ x 2))))",
-                "42",
-            ),
-            (
-                "(promise/value (promise/then (promise/run (fn [] 40)) (fn [x] (promise/run (fn [] (+ x 2))))))",
-                "42",
-            ),
-            (
-                r#"(promise/value (promise/catch (promise/run (fn [] (throw "bad"))) (fn [error] 7)))"#,
-                "7",
-            ),
-            (
-                "(. (promise/value (promise/all [(promise/run (fn [] 1)) 2 (promise/run (fn [] 3))])) (get 1))",
-                "2",
-            ),
-            (
-                "(promise/value (promise/run (fn [] (promise/run (fn [] 9)))))",
-                "9",
-            ),
-            (
-                "(promise/value (promise/finally (promise/run (fn [] 4)) (fn [] (promise/run (fn [] 99)))))",
-                "4",
-            ),
-            (
-                "(promise/value (promise/delay 0 (fn [] 5)))",
-                "5",
-            ),
-            (
-                "(promise/native? (promise/new (fn [resolve reject] (resolve 1))))",
-                "true",
-            ),
-            (
-                "(let [p (promise/delay 10000 (fn [] 1))] (do (promise/cancel p) (promise/state p)))",
-                ":cancelled",
-            ),
-        ];
-        for (source, expected) in cases {
-            assert_eq!(runtime.eval_text(source).unwrap(), expected, "{source}");
-        }
         assert!(runtime
             .eval_text("(promise/delay -1 (fn [] 1))")
             .unwrap_err()
@@ -2650,7 +2679,26 @@ mod tests {
             runtime.eval_text(r#"(str "hello" " " "world")"#).unwrap(),
             "\"hello world\""
         );
-        assert_eq!(runtime.eval_text(r#"(str/count "hé")"#).unwrap(), "2");
+        assert_eq!(runtime.eval_text(r#"(str/length "a😀b")"#).unwrap(), "3");
+        assert_eq!(
+            runtime.eval_text(r#"(str/char-at "a😀b" 1)"#).unwrap(),
+            "\"😀\""
+        );
+        assert_eq!(
+            runtime.eval_text(r#"(str/slice "a😀b" 1 2)"#).unwrap(),
+            "\"😀\""
+        );
+        assert_eq!(runtime.eval_text(r#"(str/index-of "a😀b" "b")"#).unwrap(), "2");
+        assert_eq!(
+            runtime
+                .eval_text(r#"(str/last-index-of "😀a😀" "😀")"#)
+                .unwrap(),
+            "2"
+        );
+        assert_eq!(
+            runtime.eval_text(r#"(str/pad-left "x" 3 "😀")"#).unwrap(),
+            "\"😀😀x\""
+        );
         assert_eq!(
             runtime.eval_text(r#"(str/trim "  hara  ")"#).unwrap(),
             "\"hara\""
@@ -3697,7 +3745,7 @@ mod tests {
             .unwrap_err()
             .contains("fiber evaluator"));
         assert!(runtime
-            .eval_native_traced("(std.foundation.coroutine/await (promise/run (fn [] 1)))")
+            .eval_native_traced("(std.foundation.coroutine/await (promise (fn [] 1)))")
             .unwrap_err()
             .contains("fiber evaluator"));
     }

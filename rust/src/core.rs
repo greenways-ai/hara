@@ -1698,6 +1698,58 @@ fn file_operation(
                 .map(Value::Promise)
                 .map_err(|error| file_error(operation, error))
         }
+        "file/exists?" => {
+            if forms.len() != 1 {
+                return Err("file/exists? expects a path".into());
+            }
+            let path = match eval(&forms[0], env)? {
+                Value::String(value) => value,
+                _ => return Err("file/exists? expects a path".into()),
+            };
+            file_provider(operation)?
+                .exists(&path)
+                .map(Value::Promise)
+                .map_err(|error| file_error(operation, error))
+        }
+        "file/list" => {
+            if forms.len() != 1 {
+                return Err("file/list expects a path".into());
+            }
+            let path = match eval(&forms[0], env)? {
+                Value::String(value) => value,
+                _ => return Err("file/list expects a path".into()),
+            };
+            file_provider(operation)?
+                .list(&path)
+                .map(Value::Promise)
+                .map_err(|error| file_error(operation, error))
+        }
+        "file/mkdir" => {
+            if forms.len() != 1 {
+                return Err("file/mkdir expects a path".into());
+            }
+            let path = match eval(&forms[0], env)? {
+                Value::String(value) => value,
+                _ => return Err("file/mkdir expects a path".into()),
+            };
+            file_provider(operation)?
+                .mkdir(&path)
+                .map(Value::Promise)
+                .map_err(|error| file_error(operation, error))
+        }
+        "file/delete" => {
+            if forms.len() != 1 {
+                return Err("file/delete expects a path".into());
+            }
+            let path = match eval(&forms[0], env)? {
+                Value::String(value) => value,
+                _ => return Err("file/delete expects a path".into()),
+            };
+            file_provider(operation)?
+                .delete(&path)
+                .map(Value::Promise)
+                .map_err(|error| file_error(operation, error))
+        }
         _ => unreachable!(),
     }
 }
@@ -1900,6 +1952,10 @@ pub trait FileProvider {
     fn resolve(&self, root: &str, path: &str) -> Result<String, FileError>;
     fn read(&self, path: &str) -> Result<Promise, FileError>;
     fn write(&self, path: &str, bytes: Vec<u8>) -> Result<Promise, FileError>;
+    fn exists(&self, path: &str) -> Result<Promise, FileError>;
+    fn list(&self, path: &str) -> Result<Promise, FileError>;
+    fn mkdir(&self, path: &str) -> Result<Promise, FileError>;
+    fn delete(&self, path: &str) -> Result<Promise, FileError>;
 }
 
 pub type SocketHandle = u64;
@@ -1992,6 +2048,61 @@ impl FileProvider for NativeFileProvider {
         let path = self.scoped(path)?;
         let promise = Promise::new();
         match std::fs::write(path, bytes) {
+            Ok(()) => {
+                promise.resolve(Value::Nil);
+            }
+            Err(error) => {
+                promise.reject(error.to_string());
+            }
+        }
+        Ok(promise)
+    }
+
+    fn exists(&self, path: &str) -> Result<Promise, FileError> {
+        let path = self.scoped(path)?;
+        let promise = Promise::new();
+        promise.resolve(Value::Bool(path.exists()));
+        Ok(promise)
+    }
+
+    fn list(&self, path: &str) -> Result<Promise, FileError> {
+        let path = self.scoped(path)?;
+        let promise = Promise::new();
+        match std::fs::read_dir(path) {
+            Ok(entries) => {
+                let mut names: Vec<String> = entries
+                    .filter_map(|entry| entry.ok().map(|e| e.path().to_string_lossy().into_owned()))
+                    .collect();
+                names.sort();
+                promise.resolve(Value::Array(Rc::new(RefCell::new(
+                    names.into_iter().map(Value::String).collect(),
+                ))));
+            }
+            Err(error) => {
+                promise.reject(error.to_string());
+            }
+        }
+        Ok(promise)
+    }
+
+    fn mkdir(&self, path: &str) -> Result<Promise, FileError> {
+        let path = self.scoped(path)?;
+        let promise = Promise::new();
+        match std::fs::create_dir_all(path) {
+            Ok(()) => {
+                promise.resolve(Value::Nil);
+            }
+            Err(error) => {
+                promise.reject(error.to_string());
+            }
+        }
+        Ok(promise)
+    }
+
+    fn delete(&self, path: &str) -> Result<Promise, FileError> {
+        let path = self.scoped(path)?;
+        let promise = Promise::new();
+        match std::fs::remove_file(path) {
             Ok(()) => {
                 promise.resolve(Value::Nil);
             }
@@ -2188,6 +2299,62 @@ impl FileProvider for MemoryFileProvider {
         promise.resolve(Value::Nil);
         Ok(promise)
     }
+
+    fn exists(&self, path: &str) -> Result<Promise, FileError> {
+        if !self.within_root(path) {
+            return Err(FileError::Denied);
+        }
+        let promise = Promise::new();
+        let exists = path == self.root || self.files.borrow().contains_key(path);
+        promise.resolve(Value::Bool(exists));
+        Ok(promise)
+    }
+
+    fn list(&self, path: &str) -> Result<Promise, FileError> {
+        if !self.within_root(path) {
+            return Err(FileError::Denied);
+        }
+        let prefix = if path == self.root {
+            format!("{}/", self.root)
+        } else {
+            format!("{path}/")
+        };
+        let mut names: Vec<String> = self
+            .files
+            .borrow()
+            .keys()
+            .filter(|key| key.starts_with(&prefix) && !key[prefix.len()..].contains('/'))
+            .cloned()
+            .collect();
+        names.sort();
+        let promise = Promise::new();
+        promise.resolve(Value::Array(Rc::new(RefCell::new(
+            names.into_iter().map(Value::String).collect(),
+        ))));
+        Ok(promise)
+    }
+
+    fn mkdir(&self, path: &str) -> Result<Promise, FileError> {
+        if !self.within_root(path) {
+            return Err(FileError::Denied);
+        }
+        let promise = Promise::new();
+        promise.resolve(Value::Nil);
+        Ok(promise)
+    }
+
+    fn delete(&self, path: &str) -> Result<Promise, FileError> {
+        if !self.within_root(path) {
+            return Err(FileError::Denied);
+        }
+        let promise = Promise::new();
+        if self.files.borrow_mut().remove(path).is_some() {
+            promise.resolve(Value::Nil);
+        } else {
+            promise.reject("file not found");
+        }
+        Ok(promise)
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -2201,6 +2368,18 @@ impl FileProvider for UnsupportedFileProvider {
         Err(FileError::Unsupported)
     }
     fn write(&self, _path: &str, _bytes: Vec<u8>) -> Result<Promise, FileError> {
+        Err(FileError::Unsupported)
+    }
+    fn exists(&self, _path: &str) -> Result<Promise, FileError> {
+        Err(FileError::Unsupported)
+    }
+    fn list(&self, _path: &str) -> Result<Promise, FileError> {
+        Err(FileError::Unsupported)
+    }
+    fn mkdir(&self, _path: &str) -> Result<Promise, FileError> {
+        Err(FileError::Unsupported)
+    }
+    fn delete(&self, _path: &str) -> Result<Promise, FileError> {
         Err(FileError::Unsupported)
     }
 }
@@ -2940,6 +3119,17 @@ fn promise_value_result(promise: &Promise) -> Result<Value, String> {
     }
 }
 
+fn promise_from(value: Value) -> Promise {
+    match value {
+        Value::Promise(promise) => promise,
+        value => {
+            let promise = Promise::new();
+            promise.resolve(value);
+            promise
+        }
+    }
+}
+
 fn promise_all(values: Vec<Value>) -> Promise {
     let output = Promise::new();
     if values.is_empty() {
@@ -3027,14 +3217,10 @@ fn promise_chain(source: Promise, operation: &str, function: Rc<Function>) -> Pr
     let operation = operation.to_string();
     let destination = output.clone();
     source.on_settle(Rc::new(move |state| match state.clone() {
-        PromiseState::Fulfilled(value)
-            if operation == "promise/map" || operation == "promise/then" =>
-        {
+        PromiseState::Fulfilled(value) if operation == "promise/then" => {
             settle_promise_result(&destination, call_function(&function, vec![value]));
         }
-        PromiseState::Rejected(error)
-            if operation == "promise/recover" || operation == "promise/catch" =>
-        {
+        PromiseState::Rejected(error) if operation == "promise/catch" => {
             settle_promise_result(
                 &destination,
                 call_function(&function, vec![Value::String(error)]),
@@ -3065,6 +3251,63 @@ fn string_value<'a>(value: &'a Value, operation: &str) -> Result<&'a str, String
         Value::String(value) => Ok(value),
         _ => Err(format!("{operation} expects a string")),
     }
+}
+
+fn code_point_length(text: &str) -> usize {
+    text.chars().count()
+}
+
+fn code_point_slice(text: &str, start: usize, end: usize) -> Result<String, String> {
+    let length = text.chars().count();
+    if start > end || end > length {
+        return Err("str/slice range is out of bounds".into());
+    }
+    Ok(text.chars().skip(start).take(end - start).collect())
+}
+
+fn code_point_char_at(text: &str, index: usize) -> Result<String, String> {
+    text.chars()
+        .nth(index)
+        .map(|ch| ch.to_string())
+        .ok_or_else(|| "str/char-at index out of bounds".into())
+}
+
+fn code_point_byte_index(text: &str, code_point_offset: usize) -> usize {
+    text.char_indices()
+        .nth(code_point_offset)
+        .map(|(byte_index, _)| byte_index)
+        .unwrap_or(text.len())
+}
+
+fn code_point_index(text: &str, byte_index: usize) -> usize {
+    text[..byte_index.min(text.len())].chars().count()
+}
+
+fn code_point_index_of(text: &str, part: &str, offset: usize) -> i64 {
+    let byte_offset = code_point_byte_index(text, offset);
+    text[byte_offset..]
+        .find(part)
+        .map(|index| (code_point_index(text, byte_offset + index)) as i64)
+        .unwrap_or(-1)
+}
+
+fn code_point_last_index_of(text: &str, part: &str, offset: usize) -> i64 {
+    let len = code_point_length(text);
+    if part.is_empty() {
+        return (offset.min(len)) as i64;
+    }
+    let mut code_point_index = 0;
+    let mut last: Option<usize> = None;
+    for (byte_index, _) in text.char_indices() {
+        if code_point_index > offset && offset < len {
+            break;
+        }
+        if text[byte_index..].starts_with(part) {
+            last = Some(code_point_index);
+        }
+        code_point_index += 1;
+    }
+    last.map(|index| index as i64).unwrap_or(-1)
 }
 
 fn string_operation(operation: &str, values: Vec<Value>) -> Result<Value, String> {
@@ -3099,6 +3342,10 @@ fn string_operation(operation: &str, values: Vec<Value>) -> Result<Value, String
                 text.ends_with(&part)
             }))
         }
+        "str/includes?" => {
+            let (text, part) = pair(&values)?;
+            Ok(Value::Bool(text.contains(&part)))
+        }
         "str/pad-left" | "str/pad-right" => {
             if values.len() != 3 {
                 return Err(format!(
@@ -3108,33 +3355,47 @@ fn string_operation(operation: &str, values: Vec<Value>) -> Result<Value, String
             let text = string_value(&values[0], operation)?;
             let length = value_index(&values[1])?;
             let padding = string_value(&values[2], operation)?;
-            let text_length = text.chars().count();
+            let text_length = code_point_length(text);
             if padding.is_empty() || text_length >= length {
                 return Ok(Value::String(text.into()));
             }
             let needed = length - text_length;
-            let fill = padding.chars().cycle().take(needed).collect::<String>();
+            let padding_chars: Vec<char> = padding.chars().collect();
+            let fill: String = padding_chars
+                .iter()
+                .cycle()
+                .take(needed)
+                .copied()
+                .collect();
             Ok(Value::String(if operation == "str/pad-left" {
                 format!("{fill}{text}")
             } else {
                 format!("{text}{fill}")
             }))
         }
-        "str/char" => {
+        "str/char-at" | "str/char" => {
             if values.len() != 2 {
-                return Err("str/char expects a string and index".into());
+                return Err("str/char-at expects a string and index".into());
             }
             let text = string_value(&values[0], operation)?;
             let index = value_index(&values[1])?;
-            text.chars()
-                .nth(index)
-                .map(|value| Value::String(value.to_string()))
-                .ok_or_else(|| "str/char index out of bounds".into())
+            code_point_char_at(text, index).map(Value::String)
         }
         "str/split" => {
             let (text, separator) = pair(&values)?;
             let parts = text
                 .split(&separator)
+                .map(|part| Value::String(part.into()))
+                .collect();
+            Ok(Value::Array(Rc::new(RefCell::new(parts))))
+        }
+        "str/split-lines" => {
+            if values.len() != 1 {
+                return Err("str/split-lines expects one string".into());
+            }
+            let text = string_value(&values[0], operation)?;
+            let parts = text
+                .split('\n')
                 .map(|part| Value::String(part.into()))
                 .collect();
             Ok(Value::Array(Rc::new(RefCell::new(parts))))
@@ -3164,31 +3425,35 @@ fn string_operation(operation: &str, values: Vec<Value>) -> Result<Value, String
             } else {
                 0
             };
-            let byte_offset = text
-                .char_indices()
-                .nth(offset)
-                .map_or(text.len(), |(index, _)| index);
-            let found = text[byte_offset..]
-                .find(part)
-                .map(|index| text[..byte_offset + index].chars().count() as i64);
-            Ok(Value::Number(found.unwrap_or(-1)))
+            Ok(Value::Number(code_point_index_of(text, part, offset)))
         }
-        "str/substring" => {
+        "str/last-index-of" => {
             if values.len() != 2 && values.len() != 3 {
-                return Err("str/substring expects a string, start, and optional end".into());
+                return Err(
+                    "str/last-index-of expects a string, substring, and optional offset".into()
+                );
+            }
+            let text = string_value(&values[0], operation)?;
+            let part = string_value(&values[1], operation)?;
+            let offset = if values.len() == 3 {
+                value_index(&values[2])?
+            } else {
+                code_point_length(text)
+            };
+            Ok(Value::Number(code_point_last_index_of(text, part, offset)))
+        }
+        "str/slice" | "str/substring" => {
+            if values.len() != 2 && values.len() != 3 {
+                return Err("str/slice expects a string, start, and optional end".into());
             }
             let text = string_value(&values[0], operation)?;
             let start = value_index(&values[1])?;
-            let chars = text.chars().collect::<Vec<_>>();
             let end = if values.len() == 3 {
                 value_index(&values[2])?
             } else {
-                chars.len()
+                code_point_length(text)
             };
-            if start > end || end > chars.len() {
-                return Err("str/substring range is out of bounds".into());
-            }
-            Ok(Value::String(chars[start..end].iter().collect()))
+            code_point_slice(text, start, end).map(Value::String)
         }
         "str/to-fixed" => {
             if values.len() != 2 {
@@ -3213,16 +3478,115 @@ fn string_operation(operation: &str, values: Vec<Value>) -> Result<Value, String
                 string_value(&values[2], operation)?,
             )))
         }
-        "str/trim-left" | "str/trim-right" => {
+        "str/replace-first" => {
+            if values.len() != 3 {
+                return Err("str/replace-first expects a string, match, and replacement".into());
+            }
+            let text = string_value(&values[0], operation)?;
+            let part = string_value(&values[1], operation)?;
+            let replacement = string_value(&values[2], operation)?;
+            Ok(Value::String(text.replacen(part, replacement, 1)))
+        }
+        "str/trim" | "str/trim-left" | "str/trim-right" => {
             if values.len() != 1 {
                 return Err(format!("{operation} expects one string"));
             }
             let text = string_value(&values[0], operation)?;
-            Ok(Value::String(if operation == "str/trim-left" {
-                text.trim_start().into()
-            } else {
-                text.trim_end().into()
+            Ok(Value::String(match operation {
+                "str/trim" => text.trim().into(),
+                "str/trim-left" => text.trim_start().into(),
+                _ => text.trim_end().into(),
             }))
+        }
+        "str/length" | "str/len" | "str/count" => {
+            if values.len() != 1 {
+                return Err(format!("{operation} expects one string"));
+            }
+            let text = string_value(&values[0], operation)?;
+            Ok(Value::Number(code_point_length(text) as i64))
+        }
+        "str/blank?" => {
+            if values.len() != 1 {
+                return Err("str/blank? expects one string".into());
+            }
+            let text = string_value(&values[0], operation)?;
+            Ok(Value::Bool(text.trim().is_empty()))
+        }
+        "str/repeat" => {
+            if values.len() != 2 {
+                return Err("str/repeat expects a string and count".into());
+            }
+            let text = string_value(&values[0], operation)?;
+            let count = value_index(&values[1])?;
+            Ok(Value::String(text.repeat(count)))
+        }
+        "str/capitalize" => {
+            if values.len() != 1 {
+                return Err("str/capitalize expects one string".into());
+            }
+            let text = string_value(&values[0], operation)?;
+            let mut chars = text.chars();
+            match chars.next() {
+                Some(first) => Ok(Value::String(
+                    first.to_uppercase().collect::<String>() + chars.as_str(),
+                )),
+                None => Ok(Value::String(text.into())),
+            }
+        }
+        "str/decapitalize" => {
+            if values.len() != 1 {
+                return Err("str/decapitalize expects one string".into());
+            }
+            let text = string_value(&values[0], operation)?;
+            let mut chars = text.chars();
+            match chars.next() {
+                Some(first) => Ok(Value::String(
+                    first.to_lowercase().collect::<String>() + chars.as_str(),
+                )),
+                None => Ok(Value::String(text.into())),
+            }
+        }
+        "str/upper" | "str/to-upper" => {
+            if values.len() != 1 {
+                return Err(format!("{operation} expects one string"));
+            }
+            let text = string_value(&values[0], operation)?;
+            Ok(Value::String(text.to_uppercase()))
+        }
+        "str/lower" | "str/to-lower" => {
+            if values.len() != 1 {
+                return Err(format!("{operation} expects one string"));
+            }
+            let text = string_value(&values[0], operation)?;
+            Ok(Value::String(text.to_lowercase()))
+        }
+        "str/reverse" => {
+            if values.len() != 1 {
+                return Err("str/reverse expects one string".into());
+            }
+            let text = string_value(&values[0], operation)?;
+            Ok(Value::String(text.chars().rev().collect()))
+        }
+        "str/encode-utf8" | "str/encode" => {
+            if values.len() != 1 {
+                return Err(format!("{operation} expects one string"));
+            }
+            match &values[0] {
+                Value::String(text) => Ok(Value::ByteBuffer(Rc::new(RefCell::new(
+                    text.as_bytes().to_vec(),
+                )))),
+                _ => Err(format!("{operation} expects a string")),
+            }
+        }
+        "str/decode-utf8" | "str/decode" => {
+            if values.len() != 1 {
+                return Err(format!("{operation} expects bytes"));
+            }
+            let bytes = byte_buffer(&values[0], operation)?;
+            let raw = bytes.borrow().clone();
+            String::from_utf8(raw)
+                .map(Value::String)
+                .map_err(|_| format!("{operation} invalid UTF-8"))
         }
         _ => Err(format!("unknown string operation: {operation}")),
     }
@@ -5873,10 +6237,22 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 protocol_call(&protocol, method, &arguments)
             }
             Form::Symbol(n) if n == "promise" => {
-                if fs.len() != 1 {
-                    return Err("promise expects no arguments".into());
+                if fs.len() != 2 {
+                    return Err("promise expects one function".into());
                 }
-                Ok(Value::Promise(Promise::new()))
+                let function = match eval(&fs[1], env)? {
+                    Value::Function(function) => function,
+                    _ => return Err("promise expects a function".into()),
+                };
+                let provider = promise_provider();
+                let task = Rc::new(move || call_function(&function, Vec::new()));
+                Ok(Value::Promise(provider.run(task)))
+            }
+            Form::Symbol(n) if n == "promise?" => {
+                if fs.len() != 2 {
+                    return Err("promise? expects one value".into());
+                }
+                Ok(Value::Bool(matches!(eval(&fs[1], env)?, Value::Promise(_))))
             }
             Form::Symbol(n) if n == "host/call" => {
                 if fs.len() < 3 {
@@ -5903,41 +6279,42 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     handler(service, method, arguments)
                 })
             }
-            Form::Symbol(n) if n == "promise/new" || n == "promise/run" => {
+            Form::Symbol(n) if n == "promise/new" => {
                 if fs.len() != 2 {
-                    return Err(format!("{n} expects one function"));
+                    return Err("promise/new expects one function".into());
                 }
                 let function = match eval(&fs[1], env)? {
                     Value::Function(function) => function,
-                    _ => return Err(format!("{n} expects a function")),
+                    _ => return Err("promise/new expects a function".into()),
                 };
-                let provider = promise_provider();
-                if n == "promise/run" {
-                    let task = Rc::new(move || call_function(&function, Vec::new()));
-                    Ok(Value::Promise(provider.run(task)))
-                } else {
-                    let promise = Promise::new();
-                    let resolving = promise.clone();
-                    let resolve = native_function("promise-resolve", 1, move |mut values| {
-                        let value = values.remove(0);
-                        settle_promise_result(&resolving, Ok(value.clone()));
-                        Ok(value)
-                    });
-                    let rejecting = promise.clone();
-                    let reject = native_function("promise-reject", 1, move |mut values| {
-                        let value = values.remove(0);
-                        let error = match &value {
-                            Value::String(error) => error.clone(),
-                            value => value.display(),
-                        };
-                        rejecting.reject(error);
-                        Ok(value)
-                    });
-                    if let Err(error) = call_function(&function, vec![resolve, reject]) {
-                        promise.reject(error);
-                    }
-                    Ok(Value::Promise(promise))
+                let promise = Promise::new();
+                let resolving = promise.clone();
+                let resolve = native_function("promise-resolve", 1, move |mut values| {
+                    let value = values.remove(0);
+                    settle_promise_result(&resolving, Ok(value.clone()));
+                    Ok(value)
+                });
+                let rejecting = promise.clone();
+                let reject = native_function("promise-reject", 1, move |mut values| {
+                    let value = values.remove(0);
+                    let error = match &value {
+                        Value::String(error) => error.clone(),
+                        value => value.display(),
+                    };
+                    rejecting.reject(error);
+                    Ok(value)
+                });
+                if let Err(error) = call_function(&function, vec![resolve, reject]) {
+                    promise.reject(error);
                 }
+                Ok(Value::Promise(promise))
+            }
+            Form::Symbol(n) if n == "promise/from" => {
+                if fs.len() != 2 {
+                    return Err("promise/from expects one value".into());
+                }
+                let value = eval(&fs[1], env)?;
+                Ok(Value::Promise(promise_from(value)))
             }
             Form::Symbol(n) if n == "promise/all" => {
                 if fs.len() != 2 {
@@ -5946,12 +6323,6 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 Ok(Value::Promise(promise_all(iterator_values(eval(
                     &fs[1], env,
                 )?)?)))
-            }
-            Form::Symbol(n) if n == "promise/native?" => {
-                if fs.len() != 2 {
-                    return Err("promise/native? expects one value".into());
-                }
-                Ok(Value::Bool(matches!(eval(&fs[1], env)?, Value::Promise(_))))
             }
             Form::Symbol(n) if n == "promise/delay" => {
                 if fs.len() != 3 {
@@ -5970,39 +6341,6 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     promise_provider().delay(std::time::Duration::from_millis(millis), task),
                 ))
             }
-            Form::Symbol(n) if n == "promise/state" => {
-                if fs.len() != 2 {
-                    return Err("promise/state expects one argument".into());
-                }
-                Ok(promise_state_value(&promise_value(
-                    &eval(&fs[1], env)?,
-                    "promise/state",
-                )?))
-            }
-            Form::Symbol(n) if n == "promise/value" => {
-                if fs.len() != 2 {
-                    return Err("promise/value expects one argument".into());
-                }
-                promise_value_result(&promise_value(&eval(&fs[1], env)?, "promise/value")?)
-            }
-            Form::Symbol(n) if n == "promise/resolve" || n == "promise/reject" => {
-                if fs.len() != 3 {
-                    return Err(format!("{n} expects a promise and value"));
-                }
-                let promise = promise_value(&eval(&fs[1], env)?, n)?;
-                let settled = if n == "promise/resolve" {
-                    promise.resolve(eval(&fs[2], env)?)
-                } else {
-                    promise.reject(match eval(&fs[2], env)? {
-                        Value::String(error) => error,
-                        value => value.display(),
-                    })
-                };
-                if !settled {
-                    return Err("promise is already settled".into());
-                }
-                Ok(Value::Promise(promise))
-            }
             Form::Symbol(n) if n == "promise/cancel" => {
                 if fs.len() != 2 {
                     return Err("promise/cancel expects a promise".into());
@@ -6013,21 +6351,8 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 Ok(Value::Promise(promise))
             }
-            Form::Symbol(n) if n == "promise/adopt" => {
-                if fs.len() != 3 {
-                    return Err("promise/adopt expects two promises".into());
-                }
-                let promise = promise_value(&eval(&fs[1], env)?, n)?;
-                let other = promise_value(&eval(&fs[2], env)?, n)?;
-                if !promise.adopt(&other) {
-                    return Err("promise source is pending or destination is settled".into());
-                }
-                Ok(Value::Promise(promise))
-            }
             Form::Symbol(n)
                 if [
-                    "promise/map",
-                    "promise/recover",
                     "promise/then",
                     "promise/catch",
                     "promise/finally",
@@ -6163,7 +6488,16 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 socket_operation(n, &fs[1..], env)
             }
             Form::Symbol(n)
-                if ["file/resolve", "file/read", "file/write"].contains(&n.as_str()) =>
+                if [
+                    "file/resolve",
+                    "file/read",
+                    "file/write",
+                    "file/exists?",
+                    "file/list",
+                    "file/mkdir",
+                    "file/delete",
+                ]
+                .contains(&n.as_str()) =>
             {
                 file_operation(n, &fs[1..], env)
             }
@@ -6210,6 +6544,20 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     "str/replace",
                     "str/trim-left",
                     "str/trim-right",
+                    "str/length",
+                    "str/blank?",
+                    "str/includes?",
+                    "str/char-at",
+                    "str/slice",
+                    "str/last-index-of",
+                    "str/split-lines",
+                    "str/repeat",
+                    "str/replace-first",
+                    "str/capitalize",
+                    "str/decapitalize",
+                    "str/reverse",
+                    "str/encode-utf8",
+                    "str/decode-utf8",
                 ]
                 .contains(&n.as_str()) =>
             {
