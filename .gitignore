@@ -66,3 +66,4 @@ parse_jacoco.py
 website/docs/rust/pkg/
 apps/hara-world/runtime/
 /.venv-docs
+site-build/
