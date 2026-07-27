@@ -47,3 +47,8 @@ test("local evaluation ignores delimiters inside comments and strings", () => {
   const source = '(do ; ) ignored\n  (println "[") )';
   assert.equal(localFormAt(source, source.indexOf("println")).source, '(println "[")');
 });
+
+test("local evaluation uses the previous form after a trailing newline", () => {
+  const source = "{:version 1 :commands []}\n";
+  assert.equal(localFormAt(source, source.length).source, "{:version 1 :commands []}");
+});

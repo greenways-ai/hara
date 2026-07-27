@@ -19,39 +19,25 @@ const HAL_FORMS = [
 ];
 
 const DEFAULT_FILES = new Map([
-  ["/sketches/neon-orbit.hal", `;; Edit the node data, then press Run.
-(do
-  (def palette ["#41f5e4" "#ff2e88" "#9c7bff" "#f5d742"])
-  (def nodes
-    [[170 300 20 0]
-     [285 165 28 2]
-     [480 105 18 1]
-     [675 165 28 0]
-     [790 300 20 3]
-     [675 435 28 2]
-     [480 495 18 0]
-     [285 435 28 1]])
-  {:version 1
-   :width 960
-   :height 600
-   :background "#020408"
-   :commands
-   (vec
-     (concat
-       [[:polyline
-          [[170 300] [285 165] [480 105] [675 165] [790 300]
-           [675 435] [480 495] [285 435] [170 300]]
-          "#225f70" 3]
-        [:circle 480 300 76 "#102d3d"]
-        [:circle 480 300 16 "#bafff8"]]
-       (map
-         (fn [node]
-           [:circle
-            (get node 0)
-            (get node 1)
-            (get node 2)
-            (get palette (get node 3))])
-         nodes)))})
+  ["/sketches/neon-orbit.hal", `;; Put the cursor in this map and press Ctrl-E.
+;; Scene commands are a finite vector so the browser runtime can transport it.
+{:version 1
+ :width 960
+ :height 600
+ :background "#020408"
+ :commands
+ [[:polyline [[170 300] [285 165] [480 105] [675 165] [790 300]
+              [675 435] [480 495] [285 435] [170 300]] "#225f70" 3]
+  [:circle 480 300 76 "#102d3d"]
+  [:circle 480 300 16 "#bafff8"]
+  [:circle 170 300 20 "#41f5e4"]
+  [:circle 285 165 28 "#9c7bff"]
+  [:circle 480 105 18 "#ff2e88"]
+  [:circle 675 165 28 "#41f5e4"]
+  [:circle 790 300 20 "#f5d742"]
+  [:circle 675 435 28 "#9c7bff"]
+  [:circle 480 495 18 "#41f5e4"]
+  [:circle 285 435 28 "#ff2e88"]]}
 `],
   ["/sketches/signal-field.hal", `;; A declarative canvas scene is ordinary Hara data.
 {:version 1
@@ -619,6 +605,7 @@ function installFileActions() {
     await evalStudio(`(fs/write! ${JSON.stringify(SPACE)} ${JSON.stringify(path)} ${JSON.stringify(content)})`);
     await listFiles();
     await openFile(path, true);
+    await evaluateForm();
   });
 
   query("[data-file-rename]").addEventListener("click", async () => {
@@ -695,6 +682,7 @@ async function bootRuntime() {
     }
     state.broker = createBrowserBroker({
       workerUrl: new URL("hta-worker.js", runtimeBase),
+      sharedWorkerUrl: new URL("hta-shared-worker.js", runtimeBase),
       moduleBytes,
       hostCalls: createHostServices({ dbName: "hara-www" }),
       resources

@@ -105,6 +105,12 @@ export function localFormAt(source, caret) {
     const form = forms[0];
     return { ...form, source: source.slice(form.start, form.end) };
   }
+  // A just-opened file normally leaves its caret after the final newline.
+  // In that useful case, evaluate the preceding top-level form.
+  const previous = formsIn(source)
+    .filter((form) => form.end <= caret)
+    .sort((left, right) => right.end - left.end)[0];
+  if (previous) return { ...previous, source: source.slice(previous.start, previous.end) };
   const before = source.slice(0, caret).search(/[^\s()[\]{}]/) === -1 ? caret : caret;
   const start = source.lastIndexOf("\n", before - 1) + 1;
   const line = source.slice(start, source.indexOf("\n", before) === -1 ? source.length : source.indexOf("\n", before));

@@ -27,5 +27,5 @@ runtimeTest("www evaluates the default Hara sketch into the canvas", async ({ pa
   await page.locator("[data-run]").click();
   await expect(page.locator("[data-canvas-empty]")).toHaveClass(/is-hidden/);
   await expect(page.locator("[data-canvas-status]")).toContainText("FRAME //");
-  await expect(page.locator("[data-editor-status]")).toHaveText("RENDERED");
+  await expect(page.locator("[data-editor-status]")).toHaveText("FORM RENDERED");
 });

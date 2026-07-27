@@ -121,11 +121,24 @@ export class KernelBroker {
  * as-is (a shared map, e.g. `createHostServices()` output, possibly merged
  * with extra calls by the caller); `resources` registers into every kernel.
  */
-export function createBrowserBroker({ workerUrl, moduleBytes, hostCalls = {}, resources }) {
+function sharedWorkerPort(url) {
+  const shared = new SharedWorker(url, { type: "module", name: "hara-runtime" });
+  const port = shared.port;
+  port.start();
+  return {
+    postMessage(message) { port.postMessage(message); },
+    addEventListener(type, listener) { port.addEventListener(type, listener); },
+    terminate() { port.close(); }
+  };
+}
+
+export function createBrowserBroker({ workerUrl, sharedWorkerUrl, moduleBytes, hostCalls = {}, resources }) {
   return new KernelBroker({
     resources,
     spawn: async (name) => {
-      const worker = new Worker(workerUrl, { type: "module", name: `hara-kernel-${name}` });
+      const worker = sharedWorkerUrl && typeof SharedWorker !== "undefined"
+        ? sharedWorkerPort(sharedWorkerUrl)
+        : new Worker(workerUrl, { type: "module", name: `hara-kernel-${name}` });
       const context = new HtaContext({ worker, moduleBytes, hostCalls });
       return { context, worker };
     }
