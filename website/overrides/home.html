@@ -1,53 +1,72 @@
 {% extends "main.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  <link rel="stylesheet" href="{{ 'stylesheets/home-simple.css' | url }}">
+{% endblock %}
+
+{% block header %}
+<header class="hara-home-header">
+  <div class="hara-home-header__inner">
+    <a class="hara-home-brand" href="{{ '.' | url }}" aria-label="Hara home">
+      <img src="{{ 'assets/hara-mark.svg' | url }}" alt="">
+      <span>Hara</span>
+    </a>
+    <nav class="hara-home-nav" aria-label="Primary navigation">
+      <a href="{{ 'studio/' | url }}">Studio</a>
+      <a href="{{ 'getting-started/' | url }}">Get started</a>
+      <a href="{{ 'reference/' | url }}">Reference</a>
+      <a href="https://github.com/greenways-ai/hara">GitHub</a>
+    </nav>
+  </div>
+</header>
+{% endblock %}
+
+{% block tabs %}{% endblock %}
+{% block site_nav %}{% endblock %}
+
 {% block container %}
-<div class="hara-home-wrap">
-<section class="hara-home-intro">
-  <div class="hara-home-title">
-    <div class="hara-home-kicker">FAST · EMBEDDABLE · WASM NATIVE</div>
-    <h1>HARA</h1>
-    <p class="hara-home-tagline">A Modern Lisp for the Agentic Age.</p>
-  </div>
+<main class="hara-landing">
+  <section class="hara-hero">
+    <div class="hara-hero__copy">
+      <p class="hara-label">Runtime-neutral · live · embeddable</p>
+      <h1>A small Lisp for systems that need to live <em>everywhere.</em></h1>
+      <p class="hara-hero__lede">Hara combines a compact language core with explicit capabilities, persistent data and portable runtime contracts across the JVM, Rust and WebAssembly.</p>
+      <div class="hara-hero__actions">
+        <a class="hara-button hara-button--primary" href="{{ 'studio/' | url }}">Try Hara Studio</a>
+        <a class="hara-button" href="{{ 'getting-started/' | url }}">Read the guide</a>
+      </div>
+      <p class="hara-status"><span></span> Active experimental runtime</p>
+    </div>
 
-  <div class="hara-home-playground">
-    <div class="hara-home-palette">
-      <span class="hara-home-palette__prompt">hara ›</span>
-      <input type="text" data-console-palette
-             placeholder="(+ 19 23)" autocomplete="off"
-             spellcheck="false" aria-label="Try Hara">
-    </div>
-    <div class="hara-home-chips">
-      <button type="button" data-console-command="(+ 19 23)">math</button>
-      <button type="button" data-console-command="(map inc [1 2 3])">lists</button>
-      <button type="button" data-console-command="(osc 440)">sound</button>
-      <button type="button" data-console-command="(agent :wander)">agent</button>
-    </div>
-  </div>
+    <div class="hara-code-card" aria-label="Hara example">
+      <div class="hara-code-card__head">
+        <span>hello.hal</span>
+        <span>L0</span>
+      </div>
+      <pre><code><span class="hara-code-muted">; data stays data</span>
+(def project
+  {:name "hara"
+   :runtimes [:jvm :rust :wasm]})
 
-  <a class="hara-start" href="#" data-hara-start data-console-command="(+ 19 23)">START</a>
-</section>
-<dialog class="hara-intro-window" data-intro-window aria-label="Getting started">
-  <div class="hara-intro-window__head">
-    <span>HARA</span>
-    <button type="button" data-intro-close aria-label="Close instructions">×</button>
-  </div>
-  <div class="hara-intro-window__body">
-    <p>Welcome to the grid.</p>
-    <ul>
-      <li>Type Hara forms into the command palette at the top of the page.</li>
-      <li>Open <b>LOG</b> to see every evaluation stream in real time.</li>
-      <li>Open the <b>apps panel</b> for runtime status and links.</li>
-    </ul>
-  </div>
-  <div class="hara-intro-window__foot">
-    <button type="button" class="md-button md-button--primary" data-intro-close>Got it</button>
-  </div>
-</dialog>
-<div class="md-content" data-md-component="content">
-  <article class="md-content__inner md-typeset">
-    <div class="hara-home">
-      {{ page.content }}
+(map name (:runtimes project))
+<span class="hara-code-result">=&gt; ["jvm" "rust" "wasm"]</span></code></pre>
+      <div class="hara-code-card__foot">
+        <span>portable core</span>
+        <span>explicit host boundary</span>
+      </div>
     </div>
-  </article>
-</div>
-</div>
+  </section>
+
+  <div class="hara-home-content md-typeset">
+    {{ page.content }}
+  </div>
+</main>
+{% endblock %}
+
+{% block footer %}
+<footer class="hara-home-footer">
+  <span>Hara is built by <a href="https://www.greenways.ai">Greenways</a>.</span>
+  <span><a href="https://github.com/greenways-ai/hara">Source on GitHub</a></span>
+</footer>
 {% endblock %}
