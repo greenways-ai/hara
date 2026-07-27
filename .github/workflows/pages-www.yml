@@ -23,16 +23,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Build browser runtime and site
+        run: |
+          rustup target add wasm32-unknown-unknown
+          bash scripts/build-www
+      - name: Test website scene contract
+        run: node --test website/scene.test.mjs
+      - name: Configure custom domain
+        run: echo "www.hara-lang.org" > ./target/www/CNAME
       - name: Setup Pages
         uses: actions/configure-pages@v5
         with:
           static_site_generator: ""
-      - name: Configure custom domain
-        run: echo "www.hara-lang.org" > ./website/CNAME
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./website
+          path: ./target/www
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
