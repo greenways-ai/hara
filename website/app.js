@@ -69,6 +69,30 @@ const DEFAULT_FILES = new Map([
                            {:id "bone/arm" :parent "bone/root" :length 1}]}}]
  :audio {:tempo 120 :midi true :voices []}}
 `],
+  ["/templates/3d-editor.hal", `;; 3D editor template — change the mesh, material, or rig, then run.
+{:creative/version 1
+ :background "#020408"
+ :entities [{:id "mesh/hero"
+             :mesh {:primitive :box}
+             :material {:color "#41f5e4"}
+             :transform {:rotation [0 0 0]}
+             :rig {:bones [{:id "bone/root" :length 1}
+                           {:id "bone/arm" :parent "bone/root" :length 1}]}}]
+ :audio {:tempo 120 :midi true :voices []}}
+`],
+  ["/templates/graphing.hal", `;; Graphing template — edit the points or add another series, then run.
+{:version 1
+ :width 960
+ :height 600
+ :background "#020408"
+ :commands
+ [[:rect 72 72 816 456 "#07131d"]
+  [:line 72 300 888 300 "#1a6070" 2]
+  [:line 480 72 480 528 "#1a6070" 2]
+  [:polyline [[92 450] [172 410] [252 355] [332 290] [412 245] [492 270] [572 205] [652 150] [732 175] [812 112]] "#41f5e4" 5]
+  [:circle 492 270 10 "#ff2e88"]
+  [:circle 812 112 10 "#9c7bff"]]}
+`],
   ["/README.hal", `;; HARA VISUAL LAB
 ;;
 ;; Open a sketch from /sketches and press Run.
@@ -133,8 +157,6 @@ const elements = {
   canvasStatus: query("[data-canvas-status]"),
   canvasSize: query("[data-canvas-size]"),
   canvasWrap: query("[data-canvas-wrap]"),
-  patchWorkbench: query("[data-patch-workbench]"),
-  patchStatus: query("[data-patch-status]"),
   dialog: query("[data-dialog]"),
   dialogForm: query("[data-dialog-form]"),
   dialogTitle: query("[data-dialog-title]"),
@@ -352,6 +374,9 @@ function installLauncher() {
   for (const tile of queryAll("[data-open-window]")) {
     tile.addEventListener("click", () => openWindow(tile.dataset.openWindow));
   }
+  for (const tile of queryAll("[data-deploy-template]")) {
+    tile.addEventListener("click", () => deployTemplate(tile.dataset.deployTemplate));
+  }
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && elements.launcher.classList.contains("is-open")) {
       closeLauncher();
@@ -360,25 +385,16 @@ function installLauncher() {
   });
 }
 
-async function installPatchWorkbench() {
-  if (!elements.patchWorkbench) return;
-  const { createWorkbench } = await import("./vendor/hara-ui/workbench.js");
-  createWorkbench(elements.patchWorkbench);
-  elements.patchWorkbench.addEventListener("hara:workbench-selection", (event) => {
-    const node = event.detail.node;
-    elements.patchStatus.textContent = node ? `SELECTED // ${node.id.toUpperCase()}` : "STRUCTURED MODEL // READY";
-  });
-  elements.patchWorkbench.addEventListener("hara:workbench-structural-edit", (event) => {
-    elements.patchStatus.textContent = `MODEL // ${event.detail.kind.toUpperCase()}`;
-    elements.editorStatus.textContent = "PATCH MODEL CHANGED // SOURCE BRIDGE PENDING";
-  });
-  elements.patchWorkbench.addEventListener("hara:workbench-rejected-edit", () => {
-    elements.patchStatus.textContent = "REJECTED // INCOMPATIBLE PORTS";
-    toast("PATCH REJECTED: INCOMPATIBLE PORTS", true);
-  });
-  elements.patchWorkbench.addEventListener("hara:workbench-layout-change", () => {
-    elements.patchStatus.textContent = "LAYOUT // UPDATED";
-  });
+async function deployTemplate(name) {
+  const path = name === "3d" ? "/templates/3d-editor.hal" : "/templates/graphing.hal";
+  const source = DEFAULT_FILES.get(path);
+  if (!state.broker || !source) return toast("RUNTIME STILL BOOTING", true);
+  await evalStudio(`(fs/write! ${JSON.stringify(SPACE)} ${JSON.stringify(path)} ${JSON.stringify(source)})`);
+  await listFiles();
+  await openFile(path, true);
+  openWindow("canvas");
+  await evaluateFile();
+  toast(`${name === "3d" ? "3D EDITOR" : "GRAPHING"} TEMPLATE DEPLOYED`);
 }
 
 function studioSource(form) {
@@ -1224,7 +1240,6 @@ startTron(query("[data-tron]"));
 installWorkspaceNavigation();
 installLauncher();
 installWindowManager();
-installPatchWorkbench();
 installEditor();
 installFileActions();
 restoreWindows();
