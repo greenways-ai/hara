@@ -279,7 +279,9 @@ public final class Main {
   @SuppressWarnings({"rawtypes", "unchecked"})
   private static int runConformance(PrintStream output, PrintStream error) {
     try (InputStream resource =
-        Main.class.getClassLoader().getResourceAsStream("specs/hara/corpora/l0-conformance.edn")) {
+        Main.class
+            .getClassLoader()
+            .getResourceAsStream("specs/language/draft/conformance/l0.edn")) {
       if (resource == null) {
         error.println("Missing packaged L0 conformance manifest");
         return 1;

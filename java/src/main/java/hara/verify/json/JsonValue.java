@@ -217,7 +217,7 @@ public abstract class JsonValue {
       values.add(entry.getKey());
       values.add(entry.getValue().toHara());
     }
-    return BuiltinStruct.hashMap(values);
+    return BuiltinStruct.orderedMap(values);
   }
 
   private static void put(

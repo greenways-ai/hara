@@ -1,224 +1,265 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hara — a small Lisp for systems that need to live everywhere</title>
-  <style>
-    :root {
-      --bg: #05070d;
-      --fg: #d7e6ef;
-      --muted: #8b9bad;
-      --accent: #41f5e4;
-      --accent-dark: #8ffff2;
-      --card: #0a0f18;
-      --border: rgba(65,245,228,.14);
-      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-      background: linear-gradient(rgba(65,245,228,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(65,245,228,.035) 1px, transparent 1px), var(--bg);
-      background-size: 64px 64px;
-      color: var(--fg);
-      line-height: 1.6;
-    }
-    header {
-      border-bottom: 1px solid var(--border);
-      padding: .8rem 2rem;
-      background: rgba(3,5,10,.84);
-      backdrop-filter: blur(16px);
-      position: sticky; top: 0; z-index: 2;
-    }
-    .header-inner {
-      max-width: 1100px;
-      margin: 0 auto;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .brand {
-      font-weight: 700;
-      font-size: 1.25rem;
-      color: var(--fg);
-      text-decoration: none;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-    .brand svg {
-      width: 28px;
-      height: 28px;
-    }
-    nav a {
-      color: var(--muted);
-      text-decoration: none;
-      margin-left: 1.5rem;
-      font-family: var(--mono);
-      font-size: 0.85rem;
-    }
-    nav a:hover { color: var(--fg); }
-    main {
-      max-width: 1100px;
-      margin: 0 auto;
-      padding: 4rem 2rem;
-    }
-    .hero {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 3rem;
-      align-items: center;
-    }
-    @media (max-width: 800px) {
-      .hero { grid-template-columns: 1fr; }
-    }
-    .label {
-      color: var(--accent);
-      font-size: 0.8rem;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-    }
-    h1 {
-      font-size: 3rem;
-      line-height: 1.1;
-      margin: 1rem 0;
-    }
-    h1 em {
-      font-style: normal;
-      color: var(--accent);
-    }
-    .lede {
-      color: var(--muted);
-      font-size: 1.15rem;
-      max-width: 480px;
-    }
-    .actions {
-      margin-top: 2rem;
-      display: flex;
-      gap: 1rem;
-      flex-wrap: wrap;
-    }
-    .button {
-      display: inline-block;
-      padding: 0.75rem 1.25rem;
-      border-radius: 2px;
-      text-decoration: none;
-      font-weight: 600;
-      border: 1px solid var(--border);
-      color: var(--fg);
-      background: var(--card);
-    }
-    .button-primary {
-      background: var(--accent);
-      color: #03050a;
-      border-color: var(--accent);
-    }
-    .button-primary:hover { background: var(--accent-dark); }
-    .status {
-      margin-top: 1.5rem;
-      color: var(--muted);
-      font-size: 0.9rem;
-    }
-    .status span {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--accent);
-      margin-right: 0.5rem;
-    }
-    .code-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 2px;
-      box-shadow: 0 0 30px rgba(0,0,0,.28);
-      overflow: hidden;
-    }
-    .code-card-head,
-    .code-card-foot {
-      padding: 0.75rem 1rem;
-      color: var(--muted);
-      font-size: 0.85rem;
-      display: flex;
-      justify-content: space-between;
-    }
-    .code-card-head { border-bottom: 1px solid var(--border); }
-    .code-card-foot { border-top: 1px solid var(--border); }
-    .code-card pre {
-      margin: 0;
-      padding: 1.25rem;
-      overflow-x: auto;
-      font-size: 0.95rem;
-      line-height: 1.5;
-    }
-    .muted { color: var(--muted); }
-    .result { color: var(--accent); }
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 2rem;
-      color: var(--muted);
-      font-size: 0.9rem;
-      text-align: center;
-    }
-    footer a { color: var(--muted); }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#020408">
+  <meta name="description" content="Hara is a small, fast Lisp that runs live in your browser.">
+  <meta property="og:title" content="HARA — Lisp for the Agentic Age">
+  <meta property="og:description" content="Write Hara in the browser and render it live.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://www.hara-lang.org/og-hara-ribbon.png">
+  <meta property="og:image:width" content="1730">
+  <meta property="og:image:height" content="909">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://www.hara-lang.org/og-hara-ribbon.png">
+  <link rel="icon" href="./vendor/hara-ui/favicon.svg" type="image/svg+xml">
+  <title>HARA — Lisp for the Agentic Age</title>
+  <link rel="stylesheet" href="./vendor/hara-ui/tokens.css">
+  <link rel="stylesheet" href="./vendor/hara-ui/components.css">
+  <link rel="stylesheet" href="./app.css">
 </head>
 <body>
-  <header>
-    <div class="header-inner">
-      <a class="brand" href="/" aria-label="Hara home">
-        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <circle cx="16" cy="16" r="14" stroke="#41f5e4" stroke-width="2"/>
-          <path d="M10 16h12M16 10v12" stroke="#41f5e4" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-        <span>Hara</span>
-      </a>
-      <nav aria-label="Primary navigation">
-        <a href="https://docs.hara-lang.org">Docs</a>
-        <a href="https://specs.hara-lang.org">Specs</a>
-        <a href="https://github.com/hara-lang/hara">GitHub</a>
+  <canvas class="tron-field" data-tron aria-hidden="true"></canvas>
+  <div class="atmosphere" aria-hidden="true"></div>
+
+  <header class="system-bar">
+    <div class="system-actions">
+      <button class="system-button launcher-button" type="button"
+              data-launcher-toggle aria-expanded="false"
+              aria-controls="app-launcher" aria-label="Open application launcher">
+        <span class="dot-grid" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </span>
+      </button>
+      <button class="system-button home-button" type="button" data-home aria-label="Go to Hara home">
+        <span aria-hidden="true">⌂</span>
+      </button>
+    </div>
+
+    <div class="system-identity">
+      <img class="system-mark" src="./vendor/hara-ui/hara-mark.svg" alt="">
+      <span class="system-title">HARA</span>
+      <span class="system-context" data-system-context>WELCOME // 01</span>
+    </div>
+
+    <div class="system-right">
+      <div class="runtime-state" aria-live="polite">
+        <span class="runtime-led" data-runtime-led></span>
+        <span data-runtime-label>WASM // STANDBY</span>
+      </div>
+      <nav class="workspace-dots" aria-label="Workspaces">
+        <button type="button" data-workspace-dot="0" aria-label="Welcome workspace"
+                aria-current="true"></button>
+        <button type="button" data-workspace-dot="1" aria-label="Hara desktop workspace"></button>
       </nav>
     </div>
   </header>
 
-  <main>
-    <section class="hero">
-      <div class="hero-copy">
-        <p class="label">Runtime-neutral · live · embeddable</p>
-        <h1>A small Lisp for systems that need to live <em>everywhere.</em></h1>
-        <p class="lede">Hara combines a compact language core with explicit capabilities, persistent data and portable runtime contracts across the JVM, Rust and WebAssembly.</p>
-        <div class="actions">
-          <a class="button button-primary" href="https://docs.hara-lang.org">Read the docs</a>
-          <a class="button" href="https://github.com/hara-lang/hara">Source on GitHub</a>
-        </div>
-        <p class="status"><span></span> Active experimental runtime</p>
-      </div>
+  <aside class="app-launcher" id="app-launcher" data-launcher aria-hidden="true">
+    <div class="launcher-head">
+      <span>APPLICATIONS</span>
+      <span class="launcher-index">SYS // 01</span>
+    </div>
+    <div class="launcher-grid">
+      <button type="button" class="app-tile" data-open-window="files">
+        <span class="app-icon" aria-hidden="true">F</span>
+        <span>Files</span>
+      </button>
+      <button type="button" class="app-tile" data-open-window="editor">
+        <span class="app-icon app-icon-editor" aria-hidden="true">&lt;/&gt;</span>
+        <span>Editor</span>
+      </button>
+      <button type="button" class="app-tile" data-open-window="canvas">
+        <span class="app-icon app-icon-canvas" aria-hidden="true">◎</span>
+        <span>Canvas</span>
+      </button>
+      <a class="app-tile" href="./hara-amp.html">
+        <span class="app-icon app-icon-canvas" aria-hidden="true">♫</span>
+        <span>Music Template</span>
+      </a>
+      <button type="button" class="app-tile" data-deploy-template="3d">
+        <span class="app-icon app-icon-editor" aria-hidden="true">3D</span>
+        <span>3D Editor</span>
+      </button>
+      <button type="button" class="app-tile" data-deploy-template="graph">
+        <span class="app-icon app-icon-canvas" aria-hidden="true">∿</span>
+        <span>Graphing Template</span>
+      </button>
+      <a class="app-tile" href="https://docs.hara-lang.org/learn-programming/" target="_blank" rel="noreferrer">
+        <span class="app-icon" aria-hidden="true">01</span>
+        <span>Learning Book</span>
+      </a>
+      <a class="app-tile" href="https://docs.hara-lang.org/user-guide/" target="_blank" rel="noreferrer">
+        <span class="app-icon" aria-hidden="true">02</span>
+        <span>Language Book</span>
+      </a>
+      <a class="app-tile" href="https://docs.hara-lang.org/" target="_blank" rel="noreferrer">
+        <span class="app-icon" aria-hidden="true">D</span>
+        <span>Docs</span>
+      </a>
+      <a class="app-tile" href="https://github.com/hara-lang/hara" target="_blank" rel="noreferrer">
+        <span class="app-icon" aria-hidden="true">G</span>
+        <span>GitHub</span>
+      </a>
+    </div>
+    <div class="launcher-foot">
+      <span>LOCAL RUNTIME</span>
+      <button type="button" data-reset-demo>RESET DEMO</button>
+    </div>
+  </aside>
+  <div class="launcher-scrim" data-launcher-scrim></div>
 
-      <div class="code-card" aria-label="Hara example">
-        <div class="code-card-head">
-          <span>hello.hal</span>
-          <span>L0</span>
+  <main class="workspace-viewport">
+    <div class="workspace-track" data-workspace-track>
+      <section class="workspace welcome-workspace" aria-labelledby="welcome-title">
+        <div class="welcome-signal" aria-hidden="true">
+          <span>LIVE SYSTEM</span>
+          <span>00:01:42</span>
         </div>
-        <pre><code><span class="muted">; data stays data</span>
-(def project
-  {:name "hara"
-   :runtimes [:jvm :rust :wasm]})
+        <div class="welcome-copy">
+          <p class="welcome-kicker">FAST · EMBEDDABLE · WASM NATIVE</p>
+          <img class="welcome-mark" src="./vendor/hara-ui/hara-mark.svg" alt="Hara" id="welcome-title">
+          <p class="welcome-tagline">Lisp for the Agentic Age.</p>
+        </div>
+        <button class="start-button" type="button" data-start>
+          <img class="start-mark" src="./vendor/hara-ui/hara-mark.svg" alt="">
+          <span>START</span>
+          <i aria-hidden="true">→</i>
+        </button>
+        <div class="welcome-coordinate" aria-hidden="true">
+          GRID 37.81 // KERNEL READY
+        </div>
+      </section>
 
-(map name (:runtimes project))
-<span class="result">=&gt; ["jvm" "rust" "wasm"]</span></code></pre>
-        <div class="code-card-foot">
-          <span>portable core</span>
-          <span>explicit host boundary</span>
+      <section class="workspace desktop-workspace" aria-label="Hara desktop">
+        <div class="desktop-grid" aria-hidden="true"></div>
+        <div class="desktop-label" aria-hidden="true">
+          <span>HARA // VISUAL LAB</span>
+          <span>LOCAL SPACE · HOME</span>
         </div>
-      </div>
-    </section>
+
+        <section class="app-window files-window" data-window="files"
+                 aria-label="Files window" tabindex="-1">
+          <div class="window-titlebar" data-drag-handle>
+            <div class="window-title">
+              <span class="window-number">01</span>
+              <span>FILES</span>
+            </div>
+            <div class="window-controls">
+              <button type="button" data-window-maximize aria-label="Maximize Files">□</button>
+              <button type="button" data-window-close aria-label="Close Files">×</button>
+            </div>
+          </div>
+          <div class="window-toolbar">
+            <span>HOME</span>
+            <div>
+              <button type="button" data-file-new>NEW</button>
+              <button type="button" data-file-rename>RENAME</button>
+              <button type="button" data-file-delete>DELETE</button>
+            </div>
+          </div>
+          <div class="file-tree" data-file-tree>
+            <div class="window-loading">MOUNTING LOCAL SPACE…</div>
+          </div>
+          <div class="window-status">
+            <span data-file-count>0 FILES</span>
+            <span>INDEXEDDB</span>
+          </div>
+        </section>
+
+        <section class="app-window editor-window" data-window="editor"
+                 aria-label="Editor window" tabindex="-1">
+          <div class="window-titlebar" data-drag-handle>
+            <div class="window-title">
+              <span class="window-number">02</span>
+              <span data-editor-title>EDITOR</span>
+              <i class="dirty-indicator" data-dirty aria-label="Unsaved changes"></i>
+            </div>
+            <div class="window-controls">
+              <button type="button" data-window-maximize aria-label="Maximize Editor">□</button>
+              <button type="button" data-window-close aria-label="Close Editor">×</button>
+            </div>
+          </div>
+          <div class="window-toolbar editor-toolbar">
+            <span>CLOJURE MODE // HARA L0</span>
+            <div>
+              <button type="button" class="paredit-button" data-paredit aria-pressed="true">PAREDIT // ON</button>
+              <button type="button" data-diff aria-pressed="false">STRUCT DIFF</button>
+              <button type="button" data-save disabled>SAVE</button>
+              <button type="button" class="run-button" data-run disabled>
+                <span aria-hidden="true">▶</span> RUN FILE
+              </button>
+            </div>
+          </div>
+          <label class="editor-surface">
+            <span class="sr-only">Hara source editor</span>
+            <span class="line-numbers" data-line-numbers aria-hidden="true">1</span>
+            <pre class="code-highlight" data-code-highlight aria-hidden="true"></pre>
+            <textarea data-editor spellcheck="false" wrap="off"
+                      aria-label="Hara source editor" disabled></textarea>
+            <output class="inline-eval" data-inline-eval aria-live="polite" hidden></output>
+            <div class="hal-completions" data-hal-completions role="listbox" aria-label="HAL form completions" hidden></div>
+            <output class="structural-diff" data-structural-diff aria-live="polite" hidden></output>
+          </label>
+          <div class="window-status">
+            <span data-editor-status>WAITING FOR RUNTIME</span>
+            <span>HOLD CTRL: E FORM · E E FILE · X E INSERT · CTRL-S SAVE</span>
+          </div>
+        </section>
+
+        <section class="app-window canvas-window" data-window="canvas"
+                 aria-label="Canvas output window" tabindex="-1">
+          <div class="window-titlebar" data-drag-handle>
+            <div class="window-title">
+              <span class="window-number">03</span>
+              <span>CANVAS OUTPUT</span>
+            </div>
+            <div class="window-controls">
+              <button type="button" data-window-maximize aria-label="Maximize Canvas">□</button>
+              <button type="button" data-window-close aria-label="Close Canvas">×</button>
+            </div>
+          </div>
+          <div class="canvas-wrap" data-canvas-wrap>
+            <canvas data-output-canvas aria-label="Rendered output from the Hara program"></canvas>
+            <canvas data-creative-canvas aria-label="Rendered 3D Hara scene" hidden></canvas>
+            <div class="canvas-empty" data-canvas-empty>
+              <span>NO SIGNAL</span>
+              <small>RUN A HARA FILE TO RENDER</small>
+            </div>
+          </div>
+          <div class="window-status">
+            <span data-canvas-status>FRAME // —</span>
+            <span data-canvas-size>960 × 600</span>
+          </div>
+        </section>
+
+        <div class="desktop-hint" aria-hidden="true">
+          DRAG WINDOWS · RESIZE FROM EDGES · RUN THE OPEN FILE
+        </div>
+      </section>
+    </div>
   </main>
 
-  <footer>
-    <span>Hara is built by <a href="https://www.greenways.ai">Greenways</a>.</span>
-    <span> · <a href="https://github.com/hara-lang/hara">Source on GitHub</a></span>
-  </footer>
+  <dialog class="hara-dialog" data-dialog>
+    <form method="dialog" data-dialog-form>
+      <div class="dialog-head">
+        <span data-dialog-title>HARA // INPUT</span>
+        <button type="submit" value="cancel" aria-label="Close dialog">×</button>
+      </div>
+      <label>
+        <span data-dialog-label>VALUE</span>
+        <input type="text" data-dialog-input autocomplete="off">
+      </label>
+      <p data-dialog-message></p>
+      <div class="dialog-actions">
+        <button type="submit" value="cancel">CANCEL</button>
+        <button type="submit" value="confirm" class="dialog-confirm">CONFIRM</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast-stack" data-toasts aria-live="polite"></div>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>

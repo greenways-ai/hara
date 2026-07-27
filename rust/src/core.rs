@@ -737,7 +737,7 @@ fn sequential_equality(left: &Value, right: &Value) -> Option<bool> {
     Some(items(left)? == items(right)?)
 }
 
-fn map_entries(value: &Value) -> Option<Vec<(Value, Value)>> {
+pub(crate) fn map_entries(value: &Value) -> Option<Vec<(Value, Value)>> {
     match value {
         Value::Map(values) => Some(values.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
         Value::OrderedMap(values) => {
@@ -6220,6 +6220,12 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         .collect::<Vec<_>>()
                         .join(""),
                 ))
+            }
+            Form::Symbol(n) if n == "pr-str" => {
+                if fs.len() != 2 {
+                    return Err("pr-str expects one value".into());
+                }
+                Ok(Value::String(eval(&fs[1], env)?.display()))
             }
             Form::Symbol(n)
                 if [

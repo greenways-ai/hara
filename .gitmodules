@@ -10,3 +10,6 @@
 [submodule "specs"]
 	path = specs
 	url = https://github.com/hara-lang/hara-specs.git
+[submodule "website/vendor/hara-ui"]
+	path = website/vendor/hara-ui
+	url = git@github.com:hara-lang/hara-ui.git

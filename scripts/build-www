@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OUT="$ROOT/target/www"
+RAW_WASM="$ROOT/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm"
+
+bash "$ROOT/scripts/build-hara-wasm-raw"
+
+rm -rf "$OUT"
+mkdir -p "$OUT/runtime/studio/hal"
+
+cp "$ROOT/website/index.html" \
+   "$ROOT/website/app.css" \
+   "$ROOT/website/app.js" \
+   "$ROOT/website/creative.js" \
+   "$ROOT/website/editor.js" \
+   "$ROOT/website/og.png" \
+   "$ROOT/website/scene.js" \
+   "$ROOT/website/tron.js" \
+   "$OUT/"
+cp "$RAW_WASM" "$OUT/runtime/hara.wasm"
+cp "$ROOT/rust/web/hta.js" \
+   "$ROOT/rust/web/hta-worker.js" \
+   "$ROOT/rust/web/hta-shared-worker.js" \
+   "$OUT/runtime/"
+cp "$ROOT/rust/web/studio/boot.js" \
+   "$ROOT/rust/web/studio/broker.js" \
+   "$ROOT/rust/web/studio/host-services.js" \
+   "$OUT/runtime/studio/"
+cp "$ROOT/rust/web/studio/hal/"*.hal "$OUT/runtime/studio/hal/"
+
+printf 'Built %s\n' "$OUT"

@@ -8,38 +8,40 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.ServiceLoader;
+import hara.kernel.base.Parser;
+import hara.lang.data.Keyword;
+import hara.lang.data.types.IMapType;
 import hara.truffle.HaraLibraryProvider;
 import org.junit.Test;
 
-/** Verifies that published examples and mirrored normative documents describe the current slice. */
+/** Verifies that active specification documents and published examples describe the current slice. */
 public class DocumentationContractTest {
-  private static final List<String> MIRRORED_FILES =
+  private static final List<Path> ACTIVE_SPECIFICATIONS =
       List.of(
-          "l0-language.md",
-          "runtime-libraries.md",
-          "xtalk-equivalence.md",
-          "extensions-contract.md",
-          "extensions.md",
-          "native-flavors.md",
-          "jvm-flavor.md",
-          "repl.md",
-          "l0-conformance.edn",
-          "rust-runtime.md");
+          Path.of("specs/metaspec/draft/hal-metaspec.edn"),
+          Path.of("specs/language/draft/hal-langspec.edn"));
 
   @Test
-  public void normativeSpecificationsAreMirroredIntoDocumentationReference() throws Exception {
-    for (String file : MIRRORED_FILES) {
-      Path canonical =
-          file.endsWith(".edn")
-              ? Path.of("specs/hara/corpora", file)
-              : Path.of("spec/hara", file);
-      assertTrue("Missing canonical spec: " + file, Files.exists(canonical));
+  public void activeSpecificationsAreReadableEdnWithRenderedCompanions() throws Exception {
+    for (Path specification : ACTIVE_SPECIFICATIONS) {
+      assertTrue("Missing active specification: " + specification, Files.exists(specification));
+      Object document =
+          Parser.LispReader.readString(
+              Files.readString(specification, StandardCharsets.UTF_8), null);
+      assertTrue("Specification is not an EDN map: " + specification, document instanceof IMapType);
+      IMapType map = (IMapType) document;
       assertTrue(
-          "Missing documentation mirror: " + file, Files.exists(Path.of("website/docs/reference", file)));
+          "Missing document id: " + specification,
+          map.lookup(Keyword.create("document", "id")) != null);
       assertTrue(
-          "Spec and documentation mirror differ: " + file,
-          Files.readString(canonical, StandardCharsets.UTF_8)
-              .equals(Files.readString(Path.of("website/docs/reference", file), StandardCharsets.UTF_8)));
+          "Missing document status: " + specification,
+          map.lookup(Keyword.create("document", "status")) != null);
+
+      Path companion = specification.resolveSibling("README.md");
+      assertTrue("Missing rendered companion: " + companion, Files.exists(companion));
+      assertTrue(
+          "Rendered companion does not identify EDN authority: " + companion,
+          Files.readString(companion, StandardCharsets.UTF_8).contains("authoritative document"));
     }
   }
 
