@@ -36,7 +36,7 @@ public class ParserTest {
   public void l0ConformanceCorpusIsReadableEdn() throws Exception {
     Object corpus =
         Parser.LispReader.readString(
-            Files.readString(Path.of("specs/hara/corpora/l0-conformance.edn")), null);
+            Files.readString(Path.of("specs/language/draft/conformance/l0.edn")), null);
     assertTrue(corpus instanceof hara.lang.data.types.IMapType);
     hara.lang.data.types.IMapType map = (hara.lang.data.types.IMapType) corpus;
     assertEquals("0.1", map.lookup(Keyword.create("spec/version")));

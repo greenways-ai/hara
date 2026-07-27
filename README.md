@@ -57,11 +57,9 @@ several Git submodules at the root:
 - [Namespace catalog](docs/docs/reference/namespaces.md) — discover every shipped namespace family.
 - [Developer guide](docs/docs/development.md) — build, test, debug, and contribute.
 - [Java API and Javadocs](docs/docs/javadocs.md) — public entry points and generated API docs.
-- [Language specification](specs/hara/l0-language.md) — normative L0 behavior.
-- [Runtime libraries](specs/hara/runtime-libraries.md) — the portable library contract.
-- [Rust/WASM mapping](specs/hara/rust-runtime.md) — the cross-runtime value, provider, and conformance design.
-- [Extensions](specs/hara/extensions-contract.md) — WASM, manifests, HTA, and capabilities.
-- [REPL UX](specs/hara/repl.md) — history, completion, docs, and slash-command design.
+- [HAL meta-spec](specs/metaspec/draft/README.md) — the shape and authority rules for language specifications.
+- [HAL language draft](specs/language/draft/README.md) — the portable language contract and executable evidence.
+- [Planning archive](specs/archive/planning/README.md) — earlier runtime, extension, interop, and tooling designs.
 - [Hara for Emacs](extensions/hara-emacs/README.md) — project-aware evaluation, sessions, completion, docs,
   and a RESP-backed REPL.
 

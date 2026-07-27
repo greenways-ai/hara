@@ -14,7 +14,8 @@ import java.util.Set;
 import org.junit.Test;
 
 public class HaraDifferentialConformanceTest {
-  private static final Path MANIFEST = Path.of("specs/hara/corpora/jvm-truffle-parity.edn");
+  private static final Path MANIFEST =
+      Path.of("specs/language/draft/conformance/parity/jvm-truffle.edn");
 
   @Test
   public void portableCasesMatchAcrossJvmInterpreterAndTruffle() throws Exception {

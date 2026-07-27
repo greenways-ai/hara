@@ -55,4 +55,5 @@ is not the authoritative implementation of the current language surface.
            Hara values + promises
 ```
 
-See the [extension contract](specs/hara/extensions-contract.md) for lifecycle and capability rules.
+The earlier extension lifecycle and capability design is retained in the
+[planning archive](specs/archive/planning/extensions/contract.md).

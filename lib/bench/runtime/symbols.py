@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-SPEC = ROOT / "specs/hara/data"
+SPEC = ROOT / "specs/archive/planning/language/compatibility"
 DOC = ROOT / "website/docs/reference/clojure-core-compatibility.md"
 CLJ_SPECIALS = {"def", "if", "do", "let", "quote", "var", "fn", "loop", "recur", "throw", "try", "new", "set!", "monitor-enter", "monitor-exit", "catch", "finally"}
 HARA_SPECIALS = {"def", "if", "do", "let", "quote", "var", "fn", "loop", "recur", "throw", "try", "catch", "finally", "binding", "defn", "defmacro", "defprotocol", "extend-type", "defstruct", "defmulti", "defmethod", "ns"}
@@ -97,7 +97,7 @@ def main():
     all_h = set(grouping["groups"]["only-hara"]) | set(exact) | {x["hara"] for x in overrides["renamed"] + overrides["changed"]}
     if all_c != clojure or all_h != hara: raise SystemExit("compatibility grouping is not exhaustive")
     write_json(SPEC / "clojure-core-symbols.json", {"version": "1.12.5", "symbols": sorted(clojure)})
-    write_json(SPEC / "hara-core-symbols.json", {"surface": grouping["hara_surface"], "symbols": sorted(hara)})
+    write_json(SPEC / "hal-core-symbols.json", {"surface": grouping["hara_surface"], "symbols": sorted(hara)})
     write_json(SPEC / "clojure-core-compatibility.json", grouping)
     groups = grouping["groups"]
     lines = ["# Clojure core / Hara core compatibility", "", "Canonical exhaustive grouping for Clojure 1.12.5 and Hara L0 plus `std.lib.foundation`.", "",

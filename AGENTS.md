@@ -22,12 +22,11 @@ component map and `website/docs/development.md` for the developer guide.
 - `notes/` — working documents, NOT published: design notes and
   `notes/superpowers/` (plans/specs written by the superpowers plugin).
   Put nothing here that belongs on the website.
-- `specs/hara/` — normative specs:
-  - `*.md` — prose specs; mirrored to `website/docs/reference/` (kept in
-    sync by `hara.spec.DocumentationContractTest`)
-  - `corpora/*.edn` — machine-checked conformance/parity corpora (consumed
-    by Java and Rust test suites via repo-relative paths)
-  - `data/` — spec-shaped data (`foundation.edn`, symbol tables)
+- `specs/` — normative specifications:
+  - `metaspec/draft/hal-metaspec.edn` defines the language-spec document model
+  - `language/draft/hal-langspec.edn` is the current portable HAL contract
+  - `language/draft/conformance/` contains machine-checked conformance/parity corpora
+  - `archive/planning/` contains non-normative source material grouped by domain
 - `books/`, `registry/` — book series and the planned extension registry
 - `archive/` — legacy material, kept for history only
 
@@ -103,7 +102,7 @@ To cut a release:
 
 - Maven runs from the repo root via `-f java/pom.xml`; Surefire's working
   directory is the repo root, so tests use repo-relative paths
-  (`specs/hara/corpora/...`, `lib/examples/...`, `website/docs/...`).
+  (`specs/language/draft/conformance/...`, `lib/examples/...`, `website/docs/...`).
 - The JVM runtime embeds `lib/src/**/*.hal` (std foundation) as classpath
   resources via `java/pom.xml`; the Rust runtime embeds
   `lib/src/std/foundation.hal` via `include_str!` in `rust/src/lib.rs`.
