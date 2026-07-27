@@ -9,5 +9,7 @@ public final class StdFoundationStringLibraryProvider implements HaraLibraryProv
   public int order() { return 20; }
 
   @Override
-  public void install(HaraContext context) { context.installStringLibrary(); }
+  public void install(HaraContext context) {
+    context.collectBuiltins(namespace(), context::installStringLibrary);
+  }
 }

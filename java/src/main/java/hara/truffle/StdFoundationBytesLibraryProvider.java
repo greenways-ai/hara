@@ -9,5 +9,7 @@ public final class StdFoundationBytesLibraryProvider implements HaraLibraryProvi
   public int order() { return 20; }
 
   @Override
-  public void install(HaraContext context) { context.installBytesLibrary(); }
+  public void install(HaraContext context) {
+    context.collectBuiltins(namespace(), context::installBytesLibrary);
+  }
 }

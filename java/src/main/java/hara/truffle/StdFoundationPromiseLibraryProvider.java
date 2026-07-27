@@ -9,5 +9,7 @@ public final class StdFoundationPromiseLibraryProvider implements HaraLibraryPro
   public int order() { return 20; }
 
   @Override
-  public void install(HaraContext context) { context.installPromiseLibrary(); }
+  public void install(HaraContext context) {
+    context.collectBuiltins(namespace(), context::installPromiseLibrary);
+  }
 }

@@ -162,6 +162,7 @@ impl Runtime {
             ("std.foundation.coroutine", include_str!("../../lib/src/std/foundation/coroutine.hal")),
             ("std.foundation.file", include_str!("../../lib/src/std/foundation/file.hal")),
             ("std.foundation.os", include_str!("../../lib/src/std/foundation/os.hal")),
+            ("std.foundation.socket", include_str!("../../lib/src/std/foundation/socket.hal")),
         ] {
             self.register_resource(name, source);
         }

@@ -214,7 +214,7 @@ public final class HaraContext {
     }
   }
 
-  private void collectBuiltins(String namespaceName, Runnable definitions) {
+  void collectBuiltins(String namespaceName, Runnable definitions) {
     boolean previousCollecting = collectingBuiltins;
     String previousNamespace = collectingBuiltinNamespace;
     collectingBuiltins = true;

@@ -24,7 +24,9 @@ public final class StdFoundationLibraryProvider implements HaraLibraryProvider {
 
   @Override
   public void install(HaraContext context) {
-    HaraStaticLibrary.install(context, namespace(), StdFoundationSequence.class);
-    HaraStaticLibrary.install(context, namespace(), StdFoundationCollection.class);
+    context.collectBuiltins(namespace(), () -> {
+      HaraStaticLibrary.install(context, namespace(), StdFoundationSequence.class);
+      HaraStaticLibrary.install(context, namespace(), StdFoundationCollection.class);
+    });
   }
 }

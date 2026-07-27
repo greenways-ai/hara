@@ -9,5 +9,7 @@ public final class StdFoundationFileLibraryProvider implements HaraLibraryProvid
   public int order() { return 20; }
 
   @Override
-  public void install(HaraContext context) { context.installFileLibrary(); }
+  public void install(HaraContext context) {
+    context.collectBuiltins(namespace(), context::installFileLibrary);
+  }
 }

@@ -14,6 +14,8 @@ public final class StdFoundationCoroutineLibraryProvider implements HaraLibraryP
 
   @Override
   public void install(HaraContext context) {
-    HaraStaticLibrary.install(context, namespace(), StdFoundationCoroutine.class);
+    context.collectBuiltins(namespace(), () -> {
+      HaraStaticLibrary.install(context, namespace(), StdFoundationCoroutine.class);
+    });
   }
 }
