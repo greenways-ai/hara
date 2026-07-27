@@ -30,6 +30,8 @@ import hara.lang.protocol.INth;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -92,13 +94,15 @@ public final class HaraContext {
           "string", "std.foundation.string",
           "promise", "std.foundation.promise",
           "bytes", "std.foundation.bytes",
-          "file", "std.foundation.file");
+          "file", "std.foundation.file",
+          "socket", "std.foundation.socket");
   private static final Map<String, String> DEFAULT_LIBRARY_ALIASES =
       Map.of(
           "string", "str",
           "promise", "promise",
           "bytes", "bytes",
-          "file", "file");
+          "file", "file",
+          "socket", "socket");
   private static final Set<String> MARKER_METHOD_NAMES =
       Set.of(
           "get",
@@ -1895,17 +1899,23 @@ public final class HaraContext {
 
   private void defineStringLibrary() {
     HaraNamespace string = namespace("std.foundation.string");
+
+    // Spec-named symbols.
     string.define(
-        "len", new UnaryBuiltin("str/len", value -> (long) stringValue(value, "str/len").length()));
-    string.define("comp", new VariadicBuiltin("str/comp", this::stringCompare));
+        "length",
+        new UnaryBuiltin("str/length", value -> (long) codePointLength(stringValue(value, "str/length"))));
     string.define(
-        "lt?", new VariadicBuiltin("str/lt?", values -> ((Long) stringCompare(values)) < 0));
+        "blank?",
+        new UnaryBuiltin(
+            "str/blank?", value -> stringValue(value, "str/blank?").trim().isEmpty()));
     string.define(
-        "gt?", new VariadicBuiltin("str/gt?", values -> ((Long) stringCompare(values)) > 0));
-    string.define(
-        "pad-left", new VariadicBuiltin("str/pad-left", values -> padString(values, true)));
-    string.define(
-        "pad-right", new VariadicBuiltin("str/pad-right", values -> padString(values, false)));
+        "includes?",
+        new VariadicBuiltin(
+            "str/includes?",
+            values -> {
+              String[] pair = stringPair(values, "str/includes?");
+              return pair[0].contains(pair[1]);
+            }));
     string.define(
         "starts-with?",
         new VariadicBuiltin(
@@ -1922,23 +1932,18 @@ public final class HaraContext {
               String[] pair = stringPair(values, "str/ends-with?");
               return pair[0].endsWith(pair[1]);
             }));
-    string.define("char", new VariadicBuiltin("str/char", this::stringChar));
-    string.define("split", new VariadicBuiltin("str/split", this::stringSplit));
-    string.define("join", new VariadicBuiltin("str/join", this::stringJoin));
+    string.define("char-at", new VariadicBuiltin("str/char-at", this::stringCharAt));
+    string.define("slice", new VariadicBuiltin("str/slice", this::stringSlice));
     string.define("index-of", new VariadicBuiltin("str/index-of", this::stringIndexOf));
-    string.define("substring", new VariadicBuiltin("str/substring", this::stringSubstring));
     string.define(
-        "to-upper",
-        new UnaryBuiltin(
-            "str/to-upper",
-            value -> stringValue(value, "str/to-upper").toUpperCase(java.util.Locale.ROOT)));
-    string.define(
-        "to-lower",
-        new UnaryBuiltin(
-            "str/to-lower",
-            value -> stringValue(value, "str/to-lower").toLowerCase(java.util.Locale.ROOT)));
-    string.define("to-fixed", new VariadicBuiltin("str/to-fixed", this::stringToFixed));
+        "last-index-of", new VariadicBuiltin("str/last-index-of", this::stringLastIndexOf));
+    string.define("split", new VariadicBuiltin("str/split", this::stringSplit));
+    string.define("split-lines", new VariadicBuiltin("str/split-lines", this::stringSplitLines));
+    string.define("join", new VariadicBuiltin("str/join", this::stringJoin));
+    string.define("repeat", new VariadicBuiltin("str/repeat", this::stringRepeat));
     string.define("replace", new VariadicBuiltin("str/replace", this::stringReplace));
+    string.define(
+        "replace-first", new VariadicBuiltin("str/replace-first", this::stringReplaceFirst));
     string.define(
         "trim", new UnaryBuiltin("str/trim", value -> stringValue(value, "str/trim").trim()));
     string.define(
@@ -1950,6 +1955,55 @@ public final class HaraContext {
         new UnaryBuiltin(
             "str/trim-right", value -> stringValue(value, "str/trim-right").stripTrailing()));
     string.define(
+        "upper",
+        new UnaryBuiltin(
+            "str/upper", value -> stringValue(value, "str/upper").toUpperCase(java.util.Locale.ROOT)));
+    string.define(
+        "lower",
+        new UnaryBuiltin(
+            "str/lower", value -> stringValue(value, "str/lower").toLowerCase(java.util.Locale.ROOT)));
+    string.define(
+        "capitalize",
+        new UnaryBuiltin("str/capitalize", value -> stringCapitalize(stringValue(value, "str/capitalize"))));
+    string.define(
+        "decapitalize",
+        new UnaryBuiltin(
+            "str/decapitalize", value -> stringDecapitalize(stringValue(value, "str/decapitalize"))));
+    string.define(
+        "pad-left", new VariadicBuiltin("str/pad-left", values -> padString(values, true)));
+    string.define(
+        "pad-right", new VariadicBuiltin("str/pad-right", values -> padString(values, false)));
+    string.define(
+        "reverse",
+        new UnaryBuiltin(
+            "str/reverse", value -> new StringBuilder(stringValue(value, "str/reverse")).reverse().toString()));
+    string.define(
+        "encode-utf8",
+        new UnaryBuiltin(
+            "str/encode-utf8",
+            value -> stringValue(value, "str/encode-utf8").getBytes(StandardCharsets.UTF_8)));
+    string.define(
+        "decode-utf8",
+        new UnaryBuiltin(
+            "str/decode-utf8",
+            value -> new String(bytesValue(value, "str/decode-utf8"), StandardCharsets.UTF_8)));
+
+    // Legacy aliases (not part of the spec surface).
+    string.define(
+        "len", new UnaryBuiltin("str/len", value -> (long) codePointLength(stringValue(value, "str/len"))));
+    string.define("char", new VariadicBuiltin("str/char", this::stringCharAt));
+    string.define("substring", new VariadicBuiltin("str/substring", this::stringSlice));
+    string.define(
+        "to-upper",
+        new UnaryBuiltin(
+            "str/to-upper",
+            value -> stringValue(value, "str/to-upper").toUpperCase(java.util.Locale.ROOT)));
+    string.define(
+        "to-lower",
+        new UnaryBuiltin(
+            "str/to-lower",
+            value -> stringValue(value, "str/to-lower").toLowerCase(java.util.Locale.ROOT)));
+    string.define(
         "encode",
         new UnaryBuiltin(
             "str/encode",
@@ -1959,6 +2013,14 @@ public final class HaraContext {
         new UnaryBuiltin(
             "str/decode",
             value -> new String(bytesValue(value, "str/decode"), StandardCharsets.UTF_8)));
+
+    // Comparison helpers (not in the spec symbol list).
+    string.define("comp", new VariadicBuiltin("str/comp", this::stringCompare));
+    string.define(
+        "lt?", new VariadicBuiltin("str/lt?", values -> ((Long) stringCompare(values)) < 0));
+    string.define(
+        "gt?", new VariadicBuiltin("str/gt?", values -> ((Long) stringCompare(values)) > 0));
+    string.define("to-fixed", new VariadicBuiltin("str/to-fixed", this::stringToFixed));
   }
 
   void installBytesLibrary() {
@@ -1987,8 +2049,8 @@ public final class HaraContext {
 
   private void definePromiseLibrary() {
     HaraNamespace promise = namespace("std.foundation.promise");
-    promise.define("run", new UnaryBuiltin("promise/run", this::promiseRun));
     promise.define("new", new UnaryBuiltin("promise/new", this::promiseNew));
+    promise.define("from", new UnaryBuiltin("promise/from", this::promiseFrom));
     promise.define("all", new UnaryBuiltin("promise/all", this::promiseAll));
     promise.define(
         "then", new VariadicBuiltin("promise/then", values -> promiseThen(values, false)));
@@ -1996,18 +2058,9 @@ public final class HaraContext {
         "catch", new VariadicBuiltin("promise/catch", values -> promiseThen(values, true)));
     promise.define("finally", new VariadicBuiltin("promise/finally", this::promiseFinally));
     promise.define(
-        "state",
-        new UnaryBuiltin("promise/state", value -> requirePromise(value, "promise/state").state()));
-    promise.define(
-        "value",
-        new UnaryBuiltin("promise/value", value -> requirePromise(value, "promise/value").value()));
-    promise.define(
         "cancel",
         new UnaryBuiltin(
             "promise/cancel", value -> requirePromise(value, "promise/cancel").cancel()));
-    promise.define(
-        "native?",
-        new UnaryBuiltin("promise/native?", value -> HaraBox.unwrap(value) instanceof HaraPromise));
     promise.define("delay", new VariadicBuiltin("promise/delay", this::promiseDelay));
   }
 
@@ -2020,6 +2073,21 @@ public final class HaraContext {
     file.define("resolve", new VariadicBuiltin("file/resolve", this::fileResolve));
     file.define("read", new UnaryBuiltin("file/read", this::fileRead));
     file.define("write", new VariadicBuiltin("file/write", this::fileWrite));
+    file.define("exists?", new UnaryBuiltin("file/exists?", this::fileExists));
+    file.define("list", new UnaryBuiltin("file/list", this::fileList));
+    file.define("mkdir", new UnaryBuiltin("file/mkdir", this::fileMkdir));
+    file.define("delete", new UnaryBuiltin("file/delete", this::fileDelete));
+  }
+
+  void installSocketLibrary() {
+    withDefinitionOrigin(HaraVar.Origin.JAVA_LIBRARY, this::defineSocketLibrary);
+  }
+
+  private void defineSocketLibrary() {
+    HaraNamespace socket = namespace("std.foundation.socket");
+    socket.define("connect", new VariadicBuiltin("socket/connect", this::socketConnect));
+    socket.define("send", new VariadicBuiltin("socket/send", this::socketSend));
+    socket.define("close", new UnaryBuiltin("socket/close", this::socketClose));
   }
 
   private static int int32(Object value, String operation) {
@@ -2068,6 +2136,10 @@ public final class HaraContext {
     return (long) Integer.signum(pair[0].compareTo(pair[1]));
   }
 
+  private static int codePointLength(String input) {
+    return input.codePointCount(0, input.length());
+  }
+
   private Object padString(Object[] values, boolean left) {
     String operation = left ? "str/pad-left" : "str/pad-right";
     if (values.length != 3 || !(HaraBox.unwrap(values[1]) instanceof Number)) {
@@ -2076,27 +2148,41 @@ public final class HaraContext {
     String input = stringValue(values[0], operation);
     int length = ((Number) HaraBox.unwrap(values[1])).intValue();
     String padding = stringValue(values[2], operation);
-    if (padding.isEmpty() || input.length() >= length) return input;
+    int inputLength = codePointLength(input);
+    if (padding.isEmpty() || inputLength >= length) return input;
+    int[] paddingCodePoints = padding.codePoints().toArray();
     StringBuilder fill = new StringBuilder();
-    while (fill.length() < length - input.length()) fill.append(padding);
-    String clipped = fill.substring(0, length - input.length());
-    return left ? clipped + input : input + clipped;
+    for (int index = 0; index < length - inputLength; index++) {
+      fill.appendCodePoint(paddingCodePoints[index % paddingCodePoints.length]);
+    }
+    return left ? fill + input : input + fill;
   }
 
-  private Object stringChar(Object[] values) {
+  private Object stringCharAt(Object[] values) {
     if (values.length != 2 || !(HaraBox.unwrap(values[1]) instanceof Number)) {
-      throw new HaraException("str/char expects a string and index");
+      throw new HaraException("str/char-at expects a string and index");
     }
-    String input = stringValue(values[0], "str/char");
+    String input = stringValue(values[0], "str/char-at");
     int index = ((Number) HaraBox.unwrap(values[1])).intValue();
-    if (index < 0 || index >= input.length())
-      throw new HaraException("str/char index out of bounds");
-    return String.valueOf(input.charAt(index));
+    int length = codePointLength(input);
+    if (index < 0 || index >= length) {
+      throw new HaraException("str/char-at index out of bounds");
+    }
+    int charIndex = input.offsetByCodePoints(0, index);
+    int codePoint = input.codePointAt(charIndex);
+    return new String(Character.toChars(codePoint));
   }
 
   private Object stringSplit(Object[] values) {
     String[] pair = stringPair(values, "str/split");
     String[] parts = pair[0].split(java.util.regex.Pattern.quote(pair[1]), -1);
+    return hara.lang.data.Vector.Standard.from(null, (Object[]) parts);
+  }
+
+  private Object stringSplitLines(Object[] values) {
+    if (values.length != 1) throw new HaraException("str/split-lines expects one string");
+    String input = stringValue(values[0], "str/split-lines");
+    String[] parts = input.split("\n", -1);
     return hara.lang.data.Vector.Standard.from(null, (Object[]) parts);
   }
 
@@ -2119,21 +2205,28 @@ public final class HaraContext {
     String input = stringValue(values[0], "str/index-of");
     String part = stringValue(values[1], "str/index-of");
     int offset = values.length == 2 ? 0 : ((Number) HaraBox.unwrap(values[2])).intValue();
-    return (long) input.indexOf(part, offset);
+    int length = codePointLength(input);
+    if (offset < 0 || offset > length) return -1L;
+    int charOffset = input.offsetByCodePoints(0, offset);
+    int result = input.indexOf(part, charOffset);
+    return result < 0 ? -1L : (long) input.codePointCount(0, result);
   }
 
-  private Object stringSubstring(Object[] values) {
+  private Object stringSlice(Object[] values) {
     if (values.length < 2 || values.length > 3) {
-      throw new HaraException("str/substring expects a string, start, and optional end");
+      throw new HaraException("str/slice expects a string, start, and optional end");
     }
-    String input = stringValue(values[0], "str/substring");
+    String input = stringValue(values[0], "str/slice");
     int start = ((Number) HaraBox.unwrap(values[1])).intValue();
-    int end = values.length == 3 ? ((Number) HaraBox.unwrap(values[2])).intValue() : input.length();
-    try {
-      return input.substring(start, end);
-    } catch (IndexOutOfBoundsException error) {
-      throw new HaraException("str/substring range is out of bounds");
+    int end = values.length == 3
+        ? ((Number) HaraBox.unwrap(values[2])).intValue()
+        : codePointLength(input);
+    int length = codePointLength(input);
+    if (start < 0 || start > end || end > length) {
+      throw new HaraException("str/slice range is out of bounds");
     }
+    return input.substring(
+        input.offsetByCodePoints(0, start), input.offsetByCodePoints(0, end));
   }
 
   private Object stringToFixed(Object[] values) {
@@ -2158,6 +2251,58 @@ public final class HaraContext {
     }
     return stringValue(values[0], "str/replace")
         .replace(stringValue(values[1], "str/replace"), stringValue(values[2], "str/replace"));
+  }
+
+  private Object stringReplaceFirst(Object[] values) {
+    if (values.length != 3) {
+      throw new HaraException("str/replace-first expects a string, match, and replacement");
+    }
+    String input = stringValue(values[0], "str/replace-first");
+    String match = stringValue(values[1], "str/replace-first");
+    String replacement = stringValue(values[2], "str/replace-first");
+    int index = input.indexOf(match);
+    if (index < 0) return input;
+    return input.substring(0, index) + replacement + input.substring(index + match.length());
+  }
+
+  private Object stringRepeat(Object[] values) {
+    if (values.length != 2 || !(HaraBox.unwrap(values[1]) instanceof Number)) {
+      throw new HaraException("str/repeat expects a string and count");
+    }
+    String input = stringValue(values[0], "str/repeat");
+    int count = ((Number) HaraBox.unwrap(values[1])).intValue();
+    if (count < 0) throw new HaraException("str/repeat count must be non-negative");
+    return input.repeat(count);
+  }
+
+  private static String stringCapitalize(String input) {
+    if (input.isEmpty()) return input;
+    int first = input.codePointAt(0);
+    int rest = Character.charCount(first);
+    return new String(Character.toChars(Character.toUpperCase(first))) + input.substring(rest);
+  }
+
+  private static String stringDecapitalize(String input) {
+    if (input.isEmpty()) return input;
+    int first = input.codePointAt(0);
+    int rest = Character.charCount(first);
+    return new String(Character.toChars(Character.toLowerCase(first))) + input.substring(rest);
+  }
+
+  private Object stringLastIndexOf(Object[] values) {
+    if (values.length < 2 || values.length > 3) {
+      throw new HaraException("str/last-index-of expects a string, substring, and optional offset");
+    }
+    String input = stringValue(values[0], "str/last-index-of");
+    String part = stringValue(values[1], "str/last-index-of");
+    int length = codePointLength(input);
+    int offset = values.length == 2
+        ? length
+        : ((Number) HaraBox.unwrap(values[2])).intValue();
+    if (offset < 0) return -1L;
+    int charOffset = input.offsetByCodePoints(0, Math.min(offset, length));
+    int result = input.lastIndexOf(part, charOffset);
+    return result < 0 ? -1L : (long) input.codePointCount(0, result);
   }
 
   private static byte[] bytesValue(Object value, String operation) {
@@ -2255,6 +2400,10 @@ public final class HaraContext {
       future.completeExceptionally(error);
     }
     return new HaraPromise(future);
+  }
+
+  private Object promiseFrom(Object value) {
+    return new HaraPromise(flatten(value));
   }
 
   private HaraPromise requirePromise(Object value, String operation) {
@@ -2371,6 +2520,69 @@ public final class HaraContext {
     }
   }
 
+  private void requireSocketIO(String operation) {
+    if (!environment.isSocketIOAllowed()) {
+      throw new HaraException(operation + " is unsupported or network access is denied");
+    }
+  }
+
+  private Object socketConnect(Object[] values) {
+    requireSocketIO("socket/connect");
+    if (values.length != 4 || !(HaraBox.unwrap(values[1]) instanceof Number)) {
+      throw new HaraException("socket/connect expects host, port, options, and callback");
+    }
+    String host = stringValue(values[0], "socket/connect");
+    int port = ((Number) HaraBox.unwrap(values[1])).intValue();
+    if (port < 1 || port > 65535) throw new HaraException("socket/connect expects a valid port");
+    Object callback = values[3];
+    CompletableFuture.runAsync(
+        () -> {
+          try {
+            HaraSocket connection = new HaraSocket(new Socket());
+            connection.socket.connect(new InetSocketAddress(host, port));
+            connection.startDrainer();
+            invokeInContext(() -> invokeCallable(callback, new Object[] {null, connection}));
+          } catch (Exception error) {
+            String message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+            invokeInContext(() -> invokeCallable(callback, new Object[] {message, null}));
+          }
+        });
+    return null;
+  }
+
+  private Object socketSend(Object[] values) {
+    requireSocketIO("socket/send");
+    if (values.length != 2) throw new HaraException("socket/send expects a connection and bytes");
+    HaraSocket connection = requireSocket(values[0], "socket/send");
+    byte[] bytes = bytesValue(values[1], "socket/send");
+    synchronized (connection) {
+      try {
+        connection.socket.getOutputStream().write(bytes);
+        connection.socket.getOutputStream().flush();
+        return (long) bytes.length;
+      } catch (IOException error) {
+        throw new HaraException("socket/send failed: " + error.getMessage());
+      }
+    }
+  }
+
+  private Object socketClose(Object value) {
+    requireSocketIO("socket/close");
+    HaraSocket connection = requireSocket(value, "socket/close");
+    try {
+      connection.socket.close();
+      return null;
+    } catch (IOException error) {
+      throw new HaraException("socket/close failed: " + error.getMessage());
+    }
+  }
+
+  private static HaraSocket requireSocket(Object value, String operation) {
+    Object input = HaraBox.unwrap(value);
+    if (!(input instanceof HaraSocket)) throw new HaraException(operation + " expects a socket connection");
+    return (HaraSocket) input;
+  }
+
   private Object fileResolve(Object[] values) {
     requireFileIO("file/resolve");
     if (values.length != 2) throw new HaraException("file/resolve expects a root and path");
@@ -2409,6 +2621,71 @@ public final class HaraContext {
                             environment.getPublicTruffleFile(path).newOutputStream()) {
                           output.write(contents);
                         }
+                        return null;
+                      } catch (IOException error) {
+                        throw new CompletionException(error);
+                      }
+                    })));
+  }
+
+  private Object fileExists(Object value) {
+    requireFileIO("file/exists?");
+    String path = stringValue(value, "file/exists?");
+    return new HaraPromise(
+        CompletableFuture.supplyAsync(
+            () -> invokeInContext(() -> environment.getPublicTruffleFile(path).exists())));
+  }
+
+  private Object fileList(Object value) {
+    requireFileIO("file/list");
+    String path = stringValue(value, "file/list");
+    return new HaraPromise(
+        CompletableFuture.supplyAsync(
+            () ->
+                invokeInContext(
+                    () -> {
+                      try {
+                        TruffleFile directory = environment.getPublicTruffleFile(path);
+                        java.util.Collection<TruffleFile> children = directory.list();
+                        ArrayList<String> names = new ArrayList<>(children.size());
+                        for (TruffleFile child : children) {
+                          names.add(child.normalize().getPath());
+                        }
+                        Collections.sort(names);
+                        return names.toArray(new String[0]);
+                      } catch (IOException error) {
+                        throw new CompletionException(error);
+                      }
+                    })));
+  }
+
+  private Object fileMkdir(Object value) {
+    requireFileIO("file/mkdir");
+    String path = stringValue(value, "file/mkdir");
+    return new HaraPromise(
+        CompletableFuture.supplyAsync(
+            () ->
+                invokeInContext(
+                    () -> {
+                      try {
+                        environment.getPublicTruffleFile(path).createDirectories();
+                        return null;
+                      } catch (IOException error) {
+                        throw new CompletionException(error);
+                      }
+                    })));
+  }
+
+  private Object fileDelete(Object value) {
+    requireFileIO("file/delete");
+    String path = stringValue(value, "file/delete");
+    return new HaraPromise(
+        CompletableFuture.supplyAsync(
+            () ->
+                invokeInContext(
+                    () -> {
+                      try {
+                        environment.getPublicTruffleFile(path).delete();
                         return null;
                       } catch (IOException error) {
                         throw new CompletionException(error);
@@ -4064,6 +4341,35 @@ public final class HaraContext {
     }
   }
 
+  private static final class HaraSocket implements IDisplay {
+    private final Socket socket;
+
+    private HaraSocket(Socket socket) {
+      this.socket = socket;
+    }
+
+    private void startDrainer() {
+      Thread reader =
+          new Thread(
+              () -> {
+                try (InputStream input = socket.getInputStream()) {
+                  byte[] buffer = new byte[8192];
+                  while (input.read(buffer) >= 0) {}
+                } catch (IOException ignored) {
+                  // Closing a socket or a peer disconnecting terminates the background drain.
+                }
+              },
+              "hara-socket-reader");
+      reader.setDaemon(true);
+      reader.start();
+    }
+
+    
+    public String display() {
+      return "#<socket " + socket.getRemoteSocketAddress() + ">";
+    }
+  }
+
   private static final class HaraPromise implements IDeref<Object>, IDerefTimeout<Object> {
     private final CompletableFuture<Object> future;
 
@@ -4080,7 +4386,7 @@ public final class HaraContext {
     }
 
     private Object value() {
-      if (!future.isDone()) throw new HaraException("promise/value: promise is pending");
+      if (!future.isDone()) throw new HaraException("promise is pending");
       return deref();
     }
 

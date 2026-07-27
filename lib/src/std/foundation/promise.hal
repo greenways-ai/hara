@@ -7,26 +7,20 @@
 ;; (specs/hara/data/typed.edn).
 ;;
 ;; Contract:
-;;   * Promises are the single async boundary; run/then/catch/finally compose
-;;     without exposing host executors.
-;;   * state and value are non-blocking observers; cancel is best-effort.
-;;   * native? reports host-promise interop provenance; delay defers
-;;     evaluation into the promise scheduler.
+;;   * Promises are the single async boundary; new/from/then/catch/finally
+;;     compose without exposing host executors.
+;;   * cancel is best-effort.
+;;   * delay defers evaluation into the promise scheduler.
 ;;
 ;; Authority: specs/hara/data/foundation.edn (:runtime-libraries std.foundation.promise)
 ;; ============================================================================
 (ns std.foundation.promise
   (:config
-   {:builtins [run
-               new
+   {:builtins [new
+               from
                all
                then
                catch
                finally
-               state
-               value
                cancel
-               native?
-               delay
-               resolve
-               reject]}))
+               delay]}))

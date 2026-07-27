@@ -2,46 +2,50 @@
   (:require [std.lib.test :as test]))
 
 (def results
-  [(test/check "promise/run resolves to value"
-               (deref (promise/run (fn [] 42)))
+  [(test/check "promise body constructor resolves to value"
+               (deref (promise (fn [] 42)))
                42)
+   (test/check "promise/from wraps a value"
+               (deref (promise/from 42))
+               42)
+   (test/check "promise? recognizes promises"
+               (promise? (promise/from 1))
+               true)
+   (test/check "promise? rejects non-promises"
+               (promise? 1)
+               false)
    (test/check "promise/then chains"
-               (deref (promise/then (promise/run (fn [] 40))
-                                    (fn [x] (promise/run (fn [] (+ x 2))))))
+               (deref (promise/then (promise (fn [] 40))
+                                    (fn [x] (promise (fn [] (+ x 2))))))
                42)
    (test/check "promise/catch recovers from rejection"
-               (deref (promise/catch (promise/run (fn [] (throw "bad")))
+               (deref (promise/catch (promise (fn [] (throw "bad")))
                                      (fn [error] 7)))
                7)
    (test/check "promise/all returns vector of results"
-               (nth (deref (promise/all [(promise/run (fn [] 1))
-                                         (promise/run (fn [] 3))]))
+               (nth (deref (promise/all [(promise (fn [] 1))
+                                         (promise (fn [] 3))]))
                     1)
                3)
-   (test/check "promise/run can return nested promise"
-               (deref (promise/run (fn [] (promise/run (fn [] 9)))))
+   (test/check "promise body can return nested promise"
+               (deref (promise (fn [] (promise (fn [] 9)))))
                9)
    (test/check "promise/finally runs and returns original value"
-               (deref (promise/finally (promise/run (fn [] 4))
-                                       (fn [] (promise/run (fn [] 99)))))
+               (deref (promise/finally (promise (fn [] 4))
+                                       (fn [] (promise (fn [] 99)))))
                4)
    (test/check "promise/catch on explicit reject"
                (deref (promise/catch (promise/new (fn [resolve reject] (reject "bad")))
                                      (fn [error] 8)))
                8)
    (test/check "promise/catch after finally recovers original error"
-               (deref (promise/catch (promise/finally (promise/run (fn [] (throw "original")))
+               (deref (promise/catch (promise/finally (promise (fn [] (throw "original")))
                                                       (fn [] nil))
                                      (fn [error] 11)))
                11)
-   (test/check "promise/state and value for fulfilled"
-               (let [p (promise/new (fn [resolve reject] (resolve 42)))]
-                 [(str (promise/state p)) (promise/value p)])
-               [":fulfilled" 42])
-   (test/check "promise/cancel transitions state"
+   (test/check "promise/cancel returns the promise"
                (let [p (promise/delay 10000 (fn [] 1))]
-                 (promise/cancel p)
-                 (str (promise/state p)))
-               ":cancelled")])
+                 (promise? (promise/cancel p)))
+               true)])
 
 (test/print-results results)

@@ -4,3 +4,4 @@ hara.truffle.StdFoundationBytesLibraryProvider
 hara.truffle.StdFoundationPromiseLibraryProvider
 hara.truffle.StdFoundationFileLibraryProvider
 hara.truffle.StdFoundationCoroutineLibraryProvider
+hara.truffle.StdFoundationSocketLibraryProvider
