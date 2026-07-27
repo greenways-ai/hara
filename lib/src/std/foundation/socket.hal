@@ -1,0 +1,19 @@
+;; ============================================================================
+;; std.foundation.socket — small portable network boundary.
+;;
+;; Pure activation declaration: every public Var is a host builtin. The
+;; namespace is always available, but operations only succeed when the host
+;; grants network authority.
+;;
+;; Contract (spec/hara/runtime-libraries.md, Socket v1):
+;;   * connect accepts host, port, a reserved options value, and an
+;;     (fn [error connection] ...) callback.
+;;   * send accepts bytes and returns the byte count.
+;;   * close is direct and releases the connection.
+;;   * Receive/framing and HTTP are outside this slice.
+;; ============================================================================
+(ns std.foundation.socket
+  (:config
+   {:builtins [connect
+               send
+               close]}))
