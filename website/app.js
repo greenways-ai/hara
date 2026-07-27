@@ -1,4 +1,4 @@
-import { renderScene, validateScene } from "./scene.js";
+import { keywordName, mapValue, renderScene, validateScene } from "./scene.js";
 import { startTron } from "./tron.js";
 import { applyParedit, barfForward, insertIndent, killToFormEnd, localFormAt, slurpForward, structuralAlign } from "./editor.js";
 
@@ -7,6 +7,8 @@ const ROOT = "ROOT";
 const ACTIVE_FILE_KEY = "hara-www.active-file.v1";
 const WINDOWS_KEY = "hara-www.windows.v1";
 const WORKSPACE_KEY = "hara-www.workspace.v1";
+const BACKGROUND_SOURCE_KEY = "hara-www.background-source.v1";
+const BACKGROUND_SOURCES = new Set(["tron", "grid", "off"]);
 const HAL_FORMS = [
   ["def", "bind a named value"], ["defn", "define a function"], ["fn", "anonymous function"],
   ["let", "local bindings"], ["if", "conditional branch"], ["when", "conditional body"],
@@ -79,6 +81,8 @@ const queryAll = (selector, root = document) => [...root.querySelectorAll(select
 
 const state = {
   broker: null,
+  nodeRuntime: null,
+  activeDocument: null,
   files: [],
   activeFile: null,
   dirty: false,
@@ -88,6 +92,9 @@ const state = {
   editorPrefixTimer: null,
   evalRange: null,
   editorHistory: { past: [], future: [], current: null, replaying: false },
+  backgroundSource: BACKGROUND_SOURCES.has(localStorage.getItem(BACKGROUND_SOURCE_KEY))
+    ? localStorage.getItem(BACKGROUND_SOURCE_KEY) : "tron",
+  backgroundProgram: null,
   zIndex: 10,
   workspace: Number(localStorage.getItem(WORKSPACE_KEY)) === 1 ? 1 : 0
 };
@@ -99,6 +106,7 @@ const elements = {
   systemContext: query("[data-system-context]"),
   runtimeLed: query("[data-runtime-led]"),
   runtimeLabel: query("[data-runtime-label]"),
+  backgroundSource: query("[data-background-source]"),
   fileTree: query("[data-file-tree]"),
   fileCount: query("[data-file-count]"),
   editor: query("[data-editor]"),
@@ -131,6 +139,8 @@ const elements = {
 };
 
 const completionState = { entries: [], index: 0, start: 0 };
+let stopTron = null;
+let backgroundLoadGeneration = 0;
 
 function toast(message, error = false) {
   const node = document.createElement("div");
@@ -150,6 +160,62 @@ function setRuntimeStatus(label, status) {
   elements.runtimeLed.classList.toggle("is-error", status === "error");
 }
 
+function validateBackgroundProgram(value) {
+  if (!(value instanceof Map)) throw new Error("background source must return a map");
+  if (keywordName(mapValue(value, "hara/type")) !== "studio/background") {
+    throw new Error("background source must declare :hara/type :studio/background");
+  }
+  const renderer = keywordName(mapValue(value, "background/renderer"));
+  if (!["tron", "none"].includes(renderer)) throw new Error(`unsupported background renderer: ${renderer}`);
+  const colors = mapValue(value, "background/colors");
+  const speed = mapValue(value, "background/speed");
+  return {
+    id: keywordName(mapValue(value, "background/id")) ?? "anonymous",
+    renderer,
+    grid: mapValue(value, "background/grid"),
+    speed: Number.isFinite(speed) && speed > 1 ? speed / 100 : speed,
+    cycles: mapValue(value, "background/cycles"),
+    colors: Array.isArray(colors) ? colors : undefined
+  };
+}
+
+function applyBackgroundProgram(program) {
+  const canvas = query("[data-tron]");
+  stopTron?.();
+  stopTron = null;
+  canvas.dataset.backgroundName = state.backgroundSource;
+  canvas.dataset.backgroundRenderer = program?.renderer ?? "none";
+  if (state.workspace === 1 || !program || program.renderer === "none") {
+    canvas.hidden = true;
+    canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+  canvas.hidden = false;
+  stopTron = startTron(canvas, program);
+}
+
+async function loadBackgroundSource(name) {
+  if (!BACKGROUND_SOURCES.has(name)) name = "tron";
+  state.backgroundSource = name;
+  localStorage.setItem(BACKGROUND_SOURCE_KEY, name);
+  if (elements.backgroundSource) elements.backgroundSource.value = name;
+  if (!state.broker) return;
+  const generation = ++backgroundLoadGeneration;
+  try {
+    const response = await fetch(new URL(`./sources/${name}.hal`, import.meta.url));
+    if (!response.ok) throw new Error(`background source fetch failed: ${response.status}`);
+    const value = await state.broker.eval(ROOT, await response.text());
+    if (generation !== backgroundLoadGeneration) return;
+    state.backgroundProgram = validateBackgroundProgram(value);
+    applyBackgroundProgram(state.backgroundProgram);
+  } catch (error) {
+    if (generation !== backgroundLoadGeneration) return;
+    state.backgroundProgram = null;
+    applyBackgroundProgram(null);
+    toast(`BACKGROUND SOURCE FAILED: ${errorText(error)}`, true);
+  }
+}
+
 function setWorkspace(index) {
   state.workspace = index === 1 ? 1 : 0;
   document.body.dataset.workspace = String(state.workspace);
@@ -157,6 +223,14 @@ function setWorkspace(index) {
   elements.systemContext.textContent = state.workspace === 0 ? "WELCOME // 01" : "VISUAL LAB // 02";
   for (const dot of queryAll("[data-workspace-dot]")) {
     dot.setAttribute("aria-current", String(Number(dot.dataset.workspaceDot) === state.workspace));
+  }
+  if (state.workspace === 1) {
+    stopTron?.();
+    stopTron = null;
+    query("[data-tron]").hidden = true;
+  } else {
+    applyBackgroundProgram(state.backgroundProgram);
+    if (!state.backgroundProgram && state.broker) void loadBackgroundSource(state.backgroundSource);
   }
   closeLauncher();
 }
@@ -300,6 +374,12 @@ function installWindowManager() {
 }
 
 function installWorkspaceNavigation() {
+  if (elements.backgroundSource) {
+    elements.backgroundSource.value = state.backgroundSource;
+    elements.backgroundSource.addEventListener("change", () => {
+      void loadBackgroundSource(elements.backgroundSource.value);
+    });
+  }
   query("[data-start]").addEventListener("click", () => setWorkspace(1));
   query("[data-home]").addEventListener("click", () => setWorkspace(0));
   for (const dot of queryAll("[data-workspace-dot]")) {
@@ -549,6 +629,11 @@ async function openFile(path, force = false) {
     if (!discard) return;
   }
   const content = await evalStudio(`(fs/read ${JSON.stringify(SPACE)} ${JSON.stringify(path)})`);
+  if (state.activeDocument && state.activeDocument.path !== path) {
+    state.broker.releaseDocument(ROOT, state.activeDocument.id);
+    state.nodeRuntime?.releaseDocument(state.activeDocument.id);
+    state.activeDocument = null;
+  }
   state.activeFile = path;
   state.dirty = false;
   elements.editor.value = content == null ? "" : String(content);
@@ -646,74 +731,6 @@ function showInlineEval(form, label, error = false) {
   positionEditorOverlay(elements.inlineEval, form.end ?? elements.editor.selectionEnd);
 }
 
-function readSceneLiteral(source) {
-  let cursor = 0;
-  const space = () => {
-    while (cursor < source.length) {
-      if (/\s/.test(source[cursor])) { cursor += 1; continue; }
-      if (source[cursor] === ";") {
-        const newline = source.indexOf("\n", cursor);
-        cursor = newline === -1 ? source.length : newline + 1;
-        continue;
-      }
-      break;
-    }
-  };
-  const token = () => {
-    const start = cursor;
-    while (cursor < source.length && !/\s/.test(source[cursor]) && !"{}[]".includes(source[cursor])) cursor += 1;
-    return source.slice(start, cursor);
-  };
-  const value = () => {
-    space();
-    const character = source[cursor];
-    if (character === "{") {
-      cursor += 1;
-      const map = new Map();
-      for (;;) {
-        space();
-        if (source[cursor] === "}") { cursor += 1; return map; }
-        const key = value();
-        space();
-        if (source[cursor] === "}") throw new Error("scene map value missing");
-        map.set(key, value());
-      }
-    }
-    if (character === "[") {
-      cursor += 1;
-      const items = [];
-      for (;;) {
-        space();
-        if (source[cursor] === "]") { cursor += 1; return items; }
-        if (cursor >= source.length) throw new Error("unterminated scene vector");
-        items.push(value());
-      }
-    }
-    if (character === '"') {
-      const start = cursor;
-      cursor += 1;
-      let escaped = false;
-      while (cursor < source.length) {
-        const next = source[cursor++];
-        if (!escaped && next === '"') return JSON.parse(source.slice(start, cursor));
-        escaped = !escaped && next === "\\";
-      }
-      throw new Error("unterminated scene string");
-    }
-    const next = token();
-    if (next === "nil") return null;
-    if (next === "true") return true;
-    if (next === "false") return false;
-    if (/^-?\d+(?:\.\d+)?$/.test(next)) return Number(next);
-    if (next.startsWith(":")) return next;
-    throw new Error("not a declarative scene");
-  };
-  const result = value();
-  space();
-  if (cursor !== source.length) throw new Error("trailing scene source");
-  return result;
-}
-
 function showScene(scene, started, target) {
   state.lastScene = scene;
   query('[data-window="canvas"]').classList.remove("is-hidden");
@@ -799,7 +816,9 @@ async function evaluateAndInsert() {
   if (!form?.source) return;
   elements.editorStatus.textContent = "EVALUATING FOR INSERT";
   try {
-    const result = await state.broker.eval(ROOT, form.source);
+    const result = state.activeDocument?.path === state.activeFile
+      ? await state.broker.evalForm(ROOT, state.activeDocument.id, form.source)
+      : await state.broker.eval(ROOT, form.source);
     const replacement = haraLiteral(result);
     elements.editor.setRangeText(replacement, form.start, form.end, "end");
     elements.editor.dispatchEvent(new Event("input", { bubbles: true }));
@@ -829,16 +848,24 @@ async function evaluateForm(form = null, target = "FORM") {
   elements.inlineEval.hidden = true;
   const started = performance.now();
   try {
-    try {
-      const literalScene = validateScene(readSceneLiteral(form.source));
-      state.evalRange = null;
-      syncHighlight();
-      showScene(literalScene, started, target);
-      return;
-    } catch {
-      // Non-literal programs continue through the Hara runtime below.
+    let result;
+    if (target === "FILE" && isAnonymousDocument(form.source)) {
+      const documentId = `document${state.activeFile}`;
+      const nodeId = `node${state.activeFile}`;
+      state.nodeRuntime.registerNode({ id: nodeId, type: "hal/transform" });
+      const document = await state.broker.evalDocument(ROOT, documentId, form.source, { nodeId });
+      await state.nodeRuntime.activateDocument(nodeId, {
+        documentId,
+        generation: document.generation,
+        moduleId: document.moduleId
+      });
+      state.activeDocument = { path: state.activeFile, id: documentId, nodeId };
+      result = document.value;
+    } else if (state.activeDocument?.path === state.activeFile) {
+      result = await state.broker.evalForm(ROOT, state.activeDocument.id, form.source);
+    } else {
+      result = await state.broker.eval(ROOT, form.source);
     }
-    const result = await state.broker.eval(ROOT, form.source);
     try {
       const scene = validateScene(result);
       state.evalRange = null;
@@ -870,6 +897,10 @@ function evaluateFile() {
     start: 0,
     end: elements.editor.value.length
   }, "FILE");
+}
+
+function isAnonymousDocument(source) {
+  return /^\s*(?:(?:;[^\n]*(?:\n|$))|(?:#_\s*\([^)]*\)\s*))*\(ns\+(?=[\s()])/s.test(source);
 }
 
 function clearEditorPrefix() {
@@ -1020,29 +1051,44 @@ async function bootRuntime() {
   elements.editorStatus.textContent = "BOOTING HARA.WASM";
   try {
     const runtimeBase = new URL("./runtime/", import.meta.url);
-    const [{ createBrowserBroker }, { createHostServices }, { defaultBootstrap }] = await Promise.all([
+    const [
+      { createBrowserBroker },
+      { createHostServices },
+      { defaultBootstrap },
+      { NodeRuntime }
+    ] = await Promise.all([
       import(new URL("studio/broker.js", runtimeBase)),
       import(new URL("studio/host-services.js", runtimeBase)),
-      import(new URL("studio/boot.js", runtimeBase))
+      import(new URL("studio/boot.js", runtimeBase)),
+      import(new URL("studio/node-runtime.js", runtimeBase))
     ]);
     const wasmResponse = await fetch(new URL("hara.wasm", runtimeBase));
     if (!wasmResponse.ok) throw new Error(`runtime fetch failed: ${wasmResponse.status}`);
     const moduleBytes = new Uint8Array(await wasmResponse.arrayBuffer());
     const resources = {};
-    for (const name of ["store", "fs", "space", "boot"]) {
+    for (const name of ["store", "fs", "space", "boot", "node", "draw"]) {
       const response = await fetch(new URL(`studio/hal/${name}.hal`, runtimeBase));
       if (!response.ok) throw new Error(`resource ${name} fetch failed: ${response.status}`);
       resources[`studio.${name}`] = await response.text();
     }
+    state.nodeRuntime = new NodeRuntime({ space: `workspace/${SPACE}` });
+    const hostCalls = createHostServices({
+      dbName: "hara-www",
+      nodeRuntime: state.nodeRuntime,
+      renderCanvas: (_canvasId, value) => {
+        showScene(validateScene(value), performance.now(), "HAL");
+      }
+    });
     state.broker = createBrowserBroker({
       workerUrl: new URL("hta-worker.js", runtimeBase),
       sharedWorkerUrl: new URLSearchParams(location.search).has("shared-runtime")
         ? new URL("hta-shared-worker.js", runtimeBase) : undefined,
       moduleBytes,
-      hostCalls: createHostServices({ dbName: "hara-www" }),
+      hostCalls,
       resources
     });
     await state.broker.eval(ROOT, defaultBootstrap(SPACE));
+    await loadBackgroundSource(state.backgroundSource);
     const files = await listFiles();
     if (!files.length) await seedFiles();
     setRuntimeStatus("WASM // LIVE", "live");
@@ -1184,7 +1230,6 @@ function installEditor() {
   elements.run.addEventListener("click", evaluateFile);
 }
 
-startTron(query("[data-tron]"));
 installWorkspaceNavigation();
 installLauncher();
 installWindowManager();

@@ -1,5 +1,5 @@
 const MAGIC = new Uint8Array([0x48, 0x54, 0x41, 0x31]);
-const TAG = { nil: 0, false: 1, true: 2, i64: 3, string: 4, bytes: 5, keyword: 6, symbol: 7, list: 8, vector: 9, set: 10, map: 11, handle: 12 };
+const TAG = { nil: 0, false: 1, true: 2, i64: 3, string: 4, bytes: 5, keyword: 6, symbol: 7, list: 8, vector: 9, set: 10, map: 11, handle: 12, f64: 15 };
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -143,8 +143,10 @@ function writeValue(output, value) {
   if (value === null || value === undefined) output.push(TAG.nil);
   else if (value === false) output.push(TAG.false);
   else if (value === true) output.push(TAG.true);
-  else if (typeof value === "bigint" || Number.isSafeInteger(value)) {
+  else if (typeof value === "bigint" || (Number.isSafeInteger(value) && !Object.is(value, -0))) {
     output.push(TAG.i64); writeI64(output, BigInt(value));
+  } else if (typeof value === "number") {
+    output.push(TAG.f64); writeF64(output, value);
   } else if (typeof value === "string") { output.push(TAG.string); writeBytes(output, encoder.encode(value)); }
   else if (value instanceof Uint8Array) { output.push(TAG.bytes); writeBytes(output, value); }
   else if (value instanceof HtaKeyword) { output.push(TAG.keyword); writeBytes(output, encoder.encode(value.name)); }
@@ -166,6 +168,7 @@ function compare(left, right) { for (let i=0;i<Math.min(left.length,right.length
 function writeBytes(output, bytes) { writeU32(output, bytes.length); output.push(...bytes); }
 function writeU32(output, value) { if(value<0||value>0xffff_ffff)throw new Error("hta/value-too-large"); output.push(value>>>24,(value>>>16)&255,(value>>>8)&255,value&255); }
 function writeI64(output, value) { const normalized=BigInt.asUintN(64,value); for(let shift=56n;shift>=0n;shift-=8n)output.push(Number((normalized>>shift)&255n)); }
+function writeF64(output, value) { const bytes=new Uint8Array(8);new DataView(bytes.buffer).setFloat64(0,value,false);output.push(...bytes); }
 
 class Reader {
   constructor(bytes, cursor) { this.bytes=bytes; this.cursor=cursor; }
@@ -177,6 +180,7 @@ class Reader {
     const tag=this.take(1)[0];
     if(tag===TAG.nil)return null;if(tag===TAG.false)return false;if(tag===TAG.true)return true;
     if(tag===TAG.i64){const bytes=this.take(8);let value=0n;for(const byte of bytes)value=(value<<8n)|BigInt(byte);value=BigInt.asIntN(64,value);return value>=BigInt(Number.MIN_SAFE_INTEGER)&&value<=BigInt(Number.MAX_SAFE_INTEGER)?Number(value):value;}
+    if(tag===TAG.f64){const bytes=this.take(8);return new DataView(bytes.buffer,bytes.byteOffset,8).getFloat64(0,false);}
     if(tag===TAG.string)return decoder.decode(this.data());if(tag===TAG.bytes)return this.data().slice();
     if(tag===TAG.keyword)return new HtaKeyword(decoder.decode(this.data()));if(tag===TAG.symbol)return new HtaSymbol(decoder.decode(this.data()));
     if(tag===TAG.list||tag===TAG.vector)return this.sequence();if(tag===TAG.set)return new Set(this.sequence());

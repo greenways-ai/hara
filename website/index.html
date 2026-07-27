@@ -8,10 +8,12 @@
   <meta property="og:title" content="HARA — Lisp for the Agentic Age">
   <meta property="og:description" content="Write Hara in the browser and render it live.">
   <meta property="og:type" content="website">
-  <meta property="og:image" content="https://www.hara-lang.org/og.png">
+  <meta property="og:image" content="https://www.hara-lang.org/og-hara-ribbon.png">
+  <meta property="og:image:width" content="1730">
+  <meta property="og:image:height" content="909">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:image" content="https://www.hara-lang.org/og.png">
-  <link rel="icon" href="./assets/hara-rings-favicon.svg" type="image/svg+xml">
+  <meta name="twitter:image" content="https://www.hara-lang.org/og-hara-ribbon.png">
+  <link rel="icon" href="./vendor/hara-ui/favicon.svg" type="image/svg+xml">
   <title>HARA — Lisp for the Agentic Age</title>
   <link rel="stylesheet" href="./vendor/hara-ui/tokens.css">
   <link rel="stylesheet" href="./vendor/hara-ui/components.css">
@@ -36,12 +38,19 @@
     </div>
 
     <div class="system-identity">
-      <span class="system-mark" aria-hidden="true">H</span>
       <span class="system-title">HARA</span>
       <span class="system-context" data-system-context>WELCOME // 01</span>
     </div>
 
     <div class="system-right">
+      <label class="background-picker">
+        <span>SOURCE</span>
+        <select data-background-source aria-label="Background source">
+          <option value="tron">TRON.HAL</option>
+          <option value="grid">GRID.HAL</option>
+          <option value="off">OFF.HAL</option>
+        </select>
+      </label>
       <div class="runtime-state" aria-live="polite">
         <span class="runtime-led" data-runtime-led></span>
         <span data-runtime-label>WASM // STANDBY</span>
@@ -76,6 +85,10 @@
         <span class="app-icon app-icon-patch" aria-hidden="true">⊞</span>
         <span>Patch</span>
       </button>
+      <a class="app-tile" href="./hara-amp.html">
+        <span class="app-icon app-icon-canvas" aria-hidden="true">♫</span>
+        <span>Hara Amp</span>
+      </a>
       <a class="app-tile" href="https://docs.hara-lang.org/user-guide/" target="_blank" rel="noreferrer">
         <span class="app-icon" aria-hidden="true">L</span>
         <span>Learn</span>
@@ -109,13 +122,16 @@
           <p class="welcome-tagline">Lisp for the Agentic Age.</p>
         </div>
         <button class="start-button" type="button" data-start>
-          <span class="start-mark" aria-hidden="true"></span>
+          <img class="start-mark" src="./assets/hara-amp/hara-emblem.svg" alt="">
           <span>START</span>
           <i aria-hidden="true">→</i>
         </button>
-        <div class="welcome-coordinate" aria-hidden="true">
-          GRID 37.81 // KERNEL READY
-        </div>
+        <nav class="welcome-coordinate" aria-label="Hara project links">
+          <a href="https://github.com/hara-lang/hara" target="_blank" rel="noreferrer">GITHUB ↗</a>
+          <span aria-hidden="true">//</span>
+          <a href="https://www.youtube.com/results?search_query=Hara+programming+language"
+             target="_blank" rel="noreferrer">YOUTUBE ↗</a>
+        </nav>
       </section>
 
       <section class="workspace desktop-workspace" aria-label="Hara desktop">

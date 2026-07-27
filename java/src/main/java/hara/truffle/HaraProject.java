@@ -13,9 +13,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 
-/** Discovers project.hal and resolves Hara namespaces through its source paths. */
+/** Discovers project.edn (or legacy project.hal) and resolves namespace paths. */
 final class HaraProject {
-  private static final String PROJECT_FILE = "project.hal";
+  private static final String PROJECT_FILE = "project.edn";
+  private static final String LEGACY_PROJECT_FILE = "project.hal";
 
   private final Path root;
   private final Symbol name;
@@ -35,6 +36,8 @@ final class HaraProject {
     while (current != null) {
       Path descriptor = current.resolve(PROJECT_FILE);
       if (Files.isRegularFile(descriptor)) return read(descriptor);
+      descriptor = current.resolve(LEGACY_PROJECT_FILE);
+      if (Files.isRegularFile(descriptor)) return read(descriptor);
       current = current.getParent();
     }
     return null;
@@ -45,6 +48,28 @@ final class HaraProject {
       Object form =
           Parser.LispReader.readString(
               Files.readString(descriptor, StandardCharsets.UTF_8), null);
+      if (PROJECT_FILE.equals(descriptor.getFileName().toString())) {
+        if (!(form instanceof IMapType<?, ?> options)
+            || !(lookup(options, "project/id") instanceof Symbol projectName)) {
+          throw new HaraException("project.edn expects a map with :project/id");
+        }
+        Path root = descriptor.toAbsolutePath().normalize().getParent();
+        return new HaraProject(
+            root,
+            projectName,
+            paths(
+                root,
+                lookup(options, "project/source-paths"),
+                "project/source-paths",
+                java.util.List.of("src"),
+                PROJECT_FILE),
+            paths(
+                root,
+                lookup(options, "project/test-paths"),
+                "project/test-paths",
+                java.util.List.of("test"),
+                PROJECT_FILE));
+      }
       if (!(form instanceof List<?> list)
           || list.count() != 3
           || !Symbol.create("defproject").equals(list.nth(0))
@@ -58,11 +83,21 @@ final class HaraProject {
       return new HaraProject(
           root,
           projectName,
-          paths(root, lookup(options, "source-paths"), "source-paths", java.util.List.of("src")),
-          paths(root, lookup(options, "test-paths"), "test-paths", java.util.List.of("test")));
+          paths(
+              root,
+              lookup(options, "source-paths"),
+              "source-paths",
+              java.util.List.of("src"),
+              LEGACY_PROJECT_FILE),
+          paths(
+              root,
+              lookup(options, "test-paths"),
+              "test-paths",
+              java.util.List.of("test"),
+              LEGACY_PROJECT_FILE));
     } catch (IOException error) {
       throw new HaraException(
-          "Unable to read project.hal " + descriptor + ": " + error.getMessage());
+          "Unable to read project descriptor " + descriptor + ": " + error.getMessage());
     }
   }
 
@@ -107,23 +142,27 @@ final class HaraProject {
   }
 
   private static java.util.List<Path> paths(
-      Path root, Object value, String option, java.util.List<String> defaults) {
+      Path root,
+      Object value,
+      String option,
+      java.util.List<String> defaults,
+      String descriptor) {
     Iterable<?> entries;
     if (value == null) {
       entries = defaults;
     } else if (value instanceof ILinearType<?>) {
       entries = (ILinearType<?>) value;
     } else {
-      throw new HaraException("project.hal :" + option + " expects a sequential collection");
+      throw new HaraException(descriptor + " :" + option + " expects a sequential collection");
     }
     ArrayList<Path> paths = new ArrayList<>();
     for (Object entry : entries) {
       if (!(entry instanceof String) || ((String) entry).isBlank()) {
-        throw new HaraException("project.hal :" + option + " expects non-empty path strings");
+        throw new HaraException(descriptor + " :" + option + " expects non-empty path strings");
       }
       Path path = root.resolve((String) entry).normalize();
       if (!path.startsWith(root)) {
-        throw new HaraException("project.hal :" + option + " cannot escape the project root");
+        throw new HaraException(descriptor + " :" + option + " cannot escape the project root");
       }
       paths.add(path);
     }

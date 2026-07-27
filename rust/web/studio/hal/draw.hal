@@ -1,0 +1,4 @@
+(ns studio.draw)
+
+(defn render [canvas scene]
+  (host/call "studio.canvas" "render" canvas scene))

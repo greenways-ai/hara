@@ -10,11 +10,17 @@ bash "$ROOT/scripts/build-hara-wasm-raw"
 
 rm -rf "$OUT"
 mkdir -p "$OUT/runtime/studio/hal"
+mkdir -p "$OUT/assets/wasm" "$OUT/assets/hara-amp" "$OUT/examples/hara-amp/src"
+mkdir -p "$OUT/sources"
+mkdir -p "$OUT/vendor"
 
 cp "$ROOT/website/index.html" \
    "$ROOT/website/app.css" \
    "$ROOT/website/app.js" \
    "$ROOT/website/editor.js" \
+   "$ROOT/website/hara-amp.html" \
+   "$ROOT/website/hara-amp.css" \
+   "$ROOT/website/hara-amp.js" \
    "$ROOT/website/og.png" \
    "$ROOT/website/scene.js" \
    "$ROOT/website/tron.js" \
@@ -27,7 +33,20 @@ cp "$ROOT/rust/web/hta.js" \
 cp "$ROOT/rust/web/studio/boot.js" \
    "$ROOT/rust/web/studio/broker.js" \
    "$ROOT/rust/web/studio/host-services.js" \
+   "$ROOT/rust/web/studio/node-runtime.js" \
+   "$ROOT/rust/web/studio/workspace.js" \
    "$OUT/runtime/studio/"
 cp "$ROOT/rust/web/studio/hal/"*.hal "$OUT/runtime/studio/hal/"
+cp "$ROOT/website/assets/hara-amp/"* "$OUT/assets/hara-amp/"
+cp "$ROOT/website/examples/hara-amp/project.edn" \
+   "$ROOT/website/examples/hara-amp/workspace.edn" \
+   "$OUT/examples/hara-amp/"
+cp "$ROOT/website/examples/hara-amp/src/visualizer.hal" "$OUT/examples/hara-amp/src/"
+cp "$ROOT/website/sources/"*.hal "$OUT/sources/"
+cp -R "$ROOT/website/vendor/hara-ui" "$OUT/vendor/"
+
+bash "$ROOT/scripts/build-demo-synth-wasm"
+bash "$ROOT/scripts/build-demo-fft-wasm"
+cp "$ROOT/website/assets/wasm/"*.wasm "$OUT/assets/wasm/"
 
 printf 'Built %s\n' "$OUT"

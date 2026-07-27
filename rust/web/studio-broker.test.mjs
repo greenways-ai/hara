@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 
 import { HtaContext } from "./hta.js";
-import { createBrowserBroker, KernelBroker } from "./studio/broker.js";
+import { compileAnonymousDocument, createBrowserBroker, KernelBroker } from "./studio/broker.js";
 
 // Mock HtaContext-shaped kernel: records calls, echoes evals with the kernel name.
 function mockSpawn({ failFor } = {}) {
@@ -121,6 +121,67 @@ test("close terminates context and worker and removes the kernel", async () => {
   assert.ok(!broker.list().includes("alpha"));
   await assert.rejects(broker.require("alpha"), /^Error: NO_SESSION alpha$/);
   await assert.rejects(broker.close("alpha"), /^Error: NO_SESSION alpha$/);
+});
+
+test("ns+ documents activate isolated generations and roll back failed reloads", async () => {
+  const { spawn, spawned } = mockSpawn();
+  const broker = new KernelBroker({
+    spawn: async (name) => {
+      const kernel = await spawn(name);
+      kernel.context.call = async function (target, args) {
+        this.calls.push([target, args]);
+        if (target === "eval" && args[0].includes("BROKEN")) throw new Error("bad reload");
+        return args[0].includes("(+ value 1)") ? 43 : 42;
+      };
+      return kernel;
+    },
+    resources: { "studio.node": "(ns studio.node)" }
+  });
+  const first = await broker.evalDocument("ROOT", "document/a", "(ns+)\n(def value 42)\nvalue", {
+    nodeId: "node/a"
+  });
+  assert.equal(first.value, 42);
+  assert.equal(first.generation, 1);
+  const active = broker.requireDocument("ROOT", "document/a");
+  assert.equal(await broker.evalForm("ROOT", "document/a", "(+ value 1)"), 43);
+
+  await assert.rejects(
+    broker.evalDocument("ROOT", "document/a", "(ns+)\nBROKEN", { nodeId: "node/a" }),
+    /bad reload/
+  );
+  assert.equal(broker.requireDocument("ROOT", "document/a"), active);
+  assert.equal(active.worker.terminated, false);
+  assert.equal(spawned.at(-1).worker.terminated, true);
+
+  const third = await broker.evalDocument("ROOT", "document/a", "(ns+)\n43", { nodeId: "node/a" });
+  assert.equal(third.generation, 2);
+  assert.equal(active.worker.terminated, true);
+  assert.equal(broker.releaseDocument("ROOT", "document/a"), true);
+  assert.throws(() => broker.requireDocument("ROOT", "document/a"), /NO_DOCUMENT/);
+});
+
+test("anonymous document compiler requires ns+ first and binds node context", () => {
+  assert.throws(() => compileAnonymousDocument("(ns public.name) 42", {
+    documentId: "document/a"
+  }), /NS_PLUS_MUST_BE_FIRST/);
+  const compiled = compileAnonymousDocument(
+    "; comment\n#_ (ignored)\n(ns+ (:require [studio.draw :as draw]))\n(node/info)",
+    { documentId: "document/a", nodeId: "node/a" }
+  );
+  assert.ok(compiled.source.includes("ns anonymous.document.a."));
+  assert.ok(compiled.source.includes("require [studio.node :as node]"));
+  assert.ok(compiled.source.includes('set! node/*node-id* "node/a"'));
+  assert.ok(!compiled.moduleId.includes("node/a"));
+});
+
+test("document compiler resolves built-in co/ without changing strings or comments", () => {
+  const compiled = compileAnonymousDocument(
+    '(ns+)\n; co/await stays documentation\n(def label "co/await")\n(co/await (node/in "x"))',
+    { documentId: "document/co", nodeId: "node/co" }
+  );
+  assert.ok(compiled.source.includes("(std.foundation.coroutine/await (node/in"));
+  assert.ok(compiled.source.includes('"co/await"'));
+  assert.ok(compiled.source.includes("; co/await stays documentation"));
 });
 
 test("ROOT exists without explicit creation and cannot be closed or recreated", async () => {

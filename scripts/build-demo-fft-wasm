@@ -2,13 +2,13 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-MANIFEST="$ROOT/rust/extensions/demo-synth/Cargo.toml"
+MANIFEST="$ROOT/rust/extensions/demo-fft/Cargo.toml"
 OUT_DIR="$ROOT/website/assets/wasm"
 
 "$ROOT/scripts/cargo-wasm-build" \
   --manifest-path "$MANIFEST" --target wasm32-unknown-unknown --release
 
 mkdir -p "$OUT_DIR"
-cp "$ROOT/rust/extensions/demo-synth/target/wasm32-unknown-unknown/release/hara_demo_synth.wasm" \
-   "$OUT_DIR/demo-synth.wasm"
-echo "Built $OUT_DIR/demo-synth.wasm"
+cp "$ROOT/rust/extensions/demo-fft/target/wasm32-unknown-unknown/release/hara_demo_fft.wasm" \
+   "$OUT_DIR/demo-fft.wasm"
+echo "Built $OUT_DIR/demo-fft.wasm"

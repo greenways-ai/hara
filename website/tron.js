@@ -1,32 +1,37 @@
-const COLORS = ["#41f5e4", "#ff2e88", "#9c7bff", "#f5d742"];
+const DEFAULT_COLORS = ["#41f5e4", "#ff2e88", "#9c7bff", "#f5d742"];
 const DIRECTIONS = [[1, 0], [0, 1], [-1, 0], [0, -1]];
-const GRID = 36;
+const DEFAULT_GRID = 36;
 
 function choose(options) {
   return options[Math.floor(Math.random() * options.length)];
 }
 
-function createCycle(index) {
+function createCycle(index, colors, grid) {
   const corners = [
     [3, 3, 0],
-    [GRID - 3, 3, 2],
-    [3, GRID - 3, 0],
-    [GRID - 3, GRID - 3, 2]
+    [grid - 3, 3, 2],
+    [3, grid - 3, 0],
+    [grid - 3, grid - 3, 2]
   ];
-  const [x, y, direction] = corners[index];
+  const [x, y, direction] = corners[index % corners.length];
   return {
     x,
     y,
     direction,
-    color: COLORS[index],
+    color: colors[index],
     trail: [[x, y]],
     nextTurn: 12 + Math.random() * 20
   };
 }
 
-export function startTron(canvas) {
+export function startTron(canvas, options = {}) {
   const context = canvas?.getContext("2d");
   if (!context) return () => {};
+  const colors = Array.isArray(options.colors) && options.colors.length
+    ? options.colors.slice(0, 4) : DEFAULT_COLORS;
+  const grid = Number.isFinite(options.grid) ? Math.max(12, Math.min(72, options.grid)) : DEFAULT_GRID;
+  const speed = Number.isFinite(options.speed) ? Math.max(0, Math.min(1, options.speed)) : .28;
+  const cyclesEnabled = options.cycles !== false && speed > 0;
 
   let width = 0;
   let height = 0;
@@ -35,7 +40,7 @@ export function startTron(canvas) {
   let raf = 0;
   let last = performance.now();
   let accumulator = 0;
-  let cycles = COLORS.map((_, index) => createCycle(index));
+  let cycles = cyclesEnabled ? colors.map((_, index) => createCycle(index, colors, grid)) : [];
 
   function resize() {
     width = innerWidth;
@@ -61,7 +66,7 @@ export function startTron(canvas) {
         const [dx, dy] = DIRECTIONS[direction];
         const x = cycle.x + dx * 2;
         const y = cycle.y + dy * 2;
-        return x > 1 && x < GRID - 1 && y > 1 && y < GRID - 1 && !occupied(x, y, cycle);
+        return x > 1 && x < grid - 1 && y > 1 && y < grid - 1 && !occupied(x, y, cycle);
       });
   }
 
@@ -81,10 +86,10 @@ export function startTron(canvas) {
         cycle.trail.push([cycle.x, cycle.y]);
       }
       const [nextX, nextY] = DIRECTIONS[cycle.direction];
-      cycle.x += nextX * .28;
-      cycle.y += nextY * .28;
-      if (cycle.x < 0 || cycle.x > GRID || cycle.y < 0 || cycle.y > GRID) {
-        Object.assign(cycle, createCycle(COLORS.indexOf(cycle.color)));
+      cycle.x += nextX * speed;
+      cycle.y += nextY * speed;
+      if (cycle.x < 0 || cycle.x > grid || cycle.y < 0 || cycle.y > grid) {
+        Object.assign(cycle, createCycle(colors.indexOf(cycle.color), colors, grid));
       }
       const head = cycle.trail[cycle.trail.length - 1];
       if (Math.hypot(cycle.x - head[0], cycle.y - head[1]) > 4) {
@@ -92,7 +97,7 @@ export function startTron(canvas) {
       }
       if (cycle.trail.length > 26) cycle.trail.shift();
     }
-    if (step % 1200 === 0) cycles = COLORS.map((_, index) => createCycle(index));
+    if (step % 1200 === 0) cycles = colors.map((_, index) => createCycle(index, colors, grid));
   }
 
   function project(x, y) {
@@ -106,14 +111,14 @@ export function startTron(canvas) {
   function drawGrid() {
     context.strokeStyle = "rgba(65,245,228,.055)";
     context.lineWidth = 1;
-    for (let value = 0; value <= GRID; value += 3) {
+    for (let value = 0; value <= grid; value += 3) {
       context.beginPath();
       context.moveTo(...project(value, 0));
-      context.lineTo(...project(value, GRID));
+      context.lineTo(...project(value, grid));
       context.stroke();
       context.beginPath();
       context.moveTo(...project(0, value));
-      context.lineTo(...project(GRID, value));
+      context.lineTo(...project(grid, value));
       context.stroke();
     }
   }

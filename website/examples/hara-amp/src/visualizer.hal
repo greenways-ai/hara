@@ -1,0 +1,18 @@
+(ns+
+  (:require [studio.draw :as draw]))
+
+(defn visualize [input]
+  ;; The FFT node already emits the canvas scene in this first conformance
+  ;; example. This function is the document-owned transform seam.
+  input)
+
+(defn run-visualizer []
+  (loop []
+    (let [input (co/await (node/in "fft/bins"))]
+      (do
+        (co/await
+          (draw/render "canvas/visualizer"
+                       (visualize input)))
+        (recur)))))
+
+(node/start run-visualizer)

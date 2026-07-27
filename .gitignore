@@ -24,6 +24,8 @@ hs_err_pid*
 
 /target/
 java/target/
+**/target/
+test-results/
 /log
 node_modules
 *.js.map

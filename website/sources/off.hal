@@ -1,0 +1,3 @@
+{:hara/type :studio/background
+ :background/id :off
+ :background/renderer :none}

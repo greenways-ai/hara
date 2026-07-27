@@ -1,0 +1,71 @@
+{:hara/type :workspace
+ :hara/version "1.0.0"
+ :workspace/id :hara-amp
+ :workspace/layout
+ {:layout/type :split
+  :layout/direction :vertical
+  :layout/ratio 0.48
+  :layout/first
+  {:layout/type :split
+   :layout/direction :horizontal
+   :layout/ratio 0.55
+   :layout/first {:layout/type :area :layout/area "area/player"}
+   :layout/second {:layout/type :area :layout/area "area/equalizer"}}
+  :layout/second
+  {:layout/type :split
+   :layout/direction :horizontal
+   :layout/ratio 0.45
+   :layout/first {:layout/type :area :layout/area "area/playlist"}
+   :layout/second {:layout/type :area :layout/area "area/visualizer"}}}
+ :workspace/documents
+ [{:document/id "document/visualizer"
+   :document/path "src/visualizer.hal"
+   :document/language :hal
+   :document/anonymous true}]
+ :workspace/areas
+ [{:area/id "area/player" :area/type :hara-ui/player :area/title "Hara Amp"}
+  {:area/id "area/equalizer" :area/type :hara-ui/equalizer :area/title "10-band EQ"}
+  {:area/id "area/playlist" :area/type :hara-ui/playlist :area/title "Playlist"}
+  {:area/id "area/visualizer" :area/type :visual-canvas
+   :area/title "WASM Spectrum" :area/canvas "canvas/visualizer"}]
+ :workspace/nodes
+ [{:node/id "node/synth"
+   :node/type :wasm/audio-source
+   :node/module "../../assets/wasm/demo-synth.wasm"
+   :node/ports [{:port/id "audio/pcm" :port/direction :out :port/type :audio/f32}]}
+  {:node/id "node/fft"
+   :node/type :wasm/transform
+   :node/module "../../assets/wasm/demo-fft.wasm"
+   :node/ports
+   [{:port/id "audio/pcm" :port/direction :in :port/type :audio/f32}
+    {:port/id "fft/bins" :port/direction :out :port/type :buffer/f32}]}
+  {:node/id "node/visualizer"
+   :node/type :hal/transform
+   :node/document "document/visualizer"
+   :node/ports
+   [{:port/id "fft/bins" :port/direction :in :port/type :buffer/f32}
+    {:port/id "canvas/frame" :port/direction :out :port/type :canvas/scene}]}]
+ :workspace/connections
+ [{:connection/id "connection/synth-fft"
+   :connection/from ["node/synth" "audio/pcm"]
+   :connection/to ["node/fft" "audio/pcm"]
+   :connection/transport :audio/buffer
+   :connection/delivery :latest
+   :connection/capacity 2}
+  {:connection/id "connection/fft-visualizer"
+   :connection/from ["node/fft" "fft/bins"]
+   :connection/to ["node/visualizer" "fft/bins"]
+   :connection/transport :hta
+   :connection/delivery :latest
+   :connection/capacity 1}]
+ :workspace/links
+ [{:link/id "link/visualizer"
+   :link/document "document/visualizer"
+   :link/area "area/visualizer"
+   :link/node "node/visualizer"}]
+ :workspace/customizations
+ {:theme :hara/amp
+  :audio/user-gesture true
+  :audio/realtime-transport [:shared-audio-ring :audio-block-batch]
+  :playlist/local-handle-store "hara-amp/local-handles"
+  :recovery/journal true}}

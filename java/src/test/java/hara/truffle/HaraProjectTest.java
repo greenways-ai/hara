@@ -16,8 +16,9 @@ public class HaraProjectTest {
   public void parsesProjectDescriptorAndResolvesNamespacePaths() throws Exception {
     Path root = Files.createTempDirectory("hara-project");
     Files.writeString(
-        root.resolve("project.hal"),
-        "(defproject sample {:source-paths [\"src\"] :test-paths [\"test\"]})");
+        root.resolve("project.edn"),
+        "{:hara/type :project :project/id sample "
+            + ":project/source-paths [\"src\"] :project/test-paths [\"test\"]}");
     Path source = root.resolve("src/sample/core_name.hal");
     Files.createDirectories(source.getParent());
     Files.writeString(source, "(ns sample.core-name)");
@@ -31,12 +32,22 @@ public class HaraProjectTest {
   @Test
   public void rejectsProjectPathsOutsideTheProjectRoot() throws Exception {
     Path root = Files.createTempDirectory("hara-project-invalid");
-    Path descriptor = root.resolve("project.hal");
+    Path descriptor = root.resolve("project.edn");
     Files.writeString(
-        descriptor, "(defproject sample {:source-paths [\"../outside\"]})");
+        descriptor, "{:project/id sample :project/source-paths [\"../outside\"]}");
     HaraException error =
         assertThrows(HaraException.class, () -> HaraProject.read(descriptor));
     assertTrue(error.getMessage().contains("cannot escape"));
+  }
+
+  @Test
+  public void keepsLegacyProjectHalAsMigrationFallback() throws Exception {
+    Path root = Files.createTempDirectory("hara-project-legacy");
+    Files.writeString(
+        root.resolve("project.hal"),
+        "(defproject sample {:source-paths [\"src\"] :test-paths [\"test\"]})");
+    HaraProject project = HaraProject.discover(root);
+    assertEquals("sample", project.name().display());
   }
 
   @Test

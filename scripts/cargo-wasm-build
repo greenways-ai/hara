@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Homebrew may put a non-rustup `rustc` ahead of the rustup toolchain even
+# though the wasm standard library was installed by rustup. Pin rustc to the
+# selected rustup toolchain when available; CI and ordinary rustup installs
+# continue through the same path.
+if command -v rustup >/dev/null 2>&1; then
+  HARA_WASM_RUSTC=$(rustup which rustc)
+  exec rustup run stable cargo \
+    --config "build.rustc=\"$HARA_WASM_RUSTC\"" \
+    build "$@"
+fi
+
+exec cargo build "$@"

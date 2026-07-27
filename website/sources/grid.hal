@@ -1,0 +1,7 @@
+{:hara/type :studio/background
+ :background/id :grid
+ :background/renderer :tron
+ :background/grid 36
+ :background/speed 0
+ :background/cycles false
+ :background/colors ["#41f5e4" "#9c7bff"]}

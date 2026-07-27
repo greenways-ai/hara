@@ -1,6 +1,6 @@
 use crate::core::Value;
 #[cfg(test)]
-use crate::lang::data::Vector as PVector;
+use crate::lang::data::{Tuple as PTuple, Vector as PVector};
 
 const MAGIC: &[u8; 4] = b"HTA1";
 const NIL: u8 = 0;
@@ -18,6 +18,7 @@ const MAP: u8 = 11;
 const HANDLE: u8 = 12;
 const NAMESPACE: u8 = 13;
 const VAR: u8 = 14;
+const F64: u8 = 15;
 
 pub fn encode(value: &Value) -> Result<Vec<u8>, String> {
     let mut output = MAGIC.to_vec();
@@ -49,6 +50,10 @@ fn encode_bare(value: &Value, output: &mut Vec<u8>) -> Result<(), String> {
             output.push(I64);
             output.extend_from_slice(&value.to_be_bytes());
         }
+        Value::Float(value) => {
+            output.push(F64);
+            output.extend_from_slice(&value.to_bits().to_be_bytes());
+        }
         Value::String(value) => {
             output.push(STRING);
             encode_bytes(value.as_str().as_bytes(), output)?;
@@ -70,6 +75,7 @@ fn encode_bare(value: &Value, output: &mut Vec<u8>) -> Result<(), String> {
             encode_bytes(value.as_str().as_bytes(), output)?;
         }
         Value::List(values) => encode_sequence(LIST, values.iter(), output)?,
+        Value::Tuple(values) => encode_sequence(VECTOR, values.iter(), output)?,
         Value::Vector(values) => encode_sequence(VECTOR, values.iter(), output)?,
         Value::Set(values) => {
             let mut encoded = values.iter().map(bare).collect::<Result<Vec<_>, _>>()?;
@@ -171,6 +177,12 @@ impl Reader<'_> {
             I64 => {
                 let bytes = self.take(8)?;
                 Ok(Value::Number(i64::from_be_bytes(bytes.try_into().unwrap())))
+            }
+            F64 => {
+                let bytes = self.take(8)?;
+                Ok(Value::Float(f64::from_bits(u64::from_be_bytes(
+                    bytes.try_into().unwrap(),
+                ))))
             }
             STRING => Ok(Value::String(
                 String::from_utf8(self.data()?.to_vec())
@@ -275,6 +287,27 @@ mod tests {
         );
         let encoded = encode(&value).unwrap();
         assert_eq!(encode(&decode(&encoded).unwrap()).unwrap(), encoded);
+    }
+    #[test]
+    fn compact_tuple_uses_the_portable_vector_wire_type() {
+        let tuple = Value::Tuple(Box::new(
+            PTuple::from_values(vec![Value::Number(1), Value::Number(2)]).unwrap(),
+        ));
+        let decoded = decode(&encode(&tuple).unwrap()).unwrap();
+        assert_eq!(
+            decoded,
+            Value::Vector(PVector::from(vec![Value::Number(1), Value::Number(2)]))
+        );
+    }
+    #[test]
+    fn floats_round_trip_with_ieee_754_bits() {
+        for value in [0.28, -0.0, f64::INFINITY, f64::NEG_INFINITY] {
+            let decoded = decode(&encode(&Value::Float(value)).unwrap()).unwrap();
+            let Value::Float(decoded) = decoded else {
+                panic!("float value")
+            };
+            assert_eq!(decoded.to_bits(), value.to_bits());
+        }
     }
     #[test]
     fn canonical_maps_ignore_insertion_order() {

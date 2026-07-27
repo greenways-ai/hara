@@ -1,0 +1,58 @@
+(ns studio.node)
+
+;; The browser host binds this dynamically for every document generation.
+;; ns+ source never receives or exposes its generated private module name.
+(def ^:dynamic *node-id* nil)
+(def ^:private *next-task* (atom 0))
+(def ^:private *active-task* (atom nil))
+
+(defn- require-node []
+  (if *node-id*
+    *node-id*
+    (throw "node operation requires an active workspace node")))
+
+(defn start [f]
+  (let [id (str "task-" (swap! *next-task* inc))]
+    (do
+      ;; The broker launches this callback as an independent HTA task after
+      ;; the document generation activates. Keeping the function in its
+      ;; private ns+ kernel lets closing/reloading that kernel cancel it.
+      (reset! *active-task* [id f])
+      id)))
+
+(defn run-task [id]
+  (let [entry (deref (deref *active-task*))]
+    (if (= id (nth entry 0))
+      ((nth entry 1))
+      (throw (str "unknown node task " id)))))
+
+(defn in [signal]
+  (host/call "node" "in" (require-node) signal))
+
+(defn in-frame [signal]
+  (host/call "node" "in-frame" (require-node) signal))
+
+(defn emit
+  ([signal value]
+   (host/call "node" "emit" (require-node) signal value {}))
+  ([signal value meta]
+   (host/call "node" "emit" (require-node) signal value meta)))
+
+(defn call
+  ([target action args]
+   (host/call "node" "call" (require-node) target action args {}))
+  ([target action args opts]
+   (host/call "node" "call" (require-node) target action args opts)))
+
+(defn handle
+  ([action f] (handle action f {}))
+  ([action f meta]
+   (host/call "node" "handle" (require-node) action f meta)))
+
+(defn stop [id]
+  (do
+    (reset! *active-task* nil)
+    (host/call "node" "stop" (require-node) id)))
+
+(defn info []
+  (host/call "node" "info" (require-node)))

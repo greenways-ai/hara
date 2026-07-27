@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#03050a">
+  <title>Hara Amp — Programmable Studio Demo</title>
+  <link rel="stylesheet" href="./hara-amp.css">
+</head>
+<body>
+  <header class="amp-system">
+    <a href="./" aria-label="Back to Hara">HARA</a>
+    <span>AMP / PROGRAMMABLE STUDIO</span>
+    <output data-runtime-status>WASM · BOOTING</output>
+  </header>
+
+  <main class="amp-workspace" data-amp-workspace>
+    <section class="amp-panel amp-player" aria-labelledby="player-title">
+      <header><span>01</span><h1 id="player-title">HARA AMP</h1><i>NODE/SYNTH</i></header>
+      <div class="player-body">
+        <img src="./assets/hara-amp/hara-amp-emblem.png" alt="Interwoven cyan and violet Hara emblem">
+        <div class="track-copy">
+          <p>NOW PLAYING</p>
+          <strong data-track-title>Hara Signal / Synth WASM</strong>
+          <small data-track-detail>DETERMINISTIC · 120 BPM · LOCAL</small>
+          <div class="time-row">
+            <time data-elapsed>00:00</time>
+            <input data-seek type="range" min="0" max="1000" value="0" aria-label="Seek">
+            <time data-remaining>-00:04</time>
+          </div>
+          <div class="transport" role="group" aria-label="Transport controls">
+            <button data-previous aria-label="Previous track">Ⅰ◀</button>
+            <button data-play class="primary" aria-label="Play">▶</button>
+            <button data-pause aria-label="Pause">Ⅱ</button>
+            <button data-stop aria-label="Stop">■</button>
+            <button data-next aria-label="Next track">▶Ⅰ</button>
+            <button data-shuffle aria-pressed="false">SHUF</button>
+            <button data-repeat aria-pressed="true">LOOP</button>
+          </div>
+          <div class="mix-row">
+            <label>VOL <input data-volume type="range" min="0" max="100" value="78"></label>
+            <label>BAL <input data-balance type="range" min="-100" max="100" value="0"></label>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="amp-panel amp-eq" aria-labelledby="eq-title">
+      <header><span>02</span><h2 id="eq-title">EQUALIZER</h2><i>WEB AUDIO / 10 BAND</i></header>
+      <div class="eq-actions">
+        <button data-eq-enable aria-pressed="true">ENABLED</button>
+        <select data-eq-preset aria-label="Equalizer preset">
+          <option value="flat">FLAT</option>
+          <option value="hara">HARA GLOW</option>
+          <option value="bass">BASS ARC</option>
+          <option value="voice">VOICE</option>
+        </select>
+      </div>
+      <div class="eq-bands" data-eq-bands></div>
+    </section>
+
+    <section class="amp-panel amp-playlist" aria-labelledby="playlist-title">
+      <header><span>03</span><h2 id="playlist-title">PLAYLIST</h2><i>LOCAL MEDIA</i></header>
+      <ol data-playlist>
+        <li class="is-active" data-track-index="0"><b>01</b><span>Hara Signal</span><small>SYNTH.WASM · 00:04</small></li>
+      </ol>
+      <div class="playlist-actions">
+        <label class="file-button">ADD LOCAL
+          <input data-local-file type="file" accept="audio/mpeg,audio/ogg,audio/wav,audio/*" multiple>
+        </label>
+        <button data-clear-local>CLEAR LOCAL</button>
+      </div>
+      <p>Audio bytes and machine paths are never written to <code>workspace.edn</code>.</p>
+    </section>
+
+    <section class="amp-panel amp-visualizer" aria-labelledby="visualizer-title">
+      <header><span>04</span><h2 id="visualizer-title">VISUALIZER</h2><i data-frame-status>HAL · WAITING</i></header>
+      <div class="visual-wrap">
+        <canvas data-visualizer aria-label="Hara WASM FFT spectrum and oscilloscope"></canvas>
+        <img src="./assets/hara-amp/hara-amp-artwork-original.png" alt="" aria-hidden="true">
+        <div class="visual-empty" data-visual-empty>
+          <b>NO SIGNAL</b>
+          <span>PRESS PLAY TO AUTHORIZE AUDIO</span>
+        </div>
+      </div>
+      <div class="visual-actions">
+        <button data-visual-mode="spectrum" aria-pressed="true">SPECTRUM</button>
+        <button data-visual-mode="scope" aria-pressed="false">SCOPE</button>
+        <button data-visual-mode="artwork" aria-pressed="false">ARTWORK</button>
+        <span>FFT.WASM → NODE → NS+ → CANVAS</span>
+      </div>
+    </section>
+  </main>
+
+  <footer class="amp-status">
+    <span>PROJECT <b>hara.amp</b></span>
+    <span>WIRE <b>substrate.v1 / JSON</b></span>
+    <span>AUDIO <b data-audio-status>GESTURE REQUIRED</b></span>
+    <span>WORKSPACE <b data-workspace-status>CLEAN</b></span>
+  </footer>
+  <script type="module" src="./hara-amp.js"></script>
+</body>
+</html>

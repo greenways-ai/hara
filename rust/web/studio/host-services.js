@@ -29,7 +29,7 @@ export function createHostServices(options = {}) {
     return db.transaction(STORE, mode).objectStore(STORE);
   }
 
-  return {
+  const services = {
     "store/get": async (key) => request(await store("readonly"), "get", key),
     "store/put": async (key, value) => {
       await request(await store("readwrite"), "put", value, key);
@@ -52,6 +52,30 @@ export function createHostServices(options = {}) {
     },
     "json/parse": async (text) => fromJson(JSON.parse(text))
   };
+  if (options.nodeRuntime) Object.assign(services, createNodeHostServices(options.nodeRuntime));
+  if (options.renderCanvas) {
+    services["studio.canvas/render"] = async (canvas, scene) => {
+      await options.renderCanvas(canvas, scene);
+      return true;
+    };
+  }
+  return services;
+}
+
+export function createNodeHostServices(runtime) {
+  return {
+    "node/in": (nodeId, signal) => runtime.in(nodeId, signal),
+    "node/in-frame": async (nodeId, signal) => toHta(await runtime.inFrame(nodeId, signal)),
+    "node/emit": async (nodeId, signal, value, meta) =>
+      toHta(await runtime.emit(nodeId, signal, value, toPlain(meta))),
+    "node/call": async (nodeId, target, action, args, opts) =>
+      (await runtime.call(nodeId, target, action, args, toPlain(opts))).data,
+    "node/handle": () => {
+      throw new Error("node/handle requires a kernel callback transport");
+    },
+    "node/stop": (nodeId, task) => runtime.stop(nodeId, task),
+    "node/info": (nodeId) => toHta(runtime.info(nodeId))
+  };
 }
 
 // Decoded shape: objects -> Maps with string keys, arrays -> arrays, scalars
@@ -61,6 +85,26 @@ function fromJson(value) {
   if (Array.isArray(value)) return value.map(fromJson);
   if (value !== null && typeof value === "object") {
     return new Map(Object.entries(value).map(([key, item]) => [key, fromJson(item)]));
+  }
+  return value;
+}
+
+function toPlain(value) {
+  if (value instanceof Map) {
+    return Object.fromEntries([...value].map(([key, entry]) => [
+      key?.constructor?.name === "HtaKeyword" ? key.name : String(key),
+      toPlain(entry)
+    ]));
+  }
+  if (Array.isArray(value)) return value.map(toPlain);
+  return value;
+}
+
+function toHta(value) {
+  if (Array.isArray(value)) return value.map(toHta);
+  if (value !== null && typeof value === "object" &&
+      !(value instanceof Uint8Array) && !(value instanceof ArrayBuffer) && !ArrayBuffer.isView(value)) {
+    return new Map(Object.entries(value).map(([key, entry]) => [key, toHta(entry)]));
   }
   return value;
 }

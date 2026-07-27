@@ -8,7 +8,7 @@ const bytes = new Uint8Array(
   await (await fetch("/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm")).arrayBuffer()
 );
 const resources = {};
-for (const name of ["store", "fs", "space", "boot"]) {
+for (const name of ["store", "fs", "space", "boot", "node", "draw"]) {
   resources[`studio.${name}`] = await (await fetch(`./studio/hal/${name}.hal`)).text();
 }
 const broker = createBrowserBroker({
