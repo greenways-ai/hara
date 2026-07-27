@@ -51,6 +51,75 @@ public class MainTest {
   }
 
   @Test
+  public void fileLibrarySupportsExistsListMkdirAndDelete() throws Exception {
+    Path directory = Files.createTempDirectory("hara-file-library-");
+    try {
+      ByteArrayOutputStream output = new ByteArrayOutputStream();
+      ByteArrayOutputStream error = new ByteArrayOutputStream();
+      String escaped = directory.toString().replace("\\", "\\\\").replace("\"", "\\\"");
+      String child = escaped + "/child.bin";
+      String form =
+          "[(deref (file/write \""
+              + child
+              + "\" (bytes 1 2 3))) "
+              + "(deref (file/exists? \""
+              + child
+              + "\")) "
+              + "(count (deref (file/list \""
+              + escaped
+              + "\"))) "
+              + "(deref (file/delete \""
+              + child
+              + "\")) "
+              + "(deref (file/exists? \""
+              + child
+              + "\"))]";
+      int status =
+          Main.run(
+              new String[] {"--allow-file", "eval", form},
+              new PrintStream(output, true, StandardCharsets.UTF_8),
+              new PrintStream(error, true, StandardCharsets.UTF_8));
+      assertEquals(error.toString(StandardCharsets.UTF_8), 0, status);
+      assertEquals("[nil true 1 nil false]\n", output.toString(StandardCharsets.UTF_8));
+    } finally {
+      Files.walk(directory)
+          .sorted(java.util.Comparator.reverseOrder())
+          .forEach(
+              p -> {
+                try {
+                  Files.deleteIfExists(p);
+                } catch (Exception ignored) {
+                }
+              });
+    }
+  }
+
+  @Test
+  public void stringLibraryUsesSpecNamesAndUnicodeCodePointIndexes() {
+    ByteArrayOutputStream output = new ByteArrayOutputStream();
+    ByteArrayOutputStream error = new ByteArrayOutputStream();
+    String form =
+        "[(str/length \"a😀b\") "
+            + "(str/char-at \"a😀b\" 1) "
+            + "(str/slice \"a😀b\" 1 2) "
+            + "(str/index-of \"a😀b\" \"b\") "
+            + "(str/last-index-of \"😀a😀\" \"😀\") "
+            + "(str/pad-left \"x\" 3 \"😀\") "
+            + "(str/replace-first \"a.a\" \".\" \"-\")]";
+
+    int status =
+        Main.run(
+            new String[] {"eval", form},
+            new PrintStream(output, true, StandardCharsets.UTF_8),
+            new PrintStream(error, true, StandardCharsets.UTF_8));
+
+    assertEquals(error.toString(StandardCharsets.UTF_8), 0, status);
+    assertEquals(
+        "[3 \"\\uD83D\\uDE00\" \"\\uD83D\\uDE00\" 2 2 \"\\uD83D\\uDE00\\uD83D\\uDE00x\" \"a-a\"]\n",
+        output.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
   public void evaluatesAnExpression() {
     ByteArrayOutputStream output = new ByteArrayOutputStream();
     ByteArrayOutputStream error = new ByteArrayOutputStream();

@@ -1,5 +1,6 @@
 import { keywordName, mapValue, renderScene, validateScene } from "./scene.js";
 import { startTron } from "./tron.js";
+import { CreativeRuntime, normalizeCreative } from "./creative.js";
 import { applyParedit, barfForward, insertIndent, killToFormEnd, localFormAt, slurpForward, structuralAlign } from "./editor.js";
 
 const SPACE = "home";
@@ -59,6 +60,41 @@ const DEFAULT_FILES = new Map([
   [:circle 610 130 11 "#f5d742"]
   [:circle 880 120 11 "#bafff8"]]}
 `],
+  ["/sketches/rigged-cube.hal", `;; Creative scenes share the same local form evaluation workflow.
+{:creative/version 1
+ :background "#020408"
+ :entities [{:id "mesh/hero"
+             :mesh {:primitive :box}
+             :material {:color "#41f5e4"}
+             :transform {:rotation [0 0 0]}
+             :rig {:bones [{:id "bone/root" :length 1}
+                           {:id "bone/arm" :parent "bone/root" :length 1}]}}]
+ :audio {:tempo 120 :midi true :voices []}}
+`],
+  ["/templates/3d-editor.hal", `;; 3D editor template — change the mesh, material, or rig, then run.
+{:creative/version 1
+ :background "#020408"
+ :entities [{:id "mesh/hero"
+             :mesh {:primitive :box}
+             :material {:color "#41f5e4"}
+             :transform {:rotation [0 0 0]}
+             :rig {:bones [{:id "bone/root" :length 1}
+                           {:id "bone/arm" :parent "bone/root" :length 1}]}}]
+ :audio {:tempo 120 :midi true :voices []}}
+`],
+  ["/templates/graphing.hal", `;; Graphing template — edit the points or add another series, then run.
+{:version 1
+ :width 960
+ :height 600
+ :background "#020408"
+ :commands
+ [[:rect 72 72 816 456 "#07131d"]
+  [:line 72 300 888 300 "#1a6070" 2]
+  [:line 480 72 480 528 "#1a6070" 2]
+  [:polyline [[92 450] [172 410] [252 355] [332 290] [412 245] [492 270] [572 205] [652 150] [732 175] [812 112]] "#41f5e4" 5]
+  [:circle 492 270 10 "#ff2e88"]
+  [:circle 812 112 10 "#9c7bff"]]}
+`],
   ["/README.hal", `;; HARA VISUAL LAB
 ;;
 ;; Open a sketch from /sketches and press Run.
@@ -88,6 +124,7 @@ const state = {
   dirty: false,
   savedSource: "",
   lastScene: null,
+  creativeRuntime: null,
   editorPrefix: null,
   editorPrefixTimer: null,
   evalRange: null,
@@ -123,18 +160,18 @@ const elements = {
   completions: query("[data-hal-completions]"),
   structuralDiff: query("[data-structural-diff]"),
   outputCanvas: query("[data-output-canvas]"),
+  creativeCanvas: query("[data-creative-canvas]"),
   canvasEmpty: query("[data-canvas-empty]"),
   canvasStatus: query("[data-canvas-status]"),
   canvasSize: query("[data-canvas-size]"),
   canvasWrap: query("[data-canvas-wrap]"),
-  patchWorkbench: query("[data-patch-workbench]"),
-  patchStatus: query("[data-patch-status]"),
   dialog: query("[data-dialog]"),
   dialogForm: query("[data-dialog-form]"),
   dialogTitle: query("[data-dialog-title]"),
   dialogLabel: query("[data-dialog-label]"),
   dialogInput: query("[data-dialog-input]"),
   dialogMessage: query("[data-dialog-message]"),
+  helpDialog: query("[data-help-dialog]"),
   toasts: query("[data-toasts]")
 };
 
@@ -382,6 +419,8 @@ function installWorkspaceNavigation() {
   }
   query("[data-start]").addEventListener("click", () => setWorkspace(1));
   query("[data-home]").addEventListener("click", () => setWorkspace(0));
+  query("[data-workspace-prev]").addEventListener("click", () => setWorkspace(0));
+  query("[data-workspace-next]").addEventListener("click", () => setWorkspace(1));
   for (const dot of queryAll("[data-workspace-dot]")) {
     dot.addEventListener("click", () => setWorkspace(Number(dot.dataset.workspaceDot)));
   }
@@ -410,6 +449,13 @@ function installWorkspaceNavigation() {
   });
 }
 
+function installHelp() {
+  for (const button of queryAll("[data-help]")) {
+    button.addEventListener("click", () => elements.helpDialog.showModal());
+  }
+  query("[data-help-close]").addEventListener("click", () => elements.helpDialog.close());
+}
+
 function installLauncher() {
   elements.launcherToggle.addEventListener("click", () => {
     setLauncher(!elements.launcher.classList.contains("is-open"));
@@ -417,6 +463,9 @@ function installLauncher() {
   elements.launcherScrim.addEventListener("click", closeLauncher);
   for (const tile of queryAll("[data-open-window]")) {
     tile.addEventListener("click", () => openWindow(tile.dataset.openWindow));
+  }
+  for (const tile of queryAll("[data-deploy-template]")) {
+    tile.addEventListener("click", () => deployTemplate(tile.dataset.deployTemplate));
   }
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && elements.launcher.classList.contains("is-open")) {
@@ -426,25 +475,16 @@ function installLauncher() {
   });
 }
 
-async function installPatchWorkbench() {
-  if (!elements.patchWorkbench) return;
-  const { createWorkbench } = await import("./vendor/hara-ui/workbench.js");
-  createWorkbench(elements.patchWorkbench);
-  elements.patchWorkbench.addEventListener("hara:workbench-selection", (event) => {
-    const node = event.detail.node;
-    elements.patchStatus.textContent = node ? `SELECTED // ${node.id.toUpperCase()}` : "STRUCTURED MODEL // READY";
-  });
-  elements.patchWorkbench.addEventListener("hara:workbench-structural-edit", (event) => {
-    elements.patchStatus.textContent = `MODEL // ${event.detail.kind.toUpperCase()}`;
-    elements.editorStatus.textContent = "PATCH MODEL CHANGED // SOURCE BRIDGE PENDING";
-  });
-  elements.patchWorkbench.addEventListener("hara:workbench-rejected-edit", () => {
-    elements.patchStatus.textContent = "REJECTED // INCOMPATIBLE PORTS";
-    toast("PATCH REJECTED: INCOMPATIBLE PORTS", true);
-  });
-  elements.patchWorkbench.addEventListener("hara:workbench-layout-change", () => {
-    elements.patchStatus.textContent = "LAYOUT // UPDATED";
-  });
+async function deployTemplate(name) {
+  const path = name === "3d" ? "/templates/3d-editor.hal" : "/templates/graphing.hal";
+  const source = DEFAULT_FILES.get(path);
+  if (!state.broker || !source) return toast("RUNTIME STILL BOOTING", true);
+  await evalStudio(`(fs/write! ${JSON.stringify(SPACE)} ${JSON.stringify(path)} ${JSON.stringify(source)})`);
+  await listFiles();
+  await openFile(path, true);
+  openWindow("canvas");
+  await evaluateFile();
+  toast(`${name === "3d" ? "3D EDITOR" : "GRAPHING"} TEMPLATE DEPLOYED`);
 }
 
 function studioSource(form) {
@@ -732,6 +772,8 @@ function showInlineEval(form, label, error = false) {
 }
 
 function showScene(scene, started, target) {
+  elements.creativeCanvas.hidden = true;
+  elements.outputCanvas.hidden = false;
   state.lastScene = scene;
   query('[data-window="canvas"]').classList.remove("is-hidden");
   drawLastScene();
@@ -741,6 +783,19 @@ function showScene(scene, started, target) {
   elements.editorStatus.textContent = `${target} RENDERED`;
   if (innerWidth <= 900) focusWindow(query('[data-window="canvas"]'));
   toast(`${target} RENDERED`);
+}
+
+function showCreative(scene, started, target) {
+  state.creativeRuntime ??= new CreativeRuntime(elements.creativeCanvas);
+  elements.outputCanvas.hidden = true;
+  elements.creativeCanvas.hidden = false;
+  state.creativeRuntime.render(scene);
+  query('[data-window="canvas"]').classList.remove("is-hidden");
+  elements.canvasEmpty.classList.add("is-hidden");
+  elements.canvasStatus.textContent = `3D // ${Math.round(performance.now() - started)} MS`;
+  elements.canvasSize.textContent = `${scene.entities.length} ENTITY${scene.entities.length === 1 ? "" : "IES"}`;
+  elements.editorStatus.textContent = `${target} CREATIVE`;
+  toast(`${target} CREATIVE SCENE`);
 }
 
 function hideCompletions() {
@@ -872,11 +927,18 @@ async function evaluateForm(form = null, target = "FORM") {
       syncHighlight();
       showScene(scene, started, target);
     } catch {
-      const label = resultLabel(result);
-      elements.editorStatus.textContent = `EVAL // ${label}`;
-      state.evalRange = null;
-      syncHighlight();
-      showInlineEval(form, label);
+      try {
+        const creative = normalizeCreative(result);
+        state.evalRange = null;
+        syncHighlight();
+        showCreative(creative, started, target);
+      } catch {
+        const label = resultLabel(result);
+        elements.editorStatus.textContent = `EVAL // ${label}`;
+        state.evalRange = null;
+        syncHighlight();
+        showInlineEval(form, label);
+      }
     }
   } catch (error) {
     const message = errorText(error);
@@ -1035,15 +1097,6 @@ function installFileActions() {
     toast(`DELETED ${path}`);
   });
 
-  query("[data-reset-demo]").addEventListener("click", async () => {
-    closeLauncher();
-    if (!await confirmDialog("RESET HARA DEMO", "Restore the example files and default window layout?")) return;
-    localStorage.removeItem(WINDOWS_KEY);
-    await seedFiles(true);
-    state.activeFile = null;
-    state.dirty = false;
-    location.reload();
-  });
 }
 
 async function bootRuntime() {
@@ -1232,8 +1285,8 @@ function installEditor() {
 
 installWorkspaceNavigation();
 installLauncher();
+installHelp();
 installWindowManager();
-installPatchWorkbench();
 installEditor();
 installFileActions();
 restoreWindows();

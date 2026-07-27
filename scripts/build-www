@@ -17,6 +17,7 @@ mkdir -p "$OUT/vendor"
 cp "$ROOT/website/index.html" \
    "$ROOT/website/app.css" \
    "$ROOT/website/app.js" \
+   "$ROOT/website/creative.js" \
    "$ROOT/website/editor.js" \
    "$ROOT/website/hara-amp.html" \
    "$ROOT/website/hara-amp.css" \

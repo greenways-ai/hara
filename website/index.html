@@ -13,7 +13,7 @@
   <meta property="og:image:height" content="909">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://www.hara-lang.org/og-hara-ribbon.png">
-  <link rel="icon" href="./vendor/hara-ui/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="./assets/hara-favicon.svg" type="image/svg+xml">
   <title>HARA — Lisp for the Agentic Age</title>
   <link rel="stylesheet" href="./vendor/hara-ui/tokens.css">
   <link rel="stylesheet" href="./vendor/hara-ui/components.css">
@@ -32,12 +32,16 @@
           <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
         </span>
       </button>
-      <button class="system-button home-button" type="button" data-home aria-label="Go to Hara home">
-        <span aria-hidden="true">⌂</span>
+      <button class="system-button workspace-nav-button" type="button" data-workspace-prev aria-label="Previous workspace">
+        <span aria-hidden="true">‹</span>
+      </button>
+      <button class="system-button workspace-nav-button" type="button" data-workspace-next aria-label="Next workspace">
+        <span aria-hidden="true">›</span>
       </button>
     </div>
 
     <div class="system-identity">
+      <img class="system-mark" src="./assets/hara-mark.svg" alt="">
       <span class="system-title">HARA</span>
       <span class="system-context" data-system-context>WELCOME // 01</span>
     </div>
@@ -65,10 +69,13 @@
 
   <aside class="app-launcher" id="app-launcher" data-launcher aria-hidden="true">
     <div class="launcher-head">
-      <span>APPLICATIONS</span>
-      <span class="launcher-index">SYS // 01</span>
+      <span>HARA LAUNCHER</span>
     </div>
     <div class="launcher-grid">
+      <button type="button" class="app-tile" data-home>
+        <span class="app-icon" aria-hidden="true">⌂</span>
+        <span>Home</span>
+      </button>
       <button type="button" class="app-tile" data-open-window="files">
         <span class="app-icon" aria-hidden="true">F</span>
         <span>Files</span>
@@ -81,17 +88,25 @@
         <span class="app-icon app-icon-canvas" aria-hidden="true">◎</span>
         <span>Canvas</span>
       </button>
-      <button type="button" class="app-tile" data-open-window="patch">
-        <span class="app-icon app-icon-patch" aria-hidden="true">⊞</span>
-        <span>Patch</span>
-      </button>
       <a class="app-tile" href="./hara-amp.html">
         <span class="app-icon app-icon-canvas" aria-hidden="true">♫</span>
-        <span>Hara Amp</span>
+        <span>Music Template</span>
+      </a>
+      <button type="button" class="app-tile" data-deploy-template="3d">
+        <span class="app-icon app-icon-editor" aria-hidden="true">3D</span>
+        <span>3D Editor</span>
+      </button>
+      <button type="button" class="app-tile" data-deploy-template="graph">
+        <span class="app-icon app-icon-canvas" aria-hidden="true">∿</span>
+        <span>Graphing Template</span>
+      </button>
+      <a class="app-tile" href="https://docs.hara-lang.org/learn-programming/" target="_blank" rel="noreferrer">
+        <span class="app-icon" aria-hidden="true">01</span>
+        <span>Learning Book</span>
       </a>
       <a class="app-tile" href="https://docs.hara-lang.org/user-guide/" target="_blank" rel="noreferrer">
-        <span class="app-icon" aria-hidden="true">L</span>
-        <span>Learn</span>
+        <span class="app-icon" aria-hidden="true">02</span>
+        <span>Language Book</span>
       </a>
       <a class="app-tile" href="https://docs.hara-lang.org/" target="_blank" rel="noreferrer">
         <span class="app-icon" aria-hidden="true">D</span>
@@ -101,10 +116,6 @@
         <span class="app-icon" aria-hidden="true">G</span>
         <span>GitHub</span>
       </a>
-    </div>
-    <div class="launcher-foot">
-      <span>LOCAL RUNTIME</span>
-      <button type="button" data-reset-demo>RESET DEMO</button>
     </div>
   </aside>
   <div class="launcher-scrim" data-launcher-scrim></div>
@@ -118,14 +129,15 @@
         </div>
         <div class="welcome-copy">
           <p class="welcome-kicker">FAST · EMBEDDABLE · WASM NATIVE</p>
-          <h1 id="welcome-title">HARA</h1>
+          <img class="welcome-mark" src="./assets/hara-mark.svg" alt="Hara" id="welcome-title">
           <p class="welcome-tagline">Lisp for the Agentic Age.</p>
         </div>
         <button class="start-button" type="button" data-start>
-          <img class="start-mark" src="./assets/hara-amp/hara-emblem.svg" alt="">
+          <img class="start-mark" src="./assets/hara-mark.svg" alt="">
           <span>START</span>
           <i aria-hidden="true">→</i>
         </button>
+        <button class="need-help" type="button" data-help>NEED HELP? <span aria-hidden="true">→</span></button>
         <nav class="welcome-coordinate" aria-label="Hara project links">
           <a href="https://github.com/hara-lang/hara" target="_blank" rel="noreferrer">GITHUB ↗</a>
           <span aria-hidden="true">//</span>
@@ -138,7 +150,6 @@
         <div class="desktop-grid" aria-hidden="true"></div>
         <div class="desktop-label" aria-hidden="true">
           <span>HARA // VISUAL LAB</span>
-          <span>LOCAL SPACE · HOME</span>
         </div>
 
         <section class="app-window files-window" data-window="files"
@@ -162,7 +173,7 @@
             </div>
           </div>
           <div class="file-tree" data-file-tree>
-            <div class="window-loading">MOUNTING LOCAL SPACE…</div>
+            <div class="window-loading">OPENING WORKSPACE…</div>
           </div>
           <div class="window-status">
             <span data-file-count>0 FILES</span>
@@ -224,6 +235,7 @@
           </div>
           <div class="canvas-wrap" data-canvas-wrap>
             <canvas data-output-canvas aria-label="Rendered output from the Hara program"></canvas>
+            <canvas data-creative-canvas aria-label="Rendered 3D Hara scene" hidden></canvas>
             <div class="canvas-empty" data-canvas-empty>
               <span>NO SIGNAL</span>
               <small>RUN A HARA FILE TO RENDER</small>
@@ -235,31 +247,33 @@
           </div>
         </section>
 
-        <section class="app-window patch-window" data-window="patch"
-                 aria-label="Visual patch window" tabindex="-1">
-          <div class="window-titlebar" data-drag-handle>
-            <div class="window-title">
-              <span class="window-number">04</span>
-              <span>PATCH</span>
-            </div>
-            <div class="window-controls">
-              <button type="button" data-window-maximize aria-label="Maximize Patch">□</button>
-              <button type="button" data-window-close aria-label="Close Patch">×</button>
-            </div>
-          </div>
-          <div class="patch-host" data-patch-workbench aria-label="Visual program patch"></div>
-          <div class="window-status">
-            <span data-patch-status>STRUCTURED MODEL // READY</span>
-            <span>DRAG NODES · WIRE COMPATIBLE PORTS · SOURCE TAB</span>
-          </div>
-        </section>
-
         <div class="desktop-hint" aria-hidden="true">
           DRAG WINDOWS · RESIZE FROM EDGES · RUN THE OPEN FILE
         </div>
       </section>
     </div>
   </main>
+
+  <footer class="system-bottom-bar">
+    <div class="runtime-state" aria-live="polite">
+      <span class="runtime-led" data-runtime-led></span>
+      <span data-runtime-label>WASM // STANDBY</span>
+    </div>
+    <button type="button" class="help-button" data-help aria-label="Open Hara help">? <span>HELP</span></button>
+  </footer>
+
+  <dialog class="hara-dialog hara-help-dialog" data-help-dialog>
+    <div class="dialog-head"><span>HARA // HELP</span><button type="button" data-help-close aria-label="Close help">×</button></div>
+    <div class="help-content">
+      <p>Use the launcher to start a template, open a book, or return home.</p>
+      <dl>
+        <div><dt>‹ / ›</dt><dd>Move between the welcome page and workspace.</dd></div>
+        <div><dt>Ctrl E</dt><dd>Evaluate the current form in the editor.</dd></div>
+        <div><dt>Ctrl E E</dt><dd>Run the open Hara file.</dd></div>
+        <div><dt>Ctrl S</dt><dd>Save the open file.</dd></div>
+      </dl>
+    </div>
+  </dialog>
 
   <dialog class="hara-dialog" data-dialog>
     <form method="dialog" data-dialog-form>
