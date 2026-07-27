@@ -67,3 +67,52 @@ export function insertIndent(editor, unindent = false) {
   replace(editor, from, to, next, "select");
   editor.setSelectionRange(from, from + next.length);
 }
+
+function formsIn(source) {
+  const forms = [];
+  const stack = [];
+  let inString = false;
+  let inComment = false;
+  let escaped = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (inComment) {
+      if (character === "\n") inComment = false;
+      continue;
+    }
+    if (inString) {
+      if (!escaped && character === '"') inString = false;
+      escaped = !escaped && character === "\\";
+      continue;
+    }
+    if (character === ";") { inComment = true; continue; }
+    if (character === '"') { inString = true; escaped = false; continue; }
+    if (Object.hasOwn(PAIRS, character)) stack.push({ opener: character, start: index });
+    if (CLOSERS.has(character) && stack.length && PAIRS[stack.at(-1).opener] === character) {
+      const form = stack.pop();
+      forms.push({ start: form.start, end: index + 1 });
+    }
+  }
+  return forms;
+}
+
+/** Return the innermost balanced form at a caret, or the atom beneath it. */
+export function localFormAt(source, caret) {
+  const forms = formsIn(source)
+    .filter((form) => form.start <= caret && caret <= form.end)
+    .sort((left, right) => left.end - left.start - (right.end - right.start));
+  if (forms.length) {
+    const form = forms[0];
+    return { ...form, source: source.slice(form.start, form.end) };
+  }
+  const before = source.slice(0, caret).search(/[^\s()[\]{}]/) === -1 ? caret : caret;
+  const start = source.lastIndexOf("\n", before - 1) + 1;
+  const line = source.slice(start, source.indexOf("\n", before) === -1 ? source.length : source.indexOf("\n", before));
+  const token = /[^\s()[\]{}]+/g;
+  for (const match of line.matchAll(token)) {
+    const tokenStart = start + match.index;
+    const tokenEnd = tokenStart + match[0].length;
+    if (tokenStart <= caret && caret <= tokenEnd) return { start: tokenStart, end: tokenEnd, source: match[0] };
+  }
+  return null;
+}

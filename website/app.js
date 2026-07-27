@@ -1,12 +1,22 @@
 import { renderScene, validateScene } from "./scene.js";
 import { startTron } from "./tron.js";
-import { applyParedit, insertIndent } from "./editor.js";
+import { applyParedit, insertIndent, localFormAt } from "./editor.js";
 
 const SPACE = "home";
 const ROOT = "ROOT";
 const ACTIVE_FILE_KEY = "hara-www.active-file.v1";
 const WINDOWS_KEY = "hara-www.windows.v1";
 const WORKSPACE_KEY = "hara-www.workspace.v1";
+const HAL_FORMS = [
+  ["def", "bind a named value"], ["defn", "define a function"], ["fn", "anonymous function"],
+  ["let", "local bindings"], ["if", "conditional branch"], ["when", "conditional body"],
+  ["do", "evaluate forms in sequence"], ["cond", "multi-branch conditional"],
+  ["map", "transform a collection"], ["filter", "select collection values"], ["reduce", "fold a collection"],
+  ["get", "read a value from a collection"], ["assoc", "associate map entries"],
+  ["vec", "make a vector"], ["concat", "join collections"], ["println", "write a value"],
+  [":version", "scene format version"], [":commands", "scene drawing commands"],
+  [":background", "scene background colour"], [":width", "scene width"], [":height", "scene height"]
+];
 
 const DEFAULT_FILES = new Map([
   ["/sketches/neon-orbit.hal", `;; Edit the node data, then press Run.
@@ -108,6 +118,8 @@ const elements = {
   save: query("[data-save]"),
   run: query("[data-run]"),
   paredit: query("[data-paredit]"),
+  inlineEval: query("[data-inline-eval]"),
+  completions: query("[data-hal-completions]"),
   outputCanvas: query("[data-output-canvas]"),
   canvasEmpty: query("[data-canvas-empty]"),
   canvasStatus: query("[data-canvas-status]"),
@@ -121,6 +133,8 @@ const elements = {
   dialogMessage: query("[data-dialog-message]"),
   toasts: query("[data-toasts]")
 };
+
+const completionState = { entries: [], index: 0, start: 0 };
 
 function toast(message, error = false) {
   const node = document.createElement("div");
@@ -428,27 +442,110 @@ function drawLastScene() {
   renderScene(elements.outputCanvas, state.lastScene);
 }
 
-async function runFile() {
+function resultLabel(value) {
+  if (value == null) return "NIL";
+  if (typeof value === "string") return JSON.stringify(value).slice(0, 90);
+  try { return JSON.stringify(value).slice(0, 90); } catch { return String(value).slice(0, 90); }
+}
+
+function positionEditorOverlay(node, offset) {
+  const source = elements.editor.value.slice(0, offset);
+  const line = source.split("\n").length - 1;
+  const column = source.length - source.lastIndexOf("\n") - 1;
+  node.style.top = `${14 + line * 18 - elements.editor.scrollTop}px`;
+  node.style.left = `${62 + Math.min(column * 7.1, Math.max(30, elements.editor.clientWidth - 190))}px`;
+}
+
+function showInlineEval(form, label, error = false) {
+  elements.inlineEval.textContent = `⇒ ${label}`;
+  elements.inlineEval.classList.toggle("is-error", error);
+  elements.inlineEval.hidden = false;
+  positionEditorOverlay(elements.inlineEval, form.end ?? elements.editor.selectionEnd);
+}
+
+function hideCompletions() {
+  elements.completions.hidden = true;
+  completionState.entries = [];
+}
+
+function completionPrefix() {
+  const before = elements.editor.value.slice(0, elements.editor.selectionStart);
+  const match = before.match(/[:A-Za-z*+!?._/-]+$/);
+  return match ? { value: match[0], start: before.length - match[0].length } : null;
+}
+
+function renderCompletions() {
+  elements.completions.replaceChildren();
+  for (const [index, entry] of completionState.entries.entries()) {
+    const [form, detail] = entry;
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = `hal-completion${index === completionState.index ? " is-active" : ""}`;
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", String(index === completionState.index));
+    item.innerHTML = `<strong>${form}</strong><small>${detail}</small>`;
+    item.addEventListener("mousedown", (event) => { event.preventDefault(); acceptCompletion(index); });
+    elements.completions.append(item);
+  }
+  positionEditorOverlay(elements.completions, elements.editor.selectionStart);
+  elements.completions.style.left = `${Math.max(52, Number.parseFloat(elements.completions.style.left) - 10)}px`;
+  elements.completions.style.top = `${Number.parseFloat(elements.completions.style.top) + 20}px`;
+  elements.completions.hidden = !completionState.entries.length;
+}
+
+function updateCompletions() {
+  const prefix = completionPrefix();
+  if (!prefix || prefix.value.length < 2) return hideCompletions();
+  const entries = HAL_FORMS.filter(([form]) => form.startsWith(prefix.value)).slice(0, 8);
+  if (!entries.length) return hideCompletions();
+  completionState.entries = entries;
+  completionState.index = 0;
+  completionState.start = prefix.start;
+  renderCompletions();
+}
+
+function acceptCompletion(index = completionState.index) {
+  const entry = completionState.entries[index];
+  if (!entry) return;
+  elements.editor.setRangeText(entry[0], completionState.start, elements.editor.selectionStart, "end");
+  elements.editor.dispatchEvent(new Event("input", { bubbles: true }));
+  hideCompletions();
+}
+
+async function evaluateForm() {
   if (!state.activeFile) return;
   elements.run.disabled = true;
-  elements.editorStatus.textContent = "EVALUATING";
+  const selection = elements.editor.value.slice(elements.editor.selectionStart, elements.editor.selectionEnd).trim();
+  const form = selection ? { source: selection } : localFormAt(elements.editor.value, elements.editor.selectionStart);
+  if (!form?.source) {
+    elements.editorStatus.textContent = "NO FORM AT CURSOR";
+    elements.run.disabled = false;
+    return;
+  }
+  elements.editorStatus.textContent = "EVALUATING FORM";
   const started = performance.now();
   try {
-    await saveFile(false);
-    const result = await state.broker.eval(ROOT, elements.editor.value);
-    const scene = validateScene(result);
-    state.lastScene = scene;
-    query('[data-window="canvas"]').classList.remove("is-hidden");
-    drawLastScene();
-    elements.canvasEmpty.classList.add("is-hidden");
-    elements.canvasStatus.textContent = `FRAME // ${Math.round(performance.now() - started)} MS`;
-    elements.canvasSize.textContent = `${scene.width} × ${scene.height}`;
-    elements.editorStatus.textContent = "RENDERED";
-    if (innerWidth <= 900) focusWindow(query('[data-window="canvas"]'));
-    toast(`RENDERED ${state.activeFile}`);
+    const result = await state.broker.eval(ROOT, form.source);
+    try {
+      const scene = validateScene(result);
+      state.lastScene = scene;
+      query('[data-window="canvas"]').classList.remove("is-hidden");
+      drawLastScene();
+      elements.canvasEmpty.classList.add("is-hidden");
+      elements.canvasStatus.textContent = `FRAME // ${Math.round(performance.now() - started)} MS`;
+      elements.canvasSize.textContent = `${scene.width} × ${scene.height}`;
+      elements.editorStatus.textContent = "FORM RENDERED";
+      if (innerWidth <= 900) focusWindow(query('[data-window="canvas"]'));
+      toast("FORM RENDERED");
+    } catch {
+      const label = resultLabel(result);
+      elements.editorStatus.textContent = `EVAL // ${label}`;
+      showInlineEval(form, label);
+    }
   } catch (error) {
     const message = errorText(error);
     elements.editorStatus.textContent = `ERROR // ${message}`;
+    showInlineEval(form, message, true);
     elements.canvasStatus.textContent = "FRAME // LAST GOOD";
     toast(message, true);
   } finally {
@@ -623,18 +720,36 @@ function installEditor() {
   elements.editor.addEventListener("input", () => {
     state.dirty = true;
     updateEditorChrome();
+    updateCompletions();
   });
   elements.editor.addEventListener("scroll", () => {
     elements.lineNumbers.scrollTop = elements.editor.scrollTop;
+    if (!elements.inlineEval.hidden) positionEditorOverlay(elements.inlineEval, elements.editor.selectionEnd);
+    if (!elements.completions.hidden) renderCompletions();
   });
   elements.editor.addEventListener("keydown", (event) => {
+    if (!elements.completions.hidden) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        completionState.index = (completionState.index + direction + completionState.entries.length) % completionState.entries.length;
+        renderCompletions();
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        acceptCompletion();
+        return;
+      }
+      if (event.key === "Escape") hideCompletions();
+    }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
       event.preventDefault();
       saveFile();
     }
     if ((event.metaKey || event.ctrlKey) && (event.key === "Enter" || event.key.toLowerCase() === "e")) {
       event.preventDefault();
-      runFile();
+      evaluateForm();
     }
     if (elements.paredit.getAttribute("aria-pressed") === "true" &&
         !event.metaKey && !event.ctrlKey && !event.altKey &&
@@ -653,8 +768,9 @@ function installEditor() {
     elements.paredit.textContent = enabled ? "PAREDIT // ON" : "PAREDIT // OFF";
     toast(enabled ? "PAREDIT ENABLED" : "PAREDIT DISABLED");
   });
+  elements.editor.addEventListener("blur", () => setTimeout(hideCompletions, 120));
   elements.save.addEventListener("click", () => saveFile());
-  elements.run.addEventListener("click", runFile);
+  elements.run.addEventListener("click", evaluateForm);
 }
 
 startTron(query("[data-tron]"));

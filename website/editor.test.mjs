@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyParedit } from "./editor.js";
+import { applyParedit, localFormAt } from "./editor.js";
 
 function editor(value, start = value.length, end = start) {
   return {
@@ -35,4 +35,15 @@ test("paredit skips an existing closer and removes empty pairs", () => {
   input.setSelectionRange(1, 1);
   applyParedit(input, "Backspace");
   assert.equal(input.value, "");
+});
+
+test("local evaluation selects the innermost balanced form", () => {
+  const source = "(do (def x (+ 1 2)) (* x 3))";
+  const form = localFormAt(source, source.indexOf("1"));
+  assert.equal(form.source, "(+ 1 2)");
+});
+
+test("local evaluation ignores delimiters inside comments and strings", () => {
+  const source = '(do ; ) ignored\n  (println "[") )';
+  assert.equal(localFormAt(source, source.indexOf("println")).source, '(println "[")');
 });

@@ -651,7 +651,54 @@ body[data-workspace="1"] .workspace-track { transform: translate3d(-100vw, 0, 0)
   line-height: 1.65;
   tab-size: 2;
   white-space: pre;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
+
+.inline-eval {
+  position: absolute;
+  z-index: 3;
+  max-width: min(42%, 340px);
+  overflow: hidden;
+  padding: 1px 6px;
+  color: var(--cyan);
+  background: rgba(2, 12, 16, .94);
+  border: 1px solid rgba(65, 245, 228, .28);
+  font: .61rem/1.35 "SFMono-Regular", Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.inline-eval.is-error { color: var(--pink); border-color: rgba(255, 46, 136, .35); }
+
+.hal-completions {
+  position: absolute;
+  z-index: 4;
+  min-width: 190px;
+  max-width: 320px;
+  max-height: 190px;
+  overflow: auto;
+  padding: 4px;
+  background: #071019;
+  border: 1px solid rgba(65, 245, 228, .32);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .45);
+}
+
+.hal-completion {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hal-completion strong { color: var(--cyan); font: .64rem "SFMono-Regular", Consolas, monospace; }
+.hal-completion small { color: var(--muted); font-size: .52rem; }
+.hal-completion.is-active, .hal-completion:hover { background: rgba(65, 245, 228, .1); }
 
 .editor-surface textarea::selection {
   color: #fff;
