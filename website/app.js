@@ -163,6 +163,7 @@ const elements = {
   dialogLabel: query("[data-dialog-label]"),
   dialogInput: query("[data-dialog-input]"),
   dialogMessage: query("[data-dialog-message]"),
+  helpDialog: query("[data-help-dialog]"),
   toasts: query("[data-toasts]")
 };
 
@@ -338,6 +339,8 @@ function installWindowManager() {
 function installWorkspaceNavigation() {
   query("[data-start]").addEventListener("click", () => setWorkspace(1));
   query("[data-home]").addEventListener("click", () => setWorkspace(0));
+  query("[data-workspace-prev]").addEventListener("click", () => setWorkspace(0));
+  query("[data-workspace-next]").addEventListener("click", () => setWorkspace(1));
   for (const dot of queryAll("[data-workspace-dot]")) {
     dot.addEventListener("click", () => setWorkspace(Number(dot.dataset.workspaceDot)));
   }
@@ -364,6 +367,13 @@ function installWorkspaceNavigation() {
       setWorkspace(dx < 0 ? 1 : 0);
     }
   });
+}
+
+function installHelp() {
+  for (const button of queryAll("[data-help]")) {
+    button.addEventListener("click", () => elements.helpDialog.showModal());
+  }
+  query("[data-help-close]").addEventListener("click", () => elements.helpDialog.close());
 }
 
 function installLauncher() {
@@ -1056,15 +1066,6 @@ function installFileActions() {
     toast(`DELETED ${path}`);
   });
 
-  query("[data-reset-demo]").addEventListener("click", async () => {
-    closeLauncher();
-    if (!await confirmDialog("RESET HARA DEMO", "Restore the example files and default window layout?")) return;
-    localStorage.removeItem(WINDOWS_KEY);
-    await seedFiles(true);
-    state.activeFile = null;
-    state.dirty = false;
-    location.reload();
-  });
 }
 
 async function bootRuntime() {
@@ -1239,6 +1240,7 @@ function installEditor() {
 startTron(query("[data-tron]"));
 installWorkspaceNavigation();
 installLauncher();
+installHelp();
 installWindowManager();
 installEditor();
 installFileActions();
