@@ -9,7 +9,7 @@ assets. The pages deploy copies the runtime-facing pieces under
 - `hta.js` / `hta-worker.js` — the raw HTA loader: `HtaContext` drives one
   raw wasm instance (`rust/raw`) inside a Web Worker over the `HTA1` binary
   wire format, with handles and the promise-provider contract
-  (`spec/hara/extensions-contract.md`).
+  (`specs/hara/extensions-contract.md`).
 - `index.html` / `playground.js` — the wasm-bindgen playground page
   (in-browser runtime plus Noir proving).
 - `noir-loader.js` — Noir circuit loader/backends for the playground and the

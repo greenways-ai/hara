@@ -30,7 +30,7 @@ result directly into the current buffer at point.
 5. Add the keybinding to `hara-mode-map`.
 6. Add an ERT test that mocks the connection and asserts the result is
    inserted at point.
-7. Update `apps/hara-emacs/README.md`.
+7. Update `extensions/hara-emacs/README.md`.
 
 ## Why async
 
@@ -40,6 +40,6 @@ of the mode.
 
 ## Files changed
 
-- `apps/hara-emacs/hara-mode.el`
-- `apps/hara-emacs/test/hara-mode-test.el`
-- `apps/hara-emacs/README.md`
+- `extensions/hara-emacs/hara-mode.el`
+- `extensions/hara-emacs/test/hara-mode-test.el`
+- `extensions/hara-emacs/README.md`

@@ -1,6 +1,6 @@
 # WASM Foundation Parity Audit
 
-**Scope:** `spec/hara/data/foundation.edn` vs the Rust/WASM runtimes (`rust/src/core.rs`, `rust/src/lib.rs`, `rust/raw/src/lib.rs`).
+**Scope:** `specs/hara/data/foundation.edn` vs the Rust/WASM runtimes (`rust/src/core.rs`, `rust/src/lib.rs`, `rust/raw/src/lib.rs`).
 **Date:** 2026-07-25
 **Status:** snapshot of `main` after the studio-kernels merge.
 
@@ -29,7 +29,7 @@ surface.
 
 ## Methodology
 
-- Read `spec/hara/data/foundation.edn` as the authority.
+- Read `specs/hara/data/foundation.edn` as the authority.
 - Cross-referenced each boundary item against:
   - special-form dispatch in `rust/src/core.rs`
   - builtin/object/array method implementations in `rust/src/core.rs`

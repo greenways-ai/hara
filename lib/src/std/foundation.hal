@@ -4,7 +4,7 @@
 ;; Contract:
 ;;   * Keep this layer free of host interop and Java-specific values.
 ;;   * Every public definition carries a docstring and a ^{:schema ...}
-;;     annotation in the std.typed surface grammar (spec/hara/data/typed.edn).
+;;     annotation in the std.typed surface grammar (specs/hara/data/typed.edn).
 ;;     Annotations are data: checked by the std.typed linter, never required
 ;;     at runtime. This file is the linter's dogfood target.
 ;;   * Variadic signatures use & in the schema input vector, e.g.
@@ -14,8 +14,8 @@
 ;;     outside the value-type schema grammar.
 ;;
 ;; Authoritative references:
-;;   * spec/hara/data/foundation.edn — the namespace boundary (what exists).
-;;   * spec/hara/data/typed.edn      — the schema grammar (how types are written).
+;;   * specs/hara/data/foundation.edn — the namespace boundary (what exists).
+;;   * specs/hara/data/typed.edn      — the schema grammar (how types are written).
 ;; ============================================================================
 (ns std.foundation
   (:config

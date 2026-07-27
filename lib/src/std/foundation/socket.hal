@@ -5,7 +5,7 @@
 ;; namespace is always available, but operations only succeed when the host
 ;; grants network authority.
 ;;
-;; Contract (spec/hara/runtime-libraries.md, Socket v1):
+;; Contract (specs/hara/runtime-libraries.md, Socket v1):
 ;;   * connect accepts host, port, a reserved options value, and an
 ;;     (fn [error connection] ...) callback.
 ;;   * send accepts bytes and returns the byte count.

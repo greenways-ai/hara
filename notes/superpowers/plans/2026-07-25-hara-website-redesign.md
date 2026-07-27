@@ -494,8 +494,8 @@
         - Foundation porting: foundation-porting.md
         - Java API: javadocs.md
     - Apps:
-        - hara-chrome: '!include ../apps/hara-chrome/mkdocs.yml'
-        - hara-emacs: '!include ../apps/hara-emacs/mkdocs.yml'
+        - hara-chrome: '!include ../extensions/hara-chrome/mkdocs.yml'
+        - hara-emacs: '!include ../extensions/hara-emacs/mkdocs.yml'
     - Books:
         - The Little Book of HAL: '!include ../books/the-little-book-of-hal/mkdocs.yml'
   ```

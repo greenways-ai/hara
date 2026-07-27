@@ -20,9 +20,8 @@ Truffle parser / AST
 ## Repository layout
 
 This repository (`hara-lang/hara`) is the workspace. It keeps the language
-runtime (`java/`, `rust/`, `lib/`) and the landing-page website (`website/`).
-Other major sections live in Git submodules and are exposed through root
-symlinks:
+runtime (`java/`, `rust/`, `lib/`), the landing-page website (`website/`), and
+several Git submodules at the root:
 
 - [`java/`](java/) — the Java/Truffle runtime (Maven project, CLI, native-image).
 - [`rust/`](rust/) — the Rust/embedding runtime: native CLI, wasm builds, web
@@ -32,19 +31,17 @@ symlinks:
   ([`lib/examples/`](lib/examples/)), and benchmark suites
   ([`lib/bench/`](lib/bench/)).
 - [`website/`](website/) — the landing page for `www.hara-lang.org`.
-- [`docs`](docs) → [`hara-docs/`](hara-docs) — published documentation site
-  (Material for MkDocs). Lives in the [`hara-lang/hara-docs`](https://github.com/hara-lang/hara-docs)
+- [`docs/`](docs/) — published documentation site (Material for MkDocs). Lives
+  in the [`hara-lang/hara-docs`](https://github.com/hara-lang/hara-docs)
   submodule.
-- [`extensions`](extensions) → [`hara-extensions/`](hara-extensions) — editor and
-  browser apps (`hara-chrome`, `hara-vscode`, `hara-emacs`, `hara-world`,
-  planned `hara-lsp`). Lives in the
+- [`extensions/`](extensions/) — editor and browser apps (`hara-chrome`,
+  `hara-vscode`, `hara-emacs`, `hara-world`, planned `hara-lsp`). Lives in the
   [`hara-lang/hara-extensions`](https://github.com/hara-lang/hara-extensions)
   submodule.
-- [`specs`](specs) → [`hara-specs/`](hara-specs) — normative specs: prose
-  (`.md`), machine-checked corpora, and spec-shaped data. Lives in the
+- [`specs/`](specs/) — normative specs: prose (`.md`), machine-checked corpora,
+  and spec-shaped data. Lives in the
   [`hara-lang/hara-specs`](https://github.com/hara-lang/hara-specs) submodule.
-- [`archive`](archive) → [`hara-archive/`](hara-archive) — legacy material kept
-  for history. Lives in the
+- [`archive/`](archive/) — legacy material kept for history. Lives in the
   [`hara-lang/hara-archive`](https://github.com/hara-lang/hara-archive)
   submodule.
 - [`notes/`](notes/) — working documents (not published): design notes and

@@ -183,7 +183,7 @@ File loading is not a reader primitive. Module loading remains namespace infrast
 general filesystem access belongs in `std.foundation.file`.
 
 The detailed builtin and Hara-defined symbol inventory remains data in
-`spec/hara/foundation.edn`. Public `iter-*` mechanics and `mapv` are not part of the language
+`specs/hara/foundation.edn`. Public `iter-*` mechanics and `mapv` are not part of the language
 surface. Direct `(map f source)` is eager and preserves the origin family; `(map f)` returns a
 lazy iterator transform.
 
@@ -251,7 +251,7 @@ notifications, URL helpers, and the legacy tmux conveniences are outside this bo
 
 ## Implementation status in the editable spec
 
-`spec/hara/foundation.edn` should distinguish the normative boundary from implementation
+`specs/hara/foundation.edn` should distinguish the normative boundary from implementation
 status. Its status data should record:
 
 - the current namespace and alias names;

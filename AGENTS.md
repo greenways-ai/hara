@@ -15,14 +15,14 @@ component map and `website/docs/development.md` for the developer guide.
   (`lib/examples/`), benchmarks (`lib/bench/`). Notable namespaces:
   `std.foundation`, the `talo.*` compiler port, and the `std.ledger.*`
   consensus-free executable-chain experiments.
-- `apps/` — `hara-chrome`, `hara-vscode`, `hara-emacs`, `hara-lsp` (planned)
+- `extensions/` — `hara-chrome`, `hara-vscode`, `hara-emacs`, `hara-lsp` (planned)
 - `website/` — the published site, content included: `website/docs/` is the
   mkdocs docs_dir; infra (mkdocs.yml, overrides/, landing page) alongside.
   Apps and books join the site as monorepo sub-sites (see below).
 - `notes/` — working documents, NOT published: design notes and
   `notes/superpowers/` (plans/specs written by the superpowers plugin).
   Put nothing here that belongs on the website.
-- `spec/hara/` — normative specs:
+- `specs/hara/` — normative specs:
   - `*.md` — prose specs; mirrored to `website/docs/reference/` (kept in
     sync by `hara.spec.DocumentationContractTest`)
   - `corpora/*.edn` — machine-checked conformance/parity corpora (consumed
@@ -64,8 +64,8 @@ without it.
 Apps:
 
 ```shell
-cd apps/hara-chrome && npm ci && npm run build && npm test
-cd apps/hara-chrome && npm run test:browser  # playwright (needs xvfb)
+cd extensions/hara-chrome && npm ci && npm run build && npm test
+cd extensions/hara-chrome && npm run test:browser  # playwright (needs xvfb)
 ```
 
 Website:
@@ -103,7 +103,7 @@ To cut a release:
 
 - Maven runs from the repo root via `-f java/pom.xml`; Surefire's working
   directory is the repo root, so tests use repo-relative paths
-  (`spec/hara/corpora/...`, `lib/examples/...`, `website/docs/...`).
+  (`specs/hara/corpora/...`, `lib/examples/...`, `website/docs/...`).
 - The JVM runtime embeds `lib/src/**/*.hal` (std foundation) as classpath
   resources via `java/pom.xml`; the Rust runtime embeds
   `lib/src/std/foundation.hal` via `include_str!` in `rust/src/lib.rs`.

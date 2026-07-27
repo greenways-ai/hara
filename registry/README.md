@@ -9,7 +9,7 @@ any hara runtime (Java/Truffle, Rust native, browser, Chrome extension)
 can resolve and load via `(require [...])`.
 
 Each extension is described by a `hara.extension.edn` manifest (see
-`spec/hara/extensions-contract.md` for the contract) plus its wasm
+`specs/hara/extensions-contract.md` for the contract) plus its wasm
 artifact and optional host workers.
 
 ## Until the registry exists

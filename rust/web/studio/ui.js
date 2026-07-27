@@ -18,7 +18,7 @@ import { defaultBootstrap } from "./boot.js";
 const PROMPT = "hara ›";
 
 /** Render a decoded HTA value as a display string (same approach as
- *  apps/hara-chrome/src/resp-client.js `renderHta`, plus symbols). */
+ *  extensions/hara-chrome/src/resp-client.js `renderHta`, plus symbols). */
 export function renderValue(value) {
   if (value === null || value === undefined) return "nil";
   if (value instanceof HtaKeyword) return `:${value.name}`;

@@ -1,12 +1,12 @@
-[submodule "hara-docs"]
-	path = hara-docs
-	url = https://github.com/hara-lang/hara-docs.git
-[submodule "hara-extensions"]
-	path = hara-extensions
-	url = https://github.com/hara-lang/hara-extensions.git
-[submodule "hara-specs"]
-	path = hara-specs
-	url = https://github.com/hara-lang/hara-specs.git
-[submodule "hara-archive"]
-	path = hara-archive
+[submodule "archive"]
+	path = archive
 	url = https://github.com/hara-lang/hara-archive.git
+[submodule "docs"]
+	path = docs
+	url = https://github.com/hara-lang/hara-docs.git
+[submodule "extensions"]
+	path = extensions
+	url = https://github.com/hara-lang/hara-extensions.git
+[submodule "specs"]
+	path = specs
+	url = https://github.com/hara-lang/hara-specs.git

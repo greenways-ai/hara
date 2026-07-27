@@ -31,7 +31,7 @@ public class DocumentationContractTest {
     for (String file : MIRRORED_FILES) {
       Path canonical =
           file.endsWith(".edn")
-              ? Path.of("spec/hara/corpora", file)
+              ? Path.of("specs/hara/corpora", file)
               : Path.of("spec/hara", file);
       assertTrue("Missing canonical spec: " + file, Files.exists(canonical));
       assertTrue(

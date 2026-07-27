@@ -61,7 +61,7 @@ Namespaces — types is the umbrella, lint is its first consumer (leaving room f
   metadata (`:arglists` on vars, `@HaraExport` on Java stdlib classes), then hand-completed
   with arg/return types for the L0/core surface. Kept honest by a **sync test** that diffs
   the table's keys against the core namespace's publics — a builtin without a signature
-  fails the build (same pattern as `spec/hara/clojure-core-symbols.json`). Writing the table
+  fails the build (same pattern as `specs/hara/clojure-core-symbols.json`). Writing the table
   in the public grammar dogfoods the projection.
 - **`std.typed.lint.forms`** — walks `read-forms` output; normalizes `defn`/`let`/`fn`/`if`
   shapes; span accessors. No analysis logic.
@@ -230,8 +230,8 @@ the printed form in the message. Analysis never throws on malformed-but-readable
 check is total and returns findings.
 
 The normative, machine-readable contract for the whole `std.typed.*` surface — grammar,
-checks, findings shape, registries, semantics — lives in `spec/hara/data/typed.edn` (same
-"design authority" pattern as `spec/hara/data/foundation.edn`); facts and implementations
+checks, findings shape, registries, semantics — lives in `specs/hara/data/typed.edn` (same
+"design authority" pattern as `specs/hara/data/foundation.edn`); facts and implementations
 reconcile against it.
 
 ## 6. Extensibility
@@ -327,7 +327,7 @@ a project executes its registered check namespaces.
 
 ## 9. Phasing
 
-1. Spec: this doc + `spec/hara/data/typed.edn` (normative data authority, written).
+1. Spec: this doc + `specs/hara/data/typed.edn` (normative data authority, written).
 2. `std.typed.lint.forms` + facts.
 3. `std.typed.schema` + facts (grammar, lattice, projection, both registries).
 4. `std.typed.infer` + facts (inference rules, narrowing propositions, signature application).

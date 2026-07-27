@@ -111,8 +111,8 @@ Modified files:
 
 - `src/main/resources/META-INF/services/hara.truffle.HaraLibraryProvider` — register the
   provider (library installs lazily on first namespace use).
-- `spec/hara/runtime-libraries.md` — `std.lib.coroutine` contract entry.
-- `spec/hara/xtalk-equivalence.md` — add `x:coroutine-create` / `x:coroutine-resume` /
+- `specs/hara/runtime-libraries.md` — `std.lib.coroutine` contract entry.
+- `specs/hara/xtalk-equivalence.md` — add `x:coroutine-create` / `x:coroutine-resume` /
   `x:coroutine-yield` / `x:coroutine-status` rows (equivalence metadata, per the file's
   existing convention).
 - No `wasm-truffle-parity.edn` or `hara-core-symbols.json` changes: the parity file is an
@@ -123,7 +123,7 @@ Modified files:
   layout during implementation).
 
 Explicitly **not** touched: `HaraAnalyzer.java`, `HaraNodes.java`,
-`spec/hara/l0-language.md`, `spec/hara/l0-conformance.edn`. Coroutines are a library;
+`specs/hara/l0-language.md`, `specs/hara/l0-conformance.edn`. Coroutines are a library;
 L0 is unchanged.
 
 ### Mechanism details
@@ -158,7 +158,7 @@ L0 is unchanged.
 promise and resumes on settlement — a one-shot coroutine. The port adds a `Yield` step
 variant alongside the existing `Wait` step plus guest-facing builtins, implementing the
 same contract above. No Rust code changes are part of this design; the parity gap is
-recorded in `spec/hara/runtime-libraries.md`.
+recorded in `specs/hara/runtime-libraries.md`.
 
 ### xtalk portability note
 

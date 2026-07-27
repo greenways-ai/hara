@@ -20,7 +20,7 @@
 ### Task 1: Implement `hara-eval-last-sexp-and-insert`
 
 **Files:**
-- Modify: `apps/hara-emacs/hara-mode.el`
+- Modify: `extensions/hara-emacs/hara-mode.el`
 
 **Interfaces:**
 - Consumes: `hara--last-sexp-bounds`, `hara--request`, `hara--show-error`
@@ -61,7 +61,7 @@ Add to the `define-key` block:
 ### Task 2: Add ERT test
 
 **Files:**
-- Modify: `apps/hara-emacs/test/hara-mode-test.el`
+- Modify: `extensions/hara-emacs/test/hara-mode-test.el`
 
 **Interfaces:**
 - Consumes: `hara-eval-last-sexp-and-insert`, `hara--request`
@@ -96,7 +96,7 @@ Add to the `define-key` block:
 ### Task 3: Update README
 
 **Files:**
-- Modify: `apps/hara-emacs/README.md`
+- Modify: `extensions/hara-emacs/README.md`
 
 - [ ] **Step 1: Add the new command to the Common commands list**
 
@@ -111,14 +111,14 @@ Insert after the `C-c C-e` line:
 ### Task 4: Verify and commit
 
 **Files:**
-- `apps/hara-emacs/hara-mode.el`
-- `apps/hara-emacs/test/hara-mode-test.el`
-- `apps/hara-emacs/README.md`
+- `extensions/hara-emacs/hara-mode.el`
+- `extensions/hara-emacs/test/hara-mode-test.el`
+- `extensions/hara-emacs/README.md`
 
 - [ ] **Step 1: Run ERT tests**
 
 ```sh
-cd apps/hara-emacs
+cd extensions/hara-emacs
 emacs --batch -L . -L test -l test/hara-mode-test.el -f ert-run-tests-batch-and-exit
 ```
 
@@ -135,6 +135,6 @@ Expected: no warnings.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add apps/hara-emacs/hara-mode.el apps/hara-emacs/test/hara-mode-test.el apps/hara-emacs/README.md
+git add extensions/hara-emacs/hara-mode.el extensions/hara-emacs/test/hara-mode-test.el extensions/hara-emacs/README.md
 git commit -m "Add hara-eval-last-sexp-and-insert bound to C-c C-i"
 ```

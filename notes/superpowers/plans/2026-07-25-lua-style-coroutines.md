@@ -17,8 +17,8 @@
 - Library exports are `public static Object name(HaraContext context, Object[] values)` annotated `@HaraExport(name=..., doc=..., arglists=...)` (pattern: `StdLibTask.java:19-34`).
 - The git working tree contains UNRELATED uncommitted work. Every commit step lists exact files with `git add <files>` — NEVER `git add -A` or `git add .`.
 - Tests: JUnit 4 (`org.junit.Test`), polyglot `Context.newBuilder(HaraLanguage.ID).build()`, `context.eval(HaraLanguage.ID, "...")`, `assertThrows(PolyglotException.class, () -> ...)` (pattern: `StdLibraryProviderTest.java:30-41`).
-- No changes to `HaraAnalyzer.java`, `HaraNodes.java`, `spec/hara/l0-language.md`, or `spec/hara/l0-conformance.edn`.
-- `spec/hara/hara-core-symbols.json` and `spec/hara/wasm-truffle-parity.edn` are NOT modified (see Task 6 — this corrects the design spec, which listed them; `std.lib.task` precedent shows lazy providers are not in the core-symbols inventory, and the parity `.edn` is an executable corpus that must not gain uncovered cases).
+- No changes to `HaraAnalyzer.java`, `HaraNodes.java`, `specs/hara/l0-language.md`, or `specs/hara/l0-conformance.edn`.
+- `specs/hara/hara-core-symbols.json` and `specs/hara/wasm-truffle-parity.edn` are NOT modified (see Task 6 — this corrects the design spec, which listed them; `std.lib.task` precedent shows lazy providers are not in the core-symbols inventory, and the parity `.edn` is an executable corpus that must not gain uncovered cases).
 
 ---
 
@@ -1001,19 +1001,19 @@ git commit -m "Add coroutine await for promise settlement"
 ### Task 6: Spec and docs updates
 
 **Files:**
-- Modify: `spec/hara/runtime-libraries.md`
+- Modify: `specs/hara/runtime-libraries.md`
 - Modify: `docs/reference/runtime-libraries.md`
-- Modify: `spec/hara/xtalk-equivalence.md`
+- Modify: `specs/hara/xtalk-equivalence.md`
 - Modify: `docs/reference/xtalk-equivalence.md`
 - Modify: `docs/superpowers/specs/2026-07-25-lua-style-coroutines-design.md` (corrections below)
 
 **Interfaces:**
-- Consumes: the provider table at `spec/hara/runtime-libraries.md:73-85`; the equivalence table at `spec/hara/xtalk-equivalence.md:7-20`.
+- Consumes: the provider table at `specs/hara/runtime-libraries.md:73-85`; the equivalence table at `specs/hara/xtalk-equivalence.md:7-20`.
 - Produces: documented `std.lib.coroutine` contract; `x:coroutine-*` equivalence rows; corrected design spec.
 
 - [ ] **Step 1: Check whether spec and docs/reference copies are mirrored**
 
-Run: `diff spec/hara/runtime-libraries.md docs/reference/runtime-libraries.md; diff spec/hara/xtalk-equivalence.md docs/reference/xtalk-equivalence.md`
+Run: `diff specs/hara/runtime-libraries.md docs/reference/runtime-libraries.md; diff specs/hara/xtalk-equivalence.md docs/reference/xtalk-equivalence.md`
 Expected: no output (identical) or minor drift. If identical, make the same edits to both files. If drifted, edit each to match its own surrounding format.
 
 - [ ] **Step 2: Add the std.lib.coroutine entry to runtime-libraries.md (both copies)**
@@ -1050,8 +1050,8 @@ Append to the equivalence table:
 
 In `docs/superpowers/specs/2026-07-25-lua-style-coroutines-design.md`:
 
-1. In "Modified files", remove the `spec/hara/wasm-truffle-parity.edn` and
-   `spec/hara/hara-core-symbols.json` bullets and add one bullet:
+1. In "Modified files", remove the `specs/hara/wasm-truffle-parity.edn` and
+   `specs/hara/hara-core-symbols.json` bullets and add one bullet:
 
 ```markdown
 - No `wasm-truffle-parity.edn` or `hara-core-symbols.json` changes: the parity file is an
@@ -1067,8 +1067,8 @@ In `docs/superpowers/specs/2026-07-25-lua-style-coroutines-design.md`:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add spec/hara/runtime-libraries.md docs/reference/runtime-libraries.md \
-        spec/hara/xtalk-equivalence.md docs/reference/xtalk-equivalence.md \
+git add specs/hara/runtime-libraries.md docs/reference/runtime-libraries.md \
+        specs/hara/xtalk-equivalence.md docs/reference/xtalk-equivalence.md \
         docs/superpowers/specs/2026-07-25-lua-style-coroutines-design.md
 git commit -m "Document std.lib.coroutine contract and xtalk equivalence"
 ```

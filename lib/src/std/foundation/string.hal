@@ -5,16 +5,16 @@
 ;; builtin activated by the :builtins clause below. Kind, docstring, and
 ;; arglists come from the host export catalog (@HaraExport); no Hara-level
 ;; definitions live here. Schema annotations for these symbols belong in
-;; std.typed.core-sigs (spec/hara/data/typed.edn).
+;; std.typed.core-sigs (specs/hara/data/typed.edn).
 ;;
-;; Contract (spec/hara/data/foundation.edn, :semantics :string):
+;; Contract (specs/hara/data/foundation.edn, :semantics :string):
 ;;   * All indexes and offsets are Unicode code points, not UTF-16 units:
 ;;     length, char-at, slice, index-of, last-index-of, and regex offsets.
 ;;   * split, replace, and replace-first treat their pattern argument as a
 ;;     literal string, not a regex.
 ;;   * encode-utf8 / decode-utf8 convert between strings and byte vectors.
 ;;
-;; Authority: spec/hara/data/foundation.edn (:runtime-libraries std.foundation.string)
+;; Authority: specs/hara/data/foundation.edn (:runtime-libraries std.foundation.string)
 ;; ============================================================================
 (ns std.foundation.string
   (:config

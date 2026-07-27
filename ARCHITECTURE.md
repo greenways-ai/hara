@@ -55,4 +55,4 @@ is not the authoritative implementation of the current language surface.
            Hara values + promises
 ```
 
-See the [extension contract](spec/hara/extensions-contract.md) for lifecycle and capability rules.
+See the [extension contract](specs/hara/extensions-contract.md) for lifecycle and capability rules.
