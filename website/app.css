@@ -559,6 +559,16 @@ body[data-workspace="1"] .workspace-track { transform: translate3d(-100vw, 0, 0)
   background: var(--cyan-bright);
 }
 
+.editor-toolbar .paredit-button {
+  color: var(--violet);
+  border-color: rgba(156, 123, 255, .42);
+}
+
+.editor-toolbar .paredit-button[aria-pressed="false"] {
+  color: var(--faint);
+  border-color: rgba(123, 145, 164, .24);
+}
+
 .file-tree {
   flex: 1;
   min-height: 0;

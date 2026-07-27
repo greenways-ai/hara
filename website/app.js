@@ -1,5 +1,6 @@
 import { renderScene, validateScene } from "./scene.js";
 import { startTron } from "./tron.js";
+import { applyParedit, insertIndent } from "./editor.js";
 
 const SPACE = "home";
 const ROOT = "ROOT";
@@ -106,6 +107,7 @@ const elements = {
   dirty: query("[data-dirty]"),
   save: query("[data-save]"),
   run: query("[data-run]"),
+  paredit: query("[data-paredit]"),
   outputCanvas: query("[data-output-canvas]"),
   canvasEmpty: query("[data-canvas-empty]"),
   canvasStatus: query("[data-canvas-status]"),
@@ -630,17 +632,26 @@ function installEditor() {
       event.preventDefault();
       saveFile();
     }
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    if ((event.metaKey || event.ctrlKey) && (event.key === "Enter" || event.key.toLowerCase() === "e")) {
       event.preventDefault();
       runFile();
     }
+    if (elements.paredit.getAttribute("aria-pressed") === "true" &&
+        !event.metaKey && !event.ctrlKey && !event.altKey &&
+        applyParedit(elements.editor, event.key)) {
+      event.preventDefault();
+      return;
+    }
     if (event.key === "Tab") {
       event.preventDefault();
-      const start = elements.editor.selectionStart;
-      const end = elements.editor.selectionEnd;
-      elements.editor.setRangeText("  ", start, end, "end");
-      elements.editor.dispatchEvent(new Event("input", { bubbles: true }));
+      insertIndent(elements.editor, event.shiftKey);
     }
+  });
+  elements.paredit.addEventListener("click", () => {
+    const enabled = elements.paredit.getAttribute("aria-pressed") !== "true";
+    elements.paredit.setAttribute("aria-pressed", String(enabled));
+    elements.paredit.textContent = enabled ? "PAREDIT // ON" : "PAREDIT // OFF";
+    toast(enabled ? "PAREDIT ENABLED" : "PAREDIT DISABLED");
   });
   elements.save.addEventListener("click", () => saveFile());
   elements.run.addEventListener("click", runFile);
