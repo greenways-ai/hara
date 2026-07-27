@@ -461,6 +461,19 @@ body[data-workspace="1"] .workspace-track { transform: translate3d(-100vw, 0, 0)
 .files-window { left: 2.4vw; top: 7vh; width: min(22vw, 330px); height: 73vh; }
 .editor-window { left: 24.8vw; top: 4vh; width: 45vw; height: 78vh; }
 .canvas-window { left: 67.5vw; top: 11vh; width: 30vw; height: 64vh; }
+.patch-window { left: 17vw; top: 9vh; width: min(66vw, 980px); height: min(72vh, 660px); }
+
+.patch-host {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.patch-host .hara-workbench {
+  height: 100%;
+  min-height: 0;
+  border: 0;
+}
 
 .window-titlebar {
   min-height: 38px;

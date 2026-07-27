@@ -112,6 +112,8 @@ const elements = {
   canvasStatus: query("[data-canvas-status]"),
   canvasSize: query("[data-canvas-size]"),
   canvasWrap: query("[data-canvas-wrap]"),
+  patchWorkbench: query("[data-patch-workbench]"),
+  patchStatus: query("[data-patch-status]"),
   dialog: query("[data-dialog]"),
   dialogForm: query("[data-dialog-form]"),
   dialogTitle: query("[data-dialog-title]"),
@@ -343,6 +345,27 @@ function studioSource(form) {
 
 function evalStudio(form) {
   return state.broker.eval(ROOT, studioSource(form));
+}
+
+async function installPatchWorkbench() {
+  if (!elements.patchWorkbench) return;
+  const { createWorkbench } = await import("./vendor/hara-ui/workbench.js");
+  createWorkbench(elements.patchWorkbench);
+  elements.patchWorkbench.addEventListener("hara:workbench-selection", (event) => {
+    const node = event.detail.node;
+    elements.patchStatus.textContent = node ? `SELECTED // ${node.id.toUpperCase()}` : "STRUCTURED MODEL // READY";
+  });
+  elements.patchWorkbench.addEventListener("hara:workbench-structural-edit", (event) => {
+    elements.patchStatus.textContent = `MODEL // ${event.detail.kind.toUpperCase()}`;
+    elements.editorStatus.textContent = "PATCH MODEL CHANGED // SOURCE BRIDGE PENDING";
+  });
+  elements.patchWorkbench.addEventListener("hara:workbench-rejected-edit", () => {
+    elements.patchStatus.textContent = "REJECTED // INCOMPATIBLE PORTS";
+    toast("PATCH REJECTED: INCOMPATIBLE PORTS", true);
+  });
+  elements.patchWorkbench.addEventListener("hara:workbench-layout-change", () => {
+    elements.patchStatus.textContent = "LAYOUT // UPDATED";
+  });
 }
 
 async function listFiles() {
@@ -820,6 +843,7 @@ startTron(query("[data-tron]"));
 installWorkspaceNavigation();
 installLauncher();
 installWindowManager();
+installPatchWorkbench();
 installEditor();
 installFileActions();
 restoreWindows();

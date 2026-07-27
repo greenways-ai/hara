@@ -72,6 +72,10 @@
         <span class="app-icon app-icon-canvas" aria-hidden="true">◎</span>
         <span>Canvas</span>
       </button>
+      <button type="button" class="app-tile" data-open-window="patch">
+        <span class="app-icon app-icon-patch" aria-hidden="true">⊞</span>
+        <span>Patch</span>
+      </button>
       <a class="app-tile" href="https://docs.hara-lang.org/user-guide/" target="_blank" rel="noreferrer">
         <span class="app-icon" aria-hidden="true">L</span>
         <span>Learn</span>
@@ -209,6 +213,25 @@
           <div class="window-status">
             <span data-canvas-status>FRAME // —</span>
             <span data-canvas-size>960 × 600</span>
+          </div>
+        </section>
+
+        <section class="app-window patch-window" data-window="patch"
+                 aria-label="Visual patch window" tabindex="-1">
+          <div class="window-titlebar" data-drag-handle>
+            <div class="window-title">
+              <span class="window-number">04</span>
+              <span>PATCH</span>
+            </div>
+            <div class="window-controls">
+              <button type="button" data-window-maximize aria-label="Maximize Patch">□</button>
+              <button type="button" data-window-close aria-label="Close Patch">×</button>
+            </div>
+          </div>
+          <div class="patch-host" data-patch-workbench aria-label="Visual program patch"></div>
+          <div class="window-status">
+            <span data-patch-status>STRUCTURED MODEL // READY</span>
+            <span>DRAG NODES · WIRE COMPATIBLE PORTS · SOURCE TAB</span>
           </div>
         </section>
 
