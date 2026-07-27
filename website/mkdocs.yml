@@ -1,6 +1,6 @@
 site_name: Hara
 site_description: A small, runtime-neutral language for live systems.
-site_url: https://greenways-ai.github.io/hara/
+site_url: https://hara-lang.github.io/hara/
 docs_dir: docs
 theme:
   name: material
