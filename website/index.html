@@ -13,7 +13,7 @@
   <meta property="og:image:height" content="909">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://www.hara-lang.org/og-hara-ribbon.png">
-  <link rel="icon" href="./vendor/hara-ui/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="./assets/hara-favicon.svg" type="image/svg+xml">
   <title>HARA — Lisp for the Agentic Age</title>
   <link rel="stylesheet" href="./vendor/hara-ui/tokens.css">
   <link rel="stylesheet" href="./vendor/hara-ui/components.css">
@@ -32,36 +32,32 @@
           <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
         </span>
       </button>
-      <button class="system-button home-button" type="button" data-home aria-label="Go to Hara home">
-        <span aria-hidden="true">⌂</span>
+      <button class="system-button workspace-nav-button" type="button" data-workspace-prev aria-label="Previous workspace">
+        <span aria-hidden="true">‹</span>
+      </button>
+      <button class="system-button workspace-nav-button" type="button" data-workspace-next aria-label="Next workspace">
+        <span aria-hidden="true">›</span>
       </button>
     </div>
 
     <div class="system-identity">
-      <img class="system-mark" src="./vendor/hara-ui/hara-mark.svg" alt="">
+      <img class="system-mark" src="./assets/hara-mark.svg" alt="">
       <span class="system-title">HARA</span>
       <span class="system-context" data-system-context>WELCOME // 01</span>
     </div>
 
-    <div class="system-right">
-      <div class="runtime-state" aria-live="polite">
-        <span class="runtime-led" data-runtime-led></span>
-        <span data-runtime-label>WASM // STANDBY</span>
-      </div>
-      <nav class="workspace-dots" aria-label="Workspaces">
-        <button type="button" data-workspace-dot="0" aria-label="Welcome workspace"
-                aria-current="true"></button>
-        <button type="button" data-workspace-dot="1" aria-label="Hara desktop workspace"></button>
-      </nav>
-    </div>
+    <div class="system-right"></div>
   </header>
 
   <aside class="app-launcher" id="app-launcher" data-launcher aria-hidden="true">
     <div class="launcher-head">
-      <span>APPLICATIONS</span>
-      <span class="launcher-index">SYS // 01</span>
+      <span>HARA LAUNCHER</span>
     </div>
     <div class="launcher-grid">
+      <button type="button" class="app-tile" data-home>
+        <span class="app-icon" aria-hidden="true">⌂</span>
+        <span>Home</span>
+      </button>
       <button type="button" class="app-tile" data-open-window="files">
         <span class="app-icon" aria-hidden="true">F</span>
         <span>Files</span>
@@ -103,10 +99,6 @@
         <span>GitHub</span>
       </a>
     </div>
-    <div class="launcher-foot">
-      <span>LOCAL RUNTIME</span>
-      <button type="button" data-reset-demo>RESET DEMO</button>
-    </div>
   </aside>
   <div class="launcher-scrim" data-launcher-scrim></div>
 
@@ -119,24 +111,21 @@
         </div>
         <div class="welcome-copy">
           <p class="welcome-kicker">FAST · EMBEDDABLE · WASM NATIVE</p>
-          <img class="welcome-mark" src="./vendor/hara-ui/hara-mark.svg" alt="Hara" id="welcome-title">
+          <img class="welcome-mark" src="./assets/hara-mark.svg" alt="Hara" id="welcome-title">
           <p class="welcome-tagline">Lisp for the Agentic Age.</p>
         </div>
         <button class="start-button" type="button" data-start>
-          <img class="start-mark" src="./vendor/hara-ui/hara-mark.svg" alt="">
+          <img class="start-mark" src="./assets/hara-mark.svg" alt="">
           <span>START</span>
           <i aria-hidden="true">→</i>
         </button>
-        <div class="welcome-coordinate" aria-hidden="true">
-          GRID 37.81 // KERNEL READY
-        </div>
+        <button class="need-help" type="button" data-help>NEED HELP? <span aria-hidden="true">→</span></button>
       </section>
 
       <section class="workspace desktop-workspace" aria-label="Hara desktop">
         <div class="desktop-grid" aria-hidden="true"></div>
         <div class="desktop-label" aria-hidden="true">
           <span>HARA // VISUAL LAB</span>
-          <span>LOCAL SPACE · HOME</span>
         </div>
 
         <section class="app-window files-window" data-window="files"
@@ -160,7 +149,7 @@
             </div>
           </div>
           <div class="file-tree" data-file-tree>
-            <div class="window-loading">MOUNTING LOCAL SPACE…</div>
+            <div class="window-loading">OPENING WORKSPACE…</div>
           </div>
           <div class="window-status">
             <span data-file-count>0 FILES</span>
@@ -240,6 +229,27 @@
       </section>
     </div>
   </main>
+
+  <footer class="system-bottom-bar">
+    <div class="runtime-state" aria-live="polite">
+      <span class="runtime-led" data-runtime-led></span>
+      <span data-runtime-label>WASM // STANDBY</span>
+    </div>
+    <button type="button" class="help-button" data-help aria-label="Open Hara help">? <span>HELP</span></button>
+  </footer>
+
+  <dialog class="hara-dialog hara-help-dialog" data-help-dialog>
+    <div class="dialog-head"><span>HARA // HELP</span><button type="button" data-help-close aria-label="Close help">×</button></div>
+    <div class="help-content">
+      <p>Use the launcher to start a template, open a book, or return home.</p>
+      <dl>
+        <div><dt>‹ / ›</dt><dd>Move between the welcome page and workspace.</dd></div>
+        <div><dt>Ctrl E</dt><dd>Evaluate the current form in the editor.</dd></div>
+        <div><dt>Ctrl E E</dt><dd>Run the open Hara file.</dd></div>
+        <div><dt>Ctrl S</dt><dd>Save the open file.</dd></div>
+      </dl>
+    </div>
+  </dialog>
 
   <dialog class="hara-dialog" data-dialog>
     <form method="dialog" data-dialog-form>
