@@ -1,6 +1,6 @@
 site_name: Hara
-site_description: A live language for systems that stay alive.
-site_url: https://hoebat.github.io/hara.lang/
+site_description: A small, runtime-neutral language for live systems.
+site_url: https://greenways-ai.github.io/hara/
 docs_dir: docs
 theme:
   name: material
