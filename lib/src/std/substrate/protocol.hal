@@ -1,0 +1,64 @@
+;; ============================================================================
+;; std.substrate.protocol — capability contracts for the portable substrate.
+;;
+;; This namespace deliberately contains no concrete node state, transports, or
+;; wire codecs.  `std.substrate` will supply an atom-backed node implementation;
+;; Studio and other hosts can then adapt that implementation without owning the
+;; substrate semantics themselves.
+;; ============================================================================
+(ns std.substrate.protocol)
+
+(defprotocol IFrame
+  (frame-id [frame])
+  (frame-kind [frame])
+  (frame-space [frame])
+  (frame-meta [frame])
+  (frame-cause [frame])
+  (frame-data [frame]))
+
+(defprotocol ISpace
+  (get-space [node space-id])
+  (create-space [node space-id opts])
+  (ensure-space [node space-id opts])
+  (remove-space [node space-id])
+  (list-spaces [node])
+  (get-space-state [node space-id])
+  (set-space-state [node space-id state])
+  (update-space-state [node space-id updater]))
+
+(defprotocol IService
+  (get-service [node service-id])
+  (set-service [node service-id service])
+  (remove-service [node service-id]))
+
+(defprotocol IHandler
+  (register-handler [node action handler meta])
+  (unregister-handler [node action])
+  (get-handler [node action])
+  (list-handlers [node])
+  (register-trigger [node signal trigger meta])
+  (unregister-trigger [node signal])
+  (get-trigger [node signal])
+  (list-triggers [node]))
+
+(defprotocol ITransport
+  (attach-transport [node transport-id transport])
+  (detach-transport [node transport-id])
+  (get-transport [node transport-id])
+  (list-transports [node])
+  (send-transport [node transport-id frame])
+  (receive-frame [node frame context]))
+
+(defprotocol IRequest
+  (request [node space-id action args meta])
+  (receive-request [node frame context])
+  (receive-response [node frame])
+  (cancel-request [node request-id reason])
+  (reject-pending [node reason]))
+
+(defprotocol IStream
+  (publish [node space-id signal data meta])
+  (receive-publish [node frame context])
+  (subscribe [node space-id signal subscription-id meta])
+  (unsubscribe [node space-id signal subscription-id meta])
+  (list-subscriptions [node space-id signal]))

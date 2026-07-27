@@ -1,4 +1,8 @@
-(ns studio.draw)
+(ns studio.draw
+  (:require [studio.node :as node]))
 
-(defn render [canvas scene]
-  (host/call "studio.canvas" "render" canvas scene))
+(defn next-frame [canvas]
+  (host/call "studio.canvas" "next-frame" (node/current-id) canvas))
+
+(defn render [canvas frame]
+  (host/call "studio.canvas" "render" (node/current-id) canvas frame))

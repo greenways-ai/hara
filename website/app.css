@@ -186,6 +186,82 @@ body[data-workspace="1"] .atmosphere {
   letter-spacing: .08em;
 }
 
+.source-toggle,
+.background-source-panel button {
+  height: 100%;
+  padding: 0 .8rem;
+  color: var(--cyan);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--line);
+  font-size: .52rem;
+  letter-spacing: .12em;
+  cursor: pointer;
+}
+
+.source-toggle[aria-expanded="true"] { background: rgba(65, 245, 228, .1); }
+
+.background-source-panel {
+  position: fixed;
+  z-index: 900;
+  top: var(--bar-height);
+  right: 0;
+  bottom: 0;
+  width: min(46vw, 720px);
+  display: none;
+  grid-template-rows: 38px 1fr 28px;
+  color: var(--text);
+  background: rgba(2, 5, 10, .97);
+  border-left: 1px solid var(--line-strong);
+  box-shadow: -24px 0 70px rgba(0, 0, 0, .48);
+  resize: horizontal;
+  overflow: hidden;
+}
+
+.background-source-panel.is-open { display: grid; }
+.background-source-panel > header,
+.background-source-panel > footer {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding-left: .8rem;
+  border-bottom: 1px solid var(--line);
+  color: var(--faint);
+  font-size: .52rem;
+  letter-spacing: .09em;
+}
+.background-source-panel > header strong { color: var(--cyan); }
+.background-source-panel > header span { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.background-source-panel > footer { border-top: 1px solid var(--line); border-bottom: 0; }
+
+.background-editor-shell { position: relative; min-height: 0; overflow: hidden; }
+.background-editor-shell pre,
+.background-editor-shell textarea {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 1rem;
+  overflow: auto;
+  border: 0;
+  font: 12px/1.55 var(--mono);
+  tab-size: 2;
+  white-space: pre;
+}
+.background-editor-shell pre { color: var(--text); pointer-events: none; }
+.background-editor-shell textarea {
+  color: transparent;
+  caret-color: var(--cyan-bright);
+  background: transparent;
+  resize: none;
+}
+.background-editor-shell textarea::selection { color: transparent; background: rgba(65, 245, 228, .22); }
+
+body.source-open .tron-field,
+body.source-open .atmosphere { right: min(46vw, 720px); width: auto; }
+
 .runtime-state {
   height: 100%;
   gap: .55rem;
@@ -1103,6 +1179,18 @@ body[data-workspace="1"] .workspace-track { transform: translate3d(-100vw, 0, 0)
   .system-title { display: none; }
   .system-mark { width: 22px; height: 22px; }
   .background-picker { display: none; }
+  .source-toggle { display: block; }
+  .background-source-panel {
+    top: auto;
+    left: 0;
+    width: 100%;
+    height: 58vh;
+    resize: vertical;
+    border-top: 1px solid var(--line-strong);
+    border-left: 0;
+  }
+  body.source-open .tron-field,
+  body.source-open .atmosphere { inset: 0 0 58vh; width: 100%; height: auto; }
   .workspace-dots { gap: 10px; padding: 0 14px; }
   .runtime-state { display: none; }
   .welcome-workspace { padding: 11vw 8vw; }

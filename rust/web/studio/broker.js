@@ -69,6 +69,17 @@ export class KernelBroker {
    * terminated. Hidden document kernels never appear in list()/size().
    */
   async evalDocument(name, documentId, source, { nodeId = null } = {}) {
+    const prepared = await this.prepareDocument(name, documentId, source, { nodeId });
+    this.commitDocument(prepared);
+    return documentResult(prepared);
+  }
+
+  /**
+   * Evaluate a candidate anonymous generation without disturbing the active
+   * document. Callers can run it until its first visible frame, then commit,
+   * or discard it to preserve the previous generation.
+   */
+  async prepareDocument(name, documentId, source, { nodeId = null } = {}) {
     name = KernelBroker.normalizeName(name);
     if (typeof documentId !== "string" || documentId.length === 0) {
       throw new Error("INVALID_DOCUMENT_ID");
@@ -80,19 +91,17 @@ export class KernelBroker {
     const candidate = await this.boot(hiddenName);
     try {
       const value = await candidate.context.call("eval", [compiled.source]);
-      const previous = this.documents.get(key);
-      this.documents.set(key, {
+      return {
         ...candidate,
+        key,
         kernel: name,
         documentId,
         nodeId,
         generation,
-        moduleId: compiled.moduleId
-      });
-      this.documentGenerations.set(key, generation);
-      previous?.context?.close?.();
-      previous?.worker?.terminate?.();
-      return { value, generation, moduleId: compiled.moduleId, private: true };
+        moduleId: compiled.moduleId,
+        value,
+        prepared: true
+      };
     } catch (error) {
       candidate.context?.close?.();
       candidate.worker?.terminate?.();
@@ -100,9 +109,33 @@ export class KernelBroker {
     }
   }
 
+  commitDocument(candidate) {
+    if (!candidate?.prepared) throw new Error("INVALID_DOCUMENT_CANDIDATE");
+    const previous = this.documents.get(candidate.key);
+    candidate.prepared = false;
+    this.documents.set(candidate.key, candidate);
+    this.documentGenerations.set(candidate.key, candidate.generation);
+    previous?.context?.close?.();
+    previous?.worker?.terminate?.();
+    return documentResult(candidate);
+  }
+
+  discardDocument(candidate) {
+    if (!candidate?.prepared) return false;
+    candidate.prepared = false;
+    candidate.context?.close?.();
+    candidate.worker?.terminate?.();
+    return true;
+  }
+
   async evalForm(name, documentId, source) {
     const document = this.requireDocument(name, documentId);
     return document.context.call("eval", [expandBuiltinAliases(source)]);
+  }
+
+  async evalPreparedDocument(candidate, source) {
+    if (!candidate?.prepared) throw new Error("INVALID_DOCUMENT_CANDIDATE");
+    return candidate.context.call("eval", [expandBuiltinAliases(source)]);
   }
 
   releaseDocument(name, documentId) {
@@ -177,6 +210,15 @@ export class KernelBroker {
     }
     return { name, context, worker };
   }
+}
+
+function documentResult(document) {
+  return {
+    value: document.value,
+    generation: document.generation,
+    moduleId: document.moduleId,
+    private: true
+  };
 }
 
 export function compileAnonymousDocument(source, { documentId, nodeId = null } = {}) {

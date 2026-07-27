@@ -1,0 +1,7 @@
+{:hara/type :project
+ :hara/version "1.0.0"
+ :project/id hara.studio.backgrounds
+ :project/version "0.1.0"
+ :project/source-paths ["../../sources"]
+ :project/capabilities
+ #{:studio/node-send :canvas/2d :canvas/webgl2 :input/keyboard :input/pointer}}

@@ -205,6 +205,17 @@ export class NodeRuntime {
     return state.publicInfo();
   }
 
+  releaseNode(nodeId) {
+    const node = this.nodes.get(nodeId);
+    if (!node) return false;
+    node.active?.close(new NodeProtocolError("node/released", `node ${nodeId} released`));
+    for (const [id, connection] of this.connections) {
+      if (connection.from[0] === nodeId || connection.to[0] === nodeId) this.connections.delete(id);
+    }
+    this.nodes.delete(nodeId);
+    return true;
+  }
+
   /**
    * Atomically binds a successful private ns+ document generation to a public
    * node instance. The prior generation is cancelled only after `prepare`
@@ -278,11 +289,10 @@ export class NodeRuntime {
   }
 
   async call(source, target, action, args = [], opts = {}) {
-    const request = normalizeFrame({
+    return this.callFrame(source, {
       version: VERSION,
       kind: "request",
       id: opts.id ?? frameId("req"),
-      source,
       target,
       space: opts.space ?? this.space,
       action,
@@ -290,25 +300,44 @@ export class NodeRuntime {
       cause: opts.cause ?? null,
       meta: opts.meta ?? {}
     });
+  }
+
+  /**
+   * Browser adapter for a request constructed by `std.substrate.frame`.
+   * The portable layer owns the frame shape; Studio supplies only its local
+   * source and workspace defaults before dispatching it to a document node.
+   */
+  async callFrame(source, frame) {
+    const request = normalizeFrame({
+      ...frame,
+      version: frame?.version ?? VERSION,
+      source: frame?.source ?? source,
+      space: frame?.space ?? this.space,
+      meta: frame?.meta ?? {}
+    });
+    if (request.kind !== "request") {
+      throw new NodeProtocolError("frame/kind", "node/call-frame expects a request frame", request);
+    }
+    const opts = request.meta ?? {};
     const controller = new AbortController();
     const pending = { request, controller };
     this.pending.set(request.id, pending);
     let timer = null;
     if (opts.timeout > 0) {
-      timer = setTimeout(() => controller.abort(new NodeProtocolError("call/timeout", `node call timed out: ${action}`, request)), opts.timeout);
+      timer = setTimeout(() => controller.abort(new NodeProtocolError("call/timeout", `node call timed out: ${request.action}`, request)), opts.timeout);
     }
     try {
       this.publish(request);
-      const targetNode = this.requireNode(target);
-      const entry = targetNode.handlers.get(action);
-      if (!entry) throw new NodeProtocolError("handler/missing", `no handler for ${target} ${action}`, request);
-      const data = await abortable(entry.handler(args, request, controller.signal), controller.signal);
+      const targetNode = this.requireNode(request.target);
+      const entry = targetNode.handlers.get(request.action);
+      if (!entry) throw new NodeProtocolError("handler/missing", `no handler for ${request.target} ${request.action}`, request);
+      const data = await abortable(entry.handler(request.args, request, controller.signal), controller.signal);
       const response = normalizeFrame({
         version: VERSION,
         kind: "response",
         id: frameId("res"),
-        source: target,
-        target: source,
+        source: request.target,
+        target: request.source,
         space: request.space,
         reply_to: request.id,
         status: "ok",
@@ -319,12 +348,12 @@ export class NodeRuntime {
       this.publish(response);
       return response;
     } catch (error) {
-      const frame = normalizeFrame({
+      const errorFrame = normalizeFrame({
         version: VERSION,
         kind: "error",
         id: frameId("err"),
-        source: target,
-        target: source,
+        source: request.target,
+        target: request.source,
         space: request.space,
         reply_to: request.id,
         status: "error",
@@ -335,8 +364,8 @@ export class NodeRuntime {
         cause: request.id,
         meta: {}
       });
-      this.publish(frame);
-      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { frame });
+      this.publish(errorFrame);
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { frame: errorFrame });
     } finally {
       clearTimeout(timer);
       this.pending.delete(request.id);
@@ -361,11 +390,10 @@ export class NodeRuntime {
   }
 
   async emit(source, signal, data, meta = {}) {
-    const frame = normalizeFrame({
+    return this.emitFrame(source, {
       version: VERSION,
       kind: "stream",
       id: frameId("evt"),
-      source,
       target: null,
       space: this.space,
       signal,
@@ -373,9 +401,30 @@ export class NodeRuntime {
       cause: meta.cause ?? null,
       meta
     });
+  }
+
+  /**
+   * Browser adapter for a stream frame constructed by `std.substrate.frame`.
+   * Queues and graph edges remain Studio concerns; envelope validation and
+   * wire-key normalization stay portable.
+   */
+  async emitFrame(source, frame) {
+    frame = normalizeFrame({
+      ...frame,
+      version: frame?.version ?? VERSION,
+      source: frame?.source ?? source,
+      space: frame?.space ?? this.space,
+      meta: frame?.meta ?? {}
+    });
+    if (frame.kind !== "stream") {
+      throw new NodeProtocolError("frame/kind", "node/emit-frame expects a stream frame", frame);
+    }
+    if (typeof frame.signal !== "string" || frame.signal.length === 0) {
+      throw new NodeProtocolError("frame/signal", "stream frames require a non-empty signal", frame);
+    }
     const deliveries = [];
     for (const edge of this.connections.values()) {
-      if (edge.from[0] !== source || edge.from[1] !== signal) continue;
+      if (edge.from[0] !== frame.source || edge.from[1] !== frame.signal) continue;
       const target = this.requireNode(edge.to[0]);
       const queue = target.input(edge.to[1], edge);
       deliveries.push({ connection: edge.id, ...queue.accept({ ...frame, target: edge.to[0], signal: edge.to[1] }) });
@@ -481,7 +530,12 @@ class GenerationScope {
     ).finally(() => this.tasks.delete(id));
     task.promise.catch(() => {});
     this.tasks.set(id, task);
-    return Object.freeze({ id, stop: () => this.stop(id), get state() { return task.state; } });
+    return Object.freeze({
+      id,
+      settled: task.promise,
+      stop: () => this.stop(id),
+      get state() { return task.state; }
+    });
   }
 
   stop(handle) {

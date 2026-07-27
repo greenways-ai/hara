@@ -66,7 +66,13 @@ impl GeneratedNamespaceConfig {
                     if values.len() != 2 {
                         return Err(":config expects one map".into());
                     }
-                    parse_config(&values[1], &mut builtins, &mut blank, &mut excluded, &mut overrides)?;
+                    parse_config(
+                        &values[1],
+                        &mut builtins,
+                        &mut blank,
+                        &mut excluded,
+                        &mut overrides,
+                    )?;
                 }
                 "intrinsics" => {
                     // Legacy top-level :intrinsics is accepted for backward compatibility,

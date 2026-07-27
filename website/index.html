@@ -38,6 +38,7 @@
     </div>
 
     <div class="system-identity">
+      <img class="system-mark" src="./vendor/hara-ui/hara-mark.svg" alt="">
       <span class="system-title">HARA</span>
       <span class="system-context" data-system-context>WELCOME // 01</span>
     </div>
@@ -45,12 +46,10 @@
     <div class="system-right">
       <label class="background-picker">
         <span>SOURCE</span>
-        <select data-background-source aria-label="Background source">
-          <option value="tron">TRON.HAL</option>
-          <option value="grid">GRID.HAL</option>
-          <option value="off">OFF.HAL</option>
-        </select>
+        <select data-background-source aria-label="Background source"></select>
       </label>
+      <button class="source-toggle" type="button" data-source-toggle
+              aria-expanded="false" aria-controls="background-source-panel">CODE</button>
       <div class="runtime-state" aria-live="polite">
         <span class="runtime-led" data-runtime-led></span>
         <span data-runtime-label>WASM // STANDBY</span>
@@ -62,6 +61,21 @@
       </nav>
     </div>
   </header>
+
+  <aside class="background-source-panel" id="background-source-panel"
+         data-background-panel aria-hidden="true">
+    <header>
+      <strong>LIVE BACKGROUND SOURCE</strong>
+      <span data-background-status>WAITING FOR RUNTIME</span>
+      <button type="button" data-background-save>SAVE</button>
+    </header>
+    <div class="background-editor-shell">
+      <pre data-background-highlight aria-hidden="true"></pre>
+      <textarea data-background-editor spellcheck="false" wrap="off"
+                aria-label="Live HAL background source"></textarea>
+    </div>
+    <footer>LIVE PREVIEW · TAB ALIGN · PAREDIT · CTRL-S SAVE · ERRORS ROLL BACK</footer>
+  </aside>
 
   <aside class="app-launcher" id="app-launcher" data-launcher aria-hidden="true">
     <div class="launcher-head">
@@ -118,11 +132,11 @@
         </div>
         <div class="welcome-copy">
           <p class="welcome-kicker">FAST · EMBEDDABLE · WASM NATIVE</p>
-          <h1 id="welcome-title">HARA</h1>
+          <img class="welcome-mark" src="./vendor/hara-ui/hara-mark.svg" alt="Hara" id="welcome-title">
           <p class="welcome-tagline">Lisp for the Agentic Age.</p>
         </div>
         <button class="start-button" type="button" data-start>
-          <img class="start-mark" src="./assets/hara-amp/hara-emblem.svg" alt="">
+          <img class="start-mark" src="./vendor/hara-ui/hara-mark.svg" alt="">
           <span>START</span>
           <i aria-hidden="true">→</i>
         </button>

@@ -208,7 +208,7 @@ export class HtaContext {
   async message(message) {
     if(message.type==="ready"){this.readyResolve();return;}if(message.type==="fatal"){this.fail(new Error(message.error?.message??"HTA worker failed"));return;}
     if(message.type==="result"){const pending=this.pending.get(message.id);if(!pending)return;this.pending.delete(message.id);const value=bindHandles(decodeHta(message.frame),this);message.ok?pending.resolve(value):pending.reject(errorFrom(value));return;}
-    if(message.type==="host-call"){const key=`${message.service}/${message.method}`,handler=this.hostCalls[key];try{if(!handler)throw new Error(`hta/host-call-denied: ${key}`);const value=await handler(...decodeHta(message.frame));this.worker.postMessage({type:"delivery",call:message.call,ok:true,frame:encodeHta(value)});}catch(error){this.worker.postMessage({type:"delivery",call:message.call,ok:false,frame:encodeHta(errorValue(error))});}}
+    if(message.type==="host-call"){const key=`${message.service}/${message.method}`,handler=this.hostCalls[key];try{if(!handler)throw new Error(`hta/host-call-denied: ${key}`);const value=await handler.call({context:this,task:message.task},...decodeHta(message.frame));this.worker.postMessage({type:"delivery",call:message.call,ok:true,frame:encodeHta(value)});}catch(error){this.worker.postMessage({type:"delivery",call:message.call,ok:false,frame:encodeHta(errorValue(error))});}}
   }
   fail(error){this.readyReject(error);for(const pending of this.pending.values())pending.reject(error);this.pending.clear();}
   close(){this.worker.postMessage({type:"close"});this.worker.terminate();}

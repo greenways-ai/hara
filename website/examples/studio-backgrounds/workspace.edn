@@ -1,0 +1,46 @@
+{:hara/type :workspace
+ :hara/version "1.0.0"
+ :workspace/id :hara-studio-backgrounds
+ :workspace/areas
+ [{:area/id "canvas/background"
+   :area/type :visual/canvas
+   :area/title "Live HAL background"}]
+ :workspace/documents
+ [{:document/id "document/background/tron"
+   :document/title "Tron"
+   :document/path "../../sources/tron.hal"
+   :document/role :studio/background
+   :document/anonymous true
+   :document/node "node/background/tron"
+   :document/canvas "canvas/background"}
+  {:document/id "document/background/fire"
+   :document/title "Fire"
+   :document/path "../../sources/fire.hal"
+   :document/role :studio/background
+   :document/anonymous true
+   :document/node "node/background/fire"
+   :document/canvas "canvas/background"}
+  {:document/id "document/background/grid"
+   :document/title "Grid"
+   :document/path "../../sources/grid.hal"
+   :document/role :studio/background
+   :document/anonymous true
+   :document/node "node/background/grid"
+   :document/canvas "canvas/background"}
+  {:document/id "document/background/off"
+   :document/title "Off"
+   :document/path "../../sources/off.hal"
+   :document/role :studio/background
+   :document/anonymous true
+   :document/node "node/background/off"
+   :document/canvas "canvas/background"}]
+ :workspace/nodes
+ [{:node/id "node/background/tron" :node/type :hal/transform :node/document "document/background/tron"}
+  {:node/id "node/background/fire" :node/type :hal/transform :node/document "document/background/fire"}
+  {:node/id "node/background/grid" :node/type :hal/transform :node/document "document/background/grid"}
+  {:node/id "node/background/off" :node/type :hal/transform :node/document "document/background/off"}]
+ :workspace/links
+ [{:link/from "document/background/tron" :link/to "canvas/background"}
+  {:link/from "document/background/fire" :link/to "canvas/background"}
+  {:link/from "document/background/grid" :link/to "canvas/background"}
+  {:link/from "document/background/off" :link/to "canvas/background"}]}

@@ -182,12 +182,15 @@ class AmpAudio {
 async function boot() {
   const status = $("[data-runtime-status]");
   try {
-    const [runtimeBytes, synth, fft, nodeSource, drawSource, visualizerSource] = await Promise.all([
+    const [runtimeBytes, synth, fft, nodeSource, drawSource, protocolSource, frameSource, substrateSource, visualizerSource] = await Promise.all([
       bytes("./runtime/hara.wasm"),
       wasm("./assets/wasm/demo-synth.wasm"),
       wasm("./assets/wasm/demo-fft.wasm"),
       text("./runtime/studio/hal/node.hal"),
       text("./runtime/studio/hal/draw.hal"),
+      text("./runtime/std/substrate/protocol.hal"),
+      text("./runtime/std/substrate/frame.hal"),
+      text("./runtime/std/substrate.hal"),
       text("./examples/hara-amp/src/visualizer.hal")
     ]);
     state.engine = new AmpAudio(synth, fft);
@@ -200,7 +203,13 @@ async function boot() {
       workerUrl: new URL("./runtime/hta-worker.js", import.meta.url),
       moduleBytes: runtimeBytes,
       hostCalls,
-      resources: { "studio.node": nodeSource, "studio.draw": drawSource }
+      resources: {
+        "studio.node": nodeSource,
+        "studio.draw": drawSource,
+        "std.substrate.protocol": protocolSource,
+        "std.substrate.frame": frameSource,
+        "std.substrate": substrateSource
+      }
     });
     const result = await state.broker.evalDocument("ROOT", "document/visualizer", visualizerSource, {
       nodeId: "node/visualizer"

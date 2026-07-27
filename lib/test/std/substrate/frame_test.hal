@@ -1,0 +1,57 @@
+(ns std.substrate.frame-test
+  (:require [std.lib.test :as test]
+            [std.substrate.frame :as frame]))
+
+(def results
+  [(test/check "keyword inputs normalize to substrate.v1 string-keyed wire maps"
+               (frame/frame-create :request "req-1"
+                                   {:source "client/a"
+                                    :space "workspace/main"
+                                    :action "math/add"
+                                    :args [19 23]
+                                    :meta {:trace "trace-1"}})
+               {"version" "substrate.v1"
+                "kind" "request"
+                "id" "req-1"
+                "source" "client/a"
+                "target" nil
+                "space" "workspace/main"
+                "meta" {"trace" "trace-1"}
+                "action" "math/add"
+                "args" [19 23]
+                "reply_to" nil
+                "status" nil
+                "data" nil
+                "error" nil
+                "signal" nil
+                "cause" nil})
+   (test/check "JSON wire round-trips through canonical normalization"
+               (let [frame (frame/frame-create :response "res-1"
+                                                {:reply_to "req-1"
+                                                 :status :ok
+                                                 :data false})]
+                 [(frame/encode-frame-json frame)
+                  (frame/decode-frame-json (frame/encode-frame-json frame))])
+               ["{\"version\":\"substrate.v1\",\"kind\":\"response\",\"id\":\"res-1\",\"source\":null,\"target\":null,\"space\":null,\"meta\":{},\"action\":null,\"args\":null,\"reply_to\":\"req-1\",\"status\":\"ok\",\"data\":false,\"error\":null,\"signal\":null,\"cause\":null}"
+                {"version" "substrate.v1"
+                 "kind" "response"
+                 "id" "res-1"
+                 "source" nil
+                 "target" nil
+                 "space" nil
+                 "meta" {}
+                 "action" nil
+                 "args" nil
+                 "reply_to" "req-1"
+                 "status" "ok"
+                 "data" false
+                 "error" nil
+                 "signal" nil
+                 "cause" nil}])
+   (test/check "validation reports invalid frame shapes deterministically"
+               [(frame/frame-errors {:kind :unknown :id "evt-1"})
+                (frame/frame-errors {:kind :stream})
+                (frame/frame-errors [1])]
+               [["frame/kind"] ["frame/id"] ["frame/invalid"]])])
+
+(test/print-results results)

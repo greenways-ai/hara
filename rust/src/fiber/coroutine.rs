@@ -49,10 +49,12 @@ pub fn coroutine_resume(coroutine: Rc<Coroutine>, args: Vec<Value>, k: Cont) -> 
                 Err(e) => k(Err(e)),
             }
         }
-        CoroutineState::Running => {
-            k(Err("coroutine/resume: cannot resume a running coroutine".into()))
-        }
-        CoroutineState::Dead => k(Err("coroutine/resume: cannot resume a dead coroutine".into())),
+        CoroutineState::Running => k(Err(
+            "coroutine/resume: cannot resume a running coroutine".into()
+        )),
+        CoroutineState::Dead => k(Err(
+            "coroutine/resume: cannot resume a dead coroutine".into()
+        )),
     }
 }
 
@@ -184,7 +186,9 @@ pub fn await_form(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Con
                     }),
                 ),
             },
-            Ok(_) => k(Err("coroutine/await expects a derefable (e.g. a promise)".into())),
+            Ok(_) => k(Err(
+                "coroutine/await expects a derefable (e.g. a promise)".into()
+            )),
             Err(e) => k(Err(e)),
         }),
     )

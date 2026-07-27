@@ -7,6 +7,7 @@ import { HtaContext, HtaKeyword } from "./hta.js";
 import { KernelBroker } from "./studio/broker.js";
 import { defaultBootstrap } from "./studio/boot.js";
 import { createHostServices } from "./studio/host-services.js";
+import { NodeRuntime } from "./studio/node-runtime.js";
 
 // Real-wasm integration tests for the studio hara libraries
 // (rust/web/studio/hal/*.hal): store/fs/space/boot behaviour is asserted by
@@ -21,7 +22,11 @@ const resources = wasmBytes === null
       "studio.store": await hal("store"),
       "studio.fs": await hal("fs"),
       "studio.space": await hal("space"),
-      "studio.boot": await hal("boot")
+      "studio.boot": await hal("boot"),
+      "studio.node": await hal("node"),
+      "std.substrate.protocol": await readFile(new URL("../../lib/src/std/substrate/protocol.hal", import.meta.url), "utf8"),
+      "std.substrate.frame": await readFile(new URL("../../lib/src/std/substrate/frame.hal", import.meta.url), "utf8"),
+      "std.substrate": await readFile(new URL("../../lib/src/std/substrate.hal", import.meta.url), "utf8")
     };
 
 const LISTING_URL = "https://data.jsdelivr.com/v1/packages/gh/octo/lessons@main";
@@ -65,6 +70,7 @@ function mockFetch({ failFor } = {}) {
 // the cache-busting query forces node to evaluate the module afresh so it
 // binds to the bridge installed just before the import.
 let kernelCounter = 0;
+let brokerCounter = 0;
 async function spawnRealKernel(hostCalls) {
   kernelCounter += 1;
   const bridge = { listeners: {}, selfListeners: {} };
@@ -90,8 +96,12 @@ async function spawnRealKernel(hostCalls) {
   return { context: new HtaContext({ worker, moduleBytes: wasmBytes, hostCalls }), worker };
 }
 
-function makeBroker({ fetch } = {}) {
-  const hostCalls = createHostServices({ dbName: "hara-studio-hal-test", fetch: fetch ?? mockFetch() });
+function makeBroker({ fetch, nodeRuntime } = {}) {
+  const hostCalls = createHostServices({
+    dbName: `hara-studio-hal-test-${++brokerCounter}`,
+    fetch: fetch ?? mockFetch(),
+    nodeRuntime
+  });
   return new KernelBroker({ resources, spawn: () => spawnRealKernel(hostCalls) });
 }
 
@@ -116,6 +126,72 @@ test("defaultBootstrap renders the shared bootstrap template", { skip: wasmBytes
     defaultBootstrap("boot-space"),
     '(do (require [studio.boot :as boot]) (boot/boot! "boot-space"))'
   );
+});
+
+test("studio.node sends std.substrate.frame envelopes through the browser adapter", { skip: wasmBytes === null }, async () => {
+  const runtime = new NodeRuntime({ space: "workspace/studio-hal" });
+  runtime.registerNode({ id: "node/a" });
+  runtime.registerNode({ id: "node/b" });
+  runtime.connect({
+    id: "a-to-b",
+    from: ["node/a", "signal/out"],
+    to: ["node/b", "signal/in"]
+  });
+  runtime.handle("node/b", "double", ([value]) => value * 2);
+  const broker = makeBroker({ nodeRuntime: runtime });
+
+  const document = await broker.evalDocument(
+    "ROOT",
+    "document/substrate-node",
+    '(ns+) (node/emit "signal/out" {:answer 42} {:cause "evt-0"})',
+    { nodeId: "node/a" }
+  );
+  const frame = await runtime.inFrame("node/b", "signal/in");
+  assert.equal(frame.version, "substrate.v1");
+  assert.equal(frame.kind, "stream");
+  assert.equal(frame.source, "node/a");
+  assert.equal(frame.cause, "evt-0");
+  assert.deepEqual(frame.data, { answer: 42 });
+
+  const value = await broker.evalForm(
+    "ROOT",
+    "document/substrate-node",
+    '(node/call "node/b" "double" [21] {:id "req-1" :meta {:trace "studio"}})'
+  );
+  assert.equal(value, 42);
+});
+
+test("studio.node registers kernel-owned request handlers", { skip: wasmBytes === null }, async () => {
+  const runtime = new NodeRuntime({ space: "workspace/studio-hal" });
+  runtime.registerNode({ id: "node/a" });
+  runtime.registerNode({ id: "node/b" });
+  const broker = makeBroker({ nodeRuntime: runtime });
+
+  const document = await broker.evalDocument(
+    "ROOT",
+    "document/substrate-handler",
+    '(ns+) (node/handle "double" (fn [args] (* 2 (nth args 0))))',
+    { nodeId: "node/b" }
+  );
+  assert.equal(document.value, "handler-1");
+  assert.equal(await broker.evalForm("ROOT", "document/substrate-handler", '(studio.node/invoke-handler "handler-1" [21] nil)'), 42);
+  const response = await runtime.call("node/a", "node/b", "double", [21], { id: "handler-req" });
+  assert.equal(response.data, 42);
+  assert.equal(response.reply_to, "handler-req");
+});
+
+test("Studio kernels load the atom-backed std.substrate node", { skip: wasmBytes === null }, async () => {
+  const broker = makeBroker();
+  const value = await broker.eval(
+    "ROOT",
+    "(do " +
+      "(require [std.substrate :as substrate]) " +
+      "(require [std.substrate.protocol :as protocol]) " +
+      '(def node (substrate/node-create "node/studio")) ' +
+      '(protocol-call protocol/IService set-service node "answer" 42) ' +
+      '(protocol-call protocol/IService get-service node "answer"))'
+  );
+  assert.equal(value, 42);
 });
 
 test("studio.store round trips string values and lists keys", { skip: wasmBytes === null }, async () => {

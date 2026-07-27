@@ -1,7 +1,112 @@
-{:hara/type :studio/background
- :background/id :tron
- :background/renderer :tron
- :background/grid 36
- :background/speed 28
- :background/cycles true
- :background/colors ["#41f5e4" "#ff2e88" "#9c7bff" "#f5d742"]}
+(ns+
+  (:require [studio.draw :as draw]))
+
+;; All game state lives here. The browser only schedules a frame and executes
+;; the complete Canvas2D command scene returned by render-state.
+(def directions [[4 0] [0 4] [-4 0] [0 -4]])
+
+(defn either [a b] (if a true b))
+(defn absolute [value] (if (< value 0) (- 0 value) value))
+
+(defn trim-trail [trail]
+  (if (> (count trail) 34) (vec (rest trail)) trail))
+
+(defn event-direction [events direction]
+  (loop [index 0 result direction]
+    (if (< index (count events))
+      (let [event (nth events index)
+            key (get event "key")
+            swipe (get event "direction")]
+        (recur
+          (+ index 1)
+          (if (either (= key "ArrowLeft") (= swipe "left"))
+            2
+            (if (either (= key "ArrowRight") (= swipe "right"))
+              0
+              (if (either (= key "ArrowUp") (= swipe "up"))
+                3
+                (if (either (= key "ArrowDown") (= swipe "down"))
+                  1 result))))))
+      result)))
+
+(defn hit-wall [x y width height]
+  (if (< x 24) true
+    (if (> x (- width 24)) true
+      (if (< y 50) true
+        (> y (- height 24))))))
+
+(defn collides [cycle other]
+  (if (< (absolute (- (get cycle :x) (get other :x))) 10)
+    (< (absolute (- (get cycle :y) (get other :y))) 10)
+    false))
+
+(defn advance [cycle direction width height]
+  (let [velocity (nth directions direction)
+        x (+ (get cycle :x) (nth velocity 0))
+        y (+ (get cycle :y) (nth velocity 1))]
+    (if (hit-wall x y width height)
+      (assoc (assoc cycle :direction (mod (+ direction 1) 4)) :trail [])
+      (assoc
+        (assoc (assoc cycle :x x) :y y)
+        :trail (trim-trail (conj (get cycle :trail) [x y]))))))
+
+(defn update-player [cycle events width height]
+  (let [direction (event-direction events (get cycle :direction))]
+    (advance (assoc cycle :direction direction) direction width height)))
+
+(defn update-agent [cycle tick period width height]
+  (let [direction (if (= (mod tick period) 0)
+                    (mod (+ (get cycle :direction) 1) 4)
+                    (get cycle :direction))]
+    (advance (assoc cycle :direction direction) direction width height)))
+
+(defn initial-state [width height]
+  {:cyan {:x 50 :y 76 :direction 0 :trail [[50 76]]}
+   :pink {:x (- width 54) :y 108 :direction 2 :trail [[(- width 54) 108]]}
+   :violet {:x 72 :y (- height 56) :direction 3 :trail [[72 (- height 56)]]}
+   :gold {:x (- width 80) :y (- height 80) :direction 2
+          :trail [[(- width 80) (- height 80)]]}})
+
+(defn update-state [state events tick width height]
+  (let [cyan (update-player (get state :cyan) events width height)
+        pink (update-agent (get state :pink) tick 47 width height)
+        violet (update-agent (get state :violet) tick 71 width height)
+        gold (update-agent (get state :gold) tick 89 width height)
+        cyan' (if (collides cyan pink)
+                (assoc (assoc cyan :direction 1) :trail [])
+                cyan)]
+    {:cyan cyan' :pink pink :violet violet :gold gold}))
+
+(defn cycle-commands [cycle color]
+  [[:polyline (get cycle :trail) color 11 0.12]
+   [:polyline (get cycle :trail) color 2 0.86]
+   [:circle (get cycle :x) (get cycle :y) 4 "#efffff" 1]])
+
+(defn render-state [state width height]
+  (let [cyan (cycle-commands (get state :cyan) "#41f5e4")
+        pink (cycle-commands (get state :pink) "#ff2e88")
+        violet (cycle-commands (get state :violet) "#9c7bff")
+        gold (cycle-commands (get state :gold) "#f5d742")]
+    {:type :canvas-2d
+     :background "#02050b"
+     :commands
+     [[:grid 46 "rgba(65,245,228,.055)" 1]
+      (nth cyan 0) (nth cyan 1) (nth cyan 2)
+      (nth pink 0) (nth pink 1) (nth pink 2)
+      (nth violet 0) (nth violet 1) (nth violet 2)
+      (nth gold 0) (nth gold 1) (nth gold 2)
+      [:text "TRON.HAL // ARROWS OR SWIPE" 24 (- height 24) "#65c9d0" 11]]}))
+
+(node/start
+  (fn []
+    (loop [state nil tick 0]
+      (let [frame (co/await (draw/next-frame "canvas/background"))
+            width (get frame "canvas/width")
+            height (get frame "canvas/height")
+            events (get frame "input/events")
+            current (if state state (initial-state width height))
+            next (update-state current events tick width height)]
+        (do
+          (co/await
+            (draw/render "canvas/background" (render-state next width height)))
+          (recur next (+ tick 1)))))))

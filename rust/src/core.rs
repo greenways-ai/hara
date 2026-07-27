@@ -29,6 +29,24 @@ pub struct ExtensionValue {
 }
 
 #[derive(Debug, Clone)]
+pub struct StructType {
+    pub name: String,
+    pub fields: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructValue {
+    pub ty: Rc<StructType>,
+    pub values: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GuestProtocol {
+    pub name: String,
+    pub methods: HashMap<String, usize>,
+}
+
+#[derive(Debug, Clone)]
 pub enum Value {
     Number(i64),
     Float(f64),
@@ -66,6 +84,9 @@ pub enum Value {
     Var(KernelVar<Value>),
     Namespace(Rc<crate::kernel::Namespace<Value>>),
     Extension(ExtensionValue),
+    StructType(Rc<StructType>),
+    Struct(Rc<StructValue>),
+    Protocol(Rc<GuestProtocol>),
     Coroutine(Rc<Coroutine>),
     Nil,
 }
@@ -285,10 +306,12 @@ fn register_macro(namespace: &str, name: &str, function: Rc<Function>) -> Result
 
 fn resolve_macro_in(namespace: &str, name: &str) -> Option<Rc<Function>> {
     ACTIVE_MACROS.with(|active| {
-        active
-            .borrow()
-            .as_ref()
-            .and_then(|macros| macros.borrow().get(&(namespace.into(), name.into())).cloned())
+        active.borrow().as_ref().and_then(|macros| {
+            macros
+                .borrow()
+                .get(&(namespace.into(), name.into()))
+                .cloned()
+        })
     })
 }
 
@@ -299,8 +322,7 @@ pub(crate) fn resolve_macro(name: &str) -> Option<Rc<Function>> {
     let current = namespace_registry()
         .map(|registry| registry.current().name().as_str().to_owned())
         .ok()?;
-    resolve_macro_in(&current, name)
-        .or_else(|| resolve_macro_in("std.foundation", name))
+    resolve_macro_in(&current, name).or_else(|| resolve_macro_in("std.foundation", name))
 }
 
 fn gensym(prefix: &str) -> String {
@@ -333,19 +355,34 @@ fn value_to_form(value: &Value) -> Result<Form, String> {
             Box::new(value_to_form(value.form())?),
         )),
         Value::List(values) => Ok(Form::List(
-            values.iter().map(|v| value_to_form(v)).collect::<Result<_, _>>()?,
+            values
+                .iter()
+                .map(|v| value_to_form(v))
+                .collect::<Result<_, _>>()?,
         )),
         Value::Queue(values) => Ok(Form::List(
-            values.iter().map(|v| value_to_form(v)).collect::<Result<_, _>>()?,
+            values
+                .iter()
+                .map(|v| value_to_form(v))
+                .collect::<Result<_, _>>()?,
         )),
         Value::Cons(values) => Ok(Form::List(
-            values.iter().map(|v| value_to_form(&v)).collect::<Result<_, _>>()?,
+            values
+                .iter()
+                .map(|v| value_to_form(&v))
+                .collect::<Result<_, _>>()?,
         )),
         Value::Vector(values) => Ok(Form::Vector(
-            values.iter().map(|v| value_to_form(v)).collect::<Result<_, _>>()?,
+            values
+                .iter()
+                .map(|v| value_to_form(v))
+                .collect::<Result<_, _>>()?,
         )),
         Value::Tuple(values) => Ok(Form::Vector(
-            values.iter().map(|v| value_to_form(v)).collect::<Result<_, _>>()?,
+            values
+                .iter()
+                .map(|v| value_to_form(v))
+                .collect::<Result<_, _>>()?,
         )),
         Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_) => Ok(Form::Set(
             set_items(value)
@@ -355,15 +392,17 @@ fn value_to_form(value: &Value) -> Result<Form, String> {
                 .map(value_to_form)
                 .collect::<Result<_, _>>()?,
         )),
-        Value::Map(_) | Value::OrderedMap(_) | Value::SortedMap(_) | Value::Trie(_) => Ok(Form::Map(
-            map_entries(value)
-                .unwrap()
-                .into_iter()
-                .map(|(key, value)| -> Result<(Form, Form), String> {
-                    Ok((value_to_form(&key)?, value_to_form(&value)?))
-                })
-                .collect::<Result<_, _>>()?,
-        )),
+        Value::Map(_) | Value::OrderedMap(_) | Value::SortedMap(_) | Value::Trie(_) => {
+            Ok(Form::Map(
+                map_entries(value)
+                    .unwrap()
+                    .into_iter()
+                    .map(|(key, value)| -> Result<(Form, Form), String> {
+                        Ok((value_to_form(&key)?, value_to_form(&value)?))
+                    })
+                    .collect::<Result<_, _>>()?,
+            ))
+        }
         value => Err(format!("cannot use {} as code", portable_type_name(value))),
     }
 }
@@ -371,9 +410,18 @@ fn value_to_form(value: &Value) -> Result<Form, String> {
 fn macro_environment() -> Result<Value, String> {
     let namespace = namespace_registry()?.current().name().as_str().to_owned();
     let entries = vec![
-        (Value::Keyword(Keyword::from("ns")), Value::Symbol(Symbol::from(namespace))),
-        (Value::Keyword(Keyword::from("locals")), Value::OrderedMap(Box::new(POrderedMap::new()))),
-        (Value::Keyword(Keyword::from("aliases")), Value::OrderedMap(Box::new(POrderedMap::new()))),
+        (
+            Value::Keyword(Keyword::from("ns")),
+            Value::Symbol(Symbol::from(namespace)),
+        ),
+        (
+            Value::Keyword(Keyword::from("locals")),
+            Value::OrderedMap(Box::new(POrderedMap::new())),
+        ),
+        (
+            Value::Keyword(Keyword::from("aliases")),
+            Value::OrderedMap(Box::new(POrderedMap::new())),
+        ),
     ];
     Ok(Value::OrderedMap(Box::new(POrderedMap::from_iter(entries))))
 }
@@ -892,6 +940,9 @@ impl PartialEq for Value {
             (Value::Var(a), Value::Var(b)) => a.same_identity(b),
             (Value::Namespace(a), Value::Namespace(b)) => a.same_identity(b),
             (Value::Extension(a), Value::Extension(b)) => a == b,
+            (Value::StructType(a), Value::StructType(b)) => Rc::ptr_eq(a, b),
+            (Value::Struct(a), Value::Struct(b)) => Rc::ptr_eq(a, b),
+            (Value::Protocol(a), Value::Protocol(b)) => Rc::ptr_eq(a, b),
             (Value::Coroutine(a), Value::Coroutine(b)) => Rc::ptr_eq(a, b),
             (Value::Nil, Value::Nil) => true,
             _ => false,
@@ -955,6 +1006,9 @@ impl Ord for Value {
                 Value::Var(_) => 23,
                 Value::Namespace(_) => 24,
                 Value::Extension(_) => 25,
+                Value::StructType(_) => 27,
+                Value::Struct(_) => 28,
+                Value::Protocol(_) => 29,
                 Value::Coroutine(_) => 30,
             }
         }
@@ -1115,6 +1169,20 @@ impl Value {
             Self::Var(value) => value.display(),
             Self::Namespace(value) => format!("#namespace[{}]", value.name().as_str()),
             Self::Extension(value) => format!("#ht[:handle {}]", value.handle),
+            Self::StructType(value) => value.name.clone(),
+            Self::Struct(value) => format!(
+                "#{}{{{}}}",
+                value.ty.name,
+                value
+                    .ty
+                    .fields
+                    .iter()
+                    .zip(&value.values)
+                    .map(|(field, value)| format!(":{field} {}", value.display()))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+            Self::Protocol(value) => format!("#protocol[{}]", value.name),
             Self::Coroutine(value) => {
                 let status = match &*value.state.borrow() {
                     CoroutineState::New(_) | CoroutineState::Suspended(_) => "suspended",
@@ -1159,6 +1227,9 @@ impl Value {
                 Value::Var(_) => 17,
                 Value::Namespace(_) => 27,
                 Value::Extension(_) => 18,
+                Value::StructType(_) => 26,
+                Value::Struct(_) => 27,
+                Value::Protocol(_) => 28,
                 Value::Coroutine(_) => 29,
                 Value::Nil => 19,
                 Value::Float(_) => 20,
@@ -1237,6 +1308,9 @@ impl Value {
                     v.type_name.hash(state);
                     v.handle.hash(state);
                 }
+                Value::StructType(v) => v.name.hash(state),
+                Value::Struct(v) => Rc::as_ptr(v).hash(state),
+                Value::Protocol(v) => v.name.hash(state),
                 Value::Coroutine(v) => {
                     Rc::as_ptr(v).hash(state);
                 }
@@ -1253,7 +1327,9 @@ pub type ProtocolFn = Rc<dyn Fn(&[Value]) -> Result<Value, String>>;
 
 #[derive(Default, Clone)]
 pub struct ProtocolRegistry {
-    methods: HashMap<(String, String), Vec<ProtocolFn>>,
+    methods: Rc<RefCell<HashMap<(String, String), Vec<ProtocolFn>>>>,
+    guest_methods: Rc<RefCell<HashMap<(String, String, String), Rc<Function>>>>,
+    guest_declarations: Rc<RefCell<HashSet<(String, String)>>>,
 }
 
 #[allow(dead_code)]
@@ -1271,9 +1347,29 @@ impl ProtocolRegistry {
         F: Fn(&[Value]) -> Result<Value, String> + 'static,
     {
         self.methods
+            .borrow_mut()
             .entry((protocol.into(), method.into()))
             .or_default()
             .push(Rc::new(function));
+    }
+
+    pub fn register_guest(
+        &self,
+        protocol: impl Into<String>,
+        type_name: impl Into<String>,
+        method: impl Into<String>,
+        function: Rc<Function>,
+    ) {
+        self.guest_methods.borrow_mut().insert(
+            (protocol.into(), type_name.into(), method.into()),
+            function,
+        );
+    }
+
+    pub fn declare_guest(&self, protocol: impl Into<String>, method: impl Into<String>) {
+        self.guest_declarations
+            .borrow_mut()
+            .insert((protocol.into(), method.into()));
     }
 
     pub fn invoke(
@@ -1282,8 +1378,24 @@ impl ProtocolRegistry {
         method: &str,
         arguments: &[Value],
     ) -> Result<Value, String> {
-        let implementations = self
-            .methods
+        if let Some(Value::Struct(receiver)) = arguments.first() {
+            if let Some(function) = self.guest_methods.borrow().get(&(
+                protocol.to_owned(),
+                receiver.ty.name.clone(),
+                method.to_owned(),
+            )) {
+                return call_function(function, arguments.to_vec());
+            }
+        }
+        if self
+            .guest_declarations
+            .borrow()
+            .contains(&(protocol.to_owned(), method.to_owned()))
+        {
+            return Err(format!("missing protocol implementation: {protocol}/{method}"));
+        }
+        let methods = self.methods.borrow();
+        let implementations = methods
             .get(&(protocol.to_string(), method.to_string()))
             .ok_or_else(|| format!("missing protocol method: {protocol}/{method}"))?;
         let mut last_error = format!("missing protocol implementation: {protocol}/{method}");
@@ -1298,6 +1410,7 @@ impl ProtocolRegistry {
 
     pub fn contains(&self, protocol: &str, method: &str) -> bool {
         self.methods
+            .borrow()
             .get(&(protocol.to_string(), method.to_string()))
             .is_some_and(|implementations| !implementations.is_empty())
     }
@@ -1365,7 +1478,10 @@ pub(crate) fn binding_is_local(var: &KernelVar<Value>) -> bool {
         .unwrap_or(true)
 }
 
-pub(crate) fn protected_fallback_binding(env: &HashMap<String, Value>, name: &str) -> Option<Value> {
+pub(crate) fn protected_fallback_binding(
+    env: &HashMap<String, Value>,
+    name: &str,
+) -> Option<Value> {
     if definition_origin() != VarOrigin::HalFallback {
         return None;
     }
@@ -2202,6 +2318,9 @@ fn portable_type_name(value: &Value) -> &str {
         Value::Var(_) => "var",
         Value::Namespace(_) => "namespace",
         Value::Extension(_) => "extension",
+        Value::StructType(_) => "struct-type",
+        Value::Struct(_) => "struct",
+        Value::Protocol(_) => "protocol",
         Value::Coroutine(_) => "coroutine",
     }
 }
@@ -2236,6 +2355,9 @@ pub fn receiver_category(value: &Value) -> &'static str {
         Value::Var(_) => "var",
         Value::Namespace(_) => "namespace",
         Value::Extension(_) => "extension",
+        Value::StructType(_) => "struct-type",
+        Value::Struct(_) => "struct",
+        Value::Protocol(_) => "protocol",
         Value::Coroutine(_) => "coroutine",
     }
 }
@@ -3939,7 +4061,10 @@ fn collection_empty_value(value: Value) -> Result<Value, String> {
         Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_) => {
             Ok(Value::OrderedSet(Box::new(POrderedSet::new())))
         }
-        value => Err(format!("empty expects a collection, got {}", portable_type_name(&value))),
+        value => Err(format!(
+            "empty expects a collection, got {}",
+            portable_type_name(&value)
+        )),
     }
 }
 
@@ -4414,9 +4539,7 @@ fn function_parts(form: &Form) -> Result<(Vec<String>, Option<String>), String> 
 fn select_clause(functions: &[Rc<Function>], argument_count: usize) -> Option<Rc<Function>> {
     functions
         .iter()
-        .find(|function| {
-            function.variadic.is_none() && function.params.len() == argument_count
-        })
+        .find(|function| function.variadic.is_none() && function.params.len() == argument_count)
         .or_else(|| {
             functions
                 .iter()
@@ -4490,7 +4613,7 @@ fn binding_value(env: &HashMap<String, Value>, name: &str) -> Option<Value> {
             .ok()?
             .resolve(&crate::lang::data::Symbol::parse(name))
             .map(|var| var.deref_value())
-    })
+    }).or_else(|| name.rsplit_once('/').and_then(|(_, local)| env.get(local).cloned().map(deref_value)))
 }
 
 fn binding_var(env: &mut HashMap<String, Value>, name: &str) -> Option<KernelVar<Value>> {
@@ -4510,6 +4633,12 @@ fn call_value(callable: Value, arguments: Vec<Value>) -> Result<Value, String> {
         |target: &Value, key: &Value, fallback: Value| collection_get(target, key, fallback);
     match callable {
         Value::Function(function) => call_function(&function, arguments),
+        Value::StructType(ty) => {
+            if arguments.len() != ty.fields.len() {
+                return Err(format!("{} expects {} arguments", ty.name, ty.fields.len()));
+            }
+            Ok(Value::Struct(Rc::new(StructValue { ty, values: arguments })))
+        }
         Value::Keyword(keyword) => match arguments.as_slice() {
             [target] => lookup(target, &Value::Keyword(keyword), Value::Nil),
             [target, fallback] => lookup(target, &Value::Keyword(keyword), fallback.clone()),
@@ -4786,8 +4915,7 @@ fn eval_namespace_form(fs: &[Form], env: &mut HashMap<String, Value>) -> Result<
     select_namespace_environment(&registry, env, &name);
     for clause in &fs[2..] {
         match clause {
-            Form::List(clause_forms)
-                if matches!(clause_forms.first(), Some(Form::Keyword(k)) if k == "require") =>
+            Form::List(clause_forms) if matches!(clause_forms.first(), Some(Form::Keyword(k)) if k == "require") =>
             {
                 eval_require_specs(&registry, env, &clause_forms[1..])?;
             }
@@ -4947,7 +5075,12 @@ fn eval_basic_object_form(
             } else if forms.len() == 2 {
                 match eval(&forms[1], env)? {
                     Value::String(prefix) => prefix,
-                    value => return Err(format!("gensym expects a string prefix, got {}", portable_type_name(&value))),
+                    value => {
+                        return Err(format!(
+                            "gensym expects a string prefix, got {}",
+                            portable_type_name(&value)
+                        ))
+                    }
                 }
             } else {
                 return Err("gensym expects zero or one arguments".into());
@@ -5162,8 +5295,16 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 Ok(Value::Var(cell))
             }
             Form::Symbol(n)
-                if ["type", "compare", "hash", "meta", "with-meta", "macroexpand-1", "gensym"]
-                    .contains(&n.as_str()) =>
+                if [
+                    "type",
+                    "compare",
+                    "hash",
+                    "meta",
+                    "with-meta",
+                    "macroexpand-1",
+                    "gensym",
+                ]
+                .contains(&n.as_str()) =>
             {
                 eval_basic_object_form(n, fs, env)
             }
@@ -5355,6 +5496,156 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 Ok(Value::Nil)
             }
+            Form::Symbol(n) if n == "defstruct" => {
+                if fs.len() != 3 {
+                    return Err("defstruct expects a name and field vector".into());
+                }
+                let name = match &fs[1] {
+                    Form::Symbol(name) if !name.contains('/') => name.clone(),
+                    _ => return Err("defstruct name must be an unqualified symbol".into()),
+                };
+                let fields = match &fs[2] {
+                    Form::Vector(fields) => fields
+                        .iter()
+                        .map(|field| match field {
+                            Form::Symbol(field) if !field.contains('/') => Ok(field.clone()),
+                            _ => Err("defstruct field names must be unqualified symbols".into()),
+                        })
+                        .collect::<Result<Vec<_>, String>>()?,
+                    _ => return Err("defstruct expects a field vector".into()),
+                };
+                if fields.iter().collect::<HashSet<_>>().len() != fields.len() {
+                    return Err("Duplicate defstruct field".into());
+                }
+                let namespace = namespace_registry()?.current().name().as_str().to_owned();
+                let ty = Rc::new(StructType { name: format!("{namespace}/{name}"), fields });
+                let map_type = ty.clone();
+                let map_constructor = native_function(&format!("map->{name}"), 1, move |values| {
+                    let source = values.first().expect("native arity is checked");
+                    let fields = map_type.fields.iter().map(|field| {
+                        Ok(map_value(source, &Value::Keyword(Keyword::from(field.as_str())))
+                            .cloned()
+                            .unwrap_or(Value::Nil))
+                    }).collect::<Result<Vec<_>, String>>()?;
+                    Ok(Value::Struct(Rc::new(StructValue { ty: map_type.clone(), values: fields })))
+                });
+                for (binding, value) in [
+                    (name.clone(), Value::StructType(ty.clone())),
+                    (format!("->{name}"), Value::StructType(ty.clone())),
+                    (format!("map->{name}"), map_constructor),
+                ] {
+                    let var = KernelVar::new(format!("{namespace}/{binding}"), value);
+                    var.set_origin(definition_origin());
+                    env.insert(binding, Value::Var(var));
+                }
+                Ok(Value::Nil)
+            }
+            Form::Symbol(n) if n == "field" => {
+                if fs.len() != 3 {
+                    return Err("field expects a struct and field name".into());
+                }
+                let field = match &fs[2] {
+                    Form::Keyword(field) | Form::Symbol(field) if !field.contains('/') => field,
+                    _ => return Err("field name must be an unqualified keyword or symbol".into()),
+                };
+                let value = eval(&fs[1], env)?;
+                let Value::Struct(value) = value else {
+                    return Err("field expects a struct".into());
+                };
+                value.ty.fields.iter().position(|candidate| candidate == field)
+                    .map(|index| value.values[index].clone())
+                    .ok_or_else(|| format!("unknown struct field: {field}"))
+            }
+            Form::Symbol(n) if n == "instance?" => {
+                if fs.len() != 3 {
+                    return Err("instance? expects a struct type and value".into());
+                }
+                let ty = match eval(&fs[1], env)? {
+                    Value::StructType(ty) => ty,
+                    _ => return Err("instance? expects a struct type".into()),
+                };
+                Ok(Value::Bool(matches!(eval(&fs[2], env)?, Value::Struct(value) if Rc::ptr_eq(&ty, &value.ty))))
+            }
+            Form::Symbol(n) if n == "defprotocol" => {
+                if fs.len() < 3 {
+                    return Err("defprotocol expects a name and method declarations".into());
+                }
+                let name = match &fs[1] {
+                    Form::Symbol(name) if !name.contains('/') => name.clone(),
+                    _ => return Err("defprotocol name must be an unqualified symbol".into()),
+                };
+                let mut methods = HashMap::new();
+                for declaration in &fs[2..] {
+                    let Form::List(parts) = declaration else {
+                        return Err("defprotocol method declaration must be a list".into());
+                    };
+                    if parts.len() != 2 || !matches!(&parts[0], Form::Symbol(_)) || !matches!(&parts[1], Form::Vector(_)) {
+                        return Err(
+                            "defprotocol method declaration expects a name and parameter vector"
+                                .into(),
+                        );
+                    }
+                    let Form::Symbol(method) = &parts[0] else { unreachable!() };
+                    let Form::Vector(arguments) = &parts[1] else { unreachable!() };
+                    if arguments.is_empty() || methods.insert(method.clone(), arguments.len()).is_some() {
+                        return Err("protocol methods must be unique and take a receiver".into());
+                    }
+                }
+                let namespace = namespace_registry()?.current().name().as_str().to_owned();
+                let protocol = Value::Protocol(Rc::new(GuestProtocol { name: format!("{namespace}/{name}"), methods }));
+                if let Value::Protocol(protocol_value) = &protocol {
+                    ACTIVE_PROTOCOLS.with(|active| -> Result<(), String> {
+                        let registry = active.borrow();
+                        let registry = registry.as_ref().ok_or_else(|| "protocol registry is unavailable".to_string())?;
+                        for method in protocol_value.methods.keys() {
+                            registry.declare_guest(protocol_value.name.clone(), method.clone());
+                        }
+                        Ok(())
+                    })?;
+                }
+                let var = KernelVar::new(format!("{namespace}/{name}"), protocol.clone());
+                var.set_origin(definition_origin());
+                env.insert(name, Value::Var(var));
+                Ok(protocol)
+            }
+            Form::Symbol(n) if n == "extend-type" => {
+                if fs.len() < 4 {
+                    return Err("extend-type expects a type, protocol, and method implementations".into());
+                }
+                let ty = match eval(&fs[1], env)? {
+                    Value::StructType(ty) => ty,
+                    _ => return Err("extend-type expects a struct type".into()),
+                };
+                let protocol = match eval(&fs[2], env)? {
+                    Value::Protocol(protocol) => protocol,
+                    _ => return Err("extend-type expects a protocol".into()),
+                };
+                let mut seen = HashSet::new();
+                for implementation in &fs[3..] {
+                    let Form::List(parts) = implementation else {
+                        return Err("extend-type implementations must be method forms".into());
+                    };
+                    if parts.len() < 3 { return Err("extend-type implementations require a body".into()); }
+                    let Form::Symbol(method) = &parts[0] else { return Err("extended method name must be a symbol".into()); };
+                    let Form::Vector(arguments) = &parts[1] else { return Err("extended method arguments must be a vector".into()); };
+                    if !seen.insert(method.clone()) { return Err("Duplicate extended method".into()); }
+                    if protocol.methods.get(method) != Some(&arguments.len()) {
+                        return Err(format!("invalid protocol method implementation: {method}"));
+                    }
+                    let function = eval(&Form::List(std::iter::once(Form::Symbol("fn".into()))
+                        .chain(parts[1..].iter().cloned()).collect()), env)?;
+                    let Value::Function(function) = function else { unreachable!() };
+                    ACTIVE_PROTOCOLS.with(|active| -> Result<(), String> {
+                        let registry = active.borrow();
+                        let registry = registry
+                            .as_ref()
+                            .ok_or_else(|| "protocol registry is unavailable".to_string())?;
+                        registry.register_guest(protocol.name.clone(), ty.name.clone(), method.clone(), function);
+                        Ok(())
+                    })?;
+                }
+                Ok(Value::Protocol(protocol))
+            }
             Form::Symbol(n) if n == "defmacro" => {
                 if fs.len() < 4 {
                     return Err("defmacro expects a name, parameters, and a body".into());
@@ -5408,11 +5699,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     multi_arity_function(&name, &clauses, env, true)?
                 };
                 if let Value::Function(ref function) = function {
-                    let namespace = namespace_registry()?
-                        .current()
-                        .name()
-                        .as_str()
-                        .to_owned();
+                    let namespace = namespace_registry()?.current().name().as_str().to_owned();
                     register_macro(&namespace, &name, function.clone())?;
                 }
                 cell.reset_value(function.clone());
@@ -5505,9 +5792,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 let body = eval(&fs[1], env)?;
                 match body {
-                    Value::Function(_) => {
-                        Ok(Value::Coroutine(Rc::new(Coroutine::new(body))))
-                    }
+                    Value::Function(_) => Ok(Value::Coroutine(Rc::new(Coroutine::new(body)))),
                     _ => Err("coroutine/create expects a function".into()),
                 }
             }
@@ -5566,9 +5851,13 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                             .into(),
                     );
                 }
-                let protocol = match &fs[1] {
-                    Form::Symbol(name) => name.as_str(),
-                    _ => return Err("protocol name must be a symbol".into()),
+                let protocol = match eval(&fs[1], env) {
+                    Ok(Value::Protocol(protocol)) => protocol.name.clone(),
+                    Ok(_) => return Err("protocol-call expects a protocol".into()),
+                    Err(_) => match &fs[1] {
+                        Form::Symbol(name) => name.clone(),
+                        _ => return Err("protocol name must be a symbol".into()),
+                    },
                 };
                 let method = match &fs[2] {
                     Form::Symbol(name) => name.as_str(),
@@ -5581,7 +5870,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         .map(|form| eval(form, env))
                         .collect::<Result<Vec<_>, _>>()?,
                 );
-                protocol_call(protocol, method, &arguments)
+                protocol_call(&protocol, method, &arguments)
             }
             Form::Symbol(n) if n == "promise" => {
                 if fs.len() != 1 {
@@ -5783,6 +6072,16 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         Ok(Value::Pointer(PPointer::create(Some(namespace), name)))
                     }
                     _ => unreachable!(),
+                }
+            }
+            Form::Symbol(n) if n == "name" => {
+                if fs.len() != 2 {
+                    return Err("name expects one value".into());
+                }
+                match eval(&fs[1], env)? {
+                    Value::Keyword(value) => Ok(Value::String(value.as_str().into())),
+                    Value::Symbol(value) => Ok(Value::String(value.as_str().into())),
+                    _ => Err("name expects a keyword or symbol".into()),
                 }
             }
             Form::Symbol(n) if ["list", "vector", "pair", "tup"].contains(&n.as_str()) => {
@@ -6784,7 +7083,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 collection_empty_value(eval(&fs[1], env)?)
             }
-            Form::Symbol(n) if ["list?", "vector?", "map?", "set?"].contains(&n.as_str()) => {
+            Form::Symbol(n)
+                if ["list?", "vector?", "map?", "set?", "keyword?", "symbol?", "string?"].contains(&n.as_str()) =>
+            {
                 if fs.len() != 2 {
                     return Err(format!("{n} expects one argument"));
                 }
@@ -6796,7 +7097,13 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         value,
                         Value::Map(_) | Value::OrderedMap(_) | Value::SortedMap(_) | Value::Trie(_)
                     ),
-                    "set?" => matches!(value, Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_)),
+                    "set?" => matches!(
+                        value,
+                        Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_)
+                    ),
+                    "keyword?" => matches!(value, Value::Keyword(_)),
+                    "symbol?" => matches!(value, Value::Symbol(_)),
+                    "string?" => matches!(value, Value::String(_)),
                     _ => unreachable!(),
                 }))
             }

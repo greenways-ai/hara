@@ -85,12 +85,15 @@ fn yield_exchanges_values_both_ways() {
     .unwrap();
     assert_eq!(
         f.state(),
-        EvalFiberState::Completed(Value::Vector(vec![
-            Value::Number(100),
-            keyword("second"),
-            Value::Vector(vec![keyword("got-a"), keyword("got-b")].into()),
-            keyword("dead"),
-        ].into()))
+        EvalFiberState::Completed(Value::Vector(
+            vec![
+                Value::Number(100),
+                keyword("second"),
+                Value::Vector(vec![keyword("got-a"), keyword("got-b")].into()),
+                keyword("dead"),
+            ]
+            .into()
+        ))
     );
 }
 
@@ -107,11 +110,14 @@ fn multi_arg_resume_delivers_vector_to_yield() {
     .unwrap();
     assert_eq!(
         f.state(),
-        EvalFiberState::Completed(Value::Vector(vec![
-            keyword("first"),
-            Value::Vector(vec![Value::Number(9), Value::Number(8)].into()),
-            keyword("dead"),
-        ].into()))
+        EvalFiberState::Completed(Value::Vector(
+            vec![
+                keyword("first"),
+                Value::Vector(vec![Value::Number(9), Value::Number(8)].into()),
+                keyword("dead"),
+            ]
+            .into()
+        ))
     );
 }
 
@@ -142,13 +148,16 @@ fn multi_yield_packs_vector_and_zero_yields_nil() {
     .unwrap();
     assert_eq!(
         f.state(),
-        EvalFiberState::Completed(Value::Vector(vec![
-            Value::Vector(vec![Value::Number(1), Value::Number(2), Value::Number(3)].into()),
-            Value::Nil,
-            keyword("suspended"),
-            Value::Nil,
-            keyword("dead"),
-        ].into()))
+        EvalFiberState::Completed(Value::Vector(
+            vec![
+                Value::Vector(vec![Value::Number(1), Value::Number(2), Value::Number(3)].into()),
+                Value::Nil,
+                keyword("suspended"),
+                Value::Nil,
+                keyword("dead"),
+            ]
+            .into()
+        ))
     );
 }
 
@@ -165,21 +174,15 @@ fn yield_works_from_nested_helper() {
     .unwrap();
     assert_eq!(
         f.state(),
-        EvalFiberState::Completed(Value::Vector(vec![
-            Value::Number(30),
-            keyword("end"),
-            keyword("dead"),
-        ].into()))
+        EvalFiberState::Completed(Value::Vector(
+            vec![Value::Number(30), keyword("end"), keyword("dead"),].into()
+        ))
     );
 }
 
 #[test]
 fn yield_outside_coroutine_throws() {
-    let mut f = EvalFiber::start(
-        "(std.foundation.coroutine/yield 1)",
-        HashMap::new(),
-    )
-    .unwrap();
+    let mut f = EvalFiber::start("(std.foundation.coroutine/yield 1)", HashMap::new()).unwrap();
     assert!(matches!(f.state(), EvalFiberState::Failed(e) if e.contains("outside")));
 }
 
@@ -214,12 +217,15 @@ fn nested_coroutines_resume_each_other() {
     .unwrap();
     assert_eq!(
         f.state(),
-        EvalFiberState::Completed(Value::Vector(vec![
-            keyword("inner-yield"),
-            keyword("inner-end"),
-            keyword("outer-end"),
-            keyword("dead"),
-        ].into()))
+        EvalFiberState::Completed(Value::Vector(
+            vec![
+                keyword("inner-yield"),
+                keyword("inner-end"),
+                keyword("outer-end"),
+                keyword("dead"),
+            ]
+            .into()
+        ))
     );
 }
 
@@ -241,13 +247,16 @@ fn generator_pipeline_produces_lazily() {
     .unwrap();
     assert_eq!(
         f.state(),
-        EvalFiberState::Completed(Value::Vector(vec![
-            Value::Number(0),
-            Value::Number(1),
-            Value::Number(4),
-            keyword("done"),
-            keyword("dead"),
-        ].into()))
+        EvalFiberState::Completed(Value::Vector(
+            vec![
+                Value::Number(0),
+                Value::Number(1),
+                Value::Number(4),
+                keyword("done"),
+                keyword("dead"),
+            ]
+            .into()
+        ))
     );
 }
 
@@ -280,7 +289,9 @@ fn await_rethrows_promise_rejection() {
         HashMap::new(),
     )
     .unwrap();
-    assert!(matches!(f.state(), EvalFiberState::Failed(e) if e.contains("Promise rejected") || e.contains("division") || e.contains("zero")));
+    assert!(
+        matches!(f.state(), EvalFiberState::Failed(e) if e.contains("Promise rejected") || e.contains("division") || e.contains("zero"))
+    );
     assert_eq!(status_of(&f.environment(), "c"), keyword("dead"));
 }
 

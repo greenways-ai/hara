@@ -1,0 +1,112 @@
+;; ============================================================================
+;; std.substrate.frame — portable substrate.v1 frame construction and JSON wire.
+;;
+;; This module is intentionally transport-neutral. It produces canonical
+;; string-keyed wire maps which direct, structured-clone, and JSON transports
+;; can share without depending on Studio or browser state.
+;; ============================================================================
+(ns std.substrate.frame)
+
+(def substrate-version "substrate.v1")
+(def frame-missing "__std.substrate.frame/missing__")
+
+(defn frame-id [prefix]
+  (str (gensym (if prefix prefix "evt"))))
+
+(defn frame-value [frame field]
+  (let [value (get frame field frame-missing)]
+    (if (= value frame-missing)
+      (get frame (keyword field) frame-missing)
+      value)))
+
+(defn frame-kind-name [kind]
+  (if (keyword? kind) (name kind) kind))
+
+(defn supported-kind? [kind]
+  (let [kind (frame-kind-name kind)]
+    (if (= kind "request") true
+      (if (= kind "response") true
+        (if (= kind "stream") true
+          (if (= kind "subscribe") true
+            (if (= kind "unsubscribe") true
+              (if (= kind "cancel") true
+                (= kind "error")))))))))
+
+(defn frame-errors [frame]
+  (if (not (map? frame))
+    ["frame/invalid"]
+    (let [kind (frame-value frame "kind")
+          id (frame-value frame "id")
+          kind-errors (if (supported-kind? kind) [] ["frame/kind"])]
+      (if (= id frame-missing)
+        (conj kind-errors "frame/id")
+        (if (string? id)
+          (if (not (= id ""))
+            kind-errors
+            (conj kind-errors "frame/id"))
+          (conj kind-errors "frame/id"))))))
+
+(defn valid-frame? [frame]
+  (= 0 (count (frame-errors frame))))
+
+(defn wire-key [key]
+  (if (keyword? key)
+    (name key)
+    (if (string? key)
+      key
+      (throw "substrate wire maps require string or keyword keys"))))
+
+(defn wire-scalar [value]
+  (if (keyword? value) (name value) value))
+
+(defn wire-map-loop [value map-keys index output]
+  (if (= index (count map-keys))
+    output
+    (let [key (nth map-keys index)]
+      (wire-map-loop value map-keys (+ index 1)
+                     (assoc output (wire-key key) (wire-scalar (get value key)))))))
+
+(defn wire-value [value]
+  (if (map? value)
+    (wire-map-loop value (vec (keys value)) 0 {})
+    (wire-scalar value)))
+
+(defn optional-value [frame field]
+  (let [value (frame-value frame field)]
+    (if (= value frame-missing) nil (wire-value value))))
+
+(defn normalize-frame [frame]
+  (let [errors (frame-errors frame)]
+    (if (not (= 0 (count errors)))
+      (throw (str "invalid substrate frame - " (nth errors 0)))
+      (let [version (frame-value frame "version")
+            source (frame-value frame "source")
+            target (frame-value frame "target")
+            space (frame-value frame "space")
+            meta (frame-value frame "meta")
+            wire {"version" (if (= version frame-missing) substrate-version (wire-value version))
+                  "kind" (frame-kind-name (frame-value frame "kind"))
+                  "id" (frame-value frame "id")
+                  "source" (if (= source frame-missing) nil (wire-value source))
+                  "target" (if (= target frame-missing) nil (wire-value target))
+                  "space" (if (= space frame-missing) nil (wire-value space))
+                  "meta" (if (= meta frame-missing) {} (wire-value meta))
+                  "action" (optional-value frame "action")
+                  "args" (optional-value frame "args")
+                  "reply_to" (optional-value frame "reply_to")
+                  "status" (optional-value frame "status")
+                  "data" (optional-value frame "data")
+                  "error" (optional-value frame "error")
+                  "signal" (optional-value frame "signal")
+                  "cause" (optional-value frame "cause")}]
+        wire))))
+
+(defn frame-create [kind id options]
+  (let [options (if options options {})]
+    (normalize-frame (assoc (assoc options :kind kind) :id id))))
+
+(defn encode-frame-json [frame]
+  (std.foundation.json/write (normalize-frame frame)))
+
+(defn decode-frame-json [text]
+  (normalize-frame (std.foundation.json/read text)))

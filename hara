@@ -4,6 +4,7 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 HARA_RUNTIME_JAR="${HARA_RUNTIME_JAR:-$SCRIPT_DIR/java/target/hara-truffle.jar}"
+HARA_JAVA="${HARA_JAVA:-}"
 
 if [[ ! -r "$HARA_RUNTIME_JAR" ]]; then
     echo "Hara runtime JAR not found: $HARA_RUNTIME_JAR" >&2
@@ -11,4 +12,20 @@ if [[ ! -r "$HARA_RUNTIME_JAR" ]]; then
     exit 1
 fi
 
-exec java -jar "$HARA_RUNTIME_JAR" "$@"
+if [[ -z "$HARA_JAVA" && -n "${JAVA_HOME:-}" && -x "$JAVA_HOME/bin/java" ]]; then
+    HARA_JAVA="$JAVA_HOME/bin/java"
+elif [[ -z "$HARA_JAVA" ]] && java -version >/dev/null 2>&1; then
+    HARA_JAVA="$(command -v java)"
+elif [[ -z "$HARA_JAVA" ]] && command -v brew >/dev/null 2>&1; then
+    BREW_JAVA="$(brew --prefix openjdk 2>/dev/null)/bin/java"
+    if [[ -x "$BREW_JAVA" ]]; then
+        HARA_JAVA="$BREW_JAVA"
+    fi
+fi
+
+if [[ -z "$HARA_JAVA" || ! -x "$HARA_JAVA" ]]; then
+    echo "Java runtime not found. Set HARA_JAVA or JAVA_HOME." >&2
+    exit 1
+fi
+
+exec "$HARA_JAVA" -jar "$HARA_RUNTIME_JAR" "$@"

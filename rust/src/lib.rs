@@ -1,8 +1,8 @@
 #![allow(clippy::too_many_lines)] // Temporary compatibility facade during Java-port split.
 mod core;
-mod json;
 pub mod extension;
 pub mod hta;
+mod json;
 pub mod kernel;
 pub mod lang;
 #[cfg(not(target_arch = "wasm32"))]
@@ -157,28 +157,69 @@ impl Runtime {
             self.eval_text(FOUNDATION_FALLBACK)
         })?;
         for (name, source) in [
-            ("std.foundation.string", include_str!("../../lib/src/std/foundation/string.hal")),
-            ("std.foundation.promise", include_str!("../../lib/src/std/foundation/promise.hal")),
-            ("std.foundation.bytes", include_str!("../../lib/src/std/foundation/bytes.hal")),
-            ("std.foundation.coroutine", include_str!("../../lib/src/std/foundation/coroutine.hal")),
-            ("std.foundation.file", include_str!("../../lib/src/std/foundation/file.hal")),
-            ("std.foundation.os", include_str!("../../lib/src/std/foundation/os.hal")),
-            ("std.foundation.socket", include_str!("../../lib/src/std/foundation/socket.hal")),
+            (
+                "std.foundation.string",
+                include_str!("../../lib/src/std/foundation/string.hal"),
+            ),
+            (
+                "std.foundation.promise",
+                include_str!("../../lib/src/std/foundation/promise.hal"),
+            ),
+            (
+                "std.foundation.bytes",
+                include_str!("../../lib/src/std/foundation/bytes.hal"),
+            ),
+            (
+                "std.foundation.coroutine",
+                include_str!("../../lib/src/std/foundation/coroutine.hal"),
+            ),
+            (
+                "std.foundation.file",
+                include_str!("../../lib/src/std/foundation/file.hal"),
+            ),
+            (
+                "std.foundation.os",
+                include_str!("../../lib/src/std/foundation/os.hal"),
+            ),
+            (
+                "std.foundation.socket",
+                include_str!("../../lib/src/std/foundation/socket.hal"),
+            ),
             ("std.pretty", include_str!("../../lib/src/std/pretty.hal")),
+            (
+                "std.substrate.protocol",
+                include_str!("../../lib/src/std/substrate/protocol.hal"),
+            ),
+            (
+                "std.substrate.frame",
+                include_str!("../../lib/src/std/substrate/frame.hal"),
+            ),
+            ("std.substrate", include_str!("../../lib/src/std/substrate.hal")),
         ] {
             self.register_resource(name, source);
         }
-        let json = self.namespace_registry.find_or_create("std.foundation.json");
-        json.intern("read", core::native_function("json/read", 1, |arguments| match arguments.as_slice() {
-            [core::Value::String(source)] => json::read(source),
-            _ => Err("json/read expects a string".into()),
-        }));
-        json.intern("write", core::native_function("json/write", 1, |arguments| {
-            json::write(&arguments[0]).map(core::Value::String)
-        }));
-        json.intern("write-pp", core::native_function("json/write-pp", 1, |arguments| {
-            json::write_pretty(&arguments[0]).map(core::Value::String)
-        }));
+        let json = self
+            .namespace_registry
+            .find_or_create("std.foundation.json");
+        json.intern(
+            "read",
+            core::native_function("json/read", 1, |arguments| match arguments.as_slice() {
+                [core::Value::String(source)] => json::read(source),
+                _ => Err("json/read expects a string".into()),
+            }),
+        );
+        json.intern(
+            "write",
+            core::native_function("json/write", 1, |arguments| {
+                json::write(&arguments[0]).map(core::Value::String)
+            }),
+        );
+        json.intern(
+            "write-pp",
+            core::native_function("json/write-pp", 1, |arguments| {
+                json::write_pretty(&arguments[0]).map(core::Value::String)
+            }),
+        );
         self.refer_foundation_into("user");
         self.use_namespace("user");
         Ok(())
@@ -998,7 +1039,10 @@ mod tests {
         assert_eq!(runtime.eval_text("(cond-> 1 (= 1 2) inc)").unwrap(), "1");
         assert_eq!(runtime.eval_text("(cond->> 1 (= 1 1) inc)").unwrap(), "2");
         assert_eq!(runtime.eval_text("(cond->> 1 (= 1 2) inc)").unwrap(), "1");
-        assert_eq!(runtime.eval_text("(vec (drop 2 [1 2 3 4]))").unwrap(), "[3 4]");
+        assert_eq!(
+            runtime.eval_text("(vec (drop 2 [1 2 3 4]))").unwrap(),
+            "[3 4]"
+        );
     }
 
     #[test]
@@ -1346,21 +1390,32 @@ mod tests {
         let mut runtime = Runtime::new();
         assert_eq!(
             runtime
-                .eval_text("(std.foundation.json/read \"[null,true,-2,\\\"x\\\",[3],{\\\"a\\\":4}]\")")
+                .eval_text(
+                    "(std.foundation.json/read \"[null,true,-2,\\\"x\\\",[3],{\\\"a\\\":4}]\")"
+                )
                 .unwrap(),
             "[nil true -2 \"x\" [3] {\"a\" 4}]"
         );
         assert_eq!(
-            runtime.eval_text("(std.foundation.json/write {\"a\" 1 \"b\" [true nil]})").unwrap(),
+            runtime
+                .eval_text("(std.foundation.json/write {\"a\" 1 \"b\" [true nil]})")
+                .unwrap(),
             "\"{\\\"a\\\":1,\\\"b\\\":[true,null]}\""
         );
         assert_eq!(
-            runtime.eval_text("(std.foundation.json/write-pp {\"a\" 1})").unwrap(),
+            runtime
+                .eval_text("(std.foundation.json/write-pp {\"a\" 1})")
+                .unwrap(),
             "\"{\\n  \\\"a\\\": 1\\n}\""
         );
-        assert!(runtime.eval_text("(std.foundation.json/read \"1.5\")").unwrap_err().contains("signed 64-bit integers"));
+        assert!(runtime
+            .eval_text("(std.foundation.json/read \"1.5\")")
+            .unwrap_err()
+            .contains("signed 64-bit integers"));
         assert_eq!(
-            runtime.eval_text("(do (require 'std.pretty) (std.pretty/pprint-str {:a [1 2]}))").unwrap(),
+            runtime
+                .eval_text("(do (require 'std.pretty) (std.pretty/pprint-str {:a [1 2]}))")
+                .unwrap(),
             "\"{:a [1 2]}\""
         );
     }
@@ -1373,6 +1428,152 @@ mod tests {
             "(ns demo (:require [core])) (defn answer [] 42) (answer)",
         );
         assert_eq!(runtime.load_resource("module").unwrap(), "42");
+    }
+
+    #[test]
+    fn substrate_protocol_resource_loads_in_the_native_runtime() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text("(require 'std.substrate.protocol) :loaded")
+                .unwrap(),
+            ":loaded"
+        );
+    }
+
+    #[test]
+    fn guest_struct_protocols_dispatch_like_truffle() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(do (defstruct Box [value]) \
+                     (defprotocol BoxOps (read [self]) (add [self amount])) \
+                     (extend-type Box BoxOps \
+                       (read [self] (field self :value)) \
+                       (add [self amount] (+ (field self :value) amount))) \
+                     [(protocol-call BoxOps read (Box 40)) \
+                      (protocol-call BoxOps add (map->Box {:value 40}) 2) \
+                      (instance? Box (Box 1))])",
+                )
+                .unwrap(),
+            "[40 42 true]"
+        );
+        assert!(runtime
+            .eval_text(
+                "(do (defstruct Missing []) (defprotocol Needed (get [self])) \
+                     (protocol-call Needed get (Missing)))",
+            )
+            .unwrap_err()
+            .contains("missing protocol implementation: user/Needed/get"));
+    }
+
+    #[test]
+    fn shared_protocol_conformance_fixture_runs_in_the_native_runtime() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(include_str!("../../lib/test-fixtures/std/substrate/protocol_conformance.hal"))
+                .unwrap(),
+            "[40 42]"
+        );
+    }
+
+    #[test]
+    fn shared_substrate_frame_conformance_fixture_runs_in_the_native_runtime() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(include_str!("../../lib/test-fixtures/std/substrate/frame_conformance.hal"))
+                .unwrap(),
+            "\"{\\\"version\\\":\\\"substrate.v1\\\",\\\"kind\\\":\\\"request\\\",\\\"id\\\":\\\"req-1\\\",\\\"source\\\":\\\"client/a\\\",\\\"target\\\":\\\"server/b\\\",\\\"space\\\":\\\"workspace/main\\\",\\\"meta\\\":{\\\"trace\\\":\\\"trace-1\\\"},\\\"action\\\":\\\"math/add\\\",\\\"args\\\":[19,23],\\\"reply_to\\\":null,\\\"status\\\":null,\\\"data\\\":null,\\\"error\\\":null,\\\"signal\\\":null,\\\"cause\\\":null}\""
+        );
+        assert!(runtime
+            .eval_text(
+                "(do (require 'std.substrate.frame) \\
+                     (std.substrate.frame/normalize-frame {:kind :unknown :id \"evt-1\"}))",
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn atom_backed_substrate_capabilities_work_in_the_native_runtime() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(require 'std.substrate) \
+                     (def node (std.substrate/node-create \"node-1\")) \
+                     [(protocol-call std.substrate.protocol/IService set-service node \"cache\" 42) \
+                      (protocol-call std.substrate.protocol/IService get-service node \"cache\") \
+                      (protocol-call std.substrate.protocol/ISpace set-space-state node \"main\" {:count 1}) \
+                      (protocol-call std.substrate.protocol/ISpace get-space-state node \"main\") \
+                      (def subscription (protocol-call std.substrate.protocol/IStream subscribe node \"main\" \"changed\" \"sub-1\" {})) \
+                      (protocol-call std.substrate.protocol/ITransport receive-frame node subscription {:transport-id \"peer-a\"}) \
+                      (protocol-call std.substrate.protocol/IStream list-subscriptions node \"main\" \"changed\")]",
+                )
+                .unwrap(),
+            "[42 42 {:count 1} {:count 1} #std.substrate/SubstrateFrame{:id \"sub-1\" :kind :subscribe :space \"main\" :meta {} :action nil :args [] :reply-to nil :status nil :data nil :error nil :signal \"changed\" :cause nil} {\"peer-a\" {:id \"sub-1\" :meta {}}} [\"peer-a\"]]"
+        );
+    }
+
+    #[test]
+    fn substrate_routes_streams_and_settles_transport_requests() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(require 'std.substrate) \
+                     (def node (std.substrate/node-create \"node-1\")) \
+                     (protocol-call std.substrate.protocol/ITransport attach-transport node \"peer-a\" \
+                       (fn [frame] \
+                         (protocol-call std.substrate.protocol/IService set-service node \"sent\" \
+                           (protocol-call std.substrate.protocol/IFrame frame-data frame)))) \
+                     (def subscription (protocol-call std.substrate.protocol/IStream subscribe node \"main\" \"changed\" \"sub-1\" {})) \
+                     (protocol-call std.substrate.protocol/ITransport receive-frame node subscription {:transport-id \"peer-a\"}) \
+                     (protocol-call std.substrate.protocol/IStream publish node \"main\" \"changed\" 42 {:id \"evt-1\"}) \
+                     (protocol-call std.substrate.protocol/IService get-service node \"sent\")",
+                )
+                .unwrap(),
+            "42"
+        );
+
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(def requester (std.substrate/node-create \"node-2\")) \
+                     (protocol-call std.substrate.protocol/ITransport attach-transport requester \"peer-b\" \
+                       (fn [frame] \
+                         (protocol-call std.substrate.protocol/ITransport receive-frame requester \
+                           (std.substrate/node-frame :response \"res-1\" \"main\" {} nil [] \
+                             (protocol-call std.substrate.protocol/IFrame frame-id frame) :ok 84 nil nil nil) \
+                           {:transport-id \"peer-b\"}))) \
+                     (def reply (protocol-call std.substrate.protocol/IRequest request requester \"main\" \"sum\" [] \
+                                  {:id \"req-1\" :transport-id \"peer-b\"})) \
+                     (promise/value reply)",
+                )
+                .unwrap(),
+            "84"
+        );
+    }
+
+    #[test]
+    fn substrate_cancellation_and_rejection_settle_pending_promises() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(require 'std.substrate) \
+                     (def node (std.substrate/node-create \"node-1\")) \
+                     (protocol-call std.substrate.protocol/ITransport attach-transport node \"peer-a\" (fn [frame] nil)) \
+                     (def cancelled (protocol-call std.substrate.protocol/IRequest request node \"main\" \"wait\" [] \
+                                      {:id \"req-cancel\" :transport-id \"peer-a\"})) \
+                     (protocol-call std.substrate.protocol/IRequest cancel-request node \"req-cancel\" :cancelled) \
+                     (promise/state cancelled)",
+                )
+                .unwrap(),
+            ":rejected"
+        );
     }
 
     #[test]
@@ -1814,9 +2015,7 @@ mod tests {
             .unwrap();
         assert!(!canonical.same_identity(&local));
         assert_eq!(
-            runtime
-                .eval_text("(std.foundation/identity 42)")
-                .unwrap(),
+            runtime.eval_text("(std.foundation/identity 42)").unwrap(),
             "42"
         );
     }
@@ -1824,9 +2023,7 @@ mod tests {
     #[test]
     fn fallback_definitions_never_replace_rust_library_vars() {
         let mut runtime = Runtime::new();
-        let foundation = runtime
-            .namespace_registry
-            .find_or_create("std.foundation");
+        let foundation = runtime.namespace_registry.find_or_create("std.foundation");
         let native = foundation.intern_with_origin(
             "optimized",
             core::Value::Number(7),
@@ -3462,7 +3659,9 @@ mod tests {
             "true"
         );
         assert_eq!(
-            runtime.eval_text("(std.foundation.coroutine/coroutine? 42)").unwrap(),
+            runtime
+                .eval_text("(std.foundation.coroutine/coroutine? 42)")
+                .unwrap(),
             "false"
         );
         let mut runtime = Runtime::new();
@@ -3479,7 +3678,9 @@ mod tests {
             .unwrap_err()
             .contains("coroutine/yield used outside of a coroutine"));
         assert_eq!(
-            runtime.eval_text("(std.foundation.coroutine/await (promise/run (fn [] 1)))").unwrap(),
+            runtime
+                .eval_text("(std.foundation.coroutine/await (promise/run (fn [] 1)))")
+                .unwrap(),
             "1"
         );
     }
@@ -3503,7 +3704,9 @@ mod tests {
     #[test]
     fn fiber_cli_path_evaluates_coroutine_resume_and_yield() {
         let mut runtime = Runtime::new();
-        runtime.eval_text("(require [std.foundation.coroutine :as c])").unwrap();
+        runtime
+            .eval_text("(require [std.foundation.coroutine :as c])")
+            .unwrap();
         assert_eq!(
             runtime.eval_text("(do (def co (c/create (fn [x] (let [y (c/yield (* x 2))] (+ y 1))))) (c/resume co 21))").unwrap(),
             "42"
@@ -3513,18 +3716,31 @@ mod tests {
     #[test]
     fn fiber_cli_path_awaits_promise_inside_coroutine() {
         let mut runtime = Runtime::new();
-        runtime.eval_text("(require [std.foundation.coroutine :as c])").unwrap();
+        runtime
+            .eval_text("(require [std.foundation.coroutine :as c])")
+            .unwrap();
         assert_eq!(
-            runtime.eval_text("(def co (c/create (fn [] (c/await (promise/run (fn [] 42)))))) (c/resume co)").unwrap(),
+            runtime
+                .eval_text(
+                    "(def co (c/create (fn [] (c/await (promise/run (fn [] 42)))))) (c/resume co)"
+                )
+                .unwrap(),
             "42"
         );
     }
     #[test]
     fn coroutine_namespace_can_be_required_and_aliased() {
         let mut runtime = Runtime::new();
-        assert_eq!(runtime.eval_text("(require 'std.foundation.coroutine) :loaded").unwrap(), ":loaded");
         assert_eq!(
-            runtime.eval_text("(coroutine/status (coroutine/create (fn [x] x)))").unwrap(),
+            runtime
+                .eval_text("(require 'std.foundation.coroutine) :loaded")
+                .unwrap(),
+            ":loaded"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(coroutine/status (coroutine/create (fn [x] x)))")
+                .unwrap(),
             ":suspended"
         );
         assert_eq!(
@@ -3536,7 +3752,9 @@ mod tests {
     fn coroutine_default_alias_is_co() {
         let mut runtime = Runtime::new();
         assert_eq!(
-            runtime.eval_text("(require 'std.foundation.coroutine) (co/status (co/create (fn [] 1)))").unwrap(),
+            runtime
+                .eval_text("(require 'std.foundation.coroutine) (co/status (co/create (fn [] 1)))")
+                .unwrap(),
             ":suspended"
         );
     }

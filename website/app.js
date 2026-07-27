@@ -1,5 +1,5 @@
 import { keywordName, mapValue, renderScene, validateScene } from "./scene.js";
-import { startTron } from "./tron.js";
+import { CreativeRuntime, normalizeCreative } from "./creative.js";
 import { applyParedit, barfForward, insertIndent, killToFormEnd, localFormAt, slurpForward, structuralAlign } from "./editor.js";
 
 const SPACE = "home";
@@ -8,7 +8,7 @@ const ACTIVE_FILE_KEY = "hara-www.active-file.v1";
 const WINDOWS_KEY = "hara-www.windows.v1";
 const WORKSPACE_KEY = "hara-www.workspace.v1";
 const BACKGROUND_SOURCE_KEY = "hara-www.background-source.v1";
-const BACKGROUND_SOURCES = new Set(["tron", "grid", "off"]);
+const BACKGROUND_WORKSPACE = "./examples/studio-backgrounds/";
 const HAL_FORMS = [
   ["def", "bind a named value"], ["defn", "define a function"], ["fn", "anonymous function"],
   ["let", "local bindings"], ["if", "conditional branch"], ["when", "conditional body"],
@@ -59,6 +59,17 @@ const DEFAULT_FILES = new Map([
   [:circle 610 130 11 "#f5d742"]
   [:circle 880 120 11 "#bafff8"]]}
 `],
+  ["/sketches/rigged-cube.hal", `;; Creative scenes share the same local form evaluation workflow.
+{:creative/version 1
+ :background "#020408"
+ :entities [{:id "mesh/hero"
+             :mesh {:primitive :box}
+             :material {:color "#41f5e4"}
+             :transform {:rotation [0 0 0]}
+             :rig {:bones [{:id "bone/root" :length 1}
+                           {:id "bone/arm" :parent "bone/root" :length 1}]}}]
+ :audio {:tempo 120 :midi true :voices []}}
+`],
   ["/README.hal", `;; HARA VISUAL LAB
 ;;
 ;; Open a sketch from /sketches and press Run.
@@ -88,13 +99,16 @@ const state = {
   dirty: false,
   savedSource: "",
   lastScene: null,
+  creativeRuntime: null,
   editorPrefix: null,
   editorPrefixTimer: null,
   evalRange: null,
   editorHistory: { past: [], future: [], current: null, replaying: false },
-  backgroundSource: BACKGROUND_SOURCES.has(localStorage.getItem(BACKGROUND_SOURCE_KEY))
-    ? localStorage.getItem(BACKGROUND_SOURCE_KEY) : "tron",
-  backgroundProgram: null,
+  backgroundSource: localStorage.getItem(BACKGROUND_SOURCE_KEY) ?? "document/background/tron",
+  backgroundDocuments: new Map(),
+  activeBackground: null,
+  canvasRuntime: null,
+  sourceTimer: null,
   zIndex: 10,
   workspace: Number(localStorage.getItem(WORKSPACE_KEY)) === 1 ? 1 : 0
 };
@@ -107,6 +121,12 @@ const elements = {
   runtimeLed: query("[data-runtime-led]"),
   runtimeLabel: query("[data-runtime-label]"),
   backgroundSource: query("[data-background-source]"),
+  sourceToggle: query("[data-source-toggle]"),
+  sourcePanel: query("[data-background-panel]"),
+  sourceEditor: query("[data-background-editor]"),
+  sourceHighlight: query("[data-background-highlight]"),
+  sourceStatus: query("[data-background-status]"),
+  sourceSave: query("[data-background-save]"),
   fileTree: query("[data-file-tree]"),
   fileCount: query("[data-file-count]"),
   editor: query("[data-editor]"),
@@ -123,6 +143,7 @@ const elements = {
   completions: query("[data-hal-completions]"),
   structuralDiff: query("[data-structural-diff]"),
   outputCanvas: query("[data-output-canvas]"),
+  creativeCanvas: query("[data-creative-canvas]"),
   canvasEmpty: query("[data-canvas-empty]"),
   canvasStatus: query("[data-canvas-status]"),
   canvasSize: query("[data-canvas-size]"),
@@ -139,7 +160,6 @@ const elements = {
 };
 
 const completionState = { entries: [], index: 0, start: 0 };
-let stopTron = null;
 let backgroundLoadGeneration = 0;
 
 function toast(message, error = false) {
@@ -160,59 +180,117 @@ function setRuntimeStatus(label, status) {
   elements.runtimeLed.classList.toggle("is-error", status === "error");
 }
 
-function validateBackgroundProgram(value) {
-  if (!(value instanceof Map)) throw new Error("background source must return a map");
-  if (keywordName(mapValue(value, "hara/type")) !== "studio/background") {
-    throw new Error("background source must declare :hara/type :studio/background");
+async function loadBackgroundWorkspace() {
+  const project = await fetch(new URL(`${BACKGROUND_WORKSPACE}project.edn`, import.meta.url));
+  if (!project.ok) throw new Error(`project.edn fetch failed: ${project.status}`);
+  await state.broker.eval(ROOT, `(quote ${await project.text()})`);
+  const workspace = await fetch(new URL(`${BACKGROUND_WORKSPACE}workspace.edn`, import.meta.url));
+  if (!workspace.ok) throw new Error(`workspace.edn fetch failed: ${workspace.status}`);
+  const value = await state.broker.eval(ROOT, `(quote ${await workspace.text()})`);
+  state.backgroundDocuments.clear();
+  elements.backgroundSource.replaceChildren();
+  for (const documentValue of mapValue(value, "workspace/documents") ?? []) {
+    if (keywordName(mapValue(documentValue, "document/role")) !== "studio/background") continue;
+    const descriptor = {
+      id: String(mapValue(documentValue, "document/id")),
+      title: String(mapValue(documentValue, "document/title")),
+      path: String(mapValue(documentValue, "document/path")).replace("../../sources/", "./sources/"),
+      node: String(mapValue(documentValue, "document/node")),
+      canvas: String(mapValue(documentValue, "document/canvas"))
+    };
+    state.backgroundDocuments.set(descriptor.id, descriptor);
+    const option = document.createElement("option");
+    option.value = descriptor.id;
+    option.textContent = `${descriptor.title.toUpperCase()}.HAL`;
+    elements.backgroundSource.append(option);
   }
-  const renderer = keywordName(mapValue(value, "background/renderer"));
-  if (!["tron", "none"].includes(renderer)) throw new Error(`unsupported background renderer: ${renderer}`);
-  const colors = mapValue(value, "background/colors");
-  const speed = mapValue(value, "background/speed");
+  if (!state.backgroundDocuments.has(state.backgroundSource)) {
+    state.backgroundSource = state.backgroundDocuments.keys().next().value;
+  }
+}
+
+function sourceStorageKey(documentId, kind) {
+  return `hara-www.background.${kind}.v1:${documentId}`;
+}
+
+async function fetchBackgroundSource(descriptor) {
+  const response = await fetch(new URL(descriptor.path, import.meta.url), { cache: "no-store" });
+  if (!response.ok) throw new Error(`background source fetch failed: ${response.status}`);
+  const bundled = await response.text();
+  const saved = localStorage.getItem(sourceStorageKey(descriptor.id, "saved"));
+  const recovery = localStorage.getItem(sourceStorageKey(descriptor.id, "recovery"));
   return {
-    id: keywordName(mapValue(value, "background/id")) ?? "anonymous",
-    renderer,
-    grid: mapValue(value, "background/grid"),
-    speed: Number.isFinite(speed) && speed > 1 ? speed / 100 : speed,
-    cycles: mapValue(value, "background/cycles"),
-    colors: Array.isArray(colors) ? colors : undefined
+    bundled,
+    source: recovery ?? saved ?? bundled,
+    recovered: recovery !== null
   };
 }
 
-function applyBackgroundProgram(program) {
-  const canvas = query("[data-tron]");
-  stopTron?.();
-  stopTron = null;
-  canvas.dataset.backgroundName = state.backgroundSource;
-  canvas.dataset.backgroundRenderer = program?.renderer ?? "none";
-  if (state.workspace === 1 || !program || program.renderer === "none") {
-    canvas.hidden = true;
-    canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
-    return;
+async function activateBackground(descriptor, source, generation) {
+  const nodeId = `${descriptor.node}@${generation}`;
+  const prepared = await state.broker.prepareDocument(ROOT, descriptor.id, source, { nodeId });
+  state.nodeRuntime.registerNode({ id: nodeId, type: "hal/background" });
+  state.canvasRuntime.stage(nodeId, descriptor.canvas);
+  const firstFrame = state.canvasRuntime.waitForFirstRender(nodeId, descriptor.canvas, 2500);
+  try {
+    const taskId = prepared.value;
+    if (typeof taskId !== "string") throw new Error("background must return a node/start task handle");
+    let taskSettled = null;
+    await state.nodeRuntime.activateDocument(nodeId, {
+      documentId: descriptor.id,
+      generation: prepared.generation,
+      moduleId: prepared.moduleId,
+      prepare: (node) => {
+        taskSettled = node.start(() => state.broker.evalPreparedDocument(
+          prepared,
+          `(node/run-task ${JSON.stringify(taskId)})`
+        )).settled;
+      }
+    });
+    await Promise.race([
+      firstFrame,
+      taskSettled.then(() => { throw new Error("background task stopped before its first frame"); })
+    ]);
+    const previous = state.activeBackground;
+    state.canvasRuntime.commit(nodeId, descriptor.canvas);
+    state.broker.commitDocument(prepared);
+    state.activeBackground = { descriptor, nodeId, source };
+    if (previous?.nodeId && previous.nodeId !== nodeId) state.nodeRuntime.releaseNode(previous.nodeId);
+  } catch (error) {
+    state.canvasRuntime.discard(nodeId, descriptor.canvas);
+    state.nodeRuntime.releaseNode(nodeId);
+    state.broker.discardDocument(prepared);
+    throw error;
   }
-  canvas.hidden = false;
-  stopTron = startTron(canvas, program);
 }
 
-async function loadBackgroundSource(name) {
-  if (!BACKGROUND_SOURCES.has(name)) name = "tron";
+async function loadBackgroundSource(name, sourceOverride = null) {
+  const descriptor = state.backgroundDocuments.get(name);
+  if (!descriptor) throw new Error(`unknown background document: ${name}`);
   state.backgroundSource = name;
   localStorage.setItem(BACKGROUND_SOURCE_KEY, name);
-  if (elements.backgroundSource) elements.backgroundSource.value = name;
+  elements.backgroundSource.value = name;
   if (!state.broker) return;
   const generation = ++backgroundLoadGeneration;
   try {
-    const response = await fetch(new URL(`./sources/${name}.hal`, import.meta.url));
-    if (!response.ok) throw new Error(`background source fetch failed: ${response.status}`);
-    const value = await state.broker.eval(ROOT, await response.text());
+    const loaded = await fetchBackgroundSource(descriptor);
+    const source = sourceOverride ?? loaded.source;
+    await activateBackground(descriptor, source, generation);
     if (generation !== backgroundLoadGeneration) return;
-    state.backgroundProgram = validateBackgroundProgram(value);
-    applyBackgroundProgram(state.backgroundProgram);
+    const canvas = query("[data-tron]");
+    canvas.hidden = state.workspace === 1;
+    canvas.dataset.backgroundName = descriptor.title.toLowerCase();
+    elements.sourceEditor.value = source;
+    elements.sourceEditor.dataset.baseSource = loaded.bundled;
+    elements.sourceEditor.dataset.documentId = descriptor.id;
+    elements.sourceStatus.textContent =
+      `${loaded.recovered ? "RECOVERED" : "LIVE"} // GENERATION ${generation}`;
+    syncBackgroundHighlight();
   } catch (error) {
     if (generation !== backgroundLoadGeneration) return;
-    state.backgroundProgram = null;
-    applyBackgroundProgram(null);
+    elements.sourceStatus.textContent = `ERROR // ${errorText(error)}`;
     toast(`BACKGROUND SOURCE FAILED: ${errorText(error)}`, true);
+    throw error;
   }
 }
 
@@ -225,12 +303,12 @@ function setWorkspace(index) {
     dot.setAttribute("aria-current", String(Number(dot.dataset.workspaceDot) === state.workspace));
   }
   if (state.workspace === 1) {
-    stopTron?.();
-    stopTron = null;
+    state.canvasRuntime?.setVisible(false);
     query("[data-tron]").hidden = true;
   } else {
-    applyBackgroundProgram(state.backgroundProgram);
-    if (!state.backgroundProgram && state.broker) void loadBackgroundSource(state.backgroundSource);
+    state.canvasRuntime?.setVisible(true);
+    query("[data-tron]").hidden = false;
+    if (state.broker) loadBackgroundSource(state.backgroundSource).catch(() => {});
   }
   closeLauncher();
 }
@@ -377,7 +455,7 @@ function installWorkspaceNavigation() {
   if (elements.backgroundSource) {
     elements.backgroundSource.value = state.backgroundSource;
     elements.backgroundSource.addEventListener("change", () => {
-      void loadBackgroundSource(elements.backgroundSource.value);
+      loadBackgroundSource(elements.backgroundSource.value).catch(() => {});
     });
   }
   query("[data-start]").addEventListener("click", () => setWorkspace(1));
@@ -715,6 +793,75 @@ function syncHighlight() {
   elements.codeHighlight.style.transform = `translate(${-elements.editor.scrollLeft}px, ${-elements.editor.scrollTop}px)`;
 }
 
+function syncBackgroundHighlight() {
+  if (!elements.sourceEditor || !elements.sourceHighlight) return;
+  elements.sourceHighlight.innerHTML = highlightHara(elements.sourceEditor.value);
+  elements.sourceHighlight.style.transform =
+    `translate(${-elements.sourceEditor.scrollLeft}px, ${-elements.sourceEditor.scrollTop}px)`;
+}
+
+function setSourcePanel(open) {
+  elements.sourcePanel.classList.toggle("is-open", open);
+  elements.sourcePanel.setAttribute("aria-hidden", String(!open));
+  elements.sourceToggle.setAttribute("aria-expanded", String(open));
+  document.body.classList.toggle("source-open", open);
+}
+
+function scheduleBackgroundPreview() {
+  clearTimeout(state.sourceTimer);
+  const documentId = elements.sourceEditor.dataset.documentId;
+  if (!documentId) return;
+  localStorage.setItem(sourceStorageKey(documentId, "recovery"), elements.sourceEditor.value);
+  elements.sourceStatus.textContent = "EVALUATING CANDIDATE";
+  state.sourceTimer = setTimeout(() => {
+    loadBackgroundSource(documentId, elements.sourceEditor.value).catch(() => {});
+  }, 320);
+}
+
+async function saveBackgroundSource() {
+  const descriptor = state.backgroundDocuments.get(elements.sourceEditor.dataset.documentId);
+  if (!descriptor) return;
+  const current = await fetch(new URL(descriptor.path, import.meta.url), { cache: "no-store" });
+  const currentSource = await current.text();
+  if (currentSource !== elements.sourceEditor.dataset.baseSource) {
+    elements.sourceStatus.textContent = "CONFLICT // BUNDLED SOURCE CHANGED";
+    toast("SOURCE CONFLICT: RELOAD BEFORE SAVING", true);
+    return;
+  }
+  localStorage.setItem(sourceStorageKey(descriptor.id, "saved"), elements.sourceEditor.value);
+  localStorage.removeItem(sourceStorageKey(descriptor.id, "recovery"));
+  elements.sourceStatus.textContent = "SAVED // INDEXEDDB OVERLAY";
+  toast(`SAVED ${descriptor.title.toUpperCase()}.HAL LOCALLY`);
+}
+
+function installBackgroundEditor() {
+  elements.sourceToggle.addEventListener("click", () =>
+    setSourcePanel(!elements.sourcePanel.classList.contains("is-open")));
+  elements.sourceEditor.addEventListener("input", () => {
+    syncBackgroundHighlight();
+    scheduleBackgroundPreview();
+  });
+  elements.sourceEditor.addEventListener("scroll", syncBackgroundHighlight);
+  elements.sourceEditor.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      void saveBackgroundSource();
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      structuralAlign(elements.sourceEditor);
+      elements.sourceEditor.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    }
+    if (applyParedit(elements.sourceEditor, event.key)) {
+      event.preventDefault();
+      elements.sourceEditor.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
+  elements.sourceSave.addEventListener("click", () => void saveBackgroundSource());
+}
+
 function positionEditorOverlay(node, offset) {
   const source = elements.editor.value.slice(0, offset);
   const line = source.split("\n").length - 1;
@@ -732,6 +879,8 @@ function showInlineEval(form, label, error = false) {
 }
 
 function showScene(scene, started, target) {
+  elements.creativeCanvas.hidden = true;
+  elements.outputCanvas.hidden = false;
   state.lastScene = scene;
   query('[data-window="canvas"]').classList.remove("is-hidden");
   drawLastScene();
@@ -741,6 +890,19 @@ function showScene(scene, started, target) {
   elements.editorStatus.textContent = `${target} RENDERED`;
   if (innerWidth <= 900) focusWindow(query('[data-window="canvas"]'));
   toast(`${target} RENDERED`);
+}
+
+function showCreative(scene, started, target) {
+  state.creativeRuntime ??= new CreativeRuntime(elements.creativeCanvas);
+  elements.outputCanvas.hidden = true;
+  elements.creativeCanvas.hidden = false;
+  state.creativeRuntime.render(scene);
+  query('[data-window="canvas"]').classList.remove("is-hidden");
+  elements.canvasEmpty.classList.add("is-hidden");
+  elements.canvasStatus.textContent = `3D // ${Math.round(performance.now() - started)} MS`;
+  elements.canvasSize.textContent = `${scene.entities.length} ENTITY${scene.entities.length === 1 ? "" : "IES"}`;
+  elements.editorStatus.textContent = `${target} CREATIVE`;
+  toast(`${target} CREATIVE SCENE`);
 }
 
 function hideCompletions() {
@@ -872,11 +1034,18 @@ async function evaluateForm(form = null, target = "FORM") {
       syncHighlight();
       showScene(scene, started, target);
     } catch {
-      const label = resultLabel(result);
-      elements.editorStatus.textContent = `EVAL // ${label}`;
-      state.evalRange = null;
-      syncHighlight();
-      showInlineEval(form, label);
+      try {
+        const creative = normalizeCreative(result);
+        state.evalRange = null;
+        syncHighlight();
+        showCreative(creative, started, target);
+      } catch {
+        const label = resultLabel(result);
+        elements.editorStatus.textContent = `EVAL // ${label}`;
+        state.evalRange = null;
+        syncHighlight();
+        showInlineEval(form, label);
+      }
     }
   } catch (error) {
     const message = errorText(error);
@@ -1055,12 +1224,14 @@ async function bootRuntime() {
       { createBrowserBroker },
       { createHostServices },
       { defaultBootstrap },
-      { NodeRuntime }
+      { NodeRuntime },
+      { CanvasRuntime }
     ] = await Promise.all([
       import(new URL("studio/broker.js", runtimeBase)),
       import(new URL("studio/host-services.js", runtimeBase)),
       import(new URL("studio/boot.js", runtimeBase)),
-      import(new URL("studio/node-runtime.js", runtimeBase))
+      import(new URL("studio/node-runtime.js", runtimeBase)),
+      import(new URL("studio/canvas-runtime.js", runtimeBase))
     ]);
     const wasmResponse = await fetch(new URL("hara.wasm", runtimeBase));
     if (!wasmResponse.ok) throw new Error(`runtime fetch failed: ${wasmResponse.status}`);
@@ -1071,10 +1242,22 @@ async function bootRuntime() {
       if (!response.ok) throw new Error(`resource ${name} fetch failed: ${response.status}`);
       resources[`studio.${name}`] = await response.text();
     }
+    for (const name of ["substrate/protocol", "substrate/frame", "substrate"]) {
+      const response = await fetch(new URL(`std/${name}.hal`, runtimeBase));
+      if (!response.ok) throw new Error(`resource std.${name.replaceAll("/", ".")} fetch failed: ${response.status}`);
+      resources[`std.${name.replaceAll("/", ".")}`] = await response.text();
+    }
     state.nodeRuntime = new NodeRuntime({ space: `workspace/${SPACE}` });
+    state.canvasRuntime = new CanvasRuntime({
+      onDiagnostic: (error) => {
+        elements.sourceStatus.textContent = `DIAGNOSTIC // ${errorText(error)}`;
+      }
+    });
+    state.canvasRuntime.register("canvas/background", query("[data-tron]"));
     const hostCalls = createHostServices({
       dbName: "hara-www",
       nodeRuntime: state.nodeRuntime,
+      canvasRuntime: state.canvasRuntime,
       renderCanvas: (_canvasId, value) => {
         showScene(validateScene(value), performance.now(), "HAL");
       }
@@ -1088,6 +1271,7 @@ async function bootRuntime() {
       resources
     });
     await state.broker.eval(ROOT, defaultBootstrap(SPACE));
+    await loadBackgroundWorkspace();
     await loadBackgroundSource(state.backgroundSource);
     const files = await listFiles();
     if (!files.length) await seedFiles();
@@ -1235,6 +1419,7 @@ installLauncher();
 installWindowManager();
 installPatchWorkbench();
 installEditor();
+installBackgroundEditor();
 installFileActions();
 restoreWindows();
 setWorkspace(state.workspace);

@@ -11,6 +11,10 @@ const resources = {};
 for (const name of ["store", "fs", "space", "boot", "node", "draw"]) {
   resources[`studio.${name}`] = await (await fetch(`./studio/hal/${name}.hal`)).text();
 }
+for (const name of ["protocol", "frame"]) {
+  resources[`std.substrate.${name}`] = await (await fetch(`../../lib/src/std/substrate/${name}.hal`)).text();
+}
+resources["std.substrate"] = await (await fetch("../../lib/src/std/substrate.hal")).text();
 const broker = createBrowserBroker({
   workerUrl: "./hta-worker.js",
   moduleBytes: bytes,

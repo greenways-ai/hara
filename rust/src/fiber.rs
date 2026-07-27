@@ -19,15 +19,20 @@ const SYNC_SPECIAL_FORMS: &[&str] = &[
     "binding",
     "declare",
     "def",
+    "defstruct",
+    "defprotocol",
     "defmacro",
     "defn",
     "defn-",
     "do",
     "deref",
+    "extend-type",
+    "field",
     "eval",
     "fn",
     "fn*",
     "if",
+    "instance?",
     "let",
     "loop",
     "ns",
@@ -335,7 +340,8 @@ impl EvalFiber {
                 self.state = EvalFiberState::Suspended;
             }
             Step::Yield(_, _) => {
-                self.state = EvalFiberState::Failed("coroutine/yield used outside of a coroutine".into());
+                self.state =
+                    EvalFiberState::Failed("coroutine/yield used outside of a coroutine".into());
             }
         }
     }
@@ -868,13 +874,31 @@ fn application(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) 
             }),
         );
     }
+    if head_symbol.is_none() {
+        let forms = Rc::new(v[1..].to_vec());
+        let arguments_env = env.clone();
+        return one(
+            v[0].clone(),
+            env,
+            Box::new(move |result| match result {
+                Ok(Value::Function(function)) => values_cps(
+                    forms,
+                    0,
+                    Vec::new(),
+                    arguments_env,
+                    Box::new(move |arguments| match arguments {
+                        Ok(arguments) => call(function, arguments, k),
+                        Err(error) => k(Err(error)),
+                    }),
+                ),
+                Ok(value) => k(Err(format!("{} is not callable", value.display()))),
+                Err(error) => k(Err(error)),
+            }),
+        );
+    }
     eval_special_form(v, env, k)
 }
-fn eval_special_form(
-    v: Vec<Form>,
-    env: Rc<RefCell<HashMap<String, Value>>>,
-    k: Cont,
-) -> Step {
+fn eval_special_form(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step {
     let op = v[0].clone();
     let e = env.clone();
     values_cps(
@@ -1000,12 +1024,30 @@ mod tests {
             f.resume(p.state()),
             EvalFiberState::Completed(Value::Number(42))
         );
-        let mut f = EvalFiber::start("(do (defn h ([x] (+ x 1)) ([x y] (+ x y))) (h 41))", HashMap::new()).unwrap();
+        let mut f = EvalFiber::start(
+            "(do (defn h ([x] (+ x 1)) ([x y] (+ x y))) (h 41))",
+            HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(f.state(), EvalFiberState::Completed(Value::Number(42)));
+    }
+
+    #[test]
+    fn computed_function_head_can_suspend() {
+        let promise = Promise::new();
+        let mut environment = HashMap::new();
+        environment.insert("p".into(), Value::Promise(promise.clone()));
+        let mut fiber = EvalFiber::start(
+            "(do (def entry [:task (fn [] (std.foundation.coroutine/await p))]) \
+             ((nth entry 1)))",
+            environment,
+        )
+        .unwrap();
+        assert_eq!(fiber.state(), EvalFiberState::Suspended);
+        promise.resolve(Value::Number(42));
         assert_eq!(
-            f.state(),
+            fiber.resume(promise.state()),
             EvalFiberState::Completed(Value::Number(42))
         );
     }
 }
-
-

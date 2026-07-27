@@ -49,6 +49,11 @@ pub extern "C" fn hta_abi_version() -> i32 {
 struct Runtime {
     env: HashMap<String, Value>,
     namespaces: kernel::NamespaceRegistry<Value>,
+    /// Guest protocol declarations and extensions must survive across HTA
+    /// evaluations just like namespace bindings.  The native runtime owns the
+    /// same registry; without this raw WASM kernels could load frame helpers
+    /// but not the concrete `std.substrate` node.
+    protocols: core::ProtocolRegistry,
     next_task: u64,
     next_call: u64,
     events: Rc<RefCell<VecDeque<Vec<u8>>>>,
@@ -63,6 +68,7 @@ impl Runtime {
         Self {
             env: HashMap::new(),
             namespaces: kernel::NamespaceRegistry::new("user"),
+            protocols: core::ProtocolRegistry::core(),
             next_task: 1,
             next_call: 1,
             events: Rc::new(RefCell::new(VecDeque::new())),
@@ -74,9 +80,7 @@ impl Runtime {
         }
     }
     fn event(&self, value: Value) {
-        if let Ok(bytes) = hta::encode(&value) {
-            self.events.borrow_mut().push_back(bytes);
-        }
+        enqueue_event(&self.events, value);
     }
     fn host_handler(
         &mut self,
@@ -109,8 +113,7 @@ impl Runtime {
     ) {
         self.next_call = *next.borrow();
         for (call, promise, service, method, args) in pending.borrow_mut().drain(..) {
-            self.calls.insert(call, (task, promise));
-            self.event(Value::Vector(
+            let value = Value::Vector(
                 vec![
                     Value::Number(2),
                     Value::Number(call as i64),
@@ -120,17 +123,41 @@ impl Runtime {
                     Value::Vector(args.into()),
                 ]
                 .into(),
-            ));
+            );
+            match hta::encode(&value) {
+                Ok(bytes) => {
+                    self.calls.insert(call, (task, promise));
+                    self.events.borrow_mut().push_back(bytes);
+                }
+                Err(error) => {
+                    promise.reject(format!("hta/value-unsupported: {error}"));
+                }
+            }
         }
     }
     fn start_fiber(&mut self, task: u64, source: &str) -> Result<(), String> {
+        self.start_fiber_with_bindings(task, source, Vec::new())
+    }
+    fn start_fiber_with_bindings(
+        &mut self,
+        task: u64,
+        source: &str,
+        bindings: Vec<Value>,
+    ) -> Result<(), String> {
         let (handler, pending, next) = self.host_handler(task);
         let namespaces = self.namespaces.clone();
+        let protocols = self.protocols.clone();
         let resources = self.resources.clone();
         let provider = Rc::new(move |name: &str| resources.borrow().get(name).cloned());
+        let mut environment = self.env.clone();
+        for (index, value) in bindings.into_iter().enumerate() {
+            environment.insert(format!("__hta_arg_{index}"), value);
+        }
         let fiber = core::with_namespace_registry(&namespaces, || {
             core::with_namespace_source(provider, || {
-                core::with_host_calls(handler, || EvalFiber::start(source, self.env.clone()))
+                core::with_protocols(&protocols, || {
+                    core::with_host_calls(handler, || EvalFiber::start(source, environment))
+                })
             })
         })?;
         self.collect_calls(task, pending, next);
@@ -143,12 +170,15 @@ impl Runtime {
         };
         let (handler, pending, next) = self.host_handler(task);
         let namespaces = self.namespaces.clone();
+        let protocols = self.protocols.clone();
         let resources = self.resources.clone();
         let provider = Rc::new(move |name: &str| resources.borrow().get(name).cloned());
         core::with_namespace_registry(&namespaces, || {
             core::with_namespace_source(provider, || {
-                core::with_host_calls(handler, || {
-                    fiber.resume(state);
+                core::with_protocols(&protocols, || {
+                    core::with_host_calls(handler, || {
+                        fiber.resume(state);
+                    });
                 });
             });
         });
@@ -226,8 +256,28 @@ fn emit_settlement(events: &Rc<RefCell<VecDeque<Vec<u8>>>>, task: u64, state: Pr
         PromiseState::Fulfilled(value) => event(0, task, value),
         PromiseState::Rejected(error) => event(1, task, error_value("promise/rejected", error)),
     };
-    if let Ok(bytes) = hta::encode(&value) {
-        events.borrow_mut().push_back(bytes);
+    enqueue_event(events, value);
+}
+fn enqueue_event(events: &Rc<RefCell<VecDeque<Vec<u8>>>>, value: Value) {
+    match hta::encode(&value) {
+        Ok(bytes) => events.borrow_mut().push_back(bytes),
+        Err(error) => {
+            let id = match &value {
+                Value::Vector(values) => match values.get(1) {
+                    Some(Value::Number(id)) => *id as u64,
+                    _ => 0,
+                },
+                _ => 0,
+            };
+            let fallback = event(
+                1,
+                id,
+                error_value("hta/value-unsupported", error),
+            );
+            if let Ok(bytes) = hta::encode(&fallback) {
+                events.borrow_mut().push_back(bytes);
+            }
+        }
     }
 }
 fn request(bytes: &[u8]) -> Result<(String, Vec<Value>), String> {
@@ -261,6 +311,11 @@ pub extern "C" fn hta_start(pointer: *const u8, size: usize) -> i64 {
             Ok((target, args)) if target == "eval" => match args.as_slice() {
                 [Value::String(source)] => runtime.start_fiber(task, source),
                 _ => Err("hta eval expects one source string".into()),
+            },
+            Ok((target, args)) if target == "eval-bound" => match args.as_slice() {
+                [Value::String(source), Value::Vector(bindings)] => runtime
+                    .start_fiber_with_bindings(task, source, bindings.iter().cloned().collect()),
+                _ => Err("hta eval-bound expects a source string and binding vector".into()),
             },
             Ok((target, args)) if target == "register-resource" => match args.as_slice() {
                 [Value::String(name), Value::String(source)] => {
@@ -423,7 +478,10 @@ fn evaluate(source: &str) -> Result<i64, i32> {
     kernel::parse_forms(source).map_err(|_| 1)?;
     let mut env = HashMap::new();
     let namespaces = kernel::NamespaceRegistry::new("user");
-    let value = core::with_namespace_registry(&namespaces, || core::eval_text(source, &mut env))
+    let protocols = core::ProtocolRegistry::core();
+    let value = core::with_namespace_registry(&namespaces, || {
+        core::with_protocols(&protocols, || core::eval_text(source, &mut env))
+    })
         .map_err(|error| error_code(&error))?;
     value.parse::<i64>().map_err(|_| 4)
 }
@@ -446,7 +504,10 @@ pub extern "C" fn eval_error_code(source_ptr: *const u8, source_len: usize) -> i
             }
             let mut env = HashMap::new();
             let namespaces = kernel::NamespaceRegistry::new("user");
-            match core::with_namespace_registry(&namespaces, || core::eval_text(source, &mut env)) {
+            let protocols = core::ProtocolRegistry::core();
+            match core::with_namespace_registry(&namespaces, || {
+                core::with_protocols(&protocols, || core::eval_text(source, &mut env))
+            }) {
                 Ok(_) => 0,
                 Err(error) => error_code(&error),
             }
@@ -545,6 +606,41 @@ mod tests {
             .start_fiber(3, "(acme.tools/seven)")
             .unwrap();
         assert_eq!(completion_value(&mut runtime, 3), crate::core::Value::Number(7));
+    }
+
+    #[test]
+    fn fibers_preserve_guest_protocol_extensions() {
+        let mut runtime = Runtime::new();
+        runtime
+            .start_fiber(
+                1,
+                "(defstruct Box [value]) (defprotocol ReadBox (read-box [self])) \
+                 (extend-type Box ReadBox (read-box [self] (field self :value))) :ok",
+            )
+            .unwrap();
+        assert!(matches!(completion_value(&mut runtime, 1), Value::Keyword(_)));
+
+        runtime
+            .start_fiber(2, "(protocol-call ReadBox read-box (Box 42))")
+            .unwrap();
+        assert_eq!(completion_value(&mut runtime, 2), Value::Number(42));
+    }
+
+    #[test]
+    fn bound_fibers_receive_hta_values_without_serializing_source() {
+        let mut runtime = Runtime::new();
+        runtime
+            .start_fiber_with_bindings(
+                1,
+                "(get __hta_arg_0 :answer)",
+                vec![Value::Map(
+                    vec![(Value::Keyword("answer".into()), Value::Number(42))]
+                        .into_iter()
+                        .collect(),
+                )],
+            )
+            .unwrap();
+        assert_eq!(completion_value(&mut runtime, 1), Value::Number(42));
     }
 
     #[test]

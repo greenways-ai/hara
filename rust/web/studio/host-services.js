@@ -53,7 +53,13 @@ export function createHostServices(options = {}) {
     "json/parse": async (text) => fromJson(JSON.parse(text))
   };
   if (options.nodeRuntime) Object.assign(services, createNodeHostServices(options.nodeRuntime));
-  if (options.renderCanvas) {
+  if (options.canvasRuntime) {
+    services["studio.canvas/next-frame"] = (nodeId, canvasId) =>
+      options.canvasRuntime.nextFrame(nodeId, canvasId);
+    services["studio.canvas/render"] = (nodeId, canvasId, frame) =>
+      options.canvasRuntime.render(nodeId, canvasId, frame);
+  }
+  if (options.renderCanvas && !options.canvasRuntime) {
     services["studio.canvas/render"] = async (canvas, scene) => {
       await options.renderCanvas(canvas, scene);
       return true;
@@ -64,14 +70,30 @@ export function createHostServices(options = {}) {
 
 export function createNodeHostServices(runtime) {
   return {
-    "node/in": (nodeId, signal) => runtime.in(nodeId, signal),
+    "node/in": async (nodeId, signal) => toHta(await runtime.in(nodeId, signal)),
     "node/in-frame": async (nodeId, signal) => toHta(await runtime.inFrame(nodeId, signal)),
+    // Legacy value-oriented calls remain for existing Studio documents. New
+    // documents use the frame forms below, which originate in
+    // std.substrate.frame before reaching this browser adapter.
     "node/emit": async (nodeId, signal, value, meta) =>
       toHta(await runtime.emit(nodeId, signal, value, toPlain(meta))),
     "node/call": async (nodeId, target, action, args, opts) =>
-      (await runtime.call(nodeId, target, action, args, toPlain(opts))).data,
-    "node/handle": () => {
-      throw new Error("node/handle requires a kernel callback transport");
+      toHta((await runtime.call(nodeId, target, action, args, toPlain(opts))).data),
+    "node/emit-frame": async (nodeId, frame) =>
+      toHta(await runtime.emitFrame(nodeId, toPlain(frame))),
+    "node/call-frame": async (nodeId, frame) =>
+      toHta((await runtime.callFrame(nodeId, toPlain(frame))).data),
+    "node/handle": function(nodeId, action, handlerId, meta) {
+      const invocation = this;
+      if (typeof handlerId !== "string" || handlerId.length === 0 || !invocation.context) {
+        throw new Error("node/handle requires a kernel callback id");
+      }
+      const source = `(studio.node/invoke-handler ${JSON.stringify(handlerId)} __hta_arg_0 __hta_arg_1)`;
+      runtime.handle(nodeId, action, (args, frame) => invocation.context.call(
+        "eval-bound",
+        [source, [toHta(args), toHta(frame)]]
+      ), toPlain(meta));
+      return handlerId;
     },
     "node/stop": (nodeId, task) => runtime.stop(nodeId, task),
     "node/info": (nodeId) => toHta(runtime.info(nodeId))

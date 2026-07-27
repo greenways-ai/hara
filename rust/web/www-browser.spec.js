@@ -39,24 +39,49 @@ runtimeTest("www package includes the Hara UI image assets", async ({ page }) =>
     .toBe(true);
 });
 
-runtimeTest("www evaluates selectable HAL background sources", async ({ page }) => {
+runtimeTest("www runs workspace-discovered HAL background programs", async ({ page }) => {
+  await page.addInitScript(() => localStorage.removeItem("hara-www.workspace.v1"));
   await page.goto("/target/www/");
   await expect(page.locator("[data-runtime-label]")).toHaveText("WASM // LIVE", { timeout: 60000 });
+  await page.locator("[data-home]").click();
   const canvas = page.locator("[data-tron]");
   const source = page.locator("select[data-background-source]");
 
-  await expect(source).toHaveValue("tron");
+  await expect(source.locator("option")).toHaveCount(4);
+  await expect(source).toHaveValue("document/background/tron");
   await expect(canvas).toHaveAttribute("data-background-name", "tron");
-  await expect(canvas).toHaveAttribute("data-background-renderer", "tron");
+  await expect(page.locator("[data-background-status]")).toContainText("GENERATION");
+  await expect.poll(() => canvas.evaluate((node) => node.width * node.height)).toBeGreaterThan(0);
 
-  await source.selectOption("grid");
+  await source.selectOption("document/background/grid");
   await expect(canvas).toHaveAttribute("data-background-name", "grid");
-  await expect(canvas).toHaveAttribute("data-background-renderer", "tron");
+  await expect(page.locator("[data-background-status]")).toContainText("GENERATION");
 
-  await source.selectOption("off");
+  await source.selectOption("document/background/fire");
+  await expect(canvas).toHaveAttribute("data-background-name", "fire");
+  await expect(page.locator("[data-background-status]")).toContainText(/GENERATION|FALLBACK/);
+
+  await source.selectOption("document/background/off");
   await expect(canvas).toHaveAttribute("data-background-name", "off");
-  await expect(canvas).toHaveAttribute("data-background-renderer", "none");
-  await expect(canvas).toBeHidden();
+  await expect(canvas).toBeVisible();
+});
+
+runtimeTest("live source errors roll back and explicit save uses the local overlay", async ({ page }) => {
+  await page.addInitScript(() => localStorage.removeItem("hara-www.workspace.v1"));
+  await page.goto("/target/www/");
+  await expect(page.locator("[data-runtime-label]")).toHaveText("WASM // LIVE", { timeout: 60000 });
+  await page.locator("[data-home]").click();
+  await page.locator("[data-source-toggle]").click();
+  const editor = page.locator("[data-background-editor]");
+  await expect(editor).toBeVisible();
+  const goodSource = await editor.inputValue();
+  await editor.fill("(ns+");
+  await expect(page.locator("[data-background-status]")).toContainText("ERROR", { timeout: 10000 });
+  await expect(page.locator("[data-tron]")).toBeVisible();
+  await editor.fill(goodSource);
+  await expect(page.locator("[data-background-status]")).toContainText("GENERATION", { timeout: 10000 });
+  await page.locator("[data-background-save]").click();
+  await expect(page.locator("[data-background-status]")).toContainText("SAVED");
 });
 
 runtimeTest("www evaluates the default Hara sketch into the canvas", async ({ page }) => {

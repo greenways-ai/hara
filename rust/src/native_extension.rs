@@ -128,9 +128,7 @@ pub fn configured_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Ok(current) = env::current_dir() {
         for directory in current.ancestors() {
-            if directory.join("project.edn").is_file()
-                || directory.join("project.hal").is_file()
-            {
+            if directory.join("project.edn").is_file() || directory.join("project.hal").is_file() {
                 roots.push(directory.join("extensions"));
                 break;
             }
