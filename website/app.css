@@ -266,28 +266,13 @@ body[data-workspace="1"] .workspace-track { transform: translate3d(-100vw, 0, 0)
 }
 
 .welcome-copy,
-.start-button,
-.welcome-signal,
-.need-help { position: relative; z-index: 2; }
+.start-button { position: relative; z-index: 2; }
 
 .welcome-kicker {
   margin: 0;
   color: var(--cyan);
   font-size: clamp(.58rem, .85vw, .78rem);
   letter-spacing: .25em;
-}
-
-.welcome-mark {
-  width: min(37vw, 25rem);
-  height: auto;
-  display: block;
-  margin: 1.2rem 0 .8rem;
-  filter: drop-shadow(0 0 34px rgba(65, 245, 228, .24));
-  animation: mark-float 8s ease-in-out infinite;
-}
-
-@keyframes mark-float {
-  50% { transform: translateY(-7px) rotate(-1deg); filter: drop-shadow(0 0 44px rgba(145, 61, 249, .34)); }
 }
 
 .welcome-copy h1 {
@@ -362,16 +347,6 @@ body[data-workspace="1"] .workspace-track { transform: translate3d(-100vw, 0, 0)
   50% { box-shadow: 0 0 35px rgba(65, 245, 228, .58), 0 0 95px rgba(156, 123, 255, .28); }
 }
 
-.welcome-signal,
-.need-help {
-  position: absolute;
-  color: var(--faint);
-  font-size: .52rem;
-  letter-spacing: .17em;
-}
-
-.welcome-signal { top: 8vh; right: 5vw; display: flex; gap: 1.5rem; }
-.welcome-signal span:first-child { color: var(--cyan); }
 .welcome-coordinate {
   left: 5vw;
   bottom: 8vh;
@@ -391,19 +366,6 @@ body[data-workspace="1"] .workspace-track { transform: translate3d(-100vw, 0, 0)
   color: var(--cyan-bright);
   text-shadow: 0 0 12px rgba(65, 245, 228, .45);
 }
-.need-help {
-  left: 5vw;
-  bottom: 8vh;
-  padding: .65rem .8rem;
-  color: var(--cyan-bright);
-  background: rgba(2, 7, 12, .68);
-  border: 1px solid var(--line-strong);
-  font: inherit;
-  cursor: pointer;
-}
-
-.need-help span { margin-left: .65rem; color: var(--cyan); font-size: 1rem; }
-
 .desktop-workspace { background: rgba(1, 4, 8, .18); }
 
 .desktop-grid {
@@ -1112,8 +1074,6 @@ body[data-workspace="1"] .workspace-track { transform: translate3d(-100vw, 0, 0)
   .runtime-state span:last-child { display: none; }
   .welcome-workspace { padding: 11vw 8vw; }
   .welcome-copy h1 { font-size: clamp(5rem, 28vw, 8.5rem); }
-  .welcome-signal { display: none; }
-  .need-help { bottom: 4vh; }
   .launcher-grid { grid-template-columns: repeat(2, 1fr); }
   .app-tile { min-height: 96px; }
   .window-toolbar { overflow-x: auto; }
