@@ -19,8 +19,8 @@ component map and `website/docs/development.md` for the developer guide.
 - `website/` — the published site, content included: `website/docs/` is the
   mkdocs docs_dir; infra (mkdocs.yml, overrides/, landing page) alongside.
   Apps and books join the site as monorepo sub-sites (see below).
-- `docs/` — working documents, NOT published: design notes and
-  `docs/superpowers/` (plans/specs written by the superpowers plugin).
+- `notes/` — working documents, NOT published: design notes and
+  `notes/superpowers/` (plans/specs written by the superpowers plugin).
   Put nothing here that belongs on the website.
 - `spec/hara/` — normative specs:
   - `*.md` — prose specs; mirrored to `website/docs/reference/` (kept in
