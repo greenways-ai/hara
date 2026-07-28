@@ -1,0 +1,109 @@
+(ns+
+  (:require [studio.draw :as draw]))
+
+;; EFFECT: A browser-native homage to Rich Hickey's classic Clojure ants demo.
+;; Each luminous ant travels between a shared nest and scattered food, while the
+;; fading cyan paths visualize the pheromone trails that guide the colony.
+;; TRY: change ANT_COUNT to make the colony busier.
+;; TRY: change 0.000055 to make the ants forage faster.
+
+(def vertex-shader
+  "#version 300 es
+precision highp float;
+void main() {
+  vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+")
+
+(def fragment-shader
+  "#version 300 es
+precision highp float;
+out vec4 color;
+uniform float u_time;
+uniform vec2 u_resolution;
+
+#define ANT_COUNT 28
+
+float hash11(float p) {
+  return fract(sin(p * 127.1) * 43758.5453);
+}
+
+float segmentDistance(vec2 p, vec2 a, vec2 b) {
+  vec2 pa = p - a;
+  vec2 ba = b - a;
+  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h);
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+  vec2 p = uv;
+  p.x *= u_resolution.x / u_resolution.y;
+  float aspect = u_resolution.x / u_resolution.y;
+  float t = u_time * 0.000055;
+  vec2 home = vec2(aspect * 0.50, 0.46);
+  vec3 ink = vec3(0.002, 0.006, 0.014);
+  vec3 glow = vec3(0.0);
+
+  float nest = smoothstep(0.13, 0.0, length(p - home));
+  glow += vec3(0.20, 0.32, 0.60) * nest * 0.42;
+
+  for (int i = 0; i < ANT_COUNT; i++) {
+    float id = float(i) + 1.0;
+    float seed = hash11(id);
+    float angle = seed * 6.2831853;
+    float reach = mix(0.28, min(0.72, aspect * 0.40), hash11(id + 9.0));
+    vec2 food = home + vec2(cos(angle), sin(angle) * 0.62) * reach;
+    food = clamp(food, vec2(0.07), vec2(aspect - 0.07, 0.93));
+
+    float phase = fract(t * mix(0.65, 1.10, hash11(id + 17.0)) + seed);
+    float journey = phase < 0.5 ? phase * 2.0 : (1.0 - phase) * 2.0;
+    float curve = sin(journey * 3.1415926) * (seed - 0.5) * 0.18;
+    vec2 normal = normalize(vec2(-(food - home).y, (food - home).x));
+    vec2 ant = mix(home, food, journey) + normal * curve;
+
+    float trail = segmentDistance(p, home, food);
+    float pheromone = smoothstep(0.011, 0.0, trail)
+      * (0.16 + 0.18 * sin(id * 2.7 + u_time * 0.001));
+    glow += vec3(0.08, 0.78, 0.70) * pheromone;
+
+    float body = smoothstep(0.011, 0.002, length(p - ant));
+    vec3 antColor = phase < 0.5
+      ? vec3(0.42, 1.0, 0.88)
+      : vec3(1.0, 0.30, 0.62);
+    glow += antColor * body * 1.8;
+
+    float foodDot = smoothstep(0.026, 0.006, length(p - food));
+    glow += vec3(0.72, 0.35, 1.0) * foodDot * 0.30;
+  }
+
+  float nestCore = smoothstep(0.035, 0.0, length(p - home));
+  glow += vec3(0.35, 0.95, 1.0) * nestCore * 0.8;
+  color = vec4(ink + glow, 1.0);
+}
+")
+
+(node/start
+  (fn []
+    (loop [tick 0]
+      (let [frame (co/await (draw/next-frame "canvas/background"))
+            time (get frame "frame/time-ms")
+            width (get frame "canvas/width")
+            height (get frame "canvas/height")]
+        (do
+          (co/await
+            (draw/render
+              "canvas/background"
+              {:type :webgl2
+               :vertex vertex-shader
+               :fragment fragment-shader
+               :uniforms {"u_time" time
+                          "u_resolution" [width height]}
+               :fallback
+               {:type :canvas-2d
+                :background "#02060e"
+                :commands
+                [[:text "ANTS.HAL // WEBGL2 REQUIRED"
+                  24 (- height 24) "#41f5e4" 11]]}}))
+          (recur (+ tick 1)))))))

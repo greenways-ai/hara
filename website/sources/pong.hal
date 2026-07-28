@@ -1,0 +1,96 @@
+(ns+
+  (:require [studio.draw :as draw]))
+
+;; EFFECT: A self-playing Pong rally that keeps the full-screen composition alive.
+;; TRY: change 0.00055 to make the ball travel faster.
+;; TRY: change 0.055 to widen or tighten the paddle movement.
+
+(def vertex-shader
+  "#version 300 es
+precision highp float;
+void main() {
+  vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+")
+
+(def fragment-shader
+  "#version 300 es
+precision highp float;
+out vec4 color;
+uniform float u_time;
+uniform vec2 u_resolution;
+
+float box(vec2 p, vec2 center, vec2 halfSize) {
+  vec2 d = abs(p - center) - halfSize;
+  return 1.0 - smoothstep(0.0, 0.005, max(d.x, d.y));
+}
+
+float triangle(float x) {
+  return 1.0 - abs(fract(x) * 2.0 - 1.0);
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+  vec2 p = uv;
+  p.x *= u_resolution.x / u_resolution.y;
+  float aspect = u_resolution.x / u_resolution.y;
+  float t = u_time * 0.00055;
+  vec3 ink = vec3(0.002, 0.006, 0.015);
+  vec3 cyan = vec3(0.12, 0.96, 0.90);
+  vec3 violet = vec3(0.62, 0.28, 1.0);
+  vec3 glow = vec3(0.0);
+
+  float ballX = mix(0.14, aspect - 0.14, triangle(t));
+  float ballY = mix(0.15, 0.85, triangle(t * 1.37 + 0.21));
+  float leftY = mix(0.17, 0.83, triangle(t * 1.37 + 0.18));
+  float rightY = mix(0.17, 0.83, triangle(t * 1.37 + 0.24));
+
+  float leftPaddle = box(p, vec2(0.09, leftY), vec2(0.010, 0.055));
+  float rightPaddle = box(p, vec2(aspect - 0.09, rightY), vec2(0.010, 0.055));
+  float ball = box(p, vec2(ballX, ballY), vec2(0.012));
+  glow += cyan * leftPaddle * 1.1;
+  glow += violet * rightPaddle * 1.1;
+  glow += mix(cyan, violet, ballX / aspect) * ball * 2.0;
+
+  float dash = step(0.52, fract(uv.y * 20.0));
+  float centerLine = box(p, vec2(aspect * 0.5, 0.5), vec2(0.0025, 0.46)) * dash;
+  glow += vec3(0.30, 0.45, 0.58) * centerLine * 0.45;
+
+  float leftScore = box(p, vec2(aspect * 0.44, 0.91), vec2(0.026, 0.007))
+    + box(p, vec2(aspect * 0.44, 0.875), vec2(0.026, 0.007));
+  float rightScore = box(p, vec2(aspect * 0.56, 0.91), vec2(0.026, 0.007))
+    + box(p, vec2(aspect * 0.56, 0.875), vec2(0.026, 0.007))
+    + box(p, vec2(aspect * 0.56, 0.84), vec2(0.026, 0.007));
+  glow += cyan * leftScore * 0.65 + violet * rightScore * 0.65;
+
+  float border = box(p, vec2(aspect * 0.5, 0.965), vec2(aspect * 0.46, 0.002))
+    + box(p, vec2(aspect * 0.5, 0.035), vec2(aspect * 0.46, 0.002));
+  glow += vec3(0.18, 0.32, 0.44) * border * 0.50;
+  color = vec4(ink + glow, 1.0);
+}
+")
+
+(node/start
+  (fn []
+    (loop [tick 0]
+      (let [frame (co/await (draw/next-frame "canvas/background"))
+            time (get frame "frame/time-ms")
+            width (get frame "canvas/width")
+            height (get frame "canvas/height")]
+        (do
+          (co/await
+            (draw/render
+              "canvas/background"
+              {:type :webgl2
+               :vertex vertex-shader
+               :fragment fragment-shader
+               :uniforms {"u_time" time
+                          "u_resolution" [width height]}
+               :fallback
+               {:type :canvas-2d
+                :background "#02060f"
+                :commands
+                [[:text "PONG.HAL // WEBGL2 REQUIRED"
+                  24 (- height 24) "#9c7bff" 11]]}}))
+          (recur (+ tick 1)))))))

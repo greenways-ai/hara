@@ -1,0 +1,104 @@
+(ns+
+  (:require [studio.draw :as draw]))
+
+;; EFFECT: An autonomous Space Invaders attract screen rendered entirely in HAL.
+;; TRY: change 0.00035 to speed up the alien formation.
+;; TRY: change the cyan and magenta vectors to recolor both fleets.
+
+(def vertex-shader
+  "#version 300 es
+precision highp float;
+void main() {
+  vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+")
+
+(def fragment-shader
+  "#version 300 es
+precision highp float;
+out vec4 color;
+uniform float u_time;
+uniform vec2 u_resolution;
+
+float box(vec2 p, vec2 center, vec2 halfSize) {
+  vec2 d = abs(p - center) - halfSize;
+  return 1.0 - smoothstep(0.0, 0.006, max(d.x, d.y));
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+  vec2 p = uv;
+  p.x *= u_resolution.x / u_resolution.y;
+  float aspect = u_resolution.x / u_resolution.y;
+  float t = u_time * 0.00035;
+  vec3 ink = vec3(0.002, 0.005, 0.014);
+  vec3 cyan = vec3(0.12, 0.95, 0.88);
+  vec3 magenta = vec3(1.0, 0.16, 0.52);
+  vec3 glow = vec3(0.0);
+
+  float march = sin(t) * 0.10;
+  for (int row = 0; row < 4; row++) {
+    for (int col = 0; col < 9; col++) {
+      vec2 center = vec2(
+        aspect * 0.5 + (float(col) - 4.0) * 0.115 + march,
+        0.70 - float(row) * 0.095);
+      vec2 local = p - center;
+      float shell = box(local, vec2(0.0), vec2(0.040, 0.026));
+      shell += box(local, vec2(0.0, -0.027), vec2(0.026, 0.010));
+      float eyes = box(local, vec2(-0.016, 0.006), vec2(0.005))
+        + box(local, vec2(0.016, 0.006), vec2(0.005));
+      float legs = box(local, vec2(-0.030, -0.040), vec2(0.006, 0.014))
+        + box(local, vec2(0.030, -0.040), vec2(0.006, 0.014));
+      float alien = max(shell - eyes, legs);
+      glow += mix(cyan, magenta, float(row) / 3.0) * alien * 0.72;
+    }
+  }
+
+  for (int shield = 0; shield < 4; shield++) {
+    vec2 center = vec2(aspect * (0.22 + float(shield) * 0.19), 0.25);
+    float bunker = box(p, center, vec2(0.075, 0.032))
+      - box(p, center + vec2(0.0, -0.028), vec2(0.022, 0.018));
+    glow += cyan * max(0.0, bunker) * 0.32;
+  }
+
+  float playerX = aspect * 0.5 + sin(t * 1.7) * aspect * 0.30;
+  float player = box(p, vec2(playerX, 0.105), vec2(0.055, 0.016))
+    + box(p, vec2(playerX, 0.128), vec2(0.012, 0.014));
+  glow += cyan * player * 1.2;
+
+  float shotY = fract(t * 1.8) * 0.58 + 0.14;
+  float playerShot = box(p, vec2(playerX, shotY), vec2(0.0035, 0.018));
+  float alienShotY = 0.72 - fract(t * 1.15 + 0.35) * 0.55;
+  float alienShot = box(p, vec2(aspect * 0.62 + march, alienShotY), vec2(0.004, 0.015));
+  glow += cyan * playerShot * 1.7 + magenta * alienShot * 1.6;
+
+  float horizon = box(p, vec2(aspect * 0.5, 0.065), vec2(aspect * 0.46, 0.002));
+  glow += cyan * horizon * 0.45;
+  color = vec4(ink + glow, 1.0);
+}
+")
+
+(node/start
+  (fn []
+    (loop [tick 0]
+      (let [frame (co/await (draw/next-frame "canvas/background"))
+            time (get frame "frame/time-ms")
+            width (get frame "canvas/width")
+            height (get frame "canvas/height")]
+        (do
+          (co/await
+            (draw/render
+              "canvas/background"
+              {:type :webgl2
+               :vertex vertex-shader
+               :fragment fragment-shader
+               :uniforms {"u_time" time
+                          "u_resolution" [width height]}
+               :fallback
+               {:type :canvas-2d
+                :background "#02050e"
+                :commands
+                [[:text "SPACE-INVADERS.HAL // WEBGL2 REQUIRED"
+                  24 (- height 24) "#41f5e4" 11]]}}))
+          (recur (+ tick 1)))))))

@@ -269,7 +269,12 @@ export class CanvasRuntime {
     if (!slot.webgl) {
       const surface = this.window?.document?.createElement?.("canvas");
       if (!surface) throw new Error("WebGL surface cannot be created");
-      slot.webgl = { surface, gl: surface.getContext("webgl2"), programs: new Map() };
+      slot.webgl = {
+        surface,
+        gl: surface.getContext("webgl2"),
+        programs: new Map(),
+        textures: new Map()
+      };
     }
     const { surface, gl, programs } = slot.webgl;
     if (!gl) throw new Error("WebGL2 is unavailable");
@@ -300,12 +305,62 @@ export class CanvasRuntime {
         gl.uniform1f(location, Number(value));
       }
     }
+    this.bindWebGlTextures(slot, program, plain(frame.textures ?? {}));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     const context = slot.canvas.getContext("2d");
     if (!context) throw new Error("Canvas2D compositor is unavailable");
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, width, height);
     context.drawImage(surface, 0, 0);
+  }
+
+  bindWebGlTextures(slot, program, declarations) {
+    const { gl, textures } = slot.webgl;
+    let unit = 0;
+    for (const [uniform, source] of Object.entries(declarations)) {
+      if (typeof source !== "string" || !source) continue;
+      let resource = textures.get(source);
+      if (!resource) {
+        const texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(
+          gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0,
+          gl.RGBA, gl.UNSIGNED_BYTE,
+          new Uint8Array([3, 8, 20, 255])
+        );
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        resource = { texture, loaded: false };
+        textures.set(source, resource);
+
+        const image = new this.window.Image();
+        image.decoding = "async";
+        image.onload = () => {
+          if (slot.webgl?.gl !== gl || textures.get(source) !== resource) return;
+          gl.bindTexture(gl.TEXTURE_2D, texture);
+          gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+          gl.generateMipmap(gl.TEXTURE_2D);
+          resource.loaded = true;
+        };
+        image.onerror = () => {
+          if (resource.failed) return;
+          resource.failed = true;
+          this.onDiagnostic(structuredError(
+            "canvas/texture-failed",
+            `unable to load WebGL texture: ${source}`
+          ));
+        };
+        image.src = source;
+      }
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, resource.texture);
+      const location = gl.getUniformLocation(program, uniform);
+      if (location !== null) gl.uniform1i(location, unit);
+      unit += 1;
+    }
   }
 
   resize(canvas) {
@@ -387,6 +442,9 @@ export class CanvasRuntime {
   disposeWebGl(slot) {
     if (!slot.webgl?.gl) return;
     for (const program of slot.webgl.programs.values()) slot.webgl.gl.deleteProgram(program);
+    for (const resource of slot.webgl.textures.values()) {
+      slot.webgl.gl.deleteTexture(resource.texture);
+    }
     slot.webgl = null;
   }
 

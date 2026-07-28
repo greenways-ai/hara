@@ -1280,9 +1280,13 @@ function syncHighlight() {
 
 function syncBackgroundHighlight() {
   if (!elements.sourceEditor || !elements.sourceHighlight) return;
-  elements.sourceHighlight.innerHTML = highlightHara(elements.sourceEditor.value);
-  elements.sourceHighlight.style.transform =
-    `translate(${-elements.sourceEditor.scrollLeft}px, ${-elements.sourceEditor.scrollTop}px)`;
+  elements.sourceHighlight.innerHTML =
+    `<code class="code-highlight-content">${highlightHara(elements.sourceEditor.value)}</code>`;
+  const content = elements.sourceHighlight.firstElementChild;
+  if (content) {
+    content.style.transform =
+      `translate(${-elements.sourceEditor.scrollLeft}px, ${-elements.sourceEditor.scrollTop}px)`;
+  }
   const base = elements.sourceEditor.dataset.baseSource ?? "";
   const changed = changedLineNumbers(base, elements.sourceEditor.value);
   elements.sourceLineNumbers.innerHTML = elements.sourceEditor.value.split("\n").map((_, index) =>

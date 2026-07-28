@@ -314,9 +314,6 @@ body[data-workspace="1"] .atmosphere {
   overflow: auto;
 }
 
-body.source-open .tron-field,
-body.source-open .atmosphere { right: min(64vw, 960px); width: auto; }
-
 .runtime-state {
   height: 100%;
   gap: .55rem;
@@ -837,6 +834,13 @@ body[data-workspace="1"] .source-toggle { display: none; }
   tab-size: 2;
   white-space: pre;
   pointer-events: none;
+}
+
+.code-highlight-content {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  transform-origin: top left;
   will-change: transform;
 }
 
@@ -1451,7 +1455,16 @@ body[data-workspace="1"] .source-toggle { display: none; }
   .system-title { display: none; }
   .system-mark { width: 22px; height: 22px; }
   .project-tab { min-width: 78px; padding: 0 .7rem; font-size: .5rem; }
-  .background-picker { display: none !important; }
+  .background-picker {
+    display: flex;
+    min-width: 0;
+    padding: 0 .35rem;
+  }
+  .background-picker > span { display: none; }
+  .background-picker select {
+    width: clamp(5rem, 27vw, 7rem);
+    max-width: 100%;
+  }
   .source-toggle { display: block; }
   .background-source-panel {
     top: auto;
@@ -1462,8 +1475,6 @@ body[data-workspace="1"] .source-toggle { display: none; }
     border-top: 1px solid var(--line-strong);
     border-left: 0;
   }
-  body.source-open .tron-field,
-  body.source-open .atmosphere { inset: 0 0 58vh; width: 100%; height: auto; }
   .system-bottom-bar .runtime-state span:last-child { display: none; }
   .system-bottom-bar .runtime-state { min-width: 46px; padding: 0 .8rem; }
   .welcome-workspace {

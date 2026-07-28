@@ -45,6 +45,7 @@ test("phone shell uses touch controls and one explicit workspace panel", async (
   await page.goto("/website/");
   await expect(page.locator("[data-start]")).toBeVisible();
   await expect(page.getByRole("link", { name: "GITHUB ↗" })).toBeVisible();
+  await expect(page.locator("[data-background-source]")).toBeVisible();
   await page.evaluate(() => { document.body.dataset.workspace = "1"; });
   await expect(page.locator("[data-mobile-panels]")).toBeVisible();
   await expect(page.locator('[data-window="editor"]')).toBeVisible();
@@ -61,7 +62,8 @@ runtimeTest("www package includes the Hara UI image assets", async ({ page }) =>
   await page.goto("/target/www/");
   await expect(page.getByRole("heading", { name: "HARA" })).toBeVisible();
   await expect(page.locator("img.welcome-mark")).toHaveCount(0);
-  const marks = page.locator('img.system-mark[src*="hara-mark.svg"], img.start-mark[src*="hara-mark.svg"]');
+  await expect(page.locator('img.system-mark[src*="hara-favicon.svg"]')).toHaveCount(1);
+  const marks = page.locator('img.system-mark[src*="hara-favicon.svg"], img.start-mark[src*="hara-mark.svg"]');
   await expect(marks).toHaveCount(2);
   await expect
     .poll(() => marks.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0)))
@@ -76,7 +78,7 @@ runtimeTest("www runs workspace-discovered HAL background programs", async ({ pa
   const canvas = page.locator("[data-tron]");
   const source = page.locator("select[data-background-source]");
 
-  await expect(source.locator("option")).toHaveCount(5);
+  await expect(source.locator("option")).toHaveCount(10);
   await expect(source).toHaveValue("document/background/tron");
   await expect(canvas).toHaveAttribute("data-background-name", "tron");
   await expect(page.locator("[data-background-status]")).toContainText("GENERATION");
@@ -90,6 +92,18 @@ runtimeTest("www runs workspace-discovered HAL background programs", async ({ pa
   await source.selectOption("document/background/pulse");
   await expect(canvas).toHaveAttribute("data-background-name", "pulse");
   await expect(page.locator("[data-background-status]")).toContainText("GENERATION");
+
+  for (const effect of [
+    "stars",
+    "earth",
+    "ants",
+    "space-invaders",
+    "pong"
+  ]) {
+    await source.selectOption(`document/background/${effect}`);
+    await expect(canvas).toHaveAttribute("data-background-name", effect.replaceAll("-", " "));
+    await expect(page.locator("[data-background-status]")).toContainText("GENERATION");
+  }
 
   await source.selectOption("document/background/fire");
   await expect(canvas).toHaveAttribute("data-background-name", "fire");
@@ -108,11 +122,48 @@ runtimeTest("live source errors roll back and explicit save uses the local overl
   await page.locator("[data-source-toggle]").click();
   const editor = page.locator("[data-background-editor]");
   await expect(editor).toBeVisible();
+  await expect.poll(() => page.locator("[data-tron]").evaluate((canvas) => {
+    const bounds = canvas.getBoundingClientRect();
+    return {
+      left: Math.round(bounds.left),
+      top: Math.round(bounds.top),
+      width: Math.round(bounds.width),
+      height: Math.round(bounds.height)
+    };
+  })).toEqual({ left: 0, top: 0, width: 1280, height: 720 });
   await expect(page.locator("[data-background-line-numbers]")).toBeVisible();
   await expect(page.locator("[data-background-paredit]")).toHaveText("PAREDIT ON");
   await expect(page.locator("[data-background-apply]")).toBeVisible();
   await expect(page.locator("[data-background-highlight]")).toHaveCSS("overflow", "hidden");
   const goodSource = await editor.inputValue();
+  await editor.evaluate((input) => {
+    input.scrollTop = input.scrollHeight;
+    input.scrollLeft = input.scrollWidth;
+    input.dispatchEvent(new Event("scroll"));
+  });
+  await expect.poll(() => page.locator("[data-background-highlight]").evaluate((highlight) => ({
+    top: Math.round(highlight.scrollTop),
+    left: Math.round(highlight.scrollLeft),
+    text: highlight.textContent
+  }))).toEqual(expect.objectContaining({
+    top: expect.any(Number),
+    left: expect.any(Number),
+    text: expect.stringContaining("(node/start")
+  }));
+  await expect.poll(() => page.locator("[data-background-highlight]").evaluate((highlight) => {
+    const editor = document.querySelector("[data-background-editor]");
+    const content = highlight.querySelector(".code-highlight-content");
+    const transform = new DOMMatrix(getComputedStyle(content).transform);
+    return {
+      hasVerticalScroll: editor.scrollTop > 0,
+      topMatches: Math.abs(transform.m42 + editor.scrollTop) < 1,
+      leftMatches: Math.abs(transform.m41 + editor.scrollLeft) < 1
+    };
+  })).toEqual({
+    hasVerticalScroll: true,
+    topMatches: true,
+    leftMatches: true
+  });
   await editor.fill("(ns+");
   await expect(page.locator("[data-background-status]")).toContainText("ERROR", { timeout: 10000 });
   await expect(page.locator("[data-tron]")).toBeVisible();

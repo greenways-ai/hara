@@ -34,6 +34,41 @@
    :document/anonymous true
    :document/node "node/background/pulse"
    :document/canvas "canvas/background"}
+  {:document/id "document/background/stars"
+   :document/title "Stars"
+   :document/path "../../sources/stars.hal"
+   :document/role :studio/background
+   :document/anonymous true
+   :document/node "node/background/stars"
+   :document/canvas "canvas/background"}
+  {:document/id "document/background/earth"
+   :document/title "Earth"
+   :document/path "../../sources/earth.hal"
+   :document/role :studio/background
+   :document/anonymous true
+   :document/node "node/background/earth"
+   :document/canvas "canvas/background"}
+  {:document/id "document/background/ants"
+   :document/title "Ants"
+   :document/path "../../sources/ants.hal"
+   :document/role :studio/background
+   :document/anonymous true
+   :document/node "node/background/ants"
+   :document/canvas "canvas/background"}
+  {:document/id "document/background/space-invaders"
+   :document/title "Space Invaders"
+   :document/path "../../sources/space-invaders.hal"
+   :document/role :studio/background
+   :document/anonymous true
+   :document/node "node/background/space-invaders"
+   :document/canvas "canvas/background"}
+  {:document/id "document/background/pong"
+   :document/title "Pong"
+   :document/path "../../sources/pong.hal"
+   :document/role :studio/background
+   :document/anonymous true
+   :document/node "node/background/pong"
+   :document/canvas "canvas/background"}
   {:document/id "document/background/off"
    :document/title "Off"
    :document/path "../../sources/off.hal"
@@ -46,10 +81,20 @@
   {:node/id "node/background/fire" :node/type :hal/transform :node/document "document/background/fire"}
   {:node/id "node/background/aurora" :node/type :hal/transform :node/document "document/background/aurora"}
   {:node/id "node/background/pulse" :node/type :hal/transform :node/document "document/background/pulse"}
+  {:node/id "node/background/stars" :node/type :hal/transform :node/document "document/background/stars"}
+  {:node/id "node/background/earth" :node/type :hal/transform :node/document "document/background/earth"}
+  {:node/id "node/background/ants" :node/type :hal/transform :node/document "document/background/ants"}
+  {:node/id "node/background/space-invaders" :node/type :hal/transform :node/document "document/background/space-invaders"}
+  {:node/id "node/background/pong" :node/type :hal/transform :node/document "document/background/pong"}
   {:node/id "node/background/off" :node/type :hal/transform :node/document "document/background/off"}]
  :workspace/links
  [{:link/from "document/background/tron" :link/to "canvas/background"}
   {:link/from "document/background/fire" :link/to "canvas/background"}
   {:link/from "document/background/aurora" :link/to "canvas/background"}
   {:link/from "document/background/pulse" :link/to "canvas/background"}
+  {:link/from "document/background/stars" :link/to "canvas/background"}
+  {:link/from "document/background/earth" :link/to "canvas/background"}
+  {:link/from "document/background/ants" :link/to "canvas/background"}
+  {:link/from "document/background/space-invaders" :link/to "canvas/background"}
+  {:link/from "document/background/pong" :link/to "canvas/background"}
   {:link/from "document/background/off" :link/to "canvas/background"}]}
