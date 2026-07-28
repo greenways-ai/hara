@@ -36,6 +36,7 @@ cp "$ROOT/rust/web/studio/boot.js" \
    "$ROOT/rust/web/studio/broker.js" \
    "$ROOT/rust/web/studio/host-services.js" \
    "$ROOT/rust/web/studio/canvas-runtime.js" \
+   "$ROOT/rust/web/studio/capability-registry.js" \
    "$ROOT/rust/web/studio/graph-host.js" \
    "$ROOT/rust/web/studio/module-codec.js" \
    "$ROOT/rust/web/studio/node-runtime.js" \

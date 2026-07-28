@@ -109,7 +109,7 @@ export function createGraphHostServices(graph, options = {}) {
   const hostDescription = {
     "host/version": "hara.host.v1",
     "program/runtimes": options.programRuntimes ?? ["javascript/module", "javascript/audio-worklet"],
-    capabilities: options.capabilities ?? [],
+    capabilities: options.capabilities ?? graph.availableCapabilities?.() ?? [],
     limits: options.limits ?? {
       "program/max-source-bytes": 1048576,
       "graph/max-nodes": 1024,

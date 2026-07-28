@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { GraphHost } from "./studio/graph-host.js";
+import { CapabilityRegistry } from "./studio/capability-registry.js";
 import { SessionRouter } from "./studio/session-router.js";
 
 function executor() {
@@ -50,6 +51,14 @@ test("host-to-host streams stay in GraphHost and retain substrate framing", asyn
   assert.equal(delivery[3].id, "evt-1");
   assert.equal(delivery[3].data, 41);
   assert.equal(graph.info("node/target").execution, "host");
+});
+
+test("GraphHost exposes the browser capabilities owned by its registry", () => {
+  const graph = new GraphHost({
+    executor: executor(),
+    capabilityRegistry: new CapabilityRegistry({ capabilities: ["surface/canvas-2d", "input/keyboard"] })
+  });
+  assert.deepEqual(graph.availableCapabilities(), ["input/keyboard", "surface/canvas-2d"]);
 });
 
 test("a graph session target routes a selected event into its addressed Hara session", async () => {

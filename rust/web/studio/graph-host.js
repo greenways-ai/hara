@@ -1,4 +1,5 @@
 import { NodeRuntime, normalizeFrame } from "./node-runtime.js";
+import { CapabilityRegistry } from "./capability-registry.js";
 import { ProgramHost, ProgramWorkerExecutor } from "./program-host.js";
 import { ProgramError } from "./module-codec.js";
 
@@ -8,7 +9,10 @@ import { ProgramError } from "./module-codec.js";
  * policy. Session targets are intentionally reserved for SessionRouter.
  */
 export class GraphHost {
-  constructor({ executor = null, workerUrl = null, nodeRuntime = null, sessionRouter = null, diagnostics = () => {} } = {}) {
+  constructor({
+    executor = null, workerUrl = null, nodeRuntime = null, sessionRouter = null,
+    capabilityRegistry = new CapabilityRegistry(), diagnostics = () => {}
+  } = {}) {
     this.diagnostics = diagnostics;
     const activeExecutor = executor ?? new ProgramWorkerExecutor({
       workerUrl,
@@ -17,6 +21,7 @@ export class GraphHost {
     });
     this.programs = new ProgramHost({ executor: activeExecutor, diagnostics });
     this.sessionRouter = sessionRouter;
+    this.capabilities = capabilityRegistry;
     this.runtime = nodeRuntime ?? new NodeRuntime({
       deliver: (delivery) => this.deliver(delivery)
     });
@@ -25,6 +30,7 @@ export class GraphHost {
   install(descriptor, options) { return this.programs.install(descriptor, options); }
   programInfo(id) { return this.programs.info(id); }
   listPrograms() { return [...this.programs.programs.values()].map((program) => program.info()); }
+  availableCapabilities() { return this.capabilities.available(); }
 
   async spawn(descriptor, options) {
     const node = await this.programs.spawn(descriptor, options);
