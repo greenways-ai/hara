@@ -4,12 +4,32 @@
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
-	<groupId>org.hara</groupId>
+	<groupId>org.hara-lang</groupId>
 	<artifactId>hara.lang</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<packaging>jar</packaging>
-	<name>hara.lang</name>
-	<url>http://maven.apache.org</url>
+	<name>Hara Language Runtime</name>
+	<description>Hara language runtime for the JVM and GraalVM Truffle.</description>
+	<url>https://www.hara-lang.org/</url>
+	<developers>
+		<developer>
+			<id>hara-lang</id>
+			<name>Hara Language</name>
+			<url>https://github.com/hara-lang</url>
+		</developer>
+	</developers>
+	<scm>
+		<connection>scm:git:https://github.com/hara-lang/hara.git</connection>
+		<developerConnection>scm:git:ssh://git@github.com/hara-lang/hara.git</developerConnection>
+		<url>https://github.com/hara-lang/hara</url>
+	</scm>
+	<distributionManagement>
+		<snapshotRepository>
+			<id>central</id>
+			<name>Sonatype Central Portal Snapshots</name>
+			<url>https://central.sonatype.com/repository/maven-snapshots/</url>
+		</snapshotRepository>
+	</distributionManagement>
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<mainclass>hara.kernel.Main</mainclass>
@@ -185,6 +205,17 @@
 						</manifest>
 					</archive>
 				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-source-plugin</artifactId>
+				<version>3.3.1</version>
+				<executions>
+					<execution>
+						<id>attach-sources</id>
+						<goals><goal>jar-no-fork</goal></goals>
+					</execution>
+					</executions>
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
