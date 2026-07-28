@@ -17,7 +17,7 @@
   <title>Hara - A Modern Lisp for the Agentic Age</title>
   <link rel="stylesheet" href="./vendor/hara-ui/tokens.css">
   <link rel="stylesheet" href="./vendor/hara-ui/components.css">
-  <link rel="stylesheet" href="./app.css?v=workspace-layout-4">
+  <link rel="stylesheet" href="./app.css?v=workspace-projects-1">
 </head>
 <body>
   <canvas class="tron-field" data-tron aria-hidden="true"></canvas>
@@ -42,25 +42,11 @@
 
     <div class="system-identity">
       <img class="system-mark" src="./assets/hara-mark.svg" alt="">
-      <span class="system-title">HARA</span>
-      <span class="system-context" data-system-context>WELCOME // 01</span>
     </div>
 
     <div class="system-right">
-      <label class="background-picker">
-        <span>SOURCE</span>
-        <select data-background-source aria-label="Background source"></select>
-      </label>
-      <button class="source-toggle" type="button" data-source-toggle
-              aria-expanded="false" aria-controls="background-source-panel">CODE</button>
-      <div class="runtime-state" aria-live="polite">
-        <span class="runtime-led" data-runtime-led></span>
-        <span data-runtime-label>WASM // STANDBY</span>
-      </div>
-      <nav class="workspace-dots" aria-label="Workspaces">
-        <button type="button" data-workspace-dot="0" aria-label="Welcome workspace"
-                aria-current="true"></button>
-        <button type="button" data-workspace-dot="1" aria-label="Hara desktop workspace"></button>
+      <nav class="project-tabs" data-project-tabs aria-label="Open workspaces">
+        <button class="project-tab is-active" type="button" data-home aria-current="page">HOME</button>
       </nav>
     </div>
   </header>
@@ -89,29 +75,9 @@
         <span class="app-icon" aria-hidden="true">⌂</span>
         <span>Home</span>
       </button>
-      <button type="button" class="app-tile" data-open-window="files">
-        <span class="app-icon" aria-hidden="true">F</span>
-        <span>Files</span>
-      </button>
-      <button type="button" class="app-tile" data-open-window="editor">
-        <span class="app-icon app-icon-editor" aria-hidden="true">&lt;/&gt;</span>
-        <span>Editor</span>
-      </button>
-      <button type="button" class="app-tile" data-open-window="canvas">
-        <span class="app-icon app-icon-canvas" aria-hidden="true">◎</span>
-        <span>Canvas</span>
-      </button>
-      <a class="app-tile" href="./hara-amp.html">
-        <span class="app-icon app-icon-canvas" aria-hidden="true">♫</span>
-        <span>Music Template</span>
-      </a>
-      <button type="button" class="app-tile" data-deploy-template="3d">
-        <span class="app-icon app-icon-editor" aria-hidden="true">3D</span>
-        <span>3D Editor</span>
-      </button>
-      <button type="button" class="app-tile" data-deploy-template="graph">
-        <span class="app-icon app-icon-canvas" aria-hidden="true">∿</span>
-        <span>Graphing Template</span>
+      <button type="button" class="app-tile" data-new-workspace>
+        <span class="app-icon app-icon-editor" aria-hidden="true">＋</span>
+        <span>New Workspace</span>
       </button>
       <a class="app-tile" href="https://docs.hara-lang.org/learn-programming/" target="_blank" rel="noreferrer">
         <span class="app-icon" aria-hidden="true">01</span>
@@ -129,6 +95,10 @@
         <span class="app-icon" aria-hidden="true">G</span>
         <span>GitHub</span>
       </a>
+    </div>
+    <div class="launcher-projects">
+      <strong>SAVED WORKSPACES</strong>
+      <div data-saved-workspaces><span class="launcher-empty">NO SAVED WORKSPACES</span></div>
     </div>
   </aside>
   <div class="launcher-scrim" data-launcher-scrim></div>
@@ -154,14 +124,19 @@
         </nav>
       </section>
 
-      <section class="workspace desktop-workspace" aria-label="Hara desktop">
+      <section class="workspace desktop-workspace" aria-label="Hara workspace" data-workspace-template="blank">
         <div class="desktop-grid" aria-hidden="true"></div>
+        <nav class="mobile-panel-tabs hara-tabs" data-mobile-panels aria-label="Workspace panels">
+          <button class="hara-tab" type="button" data-focus-window="files" aria-selected="false">explorer</button>
+          <button class="hara-tab" type="button" data-focus-window="editor" aria-selected="true">source</button>
+          <button class="hara-tab" type="button" data-focus-window="canvas" aria-selected="false">output</button>
+        </nav>
         <section class="app-window files-window" data-window="files"
                  aria-label="Files window" tabindex="-1">
           <div class="window-titlebar" data-drag-handle>
             <div class="window-title">
               <span class="window-number">01</span>
-              <span>FILES</span>
+              <span data-area-title="files">EXPLORER</span>
             </div>
             <div class="window-controls">
               <button type="button" data-window-maximize aria-label="Maximize Files">□</button>
@@ -190,7 +165,7 @@
           <div class="window-titlebar" data-drag-handle>
             <div class="window-title">
               <span class="window-number">02</span>
-              <span data-editor-title>EDITOR</span>
+              <span data-editor-title>SOURCE</span>
               <i class="dirty-indicator" data-dirty aria-label="Unsaved changes"></i>
             </div>
             <div class="window-controls">
@@ -198,11 +173,6 @@
               <button type="button" data-window-close aria-label="Close Editor">×</button>
             </div>
           </div>
-          <nav class="hara-tabs editor-tabs" aria-label="Workspace panels">
-            <button class="hara-tab" type="button" data-focus-window="editor" aria-selected="true">source</button>
-            <button class="hara-tab" type="button" data-focus-window="canvas" aria-selected="false">canvas</button>
-            <button class="hara-tab" type="button" data-focus-window="files" aria-selected="false">files</button>
-          </nav>
           <div class="window-toolbar editor-toolbar">
             <div>
               <button type="button" class="paredit-button" data-paredit aria-pressed="true">PAREDIT ON</button>
@@ -233,7 +203,7 @@
           <div class="window-titlebar" data-drag-handle>
             <div class="window-title">
               <span class="window-number">03</span>
-              <span>CANVAS OUTPUT</span>
+              <span data-area-title="canvas">OUTPUT</span>
             </div>
             <div class="window-controls">
               <button type="button" data-window-maximize aria-label="Maximize Canvas">□</button>
@@ -266,6 +236,16 @@
       <span class="runtime-led" data-runtime-led></span>
       <span data-runtime-label>WASM // STANDBY</span>
     </div>
+    <div class="bottom-spacer"></div>
+    <div class="home-tools">
+      <label class="background-picker">
+        <span>SOURCE</span>
+        <select data-background-source aria-label="Background source"></select>
+      </label>
+      <button class="source-toggle" type="button" data-source-toggle
+              aria-expanded="false" aria-controls="background-source-panel">CODE</button>
+    </div>
+    <button type="button" class="publish-button" data-publish disabled>PUBLISH</button>
     <button type="button" class="help-button" data-help aria-label="Open Hara help">? <span>HELP</span></button>
   </footer>
 
@@ -280,6 +260,27 @@
         <div><dt>Ctrl S</dt><dd>Save the open file.</dd></div>
       </dl>
     </div>
+  </dialog>
+
+  <dialog class="hara-dialog workspace-template-dialog" data-template-dialog>
+    <div class="dialog-head"><span>NEW WORKSPACE</span><button type="button" data-template-close aria-label="Close">×</button></div>
+    <label class="workspace-name-field">
+      <span>NAME</span>
+      <input type="text" data-workspace-name value="Untitled Workspace" maxlength="48">
+    </label>
+    <div class="template-grid" data-template-grid></div>
+  </dialog>
+
+  <dialog class="hara-dialog publish-dialog" data-publish-dialog>
+    <div class="dialog-head"><span>PUBLISH WORKSPACE</span><button type="button" data-publish-close aria-label="Close">×</button></div>
+    <p>Publish the complete project, including project.edn, workspace.edn and source files.</p>
+    <label class="publish-visibility"><input type="checkbox" data-publish-public checked> PUBLIC</label>
+    <div class="publish-options">
+      <button type="button" data-publish-provider="download">SELF-HOST EXPORT</button>
+      <button type="button" data-publish-provider="gist">GITHUB GIST</button>
+      <button type="button" data-publish-provider="greenways">GREENWAYS</button>
+    </div>
+    <p class="publish-note" data-publish-note>GitHub and Greenways connect through a server-side GitHub profile authorization.</p>
   </dialog>
 
   <dialog class="hara-dialog" data-dialog>
@@ -301,6 +302,6 @@
   </dialog>
 
   <div class="toast-stack" data-toasts aria-live="polite"></div>
-  <script type="module" src="./app.js?v=project-workspaces"></script>
+  <script type="module" src="./app.js?v=workspace-projects-1"></script>
 </body>
 </html>

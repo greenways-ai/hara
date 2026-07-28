@@ -46,6 +46,33 @@ test("two instances sharing a db name see the same IndexedDB data", async () => 
   assert.deepEqual(await second["store/keys"](), ["shared-key"]);
 });
 
+test("workspace scoped stores cannot read, write, or list another workspace", async () => {
+  const contexts = new Map([["alpha-context", "alpha"], ["beta-context", "beta"]]);
+  const host = createHostServices({
+    dbName: "test-workspace-scope",
+    scopeForContext: (context) => contexts.get(context)
+  });
+  const alpha = Object.fromEntries(Object.entries(host).map(([name, handler]) => [
+    name, (...args) => handler.call({ context: "alpha-context" }, ...args)
+  ]));
+  const beta = Object.fromEntries(Object.entries(host).map(([name, handler]) => [
+    name, (...args) => handler.call({ context: "beta-context" }, ...args)
+  ]));
+
+  await alpha["store/put"]("spaces/alpha/files/src/main.hal", "alpha");
+  await beta["store/put"]("spaces/beta/files/src/main.hal", "beta");
+  assert.equal(await alpha["store/get"]("spaces/alpha/files/src/main.hal"), "alpha");
+  assert.deepEqual(await alpha["store/keys"](), ["spaces/alpha/files/src/main.hal"]);
+  await assert.rejects(
+    alpha["store/get"]("spaces/beta/files/src/main.hal"),
+    /workspace-scope-denied:alpha/
+  );
+  await assert.rejects(
+    alpha["store/put"]("spaces/beta/files/leak.hal", "no"),
+    /workspace-scope-denied:alpha/
+  );
+});
+
 test("http/get returns the response body as text", async () => {
   const calls = [];
   const fetch = async (url) => {

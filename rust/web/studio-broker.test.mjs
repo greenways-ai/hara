@@ -69,6 +69,26 @@ test("resources are registered before the bootstrap eval", async () => {
   ]);
 });
 
+test("kernel starting hook establishes host scope before bootstrap", async () => {
+  const { spawn } = mockSpawn();
+  const order = [];
+  const broker = new KernelBroker({
+    spawn: async (name) => {
+      const kernel = await spawn(name);
+      const call = kernel.context.call.bind(kernel.context);
+      kernel.context.call = async (...args) => {
+        order.push(args[0]);
+        return call(...args);
+      };
+      return kernel;
+    },
+    onKernelStarting: ({ name }) => order.push(`scope:${name}`),
+    resources: { "lib/a.hal": "(ns lib.a)" }
+  });
+  await broker.create("scoped", { bootstrap: "(+ 1 2)" });
+  assert.deepEqual(order, ["scope:scoped", "register-resource", "eval"]);
+});
+
 test("create without bootstrap only registers resources", async () => {
   const { spawn } = mockSpawn();
   const broker = new KernelBroker({ spawn, resources: { "lib/a.hal": "(ns lib.a)" } });

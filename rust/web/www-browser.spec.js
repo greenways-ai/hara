@@ -1,8 +1,10 @@
 import { existsSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 
-test("www shell navigates workspaces and opens desktop apps", async ({ page }) => {
+test("www always opens Home and offers manifest-backed workspace templates", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("hara-www.workspace.v1", "1"));
   await page.goto("/website/");
+  await expect(page.locator("body")).toHaveAttribute("data-workspace", "0");
   await expect(page.getByRole("link", { name: "GITHUB ↗" })).toHaveAttribute(
     "href",
     "https://github.com/hara-lang/hara",
@@ -12,17 +14,37 @@ test("www shell navigates workspaces and opens desktop apps", async ({ page }) =
     /youtube\.com\/results/,
   );
   await page.locator("[data-start]").click();
-  await expect(page.locator("body")).toHaveAttribute("data-workspace", "1");
-  await expect(page.locator('[data-workspace-dot="1"]')).toHaveAttribute("aria-current", "true");
-
-  await page.locator("[data-home]").click();
-  await expect(page.locator("body")).toHaveAttribute("data-workspace", "0");
+  await expect(page.locator("[data-template-dialog]")).toBeVisible();
+  await expect(page.locator("[data-template]")).toHaveCount(5);
+  await page.locator("[data-template-close]").click();
 
   await page.locator("[data-launcher-toggle]").click();
   await expect(page.locator("[data-launcher]")).toHaveAttribute("aria-hidden", "false");
-  await page.locator('[data-open-window="files"]').click();
-  await expect(page.locator("body")).toHaveAttribute("data-workspace", "1");
-  await expect(page.locator('[data-window="files"]')).toHaveClass(/is-focused/);
+  await expect(page.locator("[data-new-workspace]")).toBeVisible();
+  await expect(page.locator("[data-deploy-template]")).toHaveCount(0);
+});
+
+test("zoomed desktop keeps explorer, source, and output visible", async ({ page }) => {
+  await page.setViewportSize({ width: 892, height: 900 });
+  await page.goto("/website/");
+  await page.evaluate(() => { document.body.dataset.workspace = "1"; });
+  for (const name of ["files", "editor", "canvas"]) {
+    await expect(page.locator(`[data-window="${name}"]`)).toBeVisible();
+  }
+});
+
+test("phone shell uses touch controls and one explicit workspace panel", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/website/");
+  await expect(page.locator("[data-start]")).toBeVisible();
+  await expect(page.getByRole("link", { name: "GITHUB ↗" })).toBeVisible();
+  await page.evaluate(() => { document.body.dataset.workspace = "1"; });
+  await expect(page.locator("[data-mobile-panels]")).toBeVisible();
+  await expect(page.locator('[data-window="editor"]')).toBeVisible();
+  await expect(page.locator('[data-window="files"]')).toBeHidden();
+  await page.locator('[data-mobile-panels] [data-focus-window="files"]').click();
+  await expect(page.locator('[data-window="files"]')).toBeVisible();
+  await expect(page.locator('[data-window="editor"]')).toBeHidden();
 });
 
 const builtRuntime = new URL("../../target/www/runtime/hara.wasm", import.meta.url);
@@ -31,9 +53,9 @@ const runtimeTest = existsSync(builtRuntime) ? test : test.skip;
 runtimeTest("www package includes the Hara UI image assets", async ({ page }) => {
   await page.goto("/target/www/");
   await expect(page.getByRole("heading", { name: "HARA" })).toBeVisible();
-  await expect(page.locator("img.welcome-mark, img.system-mark")).toHaveCount(0);
-  const marks = page.locator('img.start-mark[src*="hara-emblem.svg"]');
-  await expect(marks).toHaveCount(1);
+  await expect(page.locator("img.welcome-mark")).toHaveCount(0);
+  const marks = page.locator('img.system-mark[src*="hara-mark.svg"], img.start-mark[src*="hara-mark.svg"]');
+  await expect(marks).toHaveCount(2);
   await expect
     .poll(() => marks.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0)))
     .toBe(true);
@@ -43,7 +65,7 @@ runtimeTest("www runs workspace-discovered HAL background programs", async ({ pa
   await page.addInitScript(() => localStorage.removeItem("hara-www.workspace.v1"));
   await page.goto("/target/www/");
   await expect(page.locator("[data-runtime-label]")).toHaveText("WASM // LIVE", { timeout: 60000 });
-  await page.locator("[data-home]").click();
+  await page.locator(".project-tab[data-home]").click();
   const canvas = page.locator("[data-tron]");
   const source = page.locator("select[data-background-source]");
 
@@ -70,7 +92,7 @@ runtimeTest("live source errors roll back and explicit save uses the local overl
   await page.addInitScript(() => localStorage.removeItem("hara-www.workspace.v1"));
   await page.goto("/target/www/");
   await expect(page.locator("[data-runtime-label]")).toHaveText("WASM // LIVE", { timeout: 60000 });
-  await page.locator("[data-home]").click();
+  await page.locator(".project-tab[data-home]").click();
   await page.locator("[data-source-toggle]").click();
   const editor = page.locator("[data-background-editor]");
   await expect(editor).toBeVisible();
@@ -92,6 +114,21 @@ runtimeTest("www evaluates the default Hara sketch into the canvas", async ({ pa
   await expect(page.locator("[data-canvas-empty]")).toHaveClass(/is-hidden/);
   await expect(page.locator("[data-canvas-status]")).toContainText("FRAME //");
   await expect(page.locator("[data-editor-status]")).toHaveText("FILE RENDERED");
+});
+
+runtimeTest("workspace template opens a dedicated project tab and survives Home navigation", async ({ page }) => {
+  await page.goto("/target/www/");
+  await expect(page.locator("[data-runtime-label]")).toHaveText("WASM // LIVE", { timeout: 60000 });
+  await page.locator("[data-start]").click();
+  await page.locator("[data-workspace-name]").fill(`Canvas ${Date.now()}`);
+  await page.locator('[data-template="canvas"]').click();
+  await expect(page.locator("body")).toHaveAttribute("data-workspace", "1");
+  await expect(page.locator("[data-project-id]")).toHaveCount(1);
+  await expect(page.locator('[data-file="/project.edn"]')).toBeVisible();
+  await expect(page.locator('[data-file="/workspace.edn"]')).toBeVisible();
+  await page.locator(".project-tab[data-home]").click();
+  await expect(page.locator("body")).toHaveAttribute("data-workspace", "0");
+  await expect(page.locator("[data-project-id]")).toHaveCount(1);
 });
 
 runtimeTest("www evaluates scalars through the SharedWorker runtime", async ({ page }) => {

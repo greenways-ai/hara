@@ -1,12 +1,13 @@
 import { keywordName, mapValue, renderScene, validateScene } from "./scene.js";
 import { CreativeRuntime, normalizeCreative } from "./creative.js";
 import { applyParedit, barfForward, insertIndent, killToFormEnd, localFormAt, slurpForward, structuralAlign } from "./editor.js";
+import { WorkspaceRepository, kernelName, workspaceTemplates } from "./workspaces.js";
+import { downloadWorkspace, workspaceBundle } from "./publishing.js";
 
 const SPACE = "home";
 const ROOT = "ROOT";
 const ACTIVE_FILE_KEY = "hara-www.active-file.v1";
 const WINDOWS_KEY = "hara-www.windows.v1";
-const WORKSPACE_KEY = "hara-www.workspace.v1";
 const BACKGROUND_SOURCE_KEY = "hara-www.background-source.v1";
 const BACKGROUND_WORKSPACE = "./examples/studio-backgrounds/";
 const HAL_FORMS = [
@@ -134,14 +135,22 @@ const state = {
   canvasRuntime: null,
   sourceTimer: null,
   zIndex: 10,
-  workspace: Number(localStorage.getItem(WORKSPACE_KEY)) === 1 ? 1 : 0
+  workspace: 0,
+  workspaceRepository: new WorkspaceRepository(),
+  workspaceRecords: new Map(),
+  openWorkspaces: [],
+  currentProject: null,
+  activeKernel: ROOT,
+  activeSpace: SPACE,
+  kernelSpaces: new Map([[ROOT, SPACE]]),
+  contextSpaces: new WeakMap(),
+  defaultBootstrap: null
 };
 
 const elements = {
   launcher: query("[data-launcher]"),
   launcherToggle: query("[data-launcher-toggle]"),
   launcherScrim: query("[data-launcher-scrim]"),
-  systemContext: query("[data-system-context]"),
   runtimeLed: query("[data-runtime-led]"),
   runtimeLabel: query("[data-runtime-label]"),
   backgroundSource: query("[data-background-source]"),
@@ -179,6 +188,14 @@ const elements = {
   dialogInput: query("[data-dialog-input]"),
   dialogMessage: query("[data-dialog-message]"),
   helpDialog: query("[data-help-dialog]"),
+  templateDialog: query("[data-template-dialog]"),
+  templateGrid: query("[data-template-grid]"),
+  workspaceName: query("[data-workspace-name]"),
+  projectTabs: query("[data-project-tabs]"),
+  savedWorkspaces: query("[data-saved-workspaces]"),
+  publish: query("[data-publish]"),
+  publishDialog: query("[data-publish-dialog]"),
+  publishNote: query("[data-publish-note]"),
   toasts: query("[data-toasts]")
 };
 
@@ -321,11 +338,12 @@ async function loadBackgroundSource(name, sourceOverride = null) {
 function setWorkspace(index) {
   state.workspace = index === 1 ? 1 : 0;
   document.body.dataset.workspace = String(state.workspace);
-  localStorage.setItem(WORKSPACE_KEY, String(state.workspace));
-  elements.systemContext.textContent = state.workspace === 0 ? "WELCOME // 01" : "VISUAL LAB // 02";
-  for (const dot of queryAll("[data-workspace-dot]")) {
-    dot.setAttribute("aria-current", String(Number(dot.dataset.workspaceDot) === state.workspace));
-  }
+  queryAll("[data-home]").forEach((button) => {
+    button.classList.toggle("is-active", state.workspace === 0);
+    if (button.classList.contains("project-tab")) {
+      button.toggleAttribute("aria-current", state.workspace === 0);
+    }
+  });
   if (state.workspace === 1) {
     state.canvasRuntime?.setVisible(false);
     query("[data-tron]").hidden = true;
@@ -336,6 +354,136 @@ function setWorkspace(index) {
     if (state.broker) loadBackgroundSource(state.backgroundSource).catch(() => {});
   }
   closeLauncher();
+}
+
+const workspacePresentation = {
+  blank: { files: "EXPLORER", editor: "SOURCE", canvas: "OUTPUT", tabs: ["explorer", "source", "output"] },
+  canvas: { files: "EXPLORER", editor: "SOURCE", canvas: "CANVAS", tabs: ["explorer", "source", "canvas"] },
+  music: { files: "PLAYLIST", editor: "PLAYER / SOURCE", canvas: "SPECTRUM", tabs: ["playlist", "source", "spectrum"] },
+  "3d": { files: "HIERARCHY", editor: "SOURCE", canvas: "3D VIEWPORT", tabs: ["hierarchy", "source", "viewport"] },
+  graphs: { files: "SOURCE & DATA", editor: "SOURCE", canvas: "GRAPH", tabs: ["data", "source", "graph"] }
+};
+
+function applyWorkspacePresentation(record) {
+  const template = record?.template ?? "blank";
+  const presentation = workspacePresentation[template] ?? workspacePresentation.blank;
+  const desktop = query(".desktop-workspace");
+  desktop.dataset.workspaceTemplate = template;
+  query('[data-area-title="files"]').textContent = presentation.files;
+  query('[data-area-title="canvas"]').textContent = presentation.canvas;
+  if (!state.activeFile) elements.editorTitle.textContent = presentation.editor;
+  queryAll("[data-mobile-panels] [data-focus-window]").forEach((tab, index) => {
+    tab.textContent = presentation.tabs[index];
+  });
+}
+
+function renderProjectTabs() {
+  elements.projectTabs.querySelectorAll("[data-project-id]").forEach((tab) => tab.remove());
+  for (const id of state.openWorkspaces) {
+    const record = state.workspaceRecords.get(id);
+    if (!record) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `project-tab${state.currentProject?.id === id && state.workspace === 1 ? " is-active" : ""}`;
+    button.dataset.projectId = id;
+    button.title = record.name;
+    button.append(document.createTextNode(record.name.toUpperCase()));
+    const close = document.createElement("span");
+    close.className = "project-tab-close";
+    close.textContent = "×";
+    close.setAttribute("role", "button");
+    close.setAttribute("aria-label", `Close ${record.name}`);
+    close.addEventListener("click", (event) => {
+      event.stopPropagation();
+      closeWorkspace(id).catch((error) => toast(errorText(error), true));
+    });
+    button.append(close);
+    button.addEventListener("click", () => openWorkspace(record).catch((error) => toast(errorText(error), true)));
+    elements.projectTabs.append(button);
+  }
+}
+
+async function renderSavedWorkspaces() {
+  const records = await state.workspaceRepository.list();
+  state.workspaceRecords = new Map(records.map((record) => [record.id, record]));
+  elements.savedWorkspaces.replaceChildren();
+  if (!records.length) {
+    const empty = document.createElement("span");
+    empty.className = "launcher-empty";
+    empty.textContent = "NO SAVED WORKSPACES";
+    elements.savedWorkspaces.append(empty);
+  }
+  for (const record of records) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "saved-workspace";
+    button.textContent = `${record.name.toUpperCase()}  //  ${record.template.toUpperCase()}`;
+    button.addEventListener("click", () => openWorkspace(record).catch((error) => toast(errorText(error), true)));
+    elements.savedWorkspaces.append(button);
+  }
+  renderProjectTabs();
+}
+
+async function syncProjectIntoKernel(record) {
+  const files = await state.workspaceRepository.files(record.id);
+  for (const [path, content] of files) {
+    await state.broker.eval(kernelName(record.id), studioSource(
+      `(fs/write! ${JSON.stringify(`workspace-${record.id}`)} ${JSON.stringify(path)} ${JSON.stringify(content)})`
+    ));
+  }
+}
+
+async function openWorkspace(record) {
+  if (!state.broker || !state.defaultBootstrap) {
+    toast("RUNTIME STILL BOOTING", true);
+    return;
+  }
+  const name = kernelName(record.id);
+  const space = `workspace-${record.id}`;
+  if (!state.openWorkspaces.includes(record.id)) state.openWorkspaces.push(record.id);
+  state.workspaceRecords.set(record.id, record);
+  state.kernelSpaces.set(name, space);
+  if (!state.broker.list().includes(name)) {
+    await state.broker.create(name, { bootstrap: state.defaultBootstrap(space) });
+    await syncProjectIntoKernel(record);
+  }
+  if (state.activeDocument) {
+    state.broker.releaseDocument(state.activeKernel, state.activeDocument.id);
+    state.activeDocument = null;
+  }
+  state.currentProject = record;
+  state.activeKernel = name;
+  state.activeSpace = space;
+  state.activeFile = null;
+  state.dirty = false;
+  applyWorkspacePresentation(record);
+  setWorkspace(1);
+  renderProjectTabs();
+  const files = await listFiles();
+  const path = files.includes("/src/main.hal") ? "/src/main.hal" :
+    files.includes("/workspace.edn") ? "/workspace.edn" : files[0];
+  if (path) await openFile(path, true);
+  elements.publish.disabled = false;
+}
+
+async function closeWorkspace(id) {
+  const name = kernelName(id);
+  if (state.broker?.list().includes(name)) await state.broker.close(name);
+  state.openWorkspaces = state.openWorkspaces.filter((value) => value !== id);
+  state.kernelSpaces.delete(name);
+  if (state.currentProject?.id === id) {
+    const next = state.workspaceRecords.get(state.openWorkspaces.at(-1));
+    state.currentProject = null;
+    state.activeKernel = ROOT;
+    state.activeSpace = SPACE;
+    state.activeDocument = null;
+    if (next) await openWorkspace(next);
+    else {
+      elements.publish.disabled = true;
+      setWorkspace(0);
+    }
+  }
+  renderProjectTabs();
 }
 
 function setLauncher(open) {
@@ -494,19 +642,25 @@ function installWorkspaceNavigation() {
       loadBackgroundSource(elements.backgroundSource.value).catch(() => {});
     });
   }
-  query("[data-start]").addEventListener("click", () => setWorkspace(1));
-  query("[data-home]").addEventListener("click", () => setWorkspace(0));
-  query("[data-workspace-prev]").addEventListener("click", () => setWorkspace(0));
-  query("[data-workspace-next]").addEventListener("click", () => setWorkspace(1));
-  for (const dot of queryAll("[data-workspace-dot]")) {
-    dot.addEventListener("click", () => setWorkspace(Number(dot.dataset.workspaceDot)));
-  }
+  query("[data-start]").addEventListener("click", openTemplateDialog);
+  queryAll("[data-home]").forEach((button) => button.addEventListener("click", () => setWorkspace(0)));
+  query("[data-workspace-prev]").addEventListener("click", () => {
+    if (state.workspace === 1) setWorkspace(0);
+  });
+  query("[data-workspace-next]").addEventListener("click", () => {
+    const record = state.workspaceRecords.get(state.openWorkspaces[0]);
+    if (record) openWorkspace(record).catch((error) => toast(errorText(error), true));
+    else openTemplateDialog();
+  });
 
   document.addEventListener("keydown", (event) => {
     if (elements.dialog.open || elements.launcher.classList.contains("is-open")) return;
     if (event.target.matches("input, textarea, select")) return;
-    if (event.key === "ArrowRight") setWorkspace(1);
-    if (event.key === "ArrowLeft") setWorkspace(0);
+    if (event.key === "ArrowRight" && state.workspace === 0) {
+      const record = state.workspaceRecords.get(state.openWorkspaces[0]);
+      if (record) openWorkspace(record).catch((error) => toast(errorText(error), true));
+    }
+    if (event.key === "ArrowLeft" && state.workspace === 1) setWorkspace(0);
   });
 
   const viewport = query(".workspace-viewport");
@@ -521,7 +675,7 @@ function installWorkspaceNavigation() {
     const dy = event.clientY - swipeStart.y;
     swipeStart = null;
     if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.4) {
-      setWorkspace(dx < 0 ? 1 : 0);
+      if (dx > 0) setWorkspace(0);
     }
   });
 }
@@ -538,12 +692,7 @@ function installLauncher() {
     setLauncher(!elements.launcher.classList.contains("is-open"));
   });
   elements.launcherScrim.addEventListener("click", closeLauncher);
-  for (const tile of queryAll("[data-open-window]")) {
-    tile.addEventListener("click", () => openWindow(tile.dataset.openWindow));
-  }
-  for (const tile of queryAll("[data-deploy-template]")) {
-    tile.addEventListener("click", () => deployTemplate(tile.dataset.deployTemplate));
-  }
+  query("[data-new-workspace]").addEventListener("click", openTemplateDialog);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && elements.launcher.classList.contains("is-open")) {
       closeLauncher();
@@ -552,22 +701,68 @@ function installLauncher() {
   });
 }
 
+function openTemplateDialog() {
+  closeLauncher();
+  elements.workspaceName.value = "Untitled Workspace";
+  elements.templateDialog.showModal();
+  requestAnimationFrame(() => elements.workspaceName.select());
+}
+
+function installWorkspaceCreation() {
+  const symbols = { blank: "◇", canvas: "◎", music: "♫", "3d": "3D", graphs: "∿" };
+  for (const template of workspaceTemplates) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "template-option";
+    button.dataset.template = template.id;
+    button.dataset.symbol = symbols[template.id];
+    button.textContent = template.label.toUpperCase();
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try {
+        const record = await state.workspaceRepository.create({
+          name: elements.workspaceName.value,
+          template: template.id
+        });
+        elements.templateDialog.close();
+        await renderSavedWorkspaces();
+        await openWorkspace(record);
+      } catch (error) {
+        toast(`WORKSPACE FAILED: ${errorText(error)}`, true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+    elements.templateGrid.append(button);
+  }
+  query("[data-template-close]").addEventListener("click", () => elements.templateDialog.close());
+}
+
+function installPublishing() {
+  elements.publish.addEventListener("click", () => elements.publishDialog.showModal());
+  query("[data-publish-close]").addEventListener("click", () => elements.publishDialog.close());
+  for (const button of queryAll("[data-publish-provider]")) {
+    button.addEventListener("click", async () => {
+      if (!state.currentProject) return;
+      const provider = button.dataset.publishProvider;
+      const publicVisibility = query("[data-publish-public]").checked;
+      if (provider === "download") {
+        downloadWorkspace(await workspaceBundle(state.workspaceRepository, state.currentProject.id));
+        elements.publishNote.textContent = "WORKSPACE EXPORTED FOR SELF-HOSTING.";
+        return;
+      }
+      const label = provider === "gist" ? "GitHub Gist" : "Greenways";
+      elements.publishNote.textContent =
+        `${label} publishing is ready for a server-side GitHub profile connection. ` +
+        `${publicVisibility ? "Public" : "Private/draft"} will be used after authorization.`;
+    });
+  }
+}
+
 function installWorkspaceTabs() {
   for (const tab of queryAll("[data-focus-window]")) {
     tab.addEventListener("click", () => openWindow(tab.dataset.focusWindow));
   }
-}
-
-async function deployTemplate(name) {
-  const path = name === "3d" ? "/templates/3d-editor.hal" : "/templates/graphing.hal";
-  const source = DEFAULT_FILES.get(path);
-  if (!state.broker || !source) return toast("RUNTIME STILL BOOTING", true);
-  await evalStudio(`(fs/write! ${JSON.stringify(SPACE)} ${JSON.stringify(path)} ${JSON.stringify(source)})`);
-  await listFiles();
-  await openFile(path, true);
-  openWindow("canvas");
-  await evaluateFile();
-  toast(`${name === "3d" ? "3D EDITOR" : "GRAPHING"} TEMPLATE DEPLOYED`);
 }
 
 function studioSource(form) {
@@ -575,11 +770,11 @@ function studioSource(form) {
 }
 
 function evalStudio(form) {
-  return state.broker.eval(ROOT, studioSource(form));
+  return state.broker.eval(state.activeKernel, studioSource(form));
 }
 
 async function listFiles() {
-  const result = await evalStudio(`(space/files ${JSON.stringify(SPACE)})`);
+  const result = await evalStudio(`(space/files ${JSON.stringify(state.activeSpace)})`);
   state.files = (Array.isArray(result) ? result.map(String) : []).sort();
   renderFiles();
   return state.files;
@@ -746,14 +941,14 @@ function redoEditor() {
   return true;
 }
 
-async function openFile(path, force = false) {
+async function openFile(path, force = false, activateWorkspace = true) {
   if (state.dirty && !force) {
     const discard = await confirmDialog("UNSAVED CHANGES", "Discard the current editor changes?");
     if (!discard) return;
   }
-  const content = await evalStudio(`(fs/read ${JSON.stringify(SPACE)} ${JSON.stringify(path)})`);
+  const content = await evalStudio(`(fs/read ${JSON.stringify(state.activeSpace)} ${JSON.stringify(path)})`);
   if (state.activeDocument && state.activeDocument.path !== path) {
-    state.broker.releaseDocument(ROOT, state.activeDocument.id);
+    state.broker.releaseDocument(state.activeKernel, state.activeDocument.id);
     state.nodeRuntime?.releaseDocument(state.activeDocument.id);
     state.activeDocument = null;
   }
@@ -767,15 +962,39 @@ async function openFile(path, force = false) {
   updateEditorChrome();
   syncHighlight();
   updateStructuralDiff();
-  openWindow("editor");
+  if (activateWorkspace) openWindow("editor");
 }
 
 async function saveFile(showToast = true) {
   if (!state.activeFile) return false;
   elements.editorStatus.textContent = "SAVING";
+  if (state.activeFile === "/workspace.edn") {
+    try {
+      const manifest = await state.broker.eval(state.activeKernel, `(quote ${elements.editor.value})`);
+      for (const key of ["workspace/id", "workspace/layout", "workspace/documents", "workspace/areas",
+        "workspace/nodes", "workspace/connections", "workspace/links", "workspace/customizations"]) {
+        if (mapValue(manifest, key) === undefined) throw new Error(`workspace.edn missing :${key}`);
+      }
+      const customizations = mapValue(manifest, "workspace/customizations");
+      const template = keywordName(mapValue(customizations, "template"));
+      if (workspacePresentation[template]) {
+        state.currentProject = { ...state.currentProject, template };
+        state.workspaceRecords.set(state.currentProject.id, state.currentProject);
+        await state.workspaceRepository.setTemplate(state.currentProject.id, template);
+        applyWorkspacePresentation(state.currentProject);
+      }
+    } catch (error) {
+      elements.editorStatus.textContent = `WORKSPACE ERROR // ${errorText(error)}`;
+      toast(`WORKSPACE LAYOUT NOT APPLIED: ${errorText(error)}`, true);
+      return false;
+    }
+  }
   await evalStudio(
-    `(fs/write! ${JSON.stringify(SPACE)} ${JSON.stringify(state.activeFile)} ${JSON.stringify(elements.editor.value)})`
+    `(fs/write! ${JSON.stringify(state.activeSpace)} ${JSON.stringify(state.activeFile)} ${JSON.stringify(elements.editor.value)})`
   );
+  if (state.currentProject) {
+    await state.workspaceRepository.writeFile(state.currentProject.id, state.activeFile, elements.editor.value);
+  }
   state.dirty = false;
   state.savedSource = elements.editor.value;
   elements.editorStatus.textContent = "SAVED";
@@ -1024,8 +1243,8 @@ async function evaluateAndInsert() {
   elements.editorStatus.textContent = "EVALUATING FOR INSERT";
   try {
     const result = state.activeDocument?.path === state.activeFile
-      ? await state.broker.evalForm(ROOT, state.activeDocument.id, form.source)
-      : await state.broker.eval(ROOT, form.source);
+      ? await state.broker.evalForm(state.activeKernel, state.activeDocument.id, form.source)
+      : await state.broker.eval(state.activeKernel, form.source);
     const replacement = haraLiteral(result);
     elements.editor.setRangeText(replacement, form.start, form.end, "end");
     elements.editor.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1060,7 +1279,7 @@ async function evaluateForm(form = null, target = "FORM") {
       const documentId = `document${state.activeFile}`;
       const nodeId = `node${state.activeFile}`;
       state.nodeRuntime.registerNode({ id: nodeId, type: "hal/transform" });
-      const prepared = await state.broker.prepareDocument(ROOT, documentId, form.source, { nodeId });
+      const prepared = await state.broker.prepareDocument(state.activeKernel, documentId, form.source, { nodeId });
       try {
         await state.nodeRuntime.activateDocument(nodeId, {
           documentId,
@@ -1076,9 +1295,9 @@ async function evaluateForm(form = null, target = "FORM") {
         throw error;
       }
     } else if (state.activeDocument?.path === state.activeFile) {
-      result = await state.broker.evalForm(ROOT, state.activeDocument.id, form.source);
+      result = await state.broker.evalForm(state.activeKernel, state.activeDocument.id, form.source);
     } else {
-      result = await state.broker.eval(ROOT, form.source);
+      result = await state.broker.eval(state.activeKernel, form.source);
     }
     try {
       const scene = validateScene(result);
@@ -1146,19 +1365,19 @@ function normalizePath(value) {
   if (typeof value !== "string") return null;
   let path = value.trim().replace(/\/+/g, "/");
   if (!path.startsWith("/")) path = `/${path}`;
-  if (path === "/" || path.includes("..") || !/\.hal$/i.test(path)) return null;
+  if (path === "/" || path.includes("..") || !/\.(hal|edn)$/i.test(path)) return null;
   return path;
 }
 
 async function seedFiles(force = false) {
   if (force) {
     for (const path of await listFiles()) {
-      await evalStudio(`(fs/delete! ${JSON.stringify(SPACE)} ${JSON.stringify(path)})`);
+      await evalStudio(`(fs/delete! ${JSON.stringify(state.activeSpace)} ${JSON.stringify(path)})`);
     }
   }
   for (const [path, content] of DEFAULT_FILES) {
     await evalStudio(
-      `(fs/write! ${JSON.stringify(SPACE)} ${JSON.stringify(path)} ${JSON.stringify(content)})`
+      `(fs/write! ${JSON.stringify(state.activeSpace)} ${JSON.stringify(path)} ${JSON.stringify(content)})`
     );
   }
   await listFiles();
@@ -1206,7 +1425,10 @@ function installFileActions() {
     if (!path) return toast("INVALID HARA FILE PATH", true);
     if (state.files.includes(path)) return toast("FILE ALREADY EXISTS", true);
     const content = `;; ${path}\n\n{:version 1\n :width 960\n :height 600\n :background "#020408"\n :commands []}\n`;
-    await evalStudio(`(fs/write! ${JSON.stringify(SPACE)} ${JSON.stringify(path)} ${JSON.stringify(content)})`);
+    await evalStudio(`(fs/write! ${JSON.stringify(state.activeSpace)} ${JSON.stringify(path)} ${JSON.stringify(content)})`);
+    if (state.currentProject) {
+      await state.workspaceRepository.writeFile(state.currentProject.id, path, content);
+    }
     await listFiles();
     await openFile(path, true);
     await evaluateFile();
@@ -1227,10 +1449,16 @@ function installFileActions() {
     await saveFile(false);
     const oldPath = state.activeFile;
     await evalStudio(
-      `(fs/write! ${JSON.stringify(SPACE)} ${JSON.stringify(nextPath)} ${JSON.stringify(elements.editor.value)})`
+      `(fs/write! ${JSON.stringify(state.activeSpace)} ${JSON.stringify(nextPath)} ${JSON.stringify(elements.editor.value)})`
     );
+    if (state.currentProject) {
+      await state.workspaceRepository.writeFile(state.currentProject.id, nextPath, elements.editor.value);
+    }
     if (nextPath !== oldPath) {
-      await evalStudio(`(fs/delete! ${JSON.stringify(SPACE)} ${JSON.stringify(oldPath)})`);
+      await evalStudio(`(fs/delete! ${JSON.stringify(state.activeSpace)} ${JSON.stringify(oldPath)})`);
+      if (state.currentProject) {
+        await state.workspaceRepository.deleteFile(state.currentProject.id, oldPath);
+      }
     }
     state.activeFile = nextPath;
     localStorage.setItem(ACTIVE_FILE_KEY, nextPath);
@@ -1244,7 +1472,10 @@ function installFileActions() {
     if (!state.activeFile) return;
     const path = state.activeFile;
     if (!await confirmDialog("DELETE HARA FILE", `Delete ${path}? This cannot be undone.`)) return;
-    await evalStudio(`(fs/delete! ${JSON.stringify(SPACE)} ${JSON.stringify(path)})`);
+    await evalStudio(`(fs/delete! ${JSON.stringify(state.activeSpace)} ${JSON.stringify(path)})`);
+    if (state.currentProject) {
+      await state.workspaceRepository.deleteFile(state.currentProject.id, path);
+    }
     state.activeFile = null;
     state.dirty = false;
     elements.editor.value = "";
@@ -1318,6 +1549,7 @@ async function bootRuntime() {
     });
     const hostCalls = createHostServices({
       dbName: "hara-www",
+      scopeForContext: (context) => state.contextSpaces.get(context),
       nodeRuntime: state.nodeRuntime,
       canvasRuntime: state.canvasRuntime,
       graphHost,
@@ -1333,11 +1565,21 @@ async function bootRuntime() {
       moduleBytes,
       hostCalls,
       resources,
+      onKernelStarting: async (kernel) => {
+        let space = state.kernelSpaces.get(kernel.name);
+        if (!space && kernel.name.startsWith("DOC.")) {
+          space = [...state.kernelSpaces.entries()]
+            .find(([name]) => kernel.name.startsWith(`DOC.${name}.`))?.[1];
+        }
+        if (!space) throw new Error(`NO_WORKSPACE_SCOPE ${kernel.name}`);
+        state.contextSpaces.set(kernel.context, space);
+      },
       onKernelCreated: async (kernel) => sessionRouter.register(kernel.name, kernel.context, {
         onRelease: (sessionId) => graphHost.releaseSession(sessionId)
       }),
       onKernelClosed: (kernel) => sessionRouter.unregister(kernel.name)
     });
+    state.defaultBootstrap = defaultBootstrap;
     await state.broker.eval(ROOT, defaultBootstrap(SPACE));
     await loadBackgroundWorkspace();
     await loadBackgroundSource(state.backgroundSource);
@@ -1348,8 +1590,10 @@ async function bootRuntime() {
     const preferred = localStorage.getItem(ACTIVE_FILE_KEY);
     const path = state.files.includes(preferred) ? preferred :
       state.files.includes("/sketches/neon-orbit.hal") ? "/sketches/neon-orbit.hal" : state.files[0];
-    if (path) await openFile(path, true);
+    if (path) await openFile(path, true, false);
     syncHighlight();
+    await renderSavedWorkspaces();
+    setWorkspace(0);
   } catch (error) {
     console.error("[hara www]", error);
     setRuntimeStatus("WASM // ERROR", "error");
@@ -1485,11 +1729,14 @@ function installEditor() {
 installWorkspaceNavigation();
 installLauncher();
 installWorkspaceTabs();
+installWorkspaceCreation();
+installPublishing();
 installHelp();
 installWindowManager();
 installEditor();
 installBackgroundEditor();
 installFileActions();
 restoreWindows();
-setWorkspace(state.workspace);
+setWorkspace(0);
+renderSavedWorkspaces().catch((error) => toast(`WORKSPACE INDEX FAILED: ${errorText(error)}`, true));
 bootRuntime();

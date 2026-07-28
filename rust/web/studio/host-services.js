@@ -10,6 +10,7 @@ const STORE = "kv";
 export function createHostServices(options = {}) {
   const dbName = options.dbName ?? DEFAULT_DATABASE;
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
+  const scopeForContext = options.scopeForContext ?? null;
   let opening = null;
 
   function open() {
@@ -29,17 +30,34 @@ export function createHostServices(options = {}) {
     return db.transaction(STORE, mode).objectStore(STORE);
   }
 
+  function scopedKey(invocation, key, { keys = false } = {}) {
+    if (!scopeForContext) return key;
+    const space = scopeForContext(invocation?.context);
+    if (!space) throw new Error("store/workspace-scope-unavailable");
+    const prefix = `spaces/${space}/`;
+    if (keys && (key === undefined || key === null)) return prefix;
+    if (typeof key !== "string" || !key.startsWith(prefix)) {
+      throw new Error(`store/workspace-scope-denied:${space}`);
+    }
+    return key;
+  }
+
   const services = {
-    "store/get": async (key) => request(await store("readonly"), "get", key),
-    "store/put": async (key, value) => {
+    "store/get": async function(key) {
+      return request(await store("readonly"), "get", scopedKey(this, key));
+    },
+    "store/put": async function(key, value) {
+      key = scopedKey(this, key);
       await request(await store("readwrite"), "put", value, key);
       return true;
     },
-    "store/del": async (key) => {
+    "store/del": async function(key) {
+      key = scopedKey(this, key);
       await request(await store("readwrite"), "delete", key);
       return true;
     },
-    "store/keys": async (prefix) => {
+    "store/keys": async function(prefix) {
+      prefix = scopedKey(this, prefix, { keys: true });
       const keys = await request(await store("readonly"), "getAllKeys");
       return prefix === undefined || prefix === null
         ? keys

@@ -19,9 +19,13 @@ const NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
  * report ROOT once its spawn has been triggered.
  */
 export class KernelBroker {
-  constructor({ spawn, resources = {}, onKernelCreated = async () => {}, onKernelClosed = async () => {} }) {
+  constructor({
+    spawn, resources = {}, onKernelStarting = async () => {},
+    onKernelCreated = async () => {}, onKernelClosed = async () => {}
+  }) {
     this.spawn = spawn;
     this.resources = resources;
+    this.onKernelStarting = onKernelStarting;
     this.onKernelCreated = onKernelCreated;
     this.onKernelClosed = onKernelClosed;
     this.kernels = new Map(); // name -> { name, context, worker }
@@ -206,6 +210,7 @@ export class KernelBroker {
   async boot(name, bootstrap) {
     const { context, worker } = await this.spawn(name);
     try {
+      await this.onKernelStarting({ name, context, worker });
       for (const [resourceName, source] of Object.entries(this.resources)) {
         await context.call("register-resource", [resourceName, source]);
       }
@@ -401,10 +406,11 @@ function sharedWorkerPort(url) {
 
 export function createBrowserBroker({
   workerUrl, sharedWorkerUrl, moduleBytes, hostCalls = {}, resources,
-  onKernelCreated, onKernelClosed
+  onKernelStarting, onKernelCreated, onKernelClosed
 }) {
   return new KernelBroker({
     resources,
+    onKernelStarting,
     onKernelCreated,
     onKernelClosed,
     spawn: async (name) => {
