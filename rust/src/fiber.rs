@@ -252,6 +252,10 @@ pub enum Step {
     Done(Result<Value, String>),
     Wait(Promise, Resume),
     Yield(Value, Box<dyn FnOnce(Value) -> Step>),
+    /// Defers the next synchronous continuation to the fiber driver.  Without
+    /// this trampoline, a document with many top-level forms keeps one Rust
+    /// stack frame per completed form (and can exhaust the smaller WASM stack).
+    Continue(Box<dyn FnOnce() -> Step>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -356,18 +360,30 @@ impl EvalFiber {
             }
         }
     }
-    fn accept(&mut self, step: Step) {
-        match step {
-            Step::Done(Ok(v)) => self.state = EvalFiberState::Completed(v),
-            Step::Done(Err(e)) => self.state = EvalFiberState::Failed(e),
-            Step::Wait(p, r) => {
-                self.pending = Some(p);
-                self.resume = Some(r);
-                self.state = EvalFiberState::Suspended;
-            }
-            Step::Yield(_, _) => {
-                self.state =
-                    EvalFiberState::Failed("coroutine/yield used outside of a coroutine".into());
+    fn accept(&mut self, mut step: Step) {
+        loop {
+            match step {
+                Step::Continue(next) => step = next(),
+                Step::Done(Ok(v)) => {
+                    self.state = EvalFiberState::Completed(v);
+                    return;
+                }
+                Step::Done(Err(e)) => {
+                    self.state = EvalFiberState::Failed(e);
+                    return;
+                }
+                Step::Wait(p, r) => {
+                    self.pending = Some(p);
+                    self.resume = Some(r);
+                    self.state = EvalFiberState::Suspended;
+                    return;
+                }
+                Step::Yield(_, _) => {
+                    self.state = EvalFiberState::Failed(
+                        "coroutine/yield used outside of a coroutine".into(),
+                    );
+                    return;
+                }
             }
         }
     }
@@ -389,7 +405,7 @@ fn forms_cps(
         forms[i].clone(),
         env,
         Box::new(move |r| match r {
-            Ok(v) => forms_cps(next, i + 1, v, e, k),
+            Ok(v) => Step::Continue(Box::new(move || forms_cps(next, i + 1, v, e, k))),
             Err(x) => k(Err(x)),
         }),
     )
@@ -413,7 +429,7 @@ fn values_cps(
             Ok(v) => {
                 let mut values = values;
                 values.push(v);
-                values_cps(next, i + 1, values, e, k)
+                Step::Continue(Box::new(move || values_cps(next, i + 1, values, e, k)))
             }
             Err(x) => k(Err(x)),
         }),

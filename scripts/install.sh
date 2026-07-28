@@ -1,20 +1,21 @@
 #!/bin/sh
-# install.sh — install the hara native CLI from prebuilt GitHub releases.
+# install.sh — install Hara runtimes from GitHub Release packages.
 #
-#   curl -fsSL https://raw.githubusercontent.com/hoebat/hara.lang/main/scripts/install.sh | sh
+#   curl -fsSL https://www.hara-lang.org/install.sh | sh -- --rust --truffle
 #
 # Environment overrides:
 #   HARA_VERSION          release tag to install (default: latest release)
 #   HARA_INSTALL_DIR      install location (default: ~/.local/bin)
 #   HARA_RELEASE_BASE_URL  base URL containing the release assets
-#                         (default: https://github.com/hoebat/hara.lang/releases/download/$HARA_VERSION)
+#                         (default: https://github.com/hara-lang/hara/releases/download/$HARA_VERSION)
 #   HARA_TARGET_TRIPLE    override platform detection (for testing)
 #
-# Platforms: Linux x86_64, macOS arm64, macOS x86_64. Anything else: build
-# from source — cargo build --release --manifest-path rust/Cargo.toml --bin hara
+# --rust installs hara for Linux x86_64, macOS arm64, and macOS x86_64.
+# --truffle installs the hara-truffle native image.
+# At least one runtime flag is required.
 set -eu
 
-REPO="hoebat/hara.lang"
+REPO="hara-lang/hara"
 
 info() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -22,6 +23,26 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 need() {
   command -v "$1" >/dev/null 2>&1 || die "required tool not found: $1"
 }
+
+INSTALL_RUST=false
+INSTALL_TRUFFLE=false
+for arg in "$@"; do
+  case "$arg" in
+    --rust) INSTALL_RUST=true ;;
+    --truffle) INSTALL_TRUFFLE=true ;;
+    -h|--help)
+      cat <<'EOF'
+Usage: install.sh [--rust] [--truffle]
+
+Install one or both Hara runtimes from GitHub Releases.
+EOF
+      exit 0
+      ;;
+    *) die "unknown option: $arg (use --rust and/or --truffle)" ;;
+  esac
+done
+[ "$INSTALL_RUST" = true ] || [ "$INSTALL_TRUFFLE" = true ] \
+  || die "choose at least one runtime: --rust and/or --truffle"
 
 # --- platform detection -----------------------------------------------------
 detect_triple() {
@@ -45,18 +66,20 @@ detect_triple() {
   esac
 }
 
-if [ "${HARA_TARGET_TRIPLE:-}" ]; then
-  TRIPLE=$HARA_TARGET_TRIPLE
-else
-  TRIPLE=$(detect_triple) || TRIPLE=""
-fi
-case "$TRIPLE" in
-  x86_64-unknown-linux-gnu|aarch64-apple-darwin|x86_64-apple-darwin) ;;
-  *)
-    die "platform not supported yet (${HARA_TARGET_TRIPLE:-$(uname -s)/$(uname -m)}).
+if [ "$INSTALL_RUST" = true ] || [ "$INSTALL_TRUFFLE" = true ]; then
+  if [ "${HARA_TARGET_TRIPLE:-}" ]; then
+    TRIPLE=$HARA_TARGET_TRIPLE
+  else
+    TRIPLE=$(detect_triple) || TRIPLE=""
+  fi
+  case "$TRIPLE" in
+    x86_64-unknown-linux-gnu|aarch64-apple-darwin|x86_64-apple-darwin) ;;
+    *)
+      die "native runtime is not supported on ${HARA_TARGET_TRIPLE:-$(uname -s)/$(uname -m)}.
 Build from source instead: cargo build --release --manifest-path rust/Cargo.toml --bin hara"
-    ;;
-esac
+      ;;
+  esac
+fi
 
 # --- download helpers -------------------------------------------------------
 if command -v curl >/dev/null 2>&1; then
@@ -83,45 +106,65 @@ else
 fi
 
 BASE_URL=${HARA_RELEASE_BASE_URL:-"https://github.com/$REPO/releases/download/$VERSION"}
-TARBALL="hara-$VERSION-$TRIPLE.tar.gz"
-
 INSTALL_DIR=${HARA_INSTALL_DIR:-"$HOME/.local/bin"}
 
 # --- download + verify ------------------------------------------------------
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
-info "downloading $TARBALL ($TRIPLE)..."
-fetch_to "$BASE_URL/$TARBALL" "$TMP/$TARBALL" \
-  || die "download failed: $BASE_URL/$TARBALL"
 fetch_to "$BASE_URL/SHA256SUMS" "$TMP/SHA256SUMS" \
   || die "download failed: $BASE_URL/SHA256SUMS"
 
 if command -v sha256sum >/dev/null 2>&1; then
-  verify() { (cd "$TMP" && sha256sum --check --status SHA256SUMS); }
+  verify() {
+    CHECKSUM_ENTRY="$TMP/checksum-entry"
+    grep " $1\$" "$TMP/SHA256SUMS" > "$CHECKSUM_ENTRY" || return 1
+    (cd "$TMP" && sha256sum --check --status "$(basename "$CHECKSUM_ENTRY")")
+  }
 elif command -v shasum >/dev/null 2>&1; then
-  verify() { (cd "$TMP" && shasum -a 256 --check --status SHA256SUMS); }
+  verify() {
+    CHECKSUM_ENTRY="$TMP/checksum-entry"
+    grep " $1\$" "$TMP/SHA256SUMS" > "$CHECKSUM_ENTRY" || return 1
+    (cd "$TMP" && shasum -a 256 --check --status "$(basename "$CHECKSUM_ENTRY")")
+  }
 else
   die "neither sha256sum nor shasum found; cannot verify checksum"
 fi
-if ! verify; then
-  die "checksum mismatch for $TARBALL; aborting (file not installed)"
-fi
-
-# --- install ----------------------------------------------------------------
-tar -xzf "$TMP/$TARBALL" -C "$TMP" || die "failed to extract $TARBALL"
-[ -f "$TMP/hara" ] || die "archive did not contain a hara binary"
-
 mkdir -p "$INSTALL_DIR"
-DEST="$INSTALL_DIR/hara"
-if [ -e "$DEST" ]; then
-  info "Existing installation found at $DEST, overwriting"
-fi
-cp "$TMP/hara" "$DEST"
-chmod 755 "$DEST"
 
-info "installed: $("$DEST" --version 2>/dev/null || echo "hara $VERSION")"
-info "location:  $DEST"
+install_rust() {
+  TARBALL="hara-rust-$VERSION-$TRIPLE.tar.gz"
+  info "downloading $TARBALL ($TRIPLE)..."
+  fetch_to "$BASE_URL/$TARBALL" "$TMP/$TARBALL" \
+    || die "download failed: $BASE_URL/$TARBALL"
+  verify "$TARBALL" || die "checksum mismatch for $TARBALL; aborting (file not installed)"
+  tar -xzf "$TMP/$TARBALL" -C "$TMP" || die "failed to extract $TARBALL"
+  [ -f "$TMP/hara" ] || die "archive did not contain a hara binary"
+  DEST="$INSTALL_DIR/hara"
+  [ ! -e "$DEST" ] || info "Existing installation found at $DEST, overwriting"
+  cp "$TMP/hara" "$DEST"
+  chmod 755 "$DEST"
+  info "installed Rust runtime: $("$DEST" --version 2>/dev/null || echo "hara $VERSION")"
+  info "location:  $DEST"
+}
+
+install_truffle() {
+  TARBALL="hara-truffle-$VERSION-$TRIPLE.tar.gz"
+  info "downloading $TARBALL ($TRIPLE)..."
+  fetch_to "$BASE_URL/$TARBALL" "$TMP/$TARBALL" \
+    || die "download failed: $BASE_URL/$TARBALL"
+  verify "$TARBALL" || die "checksum mismatch for $TARBALL; aborting (file not installed)"
+  tar -xzf "$TMP/$TARBALL" -C "$TMP" || die "failed to extract $TARBALL"
+  [ -f "$TMP/hara-truffle" ] || die "archive did not contain a hara-truffle binary"
+  DEST="$INSTALL_DIR/hara-truffle"
+  [ ! -e "$DEST" ] || info "Existing installation found at $DEST, overwriting"
+  cp "$TMP/hara-truffle" "$DEST"
+  chmod 755 "$DEST"
+  info "installed Truffle native image: $DEST"
+}
+
+[ "$INSTALL_RUST" = true ] && install_rust
+[ "$INSTALL_TRUFFLE" = true ] && install_truffle
 
 # --- PATH hint ---------------------------------------------------------------
 case ":$PATH:" in

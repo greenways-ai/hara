@@ -190,6 +190,9 @@ export class NodeRuntime {
     this.connections = new Map();
     this.pending = new Map();
     this.observers = new Set();
+    // A kernel context may evaluate a candidate document before its generation
+    // is public. Keep its callbacks private until activateDocument commits it.
+    this.stagedKernelHandlers = new WeakMap();
   }
 
   registerNode(descriptor) {
@@ -221,7 +224,7 @@ export class NodeRuntime {
    * node instance. The prior generation is cancelled only after `prepare`
    * succeeds, providing reload rollback.
    */
-  async activateDocument(nodeId, { documentId, generation, moduleId, prepare } = {}) {
+  async activateDocument(nodeId, { documentId, generation, moduleId, kernelContext, prepare } = {}) {
     const node = this.requireNode(nodeId);
     if (typeof documentId !== "string" || !documentId) {
       throw new NodeProtocolError("document/id", "document id is required");
@@ -233,7 +236,9 @@ export class NodeRuntime {
     });
     try {
       await prepare?.(candidate.api());
+      this.commitKernelHandlers(nodeId, kernelContext);
     } catch (error) {
+      this.discardKernelHandlers(kernelContext);
       candidate.close(new NodeProtocolError("generation/rollback", String(error?.message ?? error)));
       throw error;
     }
@@ -249,6 +254,7 @@ export class NodeRuntime {
       if (node.active?.documentId === documentId) {
         node.active.close(new NodeProtocolError("document/released", `document ${documentId} released`));
         node.active = null;
+        node.kernelHandlers.clear();
         released += 1;
       }
     }
@@ -286,6 +292,35 @@ export class NodeRuntime {
     const node = this.requireNode(nodeId);
     node.handlers.set(action, { handler, meta });
     return () => node.handlers.delete(action);
+  }
+
+  stageKernelHandler(context, nodeId, action, handler, meta = {}) {
+    if (!context) throw new NodeProtocolError("handler/context", "kernel handler requires a document context");
+    if (typeof handler !== "function") throw new NodeProtocolError("handler/type", "node handler must be a function");
+    this.requireNode(nodeId);
+    let staged = this.stagedKernelHandlers.get(context);
+    if (!staged) {
+      staged = new Map();
+      this.stagedKernelHandlers.set(context, staged);
+    }
+    let handlers = staged.get(nodeId);
+    if (!handlers) {
+      handlers = new Map();
+      staged.set(nodeId, handlers);
+    }
+    handlers.set(action, { handler, meta });
+    return () => handlers.delete(action);
+  }
+
+  commitKernelHandlers(nodeId, context) {
+    const node = this.requireNode(nodeId);
+    const staged = context ? this.stagedKernelHandlers.get(context)?.get(nodeId) : null;
+    node.kernelHandlers = new Map(staged ?? []);
+    this.discardKernelHandlers(context);
+  }
+
+  discardKernelHandlers(context) {
+    if (context) this.stagedKernelHandlers.delete(context);
   }
 
   async call(source, target, action, args = [], opts = {}) {
@@ -329,7 +364,7 @@ export class NodeRuntime {
     try {
       this.publish(request);
       const targetNode = this.requireNode(request.target);
-      const entry = targetNode.handlers.get(request.action);
+      const entry = targetNode.kernelHandlers.get(request.action) ?? targetNode.handlers.get(request.action);
       if (!entry) throw new NodeProtocolError("handler/missing", `no handler for ${request.target} ${request.action}`, request);
       const data = await abortable(entry.handler(request.args, request, controller.signal), controller.signal);
       const response = normalizeFrame({
@@ -471,6 +506,7 @@ class NodeState {
     this.runtime = runtime;
     this.descriptor = descriptor;
     this.handlers = new Map();
+    this.kernelHandlers = new Map();
     this.inputs = new Map();
     this.active = null;
   }
@@ -504,6 +540,7 @@ class GenerationScope {
     this.moduleId = moduleId;
     this.controller = new AbortController();
     this.tasks = new Map();
+    this.handlerDisposers = [];
   }
 
   api() {
@@ -513,7 +550,11 @@ class GenerationScope {
       inFrame: (signal) => this.node.runtime.inFrame(this.node.descriptor.id, signal, { signal: this.controller.signal }),
       emit: (signal, value, meta) => this.node.runtime.emit(this.node.descriptor.id, signal, value, meta),
       call: (target, action, args, opts) => this.node.runtime.call(this.node.descriptor.id, target, action, args, opts),
-      handle: (action, fn, meta) => this.node.runtime.handle(this.node.descriptor.id, action, fn, meta),
+      handle: (action, fn, meta) => {
+        const dispose = this.node.runtime.handle(this.node.descriptor.id, action, fn, meta);
+        this.handlerDisposers.push(dispose);
+        return dispose;
+      },
       stop: (task) => this.stop(task),
       info: () => this.node.publicInfo()
     });
@@ -550,6 +591,7 @@ class GenerationScope {
     this.controller.abort(reason);
     for (const task of this.tasks.values()) task.controller.abort(reason);
     this.tasks.clear();
+    for (const dispose of this.handlerDisposers.splice(0)) dispose();
   }
 
   info() {

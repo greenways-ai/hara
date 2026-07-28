@@ -167,17 +167,40 @@ test("studio.node registers kernel-owned request handlers", { skip: wasmBytes ==
   runtime.registerNode({ id: "node/b" });
   const broker = makeBroker({ nodeRuntime: runtime });
 
-  const document = await broker.evalDocument(
+  const prepared = await broker.prepareDocument(
     "ROOT",
     "document/substrate-handler",
     '(ns+) (node/handle "double" (fn [args] (* 2 (nth args 0))))',
     { nodeId: "node/b" }
   );
-  assert.equal(document.value, "handler-1");
+  await runtime.activateDocument("node/b", {
+    documentId: "document/substrate-handler",
+    generation: prepared.generation,
+    moduleId: prepared.moduleId,
+    kernelContext: prepared.context
+  });
+  broker.commitDocument(prepared);
+  assert.equal(prepared.value, "handler-1");
   assert.equal(await broker.evalForm("ROOT", "document/substrate-handler", '(studio.node/invoke-handler "handler-1" [21] nil)'), 42);
   const response = await runtime.call("node/a", "node/b", "double", [21], { id: "handler-req" });
   assert.equal(response.data, 42);
   assert.equal(response.reply_to, "handler-req");
+
+  const failed = await broker.prepareDocument(
+    "ROOT",
+    "document/substrate-handler",
+    '(ns+) (node/handle "double" (fn [args] (* 3 (nth args 0))))',
+    { nodeId: "node/b" }
+  );
+  await assert.rejects(runtime.activateDocument("node/b", {
+    documentId: "document/substrate-handler",
+    generation: failed.generation,
+    moduleId: failed.moduleId,
+    kernelContext: failed.context,
+    prepare() { throw new Error("candidate failed"); }
+  }), /candidate failed/);
+  broker.discardDocument(failed);
+  assert.equal((await runtime.call("node/a", "node/b", "double", [21])).data, 42);
 });
 
 test("Studio kernels load the atom-backed std.substrate node", { skip: wasmBytes === null }, async () => {
@@ -192,6 +215,36 @@ test("Studio kernels load the atom-backed std.substrate node", { skip: wasmBytes
       '(protocol-call protocol/IService get-service node "answer"))'
   );
   assert.equal(value, 42);
+});
+
+test("Studio kernels run the atom-backed substrate request stream and cancellation lifecycle", { skip: wasmBytes === null }, async () => {
+  const broker = makeBroker();
+  const fixture = await readFile(
+    new URL("../../lib/test-fixtures/std/substrate/node_lifecycle_conformance.hal", import.meta.url),
+    "utf8"
+  );
+  assert.deepEqual(await broker.eval("ROOT", fixture), [84, 42, new HtaKeyword("rejected")]);
+});
+
+test("Studio runs the shared substrate protocol fixture", { skip: wasmBytes === null }, async () => {
+  const broker = makeBroker();
+  const protocolFixture = await readFile(
+    new URL("../../lib/test-fixtures/std/substrate/protocol_conformance.hal", import.meta.url),
+    "utf8"
+  );
+  assert.deepEqual(await broker.eval("ROOT", protocolFixture), [40, 42]);
+});
+
+test("Studio runs the shared substrate frame fixture", { skip: wasmBytes === null }, async () => {
+  const broker = makeBroker();
+  const frameFixture = await readFile(
+    new URL("../../lib/test-fixtures/std/substrate/frame_conformance.hal", import.meta.url),
+    "utf8"
+  );
+  assert.equal(
+    await broker.eval("ROOT", frameFixture),
+    '{"version":"substrate.v1","kind":"request","id":"req-1","source":"client/a","target":"server/b","space":"workspace/main","meta":{"trace":"trace-1"},"action":"math/add","args":[19,23],"reply_to":null,"status":null,"data":null,"error":null,"signal":null,"cause":null}'
+  );
 });
 
 test("studio.store round trips string values and lists keys", { skip: wasmBytes === null }, async () => {

@@ -8,6 +8,8 @@ pub mod lang;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_cli;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod package;
+#[cfg(not(target_arch = "wasm32"))]
 mod native_extension;
 #[cfg(not(target_arch = "wasm32"))]
 mod process_extension;
@@ -194,7 +196,10 @@ impl Runtime {
                 "std.substrate.frame",
                 include_str!("../../lib/src/std/substrate/frame.hal"),
             ),
-            ("std.substrate", include_str!("../../lib/src/std/substrate.hal")),
+            (
+                "std.substrate",
+                include_str!("../../lib/src/std/substrate.hal"),
+            ),
         ] {
             self.register_resource(name, source);
         }
@@ -1559,7 +1564,9 @@ mod tests {
         let mut runtime = Runtime::new();
         assert_eq!(
             runtime
-                .eval_text(include_str!("../../lib/test-fixtures/std/substrate/protocol_conformance.hal"))
+                .eval_text(include_str!(
+                    "../../lib/test-fixtures/std/substrate/protocol_conformance.hal"
+                ))
                 .unwrap(),
             "[40 42]"
         );
@@ -1580,6 +1587,19 @@ mod tests {
                      (std.substrate.frame/normalize-frame {:kind :unknown :id \"evt-1\"}))",
             )
             .is_err());
+    }
+
+    #[test]
+    fn shared_substrate_node_lifecycle_fixture_runs_in_the_native_runtime() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(include_str!(
+                    "../../lib/test-fixtures/std/substrate/node_lifecycle_conformance.hal"
+                ))
+                .unwrap(),
+            "[84 42 :rejected]"
+        );
     }
 
     #[test]
@@ -2459,9 +2479,7 @@ mod tests {
         );
         assert_eq!(
             runtime
-                .eval_text(
-                    "(deref (promise/catch (promise (fn [] (throw :bad))) (fn [error] 7)))"
-                )
+                .eval_text("(deref (promise/catch (promise (fn [] (throw :bad))) (fn [error] 7)))")
                 .unwrap(),
             "7"
         );
@@ -2473,7 +2491,9 @@ mod tests {
         );
         assert_eq!(
             runtime
-                .eval_text("(. (deref (promise/all [(promise (fn [] 1)) 2 (promise (fn [] 3))])) (get 1))")
+                .eval_text(
+                    "(. (deref (promise/all [(promise (fn [] 1)) 2 (promise (fn [] 3))])) (get 1))"
+                )
                 .unwrap(),
             "2"
         );
@@ -2688,7 +2708,10 @@ mod tests {
             runtime.eval_text(r#"(str/slice "a😀b" 1 2)"#).unwrap(),
             "\"😀\""
         );
-        assert_eq!(runtime.eval_text(r#"(str/index-of "a😀b" "b")"#).unwrap(), "2");
+        assert_eq!(
+            runtime.eval_text(r#"(str/index-of "a😀b" "b")"#).unwrap(),
+            "2"
+        );
         assert_eq!(
             runtime
                 .eval_text(r#"(str/last-index-of "😀a😀" "😀")"#)

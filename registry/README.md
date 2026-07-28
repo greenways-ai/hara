@@ -1,20 +1,30 @@
-# hara extension registry
+# Hara package registry
 
-Status: **placeholder** — planned, not yet implemented.
+Status: **bootstrap placeholder** — the normative contract is drafted; the
+separate `hara-lang/hara-packages` repository remains to be created.
 
 ## Intent
 
-A registry of hara wasm extensions: versioned, discoverable bundles that
-any hara runtime (Java/Truffle, Rust native, browser, Chrome extension)
-can resolve and load via `(require [...])`.
+The reviewed Git registry records package ownership and immutable releases for
+Hara runtimes. Archives are GitHub Release assets on their source repositories;
+clients require publisher intent and registry-CI Ed25519 attestations before
+mounting their read-only package roots.
 
-Each extension is described by a `hara.extension.edn` manifest (see
-`specs/archive/planning/extensions/contract.md` for the current planning contract) plus its wasm
-artifact and optional host workers.
+The package system also carries extension packages described by
+`hara.extension.edn`, including WASM artifacts and optional host workers.
 
 ## Until the registry exists
 
-Extensions incubate in-tree under
+The initial Rust implementation exposes deterministic local commands:
+
+```text
+hara package check
+hara package build
+hara package inspect
+```
+
+Remote resolution and publication require the external registry and identity
+repositories. Extensions continue to incubate in-tree under
 [`rust/extensions/`](../rust/extensions/) — e.g. `ledger-noir` and
 `crypto-hash-sha256` — and reference packages live under
 [`lib/examples/extensions/`](../lib/examples/extensions/). The registry

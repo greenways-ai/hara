@@ -11,9 +11,15 @@ set -eu
 REPO_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 INSTALL_SH="$REPO_ROOT/scripts/install.sh"
 WORK="$REPO_ROOT/.tmp/install-test"
-TRIPLE="x86_64-unknown-linux-gnu"
+case "$(uname -s)/$(uname -m)" in
+  Linux/x86_64) TRIPLE="x86_64-unknown-linux-gnu" ;;
+  Darwin/arm64) TRIPLE="aarch64-apple-darwin" ;;
+  Darwin/x86_64) TRIPLE="x86_64-apple-darwin" ;;
+  *) echo "unsupported test platform: $(uname -s)/$(uname -m)" >&2; exit 1 ;;
+esac
 VERSION="v9.9.9"
-TARBALL="hara-$VERSION-$TRIPLE.tar.gz"
+TARBALL="hara-rust-$VERSION-$TRIPLE.tar.gz"
+TRUFFLE_TARBALL="hara-truffle-$VERSION-$TRIPLE.tar.gz"
 BINARY="$REPO_ROOT/rust/target/release/hara"
 
 pass=0
@@ -36,13 +42,25 @@ fi
 rm -rf "$WORK"
 mkdir -p "$WORK/release"
 tar -czf "$WORK/release/$TARBALL" -C "$(dirname "$BINARY")" hara
-(cd "$WORK/release" && sha256sum "$TARBALL" > SHA256SUMS)
+mkdir -p "$WORK/truffle"
+cp "$BINARY" "$WORK/truffle/hara-truffle"
+tar -czf "$WORK/release/$TRUFFLE_TARBALL" -C "$WORK/truffle" hara-truffle
+(cd "$WORK/release" && sha256sum "$TARBALL" "$TRUFFLE_TARBALL" > SHA256SUMS)
 
 run_installer() { # run_installer <extra-env...>; stdout+stderr captured
   env -i PATH="$TEST_PATH" HOME="$TEST_HOME" \
     HARA_VERSION="$VERSION" \
+    HARA_TARGET_TRIPLE="$TRIPLE" \
     HARA_RELEASE_BASE_URL="file://$WORK/release" \
-    "$@" sh "$INSTALL_SH" 2>&1
+    "$@" sh "$INSTALL_SH" --rust 2>&1
+}
+
+run_truffle_installer() { # run_truffle_installer <extra-env...>; stdout+stderr captured
+  env -i PATH="$TEST_PATH" HOME="$TEST_HOME" \
+    HARA_VERSION="$VERSION" \
+    HARA_TARGET_TRIPLE="$TRIPLE" \
+    HARA_RELEASE_BASE_URL="file://$WORK/release" \
+    "$@" sh "$INSTALL_SH" --truffle 2>&1
 }
 
 TEST_HOME="$WORK/home"
@@ -64,13 +82,24 @@ case "$OUT" in
   *) ok "installer exit status was 0" ;;
 esac
 
-# --- 2. default install dir under HOME --------------------------------------
+# --- 2. native-image install ------------------------------------------------
+OUT=$({ run_truffle_installer HARA_INSTALL_DIR="$WORK/truffle-bin"; } || echo "EXIT:$?")
+check "Truffle installer installs hara-truffle" test -x "$WORK/truffle-bin/hara-truffle"
+RESULT=$("$WORK/truffle-bin/hara-truffle" eval '(+ 19 23)' 2>/dev/null || true)
+check "installed hara-truffle evaluates (+ 19 23) => 42" test "$RESULT" = "42"
+case "$OUT" in
+  *EXIT:*) not_ok "Truffle installer exit status was 0" ;;
+  *) ok "Truffle installer exit status was 0" ;;
+esac
+
+# --- 3. default install dir under HOME --------------------------------------
 OUT=$({ run_installer; } || echo "EXIT:$?")
 check "default install dir is \$HOME/.local/bin" test -x "$TEST_HOME/.local/bin/hara"
 
-# --- 3. checksum mismatch aborts --------------------------------------------
+# --- 4. checksum mismatch aborts --------------------------------------------
 cp "$WORK/release/SHA256SUMS" "$WORK/release/SHA256SUMS.good"
-sed -i 's/^./X/' "$WORK/release/SHA256SUMS"
+sed 's/^./X/' "$WORK/release/SHA256SUMS" > "$WORK/release/SHA256SUMS.bad"
+mv "$WORK/release/SHA256SUMS.bad" "$WORK/release/SHA256SUMS"
 OUT=$({ run_installer HARA_INSTALL_DIR="$WORK/bin-badsum"; } && echo "EXIT:0" || echo "EXIT:$?")
 mv "$WORK/release/SHA256SUMS.good" "$WORK/release/SHA256SUMS"
 case "$OUT" in
@@ -83,7 +112,7 @@ case "$OUT" in
 esac
 check "checksum mismatch leaves no binary behind" test ! -e "$WORK/bin-badsum/hara"
 
-# --- 4. unsupported platform ------------------------------------------------
+# --- 5. unsupported platform ------------------------------------------------
 OUT=$({ run_installer HARA_INSTALL_DIR="$WORK/bin-win" HARA_TARGET_TRIPLE="x86_64-pc-windows-msvc"; } \
       && echo "EXIT:0" || echo "EXIT:$?")
 case "$OUT" in
@@ -96,7 +125,7 @@ case "$OUT" in
 esac
 check "unsupported platform installs nothing" test ! -e "$WORK/bin-win/hara"
 
-# --- 5. overwrite existing install ------------------------------------------
+# --- 6. overwrite existing install ------------------------------------------
 OUT=$({ run_installer HARA_INSTALL_DIR="$WORK/bin"; } || echo "EXIT:$?")
 case "$OUT" in
   *[Ee]xisting*|*verwrit*) ok "reinstall over existing binary is reported" ;;

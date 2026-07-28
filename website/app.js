@@ -263,6 +263,7 @@ async function activateBackground(descriptor, source, generation) {
       documentId: descriptor.id,
       generation: prepared.generation,
       moduleId: prepared.moduleId,
+      kernelContext: prepared.context,
       prepare: (node) => {
         taskSettled = node.start(() => state.broker.evalPreparedDocument(
           prepared,
@@ -1041,14 +1042,21 @@ async function evaluateForm(form = null, target = "FORM") {
       const documentId = `document${state.activeFile}`;
       const nodeId = `node${state.activeFile}`;
       state.nodeRuntime.registerNode({ id: nodeId, type: "hal/transform" });
-      const document = await state.broker.evalDocument(ROOT, documentId, form.source, { nodeId });
-      await state.nodeRuntime.activateDocument(nodeId, {
-        documentId,
-        generation: document.generation,
-        moduleId: document.moduleId
-      });
-      state.activeDocument = { path: state.activeFile, id: documentId, nodeId };
-      result = document.value;
+      const prepared = await state.broker.prepareDocument(ROOT, documentId, form.source, { nodeId });
+      try {
+        await state.nodeRuntime.activateDocument(nodeId, {
+          documentId,
+          generation: prepared.generation,
+          moduleId: prepared.moduleId,
+          kernelContext: prepared.context
+        });
+        state.broker.commitDocument(prepared);
+        state.activeDocument = { path: state.activeFile, id: documentId, nodeId };
+        result = prepared.value;
+      } catch (error) {
+        state.broker.discardDocument(prepared);
+        throw error;
+      }
     } else if (state.activeDocument?.path === state.activeFile) {
       result = await state.broker.evalForm(ROOT, state.activeDocument.id, form.source);
     } else {

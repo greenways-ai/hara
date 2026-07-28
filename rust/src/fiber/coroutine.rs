@@ -22,6 +22,9 @@ pub fn run_coroutine(step: Step, coroutine: Rc<Coroutine>, k: Cont) -> Step {
             *coroutine.state.borrow_mut() = CoroutineState::Suspended(resume);
             k(Ok(value))
         }
+        Step::Continue(next) => {
+            Step::Continue(Box::new(move || run_coroutine(next(), coroutine, k)))
+        }
         Step::Wait(promise, resume) => Step::Wait(
             promise,
             Box::new(move |state| run_coroutine(resume(state), coroutine, k)),

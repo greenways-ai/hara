@@ -2,6 +2,8 @@
 mod core;
 #[path = "../../src/hta.rs"]
 mod hta;
+#[path = "../../src/json.rs"]
+mod json;
 #[path = "../../src/kernel.rs"]
 mod kernel;
 #[path = "../../src/lang.rs"]
@@ -65,9 +67,32 @@ struct Runtime {
 }
 impl Runtime {
     fn new() -> Self {
+        let namespaces = kernel::NamespaceRegistry::new("user");
+        let json_namespace = namespaces.find_or_create("std.foundation.json");
+        json_namespace.intern(
+            "read",
+            core::native_function("json/read", 1, |arguments| match arguments.as_slice() {
+                [Value::String(source)] => json::read(source),
+                _ => Err("json/read expects a string".into()),
+            }),
+        );
+        json_namespace.intern(
+            "write",
+            core::native_function("json/write", 1, |arguments| {
+                json::write(&arguments[0]).map(Value::String)
+            }),
+        );
+        json_namespace.intern(
+            "write-pp",
+            core::native_function("json/write-pp", 1, |arguments| {
+                json::write_pretty(&arguments[0]).map(Value::String)
+            }),
+        );
+        let mut env = HashMap::new();
+        core::refresh_namespace_environment(&namespaces, &mut env);
         Self {
-            env: HashMap::new(),
-            namespaces: kernel::NamespaceRegistry::new("user"),
+            env,
+            namespaces,
             protocols: core::ProtocolRegistry::core(),
             next_task: 1,
             next_call: 1,
@@ -269,11 +294,7 @@ fn enqueue_event(events: &Rc<RefCell<VecDeque<Vec<u8>>>>, value: Value) {
                 },
                 _ => 0,
             };
-            let fallback = event(
-                1,
-                id,
-                error_value("hta/value-unsupported", error),
-            );
+            let fallback = event(1, id, error_value("hta/value-unsupported", error));
             if let Ok(bytes) = hta::encode(&fallback) {
                 events.borrow_mut().push_back(bytes);
             }
@@ -482,7 +503,7 @@ fn evaluate(source: &str) -> Result<i64, i32> {
     let value = core::with_namespace_registry(&namespaces, || {
         core::with_protocols(&protocols, || core::eval_text(source, &mut env))
     })
-        .map_err(|error| error_code(&error))?;
+    .map_err(|error| error_code(&error))?;
     value.parse::<i64>().map_err(|_| 4)
 }
 
@@ -588,7 +609,10 @@ mod tests {
         runtime
             .start_fiber(1, "(require [chrome.api :as api]) (api/answer)")
             .unwrap();
-        assert_eq!(completion_value(&mut runtime, 1), crate::core::Value::Number(42));
+        assert_eq!(
+            completion_value(&mut runtime, 1),
+            crate::core::Value::Number(42)
+        );
     }
 
     #[test]
@@ -599,13 +623,20 @@ mod tests {
             "(ns acme.tools) (defn seven [] 7)".to_string(),
         );
         runtime
-            .start_fiber(2, "(ns demo (:require [acme.tools :as tools])) (tools/seven)")
+            .start_fiber(
+                2,
+                "(ns demo (:require [acme.tools :as tools])) (tools/seven)",
+            )
             .unwrap();
-        assert_eq!(completion_value(&mut runtime, 2), crate::core::Value::Number(7));
-        runtime
-            .start_fiber(3, "(acme.tools/seven)")
-            .unwrap();
-        assert_eq!(completion_value(&mut runtime, 3), crate::core::Value::Number(7));
+        assert_eq!(
+            completion_value(&mut runtime, 2),
+            crate::core::Value::Number(7)
+        );
+        runtime.start_fiber(3, "(acme.tools/seven)").unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 3),
+            crate::core::Value::Number(7)
+        );
     }
 
     #[test]
@@ -618,7 +649,10 @@ mod tests {
                  (extend-type Box ReadBox (read-box [self] (field self :value))) :ok",
             )
             .unwrap();
-        assert!(matches!(completion_value(&mut runtime, 1), Value::Keyword(_)));
+        assert!(matches!(
+            completion_value(&mut runtime, 1),
+            Value::Keyword(_)
+        ));
 
         runtime
             .start_fiber(2, "(protocol-call ReadBox read-box (Box 42))")
@@ -641,6 +675,76 @@ mod tests {
             )
             .unwrap();
         assert_eq!(completion_value(&mut runtime, 1), Value::Number(42));
+    }
+
+    #[test]
+    fn raw_kernels_expose_the_foundation_json_namespace() {
+        let mut runtime = Runtime::new();
+        runtime
+            .start_fiber(
+                1,
+                "(ns example.json) (std.foundation.json/write {\"answer\" 42})",
+            )
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 1),
+            Value::String("{\"answer\":42}".into())
+        );
+    }
+
+    #[test]
+    fn raw_kernels_run_the_shared_substrate_frame_fixture() {
+        let mut runtime = Runtime::new();
+        runtime.resources.borrow_mut().insert(
+            "std.substrate.frame".into(),
+            include_str!("../../../lib/src/std/substrate/frame.hal").into(),
+        );
+        runtime
+            .start_fiber(
+                1,
+                include_str!("../../../lib/test-fixtures/std/substrate/frame_conformance.hal"),
+            )
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 1),
+            Value::String(
+                "{\"version\":\"substrate.v1\",\"kind\":\"request\",\"id\":\"req-1\",\"source\":\"client/a\",\"target\":\"server/b\",\"space\":\"workspace/main\",\"meta\":{\"trace\":\"trace-1\"},\"action\":\"math/add\",\"args\":[19,23],\"reply_to\":null,\"status\":null,\"data\":null,\"error\":null,\"signal\":null,\"cause\":null}".into(),
+            )
+        );
+    }
+
+    #[test]
+    fn raw_kernels_run_atom_backed_substrate_request_stream_and_cancellation_lifecycle() {
+        let mut runtime = Runtime::new();
+        runtime.resources.borrow_mut().extend([
+            (
+                "std.substrate.protocol".into(),
+                include_str!("../../../lib/src/std/substrate/protocol.hal").into(),
+            ),
+            (
+                "std.substrate".into(),
+                include_str!("../../../lib/src/std/substrate.hal").into(),
+            ),
+        ]);
+        runtime
+            .start_fiber(
+                1,
+                include_str!(
+                    "../../../lib/test-fixtures/std/substrate/node_lifecycle_conformance.hal"
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 1),
+            Value::Vector(
+                vec![
+                    Value::Number(84),
+                    Value::Number(42),
+                    Value::Keyword("rejected".into()),
+                ]
+                .into()
+            ),
+        );
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use hara_wasm::native_cli::RuntimeBroker;
+use hara_wasm::package;
 use hara_wasm::resp::{RespConnection, RespServer, RespValue};
 use hara_wasm::Runtime;
 use rustyline::completion::{Completer, Pair};
@@ -121,6 +122,7 @@ fn required(args: &mut impl Iterator<Item = String>, option: &str) -> Result<Str
 
 fn run(options: Options) -> Result<(), String> {
     match options.command.first().map(String::as_str) {
+        Some("package") => package::run(&options.command[1..]),
         Some("eval") => direct_eval(&options, &options.command[1..].join(" ")),
         Some("run") | Some("--file") => {
             let path = options

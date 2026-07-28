@@ -2053,6 +2053,12 @@ public final class HaraContext {
     promise.define("from", new UnaryBuiltin("promise/from", this::promiseFrom));
     promise.define("all", new UnaryBuiltin("promise/all", this::promiseAll));
     promise.define(
+        "state",
+        new UnaryBuiltin("promise/state", value -> requirePromise(value, "promise/state").state()));
+    promise.define(
+        "value",
+        new UnaryBuiltin("promise/value", value -> requirePromise(value, "promise/value").value()));
+    promise.define(
         "then", new VariadicBuiltin("promise/then", values -> promiseThen(values, false)));
     promise.define(
         "catch", new VariadicBuiltin("promise/catch", values -> promiseThen(values, true)));

@@ -5,11 +5,13 @@
 Linux (x86_64) and macOS (arm64, x86_64):
 
 ```shell
-curl -fsSL https://raw.githubusercontent.com/hoebat/hara.lang/main/scripts/install.sh | sh
+curl -fsSL https://www.hara-lang.org/install.sh | sh -- --rust --truffle
 ```
 
-This installs the native `hara` binary to `~/.local/bin` — no JVM required. Override the
-location with `HARA_INSTALL_DIR`, pin a specific release with `HARA_VERSION=v0.1.0`.
+This installs `hara` and the native-image `hara-truffle` to `~/.local/bin`; neither needs a
+JVM at runtime. GitHub Releases is the publishing authority for the downloaded packages and
+checksums. Install only one runtime with `--rust` or `--truffle`.
+Override the location with `HARA_INSTALL_DIR`, or pin a release with `HARA_VERSION=v0.1.0`.
 
 The sections below build the Java/Truffle runtime from source instead.
 

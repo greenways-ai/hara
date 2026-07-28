@@ -21,6 +21,7 @@ js-sys = "0.3"
 wasmtime = { version = "18.0.0", default-features = false, features = ["cranelift", "runtime"] }
 rustyline = "14.0.0"
 home = "=0.5.9"
+semver = "1.0"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
-

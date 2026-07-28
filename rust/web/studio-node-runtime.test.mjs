@@ -132,6 +132,37 @@ test("anonymous document generation activation rolls back and cancels old scope"
   assert.equal(runtime.info("node/b").generation, null);
 });
 
+test("kernel handlers become public only with their committed document generation", async () => {
+  const runtime = graph();
+  const firstContext = {};
+  runtime.stageKernelHandler(firstContext, "node/b", "double", ([value]) => value * 2);
+  await runtime.activateDocument("node/b", {
+    documentId: "document/handler",
+    generation: 1,
+    kernelContext: firstContext
+  });
+  assert.equal((await runtime.call("node/a", "node/b", "double", [21])).data, 42);
+
+  const failedContext = {};
+  runtime.stageKernelHandler(failedContext, "node/b", "double", ([value]) => value * 3);
+  await assert.rejects(runtime.activateDocument("node/b", {
+    documentId: "document/handler",
+    generation: 2,
+    kernelContext: failedContext,
+    prepare() { throw new Error("bad reload"); }
+  }), /bad reload/);
+  assert.equal((await runtime.call("node/a", "node/b", "double", [21])).data, 42);
+
+  const nextContext = {};
+  runtime.stageKernelHandler(nextContext, "node/b", "double", ([value]) => value * 3);
+  await runtime.activateDocument("node/b", {
+    documentId: "document/handler",
+    generation: 3,
+    kernelContext: nextContext
+  });
+  assert.equal((await runtime.call("node/a", "node/b", "double", [21])).data, 63);
+});
+
 test("missing handlers return substrate error frames", async () => {
   const runtime = graph();
   await assert.rejects(runtime.call("node/a", "node/b", "missing", []), (error) => {

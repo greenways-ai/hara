@@ -25,6 +25,8 @@ cp "$ROOT/website/index.html" \
    "$ROOT/website/og.png" \
    "$ROOT/website/scene.js" \
    "$OUT/"
+cp "$ROOT/scripts/install.sh" "$OUT/install.sh"
+chmod 755 "$OUT/install.sh"
 cp "$RAW_WASM" "$OUT/runtime/hara.wasm"
 cp "$ROOT/rust/web/hta.js" \
    "$ROOT/rust/web/hta-worker.js" \

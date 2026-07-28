@@ -211,24 +211,30 @@ async function boot() {
         "std.substrate": substrateSource
       }
     });
-    const result = await state.broker.evalDocument("ROOT", "document/visualizer", visualizerSource, {
+    const prepared = await state.broker.prepareDocument("ROOT", "document/visualizer", visualizerSource, {
       nodeId: "node/visualizer"
     });
-    await state.runtime.activateDocument("node/visualizer", {
-      documentId: "document/visualizer",
-      generation: result.generation,
-      moduleId: result.moduleId,
-      prepare: (node) => {
-        node.start(() => state.broker.evalForm(
-          "ROOT",
-          "document/visualizer",
-          "(run-visualizer)"
-        ).catch((error) => {
-          document.documentElement.dataset.taskError = String(error?.message ?? error);
-          throw error;
-        }));
-      }
-    });
+    try {
+      await state.runtime.activateDocument("node/visualizer", {
+        documentId: "document/visualizer",
+        generation: prepared.generation,
+        moduleId: prepared.moduleId,
+        kernelContext: prepared.context,
+        prepare: (node) => {
+          node.start(() => state.broker.evalPreparedDocument(
+            prepared,
+            "(run-visualizer)"
+          ).catch((error) => {
+            document.documentElement.dataset.taskError = String(error?.message ?? error);
+            throw error;
+          }));
+        }
+      });
+      state.broker.commitDocument(prepared);
+    } catch (error) {
+      state.broker.discardDocument(prepared);
+      throw error;
+    }
     state.visualizerRunning = true;
     status.textContent = "WASM · LIVE / NS+ G1";
     status.classList.add("is-live");

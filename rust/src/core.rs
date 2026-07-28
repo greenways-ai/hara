@@ -1360,10 +1360,9 @@ impl ProtocolRegistry {
         method: impl Into<String>,
         function: Rc<Function>,
     ) {
-        self.guest_methods.borrow_mut().insert(
-            (protocol.into(), type_name.into(), method.into()),
-            function,
-        );
+        self.guest_methods
+            .borrow_mut()
+            .insert((protocol.into(), type_name.into(), method.into()), function);
     }
 
     pub fn declare_guest(&self, protocol: impl Into<String>, method: impl Into<String>) {
@@ -1392,7 +1391,9 @@ impl ProtocolRegistry {
             .borrow()
             .contains(&(protocol.to_owned(), method.to_owned()))
         {
-            return Err(format!("missing protocol implementation: {protocol}/{method}"));
+            return Err(format!(
+                "missing protocol implementation: {protocol}/{method}"
+            ));
         }
         let methods = self.methods.borrow();
         let implementations = methods
@@ -3361,12 +3362,7 @@ fn string_operation(operation: &str, values: Vec<Value>) -> Result<Value, String
             }
             let needed = length - text_length;
             let padding_chars: Vec<char> = padding.chars().collect();
-            let fill: String = padding_chars
-                .iter()
-                .cycle()
-                .take(needed)
-                .copied()
-                .collect();
+            let fill: String = padding_chars.iter().cycle().take(needed).copied().collect();
             Ok(Value::String(if operation == "str/pad-left" {
                 format!("{fill}{text}")
             } else {
@@ -3430,7 +3426,7 @@ fn string_operation(operation: &str, values: Vec<Value>) -> Result<Value, String
         "str/last-index-of" => {
             if values.len() != 2 && values.len() != 3 {
                 return Err(
-                    "str/last-index-of expects a string, substring, and optional offset".into()
+                    "str/last-index-of expects a string, substring, and optional offset".into(),
                 );
             }
             let text = string_value(&values[0], operation)?;
@@ -4972,12 +4968,19 @@ fn deref_value(value: Value) -> Value {
 }
 
 fn binding_value(env: &HashMap<String, Value>, name: &str) -> Option<Value> {
-    env.get(name).cloned().map(deref_value).or_else(|| {
-        namespace_registry()
-            .ok()?
-            .resolve(&crate::lang::data::Symbol::parse(name))
-            .map(|var| var.deref_value())
-    }).or_else(|| name.rsplit_once('/').and_then(|(_, local)| env.get(local).cloned().map(deref_value)))
+    env.get(name)
+        .cloned()
+        .map(deref_value)
+        .or_else(|| {
+            namespace_registry()
+                .ok()?
+                .resolve(&crate::lang::data::Symbol::parse(name))
+                .map(|var| var.deref_value())
+        })
+        .or_else(|| {
+            name.rsplit_once('/')
+                .and_then(|(_, local)| env.get(local).cloned().map(deref_value))
+        })
 }
 
 fn binding_var(env: &mut HashMap<String, Value>, name: &str) -> Option<KernelVar<Value>> {
@@ -5001,7 +5004,10 @@ fn call_value(callable: Value, arguments: Vec<Value>) -> Result<Value, String> {
             if arguments.len() != ty.fields.len() {
                 return Err(format!("{} expects {} arguments", ty.name, ty.fields.len()));
             }
-            Ok(Value::Struct(Rc::new(StructValue { ty, values: arguments })))
+            Ok(Value::Struct(Rc::new(StructValue {
+                ty,
+                values: arguments,
+            })))
         }
         Value::Keyword(keyword) => match arguments.as_slice() {
             [target] => lookup(target, &Value::Keyword(keyword), Value::Nil),
@@ -5882,16 +5888,28 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("Duplicate defstruct field".into());
                 }
                 let namespace = namespace_registry()?.current().name().as_str().to_owned();
-                let ty = Rc::new(StructType { name: format!("{namespace}/{name}"), fields });
+                let ty = Rc::new(StructType {
+                    name: format!("{namespace}/{name}"),
+                    fields,
+                });
                 let map_type = ty.clone();
                 let map_constructor = native_function(&format!("map->{name}"), 1, move |values| {
                     let source = values.first().expect("native arity is checked");
-                    let fields = map_type.fields.iter().map(|field| {
-                        Ok(map_value(source, &Value::Keyword(Keyword::from(field.as_str())))
-                            .cloned()
-                            .unwrap_or(Value::Nil))
-                    }).collect::<Result<Vec<_>, String>>()?;
-                    Ok(Value::Struct(Rc::new(StructValue { ty: map_type.clone(), values: fields })))
+                    let fields = map_type
+                        .fields
+                        .iter()
+                        .map(|field| {
+                            Ok(
+                                map_value(source, &Value::Keyword(Keyword::from(field.as_str())))
+                                    .cloned()
+                                    .unwrap_or(Value::Nil),
+                            )
+                        })
+                        .collect::<Result<Vec<_>, String>>()?;
+                    Ok(Value::Struct(Rc::new(StructValue {
+                        ty: map_type.clone(),
+                        values: fields,
+                    })))
                 });
                 for (binding, value) in [
                     (name.clone(), Value::StructType(ty.clone())),
@@ -5916,7 +5934,11 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 let Value::Struct(value) = value else {
                     return Err("field expects a struct".into());
                 };
-                value.ty.fields.iter().position(|candidate| candidate == field)
+                value
+                    .ty
+                    .fields
+                    .iter()
+                    .position(|candidate| candidate == field)
                     .map(|index| value.values[index].clone())
                     .ok_or_else(|| format!("unknown struct field: {field}"))
             }
@@ -5928,7 +5950,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     Value::StructType(ty) => ty,
                     _ => return Err("instance? expects a struct type".into()),
                 };
-                Ok(Value::Bool(matches!(eval(&fs[2], env)?, Value::Struct(value) if Rc::ptr_eq(&ty, &value.ty))))
+                Ok(Value::Bool(
+                    matches!(eval(&fs[2], env)?, Value::Struct(value) if Rc::ptr_eq(&ty, &value.ty)),
+                ))
             }
             Form::Symbol(n) if n == "defprotocol" => {
                 if fs.len() < 3 {
@@ -5943,24 +5967,38 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     let Form::List(parts) = declaration else {
                         return Err("defprotocol method declaration must be a list".into());
                     };
-                    if parts.len() != 2 || !matches!(&parts[0], Form::Symbol(_)) || !matches!(&parts[1], Form::Vector(_)) {
+                    if parts.len() != 2
+                        || !matches!(&parts[0], Form::Symbol(_))
+                        || !matches!(&parts[1], Form::Vector(_))
+                    {
                         return Err(
                             "defprotocol method declaration expects a name and parameter vector"
                                 .into(),
                         );
                     }
-                    let Form::Symbol(method) = &parts[0] else { unreachable!() };
-                    let Form::Vector(arguments) = &parts[1] else { unreachable!() };
-                    if arguments.is_empty() || methods.insert(method.clone(), arguments.len()).is_some() {
+                    let Form::Symbol(method) = &parts[0] else {
+                        unreachable!()
+                    };
+                    let Form::Vector(arguments) = &parts[1] else {
+                        unreachable!()
+                    };
+                    if arguments.is_empty()
+                        || methods.insert(method.clone(), arguments.len()).is_some()
+                    {
                         return Err("protocol methods must be unique and take a receiver".into());
                     }
                 }
                 let namespace = namespace_registry()?.current().name().as_str().to_owned();
-                let protocol = Value::Protocol(Rc::new(GuestProtocol { name: format!("{namespace}/{name}"), methods }));
+                let protocol = Value::Protocol(Rc::new(GuestProtocol {
+                    name: format!("{namespace}/{name}"),
+                    methods,
+                }));
                 if let Value::Protocol(protocol_value) = &protocol {
                     ACTIVE_PROTOCOLS.with(|active| -> Result<(), String> {
                         let registry = active.borrow();
-                        let registry = registry.as_ref().ok_or_else(|| "protocol registry is unavailable".to_string())?;
+                        let registry = registry
+                            .as_ref()
+                            .ok_or_else(|| "protocol registry is unavailable".to_string())?;
                         for method in protocol_value.methods.keys() {
                             registry.declare_guest(protocol_value.name.clone(), method.clone());
                         }
@@ -5974,7 +6012,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             }
             Form::Symbol(n) if n == "extend-type" => {
                 if fs.len() < 4 {
-                    return Err("extend-type expects a type, protocol, and method implementations".into());
+                    return Err(
+                        "extend-type expects a type, protocol, and method implementations".into(),
+                    );
                 }
                 let ty = match eval(&fs[1], env)? {
                     Value::StructType(ty) => ty,
@@ -5989,22 +6029,43 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     let Form::List(parts) = implementation else {
                         return Err("extend-type implementations must be method forms".into());
                     };
-                    if parts.len() < 3 { return Err("extend-type implementations require a body".into()); }
-                    let Form::Symbol(method) = &parts[0] else { return Err("extended method name must be a symbol".into()); };
-                    let Form::Vector(arguments) = &parts[1] else { return Err("extended method arguments must be a vector".into()); };
-                    if !seen.insert(method.clone()) { return Err("Duplicate extended method".into()); }
+                    if parts.len() < 3 {
+                        return Err("extend-type implementations require a body".into());
+                    }
+                    let Form::Symbol(method) = &parts[0] else {
+                        return Err("extended method name must be a symbol".into());
+                    };
+                    let Form::Vector(arguments) = &parts[1] else {
+                        return Err("extended method arguments must be a vector".into());
+                    };
+                    if !seen.insert(method.clone()) {
+                        return Err("Duplicate extended method".into());
+                    }
                     if protocol.methods.get(method) != Some(&arguments.len()) {
                         return Err(format!("invalid protocol method implementation: {method}"));
                     }
-                    let function = eval(&Form::List(std::iter::once(Form::Symbol("fn".into()))
-                        .chain(parts[1..].iter().cloned()).collect()), env)?;
-                    let Value::Function(function) = function else { unreachable!() };
+                    let function = eval(
+                        &Form::List(
+                            std::iter::once(Form::Symbol("fn".into()))
+                                .chain(parts[1..].iter().cloned())
+                                .collect(),
+                        ),
+                        env,
+                    )?;
+                    let Value::Function(function) = function else {
+                        unreachable!()
+                    };
                     ACTIVE_PROTOCOLS.with(|active| -> Result<(), String> {
                         let registry = active.borrow();
                         let registry = registry
                             .as_ref()
                             .ok_or_else(|| "protocol registry is unavailable".to_string())?;
-                        registry.register_guest(protocol.name.clone(), ty.name.clone(), method.clone(), function);
+                        registry.register_guest(
+                            protocol.name.clone(),
+                            ty.name.clone(),
+                            method.clone(),
+                            function,
+                        );
                         Ok(())
                     })?;
                 }
@@ -6341,6 +6402,20 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     promise_provider().delay(std::time::Duration::from_millis(millis), task),
                 ))
             }
+            Form::Symbol(n) if n == "promise/state" => {
+                if fs.len() != 2 {
+                    return Err("promise/state expects one promise".into());
+                }
+                let promise = promise_value(&eval(&fs[1], env)?, n)?;
+                Ok(promise_state_value(&promise))
+            }
+            Form::Symbol(n) if n == "promise/value" => {
+                if fs.len() != 2 {
+                    return Err("promise/value expects one promise".into());
+                }
+                let promise = promise_value(&eval(&fs[1], env)?, n)?;
+                promise_value_result(&promise)
+            }
             Form::Symbol(n) if n == "promise/cancel" => {
                 if fs.len() != 2 {
                     return Err("promise/cancel expects a promise".into());
@@ -6352,12 +6427,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 Ok(Value::Promise(promise))
             }
             Form::Symbol(n)
-                if [
-                    "promise/then",
-                    "promise/catch",
-                    "promise/finally",
-                ]
-                .contains(&n.as_str()) =>
+                if ["promise/then", "promise/catch", "promise/finally"].contains(&n.as_str()) =>
             {
                 if fs.len() != 3 {
                     return Err(format!("{n} expects a promise and function"));
@@ -7432,7 +7502,10 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 collection_empty_value(eval(&fs[1], env)?)
             }
             Form::Symbol(n)
-                if ["list?", "vector?", "map?", "set?", "keyword?", "symbol?", "string?"].contains(&n.as_str()) =>
+                if [
+                    "list?", "vector?", "map?", "set?", "keyword?", "symbol?", "string?",
+                ]
+                .contains(&n.as_str()) =>
             {
                 if fs.len() != 2 {
                     return Err(format!("{n} expects one argument"));

@@ -89,7 +89,7 @@ export function createNodeHostServices(runtime) {
         throw new Error("node/handle requires a kernel callback id");
       }
       const source = `(studio.node/invoke-handler ${JSON.stringify(handlerId)} __hta_arg_0 __hta_arg_1)`;
-      runtime.handle(nodeId, action, (args, frame) => invocation.context.call(
+      runtime.stageKernelHandler(invocation.context, nodeId, action, (args, frame) => invocation.context.call(
         "eval-bound",
         [source, [toHta(args), toHta(frame)]]
       ), toPlain(meta));

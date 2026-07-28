@@ -112,6 +112,14 @@ public class HaraSubstrateProtocolTest {
   }
 
   @Test
+  public void sharedSubstrateNodeLifecycleFixtureRuns() throws Exception {
+    String source = Files.readString(Path.of("lib/test-fixtures/std/substrate/node_lifecycle_conformance.hal"));
+    try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
+      assertEquals("[84 42 :rejected]", context.eval(HaraLanguage.ID, source).toString());
+    }
+  }
+
+  @Test
   public void substrateNodeHalFixturePasses() throws Exception {
     String source = Files.readString(Path.of("lib/test/std/substrate/node_test.hal"));
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
