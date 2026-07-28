@@ -28,6 +28,8 @@ struct Project {
     id: String,
     version: Version,
     source_paths: Vec<PathBuf>,
+    artifact_paths: Vec<PathBuf>,
+    archive_root: Option<PathBuf>,
 }
 
 /// Handles the public `hara package` command group.
@@ -51,7 +53,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
                     project
                         .root
                         .join("target")
-                        .join(format!("{}-{}.harp", project.id, project.version))
+                        .join(format!("{}-{}.harp", archive_name(&project.id), project.version))
                 });
             build_archive(&project, &output)?;
             println!("package build: {}", output.display());
@@ -83,14 +85,16 @@ pub fn run(args: &[String]) -> Result<(), String> {
 }
 
 fn read_project(path: &Path) -> Result<Project, String> {
-    let root = if path.is_dir() {
-        path.to_path_buf()
+    let (root, manifest_path) = if path.is_dir() {
+        (path.to_path_buf(), path.join("project.edn"))
     } else {
-        path.parent()
-            .ok_or_else(|| format!("cannot determine project root for {}", path.display()))?
-            .to_path_buf()
+        (
+            path.parent()
+                .ok_or_else(|| format!("cannot determine project root for {}", path.display()))?
+                .to_path_buf(),
+            path.to_path_buf(),
+        )
     };
-    let manifest_path = root.join("project.edn");
     let source = fs::read_to_string(&manifest_path)
         .map_err(|error| format!("cannot read {}: {error}", manifest_path.display()))?;
     for key in REQUIRED_PROJECT_KEYS {
@@ -112,11 +116,23 @@ fn read_project(path: &Path) -> Result<Project, String> {
         .into_iter()
         .map(PathBuf::from)
         .collect();
+    let artifact_paths: Vec<PathBuf> = vector_after(&source, ":project/artifact-paths")
+        .unwrap_or_default()
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
+    let archive_root = scalar_after(&source, ":project/archive-root")
+        .map(PathBuf::from);
+    for path in artifact_paths.iter().chain(archive_root.iter()) {
+        validate_relative_path(path)?;
+    }
     Ok(Project {
         root,
         id,
         version,
         source_paths,
+        artifact_paths,
+        archive_root,
     })
 }
 
@@ -151,18 +167,38 @@ fn build_archive(project: &Project, output: &Path) -> Result<(), String> {
     let mut entries = Vec::new();
     for source_path in &project.source_paths {
         let base = project.root.join(source_path);
-        collect_files(&base, &project.root, &mut entries)?;
+        collect_files(&base, &project.root, false, false, &mut entries)?;
     }
-    entries.sort();
-    entries.dedup();
-    if entries.is_empty() {
-        return Err("package build found no files in :project/source-paths".into());
+    for artifact_path in &project.artifact_paths {
+        let base = project.root.join(artifact_path);
+        collect_files(&base, &project.root, true, true, &mut entries)?;
+    }
+    let mut archive_entries = Vec::new();
+    for source in entries {
+        let archive = match &project.archive_root {
+            Some(root) => source.strip_prefix(root).map(PathBuf::from).unwrap_or_else(|_| source.clone()),
+            None => source.clone(),
+        };
+        validate_relative_path(&archive)?;
+        if archive.as_os_str().is_empty() {
+            return Err("package archive path must name a file".into());
+        }
+        archive_entries.push((archive, source));
+    }
+    archive_entries.sort_by(|left, right| left.0.cmp(&right.0));
+    for pair in archive_entries.windows(2) {
+        if pair[0].0 == pair[1].0 {
+            return Err(format!("duplicate package archive path: {}", pair[0].0.display()));
+        }
+    }
+    if archive_entries.is_empty() {
+        return Err("package build found no files in :project/source-paths or :project/artifact-paths".into());
     }
     let mut contents = Vec::new();
-    for entry in &entries {
-        let bytes = fs::read(project.root.join(entry))
-            .map_err(|error| format!("cannot read {}: {error}", entry.display()))?;
-        contents.push((entry.clone(), bytes));
+    for (archive, source) in &archive_entries {
+        let bytes = fs::read(project.root.join(source))
+            .map_err(|error| format!("cannot read {}: {error}", source.display()))?;
+        contents.push((archive.clone(), bytes));
     }
     let package_edn = package_manifest(project, &contents);
     if let Some(parent) = output.parent() {
@@ -227,18 +263,34 @@ fn package_manifest(project: &Project, contents: &[(PathBuf, Vec<u8>)]) -> Strin
     )
 }
 
-fn collect_files(directory: &Path, root: &Path, entries: &mut Vec<PathBuf>) -> Result<(), String> {
+fn collect_files(
+    directory: &Path,
+    root: &Path,
+    include_all: bool,
+    required: bool,
+    entries: &mut Vec<PathBuf>,
+) -> Result<(), String> {
     if !directory.exists() {
-        return Ok(());
+        return if required {
+            Err(format!("declared package path does not exist: {}", directory.display()))
+        } else {
+            Ok(())
+        };
     }
     for entry in fs::read_dir(directory)
         .map_err(|error| format!("cannot read {}: {error}", directory.display()))?
     {
         let entry = entry.map_err(io_error)?;
         let path = entry.path();
-        if path.is_dir() {
-            collect_files(&path, root, entries)?;
-        } else if path.extension().and_then(|extension| extension.to_str()) == Some("hal") {
+        let metadata = fs::symlink_metadata(&path).map_err(io_error)?;
+        if metadata.file_type().is_symlink() {
+            return Err(format!("package entries must not be symbolic links: {}", path.display()));
+        }
+        if metadata.is_dir() {
+            collect_files(&path, root, include_all, true, entries)?;
+        } else if metadata.is_file()
+            && (include_all || path.extension().and_then(|extension| extension.to_str()) == Some("hal"))
+        {
             let relative = path
                 .strip_prefix(root)
                 .map_err(|_| "package path escapes project root".to_owned())?;
@@ -266,6 +318,10 @@ fn path_to_slash(path: &Path) -> Result<String, String> {
     path.to_str()
         .map(|value| value.replace('\\', "/"))
         .ok_or_else(|| format!("package path is not UTF-8: {}", path.display()))
+}
+
+fn archive_name(id: &str) -> String {
+    id.replace('/', "-")
 }
 
 fn scalar_after(source: &str, key: &str) -> Option<String> {
@@ -366,6 +422,41 @@ mod tests {
         let root = fixture();
         fs::write(root.join("project.edn"), "{:hara/type :project}").unwrap();
         assert!(read_project(&root).unwrap_err().contains(":hara/version"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn packages_declared_artifacts_under_the_archive_root() {
+        let root = fixture();
+        fs::create_dir_all(root.join("target/package/ledger/noir/assets")).unwrap();
+        fs::write(root.join("target/package/ledger/noir/hara.extension.edn"), "{:namespace \"ledger.noir\"}\n").unwrap();
+        fs::write(root.join("target/package/ledger/noir/assets/worker.mjs"), "export {};\n").unwrap();
+        fs::write(
+            root.join("project.edn"),
+            "{:hara/type :project :hara/version \"1.0.0\" :project/id hara/ledger-noir :project/version \"0.1.0\" :project/source-paths [] :project/test-paths [\"test\"] :project/extension-paths [\"target/package\"] :project/capabilities #{} :project/artifact-paths [\"target/package\"] :project/archive-root \"target/package\"}",
+        )
+        .unwrap();
+        let project = read_project(&root).unwrap();
+        let archive = root.join("ledger-noir.harp");
+        build_archive(&project, &archive).unwrap();
+        let file = File::open(&archive).unwrap();
+        let mut zip = ZipArchive::new(file).unwrap();
+        assert!(zip.by_name("ledger/noir/hara.extension.edn").is_ok());
+        assert!(zip.by_name("ledger/noir/assets/worker.mjs").is_ok());
+        assert!(zip.by_name("target/package/ledger/noir/hara.extension.edn").is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_missing_declared_artifacts() {
+        let root = fixture();
+        fs::write(
+            root.join("project.edn"),
+            "{:hara/type :project :hara/version \"1.0.0\" :project/id example/app :project/version \"1.2.3\" :project/source-paths [] :project/test-paths [\"test\"] :project/extension-paths [\"extensions\"] :project/capabilities #{} :project/artifact-paths [\"target/package\"]}",
+        )
+        .unwrap();
+        let project = read_project(&root).unwrap();
+        assert!(build_archive(&project, &root.join("missing.harp")).unwrap_err().contains("does not exist"));
         fs::remove_dir_all(root).unwrap();
     }
 }

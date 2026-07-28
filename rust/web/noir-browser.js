@@ -1,7 +1,7 @@
 import { HtaKeyword, loadHtaExtension } from "./hta.js";
 
 const descriptorUrl = new URL(
-  "./dist/extensions/ledger/noir/hara.extension.edn",
+  "../extensions/ledger-noir/target/package/ledger/noir/hara.extension.edn",
   import.meta.url
 ).toString();
 const context = await loadHtaExtension({ descriptorUrl });

@@ -13,7 +13,7 @@ assets. The pages deploy copies the runtime-facing pieces under
 - `index.html` / `playground.js` — the wasm-bindgen playground page
   (in-browser runtime plus Noir proving).
 - `noir-loader.js` — Noir circuit loader/backends for the playground and the
-  noir wasm extension (`build:noir`).
+  Noir extension. `build:package:noir` builds its deterministic HARP archive.
 - `studio/` — the shared studio environment:
   - `broker.js` — kernel broker; one kernel = one Web Worker running one raw
     HTA wasm instance (mirrors the JVM `HaraSessionBroker`).

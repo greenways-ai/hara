@@ -70,3 +70,4 @@ apps/hara-world/runtime/
 /.venv-docs
 site-build/
 rust/target/debug
+rust/web/dist/

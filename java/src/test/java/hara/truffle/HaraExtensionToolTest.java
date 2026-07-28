@@ -13,7 +13,9 @@ import org.junit.Test;
 
 public class HaraExtensionToolTest {
   private static final Path PACKAGE =
-      Path.of("rust/web/dist/extensions/ledger/noir").toAbsolutePath().normalize();
+      Path.of("rust/extensions/ledger-noir/target/package/ledger/noir")
+          .toAbsolutePath()
+          .normalize();
 
   @Test
   public void checksACompleteBuiltPackage() {

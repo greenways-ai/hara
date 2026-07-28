@@ -1,7 +1,9 @@
 # Hara package registry
 
-Status: **bootstrap placeholder** — the normative contract is drafted; the
-separate `hara-lang/hara-packages` repository remains to be created.
+Status: **bootstrap** — the normative contract is drafted and the public
+[`hara-lang/hara-packages`](https://github.com/hara-lang/hara-packages)
+repository now hosts the reviewed registry. Remote resolution and publication
+remain under implementation.
 
 ## Intent
 
@@ -13,7 +15,7 @@ mounting their read-only package roots.
 The package system also carries extension packages described by
 `hara.extension.edn`, including WASM artifacts and optional host workers.
 
-## Until the registry exists
+## Current implementation
 
 The initial Rust implementation exposes deterministic local commands:
 
@@ -23,8 +25,8 @@ hara package build
 hara package inspect
 ```
 
-Remote resolution and publication require the external registry and identity
-repositories. Extensions continue to incubate in-tree under
+Remote resolution and publication require the registry and identity clients.
+Extensions continue to incubate in-tree under
 [`rust/extensions/`](../rust/extensions/) — e.g. `ledger-noir` and
 `crypto-hash-sha256` — and reference packages live under
 [`lib/examples/extensions/`](../lib/examples/extensions/). The registry

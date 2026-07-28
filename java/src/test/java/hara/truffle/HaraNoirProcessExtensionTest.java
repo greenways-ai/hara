@@ -12,7 +12,7 @@ import org.junit.Test;
 
 public class HaraNoirProcessExtensionTest {
   private static final Path ROOT =
-      Path.of("rust/web/dist/extensions").toAbsolutePath().normalize();
+      Path.of("rust/extensions/ledger-noir/target/package").toAbsolutePath().normalize();
 
   @Test
   public void realNoirCompilerProverAndVerifierRunThroughManagedNode() {
