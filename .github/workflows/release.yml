@@ -145,16 +145,20 @@ jobs:
         VERSION="${{ needs.guard.outputs.version }}"
         FLAGS=""
         case "$VERSION" in 0.*) FLAGS="--prerelease" ;; esac
-        gh release create "$TAG" \
-          --title "hara $TAG" \
-          --notes "GitHub Releases are the publishing authority for Hara runtime packages. Install with:
-        
-            curl -fsSL https://www.hara-lang.org/install.sh | sh -- --rust --truffle
-        " \
-          $FLAGS \
-          dist/hara-rust-*.tar.gz dist/hara-truffle-*.tar.gz \
-          dist/hara-studio-runtime-*.tar.gz dist/hara-studio-runtime-*.tar.gz.sha256 \
-          dist/SHA256SUMS
+        ASSETS=(dist/hara-rust-*.tar.gz dist/hara-truffle-*.tar.gz \
+                dist/hara-studio-runtime-*.tar.gz dist/hara-studio-runtime-*.tar.gz.sha256 \
+                dist/SHA256SUMS)
+        if gh release view "$TAG" >/dev/null 2>&1; then
+          gh release upload "$TAG" "${ASSETS[@]}" --clobber
+        else
+          gh release create "$TAG" \
+            --title "hara $TAG" \
+            --notes "GitHub Releases are the publishing authority for Hara runtime packages. Install with:
+          
+              curl -fsSL https://www.hara-lang.org/install.sh | sh -- --rust --truffle
+          " \
+            $FLAGS "${ASSETS[@]}"
+        fi
 
   smoke-install:
     needs: [guard, release]

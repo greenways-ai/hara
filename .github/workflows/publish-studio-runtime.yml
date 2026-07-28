@@ -1,0 +1,61 @@
+name: Publish Studio runtime
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-studio-runtime.yml
+      - .github/studio-runtime-release.json
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing Hara release tag to receive the Studio runtime
+        required: true
+        default: v0.1.0
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Resolve release tag
+        id: release
+        run: |
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then TAG=$(node -p 'require("./.github/studio-runtime-release.json").tag'); fi
+          VERSION="${TAG#v}"
+          CRATE_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -n 1)
+          [ "$VERSION" = "$CRATE_VERSION" ] || {
+            echo "tag $TAG does not match rust/Cargo.toml $CRATE_VERSION" >&2
+            exit 1
+          }
+          git fetch --tags origin
+          git rev-parse --verify "refs/tags/$TAG" >/dev/null
+          git checkout --detach "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Build and verify Studio runtime
+        run: scripts/build-studio-runtime "${{ steps.release.outputs.version }}"
+      - name: Create or update release runtime assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.release.outputs.tag }}"
+          VERSION="${{ steps.release.outputs.version }}"
+          ASSETS=(target/studio-runtime/hara-studio-runtime-$VERSION.tar.gz \
+                  target/studio-runtime/hara-studio-runtime-$VERSION.tar.gz.sha256)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+          else
+            gh release create "$TAG" --verify-tag --title "hara $TAG" --prerelease \
+              --notes "Studio runtime package for Hara $TAG." "${ASSETS[@]}"
+          fi
