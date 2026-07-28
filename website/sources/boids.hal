@@ -100,7 +100,7 @@
         (recur
           (+ index 1)
           (conj
-            (conj commands [:line x y (- x (* vx 2.8)) (- y (* vy 2.8))
+            (conj commands [:line x y (- x (/ (* vx 14) 5)) (- y (/ (* vy 14) 5))
                             color 2 0.48])
             [:circle x y 3 "#efffff" 0.94])))
       commands)))

@@ -6,7 +6,7 @@
 ;; preserve both lengths while gravity continuously advances the masses.
 ;; TRY: change gravity or the initial mass positions to change the attractor.
 
-(def gravity 0.48)
+(def gravity 1)
 (def trail-limit 180)
 
 (defn absolute [value] (if (< value 0) (- 0 value) value))
@@ -27,10 +27,10 @@
   (let [anchor-x (/ width 2)
         anchor-y (/ height 5)
         length (smaller (/ width 4) (/ height 4))
-        first {:x (+ anchor-x (* length 0.82))
-               :y (+ anchor-y (* length 0.42))}
-        second {:x (+ anchor-x (* length 1.18))
-                :y (+ anchor-y (* length 1.28))}]
+        first {:x (+ anchor-x (/ (* length 82) 100))
+               :y (+ anchor-y (/ (* length 42) 100))}
+        second {:x (+ anchor-x (/ (* length 118) 100))
+                :y (+ anchor-y (/ (* length 128) 100))}]
     {:anchor-x anchor-x :anchor-y anchor-y :length length
      :first first :first-old {:x (- (get first :x) 2) :y (get first :y)}
      :second second :second-old {:x (+ (get second :x) 1) :y (get second :y)}
@@ -44,18 +44,18 @@
 (defn constrain-to [point anchor-x anchor-y length]
   (let [dx (- (get point :x) anchor-x)
         dy (- (get point :y) anchor-y)
-        distance (square-root (+ (* dx dx) (* dy dy)))
-        scale (if (= distance 0) 1 (/ length distance))]
-    {:x (+ anchor-x (* dx scale))
-     :y (+ anchor-y (* dy scale))}))
+        distance (square-root (+ (* dx dx) (* dy dy)))]
+    (if (= distance 0)
+      point
+      {:x (+ anchor-x (/ (* dx length) distance))
+       :y (+ anchor-y (/ (* dy length) distance))})))
 
 (defn constrain-pair [first second length]
   (let [dx (- (get second :x) (get first :x))
         dy (- (get second :y) (get first :y))
         distance (square-root (+ (* dx dx) (* dy dy)))
-        correction (if (= distance 0) 0 (/ (- distance length) distance))
-        adjust-x (* dx correction 0.5)
-        adjust-y (* dy correction 0.5)]
+        adjust-x (if (= distance 0) 0 (/ (* dx (- distance length)) (* distance 2)))
+        adjust-y (if (= distance 0) 0 (/ (* dy (- distance length)) (* distance 2)))]
     {:first {:x (+ (get first :x) adjust-x)
              :y (+ (get first :y) adjust-y)}
      :second {:x (- (get second :x) adjust-x)
