@@ -183,13 +183,14 @@ class PortQueue {
  * contract; direct and binary transports carry the same normalized frame.
  */
 export class NodeRuntime {
-  constructor({ space = "workspace/default", transport = "direct" } = {}) {
+  constructor({ space = "workspace/default", transport = "direct", deliver = null } = {}) {
     this.space = space;
     this.transport = transport;
     this.nodes = new Map();
     this.connections = new Map();
     this.pending = new Map();
     this.observers = new Set();
+    this.deliver = deliver;
     // A kernel context may evaluate a candidate document before its generation
     // is public. Keep its callbacks private until activateDocument commits it.
     this.stagedKernelHandlers = new WeakMap();
@@ -461,8 +462,15 @@ export class NodeRuntime {
     for (const edge of this.connections.values()) {
       if (edge.from[0] !== frame.source || edge.from[1] !== frame.signal) continue;
       const target = this.requireNode(edge.to[0]);
-      const queue = target.input(edge.to[1], edge);
-      deliveries.push({ connection: edge.id, ...queue.accept({ ...frame, target: edge.to[0], signal: edge.to[1] }) });
+      const targetFrame = { ...frame, target: edge.to[0], signal: edge.to[1] };
+      if (target.execution === "queue") {
+        const queue = target.input(edge.to[1], edge);
+        deliveries.push({ connection: edge.id, ...queue.accept(targetFrame) });
+      } else {
+        if (!this.deliver) throw new NodeProtocolError("node/delivery-unavailable", `no delivery adapter for ${target.execution}`, targetFrame);
+        const result = await this.deliver({ targetNode: target.publicInfo(), port: edge.to[1], frame: targetFrame, connection: edge });
+        deliveries.push({ connection: edge.id, accepted: result?.accepted ?? true, dropped: result?.dropped ?? 0 });
+      }
     }
     this.publish(frame);
     return { accepted: true, deliveries };
@@ -509,6 +517,10 @@ class NodeState {
     this.kernelHandlers = new Map();
     this.inputs = new Map();
     this.active = null;
+    this.execution = descriptor.execution ?? descriptor["node/execution"] ?? "queue";
+    if (!new Set(["queue", "host", "session"]).has(this.execution)) {
+      throw new NodeProtocolError("node/execution", `unsupported node execution: ${this.execution}`);
+    }
   }
 
   input(signal, options = {}) {
@@ -520,6 +532,8 @@ class NodeState {
     return {
       id: this.descriptor.id,
       type: this.descriptor.type ?? this.descriptor["node/type"] ?? null,
+      execution: this.execution,
+      sessionId: this.descriptor.sessionId ?? this.descriptor["node/session"] ?? null,
       ports: this.descriptor.ports ?? this.descriptor["node/ports"] ?? [],
       transport: {
         protocol: VERSION,

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import "fake-indexeddb/auto";
 
-import { createHostServices } from "./studio/host-services.js";
+import { createGraphHostServices, createHostServices } from "./studio/host-services.js";
+import { SessionRouter } from "./studio/session-router.js";
 
 test("store put/get round trips string values", async () => {
   const host = createHostServices({ dbName: "test-round-trip" });
@@ -78,4 +79,50 @@ test("json/parse decodes JSON text into maps, arrays, and scalars", async () => 
 test("json/parse rejects invalid JSON", async () => {
   const host = createHostServices({ dbName: "test-json-bad" });
   await assert.rejects(host["json/parse"]("{nope"));
+});
+
+test("graph host services expose exact generated-program host-call keys", async () => {
+  const calls = [];
+  const graph = {
+    programs: { release: async (id) => { calls.push(["program/release", id]); return true; } },
+    install: async (descriptor, options) => { calls.push(["program/install", descriptor, options]); return { programId: "example/node" }; },
+    programInfo: (id) => ({ programId: id }),
+    spawn: async (descriptor) => ({ nodeId: descriptor["node/id"] }),
+    release: async () => true,
+    connect: () => "connection-1",
+    disconnect: () => true,
+    sendFrame: async () => ({ accepted: true }),
+    callFrame: async () => ({ data: 42 }),
+    info: (id) => ({ id }),
+    list: () => []
+  };
+  const services = createGraphHostServices(graph, { capabilities: ["surface/canvas-2d"] });
+  const installed = await services["program/install"](
+    new Map([["program/id", "example/node"]]),
+    new Map([["sessionId", "UI"]])
+  );
+  assert.ok(installed instanceof Map);
+  assert.equal(installed.get("programId"), "example/node");
+  assert.deepEqual(calls[0], ["program/install", { "program/id": "example/node" }, { sessionId: "UI" }]);
+  const described = await services["host/describe"]();
+  assert.equal(described.get("host/version"), "hara.host.v1");
+  assert.deepEqual(await services["host/capabilities"](), ["surface/canvas-2d"]);
+});
+
+test("session host calls register explicit ingress and release its graph partition", async () => {
+  const released = [];
+  const sessions = new SessionRouter();
+  const graph = { releaseSession: async (id) => released.push(id) };
+  const services = createGraphHostServices(graph, { sessionRouter: sessions });
+  const context = { call: async () => null };
+  const registered = services["session/register-ingress"].call(
+    { context }, "UI", ["input/keyboard"]
+  );
+  assert.ok(registered instanceof Map);
+  assert.equal(registered.get("sessionId"), "UI");
+  const subscription = await services["session/subscribe"]("UI", "selected", "callback/1");
+  assert.equal(typeof subscription, "string");
+  assert.equal(await services["session/unsubscribe"](subscription), true);
+  assert.equal(await services["session/unregister-ingress"]("UI"), true);
+  assert.deepEqual(released, ["UI"]);
 });

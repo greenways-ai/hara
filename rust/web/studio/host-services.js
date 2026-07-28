@@ -53,6 +53,7 @@ export function createHostServices(options = {}) {
     "json/parse": async (text) => fromJson(JSON.parse(text))
   };
   if (options.nodeRuntime) Object.assign(services, createNodeHostServices(options.nodeRuntime));
+  if (options.graphHost) Object.assign(services, createGraphHostServices(options.graphHost, options.graphHostOptions));
   if (options.canvasRuntime) {
     services["studio.canvas/next-frame"] = (nodeId, canvasId) =>
       options.canvasRuntime.nextFrame(nodeId, canvasId);
@@ -97,6 +98,61 @@ export function createNodeHostServices(runtime) {
     },
     "node/stop": (nodeId, task) => runtime.stop(nodeId, task),
     "node/info": (nodeId) => toHta(runtime.info(nodeId))
+  };
+}
+
+/** Exact HTA host-call surface for generated programs and active graph nodes.
+ * The compatibility session ingress methods are intentionally not registered
+ * until SessionRouter owns their permission and lifecycle rules. */
+export function createGraphHostServices(graph, options = {}) {
+  const sessions = options.sessionRouter ?? graph.sessionRouter ?? null;
+  const hostDescription = {
+    "host/version": "hara.host.v1",
+    "program/runtimes": options.programRuntimes ?? ["javascript/module", "javascript/audio-worklet"],
+    capabilities: options.capabilities ?? [],
+    limits: options.limits ?? {
+      "program/max-source-bytes": 1048576,
+      "graph/max-nodes": 1024,
+      "graph/max-connections": 4096
+    }
+  };
+  const services = {
+    "program/install": async (descriptor, installOptions = {}) =>
+      toHta(await graph.install(toPlain(descriptor), toPlain(installOptions))),
+    "program/info": async (programId) => toHta(graph.programInfo(String(programId))),
+    "program/release": async (programId) => graph.programs.release(String(programId)),
+    "graph/spawn": async (descriptor, spawnOptions = {}) =>
+      toHta(await graph.spawn(toPlain(descriptor), toPlain(spawnOptions))),
+    "graph/release": async (nodeId) => graph.release(String(nodeId)),
+    "graph/connect": async (descriptor) => graph.connect(toPlain(descriptor)),
+    "graph/disconnect": async (connectionId) => graph.disconnect(String(connectionId)),
+    "graph/send-frame": async (source, frame) => toHta(await graph.sendFrame(String(source), toPlain(frame))),
+    "graph/call-frame": async (source, frame) => toHta(await graph.callFrame(String(source), toPlain(frame))),
+    "graph/info": async (nodeId) => toHta(graph.info(String(nodeId))),
+    "graph/list": async () => toHta(graph.list()),
+    "host/describe": async () => toHta(hostDescription),
+    "host/capabilities": async () => toHta(hostDescription.capabilities)
+  };
+  if (sessions) Object.assign(services, createSessionHostServices(graph, sessions));
+  return services;
+}
+
+/** Compatibility ingress registration is intentionally a separate surface:
+ * graph traffic never enters a Hara session unless that session explicitly
+ * subscribes. The handler receives the owning HtaContext from HtaContext's
+ * host-call invocation binding. */
+export function createSessionHostServices(graph, sessions) {
+  return {
+    "session/register-ingress": function(sessionId, capabilities = []) {
+      return toHta(sessions.register(String(sessionId), this.context, {
+        capabilities: toPlain(capabilities),
+        onRelease: async (released) => graph.releaseSession(released)
+      }));
+    },
+    "session/unregister-ingress": async (sessionId) => sessions.unregister(String(sessionId)),
+    "session/subscribe": async (sessionId, signal, callbackId) =>
+      sessions.subscribe(String(sessionId), String(signal), String(callbackId)),
+    "session/unsubscribe": async (subscriptionId) => sessions.unsubscribe(String(subscriptionId))
   };
 }
 

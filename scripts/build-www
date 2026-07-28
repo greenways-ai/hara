@@ -36,7 +36,12 @@ cp "$ROOT/rust/web/studio/boot.js" \
    "$ROOT/rust/web/studio/broker.js" \
    "$ROOT/rust/web/studio/host-services.js" \
    "$ROOT/rust/web/studio/canvas-runtime.js" \
+   "$ROOT/rust/web/studio/graph-host.js" \
+   "$ROOT/rust/web/studio/module-codec.js" \
    "$ROOT/rust/web/studio/node-runtime.js" \
+   "$ROOT/rust/web/studio/program-host.js" \
+   "$ROOT/rust/web/studio/program-worker.js" \
+   "$ROOT/rust/web/studio/session-router.js" \
    "$ROOT/rust/web/studio/workspace.js" \
    "$OUT/runtime/studio/"
 cp "$ROOT/rust/web/studio/hal/"*.hal "$OUT/runtime/studio/hal/"
