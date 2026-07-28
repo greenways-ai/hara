@@ -80,6 +80,21 @@ test("a graph session target routes a selected event into its addressed Hara ses
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], "eval-bound");
   const delivered = calls[0][1][1][0];
-  assert.equal(delivered.id, "evt-selected");
-  assert.equal(delivered.meta["session/callback"], "callback/selected");
+  assert.equal(delivered.get("id"), "evt-selected");
+  assert.equal(delivered.get("meta").get("session/callback"), "callback/selected");
+});
+
+test("releasing a session removes both generated and Hara ingress graph nodes", async () => {
+  const active = executor();
+  const sessions = new SessionRouter();
+  sessions.register("UI", { call: async () => null });
+  const graph = new GraphHost({ executor: active, sessionRouter: sessions });
+  await graph.install(program("example/source"), { capabilities: [] });
+  await graph.spawn(node("node/source", "example/source"), { capabilities: [] });
+  graph.registerSessionNode({ "node/id": "node/ui", "node/session": "UI" });
+  graph.connect({ id: "source-ui", from: ["node/source", "out"], to: ["node/ui", "in"] });
+
+  assert.equal(await graph.releaseSession("UI"), 2);
+  assert.throws(() => graph.info("node/source"), /unknown node/);
+  assert.throws(() => graph.info("node/ui"), /unknown node/);
 });

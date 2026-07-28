@@ -1,0 +1,57 @@
+;; studio.session — explicit, session-qualified stream ingress.
+(ns studio.session
+  (:require [std.substrate.frame :as frame]))
+
+(def ^:private *next-callback* (atom 0))
+(def ^:private *callbacks* (atom []))
+
+(defn- find-callback [entries callback-id index]
+  (if (= index (count entries))
+    nil
+    (let [entry (nth entries index)]
+      (if (= callback-id (nth entry 0))
+        entry
+        (find-callback entries callback-id (+ index 1))))))
+
+(defn- remove-callback [entries callback-id index output]
+  (if (= index (count entries))
+    output
+    (let [entry (nth entries index)]
+      (remove-callback entries callback-id (+ index 1)
+                       (if (= callback-id (nth entry 0)) output (conj output entry))))))
+
+(defn register-ingress!
+  ([session-id]
+   (register-ingress! session-id []))
+  ([session-id capabilities]
+   (deref (host/call "session" "register-ingress" session-id capabilities))))
+
+(defn unregister-ingress! [session-id]
+  (deref (host/call "session" "unregister-ingress" session-id)))
+
+(defn on [session-id signal callback]
+  (let [callback-id (str "session-callback-" (swap! *next-callback* inc))
+        subscription-id (deref (host/call "session" "subscribe" session-id signal callback-id))]
+    (do
+      (swap! *callbacks* (fn [entries] (conj entries [callback-id subscription-id callback])))
+      callback-id)))
+
+(defn off [callback-id]
+  (let [entry (find-callback (deref (deref *callbacks*)) callback-id 0)]
+    (if entry
+      (do
+        (deref (host/call "session" "unsubscribe" (nth entry 1)))
+        (swap! *callbacks* (fn [entries] (remove-callback entries callback-id 0 [])))
+        true)
+      false)))
+
+(defn invoke-ingress [incoming]
+  (let [frame (frame/normalize-frame incoming)
+        callback-id (get (frame/frame-value frame "meta") "session/callback")
+        entry (find-callback (deref (deref *callbacks*)) callback-id 0)]
+    (if entry
+      ((nth entry 2) frame)
+      nil)))
+
+(defn deliver [incoming]
+  (invoke-ingress incoming))

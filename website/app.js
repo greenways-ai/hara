@@ -1268,19 +1268,23 @@ async function bootRuntime() {
       { createHostServices },
       { defaultBootstrap },
       { NodeRuntime },
-      { CanvasRuntime }
+      { CanvasRuntime },
+      { GraphHost },
+      { SessionRouter }
     ] = await Promise.all([
       import(new URL("studio/broker.js", runtimeBase)),
       import(new URL("studio/host-services.js", runtimeBase)),
       import(new URL("studio/boot.js", runtimeBase)),
       import(new URL("studio/node-runtime.js", runtimeBase)),
-      import(new URL("studio/canvas-runtime.js", runtimeBase))
+      import(new URL("studio/canvas-runtime.js", runtimeBase)),
+      import(new URL("studio/graph-host.js", runtimeBase)),
+      import(new URL("studio/session-router.js", runtimeBase))
     ]);
     const wasmResponse = await fetch(new URL("hara.wasm", runtimeBase));
     if (!wasmResponse.ok) throw new Error(`runtime fetch failed: ${wasmResponse.status}`);
     const moduleBytes = new Uint8Array(await wasmResponse.arrayBuffer());
     const resources = {};
-    for (const name of ["store", "fs", "space", "boot", "node", "draw"]) {
+    for (const name of ["store", "fs", "space", "boot", "node", "draw", "program", "graph", "session"]) {
       const response = await fetch(new URL(`studio/hal/${name}.hal`, runtimeBase));
       if (!response.ok) throw new Error(`resource ${name} fetch failed: ${response.status}`);
       resources[`studio.${name}`] = await response.text();
@@ -1297,10 +1301,17 @@ async function bootRuntime() {
       }
     });
     state.canvasRuntime.register("canvas/background", query("[data-tron]"));
+    const sessionRouter = new SessionRouter();
+    const graphHost = new GraphHost({
+      workerUrl: new URL("studio/program-worker.js", runtimeBase),
+      sessionRouter
+    });
     const hostCalls = createHostServices({
       dbName: "hara-www",
       nodeRuntime: state.nodeRuntime,
       canvasRuntime: state.canvasRuntime,
+      graphHost,
+      graphHostOptions: { sessionRouter },
       renderCanvas: (_canvasId, value) => {
         showScene(validateScene(value), performance.now(), "HAL");
       }
@@ -1311,7 +1322,11 @@ async function bootRuntime() {
         ? new URL("hta-shared-worker.js", runtimeBase) : undefined,
       moduleBytes,
       hostCalls,
-      resources
+      resources,
+      onKernelCreated: async (kernel) => sessionRouter.register(kernel.name, kernel.context, {
+        onRelease: (sessionId) => graphHost.releaseSession(sessionId)
+      }),
+      onKernelClosed: (kernel) => sessionRouter.unregister(kernel.name)
     });
     await state.broker.eval(ROOT, defaultBootstrap(SPACE));
     await loadBackgroundWorkspace();

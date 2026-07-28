@@ -4,6 +4,8 @@ import test from "node:test";
 import { NodeProtocolError } from "./studio/node-runtime.js";
 import { SessionRouter } from "./studio/session-router.js";
 
+const mapGet = (value, key) => value instanceof Map ? value.get(key) : value?.[key];
+
 function context() {
   return { calls: [], async call(target, args) { this.calls.push([target, args]); return true; } };
 }
@@ -24,7 +26,7 @@ test("session router delivers subscribed substrate frames only to the addressed 
   assert.equal(ui.calls.length, 1);
   assert.equal(market.calls.length, 0);
   assert.equal(ui.calls[0][0], "eval-bound");
-  assert.equal(ui.calls[0][1][1][0].meta["session/callback"], "callback-ui");
+  assert.equal(mapGet(mapGet(ui.calls[0][1][1][0], "meta"), "session/callback"), "callback-ui");
 });
 
 test("unregister closes subscriptions and rejects later delivery", async () => {
@@ -38,4 +40,12 @@ test("unregister closes subscriptions and rejects later delivery", async () => {
   await assert.rejects(router.deliver("UI", {
     version: "substrate.v1", kind: "stream", id: "evt", signal: "selection", meta: {}
   }), (error) => error instanceof NodeProtocolError && error.code === "session/not-found");
+});
+
+test("a lifecycle registration can be augmented by explicit Hara capabilities", () => {
+  const ui = context();
+  const router = new SessionRouter();
+  router.register("UI", ui, { capabilities: ["input/keyboard"] });
+  const info = router.register("UI", ui, { capabilities: ["surface/canvas-2d"] });
+  assert.deepEqual(info.capabilities, ["input/keyboard", "surface/canvas-2d"]);
 });

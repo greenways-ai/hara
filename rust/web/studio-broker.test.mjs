@@ -123,6 +123,20 @@ test("close terminates context and worker and removes the kernel", async () => {
   await assert.rejects(broker.close("alpha"), /^Error: NO_SESSION alpha$/);
 });
 
+test("kernel lifecycle hooks observe created sessions before release", async () => {
+  const { spawn } = mockSpawn();
+  const events = [];
+  const broker = new KernelBroker({
+    spawn,
+    onKernelCreated: async (kernel) => events.push(["created", kernel.name]),
+    onKernelClosed: async (kernel) => events.push(["closed", kernel.name])
+  });
+  await broker.require("ROOT");
+  await broker.create("alpha");
+  await broker.close("alpha");
+  assert.deepEqual(events, [["created", "ROOT"], ["created", "alpha"], ["closed", "alpha"]]);
+});
+
 test("ns+ documents activate isolated generations and roll back failed reloads", async () => {
   const { spawn, spawned } = mockSpawn();
   const broker = new KernelBroker({

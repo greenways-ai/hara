@@ -19,9 +19,11 @@ const NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
  * report ROOT once its spawn has been triggered.
  */
 export class KernelBroker {
-  constructor({ spawn, resources = {} }) {
+  constructor({ spawn, resources = {}, onKernelCreated = async () => {}, onKernelClosed = async () => {} }) {
     this.spawn = spawn;
     this.resources = resources;
+    this.onKernelCreated = onKernelCreated;
+    this.onKernelClosed = onKernelClosed;
     this.kernels = new Map(); // name -> { name, context, worker }
     this.pending = new Map(); // name -> in-flight create promise
     this.rootStart = null; // in-flight ROOT spawn promise, once triggered
@@ -45,6 +47,7 @@ export class KernelBroker {
     try {
       const kernel = await boot;
       this.kernels.set(name, kernel);
+      await this.afterCreate(kernel);
       return kernel;
     } finally {
       this.pending.delete(name);
@@ -164,8 +167,12 @@ export class KernelBroker {
       if (document.kernel !== name) continue;
       this.releaseDocument(name, document.documentId);
     }
-    kernel.context?.close?.();
-    kernel.worker?.terminate?.();
+    try {
+      await this.onKernelClosed(kernel);
+    } finally {
+      kernel.context?.close?.();
+      kernel.worker?.terminate?.();
+    }
   }
 
   list() {
@@ -184,7 +191,7 @@ export class KernelBroker {
     this.rootStart ??= this.boot(ROOT).then(
       (kernel) => {
         this.kernels.set(ROOT, kernel);
-        return kernel;
+        return this.afterCreate(kernel).then(() => kernel);
       },
       (error) => {
         this.rootStart = null; // allow a later access to retry
@@ -209,6 +216,17 @@ export class KernelBroker {
       throw error;
     }
     return { name, context, worker };
+  }
+
+  async afterCreate(kernel) {
+    try {
+      await this.onKernelCreated(kernel);
+    } catch (error) {
+      this.kernels.delete(kernel.name);
+      kernel.context?.close?.();
+      kernel.worker?.terminate?.();
+      throw error;
+    }
   }
 }
 
@@ -381,9 +399,14 @@ function sharedWorkerPort(url) {
   };
 }
 
-export function createBrowserBroker({ workerUrl, sharedWorkerUrl, moduleBytes, hostCalls = {}, resources }) {
+export function createBrowserBroker({
+  workerUrl, sharedWorkerUrl, moduleBytes, hostCalls = {}, resources,
+  onKernelCreated, onKernelClosed
+}) {
   return new KernelBroker({
     resources,
+    onKernelCreated,
+    onKernelClosed,
     spawn: async (name) => {
       const worker = sharedWorkerUrl && typeof SharedWorker !== "undefined"
         ? sharedWorkerPort(sharedWorkerUrl)

@@ -12,7 +12,15 @@ export class SessionRouter {
 
   register(sessionId, context, { capabilities = [], onRelease = null } = {}) {
     if (!sessionId || !context?.call) throw new NodeProtocolError("session/invalid", "session requires an id and HtaContext");
-    if (this.sessions.has(sessionId)) throw new NodeProtocolError("session/already-exists", `session already registered: ${sessionId}`);
+    const existing = this.sessions.get(sessionId);
+    if (existing) {
+      if (existing.context !== context) {
+        throw new NodeProtocolError("session/already-exists", `session already registered: ${sessionId}`);
+      }
+      for (const capability of capabilities) existing.capabilities.add(capability);
+      existing.onRelease = onRelease ?? existing.onRelease;
+      return this.info(sessionId);
+    }
     this.sessions.set(sessionId, { id: sessionId, context, capabilities: new Set(capabilities), onRelease });
     return this.info(sessionId);
   }
@@ -47,7 +55,7 @@ export class SessionRouter {
     if (!matching.length) return { accepted: true, delivered: 0 };
     await Promise.all(matching.map((subscription) => session.context.call("eval-bound", [
       this.ingressSource,
-      [{ ...normalized, meta: { ...normalized.meta, "session/callback": subscription.callbackId } }]
+      [toHta({ ...normalized, meta: { ...normalized.meta, "session/callback": subscription.callbackId } })]
     ])));
     return { accepted: true, delivered: matching.length };
   }
@@ -68,4 +76,16 @@ export class SessionRouter {
     if (!session) throw new NodeProtocolError("session/not-found", `unknown session: ${sessionId}`);
     return session;
   }
+}
+
+// HtaContext only accepts the codec's Map/array/scalar value vocabulary.
+// Keep this conversion at the compatibility boundary so host graph transport
+// itself remains plain normalized substrate data.
+function toHta(value) {
+  if (Array.isArray(value)) return value.map(toHta);
+  if (value !== null && typeof value === "object" &&
+      !(value instanceof Uint8Array) && !(value instanceof ArrayBuffer) && !ArrayBuffer.isView(value)) {
+    return new Map(Object.entries(value).map(([key, entry]) => [key, toHta(entry)]));
+  }
+  return value;
 }

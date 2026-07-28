@@ -1,0 +1,30 @@
+;; studio.graph — substrate-frame graph operations for Hara coordinators.
+(ns studio.graph
+  (:require [std.substrate.frame :as frame]))
+
+(defn spawn
+  ([descriptor]
+   (spawn descriptor {}))
+  ([descriptor options]
+   (deref (host/call "graph" "spawn" descriptor options))))
+
+(defn release [node-id]
+  (deref (host/call "graph" "release" node-id)))
+
+(defn connect [descriptor]
+  (deref (host/call "graph" "connect" descriptor)))
+
+(defn disconnect [connection-id]
+  (deref (host/call "graph" "disconnect" connection-id)))
+
+(defn send-frame [source frame]
+  (deref (host/call "graph" "send-frame" source (frame/normalize-frame frame))))
+
+(defn call-frame [source frame]
+  (deref (host/call "graph" "call-frame" source (frame/normalize-frame frame))))
+
+(defn info [node-id]
+  (deref (host/call "graph" "info" node-id)))
+
+(defn list []
+  (deref (host/call "graph" "list")))

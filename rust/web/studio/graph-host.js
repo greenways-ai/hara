@@ -54,9 +54,15 @@ export class GraphHost {
   }
 
   async releaseSession(sessionId) {
-    const nodes = this.programs.list({ sessionId }).map((entry) => entry.nodeId);
-    for (const nodeId of nodes) this.runtime.releaseNode(nodeId);
-    return this.programs.releaseSession(sessionId);
+    const hostNodes = this.programs.list({ sessionId }).map((entry) => entry.nodeId);
+    const sessionNodes = [...this.runtime.nodes.values()]
+      .map((node) => node.publicInfo())
+      .filter((node) => node.sessionId === sessionId)
+      .map((node) => node.id);
+    const ids = new Set([...hostNodes, ...sessionNodes]);
+    for (const nodeId of ids) this.runtime.releaseNode(nodeId);
+    await this.programs.releaseSession(sessionId);
+    return ids.size;
   }
 
   async deliver({ targetNode, port, frame, connection }) {

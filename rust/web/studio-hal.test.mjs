@@ -8,6 +8,7 @@ import { KernelBroker } from "./studio/broker.js";
 import { defaultBootstrap } from "./studio/boot.js";
 import { createHostServices } from "./studio/host-services.js";
 import { NodeRuntime } from "./studio/node-runtime.js";
+import { SessionRouter } from "./studio/session-router.js";
 
 // Real-wasm integration tests for the studio hara libraries
 // (rust/web/studio/hal/*.hal): store/fs/space/boot behaviour is asserted by
@@ -24,6 +25,9 @@ const resources = wasmBytes === null
       "studio.space": await hal("space"),
       "studio.boot": await hal("boot"),
       "studio.node": await hal("node"),
+      "studio.program": await hal("program"),
+      "studio.graph": await hal("graph"),
+      "studio.session": await hal("session"),
       "std.substrate.protocol": await readFile(new URL("../../lib/src/std/substrate/protocol.hal", import.meta.url), "utf8"),
       "std.substrate.frame": await readFile(new URL("../../lib/src/std/substrate/frame.hal", import.meta.url), "utf8"),
       "std.substrate": await readFile(new URL("../../lib/src/std/substrate.hal", import.meta.url), "utf8")
@@ -159,6 +163,61 @@ test("studio.node sends std.substrate.frame envelopes through the browser adapte
     '(node/call "node/b" "double" [21] {:id "req-1" :meta {:trace "studio"}})'
   );
   assert.equal(value, 42);
+});
+
+test("studio.program and studio.graph bridge their host-call operations", { skip: wasmBytes === null }, async () => {
+  const calls = [];
+  const graphHost = {
+    programs: { release: async (id) => { calls.push(["program/release", id]); return true; } },
+    install: async (descriptor, options) => { calls.push(["program/install", descriptor, options]); return { programId: descriptor["program/id"] }; },
+    programInfo: (id) => ({ programId: id }),
+    spawn: async (descriptor) => ({ nodeId: descriptor["node/id"] }),
+    release: async () => true,
+    connect: () => "connection-1",
+    disconnect: () => true,
+    sendFrame: async (_source, frame) => ({ accepted: true, frame }),
+    callFrame: async () => ({ data: 42 }),
+    info: (id) => ({ nodeId: id }),
+    list: () => []
+  };
+  const hostCalls = createHostServices({
+    dbName: `hara-studio-graph-test-${++brokerCounter}`,
+    fetch: mockFetch(),
+    graphHost
+  });
+  const broker = new KernelBroker({ resources, spawn: () => spawnRealKernel(hostCalls) });
+  const value = await broker.eval("ROOT", "(do " +
+    "(require [studio.program :as program]) " +
+    "(require [studio.graph :as graph]) " +
+    '(program/install {"program/id" "example/transform"} {"sessionId" "ROOT"}) ' +
+    '(graph/send-frame "node/source" {"kind" "stream" "id" "evt-1" "signal" "out" "data" 42}))');
+  assert.equal(mapGet(value, "accepted"), true);
+  assert.deepEqual(calls[0], ["program/install", { "program/id": "example/transform" }, { sessionId: "ROOT" }]);
+});
+
+test("studio.session registers a callback and receives only its subscribed frame", { skip: wasmBytes === null }, async () => {
+  const sessions = new SessionRouter();
+  const released = [];
+  const graphHost = { releaseSession: async (id) => released.push(id) };
+  const hostCalls = createHostServices({
+    dbName: `hara-studio-session-test-${++brokerCounter}`,
+    fetch: mockFetch(),
+    graphHost,
+    graphHostOptions: { sessionRouter: sessions }
+  });
+  const broker = new KernelBroker({ resources, spawn: () => spawnRealKernel(hostCalls) });
+  const callbackId = await broker.eval("ROOT", "(do " +
+    "(require [studio.session :as session]) " +
+    '(session/register-ingress! "ROOT") ' +
+    '(session/on "ROOT" "selected" (fn [event] (get event "data"))))');
+  assert.equal(typeof callbackId, "string");
+  const delivered = await sessions.deliver("ROOT", {
+    version: "substrate.v1", kind: "stream", id: "evt-selected", signal: "selected", data: 7,
+    meta: { "session/callback": callbackId }
+  });
+  assert.deepEqual(delivered, { accepted: true, delivered: 1 });
+  assert.equal(await broker.eval("ROOT", '(session/unregister-ingress! "ROOT")'), true);
+  assert.deepEqual(released, ["ROOT"]);
 });
 
 test("studio.node registers kernel-owned request handlers", { skip: wasmBytes === null }, async () => {

@@ -1,0 +1,14 @@
+;; studio.program — Hara-facing lifecycle for generated host programs.
+(ns studio.program)
+
+(defn install
+  ([descriptor]
+   (install descriptor {}))
+  ([descriptor options]
+   (deref (host/call "program" "install" descriptor options))))
+
+(defn info [program-id]
+  (deref (host/call "program" "info" program-id)))
+
+(defn release [program-id]
+  (deref (host/call "program" "release" program-id)))
