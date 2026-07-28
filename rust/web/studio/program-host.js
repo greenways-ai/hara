@@ -165,14 +165,15 @@ export class ProgramHost {
 
 /** Browser executor for ordinary generated JavaScript. It keeps source module
  * loading in a module Worker and exposes only the command protocol used by
- * ProgramHost. Capability RPC is deliberately left to GraphHost in phase 2. */
+ * ProgramHost. Capabilities and node calls are routed through GraphHost. */
 export class ProgramWorkerExecutor {
-  constructor({ workerUrl, WorkerImpl = globalThis.Worker, onEmission = () => {}, onLog = () => {}, onCapability = null } = {}) {
+  constructor({ workerUrl, WorkerImpl = globalThis.Worker, onEmission = () => {}, onLog = () => {}, onCapability = null, onCall = null } = {}) {
     if (!workerUrl || !WorkerImpl) throw new Error("ProgramWorkerExecutor requires workerUrl and Worker");
     this.worker = new WorkerImpl(workerUrl, { type: "module" });
     this.onEmission = onEmission;
     this.onLog = onLog;
     this.onCapability = onCapability;
+    this.onCall = onCall;
     this.nextId = 0;
     this.pending = new Map();
     this.worker.addEventListener("message", (event) => this.receive(event.data));
@@ -203,6 +204,7 @@ export class ProgramWorkerExecutor {
     if (message?.type === "emission") return this.onEmission(message);
     if (message?.type === "log") return this.onLog(message);
     if (message?.type === "capability") return this.handleCapability(message);
+    if (message?.type === "host-call") return this.handleCall(message);
     const pending = this.pending.get(message?.id);
     if (!pending) return;
     this.pending.delete(message.id);
@@ -226,6 +228,23 @@ export class ProgramWorkerExecutor {
     } catch (error) {
       this.worker.postMessage({ type: "capability-error", requestId: message.requestId, error: {
         code: error?.code ?? "program/capability-error", message: String(error?.message ?? error)
+      } });
+    }
+  }
+
+  async handleCall(message) {
+    if (!this.onCall) {
+      this.worker.postMessage({ type: "host-call-error", requestId: message.requestId, error: {
+        code: "node/call-unavailable", message: "GraphHost has no node call router"
+      } });
+      return;
+    }
+    try {
+      const value = await this.onCall(message);
+      this.worker.postMessage({ type: "host-call-result", requestId: message.requestId, value });
+    } catch (error) {
+      this.worker.postMessage({ type: "host-call-error", requestId: message.requestId, error: {
+        code: error?.code ?? "node/call-error", message: String(error?.message ?? error)
       } });
     }
   }

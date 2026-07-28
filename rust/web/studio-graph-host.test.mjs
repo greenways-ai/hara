@@ -12,7 +12,7 @@ function executor() {
     async install(value) { calls.push(["install", value]); },
     async spawn(value) { calls.push(["spawn", value]); },
     async deliver(nodeId, port, frame) { calls.push(["deliver", nodeId, port, frame]); return { accepted: true }; },
-    async call() { return null; },
+    async call(...value) { calls.push(["call", ...value]); return null; },
     async releaseNode() {},
     async releaseProgram() {}
   };
@@ -75,6 +75,21 @@ test("GraphHost permits Worker capability calls only for the owning granted sess
   await assert.rejects(graph.invokeCapability({
     nodeId: "node/assets", sessionId: "MARKET", capability: "asset/load", method: "load", args: []
   }), /not owned/);
+});
+
+test("GraphHost routes a generated node call to another generated node", async () => {
+  const active = executor();
+  const graph = new GraphHost({ executor: active });
+  await graph.install(program("example/source"), { sessionId: "UI" });
+  await graph.install(program("example/target"), { sessionId: "UI" });
+  await graph.spawn(node("node/source", "example/source"));
+  await graph.spawn(node("node/target", "example/target"));
+  assert.equal(await graph.invokeProgramCall({
+    nodeId: "node/source", sessionId: "UI", target: "node/target",
+    action: "transform", args: [41]
+  }), null);
+  assert.deepEqual(active.calls.find(([kind]) => kind === "call").slice(0, 4),
+    ["call", "node/target", "transform", [41]]);
 });
 
 test("a graph session target routes a selected event into its addressed Hara session", async () => {

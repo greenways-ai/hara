@@ -5,11 +5,17 @@
 const programs = new Map();
 const nodes = new Map();
 const capabilityCalls = new Map();
+const hostCalls = new Map();
 let nextCapabilityCall = 0;
+let nextHostCall = 0;
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "capability-result" || event.data?.type === "capability-error") {
     receiveCapabilityResult(event.data);
+    return;
+  }
+  if (event.data?.type === "host-call-result" || event.data?.type === "host-call-error") {
+    receiveHostCallResult(event.data);
     return;
   }
   handle(event.data).catch((error) => replyError(event.data?.id, error));
@@ -101,9 +107,7 @@ function apiFor(descriptor) {
     nodeId: descriptor.nodeId,
     sessionId: descriptor.sessionId,
     emit: (signal, data, meta = {}) => postMessage({ type: "emission", nodeId: descriptor.nodeId, sessionId: descriptor.sessionId, signal, data, meta }),
-    call: (target, action, args, options = {}) => {
-      throw structured("node/call-unavailable", `host call routing is not installed for ${target}/${action}`, { options, args });
-    },
+    call: (target, action, args, options = {}) => hostCall(descriptor, target, action, args, options),
     capability: (name) => capabilityFacade(descriptor, String(name)),
     schedule: (callback, delayMs = 0) => setTimeout(callback, delayMs),
     cancelSchedule: (token) => clearTimeout(token),
@@ -146,6 +150,26 @@ function receiveCapabilityResult(message) {
   capabilityCalls.delete(message.requestId);
   if (message.type === "capability-error") {
     pending.reject(structured(message.error?.code ?? "program/capability-error", message.error?.message ?? "capability call failed"));
+  } else {
+    pending.resolve(message.value);
+  }
+}
+
+function hostCall(descriptor, target, action, args, options) {
+  const requestId = `host-call-${++nextHostCall}`;
+  return new Promise((resolve, reject) => {
+    hostCalls.set(requestId, { resolve, reject });
+    postMessage({ type: "host-call", requestId, nodeId: descriptor.nodeId,
+      sessionId: descriptor.sessionId, target, action, args, options });
+  });
+}
+
+function receiveHostCallResult(message) {
+  const pending = hostCalls.get(message.requestId);
+  if (!pending) return;
+  hostCalls.delete(message.requestId);
+  if (message.type === "host-call-error") {
+    pending.reject(structured(message.error?.code ?? "node/call-error", message.error?.message ?? "node call failed"));
   } else {
     pending.resolve(message.value);
   }

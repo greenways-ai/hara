@@ -121,13 +121,20 @@ test("worker capability requests are correlated and return structured denials", 
   const executor = new ProgramWorkerExecutor({
     workerUrl: "program-worker.js",
     WorkerImpl: class { constructor() { return worker; } },
-    onCapability: async (message) => `${message.capability}/${message.method}:${message.args[0]}`
+    onCapability: async (message) => `${message.capability}/${message.method}:${message.args[0]}`,
+    onCall: async (message) => `${message.target}/${message.action}:${message.args[0]}`
   });
   worker.emit({ type: "capability", requestId: "cap-1", nodeId: "node/a", sessionId: "UI",
     capability: "asset/load", method: "load", args: ["cover.png"] });
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(worker.sent.at(-1), {
     type: "capability-result", requestId: "cap-1", value: "asset/load/load:cover.png"
+  });
+  worker.emit({ type: "host-call", requestId: "call-1", nodeId: "node/a", sessionId: "UI",
+    target: "node/b", action: "transform", args: [41], options: {} });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(worker.sent.at(-1), {
+    type: "host-call-result", requestId: "call-1", value: "node/b/transform:41"
   });
 
   const deniedWorker = new WorkerStub();

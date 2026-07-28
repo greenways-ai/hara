@@ -18,7 +18,8 @@ export class GraphHost {
       workerUrl,
       onEmission: (message) => this.receiveEmission(message),
       onLog: (message) => this.diagnostics({ kind: "program/log", ...message }),
-      onCapability: (message) => this.invokeCapability(message)
+      onCapability: (message) => this.invokeCapability(message),
+      onCall: (message) => this.invokeProgramCall(message)
     });
     this.programs = new ProgramHost({ executor: activeExecutor, diagnostics });
     this.sessionRouter = sessionRouter;
@@ -113,5 +114,18 @@ export class GraphHost {
       throw new ProgramError("program/session-mismatch", `node ${nodeId} is not owned by ${sessionId}`, { nodeId, sessionId });
     }
     return this.capabilities.invokeForNode(sessionId, nodeId, capability, method, ...args);
+  }
+
+  async invokeProgramCall({ nodeId, sessionId, target, action, args = [], options = {} }) {
+    const node = this.programs.requireNode(nodeId);
+    if (node.sessionId !== sessionId) {
+      throw new ProgramError("program/session-mismatch", `node ${nodeId} is not owned by ${sessionId}`, { nodeId, sessionId });
+    }
+    const targetNode = this.runtime.requireNode(String(target));
+    if (targetNode.execution === "host") {
+      return this.programs.call(String(target), String(action), args, null);
+    }
+    const response = await this.runtime.call(nodeId, String(target), String(action), args, options);
+    return response.data;
   }
 }
