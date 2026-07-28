@@ -22,7 +22,16 @@ test("www is a single Home screen with external site navigation", async ({ page 
 
   await page.locator("[data-launcher-toggle]").click();
   await expect(page.locator("[data-launcher]")).toHaveAttribute("aria-hidden", "false");
-  await expect(page.locator(".site-launcher-links a")).toHaveCount(5);
+  const siteLinks = page.locator(".site-launcher-links a");
+  await expect(siteLinks).toHaveCount(5);
+  await expect.poll(() => siteLinks.evaluateAll((links) =>
+    links.every((link) =>
+      link.getAttribute("target") === "_blank"
+      && link.getAttribute("rel") === "noopener noreferrer"
+    )
+  )).toBe(true);
+  const launcherBox = await page.locator("[data-launcher]").boundingBox();
+  expect(launcherBox.width).toBeLessThanOrEqual(560);
   await expect(page.getByRole("link", { name: "PLAYGROUND" })).toBeVisible();
   await expect(page.getByRole("link", { name: "DOCS" })).toBeVisible();
   await expect(page.getByRole("link", { name: "SPECS" })).toBeVisible();
