@@ -257,9 +257,9 @@ body[data-workspace="1"] .atmosphere {
   top: var(--bar-height);
   right: 0;
   bottom: 0;
-  width: min(46vw, 720px);
+  width: min(64vw, 960px);
   display: none;
-  grid-template-rows: 38px 1fr 28px;
+  grid-template-rows: 38px 34px minmax(0, 1fr) 28px;
   color: var(--text);
   background: rgba(2, 5, 10, .97);
   border-left: 1px solid var(--line-strong);
@@ -284,33 +284,38 @@ body[data-workspace="1"] .atmosphere {
 .background-source-panel > header span { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .background-source-panel > footer { border-top: 1px solid var(--line); border-bottom: 0; }
 
-.background-editor-shell { position: relative; min-height: 0; overflow: hidden; }
-.background-editor-shell pre,
-.background-editor-shell textarea {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  box-sizing: border-box;
-  margin: 0;
-  padding: 1rem;
-  overflow: auto;
+.background-editor-toolbar {
+  min-height: 34px;
+  border-bottom: 1px solid var(--line);
+}
+
+.background-editor-toolbar button {
+  border-left: 0;
+  border-right: 1px solid var(--line);
+}
+
+.background-editor-shell {
+  min-height: 0;
   border: 0;
-  font: 12px/1.55 var(--mono);
-  tab-size: 2;
-  white-space: pre;
+  background: #010307;
 }
-.background-editor-shell pre { color: var(--text); pointer-events: none; }
+
+.background-editor-shell .code-highlight,
 .background-editor-shell textarea {
-  color: transparent;
-  caret-color: var(--cyan-bright);
-  background: transparent;
-  resize: none;
+  font-size: .68rem;
+  line-height: 1.65;
 }
-.background-editor-shell textarea::selection { color: transparent; background: rgba(65, 245, 228, .22); }
+
+.background-editor-shell .code-highlight {
+  overflow: hidden;
+}
+
+.background-editor-shell textarea {
+  overflow: auto;
+}
 
 body.source-open .tron-field,
-body.source-open .atmosphere { right: min(46vw, 720px); width: auto; }
+body.source-open .atmosphere { right: min(64vw, 960px); width: auto; }
 
 .runtime-state {
   height: 100%;

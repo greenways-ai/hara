@@ -18,7 +18,7 @@
   <title>Hara - A Modern Lisp for the Agentic Age</title>
   <link rel="stylesheet" href="./vendor/hara-ui/tokens.css">
   <link rel="stylesheet" href="./vendor/hara-ui/components.css">
-  <link rel="stylesheet" href="./app.css?v=auth-ai-kernel-1">
+  <link rel="stylesheet" href="./app.css?v=studio-effects-1">
 </head>
 <body>
   <canvas class="tron-field" data-tron aria-hidden="true"></canvas>
@@ -57,14 +57,27 @@
     <header>
       <strong>LIVE BACKGROUND SOURCE</strong>
       <span data-background-status>WAITING FOR RUNTIME</span>
-      <button type="button" data-background-save>SAVE</button>
     </header>
-    <div class="background-editor-shell">
-      <pre data-background-highlight aria-hidden="true"></pre>
+    <div class="window-toolbar editor-toolbar background-editor-toolbar">
+      <div>
+        <button type="button" class="paredit-button" data-background-paredit
+                aria-pressed="true">PAREDIT ON</button>
+        <button type="button" class="run-button" data-background-apply>
+          <span aria-hidden="true">▶</span> APPLY
+        </button>
+        <button type="button" data-background-save>SAVE</button>
+      </div>
+    </div>
+    <label class="editor-surface background-editor-shell">
+      <span class="sr-only">Live HAL background source</span>
+      <span class="line-numbers" data-background-line-numbers aria-hidden="true">1</span>
+      <pre class="code-highlight" data-background-highlight aria-hidden="true"></pre>
       <textarea data-background-editor spellcheck="false" wrap="off"
                 aria-label="Live HAL background source"></textarea>
-    </div>
-    <footer>LIVE PREVIEW · TAB ALIGN · PAREDIT · CTRL-S SAVE · ERRORS ROLL BACK</footer>
+    </label>
+    <footer>
+      LIVE PREVIEW · CTRL-ENTER APPLY · CTRL-S SAVE · COMMENTS MARK SAFE CHANGES
+    </footer>
   </aside>
 
   <aside class="app-launcher" id="app-launcher" data-launcher aria-hidden="true">
@@ -353,6 +366,6 @@
   </dialog>
 
   <div class="toast-stack" data-toasts aria-live="polite"></div>
-  <script type="module" src="./app.js?v=auth-ai-kernel-1"></script>
+  <script type="module" src="./app.js?v=studio-effects-1"></script>
 </body>
 </html>

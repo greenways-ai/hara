@@ -76,14 +76,19 @@ runtimeTest("www runs workspace-discovered HAL background programs", async ({ pa
   const canvas = page.locator("[data-tron]");
   const source = page.locator("select[data-background-source]");
 
-  await expect(source.locator("option")).toHaveCount(4);
+  await expect(source.locator("option")).toHaveCount(5);
   await expect(source).toHaveValue("document/background/tron");
   await expect(canvas).toHaveAttribute("data-background-name", "tron");
   await expect(page.locator("[data-background-status]")).toContainText("GENERATION");
   await expect.poll(() => canvas.evaluate((node) => node.width * node.height)).toBeGreaterThan(0);
 
-  await source.selectOption("document/background/grid");
-  await expect(canvas).toHaveAttribute("data-background-name", "grid");
+  await expect(source.locator('option[value="document/background/grid"]')).toHaveCount(0);
+  await source.selectOption("document/background/aurora");
+  await expect(canvas).toHaveAttribute("data-background-name", "aurora");
+  await expect(page.locator("[data-background-status]")).toContainText("GENERATION");
+
+  await source.selectOption("document/background/pulse");
+  await expect(canvas).toHaveAttribute("data-background-name", "pulse");
   await expect(page.locator("[data-background-status]")).toContainText("GENERATION");
 
   await source.selectOption("document/background/fire");
@@ -103,6 +108,10 @@ runtimeTest("live source errors roll back and explicit save uses the local overl
   await page.locator("[data-source-toggle]").click();
   const editor = page.locator("[data-background-editor]");
   await expect(editor).toBeVisible();
+  await expect(page.locator("[data-background-line-numbers]")).toBeVisible();
+  await expect(page.locator("[data-background-paredit]")).toHaveText("PAREDIT ON");
+  await expect(page.locator("[data-background-apply]")).toBeVisible();
+  await expect(page.locator("[data-background-highlight]")).toHaveCSS("overflow", "hidden");
   const goodSource = await editor.inputValue();
   await editor.fill("(ns+");
   await expect(page.locator("[data-background-status]")).toContainText("ERROR", { timeout: 10000 });

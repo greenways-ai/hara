@@ -165,7 +165,10 @@ const elements = {
   sourcePanel: query("[data-background-panel]"),
   sourceEditor: query("[data-background-editor]"),
   sourceHighlight: query("[data-background-highlight]"),
+  sourceLineNumbers: query("[data-background-line-numbers]"),
   sourceStatus: query("[data-background-status]"),
+  sourceParedit: query("[data-background-paredit]"),
+  sourceApply: query("[data-background-apply]"),
   sourceSave: query("[data-background-save]"),
   fileTree: query("[data-file-tree]"),
   fileCount: query("[data-file-count]"),
@@ -353,6 +356,8 @@ async function loadBackgroundSource(name, sourceOverride = null) {
     canvas.hidden = state.workspace === 1;
     canvas.dataset.backgroundName = descriptor.title.toLowerCase();
     elements.sourceEditor.value = source;
+    elements.sourceEditor.scrollTop = 0;
+    elements.sourceEditor.scrollLeft = 0;
     elements.sourceEditor.dataset.baseSource = loaded.bundled;
     elements.sourceEditor.dataset.documentId = descriptor.id;
     elements.sourceStatus.textContent =
@@ -1278,6 +1283,12 @@ function syncBackgroundHighlight() {
   elements.sourceHighlight.innerHTML = highlightHara(elements.sourceEditor.value);
   elements.sourceHighlight.style.transform =
     `translate(${-elements.sourceEditor.scrollLeft}px, ${-elements.sourceEditor.scrollTop}px)`;
+  const base = elements.sourceEditor.dataset.baseSource ?? "";
+  const changed = changedLineNumbers(base, elements.sourceEditor.value);
+  elements.sourceLineNumbers.innerHTML = elements.sourceEditor.value.split("\n").map((_, index) =>
+    `<span class="${changed.has(index) ? "is-changed" : ""}">${index + 1}</span>`
+  ).join("\n");
+  elements.sourceLineNumbers.scrollTop = elements.sourceEditor.scrollTop;
 }
 
 function setSourcePanel(open) {
@@ -1323,21 +1334,46 @@ function installBackgroundEditor() {
   });
   elements.sourceEditor.addEventListener("scroll", syncBackgroundHighlight);
   elements.sourceEditor.addEventListener("keydown", (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+    const modifier = event.ctrlKey || event.metaKey;
+    if (modifier && event.key.toLowerCase() === "s") {
       event.preventDefault();
       void saveBackgroundSource();
       return;
     }
+    if (modifier && event.key === "Enter") {
+      event.preventDefault();
+      clearTimeout(state.sourceTimer);
+      void loadBackgroundSource(
+        elements.sourceEditor.dataset.documentId,
+        elements.sourceEditor.value
+      );
+      return;
+    }
     if (event.key === "Tab") {
       event.preventDefault();
-      structuralAlign(elements.sourceEditor);
+      if (event.shiftKey) insertIndent(elements.sourceEditor, true);
+      else structuralAlign(elements.sourceEditor);
       elements.sourceEditor.dispatchEvent(new Event("input", { bubbles: true }));
       return;
     }
-    if (applyParedit(elements.sourceEditor, event.key)) {
+    if (elements.sourceParedit.getAttribute("aria-pressed") === "true" &&
+        !event.metaKey && !event.ctrlKey && !event.altKey &&
+        applyParedit(elements.sourceEditor, event.key)) {
       event.preventDefault();
       elements.sourceEditor.dispatchEvent(new Event("input", { bubbles: true }));
     }
+  });
+  elements.sourceParedit.addEventListener("click", () => {
+    const enabled = elements.sourceParedit.getAttribute("aria-pressed") !== "true";
+    elements.sourceParedit.setAttribute("aria-pressed", String(enabled));
+    elements.sourceParedit.textContent = enabled ? "PAREDIT ON" : "PAREDIT OFF";
+  });
+  elements.sourceApply.addEventListener("click", () => {
+    clearTimeout(state.sourceTimer);
+    void loadBackgroundSource(
+      elements.sourceEditor.dataset.documentId,
+      elements.sourceEditor.value
+    );
   });
   elements.sourceSave.addEventListener("click", () => void saveBackgroundSource());
 }

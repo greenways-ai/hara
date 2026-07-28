@@ -1,13 +1,10 @@
 (ns+
   (:require [studio.draw :as draw]))
 
-;; EFFECT: A cyan-to-violet flame rendered as a small WebGL2 shader.
-;; TRY: change 18.0 to alter the horizontal detail.
-;; TRY: change 9.0 to make the flame climb faster or slower.
-;; TRY: edit cyan and violet below to build a custom gradient.
+;; EFFECT: Concentric signal rings that breathe around the Hara workspace.
+;; TRY: change the 18.0 ring count for broader or tighter bands.
+;; TRY: increase 0.0012 to make the pulse travel faster.
 
-;; This vertex shader draws one full-screen triangle. All visible detail is
-;; calculated by the fragment shader, so no mesh or asset download is needed.
 (def vertex-shader
   "#version 300 es
 precision highp float;
@@ -22,18 +19,21 @@ precision highp float;
 out vec4 color;
 uniform float u_time;
 uniform vec2 u_resolution;
-float noise(vec2 p) {
-  return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453);
-}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution.xy;
-  float t = u_time * 0.001;
-  float n = noise(vec2(uv.x * 18.0, floor(uv.y * 34.0 - t * 9.0)));
-  float flame = smoothstep(0.92, 0.08, uv.y) * (0.55 + 0.45 * n);
+  vec2 p = uv * 2.0 - 1.0;
+  p.x *= u_resolution.x / u_resolution.y;
+  float distanceFromCenter = length(p);
+  float wave = sin(distanceFromCenter * 18.0 - u_time * 0.0012);
+  float ring = pow(max(0.0, wave), 14.0);
+  float halo = 0.025 / max(0.04, abs(wave));
   vec3 cyan = vec3(0.05, 0.95, 0.88);
-  vec3 violet = vec3(0.57, 0.13, 1.0);
-  vec3 ink = vec3(0.003, 0.008, 0.02);
-  color = vec4(mix(ink, mix(cyan, violet, uv.y), flame), 1.0);
+  vec3 violet = vec3(0.58, 0.14, 1.0);
+  vec3 ink = vec3(0.002, 0.006, 0.016);
+  vec3 tint = mix(cyan, violet, clamp(distanceFromCenter, 0.0, 1.0));
+  float vignette = smoothstep(1.45, 0.2, distanceFromCenter);
+  color = vec4(ink + tint * (ring * 0.65 + halo * 0.18) * vignette, 1.0);
 }")
 
 (node/start
@@ -54,8 +54,8 @@ void main() {
                           "u_resolution" [width height]}
                :fallback
                {:type :canvas-2d
-                :background "#090313"
+                :background "#02040c"
                 :commands
-                [[:text "FIRE.HAL // WEBGL2 FALLBACK"
+                [[:text "PULSE.HAL // WEBGL2 REQUIRED"
                   24 (- height 24) "#9c7bff" 11]]}}))
           (recur (+ tick 1)))))))

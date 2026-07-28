@@ -1,8 +1,11 @@
 (ns+
   (:require [studio.draw :as draw]))
 
-;; All game state lives here. The browser only schedules a frame and executes
-;; the complete Canvas2D command scene returned by render-state.
+;; EFFECT: Four light cycles draw animated ribbons behind the Hara home screen.
+;; All state lives in HAL; the browser only schedules frames and draws commands.
+;; TRY: change 4 to 6 for faster cycles.
+;; TRY: edit the four hex colors in render-state to create a custom palette.
+;; TRY: increase 11 in cycle-commands for wider neon trails.
 (def directions [[4 0] [0 4] [-4 0] [0 -4]])
 
 (defn either [a b] (if a true b))
@@ -92,10 +95,10 @@
     {:type :canvas-2d
      :background "#02050b"
      :commands
-     [[:grid 46 "rgba(65,245,228,.055)" 1]
-      (nth cyan 1) (nth cyan 2)
-      (nth pink 1) (nth pink 2)
-      (nth violet 1) (nth violet 2)
+     [(nth cyan 0) (nth cyan 1) (nth cyan 2)
+      (nth pink 0) (nth pink 1) (nth pink 2)
+      (nth violet 0) (nth violet 1) (nth violet 2)
+      (nth gold 0) (nth gold 1) (nth gold 2)
       [:text "TRON.HAL // ARROWS OR SWIPE" 24 (- height 24) "#65c9d0" 11]]}))
 
 (node/start
