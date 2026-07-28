@@ -1,0 +1,227 @@
+(ns+
+  (:require [studio.draw :as draw]))
+
+;; EFFECT: Raymarched procedural ocean with animated waves and atmosphere.
+;; PORT: Adapted from afl_ext's 2017–2024 MIT-licensed water shader.
+;; CAMERA: The original mouse camera is replaced by a slow automatic orbit so
+;; the background works without pointer input and remains useful on mobile.
+;; TRY: change 0.38 in waveHeight to make the waves pull more or less.
+;; TRY: change the deep-water color near the end of the shader.
+;; PERFORMANCE: The normal field uses 18 octaves, balancing detail with phones.
+
+(def vertex-shader
+  "#version 300 es
+precision highp float;
+void main() {
+  vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+")
+
+(def fragment-shader
+  "#version 300 es
+precision highp float;
+out vec4 color;
+uniform float u_time;
+uniform vec2 u_resolution;
+
+const float WATER_DEPTH = 1.0;
+const float CAMERA_HEIGHT = 1.5;
+
+vec2 waveDerivative(vec2 position, vec2 direction,
+    float frequency, float timeShift) {
+  float phase = dot(direction, position) * frequency + timeShift;
+  float wave = exp(sin(phase) - 1.0);
+  return vec2(wave, -wave * cos(phase));
+}
+
+float waveHeight(vec2 position, int iterations, float time) {
+  float phaseShift = length(position) * 0.1;
+  float iterator = 0.0;
+  float frequency = 1.0;
+  float timeMultiplier = 2.0;
+  float weight = 1.0;
+  float valueSum = 0.0;
+  float weightSum = 0.0;
+  for (int index = 0; index < 24; index++) {
+    if (index >= iterations) break;
+    vec2 direction = vec2(sin(iterator), cos(iterator));
+    vec2 wave = waveDerivative(position, direction, frequency,
+      time * timeMultiplier + phaseShift);
+    position += direction * wave.y * weight * 0.38;
+    valueSum += wave.x * weight;
+    weightSum += weight;
+    weight *= 0.8;
+    frequency *= 1.18;
+    timeMultiplier *= 1.07;
+    iterator += 1232.399963;
+  }
+  return valueSum / weightSum;
+}
+
+float intersectPlane(vec3 origin, vec3 direction,
+    vec3 point, vec3 planeNormal) {
+  return clamp(dot(point - origin, planeNormal)
+    / dot(direction, planeNormal), -1.0, 9991999.0);
+}
+
+float raymarchWater(vec3 camera, vec3 start, vec3 end, float time) {
+  vec3 position = start;
+  vec3 direction = normalize(end - start);
+  for (int index = 0; index < 48; index++) {
+    float height = waveHeight(position.xz, 12, time)
+      * WATER_DEPTH - WATER_DEPTH;
+    if (height + 0.01 > position.y)
+      return distance(position, camera);
+    position += direction * (position.y - height);
+  }
+  return distance(start, camera);
+}
+
+vec3 waterNormal(vec2 position, float epsilon, float time) {
+  vec2 offset = vec2(epsilon, 0.0);
+  float height = waveHeight(position, 18, time) * WATER_DEPTH;
+  vec3 point = vec3(position.x, height, position.y);
+  vec3 left = vec3(position.x - epsilon,
+    waveHeight(position - offset, 18, time) * WATER_DEPTH,
+    position.y);
+  vec3 forward = vec3(position.x,
+    waveHeight(position + offset.yx, 18, time) * WATER_DEPTH,
+    position.y + epsilon);
+  return normalize(cross(point - left, point - forward));
+}
+
+mat3 rotateAxis(vec3 axis, float angle) {
+  float sine = sin(angle);
+  float cosine = cos(angle);
+  float inverse = 1.0 - cosine;
+  return mat3(
+    inverse * axis.x * axis.x + cosine,
+    inverse * axis.x * axis.y - axis.z * sine,
+    inverse * axis.z * axis.x + axis.y * sine,
+    inverse * axis.x * axis.y + axis.z * sine,
+    inverse * axis.y * axis.y + cosine,
+    inverse * axis.y * axis.z - axis.x * sine,
+    inverse * axis.z * axis.x - axis.y * sine,
+    inverse * axis.y * axis.z + axis.x * sine,
+    inverse * axis.z * axis.z + cosine);
+}
+
+vec3 cameraRay(vec2 coordinate, float time) {
+  vec2 uv = (coordinate / u_resolution * 2.0 - 1.0)
+    * vec2(u_resolution.x / u_resolution.y, 1.0);
+  vec3 projection = normalize(vec3(uv, 1.5));
+  float yaw = sin(time * 0.075) * 0.42;
+  float pitch = 0.38 + sin(time * 0.11) * 0.08;
+  return rotateAxis(vec3(0.0, -1.0, 0.0), yaw)
+    * rotateAxis(vec3(1.0, 0.0, 0.0), pitch)
+    * projection;
+}
+
+vec3 sunDirection(float time) {
+  return normalize(vec3(-0.077,
+    0.5 + sin(time * 0.2 + 2.6) * 0.45,
+    0.577));
+}
+
+vec3 atmosphere(vec3 ray, vec3 sun) {
+  float horizon = 1.0 / (ray.y + 0.1);
+  float sunHeight = 1.0 / (sun.y * 11.0 + 1.0);
+  float raySun = pow(abs(dot(sun, ray)), 2.0);
+  float sunDot = pow(max(0.0, dot(sun, ray)), 8.0);
+  float mie = sunDot * horizon * 0.2;
+  vec3 sunColor = mix(vec3(1.0),
+    max(vec3(0.0), vec3(1.0)
+      - vec3(5.5, 13.0, 22.4) / 22.4), sunHeight);
+  vec3 sky = vec3(5.5, 13.0, 22.4) / 22.4 * sunColor;
+  vec3 haze = max(vec3(0.0), sky
+    - vec3(5.5, 13.0, 22.4) * 0.002
+    * (horizon - 6.0 * sun.y * sun.y));
+  haze *= horizon * (0.24 + raySun * 0.24);
+  return (haze + mie) * (1.0 + pow(1.0 - ray.y, 3.0)) * 0.5;
+}
+
+float sunDisc(vec3 ray, vec3 sun) {
+  return pow(max(0.0, dot(ray, sun)), 720.0) * 210.0;
+}
+
+vec3 acesToneMap(vec3 value) {
+  mat3 inputMatrix = mat3(
+    0.59719, 0.07600, 0.02840,
+    0.35458, 0.90834, 0.13383,
+    0.04823, 0.01566, 0.83777);
+  mat3 outputMatrix = mat3(
+    1.60475, -0.10208, -0.00327,
+    -0.53108, 1.10813, -0.07276,
+    -0.07367, -0.00605, 1.07602);
+  vec3 transformed = inputMatrix * value;
+  vec3 numerator = transformed
+    * (transformed + 0.0245786) - 0.000090537;
+  vec3 denominator = transformed
+    * (0.983729 * transformed + 0.4329510) + 0.238081;
+  return pow(clamp(outputMatrix * (numerator / denominator),
+    0.0, 1.0), vec3(1.0 / 2.2));
+}
+
+void main() {
+  float time = u_time * 0.001;
+  vec3 ray = cameraRay(gl_FragCoord.xy, time);
+  vec3 sun = sunDirection(time);
+  if (ray.y >= 0.0) {
+    vec3 sky = atmosphere(ray, sun) + sunDisc(ray, sun);
+    color = vec4(acesToneMap(sky * 2.0), 1.0);
+    return;
+  }
+
+  vec3 origin = vec3(time * 0.2, CAMERA_HEIGHT, 1.0);
+  float highHit = intersectPlane(origin, ray, vec3(0.0),
+    vec3(0.0, 1.0, 0.0));
+  float lowHit = intersectPlane(origin, ray,
+    vec3(0.0, -WATER_DEPTH, 0.0), vec3(0.0, 1.0, 0.0));
+  vec3 highPosition = origin + ray * highHit;
+  vec3 lowPosition = origin + ray * lowHit;
+  float distanceToWater = raymarchWater(
+    origin, highPosition, lowPosition, time);
+  vec3 hitPosition = origin + ray * distanceToWater;
+
+  vec3 normal = waterNormal(hitPosition.xz, 0.01, time);
+  normal = mix(normal, vec3(0.0, 1.0, 0.0),
+    0.8 * min(1.0, sqrt(distanceToWater * 0.01) * 1.1));
+  float fresnel = 0.04 + 0.96
+    * pow(1.0 - max(0.0, dot(-normal, ray)), 5.0);
+  vec3 reflectedRay = normalize(reflect(ray, normal));
+  reflectedRay.y = abs(reflectedRay.y);
+
+  vec3 reflection = atmosphere(reflectedRay, sun)
+    + sunDisc(reflectedRay, sun);
+  vec3 deepWater = vec3(0.018, 0.085, 0.22);
+  vec3 scattering = deepWater * 0.12
+    * (0.2 + (hitPosition.y + WATER_DEPTH) / WATER_DEPTH);
+  vec3 result = fresnel * reflection + scattering;
+  color = vec4(acesToneMap(result * 2.2), 1.0);
+}
+")
+
+(node/start
+  (fn []
+    (loop [tick 0]
+      (let [frame (co/await (draw/next-frame "canvas/background"))
+            time (get frame "frame/time-ms")
+            width (get frame "canvas/width")
+            height (get frame "canvas/height")]
+        (do
+          (co/await
+            (draw/render
+              "canvas/background"
+              {:type :webgl2
+               :vertex vertex-shader
+               :fragment fragment-shader
+               :uniforms {"u_time" time
+                          "u_resolution" [width height]}
+               :fallback
+               {:type :canvas-2d
+                :background "#020817"
+                :commands
+                [[:text "OCEAN // WEBGL2 REQUIRED"
+                  24 (- height 24) "#6ee7ff" 11]]}}))
+          (recur (+ tick 1)))))))

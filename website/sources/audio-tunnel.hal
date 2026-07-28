@@ -1,0 +1,199 @@
+(ns+
+  (:require [studio.draw :as draw]))
+
+;; EFFECT: A rhythmic raymarched tunnel with luminous wall segments.
+;; PORT: Adapted from the user-supplied multipass Shadertoy fragment.
+;; NOTE: Its FFT and buffer textures are replaced by procedural beat bands and
+;; value noise, allowing this to run as one self-contained Hara WebGL2 pass.
+;; TRY: change 112 in traceTunnel for quality versus mobile performance.
+;; TRY: change tubeRadius modulation for a tighter or wider flight path.
+;; TRY: replace syntheticBand with a real audio analyser when one is connected.
+
+(def vertex-shader
+  "#version 300 es
+precision highp float;
+void main() {
+  vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+")
+
+(def fragment-shader
+  "#version 300 es
+precision highp float;
+out vec4 color;
+uniform float u_time;
+uniform vec2 u_resolution;
+
+mat2 rotate2d(float angle) {
+  float cosine = cos(angle);
+  float sine = sin(angle);
+  return mat2(cosine, -sine, sine, cosine);
+}
+
+float hash21(vec2 point) {
+  point = fract(point * vec2(123.34, 456.21));
+  point += dot(point, point + 45.32);
+  return fract(point.x * point.y);
+}
+
+float valueNoise(vec2 point) {
+  vec2 cell = floor(point);
+  vec2 local = fract(point);
+  local = local * local * (3.0 - 2.0 * local);
+  return mix(
+    mix(hash21(cell), hash21(cell + vec2(1.0, 0.0)), local.x),
+    mix(hash21(cell + vec2(0.0, 1.0)),
+      hash21(cell + vec2(1.0, 1.0)), local.x),
+    local.y);
+}
+
+float syntheticBand(float band, float time) {
+  float slow = sin(time * (1.35 + band * 4.0)
+    + band * 19.0) * 0.5 + 0.5;
+  float beat = pow(max(0.0,
+    sin(time * 3.2 - band * 11.0)), 8.0);
+  return clamp(slow * 0.55 + beat * 0.72, 0.0, 1.0);
+}
+
+float tunnelField(vec3 point, float time) {
+  point.xy -= vec2(
+    sin(point.z + time),
+    cos(point.z * 0.5 + time)) * 0.5;
+  point.y += sin(point.z * 2.0 + time) * 0.1;
+  float audioRadius = syntheticBand(abs(point.z * 0.001), time) * 0.25;
+  return -(length(point.xy) - 2.0 - audioRadius
+    + sin(point.z * 0.25));
+}
+
+vec3 tunnelNormal(vec3 point, float distanceValue, float time) {
+  vec2 epsilon = vec2(0.01, 0.0);
+  return normalize(vec3(distanceValue) - vec3(
+    tunnelField(point - epsilon.xyy, time),
+    tunnelField(point - epsilon.yxy, time),
+    tunnelField(point - epsilon.yyx, time)));
+}
+
+vec3 cameraRay(vec3 direction, vec2 uv) {
+  vec3 right = normalize(cross(direction, vec3(0.0, 1.0, 0.0)));
+  vec3 up = normalize(cross(direction, right));
+  return normalize(direction + right * uv.x + up * uv.y);
+}
+
+vec3 traceTunnel(vec3 origin, vec3 ray, float time,
+    out float distanceTravelled, out vec3 accumulatedGlow) {
+  accumulatedGlow = vec3(0.0);
+  vec3 point = origin;
+  for (int stepIndex = 0; stepIndex < 112; stepIndex++) {
+    float distanceToWall = tunnelField(point, time);
+    if (distanceToWall < 0.01) {
+      distanceTravelled = distance(point, origin);
+      return vec3(distanceToWall, distanceTravelled, 0.0);
+    }
+    float wallGlow = pow(
+      1.0 - clamp(distanceToWall / 0.7, 0.0, 1.0), 30.0);
+    accumulatedGlow += vec3(
+      1.0, 0.5, sin(point.z) * 0.5 + 0.5) * wallGlow * 0.3;
+    point += ray * distanceToWall * 0.7;
+  }
+  distanceTravelled = -1.0;
+  return vec3(-1.0);
+}
+
+float boxDistance(vec2 point, vec2 bounds) {
+  vec2 delta = abs(point) - bounds;
+  return max(delta.x, delta.y);
+}
+
+void main() {
+  float time = u_time * 0.001;
+  vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution)
+    / u_resolution.x;
+  float travelTime = time * 2.0;
+
+  vec3 origin = vec3(
+    sin(time) * 0.15,
+    cos(time * 0.5) * 0.12,
+    -12.0 + travelTime);
+  vec3 target = vec3(0.0, 0.0, travelTime);
+  vec3 direction = normalize(target - origin);
+  direction.xz *= rotate2d(sin(time * 0.5) * 0.15);
+  direction.yz *= rotate2d(sin(time + 0.5) * 0.15);
+  vec3 ray = cameraRay(direction, uv);
+
+  float distanceTravelled;
+  vec3 accumulatedGlow;
+  vec3 hit = traceTunnel(
+    origin, ray, time, distanceTravelled, accumulatedGlow);
+  vec3 result = accumulatedGlow * 0.25;
+
+  if (hit.y > 0.0) {
+    vec3 point = origin + ray * hit.y;
+    vec3 normal = tunnelNormal(point, hit.x, time);
+    vec3 lightDirection = normalize(point);
+    result = max(0.0, dot(lightDirection, normal)) * vec3(1.0);
+    result += accumulatedGlow;
+    result = pow(max(result, vec3(0.0)), vec3(3.0));
+
+    float angle = atan(point.y, point.x);
+    vec2 repeatSize = vec2(0.9, 0.5);
+    vec2 lightUv = vec2(angle, point.z + time);
+    vec2 cell = floor((lightUv + 0.5 * repeatSize) / repeatSize);
+    lightUv.x += sin(cell.y * 0.5) * time * 2.0;
+    lightUv = mod(lightUv + 0.5 * repeatSize, repeatSize)
+      - 0.5 * repeatSize;
+
+    float band = syntheticBand(abs(cell.y * 0.01), time);
+    float segment = boxDistance(lightUv,
+      vec2(0.15 + 1.1 * pow(band, 5.0), 0.05));
+    float segmentMask = 1.0 - clamp(segment * 50.0, 0.0, 1.0);
+    vec3 segmentColor = mix(result, vec3(1.0), segmentMask);
+    float bass = syntheticBand(0.0, time);
+    segmentColor += bass * bass * 2.0
+      * vec3(1.0, 0.5, sin(point.z * 10.0) * 0.5 + 0.5)
+      * (1.0 - clamp(segment, 0.0, 1.0))
+      * (1.0 - clamp(length(uv), 0.0, 1.0));
+    result = mix(result, segmentColor,
+      sin(time * 5.0 + point.z * 0.5) * 0.5 + 0.5);
+
+    float surfaceNoise = valueNoise(vec2(
+      angle * 1.7, length(point.xy) - time * 0.25) * 3.0);
+    result += 0.16 * vec3(
+      surfaceNoise,
+      surfaceNoise * 0.55,
+      1.0 - surfaceNoise);
+    result = mix(result, result.zyx,
+      sin(time + point.z * 0.1) * 0.5 + 0.5);
+  }
+
+  result *= 1.0 + syntheticBand(0.1, time) * 1.4;
+  float vignette = smoothstep(0.72, 0.12, length(uv));
+  result *= 0.56 + 0.44 * vignette;
+  result = 1.0 - exp(-max(result, vec3(0.0)) * 0.82);
+  color = vec4(result, 1.0);
+}
+")
+
+(node/start
+  (fn []
+    (loop [tick 0]
+      (let [frame (co/await (draw/next-frame "canvas/background"))
+            time (get frame "frame/time-ms")
+            width (get frame "canvas/width")
+            height (get frame "canvas/height")]
+        (do
+          (co/await
+            (draw/render
+              "canvas/background"
+              {:type :webgl2
+               :vertex vertex-shader
+               :fragment fragment-shader
+               :uniforms {"u_time" time
+                          "u_resolution" [width height]}
+               :fallback
+               {:type :canvas-2d
+                :background "#020408"
+                :commands
+                [[:text "AUDIO TUNNEL // WEBGL2 REQUIRED"
+                  24 (- height 24) "#ff63d8" 11]]}}))
+          (recur (+ tick 1)))))))

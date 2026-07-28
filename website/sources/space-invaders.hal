@@ -15,6 +15,7 @@
 
 (def game-width 640)
 (def game-height 480)
+(def game-baseline 455)
 
 (defn smaller [a b] (if (< a b) a b))
 (defn larger [a b] (if (> a b) a b))
@@ -276,25 +277,23 @@
       input)))
 
 (defn viewport [width height]
-  (let [available-height (- height 80)
-        board-width (smaller width (/ (* available-height 4) 3))
-        board-height (smaller available-height (/ (* width 3) 4))]
-    {:width board-width
-     :height board-height
-     :left (/ (- width board-width) 2)
-     :top (/ (- height board-height) 2)}))
+  ;; Scale each axis independently so the arcade field reaches every screen
+  ;; edge, including tall phone viewports.
+  {:width width :height height :left 0 :top 0})
 
 (defn scale-x [view x]
   (+ (get view :left) (/ (* x (get view :width)) game-width)))
 
 (defn scale-y [view y]
-  (+ (get view :top) (/ (* y (get view :height)) game-height)))
+  ;; The original game leaves 25 logical pixels below its gate. Map the gate,
+  ;; rather than that unused padding, to the physical bottom of the canvas.
+  (+ (get view :top) (/ (* y (get view :height)) game-baseline)))
 
 (defn scale-width [view width]
   (larger 1 (/ (* width (get view :width)) game-width)))
 
 (defn scale-height [view height]
-  (larger 1 (/ (* height (get view :height)) game-height)))
+  (larger 1 (/ (* height (get view :height)) game-baseline)))
 
 (defn rect-command [view rect color]
   [:rect
@@ -394,18 +393,7 @@
         stars (add-stars (list) view)
         enemies (add-enemies stars view (get state :enemies))
         bullets (add-bullets enemies view (get state :bullets))]
-    (let [player
-          (append-commands bullets (player-sprite view (get state :player)))
-          baseline
-          [:line
-           (get view :left)
-           (scale-y view 455)
-           (+ (get view :left) (get view :width))
-           (scale-y view 455)
-           "#1b5362"
-           1
-           0.72]]
-      (conj player baseline))))
+    (append-commands bullets (player-sprite view (get state :player)))))
 
 (node/start
   (fn []

@@ -293,9 +293,10 @@ export class CanvasRuntime {
       const location = gl.getUniformLocation(program, name);
       if (location === null) continue;
       if (Array.isArray(value)) {
-        if (value.length === 2) gl.uniform2fv(location, value);
-        else if (value.length === 3) gl.uniform3fv(location, value);
-        else if (value.length === 4) gl.uniform4fv(location, value);
+        const physicalValue = resolutionUniform(name, value, width, height);
+        if (physicalValue.length === 2) gl.uniform2fv(location, physicalValue);
+        else if (physicalValue.length === 3) gl.uniform3fv(location, physicalValue);
+        else if (physicalValue.length === 4) gl.uniform4fv(location, physicalValue);
       } else {
         gl.uniform1f(location, Number(value));
       }
@@ -400,6 +401,13 @@ export class CanvasRuntime {
   }
 }
 
+export function resolutionUniform(name, value, width, height) {
+  if (name !== "u_resolution" && name !== "iResolution") return value;
+  if (value.length === 2) return [width, height];
+  if (value.length === 3) return [width, height, value[2]];
+  return value;
+}
+
 function execute2d(context, command, width, height) {
   if (!Array.isArray(command) || command.length === 0) return;
   const name = keyName(command[0]);
@@ -443,6 +451,22 @@ function execute2d(context, command, width, height) {
     context.arc(Number(command[1]), Number(command[2]), Number(command[3]), 0, Math.PI * 2);
     context.fill();
     context.globalAlpha = 1;
+  } else if (name === "mist") {
+    const x = Number(command[1]);
+    const y = Number(command[2]);
+    const radius = Math.max(1, Number(command[3] ?? 24));
+    const color = command[4] ?? "#31ff8d";
+    const alpha = Number(command[5] ?? 0.2);
+    const gradient = context.createRadialGradient(x, y, 0, x, y, radius);
+    gradient.addColorStop(0, color);
+    gradient.addColorStop(0.28, color);
+    gradient.addColorStop(1, "rgba(0,0,0,0)");
+    context.save();
+    context.globalCompositeOperation = "lighter";
+    context.globalAlpha = alpha;
+    context.fillStyle = gradient;
+    context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+    context.restore();
   } else if (name === "text") {
     context.fillStyle = command[4] ?? "#eaffff";
     context.font = `${Number(command[5] ?? 12)}px ui-monospace, monospace`;

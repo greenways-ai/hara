@@ -1,0 +1,99 @@
+(ns+
+  (:require [studio.draw :as draw]))
+
+;; EFFECT: A luminous mirrored fog tunnel built from a folded sine field.
+;; PORT: Adapted from the user-supplied shader, which cites the repetitive
+;; mirror technique at https://www.shadertoy.com/view/w3VGzc
+;; TRY: change 1.55 in the rotation angle to twist the tunnel more tightly.
+;; TRY: change the vec4 palette in glowWave to shift the spectral highlights.
+;; TRY: lower 100 steps to improve performance on older mobile GPUs.
+
+(def vertex-shader
+  "#version 300 es
+precision highp float;
+void main() {
+  vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+")
+
+(def fragment-shader
+  "#version 300 es
+precision highp float;
+out vec4 color;
+uniform float u_time;
+uniform vec2 u_resolution;
+
+mat2 rotate2d(float angle) {
+  float cosine = cos(angle);
+  float sine = sin(angle);
+  return mat2(cosine, sine, -sine, cosine);
+}
+
+void main() {
+  float time = u_time * 0.001;
+  vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution)
+    / u_resolution.y;
+
+  vec4 accumulation = vec4(0.0);
+  float travel = 0.0;
+  float field = 0.0;
+
+  for (int stepIndex = 0; stepIndex < 100; stepIndex++) {
+    float index = float(stepIndex) + 1.0;
+    field = 0.007 + abs(field) * 0.15;
+    travel += field;
+
+    vec4 glowWave = sin(travel + vec4(
+      0.8 + cos(time) * 0.25,
+      0.0,
+      0.0,
+      0.0));
+    accumulation += glowWave / (abs(field) + 0.0001);
+
+    vec3 point = vec3(uv * travel, travel + time * 0.25);
+    point = abs(point * 0.5 + sin(time * 0.1)
+      + cos(time * 0.05))
+      - 0.5 + sin(index * 0.5) * 0.9;
+
+    float angle = -0.051 * time + point.z * 1.55;
+    point.xy *= rotate2d(angle);
+    field = sin(point.x * 2.0 + point.y * 2.0);
+  }
+
+  vec4 mapped = tanh(
+    accumulation * accumulation / 600000.0);
+  mapped = pow(max(mapped, vec4(0.0)), vec4(0.4545));
+
+  float vignette = smoothstep(0.82, 0.16, length(uv));
+  vec3 ink = vec3(0.001, 0.004, 0.012);
+  vec3 spectral = mapped.rgb * vec3(0.38, 1.0, 1.42);
+  spectral += mapped.r * vec3(0.62, 0.08, 0.72);
+  color = vec4(mix(ink, spectral,
+    0.68 + 0.32 * vignette), 1.0);
+}
+")
+
+(node/start
+  (fn []
+    (loop [tick 0]
+      (let [frame (co/await (draw/next-frame "canvas/background"))
+            time (get frame "frame/time-ms")
+            width (get frame "canvas/width")
+            height (get frame "canvas/height")]
+        (do
+          (co/await
+            (draw/render
+              "canvas/background"
+              {:type :webgl2
+               :vertex vertex-shader
+               :fragment fragment-shader
+               :uniforms {"u_time" time
+                          "u_resolution" [width height]}
+               :fallback
+               {:type :canvas-2d
+                :background "#020408"
+                :commands
+                [[:text "MIRROR FOG // WEBGL2 REQUIRED"
+                  24 (- height 24) "#b37cff" 11]]}}))
+          (recur (+ tick 1)))))))

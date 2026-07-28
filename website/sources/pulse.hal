@@ -1,0 +1,69 @@
+(ns+
+  (:require [studio.draw :as draw]))
+
+;; EFFECT: Concentric signal rings that breathe around the Hara workspace.
+;; TRY: change the 18.0 ring count for broader or tighter bands.
+;; TRY: increase 0.0012 to make the pulse travel faster.
+
+(def vertex-shader
+  "#version 300 es
+precision highp float;
+void main() {
+  vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}")
+
+(def fragment-shader
+  "#version 300 es
+precision highp float;
+out vec4 color;
+uniform float u_time;
+uniform vec2 u_resolution;
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution.xy;
+  vec2 p = uv * 2.0 - 1.0;
+  p.x *= u_resolution.x / u_resolution.y;
+  float distanceFromCenter = length(p);
+  float distanceFromCorner = length(p - vec2(0.72, 0.68));
+  float centerWave = sin(distanceFromCenter * 18.0 - u_time * 0.0012);
+  float cornerWave = sin(distanceFromCorner * 18.0 + u_time * 0.00105);
+  float centerRing = pow(max(0.0, centerWave), 14.0);
+  float cornerRing = pow(max(0.0, cornerWave), 14.0);
+  float centerHalo = 0.025 / max(0.04, abs(centerWave));
+  float cornerHalo = 0.021 / max(0.04, abs(cornerWave));
+  vec3 cyan = vec3(0.05, 0.95, 0.88);
+  vec3 violet = vec3(0.58, 0.14, 1.0);
+  vec3 ink = vec3(0.002, 0.006, 0.016);
+  vec3 centerTint = mix(cyan, violet, clamp(distanceFromCenter, 0.0, 1.0));
+  vec3 cornerTint = mix(violet, cyan, clamp(distanceFromCorner, 0.0, 1.0));
+  float centerVignette = smoothstep(1.45, 0.2, distanceFromCenter);
+  float cornerVignette = smoothstep(1.15, 0.12, distanceFromCorner);
+  vec3 centerPulse = centerTint * (centerRing * 0.65 + centerHalo * 0.18) * centerVignette;
+  vec3 cornerPulse = cornerTint * (cornerRing * 0.58 + cornerHalo * 0.16) * cornerVignette;
+  color = vec4(ink + centerPulse + cornerPulse, 1.0);
+}")
+
+(node/start
+  (fn []
+    (loop [tick 0]
+      (let [frame (co/await (draw/next-frame "canvas/background"))
+            time (get frame "frame/time-ms")
+            width (get frame "canvas/width")
+            height (get frame "canvas/height")]
+        (do
+          (co/await
+            (draw/render
+              "canvas/background"
+              {:type :webgl2
+               :vertex vertex-shader
+               :fragment fragment-shader
+               :uniforms {"u_time" time
+                          "u_resolution" [width height]}
+               :fallback
+               {:type :canvas-2d
+                :background "#02040c"
+                :commands
+                [[:text "PULSE.HAL // WEBGL2 REQUIRED"
+                  24 (- height 24) "#9c7bff" 11]]}}))
+          (recur (+ tick 1)))))))

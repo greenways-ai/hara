@@ -316,6 +316,18 @@
      color
      alpha]))
 
+(defn pheromone-command [geometry location amount]
+  (let [x (nth location 0)
+        y (nth location 1)
+        size (get geometry :size)
+        strength (smaller 1.0 (/ amount (* 12 pher-unit)))]
+    [:mist
+     (+ (get geometry :left) (* x size) (/ size 2))
+     (+ (get geometry :top) (* y size) (/ size 2))
+     (+ (* size 2.8) (* size strength 4.4))
+     "#31ff8d"
+     (+ 0.035 (* strength 0.19))]))
+
 (defn food-command [geometry location amount]
   (let [x (nth location 0)
         y (nth location 1)
@@ -336,11 +348,8 @@
             with-pheromone
             (if (> (cell-number cell :pher) pher-visible)
               (conj commands
-                    (cell-command
-                      geometry location "#31ff8d"
-                      (if (> (cell-number cell :pher) (* 8 pher-unit))
-                        0.82
-                        0.30)))
+                    (pheromone-command
+                      geometry location (cell-number cell :pher)))
               commands)]
         (let [next-commands
               (if (pos? (cell-number cell :food))

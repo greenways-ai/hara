@@ -61,6 +61,8 @@ cp "$ROOT/website/assets/favicon-48.svg" \
    "$ROOT/website/assets/favicon-128.svg" \
    "$ROOT/website/assets/favicon-256.svg" \
    "$ROOT/website/assets/logo.svg" \
+   "$ROOT/website/assets/hara-mark.svg" \
+   "$ROOT/website/assets/hara-favicon.svg" \
    "$ROOT/website/assets/logo-white.svg" \
    "$OUT/assets/"
 cp "$ROOT/website/og-hara-ribbon.png" "$OUT/"

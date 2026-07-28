@@ -14,58 +14,63 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://www.hara-lang.org/og-hara-ribbon.png">
   <meta name="hara-auth-api" content="">
-  <link rel="icon" href="./assets/hara-favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="./assets/favicon-48.svg" type="image/svg+xml" sizes="48x48">
   <title>Hara - A Modern Lisp for the Agentic Age</title>
   <link rel="stylesheet" href="./vendor/hara-ui/tokens.css">
   <link rel="stylesheet" href="./vendor/hara-ui/components.css">
-  <link rel="stylesheet" href="./app.css?v=studio-effects-2">
+  <link rel="stylesheet" href="./app.css?v=studio-effects-9">
 </head>
 <body>
   <canvas class="tron-field" data-tron aria-hidden="true"></canvas>
   <div class="atmosphere" aria-hidden="true"></div>
 
-  <header class="system-bar">
-    <div class="system-actions">
-      <button class="system-button launcher-button" type="button"
-              data-launcher-toggle aria-expanded="false"
-              aria-controls="app-launcher" aria-label="Open application launcher">
-        <span class="dot-grid" aria-hidden="true">
-          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-        </span>
-      </button>
-      <button class="system-button workspace-nav-button" type="button" data-workspace-prev aria-label="Previous workspace">
-        <span aria-hidden="true">‹</span>
-      </button>
-      <button class="system-button workspace-nav-button" type="button" data-workspace-next aria-label="Next workspace">
-        <span aria-hidden="true">›</span>
-      </button>
-    </div>
-
-    <div class="system-identity">
-      <img class="system-mark" src="./assets/hara-favicon.svg" alt="">
-    </div>
-
-    <div class="system-right">
-      <nav class="project-tabs" data-project-tabs aria-label="Open workspaces">
-        <button class="project-tab is-active" type="button" data-home aria-current="page">HOME</button>
-      </nav>
-    </div>
-  </header>
+  <div class="background-picker floating-background-picker">
+    <select class="sr-only" data-background-source aria-label="Background source"></select>
+    <button class="background-menu-toggle" type="button" data-background-menu-toggle
+            aria-haspopup="menu" aria-expanded="false" aria-controls="background-source-menu">
+      <span data-background-menu-label>SELECT</span>
+      <span aria-hidden="true">⌄</span>
+    </button>
+    <div class="background-source-menu" id="background-source-menu"
+         data-background-menu role="menu" hidden></div>
+  </div>
 
   <aside class="background-source-panel" id="background-source-panel"
          data-background-panel aria-hidden="true">
-    <header>
-      <strong>LIVE BACKGROUND SOURCE</strong>
-      <span data-background-status>WAITING FOR RUNTIME</span>
-    </header>
-    <div class="window-toolbar editor-toolbar background-editor-toolbar">
-      <div>
+    <button type="button" class="background-panel-resizer" data-background-resizer
+            aria-label="Resize code editor"></button>
+    <div class="hara-editor-menubar background-editor-toolbar">
+      <div class="hara-editor-menubar__group">
         <button type="button" class="paredit-button" data-background-paredit
-                aria-pressed="true">PAREDIT ON</button>
+                aria-pressed="true" hidden>PAREDIT ON</button>
         <button type="button" class="run-button" data-background-apply>
           <span aria-hidden="true">▶</span> APPLY
         </button>
+        <button type="button" data-background-eval>EVAL</button>
         <button type="button" data-background-save>SAVE</button>
+        <button type="button" data-background-trace aria-pressed="false">TRACE OFF</button>
+        <button type="button" data-background-font-decrease
+                aria-label="Decrease editor text size">A−</button>
+        <button type="button" data-background-font-increase
+                aria-label="Increase editor text size">A+</button>
+      </div>
+      <span class="sr-only" data-background-status aria-live="polite">WAITING FOR RUNTIME</span>
+      <button type="button" class="hara-editor-menubar__help" data-background-help
+              aria-expanded="false" aria-controls="background-editor-help"
+              aria-label="Editor help">?</button>
+      <button type="button" class="hara-editor-menubar__close" data-background-close
+              aria-label="Close code editor">×</button>
+      <div class="hara-editor-menubar__popover" id="background-editor-help"
+           data-background-help-panel hidden>
+        <strong>EDITOR SHORTCUTS</strong>
+        <span><kbd>Ctrl/⌘ Enter</kbd> apply preview</span>
+        <span><kbd>Ctrl/⌘ E</kbd> evaluate selection or current form</span>
+        <span><kbd>Ctrl/⌘ S</kbd> save locally</span>
+        <span><kbd>Tab</kbd> structurally align</span>
+        <span><kbd>A− / A+</kbd> adjust editor text size</span>
+        <span>Drag the editor’s left edge to adjust its width.</span>
+        <span>Paredit is always on. Comments mark safe changes.</span>
+        <span>Trace captures compiler and runtime events for this background.</span>
       </div>
     </div>
     <label class="editor-surface background-editor-shell">
@@ -75,48 +80,32 @@
       <textarea data-background-editor spellcheck="false" wrap="off"
                 aria-label="Live HAL background source"></textarea>
     </label>
-    <footer>
-      LIVE PREVIEW · CTRL-ENTER APPLY · CTRL-S SAVE · COMMENTS MARK SAFE CHANGES
-    </footer>
   </aside>
 
   <aside class="app-launcher" id="app-launcher" data-launcher aria-hidden="true">
-    <div class="launcher-head">
-      <span>HARA LAUNCHER</span>
-      <div class="launcher-actions">
-        <button type="button" data-close-active-workspace hidden>CLOSE ACTIVE</button>
-        <button type="button" data-clear-workspaces hidden>CLEAR SAVED</button>
-      </div>
-    </div>
-    <div class="launcher-grid">
-      <button type="button" class="app-tile" data-home>
-        <span class="app-icon" aria-hidden="true">⌂</span>
-        <span>Home</span>
-      </button>
-      <button type="button" class="app-tile" data-new-workspace>
-        <span class="app-icon app-icon-editor" aria-hidden="true">＋</span>
-        <span>New Workspace</span>
-      </button>
-      <button type="button" class="app-tile" data-quick-template="canvas">
-        <span class="app-icon app-icon-canvas" aria-hidden="true">◎</span>
-        <span>Canvas</span>
-      </button>
-      <button type="button" class="app-tile" data-quick-template="music">
-        <span class="app-icon app-icon-canvas" aria-hidden="true">♫</span>
-        <span>Audio</span>
-      </button>
-      <button type="button" class="app-tile" data-quick-template="3d">
-        <span class="app-icon app-icon-editor" aria-hidden="true">3D</span>
-        <span>3D</span>
-      </button>
-      <button type="button" class="app-tile" data-quick-template="graphs">
-        <span class="app-icon app-icon-canvas" aria-hidden="true">∿</span>
-        <span>Graphs</span>
-      </button>
-    </div>
-    <div class="launcher-projects">
-      <strong>SAVED WORKSPACES</strong>
-      <div data-saved-workspaces><span class="launcher-empty">NO SAVED WORKSPACES</span></div>
+    <nav class="site-launcher-links" aria-label="Hara sites">
+      <a href="https://playground.hara-lang.org/" target="_blank" rel="noreferrer">
+        <span aria-hidden="true">&gt;_</span><strong>PLAYGROUND</strong>
+      </a>
+      <a href="https://docs.hara-lang.org/" target="_blank" rel="noreferrer">
+        <span aria-hidden="true">D</span><strong>DOCS</strong>
+      </a>
+      <a href="https://specs.hara-lang.org/" target="_blank" rel="noreferrer">
+        <span aria-hidden="true">{ }</span><strong>SPECS</strong>
+      </a>
+      <a href="https://github.com/hara-lang/hara" target="_blank" rel="noreferrer">
+        <span aria-hidden="true">GH</span><strong>GITHUB</strong>
+      </a>
+      <a href="https://www.youtube.com/results?search_query=Hara+programming+language"
+         target="_blank" rel="noreferrer">
+        <span aria-hidden="true">▶</span><strong>YOUTUBE</strong>
+      </a>
+    </nav>
+    <div class="launcher-workspace-hooks" hidden>
+      <button type="button" data-new-workspace></button>
+      <button type="button" data-close-active-workspace></button>
+      <button type="button" data-clear-workspaces></button>
+      <div data-saved-workspaces></div>
     </div>
   </aside>
   <div class="launcher-scrim" data-launcher-scrim></div>
@@ -134,17 +123,12 @@
           <h1 id="welcome-title">HARA</h1>
           <p class="welcome-tagline">A Modern Lisp for the Agentic Age.</p>
         </div>
-        <button class="start-button" type="button" data-start>
-          <img class="start-mark" src="./assets/hara-mark.svg" alt="">
+        <button class="start-button" type="button" data-start
+                data-playground-url="https://playground.hara-lang.org/">
+          <img class="start-mark" src="./assets/logo-white.svg" alt="">
           <span>START</span>
           <i aria-hidden="true">→</i>
         </button>
-        <nav class="welcome-coordinate" aria-label="Hara project links">
-          <a href="https://github.com/hara-lang/hara" target="_blank" rel="noreferrer">GITHUB ↗</a>
-          <span aria-hidden="true">//</span>
-          <a href="https://www.youtube.com/results?search_query=Hara+programming+language"
-             target="_blank" rel="noreferrer">YOUTUBE ↗</a>
-        </nav>
       </section>
 
       <section class="workspace desktop-workspace" aria-label="Hara workspace" data-workspace-template="blank">
@@ -255,23 +239,51 @@
   </main>
 
   <footer class="system-bottom-bar">
-    <div class="runtime-state" aria-live="polite">
-      <span class="runtime-led" data-runtime-led></span>
-      <span data-runtime-label>WASM // STANDBY</span>
+    <div class="system-actions bottom-navigation">
+      <button class="system-button launcher-button" type="button"
+              data-launcher-toggle aria-expanded="false"
+              aria-controls="app-launcher" aria-label="Open application launcher">
+        <span class="app-launcher-glyph" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </span>
+      </button>
+      <button class="system-button workspace-nav-button" type="button" data-workspace-prev
+              aria-label="Previous screen" disabled>
+        <span aria-hidden="true">‹</span>
+      </button>
+      <button class="system-button workspace-nav-button" type="button" data-workspace-next
+              aria-label="Next screen" disabled>
+        <span aria-hidden="true">›</span>
+      </button>
     </div>
-    <div class="bottom-spacer"></div>
+    <nav class="project-tabs" data-project-tabs aria-label="Open workspaces"></nav>
     <div class="home-tools">
-      <label class="background-picker">
-        <span>SOURCE</span>
-        <select data-background-source aria-label="Background source"></select>
-      </label>
       <button class="source-toggle" type="button" data-source-toggle
               aria-expanded="false" aria-controls="background-source-panel">CODE</button>
     </div>
     <button type="button" class="publish-button" data-publish disabled>PUBLISH</button>
-    <button type="button" class="settings-button" data-settings aria-label="Open settings">⚙ <span>SETTINGS</span></button>
-    <button type="button" class="help-button" data-help aria-label="Open Hara help">? <span>HELP</span></button>
+    <button class="runtime-state" type="button" data-runtime-toggle
+            aria-live="polite" aria-expanded="false" aria-controls="kernel-statistics">
+      <span class="runtime-led" data-runtime-led></span>
+      <span class="sr-only" data-runtime-label>WASM // STANDBY</span>
+    </button>
   </footer>
+
+  <section class="kernel-statistics" id="kernel-statistics" data-kernel-statistics hidden
+           aria-label="Kernel statistics">
+    <header>
+      <div>
+        <span>KERNEL TELEMETRY</span>
+        <strong data-kernel-state>STANDBY</strong>
+      </div>
+      <button type="button" data-kernel-statistics-close aria-label="Close kernel statistics">×</button>
+    </header>
+    <div class="kernel-statistics-grid" data-kernel-statistics-grid></div>
+    <footer>
+      <span>LIVE BROWSER TELEMETRY</span>
+      <time data-kernel-statistics-updated>—</time>
+    </footer>
+  </section>
 
   <dialog class="hara-dialog hara-help-dialog" data-help-dialog>
     <div class="dialog-head"><span>HARA // HELP</span><button type="button" data-help-close aria-label="Close help">×</button></div>
@@ -377,6 +389,6 @@
   </dialog>
 
   <div class="toast-stack" data-toasts aria-live="polite"></div>
-  <script type="module" src="./app.js?v=studio-effects-2"></script>
+  <script type="module" src="./app.js?v=studio-effects-7"></script>
 </body>
 </html>

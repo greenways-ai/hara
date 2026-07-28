@@ -10,7 +10,6 @@ const SPACE = "home";
 const ROOT = "ROOT";
 const ACTIVE_FILE_KEY = "hara-www.active-file.v1";
 const WINDOWS_KEY = "hara-www.windows.v1";
-const BACKGROUND_SOURCE_KEY = "hara-www.background-source.v1";
 const BACKGROUND_WORKSPACE = "./examples/studio-backgrounds/";
 const HAL_FORMS = [
   ["def", "bind a named value"], ["defn", "define a function"], ["fn", "anonymous function"],
@@ -131,7 +130,7 @@ const state = {
   editorPrefixTimer: null,
   evalRange: null,
   editorHistory: { past: [], future: [], current: null, replaying: false },
-  backgroundSource: localStorage.getItem(BACKGROUND_SOURCE_KEY) ?? "document/background/tron",
+  backgroundSource: null,
   backgroundDocuments: new Map(),
   activeBackground: null,
   canvasRuntime: null,
@@ -151,7 +150,24 @@ const state = {
   activeSpace: SPACE,
   kernelSpaces: new Map([[ROOT, SPACE]]),
   contextSpaces: new WeakMap(),
-  defaultBootstrap: null
+  defaultBootstrap: null,
+  sessionRouter: null,
+  runtimeStatus: "standby",
+  runtimeStartedAt: null,
+  runtimeModuleBytes: 0,
+  telemetry: {
+    kernelsCreated: 0,
+    kernelsClosed: 0,
+    evalRequests: 0,
+    documentRuns: 0,
+    deliveredMessages: 0,
+    frameRequests: 0,
+    renderCalls: 0,
+    framesPerSecond: 0,
+    frameRateWindowStartedAt: 0,
+    frameRateWindowCount: 0,
+    errors: 0
+  }
 };
 
 const elements = {
@@ -160,7 +176,15 @@ const elements = {
   launcherScrim: query("[data-launcher-scrim]"),
   runtimeLed: query("[data-runtime-led]"),
   runtimeLabel: query("[data-runtime-label]"),
+  runtimeToggle: query("[data-runtime-toggle]"),
+  kernelStatistics: query("[data-kernel-statistics]"),
+  kernelStatisticsGrid: query("[data-kernel-statistics-grid]"),
+  kernelStatisticsState: query("[data-kernel-state]"),
+  kernelStatisticsUpdated: query("[data-kernel-statistics-updated]"),
   backgroundSource: query("[data-background-source]"),
+  backgroundMenu: query("[data-background-menu]"),
+  backgroundMenuToggle: query("[data-background-menu-toggle]"),
+  backgroundMenuLabel: query("[data-background-menu-label]"),
   sourceToggle: query("[data-source-toggle]"),
   sourcePanel: query("[data-background-panel]"),
   sourceEditor: query("[data-background-editor]"),
@@ -169,7 +193,15 @@ const elements = {
   sourceStatus: query("[data-background-status]"),
   sourceParedit: query("[data-background-paredit]"),
   sourceApply: query("[data-background-apply]"),
+  sourceEval: query("[data-background-eval]"),
   sourceSave: query("[data-background-save]"),
+  sourceTrace: query("[data-background-trace]"),
+  sourceFontDecrease: query("[data-background-font-decrease]"),
+  sourceFontIncrease: query("[data-background-font-increase]"),
+  sourceHelp: query("[data-background-help]"),
+  sourceHelpPanel: query("[data-background-help-panel]"),
+  sourceClose: query("[data-background-close]"),
+  sourceResizer: query("[data-background-resizer]"),
   fileTree: query("[data-file-tree]"),
   fileCount: query("[data-file-count]"),
   editor: query("[data-editor]"),
@@ -239,9 +271,209 @@ function errorText(error) {
 }
 
 function setRuntimeStatus(label, status) {
+  state.runtimeStatus = status;
   elements.runtimeLabel.textContent = label;
   elements.runtimeLed.classList.toggle("is-live", status === "live");
   elements.runtimeLed.classList.toggle("is-error", status === "error");
+  if (!elements.kernelStatistics.hidden) renderKernelStatistics();
+}
+
+function formatDuration(milliseconds) {
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return "—";
+  const seconds = Math.floor(milliseconds / 1000);
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor(seconds % 86400 / 3600);
+  const minutes = Math.floor(seconds % 3600 / 60);
+  const remainder = seconds % 60;
+  return days ? `${days}d ${hours}h ${minutes}m` :
+    hours ? `${hours}h ${minutes}m ${remainder}s` :
+      `${minutes}m ${String(remainder).padStart(2, "0")}s`;
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "—";
+  const units = ["B", "KB", "MB", "GB"];
+  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / 1024 ** exponent).toFixed(exponent ? 1 : 0)} ${units[exponent]}`;
+}
+
+function telemetryGroup(title, entries) {
+  const section = document.createElement("section");
+  section.className = "kernel-statistics-group";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  const list = document.createElement("dl");
+  for (const [label, value] of entries) {
+    const term = document.createElement("dt");
+    const detail = document.createElement("dd");
+    term.textContent = label;
+    detail.textContent = String(value);
+    list.append(term, detail);
+  }
+  section.append(heading, list);
+  return section;
+}
+
+function renderKernelStatistics() {
+  if (!state.broker) {
+    elements.kernelStatisticsState.textContent = state.runtimeStatus.toUpperCase();
+    elements.kernelStatisticsGrid.replaceChildren(telemetryGroup("RUNTIME", [
+      ["State", state.runtimeStatus.toUpperCase()],
+      ["Kernel", "NOT AVAILABLE"]
+    ]));
+    return;
+  }
+  const kernels = state.broker.list();
+  const sessions = state.sessionRouter?.list() ?? [];
+  const subscriptions = sessions.reduce((total, session) => total + session.subscriptions, 0);
+  const capabilities = state.capabilityRegistry?.available() ?? [];
+  const grants = sessions.reduce((total, session) =>
+    total + (state.capabilityRegistry?.forSession(session.sessionId).length ?? 0), 0);
+  const memory = performance.memory?.usedJSHeapSize;
+  const activeWorkspace = state.currentProject?.name ?? (state.workspace ? "UNNAMED" : "HOME");
+  elements.kernelStatisticsState.textContent = state.runtimeStatus.toUpperCase();
+  elements.kernelStatisticsGrid.replaceChildren(
+    telemetryGroup("RUNTIME", [
+      ["State", state.runtimeStatus.toUpperCase()],
+      ["Uptime", formatDuration(performance.now() - (state.runtimeStartedAt ?? performance.now()))],
+      ["WASM module", formatBytes(state.runtimeModuleBytes)],
+      ["JS heap", formatBytes(memory)],
+      ["Page", document.visibilityState.toUpperCase()]
+    ]),
+    telemetryGroup("KERNELS", [
+      ["Running", kernels.length],
+      ["Pending", state.broker.pending?.size ?? 0],
+      ["Documents", state.broker.documents?.size ?? 0],
+      ["Created", state.telemetry.kernelsCreated],
+      ["Stopped", state.telemetry.kernelsClosed],
+      ["Active", state.activeKernel]
+    ]),
+    telemetryGroup("SESSIONS", [
+      ["Registered", sessions.length],
+      ["Subscriptions", subscriptions],
+      ["Workspace", activeWorkspace],
+      ["Open workspaces", state.openWorkspaces.length],
+      ["Filesystem", state.activeSpace],
+      ["Isolation", "DEDICATED KERNEL"]
+    ]),
+    telemetryGroup("TRAFFIC", [
+      ["Eval requests", state.telemetry.evalRequests],
+      ["Document runs", state.telemetry.documentRuns],
+      ["Host calls", state.telemetry.frameRequests + state.telemetry.renderCalls],
+      ["Frame requests", state.telemetry.frameRequests],
+      ["Frames rendered", state.telemetry.renderCalls],
+      ["Render rate", `${state.telemetry.framesPerSecond} FPS`],
+      ["Session messages", state.telemetry.deliveredMessages],
+      ["Errors", state.telemetry.errors],
+      ["Queue", state.broker.pending?.size ?? 0]
+    ]),
+    telemetryGroup("CAPABILITIES", [
+      ["Available", capabilities.length],
+      ["Granted", grants],
+      ["Adapters", capabilities.join(", ") || "NONE"],
+      ["AI profiles", state.currentProject ? state.aiAdapters.list(state.currentProject.id).length : 0]
+    ]),
+    telemetryGroup("STORAGE", [
+      ["Provider", "INDEXEDDB"],
+      ["Scope", state.activeSpace],
+      ["Workspace files", state.files.length],
+      ["Persistence", "LOCAL"],
+      ["Worker model", "ONE PER KERNEL"]
+    ])
+  );
+  elements.kernelStatisticsUpdated.textContent =
+    new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date());
+}
+
+function instrumentBrokerTelemetry(broker) {
+  for (const method of ["eval", "evalForm"]) {
+    const original = broker[method].bind(broker);
+    broker[method] = async (...args) => {
+      state.telemetry.evalRequests += 1;
+      try {
+        return await original(...args);
+      } catch (error) {
+        state.telemetry.errors += 1;
+        throw error;
+      }
+    };
+  }
+  for (const method of ["prepareDocument"]) {
+    const original = broker[method].bind(broker);
+    broker[method] = async (...args) => {
+      state.telemetry.documentRuns += 1;
+      try {
+        return await original(...args);
+      } catch (error) {
+        state.telemetry.errors += 1;
+        throw error;
+      }
+    };
+  }
+  return broker;
+}
+
+function instrumentCanvasTelemetry(canvasRuntime) {
+  const nextFrame = canvasRuntime.nextFrame.bind(canvasRuntime);
+  canvasRuntime.nextFrame = async (...args) => {
+    state.telemetry.frameRequests += 1;
+    try {
+      return await nextFrame(...args);
+    } catch (error) {
+      state.telemetry.errors += 1;
+      throw error;
+    }
+  };
+  const render = canvasRuntime.render.bind(canvasRuntime);
+  canvasRuntime.render = (...args) => {
+    state.telemetry.renderCalls += 1;
+    const now = performance.now();
+    if (!state.telemetry.frameRateWindowStartedAt) state.telemetry.frameRateWindowStartedAt = now;
+    state.telemetry.frameRateWindowCount += 1;
+    const elapsed = now - state.telemetry.frameRateWindowStartedAt;
+    if (elapsed >= 1000) {
+      state.telemetry.framesPerSecond = Math.round(state.telemetry.frameRateWindowCount * 1000 / elapsed);
+      state.telemetry.frameRateWindowStartedAt = now;
+      state.telemetry.frameRateWindowCount = 0;
+    }
+    try {
+      return render(...args);
+    } catch (error) {
+      state.telemetry.errors += 1;
+      throw error;
+    }
+  };
+  return canvasRuntime;
+}
+
+function installKernelStatistics() {
+  let refreshTimer = null;
+  const close = () => {
+    elements.kernelStatistics.hidden = true;
+    elements.runtimeToggle.setAttribute("aria-expanded", "false");
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  };
+  const open = () => {
+    renderKernelStatistics();
+    elements.kernelStatistics.hidden = false;
+    elements.runtimeToggle.setAttribute("aria-expanded", "true");
+    refreshTimer ??= setInterval(renderKernelStatistics, 1000);
+  };
+  elements.runtimeToggle.addEventListener("click", () => {
+    if (elements.kernelStatistics.hidden) open();
+    else close();
+  });
+  query("[data-kernel-statistics-close]").addEventListener("click", close);
+  document.addEventListener("pointerdown", (event) => {
+    if (elements.kernelStatistics.hidden ||
+        elements.kernelStatistics.contains(event.target) ||
+        elements.runtimeToggle.contains(event.target)) return;
+    close();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !elements.kernelStatistics.hidden) close();
+  });
 }
 
 function setKernelProgress(percent, label = "KERNEL LOADING") {
@@ -266,11 +498,23 @@ async function loadBackgroundWorkspace() {
   const value = await state.broker.eval(ROOT, `(quote ${await workspace.text()})`);
   state.backgroundDocuments.clear();
   elements.backgroundSource.replaceChildren();
-  for (const documentValue of mapValue(value, "workspace/documents") ?? []) {
+  elements.backgroundMenu.replaceChildren();
+  const categories = new Map();
+  const menuCategories = new Map();
+  const categoryOrder = ["Basic", "Nature", "Shapes", "Simulation", "Controls"];
+  const categoryRank = (category) => {
+    const index = categoryOrder.indexOf(category);
+    return index === -1 ? categoryOrder.length : index;
+  };
+  const documents = [...(mapValue(value, "workspace/documents") ?? [])]
+    .sort((left, right) => categoryRank(String(mapValue(left, "document/category")))
+      - categoryRank(String(mapValue(right, "document/category"))));
+  for (const documentValue of documents) {
     if (keywordName(mapValue(documentValue, "document/role")) !== "studio/background") continue;
     const descriptor = {
       id: String(mapValue(documentValue, "document/id")),
       title: String(mapValue(documentValue, "document/title")),
+      category: String(mapValue(documentValue, "document/category") ?? "Other"),
       path: String(mapValue(documentValue, "document/path")).replace("../../sources/", "./sources/"),
       node: String(mapValue(documentValue, "document/node")),
       canvas: String(mapValue(documentValue, "document/canvas"))
@@ -278,12 +522,56 @@ async function loadBackgroundWorkspace() {
     state.backgroundDocuments.set(descriptor.id, descriptor);
     const option = document.createElement("option");
     option.value = descriptor.id;
-    option.textContent = `${descriptor.title.toUpperCase()}.HAL`;
-    elements.backgroundSource.append(option);
+    option.textContent = descriptor.title.toUpperCase();
+    let category = categories.get(descriptor.category);
+    if (!category) {
+      category = document.createElement("optgroup");
+      category.label = descriptor.category.toUpperCase();
+      categories.set(descriptor.category, category);
+      elements.backgroundSource.append(category);
+    }
+    category.append(option);
+    let menuCategory = menuCategories.get(descriptor.category);
+    if (!menuCategory) {
+      menuCategory = document.createElement("section");
+      menuCategory.className = "background-menu-group";
+      const heading = document.createElement("h3");
+      heading.textContent = descriptor.category.toUpperCase();
+      menuCategory.append(heading);
+      menuCategories.set(descriptor.category, menuCategory);
+      elements.backgroundMenu.append(menuCategory);
+    }
+    const menuItem = document.createElement("button");
+    menuItem.type = "button";
+    menuItem.role = "menuitemradio";
+    menuItem.dataset.backgroundMenuItem = descriptor.id;
+    menuItem.textContent = descriptor.title.toUpperCase();
+    menuItem.setAttribute("aria-checked", "false");
+    menuCategory.append(menuItem);
   }
-  if (!state.backgroundDocuments.has(state.backgroundSource)) {
-    state.backgroundSource = state.backgroundDocuments.keys().next().value;
-  }
+  const startupPool = [...state.backgroundDocuments.values()]
+    .filter(({ category }) => ["Basic", "Nature", "Shapes"].includes(category));
+  const selected = startupPool[Math.floor(Math.random() * startupPool.length)]
+    ?? state.backgroundDocuments.values().next().value;
+  state.backgroundSource = selected.id;
+  syncBackgroundPicker();
+}
+
+function syncBackgroundPicker() {
+  const descriptor = state.backgroundDocuments.get(state.backgroundSource);
+  if (!descriptor) return;
+  elements.backgroundSource.value = descriptor.id;
+  elements.backgroundMenuLabel.textContent = descriptor.title.toUpperCase();
+  queryAll("[data-background-menu-item]", elements.backgroundMenu).forEach((item) => {
+    const active = item.dataset.backgroundMenuItem === descriptor.id;
+    item.classList.toggle("is-active", active);
+    item.setAttribute("aria-checked", String(active));
+  });
+}
+
+function closeBackgroundMenu() {
+  elements.backgroundMenu.hidden = true;
+  elements.backgroundMenuToggle.setAttribute("aria-expanded", "false");
 }
 
 function sourceStorageKey(documentId, kind) {
@@ -306,6 +594,18 @@ async function fetchBackgroundSource(descriptor) {
 async function activateBackground(descriptor, source, generation) {
   const nodeId = `${descriptor.node}@${generation}`;
   const prepared = await state.broker.prepareDocument(ROOT, descriptor.id, source, { nodeId });
+  if (elements.sourceTrace.getAttribute("aria-pressed") === "true") {
+    try {
+      await prepared.context.call("trace-namespace-enable", [prepared.moduleId, "transitive"]);
+    } catch (error) {
+      if (!errorText(error).includes("hta/target-unknown")) throw error;
+      elements.sourceTrace.setAttribute("aria-pressed", "false");
+      elements.sourceTrace.textContent = "TRACE UNAVAILABLE";
+      elements.sourceTrace.disabled = true;
+      localStorage.removeItem("hara-www.trace-enabled.v1");
+      toast("TRACE RUNTIME IS NOT INCLUDED IN THIS BUILD", true);
+    }
+  }
   state.nodeRuntime.registerNode({ id: nodeId, type: "hal/background" });
   state.canvasRuntime.stage(nodeId, descriptor.canvas);
   const firstFrame = state.canvasRuntime.waitForFirstRender(nodeId, descriptor.canvas, 2500);
@@ -346,8 +646,7 @@ async function loadBackgroundSource(name, sourceOverride = null) {
   const descriptor = state.backgroundDocuments.get(name);
   if (!descriptor) throw new Error(`unknown background document: ${name}`);
   state.backgroundSource = name;
-  localStorage.setItem(BACKGROUND_SOURCE_KEY, name);
-  elements.backgroundSource.value = name;
+  syncBackgroundPicker();
   if (!state.broker) return;
   const generation = ++backgroundLoadGeneration;
   try {
@@ -358,6 +657,7 @@ async function loadBackgroundSource(name, sourceOverride = null) {
     const canvas = query("[data-tron]");
     canvas.hidden = state.workspace === 1;
     canvas.dataset.backgroundName = descriptor.title.toLowerCase();
+    document.body.dataset.backgroundName = descriptor.title.toLowerCase().replaceAll(" ", "-");
     elements.sourceEditor.value = source;
     elements.sourceEditor.scrollTop = 0;
     elements.sourceEditor.scrollLeft = 0;
@@ -758,35 +1058,36 @@ function installWindowManager() {
 
 function installWorkspaceNavigation() {
   if (elements.backgroundSource) {
-    elements.backgroundSource.value = state.backgroundSource;
     elements.backgroundSource.addEventListener("change", () => {
       loadBackgroundSource(elements.backgroundSource.value).catch(() => {});
     });
+    elements.backgroundMenuToggle.addEventListener("click", () => {
+      const open = elements.backgroundMenu.hidden;
+      elements.backgroundMenu.hidden = !open;
+      elements.backgroundMenuToggle.setAttribute("aria-expanded", String(open));
+    });
+    elements.backgroundMenu.addEventListener("click", (event) => {
+      const item = event.target.closest("[data-background-menu-item]");
+      if (!item) return;
+      closeBackgroundMenu();
+      loadBackgroundSource(item.dataset.backgroundMenuItem).catch(() => {});
+    });
+    document.addEventListener("pointerdown", (event) => {
+      if (elements.backgroundMenu.hidden || event.target.closest(".background-picker")) return;
+      closeBackgroundMenu();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !elements.backgroundMenu.hidden) closeBackgroundMenu();
+    });
   }
-  query("[data-start]").addEventListener("click", openTemplateDialog);
+  query("[data-start]").addEventListener("click", () => {
+    window.location.href = query("[data-start]").dataset.playgroundUrl;
+  });
   queryAll("[data-home]").forEach((button) => button.addEventListener("click", () => {
     transitionHome().catch((error) => toast(errorText(error), true));
   }));
-  query("[data-workspace-prev]").addEventListener("click", () => {
-    if (state.workspace === 1) transitionHome().catch((error) => toast(errorText(error), true));
-  });
-  query("[data-workspace-next]").addEventListener("click", () => {
-    const record = state.workspaceRecords.get(state.openWorkspaces[0]);
-    if (record) openWorkspace(record).catch((error) => toast(errorText(error), true));
-    else openTemplateDialog();
-  });
-
-  document.addEventListener("keydown", (event) => {
-    if (elements.dialog.open || elements.launcher.classList.contains("is-open")) return;
-    if (event.target.matches("input, textarea, select")) return;
-    if (event.key === "ArrowRight" && state.workspace === 0) {
-      const record = state.workspaceRecords.get(state.openWorkspaces[0]);
-      if (record) openWorkspace(record).catch((error) => toast(errorText(error), true));
-    }
-    if (event.key === "ArrowLeft" && state.workspace === 1) {
-      transitionHome().catch((error) => toast(errorText(error), true));
-    }
-  });
+  query("[data-workspace-prev]").disabled = true;
+  query("[data-workspace-next]").disabled = true;
 
   const viewport = query(".workspace-viewport");
   let swipeStart = null;
@@ -1371,6 +1672,56 @@ function setSourcePanel(open) {
   document.body.classList.toggle("source-open", open);
 }
 
+const BACKGROUND_EDITOR_WIDTH_KEY = "hara-www.editor-width.v1";
+const BACKGROUND_EDITOR_FONT_KEY = "hara-www.editor-font-size.v1";
+
+function setBackgroundEditorWidth(width) {
+  const minimum = 420;
+  const maximum = Math.max(minimum, window.innerWidth - 80);
+  const next = Math.round(Math.min(maximum, Math.max(minimum, width)));
+  elements.sourcePanel.style.setProperty("--background-editor-width", `${next}px`);
+  localStorage.setItem(BACKGROUND_EDITOR_WIDTH_KEY, String(next));
+}
+
+function setBackgroundEditorFontSize(size) {
+  const next = Math.round(Math.min(22, Math.max(10, size)));
+  elements.sourcePanel.style.setProperty("--background-editor-font-size", `${next}px`);
+  localStorage.setItem(BACKGROUND_EDITOR_FONT_KEY, String(next));
+}
+
+function installBackgroundEditorSizing() {
+  const savedWidth = Number(localStorage.getItem(BACKGROUND_EDITOR_WIDTH_KEY));
+  const savedFont = Number(localStorage.getItem(BACKGROUND_EDITOR_FONT_KEY));
+  if (Number.isFinite(savedWidth) && savedWidth > 0) setBackgroundEditorWidth(savedWidth);
+  if (Number.isFinite(savedFont) && savedFont > 0) setBackgroundEditorFontSize(savedFont);
+
+  elements.sourceFontDecrease.addEventListener("click", () => {
+    setBackgroundEditorFontSize(parseFloat(getComputedStyle(elements.sourceEditor).fontSize) - 1);
+  });
+  elements.sourceFontIncrease.addEventListener("click", () => {
+    setBackgroundEditorFontSize(parseFloat(getComputedStyle(elements.sourceEditor).fontSize) + 1);
+  });
+
+  elements.sourceResizer.addEventListener("pointerdown", (event) => {
+    if (matchMedia("(max-width: 700px)").matches) return;
+    event.preventDefault();
+    elements.sourceResizer.setPointerCapture(event.pointerId);
+    elements.sourceResizer.classList.add("is-dragging");
+  });
+  elements.sourceResizer.addEventListener("pointermove", (event) => {
+    if (!elements.sourceResizer.hasPointerCapture(event.pointerId)) return;
+    setBackgroundEditorWidth(window.innerWidth - event.clientX);
+  });
+  const finishResize = (event) => {
+    if (elements.sourceResizer.hasPointerCapture(event.pointerId)) {
+      elements.sourceResizer.releasePointerCapture(event.pointerId);
+    }
+    elements.sourceResizer.classList.remove("is-dragging");
+  };
+  elements.sourceResizer.addEventListener("pointerup", finishResize);
+  elements.sourceResizer.addEventListener("pointercancel", finishResize);
+}
+
 function scheduleBackgroundPreview() {
   clearTimeout(state.sourceTimer);
   const documentId = elements.sourceEditor.dataset.documentId;
@@ -1398,7 +1749,30 @@ async function saveBackgroundSource() {
   toast(`SAVED ${descriptor.title.toUpperCase()}.HAL LOCALLY`);
 }
 
+async function evaluateBackgroundForm() {
+  const documentId = elements.sourceEditor.dataset.documentId;
+  if (!documentId || !state.activeBackground) return;
+  const start = elements.sourceEditor.selectionStart;
+  const end = elements.sourceEditor.selectionEnd;
+  const selected = elements.sourceEditor.value.slice(start, end).trim();
+  const form = selected ? { source: selected, start, end } :
+    localFormAt(elements.sourceEditor.value, start);
+  if (!form?.source) return;
+  elements.sourceStatus.textContent = "EVALUATING IN BACKGROUND ENVIRONMENT";
+  try {
+    const result = await state.broker.evalForm(ROOT, documentId, form.source);
+    elements.sourceStatus.textContent = `RESULT // ${resultLabel(result)}`;
+    toast(`EVAL => ${resultLabel(result)}`);
+  } catch (error) {
+    const message = errorText(error);
+    elements.sourceStatus.textContent = `EVAL ERROR // ${message}`;
+    toast(`EVAL ERROR: ${message}`, true);
+  }
+}
+
 function installBackgroundEditor() {
+  installBackgroundEditorSizing();
+  elements.sourceParedit.setAttribute("aria-pressed", "true");
   elements.sourceToggle.addEventListener("click", () =>
     setSourcePanel(!elements.sourcePanel.classList.contains("is-open")));
   elements.sourceEditor.addEventListener("input", () => {
@@ -1422,6 +1796,11 @@ function installBackgroundEditor() {
       );
       return;
     }
+    if (modifier && event.key.toLowerCase() === "e") {
+      event.preventDefault();
+      void evaluateBackgroundForm();
+      return;
+    }
     if (event.key === "Tab") {
       event.preventDefault();
       if (event.shiftKey) insertIndent(elements.sourceEditor, true);
@@ -1436,11 +1815,6 @@ function installBackgroundEditor() {
       elements.sourceEditor.dispatchEvent(new Event("input", { bubbles: true }));
     }
   });
-  elements.sourceParedit.addEventListener("click", () => {
-    const enabled = elements.sourceParedit.getAttribute("aria-pressed") !== "true";
-    elements.sourceParedit.setAttribute("aria-pressed", String(enabled));
-    elements.sourceParedit.textContent = enabled ? "PAREDIT ON" : "PAREDIT OFF";
-  });
   elements.sourceApply.addEventListener("click", () => {
     clearTimeout(state.sourceTimer);
     void loadBackgroundSource(
@@ -1448,7 +1822,30 @@ function installBackgroundEditor() {
       elements.sourceEditor.value
     );
   });
+  elements.sourceEval.addEventListener("click", () => void evaluateBackgroundForm());
   elements.sourceSave.addEventListener("click", () => void saveBackgroundSource());
+  elements.sourceTrace.addEventListener("click", () => {
+    const enabled = elements.sourceTrace.getAttribute("aria-pressed") !== "true";
+    elements.sourceTrace.setAttribute("aria-pressed", String(enabled));
+    elements.sourceTrace.textContent = enabled ? "TRACE ON" : "TRACE OFF";
+    localStorage.setItem("hara-www.trace-enabled.v1", String(enabled));
+    toast(enabled ? "TRACING ENABLED FOR NEXT APPLY" : "TRACING DISABLED");
+  });
+  if (localStorage.getItem("hara-www.trace-enabled.v1") === "true") {
+    elements.sourceTrace.setAttribute("aria-pressed", "true");
+    elements.sourceTrace.textContent = "TRACE ON";
+  }
+  elements.sourceHelp.addEventListener("click", () => {
+    const open = elements.sourceHelp.getAttribute("aria-expanded") !== "true";
+    elements.sourceHelp.setAttribute("aria-expanded", String(open));
+    elements.sourceHelpPanel.hidden = !open;
+  });
+  elements.sourceClose.addEventListener("click", () => {
+    elements.sourceHelp.setAttribute("aria-expanded", "false");
+    elements.sourceHelpPanel.hidden = true;
+    setSourcePanel(false);
+    elements.sourceToggle.focus();
+  });
 }
 
 function positionEditorOverlay(node, offset) {
@@ -1815,6 +2212,7 @@ function installFileActions() {
 }
 
 async function bootRuntime() {
+  state.runtimeStartedAt = performance.now();
   setRuntimeStatus("WASM // BOOTING", "booting");
   elements.editorStatus.textContent = "BOOTING HARA.WASM";
   try {
@@ -1842,9 +2240,10 @@ async function bootRuntime() {
       import(new URL("studio/capabilities/canvas.js", runtimeBase)),
       import(new URL("studio/capabilities/clock.js", runtimeBase))
     ]);
-    const wasmResponse = await fetch(new URL("hara.wasm", runtimeBase));
+    const wasmResponse = await fetch(new URL("hara.wasm", runtimeBase), { cache: "no-store" });
     if (!wasmResponse.ok) throw new Error(`runtime fetch failed: ${wasmResponse.status}`);
     const moduleBytes = new Uint8Array(await wasmResponse.arrayBuffer());
+    state.runtimeModuleBytes = moduleBytes.byteLength;
     const resources = {};
     for (const name of ["store", "fs", "space", "boot", "node", "draw", "program", "graph", "session"]) {
       const response = await fetch(new URL(`studio/hal/${name}.hal`, runtimeBase));
@@ -1857,13 +2256,25 @@ async function bootRuntime() {
       resources[`std.${name.replaceAll("/", ".")}`] = await response.text();
     }
     state.nodeRuntime = new NodeRuntime({ space: `workspace/${SPACE}` });
-    state.canvasRuntime = new CanvasRuntime({
+    state.canvasRuntime = instrumentCanvasTelemetry(new CanvasRuntime({
       onDiagnostic: (error) => {
         elements.sourceStatus.textContent = `DIAGNOSTIC // ${errorText(error)}`;
       }
-    });
+    }));
     state.canvasRuntime.register("canvas/background", query("[data-tron]"));
     const sessionRouter = new SessionRouter();
+    const deliver = sessionRouter.deliver.bind(sessionRouter);
+    sessionRouter.deliver = async (...args) => {
+      try {
+        const result = await deliver(...args);
+        state.telemetry.deliveredMessages += result?.delivered ?? 0;
+        return result;
+      } catch (error) {
+        state.telemetry.errors += 1;
+        throw error;
+      }
+    };
+    state.sessionRouter = sessionRouter;
     const capabilityRegistry = new CapabilityRegistry({ adapters: {
       "surface/canvas-2d": createCanvasCapability(state.canvasRuntime),
       "clock/frame": createClockCapability(),
@@ -1887,7 +2298,7 @@ async function bootRuntime() {
         showScene(validateScene(value), performance.now(), "HAL");
       }
     });
-    state.broker = createBrowserBroker({
+    state.broker = instrumentBrokerTelemetry(createBrowserBroker({
       workerUrl: new URL("hta-worker.js", runtimeBase),
       sharedWorkerUrl: new URLSearchParams(location.search).has("shared-runtime")
         ? new URL("hta-shared-worker.js", runtimeBase) : undefined,
@@ -1895,6 +2306,7 @@ async function bootRuntime() {
       hostCalls,
       resources,
       onKernelStarting: async (kernel) => {
+        state.telemetry.kernelsCreated += 1;
         let space = state.kernelSpaces.get(kernel.name);
         if (!space && kernel.name.startsWith("DOC.")) {
           space = [...state.kernelSpaces.entries()]
@@ -1917,10 +2329,12 @@ async function bootRuntime() {
         return session;
       },
       onKernelClosed: (kernel) => {
+        state.telemetry.kernelsClosed += 1;
         state.aiSessionWorkspaces.delete(kernel.name);
+        capabilityRegistry.revokeSession(kernel.name);
         return sessionRouter.unregister(kernel.name);
       }
-    });
+    }));
     state.defaultBootstrap = defaultBootstrap;
     await state.broker.eval(ROOT, defaultBootstrap(SPACE));
     await loadBackgroundWorkspace();
@@ -1937,6 +2351,7 @@ async function bootRuntime() {
     await renderSavedWorkspaces();
     setWorkspace(0);
   } catch (error) {
+    state.telemetry.errors += 1;
     console.error("[hara www]", error);
     setRuntimeStatus("WASM // ERROR", "error");
     elements.editorStatus.textContent = `BOOT ERROR // ${errorText(error)}`;
@@ -2070,13 +2485,12 @@ function installEditor() {
 
 installWorkspaceNavigation();
 installLauncher();
+installKernelStatistics();
 installWorkspaceTabs();
 installWorkspaceCreation();
 installPublishing();
 installGitHubAccount();
 installAiAdapters();
-installSettings();
-installHelp();
 installWindowManager();
 installEditor();
 installBackgroundEditor();

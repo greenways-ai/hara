@@ -124,14 +124,9 @@
   (/ (* height (get view :height)) game-height))
 
 (defn field-commands [view]
-  (let [width (get view :width)
-        height (get view :height)
-        center (/ height 2)]
-    (list
-      [:rect 0 0 width height "#06161f" 0.72]
-      [:line 0 center width center "#1b5362" 2 0.42]
-      [:line 0 1 width 1 "#41f5e4" 2 0.38]
-      [:line 0 (- height 2) width (- height 2) "#9c7bff" 2 0.38])))
+  ;; The whole browser canvas is the playfield. Keeping this command list
+  ;; empty avoids drawing a separate framed or tinted "screen" over the hero.
+  (list))
 
 (defn paddle-commands [view paddle color]
   (let [left (scale-x view (get paddle :x))
@@ -185,6 +180,6 @@
             (draw/render
               "canvas/background"
               {:type :canvas-2d
-               :background "#06161f"
+               :background "#02050b"
                :commands (draw-pong-game next-state width height)}))
           (recur next-state (inc tick)))))))

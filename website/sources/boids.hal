@@ -1,0 +1,125 @@
+(ns+
+  (:require [studio.draw :as draw]))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; Boids ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Reynolds-style flocking in Hara: every frame combines separation,
+;; alignment, and cohesion from the previous flock state.
+;; TRY: change flock-size or neighborhood to alter the emergent formations.
+
+(def flock-size 44)
+(def neighborhood 15000)
+(def separation-zone 1600)
+(def max-speed 9)
+
+(defn absolute [value] (if (< value 0) (- 0 value) value))
+(defn larger [a b] (if (> a b) a b))
+
+(defn seed-flock [width height]
+  (loop [index 0 flock (list)]
+    (if (< index flock-size)
+      (recur
+        (+ index 1)
+        (conj
+          flock
+          {:x (+ 30 (mod (* index 83) (larger 60 (- width 60))))
+           :y (+ 30 (mod (* index 47) (larger 60 (- height 60))))
+           :vx (- (mod (* index 7) 11) 5)
+           :vy (- (mod (* index 13) 9) 4)}))
+      flock)))
+
+(defn neighborhood-force [boid flock]
+  (loop [index 0 neighbors 0
+         center-x 0 center-y 0 align-x 0 align-y 0
+         separate-x 0 separate-y 0]
+    (if (< index (count flock))
+      (let [other (nth flock index)
+            dx (- (get other :x) (get boid :x))
+            dy (- (get other :y) (get boid :y))
+            distance (+ (* dx dx) (* dy dy))]
+        (if (if (> distance 0) (< distance neighborhood))
+          (recur
+            (+ index 1)
+            (+ neighbors 1)
+            (+ center-x (get other :x))
+            (+ center-y (get other :y))
+            (+ align-x (get other :vx))
+            (+ align-y (get other :vy))
+            (if (< distance separation-zone) (- separate-x dx) separate-x)
+            (if (< distance separation-zone) (- separate-y dy) separate-y))
+          (recur
+            (+ index 1) neighbors center-x center-y align-x align-y
+            separate-x separate-y)))
+      (if (= neighbors 0)
+        {:x 0 :y 0}
+        {:x (+ (/ (- (/ center-x neighbors) (get boid :x)) 90)
+               (/ (- (/ align-x neighbors) (get boid :vx)) 8)
+               (/ separate-x 28))
+         :y (+ (/ (- (/ center-y neighbors) (get boid :y)) 90)
+               (/ (- (/ align-y neighbors) (get boid :vy)) 8)
+               (/ separate-y 28))}))))
+
+(defn limit-velocity [vx vy]
+  (let [magnitude (+ (absolute vx) (absolute vy))]
+    (if (> magnitude max-speed)
+      {:x (/ (* vx max-speed) magnitude)
+       :y (/ (* vy max-speed) magnitude)}
+      {:x vx :y vy})))
+
+(defn wrap [value limit]
+  (if (< value -20) (+ limit 20)
+    (if (> value (+ limit 20)) -20 value)))
+
+(defn update-boid [boid flock width height]
+  (let [force (neighborhood-force boid flock)
+        velocity
+        (limit-velocity
+          (+ (get boid :vx) (get force :x))
+          (+ (get boid :vy) (get force :y)))]
+    {:x (wrap (+ (get boid :x) (get velocity :x)) width)
+     :y (wrap (+ (get boid :y) (get velocity :y)) height)
+     :vx (get velocity :x)
+     :vy (get velocity :y)}))
+
+(defn update-flock [flock width height]
+  (loop [index 0 next (list)]
+    (if (< index (count flock))
+      (recur
+        (+ index 1)
+        (conj next (update-boid (nth flock index) flock width height)))
+      next)))
+
+(defn boid-commands [flock]
+  (loop [index 0 commands (list)]
+    (if (< index (count flock))
+      (let [boid (nth flock index)
+            x (get boid :x)
+            y (get boid :y)
+            vx (get boid :vx)
+            vy (get boid :vy)
+            color (if (= (mod index 3) 0) "#9c7bff" "#41f5e4")]
+        (recur
+          (+ index 1)
+          (conj
+            (conj commands [:line x y (- x (* vx 2.8)) (- y (* vy 2.8))
+                            color 2 0.48])
+            [:circle x y 3 "#efffff" 0.94])))
+      commands)))
+
+(node/start
+  (fn []
+    (loop [flock nil tick 0]
+      (let [frame (co/await (draw/next-frame "canvas/background"))
+            width (get frame "canvas/width")
+            height (get frame "canvas/height")
+            current (if flock flock (seed-flock width height))
+            next (if (= (mod tick 2) 0)
+                   (update-flock current width height)
+                   current)]
+        (do
+          (co/await
+            (draw/render
+              "canvas/background"
+              {:type :canvas-2d
+               :background "#02050b"
+               :commands (boid-commands next)}))
+          (recur next (+ tick 1)))))))

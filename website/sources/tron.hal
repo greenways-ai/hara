@@ -1,17 +1,27 @@
 (ns+
   (:require [studio.draw :as draw]))
 
-;; All game state lives here. The browser only schedules a frame and executes
-;; the complete Canvas2D command scene returned by render-state.
-(def directions [[4 0] [0 4] [-4 0] [0 -4]])
+;; EFFECT: Four autonomous light cycles hunt, evade, and leave lethal trails.
+;; Trails persist for roughly 1.5 screen lengths before fading away.
+;; TRY: change cycle-speed to make path finding more or less frantic.
+;; TRY: increase the collision-radius for less forgiving light walls.
+(def cycle-speed 6)
+(def collision-radius 20)
+(def probe-spacing 36)
+(def directions [[6 0] [0 6] [-6 0] [0 -6]])
+(def cycle-order [:cyan :pink :violet :gold])
 
 (defn either [a b] (if a true b))
 (defn absolute [value] (if (< value 0) (- 0 value) value))
 
-(defn trim-trail [trail]
-  ;; HTA tuples carry at most eight values. Keep seven points so the complete
-  ;; polyline stays on the portable tuple lane in every browser runtime.
-  (if (> (count trail) 7) (vec (rest trail)) trail))
+(defn larger [a b] (if (> a b) a b))
+(defn smaller [a b] (if (< a b) a b))
+
+(defn trim-trail [trail width height]
+  ;; Collision probes are 36px apart with overlapping 20px hit radii.
+  ;; Retaining this many probes yields about 1.5 times the longest screen axis.
+  (let [limit (/ (* (larger width height) 3) (* probe-spacing 2))]
+    (if (> (count trail) limit) (vec (rest trail)) trail)))
 
 (defn event-direction [events direction]
   (loop [index 0 result direction]
@@ -38,29 +48,105 @@
         (> y (- height 24))))))
 
 (defn collides [cycle other]
-  (if (< (absolute (- (get cycle :x) (get other :x))) 10)
-    (< (absolute (- (get cycle :y) (get other :y))) 10)
+  (if (< (absolute (- (get cycle :x) (get other :x))) collision-radius)
+    (< (absolute (- (get cycle :y) (get other :y))) collision-radius)
     false))
 
-(defn advance [cycle direction width height]
+(defn trail-hit [x y trail skip-last]
+  (let [limit (- (count trail) skip-last)]
+    (loop [index 0 hit false]
+      (if (if (< index limit) (not hit))
+        (let [point (nth trail index)]
+          (recur
+            (+ index 1)
+            (if (< (absolute (- x (nth point 0))) collision-radius)
+              (< (absolute (- y (nth point 1))) collision-radius)
+              false)))
+        hit))))
+
+(defn blocked [name x y state width height]
+  (if (hit-wall x y width height)
+    true
+    (loop [index 0 hit false]
+      (if (if (< index (count cycle-order)) (not hit))
+        (let [other-name (nth cycle-order index)
+              other (get state other-name)
+              skip-last (if (= name other-name) 1 0)]
+          (recur
+            (+ index 1)
+            (trail-hit x y (get other :trail) skip-last)))
+        hit))))
+
+(defn next-position [cycle direction]
   (let [velocity (nth directions direction)
         x (+ (get cycle :x) (nth velocity 0))
         y (+ (get cycle :y) (nth velocity 1))]
-    (if (hit-wall x y width height)
-      (assoc (assoc cycle :direction (mod (+ direction 1) 4)) :trail [])
+    [x y]))
+
+(defn distance-to [x y target]
+  (+ (absolute (- x (get target :x)))
+     (absolute (- y (get target :y)))))
+
+(defn safe-run [name cycle direction state width height]
+  ;; Look far enough ahead to prefer corridors over locally safe dead ends.
+  ;; Twelve moves is 72 logical pixels at the default speed.
+  (let [velocity (nth directions direction)]
+    (loop [step 1]
+      (let [x (+ (get cycle :x) (* step (nth velocity 0)))
+            y (+ (get cycle :y) (* step (nth velocity 1)))]
+        (if (if (<= step 12) (not (blocked name x y state width height)))
+          (recur (+ step 1))
+          (- step 1))))))
+
+(defn choose-direction [name cycle target state preferred width height]
+  (let [candidates
+        [preferred
+         (mod (+ preferred 1) 4)
+         (mod (+ preferred 3) 4)
+         (mod (+ preferred 2) 4)]]
+    (loop [index 0 best -1 best-score -10000000]
+      (if (< index (count candidates))
+        (let [direction (nth candidates index)
+              point (next-position cycle direction)
+              x (nth point 0)
+              y (nth point 1)
+              safe (not (blocked name x y state width height))
+              runway (if safe
+                       (safe-run name cycle direction state width height)
+                       0)
+              turn-cost (if (= direction preferred) 0 20)
+              ;; Survival dominates, but equal corridors still bend toward
+              ;; the target so cycles actively pressure one another.
+              score (- (* runway 100)
+                       (distance-to x y target)
+                       turn-cost)]
+          (recur
+            (+ index 1)
+            (if (if safe (> score best-score)) direction best)
+            (if (if safe (> score best-score)) score best-score)))
+        best))))
+
+(defn advance [cycle direction width height]
+  (let [point (next-position cycle direction)
+        x (nth point 0)
+        y (nth point 1)
+        trail (get cycle :trail)
+        last-index (- (count trail) 1)
+        last-point (nth trail last-index)
+        extended
+        (if (>= (+ (absolute (- x (nth last-point 0)))
+                   (absolute (- y (nth last-point 1))))
+                probe-spacing)
+          (conj trail [x y])
+          trail)]
+    (assoc
       (assoc
-        (assoc (assoc cycle :x x) :y y)
-        :trail (trim-trail (conj (get cycle :trail) [x y]))))))
-
-(defn update-player [cycle events width height]
-  (let [direction (event-direction events (get cycle :direction))]
-    (advance (assoc cycle :direction direction) direction width height)))
-
-(defn update-agent [cycle tick period width height]
-  (let [direction (if (= (mod tick period) 0)
-                    (mod (+ (get cycle :direction) 1) 4)
-                    (get cycle :direction))]
-    (advance (assoc cycle :direction direction) direction width height)))
+        (assoc
+          (assoc cycle :x x)
+          :y y)
+        :direction direction)
+      :trail
+      (trim-trail extended width height))))
 
 (defn initial-state [width height]
   {:cyan {:x 50 :y 76 :direction 0 :trail [[50 76]]}
@@ -69,22 +155,56 @@
    :gold {:x (- width 80) :y (- height 80) :direction 2
           :trail [[(- width 80) (- height 80)]]}})
 
+(defn update-cycle [name target-name state events width height]
+  (let [cycle (get state name)
+        target (get state target-name)
+        current (get cycle :direction)
+        requested (if (= name :cyan)
+                    (event-direction events current)
+                    current)
+        direction
+        (choose-direction name cycle target state requested width height)]
+    (if (= direction -1)
+      (get (initial-state width height) name)
+      (advance cycle direction width height))))
+
+(defn head-crash [name cycle state]
+  (loop [index 0 crashed false]
+    (if (if (< index (count cycle-order)) (not crashed))
+      (let [other-name (nth cycle-order index)]
+        (recur
+          (+ index 1)
+          (if (= name other-name)
+            false
+            (collides cycle (get state other-name)))))
+      crashed)))
+
 (defn update-state [state events tick width height]
-  (let [cyan (update-player (get state :cyan) events width height)
-        pink (update-agent (get state :pink) tick 47 width height)
-        violet (update-agent (get state :violet) tick 71 width height)
-        gold (update-agent (get state :gold) tick 89 width height)
-        cyan' (if (collides cyan pink)
-                (assoc (assoc cyan :direction 1) :trail [])
-                cyan)]
-    {:cyan cyan' :pink pink :violet violet :gold gold}))
+  (let [moved
+        {:cyan (update-cycle :cyan :pink state events width height)
+         :pink (update-cycle :pink :violet state events width height)
+         :violet (update-cycle :violet :gold state events width height)
+         :gold (update-cycle :gold :cyan state events width height)}
+        spawn (initial-state width height)]
+    {:cyan (if (head-crash :cyan (get moved :cyan) moved)
+             (get spawn :cyan) (get moved :cyan))
+     :pink (if (head-crash :pink (get moved :pink) moved)
+             (get spawn :pink) (get moved :pink))
+     :violet (if (head-crash :violet (get moved :violet) moved)
+               (get spawn :violet) (get moved :violet))
+     :gold (if (head-crash :gold (get moved :gold) moved)
+             (get spawn :gold) (get moved :gold))}))
+
+(defn trail-points [cycle]
+  (conj (get cycle :trail) [(get cycle :x) (get cycle :y)]))
 
 (defn cycle-commands [cycle color]
-  [[:polyline (get cycle :trail) color 11 0.12]
-   [:polyline (get cycle :trail) color 2 0.86]
-   [:circle (get cycle :x) (get cycle :y) 4 "#efffff" 1]])
+  (let [points (trail-points cycle)]
+    [[:polyline points color 13 0.14]
+     [:polyline points color 3 0.92]
+     [:circle (get cycle :x) (get cycle :y) 5 "#efffff" 1]]))
 
-(defn render-state [state width height]
+(defn render-state [state width height tick]
   (let [cyan (cycle-commands (get state :cyan) "#41f5e4")
         pink (cycle-commands (get state :pink) "#ff2e88")
         violet (cycle-commands (get state :violet) "#9c7bff")
@@ -92,11 +212,10 @@
     {:type :canvas-2d
      :background "#02050b"
      :commands
-     [[:grid 46 "rgba(65,245,228,.055)" 1]
-      (nth cyan 1) (nth cyan 2)
-      (nth pink 1) (nth pink 2)
-      (nth violet 1) (nth violet 2)
-      [:text "TRON.HAL // ARROWS OR SWIPE" 24 (- height 24) "#65c9d0" 11]]}))
+     [(nth cyan 0) (nth cyan 1) (nth cyan 2)
+      (nth pink 0) (nth pink 1) (nth pink 2)
+      (nth violet 0) (nth violet 1) (nth violet 2)
+      (nth gold 0) (nth gold 1) (nth gold 2)]}))
 
 (node/start
   (fn []
@@ -106,8 +225,13 @@
             height (get frame "canvas/height")
             events (get frame "input/events")
             current (if state state (initial-state width height))
-            next (update-state current events tick width height)]
+            ;; Path finding runs at 20 Hz while drawing stays synchronized to
+            ;; every browser frame. This keeps long-tail collision checks from
+            ;; reducing visual smoothness.
+            next (if (= (mod tick 3) 0)
+                   (update-state current events tick width height)
+                   current)]
         (do
           (co/await
-            (draw/render "canvas/background" (render-state next width height)))
+            (draw/render "canvas/background" (render-state next width height tick)))
           (recur next (+ tick 1)))))))
