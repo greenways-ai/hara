@@ -33,6 +33,7 @@ native-image \
   -cp "$NATIVE_IMAGE_CP" \
   -H:Class=hara.truffle.Main \
   --initialize-at-build-time=hara.truffle.HaraFunctionGen,hara.truffle.HaraBoxGen,hara.truffle.HaraNullGen,hara.truffle.HaraVarGen,hara.truffle.HaraProtocolGen,hara.truffle.HaraStructGen,hara.truffle.HaraTypeGen,hara.truffle.HaraMemberNamesGen,hara.truffle.HaraHashEntryGen,hara.truffle.HaraMultiFunctionGen,hara.truffle.HaraDecimalGen,hara.truffle.HaraBigIntegerGen,hara.truffle.HaraIteratorGen \
+  '--initialize-at-build-time=hara.truffle.HaraFunctionGen$InteropLibraryExports,hara.truffle.HaraBoxGen$InteropLibraryExports,hara.truffle.HaraNullGen$InteropLibraryExports,hara.truffle.HaraVarGen$InteropLibraryExports,hara.truffle.HaraProtocolGen$InteropLibraryExports,hara.truffle.HaraStructGen$InteropLibraryExports,hara.truffle.HaraTypeGen$InteropLibraryExports,hara.truffle.HaraMemberNamesGen$InteropLibraryExports,hara.truffle.HaraHashEntryGen$InteropLibraryExports,hara.truffle.HaraMultiFunctionGen$InteropLibraryExports,hara.truffle.HaraDecimalGen$InteropLibraryExports,hara.truffle.HaraBigIntegerGen$InteropLibraryExports,hara.truffle.HaraIteratorGen$InteropLibraryExports' \
   -o "$ROOT/target/hara-truffle"
 
 echo "Built $ROOT/target/hara-truffle"
