@@ -32,6 +32,17 @@ export class GistPublisher {
   }
 }
 
+export class GreenwaysPublisher {
+  constructor({ request }) { this.request = request; }
+
+  publish(bundle, { public: visibility = true, previous = null } = {}) {
+    return this.request(previous?.id ? `/works/${previous.id}` : "/works", {
+      method: previous?.id ? "PUT" : "POST",
+      body: { ...bundle, visibility: visibility ? "public" : "draft", githubProfile: true }
+    });
+  }
+}
+
 export class GitHubDeviceAuth {
   constructor({ clientId, request = oauthRequest, sleep = delay } = {}) {
     this.clientId = clientId;
