@@ -22,6 +22,11 @@ export class ProgramHost {
     const program = normalizeProgramDescriptor(descriptor, { maxSourceBytes });
     assertCapabilities(program, capabilities);
     const active = this.programs.get(program.id);
+    if (active && active.ownerSession !== sessionId) {
+      throw new ProgramError("program/session-mismatch", `program ${program.id} is owned by ${active.ownerSession}`, {
+        programId: program.id, ownerSession: active.ownerSession, sessionId
+      });
+    }
     if (active?.hash === program.hash) return active.info("cached");
     if (!active && this.programs.size >= this.maxPrograms) {
       throw new ProgramError("program/limit", `program limit ${this.maxPrograms} reached`);
@@ -34,6 +39,10 @@ export class ProgramHost {
       throw programError("program/import-failed", error, candidate);
     }
     const entry = new ProgramEntry(candidate);
+    // Existing instances keep their original module generation until they are
+    // explicitly restarted. Carry their ownership forward so replacement does
+    // not orphan them from release(program) or releaseSession.
+    if (active) entry.nodes = active.nodes;
     this.programs.set(program.id, entry);
     this.emitDiagnostic("program/installed", entry.info(active ? "replaced" : "ready"));
     return entry.info(active ? "replaced" : "ready");

@@ -54,6 +54,25 @@ test("a changed program hash creates a new active generation", async () => {
   assert.equal(replacement.generation, 2);
 });
 
+test("a replacement retains existing node ownership until those nodes are released", async () => {
+  const runtime = executor();
+  const host = new ProgramHost({ executor: runtime });
+  await host.install(program(), { sessionId: "UI" });
+  await host.spawn(node());
+  await host.install(program({ "program/hash": "sha256:two" }), { sessionId: "UI" });
+  assert.equal(await host.release("example/increment"), true);
+  assert.deepEqual(runtime.calls.map(([kind]) => kind), ["install", "spawn", "install", "release-node", "release-program"]);
+});
+
+test("a program id cannot be replaced by a different session", async () => {
+  const host = new ProgramHost({ executor: executor() });
+  await host.install(program(), { sessionId: "UI" });
+  await assert.rejects(
+    host.install(program({ "program/hash": "sha256:two" }), { sessionId: "MARKET" }),
+    (error) => error instanceof ProgramError && error.code === "program/session-mismatch"
+  );
+});
+
 test("capability grants and source limits are enforced before execution", async () => {
   const runtime = executor();
   const host = new ProgramHost({ executor: runtime });
