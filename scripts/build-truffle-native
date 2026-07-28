@@ -20,14 +20,11 @@ if [[ "${HARA_NATIVE_USE_FALLBACK_RUNTIME:-false}" == "true" ]]; then
   NATIVE_IMAGE_OPTIONS+=(-Dtruffle.UseFallbackRuntime=true)
 fi
 
-# Build a classpath that excludes wasm-language; its bundled native-image
-# properties require GraalVM options (VectorAPISupport) newer than the
-# installed native-image, so WASM extensions are JVM-only for now.
+# Keep every runtime dependency on the native-image classpath. In particular,
+# wasm-language contributes the native-image configuration that registers the
+# WASM guest language used by packaged extensions.
 NATIVE_IMAGE_CP="$ROOT/java/target/classes"
 for jar in "$DEPENDENCIES"/*.jar; do
-  case "$(basename "$jar")" in
-    wasm-language-*) continue ;;
-  esac
   NATIVE_IMAGE_CP="$NATIVE_IMAGE_CP:$jar"
 done
 
