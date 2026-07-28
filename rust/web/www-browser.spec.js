@@ -22,6 +22,13 @@ test("www always opens Home and offers manifest-backed workspace templates", asy
   await expect(page.locator("[data-launcher]")).toHaveAttribute("aria-hidden", "false");
   await expect(page.locator("[data-new-workspace]")).toBeVisible();
   await expect(page.locator("[data-deploy-template]")).toHaveCount(0);
+  await expect(page.locator("[data-github-account]")).toBeVisible();
+  await expect(page.locator("[data-ai-adapters]")).toBeVisible();
+
+  await page.locator("[data-github-account]").click();
+  await expect(page.locator("[data-account-dialog]")).toBeVisible();
+  await expect(page.locator("[data-account-signin]")).toBeDisabled();
+  await page.locator("[data-account-close]").click();
 });
 
 test("zoomed desktop keeps explorer, source, and output visible", async ({ page }) => {
@@ -122,13 +129,21 @@ runtimeTest("workspace template opens a dedicated project tab and survives Home 
   await page.locator("[data-start]").click();
   await page.locator("[data-workspace-name]").fill(`Canvas ${Date.now()}`);
   await page.locator('[data-template="canvas"]').click();
+  await expect(page.locator("[data-kernel-loading]")).toBeVisible();
+  await expect(page.locator("[data-kernel-loading]")).toContainText("KERNEL LOADING");
   await expect(page.locator("body")).toHaveAttribute("data-workspace", "1");
   await expect(page.locator("[data-project-id]")).toHaveCount(1);
   await expect(page.locator('[data-file="/project.edn"]')).toBeVisible();
   await expect(page.locator('[data-file="/workspace.edn"]')).toBeVisible();
+  await expect(page.locator("body")).toHaveAttribute("data-kernel", "live");
   await page.locator(".project-tab[data-home]").click();
   await expect(page.locator("body")).toHaveAttribute("data-workspace", "0");
+  await expect(page.locator("body")).toHaveAttribute("data-kernel", "stopped");
   await expect(page.locator("[data-project-id]")).toHaveCount(1);
+  await page.locator("[data-project-id]").click();
+  await expect(page.locator("body")).toHaveAttribute("data-workspace", "1");
+  await expect(page.locator("body")).toHaveAttribute("data-kernel", "live");
+  await expect(page.locator('[data-file="/src/main.hal"]')).toBeVisible();
 });
 
 runtimeTest("www evaluates scalars through the SharedWorker runtime", async ({ page }) => {

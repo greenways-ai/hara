@@ -20,6 +20,8 @@ cp "$ROOT/website/index.html" \
    "$ROOT/website/app.js" \
    "$ROOT/website/workspaces.js" \
    "$ROOT/website/publishing.js" \
+   "$ROOT/website/github-auth.js" \
+   "$ROOT/website/ai-adapters.js" \
    "$ROOT/website/creative.js" \
    "$ROOT/website/editor.js" \
    "$ROOT/website/hara-amp.html" \

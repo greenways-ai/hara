@@ -13,11 +13,12 @@
   <meta property="og:image:height" content="909">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://www.hara-lang.org/og-hara-ribbon.png">
+  <meta name="hara-auth-api" content="">
   <link rel="icon" href="./assets/hara-favicon.svg" type="image/svg+xml">
   <title>Hara - A Modern Lisp for the Agentic Age</title>
   <link rel="stylesheet" href="./vendor/hara-ui/tokens.css">
   <link rel="stylesheet" href="./vendor/hara-ui/components.css">
-  <link rel="stylesheet" href="./app.css?v=workspace-projects-1">
+  <link rel="stylesheet" href="./app.css?v=auth-ai-kernel-1">
 </head>
 <body>
   <canvas class="tron-field" data-tron aria-hidden="true"></canvas>
@@ -79,6 +80,14 @@
         <span class="app-icon app-icon-editor" aria-hidden="true">＋</span>
         <span>New Workspace</span>
       </button>
+      <button type="button" class="app-tile" data-github-account>
+        <span class="app-icon" aria-hidden="true">GH</span>
+        <span data-github-label>Connect GitHub</span>
+      </button>
+      <button type="button" class="app-tile" data-ai-adapters>
+        <span class="app-icon app-icon-editor" aria-hidden="true">AI</span>
+        <span>AI Adapters</span>
+      </button>
       <a class="app-tile" href="https://docs.hara-lang.org/learn-programming/" target="_blank" rel="noreferrer">
         <span class="app-icon" aria-hidden="true">01</span>
         <span>Learning Book</span>
@@ -102,6 +111,11 @@
     </div>
   </aside>
   <div class="launcher-scrim" data-launcher-scrim></div>
+  <div class="kernel-loading" data-kernel-loading hidden role="status" aria-live="polite">
+    <span>KERNEL LOADING</span>
+    <strong data-kernel-progress>0%</strong>
+    <i><b data-kernel-meter></b></i>
+  </div>
 
   <main class="workspace-viewport">
     <div class="workspace-track" data-workspace-track>
@@ -283,6 +297,43 @@
     <p class="publish-note" data-publish-note>GitHub and Greenways connect through a server-side GitHub profile authorization.</p>
   </dialog>
 
+  <dialog class="hara-dialog account-dialog" data-account-dialog>
+    <div class="dialog-head"><span>GITHUB ACCOUNT</span><button type="button" data-account-close aria-label="Close">×</button></div>
+    <div class="account-state">
+      <img data-account-avatar alt="" hidden>
+      <div>
+        <strong data-account-name>NOT CONNECTED</strong>
+        <span data-account-status>GitHub identity is used for publishing and your Greenways profile.</span>
+      </div>
+    </div>
+    <div class="dialog-actions account-actions">
+      <button type="button" data-account-signout hidden>SIGN OUT</button>
+      <button type="button" class="dialog-confirm" data-account-signin>CONNECT GITHUB</button>
+    </div>
+  </dialog>
+
+  <dialog class="hara-dialog ai-dialog" data-ai-dialog>
+    <div class="dialog-head"><span>AI ADAPTERS</span><button type="button" data-ai-close aria-label="Close">×</button></div>
+    <p>Adapters belong to the current workspace. Keys stay in this browser tab and are never saved with the project.</p>
+    <div class="adapter-list" data-adapter-list></div>
+    <form class="adapter-form" data-adapter-form>
+      <label><span>NAME</span><input name="name" required placeholder="My model"></label>
+      <label><span>TYPE</span><select name="kind">
+        <option value="openai-compatible">OPENAI COMPATIBLE</option>
+        <option value="anthropic">ANTHROPIC</option>
+        <option value="custom-json">CUSTOM JSON PROXY</option>
+      </select></label>
+      <label><span>ENDPOINT</span><input name="endpoint" required type="url" placeholder="https://api.example/v1/chat/completions"></label>
+      <label><span>MODEL</span><input name="model" required placeholder="model-name"></label>
+      <label><span>API KEY — SESSION ONLY</span><input name="apiKey" type="password" autocomplete="off"></label>
+      <div class="dialog-actions">
+        <button type="button" data-ai-test>TEST</button>
+        <button type="submit" class="dialog-confirm">ADD ADAPTER</button>
+      </div>
+    </form>
+    <p class="publish-note" data-ai-note>Select a workspace before adding an adapter.</p>
+  </dialog>
+
   <dialog class="hara-dialog" data-dialog>
     <form method="dialog" data-dialog-form>
       <div class="dialog-head">
@@ -302,6 +353,6 @@
   </dialog>
 
   <div class="toast-stack" data-toasts aria-live="polite"></div>
-  <script type="module" src="./app.js?v=workspace-projects-1"></script>
+  <script type="module" src="./app.js?v=auth-ai-kernel-1"></script>
 </body>
 </html>

@@ -2,7 +2,9 @@ import { keywordName, mapValue, renderScene, validateScene } from "./scene.js";
 import { CreativeRuntime, normalizeCreative } from "./creative.js";
 import { applyParedit, barfForward, insertIndent, killToFormEnd, localFormAt, slurpForward, structuralAlign } from "./editor.js";
 import { WorkspaceRepository, kernelName, workspaceTemplates } from "./workspaces.js";
-import { downloadWorkspace, workspaceBundle } from "./publishing.js";
+import { downloadWorkspace, GistPublisher, GreenwaysPublisher, workspaceBundle } from "./publishing.js";
+import { GitHubAuthClient, authBaseFromDocument } from "./github-auth.js";
+import { AiAdapterRepository, createAiCapability } from "./ai-adapters.js";
 
 const SPACE = "home";
 const ROOT = "ROOT";
@@ -137,6 +139,11 @@ const state = {
   zIndex: 10,
   workspace: 0,
   workspaceRepository: new WorkspaceRepository(),
+  githubAuth: new GitHubAuthClient({ baseUrl: authBaseFromDocument() }),
+  githubSession: { authenticated: false, configured: false, profile: null },
+  aiAdapters: new AiAdapterRepository(),
+  capabilityRegistry: null,
+  aiSessionWorkspaces: new Map(),
   workspaceRecords: new Map(),
   openWorkspaces: [],
   currentProject: null,
@@ -196,6 +203,17 @@ const elements = {
   publish: query("[data-publish]"),
   publishDialog: query("[data-publish-dialog]"),
   publishNote: query("[data-publish-note]"),
+  kernelLoading: query("[data-kernel-loading]"),
+  kernelProgress: query("[data-kernel-progress]"),
+  kernelMeter: query("[data-kernel-meter]"),
+  accountDialog: query("[data-account-dialog]"),
+  accountName: query("[data-account-name]"),
+  accountStatus: query("[data-account-status]"),
+  accountAvatar: query("[data-account-avatar]"),
+  aiDialog: query("[data-ai-dialog]"),
+  adapterList: query("[data-adapter-list]"),
+  adapterForm: query("[data-adapter-form]"),
+  aiNote: query("[data-ai-note]"),
   toasts: query("[data-toasts]")
 };
 
@@ -218,6 +236,19 @@ function setRuntimeStatus(label, status) {
   elements.runtimeLabel.textContent = label;
   elements.runtimeLed.classList.toggle("is-live", status === "live");
   elements.runtimeLed.classList.toggle("is-error", status === "error");
+}
+
+function setKernelProgress(percent, label = "KERNEL LOADING") {
+  const value = Math.max(0, Math.min(100, Math.round(percent)));
+  elements.kernelLoading.hidden = false;
+  elements.kernelLoading.firstElementChild.textContent = label;
+  elements.kernelProgress.textContent = `${value}%`;
+  elements.kernelMeter.style.width = `${value}%`;
+  document.body.dataset.kernel = value === 100 ? "live" : "loading";
+}
+
+function hideKernelProgress() {
+  elements.kernelLoading.hidden = true;
 }
 
 async function loadBackgroundWorkspace() {
@@ -433,6 +464,34 @@ async function syncProjectIntoKernel(record) {
   }
 }
 
+async function stopWorkspaceKernel(record = state.currentProject) {
+  if (!record || !state.broker) return;
+  const name = kernelName(record.id);
+  if (state.activeDocument && state.activeKernel === name) {
+    state.broker.releaseDocument(name, state.activeDocument.id);
+    state.activeDocument = null;
+  }
+  if (state.broker.list().includes(name)) await state.broker.close(name);
+  document.body.dataset.kernel = "stopped";
+}
+
+async function transitionHome() {
+  if (state.workspace === 1) {
+    setKernelProgress(10, "STOPPING KERNEL");
+    try {
+      await stopWorkspaceKernel();
+    } finally {
+      hideKernelProgress();
+    }
+  }
+  state.activeKernel = ROOT;
+  state.activeSpace = SPACE;
+  state.activeFile = null;
+  state.dirty = false;
+  elements.publish.disabled = true;
+  setWorkspace(0);
+}
+
 async function openWorkspace(record) {
   if (!state.broker || !state.defaultBootstrap) {
     toast("RUNTIME STILL BOOTING", true);
@@ -440,30 +499,43 @@ async function openWorkspace(record) {
   }
   const name = kernelName(record.id);
   const space = `workspace-${record.id}`;
+  if (state.workspace === 1 && state.currentProject?.id === record.id && state.broker.list().includes(name)) return;
+  setKernelProgress(5);
+  if (state.workspace === 1 && state.currentProject?.id !== record.id) {
+    setKernelProgress(12, "STOPPING PREVIOUS KERNEL");
+    await stopWorkspaceKernel(state.currentProject);
+  }
   if (!state.openWorkspaces.includes(record.id)) state.openWorkspaces.push(record.id);
   state.workspaceRecords.set(record.id, record);
   state.kernelSpaces.set(name, space);
-  if (!state.broker.list().includes(name)) {
+  try {
+    setKernelProgress(24);
+    if (state.broker.list().includes(name)) await state.broker.close(name);
     await state.broker.create(name, { bootstrap: state.defaultBootstrap(space) });
+    setKernelProgress(52);
     await syncProjectIntoKernel(record);
+    setKernelProgress(72);
+    state.currentProject = record;
+    state.activeKernel = name;
+    state.activeSpace = space;
+    state.activeFile = null;
+    state.dirty = false;
+    applyWorkspacePresentation(record);
+    setWorkspace(1);
+    renderProjectTabs();
+    const files = await listFiles();
+    setKernelProgress(88);
+    const path = files.includes("/src/main.hal") ? "/src/main.hal" :
+      files.includes("/workspace.edn") ? "/workspace.edn" : files[0];
+    if (path) await openFile(path, true);
+    elements.publish.disabled = false;
+    setKernelProgress(100);
+    setTimeout(hideKernelProgress, 280);
+  } catch (error) {
+    document.body.dataset.kernel = "error";
+    hideKernelProgress();
+    throw error;
   }
-  if (state.activeDocument) {
-    state.broker.releaseDocument(state.activeKernel, state.activeDocument.id);
-    state.activeDocument = null;
-  }
-  state.currentProject = record;
-  state.activeKernel = name;
-  state.activeSpace = space;
-  state.activeFile = null;
-  state.dirty = false;
-  applyWorkspacePresentation(record);
-  setWorkspace(1);
-  renderProjectTabs();
-  const files = await listFiles();
-  const path = files.includes("/src/main.hal") ? "/src/main.hal" :
-    files.includes("/workspace.edn") ? "/workspace.edn" : files[0];
-  if (path) await openFile(path, true);
-  elements.publish.disabled = false;
 }
 
 async function closeWorkspace(id) {
@@ -480,7 +552,7 @@ async function closeWorkspace(id) {
     if (next) await openWorkspace(next);
     else {
       elements.publish.disabled = true;
-      setWorkspace(0);
+      await transitionHome();
     }
   }
   renderProjectTabs();
@@ -643,9 +715,11 @@ function installWorkspaceNavigation() {
     });
   }
   query("[data-start]").addEventListener("click", openTemplateDialog);
-  queryAll("[data-home]").forEach((button) => button.addEventListener("click", () => setWorkspace(0)));
+  queryAll("[data-home]").forEach((button) => button.addEventListener("click", () => {
+    transitionHome().catch((error) => toast(errorText(error), true));
+  }));
   query("[data-workspace-prev]").addEventListener("click", () => {
-    if (state.workspace === 1) setWorkspace(0);
+    if (state.workspace === 1) transitionHome().catch((error) => toast(errorText(error), true));
   });
   query("[data-workspace-next]").addEventListener("click", () => {
     const record = state.workspaceRecords.get(state.openWorkspaces[0]);
@@ -660,7 +734,9 @@ function installWorkspaceNavigation() {
       const record = state.workspaceRecords.get(state.openWorkspaces[0]);
       if (record) openWorkspace(record).catch((error) => toast(errorText(error), true));
     }
-    if (event.key === "ArrowLeft" && state.workspace === 1) setWorkspace(0);
+    if (event.key === "ArrowLeft" && state.workspace === 1) {
+      transitionHome().catch((error) => toast(errorText(error), true));
+    }
   });
 
   const viewport = query(".workspace-viewport");
@@ -675,7 +751,7 @@ function installWorkspaceNavigation() {
     const dy = event.clientY - swipeStart.y;
     swipeStart = null;
     if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.4) {
-      if (dx > 0) setWorkspace(0);
+      if (dx > 0) transitionHome().catch((error) => toast(errorText(error), true));
     }
   });
 }
@@ -751,12 +827,152 @@ function installPublishing() {
         elements.publishNote.textContent = "WORKSPACE EXPORTED FOR SELF-HOSTING.";
         return;
       }
-      const label = provider === "gist" ? "GitHub Gist" : "Greenways";
-      elements.publishNote.textContent =
-        `${label} publishing is ready for a server-side GitHub profile connection. ` +
-        `${publicVisibility ? "Public" : "Private/draft"} will be used after authorization.`;
+      if (!state.githubSession.authenticated) {
+        elements.publishNote.textContent = "CONNECT GITHUB BEFORE PUBLISHING.";
+        renderGitHubAccount();
+        elements.accountDialog.showModal();
+        return;
+      }
+      button.disabled = true;
+      try {
+        const bundle = await workspaceBundle(state.workspaceRepository, state.currentProject.id);
+        const previous = state.currentProject.providers?.[provider] ?? null;
+        const publisher = provider === "gist"
+          ? new GistPublisher({ request: (path, options) => state.githubAuth.request(`/github${path}`, options) })
+          : new GreenwaysPublisher({ request: (path, options) => state.githubAuth.request(`/greenways${path}`, options) });
+        const result = await publisher.publish(bundle, { public: publicVisibility, previous });
+        const metadata = { id: result.id, url: result.html_url ?? result.url };
+        await state.workspaceRepository.setProvider(state.currentProject.id, provider, metadata);
+        state.currentProject = { ...state.currentProject, providers: { ...state.currentProject.providers, [provider]: metadata } };
+        elements.publishNote.textContent = `PUBLISHED // ${metadata.url}`;
+      } catch (error) {
+        elements.publishNote.textContent = `PUBLISH FAILED // ${errorText(error)}`;
+      } finally {
+        button.disabled = false;
+      }
     });
   }
+}
+
+function renderGitHubAccount() {
+  const { authenticated, configured, profile } = state.githubSession;
+  query("[data-github-label]").textContent = authenticated ? `@${profile.login}` : "Connect GitHub";
+  elements.accountName.textContent = authenticated ? `@${profile.login}` : "NOT CONNECTED";
+  elements.accountStatus.textContent = authenticated
+    ? "GitHub is connected for Gist publishing and your Greenways profile."
+    : configured
+      ? "Connect GitHub to publish work and create your Greenways profile."
+      : "The secure GitHub auth service needs a GitHub App client ID and secret before sign-in can go live.";
+  elements.accountAvatar.hidden = !authenticated || !profile.avatarUrl;
+  if (profile?.avatarUrl) elements.accountAvatar.src = profile.avatarUrl;
+  query("[data-account-signin]").hidden = authenticated;
+  query("[data-account-signin]").disabled = !configured;
+  query("[data-account-signout]").hidden = !authenticated;
+}
+
+async function refreshGitHubSession() {
+  try {
+    state.githubSession = await state.githubAuth.session();
+  } catch (error) {
+    state.githubSession = { authenticated: false, configured: false, profile: null };
+    elements.accountStatus.textContent = `AUTH SERVICE ERROR // ${errorText(error)}`;
+  }
+  renderGitHubAccount();
+}
+
+function installGitHubAccount() {
+  query("[data-github-account]").addEventListener("click", () => {
+    closeLauncher();
+    renderGitHubAccount();
+    elements.accountDialog.showModal();
+  });
+  query("[data-account-close]").addEventListener("click", () => elements.accountDialog.close());
+  query("[data-account-signin]").addEventListener("click", () => {
+    try { state.githubAuth.signIn(); } catch (error) { elements.accountStatus.textContent = errorText(error); }
+  });
+  query("[data-account-signout]").addEventListener("click", async () => {
+    await state.githubAuth.signOut();
+    await refreshGitHubSession();
+  });
+  refreshGitHubSession();
+}
+
+function workspaceIdForSession(sessionId) {
+  const name = String(sessionId).replace(/^DOC\./, "");
+  return [...state.workspaceRecords.keys()].find((id) => name.startsWith(kernelName(id))) ?? null;
+}
+
+function renderAiAdapters() {
+  elements.adapterList.replaceChildren();
+  const workspaceId = state.currentProject?.id;
+  const adapters = workspaceId ? state.aiAdapters.list(workspaceId) : [];
+  if (!adapters.length) {
+    const empty = document.createElement("div");
+    empty.className = "adapter-empty";
+    empty.textContent = workspaceId ? "NO ADAPTERS CONNECTED" : "OPEN A WORKSPACE FIRST";
+    elements.adapterList.append(empty);
+  }
+  for (const adapter of adapters) {
+    const row = document.createElement("div");
+    row.className = "adapter-row";
+    const summary = document.createElement("span");
+    const name = document.createElement("strong");
+    name.textContent = adapter.name;
+    summary.append(name, document.createElement("br"), `${adapter.kind} // ${adapter.model}`);
+    row.append(summary);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "REMOVE";
+    remove.addEventListener("click", () => {
+      state.aiAdapters.remove(adapter.id);
+      renderAiAdapters();
+    });
+    row.append(remove);
+    elements.adapterList.append(row);
+  }
+  elements.aiNote.textContent = workspaceId
+    ? "API KEYS LAST FOR THIS TAB ONLY. THE ADAPTER DEFINITION STAYS WITH THIS BROWSER."
+    : "SELECT A WORKSPACE BEFORE ADDING AN ADAPTER.";
+}
+
+function adapterInput() {
+  const data = new FormData(elements.adapterForm);
+  return Object.fromEntries(data.entries());
+}
+
+function installAiAdapters() {
+  query("[data-ai-adapters]").addEventListener("click", () => {
+    closeLauncher();
+    renderAiAdapters();
+    elements.aiDialog.showModal();
+  });
+  query("[data-ai-close]").addEventListener("click", () => elements.aiDialog.close());
+  elements.adapterForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!state.currentProject) return;
+    try {
+      state.aiAdapters.save({ ...adapterInput(), workspaceId: state.currentProject.id });
+      state.capabilityRegistry?.grant(state.activeKernel, ["ai/chat"]);
+      elements.adapterForm.reset();
+      renderAiAdapters();
+      toast("AI ADAPTER CONNECTED");
+    } catch (error) {
+      elements.aiNote.textContent = `ADAPTER ERROR // ${errorText(error)}`;
+    }
+  });
+  query("[data-ai-test]").addEventListener("click", async () => {
+    if (!state.currentProject) return;
+    try {
+      const adapter = state.aiAdapters.save({ ...adapterInput(), workspaceId: state.currentProject.id });
+      const result = await state.aiAdapters.chat(state.currentProject.id, adapter.id, [
+        { role: "user", content: "Reply with OK." }
+      ]);
+      elements.aiNote.textContent = `ADAPTER LIVE // ${result.text || "OK"}`;
+      renderAiAdapters();
+    } catch (error) {
+      elements.aiNote.textContent = `TEST FAILED // ${errorText(error)}`;
+    }
+  });
 }
 
 function installWorkspaceTabs() {
@@ -1541,8 +1757,12 @@ async function bootRuntime() {
     const sessionRouter = new SessionRouter();
     const capabilityRegistry = new CapabilityRegistry({ adapters: {
       "surface/canvas-2d": createCanvasCapability(state.canvasRuntime),
-      "clock/frame": createClockCapability()
+      "clock/frame": createClockCapability(),
+      "ai/chat": createAiCapability(state.aiAdapters, {
+        workspaceForSession: (sessionId) => state.aiSessionWorkspaces.get(String(sessionId)) ?? null
+      })
     } });
+    state.capabilityRegistry = capabilityRegistry;
     const graphHost = new GraphHost({
       workerUrl: new URL("studio/program-worker.js", runtimeBase),
       sessionRouter, capabilityRegistry
@@ -1574,10 +1794,23 @@ async function bootRuntime() {
         if (!space) throw new Error(`NO_WORKSPACE_SCOPE ${kernel.name}`);
         state.contextSpaces.set(kernel.context, space);
       },
-      onKernelCreated: async (kernel) => sessionRouter.register(kernel.name, kernel.context, {
-        onRelease: (sessionId) => graphHost.releaseSession(sessionId)
-      }),
-      onKernelClosed: (kernel) => sessionRouter.unregister(kernel.name)
+      onKernelCreated: async (kernel) => {
+        const session = sessionRouter.register(kernel.name, kernel.context, {
+          onRelease: (sessionId) => graphHost.releaseSession(sessionId)
+        });
+        const workspaceId = workspaceIdForSession(kernel.name);
+        if (workspaceId && state.aiAdapters.list(workspaceId).length) {
+          state.aiSessionWorkspaces.set(kernel.name, workspaceId);
+          capabilityRegistry.grant(kernel.name, ["ai/chat"]);
+        } else if (workspaceId) {
+          state.aiSessionWorkspaces.set(kernel.name, workspaceId);
+        }
+        return session;
+      },
+      onKernelClosed: (kernel) => {
+        state.aiSessionWorkspaces.delete(kernel.name);
+        return sessionRouter.unregister(kernel.name);
+      }
     });
     state.defaultBootstrap = defaultBootstrap;
     await state.broker.eval(ROOT, defaultBootstrap(SPACE));
@@ -1731,6 +1964,8 @@ installLauncher();
 installWorkspaceTabs();
 installWorkspaceCreation();
 installPublishing();
+installGitHubAccount();
+installAiAdapters();
 installHelp();
 installWindowManager();
 installEditor();
