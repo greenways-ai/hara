@@ -13,6 +13,13 @@
    :document/anonymous true
    :document/node "node/background/tron"
    :document/canvas "canvas/background"}
+  {:document/id "document/background/signal-ring"
+   :document/title "Signal Ring"
+   :document/path "../../sources/signal-ring.hal"
+   :document/role :studio/background
+   :document/anonymous true
+   :document/node "node/background/signal-ring"
+   :document/canvas "canvas/background"}
   {:document/id "document/background/fire"
    :document/title "Fire"
    :document/path "../../sources/fire.hal"
@@ -36,11 +43,13 @@
    :document/canvas "canvas/background"}]
  :workspace/nodes
  [{:node/id "node/background/tron" :node/type :hal/transform :node/document "document/background/tron"}
+  {:node/id "node/background/signal-ring" :node/type :hal/transform :node/document "document/background/signal-ring"}
   {:node/id "node/background/fire" :node/type :hal/transform :node/document "document/background/fire"}
   {:node/id "node/background/grid" :node/type :hal/transform :node/document "document/background/grid"}
   {:node/id "node/background/off" :node/type :hal/transform :node/document "document/background/off"}]
  :workspace/links
  [{:link/from "document/background/tron" :link/to "canvas/background"}
+  {:link/from "document/background/signal-ring" :link/to "canvas/background"}
   {:link/from "document/background/fire" :link/to "canvas/background"}
   {:link/from "document/background/grid" :link/to "canvas/background"}
   {:link/from "document/background/off" :link/to "canvas/background"}]}

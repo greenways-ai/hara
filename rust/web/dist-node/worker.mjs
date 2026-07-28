@@ -61,24 +61,24 @@ var e = {
 };
 //#endregion
 //#region node_modules/fake-indexeddb/build/esm/lib/isSharedArrayBuffer.js
-function f(e) {
+function ee(e) {
 	return typeof SharedArrayBuffer < "u" && e instanceof SharedArrayBuffer;
 }
 //#endregion
 //#region node_modules/fake-indexeddb/build/esm/lib/valueToKeyWithoutThrowing.js
-var p = Symbol("INVALID_TYPE"), m = Symbol("INVALID_VALUE"), h = (e, t) => {
-	if (typeof e == "number") return isNaN(e) ? m : e;
+var f = Symbol("INVALID_TYPE"), p = Symbol("INVALID_VALUE"), m = (e, t) => {
+	if (typeof e == "number") return isNaN(e) ? p : e;
 	if (Object.prototype.toString.call(e) === "[object Date]") {
 		let t = e.valueOf();
-		return isNaN(t) ? m : new Date(t);
+		return isNaN(t) ? p : new Date(t);
 	} else if (typeof e == "string") return e;
-	else if (e instanceof ArrayBuffer || f(e) || typeof ArrayBuffer < "u" && ArrayBuffer.isView && ArrayBuffer.isView(e)) {
-		if ("detached" in e ? e.detached : e.byteLength === 0) return m;
+	else if (e instanceof ArrayBuffer || ee(e) || typeof ArrayBuffer < "u" && ArrayBuffer.isView && ArrayBuffer.isView(e)) {
+		if ("detached" in e ? e.detached : e.byteLength === 0) return p;
 		let t, n = 0, r = 0;
-		return e instanceof ArrayBuffer || f(e) ? (t = e, r = e.byteLength) : (t = e.buffer, n = e.byteOffset, r = e.byteLength), t.slice(n, n + r);
+		return e instanceof ArrayBuffer || ee(e) ? (t = e, r = e.byteLength) : (t = e.buffer, n = e.byteOffset, r = e.byteLength), t.slice(n, n + r);
 	} else if (Array.isArray(e)) {
 		if (t === void 0) t = /* @__PURE__ */ new Set();
-		else if (t.has(e)) return m;
+		else if (t.has(e)) return p;
 		t.add(e);
 		let n = !1, r = Array.from({ length: e.length }, (r, i) => {
 			if (n) return;
@@ -86,35 +86,35 @@ var p = Symbol("INVALID_TYPE"), m = Symbol("INVALID_VALUE"), h = (e, t) => {
 				n = !0;
 				return;
 			}
-			let a = e[i], o = h(a, t);
-			if (o === m || o === p) {
+			let a = e[i], o = m(a, t);
+			if (o === p || o === f) {
 				n = !0;
 				return;
 			}
 			return o;
 		});
-		return n ? m : r;
-	} else return p;
-}, g = (e, t) => {
-	let n = h(e, t);
-	if (n === m || n === p) throw new i();
+		return n ? p : r;
+	} else return f;
+}, h = (e, t) => {
+	let n = m(e, t);
+	if (n === p || n === f) throw new i();
 	return n;
-}, _ = (e) => {
+}, te = (e) => {
 	if (typeof e == "number") return "Number";
 	if (Object.prototype.toString.call(e) === "[object Date]") return "Date";
 	if (Array.isArray(e)) return "Array";
 	if (typeof e == "string") return "String";
 	if (e instanceof ArrayBuffer) return "Binary";
 	throw new i();
-}, v = (e, t) => {
+}, g = (e, t) => {
 	if (t === void 0) throw TypeError();
-	e = g(e), t = g(t);
-	let n = _(e), r = _(t);
+	e = h(e), t = h(t);
+	let n = te(e), r = te(t);
 	if (n !== r) return n === "Array" || n === "Binary" && (r === "String" || r === "Date" || r === "Number") || n === "String" && (r === "Date" || r === "Number") || n === "Date" && r === "Number" ? 1 : -1;
 	if (n === "Binary" && (e = new Uint8Array(e), t = new Uint8Array(t)), n === "Array" || n === "Binary") {
 		let n = Math.min(e.length, t.length);
 		for (let r = 0; r < n; r++) {
-			let n = v(e[r], t[r]);
+			let n = g(e[r], t[r]);
 			if (n !== 0) return n;
 		}
 		return e.length > t.length ? 1 : e.length < t.length ? -1 : 0;
@@ -123,36 +123,36 @@ var p = Symbol("INVALID_TYPE"), m = Symbol("INVALID_VALUE"), h = (e, t) => {
 		if (e.getTime() === t.getTime()) return 0;
 	} else if (e === t) return 0;
 	return e > t ? 1 : -1;
-}, y = class e {
+}, _ = class e {
 	static only(t) {
 		if (arguments.length === 0) throw TypeError();
-		return t = g(t), new e(t, t, !1, !1);
+		return t = h(t), new e(t, t, !1, !1);
 	}
 	static lowerBound(t, n = !1) {
 		if (arguments.length === 0) throw TypeError();
-		return t = g(t), new e(t, void 0, n, !0);
+		return t = h(t), new e(t, void 0, n, !0);
 	}
 	static upperBound(t, n = !1) {
 		if (arguments.length === 0) throw TypeError();
-		return t = g(t), new e(void 0, t, !0, n);
+		return t = h(t), new e(void 0, t, !0, n);
 	}
 	static bound(t, n, r = !1, a = !1) {
 		if (arguments.length < 2) throw TypeError();
-		let o = v(t, n);
+		let o = g(t, n);
 		if (o === 1 || o === 0 && (r || a)) throw new i();
-		return t = g(t), n = g(n), new e(t, n, r, a);
+		return t = h(t), n = h(n), new e(t, n, r, a);
 	}
 	constructor(e, t, n, r) {
 		this.lower = e, this.upper = t, this.lowerOpen = n, this.upperOpen = r;
 	}
 	includes(e) {
 		if (arguments.length === 0) throw TypeError();
-		if (e = g(e), this.lower !== void 0) {
-			let t = v(this.lower, e);
+		if (e = h(e), this.lower !== void 0) {
+			let t = g(this.lower, e);
 			if (t === 1 || t === 0 && this.lowerOpen) return !1;
 		}
 		if (this.upper !== void 0) {
-			let t = v(this.upper, e);
+			let t = g(this.upper, e);
 			if (t === -1 || t === 0 && this.upperOpen) return !1;
 		}
 		return !0;
@@ -160,13 +160,13 @@ var p = Symbol("INVALID_TYPE"), m = Symbol("INVALID_VALUE"), h = (e, t) => {
 	get [Symbol.toStringTag]() {
 		return "IDBKeyRange";
 	}
-}, b = (e, t) => {
+}, v = (e, t) => {
 	if (Array.isArray(e)) {
 		let n = [];
 		for (let r of e) {
 			r != null && typeof r != "string" && r.toString && (r = r.toString());
-			let e = b(r, t).key;
-			n.push(g(e));
+			let e = v(r, t).key;
+			n.push(h(e));
 		}
 		return {
 			type: "found",
@@ -190,7 +190,7 @@ var p = Symbol("INVALID_TYPE"), m = Symbol("INVALID_VALUE"), h = (e, t) => {
 };
 //#endregion
 //#region node_modules/fake-indexeddb/build/esm/lib/cloneValueForInsertion.js
-function ee(e, t) {
+function ne(e, t) {
 	if (t._state !== "active") throw Error("Assert: transaction state is active");
 	t._state = "inactive";
 	try {
@@ -201,14 +201,14 @@ function ee(e, t) {
 }
 //#endregion
 //#region node_modules/fake-indexeddb/build/esm/FDBCursor.js
-var x = (e) => e.source instanceof F ? e.source : e.source.objectStore, S = (e, t, n) => {
+var y = (e) => e.source instanceof F ? e.source : e.source.objectStore, b = (e, t, n) => {
 	let r = e === void 0 ? void 0 : e.lower, i = e === void 0 ? void 0 : e.upper;
-	for (let e of t) e !== void 0 && (r === void 0 || v(r, e) === 1) && (r = e);
-	for (let e of n) e !== void 0 && (i === void 0 || v(i, e) === -1) && (i = e);
-	if (r !== void 0 && i !== void 0) return y.bound(r, i);
-	if (r !== void 0) return y.lowerBound(r);
-	if (i !== void 0) return y.upperBound(i);
-}, C = class {
+	for (let e of t) e !== void 0 && (r === void 0 || g(r, e) === 1) && (r = e);
+	for (let e of n) e !== void 0 && (i === void 0 || g(i, e) === -1) && (i = e);
+	if (r !== void 0 && i !== void 0) return _.bound(r, i);
+	if (r !== void 0) return _.lowerBound(r);
+	if (i !== void 0) return _.upperBound(i);
+}, x = class {
 	_gotValue = !1;
 	_position = void 0;
 	_objectStorePosition = void 0;
@@ -241,46 +241,46 @@ var x = (e) => e.source instanceof F ? e.source : e.source.objectStore, S = (e, 
 	_iterate(e, t) {
 		let n = this.source instanceof F, r = this.source instanceof F ? this.source._rawObjectStore.records : this.source._rawIndex.records, i;
 		if (this.direction === "next") {
-			let a = S(this._range, [e, this._position], []);
+			let a = b(this._range, [e, this._position], []);
 			for (let o of r.values(a)) {
-				let r = e === void 0 ? void 0 : v(o.key, e), a = this._position === void 0 ? void 0 : v(o.key, this._position);
+				let r = e === void 0 ? void 0 : g(o.key, e), a = this._position === void 0 ? void 0 : g(o.key, this._position);
 				if (!(e !== void 0 && r === -1)) {
 					if (t !== void 0) {
 						if (r === -1) continue;
-						let e = v(o.value, t);
+						let e = g(o.value, t);
 						if (r === 0 && e === -1) continue;
 					}
-					if (!(this._position !== void 0 && n && a !== 1) && !(this._position !== void 0 && !n && (a === -1 || a === 0 && v(o.value, this._objectStorePosition) !== 1)) && !(this._range !== void 0 && !this._range.includes(o.key))) {
+					if (!(this._position !== void 0 && n && a !== 1) && !(this._position !== void 0 && !n && (a === -1 || a === 0 && g(o.value, this._objectStorePosition) !== 1)) && !(this._range !== void 0 && !this._range.includes(o.key))) {
 						i = o;
 						break;
 					}
 				}
 			}
 		} else if (this.direction === "nextunique") {
-			let t = S(this._range, [e, this._position], []);
-			for (let n of r.values(t)) if (!(e !== void 0 && v(n.key, e) === -1) && !(this._position !== void 0 && v(n.key, this._position) !== 1) && !(this._range !== void 0 && !this._range.includes(n.key))) {
+			let t = b(this._range, [e, this._position], []);
+			for (let n of r.values(t)) if (!(e !== void 0 && g(n.key, e) === -1) && !(this._position !== void 0 && g(n.key, this._position) !== 1) && !(this._range !== void 0 && !this._range.includes(n.key))) {
 				i = n;
 				break;
 			}
 		} else if (this.direction === "prev") {
-			let a = S(this._range, [], [e, this._position]);
+			let a = b(this._range, [], [e, this._position]);
 			for (let o of r.values(a, "prev")) {
-				let r = e === void 0 ? void 0 : v(o.key, e), a = this._position === void 0 ? void 0 : v(o.key, this._position);
+				let r = e === void 0 ? void 0 : g(o.key, e), a = this._position === void 0 ? void 0 : g(o.key, this._position);
 				if (!(e !== void 0 && r === 1)) {
 					if (t !== void 0) {
 						if (r === 1) continue;
-						let e = v(o.value, t);
+						let e = g(o.value, t);
 						if (r === 0 && e === 1) continue;
 					}
-					if (!(this._position !== void 0 && n && a !== -1) && !(this._position !== void 0 && !n && (a === 1 || a === 0 && v(o.value, this._objectStorePosition) !== -1)) && !(this._range !== void 0 && !this._range.includes(o.key))) {
+					if (!(this._position !== void 0 && n && a !== -1) && !(this._position !== void 0 && !n && (a === 1 || a === 0 && g(o.value, this._objectStorePosition) !== -1)) && !(this._range !== void 0 && !this._range.includes(o.key))) {
 						i = o;
 						break;
 					}
 				}
 			}
 		} else if (this.direction === "prevunique") {
-			let t, n = S(this._range, [], [e, this._position]);
-			for (let i of r.values(n, "prev")) if (!(e !== void 0 && v(i.key, e) === 1) && !(this._position !== void 0 && v(i.key, this._position) !== -1) && !(this._range !== void 0 && !this._range.includes(i.key))) {
+			let t, n = b(this._range, [], [e, this._position]);
+			for (let i of r.values(n, "prev")) if (!(e !== void 0 && g(i.key, e) === 1) && !(this._position !== void 0 && g(i.key, this._position) !== -1) && !(this._range !== void 0 && !this._range.includes(i.key))) {
 				t = i;
 				break;
 			}
@@ -301,17 +301,17 @@ var x = (e) => e.source instanceof F ? e.source : e.source.objectStore, S = (e, 
 	}
 	update(e) {
 		if (e === void 0) throw TypeError();
-		let t = x(this), n = Object.hasOwn(this.source, "_rawIndex") ? this.primaryKey : this._position, r = t.transaction;
+		let t = y(this), n = Object.hasOwn(this.source, "_rawIndex") ? this.primaryKey : this._position, r = t.transaction;
 		if (r._state !== "active") throw new u();
 		if (r.mode === "readonly") throw new c();
 		if (t._rawObjectStore.deleted || !(this.source instanceof F) && this.source._rawIndex.deleted || !this._gotValue || !Object.hasOwn(this, "value")) throw new o();
-		let a = ee(e, r);
+		let a = ne(e, r);
 		if (t.keyPath !== null) {
 			let e;
 			try {
-				e = b(t.keyPath, a).key;
+				e = v(t.keyPath, a).key;
 			} catch {}
-			if (v(e, n) !== 0) throw new i();
+			if (g(e, n) !== 0) throw new i();
 		}
 		let s = {
 			key: n,
@@ -324,7 +324,7 @@ var x = (e) => e.source instanceof F ? e.source : e.source.objectStore, S = (e, 
 	}
 	advance(e) {
 		if (!Number.isInteger(e) || e <= 0) throw TypeError();
-		let t = x(this), n = t.transaction;
+		let t = y(this), n = t.transaction;
 		if (n._state !== "active") throw new u();
 		if (t._rawObjectStore.deleted || !(this.source instanceof F) && this.source._rawIndex.deleted || !this._gotValue) throw new o();
 		this._request && (this._request.readyState = "pending"), n._execRequestAsync({
@@ -338,12 +338,12 @@ var x = (e) => e.source instanceof F ? e.source : e.source.objectStore, S = (e, 
 		}), this._gotValue = !1;
 	}
 	continue(e) {
-		let t = x(this), n = t.transaction;
+		let t = y(this), n = t.transaction;
 		if (n._state !== "active") throw new u();
 		if (t._rawObjectStore.deleted || !(this.source instanceof F) && this.source._rawIndex.deleted || !this._gotValue) throw new o();
 		if (e !== void 0) {
-			e = g(e);
-			let t = v(e, this._position);
+			e = h(e);
+			let t = g(e, this._position);
 			if (t <= 0 && (this.direction === "next" || this.direction === "nextunique") || t >= 0 && (this.direction === "prev" || this.direction === "prevunique")) throw new i();
 		}
 		this._request && (this._request.readyState = "pending"), n._execRequestAsync({
@@ -353,16 +353,16 @@ var x = (e) => e.source instanceof F ? e.source : e.source.objectStore, S = (e, 
 		}), this._gotValue = !1;
 	}
 	continuePrimaryKey(e, t) {
-		let n = x(this), r = n.transaction;
+		let n = y(this), r = n.transaction;
 		if (r._state !== "active") throw new u();
 		if (n._rawObjectStore.deleted || !(this.source instanceof F) && this.source._rawIndex.deleted) throw new o();
 		if (this.source instanceof F || this.direction !== "next" && this.direction !== "prev") throw new a();
 		if (!this._gotValue) throw new o();
 		if (e === void 0 || t === void 0) throw new i();
-		e = g(e);
-		let s = v(e, this._position);
+		e = h(e);
+		let s = g(e, this._position);
 		if (s === -1 && this.direction === "next" || s === 1 && this.direction === "prev") throw new i();
-		let c = v(t, this._objectStorePosition);
+		let c = g(t, this._objectStorePosition);
 		if (s === 0 && (c <= 0 && this.direction === "next" || c >= 0 && this.direction === "prev")) throw new i();
 		this._request && (this._request.readyState = "pending"), r._execRequestAsync({
 			operation: this._iterate.bind(this, e, t),
@@ -371,7 +371,7 @@ var x = (e) => e.source instanceof F ? e.source : e.source.objectStore, S = (e, 
 		}), this._gotValue = !1;
 	}
 	delete() {
-		let e = x(this), t = Object.hasOwn(this.source, "_rawIndex") ? this.primaryKey : this._position, n = e.transaction;
+		let e = y(this), t = Object.hasOwn(this.source, "_rawIndex") ? this.primaryKey : this._position, n = e.transaction;
 		if (n._state !== "active") throw new u();
 		if (n.mode === "readonly") throw new c();
 		if (e._rawObjectStore.deleted || !(this.source instanceof F) && this.source._rawIndex.deleted || !this._gotValue || !Object.hasOwn(this, "value")) throw new o();
@@ -383,7 +383,7 @@ var x = (e) => e.source instanceof F ? e.source : e.source.objectStore, S = (e, 
 	get [Symbol.toStringTag]() {
 		return "IDBCursor";
 	}
-}, w = class extends C {
+}, S = class extends x {
 	value = void 0;
 	constructor(e, t, n, r) {
 		super(e, t, n, r);
@@ -391,7 +391,7 @@ var x = (e) => e.source instanceof F ? e.source : e.source.objectStore, S = (e, 
 	get [Symbol.toStringTag]() {
 		return "IDBCursorWithValue";
 	}
-}, te = (e, t) => e.immediatePropagationStopped || e.eventPhase === e.CAPTURING_PHASE && t.capture === !1 || e.eventPhase === e.BUBBLING_PHASE && t.capture === !0, T = (e, t) => {
+}, re = (e, t) => e.immediatePropagationStopped || e.eventPhase === e.CAPTURING_PHASE && t.capture === !1 || e.eventPhase === e.BUBBLING_PHASE && t.capture === !0, C = (e, t) => {
 	e.currentTarget = t;
 	let n = [], r = (t) => {
 		try {
@@ -400,7 +400,7 @@ var x = (e) => e.source instanceof F ? e.source : e.source.objectStore, S = (e, 
 			n.push(e);
 		}
 	};
-	for (let n of t.listeners.slice()) e.type !== n.type || te(e, n) || r(n.callback);
+	for (let n of t.listeners.slice()) e.type !== n.type || re(e, n) || r(n.callback);
 	let i = {
 		abort: "onabort",
 		blocked: "onblocked",
@@ -419,10 +419,10 @@ var x = (e) => e.source instanceof F ? e.source : e.source.objectStore, S = (e, 
 			capture: !1,
 			type: e.type
 		};
-		te(e, t) || r(t.callback);
+		re(e, t) || r(t.callback);
 	}
 	if (n.length) throw AggregateError(n);
-}, ne = class {
+}, w = class {
 	listeners = [];
 	addEventListener(e, t, n = !1) {
 		this.listeners.push({
@@ -438,14 +438,14 @@ var x = (e) => e.source instanceof F ? e.source : e.source.objectStore, S = (e, 
 	dispatchEvent(e) {
 		if (e.dispatched || !e.initialized) throw new o("The object is in an invalid state.");
 		e.isTrusted = !1, e.dispatched = !0, e.target = this, e.eventPhase = e.CAPTURING_PHASE;
-		for (let t of e.eventPath) e.propagationStopped || T(e, t);
-		if (e.eventPhase = e.AT_TARGET, e.propagationStopped || T(e, e.target), e.bubbles) {
+		for (let t of e.eventPath) e.propagationStopped || C(e, t);
+		if (e.eventPhase = e.AT_TARGET, e.propagationStopped || C(e, e.target), e.bubbles) {
 			e.eventPath.reverse(), e.eventPhase = e.BUBBLING_PHASE;
-			for (let t of e.eventPath) e.propagationStopped || T(e, t);
+			for (let t of e.eventPath) e.propagationStopped || C(e, t);
 		}
 		return e.dispatched = !1, e.eventPhase = e.NONE, e.currentTarget = null, !e.canceled;
 	}
-}, E = class extends ne {
+}, T = class extends w {
 	_result = null;
 	_error = null;
 	source = null;
@@ -470,7 +470,7 @@ var x = (e) => e.source instanceof F ? e.source : e.source.objectStore, S = (e, 
 	get [Symbol.toStringTag]() {
 		return "IDBRequest";
 	}
-}, D = class {
+}, E = class {
 	constructor(...e) {
 		this._values = e;
 		for (let t = 0; t < e.length; t++) this[t] = e[t];
@@ -496,41 +496,41 @@ var x = (e) => e.source instanceof F ? e.source : e.source.objectStore, S = (e, 
 		for (let e = 0; e < this._values.length; e++) this[e] = this._values[e];
 		return this;
 	}
-}, O = (e, t = !1) => {
-	if (e instanceof y) return e;
+}, D = (e, t = !1) => {
+	if (e instanceof _) return e;
 	if (e == null) {
 		if (t) throw new i();
-		return new y(void 0, void 0, !1, !1);
+		return new _(void 0, void 0, !1, !1);
 	}
-	let n = g(e);
-	return y.only(n);
-}, re = (e) => typeof e == "object" && e ? e + "" : e;
-function ie(e) {
-	return Array.isArray(e) ? e.map(re) : re(e);
+	let n = h(e);
+	return _.only(n);
+}, ie = (e) => typeof e == "object" && e ? e + "" : e;
+function ae(e) {
+	return Array.isArray(e) ? e.map(ie) : ie(e);
 }
 //#endregion
 //#region node_modules/fake-indexeddb/build/esm/lib/isPotentiallyValidKeyRange.js
-var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
+var oe = (e) => e instanceof _ || m(e) !== f, O = (e, t) => {
 	if (isNaN(e) || e < 0 || e > (t === "unsigned long" ? 4294967295 : 9007199254740991)) throw TypeError();
 	if (e >= 0) return Math.floor(e);
-}, A = (e, t, n) => {
+}, k = (e, t, n) => {
 	let r, i;
-	if (e == null || ae(e)) r = e, n > 1 && t !== void 0 && (t = k(t, "unsigned long"));
+	if (e == null || oe(e)) r = e, n > 1 && t !== void 0 && (t = O(t, "unsigned long"));
 	else {
 		let n = e;
-		n.query !== void 0 && (r = n.query), n.count !== void 0 && (t = k(n.count, "unsigned long")), n.direction !== void 0 && (i = n.direction);
+		n.query !== void 0 && (r = n.query), n.count !== void 0 && (t = O(n.count, "unsigned long")), n.direction !== void 0 && (i = n.direction);
 	}
 	return {
 		query: r,
 		count: t,
 		direction: i
 	};
-}, j = (e) => {
+}, A = (e) => {
 	if (e._rawIndex.deleted || e.objectStore._rawObjectStore.deleted) throw new o();
 	if (e.objectStore.transaction._state !== "active") throw new u();
-}, M = class {
+}, j = class {
 	constructor(e, t) {
-		this._rawIndex = t, this._name = t.name, this.objectStore = e, this.keyPath = ie(t.keyPath), this.multiEntry = t.multiEntry, this.unique = t.unique;
+		this._rawIndex = t, this._name = t.name, this.objectStore = e, this.keyPath = ae(t.keyPath), this.multiEntry = t.multiEntry, this.unique = t.unique;
 	}
 	get name() {
 		return this._name;
@@ -543,18 +543,18 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 		if (e = String(e), e === this._name) return;
 		if (this.objectStore.indexNames.contains(e)) throw new r();
 		let n = this._name, i = [...this.objectStore.indexNames];
-		this._name = e, this._rawIndex.name = e, this.objectStore._indexesCache.delete(n), this.objectStore._indexesCache.set(e, this), this.objectStore._rawObjectStore.rawIndexes.delete(n), this.objectStore._rawObjectStore.rawIndexes.set(e, this._rawIndex), this.objectStore.indexNames = new D(...Array.from(this.objectStore._rawObjectStore.rawIndexes.keys()).filter((e) => {
+		this._name = e, this._rawIndex.name = e, this.objectStore._indexesCache.delete(n), this.objectStore._indexesCache.set(e, this), this.objectStore._rawObjectStore.rawIndexes.delete(n), this.objectStore._rawObjectStore.rawIndexes.set(e, this._rawIndex), this.objectStore.indexNames = new E(...Array.from(this.objectStore._rawObjectStore.rawIndexes.keys()).filter((e) => {
 			let t = this.objectStore._rawObjectStore.rawIndexes.get(e);
 			return t && !t.deleted;
 		}).sort()), this.objectStore.transaction._createdIndexes.has(this._rawIndex) || t._rollbackLog.push(() => {
-			this._name = n, this._rawIndex.name = n, this.objectStore._indexesCache.delete(e), this.objectStore._indexesCache.set(n, this), this.objectStore._rawObjectStore.rawIndexes.delete(e), this.objectStore._rawObjectStore.rawIndexes.set(n, this._rawIndex), this.objectStore.indexNames = new D(...i);
+			this._name = n, this._rawIndex.name = n, this.objectStore._indexesCache.delete(e), this.objectStore._indexesCache.set(n, this), this.objectStore._rawObjectStore.rawIndexes.delete(e), this.objectStore._rawObjectStore.rawIndexes.set(n, this._rawIndex), this.objectStore.indexNames = new E(...i);
 		});
 	}
 	openCursor(e, t) {
-		j(this), e === null && (e = void 0), e !== void 0 && !(e instanceof y) && (e = y.only(g(e)));
-		let n = new E();
+		A(this), e === null && (e = void 0), e !== void 0 && !(e instanceof _) && (e = _.only(h(e)));
+		let n = new T();
 		n.source = this, n.transaction = this.objectStore.transaction;
-		let r = new w(this, e, t, n);
+		let r = new S(this, e, t, n);
 		return this.objectStore.transaction._execRequestAsync({
 			operation: r._iterate.bind(r),
 			request: n,
@@ -562,10 +562,10 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 		});
 	}
 	openKeyCursor(e, t) {
-		j(this), e === null && (e = void 0), e !== void 0 && !(e instanceof y) && (e = y.only(g(e)));
-		let n = new E();
+		A(this), e === null && (e = void 0), e !== void 0 && !(e instanceof _) && (e = _.only(h(e)));
+		let n = new T();
 		n.source = this, n.transaction = this.objectStore.transaction;
-		let r = new C(this, e, t, n, !0);
+		let r = new x(this, e, t, n, !0);
 		return this.objectStore.transaction._execRequestAsync({
 			operation: r._iterate.bind(r),
 			request: n,
@@ -573,30 +573,30 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 		});
 	}
 	get(e) {
-		return j(this), e instanceof y || (e = g(e)), this.objectStore.transaction._execRequestAsync({
+		return A(this), e instanceof _ || (e = h(e)), this.objectStore.transaction._execRequestAsync({
 			operation: this._rawIndex.getValue.bind(this._rawIndex, e),
 			source: this
 		});
 	}
 	getAll(e, t) {
-		let n = A(e, t, arguments.length);
-		j(this);
-		let r = O(n.query);
+		let n = k(e, t, arguments.length);
+		A(this);
+		let r = D(n.query);
 		return this.objectStore.transaction._execRequestAsync({
 			operation: this._rawIndex.getAllValues.bind(this._rawIndex, r, n.count, n.direction),
 			source: this
 		});
 	}
 	getKey(e) {
-		return j(this), e instanceof y || (e = g(e)), this.objectStore.transaction._execRequestAsync({
+		return A(this), e instanceof _ || (e = h(e)), this.objectStore.transaction._execRequestAsync({
 			operation: this._rawIndex.getKey.bind(this._rawIndex, e),
 			source: this
 		});
 	}
 	getAllKeys(e, t) {
-		let n = A(e, t, arguments.length);
-		j(this);
-		let r = O(n.query);
+		let n = k(e, t, arguments.length);
+		A(this);
+		let r = D(n.query);
 		return this.objectStore.transaction._execRequestAsync({
 			operation: this._rawIndex.getAllKeys.bind(this._rawIndex, r, n.count, n.direction),
 			source: this
@@ -604,15 +604,15 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 	}
 	getAllRecords(e) {
 		let t, n, r;
-		e !== void 0 && (e.query !== void 0 && (t = e.query), e.count !== void 0 && (n = k(e.count, "unsigned long")), e.direction !== void 0 && (r = e.direction)), j(this);
-		let i = O(t);
+		e !== void 0 && (e.query !== void 0 && (t = e.query), e.count !== void 0 && (n = O(e.count, "unsigned long")), e.direction !== void 0 && (r = e.direction)), A(this);
+		let i = D(t);
 		return this.objectStore.transaction._execRequestAsync({
 			operation: this._rawIndex.getAllRecords.bind(this._rawIndex, i, n, r),
 			source: this
 		});
 	}
 	count(e) {
-		return j(this), e === null && (e = void 0), e !== void 0 && !(e instanceof y) && (e = y.only(g(e))), this.objectStore.transaction._execRequestAsync({
+		return A(this), e === null && (e = void 0), e !== void 0 && !(e instanceof _) && (e = _.only(h(e))), this.objectStore.transaction._execRequestAsync({
 			operation: () => this._rawIndex.count(e),
 			source: this
 		});
@@ -620,7 +620,7 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 	get [Symbol.toStringTag]() {
 		return "IDBIndex";
 	}
-}, oe = (e, t) => {
+}, se = (e, t) => {
 	if (Array.isArray(e)) throw Error("The key paths used in this section are always strings and never sequences, since it is not possible to create a object store which has a key generator and also has a key path that is a sequence.");
 	let n = e.split(".");
 	if (n.length === 0) throw Error("Assert: identifiers is not empty");
@@ -631,7 +631,7 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 		t = t[e];
 	}
 	return typeof t == "object" || Array.isArray(t);
-}, se = class {
+}, M = class {
 	constructor(e, t, n) {
 		this._key = e, this._primaryKey = t, this._value = n;
 	}
@@ -650,7 +650,7 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 	get [Symbol.toStringTag]() {
 		return "IDBRecord";
 	}
-}, ce = 2 / 3, le = new y(void 0, void 0, !1, !1), ue = class {
+}, ce = 2 / 3, le = new _(void 0, void 0, !1, !1), ue = class {
 	_numTombstones = 0;
 	_numNodes = 0;
 	constructor(e) {
@@ -666,8 +666,8 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 		return !!this.get(e);
 	}
 	_compare(e, t) {
-		let n = v(e.key, t.key);
-		return n === 0 ? this._keysAreUnique ? 0 : v(e.value, t.value) : n;
+		let n = g(e.key, t.key);
+		return n === 0 ? this._keysAreUnique ? 0 : g(e.value, t.value) : n;
 	}
 	_getByComparator(e, t) {
 		let n = e;
@@ -742,8 +742,8 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 		e && (yield* this._findRecords(e, t, n));
 	}
 	*_findRecords(e, t, n = !1) {
-		let { lower: r, upper: i, lowerOpen: a, upperOpen: o } = t, { record: { key: s } } = e, c = r === void 0 ? -1 : v(r, s), l = i === void 0 ? 1 : v(i, s), u = this._keysAreUnique ? c < 0 : c <= 0, d = this._keysAreUnique ? l > 0 : l >= 0, f = n ? d : u, p = n ? u : d, m = n ? "right" : "left", h = n ? "left" : "right", g = a ? c < 0 : c <= 0, _ = o ? l > 0 : l >= 0;
-		f && e[m] && (yield* this._findRecords(e[m], t, n)), g && _ && !e.deleted && (yield e.record), p && e[h] && (yield* this._findRecords(e[h], t, n));
+		let { lower: r, upper: i, lowerOpen: a, upperOpen: o } = t, { record: { key: s } } = e, c = r === void 0 ? -1 : g(r, s), l = i === void 0 ? 1 : g(i, s), u = this._keysAreUnique ? c < 0 : c <= 0, d = this._keysAreUnique ? l > 0 : l >= 0, ee = n ? d : u, f = n ? u : d, p = n ? "right" : "left", m = n ? "left" : "right", h = a ? c < 0 : c <= 0, te = o ? l > 0 : l >= 0;
+		ee && e[p] && (yield* this._findRecords(e[p], t, n)), h && te && !e.deleted && (yield e.record), f && e[m] && (yield* this._findRecords(e[m], t, n));
 	}
 	_onNewNodeInserted(e) {
 		this._numNodes++, this._rebalanceTree(e);
@@ -787,19 +787,19 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 		this.keysAreUnique = e, this.records = new ue(this.keysAreUnique);
 	}
 	get(e) {
-		let t = e instanceof y ? e : y.only(e);
+		let t = e instanceof _ ? e : _.only(e);
 		return this.records.getRecords(t).next().value;
 	}
 	put(e, t = !1) {
 		return this.records.put(e, t);
 	}
 	delete(e) {
-		let t = e instanceof y ? e : y.only(e), n = [...this.records.getRecords(t)];
+		let t = e instanceof _ ? e : _.only(e), n = [...this.records.getRecords(t)];
 		for (let e of n) this.records.delete(e);
 		return n;
 	}
 	deleteByValue(e) {
-		let t = e instanceof y ? e : y.only(e), n = [];
+		let t = e instanceof _ ? e : _.only(e), n = [];
 		for (let e of this.records.getAllRecords()) t.includes(e.value) && (this.records.delete(e), n.push(e));
 		return n;
 	}
@@ -816,13 +816,13 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 				let t;
 				return { next: () => {
 					let n = e();
-					for (; !n.done && t !== void 0 && v(t.key, n.value.key) === 0;) n = e();
+					for (; !n.done && t !== void 0 && g(t.key, n.value.key) === 0;) n = e();
 					return t = n.value, n;
 				} };
 			}
 			let n = e(), i = e();
 			return { next: () => {
-				for (; !i.done && v(n.value.key, i.value.key) === 0;) n = i, i = e();
+				for (; !i.done && g(n.value.key, i.value.key) === 0;) n = i, i = e();
 				let t = n;
 				return n = i, i = e(), t;
 			} };
@@ -860,26 +860,26 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 	getAllRecords(e, t, n) {
 		(t === void 0 || t === 0) && (t = Infinity);
 		let r = [];
-		for (let i of this.records.values(e, n)) if (r.push(new se(structuredClone(i.key), structuredClone(this.rawObjectStore.getKey(i.value)), this.rawObjectStore.getValue(i.value))), r.length >= t) break;
+		for (let i of this.records.values(e, n)) if (r.push(new M(structuredClone(i.key), structuredClone(this.rawObjectStore.getKey(i.value)), this.rawObjectStore.getValue(i.value))), r.length >= t) break;
 		return r;
 	}
 	storeRecord(e) {
 		let t;
 		try {
-			t = b(this.keyPath, e.value).key;
+			t = v(this.keyPath, e.value).key;
 		} catch (e) {
 			if (e.name === "DataError") return;
 			throw e;
 		}
 		if (!this.multiEntry || !Array.isArray(t)) try {
-			g(t);
+			h(t);
 		} catch {
 			return;
 		}
 		else {
 			let e = [];
 			for (let n of t) if (e.indexOf(n) < 0) try {
-				e.push(g(n));
+				e.push(h(n));
 			} catch {}
 			t = e;
 		}
@@ -942,22 +942,22 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 }, pe = (e, t, n) => {
 	if (P(e), e.transaction.mode === "readonly") throw new c();
 	if (e.keyPath !== null && n !== void 0) throw new i();
-	let r = ee(t, e.transaction);
+	let r = ne(t, e.transaction);
 	if (e.keyPath !== null) {
-		let t = b(e.keyPath, r);
-		if (t.type === "found") g(t.key);
+		let t = v(e.keyPath, r);
+		if (t.type === "found") h(t.key);
 		else if (!e._rawObjectStore.keyGenerator) throw new i();
-		else if (!oe(e.keyPath, r)) throw new i();
+		else if (!se(e.keyPath, r)) throw new i();
 	}
 	if (e.keyPath === null && e._rawObjectStore.keyGenerator === null && n === void 0) throw new i();
-	return n !== void 0 && (n = g(n)), {
+	return n !== void 0 && (n = h(n)), {
 		key: n,
 		value: r
 	};
 }, F = class {
 	_indexesCache = /* @__PURE__ */ new Map();
 	constructor(e, t) {
-		this._rawObjectStore = t, this._name = t.name, this.keyPath = ie(t.keyPath), this.autoIncrement = t.autoIncrement, this.transaction = e, this.indexNames = new D(...Array.from(t.rawIndexes.keys()).sort());
+		this._rawObjectStore = t, this._name = t.name, this.keyPath = ae(t.keyPath), this.autoIncrement = t.autoIncrement, this.transaction = e, this.indexNames = new E(...Array.from(t.rawIndexes.keys()).sort());
 	}
 	get name() {
 		return this._name;
@@ -968,13 +968,13 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 		if (P(this), e = String(e), e === this._name) return;
 		if (this._rawObjectStore.rawDatabase.rawObjectStores.has(e)) throw new r();
 		let n = this._name, i = [...t.db.objectStoreNames];
-		this._name = e, this._rawObjectStore.name = e, this.transaction._objectStoresCache.delete(n), this.transaction._objectStoresCache.set(e, this), this._rawObjectStore.rawDatabase.rawObjectStores.delete(n), this._rawObjectStore.rawDatabase.rawObjectStores.set(e, this._rawObjectStore), t.db.objectStoreNames = new D(...Array.from(this._rawObjectStore.rawDatabase.rawObjectStores.keys()).filter((e) => {
+		this._name = e, this._rawObjectStore.name = e, this.transaction._objectStoresCache.delete(n), this.transaction._objectStoresCache.set(e, this), this._rawObjectStore.rawDatabase.rawObjectStores.delete(n), this._rawObjectStore.rawDatabase.rawObjectStores.set(e, this._rawObjectStore), t.db.objectStoreNames = new E(...Array.from(this._rawObjectStore.rawDatabase.rawObjectStores.keys()).filter((e) => {
 			let t = this._rawObjectStore.rawDatabase.rawObjectStores.get(e);
 			return t && !t.deleted;
 		}).sort());
 		let a = new Set(t._scope), s = [...t.objectStoreNames];
-		this.transaction._scope.delete(n), t._scope.add(e), t.objectStoreNames = new D(...Array.from(t._scope).sort()), this.transaction._createdObjectStores.has(this._rawObjectStore) || t._rollbackLog.push(() => {
-			this._name = n, this._rawObjectStore.name = n, this.transaction._objectStoresCache.delete(e), this.transaction._objectStoresCache.set(n, this), this._rawObjectStore.rawDatabase.rawObjectStores.delete(e), this._rawObjectStore.rawDatabase.rawObjectStores.set(n, this._rawObjectStore), t.db.objectStoreNames = new D(...i), t._scope = a, t.objectStoreNames = new D(...s);
+		this.transaction._scope.delete(n), t._scope.add(e), t.objectStoreNames = new E(...Array.from(t._scope).sort()), this.transaction._createdObjectStores.has(this._rawObjectStore) || t._rollbackLog.push(() => {
+			this._name = n, this._rawObjectStore.name = n, this.transaction._objectStoresCache.delete(e), this.transaction._objectStoresCache.set(n, this), this._rawObjectStore.rawDatabase.rawObjectStores.delete(e), this._rawObjectStore.rawDatabase.rawObjectStores.set(n, this._rawObjectStore), t.db.objectStoreNames = new E(...i), t._scope = a, t.objectStoreNames = new E(...s);
 		});
 	}
 	put(e, t) {
@@ -996,22 +996,22 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 	delete(e) {
 		if (arguments.length === 0) throw TypeError();
 		if (P(this), this.transaction.mode === "readonly") throw new c();
-		return e instanceof y || (e = g(e)), this.transaction._execRequestAsync({
+		return e instanceof _ || (e = h(e)), this.transaction._execRequestAsync({
 			operation: this._rawObjectStore.deleteRecord.bind(this._rawObjectStore, e, this.transaction._rollbackLog),
 			source: this
 		});
 	}
 	get(e) {
 		if (arguments.length === 0) throw TypeError();
-		return P(this), e instanceof y || (e = g(e)), this.transaction._execRequestAsync({
+		return P(this), e instanceof _ || (e = h(e)), this.transaction._execRequestAsync({
 			operation: this._rawObjectStore.getValue.bind(this._rawObjectStore, e),
 			source: this
 		});
 	}
 	getAll(e, t) {
-		let n = A(e, t, arguments.length);
+		let n = k(e, t, arguments.length);
 		P(this);
-		let r = O(n.query);
+		let r = D(n.query);
 		return this.transaction._execRequestAsync({
 			operation: this._rawObjectStore.getAllValues.bind(this._rawObjectStore, r, n.count, n.direction),
 			source: this
@@ -1019,15 +1019,15 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 	}
 	getKey(e) {
 		if (arguments.length === 0) throw TypeError();
-		return P(this), e instanceof y || (e = g(e)), this.transaction._execRequestAsync({
+		return P(this), e instanceof _ || (e = h(e)), this.transaction._execRequestAsync({
 			operation: this._rawObjectStore.getKey.bind(this._rawObjectStore, e),
 			source: this
 		});
 	}
 	getAllKeys(e, t) {
-		let n = A(e, t, arguments.length);
+		let n = k(e, t, arguments.length);
 		P(this);
-		let r = O(n.query);
+		let r = D(n.query);
 		return this.transaction._execRequestAsync({
 			operation: this._rawObjectStore.getAllKeys.bind(this._rawObjectStore, r, n.count, n.direction),
 			source: this
@@ -1035,8 +1035,8 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 	}
 	getAllRecords(e) {
 		let t, n, r;
-		e !== void 0 && (e.query !== void 0 && (t = e.query), e.count !== void 0 && (n = k(e.count, "unsigned long")), e.direction !== void 0 && (r = e.direction)), P(this);
-		let i = O(t);
+		e !== void 0 && (e.query !== void 0 && (t = e.query), e.count !== void 0 && (n = O(e.count, "unsigned long")), e.direction !== void 0 && (r = e.direction)), P(this);
+		let i = D(t);
 		return this.transaction._execRequestAsync({
 			operation: this._rawObjectStore.getAllRecords.bind(this._rawObjectStore, i, n, r),
 			source: this
@@ -1050,10 +1050,10 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 		});
 	}
 	openCursor(e, t) {
-		P(this), e === null && (e = void 0), e !== void 0 && !(e instanceof y) && (e = y.only(g(e)));
-		let n = new E();
+		P(this), e === null && (e = void 0), e !== void 0 && !(e instanceof _) && (e = _.only(h(e)));
+		let n = new T();
 		n.source = this, n.transaction = this.transaction;
-		let r = new w(this, e, t, n);
+		let r = new S(this, e, t, n);
 		return this.transaction._execRequestAsync({
 			operation: r._iterate.bind(r),
 			request: n,
@@ -1061,10 +1061,10 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 		});
 	}
 	openKeyCursor(e, t) {
-		P(this), e === null && (e = void 0), e !== void 0 && !(e instanceof y) && (e = y.only(g(e)));
-		let n = new E();
+		P(this), e === null && (e = void 0), e !== void 0 && !(e instanceof _) && (e = _.only(h(e)));
+		let n = new T();
 		n.source = this, n.transaction = this.transaction;
-		let r = new C(this, e, t, n, !0);
+		let r = new x(this, e, t, n, !0);
 		return this.transaction._execRequestAsync({
 			operation: r._iterate.bind(r),
 			request: n,
@@ -1079,8 +1079,8 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 		if (N(t), Array.isArray(t) && i) throw new a();
 		let c = [...this.indexNames], l = new fe(this._rawObjectStore, e, t, i, s);
 		return this.indexNames._push(e), this.indexNames._sort(), this.transaction._createdIndexes.add(l), this._rawObjectStore.rawIndexes.set(e, l), l.initialize(this.transaction), this.transaction._rollbackLog.push(() => {
-			l.deleted = !0, this.indexNames = new D(...c), this._rawObjectStore.rawIndexes.delete(l.name);
-		}), new M(this, l);
+			l.deleted = !0, this.indexNames = new E(...c), this._rawObjectStore.rawIndexes.delete(l.name);
+		}), new j(this, l);
 	}
 	index(e) {
 		if (arguments.length === 0) throw TypeError();
@@ -1089,7 +1089,7 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 		if (t !== void 0) return t;
 		let n = this._rawObjectStore.rawIndexes.get(e);
 		if (!this.indexNames.contains(e) || n === void 0) throw new s();
-		let r = new M(this, n);
+		let r = new j(this, n);
 		return this._indexesCache.set(e, r), r;
 	}
 	deleteIndex(e) {
@@ -1100,7 +1100,7 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 		if (t === void 0) throw new s();
 		this.transaction._rollbackLog.push(() => {
 			t.deleted = !1, this._rawObjectStore.rawIndexes.set(t.name, t), this.indexNames._push(t.name), this.indexNames._sort();
-		}), this.indexNames = new D(...Array.from(this.indexNames).filter((t) => t !== e)), t.deleted = !0, this.transaction._execRequestAsync({
+		}), this.indexNames = new E(...Array.from(this.indexNames).filter((t) => t !== e)), t.deleted = !0, this.transaction._execRequestAsync({
 			operation: () => {
 				let n = this._rawObjectStore.rawIndexes.get(e);
 				t === n && this._rawObjectStore.rawIndexes.delete(e);
@@ -1109,7 +1109,7 @@ var ae = (e) => e instanceof y || h(e) !== p, k = (e, t) => {
 		});
 	}
 	count(e) {
-		return P(this), e === null && (e = void 0), e !== void 0 && !(e instanceof y) && (e = y.only(g(e))), this.transaction._execRequestAsync({
+		return P(this), e === null && (e = void 0), e !== void 0 && !(e instanceof _) && (e = _.only(h(e))), this.transaction._execRequestAsync({
 			operation: () => this._rawObjectStore.count(e),
 			source: this
 		});
@@ -1157,7 +1157,7 @@ function me() {
 }
 var he = typeof scheduler < "u" && ((e) => scheduler.postTask(e)), ge = (e) => setTimeout(e, 0), L = (e) => {
 	(globalThis.setImmediate || me() || he || ge)(e);
-}, _e = class extends ne {
+}, _e = class extends w {
 	_state = "active";
 	_started = !1;
 	_rollbackLog = [];
@@ -1171,7 +1171,7 @@ var he = typeof scheduler < "u" && ((e) => scheduler.postTask(e)), ge = (e) => s
 	_createdIndexes = /* @__PURE__ */ new Set();
 	_createdObjectStores = /* @__PURE__ */ new Set();
 	constructor(e, t, n, r) {
-		super(), this._scope = new Set(e), this.mode = t, this.durability = n, this.db = r, this.objectStoreNames = new D(...Array.from(this._scope).sort());
+		super(), this._scope = new Set(e), this.mode = t, this.durability = n, this.db = r, this.objectStoreNames = new E(...Array.from(this._scope).sort());
 	}
 	_abort(e) {
 		for (let e of this._rollbackLog.reverse()) e();
@@ -1221,7 +1221,7 @@ var he = typeof scheduler < "u" && ((e) => scheduler.postTask(e)), ge = (e) => s
 	_execRequestAsync(e) {
 		let t = e.source, n = e.operation, r = Object.hasOwn(e, "request") ? e.request : null;
 		if (this._state !== "active") throw new u();
-		return r || (t ? (r = new E(), r.source = t, r.transaction = t.transaction) : r = new E()), this._requests.push({
+		return r || (t ? (r = new T(), r.source = t, r.transaction = t.transaction) : r = new T()), this._requests.push({
 			operation: n,
 			request: r
 		}), r;
@@ -1314,12 +1314,12 @@ var he = typeof scheduler < "u" && ((e) => scheduler.postTask(e)), ge = (e) => s
 	getAllRecords(e, t, n) {
 		(t === void 0 || t === 0) && (t = Infinity);
 		let r = [];
-		for (let i of this.records.values(e, n)) if (r.push(new se(structuredClone(i.key), structuredClone(i.key), structuredClone(i.value))), r.length >= t) break;
+		for (let i of this.records.values(e, n)) if (r.push(new M(structuredClone(i.key), structuredClone(i.key), structuredClone(i.value))), r.length >= t) break;
 		return r;
 	}
 	storeRecord(e, t, n) {
 		if (this.keyPath !== null) {
-			let t = b(this.keyPath, e.value).key;
+			let t = v(this.keyPath, e.value).key;
 			t !== void 0 && (e.key = t);
 		}
 		let r = [];
@@ -1396,12 +1396,12 @@ var he = typeof scheduler < "u" && ((e) => scheduler.postTask(e)), ge = (e) => s
 	if (e._runningVersionchangeTransaction && (t = e._rawDatabase.transactions.findLast((e) => e.mode === "versionchange")), !t) throw new o();
 	if (t._state !== "active") throw new u();
 	return t;
-}, Ce = class extends ne {
+}, Ce = class extends w {
 	_closePending = !1;
 	_closed = !1;
 	_runningVersionchangeTransaction = !1;
 	constructor(e) {
-		super(), this._rawDatabase = e, this._rawDatabase.connections.push(this), this.name = e.name, this.version = e.version, this.objectStoreNames = new D(...Array.from(e.rawObjectStores.keys()).sort());
+		super(), this._rawDatabase = e, this._rawDatabase.connections.push(this), this.name = e.name, this.version = e.version, this.objectStoreNames = new E(...Array.from(e.rawObjectStores.keys()).sort());
 	}
 	createObjectStore(e, t = {}) {
 		if (e === void 0) throw TypeError();
@@ -1409,18 +1409,18 @@ var he = typeof scheduler < "u" && ((e) => scheduler.postTask(e)), ge = (e) => s
 		if (i !== null && N(i), this._rawDatabase.rawObjectStores.has(e)) throw new r();
 		if (o && (i === "" || Array.isArray(i))) throw new a();
 		let s = [...this.objectStoreNames], c = [...n.objectStoreNames], l = new be(this._rawDatabase, e, i, o);
-		return this.objectStoreNames._push(e), this.objectStoreNames._sort(), n._scope.add(e), n._createdObjectStores.add(l), this._rawDatabase.rawObjectStores.set(e, l), n.objectStoreNames = new D(...this.objectStoreNames), n._rollbackLog.push(() => {
-			l.deleted = !0, this.objectStoreNames = new D(...s), n.objectStoreNames = new D(...c), n._scope.delete(l.name), this._rawDatabase.rawObjectStores.delete(l.name);
+		return this.objectStoreNames._push(e), this.objectStoreNames._sort(), n._scope.add(e), n._createdObjectStores.add(l), this._rawDatabase.rawObjectStores.set(e, l), n.objectStoreNames = new E(...this.objectStoreNames), n._rollbackLog.push(() => {
+			l.deleted = !0, this.objectStoreNames = new E(...s), n.objectStoreNames = new E(...c), n._scope.delete(l.name), this._rawDatabase.rawObjectStores.delete(l.name);
 		}), n.objectStore(e);
 	}
 	deleteObjectStore(e) {
 		if (e === void 0) throw TypeError();
 		let t = Se(this), n = this._rawDatabase.rawObjectStores.get(e);
 		if (n === void 0) throw new s();
-		this.objectStoreNames = new D(...Array.from(this.objectStoreNames).filter((t) => t !== e)), t.objectStoreNames = new D(...this.objectStoreNames);
+		this.objectStoreNames = new E(...Array.from(this.objectStoreNames).filter((t) => t !== e)), t.objectStoreNames = new E(...this.objectStoreNames);
 		let r = t._objectStoresCache.get(e), i;
-		r && (i = [...r.indexNames], r.indexNames = new D()), t._rollbackLog.push(() => {
-			n.deleted = !1, this._rawDatabase.rawObjectStores.set(n.name, n), this.objectStoreNames._push(n.name), t.objectStoreNames._push(n.name), this.objectStoreNames._sort(), r && i && (r.indexNames = new D(...i));
+		r && (i = [...r.indexNames], r.indexNames = new E()), t._rollbackLog.push(() => {
+			n.deleted = !1, this._rawDatabase.rawObjectStores.set(n.name, n), this.objectStoreNames._push(n.name), t.objectStoreNames._push(n.name), this.objectStoreNames._sort(), r && i && (r.indexNames = new E(...i));
 		}), n.deleted = !0, this._rawDatabase.rawObjectStores.delete(e), t._objectStoresCache.delete(e);
 	}
 	transaction(e, t, n) {
@@ -1439,7 +1439,7 @@ var he = typeof scheduler < "u" && ((e) => scheduler.postTask(e)), ge = (e) => s
 	get [Symbol.toStringTag]() {
 		return "IDBDatabase";
 	}
-}, R = class extends E {
+}, R = class extends T {
 	onupgradeneeded = null;
 	onblocked = null;
 	get [Symbol.toStringTag]() {
@@ -1599,7 +1599,7 @@ var Ee = (e, t, n) => {
 	_databases = /* @__PURE__ */ new Map();
 	_connectionQueues = /* @__PURE__ */ new Map();
 	cmp(e, t) {
-		return B(arguments.length, 2, "IDBFactory.cmp"), v(e, t);
+		return B(arguments.length, 2, "IDBFactory.cmp"), g(e, t);
 	}
 	deleteDatabase(e) {
 		B(arguments.length, 1, "IDBFactory.deleteDatabase");
@@ -1625,7 +1625,7 @@ var Ee = (e, t, n) => {
 		}), t;
 	}
 	open(e, t) {
-		if (B(arguments.length, 1, "IDBFactory.open"), arguments.length > 1 && t !== void 0 && (t = k(t, "MAX_SAFE_INTEGER")), t === 0) throw TypeError("Database version cannot be 0");
+		if (B(arguments.length, 1, "IDBFactory.open"), arguments.length > 1 && t !== void 0 && (t = O(t, "MAX_SAFE_INTEGER")), t === 0) throw TypeError("Database version cannot be 0");
 		let n = new R();
 		return n.source = null, L(() => {
 			Ae(this._databases, this._connectionQueues, e, t, n, (e, t) => {
@@ -1664,16 +1664,16 @@ var Ee = (e, t, n) => {
 });
 Object.defineProperties(Ne, {
 	indexedDB: V(Me),
-	IDBCursor: V(C),
-	IDBCursorWithValue: V(w),
+	IDBCursor: V(x),
+	IDBCursorWithValue: V(S),
 	IDBDatabase: V(Ce),
 	IDBFactory: V(je),
-	IDBIndex: V(M),
-	IDBKeyRange: V(y),
+	IDBIndex: V(j),
+	IDBKeyRange: V(_),
 	IDBObjectStore: V(F),
 	IDBOpenDBRequest: V(R),
-	IDBRecord: V(se),
-	IDBRequest: V(E),
+	IDBRecord: V(M),
+	IDBRequest: V(T),
 	IDBTransaction: V(_e),
 	IDBVersionChangeEvent: V(z)
 });
@@ -1697,7 +1697,8 @@ var Pe = new Uint8Array([
 	vector: 9,
 	set: 10,
 	map: 11,
-	handle: 12
+	handle: 12,
+	f64: 15
 }, U = new TextEncoder(), W = new TextDecoder("utf-8", { fatal: !0 }), G = class {
 	constructor(e) {
 		this.name = e;
@@ -1724,7 +1725,7 @@ function Le(e) {
 function Re(e) {
 	let t = e instanceof Uint8Array ? e : new Uint8Array(e);
 	if (t.length < 4 || !Pe.every((e, n) => t[n] === e)) throw Error("hta/value-malformed: invalid HTA1 header");
-	let n = new Ue(t, 4), r = n.value();
+	let n = new We(t, 4), r = n.value();
 	if (n.cursor !== t.length) throw Error("hta/value-malformed: trailing bytes");
 	return r;
 }
@@ -1732,7 +1733,8 @@ function K(e, t) {
 	if (t == null) e.push(H.nil);
 	else if (t === !1) e.push(H.false);
 	else if (t === !0) e.push(H.true);
-	else if (typeof t == "bigint" || Number.isSafeInteger(t)) e.push(H.i64), He(e, BigInt(t));
+	else if (typeof t == "bigint" || Number.isSafeInteger(t) && !Object.is(t, -0)) e.push(H.i64), He(e, BigInt(t));
+	else if (typeof t == "number") e.push(H.f64), Ue(e, t);
 	else if (typeof t == "string") e.push(H.string), J(e, U.encode(t));
 	else if (t instanceof Uint8Array) e.push(H.bytes), J(e, t);
 	else if (t instanceof G) e.push(H.keyword), J(e, U.encode(t.name));
@@ -1776,7 +1778,11 @@ function He(e, t) {
 	let n = BigInt.asUintN(64, t);
 	for (let t = 56n; t >= 0n; t -= 8n) e.push(Number(n >> t & 255n));
 }
-var Ue = class {
+function Ue(e, t) {
+	let n = /* @__PURE__ */ new Uint8Array(8);
+	new DataView(n.buffer).setFloat64(0, t, !1), e.push(...n);
+}
+var We = class {
 	constructor(e, t) {
 		this.bytes = e, this.cursor = t;
 	}
@@ -1808,6 +1814,10 @@ var Ue = class {
 			for (let n of e) t = t << 8n | BigInt(n);
 			return t = BigInt.asIntN(64, t), t >= BigInt(-(2 ** 53 - 1)) && t <= BigInt(2 ** 53 - 1) ? Number(t) : t;
 		}
+		if (e === H.f64) {
+			let e = this.take(8);
+			return new DataView(e.buffer, e.byteOffset, 8).getFloat64(0, !1);
+		}
 		if (e === H.string) return W.decode(this.data());
 		if (e === H.bytes) return this.data().slice();
 		if (e === H.keyword) return new G(W.decode(this.data()));
@@ -1826,32 +1836,32 @@ var Ue = class {
 		}
 		throw Error("hta/value-malformed: unknown value tag");
 	}
-}, We;
-function Ge(e) {
-	return We ??= import(e).then((e) => ({
+}, Ge;
+function Ke(e) {
+	return Ge ??= import(e).then((e) => ({
 		module: e,
 		loader: new e.NoirBrowserLoader({ cache: new e.MemoryArtifactCache() })
-	})), We;
+	})), Ge;
 }
-async function Ke(e, t, n) {
-	let { module: r, loader: i } = await Ge(e), a = n.map(X);
+async function qe(e, t, n) {
+	let { module: r, loader: i } = await Ke(e), a = n.map(Z);
 	if (t === "compile") {
 		let e = a[0] ?? {}, t = {
-			name: Ze(e, "name"),
-			source: Ze(e, "source"),
+			name: X(e, "name"),
+			source: X(e, "source"),
 			noirVersion: e.noirVersion ?? e["noir-version"] ?? r.NOIR_VERSION,
 			backendVersion: e.backendVersion ?? e["backend-version"] ?? r.BACKEND_ID
 		};
-		return qe(await i.compile(t));
+		return Je(await i.compile(t));
 	}
 	if (t === "prove") {
-		let e = Ye(a[0]);
-		return Je(await i.prove(e, a[1]));
+		let e = Xe(a[0]);
+		return Ye(await i.prove(e, a[1]));
 	}
-	if (t === "verify") return i.verify(Ye(a[0]), Xe(a[1]));
+	if (t === "verify") return i.verify(Xe(a[0]), Ze(a[1]));
 	throw Error(`noir/operation-unknown: ${t}`);
 }
-function qe(e) {
+function Je(e) {
 	return {
 		format: e.format,
 		programKey: e.programKey,
@@ -1861,7 +1871,7 @@ function qe(e) {
 		circuitJson: JSON.stringify(e.circuit)
 	};
 }
-function Je(e) {
+function Ye(e) {
 	return {
 		format: e.format,
 		programKey: e.programKey,
@@ -1870,7 +1880,7 @@ function Je(e) {
 		publicInputs: [...e.publicInputs]
 	};
 }
-function Ye(e) {
+function Xe(e) {
 	if (!e || e.format !== "hara/ledger.noir/v1") throw TypeError("noir/artifact-format: expected hara/ledger.noir/v1");
 	return {
 		format: e.format,
@@ -1878,10 +1888,10 @@ function Ye(e) {
 		loaderId: e.loaderId,
 		compilerVersion: e.compilerVersion,
 		backendVersion: e.backendVersion,
-		circuit: JSON.parse(Ze(e, "circuitJson"))
+		circuit: JSON.parse(X(e, "circuitJson"))
 	};
 }
-function Xe(e) {
+function Ze(e) {
 	if (!e || e.format !== "hara.noir.proof/v1") throw TypeError("noir/proof-format: expected hara.noir.proof/v1");
 	return {
 		format: e.format,
@@ -1891,34 +1901,34 @@ function Xe(e) {
 		publicInputs: e.publicInputs
 	};
 }
-function Ze(e, t) {
+function X(e, t) {
 	let n = e?.[t];
 	if (typeof n != "string" || n.length === 0) throw TypeError(`noir/${t} must be a non-empty string`);
 	return n;
 }
-function X(e) {
+function Z(e) {
 	if (e instanceof Map) {
 		let t = {};
 		for (let [n, r] of e) {
 			let e = typeof n == "string" ? n : n?.name;
 			if (typeof e != "string") throw TypeError("noir/map keys must be strings or keywords");
-			t[Qe(e)] = X(r);
+			t[Qe(e)] = Z(r);
 		}
 		return t;
 	}
-	return Array.isArray(e) ? e.map(X) : e instanceof Set ? [...e].map(X) : e;
+	return Array.isArray(e) ? e.map(Z) : e instanceof Set ? [...e].map(Z) : e;
 }
 function Qe(e) {
 	return e.replace(/-([a-z])/g, (e, t) => t.toUpperCase());
 }
 //#endregion
 //#region ../extensions/ledger-noir/node/worker.mjs
-var $e = new URL("../assets/noir-loader.js", "" + import.meta.url).toString(), Z = /* @__PURE__ */ new Set(), Q = /* @__PURE__ */ new Uint8Array(), $ = null;
+var $e = new URL("../assets/noir-loader.js", "" + import.meta.url).toString(), et = /* @__PURE__ */ new Set(), Q = /* @__PURE__ */ new Uint8Array(), $ = null;
 console.log = (...e) => console.error(...e), console.info = (...e) => console.error(...e), process.stdin.on("data", (e) => {
 	let t = new Uint8Array(Q.length + e.length);
-	t.set(Q), t.set(e, Q.length), Q = t, et();
+	t.set(Q), t.set(e, Q.length), Q = t, tt();
 }), process.stdin.on("end", () => process.exit(0));
-function et() {
+function tt() {
 	for (;;) {
 		if ($ === null) {
 			if (Q.length < 4) return;
@@ -1926,13 +1936,13 @@ function et() {
 		}
 		if (Q.length < $) return;
 		let e = Q.slice(0, $);
-		Q = Q.slice($), $ = null, tt(Re(e));
+		Q = Q.slice($), $ = null, nt(Re(e));
 	}
 }
-async function tt(e) {
+async function nt(e) {
 	let [t, n, r, i] = e;
 	if (t === "handshake") {
-		nt(["ready", 1]);
+		rt(["ready", 1]);
 		return;
 	}
 	if (t === "shutdown") {
@@ -1940,38 +1950,38 @@ async function tt(e) {
 		return;
 	}
 	if (t === "cancel") {
-		Z.add(Number(n));
+		et.add(Number(n));
 		return;
 	}
 	if (t !== "call") throw Error(`hta/process-event-unknown: ${t}`);
 	let a = Number(n);
 	try {
-		let e = await Ke($e, r, i);
-		Z.delete(a) || nt([
+		let e = await qe($e, r, i);
+		et.delete(a) || rt([
 			"result",
-			a,
-			rt(e)
-		]);
-	} catch (e) {
-		Z.delete(a) || nt([
-			"error",
 			a,
 			it(e)
 		]);
+	} catch (e) {
+		et.delete(a) || rt([
+			"error",
+			a,
+			at(e)
+		]);
 	}
 }
-function nt(e) {
+function rt(e) {
 	let t = Le(e), n = /* @__PURE__ */ new Uint8Array(4);
 	new DataView(n.buffer).setUint32(0, t.length, !1), process.stdout.write(n), process.stdout.write(t);
 }
-function rt(e) {
+function it(e) {
 	if (typeof e != "object" || !e) return e ?? null;
-	if (Array.isArray(e)) return e.map(rt);
+	if (Array.isArray(e)) return e.map(it);
 	let t = /* @__PURE__ */ new Map();
-	for (let [n, r] of Object.entries(e)) t.set(new G(n), rt(r));
+	for (let [n, r] of Object.entries(e)) t.set(new G(n), it(r));
 	return t;
 }
-function it(e) {
+function at(e) {
 	let t = String(e?.message ?? e), n = t.indexOf(":"), r = n > 0 ? t.slice(0, n) : "noir/error";
 	return /* @__PURE__ */ new Map([
 		[new G("code"), new G(r)],

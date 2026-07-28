@@ -78,6 +78,12 @@ export function createHostServices(options = {}) {
     services["studio.canvas/render"] = (nodeId, canvasId, frame) =>
       options.canvasRuntime.render(nodeId, canvasId, frame);
   }
+  if (options.audioPipeline) {
+    services["studio.audio/configure"] = async (spec) =>
+      toHta(await options.audioPipeline.configure(toPlain(spec)));
+    services["studio.audio/control"] = async (command, value) =>
+      toHta(await options.audioPipeline.control(String(command), toPlain(value)));
+  }
   if (options.renderCanvas && !options.canvasRuntime) {
     services["studio.canvas/render"] = async (canvas, scene) => {
       await options.renderCanvas(canvas, scene);

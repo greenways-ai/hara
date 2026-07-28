@@ -999,6 +999,30 @@ body[data-workspace="1"] .source-toggle { display: none; }
   border-left: 1px solid var(--line);
 }
 
+.background-audio {
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
+  border-left: 1px solid var(--line);
+}
+
+.background-audio button,
+.background-audio label {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  padding: 0 .7rem;
+  color: var(--cyan);
+  background: transparent;
+  border: 0;
+  font: .52rem var(--mono);
+  letter-spacing: .1em;
+}
+
+.background-audio button { cursor: pointer; border-right: 1px solid var(--line); }
+.background-audio button:hover { color: var(--cyan-bright); background: rgba(65, 245, 228, .08); }
+.background-audio input { width: 64px; accent-color: var(--cyan); }
+
 .publish-button {
   align-self: stretch;
   padding: 0 .9rem;
@@ -1199,10 +1223,23 @@ body[data-workspace="1"] .source-toggle { display: none; }
 
 .template-option:hover { color: var(--cyan-bright); background: rgba(65, 245, 228, .07); }
 
-.publish-dialog > p,
+.publish-summary {
+  display: grid;
+  gap: .38rem;
+  padding: 1.25rem 1.25rem 1rem;
+  background: linear-gradient(120deg, rgba(65, 245, 228, .09), transparent 62%);
+  border-bottom: 1px solid rgba(65, 245, 228, .12);
+}
+
+.publish-summary strong { color: var(--cyan-bright); font: .82rem var(--mono); letter-spacing: .06em; }
+.publish-summary > span:last-child,
+.publish-eyebrow { color: var(--faint); font: .5rem var(--mono); letter-spacing: .14em; }
+.publish-eyebrow { color: var(--cyan); }
+
+.publish-intro,
 .publish-note {
   margin: 0;
-  padding: 1rem;
+  padding: .9rem 1.25rem;
   color: var(--muted);
   font-size: .62rem;
   line-height: 1.6;
@@ -1210,31 +1247,69 @@ body[data-workspace="1"] .source-toggle { display: none; }
 
 .publish-visibility {
   display: flex;
-  gap: .6rem;
+  flex-wrap: wrap;
+  gap: .55rem;
   align-items: center;
-  padding: 0 1rem 1rem;
+  padding: .15rem 1.25rem 1.05rem;
   color: var(--cyan-bright);
-  font-size: .6rem;
+  font-size: .56rem;
+  letter-spacing: .08em;
 }
+
+.publish-visibility span { width: 100%; margin-left: 1.42rem; color: var(--faint); font-size: .5rem; letter-spacing: .04em; }
 
 .publish-options {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 1px;
   background: var(--line);
 }
 
-.publish-options button {
-  min-height: 64px;
+.publish-option {
+  min-height: 128px;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: .38rem;
+  padding: 1.05rem 1.2rem;
   color: var(--muted);
   background: #040911;
   border: 0;
-  font: .55rem var(--mono);
-  letter-spacing: .08em;
+  text-align: left;
   cursor: pointer;
 }
 
-.publish-options button:hover { color: var(--cyan-bright); }
+.publish-option strong { font: .62rem var(--mono); letter-spacing: .08em; }
+.publish-option small { color: var(--faint); font: .48rem var(--mono); letter-spacing: .13em; }
+.publish-option-icon { color: var(--cyan); font: 1.35rem var(--mono); line-height: 1; }
+.publish-option:hover:not(:disabled) { color: var(--cyan-bright); background: rgba(65, 245, 228, .08); }
+.publish-option:hover:not(:disabled) small { color: var(--cyan); }
+.publish-option:disabled { cursor: not-allowed; opacity: .42; }
+.publish-option-github { background: linear-gradient(135deg, rgba(156, 123, 255, .12), #040911 65%); }
+.publish-option-github .publish-option-icon { color: #bca8ff; }
+
+.publish-auth {
+  display: block;
+  margin: 1rem 1.25rem 0;
+  color: var(--cyan);
+  font: .55rem var(--mono);
+  letter-spacing: .1em;
+}
+
+.publish-code {
+  display: block;
+  margin: .65rem 1.25rem 0;
+  padding: .55rem .7rem;
+  color: var(--cyan-bright);
+  background: #020408;
+  border: 1px dashed var(--line-strong);
+  font: .7rem var(--mono);
+  letter-spacing: .15em;
+}
+
+.publish-auth[hidden],
+.publish-code:empty { display: none; }
+.publish-note.is-error { color: #ff9da0; }
 
 .dialog-head button {
   align-self: stretch;
@@ -1350,6 +1425,7 @@ body[data-workspace="1"] .source-toggle { display: none; }
   .system-mark { width: 22px; height: 22px; }
   .project-tab { min-width: 78px; padding: 0 .7rem; font-size: .5rem; }
   .background-picker { display: none !important; }
+  .background-audio label { display: none; }
   .source-toggle { display: block; }
   .background-source-panel {
     top: auto;

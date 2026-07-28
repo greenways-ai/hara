@@ -24,6 +24,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Build browser runtime and site
+        env:
+          HARA_GITHUB_OAUTH_CLIENT_ID: ${{ vars.HARA_GITHUB_OAUTH_CLIENT_ID }}
         run: |
           rustup target add wasm32-unknown-unknown
           bash scripts/build-www

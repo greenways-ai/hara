@@ -2,14 +2,15 @@ import { keywordName, mapValue, renderScene, validateScene } from "./scene.js";
 import { CreativeRuntime, normalizeCreative } from "./creative.js";
 import { applyParedit, barfForward, insertIndent, killToFormEnd, localFormAt, slurpForward, structuralAlign } from "./editor.js";
 import { WorkspaceRepository, kernelName, workspaceTemplates } from "./workspaces.js";
-import { downloadWorkspace, workspaceBundle } from "./publishing.js";
+import { downloadWorkspace, GitHubDeviceAuth, githubRequest, GistPublisher, workspaceBundle } from "./publishing.js";
 
 const SPACE = "home";
 const ROOT = "ROOT";
 const ACTIVE_FILE_KEY = "hara-www.active-file.v1";
 const WINDOWS_KEY = "hara-www.windows.v1";
-const BACKGROUND_SOURCE_KEY = "hara-www.background-source.v1";
+const BACKGROUND_SOURCE_KEY = "hara-www.background-source.v2";
 const BACKGROUND_WORKSPACE = "./examples/studio-backgrounds/";
+const SIGNAL_RING_BACKGROUND = "document/background/signal-ring";
 const HAL_FORMS = [
   ["def", "bind a named value"], ["defn", "define a function"], ["fn", "anonymous function"],
   ["let", "local bindings"], ["if", "conditional branch"], ["when", "conditional body"],
@@ -20,6 +21,72 @@ const HAL_FORMS = [
   [":version", "scene format version"], [":commands", "scene drawing commands"],
   [":background", "scene background colour"], [":width", "scene width"], [":height", "scene height"]
 ];
+
+class HalAudioPipeline {
+  constructor() {
+    this.spec = null;
+    this.context = null;
+    this.master = null;
+    this.timer = null;
+    this.playing = false;
+    this.step = 0;
+  }
+
+  configure(spec) {
+    this.spec = { tempo: 86, volume: .16, root: 43.65, steps: [0], pulse: .42, wave: "sine", ...spec };
+    if (this.master) this.master.gain.setTargetAtTime(this.spec.volume, this.context.currentTime, .04);
+    return this.status();
+  }
+
+  async control(command, value) {
+    if (command === "volume") {
+      this.spec = { ...this.spec, volume: Math.max(0, Math.min(.32, Number(value) || 0)) };
+      if (this.master) this.master.gain.setTargetAtTime(this.spec.volume, this.context.currentTime, .025);
+    } else if (command === "toggle") {
+      if (this.playing) this.stop(); else await this.play();
+    } else if (command === "play") await this.play();
+    else if (command === "stop") this.stop();
+    return this.status();
+  }
+
+  async play() {
+    if (!this.spec) throw new Error("audio pipeline is not configured by the active HAL background");
+    const Context = globalThis.AudioContext ?? globalThis.webkitAudioContext;
+    if (!Context) throw new Error("Web Audio is unavailable in this browser");
+    this.context ??= new Context({ latencyHint: "interactive" });
+    this.master ??= new GainNode(this.context, { gain: this.spec.volume });
+    this.master.connect(this.context.destination);
+    await this.context.resume();
+    this.playing = true;
+    this.tick();
+    const milliseconds = 60000 / this.spec.tempo * this.spec.pulse;
+    this.timer = setInterval(() => this.tick(), milliseconds);
+  }
+
+  stop() {
+    clearInterval(this.timer);
+    this.timer = null;
+    this.playing = false;
+  }
+
+  tick() {
+    if (!this.playing || !this.context || !this.master) return;
+    const semitone = this.spec.steps[this.step++ % this.spec.steps.length];
+    const frequency = this.spec.root * Math.pow(2, semitone / 12);
+    const now = this.context.currentTime;
+    const oscillator = new OscillatorNode(this.context, { type: this.spec.wave, frequency });
+    const gain = new GainNode(this.context, { gain: 0.0001 });
+    oscillator.connect(gain).connect(this.master);
+    gain.gain.exponentialRampToValueAtTime(.34, now + .012);
+    gain.gain.exponentialRampToValueAtTime(.0001, now + Math.max(.11, this.spec.pulse * .46));
+    oscillator.start(now);
+    oscillator.stop(now + Math.max(.14, this.spec.pulse * .52));
+  }
+
+  status() { return { playing: this.playing, volume: this.spec?.volume ?? 0 }; }
+}
+
+const audioPipeline = new HalAudioPipeline();
 
 const DEFAULT_FILES = new Map([
   ["/sketches/neon-orbit.hal", `;; Put the cursor in this map and press Ctrl-E.
@@ -129,7 +196,7 @@ const state = {
   editorPrefixTimer: null,
   evalRange: null,
   editorHistory: { past: [], future: [], current: null, replaying: false },
-  backgroundSource: localStorage.getItem(BACKGROUND_SOURCE_KEY) ?? "document/background/tron",
+  backgroundSource: localStorage.getItem(BACKGROUND_SOURCE_KEY) ?? SIGNAL_RING_BACKGROUND,
   backgroundDocuments: new Map(),
   activeBackground: null,
   canvasRuntime: null,
@@ -154,6 +221,9 @@ const elements = {
   runtimeLed: query("[data-runtime-led]"),
   runtimeLabel: query("[data-runtime-label]"),
   backgroundSource: query("[data-background-source]"),
+  backgroundAudio: query("[data-background-audio]"),
+  audioToggle: query("[data-audio-toggle]"),
+  audioVolume: query("[data-audio-volume]"),
   sourceToggle: query("[data-source-toggle]"),
   sourcePanel: query("[data-background-panel]"),
   sourceEditor: query("[data-background-editor]"),
@@ -195,6 +265,11 @@ const elements = {
   savedWorkspaces: query("[data-saved-workspaces]"),
   publish: query("[data-publish]"),
   publishDialog: query("[data-publish-dialog]"),
+  publishName: query("[data-publish-name]"),
+  publishFiles: query("[data-publish-files]"),
+  publishGist: query("[data-publish-gist]"),
+  publishAuth: query("[data-publish-auth]"),
+  publishCode: query("[data-publish-code]"),
   publishNote: query("[data-publish-note]"),
   toasts: query("[data-toasts]")
 };
@@ -326,6 +401,11 @@ async function loadBackgroundSource(name, sourceOverride = null) {
     elements.sourceEditor.dataset.documentId = descriptor.id;
     elements.sourceStatus.textContent =
       `${loaded.recovered ? "RECOVERED" : "LIVE"} // GENERATION ${generation}`;
+    const hasAudio = descriptor.id === SIGNAL_RING_BACKGROUND;
+    elements.backgroundAudio.hidden = !hasAudio || state.workspace === 1;
+    if (!hasAudio && audioPipeline.playing) audioPipeline.stop();
+    elements.audioToggle.setAttribute("aria-pressed", String(audioPipeline.playing));
+    elements.audioToggle.textContent = audioPipeline.playing ? "■ STOP" : "♪ PLAY";
     syncBackgroundHighlight();
   } catch (error) {
     if (generation !== backgroundLoadGeneration) return;
@@ -347,6 +427,7 @@ function setWorkspace(index) {
   if (state.workspace === 1) {
     state.canvasRuntime?.setVisible(false);
     query("[data-tron]").hidden = true;
+    elements.backgroundAudio.hidden = true;
     showWorkspaceWindows();
   } else {
     state.canvasRuntime?.setVisible(true);
@@ -642,6 +723,13 @@ function installWorkspaceNavigation() {
       loadBackgroundSource(elements.backgroundSource.value).catch(() => {});
     });
   }
+  elements.audioToggle.addEventListener("click", () => {
+    controlBackgroundAudio("toggle").catch((error) => toast(`AUDIO FAILED: ${errorText(error)}`, true));
+  });
+  elements.audioVolume.addEventListener("input", () => {
+    controlBackgroundAudio("volume", Number(elements.audioVolume.value))
+      .catch((error) => toast(`AUDIO FAILED: ${errorText(error)}`, true));
+  });
   query("[data-start]").addEventListener("click", openTemplateDialog);
   queryAll("[data-home]").forEach((button) => button.addEventListener("click", () => setWorkspace(0)));
   query("[data-workspace-prev]").addEventListener("click", () => {
@@ -739,24 +827,72 @@ function installWorkspaceCreation() {
 }
 
 function installPublishing() {
-  elements.publish.addEventListener("click", () => elements.publishDialog.showModal());
-  query("[data-publish-close]").addEventListener("click", () => elements.publishDialog.close());
-  for (const button of queryAll("[data-publish-provider]")) {
-    button.addEventListener("click", async () => {
-      if (!state.currentProject) return;
-      const provider = button.dataset.publishProvider;
-      const publicVisibility = query("[data-publish-public]").checked;
-      if (provider === "download") {
-        downloadWorkspace(await workspaceBundle(state.workspaceRepository, state.currentProject.id));
-        elements.publishNote.textContent = "WORKSPACE EXPORTED FOR SELF-HOSTING.";
+  let session = null;
+  let loginGeneration = 0;
+  const auth = new GitHubDeviceAuth({ clientId: globalThis.HARA_GITHUB_OAUTH_CLIENT_ID });
+  const close = () => { loginGeneration += 1; elements.publishDialog.close(); };
+  const status = (message, error = false) => {
+    elements.publishNote.textContent = message;
+    elements.publishNote.classList.toggle("is-error", error);
+  };
+  const render = async () => {
+    if (!state.currentProject) return;
+    const files = await state.workspaceRepository.files(state.currentProject.id);
+    elements.publishName.textContent = state.currentProject.name;
+    elements.publishFiles.textContent = `${files.size} ${files.size === 1 ? "FILE" : "FILES"} READY`;
+    elements.publishGist.textContent = session ? "PUBLISH TO GITHUB GIST" : "SIGN IN WITH GITHUB";
+    elements.publishGist.disabled = !auth.configured() && !session;
+    elements.publishGist.title = auth.configured() || session ? "" : "GitHub login is not configured for this deployment.";
+    elements.publishAuth.hidden = true;
+    status(session ? `SIGNED IN AS ${session.user.login.toUpperCase()}.` : "CONNECT GITHUB TO PUBLISH A GIST.");
+  };
+  elements.publish.addEventListener("click", () => void render().then(() => elements.publishDialog.showModal()));
+  query("[data-publish-close]").addEventListener("click", close);
+  elements.publishDialog.addEventListener("close", () => { loginGeneration += 1; });
+  query("[data-publish-provider='download']").addEventListener("click", async () => {
+    if (!state.currentProject) return;
+    const filename = downloadWorkspace(await workspaceBundle(state.workspaceRepository, state.currentProject.id));
+    status(`${filename.toUpperCase()} SAVED TO DISK.`);
+  });
+  elements.publishGist.addEventListener("click", async () => {
+    if (!state.currentProject) return;
+    elements.publishGist.disabled = true;
+    try {
+      if (!session) {
+        const generation = ++loginGeneration;
+        const device = await auth.begin();
+        elements.publishAuth.hidden = false;
+        elements.publishCode.textContent = device.user_code;
+        elements.publishAuth.href = device.verification_uri;
+        elements.publishAuth.textContent = "OPEN GITHUB & AUTHORIZE ↗";
+        status("ENTER THE CODE ON GITHUB. WAITING FOR AUTHORIZATION.");
+        const token = await auth.authorize(device, { cancelled: () => generation !== loginGeneration });
+        const user = await githubRequest("/user", { token: token.access_token });
+        if (generation !== loginGeneration) return;
+        session = { token: token.access_token, user };
+        await render();
         return;
       }
-      const label = provider === "gist" ? "GitHub Gist" : "Greenways";
-      elements.publishNote.textContent =
-        `${label} publishing is ready for a server-side GitHub profile connection. ` +
-        `${publicVisibility ? "Public" : "Private/draft"} will be used after authorization.`;
-    });
-  }
+      status("PUBLISHING WORKSPACE TO GITHUB…");
+      const bundle = await workspaceBundle(state.workspaceRepository, state.currentProject.id);
+      const gist = await new GistPublisher({
+        request: (path, options) => githubRequest(path, { ...options, token: session.token })
+      }).publish(bundle, {
+        public: query("[data-publish-public]").checked,
+        previous: state.currentProject.providers?.gist
+      });
+      await state.workspaceRepository.setProvider(state.currentProject.id, "gist", {
+        id: gist.id, url: gist.html_url, public: gist.public
+      });
+      state.currentProject = await state.workspaceRepository.get(state.currentProject.id);
+      status(`GIST PUBLISHED: ${gist.html_url}`);
+      elements.publishGist.textContent = "UPDATE GITHUB GIST";
+    } catch (error) {
+      if (error.message !== "GITHUB_LOGIN_CANCELLED") status(`PUBLISH FAILED: ${errorText(error)}`, true);
+    } finally {
+      elements.publishGist.disabled = !session && !auth.configured();
+    }
+  });
 }
 
 function installWorkspaceTabs() {
@@ -1124,6 +1260,21 @@ function installBackgroundEditor() {
     }
   });
   elements.sourceSave.addEventListener("click", () => void saveBackgroundSource());
+}
+
+function syncAudioControls(result = null) {
+  const playing = result instanceof Map ? result.get("playing") : result?.playing ?? audioPipeline.playing;
+  const volume = result instanceof Map ? result.get("volume") : result?.volume;
+  elements.audioToggle.setAttribute("aria-pressed", String(playing));
+  elements.audioToggle.textContent = playing ? "■ STOP" : "♪ PLAY";
+  if (typeof volume === "number") elements.audioVolume.value = String(volume);
+}
+
+async function controlBackgroundAudio(command, value = null) {
+  const nodeId = state.activeBackground?.nodeId;
+  if (!nodeId || state.activeBackground.descriptor.id !== SIGNAL_RING_BACKGROUND) return;
+  const response = await state.nodeRuntime.call("ui/home", nodeId, "audio/control", [command, value]);
+  syncAudioControls(response.data);
 }
 
 function positionEditorOverlay(node, offset) {
@@ -1521,7 +1672,7 @@ async function bootRuntime() {
     if (!wasmResponse.ok) throw new Error(`runtime fetch failed: ${wasmResponse.status}`);
     const moduleBytes = new Uint8Array(await wasmResponse.arrayBuffer());
     const resources = {};
-    for (const name of ["store", "fs", "space", "boot", "node", "draw", "program", "graph", "session"]) {
+    for (const name of ["store", "fs", "space", "boot", "node", "draw", "audio", "program", "graph", "session"]) {
       const response = await fetch(new URL(`studio/hal/${name}.hal`, runtimeBase));
       if (!response.ok) throw new Error(`resource ${name} fetch failed: ${response.status}`);
       resources[`studio.${name}`] = await response.text();
@@ -1553,6 +1704,7 @@ async function bootRuntime() {
       nodeRuntime: state.nodeRuntime,
       canvasRuntime: state.canvasRuntime,
       graphHost,
+      audioPipeline,
       graphHostOptions: { sessionRouter },
       renderCanvas: (_canvasId, value) => {
         showScene(validateScene(value), performance.now(), "HAL");

@@ -33,6 +33,19 @@ test("zoomed desktop keeps explorer, source, and output visible", async ({ page 
   }
 });
 
+test("publish dialog offers zip export and GitHub Gist sign-in", async ({ page }) => {
+  await page.goto("/website/");
+  await page.locator("[data-publish]").evaluate((button) => { button.disabled = false; });
+  await expect(page.locator("[data-publish]")).toBeVisible();
+  await page.locator("[data-publish]").click();
+  await expect(page.locator("[data-publish-dialog]")).toBeVisible();
+  await expect(page.locator("[data-publish-provider='download']")).toContainText("SAVE BUNDLE TO DISK");
+  await expect(page.locator("[data-publish-gist]")).toContainText("SIGN IN WITH GITHUB");
+  await expect(page.locator("[data-publish-public]")).toBeChecked();
+  await page.locator("[data-publish-public]").uncheck();
+  await expect(page.locator("[data-publish-public]")).not.toBeChecked();
+});
+
 test("phone shell uses touch controls and one explicit workspace panel", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/website/");

@@ -28,6 +28,8 @@ cp "$ROOT/website/index.html" \
    "$ROOT/website/og.png" \
    "$ROOT/website/scene.js" \
    "$OUT/"
+node -e 'process.stdout.write(`globalThis.HARA_GITHUB_OAUTH_CLIENT_ID = ${JSON.stringify(process.env.HARA_GITHUB_OAUTH_CLIENT_ID || "Iv23lixQbnKYwkRBihCQ")};\n`)' \
+  > "$OUT/github-auth-config.js"
 cp "$ROOT/scripts/install.sh" "$OUT/install.sh"
 chmod 755 "$OUT/install.sh"
 cp "$RAW_WASM" "$OUT/runtime/hara.wasm"

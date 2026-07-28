@@ -241,6 +241,10 @@
     </div>
     <div class="bottom-spacer"></div>
     <div class="home-tools">
+      <div class="background-audio" data-background-audio hidden>
+        <button type="button" data-audio-toggle aria-pressed="false">♪ PLAY</button>
+        <label><span>VOL</span><input data-audio-volume type="range" min="0" max="0.32" step="0.01" value="0.16" aria-label="Signal Ring volume"></label>
+      </div>
       <label class="background-picker">
         <span>SOURCE</span>
         <select data-background-source aria-label="Background source"></select>
@@ -276,14 +280,28 @@
 
   <dialog class="hara-dialog publish-dialog" data-publish-dialog>
     <div class="dialog-head"><span>PUBLISH WORKSPACE</span><button type="button" data-publish-close aria-label="Close">×</button></div>
-    <p>Publish the complete project, including project.edn, workspace.edn and source files.</p>
-    <label class="publish-visibility"><input type="checkbox" data-publish-public checked> PUBLIC</label>
-    <div class="publish-options">
-      <button type="button" data-publish-provider="download">SELF-HOST EXPORT</button>
-      <button type="button" data-publish-provider="gist">GITHUB GIST</button>
-      <button type="button" data-publish-provider="greenways">GREENWAYS</button>
+    <div class="publish-summary">
+      <span class="publish-eyebrow">WORKSPACE BUNDLE</span>
+      <strong data-publish-name>UNTITLED WORKSPACE</strong>
+      <span data-publish-files>0 FILES READY</span>
     </div>
-    <p class="publish-note" data-publish-note>GitHub and Greenways connect through a server-side GitHub profile authorization.</p>
+    <p class="publish-intro">Export a portable workspace or publish its complete source bundle to a GitHub Gist.</p>
+    <label class="publish-visibility"><input type="checkbox" data-publish-public checked> MAKE GIST PUBLIC <span>Secret Gists stay unlisted.</span></label>
+    <div class="publish-options">
+      <button type="button" class="publish-option publish-option-download" data-publish-provider="download">
+        <span class="publish-option-icon" aria-hidden="true">↓</span>
+        <strong>SAVE BUNDLE TO DISK</strong>
+        <small>DOWNLOAD .ZIP</small>
+      </button>
+      <button type="button" class="publish-option publish-option-github" data-publish-gist>
+        <span class="publish-option-icon" aria-hidden="true">◈</span>
+        <strong>SIGN IN WITH GITHUB</strong>
+        <small>PUBLISH TO GIST</small>
+      </button>
+    </div>
+    <a class="publish-auth" data-publish-auth target="_blank" rel="noreferrer"></a>
+    <code class="publish-code" data-publish-code></code>
+    <p class="publish-note" data-publish-note aria-live="polite">CONNECT GITHUB TO PUBLISH A GIST.</p>
   </dialog>
 
   <dialog class="hara-dialog" data-dialog>
@@ -305,6 +323,7 @@
   </dialog>
 
   <div class="toast-stack" data-toasts aria-live="polite"></div>
+  <script src="./github-auth-config.js"></script>
   <script type="module" src="./app.js?v=workspace-projects-1"></script>
 </body>
 </html>
