@@ -21,7 +21,20 @@ test("www always opens Home and offers manifest-backed workspace templates", asy
   await page.locator("[data-launcher-toggle]").click();
   await expect(page.locator("[data-launcher]")).toHaveAttribute("aria-hidden", "false");
   await expect(page.locator("[data-new-workspace]")).toBeVisible();
-  await expect(page.locator("[data-deploy-template]")).toHaveCount(0);
+  await expect(page.locator("[data-quick-template]")).toHaveCount(4);
+  await expect(page.locator('[data-quick-template="canvas"]')).toBeVisible();
+  await expect(page.locator("[data-github-account]")).not.toBeVisible();
+  await expect(page.locator("[data-ai-adapters]")).not.toBeVisible();
+
+  await page.locator("[data-launcher-toggle]").click();
+  await page.locator("[data-settings]").click();
+  await expect(page.locator("[data-settings-dialog]")).toBeVisible();
+  await expect(page.locator("[data-github-account]")).toBeVisible();
+  await expect(page.locator("[data-ai-adapters]")).toBeVisible();
+  await page.locator("[data-github-account]").click();
+  await expect(page.locator("[data-account-dialog]")).toBeVisible();
+  await expect(page.locator("[data-account-signin]")).toBeDisabled();
+  await page.locator("[data-account-close]").click();
 });
 
 test("zoomed desktop keeps explorer, source, and output visible", async ({ page }) => {
@@ -33,26 +46,15 @@ test("zoomed desktop keeps explorer, source, and output visible", async ({ page 
   }
 });
 
-test("publish dialog offers zip export and GitHub Gist sign-in", async ({ page }) => {
-  await page.goto("/website/");
-  await page.locator("[data-publish]").evaluate((button) => { button.disabled = false; });
-  await expect(page.locator("[data-publish]")).toBeVisible();
-  await page.locator("[data-publish]").click();
-  await expect(page.locator("[data-publish-dialog]")).toBeVisible();
-  await expect(page.locator("[data-publish-provider='download']")).toContainText("SAVE BUNDLE TO DISK");
-  await expect(page.locator("[data-publish-gist]")).toContainText("SIGN IN WITH GITHUB");
-  await expect(page.locator("[data-publish-public]")).toBeChecked();
-  await page.locator("[data-publish-public]").uncheck();
-  await expect(page.locator("[data-publish-public]")).not.toBeChecked();
-});
-
 test("phone shell uses touch controls and one explicit workspace panel", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/website/");
   await expect(page.locator("[data-start]")).toBeVisible();
   await expect(page.getByRole("link", { name: "GITHUB ↗" })).toBeVisible();
+  await expect(page.locator("[data-background-source]")).toBeVisible();
   await page.evaluate(() => { document.body.dataset.workspace = "1"; });
   await expect(page.locator("[data-mobile-panels]")).toBeVisible();
+  await expect(page.locator("[data-background-source]")).toBeVisible();
   await expect(page.locator('[data-window="editor"]')).toBeVisible();
   await expect(page.locator('[data-window="files"]')).toBeHidden();
   await page.locator('[data-mobile-panels] [data-focus-window="files"]').click();
@@ -63,12 +65,13 @@ test("phone shell uses touch controls and one explicit workspace panel", async (
 const builtRuntime = new URL("../../target/www/runtime/hara.wasm", import.meta.url);
 const runtimeTest = existsSync(builtRuntime) ? test : test.skip;
 
-runtimeTest("www package includes the Hara logo assets", async ({ page }) => {
+runtimeTest("www package includes the Hara UI image assets", async ({ page }) => {
   await page.goto("/target/www/");
   await expect(page.getByRole("heading", { name: "HARA" })).toBeVisible();
   await expect(page.locator("img.welcome-mark")).toHaveCount(0);
-  const marks = page.locator('img.start-mark[src*="logo-white.svg"]');
-  await expect(marks).toHaveCount(1);
+  await expect(page.locator('img.system-mark[src*="hara-favicon.svg"]')).toHaveCount(1);
+  const marks = page.locator('img.system-mark[src*="hara-favicon.svg"], img.start-mark[src*="hara-mark.svg"]');
+  await expect(marks).toHaveCount(2);
   await expect
     .poll(() => marks.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0)))
     .toBe(true);
@@ -82,15 +85,32 @@ runtimeTest("www runs workspace-discovered HAL background programs", async ({ pa
   const canvas = page.locator("[data-tron]");
   const source = page.locator("select[data-background-source]");
 
-  await expect(source.locator("option")).toHaveCount(4);
+  await expect(source.locator("option")).toHaveCount(10);
   await expect(source).toHaveValue("document/background/tron");
   await expect(canvas).toHaveAttribute("data-background-name", "tron");
   await expect(page.locator("[data-background-status]")).toContainText("GENERATION");
   await expect.poll(() => canvas.evaluate((node) => node.width * node.height)).toBeGreaterThan(0);
 
-  await source.selectOption("document/background/grid");
-  await expect(canvas).toHaveAttribute("data-background-name", "grid");
+  await expect(source.locator('option[value="document/background/grid"]')).toHaveCount(0);
+  await source.selectOption("document/background/aurora");
+  await expect(canvas).toHaveAttribute("data-background-name", "aurora");
   await expect(page.locator("[data-background-status]")).toContainText("GENERATION");
+
+  await source.selectOption("document/background/pulse");
+  await expect(canvas).toHaveAttribute("data-background-name", "pulse");
+  await expect(page.locator("[data-background-status]")).toContainText("GENERATION");
+
+  for (const effect of [
+    "stars",
+    "earth",
+    "ants",
+    "space-invaders",
+    "pong"
+  ]) {
+    await source.selectOption(`document/background/${effect}`);
+    await expect(canvas).toHaveAttribute("data-background-name", effect.replaceAll("-", " "));
+    await expect(page.locator("[data-background-status]")).toContainText("GENERATION");
+  }
 
   await source.selectOption("document/background/fire");
   await expect(canvas).toHaveAttribute("data-background-name", "fire");
@@ -109,7 +129,48 @@ runtimeTest("live source errors roll back and explicit save uses the local overl
   await page.locator("[data-source-toggle]").click();
   const editor = page.locator("[data-background-editor]");
   await expect(editor).toBeVisible();
+  await expect.poll(() => page.locator("[data-tron]").evaluate((canvas) => {
+    const bounds = canvas.getBoundingClientRect();
+    return {
+      left: Math.round(bounds.left),
+      top: Math.round(bounds.top),
+      width: Math.round(bounds.width),
+      height: Math.round(bounds.height)
+    };
+  })).toEqual({ left: 0, top: 0, width: 1280, height: 720 });
+  await expect(page.locator("[data-background-line-numbers]")).toBeVisible();
+  await expect(page.locator("[data-background-paredit]")).toHaveText("PAREDIT ON");
+  await expect(page.locator("[data-background-apply]")).toBeVisible();
+  await expect(page.locator("[data-background-highlight]")).toHaveCSS("overflow", "hidden");
   const goodSource = await editor.inputValue();
+  await editor.evaluate((input) => {
+    input.scrollTop = input.scrollHeight;
+    input.scrollLeft = input.scrollWidth;
+    input.dispatchEvent(new Event("scroll"));
+  });
+  await expect.poll(() => page.locator("[data-background-highlight]").evaluate((highlight) => ({
+    top: Math.round(highlight.scrollTop),
+    left: Math.round(highlight.scrollLeft),
+    text: highlight.textContent
+  }))).toEqual(expect.objectContaining({
+    top: expect.any(Number),
+    left: expect.any(Number),
+    text: expect.stringContaining("(node/start")
+  }));
+  await expect.poll(() => page.locator("[data-background-highlight]").evaluate((highlight) => {
+    const editor = document.querySelector("[data-background-editor]");
+    const content = highlight.querySelector(".code-highlight-content");
+    const transform = new DOMMatrix(getComputedStyle(content).transform);
+    return {
+      hasVerticalScroll: editor.scrollTop > 0,
+      topMatches: Math.abs(transform.m42 + editor.scrollTop) < 1,
+      leftMatches: Math.abs(transform.m41 + editor.scrollLeft) < 1
+    };
+  })).toEqual({
+    hasVerticalScroll: true,
+    topMatches: true,
+    leftMatches: true
+  });
   await editor.fill("(ns+");
   await expect(page.locator("[data-background-status]")).toContainText("ERROR", { timeout: 10000 });
   await expect(page.locator("[data-tron]")).toBeVisible();
@@ -135,13 +196,31 @@ runtimeTest("workspace template opens a dedicated project tab and survives Home 
   await page.locator("[data-start]").click();
   await page.locator("[data-workspace-name]").fill(`Canvas ${Date.now()}`);
   await page.locator('[data-template="canvas"]').click();
+  await expect(page.locator("[data-kernel-loading]")).toBeVisible();
+  await expect(page.locator("[data-kernel-loading]")).toContainText("KERNEL LOADING");
   await expect(page.locator("body")).toHaveAttribute("data-workspace", "1");
   await expect(page.locator("[data-project-id]")).toHaveCount(1);
   await expect(page.locator('[data-file="/project.edn"]')).toBeVisible();
   await expect(page.locator('[data-file="/workspace.edn"]')).toBeVisible();
+  await expect(page.locator("body")).toHaveAttribute("data-kernel", "live");
   await page.locator(".project-tab[data-home]").click();
   await expect(page.locator("body")).toHaveAttribute("data-workspace", "0");
+  await expect(page.locator("body")).toHaveAttribute("data-kernel", "stopped");
   await expect(page.locator("[data-project-id]")).toHaveCount(1);
+  await page.locator("[data-project-id]").click();
+  await expect(page.locator("body")).toHaveAttribute("data-workspace", "1");
+  await expect(page.locator("body")).toHaveAttribute("data-kernel", "live");
+  await expect(page.locator('[data-file="/src/main.hal"]')).toBeVisible();
+  await page.locator("[data-launcher-toggle]").click();
+  await expect(page.locator("[data-close-active-workspace]")).toBeVisible();
+  await page.locator("[data-close-active-workspace]").click();
+  await expect(page.locator("body")).toHaveAttribute("data-workspace", "0");
+  await expect(page.locator("[data-project-id]")).toHaveCount(0);
+  await page.locator("[data-launcher-toggle]").click();
+  await expect(page.locator("[data-saved-workspace-id]")).toHaveCount(1);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("[data-saved-workspace-id] .saved-workspace-delete").click();
+  await expect(page.locator("[data-saved-workspace-id]")).toHaveCount(0);
 });
 
 runtimeTest("www evaluates scalars through the SharedWorker runtime", async ({ page }) => {

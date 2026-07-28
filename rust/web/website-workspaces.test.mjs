@@ -24,6 +24,15 @@ test("repository persists independent workspaces and files", async () => {
   assert.equal((await repository.files(canvas.id)).get("/src/main.hal"), "canvas-value");
   assert.notEqual((await repository.files(music.id)).get("/src/main.hal"), "canvas-value");
   assert.deepEqual((await repository.list()).map(({ id }) => id).sort(), [canvas.id, music.id].sort());
+
+  await repository.delete(canvas.id);
+  assert.equal(await repository.get(canvas.id), null);
+  assert.equal((await repository.files(canvas.id)).size, 0);
+  assert.deepEqual((await repository.list()).map(({ id }) => id), [music.id]);
+
+  await repository.clear();
+  assert.deepEqual(await repository.list(), []);
+  assert.equal((await repository.files(music.id)).size, 0);
 });
 
 test("workspace names produce safe dedicated kernel names", () => {

@@ -1,0 +1,426 @@
+(ns+
+  (:require [studio.draw :as draw]))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;; Space Invaders ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Browser-native Hara port of Rob Ashton's ClojureScript game model:
+;; https://github.com/robashton/clojure-spaceinvaders
+;;
+;; The original state model is preserved: a 640x480 playfield, four rows of
+;; enemies, edge reversal plus a 25px descent, level-scaled movement, player
+;; bullets, rectangle collision, next-level progression, and a gate condition.
+;;
+;; CONTROLS: Arrow Left / Arrow Right move. Space fires.
+;; TRY: change the grid steps in create-enemies to reshape the fleet.
+;; TRY: change enemy-descent-speed to make each edge reversal more dramatic.
+
+(def game-width 640)
+(def game-height 480)
+
+(defn smaller [a b] (if (< a b) a b))
+(defn larger [a b] (if (> a b) a b))
+(defn clamp [value low high]
+  (if (< value low) low (if (> value high) high value)))
+
+(defn create-rect [x y width height]
+  {:x x :y y :w width :h height})
+
+(defn firing-rate [state]
+  (larger 15 (- 30 (* 2 (get state :level)))))
+
+(defn enemy-speed [state] (+ 1 (get state :level)))
+(defn bullet-speed [state] (+ 4 (* 2 (get state :level))))
+(defn player-speed [state] (+ 3 (* 2 (get state :level))))
+(defn enemy-descent-speed [state] 25)
+
+(defn rect-right [rect] (+ (get rect :x) (get rect :w)))
+(defn rect-bottom [rect] (+ (get rect :y) (get rect :h)))
+
+(defn create-enemies []
+  (loop [x 0 y 0 enemies (list)]
+    (if (= y 240)
+      enemies
+      (let [next-enemies (conj enemies (create-rect x y 20 20))
+            next-x (+ x 60)]
+        (if (= next-x 480)
+          (recur 0 (+ y 60) next-enemies)
+          (recur next-x y next-enemies))))))
+
+(defn create-state [level]
+  {:direction 1
+   :level level
+   :enemies (create-enemies)
+   :player (create-rect 200 430 20 20)
+   :bullets (list)
+   :last-firing-ticks 0})
+
+(defn fleet-edge [enemies direction]
+  (loop [index 0 edge (if (= direction 1) 0 game-width)]
+    (if (< index (count enemies))
+      (let [enemy (nth enemies index)
+            x (get enemy :x)
+            next-edge
+            (if (= direction 1) (larger edge x) (smaller edge x))]
+        (recur (inc index) next-edge))
+      edge)))
+
+(defn enemies-reached-edge [enemies direction]
+  (let [edge (fleet-edge enemies direction)]
+    (if (= direction 1) (> edge 600) (< edge 0))))
+
+(defn descend-enemies [state]
+  (let [enemies (get state :enemies)]
+    (loop [index 0 descended (list)]
+      (if (< index (count enemies))
+        (let [enemy (nth enemies index)
+              moved
+              (assoc
+                enemy
+                :y
+                (+ (get enemy :y) (enemy-descent-speed state)))]
+          (recur (inc index) (conj descended moved)))
+        (assoc
+          (assoc state :direction (* (get state :direction) -1))
+          :enemies
+          descended)))))
+
+(defn update-direction [state]
+  (if (enemies-reached-edge
+        (get state :enemies)
+        (get state :direction))
+    (descend-enemies state)
+    state))
+
+(defn update-enemies [state]
+  (let [direction (get state :direction)
+        enemies (get state :enemies)
+        velocity (* direction (enemy-speed state))]
+    (loop [index 0 moved (list)]
+      (if (< index (count enemies))
+        (let [enemy (nth enemies index)]
+          (recur
+            (inc index)
+            (conj moved (assoc enemy :x (+ (get enemy :x) velocity)))))
+        (assoc state :enemies moved)))))
+
+(defn event-input [events]
+  (loop [index 0 input {:left false :right false :fire false :manual false}]
+    (if (< index (count events))
+      (let [event (nth events index)
+            key (get event "key")
+            recognized
+            (if (= key "ArrowLeft")
+              true
+              (if (= key "ArrowRight")
+                true
+                (if (= key " ") true (= key "Space"))))]
+        (recur
+          (inc index)
+          {:left (if (= key "ArrowLeft") true (get input :left))
+           :right (if (= key "ArrowRight") true (get input :right))
+           :fire
+           (if (= key " ")
+             true
+             (if (= key "Space") true (get input :fire)))
+           :manual (if recognized true (get input :manual))}))
+      input)))
+
+(defn absolute [value]
+  (if (neg? value) (- 0 value) value))
+
+(defn closest-enemy [state]
+  (let [enemies (get state :enemies)
+        player-center (+ (get (get state :player) :x) 10)]
+    (loop [index 0 target false distance game-width]
+      (if (< index (count enemies))
+        (let [enemy (nth enemies index)
+              enemy-center (+ (get enemy :x) 10)
+              next-distance (absolute (- enemy-center player-center))]
+          (if (< next-distance distance)
+            (recur (inc index) enemy next-distance)
+            (recur (inc index) target distance)))
+        target))))
+
+(defn autoplay-input [state input]
+  (if (get input :manual)
+    input
+    (let [target (closest-enemy state)
+          player (get state :player)]
+      (if target
+        (let [player-center (+ (get player :x) 10)
+              target-center (+ (get target :x) 10)
+              delta (- target-center player-center)]
+          {:left (< delta -5)
+           :right (> delta 5)
+           :fire (< (absolute delta) 10)
+           :manual false})
+        {:left false :right false :fire false :manual false}))))
+
+(defn update-player [state input]
+  (let [player (get state :player)
+        speed (player-speed state)
+        delta
+        (if (get input :left)
+          (- 0 speed)
+          (if (get input :right) speed 0))]
+    (assoc
+      state
+      :player
+      (assoc
+        player
+        :x
+        (clamp (+ (get player :x) delta) 0 (- game-width 20))))))
+
+(defn move-bullets [state]
+  (let [bullets (get state :bullets)]
+    (loop [index 0 moved (list)]
+      (if (< index (count bullets))
+        (let [bullet (nth bullets index)
+              y (- (get bullet :y) (bullet-speed state))]
+          (recur
+            (inc index)
+            (if (> y -10) (conj moved (assoc bullet :y y)) moved)))
+        (assoc state :bullets moved)))))
+
+(defn collides-with [one two]
+  (if (< (rect-right one) (get two :x))
+    false
+    (if (> (get one :x) (rect-right two))
+      false
+      (if (< (rect-bottom one) (get two :y))
+        false
+        (not (> (get one :y) (rect-bottom two)))))))
+
+(defn collides-with-any [one others]
+  (loop [index 0]
+    (if (< index (count others))
+      (if (collides-with one (nth others index))
+        true
+        (recur (inc index)))
+      false)))
+
+(defn collide-bullets [state]
+  (let [bullets (get state :bullets)
+        enemies (get state :enemies)]
+    (loop [index 0 survivors (list)]
+      (if (< index (count bullets))
+        (let [bullet (nth bullets index)]
+          (recur
+            (inc index)
+            (if (collides-with-any bullet enemies)
+              survivors
+              (conj survivors bullet))))
+        (loop [enemy-index 0 enemy-survivors (list)]
+          (if (< enemy-index (count enemies))
+            (let [enemy (nth enemies enemy-index)]
+              (recur
+                (inc enemy-index)
+                (if (collides-with-any enemy bullets)
+                  enemy-survivors
+                  (conj enemy-survivors enemy))))
+            (assoc
+              (assoc state :bullets survivors)
+              :enemies
+              enemy-survivors)))))))
+
+(defn update-firing-ticks [state]
+  (let [ticks (get state :last-firing-ticks)]
+    (if (= ticks 0)
+      state
+      (if (= (mod ticks (firing-rate state)) 0)
+        (assoc state :last-firing-ticks 0)
+        (assoc state :last-firing-ticks (inc ticks))))))
+
+(defn try-and-fire [state input]
+  (if (if (get input :fire) (= (get state :last-firing-ticks) 0))
+    (let [player (get state :player)
+          bullet
+          (create-rect
+            (+ (get player :x) 8)
+            (- (get player :y) 5)
+            5
+            8)]
+      (assoc
+        (assoc
+          state
+          :bullets
+          (conj (get state :bullets) bullet))
+        :last-firing-ticks
+        1))
+    state))
+
+(defn enemies-at-gate [enemies]
+  (loop [index 0]
+    (if (< index (count enemies))
+      (if (> (get (nth enemies index) :y) 400)
+        true
+        (recur (inc index)))
+      false)))
+
+(defn validate-end-conditions [state]
+  (let [enemies (get state :enemies)]
+    (if (= (count enemies) 0)
+      (create-state (inc (get state :level)))
+      (if (enemies-at-gate enemies)
+        (create-state 1)
+        state))))
+
+(defn update-state [state input]
+  (validate-end-conditions
+    (try-and-fire
+      (update-firing-ticks
+        (collide-bullets
+          (move-bullets
+            (update-player
+              (update-enemies (update-direction state))
+              input))))
+      input)))
+
+(defn viewport [width height]
+  (let [available-height (- height 80)
+        board-width (smaller width (/ (* available-height 4) 3))
+        board-height (smaller available-height (/ (* width 3) 4))]
+    {:width board-width
+     :height board-height
+     :left (/ (- width board-width) 2)
+     :top (/ (- height board-height) 2)}))
+
+(defn scale-x [view x]
+  (+ (get view :left) (/ (* x (get view :width)) game-width)))
+
+(defn scale-y [view y]
+  (+ (get view :top) (/ (* y (get view :height)) game-height)))
+
+(defn scale-width [view width]
+  (larger 1 (/ (* width (get view :width)) game-width)))
+
+(defn scale-height [view height]
+  (larger 1 (/ (* height (get view :height)) game-height)))
+
+(defn rect-command [view rect color]
+  [:rect
+   (scale-x view (get rect :x))
+   (scale-y view (get rect :y))
+   (larger 2 (scale-width view (get rect :w)))
+   (larger 2 (scale-height view (get rect :h)))
+   color
+   0.94])
+
+(defn append-commands [commands additions]
+  (loop [index 0 result commands]
+    (if (< index (count additions))
+      (recur (inc index) (conj result (nth additions index)))
+      result)))
+
+(defn star-command [view index]
+  (let [x (mod (+ 31 (* index 73)) game-width)
+        y (mod (+ 19 (* index 47)) game-height)
+        radius (if (= (mod index 5) 0) 2 1)
+        color (if (= (mod index 3) 0) "#41f5e4" "#7390a8")]
+    [:circle
+     (scale-x view x)
+     (scale-y view y)
+     radius
+     color
+     (if (= radius 2) 0.52 0.28)]))
+
+(defn add-stars [commands view]
+  (loop [index 0 result commands]
+    (if (< index 32)
+      (recur (inc index) (conj result (star-command view index)))
+      result)))
+
+(defn enemy-color [enemy]
+  (let [y (get enemy :y)]
+    (if (< y 60)
+      "#ff2e88"
+      (if (< y 120)
+        "#9c7bff"
+        (if (< y 180) "#ffe93d" "#41f5e4")))))
+
+(defn enemy-sprite [view enemy]
+  (let [x (get enemy :x)
+        y (get enemy :y)
+        color (enemy-color enemy)]
+    (list
+      (rect-command view (create-rect (+ x 13) (+ y 7) 3 3) "#02050b")
+      (rect-command view (create-rect (+ x 4) (+ y 7) 3 3) "#02050b")
+      (rect-command view (create-rect (+ x 13) (+ y 14) 4 6) color)
+      (rect-command view (create-rect (+ x 3) (+ y 14) 4 6) color)
+      (rect-command view (create-rect (+ x 6) y 8 5) color)
+      (rect-command view (create-rect (+ x 2) (+ y 4) 16 12) color))))
+
+(defn add-enemies [commands view enemies]
+  (loop [index 0 result commands]
+    (if (< index (count enemies))
+      (recur
+        (inc index)
+        (append-commands result (enemy-sprite view (nth enemies index))))
+      result)))
+
+(defn bullet-sprite [view bullet]
+  (let [x (+ (get bullet :x) 2)
+        y (get bullet :y)
+        trail (larger 5 (scale-height view 14))]
+    (list
+      [:circle (scale-x view x) (scale-y view y) 2 "#ffffff" 1.0]
+      [:line
+       (scale-x view x)
+       (+ (scale-y view y) trail)
+       (scale-x view x)
+       (scale-y view y)
+       "#41f5e4"
+       2
+       0.72])))
+
+(defn add-bullets [commands view bullets]
+  (loop [index 0 result commands]
+    (if (< index (count bullets))
+      (recur
+        (inc index)
+        (append-commands result (bullet-sprite view (nth bullets index))))
+      result)))
+
+(defn player-sprite [view player]
+  (let [x (get player :x)
+        y (get player :y)]
+    (list
+      (rect-command view (create-rect (+ x 8) (+ y 2) 4 6) "#eaffff")
+      (rect-command view (create-rect (+ x 2) (+ y 14) 16 6) "#41f5e4")
+      (rect-command view (create-rect x (+ y 10) 20 6) "#41f5e4")
+      (rect-command view (create-rect (+ x 6) y 8 15) "#68fff1"))))
+
+(defn render-commands [state width height]
+  (let [view (viewport width height)
+        stars (add-stars (list) view)
+        enemies (add-enemies stars view (get state :enemies))
+        bullets (add-bullets enemies view (get state :bullets))]
+    (let [player
+          (append-commands bullets (player-sprite view (get state :player)))
+          baseline
+          [:line
+           (get view :left)
+           (scale-y view 455)
+           (+ (get view :left) (get view :width))
+           (scale-y view 455)
+           "#1b5362"
+           1
+           0.72]]
+      (conj player baseline))))
+
+(node/start
+  (fn []
+    (loop [state (create-state 1) tick 0]
+      (let [frame (co/await (draw/next-frame "canvas/background"))
+            width (get frame "canvas/width")
+            height (get frame "canvas/height")]
+        (let [raw-input (event-input (get frame "input/events"))
+              input (autoplay-input state raw-input)]
+          (let [next-state (update-state state input)]
+            (do
+              (co/await
+                (draw/render
+                  "canvas/background"
+                  {:type :canvas-2d
+                   :background "#02050b"
+                   :commands (render-commands next-state width height)}))
+              (recur next-state (inc tick)))))))))

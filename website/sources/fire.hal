@@ -1,6 +1,13 @@
 (ns+
   (:require [studio.draw :as draw]))
 
+;; EFFECT: A full-screen cyan-to-violet flame with smooth rising turbulence.
+;; TRY: change 4.5 to make the broad flame shapes wider or narrower.
+;; TRY: change 1.35 to make the flame climb faster or slower.
+;; TRY: edit cyan and violet below to build a custom gradient.
+
+;; This vertex shader draws one full-screen triangle. All visible detail is
+;; calculated by the fragment shader, so no mesh or asset download is needed.
 (def vertex-shader
   "#version 300 es
 precision highp float;
@@ -15,18 +22,49 @@ precision highp float;
 out vec4 color;
 uniform float u_time;
 uniform vec2 u_resolution;
-float noise(vec2 p) {
-  return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453);
+
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
+
+float noise(vec2 p) {
+  vec2 cell = floor(p);
+  vec2 local = fract(p);
+  local = local * local * (3.0 - 2.0 * local);
+  float a = hash(cell);
+  float b = hash(cell + vec2(1.0, 0.0));
+  float c = hash(cell + vec2(0.0, 1.0));
+  float d = hash(cell + vec2(1.0, 1.0));
+  return mix(mix(a, b, local.x), mix(c, d, local.x), local.y);
+}
+
+float fbm(vec2 p) {
+  float value = 0.0;
+  value += noise(p) * 0.52;
+  p = p * 2.03 + vec2(7.1, 3.7);
+  value += noise(p) * 0.26;
+  p = p * 2.01 + vec2(5.3, 9.2);
+  value += noise(p) * 0.14;
+  p = p * 2.04 + vec2(8.4, 2.8);
+  value += noise(p) * 0.08;
+  return value;
+}
+
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution.xy;
   float t = u_time * 0.001;
-  float n = noise(vec2(uv.x * 18.0, floor(uv.y * 34.0 - t * 9.0)));
-  float flame = smoothstep(0.92, 0.08, uv.y) * (0.55 + 0.45 * n);
+  float broad = fbm(vec2(uv.x * 4.5, uv.y * 2.7 - t * 1.35));
+  float detail = fbm(vec2(uv.x * 10.0 + broad, uv.y * 5.2 - t * 2.1));
+  float warpedY = uv.y + (0.48 - broad) * 0.38 + (0.5 - detail) * 0.10;
+  float body = 1.0 - smoothstep(0.08, 1.08, warpedY);
+  float base = 1.0 - smoothstep(0.0, 0.23, uv.y);
+  float flame = clamp(body * (0.60 + detail * 0.62) + base * 0.20, 0.0, 1.0);
+  float hot = clamp((1.0 - uv.y) * flame, 0.0, 1.0);
   vec3 cyan = vec3(0.05, 0.95, 0.88);
   vec3 violet = vec3(0.57, 0.13, 1.0);
   vec3 ink = vec3(0.003, 0.008, 0.02);
-  color = vec4(mix(ink, mix(cyan, violet, uv.y), flame), 1.0);
+  vec3 tint = mix(violet, cyan, clamp(hot + detail * 0.22, 0.0, 1.0));
+  color = vec4(mix(ink, tint, flame), 1.0);
 }")
 
 (node/start
@@ -49,6 +87,6 @@ void main() {
                {:type :canvas-2d
                 :background "#090313"
                 :commands
-                [[:grid 32 "rgba(156,123,255,.12)" 1]
-                 [:text "FIRE.HAL // WEBGL2 FALLBACK" 24 (- height 24) "#9c7bff" 11]]}}))
+                [[:text "FIRE.HAL // WEBGL2 FALLBACK"
+                  24 (- height 24) "#9c7bff" 11]]}}))
           (recur (+ tick 1)))))))

@@ -13,14 +13,12 @@
   <meta property="og:image:height" content="909">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://www.hara-lang.org/og-hara-ribbon.png">
-  <link rel="icon" href="./assets/favicon-48.svg" sizes="48x48" type="image/svg+xml">
-  <link rel="icon" href="./assets/favicon-128.svg" sizes="128x128" type="image/svg+xml">
-  <link rel="icon" href="./assets/favicon-256.svg" sizes="256x256" type="image/svg+xml">
+  <meta name="hara-auth-api" content="">
+  <link rel="icon" href="./assets/hara-favicon.svg" type="image/svg+xml">
   <title>Hara - A Modern Lisp for the Agentic Age</title>
   <link rel="stylesheet" href="./vendor/hara-ui/tokens.css">
   <link rel="stylesheet" href="./vendor/hara-ui/components.css">
-  <link rel="stylesheet" href="./vendor/hara-ui/studio.css">
-  <link rel="stylesheet" href="./app.css?v=workspace-projects-1">
+  <link rel="stylesheet" href="./app.css?v=studio-effects-2">
 </head>
 <body>
   <canvas class="tron-field" data-tron aria-hidden="true"></canvas>
@@ -43,6 +41,9 @@
       </button>
     </div>
 
+    <div class="system-identity">
+      <img class="system-mark" src="./assets/hara-favicon.svg" alt="">
+    </div>
 
     <div class="system-right">
       <nav class="project-tabs" data-project-tabs aria-label="Open workspaces">
@@ -56,19 +57,36 @@
     <header>
       <strong>LIVE BACKGROUND SOURCE</strong>
       <span data-background-status>WAITING FOR RUNTIME</span>
-      <button type="button" data-background-save>SAVE</button>
     </header>
-    <div class="background-editor-shell">
-      <pre data-background-highlight aria-hidden="true"></pre>
+    <div class="window-toolbar editor-toolbar background-editor-toolbar">
+      <div>
+        <button type="button" class="paredit-button" data-background-paredit
+                aria-pressed="true">PAREDIT ON</button>
+        <button type="button" class="run-button" data-background-apply>
+          <span aria-hidden="true">▶</span> APPLY
+        </button>
+        <button type="button" data-background-save>SAVE</button>
+      </div>
+    </div>
+    <label class="editor-surface background-editor-shell">
+      <span class="sr-only">Live HAL background source</span>
+      <span class="line-numbers" data-background-line-numbers aria-hidden="true">1</span>
+      <pre class="code-highlight" data-background-highlight aria-hidden="true"></pre>
       <textarea data-background-editor spellcheck="false" wrap="off"
                 aria-label="Live HAL background source"></textarea>
-    </div>
-    <footer>LIVE PREVIEW · TAB ALIGN · PAREDIT · CTRL-S SAVE · ERRORS ROLL BACK</footer>
+    </label>
+    <footer>
+      LIVE PREVIEW · CTRL-ENTER APPLY · CTRL-S SAVE · COMMENTS MARK SAFE CHANGES
+    </footer>
   </aside>
 
   <aside class="app-launcher" id="app-launcher" data-launcher aria-hidden="true">
     <div class="launcher-head">
       <span>HARA LAUNCHER</span>
+      <div class="launcher-actions">
+        <button type="button" data-close-active-workspace hidden>CLOSE ACTIVE</button>
+        <button type="button" data-clear-workspaces hidden>CLEAR SAVED</button>
+      </div>
     </div>
     <div class="launcher-grid">
       <button type="button" class="app-tile" data-home>
@@ -79,22 +97,22 @@
         <span class="app-icon app-icon-editor" aria-hidden="true">＋</span>
         <span>New Workspace</span>
       </button>
-      <a class="app-tile" href="https://docs.hara-lang.org/learn-programming/" target="_blank" rel="noreferrer">
-        <span class="app-icon" aria-hidden="true">01</span>
-        <span>Learning Book</span>
-      </a>
-      <a class="app-tile" href="https://docs.hara-lang.org/user-guide/" target="_blank" rel="noreferrer">
-        <span class="app-icon" aria-hidden="true">02</span>
-        <span>Language Book</span>
-      </a>
-      <a class="app-tile" href="https://docs.hara-lang.org/" target="_blank" rel="noreferrer">
-        <span class="app-icon" aria-hidden="true">D</span>
-        <span>Docs</span>
-      </a>
-      <a class="app-tile" href="https://github.com/hara-lang/hara" target="_blank" rel="noreferrer">
-        <span class="app-icon" aria-hidden="true">G</span>
-        <span>GitHub</span>
-      </a>
+      <button type="button" class="app-tile" data-quick-template="canvas">
+        <span class="app-icon app-icon-canvas" aria-hidden="true">◎</span>
+        <span>Canvas</span>
+      </button>
+      <button type="button" class="app-tile" data-quick-template="music">
+        <span class="app-icon app-icon-canvas" aria-hidden="true">♫</span>
+        <span>Audio</span>
+      </button>
+      <button type="button" class="app-tile" data-quick-template="3d">
+        <span class="app-icon app-icon-editor" aria-hidden="true">3D</span>
+        <span>3D</span>
+      </button>
+      <button type="button" class="app-tile" data-quick-template="graphs">
+        <span class="app-icon app-icon-canvas" aria-hidden="true">∿</span>
+        <span>Graphs</span>
+      </button>
     </div>
     <div class="launcher-projects">
       <strong>SAVED WORKSPACES</strong>
@@ -102,6 +120,11 @@
     </div>
   </aside>
   <div class="launcher-scrim" data-launcher-scrim></div>
+  <div class="kernel-loading" data-kernel-loading hidden role="status" aria-live="polite">
+    <span>KERNEL LOADING</span>
+    <strong data-kernel-progress>0%</strong>
+    <i><b data-kernel-meter></b></i>
+  </div>
 
   <main class="workspace-viewport">
     <div class="workspace-track" data-workspace-track>
@@ -112,7 +135,7 @@
           <p class="welcome-tagline">A Modern Lisp for the Agentic Age.</p>
         </div>
         <button class="start-button" type="button" data-start>
-          <img class="start-mark" src="./assets/logo-white.svg" alt="">
+          <img class="start-mark" src="./assets/hara-mark.svg" alt="">
           <span>START</span>
           <i aria-hidden="true">→</i>
         </button>
@@ -131,9 +154,9 @@
           <button class="hara-tab" type="button" data-focus-window="editor" aria-selected="true">source</button>
           <button class="hara-tab" type="button" data-focus-window="canvas" aria-selected="false">output</button>
         </nav>
-        <section class="app-window hara-window files-window" data-window="files"
+        <section class="app-window files-window" data-window="files"
                  aria-label="Files window" tabindex="-1">
-          <div class="window-titlebar hara-window-bar" data-drag-handle>
+          <div class="window-titlebar" data-drag-handle>
             <div class="window-title">
               <span class="window-number">01</span>
               <span data-area-title="files">EXPLORER</span>
@@ -143,7 +166,7 @@
               <button type="button" data-window-close aria-label="Close Files">×</button>
             </div>
           </div>
-          <div class="window-toolbar hara-toolbar">
+          <div class="window-toolbar">
             <span>HOME</span>
             <div>
               <button type="button" data-file-new>NEW</button>
@@ -154,15 +177,15 @@
           <div class="file-tree" data-file-tree>
             <div class="window-loading">OPENING WORKSPACE…</div>
           </div>
-          <div class="window-status hara-status-bar">
+          <div class="window-status">
             <span data-file-count>0 FILES</span>
             <span>INDEXEDDB</span>
           </div>
         </section>
 
-        <section class="app-window hara-window editor-window" data-window="editor"
+        <section class="app-window editor-window" data-window="editor"
                  aria-label="Editor window" tabindex="-1">
-          <div class="window-titlebar hara-window-bar" data-drag-handle>
+          <div class="window-titlebar" data-drag-handle>
             <div class="window-title">
               <span class="window-number">02</span>
               <span data-editor-title>SOURCE</span>
@@ -173,7 +196,7 @@
               <button type="button" data-window-close aria-label="Close Editor">×</button>
             </div>
           </div>
-          <div class="window-toolbar hara-toolbar editor-toolbar">
+          <div class="window-toolbar editor-toolbar">
             <div>
               <button type="button" class="paredit-button" data-paredit aria-pressed="true">PAREDIT ON</button>
               <button type="button" data-save disabled>SAVE</button>
@@ -192,15 +215,15 @@
             <div class="hal-completions" data-hal-completions role="listbox" aria-label="HAL form completions" hidden></div>
             <output class="structural-diff" data-structural-diff aria-live="polite" hidden></output>
           </label>
-          <div class="window-status hara-status-bar">
+          <div class="window-status">
             <span data-editor-status>WAITING FOR RUNTIME</span>
             <span>HOLD CTRL: E FORM · E E FILE · X E INSERT · CTRL-S SAVE</span>
           </div>
         </section>
 
-        <section class="app-window hara-window canvas-window" data-window="canvas"
+        <section class="app-window canvas-window" data-window="canvas"
                  aria-label="Canvas output window" tabindex="-1">
-          <div class="window-titlebar hara-window-bar" data-drag-handle>
+          <div class="window-titlebar" data-drag-handle>
             <div class="window-title">
               <span class="window-number">03</span>
               <span data-area-title="canvas">OUTPUT</span>
@@ -218,7 +241,7 @@
               <small>RUN A HARA FILE TO RENDER</small>
             </div>
           </div>
-          <div class="window-status hara-status-bar">
+          <div class="window-status">
             <span data-canvas-status>FRAME // —</span>
             <span data-canvas-size>960 × 600</span>
           </div>
@@ -238,10 +261,6 @@
     </div>
     <div class="bottom-spacer"></div>
     <div class="home-tools">
-      <div class="background-audio" data-background-audio hidden>
-        <button type="button" data-audio-toggle aria-pressed="false">♪ PLAY</button>
-        <label><span>VOL</span><input data-audio-volume type="range" min="0" max="0.32" step="0.01" value="0.16" aria-label="Signal Ring volume"></label>
-      </div>
       <label class="background-picker">
         <span>SOURCE</span>
         <select data-background-source aria-label="Background source"></select>
@@ -250,6 +269,7 @@
               aria-expanded="false" aria-controls="background-source-panel">CODE</button>
     </div>
     <button type="button" class="publish-button" data-publish disabled>PUBLISH</button>
+    <button type="button" class="settings-button" data-settings aria-label="Open settings">⚙ <span>SETTINGS</span></button>
     <button type="button" class="help-button" data-help aria-label="Open Hara help">? <span>HELP</span></button>
   </footer>
 
@@ -277,28 +297,65 @@
 
   <dialog class="hara-dialog publish-dialog" data-publish-dialog>
     <div class="dialog-head"><span>PUBLISH WORKSPACE</span><button type="button" data-publish-close aria-label="Close">×</button></div>
-    <div class="publish-summary">
-      <span class="publish-eyebrow">WORKSPACE BUNDLE</span>
-      <strong data-publish-name>UNTITLED WORKSPACE</strong>
-      <span data-publish-files>0 FILES READY</span>
-    </div>
-    <p class="publish-intro">Export a portable workspace or publish its complete source bundle to a GitHub Gist.</p>
-    <label class="publish-visibility"><input type="checkbox" data-publish-public checked> MAKE GIST PUBLIC <span>Secret Gists stay unlisted.</span></label>
+    <p>Publish the complete project, including project.edn, workspace.edn and source files.</p>
+    <label class="publish-visibility"><input type="checkbox" data-publish-public checked> PUBLIC</label>
     <div class="publish-options">
-      <button type="button" class="publish-option publish-option-download" data-publish-provider="download">
-        <span class="publish-option-icon" aria-hidden="true">↓</span>
-        <strong>SAVE BUNDLE TO DISK</strong>
-        <small>DOWNLOAD .ZIP</small>
+      <button type="button" data-publish-provider="download">SELF-HOST EXPORT</button>
+      <button type="button" data-publish-provider="gist">GITHUB GIST</button>
+      <button type="button" data-publish-provider="greenways">GREENWAYS</button>
+    </div>
+    <p class="publish-note" data-publish-note>GitHub and Greenways connect through a server-side GitHub profile authorization.</p>
+  </dialog>
+
+  <dialog class="hara-dialog account-dialog" data-account-dialog>
+    <div class="dialog-head"><span>GITHUB ACCOUNT</span><button type="button" data-account-close aria-label="Close">×</button></div>
+    <div class="account-state">
+      <img data-account-avatar alt="" hidden>
+      <div>
+        <strong data-account-name>NOT CONNECTED</strong>
+        <span data-account-status>GitHub identity is used for publishing and your Greenways profile.</span>
+      </div>
+    </div>
+    <div class="dialog-actions account-actions">
+      <button type="button" data-account-signout hidden>SIGN OUT</button>
+      <button type="button" class="dialog-confirm" data-account-signin>CONNECT GITHUB</button>
+    </div>
+  </dialog>
+
+  <dialog class="hara-dialog settings-dialog" data-settings-dialog>
+    <div class="dialog-head"><span>HARA // SETTINGS</span><button type="button" data-settings-close aria-label="Close">×</button></div>
+    <div class="settings-options">
+      <button type="button" data-github-account>
+        <strong data-github-label>CONNECT GITHUB</strong>
+        <span>Publishing identity and Greenways profile</span>
       </button>
-      <button type="button" class="publish-option publish-option-github" data-publish-gist>
-        <span class="publish-option-icon" aria-hidden="true">◈</span>
-        <strong>SIGN IN WITH GITHUB</strong>
-        <small>PUBLISH TO GIST</small>
+      <button type="button" data-ai-adapters>
+        <strong>AI ADAPTERS</strong>
+        <span>Models and endpoints for the current workspace</span>
       </button>
     </div>
-    <a class="publish-auth" data-publish-auth target="_blank" rel="noreferrer"></a>
-    <code class="publish-code" data-publish-code></code>
-    <p class="publish-note" data-publish-note aria-live="polite">CONNECT GITHUB TO PUBLISH A GIST.</p>
+  </dialog>
+
+  <dialog class="hara-dialog ai-dialog" data-ai-dialog>
+    <div class="dialog-head"><span>AI ADAPTERS</span><button type="button" data-ai-close aria-label="Close">×</button></div>
+    <p>Adapters belong to the current workspace. Keys stay in this browser tab and are never saved with the project.</p>
+    <div class="adapter-list" data-adapter-list></div>
+    <form class="adapter-form" data-adapter-form>
+      <label><span>NAME</span><input name="name" required placeholder="My model"></label>
+      <label><span>TYPE</span><select name="kind">
+        <option value="openai-compatible">OPENAI COMPATIBLE</option>
+        <option value="anthropic">ANTHROPIC</option>
+        <option value="custom-json">CUSTOM JSON PROXY</option>
+      </select></label>
+      <label><span>ENDPOINT</span><input name="endpoint" required type="url" placeholder="https://api.example/v1/chat/completions"></label>
+      <label><span>MODEL</span><input name="model" required placeholder="model-name"></label>
+      <label><span>API KEY — SESSION ONLY</span><input name="apiKey" type="password" autocomplete="off"></label>
+      <div class="dialog-actions">
+        <button type="button" data-ai-test>TEST</button>
+        <button type="submit" class="dialog-confirm">ADD ADAPTER</button>
+      </div>
+    </form>
+    <p class="publish-note" data-ai-note>Select a workspace before adding an adapter.</p>
   </dialog>
 
   <dialog class="hara-dialog" data-dialog>
@@ -320,7 +377,6 @@
   </dialog>
 
   <div class="toast-stack" data-toasts aria-live="polite"></div>
-  <script src="./github-auth-config.js"></script>
-  <script type="module" src="./app.js?v=workspace-projects-1"></script>
+  <script type="module" src="./app.js?v=studio-effects-2"></script>
 </body>
 </html>

@@ -220,6 +220,26 @@ export class WorkspaceRepository {
     store.put({ ...record, template, updatedAt: now() });
     await transaction(tx);
   }
+
+  async delete(id) {
+    const db = await this.open();
+    const tx = db.transaction([WORKSPACES, FILES], "readwrite");
+    const fileStore = tx.objectStore(FILES);
+    const keys = await request(fileStore, "getAllKeys");
+    tx.objectStore(WORKSPACES).delete(id);
+    for (const key of keys) {
+      if (key[0] === id) fileStore.delete(key);
+    }
+    await transaction(tx);
+  }
+
+  async clear() {
+    const db = await this.open();
+    const tx = db.transaction([WORKSPACES, FILES], "readwrite");
+    tx.objectStore(WORKSPACES).clear();
+    tx.objectStore(FILES).clear();
+    await transaction(tx);
+  }
 }
 
 export function kernelName(id) {
