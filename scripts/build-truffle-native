@@ -30,13 +30,14 @@ done
 
 # Generated Truffle interop exports have nested cached and uncached classes.
 # Initializing the package keeps all of those image-heap objects consistent.
-# Keyword instances are the immutable language values embedded by that runtime.
+# Keyword instances and their interning cache are embedded by that runtime.
 native-image \
   "${NATIVE_IMAGE_OPTIONS[@]}" \
   -cp "$NATIVE_IMAGE_CP" \
   -H:Class=hara.truffle.Main \
   --initialize-at-build-time=hara.truffle \
   --initialize-at-build-time=hara.lang.data.Keyword \
+  --initialize-at-build-time=hara.lang.base.primitive.RefCache \
   -o "$ROOT/target/hara-truffle"
 
 echo "Built $ROOT/target/hara-truffle"
