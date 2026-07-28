@@ -442,7 +442,10 @@ fn macroexpand_call(
         arguments.push(form_to_value(form)?);
     }
     let expansion = call_function(&function, arguments)?;
-    Ok(Some(value_to_form(&expansion)?))
+    let expansion = value_to_form(&expansion)?;
+    #[cfg(feature = "dev-trace")]
+    development_trace_macro(name, &Form::List(invocation.to_vec()), &expansion);
+    Ok(Some(expansion))
 }
 
 fn macro_clause_with_implicit_params(clause: &Form) -> Result<Form, String> {
@@ -479,9 +482,101 @@ fn macroexpand_once(form: &Form, env: &mut HashMap<String, Value>) -> Result<For
 thread_local! {
     static TRACE_ENABLED: Cell<bool> = const { Cell::new(false) };
     static TRACE_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    #[cfg(feature = "dev-trace")]
+    static DEVELOPMENT_TRACE: RefCell<Option<crate::trace::TraceCollector>> = const { RefCell::new(None) };
+    #[cfg(feature = "dev-trace")]
+    static DEVELOPMENT_TRACE_STACK: RefCell<Vec<crate::trace::OperationId>> = const { RefCell::new(Vec::new()) };
     static ACTIVE_MACROS: RefCell<Option<Rc<RefCell<HashMap<(String, String), Rc<Function>>>>>> =
         const { RefCell::new(None) };
     static GENSYM_COUNTER: Cell<u64> = const { Cell::new(0) };
+}
+
+#[cfg(feature = "dev-trace")]
+fn development_preview(value: &Value) -> crate::trace::ValuePreview {
+    DEVELOPMENT_TRACE.with(|active| {
+        active
+            .borrow()
+            .as_ref()
+            .expect("development trace must be active")
+            .preview_value(portable_type_name(value), value.display())
+    })
+}
+
+#[cfg(feature = "dev-trace")]
+fn development_trace_enter(
+    function: &Function,
+    arguments: &[Value],
+) -> Option<crate::trace::OperationId> {
+    if DEVELOPMENT_TRACE.with(|active| active.borrow().is_none()) {
+        return None;
+    }
+    let values = arguments.iter().map(development_preview).collect();
+    let parent_operation = DEVELOPMENT_TRACE_STACK.with(|stack| stack.borrow().last().copied());
+    let depth = DEVELOPMENT_TRACE_STACK.with(|stack| stack.borrow().len());
+    DEVELOPMENT_TRACE.with(|active| {
+        let mut active = active.borrow_mut();
+        let collector = active.as_mut()?;
+        let operation = collector.next_operation_id();
+        let mut event = crate::trace::TraceEvent::new(crate::trace::TraceEventKind::OperationEnter);
+        event.operation = Some(operation);
+        event.parent_operation = parent_operation;
+        event.depth = depth;
+        event.function = Some(
+            function
+                .name
+                .clone()
+                .unwrap_or_else(|| "<anonymous>".into()),
+        );
+        event.values = values;
+        collector.record(event);
+        DEVELOPMENT_TRACE_STACK.with(|stack| stack.borrow_mut().push(operation));
+        Some(operation)
+    })
+}
+
+#[cfg(feature = "dev-trace")]
+fn development_trace_exit(
+    operation: Option<crate::trace::OperationId>,
+    function: &Function,
+    result: Option<&Value>,
+) {
+    let Some(operation) = operation else { return };
+    let value = result.map(development_preview);
+    DEVELOPMENT_TRACE.with(|active| {
+        if let Some(collector) = active.borrow_mut().as_mut() {
+            let mut event =
+                crate::trace::TraceEvent::new(crate::trace::TraceEventKind::OperationReturn);
+            event.operation = Some(operation);
+            event.function = Some(
+                function
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "<anonymous>".into()),
+            );
+            event.values = value.into_iter().collect();
+            collector.record(event);
+        }
+    });
+    DEVELOPMENT_TRACE_STACK.with(|stack| {
+        let popped = stack.borrow_mut().pop();
+        debug_assert_eq!(popped, Some(operation));
+    });
+}
+
+#[cfg(feature = "dev-trace")]
+fn development_trace_macro(name: &str, source: &Form, expansion: &Form) {
+    DEVELOPMENT_TRACE.with(|active| {
+        if let Some(collector) = active.borrow_mut().as_mut() {
+            let mut event =
+                crate::trace::TraceEvent::new(crate::trace::TraceEventKind::MacroExpand);
+            event.function = Some(name.into());
+            event.values = vec![
+                collector.preview_value("form", source.to_string()),
+                collector.preview_value("form", expansion.to_string()),
+            ];
+            collector.record(event);
+        }
+    });
 }
 
 struct TraceGuard {
@@ -5035,14 +5130,21 @@ pub(crate) fn call_value(callable: Value, arguments: Vec<Value>) -> Result<Value
 }
 
 pub(crate) fn call_function(function: &Function, arguments: Vec<Value>) -> Result<Value, String> {
+    #[cfg(feature = "dev-trace")]
+    let operation = development_trace_enter(function, &arguments);
     if let Some(native) = &function.native {
         if function.variadic.is_none() && function.params.len() != arguments.len() {
+            #[cfg(feature = "dev-trace")]
+            development_trace_exit(operation, function, None);
             return Err(format!(
                 "function expects {} arguments",
                 function.params.len()
             ));
         }
-        return native(arguments);
+        let result = native(arguments);
+        #[cfg(feature = "dev-trace")]
+        development_trace_exit(operation, function, result.as_ref().ok());
+        return result;
     }
     let tracing = tracing_enabled();
     if tracing {
@@ -5092,12 +5194,56 @@ pub(crate) fn call_function(function: &Function, arguments: Vec<Value>) -> Resul
         Ok(result)
     })();
     let result = result.map_err(append_trace);
+    #[cfg(feature = "dev-trace")]
+    development_trace_exit(operation, function, result.as_ref().ok());
     if tracing {
         TRACE_STACK.with(|stack| {
             stack.borrow_mut().pop();
         });
     }
     result
+}
+
+/// Runs one evaluator operation with a bounded development trace. This is
+/// intentionally separate from the legacy stack-trace flag above.
+#[cfg(feature = "dev-trace")]
+pub(crate) fn with_development_trace<T>(
+    trace_id: crate::trace::TraceId,
+    limits: crate::trace::TraceLimits,
+    evaluate: impl FnOnce() -> Result<T, String>,
+    preview: impl FnOnce(&T, &crate::trace::TraceCollector) -> crate::trace::ValuePreview,
+) -> (Result<T, String>, crate::trace::Trace) {
+    DEVELOPMENT_TRACE_STACK.with(|stack| stack.borrow_mut().clear());
+    let previous = DEVELOPMENT_TRACE
+        .with(|active| active.replace(Some(crate::trace::TraceCollector::new(trace_id, limits))));
+    assert!(
+        previous.is_none(),
+        "nested development traces are not supported yet"
+    );
+    DEVELOPMENT_TRACE.with(|active| {
+        active
+            .borrow_mut()
+            .as_mut()
+            .expect("development trace must be active")
+            .record(crate::trace::TraceEvent::new(
+                crate::trace::TraceEventKind::EvaluationStart,
+            ));
+    });
+    let result = evaluate();
+    let collector = DEVELOPMENT_TRACE.with(|active| {
+        active
+            .replace(previous)
+            .expect("development trace must be active")
+    });
+    DEVELOPMENT_TRACE_STACK.with(|stack| stack.borrow_mut().clear());
+    let trace = match &result {
+        Ok(value) => {
+            let result = preview(value, &collector);
+            collector.finish(result)
+        }
+        Err(error) => collector.fail(error.clone()),
+    };
+    (result, trace)
 }
 
 fn binding_symbol(form: &Form, context: &str) -> Result<(String, Option<Rc<Metadata>>), String> {

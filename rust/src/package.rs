@@ -121,8 +121,7 @@ fn read_project(path: &Path) -> Result<Project, String> {
         .into_iter()
         .map(PathBuf::from)
         .collect();
-    let archive_root = scalar_after(&source, ":project/archive-root")
-        .map(PathBuf::from);
+    let archive_root = scalar_after(&source, ":project/archive-root").map(PathBuf::from);
     for path in artifact_paths.iter().chain(archive_root.iter()) {
         validate_relative_path(path)?;
     }
@@ -176,7 +175,10 @@ fn build_archive(project: &Project, output: &Path) -> Result<(), String> {
     let mut archive_entries = Vec::new();
     for source in entries {
         let archive = match &project.archive_root {
-            Some(root) => source.strip_prefix(root).map(PathBuf::from).unwrap_or_else(|_| source.clone()),
+            Some(root) => source
+                .strip_prefix(root)
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| source.clone()),
             None => source.clone(),
         };
         validate_relative_path(&archive)?;
@@ -188,11 +190,17 @@ fn build_archive(project: &Project, output: &Path) -> Result<(), String> {
     archive_entries.sort_by(|left, right| left.0.cmp(&right.0));
     for pair in archive_entries.windows(2) {
         if pair[0].0 == pair[1].0 {
-            return Err(format!("duplicate package archive path: {}", pair[0].0.display()));
+            return Err(format!(
+                "duplicate package archive path: {}",
+                pair[0].0.display()
+            ));
         }
     }
     if archive_entries.is_empty() {
-        return Err("package build found no files in :project/source-paths or :project/artifact-paths".into());
+        return Err(
+            "package build found no files in :project/source-paths or :project/artifact-paths"
+                .into(),
+        );
     }
     let mut contents = Vec::new();
     for (archive, source) in &archive_entries {
@@ -272,7 +280,10 @@ fn collect_files(
 ) -> Result<(), String> {
     if !directory.exists() {
         return if required {
-            Err(format!("declared package path does not exist: {}", directory.display()))
+            Err(format!(
+                "declared package path does not exist: {}",
+                directory.display()
+            ))
         } else {
             Ok(())
         };
@@ -284,12 +295,16 @@ fn collect_files(
         let path = entry.path();
         let metadata = fs::symlink_metadata(&path).map_err(io_error)?;
         if metadata.file_type().is_symlink() {
-            return Err(format!("package entries must not be symbolic links: {}", path.display()));
+            return Err(format!(
+                "package entries must not be symbolic links: {}",
+                path.display()
+            ));
         }
         if metadata.is_dir() {
             collect_files(&path, root, include_all, true, entries)?;
         } else if metadata.is_file()
-            && (include_all || path.extension().and_then(|extension| extension.to_str()) == Some("hal"))
+            && (include_all
+                || path.extension().and_then(|extension| extension.to_str()) == Some("hal"))
         {
             let relative = path
                 .strip_prefix(root)
@@ -429,8 +444,16 @@ mod tests {
     fn packages_declared_artifacts_under_the_archive_root() {
         let root = fixture();
         fs::create_dir_all(root.join("target/package/ledger/noir/assets")).unwrap();
-        fs::write(root.join("target/package/ledger/noir/hara.extension.edn"), "{:namespace \"ledger.noir\"}\n").unwrap();
-        fs::write(root.join("target/package/ledger/noir/assets/worker.mjs"), "export {};\n").unwrap();
+        fs::write(
+            root.join("target/package/ledger/noir/hara.extension.edn"),
+            "{:namespace \"ledger.noir\"}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("target/package/ledger/noir/assets/worker.mjs"),
+            "export {};\n",
+        )
+        .unwrap();
         fs::write(
             root.join("project.edn"),
             "{:hara/type :project :hara/version \"1.0.0\" :project/id hara/ledger-noir :project/version \"0.1.0\" :project/source-paths [] :project/test-paths [\"test\"] :project/extension-paths [\"target/package\"] :project/capabilities #{} :project/artifact-paths [\"target/package\"] :project/archive-root \"target/package\"}",
@@ -443,7 +466,9 @@ mod tests {
         let mut zip = ZipArchive::new(file).unwrap();
         assert!(zip.by_name("ledger/noir/hara.extension.edn").is_ok());
         assert!(zip.by_name("ledger/noir/assets/worker.mjs").is_ok());
-        assert!(zip.by_name("target/package/ledger/noir/hara.extension.edn").is_err());
+        assert!(zip
+            .by_name("target/package/ledger/noir/hara.extension.edn")
+            .is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -456,7 +481,9 @@ mod tests {
         )
         .unwrap();
         let project = read_project(&root).unwrap();
-        assert!(build_archive(&project, &root.join("missing.harp")).unwrap_err().contains("does not exist"));
+        assert!(build_archive(&project, &root.join("missing.harp"))
+            .unwrap_err()
+            .contains("does not exist"));
         fs::remove_dir_all(root).unwrap();
     }
 }

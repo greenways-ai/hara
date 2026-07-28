@@ -9,6 +9,13 @@ rust-version = "1.78"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Development-only structured evaluator tracing.  Keep this opt-in so
+# embedded and production builds do not carry collectors or trace storage.
+dev-trace = []
+# Existing optional encoder gate (declared here so Cargo can validate it).
+hir-encoder = []
+
 [dependencies]
 wasm-bindgen = "0.2"
 sha2 = "0.10"

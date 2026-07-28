@@ -8,14 +8,16 @@ pub mod lang;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_cli;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod package;
-#[cfg(not(target_arch = "wasm32"))]
 mod native_extension;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod package;
 #[cfg(not(target_arch = "wasm32"))]
 mod process_extension;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod resp;
 pub mod task;
+#[cfg(feature = "dev-trace")]
+pub mod trace;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod wasmtime_provider;
 use crate::kernel::Form;
@@ -93,6 +95,8 @@ pub struct Runtime {
     namespace_registry: kernel::NamespaceRegistry<core::Value>,
     macros: Rc<RefCell<HashMap<(String, String), Rc<core::Function>>>>,
     generated_configs: HashMap<String, kernel::GeneratedNamespaceConfig>,
+    #[cfg(feature = "dev-trace")]
+    next_trace_id: u64,
     #[cfg(target_arch = "wasm32")]
     host_handler: Option<js_sys::Function>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -116,6 +120,8 @@ impl Runtime {
                 "user".into(),
                 kernel::GeneratedNamespaceConfig::defaults(),
             )]),
+            #[cfg(feature = "dev-trace")]
+            next_trace_id: 1,
             #[cfg(target_arch = "wasm32")]
             host_handler: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -711,6 +717,21 @@ impl Runtime {
 }
 
 impl Runtime {
+    /// Evaluates once through the existing evaluator and returns a
+    /// development-only structured trace.
+    #[cfg(feature = "dev-trace")]
+    pub fn eval_native_trace(&mut self, source: &str) -> Result<trace::Trace, String> {
+        let trace_id = trace::TraceId(self.next_trace_id);
+        self.next_trace_id += 1;
+        let (result, trace) = core::with_development_trace(
+            trace_id,
+            trace::TraceLimits::default(),
+            || self.eval_text_mode(source, true),
+            |value, collector| collector.preview_value("result", value),
+        );
+        result.map(|_| trace)
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn add_extension_root(&mut self, root: impl Into<std::path::PathBuf>) {
         self.extension_roots.push(root.into());
@@ -3838,5 +3859,37 @@ mod tests {
         let artifact = encode_hir_module("demo", "demo.hal", source, forms);
         let mut runtime = Runtime::new();
         assert_eq!(runtime.eval_hir(&artifact).unwrap(), "42");
+    }
+
+    #[cfg(feature = "dev-trace")]
+    #[test]
+    fn development_trace_uses_the_real_macro_and_invocation_paths() {
+        let mut runtime = Runtime::new();
+        let trace = runtime
+            .eval_native_trace("(defn observed [x] x) (if-not false (observed 5))")
+            .unwrap();
+
+        assert_eq!(trace.schema, crate::trace::SCHEMA);
+        assert_eq!(trace.result.as_ref().unwrap().display, "5");
+        assert!(trace.events.iter().any(|event| {
+            event.kind == crate::trace::TraceEventKind::MacroExpand
+                && event.function.as_deref() == Some("if-not")
+        }));
+        assert!(trace.events.iter().any(|event| {
+            event.kind == crate::trace::TraceEventKind::OperationEnter
+                && event.function.as_deref() == Some("observed")
+                && event
+                    .values
+                    .first()
+                    .is_some_and(|value| value.display == "5")
+        }));
+        assert!(trace.events.iter().any(|event| {
+            event.kind == crate::trace::TraceEventKind::OperationReturn
+                && event.function.as_deref() == Some("observed")
+                && event
+                    .values
+                    .first()
+                    .is_some_and(|value| value.display == "5")
+        }));
     }
 }

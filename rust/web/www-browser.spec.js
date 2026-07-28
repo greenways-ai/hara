@@ -67,8 +67,8 @@ runtimeTest("www package includes the Hara logo assets", async ({ page }) => {
   await page.goto("/target/www/");
   await expect(page.getByRole("heading", { name: "HARA" })).toBeVisible();
   await expect(page.locator("img.welcome-mark")).toHaveCount(0);
-  const marks = page.locator('img.system-mark[src*="logo-white.svg"], img.start-mark[src*="logo-white.svg"]');
-  await expect(marks).toHaveCount(2);
+  const marks = page.locator('img.start-mark[src*="logo-white.svg"]');
+  await expect(marks).toHaveCount(1);
   await expect
     .poll(() => marks.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0)))
     .toBe(true);
