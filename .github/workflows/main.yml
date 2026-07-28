@@ -123,6 +123,8 @@ jobs:
         targets: wasm32-unknown-unknown
     - name: Build raw Rust WASM extension artifact
       run: ./scripts/build-hara-wasm-raw
+    - name: Build SHA-256 HTA extension artifact
+      run: ./scripts/build-crypto-hash-sha256-wasm
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
@@ -163,6 +165,11 @@ jobs:
           target/native-extensions/hara/runtime/wasm/hara.wasm
         cp lib/examples/extensions/hara/runtime/wasm/hara.extension.edn \
           target/native-extensions/hara/runtime/wasm/hara.extension.edn
+        mkdir -p target/native-extensions/crypto/hash/sha256
+        cp rust/extensions/crypto-hash-sha256/target/wasm32-unknown-unknown/release/hara_crypto_hash_sha256.wasm \
+          target/native-extensions/crypto/hash/sha256/sha256.wasm
+        cp lib/examples/extensions/crypto/hash/sha256/hara.extension.edn \
+          target/native-extensions/crypto/hash/sha256/hara.extension.edn
         test "$(target/hara-truffle conformance)" = "L0 conformance passed: 64 cases"
         test "$(HARA_EXTENSION_PATH="$PWD/target/native-extensions" target/hara-truffle eval '(ns app (:require [demo.000-answer-42 :as answer])) (answer/add 20 22)')" = "42"
         test "$(HARA_EXTENSION_PATH="$PWD/rust/web/dist/extensions" target/hara-truffle --allow-process eval '(ns app (:require [ledger.noir :as noir])) (get (deref (noir/compile {:name "native_smoke" :source "fn main(x: pub Field) { assert(x == 42); }"})) :format)')" = "hara/ledger.noir/v1"
