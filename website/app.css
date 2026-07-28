@@ -297,7 +297,7 @@ body.source-open .atmosphere { right: min(46vw, 720px); width: auto; }
 
 .workspace-viewport {
   position: fixed;
-  z-index: 2;
+  z-index: 20;
   inset: var(--bar-height) 0 0;
   overflow: hidden;
 }
@@ -325,6 +325,7 @@ body[data-workspace="1"] .workspace-track { transform: translate3d(-100vw, 0, 0)
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
+  align-content: center;
   gap: clamp(30px, 7vw, 120px);
   padding: clamp(48px, 7vw, 110px);
 }
@@ -424,8 +425,9 @@ body[data-workspace="1"] .workspace-track { transform: translate3d(-100vw, 0, 0)
 }
 
 .welcome-coordinate {
+  position: absolute;
   left: 5vw;
-  bottom: 8vh;
+  bottom: calc(32px + 2.5vh);
   display: flex;
   gap: .8rem;
   align-items: center;
@@ -442,10 +444,19 @@ body[data-workspace="1"] .workspace-track { transform: translate3d(-100vw, 0, 0)
   color: var(--cyan-bright);
   text-shadow: 0 0 12px rgba(65, 245, 228, .45);
 }
-.desktop-workspace { background: rgba(1, 4, 8, .18); }
+.desktop-workspace {
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(220px, .28fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(190px, .68fr);
+  gap: 8px;
+  padding: 12px 12px 44px;
+  background: #020408;
+}
 
 .desktop-grid {
   position: absolute;
+  z-index: 0;
   inset: 0;
   opacity: .32;
   background-image:
@@ -490,6 +501,26 @@ body[data-workspace="1"] .workspace-track { transform: translate3d(-100vw, 0, 0)
   box-shadow: 0 24px 70px rgba(0, 0, 0, .55), inset 0 1px rgba(255, 255, 255, .035);
   backdrop-filter: blur(20px) saturate(1.15);
 }
+
+.desktop-workspace .app-window {
+  position: relative;
+  inset: auto !important;
+  width: auto !important;
+  height: auto !important;
+  min-width: 0;
+  min-height: 0;
+  resize: none;
+  z-index: 2 !important;
+  background: #030811;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .72), inset 0 1px rgba(255, 255, 255, .04);
+}
+.desktop-workspace .files-window { grid-column: 1; grid-row: 1 / span 2; }
+.desktop-workspace .editor-window { grid-column: 2; grid-row: 1; }
+.desktop-workspace .canvas-window { grid-column: 2; grid-row: 2; }
+.desktop-workspace .desktop-hint { display: none; }
+
+body[data-workspace="1"] .background-picker,
+body[data-workspace="1"] .source-toggle { display: none; }
 
 .app-window::before,
 .app-window::after {

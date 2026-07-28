@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#020408">
   <meta name="description" content="Hara is a small, fast Lisp that runs live in your browser.">
-  <meta property="og:title" content="HARA — Lisp for the Agentic Age">
+  <meta property="og:title" content="Hara - A Modern Lisp for the Agentic Age">
   <meta property="og:description" content="Write Hara in the browser and render it live.">
   <meta property="og:type" content="website">
   <meta property="og:image" content="https://www.hara-lang.org/og-hara-ribbon.png">
@@ -14,10 +14,10 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="https://www.hara-lang.org/og-hara-ribbon.png">
   <link rel="icon" href="./assets/hara-favicon.svg" type="image/svg+xml">
-  <title>HARA — Lisp for the Agentic Age</title>
+  <title>Hara - A Modern Lisp for the Agentic Age</title>
   <link rel="stylesheet" href="./vendor/hara-ui/tokens.css">
   <link rel="stylesheet" href="./vendor/hara-ui/components.css">
-  <link rel="stylesheet" href="./app.css">
+  <link rel="stylesheet" href="./app.css?v=workspace-layout-4">
 </head>
 <body>
   <canvas class="tron-field" data-tron aria-hidden="true"></canvas>
@@ -137,9 +137,9 @@
     <div class="workspace-track" data-workspace-track>
       <section class="workspace welcome-workspace" aria-labelledby="welcome-title">
         <div class="welcome-copy">
-          <p class="welcome-kicker">FAST · EMBEDDABLE · WASM NATIVE</p>
+          <p class="welcome-kicker">FAST · SECURE · WEB NATIVE</p>
           <h1 id="welcome-title">HARA</h1>
-          <p class="welcome-tagline">Lisp for the Agentic Age.</p>
+          <p class="welcome-tagline">A Modern Lisp for the Agentic Age.</p>
         </div>
         <button class="start-button" type="button" data-start>
           <img class="start-mark" src="./assets/hara-mark.svg" alt="">
@@ -156,10 +156,6 @@
 
       <section class="workspace desktop-workspace" aria-label="Hara desktop">
         <div class="desktop-grid" aria-hidden="true"></div>
-        <div class="desktop-label" aria-hidden="true">
-          <span>HARA // VISUAL LAB</span>
-        </div>
-
         <section class="app-window files-window" data-window="files"
                  aria-label="Files window" tabindex="-1">
           <div class="window-titlebar" data-drag-handle>
@@ -202,11 +198,14 @@
               <button type="button" data-window-close aria-label="Close Editor">×</button>
             </div>
           </div>
+          <nav class="hara-tabs editor-tabs" aria-label="Workspace panels">
+            <button class="hara-tab" type="button" data-focus-window="editor" aria-selected="true">source</button>
+            <button class="hara-tab" type="button" data-focus-window="canvas" aria-selected="false">canvas</button>
+            <button class="hara-tab" type="button" data-focus-window="files" aria-selected="false">files</button>
+          </nav>
           <div class="window-toolbar editor-toolbar">
-            <span>CLOJURE MODE // HARA L0</span>
             <div>
-              <button type="button" class="paredit-button" data-paredit aria-pressed="true">PAREDIT // ON</button>
-              <button type="button" data-diff aria-pressed="false">STRUCT DIFF</button>
+              <button type="button" class="paredit-button" data-paredit aria-pressed="true">PAREDIT ON</button>
               <button type="button" data-save disabled>SAVE</button>
               <button type="button" class="run-button" data-run disabled>
                 <span aria-hidden="true">▶</span> RUN FILE
@@ -302,6 +301,6 @@
   </dialog>
 
   <div class="toast-stack" data-toasts aria-live="polite"></div>
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app.js?v=project-workspaces"></script>
 </body>
 </html>
