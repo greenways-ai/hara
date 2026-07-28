@@ -47,7 +47,7 @@ public class DocumentationContractTest {
 
   @Test
   public void publishedExamplesUseSupportedMarkerSyntaxAndExistingFiles() throws Exception {
-    String userGuide = Files.readString(Path.of("website/docs/user-guide.md"), StandardCharsets.UTF_8);
+    String userGuide = Files.readString(Path.of("docs/docs/user-guide.md"), StandardCharsets.UTF_8);
     assertTrue(userGuide.contains("(. a (push-last 4))"));
     assertTrue(userGuide.contains("(. a (get 3))"));
     assertFalse(userGuide.contains("(array:push-last"));
@@ -59,7 +59,7 @@ public class DocumentationContractTest {
   @Test
   public void namespaceCatalogTracksEveryRegisteredProvider() throws Exception {
     String catalog =
-        Files.readString(Path.of("website/docs/reference/namespaces.md"), StandardCharsets.UTF_8);
+        Files.readString(Path.of("docs/docs/reference/namespaces.md"), StandardCharsets.UTF_8);
     int providers = 0;
     for (HaraLibraryProvider provider : ServiceLoader.load(HaraLibraryProvider.class)) {
       providers++;
@@ -76,9 +76,9 @@ public class DocumentationContractTest {
         List.of(
             Path.of("README.md"),
             Path.of("GETTING_STARTED.md"),
-            Path.of("website/docs/namespaces.md"),
-            Path.of("website/docs/user-guide.md"),
-            Path.of("website/docs/reference/namespaces.md"),
+            Path.of("docs/docs/namespaces.md"),
+            Path.of("docs/docs/user-guide.md"),
+            Path.of("docs/docs/reference/namespaces.md"),
             Path.of("lib/examples/code-test/README.md"));
     for (Path guide : currentGuides) {
       String content = Files.readString(guide, StandardCharsets.UTF_8);
