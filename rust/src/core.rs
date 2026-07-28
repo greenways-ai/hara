@@ -4995,7 +4995,7 @@ fn binding_var(env: &mut HashMap<String, Value>, name: &str) -> Option<KernelVar
     }
 }
 
-fn call_value(callable: Value, arguments: Vec<Value>) -> Result<Value, String> {
+pub(crate) fn call_value(callable: Value, arguments: Vec<Value>) -> Result<Value, String> {
     let lookup =
         |target: &Value, key: &Value, fallback: Value| collection_get(target, key, fallback);
     match callable {
@@ -6297,7 +6297,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 );
                 protocol_call(&protocol, method, &arguments)
             }
-            Form::Symbol(n) if n == "promise" => {
+            Form::Symbol(n) if n == "promise" || n == "promise/run" => {
                 if fs.len() != 2 {
                     return Err("promise expects one function".into());
                 }

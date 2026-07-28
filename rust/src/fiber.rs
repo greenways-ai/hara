@@ -173,6 +173,7 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "pointer",
     "pos?",
     "promise",
+    "promise/run",
     "promise?",
     "promise/all",
     "promise/cancel",
@@ -933,7 +934,16 @@ fn application(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) 
                         Err(error) => k(Err(error)),
                     }),
                 ),
-                Ok(value) => k(Err(format!("{} is not callable", value.display()))),
+                Ok(value) => values_cps(
+                    forms,
+                    0,
+                    Vec::new(),
+                    arguments_env,
+                    Box::new(move |arguments| match arguments {
+                        Ok(arguments) => k(crate::core::call_value(value, arguments)),
+                        Err(error) => k(Err(error)),
+                    }),
+                ),
                 Err(error) => k(Err(error)),
             }),
         );

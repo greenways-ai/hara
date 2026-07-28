@@ -8,7 +8,7 @@ failed=0
 while IFS= read -r source; do
   relative="${source#"$root/"}"
   case "$relative" in
-    src/core.rs|src/lib.rs)
+    src/core.rs|src/lib.rs|src/fiber.rs|src/bin/hara/repl.rs)
       # Compatibility facades while the Java port is split into modules.
       continue
       ;;

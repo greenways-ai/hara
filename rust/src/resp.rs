@@ -233,6 +233,9 @@ impl RespServer {
                 while active.load(Ordering::Acquire) {
                     match listener.accept() {
                         Ok((stream, _)) => {
+                            if stream.set_nonblocking(false).is_err() {
+                                continue;
+                            }
                             let broker = broker.clone();
                             let instance = instance.clone();
                             let root = root.clone();
@@ -287,7 +290,11 @@ fn serve(stream: TcpStream, broker: RuntimeBroker, instance: &str, root: &str) {
                 let _ = connection.write(&RespValue::Error("BAD_REQUEST expected array".into()));
                 continue;
             }
-            Ok(None) | Err(_) => return,
+            Ok(None) => return,
+            Err(error) => {
+                let _ = connection.write(&RespValue::Error(format!("BAD_REQUEST {error}")));
+                continue;
+            }
         };
         let words = request
             .iter()
