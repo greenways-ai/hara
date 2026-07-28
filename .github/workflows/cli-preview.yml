@@ -26,7 +26,8 @@ jobs:
       with:
         ref: ${{ inputs.ref }}
     - uses: dtolnay/rust-toolchain@stable
-      with: { targets: ${{ matrix.target }} }
+      with:
+        targets: ${{ matrix.target }}
     - run: cargo build --release --manifest-path rust/Cargo.toml --target ${{ matrix.target }} --bin hara
     - run: |
         SHORT_SHA=$(git rev-parse --short=12 HEAD)
