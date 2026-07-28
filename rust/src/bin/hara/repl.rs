@@ -1,9 +1,6 @@
 use crate::cli::Options;
-use crate::terminal::{clear_terminal, history_file, is_terminal, print_header, session_prompt};
-#[cfg(test)]
-use crate::terminal::{gradient, rendered_splash, DEFAULT_SPLASH};
 use hara_wasm::native_cli::RuntimeBroker;
-use hara_wasm::resp::RespServer;
+use hara_wasm::resp::{RespConnection, RespServer, RespValue};
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
@@ -13,6 +10,8 @@ use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Config, Context, Editor, Helper};
 use std::env;
 use std::io::{self, BufRead};
+use std::net::TcpStream;
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
@@ -97,7 +96,7 @@ impl RespController {
     }
 }
 
-fn parse_endpoint(value: &str, fallback_host: &str) -> Result<(String, u16), String> {
+pub(crate) fn parse_endpoint(value: &str, fallback_host: &str) -> Result<(String, u16), String> {
     if let Ok(port) = value.parse::<u16>() {
         return Ok((fallback_host.into(), port));
     }
@@ -110,7 +109,7 @@ fn parse_endpoint(value: &str, fallback_host: &str) -> Result<(String, u16), Str
     Ok((host.into(), port))
 }
 
-fn run_repl(options: &Options, offline: bool) -> Result<(), String> {
+pub(crate) fn run_repl(options: &Options, offline: bool) -> Result<(), String> {
     let broker = RuntimeBroker::start_with(options.root.clone(), options.native_sockets)?;
     let mut resp = RespController::new(options.host.clone(), options.port, broker.clone());
     if !offline {

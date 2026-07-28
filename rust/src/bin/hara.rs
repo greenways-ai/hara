@@ -1,5 +1,8 @@
+#[path = "hara/cli.rs"]
 mod cli;
+#[path = "hara/repl.rs"]
 mod repl;
+#[path = "hara/terminal.rs"]
 mod terminal;
 
 fn main() {
