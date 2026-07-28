@@ -137,11 +137,9 @@
 
 /* ------------------------------------------------------------------ studio */
 
-.hara-studio {
-  width: min(1400px, 96vw);
-  margin-inline: auto;
-  padding-bottom: 6vh;
-}
+/* Geometry is owned by the versioned @hara-lang/ui package.  The runtime
+   wrapper keeps the Studio artifact self-contained after build staging. */
+@import url("../ui/studio.css");
 
 .hara-studio-chooser {
   padding: clamp(24px, 5vw, 64px);
@@ -184,29 +182,6 @@
   margin: 20px 14px 0 0;
 }
 
-.hara-studio-canvas-panel {
-  grid-column: 2 / 4;
-  min-height: 320px;
-}
-
-.hara-studio-canvas-panel[hidden] { display: none; }
-
-.hara-studio-canvas {
-  display: block;
-  width: 100%;
-  height: 360px;
-  touch-action: none;
-}
-
-.hara-studio-amp {
-  display: block;
-  width: 100%;
-  min-height: 760px;
-  border: 0;
-  background: #03050a;
-}
-
-.hara-studio-amp[hidden] { display: none; }
 
 .is-choosing-project .hara-studio-steps,
 .is-choosing-project .hara-studio-main {
@@ -250,13 +225,6 @@
   .hara-studio-projects { grid-template-columns: 1fr; }
 }
 
-.hara-studio-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin: 1.2rem 0 1rem;
-}
-
 /* lesson steps */
 .hara-studio-steps {
   display: flex;
@@ -288,33 +256,6 @@
   color: var(--hara-cyan);
   text-shadow: 0 0 10px rgba(65, 245, 228, .45);
   background: rgba(65, 245, 228, .07);
-}
-
-/* main grid: tree | editor+repl */
-.hara-studio-main {
-  display: grid;
-  grid-template-columns: 230px 1fr;
-  grid-template-rows: minmax(300px, 44vh) minmax(200px, 30vh);
-  gap: 14px;
-}
-
-.hara-studio-tree {
-  grid-row: 1 / 3;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-
-.hara-studio-editor-wrap {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.hara-studio-repl {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
 }
 
 .hara-studio-pane-head {
@@ -493,22 +434,4 @@ textarea.hara-studio-editor {
 
 .hara-studio-pane-head .hara-studio-action {
   margin-left: .9em;
-}
-
-@media (max-width: 900px) {
-  .hara-studio {
-    width: 100%;
-    margin-left: 0;
-    padding: 0 4vw 6vh;
-  }
-
-  .hara-studio-main {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(260px, 40vh) minmax(200px, 32vh);
-  }
-
-  .hara-studio-tree {
-    grid-row: auto;
-    max-height: 180px;
-  }
 }

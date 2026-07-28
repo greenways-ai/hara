@@ -185,6 +185,7 @@ class StudioController {
     this.importAction = stepAction("IMPORT", "Import a space from GitHub (owner/repo[@ref])");
     this.newKernelAction = stepAction("NEW", "Create kernel");
     this.closeKernelAction = stepAction("CLOSE", "Close active kernel");
+    this.consoleAction = stepAction("CONSOLE", "Show or hide the REPL console");
     steps.append(
       label("SPACE"),
       this.spaceSelect,
@@ -193,7 +194,8 @@ class StudioController {
       label("KERNEL"),
       this.kernelSelect,
       this.newKernelAction,
-      this.closeKernelAction
+      this.closeKernelAction,
+      this.consoleAction
     );
 
     // File tree.
@@ -247,6 +249,7 @@ class StudioController {
     repl.append(replHead, this.replLog, entry);
 
     const main = el("div", "hara-studio-main");
+    this.main = main;
     main.append(tree, editorWrap, repl);
     this.canvasPanel = el("section", "hara-frame hara-studio-canvas-panel");
     this.canvasPanel.hidden = true;
@@ -318,6 +321,7 @@ class StudioController {
     this.kernelSelect.addEventListener("change", () => this.switchKernel(this.kernelSelect.value));
     this.newKernelAction.addEventListener("click", () => this.newKernel());
     this.closeKernelAction.addEventListener("click", () => this.closeKernel());
+    this.consoleAction.addEventListener("click", () => this.toggleConsole());
     this.newFileAction.addEventListener("click", () => this.newFile());
     this.saveAction.addEventListener("click", () => this.saveFile());
     this.runAction.addEventListener("click", () => this.runFile());
@@ -338,6 +342,13 @@ class StudioController {
         this.input.value = "";
       }
     });
+  }
+
+  toggleConsole() {
+    const open = this.main.classList.toggle("is-console-open");
+    this.consoleAction.classList.toggle("is-active", open);
+    this.consoleAction.setAttribute("aria-pressed", String(open));
+    if (open) this.input.focus();
   }
 
   // ------------------------------------------------------------------- init
@@ -439,6 +450,7 @@ class StudioController {
     if (preferred && this.state.files.includes(preferred)) await this.openFile(preferred);
     this.activeProject = project;
     const ownsCanvas = project.capabilities.some((value) => value === "canvas/2d" || value === "audio/playback");
+    this.main.classList.toggle("has-canvas", ownsCanvas);
     this.canvasPanel.hidden = !ownsCanvas;
     this.canvas.hidden = project.category === "audio";
     this.ampFrame.hidden = project.category !== "audio";

@@ -50,11 +50,11 @@ test("phone shell uses touch controls and one explicit workspace panel", async (
 const builtRuntime = new URL("../../target/www/runtime/hara.wasm", import.meta.url);
 const runtimeTest = existsSync(builtRuntime) ? test : test.skip;
 
-runtimeTest("www package includes the Hara UI image assets", async ({ page }) => {
+runtimeTest("www package includes the Hara logo assets", async ({ page }) => {
   await page.goto("/target/www/");
   await expect(page.getByRole("heading", { name: "HARA" })).toBeVisible();
   await expect(page.locator("img.welcome-mark")).toHaveCount(0);
-  const marks = page.locator('img.system-mark[src*="hara-mark.svg"], img.start-mark[src*="hara-mark.svg"]');
+  const marks = page.locator('img.system-mark[src*="logo-white.svg"], img.start-mark[src*="logo-white.svg"]');
   await expect(marks).toHaveCount(2);
   await expect
     .poll(() => marks.evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0)))

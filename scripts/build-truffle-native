@@ -6,6 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPENDENCIES="$ROOT/java/target/truffle-dependencies"
 
 cd "$ROOT"
+mkdir -p "$ROOT/target"
 
 mvn -f "$ROOT/java/pom.xml" -Ptruffle -DskipTests clean compile dependency:copy-dependencies \
   -DincludeScope=runtime \
