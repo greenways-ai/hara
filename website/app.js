@@ -328,6 +328,7 @@ function setWorkspace(index) {
   if (state.workspace === 1) {
     state.canvasRuntime?.setVisible(false);
     query("[data-tron]").hidden = true;
+    showWorkspaceWindows();
   } else {
     state.canvasRuntime?.setVisible(true);
     query("[data-tron]").hidden = false;
@@ -366,6 +367,14 @@ function openWindow(name) {
   const windowNode = query(`[data-window="${name}"]`);
   focusWindow(windowNode);
   closeLauncher();
+}
+
+function showWorkspaceWindows() {
+  for (const windowNode of queryAll("[data-window]")) {
+    windowNode.classList.remove("is-hidden", "is-maximized");
+    for (const property of ["left", "top", "width", "height"]) windowNode.style[property] = "";
+  }
+  focusWindow(query('[data-window="editor"]'));
 }
 
 function serializeWindows() {
