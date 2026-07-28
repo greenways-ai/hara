@@ -1,0 +1,3 @@
+(ns hara.starter.main)
+
+(+ 1 2)

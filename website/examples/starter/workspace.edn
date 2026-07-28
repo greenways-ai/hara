@@ -1,0 +1,24 @@
+{:hara/type :workspace
+ :hara/version "1.0.0"
+ :workspace/id :hara-starter
+ :workspace/layout
+ {:layout/type :split
+  :layout/direction :horizontal
+  :layout/ratio 0.62
+  :layout/first {:layout/type :area :layout/area "area/editor"}
+  :layout/second {:layout/type :area :layout/area "area/output"}}
+ :workspace/documents
+ [{:document/id "document/main"
+   :document/path "src/main.hal"
+   :document/language :hal}]
+ :workspace/areas
+ [{:area/id "area/editor" :area/type :code-editor :area/title "main.hal"}
+  {:area/id "area/output" :area/type :output :area/title "Output"}]
+ :workspace/nodes []
+ :workspace/connections []
+ :workspace/links
+ [{:link/id "link/main-editor"
+   :link/document "document/main"
+   :link/area "area/editor"}]
+ :workspace/customizations
+ {:recovery/journal true}}

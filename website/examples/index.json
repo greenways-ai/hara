@@ -1,0 +1,48 @@
+{
+  "version": "1.0.0",
+  "projects": [
+    {
+      "id": "starter",
+      "title": "Starter",
+      "description": "Edit a Hara form and see its value immediately.",
+      "category": "learn",
+      "project": "examples/starter/project.edn",
+      "workspace": "examples/starter/workspace.edn",
+      "files": [
+        "examples/starter/project.edn",
+        "examples/starter/workspace.edn",
+        "examples/starter/src/main.hal"
+      ],
+      "capabilities": ["studio/eval"]
+    },
+    {
+      "id": "game",
+      "title": "Browser Game",
+      "description": "Run and edit a HAL-owned Tron canvas with keyboard and touch input.",
+      "category": "visual",
+      "project": "examples/game/project.edn",
+      "workspace": "examples/game/workspace.edn",
+      "files": [
+        "examples/game/project.edn",
+        "examples/game/workspace.edn",
+        "examples/game/src/tron.hal"
+      ],
+      "capabilities": ["studio/node-send", "canvas/2d", "input/keyboard", "input/pointer"]
+    },
+    {
+      "id": "music",
+      "title": "Music",
+      "description": "Explore Hara Amp: synth, EQ, FFT routing, playlist, and visualizer.",
+      "category": "audio",
+      "project": "examples/music/project.edn",
+      "workspace": "examples/music/workspace.edn",
+      "files": [
+        "examples/music/project.edn",
+        "examples/music/workspace.edn",
+        "examples/music/src/main.hal",
+        "examples/music/src/visualizer.hal"
+      ],
+      "capabilities": ["studio/node-send", "audio/playback", "files/local-read"]
+    }
+  ]
+}

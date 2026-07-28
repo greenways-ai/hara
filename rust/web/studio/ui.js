@@ -46,6 +46,15 @@ export function normalizePath(input) {
   return path;
 }
 
+/** New source files default to HAL while manifest and explicitly-typed files
+ * keep their extension. */
+export function normalizeNewFilePath(input) {
+  const path = normalizePath(input);
+  if (!path) return null;
+  const leaf = path.slice(path.lastIndexOf("/") + 1);
+  return leaf.includes(".") ? path : `${path}.hal`;
+}
+
 /** Build a nested tree (directories first, alphabetical) from a flat list
  *  of file paths. Nodes: { name, path, directory, children? }. */
 export function buildTree(paths) {
@@ -121,16 +130,24 @@ export function defaultFileContent(path) {
  * kernels already have the studio.* hal resources registered. Returns a
  * controller: { shell, state, submitRepl, refresh, unmount }.
  */
-export function mountStudio(root, { broker } = {}) {
+export function mountStudio(root, {
+  broker,
+  projects = [],
+  runtimeVersion = "development",
+  canvasRuntime = null
+} = {}) {
   if (!root) throw new Error("mountStudio requires a root element");
   if (!broker) throw new Error("mountStudio requires a broker");
-  return new StudioController(root, broker);
+  return new StudioController(root, broker, { projects, runtimeVersion, canvasRuntime });
 }
 
 class StudioController {
-  constructor(root, broker) {
+  constructor(root, broker, { projects, runtimeVersion, canvasRuntime }) {
     this.root = root;
     this.broker = broker;
+    this.projects = projects;
+    this.runtimeVersion = runtimeVersion;
+    this.canvasRuntime = canvasRuntime;
     this.state = {
       kernel: "ROOT",
       space: null,
@@ -197,9 +214,10 @@ class StudioController {
     this.editorName.setAttribute("data-hara-studio", "editor-name");
     this.dirtyFlag = el("span", "hara-studio-dirty", "");
     this.saveAction = action("SAVE", "Save file to the active space");
+    this.runAction = action("RUN", "Evaluate the whole file");
     const editorHead = el("div", "hara-studio-pane-head");
     const editorHeadRight = el("span");
-    editorHeadRight.append(this.dirtyFlag, this.saveAction, el("span", "hara-index", "EDITABLE"));
+    editorHeadRight.append(this.dirtyFlag, this.runAction, this.saveAction, el("span", "hara-index", "EDITABLE"));
     editorHead.append(this.editorName, editorHeadRight);
     this.editor = el("textarea", "hara-studio-editor");
     this.editor.setAttribute("data-hara-studio", "editor");
@@ -230,6 +248,24 @@ class StudioController {
 
     const main = el("div", "hara-studio-main");
     main.append(tree, editorWrap, repl);
+    this.canvasPanel = el("section", "hara-frame hara-studio-canvas-panel");
+    this.canvasPanel.hidden = true;
+    this.canvas = el("canvas", "hara-studio-canvas");
+    this.canvas.setAttribute("data-hara-studio", "canvas");
+    this.canvasPanel.append(
+      el("div", "hara-studio-pane-head", "LIVE CANVAS · HAL OWNED"),
+      this.canvas
+    );
+    this.ampFrame = el("iframe", "hara-studio-amp");
+    this.ampFrame.title = "Hara Amp live workspace";
+    this.ampFrame.hidden = true;
+    this.ampFrame.setAttribute("loading", "lazy");
+    this.canvasPanel.appendChild(this.ampFrame);
+    main.appendChild(this.canvasPanel);
+    if (this.canvasRuntime) {
+      this.canvasRuntime.register("canvas/background", this.canvas);
+      this.canvasRuntime.register("canvas/visualizer", this.canvas);
+    }
 
     // Status strip.
     const status = el("div", "hara-strip hara-studio-status");
@@ -247,9 +283,32 @@ class StudioController {
       strip("STATE", this.statusState)
     );
 
-    shell.append(head, steps, main, status);
+    this.projectChooser = el("section", "hara-studio-chooser");
+    this.projectChooser.setAttribute("data-hara-studio", "project-chooser");
+    this.projectChooser.hidden = true;
+    shell.append(head, this.projectChooser, steps, main, status);
     this.shell = shell;
     this.root.appendChild(shell);
+    this.buildDialog();
+  }
+
+  buildDialog() {
+    this.dialog = el("div", "hara-studio-dialog");
+    this.dialog.hidden = true;
+    this.dialog.setAttribute("role", "dialog");
+    this.dialog.setAttribute("aria-modal", "true");
+    this.dialogTitle = el("h2", null, "");
+    this.dialogLabel = el("label", null, "");
+    this.dialogInput = el("input", "hara-studio-dialog-input");
+    this.dialogInput.setAttribute("data-hara-studio", "dialog-input");
+    this.dialogLabel.appendChild(this.dialogInput);
+    this.dialogError = el("p", "hara-studio-dialog-error", "");
+    this.dialogCancel = action("CANCEL");
+    this.dialogAccept = action("CONTINUE");
+    const actions = el("div", "hara-studio-dialog-actions");
+    actions.append(this.dialogCancel, this.dialogAccept);
+    this.dialog.append(this.dialogTitle, this.dialogLabel, this.dialogError, actions);
+    this.shell.appendChild(this.dialog);
   }
 
   bindEvents() {
@@ -261,6 +320,7 @@ class StudioController {
     this.closeKernelAction.addEventListener("click", () => this.closeKernel());
     this.newFileAction.addEventListener("click", () => this.newFile());
     this.saveAction.addEventListener("click", () => this.saveFile());
+    this.runAction.addEventListener("click", () => this.runFile());
     this.editor.addEventListener("input", () => {
       this.state.dirty = true;
       this.renderEditorHead();
@@ -291,6 +351,13 @@ class StudioController {
         await this.broker.eval(this.state.kernel, defaultBootstrap("home"));
         spaces = ["home"];
       }
+      if (this.projects.length > 0) {
+        this.renderProjectChooser(spaces);
+        this.state.runtime = "LIVE";
+        this.logNote(";; choose a local browser project to begin");
+        this.renderStatus();
+        return;
+      }
       this.state.space = spaces[0];
       this.renderSpaceSelect(spaces);
       await this.refreshFiles();
@@ -303,6 +370,111 @@ class StudioController {
       this.logNote(";; boot failed — check the console and reload");
     }
     this.renderStatus();
+  }
+
+  projectSpace(project) {
+    return `project-${project.id}-${this.runtimeVersion}`.replace(/[^A-Za-z0-9_.-]/g, "-");
+  }
+
+  renderProjectChooser(spaces = []) {
+    this.projectChooser.replaceChildren(
+      el("p", "hara-kicker", "CHOOSE A LOCAL PROJECT"),
+      el("h1", null, "Make something. Keep it live."),
+      el("p", null, "Projects stay in this browser. Pick a complete workspace, edit it, save it, and return later.")
+    );
+    const cards = el("div", "hara-studio-projects");
+    for (const project of this.projects) {
+      const space = this.projectSpace(project);
+      const recovered = spaces.includes(space);
+      const card = el("article", "hara-studio-project");
+      card.setAttribute("data-project", project.id);
+      card.append(
+        el("span", "hara-index", recovered ? "CONTINUE LOCAL PROJECT" : project.category.toUpperCase()),
+        el("h2", null, project.title),
+        el("p", null, project.description)
+      );
+      const open = action(recovered ? "CONTINUE" : "OPEN PROJECT");
+      open.setAttribute("data-project-open", project.id);
+      open.addEventListener("click", () => this.openProject(project, { reset: !recovered }));
+      card.appendChild(open);
+      if (recovered) {
+        const reset = action("RESET");
+        reset.setAttribute("data-project-reset", project.id);
+        reset.addEventListener("click", async () => {
+          if (await this.askConfirm(`Reset ${project.title}?`, "Only this project's local edits will be cleared.")) {
+            await this.openProject(project, { reset: true });
+          }
+        });
+        card.appendChild(reset);
+      }
+      cards.appendChild(card);
+    }
+    this.projectChooser.appendChild(cards);
+    this.projectChooser.hidden = false;
+    this.shell.classList.add("is-choosing-project");
+  }
+
+  async openProject(project, { reset = false } = {}) {
+    const space = this.projectSpace(project);
+    await this.task(async () => {
+      await this.evalStudio(`(space/create! ${JSON.stringify(space)})`);
+      const existing = await this.evalStudio(`(space/files ${JSON.stringify(space)})`);
+      if (reset) {
+        for (const path of existing ?? []) {
+          await this.evalStudio(`(fs/delete! ${JSON.stringify(space)} ${JSON.stringify(String(path))})`);
+        }
+        for (const [path, content] of Object.entries(project.files)) {
+          await this.evalStudio(
+            `(fs/write! ${JSON.stringify(space)} ${JSON.stringify(`/${path}`)} ${JSON.stringify(content)})`
+          );
+        }
+      }
+    });
+    this.state.space = space;
+    this.projectChooser.hidden = true;
+    this.shell.classList.remove("is-choosing-project");
+    this.renderSpaceSelect(await this.listSpaces());
+    await this.refreshFiles();
+    const preferred = project.main ? `/${project.main}` : this.state.files.find((path) => path.endsWith(".hal"));
+    if (preferred && this.state.files.includes(preferred)) await this.openFile(preferred);
+    this.activeProject = project;
+    const ownsCanvas = project.capabilities.some((value) => value === "canvas/2d" || value === "audio/playback");
+    this.canvasPanel.hidden = !ownsCanvas;
+    this.canvas.hidden = project.category === "audio";
+    this.ampFrame.hidden = project.category !== "audio";
+    if (project.category === "audio" && !this.ampFrame.src) {
+      this.ampFrame.src = new URL("../../examples/music/hara-amp.html", import.meta.url).href;
+    }
+    if (ownsCanvas && project.category === "visual") await this.runFile();
+    this.logNote(`;; project ${project.title} · manifests loaded · recovery local`);
+  }
+
+  askInput(title, label, value = "") {
+    return this.showDialog({ title, label, value, confirm: false });
+  }
+
+  askConfirm(title, label) {
+    return this.showDialog({ title, label, confirm: true });
+  }
+
+  showDialog({ title, label, value = "", confirm }) {
+    this.dialogTitle.textContent = title;
+    this.dialogLabel.firstChild.nodeValue = label;
+    this.dialogInput.value = value;
+    this.dialogInput.hidden = confirm;
+    this.dialogError.textContent = "";
+    this.dialog.hidden = false;
+    if (!confirm) queueMicrotask(() => this.dialogInput.focus());
+    return new Promise((resolve) => {
+      const finish = (result) => {
+        this.dialog.hidden = true;
+        this.dialogCancel.onclick = null;
+        this.dialogAccept.onclick = null;
+        resolve(result);
+      };
+      this.dialogCancel.onclick = () => finish(confirm ? false : null);
+      this.dialogAccept.onclick = () => finish(confirm ? true : this.dialogInput.value);
+    });
   }
 
   // ------------------------------------------------------------------ evals
@@ -381,7 +553,7 @@ class StudioController {
 
   async switchSpace(name) {
     if (!name || name === this.state.space) return;
-    if (!this.confirmDiscard()) {
+    if (!(await this.confirmDiscard())) {
       this.spaceSelect.value = this.state.space ?? "";
       return;
     }
@@ -392,7 +564,7 @@ class StudioController {
   }
 
   async newSpace() {
-    const name = window.prompt("New space name:", "");
+    const name = await this.askInput("New space", "Space name", "");
     if (!name || !name.trim()) return;
     const trimmed = name.trim();
     if (trimmed.includes("/")) {
@@ -412,7 +584,7 @@ class StudioController {
   // the ACTIVE kernel (see importGithubSource). The imported space takes the
   // repo's bare name.
   async importGithub() {
-    const spec = window.prompt("Import from GitHub — owner/repo[@ref]:", "");
+    const spec = await this.askInput("Import from GitHub", "owner/repo[@ref]", "");
     if (!spec || !spec.trim()) return;
     const parsed = parseGithubSpec(spec);
     if (!parsed) {
@@ -454,11 +626,11 @@ class StudioController {
   }
 
   async newKernel() {
-    const name = window.prompt("Kernel name (A-Za-z0-9_.-):", "");
+    const name = await this.askInput("New kernel", "Kernel name (A-Za-z0-9_.-)", "");
     if (!name || !name.trim()) return;
     const trimmed = name.trim();
     const fallback = defaultBootstrap(this.state.space ?? "home");
-    const custom = window.prompt("Bootstrap source (empty = default space bootstrap):", "");
+    const custom = await this.askInput("Kernel bootstrap", "Source (empty uses the active space)", "");
     const bootstrap = custom && custom.trim() ? custom.trim() : fallback;
     const kernel = await this.task(() => this.broker.create(trimmed, { bootstrap }));
     if (kernel === undefined) {
@@ -477,7 +649,7 @@ class StudioController {
       this.logError(new Error("ROOT_CANNOT_CLOSE"));
       return;
     }
-    if (!window.confirm(`Close kernel ${name}? Its in-memory state is lost.`)) return;
+    if (!(await this.askConfirm(`Close kernel ${name}?`, "Its in-memory state will be lost."))) return;
     // broker.close resolves undefined on success too, so confirm the close
     // by checking the kernel is actually gone before switching back.
     await this.task(() => this.broker.close(name));
@@ -525,7 +697,7 @@ class StudioController {
 
   async openFile(path) {
     if (path === this.state.open && !this.state.dirty) return;
-    if (!this.confirmDiscard()) return;
+    if (!(await this.confirmDiscard())) return;
     const content = await this.task(() =>
       this.evalStudio(`(fs/read ${JSON.stringify(this.state.space)} ${JSON.stringify(path)})`)
     );
@@ -553,11 +725,38 @@ class StudioController {
     this.logNote(`;; saved ${path}`);
   }
 
+  async runFile() {
+    if (!this.state.open) return;
+    const source = this.editor.value;
+    await this.task(async () => {
+      if (/^\s*(?:;[^\n]*\n\s*)*\(ns\+/.test(source)) {
+        const documentId = `${this.activeProject?.id ?? "document"}:${this.state.open}`;
+        const nodeId = `node/${this.activeProject?.id ?? "document"}`;
+        this.canvasRuntime?.claim(nodeId, this.activeProject?.category === "audio"
+          ? "canvas/visualizer"
+          : "canvas/background");
+        const result = await this.broker.evalDocument(this.state.kernel, documentId, source, { nodeId });
+        if (typeof result.value === "string" && result.value.startsWith("task-")) {
+          this.broker.evalForm(
+            this.state.kernel,
+            documentId,
+            `(studio.node/run-task ${JSON.stringify(result.value)})`
+          ).catch((error) => this.logError(error));
+        }
+        this.logNote(`;; activated ${this.state.open} generation ${result.generation}`);
+        return result;
+      }
+      const value = await this.broker.eval(this.state.kernel, source);
+      this.logValue(value);
+      return value;
+    });
+  }
+
   async newFile() {
     if (!this.state.space) return;
-    const input = window.prompt(`New file in space ${this.state.space}:`, "/scratch.hal");
+    const input = await this.askInput(`New file in ${this.state.space}`, "File path", "/scratch.hal");
     if (!input) return;
-    const path = normalizePath(input);
+    const path = normalizeNewFilePath(input);
     if (!path) {
       this.logError(new Error(`invalid file path: ${input.trim()}`));
       return;
@@ -571,7 +770,7 @@ class StudioController {
     // The file is created either way; only switch to it when any unsaved
     // edits in the currently open file may go (same guard as file/space
     // switching).
-    if (!this.confirmDiscard()) {
+    if (!(await this.confirmDiscard())) {
       await this.refreshFiles();
       return;
     }
@@ -588,9 +787,9 @@ class StudioController {
     this.renderEditorHead();
   }
 
-  confirmDiscard() {
+  async confirmDiscard() {
     if (!this.state.dirty) return true;
-    return window.confirm("Discard unsaved changes?");
+    return this.askConfirm("Discard unsaved changes?", "The editor contents have not been saved.");
   }
 
   // ---------------------------------------------------------------- render
@@ -640,16 +839,16 @@ function label(content) {
 }
 
 function stepAction(content, title) {
-  const node = el("span", "hara-studio-step hara-studio-action", content);
+  const node = el("button", "hara-studio-step hara-studio-action", content);
+  node.type = "button";
   if (title) node.setAttribute("title", title);
-  node.setAttribute("role", "button");
   return node;
 }
 
 function action(content, title) {
-  const node = el("span", "hara-studio-action", content);
+  const node = el("button", "hara-studio-action", content);
+  node.type = "button";
   if (title) node.setAttribute("title", title);
-  node.setAttribute("role", "button");
   return node;
 }
 

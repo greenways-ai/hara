@@ -9,7 +9,9 @@
 (defn absolute [value] (if (< value 0) (- 0 value) value))
 
 (defn trim-trail [trail]
-  (if (> (count trail) 34) (vec (rest trail)) trail))
+  ;; HTA tuples carry at most eight values. Keep seven points so the complete
+  ;; polyline stays on the portable tuple lane in every browser runtime.
+  (if (> (count trail) 7) (vec (rest trail)) trail))
 
 (defn event-direction [events direction]
   (loop [index 0 result direction]
@@ -91,10 +93,9 @@
      :background "#02050b"
      :commands
      [[:grid 46 "rgba(65,245,228,.055)" 1]
-      (nth cyan 0) (nth cyan 1) (nth cyan 2)
-      (nth pink 0) (nth pink 1) (nth pink 2)
-      (nth violet 0) (nth violet 1) (nth violet 2)
-      (nth gold 0) (nth gold 1) (nth gold 2)
+      (nth cyan 1) (nth cyan 2)
+      (nth pink 1) (nth pink 2)
+      (nth violet 1) (nth violet 2)
       [:text "TRON.HAL // ARROWS OR SWIPE" 24 (- height 24) "#65c9d0" 11]]}))
 
 (node/start

@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+VERSION=${1:-$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/rust/Cargo.toml" | head -n 1)}
+OUT=${HARA_STUDIO_RUNTIME_OUT:-"$ROOT/target/studio-runtime"}
+RAW_WASM="$ROOT/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm"
+STAGE="$OUT/hara-studio-runtime-$VERSION"
+ARCHIVE="$OUT/hara-studio-runtime-$VERSION.tar.gz"
+
+if [ ! -f "$RAW_WASM" ]; then
+  "$ROOT/scripts/build-hara-wasm-raw"
+fi
+
+mkdir -p "$OUT"
+if [ -e "$STAGE" ]; then
+  echo "refusing to replace existing staging directory: $STAGE" >&2
+  exit 1
+fi
+mkdir -p "$STAGE/rust/studio/hal" \
+         "$STAGE/examples/starter/src" \
+         "$STAGE/examples/game/src" \
+         "$STAGE/examples/music/src" \
+         "$STAGE/examples/music/runtime" \
+         "$STAGE/examples/music/runtime/studio/hal" \
+         "$STAGE/examples/music/runtime/std/substrate" \
+         "$STAGE/examples/music/examples/hara-amp/src" \
+         "$STAGE/examples/music/assets/wasm" \
+         "$STAGE/examples/music/assets/hara-amp" \
+         "$STAGE/assets/wasm" \
+         "$STAGE/assets/artwork"
+
+cp "$RAW_WASM" "$STAGE/rust/hara.wasm"
+cp "$ROOT/rust/web/hta.js" "$ROOT/rust/web/hta-worker.js" "$STAGE/rust/"
+cp "$ROOT"/rust/web/studio/*.js "$ROOT/rust/web/studio/studio.css" "$STAGE/rust/studio/"
+cp "$ROOT"/rust/web/studio/hal/*.hal "$STAGE/rust/studio/hal/"
+cp "$ROOT/lib/src/std/substrate.hal" "$STAGE/rust/studio/hal/substrate.hal"
+cp "$ROOT/lib/src/std/substrate/frame.hal" "$STAGE/rust/studio/hal/substrate-frame.hal"
+cp "$ROOT/lib/src/std/substrate/protocol.hal" "$STAGE/rust/studio/hal/substrate-protocol.hal"
+
+cp "$ROOT/website/examples/index.json" "$STAGE/examples/index.json"
+cp "$ROOT/website/examples/starter/project.edn" "$ROOT/website/examples/starter/workspace.edn" \
+   "$STAGE/examples/starter/"
+cp "$ROOT/website/examples/starter/src/main.hal" "$STAGE/examples/starter/src/"
+
+cp "$ROOT/website/examples/browser-game/project.edn" "$ROOT/website/examples/browser-game/workspace.edn" \
+   "$STAGE/examples/game/"
+cp "$ROOT/website/sources/tron.hal" "$STAGE/examples/game/src/tron.hal"
+
+cp "$ROOT/website/examples/hara-amp/project.edn" "$ROOT/website/examples/hara-amp/workspace.edn" \
+   "$STAGE/examples/music/"
+cp "$ROOT/website/examples/hara-amp/src/main.hal" "$ROOT/website/examples/hara-amp/src/visualizer.hal" \
+   "$STAGE/examples/music/src/"
+cp "$ROOT/website/hara-amp.html" "$ROOT/website/hara-amp.css" "$ROOT/website/hara-amp.js" \
+   "$STAGE/examples/music/"
+cp "$RAW_WASM" "$STAGE/examples/music/runtime/hara.wasm"
+cp "$ROOT/rust/web/hta.js" "$ROOT/rust/web/hta-worker.js" "$STAGE/examples/music/runtime/"
+cp "$ROOT"/rust/web/studio/*.js "$STAGE/examples/music/runtime/studio/"
+cp "$ROOT"/rust/web/studio/hal/*.hal "$STAGE/examples/music/runtime/studio/hal/"
+cp "$ROOT/lib/src/std/substrate.hal" "$STAGE/examples/music/runtime/std/substrate.hal"
+cp "$ROOT/lib/src/std/substrate/frame.hal" "$ROOT/lib/src/std/substrate/protocol.hal" \
+   "$STAGE/examples/music/runtime/std/substrate/"
+cp "$ROOT/website/examples/hara-amp/src/visualizer.hal" \
+   "$STAGE/examples/music/examples/hara-amp/src/"
+cp "$ROOT/website/assets/wasm/demo-synth.wasm" "$ROOT/website/assets/wasm/demo-fft.wasm" \
+   "$STAGE/assets/wasm/"
+cp "$ROOT/website/assets/wasm/demo-synth.wasm" "$ROOT/website/assets/wasm/demo-fft.wasm" \
+   "$STAGE/examples/music/assets/wasm/"
+cp "$ROOT/website/assets/hara-amp/hara-amp-artwork-original.png" \
+   "$ROOT/website/assets/hara-amp/hara-amp-emblem.png" \
+   "$ROOT/website/assets/hara-amp/hara-emblem.svg" \
+   "$STAGE/assets/artwork/"
+cp "$ROOT/website/assets/hara-amp/hara-amp-artwork-original.png" \
+   "$ROOT/website/assets/hara-amp/hara-amp-emblem.png" \
+   "$ROOT/website/assets/hara-amp/hara-emblem.svg" \
+   "$STAGE/examples/music/assets/hara-amp/"
+
+node "$ROOT/scripts/verify-studio-runtime.mjs" "$STAGE"
+
+if [ -e "$ARCHIVE" ]; then
+  echo "refusing to replace existing archive: $ARCHIVE" >&2
+  exit 1
+fi
+COPYFILE_DISABLE=1 tar -czf "$ARCHIVE" -C "$STAGE" .
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+else
+  shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
+fi
+echo "$ARCHIVE"

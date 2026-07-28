@@ -1,0 +1,5 @@
+(ns hara.amp.main)
+
+{:status :ready
+ :audio :user-gesture-required
+ :workspace :hara-amp}

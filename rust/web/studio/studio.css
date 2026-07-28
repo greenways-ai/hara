@@ -138,11 +138,116 @@
 /* ------------------------------------------------------------------ studio */
 
 .hara-studio {
-  /* breaks out of the centered .md-main__inner column (see studio.html:
-     the container block is overridden so this sits at main level) */
   width: min(1400px, 96vw);
-  margin-left: calc(50% - min(700px, 48vw));
+  margin-inline: auto;
   padding-bottom: 6vh;
+}
+
+.hara-studio-chooser {
+  padding: clamp(24px, 5vw, 64px);
+  min-height: 560px;
+  background: #03070d;
+  border-block: 1px solid rgba(65, 245, 228, .28);
+}
+
+.hara-studio-chooser[hidden],
+.hara-studio-dialog[hidden] {
+  display: none;
+}
+
+.hara-studio-chooser > h1 {
+  margin: .25rem 0 .5rem;
+  color: #eaf8ff;
+  font-size: clamp(2rem, 4vw, 4.5rem);
+}
+
+.hara-studio-projects {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 32px;
+}
+
+.hara-studio-project {
+  min-height: 230px;
+  padding: 22px;
+  border: 1px solid rgba(65, 245, 228, .3);
+  background: linear-gradient(145deg, rgba(65, 245, 228, .07), rgba(132, 86, 255, .06));
+}
+
+.hara-studio-project h2 {
+  color: #41f5e4;
+}
+
+.hara-studio-project .hara-studio-action {
+  display: inline-block;
+  margin: 20px 14px 0 0;
+}
+
+.hara-studio-canvas-panel {
+  grid-column: 2 / 4;
+  min-height: 320px;
+}
+
+.hara-studio-canvas-panel[hidden] { display: none; }
+
+.hara-studio-canvas {
+  display: block;
+  width: 100%;
+  height: 360px;
+  touch-action: none;
+}
+
+.hara-studio-amp {
+  display: block;
+  width: 100%;
+  min-height: 760px;
+  border: 0;
+  background: #03050a;
+}
+
+.hara-studio-amp[hidden] { display: none; }
+
+.is-choosing-project .hara-studio-steps,
+.is-choosing-project .hara-studio-main {
+  display: none;
+}
+
+.hara-studio-dialog {
+  position: fixed;
+  z-index: 1000;
+  inset: 50% auto auto 50%;
+  width: min(520px, calc(100vw - 32px));
+  padding: 24px;
+  transform: translate(-50%, -50%);
+  border: 1px solid #41f5e4;
+  background: #050912;
+  box-shadow: 0 0 0 100vmax rgba(0, 3, 8, .8), 0 0 48px rgba(65, 245, 228, .15);
+}
+
+.hara-studio-dialog label,
+.hara-studio-dialog-input {
+  display: block;
+  width: 100%;
+}
+
+.hara-studio-dialog-input {
+  margin-top: 10px;
+  padding: 12px;
+  color: #eaf8ff;
+  border: 1px solid rgba(65, 245, 228, .45);
+  background: #02050b;
+}
+
+.hara-studio-dialog-actions {
+  display: flex;
+  gap: 20px;
+  justify-content: flex-end;
+  margin-top: 22px;
+}
+
+@media (max-width: 760px) {
+  .hara-studio-projects { grid-template-columns: 1fr; }
 }
 
 .hara-studio-head {
@@ -354,6 +459,12 @@
 }
 
 .hara-studio-action {
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  border: 0;
+  background: transparent;
   cursor: pointer;
   transition: color .15s, text-shadow .15s;
 }

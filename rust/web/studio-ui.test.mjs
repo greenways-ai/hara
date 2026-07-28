@@ -6,6 +6,7 @@ import {
   buildTree,
   defaultFileContent,
   importGithubSource,
+  normalizeNewFilePath,
   normalizePath,
   parseGithubSpec,
   renderValue,
@@ -51,6 +52,13 @@ test("normalizePath rejects empty, root, and parent-escaping paths", () => {
   assert.equal(normalizePath("../secret"), null);
   assert.equal(normalizePath("/a/../b"), null);
   assert.equal(normalizePath(42), null);
+});
+
+test("new files receive .hal unless an extension was explicitly supplied", () => {
+  assert.equal(normalizeNewFilePath("src/player"), "/src/player.hal");
+  assert.equal(normalizeNewFilePath("src/player.hal"), "/src/player.hal");
+  assert.equal(normalizeNewFilePath("workspace.edn"), "/workspace.edn");
+  assert.equal(normalizeNewFilePath("../escape"), null);
 });
 
 test("buildTree returns an empty forest for no paths", () => {
