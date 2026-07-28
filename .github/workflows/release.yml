@@ -178,3 +178,17 @@ jobs:
         [ "$RUST_OUTPUT" = "42" ] || { echo "unexpected Rust output: $RUST_OUTPUT" >&2; exit 1; }
         TRUFFLE_OUTPUT=$("$INSTALL_DIR/hara-truffle" eval '(+ 19 23)')
         [ "$TRUFFLE_OUTPUT" = "42" ] || { echo "unexpected Truffle output: $TRUFFLE_OUTPUT" >&2; exit 1; }
+
+  smoke-public-linux-install:
+    needs: [guard, release]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Install from the public CLI endpoint into a clean Linux runner
+      run: |
+        INSTALL_DIR="$RUNNER_TEMP/hara-bin"
+        curl -fsSL https://cli.hara-lang.org/install \
+          | HARA_VERSION="${{ needs.guard.outputs.tag }}" HARA_INSTALL_DIR="$INSTALL_DIR" sh -s -- --rust --truffle
+        RUST_OUTPUT=$("$INSTALL_DIR/hara" eval '(+ 19 23)')
+        [ "$RUST_OUTPUT" = "42" ] || { echo "unexpected Rust output: $RUST_OUTPUT" >&2; exit 1; }
+        TRUFFLE_OUTPUT=$("$INSTALL_DIR/hara-truffle" eval '(+ 19 23)')
+        [ "$TRUFFLE_OUTPUT" = "42" ] || { echo "unexpected Truffle output: $TRUFFLE_OUTPUT" >&2; exit 1; }
