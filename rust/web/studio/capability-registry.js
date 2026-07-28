@@ -55,6 +55,22 @@ export class CapabilityRegistry {
     return adapter[method](...args);
   }
 
+  async invokeForNode(sessionId, nodeId, capability, method, ...args) {
+    capability = normalize(capability);
+    this.assert(sessionId, [capability]);
+    const adapter = this.adapters.get(capability);
+    if (!adapter) {
+      throw new ProgramError("capability/method", `capability ${capability} has no adapter`, { capability, method });
+    }
+    const scoped = typeof adapter.forNode === "function"
+      ? adapter.forNode({ sessionId, nodeId })
+      : adapter;
+    if (!scoped || typeof scoped[method] !== "function") {
+      throw new ProgramError("capability/method", `capability ${capability} does not implement ${method}`, { capability, method });
+    }
+    return scoped[method](...args);
+  }
+
   requireAvailable(capability) {
     if (!this.adapters.has(capability)) {
       throw new ProgramError("program/capability-unavailable", `capability unavailable: ${capability}`, { capability });

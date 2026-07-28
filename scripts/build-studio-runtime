@@ -17,12 +17,13 @@ if [ -e "$STAGE" ]; then
   echo "refusing to replace existing staging directory: $STAGE" >&2
   exit 1
 fi
-mkdir -p "$STAGE/rust/studio/hal" \
+mkdir -p "$STAGE/rust/studio/hal" "$STAGE/rust/studio/capabilities" \
          "$STAGE/examples/starter/src" \
          "$STAGE/examples/game/src" \
          "$STAGE/examples/music/src" \
          "$STAGE/examples/music/runtime" \
          "$STAGE/examples/music/runtime/studio/hal" \
+         "$STAGE/examples/music/runtime/studio/capabilities" \
          "$STAGE/examples/music/runtime/std/substrate" \
          "$STAGE/examples/music/examples/hara-amp/src" \
          "$STAGE/examples/music/assets/wasm" \
@@ -33,6 +34,7 @@ mkdir -p "$STAGE/rust/studio/hal" \
 cp "$RAW_WASM" "$STAGE/rust/hara.wasm"
 cp "$ROOT/rust/web/hta.js" "$ROOT/rust/web/hta-worker.js" "$STAGE/rust/"
 cp "$ROOT"/rust/web/studio/*.js "$ROOT/rust/web/studio/studio.css" "$STAGE/rust/studio/"
+cp "$ROOT"/rust/web/studio/capabilities/*.js "$STAGE/rust/studio/capabilities/"
 cp "$ROOT"/rust/web/studio/hal/*.hal "$STAGE/rust/studio/hal/"
 cp "$ROOT/lib/src/std/substrate.hal" "$STAGE/rust/studio/hal/substrate.hal"
 cp "$ROOT/lib/src/std/substrate/frame.hal" "$STAGE/rust/studio/hal/substrate-frame.hal"
@@ -56,6 +58,7 @@ cp "$ROOT/website/hara-amp.html" "$ROOT/website/hara-amp.css" "$ROOT/website/har
 cp "$RAW_WASM" "$STAGE/examples/music/runtime/hara.wasm"
 cp "$ROOT/rust/web/hta.js" "$ROOT/rust/web/hta-worker.js" "$STAGE/examples/music/runtime/"
 cp "$ROOT"/rust/web/studio/*.js "$STAGE/examples/music/runtime/studio/"
+cp "$ROOT"/rust/web/studio/capabilities/*.js "$STAGE/examples/music/runtime/studio/capabilities/"
 cp "$ROOT"/rust/web/studio/hal/*.hal "$STAGE/examples/music/runtime/studio/hal/"
 cp "$ROOT/lib/src/std/substrate.hal" "$STAGE/examples/music/runtime/std/substrate.hal"
 cp "$ROOT/lib/src/std/substrate/frame.hal" "$ROOT/lib/src/std/substrate/protocol.hal" \

@@ -68,6 +68,19 @@ test("only the active generation can render and replacement cancels its frame", 
   );
 });
 
+test("semantic canvas aliases cannot be owned by competing generations", async () => {
+  const { runtime, canvas } = fixture();
+  runtime.register("canvas/visualizer", canvas);
+  runtime.claim("node/tron@1", "canvas/background");
+  const pending = runtime.nextFrame("node/tron@1", "canvas/background");
+  runtime.claim("node/fft@1", "canvas/visualizer");
+  await assert.rejects(pending, /canvas surface ownership replaced/);
+  assert.throws(
+    () => runtime.render("node/tron@1", "canvas/background", new Map()),
+    /does not own/
+  );
+});
+
 test("Canvas2D frames execute declared commands without game-specific state", () => {
   const { runtime, calls } = fixture();
   runtime.claim("node/grid@1", "canvas/background");

@@ -1270,7 +1270,10 @@ async function bootRuntime() {
       { NodeRuntime },
       { CanvasRuntime },
       { GraphHost },
-      { SessionRouter }
+      { SessionRouter },
+      { CapabilityRegistry },
+      { createCanvasCapability },
+      { createClockCapability }
     ] = await Promise.all([
       import(new URL("studio/broker.js", runtimeBase)),
       import(new URL("studio/host-services.js", runtimeBase)),
@@ -1278,7 +1281,10 @@ async function bootRuntime() {
       import(new URL("studio/node-runtime.js", runtimeBase)),
       import(new URL("studio/canvas-runtime.js", runtimeBase)),
       import(new URL("studio/graph-host.js", runtimeBase)),
-      import(new URL("studio/session-router.js", runtimeBase))
+      import(new URL("studio/session-router.js", runtimeBase)),
+      import(new URL("studio/capability-registry.js", runtimeBase)),
+      import(new URL("studio/capabilities/canvas.js", runtimeBase)),
+      import(new URL("studio/capabilities/clock.js", runtimeBase))
     ]);
     const wasmResponse = await fetch(new URL("hara.wasm", runtimeBase));
     if (!wasmResponse.ok) throw new Error(`runtime fetch failed: ${wasmResponse.status}`);
@@ -1302,9 +1308,13 @@ async function bootRuntime() {
     });
     state.canvasRuntime.register("canvas/background", query("[data-tron]"));
     const sessionRouter = new SessionRouter();
+    const capabilityRegistry = new CapabilityRegistry({ adapters: {
+      "surface/canvas-2d": createCanvasCapability(state.canvasRuntime),
+      "clock/frame": createClockCapability()
+    } });
     const graphHost = new GraphHost({
       workerUrl: new URL("studio/program-worker.js", runtimeBase),
-      sessionRouter
+      sessionRouter, capabilityRegistry
     });
     const hostCalls = createHostServices({
       dbName: "hara-www",

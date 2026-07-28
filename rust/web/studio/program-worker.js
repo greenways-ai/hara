@@ -4,8 +4,14 @@
 
 const programs = new Map();
 const nodes = new Map();
+const capabilityCalls = new Map();
+let nextCapabilityCall = 0;
 
 self.addEventListener("message", (event) => {
+  if (event.data?.type === "capability-result" || event.data?.type === "capability-error") {
+    receiveCapabilityResult(event.data);
+    return;
+  }
   handle(event.data).catch((error) => replyError(event.data?.id, error));
 });
 
@@ -98,13 +104,51 @@ function apiFor(descriptor) {
     call: (target, action, args, options = {}) => {
       throw structured("node/call-unavailable", `host call routing is not installed for ${target}/${action}`, { options, args });
     },
-    capability: (name) => { throw structured("program/capability-unavailable", `capability unavailable in worker: ${name}`); },
+    capability: (name) => capabilityFacade(descriptor, String(name)),
     schedule: (callback, delayMs = 0) => setTimeout(callback, delayMs),
     cancelSchedule: (token) => clearTimeout(token),
     frame: () => { throw structured("program/frame-unavailable", "frame scheduling requires a surface capability"); },
     cancelFrame: () => {},
     log: (level, message, data = null) => postMessage({ type: "log", nodeId: descriptor.nodeId, sessionId: descriptor.sessionId, level, message, data })
   });
+}
+
+function capabilityFacade(descriptor, name) {
+  const invoke = (method, ...args) => capabilityCall(descriptor, name, method, args);
+  // The facade intentionally exposes no host object. Generated code can use
+  // either `api.capability(name).invoke(method, ...)` or normal method syntax
+  // such as `api.capability(name).render(frame)`.
+  return new Proxy(Object.freeze({ invoke }), {
+    get(target, property) {
+      if (property === "then") return undefined;
+      if (property in target) return target[property];
+      if (typeof property !== "string") return undefined;
+      return (...args) => invoke(property, ...args);
+    }
+  });
+}
+
+function capabilityCall(descriptor, name, method, args) {
+  if (!name || !method) return Promise.reject(structured("program/capability", "capability name and method are required"));
+  const requestId = `capability-${++nextCapabilityCall}`;
+  return new Promise((resolve, reject) => {
+    capabilityCalls.set(requestId, { resolve, reject });
+    postMessage({
+      type: "capability", requestId, nodeId: descriptor.nodeId,
+      sessionId: descriptor.sessionId, capability: name, method, args
+    });
+  });
+}
+
+function receiveCapabilityResult(message) {
+  const pending = capabilityCalls.get(message.requestId);
+  if (!pending) return;
+  capabilityCalls.delete(message.requestId);
+  if (message.type === "capability-error") {
+    pending.reject(structured(message.error?.code ?? "program/capability-error", message.error?.message ?? "capability call failed"));
+  } else {
+    pending.resolve(message.value);
+  }
 }
 
 function enqueue(state, task) {

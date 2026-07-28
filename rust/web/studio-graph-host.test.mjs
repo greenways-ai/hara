@@ -61,6 +61,22 @@ test("GraphHost exposes the browser capabilities owned by its registry", () => {
   assert.deepEqual(graph.availableCapabilities(), ["input/keyboard", "surface/canvas-2d"]);
 });
 
+test("GraphHost permits Worker capability calls only for the owning granted session", async () => {
+  const registry = new CapabilityRegistry({
+    adapters: { "asset/load": { load: async (path) => `loaded:${path}` } }
+  });
+  registry.grant("UI", ["asset/load"]);
+  const graph = new GraphHost({ executor: executor(), capabilityRegistry: registry });
+  await graph.install({ ...program("example/assets"), "program/capabilities": ["asset/load"] }, { sessionId: "UI" });
+  await graph.spawn(node("node/assets", "example/assets"));
+  assert.equal(await graph.invokeCapability({
+    nodeId: "node/assets", sessionId: "UI", capability: "asset/load", method: "load", args: ["cover.png"]
+  }), "loaded:cover.png");
+  await assert.rejects(graph.invokeCapability({
+    nodeId: "node/assets", sessionId: "MARKET", capability: "asset/load", method: "load", args: []
+  }), /not owned/);
+});
+
 test("a graph session target routes a selected event into its addressed Hara session", async () => {
   const active = executor();
   const calls = [];
@@ -97,7 +113,9 @@ test("releasing a session removes both generated and Hara ingress graph nodes", 
   const active = executor();
   const sessions = new SessionRouter();
   sessions.register("UI", { call: async () => null });
-  const graph = new GraphHost({ executor: active, sessionRouter: sessions });
+  const capabilities = new CapabilityRegistry({ capabilities: ["surface/canvas-2d"] });
+  capabilities.grant("UI", ["surface/canvas-2d"]);
+  const graph = new GraphHost({ executor: active, sessionRouter: sessions, capabilityRegistry: capabilities });
   await graph.install(program("example/source"), { capabilities: [] });
   await graph.spawn(node("node/source", "example/source"), { capabilities: [] });
   graph.registerSessionNode({ "node/id": "node/ui", "node/session": "UI" });
@@ -106,4 +124,5 @@ test("releasing a session removes both generated and Hara ingress graph nodes", 
   assert.equal(await graph.releaseSession("UI"), 2);
   assert.throws(() => graph.info("node/source"), /unknown node/);
   assert.throws(() => graph.info("node/ui"), /unknown node/);
+  assert.deepEqual(capabilities.forSession("UI"), []);
 });

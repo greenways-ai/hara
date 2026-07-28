@@ -10,6 +10,7 @@ bash "$ROOT/scripts/build-hara-wasm-raw"
 
 rm -rf "$OUT"
 mkdir -p "$OUT/runtime/studio/hal" "$OUT/runtime/std/substrate"
+mkdir -p "$OUT/runtime/studio/capabilities"
 mkdir -p "$OUT/assets/wasm" "$OUT/assets/hara-amp" "$OUT/examples/hara-amp/src"
 mkdir -p "$OUT/sources"
 mkdir -p "$OUT/vendor"
@@ -46,6 +47,7 @@ cp "$ROOT/rust/web/studio/boot.js" \
    "$ROOT/rust/web/studio/workspace.js" \
    "$OUT/runtime/studio/"
 cp "$ROOT/rust/web/studio/hal/"*.hal "$OUT/runtime/studio/hal/"
+cp "$ROOT/rust/web/studio/capabilities/"*.js "$OUT/runtime/studio/capabilities/"
 cp "$ROOT/lib/src/std/substrate.hal" "$OUT/runtime/std/substrate.hal"
 cp "$ROOT/lib/src/std/substrate/protocol.hal" \
    "$ROOT/lib/src/std/substrate/frame.hal" \

@@ -19,6 +19,11 @@ export class CanvasRuntime {
     this.capabilities = new Set(capabilities);
     this.onDiagnostic = onDiagnostic;
     this.canvases = new Map();
+    // A workspace can give one physical surface several semantic names (for
+    // example canvas/background and canvas/visualizer). Ownership must still
+    // be exclusive at the browser surface, otherwise two live generations
+    // could silently draw over one another.
+    this.surfaces = new Map();
     this.events = [];
     this.listeners = [];
     this.visible = true;
@@ -40,6 +45,9 @@ export class CanvasRuntime {
       lastFrame: null
     };
     this.canvases.set(canvasId, slot);
+    let slots = this.surfaces.get(canvas);
+    if (!slots) this.surfaces.set(canvas, slots = new Set());
+    slots.add(slot);
     return () => this.unregister(canvasId);
   }
 
@@ -49,11 +57,15 @@ export class CanvasRuntime {
     this.cancelSlot(slot, "canvas closed");
     this.disposeWebGl(slot);
     this.canvases.delete(canvasId);
+    const slots = this.surfaces.get(slot.canvas);
+    slots?.delete(slot);
+    if (slots?.size === 0) this.surfaces.delete(slot.canvas);
     return true;
   }
 
   claim(nodeId, canvasId) {
     const slot = this.requireCanvas(canvasId);
+    this.cancelSurfaceOwners(slot, nodeId, "canvas surface ownership replaced");
     if (slot.owner && slot.owner !== nodeId) this.cancelOwner(slot, slot.owner, "canvas ownership replaced");
     slot.owner = nodeId;
     slot.lastTime = null;
@@ -62,6 +74,7 @@ export class CanvasRuntime {
 
   stage(nodeId, canvasId) {
     const slot = this.requireCanvas(canvasId);
+    this.cancelSurfaceCandidates(slot, nodeId, "canvas surface candidate replaced");
     if (slot.candidate && slot.candidate !== nodeId) {
       this.cancelOwner(slot, slot.candidate, "candidate generation replaced");
     }
@@ -72,6 +85,7 @@ export class CanvasRuntime {
   commit(nodeId, canvasId) {
     const slot = this.requireCanvas(canvasId);
     if (slot.candidate !== nodeId) throw structuredError("canvas/not-candidate", `${nodeId} is not staged`);
+    this.cancelSurfaceOwners(slot, nodeId, "canvas surface generation replaced");
     if (slot.owner && slot.owner !== nodeId) this.cancelOwner(slot, slot.owner, "canvas generation replaced");
     slot.owner = nodeId;
     slot.candidate = null;
@@ -347,8 +361,27 @@ export class CanvasRuntime {
     this.rejectFirstRender(slot, nodeId, structuredError("canvas/cancelled", reason));
   }
 
+  cancelSurfaceOwners(slot, nodeId, reason) {
+    for (const sibling of this.surfaces.get(slot.canvas) ?? []) {
+      if (sibling !== slot && sibling.owner && sibling.owner !== nodeId) {
+        this.cancelOwner(sibling, sibling.owner, reason);
+        sibling.owner = null;
+      }
+    }
+  }
+
+  cancelSurfaceCandidates(slot, nodeId, reason) {
+    for (const sibling of this.surfaces.get(slot.canvas) ?? []) {
+      if (sibling !== slot && sibling.candidate && sibling.candidate !== nodeId) {
+        this.cancelOwner(sibling, sibling.candidate, reason);
+        sibling.candidate = null;
+      }
+    }
+  }
+
   cancelSlot(slot, reason) {
     if (slot.owner) this.cancelOwner(slot, slot.owner, reason);
+    if (slot.candidate && slot.candidate !== slot.owner) this.cancelOwner(slot, slot.candidate, reason);
   }
 
   disposeWebGl(slot) {

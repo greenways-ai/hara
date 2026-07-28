@@ -11,6 +11,8 @@ const required = [
   "rust/hta-worker.js",
   "rust/studio/broker.js",
   "rust/studio/capability-registry.js",
+  "rust/studio/capabilities/canvas.js",
+  "rust/studio/capabilities/clock.js",
   "rust/studio/graph-host.js",
   "rust/studio/host-services.js",
   "rust/studio/program-host.js",

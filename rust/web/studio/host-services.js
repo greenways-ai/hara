@@ -144,6 +144,7 @@ export function createGraphHostServices(graph, options = {}) {
 export function createSessionHostServices(graph, sessions) {
   return {
     "session/register-ingress": function(sessionId, capabilities = []) {
+      graph.capabilities?.grant(String(sessionId), toPlain(capabilities));
       return toHta(sessions.register(String(sessionId), this.context, {
         capabilities: toPlain(capabilities),
         onRelease: async (released) => graph.releaseSession(released)

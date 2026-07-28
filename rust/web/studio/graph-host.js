@@ -17,7 +17,8 @@ export class GraphHost {
     const activeExecutor = executor ?? new ProgramWorkerExecutor({
       workerUrl,
       onEmission: (message) => this.receiveEmission(message),
-      onLog: (message) => this.diagnostics({ kind: "program/log", ...message })
+      onLog: (message) => this.diagnostics({ kind: "program/log", ...message }),
+      onCapability: (message) => this.invokeCapability(message)
     });
     this.programs = new ProgramHost({ executor: activeExecutor, diagnostics });
     this.sessionRouter = sessionRouter;
@@ -27,13 +28,22 @@ export class GraphHost {
     });
   }
 
-  install(descriptor, options) { return this.programs.install(descriptor, options); }
+  install(descriptor, options = {}) {
+    const sessionId = options.sessionId ?? "ROOT";
+    this.capabilities.assert(sessionId, descriptor?.["program/capabilities"] ?? []);
+    return this.programs.install(descriptor, {
+      ...options, sessionId, capabilities: this.capabilities.forSession(sessionId)
+    });
+  }
   programInfo(id) { return this.programs.info(id); }
   listPrograms() { return [...this.programs.programs.values()].map((program) => program.info()); }
   availableCapabilities() { return this.capabilities.available(); }
 
   async spawn(descriptor, options) {
-    const node = await this.programs.spawn(descriptor, options);
+    const sessionId = descriptor?.["node/session"] ?? descriptor?.sessionId;
+    const node = await this.programs.spawn(descriptor, {
+      ...options, capabilities: this.capabilities.forSession(sessionId)
+    });
     this.runtime.registerNode({ id: node.nodeId, type: "generated/javascript", execution: "host" });
     return node;
   }
@@ -68,12 +78,19 @@ export class GraphHost {
     const ids = new Set([...hostNodes, ...sessionNodes]);
     for (const nodeId of ids) this.runtime.releaseNode(nodeId);
     await this.programs.releaseSession(sessionId);
+    // Grants are process-local authority, not persisted workspace state. A
+    // closed document/kernel must never leave them available to a future
+    // session reusing the same public id.
+    this.capabilities.revokeSession(sessionId);
     return ids.size;
   }
 
   async deliver({ targetNode, port, frame, connection }) {
     if (targetNode.execution === "host") {
-      return this.programs.deliver(targetNode.id, port, frame);
+      return this.programs.deliver(targetNode.id, port, frame, {
+        delivery: connection.delivery,
+        capacity: connection.capacity
+      });
     }
     if (targetNode.execution === "session") {
       return this.sessionRouter?.deliver(targetNode.sessionId, frame) ??
@@ -88,5 +105,13 @@ export class GraphHost {
 
   async receiveEmission({ nodeId, signal, data, meta = {} }) {
     return this.runtime.emit(nodeId, signal, data, meta);
+  }
+
+  async invokeCapability({ nodeId, sessionId, capability, method, args = [] }) {
+    const node = this.programs.requireNode(nodeId);
+    if (node.sessionId !== sessionId) {
+      throw new ProgramError("program/session-mismatch", `node ${nodeId} is not owned by ${sessionId}`, { nodeId, sessionId });
+    }
+    return this.capabilities.invokeForNode(sessionId, nodeId, capability, method, ...args);
   }
 }

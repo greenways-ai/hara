@@ -77,13 +77,12 @@ export class ProgramHost {
     return instance.info();
   }
 
-  async deliver(nodeId, port, frame) {
+  async deliver(nodeId, port, frame, options = {}) {
     const node = this.requireNode(nodeId);
-    try {
-      return await this.executor.deliver(nodeId, port, frame, node.generation);
-    } catch (error) {
-      throw programError("node/receive-failed", error, node, frame);
-    }
+    const mailbox = node.mailbox(port, options);
+    const receipt = mailbox.accept(frame);
+    this.drainMailbox(node, port, mailbox);
+    return receipt;
   }
 
   async call(nodeId, action, args, frame = null) {
@@ -99,6 +98,7 @@ export class ProgramHost {
     const node = this.nodes.get(nodeId);
     if (!node) return false;
     this.nodes.delete(nodeId);
+    node.close();
     this.programs.get(node.programId)?.nodes.delete(nodeId);
     const owned = this.sessionNodes.get(node.sessionId);
     owned?.delete(nodeId);
@@ -129,6 +129,26 @@ export class ProgramHost {
     return node;
   }
 
+  drainMailbox(node, port, mailbox) {
+    if (mailbox.draining) return;
+    mailbox.draining = true;
+    const drain = async () => {
+      try {
+        for (let frame = mailbox.take(); frame !== null; frame = mailbox.take()) {
+          try {
+            await this.executor.deliver(node.id, port, frame, node.generation);
+          } catch (error) {
+            this.emitDiagnostic("node/receive-failed", programError("node/receive-failed", error, node, frame));
+          }
+        }
+      } finally {
+        mailbox.draining = false;
+        if (!mailbox.closed && mailbox.size()) this.drainMailbox(node, port, mailbox);
+      }
+    };
+    void drain();
+  }
+
   emitDiagnostic(kind, detail) {
     this.diagnostics({ kind, ...detail });
   }
@@ -138,11 +158,12 @@ export class ProgramHost {
  * loading in a module Worker and exposes only the command protocol used by
  * ProgramHost. Capability RPC is deliberately left to GraphHost in phase 2. */
 export class ProgramWorkerExecutor {
-  constructor({ workerUrl, WorkerImpl = globalThis.Worker, onEmission = () => {}, onLog = () => {} } = {}) {
+  constructor({ workerUrl, WorkerImpl = globalThis.Worker, onEmission = () => {}, onLog = () => {}, onCapability = null } = {}) {
     if (!workerUrl || !WorkerImpl) throw new Error("ProgramWorkerExecutor requires workerUrl and Worker");
     this.worker = new WorkerImpl(workerUrl, { type: "module" });
     this.onEmission = onEmission;
     this.onLog = onLog;
+    this.onCapability = onCapability;
     this.nextId = 0;
     this.pending = new Map();
     this.worker.addEventListener("message", (event) => this.receive(event.data));
@@ -172,6 +193,7 @@ export class ProgramWorkerExecutor {
   receive(message) {
     if (message?.type === "emission") return this.onEmission(message);
     if (message?.type === "log") return this.onLog(message);
+    if (message?.type === "capability") return this.handleCapability(message);
     const pending = this.pending.get(message?.id);
     if (!pending) return;
     this.pending.delete(message.id);
@@ -179,6 +201,23 @@ export class ProgramWorkerExecutor {
       pending.reject(new ProgramError(message.error?.code ?? "program/worker-error", message.error?.message ?? "program worker error", message.error));
     } else {
       pending.resolve(message.value);
+    }
+  }
+
+  async handleCapability(message) {
+    if (!this.onCapability) {
+      this.worker.postMessage({ type: "capability-error", requestId: message.requestId, error: {
+        code: "program/capability-unavailable", message: "GraphHost has no capability adapter"
+      } });
+      return;
+    }
+    try {
+      const value = await this.onCapability(message);
+      this.worker.postMessage({ type: "capability-result", requestId: message.requestId, value });
+    } catch (error) {
+      this.worker.postMessage({ type: "capability-error", requestId: message.requestId, error: {
+        code: error?.code ?? "program/capability-error", message: String(error?.message ?? error)
+      } });
     }
   }
 
@@ -208,7 +247,15 @@ class ProgramEntry {
 }
 
 class NodeEntry {
-  constructor(node) { Object.assign(this, node); }
+  constructor(node) { Object.assign(this, node); this.mailboxes = new Map(); }
+  mailbox(port, options) {
+    const existing = this.mailboxes.get(port);
+    if (existing) return existing;
+    const mailbox = new HostMailbox(options);
+    this.mailboxes.set(port, mailbox);
+    return mailbox;
+  }
+  close() { for (const mailbox of this.mailboxes.values()) mailbox.close(); }
   descriptor() {
     return {
       nodeId: this.id,
@@ -230,6 +277,34 @@ class NodeEntry {
       programGeneration: this.programGeneration
     };
   }
+}
+
+class HostMailbox {
+  constructor({ delivery = "ordered", capacity = 16 } = {}) {
+    this.delivery = delivery;
+    this.capacity = Math.max(1, Number(capacity) || 1);
+    this.values = [];
+    this.draining = false;
+    this.closed = false;
+  }
+
+  accept(frame) {
+    if (this.closed) throw new ProgramError("node/released", "node mailbox is closed");
+    if (this.delivery === "latest") {
+      const dropped = this.values.length;
+      this.values.splice(0, this.values.length, frame);
+      return { accepted: true, dropped };
+    }
+    if (this.values.length >= this.capacity) {
+      throw new ProgramError("queue/overflow", `node input queue capacity ${this.capacity} exceeded`, { frame });
+    }
+    this.values.push(frame);
+    return { accepted: true, dropped: 0 };
+  }
+
+  take() { return this.values.shift() ?? null; }
+  size() { return this.values.length; }
+  close() { this.closed = true; this.values.length = 0; }
 }
 
 function programError(code, error, nodeOrProgram, frame = null) {
