@@ -460,6 +460,7 @@ body[data-background-name="space-invaders"] .welcome-copy h1 {
 }
 
 .background-editor-shell .code-highlight,
+.background-editor-shell .line-numbers,
 .background-editor-shell textarea {
   font-size: var(--background-editor-font-size, .68rem);
   line-height: 1.65;

@@ -285,6 +285,14 @@ runtimeTest("live source errors roll back and explicit save uses the local overl
   await expect(page.locator("[data-background-paredit]")).toHaveText("PAREDIT ON");
   await expect(page.locator("[data-background-apply]")).toBeVisible();
   await expect(page.locator("[data-background-highlight]")).toHaveCSS("overflow", "hidden");
+  const editorFontSize = () => editor.evaluate((input) => getComputedStyle(input).fontSize);
+  const lineNumberFontSize = () => page.locator("[data-background-line-numbers]")
+    .evaluate((gutter) => getComputedStyle(gutter).fontSize);
+  const initialEditorFontSize = await editorFontSize();
+  await expect.poll(lineNumberFontSize).toBe(initialEditorFontSize);
+  await page.locator("[data-background-font-increase]").click();
+  await expect.poll(editorFontSize).not.toBe(initialEditorFontSize);
+  await expect.poll(lineNumberFontSize).toBe(await editorFontSize());
   const goodSource = await editor.inputValue();
   await editor.evaluate((input) => {
     input.scrollTop = input.scrollHeight;
