@@ -12,6 +12,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: recursive
     - name: Set up Rust WASM toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -113,6 +115,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: recursive
     - name: Set up Rust WASM toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
