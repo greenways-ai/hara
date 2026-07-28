@@ -1,6 +1,5 @@
 import { HtaKeyword, HtaSymbol } from "../hta.js";
 import { defaultBootstrap } from "./boot.js";
-import { createStudioShell } from "../ui/studio-shell.js";
 
 /**
  * Shared, framework-free studio UI. `mountStudio(root, { broker })` builds
@@ -167,26 +166,47 @@ class StudioController {
   // -------------------------------------------------------------- dom build
 
   buildDom() {
-    this.chrome = createStudioShell(this.root);
-    const shell = this.chrome.shell;
-    const main = this.chrome.main;
+    const shell = el("div", "hara-studio");
+    shell.setAttribute("data-hara-studio", "shell");
 
-    // Runtime selectors remain controller state. Operational details and
-    // kernel actions are exposed through the compact health popover.
+    const head = el("div", "hara-studio-head");
+    head.append(el("span", "hara-kicker", "HARA STUDIO"), el("span", "hara-index", "ENV/01 · LIVE WASM"));
+
+    // Switcher strip: spaces and kernels, reusing the mock's steps styling.
+    const steps = el("div", "hara-studio-steps");
+    steps.setAttribute("data-hara-studio", "steps");
     this.spaceSelect = el("select", "hara-studio-select");
     this.spaceSelect.setAttribute("data-hara-studio", "space-select");
     this.spaceSelect.setAttribute("aria-label", "Active space");
     this.kernelSelect = el("select", "hara-studio-select");
     this.kernelSelect.setAttribute("data-hara-studio", "kernel-select");
     this.kernelSelect.setAttribute("aria-label", "Active kernel");
-    this.newFileAction = this.chrome.fileNewButton;
+    this.newSpaceAction = stepAction("NEW", "Create blank space");
+    this.importAction = stepAction("IMPORT", "Import a space from GitHub (owner/repo[@ref])");
+    this.newKernelAction = stepAction("NEW", "Create kernel");
+    this.closeKernelAction = stepAction("CLOSE", "Close active kernel");
+    this.consoleAction = stepAction("CONSOLE", "Show or hide the REPL console");
+    steps.append(
+      label("SPACE"),
+      this.spaceSelect,
+      this.newSpaceAction,
+      this.importAction,
+      label("KERNEL"),
+      this.kernelSelect,
+      this.newKernelAction,
+      this.closeKernelAction,
+      this.consoleAction
+    );
 
     // File tree.
     const tree = el("aside", "hara-frame hara-studio-tree");
     tree.setAttribute("data-hara-studio", "file-tree");
-    this.treeCount = el("span", "hara-index", "0");
+    this.treeSpace = el("span", "hara-index", "—");
+    this.newFileAction = action("NEW FILE", "Create a file in the active space");
     const treeHead = el("div", "hara-studio-pane-head");
-    treeHead.append(el("span", null, "EXPLORER"), this.treeCount);
+    const treeHeadRight = el("span");
+    treeHeadRight.append(this.treeSpace, text(" · "), this.newFileAction);
+    treeHead.append(el("span", null, "FILES"), treeHeadRight);
     this.treeBody = el("div", "hara-studio-tree-body");
     tree.append(treeHead, this.treeBody);
 
@@ -195,15 +215,11 @@ class StudioController {
     this.editorName = el("span", null, "—");
     this.editorName.setAttribute("data-hara-studio", "editor-name");
     this.dirtyFlag = el("span", "hara-studio-dirty", "");
-    this.saveAction = action("◆", "Save file to the active project");
-    this.saveAction.classList.add("hara-studio-pane-icon");
-    this.saveAction.setAttribute("aria-label", "Save file");
-    this.runAction = action("▶", "Evaluate the whole file");
-    this.runAction.classList.add("hara-studio-pane-icon");
-    this.runAction.setAttribute("aria-label", "Run file");
+    this.saveAction = action("SAVE", "Save file to the active space");
+    this.runAction = action("RUN", "Evaluate the whole file");
     const editorHead = el("div", "hara-studio-pane-head");
     const editorHeadRight = el("span");
-    editorHeadRight.append(this.dirtyFlag, this.runAction, this.saveAction);
+    editorHeadRight.append(this.dirtyFlag, this.runAction, this.saveAction, el("span", "hara-index", "EDITABLE"));
     editorHead.append(this.editorName, editorHeadRight);
     this.editor = el("textarea", "hara-studio-editor");
     this.editor.setAttribute("data-hara-studio", "editor");
@@ -232,6 +248,7 @@ class StudioController {
     entry.append(this.promptLabel, this.input);
     repl.append(replHead, this.replLog, entry);
 
+    const main = el("div", "hara-studio-main");
     this.main = main;
     main.append(tree, editorWrap, repl);
     this.canvasPanel = el("section", "hara-frame hara-studio-canvas-panel");
@@ -253,11 +270,28 @@ class StudioController {
       this.canvasRuntime.register("canvas/visualizer", this.canvas);
     }
 
+    // Status strip.
+    const status = el("div", "hara-strip hara-studio-status");
+    status.setAttribute("data-hara-studio", "status");
+    this.statusRuntime = el("b", null, "WASM · BOOTING");
+    this.statusKernel = el("b", null, "ROOT");
+    this.statusSpace = el("b", null, "—");
+    this.statusFiles = el("b", null, "0");
+    this.statusState = el("b", null, "BUSY");
+    status.append(
+      strip("RUNTIME", this.statusRuntime),
+      strip("KERNEL", this.statusKernel),
+      strip("SPACE", this.statusSpace),
+      strip("FILES", this.statusFiles),
+      strip("STATE", this.statusState)
+    );
+
     this.projectChooser = el("section", "hara-studio-chooser");
     this.projectChooser.setAttribute("data-hara-studio", "project-chooser");
     this.projectChooser.hidden = true;
-    shell.insertBefore(this.projectChooser, main);
+    shell.append(head, this.projectChooser, steps, main, status);
     this.shell = shell;
+    this.root.appendChild(shell);
     this.buildDialog();
   }
 
@@ -282,22 +316,13 @@ class StudioController {
 
   bindEvents() {
     this.spaceSelect.addEventListener("change", () => this.switchSpace(this.spaceSelect.value));
+    this.newSpaceAction.addEventListener("click", () => this.newSpace());
+    this.importAction.addEventListener("click", () => this.importGithub());
     this.kernelSelect.addEventListener("change", () => this.switchKernel(this.kernelSelect.value));
-    this.shell.addEventListener("hara:studio-action", (event) => {
-      const handlers = {
-        "project/select": () => this.showProjectChooser(),
-        "file/new": () => this.newFile(),
-        "project/import": () => this.importGithub(),
-        "console/toggle": () => this.toggleConsole(),
-        "view/explorer": () => this.setMobileView("explorer"),
-        "view/source": () => this.setMobileView("source"),
-        "view/output": () => this.setMobileView("output"),
-        "view/console": () => this.setMobileView("console"),
-        "kernel/new": () => this.newKernel(),
-        "kernel/close": () => this.closeKernel()
-      };
-      handlers[event.detail?.action]?.();
-    });
+    this.newKernelAction.addEventListener("click", () => this.newKernel());
+    this.closeKernelAction.addEventListener("click", () => this.closeKernel());
+    this.consoleAction.addEventListener("click", () => this.toggleConsole());
+    this.newFileAction.addEventListener("click", () => this.newFile());
     this.saveAction.addEventListener("click", () => this.saveFile());
     this.runAction.addEventListener("click", () => this.runFile());
     this.editor.addEventListener("input", () => {
@@ -321,21 +346,9 @@ class StudioController {
 
   toggleConsole() {
     const open = this.main.classList.toggle("is-console-open");
-    if (open) this.setMobileView("console", { render: false });
-    this.renderStatus();
+    this.consoleAction.classList.toggle("is-active", open);
+    this.consoleAction.setAttribute("aria-pressed", String(open));
     if (open) this.input.focus();
-  }
-
-  setMobileView(view, { render = true } = {}) {
-    for (const name of ["explorer", "source", "output", "console"]) this.main.classList.remove(`mobile-view-${name}`);
-    this.main.classList.add(`mobile-view-${view}`);
-    this.state.mobileView = view;
-    if (render) this.renderStatus();
-  }
-
-  async showProjectChooser() {
-    if (!(await this.confirmDiscard())) return;
-    this.renderProjectChooser(await this.listSpaces());
   }
 
   // ------------------------------------------------------------------- init
@@ -410,7 +423,6 @@ class StudioController {
     this.projectChooser.appendChild(cards);
     this.projectChooser.hidden = false;
     this.shell.classList.add("is-choosing-project");
-    this.renderStatus();
   }
 
   async openProject(project, { reset = false } = {}) {
@@ -430,14 +442,13 @@ class StudioController {
       }
     });
     this.state.space = space;
-    this.activeProject = project;
-    this.chrome.setProject(project.title);
     this.projectChooser.hidden = true;
     this.shell.classList.remove("is-choosing-project");
     this.renderSpaceSelect(await this.listSpaces());
     await this.refreshFiles();
     const preferred = project.main ? `/${project.main}` : this.state.files.find((path) => path.endsWith(".hal"));
     if (preferred && this.state.files.includes(preferred)) await this.openFile(preferred);
+    this.activeProject = project;
     const ownsCanvas = project.capabilities.some((value) => value === "canvas/2d" || value === "audio/playback");
     this.main.classList.toggle("has-canvas", ownsCanvas);
     this.canvasPanel.hidden = !ownsCanvas;
@@ -447,7 +458,6 @@ class StudioController {
       this.ampFrame.src = new URL("../../examples/music/hara-amp.html", import.meta.url).href;
     }
     if (ownsCanvas && project.category === "visual") await this.runFile();
-    this.renderStatus();
     this.logNote(`;; project ${project.title} · manifests loaded · recovery local`);
   }
 
@@ -802,19 +812,12 @@ class StudioController {
   }
 
   renderStatus() {
-    const state = this.state.busy > 0 ? "Busy" : this.state.failed ? "Error" : "Idle";
-    this.chrome.update({
-      project: this.activeProject?.title ?? "Choose project",
-      runtime: this.state.runtime,
-      kernel: this.state.kernel,
-      space: this.state.space ?? "—",
-      files: this.state.files.length,
-      state,
-      consoleOpen: this.main.classList.contains("is-console-open"),
-      outputAvailable: !this.canvasPanel.hidden,
-      mobileView: this.state.mobileView ?? "source"
-    });
-    this.treeCount.textContent = String(this.state.files.length);
+    this.statusRuntime.textContent = `WASM · ${this.state.runtime}`;
+    this.statusKernel.textContent = this.state.kernel;
+    this.statusSpace.textContent = this.state.space ?? "—";
+    this.statusFiles.textContent = String(this.state.files.length);
+    this.statusState.textContent = this.state.busy > 0 ? "BUSY" : this.state.failed ? "ERROR" : "IDLE";
+    this.treeSpace.textContent = this.state.space ?? "—";
   }
 
   // ----------------------------------------------------------------- handle
@@ -826,7 +829,7 @@ class StudioController {
   }
 
   unmount() {
-    this.chrome.destroy();
+    this.shell.remove();
   }
 }
 

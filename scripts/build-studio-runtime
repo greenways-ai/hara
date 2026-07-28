@@ -35,7 +35,6 @@ cp "$RAW_WASM" "$STAGE/rust/hara.wasm"
 cp "$ROOT/website/vendor/hara-ui/tokens.css" \
    "$ROOT/website/vendor/hara-ui/components.css" \
    "$ROOT/website/vendor/hara-ui/studio.css" \
-   "$ROOT/website/vendor/hara-ui/studio-shell.js" \
    "$STAGE/rust/ui/"
 cp "$ROOT/rust/web/hta.js" "$ROOT/rust/web/hta-worker.js" "$STAGE/rust/"
 cp "$ROOT"/rust/web/studio/*.js "$ROOT/rust/web/studio/studio.css" "$STAGE/rust/studio/"

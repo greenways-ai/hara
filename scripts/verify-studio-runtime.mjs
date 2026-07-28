@@ -23,7 +23,6 @@ const required = [
   "rust/ui/tokens.css",
   "rust/ui/components.css",
   "rust/ui/studio.css",
-  "rust/ui/studio-shell.js",
   "rust/studio/hal/store.hal",
   "rust/studio/hal/fs.hal",
   "rust/studio/hal/space.hal",
