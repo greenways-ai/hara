@@ -85,6 +85,44 @@ test("canonical Hara assets and compact Start button survive responsive widths",
   expect(extraSmall.width).toBeGreaterThan(320);
 });
 
+
+test("kernel loader does not move the hero callout", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/website/");
+  const loader = page.locator("[data-kernel-loading]");
+  const start = page.locator("[data-start]");
+  await loader.evaluate((node) => { node.hidden = true; });
+  const before = await start.boundingBox();
+  await loader.evaluate((node) => { node.hidden = false; });
+  const during = await start.boundingBox();
+  await loader.evaluate((node) => { node.hidden = true; });
+  const after = await start.boundingBox();
+  expect(Math.abs(during.y - before.y)).toBeLessThan(0.5);
+  expect(Math.abs(after.y - before.y)).toBeLessThan(0.5);
+});
+
+test("mobile editor toolbar uses icons instead of visible text", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/website/");
+  const styles = await page.locator(".editor-toolbar").evaluate((toolbar) => {
+    const paredit = toolbar.querySelector("[data-paredit]");
+    const save = toolbar.querySelector("[data-save]");
+    const runIcon = toolbar.querySelector("[data-run] > span");
+    return {
+      pareditFontSize: getComputedStyle(paredit).fontSize,
+      pareditIcon: getComputedStyle(paredit, "::before").content,
+      saveFontSize: getComputedStyle(save).fontSize,
+      saveIcon: getComputedStyle(save, "::before").content,
+      runIconSize: parseFloat(getComputedStyle(runIcon).fontSize)
+    };
+  });
+  expect(styles.pareditFontSize).toBe("0px");
+  expect(styles.pareditIcon).toContain("()");
+  expect(styles.saveFontSize).toBe("0px");
+  expect(styles.saveIcon).toContain("⇩");
+  expect(styles.runIconSize).toBeGreaterThan(0);
+});
+
 const builtRuntime = new URL("../../target/www/runtime/hara.wasm", import.meta.url);
 const runtimeTest = existsSync(builtRuntime) ? test : test.skip;
 
