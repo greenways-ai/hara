@@ -19,12 +19,12 @@
 ;;
 ;; Authority: specs/hara/data/foundation.edn (:runtime-libraries std.foundation.file)
 ;; ============================================================================
-(ns std.foundation.file
-  (:config
-   {:builtins [resolve
-               read
-               write
-               exists?
-               list
-               mkdir
-               delete]}))
+(ns std.foundation.file)
+
+(defn resolve [root path] (std.native.File/resolve root path))
+(defn read [path] (std.native.File/read path))
+(defn write [path contents] (std.native.File/write path contents))
+(defn exists? [path] (std.native.File/exists? path))
+(defn list [path] (std.native.File/list path))
+(defn mkdir [path] (std.native.File/mkdir path))
+(defn delete [path] (std.native.File/delete path))

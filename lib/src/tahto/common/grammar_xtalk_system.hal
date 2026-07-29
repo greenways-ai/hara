@@ -1,5 +1,5 @@
-(ns talo.common.grammar-xtalk-system
-  (:require [talo.common.grammar-xtalk :as xtalk]))
+(ns tahto.common.grammar-xtalk-system
+  (:require [tahto.common.grammar-xtalk :as xtalk]))
 
 (def +xtalk-area-order+
   [:xtalk-common

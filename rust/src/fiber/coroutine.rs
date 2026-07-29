@@ -200,16 +200,19 @@ pub fn resume_protocol_form(
 }
 
 pub fn yield_form(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step {
+    if v.len() != 2 {
+        return k(Err("coroutine/yield expects one value".into()));
+    }
     values_cps(
         Rc::new(v[1..].to_vec()),
         0,
         Vec::new(),
         env,
         Box::new(move |r| match r {
-            Ok(values) => match pack_values(values) {
-                Ok(packed) => Step::Yield(packed, Box::new(move |value| k(Ok(value)))),
-                Err(e) => k(Err(e)),
-            },
+            Ok(mut values) => Step::Yield(
+                values.remove(0),
+                Box::new(move |value| k(Ok(value))),
+            ),
             Err(e) => k(Err(e)),
         }),
     )

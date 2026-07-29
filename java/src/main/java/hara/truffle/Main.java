@@ -491,11 +491,25 @@ public final class Main {
         String className = ((Keyword) testCase.lookup(Keyword.create("class"))).getName();
         IMapType expected = (IMapType) testCase.lookup(Keyword.create("expect"));
         if ("reader".equals(className)) {
-          Object actual = Parser.LispReader.readString(form, null);
-          Object expectedForm = expected.lookup(Keyword.create("form"));
-          if (expectedForm != null && !expectedForm.toString().equals(G.display(actual))) {
-            throw new IllegalStateException(
-                id + " expected " + expectedForm + ", got " + G.display(actual));
+          Object expectedError = expected.lookup(Keyword.create("error"));
+          Object expectedMessage = expected.lookup(Keyword.create("message"));
+          try {
+            Object actual = Parser.LispReader.readString(form, null);
+            if (expectedError != null) {
+              throw new IllegalStateException(id + " expected a reader error");
+            }
+            Object expectedForm = expected.lookup(Keyword.create("form"));
+            if (expectedForm != null && !expectedForm.toString().equals(G.display(actual))) {
+              throw new IllegalStateException(
+                  id + " expected " + expectedForm + ", got " + G.display(actual));
+            }
+          } catch (RuntimeException readerError) {
+            if (expectedError == null) throw readerError;
+            if (expectedMessage != null
+                && !readerError.getMessage().contains(expectedMessage.toString())) {
+              throw new IllegalStateException(
+                  id + " reader error mismatch: expected message containing " + expectedMessage);
+            }
           }
         } else {
           String setup = (String) testCase.lookup(Keyword.create("setup"));

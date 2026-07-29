@@ -1,0 +1,16 @@
+(ns std.foundation.json)
+
+(defn read
+  "Reads one strict JSON value."
+  [source]
+  (std.native.Json/read source))
+
+(defn write
+  "Returns the compact JSON representation of value."
+  [value]
+  (std.native.Json/write value))
+
+(defn pretty
+  "Returns the indented JSON representation of value."
+  [value opts]
+  (std.native.Json/pretty value opts))

@@ -17,12 +17,7 @@
 ;;   * specs/hara/data/foundation.edn — the namespace boundary (what exists).
 ;;   * specs/hara/data/typed.edn      — the schema grammar (how types are written).
 ;; ============================================================================
-(ns std.foundation
-  (:config
-   {:builtins
-    [+ - < <= = > >= apply array? assoc compare concat conj cons count
-     empty gensym get iter list list? map? mod not= nth reduce set?
-     vec vector?]}))
+(ns std.foundation)
 
 ;; ---------------------------------------------------------------------------
 ;; Functions and composition
@@ -475,6 +470,54 @@
 ;; Truth and fixed-point combinators retained from Foundation
 ;; ---------------------------------------------------------------------------
 
+(def ^{:schema :num :doc "Euler's number."} E 2.718281828459045)
+
+(def ^{:schema :num
+       :doc "The ratio of a circle's circumference to its diameter."}
+  PI
+  3.141592653589793)
+
+(defn ^{:schema [:fn [:num] :int]}
+  long
+  "Converts a numeric value to a signed 64-bit integer by truncating toward zero."
+  [value]
+  (std.native.Numbers/long value))
+
+(defn ^{:schema [:fn [:num] :float]}
+  double
+  "Converts a numeric value to an IEEE-754 double."
+  [value]
+  (std.native.Numbers/double value))
+
+(defn bit-and [& values] (apply std.native.Bits/and values))
+(defn bit-or [& values] (apply std.native.Bits/or values))
+(defn bit-xor [& values] (apply std.native.Bits/xor values))
+(defn bit-not [value] (std.native.Bits/not value))
+(defn bit-shift-left [& values]
+  (apply std.native.Bits/shift-left values))
+(defn bit-shift-right [& values]
+  (apply std.native.Bits/shift-right values))
+
+(defn abs [value] (std.native.Maths/abs value))
+(defn acos [value] (std.native.Maths/acos value))
+(defn acosh [value] (std.native.Maths/acosh value))
+(defn asin [value] (std.native.Maths/asin value))
+(defn asinh [value] (std.native.Maths/asinh value))
+(defn atan [value] (std.native.Maths/atan value))
+(defn atan2 [y x] (std.native.Maths/atan2 y x))
+(defn atanh [value] (std.native.Maths/atanh value))
+(defn ceil [value] (std.native.Maths/ceil value))
+(defn cos [value] (std.native.Maths/cos value))
+(defn cosh [value] (std.native.Maths/cosh value))
+(defn exp [value] (std.native.Maths/exp value))
+(defn floor [value] (std.native.Maths/floor value))
+(defn pow [value exponent] (std.native.Maths/pow value exponent))
+(defn sin [value] (std.native.Maths/sin value))
+(defn sinh [value] (std.native.Maths/sinh value))
+(defn sqrt [value] (std.native.Maths/sqrt value))
+(defn tan [value] (std.native.Maths/tan value))
+(defn tanh [value] (std.native.Maths/tanh value))
+
 (defn ^{:schema [:fn [& :any] :bool]}
   T
   "Ignores its arguments and returns true."
@@ -899,6 +942,27 @@
 ;; Macros
 ;; ---------------------------------------------------------------------------
 
+;; ---------------------------------------------------------------------------
+;; Application
+;; ---------------------------------------------------------------------------
+
+(defn apply-in
+  "Invokes value in runtime after IApplicable input and output transforms."
+  [value runtime args]
+  (let [input (IApplicable/transform-in value runtime args)
+        result (IApplicable/apply-in value runtime input)]
+    (IApplicable/transform-out value runtime args result)))
+
+(defn apply-as
+  "Invokes value using its default IApplicable runtime."
+  [value args]
+  (apply-in value (IApplicable/apply-default value) args))
+
+(defn invoke-as
+  "Invokes value using its default IApplicable runtime and arguments."
+  [value & args]
+  (apply-as value args))
+
 (defn- ^{:schema [:fn [:any :any] :vector]}
   doto-forms
   "Builds the target-first calls used by doto."
@@ -953,6 +1017,86 @@
    last argument."
   [value & clauses]
   (conditional-thread-form value clauses true))
+
+(defmacro with-ns
+  "Evaluates body forms in an existing namespace and restores the caller."
+  [namespace & forms]
+  `(eval-in-ns ~namespace '~(vec forms)))
+
+(defmacro intern-in
+  "Copies selected Vars into a namespace as its public façade."
+  [ns? & syms]
+  (let [implicit? (if (vector? ns?) true (if (namespace ns?) true false))
+        target (if implicit? (list 'current-namespace) ns?)
+        entries (if implicit? (apply list ns? syms) syms)]
+    (vec
+     (map
+      (fn [entry]
+        (let [to (if (vector? entry) (first entry) entry)
+              from (if (vector? entry) (second entry) entry)]
+          (list 'intern-var
+                target
+                (list 'quote (symbol (name to)))
+                (list 'var from))))
+      entries))))
+
+(defmacro intern-all
+  "Copies every public Var from each source namespace into the current namespace."
+  [& namespaces]
+  (vec
+   (mapcat
+    (fn [source]
+      (map
+       (fn [entry]
+         (list 'intern-var
+               (list 'current-namespace)
+               (list 'quote entry)
+               (list 'var (symbol source (name entry)))))
+       (keys (ns-publics source))))
+    namespaces)))
+
+(def ^:dynamic *template-meta* nil)
+
+(defmacro with:template-meta
+  "Binds template metadata for the duration of body."
+  [metadata & body]
+  `(binding [*template-meta* ~metadata] ~@body))
+
+(defn template-meta
+  "Returns metadata supplied to the active template expansion."
+  []
+  *template-meta*)
+
+(defmacro template-vars
+  "Evaluates template forms for named source Vars."
+  [spec & entries]
+  (let [template (first spec)
+        metadata (second spec)
+        forms
+        (map
+         (fn [entry]
+           (let [to (if (vector? entry) (first entry) (symbol (name entry)))
+                 from (if (vector? entry) (second entry) entry)
+                 args (if (vector? entry) (vec (drop 2 entry)) [])]
+             (list 'eval
+                   (apply list template (list 'quote to) (list 'var from) args))))
+         entries)]
+    (list 'binding [ '*template-meta* metadata] (apply list 'do forms))))
+
+(defmacro template-entries
+  "Evaluates template forms for literal entries."
+  [spec & entries]
+  (let [template (first spec)
+        metadata (second spec)
+        forms (map (fn [entry]
+                     (list 'eval (list template (list 'quote entry))))
+                   entries)]
+    (list 'binding [ '*template-meta* metadata] (apply list 'do forms))))
+
+(defn template-ensure
+  "Returns generated template Vars after the caller has materialized them."
+  [symbols variables]
+  variables)
 
 (defmacro code-line
   "Expands to the line number of the invocation form."

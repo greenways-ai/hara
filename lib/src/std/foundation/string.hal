@@ -1,47 +1,56 @@
-;; ============================================================================
-;; std.foundation.string — portable string library (foundation boundary).
-;;
-;; This namespace is a pure activation declaration: every public Var is a host
-;; builtin activated by the :builtins clause below. Kind, docstring, and
-;; arglists come from the host export catalog (@HaraExport); no Hara-level
-;; definitions live here. Schema annotations for these symbols belong in
-;; std.typed.core-sigs (specs/hara/data/typed.edn).
-;;
-;; Contract (specs/hara/data/foundation.edn, :semantics :string):
-;;   * All indexes and offsets are Unicode code points, not UTF-16 units:
-;;     length, char-at, slice, index-of, last-index-of, and regex offsets.
-;;   * split, replace, and replace-first treat their pattern argument as a
-;;     literal string, not a regex.
-;;   * encode-utf8 / decode-utf8 convert between strings and byte vectors.
-;;
-;; Authority: specs/hara/data/foundation.edn (:runtime-libraries std.foundation.string)
-;; ============================================================================
-(ns std.foundation.string
-  (:config
-   {:builtins [length
-               blank?
-               includes?
-               starts-with?
-               ends-with?
-               char-at
-               slice
-               index-of
-               last-index-of
-               join
-               split
-               split-lines
-               repeat
-               replace
-               replace-first
-               trim
-               trim-left
-               trim-right
-               upper
-               lower
-               capitalize
-               decapitalize
-               pad-left
-               pad-right
-               reverse
-               encode-utf8
-               decode-utf8]}))
+(ns std.foundation.string)
+
+(defn length [value] (std.native.String/length value))
+(defn blank? [value] (std.native.String/blank? value))
+(defn includes? [value part] (std.native.String/includes? value part))
+(defn starts-with? [value part] (std.native.String/starts-with? value part))
+(defn ends-with? [value part] (std.native.String/ends-with? value part))
+(defn char-at [value index] (std.native.String/char-at value index))
+(defn slice
+  ([value start] (std.native.String/slice value start))
+  ([value start end] (std.native.String/slice value start end)))
+(defn index-of
+  ([value part] (std.native.String/index-of value part))
+  ([value part offset] (std.native.String/index-of value part offset)))
+(defn last-index-of
+  ([value part] (std.native.String/last-index-of value part))
+  ([value part offset] (std.native.String/last-index-of value part offset)))
+(defn join [separator values] (std.native.String/join separator values))
+(defn split [value separator] (std.native.String/split value separator))
+(defn split-lines [value] (std.native.String/split-lines value))
+(defn repeat [value count] (std.native.String/repeat value count))
+(defn replace [value match replacement]
+  (std.native.String/replace value match replacement))
+(defn replace-first [value match replacement]
+  (std.native.String/replace-first value match replacement))
+(defn trim [value] (std.native.String/trim value))
+(defn trim-left [value] (std.native.String/trim-left value))
+(defn trim-right [value] (std.native.String/trim-right value))
+(defn upper [value] (std.native.String/upper value))
+(defn lower [value] (std.native.String/lower value))
+(defn capitalize [value] (std.native.String/capitalize value))
+(defn decapitalize [value] (std.native.String/decapitalize value))
+(defn pad-left [value length padding]
+  (std.native.String/pad-left value length padding))
+(defn pad-right [value length padding]
+  (std.native.String/pad-right value length padding))
+(defn reverse [value] (std.native.String/reverse value))
+(defn encode-utf8 [value] (std.native.String/encode-utf8 value))
+(defn decode-utf8 [value] (std.native.String/decode-utf8 value))
+
+;; Compatibility spellings remain HAL wrappers over the same native boundary.
+(defn len [value] (length value))
+(defn count [value] (length value))
+(defn char [value index] (char-at value index))
+(defn substring
+  ([value start] (slice value start))
+  ([value start end] (slice value start end)))
+(defn to-upper [value] (upper value))
+(defn to-lower [value] (lower value))
+(defn encode [value] (encode-utf8 value))
+(defn decode [value] (decode-utf8 value))
+(defn comp [left right] (std.native.String/comp left right))
+(defn lt? [left right] (std.native.String/lt? left right))
+(defn gt? [left right] (std.native.String/gt? left right))
+(defn to-fixed [value precision]
+  (std.native.String/to-fixed value precision))

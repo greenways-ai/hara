@@ -1,5 +1,5 @@
-(ns talo.common.book-entry
-  (:require [talo.common.util :as ut]))
+(ns tahto.common.book-entry
+  (:require [tahto.common.util :as ut]))
 
 (defn- filter-values
   [m]

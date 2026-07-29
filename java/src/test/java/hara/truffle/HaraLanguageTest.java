@@ -5,7 +5,6 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import hara.kernel.base.RT;
-import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
@@ -370,14 +369,13 @@ public class HaraLanguageTest {
       assertTrue(context.eval(HaraLanguage.ID, "(= 1 1.0)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(not= 1 2)").asBoolean());
       assertEquals(1, context.eval(HaraLanguage.ID, "(mod 7 3)").asLong());
-      assertTrue(context.eval(HaraLanguage.ID, "(< 1N 2N)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(< 1 2 3)").asBoolean());
       assertTrue(!context.eval(HaraLanguage.ID, "(< 1 3 2)").asBoolean());
-      assertTrue(context.eval(HaraLanguage.ID, "(< 1N 1.1M)").asBoolean());
-      assertTrue(context.eval(HaraLanguage.ID, "(= 1N 1.0M)").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(< 1 1.1)").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(= 1 1.0)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(= 1 1 1)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(not= 1 1 2)").asBoolean());
-      assertTrue(context.eval(HaraLanguage.ID, "(< 1.2M 1.3M)").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(< 1.2 1.3)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(< 1 2)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(apply < [1 2 3])").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(reduce < [1 2])").asBoolean());
@@ -389,9 +387,11 @@ public class HaraLanguageTest {
   @Test
   public void numericOverflowAndDivisionErrorsAreExplicit() {
     try (Context context = context()) {
-      Value overflow = context.eval(HaraLanguage.ID, "(+ 9223372036854775807 1)");
-      assertEquals(
-          BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.ONE), overflow.as(BigInteger.class));
+      PolyglotException overflow =
+          assertThrows(
+              PolyglotException.class,
+              () -> context.eval(HaraLanguage.ID, "(+ 9223372036854775807 1)"));
+      assertTrue(overflow.getMessage().contains("overflow"));
       PolyglotException divideByZero =
           assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(/ 1 0)"));
       assertTrue(divideByZero.getMessage().contains("Divide by zero"));
@@ -416,7 +416,7 @@ public class HaraLanguageTest {
       assertTrue(context.eval(HaraLanguage.ID, "(= ##NaN ##NaN)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(not= ##NaN 1)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(= -0.0 0.0)").asBoolean());
-      assertTrue(context.eval(HaraLanguage.ID, "(= 1.0M 1.00M)").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(= 1.0 1.00)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(= ##Inf ##Inf)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(< 1 ##Inf)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(not= ##Inf 1)").asBoolean());
@@ -499,16 +499,13 @@ public class HaraLanguageTest {
   @Test
   public void convertsBetweenNumericRepresentationsExplicitly() {
     try (Context context = context()) {
-      assertEquals(
-          BigInteger.ONE, context.eval(HaraLanguage.ID, "(bigint 1.9)").as(BigInteger.class));
-
-      Value decimal = context.eval(HaraLanguage.ID, "(bigdec 1.2300)");
-      assertTrue(decimal.hasMembers());
-      assertEquals("1.23", decimal.getMember("value").asString());
-
-      assertEquals(2.25, context.eval(HaraLanguage.ID, "(+ (double 1.25M) 1.0)").asDouble(), 0.0);
-      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(+ 1.25M 1.0)"));
-      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(bigint \"1\")"));
+      assertEquals(1, context.eval(HaraLanguage.ID, "(long 1.9)").asLong());
+      assertEquals(-1, context.eval(HaraLanguage.ID, "(long -1.9)").asLong());
+      assertEquals(2.0, context.eval(HaraLanguage.ID, "(double 2)").asDouble(), 0.0);
+      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(long ##NaN)"));
+      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(long \"1\")"));
+      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "1N"));
+      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "1M"));
     }
   }
 

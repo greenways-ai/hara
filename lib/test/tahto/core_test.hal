@@ -1,0 +1,28 @@
+(ns tahto.core-test
+  (:require [std.lib.test :as test]
+            [std.lib.walk :as walk]
+            [tahto.core :as tahto]
+            [tahto.protocol.grammar :as protocol]))
+
+(defstruct GrammarFixture [reserved default define])
+
+(extend-type GrammarFixture protocol/IGrammar
+  (grammar-reserved [grammar symbol] (get (:reserved grammar) symbol))
+  (grammar-default [grammar] (:default grammar))
+  (grammar-define [grammar] (:define grammar)))
+
+(def results
+  [(test/check "protocol dispatch"
+               (protocol-call protocol/IGrammar grammar-reserved
+                              (GrammarFixture {'add {:emit :infix}} {} {}) 'add)
+               {:emit :infix})
+   (test/check "prewalk replaces nested values"
+               (walk/prewalk-replace {'a 'x} '(a (a b)))
+               '(x (x b)))
+   (test/check "resolves namespaced code symbols"
+               (tahto/to-resolve '(u/add 1 2) nil
+                                 {'L.core {:code {'add {:id 'add :op 'defn}}}}
+                                 {:module {:id 'L.current :link '{u L.core}}})
+               '(L.core/add 1 2))])
+
+(test/print-results results)

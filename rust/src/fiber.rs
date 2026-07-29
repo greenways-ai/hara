@@ -64,12 +64,20 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "<=",
     ">=",
     ".",
+    "abs",
+    "acos",
+    "acosh",
     "alter-var-root",
     "any?",
     "apply",
     "array",
+    "asin",
+    "asinh",
     "assoc",
     "assoc-in",
+    "atan",
+    "atan2",
+    "atanh",
     "binding",
     "bit-and",
     "bit-or",
@@ -85,6 +93,7 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "bytes/s8",
     "bytes/slice",
     "bytes/u8",
+    "ceil",
     "comp",
     "comp2",
     "comp3",
@@ -93,6 +102,8 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "conj",
     "cons",
     "constantly",
+    "cos",
+    "cosh",
     "count",
     "cycle",
     "declare",
@@ -109,6 +120,7 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "eval",
     "even?",
     "every?",
+    "exp",
     "false?",
     "file/read",
     "file/resolve",
@@ -119,6 +131,7 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "file/delete",
     "filter",
     "first",
+    "floor",
     "fn",
     "fn*",
     "get",
@@ -172,6 +185,7 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "partition-pair",
     "pointer",
     "pos?",
+    "pow",
     "promise",
     "promise/run",
     "promise?",
@@ -194,6 +208,8 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "set",
     "set!",
     "set?",
+    "sin",
+    "sinh",
     "socket/close",
     "socket/connect",
     "socket/send",
@@ -227,8 +243,11 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "str/pad-left",
     "str/pad-right",
     "str/reverse",
+    "sqrt",
     "symbol",
     "take",
+    "tan",
+    "tanh",
     "throw",
     "true?",
     "try",
@@ -594,7 +613,7 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
                 v[1].clone(),
                 env,
                 Box::new(move |r| match r {
-                    Ok(x) => k(Err(format!("thrown: {}", x.display()))),
+                    Ok(x) => k(Err(thrown_error(x))),
                     Err(x) => k(Err(x)),
                 }),
             )
@@ -865,7 +884,7 @@ fn finish_try(
                 Form::Symbol(n) => n.clone(),
                 _ => return k(Err("catch name must be symbol".into())),
             };
-            let old = env.borrow_mut().insert(n.clone(), Value::String(x));
+            let old = env.borrow_mut().insert(n.clone(), caught_error(&x));
             let e = env.clone();
             one(
                 p[body_index].clone(),
@@ -920,7 +939,7 @@ fn application(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) 
         _ => None,
     };
     if let Some(name) = head_symbol {
-        if CORE_SPECIAL_FORMS.contains(&name) {
+        if CORE_SPECIAL_FORMS.contains(&name) || name.starts_with("std.native.") {
             return eval_special_form(v, env, k);
         }
     }

@@ -78,28 +78,87 @@ impl Runtime {
         events: Rc<RefCell<VecDeque<Vec<u8>>>>,
     ) -> Self {
         let namespaces = kernel::NamespaceRegistry::new("user");
-        let json_namespace = namespaces.find_or_create("std.foundation.json");
-        json_namespace.intern(
+        let foundation_namespace = namespaces.find_or_create("std.foundation");
+        for (name, value) in core::exception_function_values() {
+            foundation_namespace.intern(name, value);
+        }
+        for (name, protocol) in core::foundation_protocol_values() {
+            foundation_namespace.intern(&name, protocol.clone());
+            namespaces
+                .find_or_create(core::builtin_protocol_namespace(&name))
+                .intern(name, protocol);
+        }
+        for (namespace, name, method) in core::builtin_protocol_method_values() {
+            namespaces.find_or_create(namespace).intern(name, method);
+        }
+        let native_namespace = namespaces.find_or_create("std.native");
+        for (name, descriptor) in core::native_type_values() {
+            let var = native_namespace.intern(&name, descriptor);
+            foundation_namespace.map_var(lang::data::Symbol::parse(&name), var);
+        }
+        let native_json = namespaces.find_or_create("std.native.Json");
+        let json_read = native_json.intern(
             "read",
-            core::native_function("json/read", 1, |arguments| match arguments.as_slice() {
-                [Value::String(source)] => json::read(source),
-                _ => Err("json/read expects a string".into()),
-            }),
+            core::native_function(
+                "std.native.Json/read",
+                1,
+                |arguments| match arguments.as_slice() {
+                    [Value::String(source)] => json::read(source),
+                    _ => Err("json/read expects a string".into()),
+                },
+            ),
         );
-        json_namespace.intern(
+        let json_write = native_json.intern(
             "write",
-            core::native_function("json/write", 1, |arguments| {
+            core::native_function("std.native.Json/write", 1, |arguments| {
                 json::write(&arguments[0]).map(Value::String)
             }),
         );
-        json_namespace.intern(
-            "write-pp",
-            core::native_function("json/write-pp", 1, |arguments| {
+        let json_pretty = native_json.intern(
+            "pretty",
+            core::native_function("std.native.Json/pretty", 2, |arguments| {
+                if core::map_entries(&arguments[1]).is_none() {
+                    return Err("json/pretty expects an options map".into());
+                }
                 json::write_pretty(&arguments[0]).map(Value::String)
             }),
         );
+        let json_namespace = namespaces.find_or_create("std.foundation.json");
+        json_namespace.map_var(lang::data::Symbol::parse("read"), json_read);
+        json_namespace.map_var(lang::data::Symbol::parse("write"), json_write);
+        json_namespace.map_var(lang::data::Symbol::parse("pretty"), json_pretty);
+        let native_edn = namespaces.find_or_create("std.native.Edn");
+        let edn_read = native_edn.intern(
+            "read",
+            core::native_function(
+                "std.native.Edn/read",
+                1,
+                |arguments| match arguments.as_slice() {
+                    [Value::String(source)] => core::read_edn(source),
+                    _ => Err("edn/read expects a string".into()),
+                },
+            ),
+        );
+        let edn_namespace = namespaces.find_or_create("std.foundation.edn");
+        edn_namespace.map_var(lang::data::Symbol::parse("read"), edn_read);
+        edn_namespace.intern(
+            "write",
+            core::native_function("edn/write", 1, |arguments| {
+                Ok(Value::String(arguments[0].display()))
+            }),
+        );
+        edn_namespace.intern(
+            "pretty",
+            core::native_function("edn/pretty", 2, |arguments| {
+                if core::map_entries(&arguments[1]).is_none() {
+                    return Err("edn/pretty expects an options map".into());
+                }
+                Ok(Value::String(arguments[0].display()))
+            }),
+        );
+        core::refer_startup_defaults(&namespaces, "user");
         let mut env = HashMap::new();
-        core::refresh_namespace_environment(&namespaces, &mut env);
+        core::select_namespace_environment(&namespaces, &mut env, "user");
         Self {
             env,
             namespaces,
@@ -1054,7 +1113,13 @@ mod tests {
             .expect("completion event");
         match super::hta::decode(&frame).unwrap() {
             crate::core::Value::Vector(values) => {
-                assert_eq!(values[0], crate::core::Value::Number(0), "eval failed");
+                assert_eq!(
+                    values[0],
+                    crate::core::Value::Number(0),
+                    "eval failed for task {}: {}",
+                    values[1].display(),
+                    values[2].display()
+                );
                 assert_eq!(values[1], crate::core::Value::Number(task as i64));
                 values[2].clone()
             }
@@ -1141,8 +1206,17 @@ mod tests {
     }
 
     #[test]
-    fn raw_kernels_expose_the_foundation_json_namespace() {
+    fn raw_kernels_expose_the_foundation_data_namespaces() {
         let mut runtime = Runtime::new();
+        assert!(runtime.env.contains_key("edn/write"));
+        assert!(runtime.env.contains_key("ICount"));
+        for native_type in [
+            "Maths", "Numbers", "Bits", "String", "Bytes", "File", "Socket", "Promise",
+            "Coroutine", "Array", "Object", "Runtime", "Printer", "Edn", "Json", "Regex",
+            "UUID", "Error",
+        ] {
+            assert!(runtime.env.contains_key(native_type), "{native_type}");
+        }
         runtime
             .start_fiber(
                 1,
@@ -1153,6 +1227,67 @@ mod tests {
             completion_value(&mut runtime, 1),
             Value::String("{\"answer\":42}".into())
         );
+        runtime
+            .start_fiber(2, "(std.foundation.edn/read \"{:answer 42}\")")
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 2).display(),
+            "{:answer 42}"
+        );
+        runtime
+            .start_fiber(
+                3,
+                "(std.foundation.json/pretty {\"answer\" 42} {})",
+            )
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 3),
+            Value::String("{\n  \"answer\": 42\n}".into())
+        );
+        runtime
+            .start_fiber(4, "(std.foundation.edn/pretty {:answer 42} {})")
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 4),
+            Value::String("{:answer 42}".into())
+        );
+        runtime
+            .start_fiber(
+                5,
+                "(try \
+                   (throw (std.foundation/ex-info \"bad input\" {:kind :invalid})) \
+                   (catch Throwable error \
+                     [(std.foundation/ex-message error) \
+                      (std.foundation/ex-data error)]))",
+            )
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 5).display(),
+            "[\"bad input\" {:kind :invalid}]"
+        );
+        runtime
+            .start_fiber(6, "(edn/write {:answer 42})")
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 6),
+            Value::String("{:answer 42}".into())
+        );
+        runtime.start_fiber(7, "(= Maths std.native/Maths)").unwrap();
+        assert_eq!(completion_value(&mut runtime, 7), Value::Bool(true));
+        runtime
+            .start_fiber(
+                8,
+                "[(= Edn std.native/Edn std.foundation/Edn) \
+                  (= Json std.native/Json std.foundation/Json) \
+                  (= Maths std.native/Maths std.foundation/Maths)]",
+            )
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 8).display(),
+            "[true true true]"
+        );
+        runtime.start_fiber(9, "(ICount/count [1 2 3])").unwrap();
+        assert_eq!(completion_value(&mut runtime, 9), Value::Number(3));
     }
 
     #[test]

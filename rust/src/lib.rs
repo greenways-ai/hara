@@ -248,6 +248,9 @@ impl Runtime {
             "list",
             core::native_variadic_function("list", |values| Ok(core::Value::List(values.into()))),
         );
+        for (name, value) in core::exception_function_values() {
+            foundation.intern(name, value);
+        }
         for (name, protocol) in core::foundation_protocol_values() {
             foundation.intern(&name, protocol.clone());
             let namespace =
@@ -258,6 +261,11 @@ impl Runtime {
             namespace_registry
                 .find_or_create(namespace)
                 .intern(name, method);
+        }
+        let native = namespace_registry.find_or_create("std.native");
+        for (name, descriptor) in core::native_type_values() {
+            let var = native.intern(&name, descriptor);
+            foundation.map_var(crate::lang::data::Symbol::parse(&name), var);
         }
         Runtime {
             env: HashMap::new(),
@@ -323,6 +331,31 @@ impl Runtime {
         core::with_definition_origin(kernel::VarOrigin::HalFallback, || {
             self.eval_text(FOUNDATION_FALLBACK)
         })?;
+        let json = self.namespace_registry.find_or_create("std.native.Json");
+        json.intern(
+            "read",
+            core::native_function("std.native.Json/read", 1, |arguments| {
+                match arguments.as_slice() {
+                    [core::Value::String(source)] => json::read(source),
+                    _ => Err("json/read expects a string".into()),
+                }
+            }),
+        );
+        json.intern(
+            "write",
+            core::native_function("std.native.Json/write", 1, |arguments| {
+                json::write(&arguments[0]).map(core::Value::String)
+            }),
+        );
+        json.intern(
+            "pretty",
+            core::native_function("std.native.Json/pretty", 2, |arguments| {
+                if core::map_entries(&arguments[1]).is_none() {
+                    return Err("json/pretty expects an options map".into());
+                }
+                json::write_pretty(&arguments[0]).map(core::Value::String)
+            }),
+        );
         for (name, source) in [
             (
                 "std.foundation.string",
@@ -356,6 +389,14 @@ impl Runtime {
                 "std.foundation.set",
                 include_str!("../../lib/src/std/foundation/set.hal"),
             ),
+            (
+                "std.foundation.edn",
+                include_str!("../../lib/src/std/foundation/edn.hal"),
+            ),
+            (
+                "std.foundation.json",
+                include_str!("../../lib/src/std/foundation/json.hal"),
+            ),
             ("std.pretty", include_str!("../../lib/src/std/pretty.hal")),
             (
                 "std.substrate.protocol",
@@ -372,28 +413,46 @@ impl Runtime {
         ] {
             self.register_resource(name, source);
         }
-        let json = self
-            .namespace_registry
-            .find_or_create("std.foundation.json");
-        json.intern(
-            "read",
-            core::native_function("json/read", 1, |arguments| match arguments.as_slice() {
-                [core::Value::String(source)] => json::read(source),
-                _ => Err("json/read expects a string".into()),
-            }),
-        );
-        json.intern(
-            "write",
-            core::native_function("json/write", 1, |arguments| {
-                json::write(&arguments[0]).map(core::Value::String)
-            }),
-        );
-        json.intern(
-            "write-pp",
-            core::native_function("json/write-pp", 1, |arguments| {
-                json::write_pretty(&arguments[0]).map(core::Value::String)
-            }),
-        );
+        for (name, source) in [
+            (
+                "std.foundation.string",
+                include_str!("../../lib/src/std/foundation/string.hal"),
+            ),
+            (
+                "std.foundation.promise",
+                include_str!("../../lib/src/std/foundation/promise.hal"),
+            ),
+            (
+                "std.foundation.bytes",
+                include_str!("../../lib/src/std/foundation/bytes.hal"),
+            ),
+            (
+                "std.foundation.coroutine",
+                include_str!("../../lib/src/std/foundation/coroutine.hal"),
+            ),
+            (
+                "std.foundation.file",
+                include_str!("../../lib/src/std/foundation/file.hal"),
+            ),
+            (
+                "std.foundation.socket",
+                include_str!("../../lib/src/std/foundation/socket.hal"),
+            ),
+            (
+                "std.foundation.edn",
+                include_str!("../../lib/src/std/foundation/edn.hal"),
+            ),
+            (
+                "std.foundation.json",
+                include_str!("../../lib/src/std/foundation/json.hal"),
+            ),
+        ] {
+            core::with_definition_origin(kernel::VarOrigin::HalFallback, || {
+                self.eval_text(source)
+            })?;
+            self.loaded_resources.insert(name.into());
+        }
+        self.use_namespace("std.foundation");
         self.refer_foundation_into("user");
         self.use_namespace("user");
         Ok(())
@@ -464,8 +523,8 @@ impl Runtime {
                         self.install_discovered_extension(&target)?;
                         self.load_wasm_extension_namespace(&target)?;
                     }
+                    self.generated_configs.insert(name.clone(), config);
                     self.use_namespace(&name);
-                    self.generated_configs.insert(name, config);
                     result = core::Value::Nil;
                     continue;
                 }
@@ -499,6 +558,7 @@ impl Runtime {
                             config.apply_require(spec, &available)?;
                         }
                     }
+                    self.sync_generated_aliases(&config);
                     self.generated_configs.insert(current, config);
                 }
             }
@@ -608,7 +668,23 @@ impl Runtime {
         }
         self.refer_foundation_into(name);
         core::select_namespace_environment(&self.namespace_registry, &mut self.env, name);
+        let config = self
+            .generated_configs
+            .get(name)
+            .cloned()
+            .unwrap_or_else(kernel::GeneratedNamespaceConfig::defaults);
+        self.sync_generated_aliases(&config);
+        self.refresh_qualified_bindings();
         true
+    }
+
+    fn sync_generated_aliases(&self, config: &kernel::GeneratedNamespaceConfig) {
+        let target = self.namespace_registry.current();
+        for (alias, namespace) in config.aliases() {
+            if let Some(source) = self.namespace_registry.find(&namespace) {
+                target.alias(alias, source);
+            }
+        }
     }
 
     pub fn visible_symbols(&self) -> Vec<String> {
@@ -1035,7 +1111,12 @@ fn value_to_js(value: &core::Value) -> Result<JsValue, String> {
     match value {
         core::Value::Nil => Ok(JsValue::NULL),
         core::Value::Bool(flag) => Ok(JsValue::from_bool(*flag)),
-        core::Value::Number(number) => Ok(JsValue::from_f64(*number as f64)),
+        core::Value::Number(number)
+            if (*number as i128).abs() <= js_sys::Number::MAX_SAFE_INTEGER as i128 =>
+        {
+            Ok(JsValue::from_f64(*number as f64))
+        }
+        core::Value::Number(number) => Ok(js_sys::BigInt::from(*number).into()),
         core::Value::Float(number) => Ok(JsValue::from_f64(*number)),
         core::Value::String(text) => Ok(JsValue::from_str(text)),
         core::Value::Keyword(keyword) => Ok(JsValue::from_str(keyword.as_str())),
@@ -1087,8 +1168,17 @@ fn js_to_value(value: &JsValue) -> Result<core::Value, String> {
     if let Some(flag) = value.as_bool() {
         return Ok(core::Value::Bool(flag));
     }
+    if value.is_bigint() {
+        let integer: js_sys::BigInt = value.clone().unchecked_into();
+        return i64::try_from(integer)
+            .map(core::Value::Number)
+            .map_err(|_| "host/call bigint is outside the signed 64-bit range".into());
+    }
     if let Some(number) = value.as_f64() {
-        if number.fract() == 0.0 && number >= i64::MIN as f64 && number <= i64::MAX as f64 {
+        if number.fract() == 0.0
+            && number >= js_sys::Number::MIN_SAFE_INTEGER
+            && number <= js_sys::Number::MAX_SAFE_INTEGER
+        {
             return Ok(core::Value::Number(number as i64));
         }
         return Ok(core::Value::Float(number));
@@ -1705,10 +1795,20 @@ mod tests {
         );
         assert_eq!(
             runtime
-                .eval_text("(std.foundation.json/write-pp {\"a\" 1})")
+                .eval_text("(std.native.Json/write {\"a\" 1})")
+                .unwrap(),
+            "\"{\\\"a\\\":1}\""
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(std.foundation.json/pretty {\"a\" 1} {})")
                 .unwrap(),
             "\"{\\n  \\\"a\\\": 1\\n}\""
         );
+        assert!(runtime
+            .eval_text("(std.foundation.json/pretty {\"a\" 1} nil)")
+            .unwrap_err()
+            .contains("options map"));
         assert!(runtime
             .eval_text("(std.foundation.json/read \"1.5\")")
             .unwrap_err()
@@ -1719,6 +1819,75 @@ mod tests {
                 .unwrap(),
             "\"{:a [1 2]}\""
         );
+    }
+
+    #[test]
+    fn restricted_edn_library_reads_and_writes_without_evaluation() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(do (require 'std.foundation.edn) \
+                     (std.foundation.edn/read \"{:a [1 2] :b #{:x}}\"))"
+                )
+                .unwrap(),
+            "{:a [1 2] :b #{:x}}"
+        );
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(do (require 'std.foundation.edn) \
+                     [(std.foundation.edn/write {:a [1 2]}) \
+                      (std.foundation.edn/pretty [:a 1] {})])"
+                )
+                .unwrap(),
+            "[\"{:a [1 2]}\" \"[:a 1]\"]"
+        );
+        assert!(runtime
+            .eval_text(
+                "(do (require 'std.foundation.edn) \
+                 (std.foundation.edn/pretty [:a 1] nil))"
+            )
+            .unwrap_err()
+            .contains("options map"));
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(do (require 'std.foundation.edn) \
+                     (std.foundation.edn/read \"(+ 1 2)\"))"
+                )
+                .unwrap(),
+            "(+ 1 2)"
+        );
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(try \
+                       (throw (ex-info \"bad input\" {:kind :invalid})) \
+                       (catch Throwable error \
+                         [(ex-message error) (ex-data error)]))"
+                )
+                .unwrap(),
+            "[\"bad input\" {:kind :invalid}]"
+        );
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(IExInfo/data \
+                       (ex-info \"bad input\" {:kind :invalid}))"
+                )
+                .unwrap(),
+            "{:kind :invalid}"
+        );
+        for source in ["1/2", "1N", "1M", "1 2"] {
+            let escaped = source.replace('\\', "\\\\").replace('"', "\\\"");
+            assert!(runtime
+                .eval_text(&format!(
+                    "(do (require 'std.foundation.edn) \
+                     (std.foundation.edn/read \"{escaped}\"))"
+                ))
+                .is_err());
+        }
     }
 
     #[test]
@@ -2254,8 +2423,6 @@ mod tests {
         let mut runtime = Runtime::new();
         let cases = [
             ("1.5", "1.5"),
-            ("123N", "123N"),
-            ("1.20M", "1.2M"),
             ("\\newline", "\\newline"),
             ("#\"a+\"", "#\"a+\""),
             ("#demo {:a 1}", "#demo{:a 1}"),
@@ -2266,8 +2433,103 @@ mod tests {
         for (source, expected) in cases {
             assert_eq!(runtime.eval_text(source).unwrap(), expected, "{source}");
         }
+        for unsupported in ["123N", "1.20M", "9223372036854775808"] {
+            assert!(runtime.eval_text(unsupported).is_err(), "{unsupported}");
+        }
         assert_eq!(runtime.eval_text("(= ##NaN ##NaN)").unwrap(), "true");
         assert_eq!(runtime.eval_text("'#demo [1 2]").unwrap(), "#demo[1 2]");
+    }
+
+    #[test]
+    fn basic_math_has_the_portable_root_surface_and_explicit_numeric_boundary() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "[(= E 2.718281828459045) (= PI 3.141592653589793) \
+                     (sin 0) (cos 0) (tan 0) (asin 0) (acos 1) (atan 0) \
+                     (atan2 0 1) (sinh 0) (cosh 0) (tanh 0) \
+                     (asinh 0) (acosh 1) (atanh 0) \
+                     (floor 1.75) (ceil 1.25) (pow 2 3) (abs -3) \
+                     (exp 0) (sqrt 9)]"
+                )
+                .unwrap(),
+            "[true true 0 1 0 0 0 0 0 0 1 0 0 0 0 1 2 8 3 1 3]"
+        );
+        assert_eq!(runtime.eval_text("(= (sqrt -1) ##NaN)").unwrap(), "true");
+        assert_eq!(runtime.eval_text("(sqrt (long 9.9))").unwrap(), "3");
+        assert_eq!(runtime.eval_text("(sqrt (double 9))").unwrap(), "3");
+        assert!(runtime
+            .eval_text("(abs -9223372036854775808)")
+            .unwrap_err()
+            .contains("overflow"));
+        assert_eq!(
+            runtime
+                .eval_text("[(= (asinh 1.0e300) ##Inf) (= (acosh 1.0e300) ##Inf)]")
+                .unwrap(),
+            "[false false]"
+        );
+        for source in ["(sin)", "(pow 2)", "(sqrt \"9\")"] {
+            assert!(runtime.eval_text(source).is_err(), "{source}");
+        }
+    }
+
+    #[test]
+    fn native_types_are_descriptors_and_foundation_libraries_are_hal_wrappers() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "[(str std.native/Maths) \
+                      (INamespaced/name std.native/Maths) \
+                      (INamespaced/namespace std.native/Maths) \
+                      (= std.native/Maths (with-meta std.native/Maths {:doc \"math\"})) \
+                      (std.native.Maths/sin 0) \
+                      (std.native.String/upper \"hara\") \
+                      (str/upper \"hara\") \
+                      (std.native.Bytes/u8 -1) \
+                      (bytes/u8 -1)]"
+                )
+                .unwrap(),
+            "[\"#<native-type std.native/Maths>\" \"Maths\" \"std.native\" true 0 \"HARA\" \"HARA\" 255 255]"
+        );
+        assert!(runtime.eval_text("(std.native/Maths 1)").is_err());
+        assert_eq!(
+            runtime
+                .eval_text("(ns legacy.activation (:config {:builtins [inc]}))")
+                .unwrap(),
+            "nil"
+        );
+    }
+
+    #[test]
+    fn startup_defaults_expose_edn_native_types_and_protocols() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(ns startup.defaults) \
+                     [(edn/write {:a 1}) \
+                      (= Maths std.native/Maths std.foundation/Maths) \
+                      (= Edn std.native/Edn std.foundation/Edn) \
+                      (= Json std.native/Json std.foundation/Json) \
+                      (ICount/count [1 2 3])]"
+                )
+                .unwrap(),
+            "[\"{:a 1}\" true true true 3]"
+        );
+        let symbols = runtime.visible_symbols();
+        assert!(symbols.iter().any(|symbol| symbol == "edn/pretty"));
+        for native_type in [
+            "Maths", "Numbers", "Bits", "String", "Bytes", "File", "Socket", "Promise",
+            "Coroutine", "Array", "Object", "Runtime", "Printer", "Edn", "Json", "Regex",
+            "UUID", "Error",
+        ] {
+            assert!(
+                symbols.iter().any(|symbol| symbol == native_type),
+                "{native_type}"
+            );
+        }
     }
 
     #[test]

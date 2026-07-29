@@ -1,0 +1,27 @@
+(ns std.foundation.edn-test
+  (:require [std.lib.test :as test]
+            [std.foundation.edn :as edn]))
+
+(def results
+  [(test/check "read"
+               (edn/read "{:a [1 2] :b #{:x}}")
+               {:a [1 2] :b #{:x}})
+   (test/check "write"
+               (edn/write {:a [1 2]})
+               "{:a [1 2]}")
+   (test/check "pretty"
+               (edn/pretty [:a 1] {})
+               "[:a 1]")
+   (test/check-error "pretty requires an options map"
+                     (edn/pretty [:a 1] nil))
+   (test/check "pretty error carries the rejected options"
+               (try
+                 (edn/pretty [:a 1] nil)
+                 (catch Throwable error
+                   (ex-data error)))
+               {:options nil})
+   (test/check "read does not evaluate"
+               (edn/read "(+ 1 2)")
+               '(+ 1 2))])
+
+(test/print-results results)

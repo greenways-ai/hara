@@ -14,13 +14,17 @@
 ;;
 ;; Authority: specs/hara/data/foundation.edn (:runtime-libraries std.foundation.promise)
 ;; ============================================================================
-(ns std.foundation.promise
-  (:config
-   {:builtins [new
-               from
-               all
-               then
-               catch
-               finally
-               cancel
-               delay]}))
+(ns std.foundation.promise)
+
+(defn run [function] (std.native.Promise/run function))
+(defn new [executor] (std.native.Promise/new executor))
+(defn from [value] (std.native.Promise/from value))
+(defn all [values] (std.native.Promise/all values))
+(defn delay [milliseconds function]
+  (std.native.Promise/delay milliseconds function))
+(defn state [promise] (IPromise/state promise))
+(defn value [promise] (IPromise/value promise))
+(defn then [promise function] (IPromise/then promise function))
+(defn catch [promise function] (IPromise/catch promise function))
+(defn finally [promise function] (IPromise/finally promise function))
+(defn cancel [promise] (IPromise/cancel promise))

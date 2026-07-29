@@ -10,10 +10,20 @@
 ;;     (fn [error connection] ...) callback.
 ;;   * send accepts bytes and returns the byte count.
 ;;   * close is direct and releases the connection.
-;;   * Receive/framing and HTTP are outside this slice.
+;;   * listen creates a SocketServer and emits :open, :data, :close, and :error
+;;     event maps to its callback.
+;;   * events and next expose promise-backed streams for SocketServer and Socket
+;;     handles; framing and HTTP remain above this transport boundary.
 ;; ============================================================================
-(ns std.foundation.socket
-  (:config
-   {:builtins [connect
-               send
-               close]}))
+(ns std.foundation.socket)
+
+(defn connect [host port options callback]
+  (std.native.Socket/connect host port options callback))
+(defn listen [host port options callback]
+  (std.native.Socket/listen host port options callback))
+(defn endpoint [server] (std.native.Socket/endpoint server))
+(defn events [handle options] (std.native.Socket/events handle options))
+(defn next [stream] (std.native.Socket/next stream))
+(defn send [connection contents]
+  (std.native.Socket/send connection contents))
+(defn close [connection] (std.native.Socket/close connection))

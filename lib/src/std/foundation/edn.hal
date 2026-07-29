@@ -1,0 +1,20 @@
+(ns std.foundation.edn)
+
+(defn read
+  "Reads exactly one value using the restricted Hara EDN profile."
+  [source]
+  (std.native.Edn/read source))
+
+(defn write
+  "Returns the canonical readable representation of value."
+  [value]
+  (pr-str value))
+
+(defn pretty
+  "Returns the canonical readable representation of value. Options are reserved."
+  [value opts]
+  (if (map? opts)
+    (pr-str value)
+    (throw (std.foundation/ex-info
+            "edn/pretty expects an options map"
+            {:options opts}))))

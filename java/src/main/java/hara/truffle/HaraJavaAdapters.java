@@ -504,7 +504,7 @@ public final class HaraJavaAdapters {
         (receiver, arguments) -> {
           try {
             ((AutoCloseable) receiver).close();
-            return null;
+            return receiver;
           } catch (Exception error) {
             throw new HaraException("close failed: " + error.getMessage());
           }

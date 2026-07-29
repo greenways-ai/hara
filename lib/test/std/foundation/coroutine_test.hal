@@ -34,8 +34,8 @@
                   (std.foundation.coroutine/status c)])
                [:first [9 8] :dead])
 
-   (test/check "multi-yield packs vector and zero yields nil"
-               (let [c (std.foundation.coroutine/create (fn [] (std.foundation.coroutine/yield 1 2 3) (std.foundation.coroutine/yield)))]
+   (test/check "multiple values are yielded explicitly as one vector"
+               (let [c (std.foundation.coroutine/create (fn [] (std.foundation.coroutine/yield [1 2 3]) (std.foundation.coroutine/yield nil)))]
                  [(std.foundation.coroutine/resume c)
                   (std.foundation.coroutine/resume c 9 8)
                   (std.foundation.coroutine/status c)

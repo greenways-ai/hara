@@ -168,7 +168,7 @@ public class MainTest {
             new PrintStream(output, true, StandardCharsets.UTF_8),
             new PrintStream(error, true, StandardCharsets.UTF_8));
 
-    assertEquals(0, status);
+    assertEquals(error.toString(StandardCharsets.UTF_8), 0, status);
     assertEquals("42\n", output.toString(StandardCharsets.UTF_8));
     assertEquals("", error.toString(StandardCharsets.UTF_8));
   }
@@ -183,7 +183,7 @@ public class MainTest {
             new ByteArrayInputStream(new byte[0]),
             new PrintStream(output, true, StandardCharsets.UTF_8),
             new PrintStream(error, true, StandardCharsets.UTF_8));
-    assertEquals(0, status);
+    assertEquals(error.toString(StandardCharsets.UTF_8), 0, status);
     assertEquals("", error.toString(StandardCharsets.UTF_8));
   }
 
@@ -216,7 +216,7 @@ public class MainTest {
             new PrintStream(output, true, StandardCharsets.UTF_8),
             new PrintStream(error, true, StandardCharsets.UTF_8));
 
-    assertEquals(0, status);
+    assertEquals(error.toString(StandardCharsets.UTF_8), 0, status);
     assertTrue(output.toString(StandardCharsets.UTF_8).contains("L0 conformance passed:"));
     assertEquals("", error.toString(StandardCharsets.UTF_8));
   }

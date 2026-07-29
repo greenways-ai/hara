@@ -50,6 +50,50 @@ pub struct GuestProtocol {
     pub methods: HashMap<String, usize>,
 }
 
+#[derive(Debug, Clone)]
+pub struct NativeType {
+    pub name: String,
+    pub methods: Vec<String>,
+    pub metadata: Option<Rc<Metadata>>,
+}
+
+pub(crate) const NATIVE_TYPES: &[(&str, &[&str])] = &[
+    ("Maths", &["abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "ceil", "cos", "cosh", "exp", "floor", "pow", "sin", "sinh", "sqrt", "tan", "tanh"]),
+    ("Numbers", &["long", "double"]),
+    ("Bits", &["and", "or", "xor", "not", "shift-left", "shift-right"]),
+    ("String", &["length", "blank?", "includes?", "starts-with?", "ends-with?", "char-at", "slice", "index-of", "last-index-of", "join", "split", "split-lines", "repeat", "replace", "replace-first", "trim", "trim-left", "trim-right", "upper", "lower", "capitalize", "decapitalize", "pad-left", "pad-right", "reverse", "encode-utf8", "decode-utf8", "comp", "lt?", "gt?", "to-fixed"]),
+    ("Bytes", &["new", "instance?", "count", "get", "set", "copy", "slice", "u8", "s8"]),
+    ("File", &["resolve", "read", "write", "exists?", "list", "mkdir", "delete"]),
+    ("Socket", &["connect", "listen", "endpoint", "events", "next", "send", "close"]),
+    ("Promise", &["run", "new", "from", "all", "delay", "instance?"]),
+    ("Coroutine", &["create", "yield", "await", "instance?"]),
+    ("Array", &["new", "instance?"]),
+    ("Object", &["new", "instance?"]),
+    ("Runtime", &["load-string", "macroexpand-1", "gensym", "var-sym"]),
+    ("Printer", &["str", "pr-str"]),
+    ("Edn", &["read"]),
+    ("Json", &["read", "write", "pretty"]),
+    ("Regex", &["instance?"]),
+    ("UUID", &["instance?"]),
+    ("Error", &["new", "message", "class"]),
+];
+
+pub(crate) fn native_type_values() -> Vec<(String, Value)> {
+    NATIVE_TYPES
+        .iter()
+        .map(|(name, methods)| {
+            (
+                (*name).to_owned(),
+                Value::NativeType(Rc::new(NativeType {
+                    name: format!("std.native/{name}"),
+                    methods: methods.iter().map(|method| (*method).to_owned()).collect(),
+                    metadata: None,
+                })),
+            )
+        })
+        .collect()
+}
+
 pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
     (
         "IApplicable",
@@ -256,6 +300,13 @@ fn builtin_protocol_arity_range(
 }
 
 #[derive(Debug, Clone)]
+pub struct ExceptionInfo {
+    pub message: String,
+    pub data: Box<Value>,
+    pub cause: Option<Box<Value>>,
+}
+
+#[derive(Debug, Clone)]
 pub enum Value {
     Number(i64),
     Float(f64),
@@ -296,7 +347,9 @@ pub enum Value {
     StructType(Rc<StructType>),
     Struct(Rc<StructValue>),
     Protocol(Rc<GuestProtocol>),
+    NativeType(Rc<NativeType>),
     Coroutine(Rc<Coroutine>),
+    ExceptionInfo(Rc<ExceptionInfo>),
     Nil,
 }
 
@@ -495,6 +548,45 @@ pub(crate) fn native_variadic_function(
         clauses: Vec::new(),
         is_macro: false,
     }))
+}
+
+pub(crate) fn exception_function_values() -> Vec<(&'static str, Value)> {
+    vec![
+        (
+            "ex-info",
+            native_variadic_function("ex-info", |arguments| {
+                if !(2..=3).contains(&arguments.len()) {
+                    return Err("ex-info expects a message, data map, and optional cause".into());
+                }
+                let Value::String(message) = &arguments[0] else {
+                    return Err("ex-info expects a string message".into());
+                };
+                if map_entries(&arguments[1]).is_none() {
+                    return Err("ex-info expects a data map".into());
+                }
+                Ok(Value::ExceptionInfo(Rc::new(ExceptionInfo {
+                    message: message.clone(),
+                    data: Box::new(arguments[1].clone()),
+                    cause: arguments.get(2).cloned().map(Box::new),
+                })))
+            }),
+        ),
+        (
+            "ex-data",
+            native_function("ex-data", 1, |arguments| match &arguments[0] {
+                Value::ExceptionInfo(value) => Ok((*value.data).clone()),
+                _ => Ok(Value::Nil),
+            }),
+        ),
+        (
+            "ex-message",
+            native_function("ex-message", 1, |arguments| match &arguments[0] {
+                Value::ExceptionInfo(value) => Ok(Value::String(value.message.clone())),
+                Value::String(value) => Ok(Value::String(value.clone())),
+                value => Ok(Value::String(value.display())),
+            }),
+        ),
+    ]
 }
 
 pub fn with_macros<R>(
@@ -1263,7 +1355,9 @@ impl PartialEq for Value {
             (Value::StructType(a), Value::StructType(b)) => Rc::ptr_eq(a, b),
             (Value::Struct(a), Value::Struct(b)) => Rc::ptr_eq(a, b),
             (Value::Protocol(a), Value::Protocol(b)) => Rc::ptr_eq(a, b),
+            (Value::NativeType(a), Value::NativeType(b)) => a.name == b.name,
             (Value::Coroutine(a), Value::Coroutine(b)) => Rc::ptr_eq(a, b),
+            (Value::ExceptionInfo(a), Value::ExceptionInfo(b)) => Rc::ptr_eq(a, b),
             (Value::Nil, Value::Nil) => true,
             _ => false,
         }
@@ -1329,7 +1423,9 @@ impl Ord for Value {
                 Value::StructType(_) => 27,
                 Value::Struct(_) => 28,
                 Value::Protocol(_) => 29,
-                Value::Coroutine(_) => 30,
+                Value::NativeType(_) => 30,
+                Value::Coroutine(_) => 31,
+                Value::ExceptionInfo(_) => 32,
             }
         }
         rank(self)
@@ -1503,6 +1599,7 @@ impl Value {
                     .join(" ")
             ),
             Self::Protocol(value) => format!("#protocol[{}]", value.name),
+            Self::NativeType(value) => format!("#<native-type {}>", value.name),
             Self::Coroutine(value) => {
                 let status = match &*value.state.borrow() {
                     CoroutineState::New(_) | CoroutineState::Suspended(_) => "suspended",
@@ -1510,6 +1607,9 @@ impl Value {
                     CoroutineState::Dead => "dead",
                 };
                 format!("#<coroutine {status}>")
+            }
+            Self::ExceptionInfo(value) => {
+                format!("#error[{} {}]", Self::String(value.message.clone()).display(), value.data.display())
             }
             Self::Nil => "nil".into(),
         }
@@ -1550,7 +1650,9 @@ impl Value {
                 Value::StructType(_) => 26,
                 Value::Struct(_) => 27,
                 Value::Protocol(_) => 28,
-                Value::Coroutine(_) => 29,
+                Value::NativeType(_) => 29,
+                Value::Coroutine(_) => 30,
+                Value::ExceptionInfo(_) => 31,
                 Value::Nil => 19,
                 Value::Float(_) => 20,
                 Value::BigInteger(_) => 21,
@@ -1631,9 +1733,11 @@ impl Value {
                 Value::StructType(v) => v.name.hash(state),
                 Value::Struct(v) => Rc::as_ptr(v).hash(state),
                 Value::Protocol(v) => v.name.hash(state),
+                Value::NativeType(v) => v.name.hash(state),
                 Value::Coroutine(v) => {
                     Rc::as_ptr(v).hash(state);
                 }
+                Value::ExceptionInfo(v) => Rc::as_ptr(v).hash(state),
                 Value::Nil => {}
             }
         }
@@ -1799,6 +1903,15 @@ impl ProtocolRegistry {
             "display",
             protocol_display,
         );
+        registry.register(
+            "std.protocol.iexinfo/IExInfo",
+            "data",
+            |arguments| match arguments {
+                [Value::ExceptionInfo(value)] => Ok((*value.data).clone()),
+                [_] => Err("missing protocol implementation: std.protocol.iexinfo/IExInfo/data".into()),
+                _ => Err("IExInfo/data expects one argument".into()),
+            },
+        );
         registry.register("std.protocol.ihash/IHash", "hash", protocol_hash);
         registry.register("std.protocol.ifn/IFn", "invoke", protocol_invoke);
         registry.register("std.protocol.ipair/IPair", "key", protocol_pair_key);
@@ -1923,6 +2036,28 @@ thread_local! {
     static ACTIVE_SOCKET_PROVIDER: RefCell<Option<Rc<dyn SocketProvider>>> = const { RefCell::new(None) };
     static HOST_CALL_HANDLER: RefCell<Option<Rc<dyn Fn(String, String, Vec<Value>) -> Result<Value, String>>>> = const { RefCell::new(None) };
     static NAMESPACE_SOURCE_PROVIDER: RefCell<Option<Rc<dyn Fn(&str) -> Option<String>>>> = const { RefCell::new(None) };
+    static ACTIVE_THROWN_VALUE: RefCell<Option<(String, Value)>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn thrown_error(value: Value) -> String {
+    let error = format!("thrown: {}", value.display());
+    ACTIVE_THROWN_VALUE.with(|active| {
+        *active.borrow_mut() = Some((error.clone(), value));
+    });
+    error
+}
+
+pub(crate) fn caught_error(error: &str) -> Value {
+    ACTIVE_THROWN_VALUE.with(|active| {
+        let mut active = active.borrow_mut();
+        if active
+            .as_ref()
+            .is_some_and(|(thrown_error, _)| thrown_error == error)
+        {
+            return active.take().unwrap().1;
+        }
+        Value::String(error.to_owned())
+    })
 }
 
 /// Runs an evaluation with a namespace registry available to namespace builtins.
@@ -2046,6 +2181,31 @@ pub fn select_namespace_environment(
         .map(|(name, var)| (name.as_str().to_owned(), Value::Var(var)))
         .collect();
     refresh_namespace_environment(registry, env);
+}
+
+pub(crate) fn refer_startup_defaults(
+    registry: &NamespaceRegistry<Value>,
+    namespace: &str,
+) {
+    let target = registry.find_or_create(namespace);
+    if namespace != "std.foundation" {
+        if let Some(foundation) = registry.find("std.foundation") {
+            for (name, var) in foundation.mappings() {
+                if target.resolve(&name).is_none() {
+                    target.map_var(name, var);
+                }
+            }
+        }
+    }
+    for (protocol, _) in FOUNDATION_PROTOCOLS {
+        let protocol_namespace = builtin_protocol_namespace(protocol);
+        if let Some(source) = registry.find(&protocol_namespace) {
+            target.alias(protocol, source);
+        }
+    }
+    if let Some(edn) = registry.find("std.foundation.edn") {
+        target.alias("edn", edn);
+    }
 }
 
 /// Runs an evaluation with a registry available to protocol dispatch.
@@ -2979,7 +3139,9 @@ fn portable_type_name(value: &Value) -> &str {
         Value::StructType(_) => "struct-type",
         Value::Struct(_) => "struct",
         Value::Protocol(_) => "protocol",
+        Value::NativeType(_) => "native-type",
         Value::Coroutine(_) => "coroutine",
+        Value::ExceptionInfo(_) => "error",
     }
 }
 
@@ -3016,7 +3178,9 @@ pub fn receiver_category(value: &Value) -> &'static str {
         Value::StructType(_) => "struct-type",
         Value::Struct(_) => "struct",
         Value::Protocol(_) => "protocol",
+        Value::NativeType(_) => "native-type",
         Value::Coroutine(_) => "coroutine",
+        Value::ExceptionInfo(_) => "error",
     }
 }
 
@@ -3048,6 +3212,14 @@ fn parse_forms(source: &str) -> Result<Vec<Form>, String> {
     crate::kernel::parse_forms(source)
 }
 
+pub fn read_edn(source: &str) -> Result<Value, String> {
+    let forms = parse_forms(source).map_err(|error| format!("edn/read: {error}"))?;
+    if forms.len() != 1 {
+        return Err("edn/read expects exactly one value".into());
+    }
+    form_to_value(&forms[0]).map_err(|error| format!("edn/read: {error}"))
+}
+
 fn arithmetic(op: &str, args: &[Form], env: &mut HashMap<String, Value>) -> Result<Value, String> {
     if args.is_empty() {
         return Err(format!("{op} expects arguments"));
@@ -3061,21 +3233,21 @@ fn arithmetic(op: &str, args: &[Form], env: &mut HashMap<String, Value>) -> Resu
         .collect();
     let values = values?;
     let result = values.iter().skip(1).try_fold(values[0], |r, v| match op {
-        "+" => Ok::<i64, String>(r + v),
-        "-" => Ok::<i64, String>(r - v),
-        "*" => Ok::<i64, String>(r * v),
+        "+" => r.checked_add(*v).ok_or_else(|| "integer overflow".to_string()),
+        "-" => r.checked_sub(*v).ok_or_else(|| "integer overflow".to_string()),
+        "*" => r.checked_mul(*v).ok_or_else(|| "integer overflow".to_string()),
         "/" => {
             if *v == 0 {
                 Err("division by zero".into())
             } else {
-                Ok::<i64, String>(r / v)
+                r.checked_div(*v).ok_or_else(|| "integer overflow".to_string())
             }
         }
         "%" => {
             if *v == 0 {
                 Err("division by zero".into())
             } else {
-                Ok::<i64, String>(r % v)
+                r.checked_rem(*v).ok_or_else(|| "integer overflow".to_string())
             }
         }
         _ => unreachable!(),
@@ -3088,6 +3260,15 @@ fn bit_operation(
     args: &[Form],
     env: &mut HashMap<String, Value>,
 ) -> Result<Value, String> {
+    let op = match op.strip_prefix("std.native.Bits/").unwrap_or(op) {
+        "and" => "bit-and",
+        "or" => "bit-or",
+        "xor" => "bit-xor",
+        "not" => "bit-not",
+        "shift-left" => "bit-shift-left",
+        "shift-right" => "bit-shift-right",
+        operation => operation,
+    };
     let values = args
         .iter()
         .map(|form| eval(form, env))
@@ -3134,6 +3315,116 @@ fn bit_operation(
         }
         _ => Err(format!("unknown bit operation: {op}")),
     }
+}
+
+fn number_conversion(
+    operation: &str,
+    args: &[Form],
+    env: &mut HashMap<String, Value>,
+) -> Result<Value, String> {
+    let operation = operation
+        .strip_prefix("std.native.Numbers/")
+        .unwrap_or(operation);
+    if args.len() != 1 {
+        return Err(format!("{operation} expects one numeric value"));
+    }
+    let value = eval(&args[0], env)?;
+    match (operation, value) {
+        ("long", Value::Number(value)) => Ok(Value::Number(value)),
+        ("long", Value::Float(value))
+            if value.is_finite()
+                && value.trunc() >= i64::MIN as f64
+                && value.trunc() < -(i64::MIN as f64) =>
+        {
+            Ok(Value::Number(value.trunc() as i64))
+        }
+        ("double", Value::Number(value)) => Ok(Value::Float(value as f64)),
+        ("double", Value::Float(value)) => Ok(Value::Float(value)),
+        ("long" | "double", _) => {
+            Err(format!("{operation} cannot convert non-numeric value"))
+        }
+        _ => Err(format!("unknown number conversion: {operation}")),
+    }
+}
+
+fn numeric_to_f64(value: &Value, operation: &str) -> Result<f64, String> {
+    match value {
+        Value::Number(value) => Ok(*value as f64),
+        Value::Float(value) => Ok(*value),
+        Value::BigInteger(value) | Value::Decimal(value) => value
+            .parse::<f64>()
+            .map_err(|_| format!("{operation} expects a numeric value")),
+        _ => Err(format!("{operation} expects a numeric value")),
+    }
+}
+
+fn numeric_abs(value: Value) -> Result<Value, String> {
+    match value {
+        Value::Number(value) => match value.checked_abs() {
+            Some(value) => Ok(Value::Number(value)),
+            None => Err("integer overflow".into()),
+        },
+        Value::Float(value) => Ok(Value::Float(value.abs())),
+        Value::BigInteger(value) => Ok(Value::BigInteger(
+            value.strip_prefix('-').unwrap_or(&value).to_string(),
+        )),
+        Value::Decimal(value) => Ok(Value::Decimal(
+            value.strip_prefix('-').unwrap_or(&value).to_string(),
+        )),
+        _ => Err("abs expects a numeric value".into()),
+    }
+}
+
+fn math_operation(
+    operation: &str,
+    args: &[Form],
+    env: &mut HashMap<String, Value>,
+) -> Result<Value, String> {
+    let operation = operation
+        .strip_prefix("std.native.Maths/")
+        .unwrap_or(operation);
+    let expected = if matches!(operation, "atan2" | "pow") {
+        2
+    } else {
+        1
+    };
+    if args.len() != expected {
+        return Err(format!(
+            "{operation} expects {} numeric {}",
+            if expected == 1 { "one" } else { "two" },
+            if expected == 1 { "value" } else { "values" }
+        ));
+    }
+    let values = args
+        .iter()
+        .map(|form| eval(form, env))
+        .collect::<Result<Vec<_>, _>>()?;
+    if operation == "abs" {
+        return numeric_abs(values.into_iter().next().unwrap());
+    }
+    let first = numeric_to_f64(&values[0], operation)?;
+    let result = match operation {
+        "acos" => first.acos(),
+        "acosh" => first.acosh(),
+        "asin" => first.asin(),
+        "asinh" => first.asinh(),
+        "atan" => first.atan(),
+        "atan2" => first.atan2(numeric_to_f64(&values[1], operation)?),
+        "atanh" => first.atanh(),
+        "ceil" => first.ceil(),
+        "cos" => first.cos(),
+        "cosh" => first.cosh(),
+        "exp" => first.exp(),
+        "floor" => first.floor(),
+        "pow" => first.powf(numeric_to_f64(&values[1], operation)?),
+        "sin" => first.sin(),
+        "sinh" => first.sinh(),
+        "sqrt" => first.sqrt(),
+        "tan" => first.tan(),
+        "tanh" => first.tanh(),
+        _ => return Err(format!("unknown math operation: {operation}")),
+    };
+    Ok(Value::Float(result))
 }
 
 fn comparison(op: &str, args: &[Form], env: &mut HashMap<String, Value>) -> Result<Value, String> {
@@ -3277,6 +3568,7 @@ fn value_metadata(value: &Value) -> Option<Rc<Metadata>> {
         Value::OrderedSet(value) => value.meta().cloned(),
         Value::SortedSet(value) => value.meta().cloned(),
         Value::Var(value) => value.hara_metadata(),
+        Value::NativeType(value) => value.metadata.clone(),
         _ => None,
     }
 }
@@ -3345,6 +3637,10 @@ fn namespaced_parts(value: &Value) -> Option<(String, Option<String>)> {
             value.get_name().to_owned(),
             value.get_namespace().map(str::to_owned),
         )),
+        Value::NativeType(value) => value
+            .name
+            .rsplit_once('/')
+            .map(|(namespace, name)| (name.to_owned(), Some(namespace.to_owned()))),
         _ => None,
     }
 }
@@ -5399,6 +5695,11 @@ fn attach_metadata(value: Value, metadata: Rc<Metadata>) -> Result<Value, String
             value.set_hara_metadata(Some(metadata));
             Value::Var(value)
         }
+        Value::NativeType(value) => Value::NativeType(Rc::new(NativeType {
+            name: value.name.clone(),
+            methods: value.methods.clone(),
+            metadata: Some(metadata),
+        })),
         Value::Keyword(value) => Value::Keyword(value),
         _ => return Err("metadata can only be applied to object values".into()),
     })
@@ -5958,9 +6259,37 @@ fn eval_require_spec(
         }
         _ => return Err("require expects vectors such as [chrome.api :as api]".into()),
     };
-    ensure_namespace(registry, env, &target)?;
     if options.len() % 2 != 0 {
         return Err(format!("Malformed require options for {target}"));
+    }
+    let lazy = options.chunks(2).any(|option| {
+        matches!(&option[0], Form::Keyword(keyword) if keyword.as_str() == "lazy")
+            && matches!(&option[1], Form::Bool(true))
+    });
+    if lazy {
+        let has_alias = options.chunks(2).any(|option| {
+            matches!(&option[0], Form::Keyword(keyword) if keyword.as_str() == "as")
+        });
+        if !has_alias {
+            return Err("require :lazy requires :as".into());
+        }
+        for option in options.chunks(2) {
+            match &option[0] {
+                Form::Keyword(keyword)
+                    if keyword.as_str() == "refer" || keyword.as_str() == "refer-macros" =>
+                {
+                    return Err(format!("require :lazy cannot be combined with :{}", keyword));
+                }
+                Form::Keyword(keyword)
+                    if keyword.as_str() == "lazy" && !matches!(&option[1], Form::Bool(true)) =>
+                {
+                    return Err("require :lazy expects true".into());
+                }
+                _ => {}
+            }
+        }
+    } else {
+        ensure_namespace(registry, env, &target)?;
     }
     for option in options.chunks(2) {
         let name = match &option[0] {
@@ -5973,11 +6302,16 @@ fn eval_require_spec(
                     Form::Symbol(alias) if !alias.contains('/') => alias.clone(),
                     _ => return Err("require :as expects an unqualified symbol".into()),
                 };
-                let namespace = registry
-                    .find(&target)
-                    .ok_or_else(|| format!("Cannot require missing namespace: {target}"))?;
-                registry.current().alias(alias, namespace);
+                if lazy {
+                    registry.current().lazy_alias(alias, &target);
+                } else {
+                    let namespace = registry
+                        .find(&target)
+                        .ok_or_else(|| format!("Cannot require missing namespace: {target}"))?;
+                    registry.current().alias(alias, namespace);
+                }
             }
+            "lazy" => {}
             other => return Err(format!("Unsupported require option: :{other}")),
         }
     }
@@ -5992,6 +6326,26 @@ fn eval_require_specs(
     for spec in specs {
         eval_require_spec(registry, env, spec)?;
     }
+    refresh_namespace_environment(registry, env);
+    Ok(())
+}
+
+fn force_lazy_alias(
+    registry: &NamespaceRegistry<Value>,
+    env: &mut HashMap<String, Value>,
+    symbol: &str,
+) -> Result<(), String> {
+    let Some((alias, _)) = symbol.split_once('/') else {
+        return Ok(());
+    };
+    let Some(target) = registry.current().lazy_target(alias) else {
+        return Ok(());
+    };
+    ensure_namespace(registry, env, target.as_str())?;
+    let namespace = registry
+        .find(target.as_str())
+        .ok_or_else(|| format!("Cannot require missing namespace: {target}"))?;
+    registry.current().alias(alias, namespace);
     refresh_namespace_environment(registry, env);
     Ok(())
 }
@@ -6020,6 +6374,7 @@ fn eval_namespace_form(fs: &[Form], env: &mut HashMap<String, Value>) -> Result<
         _ => return Err("ns expects a namespace symbol".into()),
     };
     let registry = namespace_registry()?;
+    refer_startup_defaults(&registry, &name);
     select_namespace_environment(&registry, env, &name);
     for clause in &fs[2..] {
         match clause {
@@ -6284,7 +6639,14 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 vec![],
             ))
         }
-        Form::Symbol(n) => binding_value(env, n).ok_or_else(|| format!("unbound symbol: {n}")),
+        Form::Symbol(n) => {
+            if !env.contains_key(n) {
+                if let Ok(registry) = namespace_registry() {
+                    force_lazy_alias(&registry, env, n)?;
+                }
+            }
+            binding_value(env, n).ok_or_else(|| format!("unbound symbol: {n}"))
+        }
         Form::List(fs) if fs.is_empty() => Ok(Value::Nil),
         Form::List(fs) => match &fs[0] {
             Form::Symbol(n) if n == "fn" || n == "fn*" => {
@@ -6309,6 +6671,132 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 eval(&fs[1], env)
             }
+            Form::Symbol(n) if n == "ns-state" || n == "ns-loaded?" => {
+                if fs.len() != 2 {
+                    return Err(format!("{n} expects one namespace"));
+                }
+                let name = match eval(&fs[1], env)? {
+                    Value::Symbol(value) => value.as_str().to_owned(),
+                    Value::String(value) => value,
+                    _ => return Err(format!("{n} expects a namespace symbol or string")),
+                };
+                let registry = namespace_registry()?;
+                let loaded = registry.find(&name).is_some();
+                if n == "ns-loaded?" {
+                    Ok(Value::Bool(loaded))
+                } else {
+                    let deferred = registry
+                        .all()
+                        .into_iter()
+                        .flat_map(|namespace| namespace.lazy_aliases())
+                        .any(|(_, target)| target.as_str() == name);
+                    Ok(Value::Keyword(
+                        if loaded { "loaded" } else if deferred { "unloaded" } else { "unknown" }.into(),
+                    ))
+                }
+            }
+            Form::Symbol(n) if n == "ns-alias-state" => {
+                if fs.len() != 2 && fs.len() != 3 {
+                    return Err("ns-alias-state expects alias or namespace and alias".into());
+                }
+                let registry = namespace_registry()?;
+                let (owner, alias_form) = if fs.len() == 3 {
+                    let owner = match eval(&fs[1], env)? {
+                        Value::Symbol(value) => value.as_str().to_owned(),
+                        Value::String(value) => value,
+                        _ => return Err("ns-alias-state expects a namespace symbol or string".into()),
+                    };
+                    (owner, &fs[2])
+                } else {
+                    (registry.current().name().as_str().to_owned(), &fs[1])
+                };
+                let alias = match eval(alias_form, env)? {
+                    Value::Symbol(value) if value.get_namespace().is_none() => value,
+                    _ => return Err("ns-alias-state expects an unqualified alias symbol".into()),
+                };
+                let Some(namespace) = registry.find(&owner) else {
+                    return Ok(Value::Nil);
+                };
+                let target = namespace.lazy_target(alias.as_str()).or_else(|| {
+                    namespace
+                        .aliases()
+                        .into_iter()
+                        .find(|(name, _)| name == &alias)
+                        .map(|(_, target)| target.name().clone())
+                });
+                let Some(target) = target else { return Ok(Value::Nil); };
+                let state = if registry.find(target.as_str()).is_some() { "loaded" } else { "unloaded" };
+                Ok(Value::Map(PMap::from_iter([
+                    (Value::Keyword("alias".into()), Value::Symbol(alias)),
+                    (Value::Keyword("target".into()), Value::Symbol(target)),
+                    (Value::Keyword("state".into()), Value::Keyword(state.into())),
+                ])))
+            }
+            Form::Symbol(n) if n == "eval-in-ns" => {
+                if fs.len() != 3 {
+                    return Err("eval-in-ns expects namespace and forms".into());
+                }
+                let target = match eval(&fs[1], env)? {
+                    Value::Symbol(name) => name.as_str().to_owned(),
+                    Value::String(name) => name,
+                    _ => return Err("eval-in-ns expects a namespace symbol or string".into()),
+                };
+                let forms = iterator_values(eval(&fs[2], env)?)?
+                    .into_iter()
+                    .map(|value| value_to_form(&value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let registry = namespace_registry()?;
+                if registry.find(&target).is_none() {
+                    return Err(format!("eval-in-ns requires an existing namespace: {target}"));
+                }
+                let previous = registry.current().name().as_str().to_owned();
+                select_namespace_environment(&registry, env, &target);
+                let result = (|| {
+                    let mut result = Value::Nil;
+                    for form in &forms {
+                        result = eval(form, env)?;
+                    }
+                    Ok(result)
+                })();
+                select_namespace_environment(&registry, env, &previous);
+                result
+            }
+            Form::Symbol(n) if n == "intern-var" => {
+                if fs.len() != 4 && fs.len() != 5 {
+                    return Err("intern-var expects namespace, symbol, var, and optional metadata".into());
+                }
+                let target = match eval(&fs[1], env)? {
+                    Value::Symbol(name) => name.as_str().to_owned(),
+                    Value::String(name) => name,
+                    _ => return Err("intern-var expects a namespace symbol or string".into()),
+                };
+                let name = match eval(&fs[2], env)? {
+                    Value::Symbol(name) if name.get_namespace().is_none() => name,
+                    _ => return Err("intern-var expects an unqualified target symbol".into()),
+                };
+                let source = match eval(&fs[3], env)? {
+                    Value::Var(var) => var,
+                    _ => return Err("intern-var expects a source Var".into()),
+                };
+                let mut metadata = source.metadata();
+                if fs.len() == 5 {
+                    match eval(&fs[4], env)? {
+                        Value::OrderedMap(entries) => {
+                            for (key, value) in entries.iter() {
+                                metadata.extra.insert(key.display(), value.display());
+                            }
+                        }
+                        _ => return Err("intern-var metadata extension must be a map".into()),
+                    }
+                }
+                let registry = namespace_registry()?;
+                let output = registry.find_or_create(&target).intern_with_metadata(
+                    name.as_str(),
+                    source.deref_value(),
+                    metadata,
+                );
+                Ok(Value::Var(output))
+            }
             Form::Symbol(n) if n == "var" => {
                 if fs.len() != 2 {
                     return Err("var expects a symbol".into());
@@ -6317,6 +6805,11 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     Form::Symbol(name) => name,
                     _ => return Err("var expects a symbol".into()),
                 };
+                if !env.contains_key(name) {
+                    if let Ok(registry) = namespace_registry() {
+                        force_lazy_alias(&registry, env, name)?;
+                    }
+                }
                 let cell =
                     binding_var(env, name).ok_or_else(|| format!("unbound symbol: {name}"))?;
                 Ok(Value::Var(cell))
@@ -6403,7 +6896,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("throw expects one value".into());
                 }
                 let value = eval(&fs[1], env)?;
-                Err(format!("thrown: {}", value.display()))
+                Err(thrown_error(value))
             }
             Form::Symbol(n) if n == "try" => {
                 if fs.len() < 2 {
@@ -6453,7 +6946,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                             Form::Symbol(name) => name.clone(),
                             _ => return Err("catch name must be a symbol".into()),
                         };
-                        let old = env.insert(name.clone(), Value::String(error.clone()));
+                        let old = env.insert(name.clone(), caught_error(error));
                         result = eval(&parts[body_index], env);
                         if let Some(old) = old {
                             env.insert(name, old);
@@ -7882,6 +8375,40 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             {
                 bit_operation(n, &fs[1..], env)
             }
+            Form::Symbol(n)
+                if n.starts_with("std.native.Bits/")
+                    && ["and", "or", "xor", "not", "shift-left", "shift-right"]
+                        .contains(&n.trim_start_matches("std.native.Bits/")) =>
+            {
+                bit_operation(n, &fs[1..], env)
+            }
+            Form::Symbol(n)
+                if n.starts_with("std.native.Numbers/")
+                    && ["long", "double"]
+                        .contains(&n.trim_start_matches("std.native.Numbers/")) =>
+            {
+                number_conversion(n, &fs[1..], env)
+            }
+            Form::Symbol(n)
+                if n.starts_with("std.native.Maths/")
+                    && [
+                        "abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh",
+                        "ceil", "cos", "cosh", "exp", "floor", "pow", "sin", "sinh", "sqrt",
+                        "tan", "tanh",
+                    ]
+                    .contains(&n.trim_start_matches("std.native.Maths/")) =>
+            {
+                math_operation(n, &fs[1..], env)
+            }
+            Form::Symbol(n) if n == "std.native.Edn/read" => {
+                if fs.len() != 2 {
+                    return Err("edn/read expects one string".into());
+                }
+                match eval(&fs[1], env)? {
+                    Value::String(source) => read_edn(&source),
+                    _ => Err("edn/read expects a string".into()),
+                }
+            }
             Form::Symbol(n) if ["inc", "dec"].contains(&n.as_str()) => {
                 if fs.len() != 2 {
                     return Err(format!("{n} expects one number"));
@@ -8105,13 +8632,17 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         if numbers.is_empty() {
                             return Err("apply expects a function".into());
                         }
-                        let result = match name {
-                            "+" => numbers.iter().sum(),
-                            "-" => numbers[1..].iter().fold(numbers[0], |a, b| a - b),
-                            "*" => numbers.iter().product(),
-                            "/" => numbers[1..].iter().fold(numbers[0], |a, b| a / b),
-                            _ => return Err("apply expects a function".into()),
-                        };
+                        let result = numbers[1..].iter().try_fold(numbers[0], |a, b| {
+                            match name {
+                                "+" => a.checked_add(*b),
+                                "-" => a.checked_sub(*b),
+                                "*" => a.checked_mul(*b),
+                                "/" if *b == 0 => return Err("division by zero".into()),
+                                "/" => a.checked_div(*b),
+                                _ => return Err("apply expects a function".into()),
+                            }
+                            .ok_or_else(|| "integer overflow".to_string())
+                        })?;
                         Ok(Value::Number(result))
                     }
                 }

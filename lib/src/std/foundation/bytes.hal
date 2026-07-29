@@ -1,23 +1,13 @@
-;; ============================================================================
-;; std.foundation.bytes — portable byte-vector library (foundation boundary).
-;;
-;; Pure activation declaration: every public Var is a host builtin; kind,
-;; docstring, and arglists come from the host export catalog (@HaraExport).
-;; Schema annotations for these symbols belong in std.typed.core-sigs
-;; (specs/hara/data/typed.edn).
-;;
-;; Contract:
-;;   * Byte vectors are mutable runtime values; set mutates in place.
-;;   * u8 / s8 reinterpret a byte as unsigned (0..255) or signed (-128..127).
-;;
-;; Authority: specs/hara/data/foundation.edn (:runtime-libraries std.foundation.bytes)
-;; ============================================================================
-(ns std.foundation.bytes
-  (:config
-   {:builtins [count
-               get
-               set
-               copy
-               slice
-               u8
-               s8]}))
+(ns std.foundation.bytes)
+
+(defn count [value] (std.native.Bytes/count value))
+(defn get
+  ([value index] (std.native.Bytes/get value index))
+  ([value index fallback] (std.native.Bytes/get value index fallback)))
+(defn set [value index item] (std.native.Bytes/set value index item))
+(defn copy [value] (std.native.Bytes/copy value))
+(defn slice
+  ([value start] (std.native.Bytes/slice value start))
+  ([value start end] (std.native.Bytes/slice value start end)))
+(defn u8 [value] (std.native.Bytes/u8 value))
+(defn s8 [value] (std.native.Bytes/s8 value))

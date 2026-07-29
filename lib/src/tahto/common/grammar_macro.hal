@@ -1,5 +1,5 @@
-(ns talo.common.grammar-macro
-  (:require [talo.common.grammar-spec :as spec]))
+(ns tahto.common.grammar-macro
+  (:require [tahto.common.grammar-spec :as spec]))
 
 (defn form
   "Builds a persistent Hara list used as generated source."

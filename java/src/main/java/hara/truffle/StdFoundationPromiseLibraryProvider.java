@@ -9,6 +9,9 @@ public final class StdFoundationPromiseLibraryProvider implements HaraLibraryPro
   public int order() { return 20; }
 
   @Override
+  public String fallbackResource() { return "std/foundation/promise.hal"; }
+
+  @Override
   public void install(HaraContext context) {
     context.collectBuiltins(namespace(), context::installPromiseLibrary);
   }

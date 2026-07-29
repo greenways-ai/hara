@@ -1,10 +1,10 @@
-(ns talo.common.preprocess-base)
+(ns tahto.common.preprocess-base)
 
 (def ^:dynamic *macro-form* nil)
 (def ^:dynamic *macro-grammar* nil)
 (def ^:dynamic *macro-opts* nil)
 (def ^:dynamic *macro-splice* nil)
-(def ^:dynamic *macro-skip-deps* nil)
+(def ^:dynamic *macro-skip-deps* false)
 
 (defn macro-form
   "gets the current macro form"
@@ -28,5 +28,5 @@
   "bind macro opts"
   {:added "4.0"}
   [binding & body]
-  `(binding [talo.common.preprocess-base/*macro-opts* (first ~binding)]
+  `(binding [tahto.common.preprocess-base/*macro-opts* (first ~binding)]
      ~@body))

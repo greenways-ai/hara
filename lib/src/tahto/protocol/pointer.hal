@@ -1,0 +1,4 @@
+(ns tahto.protocol.pointer)
+
+(defprotocol IPointer
+  (pointer-symbol [pointer]))

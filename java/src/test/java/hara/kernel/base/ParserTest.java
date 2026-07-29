@@ -3,8 +3,6 @@ package hara.kernel.base;
 import hara.lang.data.*;
 import org.junit.Test;
 
-import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -16,20 +14,23 @@ public class ParserTest {
   public void testReadStringNumber() {
     assertEquals(123L, Parser.LispReader.readString("123", null));
     assertEquals(123.45, Parser.LispReader.readString("123.45", null));
-    assertEquals(BigInteger.valueOf(123), Parser.LispReader.readString("123N", null));
-    assertEquals(new BigDecimal("123.45"), Parser.LispReader.readString("123.45M", null));
-    assertEquals(BigDecimal.ONE, Parser.LispReader.readString("1.00M", null));
     assertEquals(0xFFL, Parser.LispReader.readString("0xFF", null));
+    for (String unsupported :
+        new String[] {
+          "123N", "0N", "+0N", "-0N", "123.45M", "0M", "9223372036854775808"
+        }) {
+      assertThrows(
+          Parser.LispReader.ReaderException.class,
+          () -> Parser.LispReader.readString(unsupported, null));
+    }
   }
 
   @Test
-  public void readableNumericPrintingPreservesBigNumberCategories() {
-    BigInteger integer = BigInteger.valueOf(123);
-    BigDecimal decimal = new BigDecimal("123.45");
-    assertEquals("123N", hara.lang.base.G.display(integer));
-    assertEquals("123.45M", hara.lang.base.G.display(decimal));
-    assertEquals(integer, Parser.LispReader.readString(hara.lang.base.G.display(integer), null));
-    assertEquals(decimal, Parser.LispReader.readString(hara.lang.base.G.display(decimal), null));
+  public void readableNumericPrintingPreservesLongAndDoubleCategories() {
+    assertEquals("123", hara.lang.base.G.display(123L));
+    assertEquals("123.45", hara.lang.base.G.display(123.45));
+    assertEquals(123L, Parser.LispReader.readString("123", null));
+    assertEquals(123.45, Parser.LispReader.readString("123.45", null));
   }
 
   @Test

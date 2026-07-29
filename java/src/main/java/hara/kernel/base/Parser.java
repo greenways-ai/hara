@@ -12,7 +12,6 @@ import hara.lang.protocol.Constant;
 import hara.lang.protocol.IMetadata;
 import hara.lang.protocol.IObjType;
 
-import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -347,7 +346,7 @@ public interface Parser {
       Matcher m = intPat.matcher(s);
       if (m.matches()) {
         if (m.group(2) != null) {
-          if (m.group(8) != null) return BigInteger.ZERO;
+          if (m.group(8) != null) return null;
           return Num.num(0);
         }
         boolean negate = (m.group(1).equals("-"));
@@ -360,12 +359,12 @@ public interface Parser {
         if (n == null) return null;
         BigInteger bn = new BigInteger(n, radix);
         if (negate) bn = bn.negate();
-        if (m.group(8) != null) return bn;
-        return bn.bitLength() < 64 ? Num.num(bn.longValue()) : bn;
+        if (m.group(8) != null || bn.bitLength() >= 64) return null;
+        return Num.num(bn.longValue());
       }
       m = floatPat.matcher(s);
       if (m.matches()) {
-        if (m.group(4) != null) return Num.canonicalDecimal(new BigDecimal(m.group(1)));
+        if (m.group(4) != null) return null;
         return Double.parseDouble(s);
       }
       return null;

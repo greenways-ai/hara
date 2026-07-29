@@ -1,4 +1,4 @@
-(ns talo.common.book-meta)
+(ns tahto.common.book-meta)
 
 (defn- filter-values
   [m]

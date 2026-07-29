@@ -1,6 +1,6 @@
-(ns talo.common.grammar-xtalk
-  (:require [talo.common.grammar-spec :as spec]
-            [talo.common.preprocess-base :as preprocess-base]))
+(ns tahto.common.grammar-xtalk
+  (:require [tahto.common.grammar-spec :as spec]
+            [tahto.common.preprocess-base :as preprocess-base]))
 
 (defn form [values] (spec/as-list values))
 (defn item [input index]

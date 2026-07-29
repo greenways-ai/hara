@@ -272,15 +272,16 @@ public final class StdFoundationCoroutine {
   @HaraExport(
       name = "yield",
       doc =
-          "Suspends the current coroutine, handing vals to the resumer. The next resume's args"
+          "Suspends the current coroutine and yields one value. The next resume's arguments"
               + " become this expression's return. Throws outside a coroutine.",
-      arglists = {"[& vals]"})
+      arglists = {"[value]"})
   public static Object yield(HaraContext context, Object[] values) {
+    requireArity("coroutine/yield", values, 1);
     HaraCoroutine coroutine = CURRENT.get();
     if (coroutine == null) {
       throw new HaraException("coroutine/yield: cannot yield outside a coroutine");
     }
-    return coroutine.doYield(pack(values));
+    return coroutine.doYield(values[0]);
   }
 
   @HaraExport(

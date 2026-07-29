@@ -14,12 +14,13 @@
 ;;
 ;; Authority: specs/hara/data/foundation.edn (:runtime-libraries std.foundation.coroutine)
 ;; ============================================================================
-(ns std.foundation.coroutine
-  (:config
-   {:builtins [create
-               resume
-               yield
-               status
-               coroutine?
-               close
-               await]}))
+(ns std.foundation.coroutine)
+
+(defn create [function] (std.native.Coroutine/create function))
+(defn coroutine? [value] (std.native.Coroutine/instance? value))
+(defn status [coroutine] (ICoroutine/status coroutine))
+(defn resume [coroutine & arguments]
+  (apply ICoroutine/resume coroutine arguments))
+(defn close [coroutine] (IClose/close coroutine))
+(defn yield [value] (std.native.Coroutine/yield value))
+(defn await [promise] (std.native.Coroutine/await promise))

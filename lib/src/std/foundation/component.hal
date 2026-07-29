@@ -1,0 +1,80 @@
+(ns std.foundation.component)
+
+(defn props [component]
+  (IComponent/props component))
+
+(defn status [component]
+  (IComponent/status component))
+
+(defn started? [component]
+  (IComponent/started? component))
+
+(defn stopped? [component]
+  (IComponent/stopped? component))
+
+(defn remote? [component]
+  (IComponent/remote? component))
+
+(defn- run-hooks [component functions keys]
+  (reduce (fn [current key]
+            (let [hook (get functions key)]
+              (if hook (hook current) current)))
+          component
+          keys))
+
+(defn- merged-options [component options]
+  (merge (:component/options (meta component)) options))
+
+(defn start
+  ([component] (start component {}))
+  ([component options]
+   (let [options (merged-options component options)
+         hooks (:hooks options)
+         functions (:functions options)
+         setup (or (:setup options) identity)]
+     (run-hooks (setup (IComponent/start
+                        (run-hooks component functions (:pre-start hooks))))
+                functions
+                (:post-start hooks)))))
+
+(defn stop
+  ([component] (stop component {}))
+  ([component options]
+   (let [options (merged-options component options)
+         hooks (:hooks options)
+         functions (:functions options)
+         teardown (or (:teardown options) identity)]
+     (run-hooks (IComponent/stop
+                 (teardown (run-hooks component functions (:pre-stop hooks))))
+                functions
+                (:post-stop hooks)))))
+
+(defn kill
+  ([component] (kill component {}))
+  ([component options]
+   (let [options (merged-options component options)
+         hooks (:hooks options)
+         functions (:functions options)
+         teardown (or (:teardown options) identity)]
+     (run-hooks (IComponent/kill
+                 (teardown (run-hooks component functions (:pre-stop hooks))))
+                functions
+                (:post-stop hooks)))))
+
+(defn all-props [component]
+  (keys (props component)))
+
+(defn get-prop [component key]
+  (let [getter (get-in (props component) [key :get])]
+    (if getter (getter))))
+
+(defn set-prop [component key value]
+  (let [setter (get-in (props component) [key :set])]
+    (if setter (setter value)
+        (throw (ex-info "Component property is not writable" {:key key})))))
+
+(defmacro with-component [binding & body]
+  `(let [component# (start ~(second binding))]
+     (try
+       (let [~(first binding) component#] ~@body)
+       (finally (stop component#)))))

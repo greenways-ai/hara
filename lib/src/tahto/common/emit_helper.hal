@@ -1,5 +1,5 @@
-(ns talo.common.emit-helper
-  (:require [talo.common.util :as util]
+(ns tahto.common.emit-helper
+  (:require [tahto.common.util :as util]
             [std.foundation.string :as string]))
 
 (defn default-emit-fn

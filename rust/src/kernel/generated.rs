@@ -9,6 +9,7 @@ const LIBRARIES: &[(&str, &str, &str)] = &[
     ("socket", "std.foundation.socket", "socket"),
     ("file", "std.foundation.file", "file"),
     ("coroutine", "std.foundation.coroutine", "co"),
+    ("edn", "std.foundation.edn", "edn"),
 ];
 
 #[derive(Debug, Clone, Default)]
@@ -130,6 +131,13 @@ impl GeneratedNamespaceConfig {
 
     pub fn blank(&self) -> bool {
         self.blank
+    }
+
+    pub fn aliases(&self) -> Vec<(String, String)> {
+        self.aliases
+            .iter()
+            .map(|(alias, namespace)| (alias.clone(), namespace.clone()))
+            .collect()
     }
 
     pub fn rewrite(&self, form: Form) -> Form {
@@ -421,6 +429,8 @@ fn known_namespace(value: &str) -> bool {
     let value = normalize_namespace(value);
     value == "std.foundation"
         || value == "std.foundation.coroutine"
+        || value == "std.native"
+        || value.starts_with("std.native.")
         || LIBRARIES
             .iter()
             .any(|(_, namespace, _)| *namespace == value)
@@ -431,31 +441,45 @@ fn canonical(namespace: &str, method: &str) -> String {
     }
     match (normalize_namespace(namespace), method) {
         ("std.foundation", method) => method.into(),
+        ("std.native.Maths", method) => format!("std.native.Maths/{method}"),
+        ("std.native.Numbers", method) => format!("std.native.Numbers/{method}"),
+        ("std.native.Bits", method) => format!("std.native.Bits/{method}"),
+        ("std.native.String", method) => format!("str/{method}"),
+        ("std.native.Bytes", "new") => "bytes".into(),
+        ("std.native.Bytes", "instance?") => "bytes?".into(),
+        ("std.native.Bytes", method) => format!("bytes/{method}"),
+        ("std.native.File", method) => format!("file/{method}"),
+        ("std.native.Socket", method) => format!("socket/{method}"),
+        ("std.native.Promise", "run") => "promise/run".into(),
+        ("std.native.Promise", "instance?") => "promise?".into(),
+        ("std.native.Promise", method) => format!("promise/{method}"),
+        ("std.native.Coroutine", "instance?") => "std.foundation.coroutine/coroutine?".into(),
+        ("std.native.Coroutine", method) => format!("std.foundation.coroutine/{method}"),
+        ("std.native.Array", "new") => "array".into(),
+        ("std.native.Array", "instance?") => "array?".into(),
+        ("std.native.Object", "new") => "object".into(),
+        ("std.native.Object", "instance?") => "object?".into(),
+        ("std.native.Runtime", method) => method.into(),
+        ("std.native.Printer", method) => method.into(),
+        ("std.native.Edn", method) => format!("std.native.Edn/{method}"),
+        ("std.native.Json", method) => format!("std.native.Json/{method}"),
+        ("std.native.Regex", "instance?") => "regexp?".into(),
+        ("std.native.UUID", "instance?") => "uuid?".into(),
+        ("std.native.Error", method) => format!("error/{method}"),
         ("std.foundation.coroutine", method) => format!("std.foundation.coroutine/{method}"),
-        ("std.foundation.string", "len") | ("std.foundation.string", "count") => {
-            "str/length".into()
-        }
-        ("std.foundation.string", "char") => "str/char-at".into(),
-        ("std.foundation.string", "substring") => "str/slice".into(),
-        ("std.foundation.string", "to-upper") => "str/upper".into(),
-        ("std.foundation.string", "to-lower") => "str/lower".into(),
-        ("std.foundation.string", "encode") => "str/encode-utf8".into(),
-        ("std.foundation.string", "decode") => "str/decode-utf8".into(),
-        ("std.foundation.string", method) => format!("str/{method}"),
+        ("std.foundation.string", method) => format!("std.foundation.string/{method}"),
         ("std.lib.string", "len") => "str/count".into(),
         ("std.lib.string", "to-upper") => "str/upper".into(),
         ("std.lib.string", "to-lower") => "str/lower".into(),
         ("std.lib.string", method) => format!("str/{method}"),
-        ("std.foundation.promise", "then") => "promise/then".into(),
-        ("std.foundation.promise", "catch") => "promise/catch".into(),
-        ("std.foundation.promise", method) => format!("promise/{method}"),
-        ("std.foundation.bytes", method) => format!("bytes/{method}"),
-        ("std.foundation.file", method) => format!("file/{method}"),
+        ("std.foundation.promise", method) => format!("std.foundation.promise/{method}"),
+        ("std.foundation.bytes", method) => format!("std.foundation.bytes/{method}"),
+        ("std.foundation.file", method) => format!("std.foundation.file/{method}"),
         ("std.lib.promise", "then") => "promise/then".into(),
         ("std.lib.promise", "catch") => "promise/catch".into(),
         ("std.lib.promise", method) => format!("promise/{method}"),
         ("std.lib.bytes", method) => format!("bytes/{method}"),
-        ("std.foundation.socket", method) => format!("socket/{method}"),
+        ("std.foundation.socket", method) => format!("std.foundation.socket/{method}"),
         ("std.lib.socket", method) => format!("socket/{method}"),
         ("std.lib.file", method) => format!("file/{method}"),
         (namespace, method) => format!("{namespace}/{method}"),
@@ -481,8 +505,8 @@ mod tests {
                 .remove(0),
         );
         let display = format!("{rewritten:?}");
-        assert!(display.contains("str/trim"));
-        assert!(display.contains("str/upper"));
+        assert!(display.contains("std.foundation.string/trim"));
+        assert!(display.contains("std.foundation.string/to-upper"));
         assert!(display.contains("bytes/count") == false);
         assert!(GeneratedNamespaceConfig::configure(
             &parse_forms("(:require [missing.lib :as x])").unwrap()
@@ -502,7 +526,6 @@ mod tests {
         let config = GeneratedNamespaceConfig::configure(&forms).unwrap();
         assert!(config.blank());
         assert_eq!(config.builtins(), &["+", "-", "=", "count", "get"]);
-        // bytes excluded, so the default alias should not rewrite the symbol.
         assert_eq!(
             config
                 .rewrite(parse_forms("bytes").unwrap().remove(0))
