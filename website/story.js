@@ -118,6 +118,7 @@ function updateNavigation() {
 }
 
 function showScreen(index) {
+  const previousScreen = activeScreen;
   activeScreen = Math.max(0, Math.min(2, index));
   const open = activeScreen > 0;
   story.hidden = !open;
@@ -126,13 +127,15 @@ function showScreen(index) {
   if (!open) {
     delete document.body.dataset.storyScreen;
     queryAll("[data-story-screen]", story).forEach((screen) => screen.classList.remove("is-active"));
-    if (returnBackground) selectBackground(returnBackground);
+    const restore = returnBackground;
+    returnBackground = null;
+    if (restore) selectBackground(restore);
     updateNavigation();
     start?.focus();
     return;
   }
 
-  if (!returnBackground) returnBackground = backgroundSelect?.value || null;
+  if (previousScreen === 0) returnBackground = backgroundSelect?.value || null;
   document.body.dataset.storyScreen = String(activeScreen);
   queryAll("[data-story-screen]", story).forEach((screen) => {
     screen.classList.toggle("is-active", Number(screen.dataset.storyScreen) === activeScreen);
@@ -204,6 +207,10 @@ new MutationObserver(() => {
     story.hidden = true;
     story.setAttribute("aria-hidden", "true");
     delete document.body.dataset.storyScreen;
+  } else if (document.body.dataset.workspace === "0" && !activeScreen && returnBackground) {
+    const restore = returnBackground;
+    returnBackground = null;
+    selectBackground(restore);
   }
   updateNavigation();
 }).observe(document.body, {
