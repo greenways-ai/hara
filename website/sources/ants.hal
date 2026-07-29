@@ -37,6 +37,7 @@
 
 (defn smaller [a b] (if (< a b) a b))
 (defn larger [a b] (if (> a b) a b))
+(defn absolute [value] (if (< value 0) (- 0 value) value))
 (defn array-get [values index] (. values (get index)))
 (defn array-set [values index value] (. values (set index value)))
 
