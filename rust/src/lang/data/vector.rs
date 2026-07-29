@@ -1,7 +1,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::lang::protocol::hash::HashType;
+use crate::lang::protocol::ihash::HashType;
 use crate::lang::protocol::{
     IAssoc, IColl, IConj, ICount, IDisplay, IEmpty, IEquality, IHash, IMetadata, IMutable, INth,
     IObjType, IPeekFirst, IPeekLast, IPersistent, IPopLast, IPushLast, IToMutable, IToPersistent,

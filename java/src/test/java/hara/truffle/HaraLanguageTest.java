@@ -8,6 +8,10 @@ import hara.kernel.base.RT;
 import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.HostAccess;
 import org.graalvm.polyglot.io.IOAccess;
@@ -66,9 +70,9 @@ public class HaraLanguageTest {
       assertEquals(
           42,
           context
-              .eval(HaraLanguage.ID, "(load-resource \"std/foundation.hal\") ((comp2 inc inc) 40)")
+              .eval(HaraLanguage.ID, "(load-resource \"std/foundation.hal\") ((comp inc inc) 40)")
               .asLong());
-      assertEquals(42, context.eval(HaraLanguage.ID, "((comp3 inc inc inc) 39)").asLong());
+      assertEquals(42, context.eval(HaraLanguage.ID, "((comp inc inc inc) 39)").asLong());
       assertTrue(context.eval(HaraLanguage.ID, "((complement (fn [x] (= x 1))) 2)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(zero? 0)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(pos? 2)").asBoolean());
@@ -95,9 +99,9 @@ public class HaraLanguageTest {
       assertEquals(":a", context.eval(HaraLanguage.ID, "(first (keys {:a 1}))").toString());
       assertEquals(1, context.eval(HaraLanguage.ID, "(first (vals {:a 1}))").asLong());
       assertTrue(
-          context.eval(HaraLanguage.ID, "(protocol-call IFind has? {:a nil} :a)").asBoolean());
+          context.eval(HaraLanguage.ID, "(has? {:a nil} :a)").asBoolean());
       assertTrue(
-          !context.eval(HaraLanguage.ID, "(protocol-call IFind has? {:a 1} :b)").asBoolean());
+          !context.eval(HaraLanguage.ID, "(has? {:a 1} :b)").asBoolean());
       assertEquals(2, context.eval(HaraLanguage.ID, "(get (dissoc {:a 1 :b 2} :a) :b)").asLong());
       assertTrue(context.eval(HaraLanguage.ID, "(nil? (get (dissoc {:a 1} :a) :a))").asBoolean());
       assertEquals(1, context.eval(HaraLanguage.ID, "(peek [1 2])").asLong());
@@ -192,9 +196,9 @@ public class HaraLanguageTest {
       assertEquals(
           42,
           context
-              .eval(HaraLanguage.ID, "(require \"std/foundation.hal\") ((comp2 inc inc) 40)")
+              .eval(HaraLanguage.ID, "(require \"std/foundation.hal\") ((comp inc inc) 40)")
               .asLong());
-      assertEquals(42, context.eval(HaraLanguage.ID, "((comp3 inc inc inc) 39)").asLong());
+      assertEquals(42, context.eval(HaraLanguage.ID, "((comp inc inc inc) 39)").asLong());
       assertEquals(
           1, context.eval(HaraLanguage.ID, "(module-revision \"std/foundation.hal\")").asLong());
       context.eval(HaraLanguage.ID, "(require \"std/foundation.hal\" {:reload true})");
@@ -1188,6 +1192,74 @@ public class HaraLanguageTest {
                       + "  (invoke [self value] (+ (field self :base) value))) "
                       + "((Incrementer 1) 41)")
               .asLong());
+    }
+  }
+
+  @Test
+  public void protocolMethodsAllowPredicatesAndRejectBangNames() {
+    try (Context context = context()) {
+      assertTrue(
+          context
+              .eval(HaraLanguage.ID, "(defprotocol PredicateProtocol (ready? [self]))")
+              .toString()
+              .contains("user/PredicateProtocol"));
+      assertTrue(
+          context
+              .eval(HaraLanguage.ID, "user/PredicateProtocol/ready?")
+              .toString()
+              .contains("user/PredicateProtocol/ready?"));
+      PolyglotException error =
+          assertThrows(
+              PolyglotException.class,
+              () ->
+                  context.eval(
+                      HaraLanguage.ID, "(defprotocol MutatingProtocol (mutate! [self]))"));
+      assertTrue(error.getMessage().contains("protocol method names must not end with !"));
+    }
+  }
+
+  @Test
+  public void exposesTheSharedProtocolInventoryFromFoundation() throws Exception {
+    String contract =
+        Files.readString(Path.of("specs/language/draft/conformance/protocols.edn"));
+    Matcher names = Pattern.compile(":name\\s+(I[A-Za-z]+)").matcher(contract);
+    Set<String> protocols = new LinkedHashSet<>();
+    while (names.find()) {
+      protocols.add(names.group(1));
+    }
+    assertEquals(59, protocols.size());
+    try (Context context = context()) {
+      for (String protocol : protocols) {
+        assertTrue(
+            protocol,
+            context
+                .eval(HaraLanguage.ID, "std.foundation/" + protocol)
+                .toString()
+                .contains("std.foundation/" + protocol));
+      }
+      assertEquals(
+          3L,
+          context
+              .eval(HaraLanguage.ID, "(std.foundation/ICount/count [1 2 3])")
+              .asLong());
+      assertTrue(
+          context
+              .eval(HaraLanguage.ID, "(std.foundation/ICas/cas (atom 1) 1 2)")
+              .asBoolean());
+      assertEquals(
+          6L,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(std.foundation/IReduce/reduce [1 2 3] + 0)")
+              .asLong());
+      assertEquals(
+          ":fulfilled",
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(std.foundation/IPromise/state (std.foundation.promise/from 7))")
+              .toString());
     }
   }
 

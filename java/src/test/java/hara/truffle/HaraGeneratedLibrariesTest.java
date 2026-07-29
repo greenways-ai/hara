@@ -81,7 +81,7 @@ public class HaraGeneratedLibrariesTest {
           context.eval(HaraLanguage.ID, "(std.foundation/count [1])").asLong());
       assertEquals(
           42,
-          context.eval(HaraLanguage.ID, "((std.foundation/comp2 inc inc) 40)").asLong());
+          context.eval(HaraLanguage.ID, "((std.foundation/comp inc inc) 40)").asLong());
     }
   }
 

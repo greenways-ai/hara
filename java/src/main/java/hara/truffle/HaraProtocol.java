@@ -33,6 +33,10 @@ public final class HaraProtocol implements TruffleObject {
     return methods.get(methodName);
   }
 
+  public Map<String, HaraProtocolMethod> methods() {
+    return methods;
+  }
+
   public com.oracle.truffle.api.Assumption implementationsStable() {
     return implementations.stable();
   }

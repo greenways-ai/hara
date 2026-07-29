@@ -24,6 +24,39 @@ public class StdFoundationTest {
   }
 
   @Test
+  public void publicMapDotoAndSetHelpersArePortable() {
+    try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
+      assertEquals(
+          "[{2 :a 3 :b} {:a 2 :b 3} [1 [1 2]]]",
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "[(map-keys inc {1 :a 2 :b}) "
+                      + "(map-vals inc {:a 1 :b 2}) "
+                      + "(let [calls (atom 0) "
+                      + "      value (doto (do (swap! calls inc) (atom [])) "
+                      + "              (swap! (fn [values item] (conj values item)) 1) "
+                      + "              (swap! (fn [values item] (conj values item)) 2))] "
+                      + "  [(deref calls) (deref value)])]")
+              .toString());
+      assertEquals(
+          "[#{1 2 3} #{3} #{1} true true #{1 3}]",
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(do "
+                      + "(ns set-test (:require [std.foundation.set :as set])) "
+                      + "[(set/union #{1 2} #{2 3}) "
+                      + " (set/intersection #{1 2 3} #{2 3 4} #{3 5}) "
+                      + " (set/difference #{1 2 3} #{2} #{3}) "
+                      + " (set/subset? #{1 2} #{1 2 3}) "
+                      + " (set/superset? #{1 2 3} #{1 2}) "
+                      + " (set/select odd? #{1 2 3 4})])")
+              .toString());
+    }
+  }
+
+  @Test
   public void optimizedOperationsMatchTheirHalDefinitions() throws Exception {
     String source;
     try (InputStream input =

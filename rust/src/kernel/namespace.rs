@@ -37,12 +37,12 @@ impl<V> Namespace<V> {
     where
         V: Clone + 'static,
     {
-        let local = Symbol::parse(name.as_ref());
+        let local = Symbol::create(None, name.as_ref());
         if let Some(existing) = self.mappings.borrow().get(&local).cloned() {
             existing.reset_value(value);
             return existing;
         }
-        let path = format!("{}/{}", self.name.as_str(), local.get_name());
+        let path = format!("{}/{}", self.name.as_str(), local.as_str());
         let var = Var::new(path, value);
         self.mappings.borrow_mut().insert(local, var.clone());
         var
@@ -56,13 +56,13 @@ impl<V> Namespace<V> {
     where
         V: Clone + 'static,
     {
-        let local = Symbol::parse(name.as_ref());
+        let local = Symbol::create(None, name.as_ref());
         if let Some(existing) = self.mappings.borrow().get(&local).cloned() {
             existing.reset_value(value);
             existing.set_metadata(metadata);
             return existing;
         }
-        let path = format!("{}/{}", self.name.as_str(), local.get_name());
+        let path = format!("{}/{}", self.name.as_str(), local.as_str());
         let var = Var::with_metadata(path, value, metadata);
         self.mappings.borrow_mut().insert(local, var.clone());
         var
@@ -95,7 +95,7 @@ impl<V> Namespace<V> {
             return self.aliases.borrow().get(&alias).and_then(|ns| {
                 ns.mappings
                     .borrow()
-                    .get(&Symbol::parse(symbol.get_name()))
+                    .get(&Symbol::create(None, symbol.get_name()))
                     .cloned()
             });
         }
@@ -219,7 +219,7 @@ impl<V: Clone> NamespaceRegistry<V> {
         V: Clone,
     {
         if let Some(namespace_name) = symbol.get_namespace() {
-            let local = Symbol::parse(symbol.get_name());
+            let local = Symbol::create(None, symbol.get_name());
             if let Some(namespace) = self.find(namespace_name) {
                 return namespace.mappings.borrow().get(&local).cloned();
             }
@@ -242,7 +242,7 @@ impl<V: Clone> NamespaceRegistry<V> {
                 .ok_or_else(|| format!("Namespace not found: {name}"))?,
             None => self.current(),
         };
-        namespace.map_var(Symbol::parse(symbol.get_name()), var.clone());
+        namespace.map_var(Symbol::create(None, symbol.get_name()), var.clone());
         Ok(var)
     }
     pub fn visible_symbol_names(&self) -> Vec<String> {
@@ -298,6 +298,7 @@ mod tests {
         registry.current().intern("local", 1);
         let library = registry.find_or_create("example.lib");
         library.intern("answer", 42);
+        library.intern("IExample/method", 43);
         registry.current().alias("lib", library);
         assert_eq!(
             registry
@@ -313,7 +314,17 @@ mod tests {
                 .deref(),
             42
         );
-        assert_eq!(registry.visible_symbol_names(), vec!["lib/answer", "local"]);
+        assert_eq!(
+            registry
+                .resolve(&Symbol::parse("example.lib/IExample/method"))
+                .unwrap()
+                .deref(),
+            43
+        );
+        assert_eq!(
+            registry.visible_symbol_names(),
+            vec!["lib/IExample/method", "lib/answer", "local"]
+        );
         assert!(registry.remove("user").is_none());
         assert!(registry.remove("example.lib").is_some());
     }

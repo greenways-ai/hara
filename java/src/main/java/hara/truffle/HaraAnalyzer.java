@@ -1438,6 +1438,9 @@ final class HaraAnalyzer {
       if (!(methodName instanceof Symbol) || ((Symbol) methodName).getNamespace() != null) {
         throw error("protocol method name must be an unqualified symbol");
       }
+      if (((Symbol) methodName).getName().endsWith("!")) {
+        throw error("protocol method names must not end with !");
+      }
       if (!isBindingVector(method.nth(1))) {
         throw error("protocol method arguments must be a vector");
       }

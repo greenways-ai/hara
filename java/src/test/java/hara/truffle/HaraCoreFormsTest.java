@@ -191,7 +191,7 @@ public class HaraCoreFormsTest {
       assertTrue(
           assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(deref 1)"))
               .getMessage()
-              .contains("No IDeref/deref implementation"));
+              .contains("No std.foundation/IDeref/deref implementation"));
     }
   }
 

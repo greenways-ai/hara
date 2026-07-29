@@ -289,7 +289,7 @@ public class HirArtifactTest {
       assertEquals(
           42,
           context
-              .eval(HaraLanguage.ID, "((std.foundation/comp2 inc inc) 40)")
+              .eval(HaraLanguage.ID, "((std.foundation/comp inc inc) 40)")
               .asLong());
       assertEquals(
           "[2 3]",

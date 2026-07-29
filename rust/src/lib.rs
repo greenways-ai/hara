@@ -238,6 +238,21 @@ fn validate_session_name(name: &str) -> Result<(), String> {
 #[wasm_bindgen]
 impl Runtime {
     fn empty() -> Runtime {
+        let namespace_registry = kernel::NamespaceRegistry::new("user");
+        let foundation = namespace_registry.find_or_create("std.foundation");
+        foundation.intern(
+            "list",
+            core::native_variadic_function("list", |values| Ok(core::Value::List(values.into()))),
+        );
+        for (name, protocol) in core::foundation_protocol_values() {
+            foundation.intern(&name, protocol.clone());
+            let namespace =
+                namespace_registry.find_or_create(core::builtin_protocol_namespace(&name));
+            namespace.intern(name, protocol);
+        }
+        for (namespace, name, method) in core::builtin_protocol_method_values() {
+            namespace_registry.find_or_create(namespace).intern(name, method);
+        }
         Runtime {
             env: HashMap::new(),
             protocols: core::ProtocolRegistry::core(),
@@ -246,7 +261,7 @@ impl Runtime {
             providers: core::ProviderRegistry::new(),
             resources: HashMap::new(),
             loaded_resources: HashSet::new(),
-            namespace_registry: kernel::NamespaceRegistry::new("user"),
+            namespace_registry,
             macros: Rc::new(RefCell::new(HashMap::new())),
             generated_configs: HashMap::from([(
                 "user".into(),
@@ -325,6 +340,10 @@ impl Runtime {
                 "std.foundation.socket",
                 include_str!("../../lib/src/std/foundation/socket.hal"),
             ),
+            (
+                "std.foundation.set",
+                include_str!("../../lib/src/std/foundation/set.hal"),
+            ),
             ("std.pretty", include_str!("../../lib/src/std/pretty.hal")),
             (
                 "std.substrate.protocol",
@@ -399,7 +418,8 @@ impl Runtime {
                     let roots = self.extension_roots.clone();
                     let config =
                         kernel::GeneratedNamespaceConfig::configure_with(&values[2..], |target| {
-                            if self.resources.contains_key(target)
+                            if self.namespace_registry.find(target).is_some()
+                                || self.resources.contains_key(target)
                                 || self.wasm_extensions.contains_key(target)
                             {
                                 return true;
@@ -450,7 +470,8 @@ impl Runtime {
                         #[cfg(not(target_arch = "wasm32"))]
                         let roots = self.extension_roots.clone();
                         let available = |target: &str| {
-                            if self.resources.contains_key(target)
+                            if self.namespace_registry.find(target).is_some()
+                                || self.resources.contains_key(target)
                                 || self.wasm_extensions.contains_key(target)
                             {
                                 return true;
@@ -1716,10 +1737,11 @@ mod tests {
                        (add [self amount] (+ (field self :value) amount))) \
                      [(protocol-call BoxOps read (Box 40)) \
                       (protocol-call BoxOps add (map->Box {:value 40}) 2) \
+                      (user/BoxOps/read (Box 41)) \
                       (instance? Box (Box 1))])",
                 )
                 .unwrap(),
-            "[40 42 true]"
+            "[40 42 41 true]"
         );
         assert!(runtime
             .eval_text(
@@ -1728,6 +1750,169 @@ mod tests {
             )
             .unwrap_err()
             .contains("missing protocol implementation: user/Needed/get"));
+    }
+
+    #[test]
+    fn foundation_protocols_are_canonical_and_method_names_reject_bangs() {
+        let mut runtime = Runtime::new();
+        let contract = include_str!(
+            "../../specs/language/draft/conformance/protocols.edn"
+        );
+        let fixture = include_str!(
+            "../../lib/test-fixtures/std/foundation/protocol_conformance.hal"
+        );
+        assert_eq!(core::FOUNDATION_PROTOCOLS.len(), 59);
+        assert_eq!(
+            core::FOUNDATION_PROTOCOLS
+                .iter()
+                .map(|(_, methods)| methods.len())
+                .sum::<usize>(),
+            106
+        );
+        let foundation = runtime
+            .namespace_registry
+            .find("std.foundation")
+            .expect("std.foundation namespace");
+        for (name, methods) in core::FOUNDATION_PROTOCOLS {
+            assert!(
+                contract.contains(&format!(":name {name}")),
+                "shared contract is missing {name}"
+            );
+            let namespace_name = core::builtin_protocol_namespace(name);
+            let namespace = runtime
+                .namespace_registry
+                .find(&namespace_name)
+                .unwrap_or_else(|| panic!("missing {namespace_name} namespace"));
+            let protocol = namespace
+                .resolve(&lang::data::Symbol::parse(name))
+                .unwrap_or_else(|| panic!("missing {namespace_name}/{name}"))
+                .deref_value();
+            let core::Value::Protocol(descriptor) = &protocol else {
+                panic!("{namespace_name}/{name} is not a protocol");
+            };
+            assert_eq!(descriptor.name, core::builtin_protocol_name(name));
+            assert_eq!(descriptor.methods.len(), methods.len());
+            assert!(descriptor.methods.keys().all(|method| !method.ends_with('!')));
+            assert_eq!(
+                foundation
+                    .resolve(&lang::data::Symbol::parse(name))
+                    .unwrap_or_else(|| panic!("missing std.foundation/{name} alias"))
+                    .deref_value(),
+                protocol
+            );
+            for (method, _) in *methods {
+                assert!(
+                    namespace
+                        .resolve(&lang::data::Symbol::parse(method))
+                        .is_some(),
+                    "missing {namespace_name}/{method}"
+                );
+                assert!(
+                    foundation
+                        .resolve(&lang::data::Symbol::parse(&format!("{name}/{method}")))
+                        .is_none(),
+                    "obsolete std.foundation/{name}/{method} must not exist"
+                );
+                assert!(
+                    fixture.contains(&format!("({namespace_name}/{method} fixture")),
+                    "shared fixture does not directly call {namespace_name}/{method}"
+                );
+            }
+        }
+        assert_eq!(
+            runtime
+                .eval_text("(std.protocol.icount/count [1 2 3])")
+                .unwrap(),
+            "3"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(std.protocol.icas/cas (atom 1) 1 2)")
+                .unwrap(),
+            "true"
+        );
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(std.protocol.ireduce/reduce \
+                       [1 2 3] (fn [left right] (+ left right)) 0)",
+                )
+                .unwrap(),
+            "6"
+        );
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(std.protocol.ipromise/state (std.foundation.promise/from 7))",
+                )
+                .unwrap(),
+            ":fulfilled"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(require 'std.protocol.ifind) :loaded")
+                .unwrap(),
+            ":loaded"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(defprotocol PredicateProtocol (ready? [self]))")
+                .unwrap(),
+            "#protocol[user/PredicateProtocol]"
+        );
+        assert!(runtime
+            .eval_text("(defprotocol MutatingProtocol (mutate! [self]))")
+            .unwrap_err()
+            .contains("protocol method names must not end with !"));
+    }
+
+    #[test]
+    fn shared_foundation_protocol_conformance_fixture_runs_in_the_native_runtime() {
+        let mut runtime = Runtime::new();
+        let result = runtime
+            .eval_text(include_str!(
+                "../../lib/test-fixtures/std/foundation/protocol_conformance.hal"
+            ))
+            .unwrap();
+        assert!(!result.contains(":pass false"), "{result}");
+        assert_eq!(result.matches(":pass true").count(), 59, "{result}");
+    }
+
+    #[test]
+    fn foundation_iterator_protocols_traverse_and_close_native_iterators() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(let [it (protocol-call std.foundation/IIter iter [1 2])] \
+                       [(protocol-call std.foundation/IIterator iter-next? it) \
+                        (protocol-call std.foundation/IIterator iter-next it) \
+                        (protocol-call std.foundation/IIterator iter-next it) \
+                        (protocol-call std.foundation/IIterator iter-next? it) \
+                        (protocol-call std.foundation/IClose close it)])"
+                )
+                .unwrap(),
+            "[true 1 2 false nil]"
+        );
+    }
+
+    #[test]
+    fn foundation_state_protocols_dispatch_and_watch_keys_come_first() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(let [a (atom 1) seen (atom nil)] \
+                       (protocol-call std.foundation/IWatch watch-add a :log \
+                         (fn [key ref old new] \
+                           (protocol-call std.foundation/IReset reset seen [key old new]))) \
+                       (protocol-call std.foundation/IReset reset a 2) \
+                       [(protocol-call std.foundation/IDeref deref a) \
+                        (protocol-call std.foundation/IDeref deref seen)])"
+                )
+                .unwrap(),
+            "[2 [:log 1 2]]"
+        );
     }
 
     #[test]
@@ -1882,7 +2067,7 @@ mod tests {
             .contains("Duplicate item"));
         assert_eq!(
             runtime
-                .eval_text("(protocol-call IFind has? #{1 2} 2)")
+                .eval_text("(has? #{1 2} 2)")
                 .unwrap(),
             "true"
         );
@@ -2127,25 +2312,25 @@ mod tests {
         let mut runtime = Runtime::new();
         assert_eq!(
             runtime
-                .eval_text(r#"(protocol-call IFind has? {"a" 1} "a")"#)
+                .eval_text(r#"(has? {"a" 1} "a")"#)
                 .unwrap(),
             "true"
         );
         assert_eq!(
             runtime
-                .eval_text("(protocol-call IFind has? [1 2] 1)")
+                .eval_text("(has? [1 2] 1)")
                 .unwrap(),
             "true"
         );
         assert_eq!(
             runtime
-                .eval_text("(protocol-call IFind has? [1 2] 2)")
+                .eval_text("(has? [1 2] 2)")
                 .unwrap(),
             "false"
         );
         assert_eq!(
             runtime
-                .eval_text(r#"(protocol-call IFind has? {"a" nil} "a")"#)
+                .eval_text(r#"(has? {"a" nil} "a")"#)
                 .unwrap(),
             "true"
         );
@@ -2206,22 +2391,22 @@ mod tests {
         );
         assert_eq!(runtime.eval_text("(= (atom 1) (atom 1))").unwrap(), "false");
         assert_eq!(
-            runtime.eval_text("(let [a (atom 1) seen (atom nil)] (do (watch:add a :log (fn [ref key old new] (reset! seen [@ref key old new]))) (reset! a 2) @seen))").unwrap(),
-            "[2 :log 1 2]"
+            runtime.eval_text("(let [a (atom 1) seen (atom nil)] (do (watch-add a :log (fn [key ref old new] (reset! seen [key @ref old new]))) (reset! a 2) @seen))").unwrap(),
+            "[:log 2 1 2]"
         );
         assert_eq!(
-            runtime.eval_text("(let [a (atom 1)] (do (watch:add a :log (fn [ref key old new] new)) (watch:add a :log (fn [ref key old new] old)) (count (watch:list a))))").unwrap(),
+            runtime.eval_text("(let [a (atom 1)] (do (watch-add a :log (fn [key ref old new] new)) (watch-add a :log (fn [key ref old new] old)) (count (watch-list a))))").unwrap(),
             "1"
         );
         assert_eq!(
-            runtime.eval_text("(let [a (atom 1) seen (atom nil)] (do (watch:add a :log (fn [ref key old new] (reset! seen new))) (watch:remove a :log) (reset! a 2) @seen))").unwrap(),
+            runtime.eval_text("(let [a (atom 1) seen (atom nil)] (do (watch-add a :log (fn [key ref old new] (reset! seen new))) (watch-remove a :log) (reset! a 2) @seen))").unwrap(),
             "nil"
         );
         assert_eq!(
             runtime
-                .eval_text("(watch:add (atom:basic 1) :log (fn [ref key old new] new))")
+                .eval_text("(watch-add (atom:basic 1) :log (fn [key ref old new] new))")
                 .unwrap_err(),
-            "watch:add expects a standard atom"
+            "watch-add expects a standard atom"
         );
         assert_eq!(
             runtime.eval_text("(reset! 1 2)").unwrap_err(),
@@ -3177,19 +3362,19 @@ mod tests {
         );
         assert_eq!(
             runtime
-                .eval_text(r#"(protocol-call IFind has? {"a" nil} "a")"#)
+                .eval_text(r#"(has? {"a" nil} "a")"#)
                 .unwrap(),
             "true"
         );
         assert_eq!(
             runtime
-                .eval_text("(protocol-call IFind has? [10 20] 1)")
+                .eval_text("(has? [10 20] 1)")
                 .unwrap(),
             "true"
         );
         assert_eq!(
             runtime
-                .eval_text("(protocol-call IFind has? [10 20] 10)")
+                .eval_text("(has? [10 20] 10)")
                 .unwrap(),
             "false"
         );
@@ -3644,15 +3829,50 @@ mod tests {
         );
         assert_eq!(
             runtime
-                .eval_text("((comp2 (fn [x] (+ x 1)) (fn [x] (* x 2))) 20)")
+                .eval_text("((comp (fn [x] (+ x 1)) (fn [x] (* x 2))) 20)")
                 .unwrap(),
             "41"
         );
         assert_eq!(
             runtime
-                .eval_text("((comp3 (fn [x] (+ x 1)) (fn [x] (+ x 1)) (fn [x] (+ x 1))) 39)")
+                .eval_text("((comp (fn [x] (+ x 1)) (fn [x] (+ x 1)) (fn [x] (+ x 1))) 39)")
                 .unwrap(),
             "42"
+        );
+    }
+
+    #[test]
+    fn public_map_doto_and_set_helpers_are_portable() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "[(map-keys (fn [x] (+ x 1)) {1 :a 2 :b}) \
+                     (map-vals (fn [x] (+ x 1)) {:a 1 :b 2}) \
+                     (let [calls (atom 0) \
+                           value (doto \
+                                   (do (swap! calls (fn [x] (+ x 1))) (atom [])) \
+                                   (swap! (fn [values item] (conj values item)) 1) \
+                                   (swap! (fn [values item] (conj values item)) 2))] \
+                       [(deref calls) (deref value)])]"
+                )
+                .unwrap(),
+            "[{2 :a 3 :b} {:a 2 :b 3} [1 [1 2]]]"
+        );
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(do \
+                       (require [std.foundation.set :as set]) \
+                       [(set/union #{1 2} #{2 3}) \
+                        (set/intersection #{1 2 3} #{2 3 4} #{3 5}) \
+                        (set/difference #{1 2 3} #{2} #{3}) \
+                        (set/subset? #{1 2} #{1 2 3}) \
+                        (set/superset? #{1 2 3} #{1 2}) \
+                        (set/select odd? #{1 2 3 4})])"
+                )
+                .unwrap(),
+            "[#{1 2 3} #{3} #{1} true true #{1 3}]"
         );
     }
 

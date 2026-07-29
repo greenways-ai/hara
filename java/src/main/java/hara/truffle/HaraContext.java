@@ -27,6 +27,7 @@ import hara.lang.protocol.IDerefTimeout;
 import hara.lang.protocol.IDisplay;
 import hara.lang.protocol.ICount;
 import hara.lang.protocol.INth;
+import hara.lang.protocol.IPromise;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -89,6 +90,7 @@ public final class HaraContext {
           "ns");
   private static final String INTRINSIC_NAMESPACE = "hara.lang.intrinsic";
   private static final String FOUNDATION_NAMESPACE = "std.foundation";
+  private static final String PROTOCOL_NAMESPACE_PREFIX = "std.protocol.";
   private static final Map<String, String> GENERATED_LIBRARIES =
       Map.of(
           "string", "std.foundation.string",
@@ -161,9 +163,7 @@ public final class HaraContext {
     currentNamespace = namespace(INTRINSIC_NAMESPACE);
     Map<String, Integer> ifnMethods = new LinkedHashMap<>();
     ifnMethods.put("invoke", -1);
-    ifnProtocol = new HaraProtocol("IFn", ifnMethods);
-    currentNamespace.define(
-        "IFn", ifnProtocol, null, HaraVar.Origin.RUNTIME_PRIMITIVE);
+    ifnProtocol = defineProtocol("IFn", ifnMethods, HaraVar.Origin.RUNTIME_PRIMITIVE);
     withDefinitionOrigin(
         HaraVar.Origin.RUNTIME_PRIMITIVE,
         () -> {
@@ -887,9 +887,74 @@ public final class HaraContext {
   }
 
   HaraProtocol defineProtocol(String name, Map<String, Integer> methodArities) {
-    HaraProtocol protocol = new HaraProtocol(name, methodArities);
-    currentNamespace.define(name, protocol, null, definitionOrigin);
+    return defineProtocol(name, methodArities, definitionOrigin);
+  }
+
+  private HaraProtocol defineProtocol(
+      String name, Map<String, Integer> methodArities, HaraVar.Origin origin) {
+    String canonicalNamespace = builtinProtocolNamespace(name);
+    HaraProtocol protocol =
+        new HaraProtocol(canonicalNamespace + "/" + name, methodArities);
+    namespace(canonicalNamespace).define(name, protocol, null, origin);
+    namespace(FOUNDATION_NAMESPACE).define(name, protocol, null, origin);
+    defineBuiltinProtocolMethods(canonicalNamespace, protocol, origin);
     return protocol;
+  }
+
+  public HaraVar defineLanguageProtocol(Symbol symbol, HaraProtocol protocol) {
+    HaraVar variable = define(symbol, protocol);
+    defineLanguageProtocolMethods(currentNamespace.name(), symbol.getName(), protocol);
+    return variable;
+  }
+
+  private static String builtinProtocolNamespace(String protocolName) {
+    return PROTOCOL_NAMESPACE_PREFIX + protocolName.toLowerCase(java.util.Locale.ROOT);
+  }
+
+  private void defineBuiltinProtocolMethods(
+      String namespaceName, HaraProtocol protocol, HaraVar.Origin origin) {
+    HaraNamespace target = namespace(namespaceName);
+    protocol
+        .methods()
+        .forEach(
+            (methodName, ignored) ->
+                target.define(
+                    methodName,
+                    new VariadicBuiltin(
+                        namespaceName + "/" + methodName,
+                        values -> invokeProtocolMethod(protocol, methodName, values)),
+                    null,
+                    origin));
+  }
+
+  private void defineLanguageProtocolMethods(
+      String namespaceName, String protocolName, HaraProtocol protocol) {
+    HaraNamespace target = namespace(namespaceName);
+    protocol
+        .methods()
+        .forEach(
+            (methodName, ignored) -> {
+              String localName = protocolName + "/" + methodName;
+              target.define(
+                  localName,
+                  new VariadicBuiltin(
+                      namespaceName + "/" + localName,
+                      values -> invokeProtocolMethod(protocol, methodName, values)),
+                  null,
+                  definitionOrigin);
+            });
+  }
+
+  private Object invokeProtocolMethod(
+      HaraProtocol protocol, String methodName, Object[] values) {
+    if (values.length == 0) {
+      throw new HaraException(protocol.name() + "/" + methodName + " expects a receiver");
+    }
+    Object receiver = HaraBox.unwrap(values[0]);
+    if (isHostObject(receiver)) receiver = asHostObject(receiver);
+    Object[] arguments = new Object[values.length - 1];
+    System.arraycopy(values, 1, arguments, 0, arguments.length);
+    return protocol.invoke(methodName, receiver, arguments);
   }
 
   public boolean hostInteropAllowed() {
@@ -1392,8 +1457,6 @@ public final class HaraContext {
     target.define(
         "find", new VariadicBuiltin("find", values -> protocolCall("IFind", "find", values)));
     target.define(
-        "has?", new VariadicBuiltin("has?", values -> protocolCall("IFind", "has?", values)));
-    target.define(
         "assoc", new VariadicBuiltin("assoc", this::associateValues));
     target.define("conj", new VariadicBuiltin("conj", this::conjoin));
     target.define(
@@ -1431,11 +1494,11 @@ public final class HaraContext {
     target.define(
         "peek",
         new UnaryBuiltin(
-            "peek", value -> protocolCall("INavigation", "peek-first", new Object[] {value})));
+            "peek", value -> protocolCall("IPeekFirst", "peek-first", new Object[] {value})));
     target.define(
         "pop",
         new UnaryBuiltin(
-            "pop", value -> protocolCall("INavigation", "pop-first", new Object[] {value})));
+            "pop", value -> protocolCall("IPopFirst", "pop-first", new Object[] {value})));
   }
 
 
@@ -1490,7 +1553,7 @@ public final class HaraContext {
     if (values.length == 1) {
       Object function = values[0];
       return new VariadicBuiltin(
-          "map-transform",
+          "map",
           inputs -> {
             if (inputs.length == 0) {
               throw new HaraException("map transform expects at least one collection");
@@ -1498,27 +1561,24 @@ public final class HaraContext {
             Object[] arguments = new Object[inputs.length + 1];
             arguments[0] = function;
             System.arraycopy(inputs, 0, arguments, 1, inputs.length);
-            Object mapped = iterMap(arguments);
-            ArrayList<Object> output = new ArrayList<>();
-            Iterator<?> iterator = (Iterator<?>) mapped;
-            while (iterator.hasNext()) output.add(iterator.next());
-            return inputs[0] instanceof HaraArray
-                ? new HaraArray(output.toArray())
-                : hara.lang.data.Vector.Standard.from(null, output.toArray());
+            return seqValue(new Object[] {iterMap(arguments)});
           });
     }
     if (values.length < 2) throw new HaraException("map expects a function and collections");
-    return seqValue(
-        new Object[] {
-          iterMap(values)
-        });
+    Iterator<?> iterator = (Iterator<?>) iterMap(values);
+    ArrayList<Object> output = new ArrayList<>();
+    while (iterator.hasNext()) output.add(iterator.next());
+    Object origin = HaraBox.unwrap(values[1]);
+    if (origin instanceof HaraArray) return new HaraArray(output.toArray());
+    if (origin instanceof List<?>) return BuiltinStruct.list(output);
+    return hara.lang.data.Vector.Standard.from(null, output.toArray());
   }
 
   Object partitionValues(Object[] values, boolean includePartial) {
     if (values.length == 1) {
       Object amount = values[0];
       return new UnaryBuiltin(
-          includePartial ? "partition-all-transform" : "partition-transform",
+          includePartial ? "partition-all" : "partition",
           input -> {
             Object partitioned = iterPartition(new Object[] {amount, input}, includePartial);
             ArrayList<Object> output = new ArrayList<>();
@@ -4420,14 +4480,15 @@ public final class HaraContext {
     }
   }
 
-  private static final class HaraPromise implements IDeref<Object>, IDerefTimeout<Object> {
+  private final class HaraPromise implements IPromise {
     private final CompletableFuture<Object> future;
 
     private HaraPromise(CompletableFuture<Object> future) {
       this.future = future;
     }
 
-    private Object state() {
+    @Override
+    public Object state() {
       if (future.isCancelled()) return Keyword.create("cancelled");
       if (!future.isDone()) return Keyword.create("pending");
       return future.isCompletedExceptionally()
@@ -4435,12 +4496,29 @@ public final class HaraContext {
           : Keyword.create("fulfilled");
     }
 
-    private Object value() {
+    @Override
+    public Object value() {
       if (!future.isDone()) throw new HaraException("promise is pending");
       return deref();
     }
 
-    private Object cancel() {
+    @Override
+    public Object then(Object function) {
+      return promiseThen(new Object[] {this, function}, false);
+    }
+
+    @Override
+    public Object catchError(Object function) {
+      return promiseThen(new Object[] {this, function}, true);
+    }
+
+    @Override
+    public Object finallyDo(Object function) {
+      return promiseFinally(new Object[] {this, function});
+    }
+
+    @Override
+    public Object cancel() {
       future.cancel(false);
       return this;
     }

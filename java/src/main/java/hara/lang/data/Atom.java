@@ -90,8 +90,9 @@ public interface Atom<V> {
     }
   }
 
-  public interface Swap<R, V> extends IWatch<R, V>, IValidate<V>, IDeref<V> {
+  public interface Swap<R, V> extends IWatch<R, V>, IValidate<V>, IDeref<V>, ICas<V> {
 
+    @Override
     boolean cas(V oldVal, V newVal);
 
     default Object swap(Function<V, V> f) {
