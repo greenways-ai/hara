@@ -3,11 +3,11 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;; Double Pendulum ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Stateful chaotic mechanics using Verlet integration. Rod constraints
-;; preserve both lengths while gravity continuously advances the masses.
-;; TRY: change gravity or the initial mass positions to change the attractor.
+;; preserve both lengths while gravity and a periodic horizontal drive keep
+;; the pendulum in motion.
+;; TRY: change the drive phases to alter the forced oscillation.
 
 (def gravity 1)
-(def trail-limit 180)
 
 (defn absolute [value] (if (< value 0) (- 0 value) value))
 (defn smaller [a b] (if (< a b) a b))
@@ -20,8 +20,13 @@
         (recur (/ (+ guess (/ value guess)) 2) (+ step 1))
         guess))))
 
-(defn trim [points]
-  (if (> (count points) trail-limit) (vec (rest points)) points))
+(defn drive-at [tick]
+  (let [phase (mod tick 120)]
+    (if (< phase 30)
+      -1
+      (if (< phase 60)
+        0
+        (if (< phase 90) 1 0)))))
 
 (defn initial-state [width height]
   (let [anchor-x (/ width 2)
@@ -33,12 +38,10 @@
                 :y (+ anchor-y (/ (* length 128) 100))}]
     {:anchor-x anchor-x :anchor-y anchor-y :length length
      :first first :first-old {:x (- (get first :x) 2) :y (get first :y)}
-     :second second :second-old {:x (+ (get second :x) 1) :y (get second :y)}
-     :trail-first [[(get first :x) (get first :y)]]
-     :trail-second [[(get second :x) (get second :y)]]}))
+     :second second :second-old {:x (+ (get second :x) 1) :y (get second :y)}}))
 
-(defn verlet [point old]
-  {:x (- (* 2 (get point :x)) (get old :x))
+(defn verlet [point old force-x]
+  {:x (+ (- (* 2 (get point :x)) (get old :x)) force-x)
    :y (+ (- (* 2 (get point :y)) (get old :y)) gravity)})
 
 (defn constrain-to [point anchor-x anchor-y length]
@@ -72,11 +75,11 @@
           (+ step 1)))
       {:first first :second second})))
 
-(defn update-state [state]
+(defn update-state [state tick]
   (let [first (get state :first)
         second (get state :second)
-        moved-first (verlet first (get state :first-old))
-        moved-second (verlet second (get state :second-old))
+        moved-first (verlet first (get state :first-old) 0)
+        moved-second (verlet second (get state :second-old) (drive-at tick))
         solved
         (solve-constraints
           moved-first moved-second
@@ -86,18 +89,10 @@
     (assoc
       (assoc
         (assoc
-          (assoc
-            (assoc
-              (assoc state :first-old first)
-              :second-old second)
-            :first next-first)
-          :second next-second)
-        :trail-first
-        (trim (conj (get state :trail-first)
-                    [(get next-first :x) (get next-first :y)])))
-      :trail-second
-      (trim (conj (get state :trail-second)
-                  [(get next-second :x) (get next-second :y)])))))
+          (assoc state :first-old first)
+          :second-old second)
+        :first next-first)
+      :second next-second)))
 
 (defn render-state [state]
   (let [anchor-x (get state :anchor-x)
@@ -107,9 +102,7 @@
     {:type :canvas-2d
      :background "#02050b"
      :commands
-     [[:polyline (get state :trail-first) "#41f5e4" 3 0.22]
-      [:polyline (get state :trail-second) "#ff2e88" 4 0.36]
-      [:line anchor-x anchor-y (get first :x) (get first :y)
+     [[:line anchor-x anchor-y (get first :x) (get first :y)
        "#7390a8" 2 0.58]
       [:line (get first :x) (get first :y)
        (get second :x) (get second :y) "#7390a8" 2 0.58]
@@ -124,7 +117,7 @@
             width (get frame "canvas/width")
             height (get frame "canvas/height")
             current (if state state (initial-state width height))
-            next (if (= (mod tick 2) 0) (update-state current) current)]
+            next (if (= (mod tick 2) 0) (update-state current tick) current)]
         (do
           (co/await
             (draw/render "canvas/background" (render-state next)))

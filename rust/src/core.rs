@@ -3136,11 +3136,23 @@ fn protocol_iter(arguments: &[Value]) -> Result<Value, String> {
 }
 
 fn tuple_push_last(values: &PTuple<Value>, item: Value) -> Result<Value, String> {
-    Ok(Value::Tuple(Box::new(values.push_last(item)?)))
+    if values.len() < 8 {
+        return Ok(Value::Tuple(Box::new(values.push_last(item)?)));
+    }
+    Ok(Value::Vector(
+        PVector::from_iter(values.iter().cloned().chain(std::iter::once(item)))
+            .with_meta(values.meta().cloned()),
+    ))
 }
 
 fn tuple_push_first(values: &PTuple<Value>, item: Value) -> Result<Value, String> {
-    Ok(Value::Tuple(Box::new(values.push_first(item)?)))
+    if values.len() < 8 {
+        return Ok(Value::Tuple(Box::new(values.push_first(item)?)));
+    }
+    Ok(Value::Vector(
+        PVector::from_iter(std::iter::once(item).chain(values.iter().cloned()))
+            .with_meta(values.meta().cloned()),
+    ))
 }
 
 fn protocol_conj(arguments: &[Value]) -> Result<Value, String> {

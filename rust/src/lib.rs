@@ -2335,6 +2335,23 @@ mod tests {
         assert_eq!(runtime.eval_text("(conj [1 2 3] 4)").unwrap(), "[1 2 3 4]");
         assert_eq!(
             runtime
+                .eval_text(
+                    "(loop [values [] n 0]
+                       (if (< n 32)
+                         (recur (conj values n) (+ n 1))
+                         [(count values) (first values) (nth values 31)]))"
+                )
+                .unwrap(),
+            "[32 0 31]"
+        );
+        let promoted = core::eval(
+            &kernel::parse("(conj (conj (conj (conj [0 1 2 3 4] 5) 6) 7) 8)").unwrap(),
+            &mut env,
+        )
+        .unwrap();
+        assert!(matches!(promoted, core::Value::Vector(values) if values.len() == 9));
+        assert_eq!(
+            runtime
                 .eval_text("(protocol-call ILookup lookup (protocol-call IObjType meta (protocol-call IObjType with-meta [1] {:doc \"tuple\"})) :doc)")
                 .unwrap(),
             "\"tuple\""
