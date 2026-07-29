@@ -10,6 +10,7 @@
 (def neighborhood 15000)
 (def separation-zone 1600)
 (def max-speed 9)
+(def tail-length 14)
 
 (defn absolute [value] (if (< value 0) (- 0 value) value))
 (defn larger [a b] (if (> a b) a b))
@@ -24,7 +25,8 @@
           {:x (+ 30 (mod (* index 83) (larger 60 (- width 60))))
            :y (+ 30 (mod (* index 47) (larger 60 (- height 60))))
            :vx (- (mod (* index 7) 11) 5)
-           :vy (- (mod (* index 13) 9) 4)}))
+           :vy (- (mod (* index 13) 9) 4)
+           :trail []}))
       flock)))
 
 (defn neighborhood-force [boid flock]
@@ -69,16 +71,24 @@
   (if (< value -20) (+ limit 20)
     (if (> value (+ limit 20)) -20 value)))
 
+(defn trim-tail [trail]
+  (if (> (count trail) tail-length)
+    (vec (rest trail))
+    trail))
+
 (defn update-boid [boid flock width height]
   (let [force (neighborhood-force boid flock)
         velocity
         (limit-velocity
           (+ (get boid :vx) (get force :x))
-          (+ (get boid :vy) (get force :y)))]
-    {:x (wrap (+ (get boid :x) (get velocity :x)) width)
-     :y (wrap (+ (get boid :y) (get velocity :y)) height)
+          (+ (get boid :vy) (get force :y)))
+        x (wrap (+ (get boid :x) (get velocity :x)) width)
+        y (wrap (+ (get boid :y) (get velocity :y)) height)]
+    {:x x
+     :y y
      :vx (get velocity :x)
-     :vy (get velocity :y)}))
+     :vy (get velocity :y)
+     :trail (trim-tail (conj (get boid :trail) [x y]))}))
 
 (defn update-flock [flock width height]
   (loop [index 0 next (list)]
@@ -88,20 +98,37 @@
         (conj next (update-boid (nth flock index) flock width height)))
       next)))
 
-(defn boid-commands [flock]
+(defn tail-points [boid tick boid-index]
+  (let [trail (get boid :trail)
+        count-trail (count trail)
+        vx (get boid :vx)
+        vy (get boid :vy)
+        magnitude (larger 1 (+ (absolute vx) (absolute vy)))]
+    (loop [index 0 points (list)]
+      (if (< index count-trail)
+        (let [point (nth trail index)
+              age (- count-trail index 1)
+              wave (- (mod (+ tick boid-index (* index 3)) 7) 3)
+              amplitude (/ (* age wave 3) tail-length)
+              x (+ (nth point 0) (/ (* (- 0 vy) amplitude) magnitude))
+              y (+ (nth point 1) (/ (* vx amplitude) magnitude))]
+          (recur (inc index) (conj points [x y])))
+        points))))
+
+(defn boid-commands [flock tick]
   (loop [index 0 commands (list)]
     (if (< index (count flock))
       (let [boid (nth flock index)
             x (get boid :x)
             y (get boid :y)
-            vx (get boid :vx)
-            vy (get boid :vy)
+            tail (tail-points boid tick index)
             color (if (= (mod index 3) 0) "#9c7bff" "#41f5e4")]
         (recur
           (+ index 1)
           (conj
-            (conj commands [:line x y (- x (/ (* vx 14) 5)) (- y (/ (* vy 14) 5))
-                            color 2 0.48])
+            (conj
+              (conj commands [:polyline tail color 7 0.12])
+              [:polyline tail color 2 0.72])
             [:circle x y 3 "#efffff" 0.94])))
       commands)))
 
@@ -112,14 +139,12 @@
             width (get frame "canvas/width")
             height (get frame "canvas/height")
             current (if flock flock (seed-flock width height))
-            next (if (= (mod tick 2) 0)
-                   (update-flock current width height)
-                   current)]
+            next (update-flock current width height)]
         (do
           (co/await
             (draw/render
               "canvas/background"
               {:type :canvas-2d
                :background "#02050b"
-               :commands (boid-commands next)}))
+               :commands (boid-commands next tick)}))
           (recur next (+ tick 1)))))))

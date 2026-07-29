@@ -225,12 +225,9 @@
             height (get frame "canvas/height")
             events (get frame "input/events")
             current (if state state (initial-state width height))
-            ;; Path finding runs at 20 Hz while drawing stays synchronized to
-            ;; every browser frame. This keeps long-tail collision checks from
-            ;; reducing visual smoothness.
-            next (if (= (mod tick 3) 0)
-                   (update-state current events tick width height)
-                   current)]
+            ;; The bounded trails and fixed look-ahead keep the four-cycle
+            ;; search small enough to advance with every display frame.
+            next (update-state current events tick width height)]
         (do
           (co/await
             (draw/render "canvas/background" (render-state next width height tick)))
