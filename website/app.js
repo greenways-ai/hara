@@ -2437,9 +2437,11 @@ async function bootRuntime() {
     await renderSavedWorkspaces();
     setWorkspace(0);
     setKernelProgress(100, "KERNEL READY", "HARA.WASM LIVE");
-    document.body.classList.add("is-start-ready");
-    query("[data-start]").disabled = false;
     setTimeout(hideKernelProgress, 700);
+    setTimeout(() => {
+      document.body.classList.add("is-start-ready");
+      query("[data-start]").disabled = false;
+    }, 950);
   } catch (error) {
     state.telemetry.errors += 1;
     console.error("[hara www]", error);
