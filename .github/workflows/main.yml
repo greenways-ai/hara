@@ -12,8 +12,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Check out conformance specifications and documentation
-      run: git submodule update --init specs docs
+      with:
+        submodules: true
     - name: Set up Rust WASM toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -115,8 +115,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Check out conformance specifications
-      run: git submodule update --init specs
+      with:
+        submodules: true
     - name: Set up Rust WASM toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
