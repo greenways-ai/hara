@@ -168,6 +168,22 @@
 (defn turn-ant [ant amount]
   (assoc ant :dir (bound 8 (+ (get ant :dir) amount))))
 
+(defn home-distance [location]
+  (let [center (+ home-off (/ nants-sqrt 2))]
+    (+ (absolute (- (nth location 0) center))
+       (absolute (- (nth location 1) center)))))
+
+(defn home-action [context]
+  (let [ahead (if (get context :ahead-open)
+                (home-distance (get context :ahead-loc)) 1000000)
+        left (if (get context :left-open)
+               (home-distance (get context :left-loc)) 1000000)
+        right (if (get context :right-open)
+                (home-distance (get context :right-loc)) 1000000)]
+    (if (<= ahead left)
+      (if (<= ahead right) 0 2)
+      (if (<= left right) 1 2))))
+
 (defn deposit-pheromone [world location]
   (if (get (cell-at world location) :home)
     world
@@ -236,7 +252,9 @@
               [ahead-score
                (direction-score (get context :left) carrying)
                (direction-score (get context :right) carrying)]
-              action (weighted-action seed weights)]
+              action (if carrying
+                       (home-action context)
+                       (weighted-action seed weights))]
           (let [moved (if (= action 0) (get context :ahead-open))
                 result
                 (if moved
@@ -260,7 +278,9 @@
             left (cell-at world left-loc)
             right (cell-at world right-loc)]
         (let [carrying (get ant :food)
-              ahead-open (not (get occupied ahead-loc))]
+              ahead-open (not (get occupied ahead-loc))
+              left-open (not (get occupied left-loc))
+              right-open (not (get occupied right-loc))]
           (if (if carrying (get here :home) false)
             (finish-pair state seed occupied (drop-food world ant))
             (if (if carrying (if (get ahead :home) ahead-open) false)
@@ -273,6 +293,10 @@
                  :occupied occupied
                  :ahead-loc ahead-loc
                  :ahead-open ahead-open
+                 :left-loc left-loc
+                 :left-open left-open
+                 :right-loc right-loc
+                 :right-open right-open
                  :here here
                  :ahead ahead
                  :left left

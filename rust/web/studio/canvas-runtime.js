@@ -447,7 +447,7 @@ export class CanvasRuntime {
 
 function renderStateful2d(slot, context, stateful, width, height) {
   const kind = keyName(stateful.kind);
-  if (kind === "ants") return renderAntsState(context, stateful, width, height);
+  if (kind === "ants") return renderAntsState(slot, context, stateful, width, height);
   if (kind === "boids") return renderBoidsState(slot, context, stateful, width, height);
   if (kind !== "tron") throw new Error(`unsupported stateful canvas: ${kind ?? "nil"}`);
   const reset = stateful.init || !slot.stateful || slot.stateful.kind !== "tron";
@@ -455,6 +455,9 @@ function renderStateful2d(slot, context, stateful, width, height) {
     slot.stateful = {
       kind: "tron",
       trails: (stateful.trails ?? []).map((trail) => trail.map(([x, y]) => [Number(x), Number(y)])),
+      positions: [],
+      velocities: [],
+      lastTime: canvasNow(),
       lastEvent: null
     };
   }
@@ -468,15 +471,29 @@ function renderStateful2d(slot, context, stateful, width, height) {
     for (const [cycle, x, y] of stateful.reset ?? []) {
       trails[Number(cycle)] = [[Number(x), Number(y)]];
     }
+    for (let cycle = 0; cycle < 4; cycle += 1) {
+      slot.stateful.positions[cycle] = [Number((stateful.heads ?? [])[cycle * 2]), Number((stateful.heads ?? [])[cycle * 2 + 1])];
+      const [vx = 0, vy = 0] = (stateful.velocities ?? [])[cycle] ?? [];
+      slot.stateful.velocities[cycle] = [Number(vx), Number(vy)];
+    }
     slot.stateful.lastEvent = stateful;
+    slot.stateful.lastTime = canvasNow();
+  } else {
+    const now = canvasNow();
+    const elapsed = Math.min(50, Math.max(0, now - slot.stateful.lastTime)) * 0.06;
+    slot.stateful.lastTime = now;
+    for (let cycle = 0; cycle < 4; cycle += 1) {
+      const position = slot.stateful.positions[cycle], [vx, vy] = slot.stateful.velocities[cycle];
+      position[0] += vx * elapsed; position[1] += vy * elapsed;
+      const trail = slot.stateful.trails[cycle] ?? (slot.stateful.trails[cycle] = []);
+      trail.push([position[0], position[1]]); trimTronTrail(trail, width, height);
+    }
   }
   const trails = slot.stateful.trails;
   const colors = ["#41f5e4", "#ff2e88", "#9c7bff", "#f5d742"];
-  const heads = stateful.heads ?? [];
   for (let cycle = 0; cycle < 4; cycle += 1) {
     const points = trails[cycle] ?? [];
-    const x = Number(heads[cycle * 2]);
-    const y = Number(heads[cycle * 2 + 1]);
+    const [x, y] = slot.stateful.positions[cycle] ?? [NaN, NaN];
     drawTronTrail(context, points, colors[cycle], x, y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
     context.fillStyle = "#efffff";
@@ -487,7 +504,22 @@ function renderStateful2d(slot, context, stateful, width, height) {
   }
 }
 
-function renderAntsState(context, stateful, width, height) {
+function renderAntsState(slot, context, stateful, width, height) {
+  if (!slot.stateful || slot.stateful.kind !== "ants") {
+    slot.stateful = { kind: "ants", musk: new Map(), lastTime: canvasNow() };
+  }
+  const now = canvasNow();
+  const fade = Math.pow(.5, Math.max(0, now - slot.stateful.lastTime) / 7000);
+  slot.stateful.lastTime = now;
+  for (const [key, amount] of slot.stateful.musk) {
+    const next = amount * fade;
+    if (next < 8) slot.stateful.musk.delete(key);
+    else slot.stateful.musk.set(key, next);
+  }
+  for (const [x, y, amount] of stateful.musk ?? []) {
+    const key = `${Number(x)},${Number(y)}`;
+    slot.stateful.musk.set(key, Math.max(Number(amount), slot.stateful.musk.get(key) ?? 0));
+  }
   const size = Math.max(width, height) / 80;
   const left = (width - size * 80) / 2, top = (height - size * 80) / 2;
   context.fillStyle = "rgba(16,45,92,.42)";
@@ -497,8 +529,9 @@ function renderAntsState(context, stateful, width, height) {
     context.fillStyle = "#ff2e88"; context.globalAlpha = Number(amount) > 30 ? 1 : .82;
     context.beginPath(); context.arc(left + (Number(x) + .5) * size, top + (Number(y) + .5) * size, Math.max(2, size / 2), 0, Math.PI * 2); context.fill();
   }
-  for (const [x, y, amount] of stateful.musk ?? []) {
-    const strength = Math.min(1, Number(amount) / 1200);
+  for (const [key, amount] of slot.stateful.musk) {
+    const [x, y] = key.split(",").map(Number);
+    const strength = Math.min(1, amount / 1200);
     if (strength <= 0) continue;
     context.fillStyle = "#31ff8d"; context.globalAlpha = .04 + strength * .18;
     context.beginPath(); context.arc(left + (Number(x) + .5) * size, top + (Number(y) + .5) * size, Math.max(3, size * (1.2 + strength * 2.4)), 0, Math.PI * 2); context.fill();
@@ -521,20 +554,39 @@ function renderBoidsState(slot, context, stateful, width, height) {
     slot.stateful = {
       kind: "boids",
       tails: boids.map(([x, y]) => [[Number(x), Number(y)]]),
+      positions: boids.map(([x, y]) => [Number(x), Number(y)]),
+      velocities: boids.map(([, , vx = 0, vy = 0]) => [Number(vx), Number(vy)]),
+      lastTime: canvasNow(),
       lastEvent: null
     };
   }
   if (reset || slot.stateful.lastEvent !== stateful) {
     for (let index = 0; index < boids.length; index += 1) {
-      const [x, y] = boids[index];
+      const [x, y, vx = 0, vy = 0] = boids[index];
       const tail = slot.stateful.tails[index];
       tail.push([Number(x), Number(y)]);
       while (tail.length > 18) tail.shift();
+      slot.stateful.positions[index] = [Number(x), Number(y)];
+      slot.stateful.velocities[index] = [Number(vx), Number(vy)];
     }
     slot.stateful.lastEvent = stateful;
+    slot.stateful.lastTime = canvasNow();
+  } else {
+    const now = canvasNow();
+    const elapsed = Math.min(50, Math.max(0, now - slot.stateful.lastTime)) * 0.06;
+    slot.stateful.lastTime = now;
+    for (let index = 0; index < boids.length; index += 1) {
+      const position = slot.stateful.positions[index];
+      const [vx, vy] = slot.stateful.velocities[index];
+      position[0] += vx * elapsed;
+      position[1] += vy * elapsed;
+      const tail = slot.stateful.tails[index];
+      tail.push([position[0], position[1]]);
+      while (tail.length > 18) tail.shift();
+    }
   }
   for (let index = 0; index < boids.length; index += 1) {
-    const [x, y] = boids[index];
+    const [x, y] = slot.stateful.positions[index];
     const color = index % 3 === 0 ? "#9c7bff" : "#41f5e4";
     drawBoidTail(context, slot.stateful.tails[index], color);
     context.fillStyle = "#efffff"; context.globalAlpha = .94; context.beginPath(); context.arc(Number(x), Number(y), 3, 0, Math.PI * 2); context.fill();
@@ -578,6 +630,10 @@ function drawBoidTail(context, points, color) {
     }
     context.stroke();
   }
+}
+
+function canvasNow() {
+  return globalThis.performance?.now?.() ?? Date.now();
 }
 
 export function resolutionUniform(name, value, width, height) {

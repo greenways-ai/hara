@@ -217,6 +217,13 @@
         (recur (+ index 1) (conj (conj heads (get cycle :x)) (get cycle :y))))
       heads)))
 
+(defn cycle-velocities [state]
+  (loop [index 0 velocities []]
+    (if (< index (count cycle-order))
+      (let [cycle (get state (nth cycle-order index))]
+        (recur (+ index 1) (conj velocities (nth directions (get cycle :direction)))))
+      velocities)))
+
 (defn initial-trails [state]
   (loop [index 0 trails []]
     (if (< index (count cycle-order))
@@ -254,6 +261,7 @@
       :init initial
       :trails (if initial (initial-trails state) [])
       :heads (cycle-heads state)
+      :velocities (cycle-velocities state)
       :append (get delta :append)
       :reset (get delta :reset)}}))
 

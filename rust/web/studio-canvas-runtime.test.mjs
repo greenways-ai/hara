@@ -141,7 +141,7 @@ test("stateful Boid frames retain tails without replaying a published event", ()
   const { runtime, callbacks } = fixture();
   runtime.claim("node/boids@1", "canvas/background");
   const frame = new Map([["type", { constructor: { name: "HtaKeyword" }, name: "canvas-2d" }], ["stateful", {
-    kind: { constructor: { name: "HtaKeyword" }, name: "boids" }, init: true, boids: [[10, 20], [30, 40]]
+    kind: { constructor: { name: "HtaKeyword" }, name: "boids" }, init: true, boids: [[10, 20, 5, 0], [30, 40, 0, 5]]
   }]]);
   runtime.publish("node/boids@1", "canvas/background", frame);
   callbacks.values().next().value(16);
