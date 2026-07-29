@@ -84,25 +84,54 @@ const start = query("[data-start]");
 const previous = query("[data-workspace-prev]");
 const next = query("[data-workspace-next]");
 const backgroundSelect = query("[data-background-source]");
+const sourceEditor = query("[data-background-editor]");
+const sourceApply = query("[data-background-apply]");
+const sourceSave = query("[data-background-save]");
 let activeScreen = 0;
 let returnBackground = null;
+let sourceSaveWasDisabled = false;
+let storyLoadGeneration = 0;
 
 const storyBackgrounds = {
-  1: "document/background/kernel-media",
-  2: "document/background/greenways-os"
+  1: "document/story/kernel-media",
+  2: "document/story/greenways-os"
+};
+
+const storySources = {
+  "document/story/kernel-media": "./sources/kernel-media.hal",
+  "document/story/greenways-os": "./sources/greenways-os.hal"
 };
 
 function runtimeReady() {
   return document.body.dataset.kernel === "live";
 }
 
-function selectBackground(documentId) {
+async function selectBackground(documentId) {
   if (!backgroundSelect || !documentId) return false;
+  const generation = ++storyLoadGeneration;
   const available = [...backgroundSelect.options].some((option) => option.value === documentId);
-  if (!available) return false;
-  backgroundSelect.value = documentId;
-  backgroundSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  if (available) {
+    backgroundSelect.value = documentId;
+    backgroundSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  }
+
+  const sourcePath = storySources[documentId];
+  if (!sourcePath || !sourceEditor || !sourceApply) return false;
+  const response = await fetch(sourcePath, { cache: "no-store" });
+  if (!response.ok) throw new Error(`story source fetch failed: ${response.status}`);
+  const source = await response.text();
+  if (generation !== storyLoadGeneration) return false;
+  sourceEditor.value = source;
+  sourceEditor.scrollTop = 0;
+  sourceEditor.scrollLeft = 0;
+  sourceEditor.dispatchEvent(new Event("scroll"));
+  sourceApply.click();
   return true;
+}
+
+function restoreSourceSave() {
+  if (sourceSave) sourceSave.disabled = sourceSaveWasDisabled;
 }
 
 function updateNavigation() {
@@ -129,18 +158,23 @@ function showScreen(index) {
     queryAll("[data-story-screen]", story).forEach((screen) => screen.classList.remove("is-active"));
     const restore = returnBackground;
     returnBackground = null;
-    if (restore) selectBackground(restore);
+    restoreSourceSave();
+    if (restore) void selectBackground(restore);
     updateNavigation();
     start?.focus();
     return;
   }
 
-  if (previousScreen === 0) returnBackground = backgroundSelect?.value || null;
+  if (previousScreen === 0) {
+    returnBackground = backgroundSelect?.value || null;
+    sourceSaveWasDisabled = Boolean(sourceSave?.disabled);
+    if (sourceSave) sourceSave.disabled = true;
+  }
   document.body.dataset.storyScreen = String(activeScreen);
   queryAll("[data-story-screen]", story).forEach((screen) => {
     screen.classList.toggle("is-active", Number(screen.dataset.storyScreen) === activeScreen);
   });
-  selectBackground(storyBackgrounds[activeScreen]);
+  void selectBackground(storyBackgrounds[activeScreen]);
   updateNavigation();
   query(".story-screen.is-active .story-copy", story)?.focus({ preventScroll: true });
 }
@@ -203,14 +237,17 @@ document.addEventListener("keydown", (event) => {
 
 new MutationObserver(() => {
   if (document.body.dataset.workspace === "1" && activeScreen) {
+    storyLoadGeneration += 1;
     activeScreen = 0;
     story.hidden = true;
     story.setAttribute("aria-hidden", "true");
     delete document.body.dataset.storyScreen;
+    restoreSourceSave();
   } else if (document.body.dataset.workspace === "0" && !activeScreen && returnBackground) {
     const restore = returnBackground;
     returnBackground = null;
-    selectBackground(restore);
+    restoreSourceSave();
+    void selectBackground(restore);
   }
   updateNavigation();
 }).observe(document.body, {
