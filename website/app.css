@@ -165,7 +165,30 @@ body[data-workspace="1"] .atmosphere {
   display: block;
   border-radius: 50%;
   background: currentColor;
-  box-shadow: 0 0 7px rgba(3, 17, 18, .22);
+  box-shadow:
+    0 0 5px rgba(65, 245, 228, .92),
+    0 0 13px rgba(65, 245, 228, .58);
+}
+
+.launcher-button,
+.workspace-nav-button:not(:disabled) {
+  color: var(--cyan-bright) !important;
+  text-shadow:
+    0 0 5px rgba(65, 245, 228, .72),
+    0 0 12px rgba(65, 245, 228, .4);
+}
+
+.system-bottom-bar .source-toggle {
+  color: var(--cyan-bright) !important;
+  font-weight: 800;
+  text-shadow: 0 0 7px rgba(65, 245, 228, .48);
+}
+
+.launcher-button:hover .app-launcher-glyph i,
+.launcher-button[aria-expanded="true"] .app-launcher-glyph i {
+  box-shadow:
+    0 0 7px rgba(65, 245, 228, 1),
+    0 0 20px rgba(65, 245, 228, .82);
 }
 
 .workspace-nav-button:disabled {

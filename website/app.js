@@ -633,6 +633,14 @@ async function activateBackground(descriptor, source, generation) {
     state.canvasRuntime.commit(nodeId, descriptor.canvas);
     state.broker.commitDocument(prepared);
     state.activeBackground = { descriptor, nodeId, source };
+    taskSettled.catch((error) => {
+      if (state.activeBackground?.nodeId !== nodeId) return;
+      const message = errorText(error);
+      state.telemetry.errors += 1;
+      state.telemetry.framesPerSecond = 0;
+      elements.sourceStatus.textContent = `ERROR // ${message}`;
+      toast(`BACKGROUND SOURCE FAILED: ${message}`, true);
+    });
     if (previous?.nodeId && previous.nodeId !== nodeId) state.nodeRuntime.releaseNode(previous.nodeId);
   } catch (error) {
     state.canvasRuntime.discard(nodeId, descriptor.canvas);
