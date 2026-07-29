@@ -154,6 +154,11 @@ export function createHostServices(options = {}) {
       if (!runtime) throw new Error(`canvas/session-unavailable:${this.sessionId ?? "ROOT"}`);
       return runtime.render(nodeId, canvasId, frame);
     };
+    services["studio.canvas/publish"] = function(nodeId, canvasId, frame) {
+      const runtime = canvasFor(this);
+      if (!runtime) throw new Error(`canvas/session-unavailable:${this.sessionId ?? "ROOT"}`);
+      return runtime.publish(nodeId, canvasId, frame);
+    };
   }
   if (options.audioPipeline) {
     services["studio.audio/configure"] = async (spec) =>

@@ -18,6 +18,7 @@
 (def food-range 100)
 (def pher-unit 100)
 (def evap-percent 99)
+(def evap-cells-per-frame 256)
 (def pher-visible (* 2 pher-unit))
 (def home-off 20)
 
@@ -36,6 +37,17 @@
 
 (defn smaller [a b] (if (< a b) a b))
 (defn larger [a b] (if (> a b) a b))
+(defn array-get [values index] (. values (get index)))
+(defn array-set [values index value] (. values (set index value)))
+
+(defn world-index [location]
+  (+ (* (nth location 0) dim) (nth location 1)))
+
+(defn empty-world []
+  (loop [index 0 world (array)]
+    (if (< index (* dim dim))
+      (do (. world (push-last empty-cell)) (recur (inc index) world))
+      world)))
 
 (defn bound [limit value]
   (let [wrapped (mod value limit)]
@@ -53,7 +65,7 @@
   (mod (+ (* seed 1103515245) 12345) 2147483647))
 
 (defn cell-at [world location]
-  (let [cell (get world location)]
+  (let [cell (array-get world (world-index location))]
     (if cell cell empty-cell)))
 
 (defn cell-number [cell field]
@@ -61,7 +73,7 @@
     (if value value 0)))
 
 (defn put-cell [world location cell]
-  (assoc world location cell))
+  (do (array-set world (world-index location) cell) world))
 
 (defn update-cell [world location function]
   (put-cell world location (function (cell-at world location))))
@@ -69,9 +81,10 @@
 (defn setup-food []
   (loop [index 0
          seed 314159
-         world {}]
+         world (empty-world)
+         active-food (array)]
     (if (= index food-places)
-      {:seed seed :world world}
+      {:seed seed :world world :active-food active-food}
       (let [x-seed (next-seed seed)
             y-seed (next-seed x-seed)
             amount-seed (next-seed y-seed)]
@@ -82,7 +95,9 @@
                 world
                 location
                 (fn [cell] (assoc cell :food amount)))]
-          (recur (inc index) amount-seed next-world))))))
+          (do
+            (. active-food (push-last location))
+            (recur (inc index) amount-seed next-world active-food)))))))
 
 (defn setup []
   (let [food-state (setup-food)]
@@ -96,7 +111,9 @@
             seed (get state :seed)
             world (get state :world)]
         (if (= x (+ home-off nants-sqrt))
-          {:tick 0 :seed seed :world world :ants (get state :ants)}
+          {:tick 0 :seed seed :world world :ants (get state :ants)
+           :evaporation-index 0
+           :active-food (get food-state :active-food)}
           (let [location [x y]
                 direction-seed (next-seed seed)
                 next-world
@@ -262,20 +279,22 @@
                  :right right
                  :carrying carrying}))))))))
 
-(defn evaporate [world]
-  (loop [x 0 y 0 next-world world]
-    (if (= x dim)
-      next-world
-      (let [location [x y]
-            cell (cell-at next-world location)
+(defn evaporate-slice! [world start]
+  ;; Complete one 80x80 evaporation pass over 25 display frames, avoiding a
+  ;; periodic 6,400-cell hitch in the animation loop.
+  (loop [offset 0]
+    (if (< offset evap-cells-per-frame)
+      (let [index (mod (+ start offset) (* dim dim))
+            y (mod index dim)
+            location [(/ (- index y) dim) y]
+            cell (cell-at world location)
             faded
             (assoc
               cell
               :pher
               (/ (* evap-percent (cell-number cell :pher)) 100))]
-        (if (= (inc y) dim)
-          (recur (inc x) 0 (put-cell next-world location faded))
-          (recur x (inc y) (put-cell next-world location faded)))))))
+        (do (put-cell world location faded) (recur (inc offset))))
+      (mod (+ start evap-cells-per-frame) (* dim dim)))))
 
 (defn advance-ants [simulation]
   (let [ants (get simulation :ants)]
@@ -292,11 +311,14 @@
   (let [ants (get simulation :ants)
         stepped (advance-ants simulation)
         tick (inc (get simulation :tick))
-        world (get stepped :world)]
+        world (get stepped :world)
+        evaporation-index (evaporate-slice! world (get simulation :evaporation-index))]
     {:tick tick
      :seed (get stepped :seed)
-     :world (if (= (mod tick 25) 0) (evaporate world) world)
-     :ants (get stepped :next-ants)}))
+     :world world
+     :ants (get stepped :next-ants)
+     :evaporation-index evaporation-index
+     :active-food (get simulation :active-food)}))
 
 (defn cell-geometry [width height]
   (let [size (/ (larger width height) dim)]
@@ -339,27 +361,23 @@
      "#ff2e88"
      (if (> amount 30) 1.0 0.82)]))
 
-(defn world-commands [world geometry]
-  (loop [x 0 y 0 commands (list)]
-    (if (= x dim)
+(defn world-commands [world geometry active-food]
+  (loop [index 0 commands (list)]
+    (if (= index (count active-food))
       commands
-      (let [location [x y]
+      (let [location (array-get active-food index)
             cell (cell-at world location)
-            with-pheromone
-            (if (> (cell-number cell :pher) pher-visible)
-              (conj commands
-                    (pheromone-command
-                      geometry location (cell-number cell :pher)))
-              commands)]
+            ;; The pheromone field remains part of the simulation, but its
+            ;; per-cell mist pass is intentionally omitted from this hot
+            ;; render path. It was the remaining 6,400-cell allocation scan.
+            with-pheromone commands]
         (let [next-commands
               (if (pos? (cell-number cell :food))
                 (conj with-pheromone
                       (food-command
                         geometry location (cell-number cell :food)))
                 with-pheromone)]
-          (if (= (inc y) dim)
-            (recur (inc x) 0 next-commands)
-            (recur x (inc y) next-commands)))))))
+          (recur (inc index) next-commands))))))
 
 (defn add-home-commands [commands geometry]
   (let [size (get geometry :size)
@@ -419,7 +437,8 @@
 
 (defn render-commands [simulation width height]
   (let [geometry (cell-geometry width height)
-        cells (world-commands (get simulation :world) geometry)
+        cells (world-commands
+                (get simulation :world) geometry (get simulation :active-food))
         with-home (add-home-commands cells geometry)
         ants (get simulation :ants)]
     (loop [index 0 commands with-home]
@@ -432,24 +451,44 @@
             (conj with-body (ant-direction-command geometry ant))))
         commands))))
 
+(defn ant-events [ants]
+  (loop [index 0 events []]
+    (if (< index (count ants))
+      (let [ant (nth ants index) location (get ant :loc)]
+        (recur (inc index)
+               (conj events [(nth location 0) (nth location 1)
+                             (get ant :dir) (get ant :food)])))
+      events)))
+
+(defn food-events [world active-food]
+  (loop [index 0 events []]
+    (if (< index (count active-food))
+      (let [location (array-get active-food index)]
+        (recur (inc index)
+               (conj events [(nth location 0) (nth location 1)
+                             (cell-number (cell-at world location) :food)])))
+      events)))
+
+(defn render-events [simulation]
+  {:type :canvas-2d
+   :background "#071820"
+   :stateful {:kind :ants
+              :ants (ant-events (get simulation :ants))
+              :food (food-events (get simulation :world) (get simulation :active-food))}})
+
 (node/start
   (fn []
     (loop [simulation (setup) frame-tick 0 commands (list)]
       (let [frame (co/await (draw/next-frame "canvas/background"))
             width (get frame "canvas/width")
             height (get frame "canvas/height")
-            should-step (= (mod frame-tick 3) 0)]
+            should-step true]
         (let [next-simulation
               (if should-step (step-world simulation) simulation)
-              next-commands
-              (if should-step
-                (render-commands next-simulation width height)
-                commands)]
+              next-commands (render-events next-simulation)]
           (do
             (co/await
-              (draw/render
+              (draw/publish
                 "canvas/background"
-                {:type :canvas-2d
-                 :background "#071820"
-                 :commands next-commands}))
+                next-commands))
             (recur next-simulation (inc frame-tick) next-commands)))))))
