@@ -8,6 +8,7 @@
 (def cycle-speed 6)
 (def collision-radius 20)
 (def probe-spacing 36)
+(def planning-interval 4)
 (def directions [[6 0] [0 6] [-6 0] [0 -6]])
 (def cycle-order [:cyan :pink :violet :gold])
 
@@ -90,12 +91,13 @@
 
 (defn safe-run [name cycle direction state width height]
   ;; Look far enough ahead to prefer corridors over locally safe dead ends.
-  ;; Twelve moves is 72 logical pixels at the default speed.
+  ;; Eight moves is enough to avoid immediate dead ends. Full path planning
+  ;; runs only every few frames; intervening frames preserve the chosen line.
   (let [velocity (nth directions direction)]
     (loop [step 1]
       (let [x (+ (get cycle :x) (* step (nth velocity 0)))
             y (+ (get cycle :y) (* step (nth velocity 1)))]
-        (if (if (<= step 12) (not (blocked name x y state width height)))
+        (if (if (<= step 8) (not (blocked name x y state width height)))
           (recur (+ step 1))
           (- step 1))))))
 
@@ -156,15 +158,23 @@
    :gold {:x (- width 80) :y (- height 80) :direction 2
           :trail (array [(- width 80) (- height 80)])}})
 
-(defn update-cycle [name target-name state events width height]
+(defn update-cycle [name target-name state events tick width height]
   (let [cycle (get state name)
         target (get state target-name)
         current (get cycle :direction)
         requested (if (= name :cyan)
                     (event-direction events current)
                     current)
+        point (next-position cycle requested)
+        path-open (not (blocked name (nth point 0) (nth point 1) state width height))
+        should-plan
+        (if (= name :cyan)
+          (if (> (count events) 0) true (if (= (mod tick planning-interval) 0) true (not path-open)))
+          (if (= (mod tick planning-interval) 0) true (not path-open)))
         direction
-        (choose-direction name cycle target state requested width height)]
+        (if should-plan
+          (choose-direction name cycle target state requested width height)
+          requested)]
     (if (= direction -1)
       (get (initial-state width height) name)
       (advance cycle direction width height))))
@@ -182,10 +192,10 @@
 
 (defn update-state [state events tick width height]
   (let [moved
-        {:cyan (update-cycle :cyan :pink state events width height)
-         :pink (update-cycle :pink :violet state events width height)
-         :violet (update-cycle :violet :gold state events width height)
-         :gold (update-cycle :gold :cyan state events width height)}
+        {:cyan (update-cycle :cyan :pink state events tick width height)
+         :pink (update-cycle :pink :violet state events tick width height)
+         :violet (update-cycle :violet :gold state events tick width height)
+         :gold (update-cycle :gold :cyan state events tick width height)}
         spawn (initial-state width height)]
     {:cyan (if (head-crash :cyan (get moved :cyan) moved)
              (get spawn :cyan) (get moved :cyan))
@@ -226,8 +236,8 @@
             height (get frame "canvas/height")
             events (get frame "input/events")
             current (if state state (initial-state width height))
-            ;; The bounded trails and fixed look-ahead keep the four-cycle
-            ;; search small enough to advance with every display frame.
+            ;; Cycles move every display frame, while expensive path planning
+            ;; is amortized across a short decision interval.
             next (update-state current events tick width height)]
         (do
           (co/await

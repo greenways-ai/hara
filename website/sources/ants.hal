@@ -80,9 +80,10 @@
 (defn setup-food []
   (loop [index 0
          seed 314159
-         world (empty-world)]
+         world (empty-world)
+         active-food (array)]
     (if (= index food-places)
-      {:seed seed :world world}
+      {:seed seed :world world :active-food active-food}
       (let [x-seed (next-seed seed)
             y-seed (next-seed x-seed)
             amount-seed (next-seed y-seed)]
@@ -93,7 +94,9 @@
                 world
                 location
                 (fn [cell] (assoc cell :food amount)))]
-          (recur (inc index) amount-seed next-world))))))
+          (do
+            (. active-food (push-last location))
+            (recur (inc index) amount-seed next-world active-food)))))))
 
 (defn setup []
   (let [food-state (setup-food)]
@@ -107,7 +110,8 @@
             seed (get state :seed)
             world (get state :world)]
         (if (= x (+ home-off nants-sqrt))
-          {:tick 0 :seed seed :world world :ants (get state :ants)}
+          {:tick 0 :seed seed :world world :ants (get state :ants)
+           :active-food (get food-state :active-food)}
           (let [location [x y]
                 direction-seed (next-seed seed)
                 next-world
@@ -307,7 +311,8 @@
     {:tick tick
      :seed (get stepped :seed)
      :world (if (= (mod tick 25) 0) (evaporate world) world)
-     :ants (get stepped :next-ants)}))
+     :ants (get stepped :next-ants)
+     :active-food (get simulation :active-food)}))
 
 (defn cell-geometry [width height]
   (let [size (/ (larger width height) dim)]
@@ -350,11 +355,11 @@
      "#ff2e88"
      (if (> amount 30) 1.0 0.82)]))
 
-(defn world-commands [world geometry]
-  (loop [x 0 y 0 commands (list)]
-    (if (= x dim)
+(defn world-commands [world geometry active-food]
+  (loop [index 0 commands (list)]
+    (if (= index (count active-food))
       commands
-      (let [location [x y]
+      (let [location (array-get active-food index)
             cell (cell-at world location)
             ;; The pheromone field remains part of the simulation, but its
             ;; per-cell mist pass is intentionally omitted from this hot
@@ -366,9 +371,7 @@
                       (food-command
                         geometry location (cell-number cell :food)))
                 with-pheromone)]
-          (if (= (inc y) dim)
-            (recur (inc x) 0 next-commands)
-            (recur x (inc y) next-commands)))))))
+          (recur (inc index) next-commands))))))
 
 (defn add-home-commands [commands geometry]
   (let [size (get geometry :size)
@@ -428,7 +431,8 @@
 
 (defn render-commands [simulation width height]
   (let [geometry (cell-geometry width height)
-        cells (world-commands (get simulation :world) geometry)
+        cells (world-commands
+                (get simulation :world) geometry (get simulation :active-food))
         with-home (add-home-commands cells geometry)
         ants (get simulation :ants)]
     (loop [index 0 commands with-home]
