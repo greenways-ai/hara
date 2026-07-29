@@ -698,10 +698,11 @@ body[data-workspace="1"] .workspace-track { transform: none; }
 
 .hero-callout {
   width: clamp(190px, 20vw, 290px);
-  min-height: clamp(86px, 9vw, 112px);
+  height: clamp(86px, 9vw, 112px);
   display: grid;
-  gap: .8rem;
+  grid-template-areas: "stage";
   justify-items: stretch;
+  justify-self: start;
   isolation: isolate;
   transform: translateY(clamp(8px, 1.5vh, 18px));
 }
@@ -744,9 +745,11 @@ body[data-workspace="1"] .workspace-track { transform: none; }
 }
 
 .start-button {
+  grid-area: stage;
   width: 100%;
+  height: 100%;
   min-width: 0;
-  min-height: clamp(86px, 9vw, 112px);
+  min-height: 0;
   display: none;
   align-items: center;
   justify-content: center;
@@ -1590,6 +1593,9 @@ body[data-workspace="1"] .source-toggle { display: none; }
 .launcher-scrim.is-open { display: block; }
 
 .kernel-loading {
+  grid-area: stage;
+  align-self: start;
+  justify-self: stretch;
   position: relative;
   top: auto;
   left: auto;
@@ -2026,12 +2032,11 @@ body[data-workspace="1"] .source-toggle { display: none; }
   .welcome-kicker { font-size: .5rem; letter-spacing: .18em; }
   .welcome-tagline { font-size: 1rem; }
   .start-button {
-    min-height: 64px;
     gap: .8rem;
     font-size: .9rem;
     justify-self: start;
   }
-  .hero-callout { width: min(220px, calc(100vw - 3rem)); min-height: 64px; }
+  .hero-callout { width: min(220px, calc(100vw - 3rem)); height: 64px; }
   .start-mark { width: 3.9em; height: 3.1em; }
   .launcher-grid { grid-template-columns: repeat(2, 1fr); }
   .app-tile { min-height: 96px; }
