@@ -1,8 +1,11 @@
 # hara.lang
 
-Hara is a small, runtime-neutral language for live systems. The current supported language
-implementation is the Truffle runtime: it provides a compact L0 core, persistent data, explicit
-mutable `array`/`object` markers, protocols, promises, bytes, capability-gated I/O, and a JLine REPL.
+Hara is a programmable, runtime-neutral kernel for building, inspecting, and
+changing live systems. Programs communicate with the kernel through HAL (Hara
+Lisp), an EDN-compatible, host-neutral notation and data format. The current
+supported runtime is Truffle: it provides a compact L0 core, persistent data,
+explicit mutable `array`/`object` markers, protocols, promises, bytes,
+capability-gated I/O, and a JLine REPL.
 
 ```text
 Hara source

@@ -185,8 +185,9 @@ class StudioController {
     const tree = el("aside", "hara-frame hara-studio-tree");
     tree.setAttribute("data-hara-studio", "file-tree");
     this.treeCount = el("span", "hara-index", "0");
+    this.treeSpace = el("span", null, "EXPLORER");
     const treeHead = el("div", "hara-studio-pane-head");
-    treeHead.append(el("span", null, "EXPLORER"), this.treeCount);
+    treeHead.append(this.treeSpace, this.treeCount);
     this.treeBody = el("div", "hara-studio-tree-body");
     tree.append(treeHead, this.treeBody);
 
