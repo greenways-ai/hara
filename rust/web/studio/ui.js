@@ -1,6 +1,6 @@
 import { HtaKeyword, HtaSymbol } from "../hta.js";
 import { defaultBootstrap } from "./boot.js";
-import { editorFormAt, isAnonymousDocument, studioDocumentId } from "./editor-state.js";
+import { editorFormAt, editorTopLevelForms, isAnonymousDocument, studioDocumentId } from "./editor-state.js";
 import { activateStudioDocument } from "./document-runtime.js";
 import { createStudioShell } from "../ui/studio-shell.js";
 
@@ -204,9 +204,12 @@ class StudioController {
     this.runAction = action("▶", "Evaluate the whole file");
     this.runAction.classList.add("hara-studio-pane-icon");
     this.runAction.setAttribute("aria-label", "Run file");
+    this.traceAction = action("≡", "Trace top-level forms in an isolated session");
+    this.traceAction.classList.add("hara-studio-pane-icon");
+    this.traceAction.setAttribute("aria-label", "Trace file");
     const editorHead = el("div", "hara-studio-pane-head");
     const editorHeadRight = el("span");
-    editorHeadRight.append(this.dirtyFlag, this.runAction, this.saveAction);
+    editorHeadRight.append(this.dirtyFlag, this.traceAction, this.runAction, this.saveAction);
     editorHead.append(this.editorName, editorHeadRight);
     this.editor = el("textarea", "hara-studio-editor");
     this.editor.setAttribute("data-hara-studio", "editor");
@@ -214,7 +217,13 @@ class StudioController {
     this.editor.setAttribute("wrap", "off");
     this.editor.setAttribute("aria-label", "File editor");
     this.editor.disabled = true;
-    editorWrap.append(editorHead, this.editor);
+    this.tracePanel = el("section", "hara-studio-trace");
+    this.tracePanel.setAttribute("data-hara-studio", "form-trace");
+    this.tracePanel.hidden = true;
+    this.tracePanel.append(el("div", "hara-studio-trace-head", "FORM TRACE"));
+    this.traceBody = el("div", "hara-studio-trace-body");
+    this.tracePanel.append(this.traceBody);
+    editorWrap.append(editorHead, this.editor, this.tracePanel);
 
     // REPL.
     const repl = el("section", "hara-frame hara-studio-repl");
@@ -303,8 +312,10 @@ class StudioController {
     });
     this.saveAction.addEventListener("click", () => this.saveFile());
     this.runAction.addEventListener("click", () => this.runFile());
+    this.traceAction.addEventListener("click", () => this.traceFile());
     this.editor.addEventListener("input", () => {
       this.state.dirty = true;
+      this.clearTrace();
       this.renderEditorHead();
     });
     this.editor.addEventListener("keydown", (event) => {
@@ -717,6 +728,7 @@ class StudioController {
     this.state.dirty = false;
     this.editor.value = content === null ? "" : String(content);
     this.editor.disabled = false;
+    this.clearTrace();
     this.renderEditorHead();
     this.renderTree();
   }
@@ -767,6 +779,60 @@ class StudioController {
       this.logValue(value);
       return value;
     });
+  }
+
+  async traceFile() {
+    if (!this.state.open) return;
+    const source = this.editor.value;
+    if (isAnonymousDocument(source)) {
+      this.showTraceMessage("Live ns+ documents use generated runtime forms and cannot be source-traced yet.");
+      return;
+    }
+    const forms = editorTopLevelForms(source);
+    if (forms.length === 0) {
+      this.showTraceMessage("No top-level forms to trace.");
+      return;
+    }
+    const rows = await this.task(() => this.broker.traceForms(this.state.kernel, forms, {
+      bootstrap: defaultBootstrap(this.state.space ?? "home")
+    }));
+    if (rows) this.renderTrace(rows);
+  }
+
+  clearTrace() {
+    this.tracePanel.hidden = true;
+    this.traceBody.replaceChildren();
+  }
+
+  showTraceMessage(message) {
+    this.tracePanel.hidden = false;
+    this.traceBody.replaceChildren(el("div", "hara-studio-trace-note", message));
+  }
+
+  renderTrace(rows) {
+    const table = el("table", "hara-studio-trace-table");
+    const head = el("thead");
+    const headRow = el("tr");
+    for (const label of ["#", "FORM", "RESULT", "MS"]) headRow.append(el("th", null, label));
+    head.append(headRow);
+    const body = el("tbody");
+    rows.forEach((row, index) => {
+      const entry = el("tr", `is-${row.status}`);
+      entry.append(
+        el("td", "hara-index", String(index + 1)),
+        el("td", "hara-studio-trace-source", compactTraceSource(row.source)),
+        el("td", row.status === "ok" ? "hara-tty-v" : "hara-tty-e", row.status === "ok" ? renderValue(row.value) : row.error),
+        el("td", "hara-index", row.duration.toFixed(1))
+      );
+      entry.addEventListener("click", () => {
+        this.editor.focus();
+        this.editor.setSelectionRange(row.start, row.end);
+      });
+      body.append(entry);
+    });
+    table.append(head, body);
+    this.tracePanel.hidden = false;
+    this.traceBody.replaceChildren(table);
   }
 
   activeDocumentId() {
@@ -827,6 +893,7 @@ class StudioController {
     this.state.dirty = false;
     this.editor.value = "";
     this.editor.disabled = true;
+    this.clearTrace();
     this.renderEditorHead();
   }
 
@@ -906,4 +973,9 @@ function strip(name, valueNode) {
   const span = el("span");
   span.append(text(`${name} `), valueNode);
   return span;
+}
+
+function compactTraceSource(source) {
+  const compact = source.replace(/\s+/g, " ").trim();
+  return compact.length > 96 ? `${compact.slice(0, 95)}…` : compact;
 }

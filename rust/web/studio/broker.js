@@ -103,6 +103,34 @@ export class KernelBroker {
     return kernel.context.call("session/eval", [sessionName, source]);
   }
 
+  /** Evaluate source forms in a disposable session without changing the active
+   * kernel or document state. Evaluation stops at the first error. */
+  async traceForms(kernelName, forms, {
+    now = () => globalThis.performance?.now?.() ?? Date.now(),
+    bootstrap
+  } = {}) {
+    if (!Array.isArray(forms)) throw new Error("TRACE_FORMS_MUST_BE_ARRAY");
+    kernelName = KernelBroker.normalizeName(kernelName);
+    const sessionName = `TRACE.${Date.now()}.${Math.random().toString(36).slice(2, 10)}`;
+    await this.createSession(kernelName, sessionName, { bootstrap });
+    const rows = [];
+    try {
+      for (const form of forms) {
+        const startedAt = now();
+        try {
+          const value = await this.evalSession(kernelName, sessionName, form.source);
+          rows.push({ ...form, status: "ok", value, duration: now() - startedAt });
+        } catch (error) {
+          rows.push({ ...form, status: "error", error: String(error?.message ?? error), duration: now() - startedAt });
+          break;
+        }
+      }
+      return rows;
+    } finally {
+      await this.closeSession(kernelName, sessionName).catch(() => {});
+    }
+  }
+
   async closeSession(kernelName, sessionName) {
     const kernel = await this.require(kernelName);
     sessionName = KernelBroker.normalizeName(sessionName);

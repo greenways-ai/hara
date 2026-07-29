@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { HtaKeyword, HtaSymbol } from "./hta.js";
-import { editorFormAt, isAnonymousDocument, studioDocumentId } from "./studio/editor-state.js";
+import { editorFormAt, editorTopLevelForms, isAnonymousDocument, studioDocumentId } from "./studio/editor-state.js";
 import {
   buildTree,
   defaultFileContent,
@@ -150,6 +150,18 @@ test("editorFormAt prefers an explicit selection and otherwise finds the innermo
 test("editor forms ignore delimiters in strings and comments", () => {
   const source = '(show ")") ; )\n(+ 1 2)';
   assert.equal(editorFormAt(source, source.length).source, "(+ 1 2)");
+});
+
+test("editorTopLevelForms retains source ranges while ignoring nested syntax and comments", () => {
+  const source = ';; setup\n(def answer (+ 19 23))\n"ready" ; note\n#{1 2}';
+  assert.deepEqual(
+    editorTopLevelForms(source).map(({ start, end, source: form }) => ({ start, end, form })),
+    [
+      { start: source.indexOf("(def"), end: source.indexOf("\n\"ready\""), form: "(def answer (+ 19 23))" },
+      { start: source.indexOf('"ready"'), end: source.indexOf(" ; note"), form: '"ready"' },
+      { start: source.indexOf("#{1 2}"), end: source.length, form: "#{1 2}" }
+    ]
+  );
 });
 
 test("Studio document identity includes project, space, and path", () => {
