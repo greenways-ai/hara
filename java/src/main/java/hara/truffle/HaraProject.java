@@ -19,14 +19,26 @@ final class HaraProject {
   private static final String LEGACY_PROJECT_FILE = "project.hal";
 
   private final Path root;
+  private final Path descriptor;
   private final Symbol name;
+  private final String version;
+  private final Symbol main;
   private final java.util.List<Path> sourcePaths;
   private final java.util.List<Path> testPaths;
 
   private HaraProject(
-      Path root, Symbol name, java.util.List<Path> sourcePaths, java.util.List<Path> testPaths) {
+      Path root,
+      Path descriptor,
+      Symbol name,
+      String version,
+      Symbol main,
+      java.util.List<Path> sourcePaths,
+      java.util.List<Path> testPaths) {
     this.root = root;
+    this.descriptor = descriptor;
     this.name = name;
+    this.version = version;
+    this.main = main;
     this.sourcePaths = java.util.List.copyOf(sourcePaths);
     this.testPaths = java.util.List.copyOf(testPaths);
   }
@@ -56,7 +68,10 @@ final class HaraProject {
         Path root = descriptor.toAbsolutePath().normalize().getParent();
         return new HaraProject(
             root,
+            descriptor,
             projectName,
+            lookup(options, "project/version") instanceof String value ? value : null,
+            lookup(options, "project/main") instanceof Symbol value ? value : null,
             paths(
                 root,
                 lookup(options, "project/source-paths"),
@@ -82,7 +97,10 @@ final class HaraProject {
       Path root = descriptor.toAbsolutePath().normalize().getParent();
       return new HaraProject(
           root,
+          descriptor,
           projectName,
+          null,
+          null,
           paths(
               root,
               lookup(options, "source-paths"),
@@ -118,6 +136,52 @@ final class HaraProject {
 
   Symbol name() {
     return name;
+  }
+
+  Path descriptor() {
+    return descriptor;
+  }
+
+  String version() {
+    return version;
+  }
+
+  Symbol main() {
+    return main;
+  }
+
+  void validateCliProject() {
+    if (!PROJECT_FILE.equals(descriptor.getFileName().toString()))
+      throw new HaraException("project CLI requires project.edn");
+    try {
+      Object form = Parser.LispReader.readString(Files.readString(descriptor, StandardCharsets.UTF_8), null);
+      if (!(form instanceof IMapType<?, ?> options)
+          || !(lookup(options, "hara/type") instanceof Keyword type)
+          || !"project".equals(type.getName()))
+        throw new HaraException("project.edn :hara/type must be :project");
+      for (String key :
+          java.util.List.of(
+              "hara/version",
+              "project/version",
+              "project/source-paths",
+              "project/test-paths",
+              "project/extension-paths",
+              "project/capabilities")) {
+        if (lookup(options, key) == null) throw new HaraException("project.edn missing required key :" + key);
+      }
+      if (!(lookup(options, "project/version") instanceof String))
+        throw new HaraException("project.edn :project/version must be a string");
+    } catch (IOException error) {
+      throw new HaraException("Unable to read project descriptor " + descriptor + ": " + error.getMessage());
+    }
+  }
+
+  Path mainFile() {
+    if (main == null) throw new HaraException("project.edn is missing :project/main");
+    Path source = resolve(main.display(), false);
+    if (source == null)
+      throw new HaraException("cannot find :project/main " + main.display() + " in :project/source-paths");
+    return source;
   }
 
   Path root() {

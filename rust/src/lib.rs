@@ -12,6 +12,8 @@ mod native_extension;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod package;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod project;
+#[cfg(not(target_arch = "wasm32"))]
 mod process_extension;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod resp;

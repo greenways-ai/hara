@@ -3,34 +3,13 @@
 //! Network reconciliation deliberately does not live here yet: package roots
 //! are only activated after a registry and identity client has verified them.
 
-use semver::{Version, VersionReq};
+use crate::project::{self, Project};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
-
-const REQUIRED_PROJECT_KEYS: &[&str] = &[
-    ":hara/type",
-    ":hara/version",
-    ":project/id",
-    ":project/version",
-    ":project/source-paths",
-    ":project/test-paths",
-    ":project/extension-paths",
-    ":project/capabilities",
-];
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Project {
-    root: PathBuf,
-    id: String,
-    version: Version,
-    source_paths: Vec<PathBuf>,
-    artifact_paths: Vec<PathBuf>,
-    archive_root: Option<PathBuf>,
-}
 
 /// Handles the public `hara package` command group.
 pub fn run(args: &[String]) -> Result<(), String> {
@@ -84,83 +63,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
 }
 
-fn read_project(path: &Path) -> Result<Project, String> {
-    let (root, manifest_path) = if path.is_dir() {
-        (path.to_path_buf(), path.join("project.edn"))
-    } else {
-        (
-            path.parent()
-                .ok_or_else(|| format!("cannot determine project root for {}", path.display()))?
-                .to_path_buf(),
-            path.to_path_buf(),
-        )
-    };
-    let source = fs::read_to_string(&manifest_path)
-        .map_err(|error| format!("cannot read {}: {error}", manifest_path.display()))?;
-    for key in REQUIRED_PROJECT_KEYS {
-        if !source.contains(key) {
-            return Err(format!("project.edn missing required key {key}"));
-        }
-    }
-    let id = scalar_after(&source, ":project/id")
-        .ok_or_else(|| "project.edn :project/id must be a symbol or string".to_owned())?;
-    let version_text = scalar_after(&source, ":project/version")
-        .ok_or_else(|| "project.edn :project/version must be a SemVer string".to_owned())?;
-    let version = Version::parse(&version_text)
-        .map_err(|error| format!("project.edn :project/version is not SemVer: {error}"))?;
-    if let Some(dependencies) = map_after(&source, ":project/dependencies") {
-        validate_dependencies(dependencies)?;
-    }
-    let source_paths = vector_after(&source, ":project/source-paths")
-        .ok_or_else(|| "project.edn :project/source-paths must be a vector of strings".to_owned())?
-        .into_iter()
-        .map(PathBuf::from)
-        .collect();
-    let artifact_paths: Vec<PathBuf> = vector_after(&source, ":project/artifact-paths")
-        .unwrap_or_default()
-        .into_iter()
-        .map(PathBuf::from)
-        .collect();
-    let archive_root = scalar_after(&source, ":project/archive-root").map(PathBuf::from);
-    for path in artifact_paths.iter().chain(archive_root.iter()) {
-        validate_relative_path(path)?;
-    }
-    Ok(Project {
-        root,
-        id,
-        version,
-        source_paths,
-        artifact_paths,
-        archive_root,
-    })
-}
-
-fn validate_dependencies(source: &str) -> Result<(), String> {
-    let mut cursor = source;
-    while let Some(index) = cursor.find('"') {
-        cursor = &cursor[index + 1..];
-        let Some(end) = cursor.find('"') else {
-            return Err("unterminated dependency coordinate".into());
-        };
-        let coordinate = &cursor[..end];
-        cursor = &cursor[end + 1..];
-        if !coordinate.contains('/') {
-            continue;
-        }
-        if coordinate.starts_with('/') || coordinate.ends_with('/') {
-            return Err(format!("invalid package coordinate: {coordinate}"));
-        }
-        if let Some(version_index) = cursor.find(":version") {
-            let after = &cursor[version_index + ":version".len()..];
-            if let Some(version) = scalar(after) {
-                VersionReq::parse(&version)
-                    .map_err(|error| format!("invalid dependency range {version}: {error}"))?;
-                cursor = after;
-            }
-        }
-    }
-    Ok(())
-}
+fn read_project(path: &Path) -> Result<Project, String> { project::read(path) }
 
 fn build_archive(project: &Project, output: &Path) -> Result<(), String> {
     let mut entries = Vec::new();
@@ -339,56 +242,6 @@ fn archive_name(id: &str) -> String {
     id.replace('/', "-")
 }
 
-fn scalar_after(source: &str, key: &str) -> Option<String> {
-    source
-        .find(key)
-        .and_then(|index| scalar(&source[index + key.len()..]))
-}
-
-fn scalar(source: &str) -> Option<String> {
-    let source = source.trim_start();
-    if let Some(rest) = source.strip_prefix('"') {
-        rest.find('"').map(|end| rest[..end].to_owned())
-    } else {
-        source.split_whitespace().next().map(|value| {
-            value
-                .trim_matches(|character| matches!(character, '}' | ']'))
-                .to_owned()
-        })
-    }
-}
-
-fn vector_after(source: &str, key: &str) -> Option<Vec<String>> {
-    let source = &source[source.find(key)? + key.len()..];
-    let body = &source[source.find('[')? + 1..];
-    let body = &body[..body.find(']')?];
-    Some(
-        body.split('"')
-            .skip(1)
-            .step_by(2)
-            .map(str::to_owned)
-            .collect(),
-    )
-}
-
-fn map_after<'a>(source: &'a str, key: &str) -> Option<&'a str> {
-    let source = &source[source.find(key)? + key.len()..];
-    let start = source.find('{')?;
-    let mut depth = 0usize;
-    for (index, character) in source[start..].char_indices() {
-        match character {
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(&source[start + 1..start + index]);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -403,15 +256,19 @@ fn zip_error(error: zip::result::ZipError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
 
     fn fixture() -> PathBuf {
         let root = std::env::temp_dir().join(format!(
-            "hara-package-{}",
+            "hara-package-{}-{}",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir_all(root.join("src/example")).unwrap();
         fs::write(root.join("src/example/main.hal"), "(ns example.main) 42\n").unwrap();
