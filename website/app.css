@@ -301,8 +301,8 @@ body[data-workspace="1"] .system-bar {
 
 .floating-background-picker .background-menu-toggle {
   min-width: clamp(9.5rem, 18vw, 13rem);
-  min-height: 54px;
-  padding: .65rem 1rem;
+  min-height: 42px;
+  padding: .45rem .8rem;
   background:
     linear-gradient(135deg, rgba(3, 8, 15, .86), rgba(5, 9, 17, .62)),
     radial-gradient(circle at 15% 0, rgba(65, 245, 228, .09), transparent 58%);
@@ -701,6 +701,7 @@ body[data-workspace="1"] .workspace-track { transform: none; }
   gap: .8rem;
   justify-items: stretch;
   isolation: isolate;
+  transform: translateY(clamp(8px, 1.5vh, 18px));
 }
 
 .welcome-kicker {
