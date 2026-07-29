@@ -1,6 +1,7 @@
 package hara.truffle;
 
 import hara.lang.data.Keyword;
+import hara.lang.protocol.ICoroutine;
 import hara.lang.protocol.IDeref;
 import java.util.concurrent.SynchronousQueue;
 import org.graalvm.nativeimage.ImageInfo;
@@ -34,7 +35,7 @@ public final class StdFoundationCoroutine {
   }
 
   /** A coroutine backed by a parked (virtual) thread. */
-  static final class HaraCoroutine {
+  static final class HaraCoroutine implements ICoroutine {
     /** Queue stand-in for nil: SynchronousQueue rejects null elements. */
     private static final Object NIL = new Object();
 
@@ -50,11 +51,12 @@ public final class StdFoundationCoroutine {
       this.function = function;
     }
 
-    Keyword status() {
+    @Override
+    public Keyword status() {
       return status;
     }
 
-    Object close() {
+    Object closeCoroutine() {
       Thread toInterrupt;
       synchronized (this) {
         if (status == STATUS_DEAD) return this;
@@ -68,7 +70,13 @@ public final class StdFoundationCoroutine {
       return this;
     }
 
-    Object resume(Object[] args) {
+    @Override
+    public void close() {
+      closeCoroutine();
+    }
+
+    @Override
+    public Object resume(Object... args) {
       synchronized (this) {
         if (status == STATUS_DEAD) {
           throw new HaraException("coroutine/resume: cannot resume a dead coroutine");
@@ -242,7 +250,7 @@ public final class StdFoundationCoroutine {
       arglists = {"[co]"})
   public static Object close(HaraContext context, Object[] values) {
     requireArity("coroutine/close", values, 1);
-    return requireCoroutine("coroutine/close", values[0]).close();
+    return requireCoroutine("coroutine/close", values[0]).closeCoroutine();
   }
 
   @HaraExport(

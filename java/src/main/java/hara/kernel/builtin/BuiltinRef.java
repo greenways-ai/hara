@@ -35,20 +35,20 @@ public interface BuiltinRef {
             args);
   }
 
-  @Module.Fn(name = "watch:add", protocol = true)
+  @Module.Fn(name = "watch-add", protocol = true)
   public static <V> Atom.Standard<V> watchAdd(
       Atom.Standard<V> atom, Object key, IFn<Object, IWatch.WatchEntry<Atom, V>, Object> f) {
     atom.addWatch(key, (e) -> f.invoke(e.A(), e.B(), e.D(), e.E()));
     return atom;
   }
 
-  @Module.Fn(name = "watch:remove", protocol = true)
+  @Module.Fn(name = "watch-remove", protocol = true)
   public static <V> Atom.Standard<V> watchRemove(Atom.Standard<V> atom, Object key) {
     atom.removeWatch(key);
     return atom;
   }
 
-  @Module.Fn(name = "watch:list", protocol = true)
+  @Module.Fn(name = "watch-list", protocol = true)
   public static <V> Iterator watchList(Atom.Standard<V> atom) {
     return atom.getWatches();
   }

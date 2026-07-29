@@ -28,9 +28,9 @@ fi
 
 required=(
   src/lang/data/vector.rs
-  src/lang/protocol/assoc.rs
-  src/lang/protocol/lookup.rs
-  src/lang/protocol/find.rs
+  src/lang/protocol/iassoc.rs
+  src/lang/protocol/ilookup.rs
+  src/lang/protocol/ifind.rs
 )
 
 for relative in "${required[@]}"; do

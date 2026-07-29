@@ -152,6 +152,51 @@ pub fn resume_form(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Co
     )
 }
 
+pub fn resume_protocol_form(
+    v: Vec<Form>,
+    env: Rc<RefCell<HashMap<String, Value>>>,
+    k: Cont,
+) -> Step {
+    if v.len() < 2 {
+        return k(Err("ICoroutine/resume expects a receiver".into()));
+    }
+    let arg_forms = v[2..].to_vec();
+    one(
+        v[1].clone(),
+        env.clone(),
+        Box::new(move |receiver| match receiver {
+            Ok(Value::Coroutine(coroutine)) => values_cps(
+                Rc::new(arg_forms),
+                0,
+                Vec::new(),
+                env,
+                Box::new(move |arguments| match arguments {
+                    Ok(arguments) => coroutine_resume(coroutine, arguments, k),
+                    Err(error) => k(Err(error)),
+                }),
+            ),
+            Ok(receiver) => values_cps(
+                Rc::new(arg_forms),
+                0,
+                Vec::new(),
+                env,
+                Box::new(move |arguments| match arguments {
+                    Ok(mut arguments) => {
+                        arguments.insert(0, receiver);
+                        k(crate::core::protocol_call(
+                            "std.protocol.icoroutine/ICoroutine",
+                            "resume",
+                            &arguments,
+                        ))
+                    }
+                    Err(error) => k(Err(error)),
+                }),
+            ),
+            Err(error) => k(Err(error)),
+        }),
+    )
+}
+
 pub fn yield_form(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step {
     values_cps(
         Rc::new(v[1..].to_vec()),

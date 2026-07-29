@@ -1,5 +1,16 @@
 use super::*;
 
+#[test]
+fn protocol_resume_path_uses_the_coroutine_evaluator() {
+    let fiber = EvalFiber::start(
+        "(let [c (std.foundation.coroutine/create (fn [] 42))] \
+           (std.protocol.icoroutine/resume c))",
+        HashMap::new(),
+    )
+    .unwrap();
+    assert_eq!(fiber.state(), EvalFiberState::Completed(Value::Number(42)));
+}
+
 fn keyword(name: &str) -> Value {
     Value::Keyword(crate::lang::data::Keyword::from(name))
 }

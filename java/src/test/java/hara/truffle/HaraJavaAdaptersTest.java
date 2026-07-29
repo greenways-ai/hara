@@ -55,37 +55,26 @@ public class HaraJavaAdaptersTest {
   @Test
   public void adaptsCollectionNavigationAndConversion() {
     List.Standard<String> list = List.Standard.from(null, "one", "two");
-    HaraProtocol navigation =
-        new HaraProtocol(
-            "INavigation",
-            Map.of(
-                "peek-first",
-                1,
-                "peek-last",
-                1,
-                "pop-first",
-                1,
-                "pop-last",
-                1,
-                "push-first",
-                2,
-                "push-last",
-                2));
-    HaraJavaAdapters.installNavigation(navigation);
-    assertEquals("one", navigation.invoke("peek-first", list, new Object[0]));
-    assertEquals("two", navigation.invoke("peek-last", list, new Object[0]));
+    HaraProtocol peekFirst = new HaraProtocol("IPeekFirst", Map.of("peek-first", 1));
+    HaraJavaAdapters.installPeekFirst(peekFirst);
+    HaraProtocol peekLast = new HaraProtocol("IPeekLast", Map.of("peek-last", 1));
+    HaraJavaAdapters.installPeekLast(peekLast);
+    HaraProtocol pushFirst = new HaraProtocol("IPushFirst", Map.of("push-first", 2));
+    HaraJavaAdapters.installPushFirst(pushFirst);
+    assertEquals("one", peekFirst.invoke("peek-first", list, new Object[0]));
+    assertEquals("two", peekLast.invoke("peek-last", list, new Object[0]));
     assertEquals(
         "zero",
-        navigation.invoke(
+        peekFirst.invoke(
             "peek-first",
-            navigation.invoke("push-first", list, new Object[] {"zero"}),
+            pushFirst.invoke("push-first", list, new Object[] {"zero"}),
             new Object[0]));
 
     HaraProtocol cons = new HaraProtocol("ICons", Map.of("cons", 2));
     HaraJavaAdapters.installCons(cons);
     assertEquals(
         "zero",
-        navigation.invoke(
+        peekFirst.invoke(
             "peek-first", cons.invoke("cons", list, new Object[] {"zero"}), new Object[0]));
 
     HaraProtocol toMutable = new HaraProtocol("IToMutable", Map.of("to-mutable", 1));
@@ -134,6 +123,26 @@ public class HaraJavaAdaptersTest {
     Iterator<?> iterator = (Iterator<?>) collection.invoke("iterator", vector, new Object[0]);
     assertEquals("first", iterator.next());
     assertEquals("second", iterator.next());
+  }
+
+  @Test
+  public void adaptsJavaIterablesAndIteratorsThroughIIter() {
+    HaraProtocol iter = new HaraProtocol("IIter", Map.of("iter", 1));
+    HaraJavaAdapters.installIter(iter);
+    HaraProtocol iterator =
+        new HaraProtocol("IIterator", Map.of("iter-next?", 1, "iter-next", 1));
+    HaraJavaAdapters.installIterator(iterator);
+    HaraProtocol close = new HaraProtocol("IClose", Map.of("close", 1));
+    HaraJavaAdapters.installClose(close);
+
+    Object cursor =
+        iter.invoke(
+            "iter", Vector.Standard.from(null, "first", "second"), new Object[0]);
+    assertEquals(true, iterator.invoke("iter-next?", cursor, new Object[0]));
+    assertEquals("first", iterator.invoke("iter-next", cursor, new Object[0]));
+    assertEquals("second", iterator.invoke("iter-next", cursor, new Object[0]));
+    assertEquals(false, iterator.invoke("iter-next?", cursor, new Object[0]));
+    assertEquals(null, close.invoke("close", cursor, new Object[0]));
   }
 
   @Test

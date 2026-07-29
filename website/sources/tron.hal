@@ -8,7 +8,8 @@
 (def cycle-speed 6)
 (def collision-radius 20)
 (def probe-spacing 36)
-(def planning-interval 4)
+(def planning-interval 12)
+(def planner-phases {:cyan 0 :pink 3 :violet 7 :gold 10})
 (def directions [[6 0] [0 6] [-6 0] [0 -6]])
 (def cycle-order [:cyan :pink :violet :gold])
 
@@ -20,8 +21,8 @@
 
 (defn trim-trail! [trail width height]
   ;; Collision probes are 36px apart with overlapping 20px hit radii.
-  ;; Retaining this many probes yields about 1.5 times the longest screen axis.
-  (let [limit (/ (* (larger width height) 3) (* probe-spacing 2))]
+  ;; A shorter retained wall keeps collision work bounded at display rate.
+  (let [limit (/ (* (larger width height) 2) (* probe-spacing 2))]
     (if (> (count trail) limit) (. trail (pop-first)) trail)
     trail))
 
@@ -91,13 +92,13 @@
 
 (defn safe-run [name cycle direction state width height]
   ;; Look far enough ahead to prefer corridors over locally safe dead ends.
-  ;; Eight moves is enough to avoid immediate dead ends. Full path planning
+  ;; Four moves is enough to avoid immediate dead ends. Full path planning
   ;; runs only every few frames; intervening frames preserve the chosen line.
   (let [velocity (nth directions direction)]
     (loop [step 1]
       (let [x (+ (get cycle :x) (* step (nth velocity 0)))
             y (+ (get cycle :y) (* step (nth velocity 1)))]
-        (if (if (<= step 8) (not (blocked name x y state width height)))
+        (if (if (<= step 4) (not (blocked name x y state width height)))
           (recur (+ step 1))
           (- step 1))))))
 
@@ -169,8 +170,11 @@
         path-open (not (blocked name (nth point 0) (nth point 1) state width height))
         should-plan
         (if (= name :cyan)
-          (if (> (count events) 0) true (if (= (mod tick planning-interval) 0) true (not path-open)))
-          (if (= (mod tick planning-interval) 0) true (not path-open)))
+          (if (> (count events) 0) true
+            (if (= (mod (+ tick (get planner-phases name)) planning-interval) 0)
+              true (not path-open)))
+          (if (= (mod (+ tick (get planner-phases name)) planning-interval) 0)
+            true (not path-open)))
         direction
         (if should-plan
           (choose-direction name cycle target state requested width height)
@@ -206,27 +210,52 @@
      :gold (if (head-crash :gold (get moved :gold) moved)
              (get spawn :gold) (get moved :gold))}))
 
-(defn trail-points [cycle]
-  (conj (vec (get cycle :trail)) [(get cycle :x) (get cycle :y)]))
+(defn cycle-heads [state]
+  (loop [index 0 heads []]
+    (if (< index (count cycle-order))
+      (let [cycle (get state (nth cycle-order index))]
+        (recur (+ index 1) (conj (conj heads (get cycle :x)) (get cycle :y))))
+      heads)))
 
-(defn cycle-commands [cycle color]
-  (let [points (trail-points cycle)]
-    [[:polyline points color 13 0.14]
-     [:polyline points color 3 0.92]
-     [:circle (get cycle :x) (get cycle :y) 5 "#efffff" 1]]))
+(defn initial-trails [state]
+  (loop [index 0 trails []]
+    (if (< index (count cycle-order))
+      (let [cycle (get state (nth cycle-order index))]
+        (recur (+ index 1) (conj trails (vec (get cycle :trail)))))
+      trails)))
 
-(defn render-state [state width height tick]
-  (let [cyan (cycle-commands (get state :cyan) "#41f5e4")
-        pink (cycle-commands (get state :pink) "#ff2e88")
-        violet (cycle-commands (get state :violet) "#9c7bff")
-        gold (cycle-commands (get state :gold) "#f5d742")]
+(defn trail-deltas [state previous]
+  (loop [index 0 appends [] resets []]
+    (if (< index (count cycle-order))
+      (let [name (nth cycle-order index)
+            cycle (get state name)
+            earlier (get previous name)
+            trail (get cycle :trail)
+            earlier-trail (get earlier :trail)
+            count-trail (count trail)
+            count-earlier (count earlier-trail)]
+        (if (< count-trail count-earlier)
+          (recur (+ index 1) appends
+                 (conj resets [index (get cycle :x) (get cycle :y)]))
+          (if (> count-trail count-earlier)
+            (let [point (nth trail (- count-trail 1))]
+              (recur (+ index 1)
+                     (conj appends [index (nth point 0) (nth point 1)]) resets))
+            (recur (+ index 1) appends resets))))
+      {:append appends :reset resets})))
+
+(defn render-state [state previous]
+  (let [initial (if previous false true)
+        delta (if previous (trail-deltas state previous) {:append [] :reset []})]
     {:type :canvas-2d
      :background "#02050b"
-     :commands
-     [(nth cyan 0) (nth cyan 1) (nth cyan 2)
-      (nth pink 0) (nth pink 1) (nth pink 2)
-      (nth violet 0) (nth violet 1) (nth violet 2)
-      (nth gold 0) (nth gold 1) (nth gold 2)]}))
+     :stateful
+     {:kind :tron
+      :init initial
+      :trails (if initial (initial-trails state) [])
+      :heads (cycle-heads state)
+      :append (get delta :append)
+      :reset (get delta :reset)}}))
 
 (node/start
   (fn []
@@ -241,5 +270,5 @@
             next (update-state current events tick width height)]
         (do
           (co/await
-            (draw/render "canvas/background" (render-state next width height tick)))
+            (draw/publish "canvas/background" (render-state next state)))
           (recur next (+ tick 1)))))))

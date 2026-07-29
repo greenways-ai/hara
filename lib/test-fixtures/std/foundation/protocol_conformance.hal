@@ -1,0 +1,520 @@
+;; Shared executable protocol-surface contract for Rust and Truffle.
+;; Every built-in method is invoked through its canonical direct method Var.
+(ns std.foundation.protocol-conformance)
+
+(defstruct ProtocolFixture [])
+
+(extend-type ProtocolFixture std.protocol.iapplicable/IApplicable
+  (apply-default [fixture] :iapplicable/apply-default)
+  (apply-in [fixture arg1 arg2] :iapplicable/apply-in)
+  (transform-in [fixture arg1 arg2] :iapplicable/transform-in)
+  (transform-out [fixture arg1 arg2 arg3] :iapplicable/transform-out)
+)
+
+(extend-type ProtocolFixture std.protocol.iassoc/IAssoc
+  (assoc [fixture arg1 arg2] :iassoc/assoc)
+)
+
+(extend-type ProtocolFixture std.protocol.icas/ICas
+  (cas [fixture arg1 arg2] :icas/cas)
+)
+
+(extend-type ProtocolFixture std.protocol.iclose/IClose
+  (close [fixture] :iclose/close)
+)
+
+(extend-type ProtocolFixture std.protocol.icoll/IColl
+  (end-string [fixture] :icoll/end-string)
+  (iterator [fixture] :icoll/iterator)
+  (sep-string [fixture] :icoll/sep-string)
+  (start-string [fixture] :icoll/start-string)
+)
+
+(extend-type ProtocolFixture std.protocol.icomponent/IComponent
+  (kill [fixture] :icomponent/kill)
+  (props [fixture] :icomponent/props)
+  (remote? [fixture] :icomponent/remote?)
+  (start [fixture] :icomponent/start)
+  (started? [fixture] :icomponent/started?)
+  (status [fixture] :icomponent/status)
+  (stop [fixture] :icomponent/stop)
+  (stopped? [fixture] :icomponent/stopped?)
+)
+
+(extend-type ProtocolFixture std.protocol.icomponentoptions/IComponentOptions
+  (options [fixture] :icomponentoptions/options)
+)
+
+(extend-type ProtocolFixture std.protocol.icomponentprops/IComponentProps
+  (props [fixture] :icomponentprops/props)
+)
+
+(extend-type ProtocolFixture std.protocol.icomponentquery/IComponentQuery
+  (health [fixture] :icomponentquery/health)
+  (info [fixture arg1] :icomponentquery/info)
+  (remote? [fixture] :icomponentquery/remote?)
+  (started? [fixture] :icomponentquery/started?)
+  (stopped? [fixture] :icomponentquery/stopped?)
+)
+
+(extend-type ProtocolFixture std.protocol.icomponenttrack/IComponentTrack
+  (track-path [fixture] :icomponenttrack/track-path)
+)
+
+(extend-type ProtocolFixture std.protocol.iconj/IConj
+  (conj [fixture arg1] :iconj/conj)
+)
+
+(extend-type ProtocolFixture std.protocol.icons/ICons
+  (cons [fixture arg1] :icons/cons)
+)
+
+(extend-type ProtocolFixture std.protocol.icontext/IContext
+  (call [fixture arg1] :icontext/call)
+)
+
+(extend-type ProtocolFixture std.protocol.icoroutine/ICoroutine
+  (resume [fixture arg1] :icoroutine/resume)
+  (status [fixture] :icoroutine/status)
+)
+
+(extend-type ProtocolFixture std.protocol.icontextlifecycle/IContextLifeCycle
+  (has-module? [fixture arg1] :icontextlifecycle/has-module?)
+  (has-pointer? [fixture arg1] :icontextlifecycle/has-pointer?)
+  (setup-module [fixture arg1] :icontextlifecycle/setup-module)
+  (setup-pointer [fixture arg1] :icontextlifecycle/setup-pointer)
+  (teardown-module [fixture arg1] :icontextlifecycle/teardown-module)
+  (teardown-pointer [fixture arg1] :icontextlifecycle/teardown-pointer)
+)
+
+(extend-type ProtocolFixture std.protocol.icount/ICount
+  (count [fixture] :icount/count)
+)
+
+(extend-type ProtocolFixture std.protocol.ideref/IDeref
+  (deref [fixture] :ideref/deref)
+)
+
+(extend-type ProtocolFixture std.protocol.idereftimeout/IDerefTimeout
+  (deref-timeout [fixture arg1 arg2] :idereftimeout/deref-timeout)
+)
+
+(extend-type ProtocolFixture std.protocol.idisplay/IDisplay
+  (display [fixture] :idisplay/display)
+)
+
+(extend-type ProtocolFixture std.protocol.idissoc/IDissoc
+  (dissoc [fixture arg1] :idissoc/dissoc)
+)
+
+(extend-type ProtocolFixture std.protocol.iempty/IEmpty
+  (empty [fixture] :iempty/empty)
+)
+
+(extend-type ProtocolFixture std.protocol.iequality/IEquality
+  (equality [fixture arg1] :iequality/equality)
+)
+
+(extend-type ProtocolFixture std.protocol.iexinfo/IExInfo
+  (data [fixture] :iexinfo/data)
+)
+
+(extend-type ProtocolFixture std.protocol.ifind/IFind
+  (find [fixture arg1] :ifind/find)
+)
+
+(extend-type ProtocolFixture std.protocol.ifn/IFn
+  (invoke [fixture arg1] :ifn/invoke)
+)
+
+(extend-type ProtocolFixture std.protocol.ihasruntime/IHasRuntime
+  (runtime [fixture] :ihasruntime/runtime)
+)
+
+(extend-type ProtocolFixture std.protocol.ihash/IHash
+  (hash [fixture] :ihash/hash)
+)
+
+(extend-type ProtocolFixture std.protocol.ihashcached/IHashCached
+  (hash-current [fixture] :ihashcached/hash-current)
+  (hash-put [fixture arg1] :ihashcached/hash-put)
+)
+
+(extend-type ProtocolFixture std.protocol.iindexed/IIndexed
+  (index-of [fixture arg1] :iindexed/index-of)
+)
+
+(extend-type ProtocolFixture std.protocol.iindexedkv/IIndexedKV
+  (index-of-key [fixture arg1] :iindexedkv/index-of-key)
+  (index-of-val [fixture arg1] :iindexedkv/index-of-val)
+)
+
+(extend-type ProtocolFixture std.protocol.iinvokein/IInvokeIn
+  (invoke-in [fixture arg1] :iinvokein/invoke-in)
+)
+
+(extend-type ProtocolFixture std.protocol.iiter/IIter
+  (iter [fixture] :iiter/iter)
+)
+
+(extend-type ProtocolFixture std.protocol.iiterator/IIterator
+  (iter-next [fixture] :iiterator/iter-next)
+  (iter-next? [fixture] :iiterator/iter-next?)
+)
+
+(extend-type ProtocolFixture std.protocol.ilookup/ILookup
+  (lookup [fixture arg1] :ilookup/lookup)
+)
+
+(extend-type ProtocolFixture std.protocol.imetadata/IMetadata
+  (metatype [fixture] :imetadata/metatype)
+)
+
+(extend-type ProtocolFixture std.protocol.inamespaced/INamespaced
+  (name [fixture] :inamespaced/name)
+  (namespace [fixture] :inamespaced/namespace)
+)
+
+(extend-type ProtocolFixture std.protocol.inth/INth
+  (nth [fixture arg1] :inth/nth)
+)
+
+(extend-type ProtocolFixture std.protocol.iobjtype/IObjType
+  (meta [fixture] :iobjtype/meta)
+  (with-meta [fixture arg1] :iobjtype/with-meta)
+)
+
+(extend-type ProtocolFixture std.protocol.ipair/IPair
+  (key [fixture] :ipair/key)
+  (value [fixture] :ipair/value)
+)
+
+(extend-type ProtocolFixture std.protocol.ipeekfirst/IPeekFirst
+  (peek-first [fixture] :ipeekfirst/peek-first)
+)
+
+(extend-type ProtocolFixture std.protocol.ipeeklast/IPeekLast
+  (peek-last [fixture] :ipeeklast/peek-last)
+)
+
+(extend-type ProtocolFixture std.protocol.ipromise/IPromise
+  (cancel [fixture] :ipromise/cancel)
+  (catch [fixture arg1] :ipromise/catch)
+  (finally [fixture arg1] :ipromise/finally)
+  (state [fixture] :ipromise/state)
+  (then [fixture arg1] :ipromise/then)
+  (value [fixture] :ipromise/value)
+)
+
+(extend-type ProtocolFixture std.protocol.ipointer/IPointer
+  (ptr-context [fixture] :ipointer/ptr-context)
+  (ptr-keys [fixture] :ipointer/ptr-keys)
+  (ptr-val [fixture arg1] :ipointer/ptr-val)
+)
+
+(extend-type ProtocolFixture std.protocol.ipopfirst/IPopFirst
+  (pop-first [fixture] :ipopfirst/pop-first)
+)
+
+(extend-type ProtocolFixture std.protocol.ipoplast/IPopLast
+  (pop-last [fixture] :ipoplast/pop-last)
+)
+
+(extend-type ProtocolFixture std.protocol.ipushfirst/IPushFirst
+  (push-first [fixture arg1] :ipushfirst/push-first)
+)
+
+(extend-type ProtocolFixture std.protocol.ipushlast/IPushLast
+  (push-last [fixture arg1] :ipushlast/push-last)
+)
+
+(extend-type ProtocolFixture std.protocol.iranged/IRanged
+  (range-max [fixture] :iranged/range-max)
+  (range-min [fixture] :iranged/range-min)
+)
+
+(extend-type ProtocolFixture std.protocol.irealize/IRealize
+  (realize [fixture] :irealize/realize)
+  (realized? [fixture] :irealize/realized?)
+)
+
+(extend-type ProtocolFixture std.protocol.ireduce/IReduce
+  (reduce [fixture arg1] :ireduce/reduce)
+)
+
+(extend-type ProtocolFixture std.protocol.ireset/IReset
+  (reset [fixture arg1] :ireset/reset)
+)
+
+(extend-type ProtocolFixture std.protocol.ispace/ISpace
+  (context-get [fixture arg1] :ispace/context-get)
+  (context-list [fixture] :ispace/context-list)
+  (context-set [fixture arg1 arg2 arg3] :ispace/context-set)
+  (context-unset [fixture arg1] :ispace/context-unset)
+  (rt-active [fixture] :ispace/rt-active)
+  (rt-get [fixture arg1] :ispace/rt-get)
+  (rt-start [fixture arg1] :ispace/rt-start)
+  (rt-started? [fixture arg1] :ispace/rt-started?)
+  (rt-stop [fixture arg1] :ispace/rt-stop)
+  (rt-stopped? [fixture arg1] :ispace/rt-stopped?)
+)
+
+(extend-type ProtocolFixture std.protocol.itomutable/IToMutable
+  (to-mutable [fixture] :itomutable/to-mutable)
+)
+
+(extend-type ProtocolFixture std.protocol.itopersistent/IToPersistent
+  (to-persistent [fixture] :itopersistent/to-persistent)
+)
+
+(extend-type ProtocolFixture std.protocol.ivalidate/IValidate
+  (validate [fixture arg1] :ivalidate/validate)
+  (validator [fixture] :ivalidate/validator)
+)
+
+(extend-type ProtocolFixture std.protocol.iwatch/IWatch
+  (watch-add [fixture arg1 arg2] :iwatch/watch-add)
+  (watch-list [fixture] :iwatch/watch-list)
+  (watch-remove [fixture arg1] :iwatch/watch-remove)
+)
+
+(def fixture (ProtocolFixture))
+
+[
+ (let [alias (= std.foundation/IApplicable std.protocol.iapplicable/IApplicable)
+       methods (= [(std.protocol.iapplicable/apply-default fixture) (std.protocol.iapplicable/apply-in fixture :arg1 :arg2) (std.protocol.iapplicable/transform-in fixture :arg1 :arg2) (std.protocol.iapplicable/transform-out fixture :arg1 :arg2 :arg3)]
+                  [:iapplicable/apply-default :iapplicable/apply-in :iapplicable/transform-in :iapplicable/transform-out])]
+   {:protocol :IApplicable :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IAssoc std.protocol.iassoc/IAssoc)
+       methods (= [(std.protocol.iassoc/assoc fixture :arg1 :arg2)]
+                  [:iassoc/assoc])]
+   {:protocol :IAssoc :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/ICas std.protocol.icas/ICas)
+       methods (= [(std.protocol.icas/cas fixture :arg1 :arg2)]
+                  [:icas/cas])]
+   {:protocol :ICas :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IClose std.protocol.iclose/IClose)
+       methods (= [(std.protocol.iclose/close fixture)]
+                  [:iclose/close])]
+   {:protocol :IClose :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IColl std.protocol.icoll/IColl)
+       methods (= [(std.protocol.icoll/end-string fixture) (std.protocol.icoll/iterator fixture) (std.protocol.icoll/sep-string fixture) (std.protocol.icoll/start-string fixture)]
+                  [:icoll/end-string :icoll/iterator :icoll/sep-string :icoll/start-string])]
+   {:protocol :IColl :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IComponent std.protocol.icomponent/IComponent)
+       methods (= [(std.protocol.icomponent/kill fixture) (std.protocol.icomponent/props fixture) (std.protocol.icomponent/remote? fixture) (std.protocol.icomponent/start fixture) (std.protocol.icomponent/started? fixture) (std.protocol.icomponent/status fixture) (std.protocol.icomponent/stop fixture) (std.protocol.icomponent/stopped? fixture)]
+                  [:icomponent/kill :icomponent/props :icomponent/remote? :icomponent/start :icomponent/started? :icomponent/status :icomponent/stop :icomponent/stopped?])]
+   {:protocol :IComponent :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IComponentOptions std.protocol.icomponentoptions/IComponentOptions)
+       methods (= [(std.protocol.icomponentoptions/options fixture)]
+                  [:icomponentoptions/options])]
+   {:protocol :IComponentOptions :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IComponentProps std.protocol.icomponentprops/IComponentProps)
+       methods (= [(std.protocol.icomponentprops/props fixture)]
+                  [:icomponentprops/props])]
+   {:protocol :IComponentProps :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IComponentQuery std.protocol.icomponentquery/IComponentQuery)
+       methods (= [(std.protocol.icomponentquery/health fixture) (std.protocol.icomponentquery/info fixture :arg1) (std.protocol.icomponentquery/remote? fixture) (std.protocol.icomponentquery/started? fixture) (std.protocol.icomponentquery/stopped? fixture)]
+                  [:icomponentquery/health :icomponentquery/info :icomponentquery/remote? :icomponentquery/started? :icomponentquery/stopped?])]
+   {:protocol :IComponentQuery :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IComponentTrack std.protocol.icomponenttrack/IComponentTrack)
+       methods (= [(std.protocol.icomponenttrack/track-path fixture)]
+                  [:icomponenttrack/track-path])]
+   {:protocol :IComponentTrack :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IConj std.protocol.iconj/IConj)
+       methods (= [(std.protocol.iconj/conj fixture :arg1)]
+                  [:iconj/conj])]
+   {:protocol :IConj :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/ICons std.protocol.icons/ICons)
+       methods (= [(std.protocol.icons/cons fixture :arg1)]
+                  [:icons/cons])]
+   {:protocol :ICons :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IContext std.protocol.icontext/IContext)
+       methods (= [(std.protocol.icontext/call fixture :arg1)]
+                  [:icontext/call])]
+   {:protocol :IContext :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/ICoroutine std.protocol.icoroutine/ICoroutine)
+       methods (= [(std.protocol.icoroutine/resume fixture :arg1) (std.protocol.icoroutine/status fixture)]
+                  [:icoroutine/resume :icoroutine/status])]
+   {:protocol :ICoroutine :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IContextLifeCycle std.protocol.icontextlifecycle/IContextLifeCycle)
+       methods (= [(std.protocol.icontextlifecycle/has-module? fixture :arg1) (std.protocol.icontextlifecycle/has-pointer? fixture :arg1) (std.protocol.icontextlifecycle/setup-module fixture :arg1) (std.protocol.icontextlifecycle/setup-pointer fixture :arg1) (std.protocol.icontextlifecycle/teardown-module fixture :arg1) (std.protocol.icontextlifecycle/teardown-pointer fixture :arg1)]
+                  [:icontextlifecycle/has-module? :icontextlifecycle/has-pointer? :icontextlifecycle/setup-module :icontextlifecycle/setup-pointer :icontextlifecycle/teardown-module :icontextlifecycle/teardown-pointer])]
+   {:protocol :IContextLifeCycle :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/ICount std.protocol.icount/ICount)
+       methods (= [(std.protocol.icount/count fixture)]
+                  [:icount/count])]
+   {:protocol :ICount :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IDeref std.protocol.ideref/IDeref)
+       methods (= [(std.protocol.ideref/deref fixture)]
+                  [:ideref/deref])]
+   {:protocol :IDeref :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IDerefTimeout std.protocol.idereftimeout/IDerefTimeout)
+       methods (= [(std.protocol.idereftimeout/deref-timeout fixture :arg1 :arg2)]
+                  [:idereftimeout/deref-timeout])]
+   {:protocol :IDerefTimeout :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IDisplay std.protocol.idisplay/IDisplay)
+       methods (= [(std.protocol.idisplay/display fixture)]
+                  [:idisplay/display])]
+   {:protocol :IDisplay :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IDissoc std.protocol.idissoc/IDissoc)
+       methods (= [(std.protocol.idissoc/dissoc fixture :arg1)]
+                  [:idissoc/dissoc])]
+   {:protocol :IDissoc :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IEmpty std.protocol.iempty/IEmpty)
+       methods (= [(std.protocol.iempty/empty fixture)]
+                  [:iempty/empty])]
+   {:protocol :IEmpty :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IEquality std.protocol.iequality/IEquality)
+       methods (= [(std.protocol.iequality/equality fixture :arg1)]
+                  [:iequality/equality])]
+   {:protocol :IEquality :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IExInfo std.protocol.iexinfo/IExInfo)
+       methods (= [(std.protocol.iexinfo/data fixture)]
+                  [:iexinfo/data])]
+   {:protocol :IExInfo :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IFind std.protocol.ifind/IFind)
+       methods (= [(std.protocol.ifind/find fixture :arg1)]
+                  [:ifind/find])]
+   {:protocol :IFind :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IFn std.protocol.ifn/IFn)
+       methods (= [(std.protocol.ifn/invoke fixture :arg1)]
+                  [:ifn/invoke])]
+   {:protocol :IFn :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IHasRuntime std.protocol.ihasruntime/IHasRuntime)
+       methods (= [(std.protocol.ihasruntime/runtime fixture)]
+                  [:ihasruntime/runtime])]
+   {:protocol :IHasRuntime :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IHash std.protocol.ihash/IHash)
+       methods (= [(std.protocol.ihash/hash fixture)]
+                  [:ihash/hash])]
+   {:protocol :IHash :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IHashCached std.protocol.ihashcached/IHashCached)
+       methods (= [(std.protocol.ihashcached/hash-current fixture) (std.protocol.ihashcached/hash-put fixture :arg1)]
+                  [:ihashcached/hash-current :ihashcached/hash-put])]
+   {:protocol :IHashCached :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IIndexed std.protocol.iindexed/IIndexed)
+       methods (= [(std.protocol.iindexed/index-of fixture :arg1)]
+                  [:iindexed/index-of])]
+   {:protocol :IIndexed :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IIndexedKV std.protocol.iindexedkv/IIndexedKV)
+       methods (= [(std.protocol.iindexedkv/index-of-key fixture :arg1) (std.protocol.iindexedkv/index-of-val fixture :arg1)]
+                  [:iindexedkv/index-of-key :iindexedkv/index-of-val])]
+   {:protocol :IIndexedKV :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IInvokeIn std.protocol.iinvokein/IInvokeIn)
+       methods (= [(std.protocol.iinvokein/invoke-in fixture :arg1)]
+                  [:iinvokein/invoke-in])]
+   {:protocol :IInvokeIn :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IIter std.protocol.iiter/IIter)
+       methods (= [(std.protocol.iiter/iter fixture)]
+                  [:iiter/iter])]
+   {:protocol :IIter :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IIterator std.protocol.iiterator/IIterator)
+       methods (= [(std.protocol.iiterator/iter-next fixture) (std.protocol.iiterator/iter-next? fixture)]
+                  [:iiterator/iter-next :iiterator/iter-next?])]
+   {:protocol :IIterator :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/ILookup std.protocol.ilookup/ILookup)
+       methods (= [(std.protocol.ilookup/lookup fixture :arg1)]
+                  [:ilookup/lookup])]
+   {:protocol :ILookup :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IMetadata std.protocol.imetadata/IMetadata)
+       methods (= [(std.protocol.imetadata/metatype fixture)]
+                  [:imetadata/metatype])]
+   {:protocol :IMetadata :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IMutable std.protocol.imutable/IMutable)
+       methods (= []
+                  [])]
+   {:protocol :IMutable :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/INamespaced std.protocol.inamespaced/INamespaced)
+       methods (= [(std.protocol.inamespaced/name fixture) (std.protocol.inamespaced/namespace fixture)]
+                  [:inamespaced/name :inamespaced/namespace])]
+   {:protocol :INamespaced :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/INth std.protocol.inth/INth)
+       methods (= [(std.protocol.inth/nth fixture :arg1)]
+                  [:inth/nth])]
+   {:protocol :INth :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IOFn std.protocol.iofn/IOFn)
+       methods (= []
+                  [])]
+   {:protocol :IOFn :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IObjType std.protocol.iobjtype/IObjType)
+       methods (= [(std.protocol.iobjtype/meta fixture) (std.protocol.iobjtype/with-meta fixture :arg1)]
+                  [:iobjtype/meta :iobjtype/with-meta])]
+   {:protocol :IObjType :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IPair std.protocol.ipair/IPair)
+       methods (= [(std.protocol.ipair/key fixture) (std.protocol.ipair/value fixture)]
+                  [:ipair/key :ipair/value])]
+   {:protocol :IPair :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IPeekFirst std.protocol.ipeekfirst/IPeekFirst)
+       methods (= [(std.protocol.ipeekfirst/peek-first fixture)]
+                  [:ipeekfirst/peek-first])]
+   {:protocol :IPeekFirst :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IPeekLast std.protocol.ipeeklast/IPeekLast)
+       methods (= [(std.protocol.ipeeklast/peek-last fixture)]
+                  [:ipeeklast/peek-last])]
+   {:protocol :IPeekLast :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IPersistent std.protocol.ipersistent/IPersistent)
+       methods (= []
+                  [])]
+   {:protocol :IPersistent :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IPromise std.protocol.ipromise/IPromise)
+       methods (= [(std.protocol.ipromise/cancel fixture) (std.protocol.ipromise/catch fixture :arg1) (std.protocol.ipromise/finally fixture :arg1) (std.protocol.ipromise/state fixture) (std.protocol.ipromise/then fixture :arg1) (std.protocol.ipromise/value fixture)]
+                  [:ipromise/cancel :ipromise/catch :ipromise/finally :ipromise/state :ipromise/then :ipromise/value])]
+   {:protocol :IPromise :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IPointer std.protocol.ipointer/IPointer)
+       methods (= [(std.protocol.ipointer/ptr-context fixture) (std.protocol.ipointer/ptr-keys fixture) (std.protocol.ipointer/ptr-val fixture :arg1)]
+                  [:ipointer/ptr-context :ipointer/ptr-keys :ipointer/ptr-val])]
+   {:protocol :IPointer :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IPopFirst std.protocol.ipopfirst/IPopFirst)
+       methods (= [(std.protocol.ipopfirst/pop-first fixture)]
+                  [:ipopfirst/pop-first])]
+   {:protocol :IPopFirst :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IPopLast std.protocol.ipoplast/IPopLast)
+       methods (= [(std.protocol.ipoplast/pop-last fixture)]
+                  [:ipoplast/pop-last])]
+   {:protocol :IPopLast :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IPushFirst std.protocol.ipushfirst/IPushFirst)
+       methods (= [(std.protocol.ipushfirst/push-first fixture :arg1)]
+                  [:ipushfirst/push-first])]
+   {:protocol :IPushFirst :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IPushLast std.protocol.ipushlast/IPushLast)
+       methods (= [(std.protocol.ipushlast/push-last fixture :arg1)]
+                  [:ipushlast/push-last])]
+   {:protocol :IPushLast :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IRanged std.protocol.iranged/IRanged)
+       methods (= [(std.protocol.iranged/range-max fixture) (std.protocol.iranged/range-min fixture)]
+                  [:iranged/range-max :iranged/range-min])]
+   {:protocol :IRanged :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IRealize std.protocol.irealize/IRealize)
+       methods (= [(std.protocol.irealize/realize fixture) (std.protocol.irealize/realized? fixture)]
+                  [:irealize/realize :irealize/realized?])]
+   {:protocol :IRealize :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IReduce std.protocol.ireduce/IReduce)
+       methods (= [(std.protocol.ireduce/reduce fixture :arg1)]
+                  [:ireduce/reduce])]
+   {:protocol :IReduce :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IReset std.protocol.ireset/IReset)
+       methods (= [(std.protocol.ireset/reset fixture :arg1)]
+                  [:ireset/reset])]
+   {:protocol :IReset :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/ISpace std.protocol.ispace/ISpace)
+       methods (= [(std.protocol.ispace/context-get fixture :arg1) (std.protocol.ispace/context-list fixture) (std.protocol.ispace/context-set fixture :arg1 :arg2 :arg3) (std.protocol.ispace/context-unset fixture :arg1) (std.protocol.ispace/rt-active fixture) (std.protocol.ispace/rt-get fixture :arg1) (std.protocol.ispace/rt-start fixture :arg1) (std.protocol.ispace/rt-started? fixture :arg1) (std.protocol.ispace/rt-stop fixture :arg1) (std.protocol.ispace/rt-stopped? fixture :arg1)]
+                  [:ispace/context-get :ispace/context-list :ispace/context-set :ispace/context-unset :ispace/rt-active :ispace/rt-get :ispace/rt-start :ispace/rt-started? :ispace/rt-stop :ispace/rt-stopped?])]
+   {:protocol :ISpace :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IToMutable std.protocol.itomutable/IToMutable)
+       methods (= [(std.protocol.itomutable/to-mutable fixture)]
+                  [:itomutable/to-mutable])]
+   {:protocol :IToMutable :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IToPersistent std.protocol.itopersistent/IToPersistent)
+       methods (= [(std.protocol.itopersistent/to-persistent fixture)]
+                  [:itopersistent/to-persistent])]
+   {:protocol :IToPersistent :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IValidate std.protocol.ivalidate/IValidate)
+       methods (= [(std.protocol.ivalidate/validate fixture :arg1) (std.protocol.ivalidate/validator fixture)]
+                  [:ivalidate/validate :ivalidate/validator])]
+   {:protocol :IValidate :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IWatch std.protocol.iwatch/IWatch)
+       methods (= [(std.protocol.iwatch/watch-add fixture :arg1 :arg2) (std.protocol.iwatch/watch-list fixture) (std.protocol.iwatch/watch-remove fixture :arg1)]
+                  [:iwatch/watch-add :iwatch/watch-list :iwatch/watch-remove])]
+   {:protocol :IWatch :alias alias :methods methods :pass (if alias methods false)})
+]

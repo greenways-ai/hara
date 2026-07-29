@@ -42,6 +42,9 @@ export class CanvasRuntime {
       firstRender: new Map(),
       lastTime: null,
       webgl: null,
+      stateful: null,
+      live: null,
+      liveToken: null,
       lastFrame: null
     };
     this.canvases.set(canvasId, slot);
@@ -68,6 +71,7 @@ export class CanvasRuntime {
     this.cancelSurfaceOwners(slot, nodeId, "canvas surface ownership replaced");
     if (slot.owner && slot.owner !== nodeId) this.cancelOwner(slot, slot.owner, "canvas ownership replaced");
     slot.owner = nodeId;
+    slot.stateful = null;
     slot.lastTime = null;
     return true;
   }
@@ -89,6 +93,7 @@ export class CanvasRuntime {
     if (slot.owner && slot.owner !== nodeId) this.cancelOwner(slot, slot.owner, "canvas generation replaced");
     slot.owner = nodeId;
     slot.candidate = null;
+    slot.stateful = null;
     slot.lastTime = null;
     return true;
   }
@@ -179,6 +184,14 @@ export class CanvasRuntime {
     }
   }
 
+  publish(nodeId, canvasId, value) {
+    const slot = this.assertAccess(nodeId, canvasId);
+    slot.live = { nodeId, frame: plain(value) };
+    this.renderLive(slot);
+    this.scheduleLive(slot);
+    return true;
+  }
+
   waitForFirstRender(nodeId, canvasId, timeout = 2000) {
     const slot = this.assertAccess(nodeId, canvasId);
     return new Promise((resolve, reject) => {
@@ -258,6 +271,10 @@ export class CanvasRuntime {
     context.clearRect(0, 0, width, height);
     context.fillStyle = frame.background ?? "#020408";
     context.fillRect(0, 0, width, height);
+    if (frame.stateful) {
+      renderStateful2d(slot, context, frame.stateful, width, height);
+      return;
+    }
     for (const command of frame.commands ?? []) execute2d(context, plain(command), width, height);
   }
 
@@ -359,6 +376,11 @@ export class CanvasRuntime {
       reject(structuredError("canvas/cancelled", reason));
     }
     slot.pending.clear();
+    if (slot.live?.nodeId === nodeId) {
+      if (slot.liveToken !== null) this.cancelFrame(slot.liveToken);
+      slot.live = null;
+      slot.liveToken = null;
+    }
     this.rejectFirstRender(slot, nodeId, structuredError("canvas/cancelled", reason));
   }
 
@@ -385,6 +407,26 @@ export class CanvasRuntime {
     if (slot.candidate && slot.candidate !== slot.owner) this.cancelOwner(slot, slot.candidate, reason);
   }
 
+  scheduleLive(slot) {
+    if (!slot.live || slot.liveToken !== null) return;
+    slot.liveToken = this.requestFrame(() => {
+      slot.liveToken = null;
+      if (!slot.live || (slot.owner !== slot.live.nodeId && slot.candidate !== slot.live.nodeId)) return;
+      this.renderLive(slot);
+      this.scheduleLive(slot);
+    });
+  }
+
+  renderLive(slot) {
+    if (!slot.live) return;
+    const frame = slot.live.frame;
+    const backend = keyName(frame.type ?? frame["frame/type"] ?? frame["render/type"]);
+    if (backend !== "canvas-2d") throw new Error(`unsupported published frame type: ${backend ?? "nil"}`);
+    this.renderCanvas2d(slot, frame);
+    slot.lastFrame = frame;
+    this.resolveFirstRender(slot, slot.live.nodeId);
+  }
+
   disposeWebGl(slot) {
     if (!slot.webgl?.gl) return;
     for (const program of slot.webgl.programs.values()) slot.webgl.gl.deleteProgram(program);
@@ -401,6 +443,84 @@ export class CanvasRuntime {
     this.surfaces.clear();
     this.events.length = 0;
   }
+}
+
+function renderStateful2d(slot, context, stateful, width, height) {
+  const kind = keyName(stateful.kind);
+  if (kind === "ants") return renderAntsState(context, stateful, width, height);
+  if (kind !== "tron") throw new Error(`unsupported stateful canvas: ${kind ?? "nil"}`);
+  if (stateful.init || !slot.stateful || slot.stateful.kind !== "tron") {
+    slot.stateful = {
+      kind: "tron",
+      trails: (stateful.trails ?? []).map((trail) => trail.map(([x, y]) => [Number(x), Number(y)]))
+    };
+  }
+  const trails = slot.stateful.trails;
+  for (const [cycle, x, y] of stateful.append ?? []) {
+    const trail = trails[Number(cycle)] ?? (trails[Number(cycle)] = []);
+    trail.push([Number(x), Number(y)]);
+    trimTronTrail(trail, width, height);
+  }
+  for (const [cycle, x, y] of stateful.reset ?? []) {
+    trails[Number(cycle)] = [[Number(x), Number(y)]];
+  }
+  const colors = ["#41f5e4", "#ff2e88", "#9c7bff", "#f5d742"];
+  const heads = stateful.heads ?? [];
+  for (let cycle = 0; cycle < 4; cycle += 1) {
+    const points = trails[cycle] ?? [];
+    const x = Number(heads[cycle * 2]);
+    const y = Number(heads[cycle * 2 + 1]);
+    drawTronTrail(context, points, colors[cycle], x, y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    context.fillStyle = "#efffff";
+    context.globalAlpha = 1;
+    context.beginPath();
+    context.arc(x, y, 5, 0, Math.PI * 2);
+    context.fill();
+  }
+}
+
+function renderAntsState(context, stateful, width, height) {
+  const size = Math.max(width, height) / 80;
+  const left = (width - size * 80) / 2, top = (height - size * 80) / 2;
+  context.fillStyle = "rgba(16,45,92,.42)";
+  context.fillRect(left + 20 * size, top + 20 * size, 7 * size, 7 * size);
+  for (const [x, y, amount] of stateful.food ?? []) {
+    if (Number(amount) <= 0) continue;
+    context.fillStyle = "#ff2e88"; context.globalAlpha = Number(amount) > 30 ? 1 : .82;
+    context.beginPath(); context.arc(left + (Number(x) + .5) * size, top + (Number(y) + .5) * size, Math.max(2, size / 2), 0, Math.PI * 2); context.fill();
+  }
+  for (const [x, y, direction, carrying] of stateful.ants ?? []) {
+    const cx = left + (Number(x) + .5) * size, cy = top + (Number(y) + .5) * size;
+    const color = carrying ? "#ffe93d" : "#eaffff";
+    context.fillStyle = color; context.globalAlpha = 1; context.beginPath(); context.arc(cx, cy, Math.max(2, size / 2), 0, Math.PI * 2); context.fill();
+    const delta = [[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1]][Number(direction)] ?? [0,0];
+    context.strokeStyle = carrying ? "#ff8a3d" : "#41f5e4"; context.lineWidth = Math.max(1, size / 5); context.globalAlpha = .92;
+    context.beginPath(); context.moveTo(cx, cy); context.lineTo(cx + delta[0] * size / 2, cy + delta[1] * size / 2); context.stroke();
+  }
+  context.globalAlpha = 1;
+}
+
+function trimTronTrail(trail, width, height) {
+  const limit = Math.max(1, Math.floor(Math.max(width, height) * 2 / 72));
+  while (trail.length > limit) trail.shift();
+}
+
+function drawTronTrail(context, points, color, headX, headY) {
+  if (points.length < 2) return;
+  for (const [lineWidth, alpha] of [[13, .14], [3, .92]]) {
+    context.strokeStyle = color;
+    context.lineWidth = lineWidth;
+    context.globalAlpha = alpha;
+    context.beginPath();
+    context.moveTo(points[0][0], points[0][1]);
+    for (let index = 1; index < points.length; index += 1) {
+      context.lineTo(points[index][0], points[index][1]);
+    }
+    if (Number.isFinite(headX) && Number.isFinite(headY)) context.lineTo(headX, headY);
+    context.stroke();
+  }
+  context.globalAlpha = 1;
 }
 
 export function resolutionUniform(name, value, width, height) {

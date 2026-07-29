@@ -21,6 +21,56 @@ HARA_SPECIALS = {
     "loop", "new", "ns", "or", "quote", "recur", "set!", "throw", "try",
     "var", "when", "when-not",
 }
+HARA_INTERNAL_FUNCTIONS = {
+    "comp2",
+    "comp3",
+    "iter-any?",
+    "iter-close",
+    "iter-constantly",
+    "iter-cycle",
+    "iter-drop",
+    "iter-drop-while",
+    "iter-every?",
+    "iter-filter",
+    "iter-has?",
+    "iter-interleave",
+    "iter-interpose",
+    "iter-iterate",
+    "iter-keep",
+    "iter-map",
+    "iter-mapcat",
+    "iter-next",
+    "iter-partition",
+    "iter-partition-all",
+    "iter-partition-pair",
+    "iter-range",
+    "iter-repeatedly",
+    "iter-take",
+    "iter-take-while",
+    "iter-zip",
+    "load-file",
+    "map-transform",
+    "module-dependencies",
+    "module-revision",
+    "partition-all-transform",
+    "partition-transform",
+    "requiring-resolve",
+}
+HARA_LIBRARIES = {
+    "std.foundation.string": "str",
+    "std.foundation.bytes": "bytes",
+    "std.foundation.coroutine": "co",
+    "std.foundation.promise": "promise",
+    "std.foundation.file": "file",
+    "std.foundation.json": "json",
+    "std.foundation.os": "os",
+    "std.foundation.socket": "socket",
+    "std.foundation.set": "set",
+    "std.pretty": "pretty",
+}
+HARA_NATIVE_LIBRARY_DECLARATIONS = {
+    "json": {"read", "write", "write-pp"},
+}
 
 
 def execute(command):
@@ -57,29 +107,93 @@ def clojure_symbols():
     return values | CLJ_SPECIALS
 
 
-def hara_symbols():
+def hara_eval(expression):
     runtime = ROOT / "java/target/hara-truffle.jar"
     if not runtime.exists():
         raise SystemExit("build java/target/hara-truffle.jar before generating compatibility data")
-    values = set()
-    for namespace in ("std.foundation", "hara.lang.intrinsic"):
-        expression = (
-            "(reduce-kv "
-            "(fn [out name value] "
-            "(if (get (meta value) :private) out (conj out name))) "
-            f"[] (ns-publics '{namespace}))"
-        )
-        output = execute([
-            java_executable(),
-            "-Dpolyglot.engine.WarnInterpreterOnly=false",
-            "-jar",
-            str(runtime),
-            "eval",
-            expression,
-        ])
-        values |= set(re.findall(r'[^\s\[\]]+', output))
-    values.add("IFind/has?")
-    return values | HARA_SPECIALS
+    return execute([
+        java_executable(),
+        "-Dpolyglot.engine.WarnInterpreterOnly=false",
+        "-jar",
+        str(runtime),
+        "eval",
+        expression,
+    ])
+
+
+def hara_namespace_publics(namespace):
+    expression = (
+        "(reduce-kv "
+        "(fn [out name value] "
+        "(if (get (meta value) :private) out (conj out name))) "
+        f"[] (ns-publics '{namespace}))"
+    )
+    return set(re.findall(r'[^\s\[\]]+', hara_eval(expression)))
+
+
+def hal_public_definitions(path):
+    source = path.read_text()
+    definitions = set()
+    for match in re.finditer(r'(?m)^\((defn-?|defmacro|def)\s+', source):
+        if match.group(1) == "defn-":
+            continue
+        tail = source[match.end():].lstrip()
+        if tail.startswith("^"):
+            opening = tail.find("{")
+            depth = 0
+            closing = None
+            for index, character in enumerate(tail[opening:], opening):
+                if character == "{":
+                    depth += 1
+                elif character == "}":
+                    depth -= 1
+                    if depth == 0:
+                        closing = index
+                        break
+            if closing is None:
+                raise SystemExit(f"unclosed metadata in {path}")
+            tail = tail[closing + 1:].lstrip()
+        name = re.match(r'([^\s\[\]()]+)', tail)
+        if name:
+            definitions.add(name.group(1))
+    return definitions
+
+
+def hal_builtin_declarations(path):
+    source = path.read_text()
+    match = re.search(r':builtins\s*\[(.*?)\]', source, re.DOTALL)
+    return set() if match is None else set(re.findall(r'[^\s\[\]]+', match.group(1)))
+
+
+def hara_inventory():
+    foundation = hara_namespace_publics("std.foundation")
+    intrinsic = hara_namespace_publics("hara.lang.intrinsic")
+    protocols = {name for name in intrinsic if name.startswith("I")}
+    functions = (
+        foundation
+        | (intrinsic - protocols)
+    ) - HARA_SPECIALS - HARA_INTERNAL_FUNCTIONS
+
+    current_symbols = set(re.findall(r'"([^"]+)"', hara_eval("(vec (current-symbols))")))
+    libraries = {}
+    for namespace, alias in HARA_LIBRARIES.items():
+        path = ROOT / "lib/src" / Path(*namespace.split(".")).with_suffix(".hal")
+        names = set(HARA_NATIVE_LIBRARY_DECLARATIONS.get(alias, set()))
+        if path.exists():
+            names |= hal_builtin_declarations(path) | hal_public_definitions(path)
+        names |= {
+            symbol.split("/", 1)[1]
+            for symbol in current_symbols
+            if symbol.startswith(f"{alias}/")
+        }
+        libraries[alias] = sorted(names)
+
+    return {
+        "functions": functions,
+        "special_forms": set(HARA_SPECIALS),
+        "protocols": protocols,
+        "libraries": libraries,
+    }
 
 
 def rust_symbols(canonical):
@@ -108,7 +222,8 @@ def write_json(path, value):
 
 def main():
     clojure = clojure_symbols()
-    hara = hara_symbols()
+    inventory = hara_inventory()
+    hara = inventory["functions"] | inventory["special_forms"]
     rust = rust_symbols(hara)
     overrides = json.loads((SPEC / "clojure-core-compatibility-overrides.json").read_text())
     used_clojure = set()
@@ -122,7 +237,7 @@ def main():
     exact = sorted((clojure & hara) - used_clojure - used_hara)
     used_clojure.update(exact); used_hara.update(exact)
     grouping = {
-        "schema_version": 1,
+        "schema_version": 2,
         "clojure_version": CLJ_VERSION,
         "hara_surface": "L0 plus eagerly referred std.foundation",
         "groups": {
@@ -142,9 +257,18 @@ def main():
     all_h = set(grouping["groups"]["only-hara"]) | set(exact) | {x["hara"] for x in overrides["renamed"] + overrides["changed"]}
     if all_c != clojure or all_h != hara: raise SystemExit("compatibility grouping is not exhaustive")
     write_json(SPEC / "clojure-core-symbols.json", {"version": CLJ_VERSION, "symbols": sorted(clojure)})
-    write_json(SPEC / "hal-core-symbols.json", {"surface": grouping["hara_surface"], "symbols": sorted(hara)})
+    write_json(SPEC / "hal-core-symbols.json", {
+        "schema_version": 2,
+        "surface": grouping["hara_surface"],
+        "symbols": sorted(hara),
+        "functions": sorted(inventory["functions"]),
+        "special_forms": sorted(inventory["special_forms"]),
+        "protocols": sorted(inventory["protocols"]),
+        "libraries": inventory["libraries"],
+    })
     write_json(SPEC / "clojure-core-compatibility.json", grouping)
     groups = grouping["groups"]
+    library_count = sum(len(names) for names in inventory["libraries"].values())
     lines = ["# Clojure core / Hara core compatibility", "", f"Canonical exhaustive grouping for Clojure {CLJ_VERSION} and Hara L0 plus `std.foundation`.", "",
              "| Group | Count |", "|---|---:|"]
     for name in ("only-clojure", "only-hara", "same-exact", "same-renamed", "same-changed"):
@@ -152,8 +276,32 @@ def main():
     for name in ("same-changed", "same-renamed"):
         lines += ["", f"## {name}", "", "| Clojure | Hara | Contract |", "|---|---|---|"]
         for item in groups[name]: lines.append(f"| `{item['clojure']}` | `{item['hara']}` | {item['summary']} |")
+    lines += [
+        "",
+        "## Hara public surface",
+        "",
+        "| Kind | Count |",
+        "|---|---:|",
+        f"| Core functions and macros | {len(inventory['functions'])} |",
+        f"| Special forms | {len(inventory['special_forms'])} |",
+        f"| Protocols | {len(inventory['protocols'])} |",
+        f"| Namespaced library functions | {library_count} |",
+    ]
     for name in ("only-clojure", "only-hara", "same-exact"):
-        lines += ["", f"## {name}", "", ", ".join(f"`{x}`" for x in groups[name]), ""]
+        title = "only-hara functions" if name == "only-hara" else name
+        lines += ["", f"## {title}", "", ", ".join(f"`{x}`" for x in groups[name]), ""]
+    lines += [
+        "## Hara protocols",
+        "",
+        ", ".join(f"`{name}`" for name in sorted(inventory["protocols"])),
+        "",
+        "## Hara namespaced libraries",
+        "",
+        "| Alias | Public functions |",
+        "|---|---|",
+    ]
+    for alias, names in inventory["libraries"].items():
+        lines.append(f"| `{alias}` | {', '.join(f'`{alias}/{name}`' for name in names)} |")
     lines += ["## Runtime drift", "", "| Runtime | Missing canonical | Extra implementation |", "|---|---:|---:|"]
     for name, drift in grouping["runtime_drift"].items(): lines.append(f"| {name} | {len(drift['missing'])} | {len(drift['extra'])} |")
     lines += [
@@ -171,7 +319,12 @@ def main():
         "not the recommended public data-transport surface.",
     ]
     DOC.write_text("\n".join(lines) + "\n")
-    print(f"wrote canonical grouping: {len(clojure)} Clojure, {len(hara)} Hara symbols")
+    print(
+        f"wrote canonical grouping: {len(clojure)} Clojure, "
+        f"{len(inventory['functions'])} Hara functions, "
+        f"{len(inventory['protocols'])} protocols, "
+        f"{library_count} namespaced functions"
+    )
 
 
 if __name__ == "__main__":

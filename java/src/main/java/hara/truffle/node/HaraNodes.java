@@ -1352,7 +1352,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      return HaraLanguage.currentContext().define(symbol, protocol);
+      return HaraLanguage.currentContext().defineLanguageProtocol(symbol, protocol);
     }
   }
 

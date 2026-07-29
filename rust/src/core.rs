@@ -50,6 +50,204 @@ pub struct GuestProtocol {
     pub methods: HashMap<String, usize>,
 }
 
+pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
+    (
+        "IApplicable",
+        &[
+            ("apply-in", 3),
+            ("apply-default", 1),
+            ("transform-in", 3),
+            ("transform-out", 4),
+        ],
+    ),
+    ("IAssoc", &[("assoc", 3)]),
+    ("ICas", &[("cas", 3)]),
+    ("IClose", &[("close", 1)]),
+    (
+        "IColl",
+        &[
+            ("start-string", 1),
+            ("end-string", 1),
+            ("sep-string", 1),
+            ("iterator", 1),
+        ],
+    ),
+    (
+        "IComponent",
+        &[
+            ("props", 1),
+            ("status", 1),
+            ("started?", 1),
+            ("stopped?", 1),
+            ("start", 1),
+            ("stop", 1),
+            ("kill", 1),
+            ("remote?", 1),
+        ],
+    ),
+    ("IComponentOptions", &[("options", 1)]),
+    ("IComponentProps", &[("props", 1)]),
+    (
+        "IComponentQuery",
+        &[
+            ("started?", 1),
+            ("stopped?", 1),
+            ("info", 2),
+            ("remote?", 1),
+            ("health", 1),
+        ],
+    ),
+    ("IComponentTrack", &[("track-path", 1)]),
+    ("IConj", &[("conj", 2)]),
+    ("ICons", &[("cons", 2)]),
+    ("IContext", &[("call", usize::MAX)]),
+    ("ICoroutine", &[("status", 1), ("resume", usize::MAX)]),
+    (
+        "IContextLifeCycle",
+        &[
+            ("has-module?", 2),
+            ("setup-module", 2),
+            ("teardown-module", 2),
+            ("has-pointer?", 2),
+            ("setup-pointer", 2),
+            ("teardown-pointer", 2),
+        ],
+    ),
+    ("ICount", &[("count", 1)]),
+    ("IDeref", &[("deref", 1)]),
+    ("IDerefTimeout", &[("deref-timeout", 3)]),
+    ("IDisplay", &[("display", 1)]),
+    ("IDissoc", &[("dissoc", 2)]),
+    ("IEmpty", &[("empty", 1)]),
+    ("IEquality", &[("equality", 2)]),
+    ("IExInfo", &[("data", 1)]),
+    ("IFind", &[("find", 2)]),
+    ("IFn", &[("invoke", usize::MAX)]),
+    ("IHasRuntime", &[("runtime", 1)]),
+    ("IHash", &[("hash", 1)]),
+    ("IHashCached", &[("hash-current", 1), ("hash-put", 2)]),
+    ("IIndexed", &[("index-of", 2)]),
+    ("IIndexedKV", &[("index-of-key", 2), ("index-of-val", 2)]),
+    ("IInvokeIn", &[("invoke-in", usize::MAX)]),
+    ("IIter", &[("iter", 1)]),
+    ("IIterator", &[("iter-next?", 1), ("iter-next", 1)]),
+    ("ILookup", &[("lookup", usize::MAX)]),
+    ("IMetadata", &[("metatype", 1)]),
+    ("IMutable", &[]),
+    ("INamespaced", &[("name", 1), ("namespace", 1)]),
+    ("INth", &[("nth", 2)]),
+    ("IOFn", &[]),
+    ("IObjType", &[("meta", 1), ("with-meta", 2)]),
+    ("IPair", &[("key", 1), ("value", 1)]),
+    ("IPeekFirst", &[("peek-first", 1)]),
+    ("IPeekLast", &[("peek-last", 1)]),
+    ("IPersistent", &[]),
+    (
+        "IPromise",
+        &[
+            ("state", 1),
+            ("value", 1),
+            ("then", 2),
+            ("catch", 2),
+            ("finally", 2),
+            ("cancel", 1),
+        ],
+    ),
+    (
+        "IPointer",
+        &[("ptr-context", 1), ("ptr-keys", 1), ("ptr-val", 2)],
+    ),
+    ("IPopFirst", &[("pop-first", 1)]),
+    ("IPopLast", &[("pop-last", 1)]),
+    ("IPushFirst", &[("push-first", 2)]),
+    ("IPushLast", &[("push-last", 2)]),
+    ("IRanged", &[("range-max", 1), ("range-min", 1)]),
+    ("IRealize", &[("realized?", 1), ("realize", 1)]),
+    ("IReduce", &[("reduce", usize::MAX)]),
+    ("IReset", &[("reset", 2)]),
+    (
+        "ISpace",
+        &[
+            ("context-set", 4),
+            ("context-unset", 2),
+            ("context-list", 1),
+            ("context-get", 2),
+            ("rt-active", 1),
+            ("rt-get", 2),
+            ("rt-start", 2),
+            ("rt-started?", 2),
+            ("rt-stopped?", 2),
+            ("rt-stop", 2),
+        ],
+    ),
+    ("IToMutable", &[("to-mutable", 1)]),
+    ("IToPersistent", &[("to-persistent", 1)]),
+    ("IValidate", &[("validate", 2), ("validator", 1)]),
+    (
+        "IWatch",
+        &[("watch-add", 3), ("watch-remove", 2), ("watch-list", 1)],
+    ),
+];
+
+pub(crate) fn builtin_protocol_namespace(protocol: &str) -> String {
+    format!("std.protocol.{}", protocol.to_ascii_lowercase())
+}
+
+pub(crate) fn builtin_protocol_name(protocol: &str) -> String {
+    format!("{}/{}", builtin_protocol_namespace(protocol), protocol)
+}
+
+fn canonical_protocol_name(protocol: &str) -> String {
+    let simple = protocol.strip_prefix("std.foundation/").unwrap_or(protocol);
+    if FOUNDATION_PROTOCOLS
+        .iter()
+        .any(|(candidate, _)| *candidate == simple)
+    {
+        builtin_protocol_name(simple)
+    } else {
+        protocol.to_owned()
+    }
+}
+
+pub(crate) fn foundation_protocol_values() -> Vec<(String, Value)> {
+    FOUNDATION_PROTOCOLS
+        .iter()
+        .map(|(name, methods)| {
+            (
+                (*name).to_owned(),
+                Value::Protocol(Rc::new(GuestProtocol {
+                    name: builtin_protocol_name(name),
+                    methods: methods
+                        .iter()
+                        .map(|(method, arity)| ((*method).to_owned(), *arity))
+                        .collect(),
+                })),
+            )
+        })
+        .collect()
+}
+
+pub(crate) fn builtin_protocol_method_values() -> Vec<(String, String, Value)> {
+    FOUNDATION_PROTOCOLS
+        .iter()
+        .flat_map(|(protocol, methods)| {
+            methods.iter().map(move |(method, _)| {
+                let namespace = builtin_protocol_namespace(protocol);
+                let protocol_name = builtin_protocol_name(protocol);
+                let method_name = (*method).to_owned();
+                let display_name = format!("{namespace}/{method}");
+                (
+                    namespace,
+                    (*method).to_owned(),
+                    native_variadic_function(&display_name, move |arguments| {
+                        protocol_call(&protocol_name, &method_name, &arguments)
+                    }),
+                )
+            })
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 pub enum Value {
     Number(i64),
@@ -206,7 +404,7 @@ impl RuntimeAtom {
     }
     fn add_watch(&self, key: Value, function: Rc<Function>) -> Result<(), String> {
         if !self.watchable {
-            return Err("watch:add expects a standard atom".into());
+            return Err("watch-add expects a standard atom".into());
         }
         let mut watches = self.watches.borrow_mut();
         watches.retain(|(candidate, _)| candidate != &key);
@@ -215,7 +413,7 @@ impl RuntimeAtom {
     }
     fn remove_watch(&self, key: &Value) -> Result<(), String> {
         if !self.watchable {
-            return Err("watch:remove expects a standard atom".into());
+            return Err("watch-remove expects a standard atom".into());
         }
         self.watches
             .borrow_mut()
@@ -224,7 +422,7 @@ impl RuntimeAtom {
     }
     fn watch_entries(&self) -> Result<Vec<Value>, String> {
         if !self.watchable {
-            return Err("watch:list expects a standard atom".into());
+            return Err("watch-list expects a standard atom".into());
         }
         self.watches
             .borrow()
@@ -240,8 +438,8 @@ impl RuntimeAtom {
             call_function(
                 &function,
                 vec![
-                    Value::Atom(Box::new(self.clone())),
                     key,
+                    Value::Atom(Box::new(self.clone())),
                     old_value.clone(),
                     new_value.clone(),
                 ],
@@ -267,6 +465,22 @@ pub(crate) fn native_function(
     Value::Function(Rc::new(Function {
         params: (0..arity).map(|index| format!("arg{index}")).collect(),
         variadic: None,
+        body: Vec::new(),
+        captured: Rc::new(RefCell::new(HashMap::new())),
+        name: Some(name.into()),
+        native: Some(Rc::new(callback)),
+        clauses: Vec::new(),
+        is_macro: false,
+    }))
+}
+
+pub(crate) fn native_variadic_function(
+    name: &str,
+    callback: impl Fn(Vec<Value>) -> Result<Value, String> + 'static,
+) -> Value {
+    Value::Function(Rc::new(Function {
+        params: Vec::new(),
+        variadic: Some("arguments".into()),
         body: Vec::new(),
         captured: Rc::new(RefCell::new(HashMap::new())),
         name: Some(name.into()),
@@ -1445,9 +1659,10 @@ impl ProtocolRegistry {
     ) where
         F: Fn(&[Value]) -> Result<Value, String> + 'static,
     {
+        let protocol = canonical_protocol_name(&protocol.into());
         self.methods
             .borrow_mut()
-            .entry((protocol.into(), method.into()))
+            .entry((protocol, method.into()))
             .or_default()
             .push(Rc::new(function));
     }
@@ -1476,6 +1691,24 @@ impl ProtocolRegistry {
         method: &str,
         arguments: &[Value],
     ) -> Result<Value, String> {
+        let qualified;
+        let protocol = if protocol.contains('/') {
+            qualified = canonical_protocol_name(protocol);
+            qualified.as_str()
+        } else if self
+            .methods
+            .borrow()
+            .contains_key(&(protocol.to_owned(), method.to_owned()))
+            || self
+                .guest_declarations
+                .borrow()
+                .contains(&(protocol.to_owned(), method.to_owned()))
+        {
+            protocol
+        } else {
+            qualified = canonical_protocol_name(protocol);
+            qualified.as_str()
+        };
         if let Some(Value::Struct(receiver)) = arguments.first() {
             if let Some(function) = self.guest_methods.borrow().get(&(
                 protocol.to_owned(),
@@ -1509,28 +1742,113 @@ impl ProtocolRegistry {
     }
 
     pub fn contains(&self, protocol: &str, method: &str) -> bool {
-        self.methods
-            .borrow()
-            .get(&(protocol.to_string(), method.to_string()))
+        let protocol = canonical_protocol_name(protocol);
+        let methods = self.methods.borrow();
+        methods
+            .get(&(protocol, method.to_string()))
             .is_some_and(|implementations| !implementations.is_empty())
     }
 
     /// Returns the built-in collection protocol registry used by evaluator dispatch.
     pub fn core() -> Self {
         let mut registry = Self::new();
-        registry.register("ICount", "count", protocol_count);
-        registry.register("INth", "nth", protocol_nth);
-        registry.register("ILookup", "lookup", protocol_lookup);
-        registry.register("IFind", "find", protocol_find);
-        registry.register("IFind", "has?", protocol_has);
-        registry.register("IAssoc", "assoc", protocol_assoc);
-        registry.register("IConj", "conj", protocol_conj);
-        registry.register("IDissoc", "dissoc", protocol_dissoc);
-        registry.register("IIter", "iter", protocol_iter);
-        registry.register("INamespaced", "name", protocol_namespaced_name);
-        registry.register("INamespaced", "namespace", protocol_namespaced_namespace);
-        registry.register("IObjType", "meta", protocol_meta);
-        registry.register("IObjType", "with-meta", protocol_with_meta);
+        for (protocol, methods) in FOUNDATION_PROTOCOLS {
+            for (method, _) in *methods {
+                let protocol_name = builtin_protocol_name(protocol);
+                let method_name = (*method).to_owned();
+                let missing_protocol = protocol_name.clone();
+                let missing_method = method_name.clone();
+                registry.register(protocol_name, method_name, move |_| {
+                    Err(format!(
+                        "missing protocol implementation: {missing_protocol}/{missing_method}"
+                    ))
+                });
+            }
+        }
+        registry.register("std.foundation/ICount", "count", protocol_count);
+        registry.register("std.foundation/INth", "nth", protocol_nth);
+        registry.register("std.foundation/ILookup", "lookup", protocol_lookup);
+        registry.register("std.foundation/IFind", "find", protocol_find);
+        registry.register("std.foundation/IAssoc", "assoc", protocol_assoc);
+        registry.register("std.foundation/IConj", "conj", protocol_conj);
+        registry.register("std.foundation/ICons", "cons", protocol_cons);
+        registry.register("std.foundation/IDissoc", "dissoc", protocol_dissoc);
+        registry.register("std.foundation/IEmpty", "empty", protocol_empty);
+        registry.register("std.foundation/IEquality", "equality", protocol_equality);
+        registry.register("std.foundation/IDisplay", "display", protocol_display);
+        registry.register("std.foundation/IHash", "hash", protocol_hash);
+        registry.register("std.foundation/IFn", "invoke", protocol_invoke);
+        registry.register("std.foundation/IPair", "key", protocol_pair_key);
+        registry.register("std.foundation/IPair", "value", protocol_pair_value);
+        registry.register(
+            "std.foundation/IPeekFirst",
+            "peek-first",
+            protocol_peek_first,
+        );
+        registry.register("std.foundation/IPeekLast", "peek-last", protocol_peek_last);
+        registry.register("std.foundation/IIter", "iter", protocol_iter);
+        registry.register("std.foundation/IIterator", "iter-next?", |arguments| {
+            arguments
+                .first()
+                .ok_or_else(|| "IIterator/iter-next? expects one argument".to_string())
+                .and_then(iterator_has_next)
+        });
+        registry.register("std.foundation/IIterator", "iter-next", |arguments| {
+            arguments
+                .first()
+                .ok_or_else(|| "IIterator/iter-next expects one argument".to_string())
+                .and_then(iterator_next)
+        });
+        registry.register("std.foundation/IClose", "close", |arguments| {
+            match arguments {
+                [Value::Coroutine(coroutine)] => {
+                    coroutine_close(coroutine)?;
+                    Ok(Value::Coroutine(coroutine.clone()))
+                }
+                [value] => iterator_close(value),
+                _ => Err("IClose/close expects one argument".into()),
+            }
+        });
+        registry.register(
+            "std.foundation/INamespaced",
+            "name",
+            protocol_namespaced_name,
+        );
+        registry.register(
+            "std.foundation/INamespaced",
+            "namespace",
+            protocol_namespaced_namespace,
+        );
+        registry.register("std.foundation/IObjType", "meta", protocol_meta);
+        registry.register("std.foundation/IObjType", "with-meta", protocol_with_meta);
+        registry.register("std.foundation/IDeref", "deref", protocol_deref);
+        registry.register("std.foundation/IReset", "reset", protocol_reset);
+        registry.register("std.foundation/ICas", "cas", protocol_cas);
+        registry.register("std.foundation/IReduce", "reduce", protocol_reduce);
+        registry.register("std.foundation/IPromise", "state", protocol_promise_state);
+        registry.register("std.foundation/IPromise", "value", protocol_promise_value);
+        registry.register("std.foundation/IPromise", "then", |arguments| {
+            protocol_promise_chain("promise/then", arguments)
+        });
+        registry.register("std.foundation/IPromise", "catch", |arguments| {
+            protocol_promise_chain("promise/catch", arguments)
+        });
+        registry.register("std.foundation/IPromise", "finally", |arguments| {
+            protocol_promise_chain("promise/finally", arguments)
+        });
+        registry.register("std.foundation/IPromise", "cancel", protocol_promise_cancel);
+        registry.register(
+            "std.foundation/ICoroutine",
+            "status",
+            protocol_coroutine_status,
+        );
+        registry.register("std.foundation/IWatch", "watch-add", protocol_watch_add);
+        registry.register(
+            "std.foundation/IWatch",
+            "watch-remove",
+            protocol_watch_remove,
+        );
+        registry.register("std.foundation/IWatch", "watch-list", protocol_watch_list);
         registry
     }
 }
@@ -3087,55 +3405,225 @@ fn protocol_find(arguments: &[Value]) -> Result<Value, String> {
     }
 }
 
-fn protocol_has(arguments: &[Value]) -> Result<Value, String> {
-    if arguments.len() != 2 {
-        return Err("IFind/has? expects a collection and key".into());
+fn protocol_iter(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [value] => make_iterator(value.clone()),
+        _ => Err("IIter/iter expects one value".into()),
     }
-    let collection = &arguments[0];
-    let key = &arguments[1];
-    let found = match collection {
-        value @ (Value::Map(_) | Value::OrderedMap(_) | Value::SortedMap(_) | Value::Trie(_)) => {
-            map_value(value, key).is_some()
-        }
-        Value::Object(values) => match key {
-            Value::String(key) => values
-                .borrow()
-                .iter()
-                .any(|(candidate, _)| candidate == key),
-            Value::Keyword(key) => values
-                .borrow()
-                .iter()
-                .any(|(candidate, _)| candidate == key.as_str()),
-            _ => false,
-        },
-        value @ (Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_)) => {
-            set_find(value, key).is_some()
-        }
-        Value::Tuple(values) => value_index(key)
-            .map(|index| index < values.len())
-            .unwrap_or(false),
-        Value::Vector(values) => value_index(key)
-            .map(|index| index < values.len())
-            .unwrap_or(false),
-        Value::List(values) => value_index(key)
-            .map(|index| index < values.len())
-            .unwrap_or(false),
-        Value::Cons(values) => value_index(key)
-            .map(|index| index < values.iter().count())
-            .unwrap_or(false),
-        Value::Queue(values) => value_index(key)
-            .map(|index| index < values.len())
-            .unwrap_or(false),
-        _ => return Err("IFind/has? has no implementation for this value".into()),
-    };
-    Ok(Value::Bool(found))
 }
 
-fn protocol_iter(arguments: &[Value]) -> Result<Value, String> {
-    if arguments.len() == 1 && matches!(arguments[0], Value::Iterator(_)) {
-        Ok(arguments[0].clone())
-    } else {
-        Err("IIter/iter has no implementation for this value".into())
+fn protocol_deref(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [Value::Atom(atom)] => Ok(atom.deref_value()),
+        [Value::Var(var)] => Ok(var.deref_value()),
+        [Value::Promise(promise)] => promise_value_result(promise),
+        _ => Err("IDeref/deref has no implementation for this value".into()),
+    }
+}
+
+fn protocol_reset(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [Value::Atom(atom), value] => atom.reset(value.clone()),
+        _ => Err("IReset/reset expects an atom and value".into()),
+    }
+}
+
+fn protocol_cas(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [Value::Atom(atom), old_value, new_value] => Ok(Value::Bool(
+            atom.compare_and_set(old_value, new_value.clone())?,
+        )),
+        _ => Err("ICas/cas expects an atom, old value, and new value".into()),
+    }
+}
+
+fn protocol_reduce(arguments: &[Value]) -> Result<Value, String> {
+    let (source, function, mut accumulator) = match arguments {
+        [source, Value::Function(function), initial] => {
+            (source, function, Some(initial.clone()))
+        }
+        [source, Value::Function(function)] => (source, function, None),
+        _ => {
+            return Err(
+                "IReduce/reduce expects a value, function, and optional initial value".into(),
+            )
+        }
+    };
+    let iterator = make_iterator(source.clone())?;
+    loop {
+        match iterator_next(&iterator) {
+            Ok(value) => {
+                accumulator = Some(match accumulator {
+                    Some(current) => call_function(function, vec![current, value])?,
+                    None => value,
+                });
+            }
+            Err(error) if error.contains("end") => break,
+            Err(error) => return Err(error),
+        }
+    }
+    accumulator.ok_or_else(|| "IReduce/reduce cannot reduce an empty value without init".into())
+}
+
+fn protocol_promise_state(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [Value::Promise(promise)] => Ok(promise_state_value(promise)),
+        _ => Err("IPromise/state expects a promise".into()),
+    }
+}
+
+fn protocol_promise_value(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [Value::Promise(promise)] => promise_value_result(promise),
+        _ => Err("IPromise/value expects a promise".into()),
+    }
+}
+
+fn protocol_promise_chain(operation: &str, arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [Value::Promise(promise), Value::Function(function)] => Ok(Value::Promise(
+            promise_chain(promise.clone(), operation, function.clone()),
+        )),
+        _ => Err(format!("IPromise/{operation} expects a promise and function")),
+    }
+}
+
+fn protocol_promise_cancel(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [Value::Promise(promise)] => {
+            promise.cancel();
+            Ok(Value::Promise(promise.clone()))
+        }
+        _ => Err("IPromise/cancel expects a promise".into()),
+    }
+}
+
+fn protocol_coroutine_status(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [Value::Coroutine(coroutine)] => Ok(coroutine_status(coroutine)),
+        _ => Err("ICoroutine/status expects a coroutine".into()),
+    }
+}
+
+fn protocol_watch_add(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [Value::Atom(atom), key, Value::Function(function)] => {
+            atom.add_watch(key.clone(), function.clone())?;
+            Ok(Value::Atom(atom.clone()))
+        }
+        _ => Err("IWatch/watch-add expects an atom, key, and function".into()),
+    }
+}
+
+fn protocol_watch_remove(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [Value::Atom(atom), key] => {
+            atom.remove_watch(key)?;
+            Ok(Value::Atom(atom.clone()))
+        }
+        _ => Err("IWatch/watch-remove expects an atom and key".into()),
+    }
+}
+
+fn protocol_watch_list(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [Value::Atom(atom)] => Ok(iterator_from_values(atom.watch_entries()?)),
+        _ => Err("IWatch/watch-list expects an atom".into()),
+    }
+}
+
+fn protocol_empty(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [value] => collection_empty_value(value.clone()),
+        _ => Err("IEmpty/empty expects one collection".into()),
+    }
+}
+
+fn protocol_equality(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [left, right] => Ok(Value::Bool(left == right)),
+        _ => Err("IEquality/equality expects two values".into()),
+    }
+}
+
+fn protocol_display(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [value] => Ok(Value::String(value.display())),
+        _ => Err("IDisplay/display expects one value".into()),
+    }
+}
+
+fn protocol_hash(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [value] => Ok(Value::Number(value.stable_hash() as i64)),
+        _ => Err("IHash/hash expects one value".into()),
+    }
+}
+
+fn protocol_invoke(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [callable, rest @ ..] => call_value(callable.clone(), rest.to_vec()),
+        _ => Err("IFn/invoke expects a callable receiver".into()),
+    }
+}
+
+fn protocol_pair_key(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [value] => pair_parts(value)
+            .map(|(key, _)| key)
+            .ok_or_else(|| "IPair/key has no implementation for this value".into()),
+        _ => Err("IPair/key expects one pair".into()),
+    }
+}
+
+fn protocol_pair_value(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [value] => pair_parts(value)
+            .map(|(_, value)| value)
+            .ok_or_else(|| "IPair/value has no implementation for this value".into()),
+        _ => Err("IPair/value expects one pair".into()),
+    }
+}
+
+fn protocol_peek_first(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [value] => collection_first(value.clone()),
+        _ => Err("IPeekFirst/peek-first expects one collection".into()),
+    }
+}
+
+fn protocol_peek_last(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [value] => collection_last(value.clone()),
+        _ => Err("IPeekLast/peek-last expects one collection".into()),
+    }
+}
+
+fn protocol_cons(arguments: &[Value]) -> Result<Value, String> {
+    let [collection, item] = arguments else {
+        return Err("ICons/cons expects a collection and value".into());
+    };
+    match collection {
+        Value::Cons(values) => Ok(Value::Cons(Box::new(
+            PCons::new(item.clone(), values.iter().collect()).with_meta(values.meta().cloned()),
+        ))),
+        Value::Tuple(values) => Ok(Value::Cons(Box::new(PCons::new(
+            item.clone(),
+            values.iter().cloned().collect(),
+        )))),
+        Value::Vector(values) => Ok(Value::Cons(Box::new(PCons::new(
+            item.clone(),
+            values.iter().cloned().collect(),
+        )))),
+        Value::List(values) => Ok(Value::Cons(Box::new(PCons::new(
+            item.clone(),
+            values.clone(),
+        )))),
+        Value::Nil => Ok(Value::Cons(Box::new(PCons::new(
+            item.clone(),
+            PList::new(),
+        )))),
+        _ => Err("ICons/cons has no implementation for this value".into()),
     }
 }
 
@@ -5661,40 +6149,40 @@ fn eval_atom_form(
                 atom.compare_and_set(&old, eval(&forms[3], env)?)?,
             ))
         }
-        "watch:add" => {
+        "watch-add" => {
             if forms.len() != 4 {
-                return Err("watch:add expects an atom, key, and function".into());
+                return Err("watch-add expects an atom, key, and function".into());
             }
             let atom = match eval(&forms[1], env)? {
                 Value::Atom(atom) => atom,
-                _ => return Err("watch:add expects an atom".into()),
+                _ => return Err("watch-add expects an atom".into()),
             };
             let key = eval(&forms[2], env)?;
             let function = match eval(&forms[3], env)? {
                 Value::Function(function) => function,
-                _ => return Err("watch:add expects a function".into()),
+                _ => return Err("watch-add expects a function".into()),
             };
             atom.add_watch(key, function)?;
             Ok(Value::Atom(atom))
         }
-        "watch:remove" => {
+        "watch-remove" => {
             if forms.len() != 3 {
-                return Err("watch:remove expects an atom and key".into());
+                return Err("watch-remove expects an atom and key".into());
             }
             let atom = match eval(&forms[1], env)? {
                 Value::Atom(atom) => atom,
-                _ => return Err("watch:remove expects an atom".into()),
+                _ => return Err("watch-remove expects an atom".into()),
             };
             atom.remove_watch(&eval(&forms[2], env)?)?;
             Ok(Value::Atom(atom))
         }
-        "watch:list" => {
+        "watch-list" => {
             if forms.len() != 2 {
-                return Err("watch:list expects an atom".into());
+                return Err("watch-list expects an atom".into());
             }
             let atom = match eval(&forms[1], env)? {
                 Value::Atom(atom) => atom,
-                _ => return Err("watch:list expects an atom".into()),
+                _ => return Err("watch-list expects an atom".into()),
             };
             Ok(iterator_from_values(atom.watch_entries()?))
         }
@@ -5847,9 +6335,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     "reset!",
                     "compare:set!",
                     "swap!",
-                    "watch:add",
-                    "watch:remove",
-                    "watch:list",
+                    "watch-add",
+                    "watch-remove",
+                    "watch-list",
                 ]
                 .contains(&n.as_str()) =>
             {
@@ -6141,6 +6629,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     let Form::Symbol(method) = &parts[0] else {
                         unreachable!()
                     };
+                    if method.ends_with('!') {
+                        return Err("protocol method names must not end with !".into());
+                    }
                     let Form::Vector(arguments) = &parts[1] else {
                         unreachable!()
                     };
@@ -6166,6 +6657,22 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         }
                         Ok(())
                     })?;
+                    let current = namespace_registry()?.current();
+                    for method in protocol_value.methods.keys() {
+                        let local_name = format!("{name}/{method}");
+                        let qualified_name = format!("{namespace}/{local_name}");
+                        let protocol_name = protocol_value.name.clone();
+                        let method_name = method.clone();
+                        let function_name = qualified_name.clone();
+                        let method_value =
+                            native_variadic_function(&function_name, move |arguments| {
+                                protocol_call(&protocol_name, &method_name, &arguments)
+                            });
+                        let method_var = current.intern(&local_name, method_value);
+                        method_var.set_origin(definition_origin());
+                        env.insert(local_name, Value::Var(method_var.clone()));
+                        env.insert(qualified_name, Value::Var(method_var));
+                    }
                 }
                 let var = KernelVar::new(format!("{namespace}/{name}"), protocol.clone());
                 var.set_origin(definition_origin());
@@ -6203,7 +6710,11 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     if !seen.insert(method.clone()) {
                         return Err("Duplicate extended method".into());
                     }
-                    if protocol.methods.get(method) != Some(&arguments.len()) {
+                    let valid_arity = protocol.methods.get(method).is_some_and(|expected| {
+                        *expected == arguments.len()
+                            || (*expected == usize::MAX && !arguments.is_empty())
+                    });
+                    if !valid_arity {
                         return Err(format!("invalid protocol method implementation: {method}"));
                     }
                     let function = eval(
@@ -6413,7 +6924,10 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     _ => Err("coroutine/close expects a coroutine".into()),
                 }
             }
-            Form::Symbol(n) if n == "std.foundation.coroutine/resume" => {
+            Form::Symbol(n)
+                if n == "std.foundation.coroutine/resume"
+                    || n == "std.protocol.icoroutine/resume" =>
+            {
                 Err("coroutine/resume requires the fiber evaluator".into())
             }
             Form::Symbol(n) if n == "std.foundation.coroutine/yield" => {
@@ -7490,9 +8004,21 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 ))
             }
             Form::Symbol(n) if n == "comp" || n == "comp2" || n == "comp3" => {
-                let arity = if n == "comp3" { 3 } else { 2 };
-                if fs.len() != arity + 1 {
-                    return Err(format!("{n} expects {arity} functions"));
+                let arity = fs.len() - 1;
+                let expected = match n.as_str() {
+                    "comp2" => arity == 2,
+                    "comp3" => arity == 3,
+                    _ => arity == 2 || arity == 3,
+                };
+                if !expected {
+                    let arities = if n == "comp" {
+                        "2 or 3"
+                    } else if n == "comp2" {
+                        "2"
+                    } else {
+                        "3"
+                    };
+                    return Err(format!("{n} expects {arities} functions"));
                 }
                 let functions = fs[1..]
                     .iter()

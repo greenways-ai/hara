@@ -123,6 +123,34 @@ test("Canvas2D frames execute declared commands without game-specific state", ()
   assert.equal(calls.filter(([name]) => name === "addColorStop").length, 2);
 });
 
+test("stateful Tron frames retain trails in the canvas host", () => {
+  const { runtime, calls } = fixture();
+  runtime.claim("node/tron@1", "canvas/background");
+  const frame = (stateful) => runtime.render("node/tron@1", "canvas/background", new Map([
+    ["type", { constructor: { name: "HtaKeyword" }, name: "canvas-2d" }],
+    ["background", "#020408"], ["stateful", stateful]
+  ]));
+  frame({ kind: { constructor: { name: "HtaKeyword" }, name: "tron" }, init: true, trails: [[[10, 20]], [[30, 40]], [[50, 60]], [[70, 80]]],
+    heads: [10, 20, 30, 40, 50, 60, 70, 80] });
+  frame({ kind: "tron", heads: [46, 20, 30, 40, 50, 60, 70, 80], append: [[0, 46, 20]] });
+  assert.deepEqual(runtime.canvases.get("canvas/background").stateful.trails[0], [[10, 20], [46, 20]]);
+  assert.ok(calls.filter(([name]) => name === "lineTo").length >= 2);
+});
+
+test("published frames continue rendering from the latest event", () => {
+  const { runtime, callbacks, calls } = fixture();
+  runtime.claim("node/tron@1", "canvas/background");
+  const frame = new Map([
+    ["type", { constructor: { name: "HtaKeyword" }, name: "canvas-2d" }],
+    ["background", "#020408"],
+    ["stateful", { kind: "tron", init: true, trails: [[], [], [], []], heads: [10, 20, 30, 40, 50, 60, 70, 80] }]
+  ]);
+  runtime.publish("node/tron@1", "canvas/background", frame);
+  assert.equal(runtime.canvases.get("canvas/background").live.nodeId, "node/tron@1");
+  callbacks.values().next().value(16);
+  assert.ok(calls.filter(([name]) => name === "fillRect").length >= 2);
+});
+
 test("hiding a workspace rejects outstanding animation frames", async () => {
   const { runtime } = fixture();
   runtime.claim("node/fire@1", "canvas/background");

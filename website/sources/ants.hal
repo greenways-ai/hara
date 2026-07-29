@@ -18,6 +18,7 @@
 (def food-range 100)
 (def pher-unit 100)
 (def evap-percent 99)
+(def evap-cells-per-frame 256)
 (def pher-visible (* 2 pher-unit))
 (def home-off 20)
 
@@ -111,6 +112,7 @@
             world (get state :world)]
         (if (= x (+ home-off nants-sqrt))
           {:tick 0 :seed seed :world world :ants (get state :ants)
+           :evaporation-index 0
            :active-food (get food-state :active-food)}
           (let [location [x y]
                 direction-seed (next-seed seed)
@@ -277,20 +279,22 @@
                  :right right
                  :carrying carrying}))))))))
 
-(defn evaporate [world]
-  (loop [x 0 y 0 next-world world]
-    (if (= x dim)
-      next-world
-      (let [location [x y]
-            cell (cell-at next-world location)
+(defn evaporate-slice! [world start]
+  ;; Complete one 80x80 evaporation pass over 25 display frames, avoiding a
+  ;; periodic 6,400-cell hitch in the animation loop.
+  (loop [offset 0]
+    (if (< offset evap-cells-per-frame)
+      (let [index (mod (+ start offset) (* dim dim))
+            y (mod index dim)
+            location [(/ (- index y) dim) y]
+            cell (cell-at world location)
             faded
             (assoc
               cell
               :pher
               (/ (* evap-percent (cell-number cell :pher)) 100))]
-        (if (= (inc y) dim)
-          (recur (inc x) 0 (put-cell next-world location faded))
-          (recur x (inc y) (put-cell next-world location faded)))))))
+        (do (put-cell world location faded) (recur (inc offset))))
+      (mod (+ start evap-cells-per-frame) (* dim dim)))))
 
 (defn advance-ants [simulation]
   (let [ants (get simulation :ants)]
@@ -307,11 +311,13 @@
   (let [ants (get simulation :ants)
         stepped (advance-ants simulation)
         tick (inc (get simulation :tick))
-        world (get stepped :world)]
+        world (get stepped :world)
+        evaporation-index (evaporate-slice! world (get simulation :evaporation-index))]
     {:tick tick
      :seed (get stepped :seed)
-     :world (if (= (mod tick 25) 0) (evaporate world) world)
+     :world world
      :ants (get stepped :next-ants)
+     :evaporation-index evaporation-index
      :active-food (get simulation :active-food)}))
 
 (defn cell-geometry [width height]
@@ -445,6 +451,31 @@
             (conj with-body (ant-direction-command geometry ant))))
         commands))))
 
+(defn ant-events [ants]
+  (loop [index 0 events []]
+    (if (< index (count ants))
+      (let [ant (nth ants index) location (get ant :loc)]
+        (recur (inc index)
+               (conj events [(nth location 0) (nth location 1)
+                             (get ant :dir) (get ant :food)])))
+      events)))
+
+(defn food-events [world active-food]
+  (loop [index 0 events []]
+    (if (< index (count active-food))
+      (let [location (array-get active-food index)]
+        (recur (inc index)
+               (conj events [(nth location 0) (nth location 1)
+                             (cell-number (cell-at world location) :food)])))
+      events)))
+
+(defn render-events [simulation]
+  {:type :canvas-2d
+   :background "#071820"
+   :stateful {:kind :ants
+              :ants (ant-events (get simulation :ants))
+              :food (food-events (get simulation :world) (get simulation :active-food))}})
+
 (node/start
   (fn []
     (loop [simulation (setup) frame-tick 0 commands (list)]
@@ -454,15 +485,10 @@
             should-step true]
         (let [next-simulation
               (if should-step (step-world simulation) simulation)
-              next-commands
-              (if should-step
-                (render-commands next-simulation width height)
-                commands)]
+              next-commands (render-events next-simulation)]
           (do
             (co/await
-              (draw/render
+              (draw/publish
                 "canvas/background"
-                {:type :canvas-2d
-                 :background "#071820"
-                 :commands next-commands}))
+                next-commands))
             (recur next-simulation (inc frame-tick) next-commands)))))))

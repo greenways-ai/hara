@@ -122,17 +122,18 @@ public class CollectionProtocolConformanceTest {
     HaraJavaAdapters.installCons(cons);
     HaraProtocol nth = new HaraProtocol("INth", java.util.Map.of("nth", 2));
     HaraJavaAdapters.installNth(nth);
-    HaraProtocol navigation =
-        new HaraProtocol(
-            "INavigation",
-            java.util.Map.of(
-                "peek-first", 1,
-                "peek-last", 1,
-                "pop-first", 1,
-                "pop-last", 1,
-                "push-first", 2,
-                "push-last", 2));
-    HaraJavaAdapters.installNavigation(navigation);
+    HaraProtocol peekFirst =
+        new HaraProtocol("IPeekFirst", java.util.Map.of("peek-first", 1));
+    HaraJavaAdapters.installPeekFirst(peekFirst);
+    HaraProtocol peekLast =
+        new HaraProtocol("IPeekLast", java.util.Map.of("peek-last", 1));
+    HaraJavaAdapters.installPeekLast(peekLast);
+    HaraProtocol pushFirst =
+        new HaraProtocol("IPushFirst", java.util.Map.of("push-first", 2));
+    HaraJavaAdapters.installPushFirst(pushFirst);
+    HaraProtocol pushLast =
+        new HaraProtocol("IPushLast", java.util.Map.of("push-last", 2));
+    HaraJavaAdapters.installPushLast(pushLast);
 
     Map.Standard<String, Long> map = Map.Standard.from(null, "a", 1L);
     Object mapWithB = assoc.invoke("assoc", map, new Object[] {"b", 2L});
@@ -146,17 +147,17 @@ public class CollectionProtocolConformanceTest {
     assertEquals(3L, nth.invoke("nth", vectorWith3, new Object[] {2L}));
     List.Standard<Long> list = List.Standard.from(null, 1L, 2L);
     Object listWith0 = cons.invoke("cons", list, new Object[] {0L});
-    assertEquals(0L, navigation.invoke("peek-first", listWith0, new Object[0]));
-    assertEquals(1L, navigation.invoke("peek-first", list, new Object[0]));
-    assertEquals(2L, navigation.invoke("peek-last", list, new Object[0]));
+    assertEquals(0L, peekFirst.invoke("peek-first", listWith0, new Object[0]));
+    assertEquals(1L, peekFirst.invoke("peek-first", list, new Object[0]));
+    assertEquals(2L, peekLast.invoke("peek-last", list, new Object[0]));
     assertEquals(
         0L,
-        navigation.invoke(
-            "peek-first", navigation.invoke("push-first", list, new Object[] {0L}), new Object[0]));
+        peekFirst.invoke(
+            "peek-first", pushFirst.invoke("push-first", list, new Object[] {0L}), new Object[0]));
     assertEquals(
         3L,
-        navigation.invoke(
-            "peek-last", navigation.invoke("push-last", list, new Object[] {3L}), new Object[0]));
+        peekLast.invoke(
+            "peek-last", pushLast.invoke("push-last", list, new Object[] {3L}), new Object[0]));
 
     Map.Mutable<String, Long> mutable = Map.Mutable.from(null, "a", 1L);
     Object sameMutable = assoc.invoke("assoc", mutable, new Object[] {"b", 2L});
