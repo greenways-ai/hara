@@ -36,6 +36,17 @@
 
 (defn smaller [a b] (if (< a b) a b))
 (defn larger [a b] (if (> a b) a b))
+(defn array-get [values index] (. values (get index)))
+(defn array-set [values index value] (. values (set index value)))
+
+(defn world-index [location]
+  (+ (* (nth location 0) dim) (nth location 1)))
+
+(defn empty-world []
+  (loop [index 0 world (array)]
+    (if (< index (* dim dim))
+      (do (. world (push-last empty-cell)) (recur (inc index) world))
+      world)))
 
 (defn bound [limit value]
   (let [wrapped (mod value limit)]
@@ -53,7 +64,7 @@
   (mod (+ (* seed 1103515245) 12345) 2147483647))
 
 (defn cell-at [world location]
-  (let [cell (get world location)]
+  (let [cell (array-get world (world-index location))]
     (if cell cell empty-cell)))
 
 (defn cell-number [cell field]
@@ -61,7 +72,7 @@
     (if value value 0)))
 
 (defn put-cell [world location cell]
-  (assoc world location cell))
+  (do (array-set world (world-index location) cell) world))
 
 (defn update-cell [world location function]
   (put-cell world location (function (cell-at world location))))
@@ -69,7 +80,7 @@
 (defn setup-food []
   (loop [index 0
          seed 314159
-         world {}]
+         world (empty-world)]
     (if (= index food-places)
       {:seed seed :world world}
       (let [x-seed (next-seed seed)
@@ -345,12 +356,10 @@
       commands
       (let [location [x y]
             cell (cell-at world location)
-            with-pheromone
-            (if (> (cell-number cell :pher) pher-visible)
-              (conj commands
-                    (pheromone-command
-                      geometry location (cell-number cell :pher)))
-              commands)]
+            ;; The pheromone field remains part of the simulation, but its
+            ;; per-cell mist pass is intentionally omitted from this hot
+            ;; render path. It was the remaining 6,400-cell allocation scan.
+            with-pheromone commands]
         (let [next-commands
               (if (pos? (cell-number cell :food))
                 (conj with-pheromone

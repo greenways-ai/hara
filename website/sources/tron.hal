@@ -17,11 +17,12 @@
 (defn larger [a b] (if (> a b) a b))
 (defn smaller [a b] (if (< a b) a b))
 
-(defn trim-trail [trail width height]
+(defn trim-trail! [trail width height]
   ;; Collision probes are 36px apart with overlapping 20px hit radii.
   ;; Retaining this many probes yields about 1.5 times the longest screen axis.
   (let [limit (/ (* (larger width height) 3) (* probe-spacing 2))]
-    (if (> (count trail) limit) (vec (rest trail)) trail)))
+    (if (> (count trail) limit) (. trail (pop-first)) trail)
+    trail))
 
 (defn event-direction [events direction]
   (loop [index 0 result direction]
@@ -133,27 +134,27 @@
         trail (get cycle :trail)
         last-index (- (count trail) 1)
         last-point (nth trail last-index)
-        extended
-        (if (>= (+ (absolute (- x (nth last-point 0)))
-                   (absolute (- y (nth last-point 1))))
-                probe-spacing)
-          (conj trail [x y])
-          trail)]
-    (assoc
+        should-extend
+        (>= (+ (absolute (- x (nth last-point 0)))
+              (absolute (- y (nth last-point 1))))
+            probe-spacing)]
+    (do
+      (if should-extend (. trail (push-last [x y])) trail)
+      (trim-trail! trail width height)
+      (assoc
       (assoc
         (assoc
           (assoc cycle :x x)
           :y y)
         :direction direction)
-      :trail
-      (trim-trail extended width height))))
+      :trail trail))))
 
 (defn initial-state [width height]
-  {:cyan {:x 50 :y 76 :direction 0 :trail [[50 76]]}
-   :pink {:x (- width 54) :y 108 :direction 2 :trail [[(- width 54) 108]]}
-   :violet {:x 72 :y (- height 56) :direction 3 :trail [[72 (- height 56)]]}
+  {:cyan {:x 50 :y 76 :direction 0 :trail (array [50 76])}
+   :pink {:x (- width 54) :y 108 :direction 2 :trail (array [(- width 54) 108])}
+   :violet {:x 72 :y (- height 56) :direction 3 :trail (array [72 (- height 56)])}
    :gold {:x (- width 80) :y (- height 80) :direction 2
-          :trail [[(- width 80) (- height 80)]]}})
+          :trail (array [(- width 80) (- height 80)])}})
 
 (defn update-cycle [name target-name state events width height]
   (let [cycle (get state name)
@@ -196,7 +197,7 @@
              (get spawn :gold) (get moved :gold))}))
 
 (defn trail-points [cycle]
-  (conj (get cycle :trail) [(get cycle :x) (get cycle :y)]))
+  (conj (vec (get cycle :trail)) [(get cycle :x) (get cycle :y)]))
 
 (defn cycle-commands [cycle color]
   (let [points (trail-points cycle)]
