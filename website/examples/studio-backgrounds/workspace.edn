@@ -174,22 +174,6 @@
    :document/anonymous true
    :document/node "node/background/pong"
    :document/canvas "canvas/background"}
-  {:document/id "document/background/kernel-media"
-   :document/title "Kernel + Media"
-   :document/category "Story"
-   :document/path "../../sources/kernel-media.hal"
-   :document/role :studio/background
-   :document/anonymous true
-   :document/node "node/background/kernel-media"
-   :document/canvas "canvas/background"}
-  {:document/id "document/background/greenways-os"
-   :document/title "Greenways OS"
-   :document/category "Story"
-   :document/path "../../sources/greenways-os.hal"
-   :document/role :studio/background
-   :document/anonymous true
-   :document/node "node/background/greenways-os"
-   :document/canvas "canvas/background"}
   {:document/id "document/background/off"
    :document/title "Off"
    :document/category "Controls"
@@ -220,8 +204,6 @@
   {:node/id "node/background/ants" :node/type :hal/transform :node/document "document/background/ants"}
   {:node/id "node/background/space-invaders" :node/type :hal/transform :node/document "document/background/space-invaders"}
   {:node/id "node/background/pong" :node/type :hal/transform :node/document "document/background/pong"}
-  {:node/id "node/background/kernel-media" :node/type :hal/transform :node/document "document/background/kernel-media"}
-  {:node/id "node/background/greenways-os" :node/type :hal/transform :node/document "document/background/greenways-os"}
   {:node/id "node/background/off" :node/type :hal/transform :node/document "document/background/off"}]
  :workspace/links
  [{:link/from "document/background/tron" :link/to "canvas/background"}
@@ -245,6 +227,4 @@
   {:link/from "document/background/ants" :link/to "canvas/background"}
   {:link/from "document/background/space-invaders" :link/to "canvas/background"}
   {:link/from "document/background/pong" :link/to "canvas/background"}
-  {:link/from "document/background/kernel-media" :link/to "canvas/background"}
-  {:link/from "document/background/greenways-os" :link/to "canvas/background"}
   {:link/from "document/background/off" :link/to "canvas/background"}]}
