@@ -145,7 +145,7 @@ test("stateful Boid frames retain tails without replaying a published event", ()
   }]]);
   runtime.publish("node/boids@1", "canvas/background", frame);
   callbacks.values().next().value(16);
-  assert.deepEqual(runtime.canvases.get("canvas/background").stateful.tails[0], [[10, 20], [10, 20]]);
+  assert.deepEqual(runtime.canvases.get("canvas/background").stateful.tails[0], [[10, 20]]);
 });
 
 test("published frames continue rendering from the latest event", () => {
