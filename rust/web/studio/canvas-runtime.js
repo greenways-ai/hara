@@ -448,22 +448,29 @@ export class CanvasRuntime {
 function renderStateful2d(slot, context, stateful, width, height) {
   const kind = keyName(stateful.kind);
   if (kind === "ants") return renderAntsState(context, stateful, width, height);
+  if (kind === "boids") return renderBoidsState(slot, context, stateful, width, height);
   if (kind !== "tron") throw new Error(`unsupported stateful canvas: ${kind ?? "nil"}`);
-  if (stateful.init || !slot.stateful || slot.stateful.kind !== "tron") {
+  const reset = stateful.init || !slot.stateful || slot.stateful.kind !== "tron";
+  if (reset) {
     slot.stateful = {
       kind: "tron",
-      trails: (stateful.trails ?? []).map((trail) => trail.map(([x, y]) => [Number(x), Number(y)]))
+      trails: (stateful.trails ?? []).map((trail) => trail.map(([x, y]) => [Number(x), Number(y)])),
+      lastEvent: null
     };
   }
+  if (reset || slot.stateful.lastEvent !== stateful) {
+    const trails = slot.stateful.trails;
+    for (const [cycle, x, y] of stateful.append ?? []) {
+      const trail = trails[Number(cycle)] ?? (trails[Number(cycle)] = []);
+      trail.push([Number(x), Number(y)]);
+      trimTronTrail(trail, width, height);
+    }
+    for (const [cycle, x, y] of stateful.reset ?? []) {
+      trails[Number(cycle)] = [[Number(x), Number(y)]];
+    }
+    slot.stateful.lastEvent = stateful;
+  }
   const trails = slot.stateful.trails;
-  for (const [cycle, x, y] of stateful.append ?? []) {
-    const trail = trails[Number(cycle)] ?? (trails[Number(cycle)] = []);
-    trail.push([Number(x), Number(y)]);
-    trimTronTrail(trail, width, height);
-  }
-  for (const [cycle, x, y] of stateful.reset ?? []) {
-    trails[Number(cycle)] = [[Number(x), Number(y)]];
-  }
   const colors = ["#41f5e4", "#ff2e88", "#9c7bff", "#f5d742"];
   const heads = stateful.heads ?? [];
   for (let cycle = 0; cycle < 4; cycle += 1) {
@@ -490,6 +497,12 @@ function renderAntsState(context, stateful, width, height) {
     context.fillStyle = "#ff2e88"; context.globalAlpha = Number(amount) > 30 ? 1 : .82;
     context.beginPath(); context.arc(left + (Number(x) + .5) * size, top + (Number(y) + .5) * size, Math.max(2, size / 2), 0, Math.PI * 2); context.fill();
   }
+  for (const [x, y, amount] of stateful.musk ?? []) {
+    const strength = Math.min(1, Number(amount) / 1200);
+    if (strength <= 0) continue;
+    context.fillStyle = "#31ff8d"; context.globalAlpha = .04 + strength * .18;
+    context.beginPath(); context.arc(left + (Number(x) + .5) * size, top + (Number(y) + .5) * size, Math.max(3, size * (1.2 + strength * 2.4)), 0, Math.PI * 2); context.fill();
+  }
   for (const [x, y, direction, carrying] of stateful.ants ?? []) {
     const cx = left + (Number(x) + .5) * size, cy = top + (Number(y) + .5) * size;
     const color = carrying ? "#ffe93d" : "#eaffff";
@@ -501,13 +514,41 @@ function renderAntsState(context, stateful, width, height) {
   context.globalAlpha = 1;
 }
 
+function renderBoidsState(slot, context, stateful, width, height) {
+  const boids = stateful.boids ?? [];
+  const reset = stateful.init || !slot.stateful || slot.stateful.kind !== "boids" || slot.stateful.tails.length !== boids.length;
+  if (reset) {
+    slot.stateful = {
+      kind: "boids",
+      tails: boids.map(([x, y]) => [[Number(x), Number(y)]]),
+      lastEvent: null
+    };
+  }
+  if (reset || slot.stateful.lastEvent !== stateful) {
+    for (let index = 0; index < boids.length; index += 1) {
+      const [x, y] = boids[index];
+      const tail = slot.stateful.tails[index];
+      tail.push([Number(x), Number(y)]);
+      while (tail.length > 18) tail.shift();
+    }
+    slot.stateful.lastEvent = stateful;
+  }
+  for (let index = 0; index < boids.length; index += 1) {
+    const [x, y] = boids[index];
+    const color = index % 3 === 0 ? "#9c7bff" : "#41f5e4";
+    drawBoidTail(context, slot.stateful.tails[index], color);
+    context.fillStyle = "#efffff"; context.globalAlpha = .94; context.beginPath(); context.arc(Number(x), Number(y), 3, 0, Math.PI * 2); context.fill();
+  }
+  context.globalAlpha = 1;
+}
+
 function trimTronTrail(trail, width, height) {
   const limit = Math.max(1, Math.floor(Math.max(width, height) * 2 / 72));
   while (trail.length > limit) trail.shift();
 }
 
 function drawTronTrail(context, points, color, headX, headY) {
-  if (points.length < 2) return;
+  if (points.length === 0 || !Number.isFinite(headX) || !Number.isFinite(headY)) return;
   for (const [lineWidth, alpha] of [[13, .14], [3, .92]]) {
     context.strokeStyle = color;
     context.lineWidth = lineWidth;
@@ -521,6 +562,22 @@ function drawTronTrail(context, points, color, headX, headY) {
     context.stroke();
   }
   context.globalAlpha = 1;
+}
+
+function drawBoidTail(context, points, color) {
+  if (points.length < 2) return;
+  for (const [lineWidth, alpha] of [[7, .12], [2, .68]]) {
+    context.strokeStyle = color; context.lineWidth = lineWidth; context.globalAlpha = alpha;
+    context.beginPath(); context.moveTo(points[0][0], points[0][1]);
+    for (let index = 1; index < points.length; index += 1) {
+      const point = points[index], previous = points[index - 1];
+      const wobble = Math.sin(index * 1.7) * Math.min(4, lineWidth + 1);
+      const dx = point[0] - previous[0], dy = point[1] - previous[1];
+      const length = Math.hypot(dx, dy) || 1;
+      context.lineTo(point[0] - dy / length * wobble, point[1] + dx / length * wobble);
+    }
+    context.stroke();
+  }
 }
 
 export function resolutionUniform(name, value, width, height) {

@@ -10,7 +10,6 @@
 (def neighborhood 15000)
 (def separation-zone 1600)
 (def max-speed 9)
-(def tail-length 14)
 
 (defn absolute [value] (if (< value 0) (- 0 value) value))
 (defn larger [a b] (if (> a b) a b))
@@ -19,14 +18,9 @@
 (defn array-set [values index value] (. values (set index value)))
 (defn array-push [values value] (. values (push-last value)))
 
-(defn trim-tail! [tail]
-  (if (> (count tail) tail-length) (. tail (pop-first)) tail)
-  tail)
-
 (defn seed-flock [width height]
   (loop [index 0 xs (array) ys (array) vxs (array) vys (array)
-         next-xs (array) next-ys (array) next-vxs (array) next-vys (array)
-         tails (array)]
+         next-xs (array) next-ys (array) next-vxs (array) next-vys (array)]
     (if (< index flock-size)
       (let [x (+ 30 (mod (* index 83) (larger 60 (- width 60))))
             y (+ 30 (mod (* index 47) (larger 60 (- height 60))))]
@@ -36,11 +30,9 @@
           (array-push vys (- (mod (* index 13) 9) 4))
           (array-push next-xs 0) (array-push next-ys 0)
           (array-push next-vxs 0) (array-push next-vys 0)
-          (array-push tails (array [x y]))
-          (recur (inc index) xs ys vxs vys next-xs next-ys next-vxs next-vys tails)))
+          (recur (inc index) xs ys vxs vys next-xs next-ys next-vxs next-vys)))
       {:x xs :y ys :vx vxs :vy vys
-       :next-x next-xs :next-y next-ys :next-vx next-vxs :next-vy next-vys
-       :tails tails})))
+       :next-x next-xs :next-y next-ys :next-vx next-vxs :next-vy next-vys})))
 
 (defn neighborhood-force [state boid-index]
   (let [xs (get state :x) ys (get state :y)
@@ -90,8 +82,7 @@
   (let [xs (get state :x) ys (get state :y)
         vxs (get state :vx) vys (get state :vy)
         next-xs (get state :next-x) next-ys (get state :next-y)
-        next-vxs (get state :next-vx) next-vys (get state :next-vy)
-        tails (get state :tails)]
+        next-vxs (get state :next-vx) next-vys (get state :next-vy)]
     (loop [index 0]
       (if (< index (count xs))
         (let [force (neighborhood-force state index)
@@ -102,33 +93,28 @@
               next-vx (nth velocity 0)
               next-vy (nth velocity 1)
               x (wrap (+ (array-get xs index) next-vx) width)
-              y (wrap (+ (array-get ys index) next-vy) height)
-        tail (array-get tails index)]
+              y (wrap (+ (array-get ys index) next-vy) height)]
           (do
             (array-set next-xs index x) (array-set next-ys index y)
             (array-set next-vxs index next-vx)
             (array-set next-vys index next-vy)
-            (array-push tail [x y]) (trim-tail! tail)
             (recur (inc index))))
         {:x next-xs :y next-ys :vx next-vxs :vy next-vys
-         :next-x xs :next-y ys :next-vx vxs :next-vy vys :tails tails}))))
+         :next-x xs :next-y ys :next-vx vxs :next-vy vys}))))
 
-(defn boid-commands [state]
-  (let [xs (get state :x) ys (get state :y) tails (get state :tails)]
-  (loop [index 0 commands (list)]
+(defn boid-events [state]
+  (let [xs (get state :x) ys (get state :y)
+        vxs (get state :vx) vys (get state :vy)]
+  (loop [index 0 events []]
     (if (< index (count xs))
       (let [x (array-get xs index)
             y (array-get ys index)
-            tail (array-get tails index)
-            color (if (= (mod index 3) 0) "#9c7bff" "#41f5e4")]
+            vx (array-get vxs index)
+            vy (array-get vys index)]
         (recur
           (+ index 1)
-          (conj
-            (conj
-              (conj commands [:polyline (vec tail) color 7 0.12])
-              [:polyline (vec tail) color 2 0.72])
-            [:circle x y 3 "#efffff" 0.94])))
-      commands))))
+          (conj events [x y vx vy])))
+      events))))
 
 (node/start
   (fn []
@@ -144,5 +130,7 @@
               "canvas/background"
               {:type :canvas-2d
                :background "#02050b"
-               :commands (boid-commands next)}))
+               :stateful {:kind :boids
+                          :init (if flock false true)
+                          :boids (boid-events next)}}))
           (recur next (+ tick 1)))))))
