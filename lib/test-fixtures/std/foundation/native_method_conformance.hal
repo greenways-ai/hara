@@ -1,0 +1,19 @@
+(ns std.foundation.native-method-conformance)
+
+(defn native-method-result
+  "Runs a direct canonical native method call and classifies only missing dispatch as failure."
+  [method thunk]
+  (try
+    (do
+      (thunk)
+      {:method method :pass true})
+    (catch Throwable error
+      (let [message (ex-message error)]
+        {:method method
+         :pass
+         (if (std.foundation.string/includes? message "nbound symbol")
+           false
+           (if (std.foundation.string/includes? message "unavailable/")
+             false
+             true))
+         :error message}))))

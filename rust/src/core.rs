@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_lines)] // Temporary compatibility facade during Java-port split.
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 pub use crate::kernel::Form;
 use crate::kernel::{NamespaceRegistry, Var as KernelVar, VarOrigin};
@@ -2398,6 +2398,7 @@ fn socket_operation(
     forms: &[Form],
     env: &mut HashMap<String, Value>,
 ) -> Result<Value, String> {
+    let operation = operation.strip_prefix("std.native.Socket/").unwrap_or(operation);
     match operation {
         "socket/connect" => {
             if forms.len() != 4 {
@@ -2433,6 +2434,65 @@ fn socket_operation(
                 .map(|handle| Value::Number(handle as i64))
                 .map_err(|error| socket_error(operation, error))
         }
+        "socket/listen" => {
+            if forms.len() != 4 {
+                return Err("socket/listen expects a host, port, options, and callback".into());
+            }
+            let host = match eval(&forms[0], env)? {
+                Value::String(value) => value,
+                _ => return Err("socket/listen expects a host string".into()),
+            };
+            let port = match eval(&forms[1], env)? {
+                Value::Number(value) if (0..=u16::MAX as i64).contains(&value) => value as u16,
+                _ => return Err("socket/listen expects a valid port".into()),
+            };
+            let _options = eval(&forms[2], env)?;
+            let callback = match eval(&forms[3], env)? {
+                Value::Function(value) => value,
+                _ => return Err("socket/listen expects a callback".into()),
+            };
+            let callback = Rc::new(move |event| {
+                let _ = call_function(&callback, vec![socket_server_event_value(event)]);
+            });
+            socket_provider(operation)?
+                .listen(&host, port, callback)
+                .map(|handle| Value::Number(handle as i64))
+                .map_err(|error| socket_error(operation, error))
+        }
+        "socket/endpoint" => {
+            if forms.len() != 1 {
+                return Err("socket/endpoint expects a server".into());
+            }
+            let server = socket_handle(&eval(&forms[0], env)?, "socket/endpoint")?;
+            socket_provider(operation)?
+                .endpoint(server)
+                .map(|(host, port)| Value::Map(PMap::from_iter([
+                    (Value::Keyword("host".into()), Value::String(host)),
+                    (Value::Keyword("port".into()), Value::Number(port as i64)),
+                ])))
+                .map_err(|error| socket_error(operation, error))
+        }
+        "socket/events" => {
+            if forms.len() != 2 {
+                return Err("socket/events expects a socket handle and options".into());
+            }
+            let handle = socket_handle(&eval(&forms[0], env)?, "socket/events")?;
+            let _options = eval(&forms[1], env)?;
+            socket_provider(operation)?
+                .events(handle)
+                .map(|stream| Value::Number(stream as i64))
+                .map_err(|error| socket_error(operation, error))
+        }
+        "socket/next" => {
+            if forms.len() != 1 {
+                return Err("socket/next expects a socket stream".into());
+            }
+            let stream = socket_handle(&eval(&forms[0], env)?, "socket/next")?;
+            socket_provider(operation)?
+                .next(stream)
+                .map(Value::Promise)
+                .map_err(|error| socket_error(operation, error))
+        }
         "socket/send" => {
             if forms.len() != 2 {
                 return Err("socket/send expects a socket connection and bytes".into());
@@ -2465,6 +2525,13 @@ fn socket_operation(
                 .map_err(|error| socket_error(operation, error))
         }
         _ => unreachable!(),
+    }
+}
+
+fn socket_handle(value: &Value, operation: &str) -> Result<SocketHandle, String> {
+    match value {
+        Value::Number(value) if *value >= 0 => Ok(*value as SocketHandle),
+        _ => Err(format!("{operation} expects a socket handle")),
     }
 }
 /// Installs the explicit host-call boundary for one evaluation.
@@ -2608,6 +2675,45 @@ pub enum SocketEvent {
     Failed(SocketHandle, String),
 }
 
+pub type SocketServerCallback = Rc<dyn Fn(SocketServerEvent)>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SocketServerEvent {
+    Open { server: SocketHandle, connection: SocketHandle },
+    Data { server: SocketHandle, connection: SocketHandle, bytes: Vec<u8> },
+    Closed { server: SocketHandle, connection: SocketHandle },
+    Failed { server: SocketHandle, connection: SocketHandle, error: String },
+}
+
+fn socket_server_event_value(event: SocketServerEvent) -> Value {
+    let mut entries = Vec::new();
+    match event {
+        SocketServerEvent::Open { server, connection } => {
+            entries.push((Value::Keyword("type".into()), Value::Keyword("open".into())));
+            entries.push((Value::Keyword("server".into()), Value::Number(server as i64)));
+            entries.push((Value::Keyword("connection".into()), Value::Number(connection as i64)));
+        }
+        SocketServerEvent::Data { server, connection, bytes } => {
+            entries.push((Value::Keyword("type".into()), Value::Keyword("data".into())));
+            entries.push((Value::Keyword("server".into()), Value::Number(server as i64)));
+            entries.push((Value::Keyword("connection".into()), Value::Number(connection as i64)));
+            entries.push((Value::Keyword("bytes".into()), Value::Bytes(bytes)));
+        }
+        SocketServerEvent::Closed { server, connection } => {
+            entries.push((Value::Keyword("type".into()), Value::Keyword("close".into())));
+            entries.push((Value::Keyword("server".into()), Value::Number(server as i64)));
+            entries.push((Value::Keyword("connection".into()), Value::Number(connection as i64)));
+        }
+        SocketServerEvent::Failed { server, connection, error } => {
+            entries.push((Value::Keyword("type".into()), Value::Keyword("error".into())));
+            entries.push((Value::Keyword("server".into()), Value::Number(server as i64)));
+            entries.push((Value::Keyword("connection".into()), Value::Number(connection as i64)));
+            entries.push((Value::Keyword("error".into()), Value::String(error)));
+        }
+    }
+    Value::Map(PMap::from_iter(entries))
+}
+
 pub trait SocketProvider {
     fn connect(
         &self,
@@ -2617,12 +2723,33 @@ pub trait SocketProvider {
     ) -> Result<SocketHandle, SocketError>;
     fn send(&self, socket: SocketHandle, bytes: &[u8]) -> Result<usize, SocketError>;
     fn close(&self, socket: SocketHandle) -> Result<(), SocketError>;
+    fn listen(
+        &self,
+        _host: &str,
+        _port: u16,
+        _callback: SocketServerCallback,
+    ) -> Result<SocketHandle, SocketError> {
+        Err(SocketError::Unsupported)
+    }
+    fn endpoint(&self, _server: SocketHandle) -> Result<(String, u16), SocketError> {
+        Err(SocketError::Unsupported)
+    }
+    fn events(&self, _handle: SocketHandle) -> Result<SocketHandle, SocketError> {
+        Err(SocketError::Unsupported)
+    }
+    fn next(&self, _stream: SocketHandle) -> Result<Promise, SocketError> {
+        Err(SocketError::Unsupported)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::io::Write;
+use std::io::{Read, Write};
 #[cfg(not(target_arch = "wasm32"))]
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpListener, TcpStream};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{mpsc, Arc, Mutex};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(any(not(target_arch = "wasm32"), target_os = "wasi"))]
 use std::path::{Path, PathBuf};
 
@@ -2754,11 +2881,159 @@ impl FileProvider for NativeFileProvider {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Default)]
+#[derive(Clone)]
+enum RawSocketEvent {
+    Open { server: SocketHandle, connection: SocketHandle, stream: Arc<Mutex<TcpStream>> },
+    Data { server: SocketHandle, connection: SocketHandle, bytes: Vec<u8> },
+    Closed { server: SocketHandle, connection: SocketHandle },
+    Failed { server: SocketHandle, connection: SocketHandle, error: String },
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct NativeServer {
+    host: String,
+    port: u16,
+    alive: Arc<AtomicBool>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct NativeSocketStream {
+    handle: SocketHandle,
+    queue: VecDeque<Value>,
+    queued_bytes: usize,
+    pending: Option<Promise>,
+    closed: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct NativeSocketState {
+    next_handle: Arc<AtomicU64>,
+    sockets: HashMap<SocketHandle, TcpStream>,
+    callbacks: HashMap<SocketHandle, SocketCallback>,
+    servers: HashMap<SocketHandle, NativeServer>,
+    connections: HashMap<SocketHandle, Arc<Mutex<TcpStream>>>,
+    connection_servers: HashMap<SocketHandle, SocketHandle>,
+    server_callbacks: HashMap<SocketHandle, SocketServerCallback>,
+    streams: HashMap<SocketHandle, NativeSocketStream>,
+    sender: mpsc::Sender<RawSocketEvent>,
+    receiver: mpsc::Receiver<RawSocketEvent>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
 pub struct NativeSocketProvider {
-    next_handle: Cell<SocketHandle>,
-    sockets: RefCell<HashMap<SocketHandle, TcpStream>>,
-    callbacks: RefCell<HashMap<SocketHandle, SocketCallback>>,
+    state: Rc<RefCell<NativeSocketState>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Default for NativeSocketProvider {
+    fn default() -> Self {
+        let (sender, receiver) = mpsc::channel();
+        Self {
+            state: Rc::new(RefCell::new(NativeSocketState {
+                next_handle: Arc::new(AtomicU64::new(1)),
+                sockets: HashMap::new(),
+                callbacks: HashMap::new(),
+                servers: HashMap::new(),
+                connections: HashMap::new(),
+                connection_servers: HashMap::new(),
+                server_callbacks: HashMap::new(),
+                streams: HashMap::new(),
+                sender,
+                receiver,
+            })),
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl NativeSocketProvider {
+    fn next_handle(&self) -> SocketHandle {
+        self.state.borrow().next_handle.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn pump(&self) {
+        loop {
+            let event = { self.state.borrow().receiver.try_recv().ok() };
+            let Some(event) = event else { break; };
+            self.dispatch(event);
+        }
+    }
+
+    fn wait_and_pump(&self) {
+        let event = { self.state.borrow().receiver.recv().ok() };
+        if let Some(event) = event {
+            self.dispatch(event);
+        }
+        self.pump();
+    }
+
+    fn dispatch(&self, raw: RawSocketEvent) {
+        let event = match raw {
+            RawSocketEvent::Open { server, connection, stream } => {
+                let mut state = self.state.borrow_mut();
+                state.connections.insert(connection, stream);
+                state.connection_servers.insert(connection, server);
+                SocketServerEvent::Open { server, connection }
+            }
+            RawSocketEvent::Data { server, connection, bytes } => {
+                SocketServerEvent::Data { server, connection, bytes }
+            }
+            RawSocketEvent::Closed { server, connection } => {
+                self.state.borrow_mut().connections.remove(&connection);
+                SocketServerEvent::Closed { server, connection }
+            }
+            RawSocketEvent::Failed { server, connection, error } => {
+                SocketServerEvent::Failed { server, connection, error }
+            }
+        };
+        let callback = {
+            self.state.borrow().server_callbacks.get(&match &event {
+                SocketServerEvent::Open { server, .. }
+                | SocketServerEvent::Data { server, .. }
+                | SocketServerEvent::Closed { server, .. }
+                | SocketServerEvent::Failed { server, .. } => *server,
+            }).cloned()
+        };
+        if let Some(callback) = callback {
+            callback(event.clone());
+        }
+        let (server, connection, bytes) = match &event {
+            SocketServerEvent::Open { server, connection }
+            | SocketServerEvent::Closed { server, connection }
+            | SocketServerEvent::Failed { server, connection, .. } => (*server, *connection, 0),
+            SocketServerEvent::Data { server, connection, bytes } => (*server, *connection, bytes.len()),
+        };
+        let value = socket_server_event_value(event);
+        let overflow = {
+            let mut state = self.state.borrow_mut();
+            let mut overflow = false;
+            for stream in state.streams.values_mut().filter(|stream| stream.handle == server || stream.handle == connection) {
+                if stream.closed { continue; }
+                if stream.queue.len() >= 256 || stream.queued_bytes.saturating_add(bytes) > 1_048_576 {
+                    stream.closed = true;
+                    if let Some(promise) = stream.pending.take() {
+                        promise.resolve(Value::Map(PMap::from_iter([
+                            (Value::Keyword("type".into()), Value::Keyword("error".into())),
+                            (Value::Keyword("error".into()), Value::String("buffer-overflow".into())),
+                        ])));
+                    }
+                    overflow = true;
+                    continue;
+                }
+                if let Some(promise) = stream.pending.take() {
+                    promise.resolve(value.clone());
+                } else {
+                    stream.queued_bytes += bytes;
+                    stream.queue.push_back(value.clone());
+                }
+            }
+            overflow
+        };
+        if overflow {
+            let _ = self.close(connection);
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2774,37 +3049,136 @@ impl SocketProvider for NativeSocketProvider {
         }
         let stream = TcpStream::connect((host, port))
             .map_err(|error| SocketError::Invalid(error.to_string()))?;
-        let handle = self.next_handle.get();
-        self.next_handle.set(handle + 1);
-        self.sockets.borrow_mut().insert(handle, stream);
-        self.callbacks.borrow_mut().insert(handle, callback.clone());
+        let handle = self.next_handle();
+        self.state.borrow_mut().sockets.insert(handle, stream);
+        self.state.borrow_mut().callbacks.insert(handle, callback.clone());
         callback(SocketEvent::Connected(handle));
         Ok(handle)
     }
 
     fn send(&self, socket: SocketHandle, bytes: &[u8]) -> Result<usize, SocketError> {
-        let mut sockets = self.sockets.borrow_mut();
-        let stream = sockets
+        let mut state = self.state.borrow_mut();
+        let stream = state.sockets
             .get_mut(&socket)
             .ok_or_else(|| SocketError::Invalid("unknown socket".into()))?;
         stream
             .write_all(bytes)
             .map_err(|error| SocketError::Invalid(error.to_string()))?;
-        drop(sockets);
-        if let Some(callback) = self.callbacks.borrow().get(&socket).cloned() {
+        drop(state);
+        if let Some(callback) = self.state.borrow().callbacks.get(&socket).cloned() {
             callback(SocketEvent::Data(socket, bytes.to_vec()));
         }
         Ok(bytes.len())
     }
 
     fn close(&self, socket: SocketHandle) -> Result<(), SocketError> {
-        if self.sockets.borrow_mut().remove(&socket).is_none() {
-            return Err(SocketError::Invalid("unknown socket".into()));
+        if self.state.borrow_mut().sockets.remove(&socket).is_some() {
+            if let Some(callback) = self.state.borrow_mut().callbacks.remove(&socket) {
+                callback(SocketEvent::Closed(socket));
+            }
+            return Ok(());
         }
-        if let Some(callback) = self.callbacks.borrow_mut().remove(&socket) {
-            callback(SocketEvent::Closed(socket));
+        let server = { self.state.borrow_mut().servers.remove(&socket) };
+        if let Some(server) = server {
+            server.alive.store(false, Ordering::Relaxed);
+            self.state.borrow_mut().server_callbacks.remove(&socket);
+            return Ok(());
         }
-        Ok(())
+        if let Some(stream) = self.state.borrow_mut().connections.remove(&socket) {
+            let server = self.state.borrow().connection_servers.get(&socket).copied().unwrap_or(0);
+            let _ = stream.lock().map(|stream| stream.shutdown(Shutdown::Both));
+            let _ = self.state.borrow().sender.send(RawSocketEvent::Closed { server, connection: socket });
+            self.pump();
+            return Ok(());
+        }
+        Err(SocketError::Invalid("unknown socket".into()))
+    }
+
+    fn listen(&self, host: &str, port: u16, callback: SocketServerCallback) -> Result<SocketHandle, SocketError> {
+        if host.is_empty() { return Err(SocketError::Invalid("host is required".into())); }
+        let listener = TcpListener::bind((host, port)).map_err(|error| SocketError::Invalid(error.to_string()))?;
+        let endpoint = listener.local_addr().map_err(|error| SocketError::Invalid(error.to_string()))?;
+        listener.set_nonblocking(true).map_err(|error| SocketError::Invalid(error.to_string()))?;
+        let server = self.next_handle();
+        let alive = Arc::new(AtomicBool::new(true));
+        let sender = self.state.borrow().sender.clone();
+        let next_handle = self.state.borrow().next_handle.clone();
+        let thread_alive = alive.clone();
+        std::thread::Builder::new().name(format!("hara-socket-{server}")).spawn(move || {
+            while thread_alive.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let connection = next_handle.fetch_add(1, Ordering::Relaxed);
+                        if let Err(error) = stream.set_nonblocking(false) {
+                            let _ = sender.send(RawSocketEvent::Failed { server, connection, error: error.to_string() });
+                            continue;
+                        }
+                        let shared = Arc::new(Mutex::new(stream));
+                        let _ = sender.send(RawSocketEvent::Open { server, connection, stream: shared.clone() });
+                        let reader = shared.clone();
+                        let reader_sender = sender.clone();
+                        std::thread::spawn(move || {
+                            let mut buffer = [0u8; 8192];
+                            loop {
+                                let read = match reader.lock() { Ok(mut stream) => stream.read(&mut buffer), Err(_) => return };
+                                match read {
+                                    Ok(0) => { let _ = reader_sender.send(RawSocketEvent::Closed { server, connection }); break; }
+                                    Ok(count) => { let _ = reader_sender.send(RawSocketEvent::Data { server, connection, bytes: buffer[..count].to_vec() }); }
+                                    Err(error) => { let _ = reader_sender.send(RawSocketEvent::Failed { server, connection, error: error.to_string() }); break; }
+                                }
+                            }
+                        });
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(std::time::Duration::from_millis(5)),
+                    Err(error) => { let _ = sender.send(RawSocketEvent::Failed { server, connection: 0, error: error.to_string() }); break; }
+                }
+            }
+        }).map_err(|error| SocketError::Invalid(error.to_string()))?;
+        let mut state = self.state.borrow_mut();
+        state.servers.insert(server, NativeServer { host: endpoint.ip().to_string(), port: endpoint.port(), alive });
+        state.server_callbacks.insert(server, callback);
+        Ok(server)
+    }
+
+    fn endpoint(&self, server: SocketHandle) -> Result<(String, u16), SocketError> {
+        let state = self.state.borrow();
+        let server = state.servers.get(&server).ok_or_else(|| SocketError::Invalid("unknown socket server".into()))?;
+        Ok((server.host.clone(), server.port))
+    }
+
+    fn events(&self, handle: SocketHandle) -> Result<SocketHandle, SocketError> {
+        let mut state = self.state.borrow_mut();
+        if !state.servers.contains_key(&handle) && !state.connections.contains_key(&handle) {
+            return Err(SocketError::Invalid("unknown socket handle".into()));
+        }
+        let stream = state.next_handle.fetch_add(1, Ordering::Relaxed);
+        state.streams.insert(stream, NativeSocketStream { handle, queue: VecDeque::new(), queued_bytes: 0, pending: None, closed: false });
+        Ok(stream)
+    }
+
+    fn next(&self, stream: SocketHandle) -> Result<Promise, SocketError> {
+        self.pump();
+        let promise = Promise::new();
+        {
+            let mut state = self.state.borrow_mut();
+            let stream = state.streams.get_mut(&stream).ok_or_else(|| SocketError::Invalid("unknown socket stream".into()))?;
+            if let Some(event) = stream.queue.pop_front() {
+                stream.queued_bytes = 0;
+                promise.resolve(event);
+                return Ok(promise);
+            }
+            if stream.closed {
+                promise.resolve(Value::Map(PMap::from_iter([ (Value::Keyword("type".into()), Value::Keyword("close".into())) ])));
+                return Ok(promise);
+            }
+            if stream.pending.is_some() { return Err(SocketError::Invalid("socket stream already has a pending next".into())); }
+            stream.pending = Some(promise.clone());
+        }
+        let provider = self.clone();
+        promise.set_poller(Rc::new(move || provider.pump()));
+        let provider = self.clone();
+        promise.set_waiter(Rc::new(move || provider.wait_and_pump()));
+        Ok(promise)
     }
 }
 
@@ -3425,6 +3799,57 @@ fn math_operation(
         _ => return Err(format!("unknown math operation: {operation}")),
     };
     Ok(Value::Float(result))
+}
+
+fn native_error_operation(
+    operation: &str,
+    args: &[Form],
+    env: &mut HashMap<String, Value>,
+) -> Result<Value, String> {
+    let operation = operation
+        .strip_prefix("std.native.Error/")
+        .unwrap_or(operation);
+    match operation {
+        "new" => {
+            if !(2..=3).contains(&args.len()) {
+                return Err("std.native.Error/new expects a message, data map, and optional cause"
+                    .into());
+            }
+            let values = args
+                .iter()
+                .map(|form| eval(form, env))
+                .collect::<Result<Vec<_>, _>>()?;
+            let Value::String(message) = &values[0] else {
+                return Err("std.native.Error/new expects a string message".into());
+            };
+            if map_entries(&values[1]).is_none() {
+                return Err("std.native.Error/new expects a data map".into());
+            }
+            Ok(Value::ExceptionInfo(Rc::new(ExceptionInfo {
+                message: message.clone(),
+                data: Box::new(values[1].clone()),
+                cause: values.get(2).cloned().map(Box::new),
+            })))
+        }
+        "message" => {
+            if args.len() != 1 {
+                return Err("std.native.Error/message expects one value".into());
+            }
+            Ok(match eval(&args[0], env)? {
+                Value::ExceptionInfo(value) => Value::String(value.message.clone()),
+                Value::String(value) => Value::String(value),
+                value => Value::String(value.display()),
+            })
+        }
+        "class" => {
+            if args.len() != 1 {
+                return Err("std.native.Error/class expects one value".into());
+            }
+            let value = eval(&args[0], env)?;
+            Ok(Value::String(portable_type_name(&value).into()))
+        }
+        _ => Err(format!("unknown native error operation: {operation}")),
+    }
 }
 
 fn comparison(op: &str, args: &[Form], env: &mut HashMap<String, Value>) -> Result<Value, String> {
@@ -6671,6 +7096,24 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 eval(&fs[1], env)
             }
+            Form::Symbol(n) if n == "load-string" => {
+                if fs.len() != 2 {
+                    return Err("load-string expects one string".into());
+                }
+                match eval(&fs[1], env)? {
+                    Value::String(source) => eval_value_text(&source, env),
+                    _ => Err("load-string expects a string".into()),
+                }
+            }
+            Form::Symbol(n) if n == "var-sym" => {
+                if fs.len() != 2 {
+                    return Err("var-sym expects one var".into());
+                }
+                match eval(&fs[1], env)? {
+                    Value::Var(var) => Ok(Value::Symbol(var.symbol().clone())),
+                    _ => Err("var-sym expects a var".into()),
+                }
+            }
             Form::Symbol(n) if n == "ns-state" || n == "ns-loaded?" => {
                 if fs.len() != 2 {
                     return Err(format!("{n} expects one namespace"));
@@ -7486,6 +7929,24 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 Ok(Value::Bool(matches!(eval(&fs[1], env)?, Value::Promise(_))))
             }
+            Form::Symbol(n)
+                if ["bytes?", "array?", "object?", "regexp?", "uuid?"]
+                    .contains(&n.as_str()) =>
+            {
+                if fs.len() != 2 {
+                    return Err(format!("{n} expects one value"));
+                }
+                let value = eval(&fs[1], env)?;
+                Ok(Value::Bool(match n.as_str() {
+                    "bytes?" => matches!(value, Value::Bytes(_) | Value::ByteBuffer(_)),
+                    "array?" => matches!(value, Value::Array(_)),
+                    "object?" => matches!(value, Value::Object(_)),
+                    "regexp?" => matches!(value, Value::Regex(_)),
+                    // UUID values are not yet represented by the Rust value model.
+                    "uuid?" => false,
+                    _ => unreachable!(),
+                }))
+            }
             Form::Symbol(n) if n == "host/call" => {
                 if fs.len() < 3 {
                     return Err("host/call expects service, method, and optional arguments".into());
@@ -7724,7 +8185,8 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 Ok(Value::ByteBuffer(Rc::new(RefCell::new(values))))
             }
             Form::Symbol(n)
-                if ["socket/connect", "socket/send", "socket/close"].contains(&n.as_str()) =>
+                if ["socket/connect", "socket/listen", "socket/endpoint", "socket/events", "socket/next", "socket/send", "socket/close"].contains(&n.as_str())
+                    || n.starts_with("std.native.Socket/") =>
             {
                 socket_operation(n, &fs[1..], env)
             }
@@ -8408,6 +8870,13 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     Value::String(source) => read_edn(&source),
                     _ => Err("edn/read expects a string".into()),
                 }
+            }
+            Form::Symbol(n)
+                if n.starts_with("std.native.Error/")
+                    && ["new", "message", "class"]
+                        .contains(&n.trim_start_matches("std.native.Error/")) =>
+            {
+                native_error_operation(n, &fs[1..], env)
             }
             Form::Symbol(n) if ["inc", "dec"].contains(&n.as_str()) => {
                 if fs.len() != 2 {

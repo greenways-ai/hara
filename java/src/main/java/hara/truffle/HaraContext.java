@@ -311,6 +311,14 @@ public final class HaraContext {
           "Regex", exports, NATIVE_TYPES.get("Regex"), Map.of("instance?", "regexp?"));
       installNativeExportGroup(
           "UUID", exports, NATIVE_TYPES.get("UUID"), Map.of("instance?", "uuid?"));
+      installNativeExportGroup(
+          "Error",
+          exports,
+          NATIVE_TYPES.get("Error"),
+          Map.of(
+              "new", "ex-info",
+              "message", "ex-message",
+              "class", "ex-class"));
       return;
     }
     String type =
@@ -4793,14 +4801,22 @@ public final class HaraContext {
     }
 
     private HaraSocketStream events() {
-      HaraSocketStream stream = new HaraSocketStream();
+      HaraSocketStream stream = new HaraSocketStream(this::closeQuietly);
       streams.add(stream);
       return stream;
     }
 
     private void emit(Object event) {
-      for (HaraSocketStream stream : streams) stream.publish(event);
+      emit(event, 0);
+    }
+
+    private void emit(Object event, int byteCount) {
+      for (HaraSocketStream stream : streams) stream.publish(event, byteCount);
       if (eventCallback != null) invokeInContext(() -> invokeCallable(eventCallback, new Object[] {event}));
+    }
+
+    private void closeQuietly() {
+      try { socket.close(); } catch (IOException ignored) { }
     }
 
     private void startDrainer() {
@@ -4812,7 +4828,7 @@ public final class HaraContext {
                   int read;
                   while ((read = input.read(buffer)) >= 0) {
                     byte[] bytes = java.util.Arrays.copyOf(buffer, read);
-                    emit(socketEvent("data", this, bytes, null));
+                    emit(socketEvent("data", this, bytes, null), bytes.length);
                   }
                   emit(socketEvent("close", this, null, null));
                 } catch (IOException error) {
@@ -4843,12 +4859,12 @@ public final class HaraContext {
     private String host() { return server.getInetAddress().getHostAddress(); }
     private int port() { return server.getLocalPort(); }
     private HaraSocketStream events() {
-      HaraSocketStream stream = new HaraSocketStream();
+      HaraSocketStream stream = new HaraSocketStream(() -> {});
       streams.add(stream);
       return stream;
     }
     private void emit(Object event) {
-      for (HaraSocketStream stream : streams) stream.publish(event);
+      for (HaraSocketStream stream : streams) stream.publish(event, 0);
       invokeInContext(() -> invokeCallable(callback, new Object[] {event}));
     }
     private void start() {
@@ -4856,8 +4872,8 @@ public final class HaraContext {
         while (!server.isClosed()) {
           try {
             HaraSocket connection = new HaraSocket(server.accept(), callback);
-            connection.startDrainer();
             emit(socketEvent("open", connection, null, null, this));
+            connection.startDrainer();
           } catch (IOException error) {
             if (!server.isClosed()) emit(socketEvent("error", null, null, error.getMessage(), this));
             return;
@@ -4874,23 +4890,37 @@ public final class HaraContext {
   }
 
   private final class HaraSocketStream implements IDisplay {
-    private final java.util.ArrayDeque<Object> events = new java.util.ArrayDeque<>();
+    private final java.util.ArrayDeque<SocketStreamEntry> events = new java.util.ArrayDeque<>();
+    private final Runnable overflow;
     private CompletableFuture<Object> waiting;
+    private int queuedBytes;
     private boolean closed;
-    private synchronized void publish(Object event) {
+    private HaraSocketStream(Runnable overflow) { this.overflow = overflow; }
+    private synchronized void publish(Object event, int byteCount) {
       if (closed) return;
       if (waiting != null) { waiting.complete(event); waiting = null; return; }
-      if (events.size() >= 256) { closed = true; return; }
-      events.addLast(event);
+      if (events.size() >= 256 || queuedBytes + byteCount > 1_048_576) {
+        closed = true;
+        overflow.run();
+        return;
+      }
+      queuedBytes += byteCount;
+      events.addLast(new SocketStreamEntry(event, byteCount));
     }
     private synchronized HaraPromise next() {
-      if (!events.isEmpty()) return new HaraPromise(CompletableFuture.completedFuture(events.removeFirst()));
+      if (!events.isEmpty()) {
+        SocketStreamEntry entry = events.removeFirst();
+        queuedBytes -= entry.byteCount();
+        return new HaraPromise(CompletableFuture.completedFuture(entry.event()));
+      }
       if (closed) return new HaraPromise(CompletableFuture.completedFuture(socketEvent("close", null, null, null)));
       if (waiting == null) waiting = new CompletableFuture<>();
       return new HaraPromise(waiting);
     }
     @Override public String display() { return "#<socket-stream>"; }
   }
+
+  private record SocketStreamEntry(Object event, int byteCount) {}
 
   private Object socketEvent(String type, HaraSocket connection, byte[] bytes, String error) {
     return socketEvent(type, connection, bytes, error, null);

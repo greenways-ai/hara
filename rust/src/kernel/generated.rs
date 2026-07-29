@@ -465,7 +465,7 @@ fn canonical(namespace: &str, method: &str) -> String {
         ("std.native.Json", method) => format!("std.native.Json/{method}"),
         ("std.native.Regex", "instance?") => "regexp?".into(),
         ("std.native.UUID", "instance?") => "uuid?".into(),
-        ("std.native.Error", method) => format!("error/{method}"),
+        ("std.native.Error", method) => format!("std.native.Error/{method}"),
         ("std.foundation.coroutine", method) => format!("std.foundation.coroutine/{method}"),
         ("std.foundation.string", method) => format!("std.foundation.string/{method}"),
         ("std.lib.string", "len") => "str/count".into(),

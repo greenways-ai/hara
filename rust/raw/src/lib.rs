@@ -1207,6 +1207,14 @@ mod tests {
 
     #[test]
     fn raw_kernels_expose_the_foundation_data_namespaces() {
+        assert_eq!(crate::core::NATIVE_TYPES.len(), 18);
+        assert_eq!(
+            crate::core::NATIVE_TYPES
+                .iter()
+                .map(|(_, methods)| methods.len())
+                .sum::<usize>(),
+            110
+        );
         let mut runtime = Runtime::new();
         assert!(runtime.env.contains_key("edn/write"));
         assert!(runtime.env.contains_key("ICount"));

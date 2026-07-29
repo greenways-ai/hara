@@ -1313,6 +1313,26 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
+    fn native_socket_server_streams_real_tcp_events() {
+        use crate::core::{PromiseState, SocketProvider};
+        use std::io::Write;
+        let sockets = core::NativeSocketProvider::default();
+        let server = sockets
+            .listen("127.0.0.1", 0, Rc::new(|_| {}))
+            .unwrap();
+        let (host, port) = sockets.endpoint(server).unwrap();
+        let stream = sockets.events(server).unwrap();
+        let mut client = std::net::TcpStream::connect((host.as_str(), port)).unwrap();
+        let open = sockets.next(stream).unwrap().wait_state();
+        assert!(matches!(open, PromiseState::Fulfilled(value) if value.display().contains(":open")));
+        client.write_all(b"ping").unwrap();
+        let data = sockets.next(stream).unwrap().wait_state();
+        assert!(matches!(data, PromiseState::Fulfilled(value) if value.display().contains(":data") && value.display().contains("112 105 110 103")));
+        sockets.close(server).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
     fn native_file_provider_round_trips_bytes() {
         use crate::core::FileProvider;
         let path = std::env::temp_dir().join(format!("hara-wasm-test-{}", std::process::id()));
@@ -2472,6 +2492,209 @@ mod tests {
         for source in ["(sin)", "(pow 2)", "(sqrt \"9\")"] {
             assert!(runtime.eval_text(source).is_err(), "{source}");
         }
+    }
+
+    #[test]
+    fn closed_native_method_inventory_is_classified_and_callable() {
+        fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> &'a Form {
+            entries
+                .iter()
+                .find_map(|(candidate, value)| match candidate {
+                    Form::Keyword(name) if name == key => Some(value),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing :{key}"))
+        }
+        fn symbols(value: &Form, label: &str) -> Vec<String> {
+            let Form::Vector(values) = value else {
+                panic!("{label} must be a vector")
+            };
+            values
+                .iter()
+                .map(|value| match value {
+                    Form::Symbol(name) => name.clone(),
+                    _ => panic!("{label} must contain symbols"),
+                })
+                .collect()
+        }
+        fn classified(value: Option<&Form>, all: &[String], label: &str) -> Vec<String> {
+            match value {
+                None => Vec::new(),
+                Some(Form::Keyword(marker)) if marker == "all" => all.to_vec(),
+                Some(value) => symbols(value, label),
+            }
+        }
+        fn wrapper_source(path: &str) -> &'static str {
+            match path {
+                "lib/src/std/foundation.hal" => include_str!("../../lib/src/std/foundation.hal"),
+                "lib/src/std/foundation/string.hal" => {
+                    include_str!("../../lib/src/std/foundation/string.hal")
+                }
+                "lib/src/std/foundation/bytes.hal" => {
+                    include_str!("../../lib/src/std/foundation/bytes.hal")
+                }
+                "lib/src/std/foundation/file.hal" => {
+                    include_str!("../../lib/src/std/foundation/file.hal")
+                }
+                "lib/src/std/foundation/socket.hal" => {
+                    include_str!("../../lib/src/std/foundation/socket.hal")
+                }
+                "lib/src/std/foundation/promise.hal" => {
+                    include_str!("../../lib/src/std/foundation/promise.hal")
+                }
+                "lib/src/std/foundation/coroutine.hal" => {
+                    include_str!("../../lib/src/std/foundation/coroutine.hal")
+                }
+                "lib/src/std/foundation/edn.hal" => {
+                    include_str!("../../lib/src/std/foundation/edn.hal")
+                }
+                "lib/src/std/foundation/json.hal" => {
+                    include_str!("../../lib/src/std/foundation/json.hal")
+                }
+                _ => panic!("unknown wrapper source: {path}"),
+            }
+        }
+
+        let contract = kernel::parse_forms(include_str!(
+            "../../specs/language/draft/conformance/native.edn"
+        ))
+        .unwrap()
+        .remove(0);
+        let Form::Map(contract) = contract else {
+            panic!("native contract must be a map")
+        };
+        let Form::Map(inventory) = entry(&contract, "inventory") else {
+            panic!(":inventory must be a map")
+        };
+        assert!(matches!(entry(inventory, "closed"), Form::Bool(true)));
+        assert!(matches!(entry(inventory, "type-count"), Form::Number(18)));
+        assert!(matches!(entry(inventory, "method-count"), Form::Number(110)));
+        let Form::Vector(types) = entry(&contract, "types") else {
+            panic!(":types must be a vector")
+        };
+
+        let mut specified = Vec::new();
+        let mut direct_cases = Vec::new();
+        for value in types {
+            let Form::Map(native_type) = value else {
+                panic!("native type entries must be maps")
+            };
+            let Form::Symbol(name) = entry(native_type, "name") else {
+                panic!("native :name must be a symbol")
+            };
+            let methods = symbols(entry(native_type, "methods"), ":methods");
+            let Form::Keyword(availability) = entry(native_type, "availability") else {
+                panic!("native :availability must be a keyword")
+            };
+            assert!(
+                ["implemented", "capability-gated"].contains(&availability.as_str()),
+                "unsupported availability: {availability}"
+            );
+            let Form::Map(classification) = entry(native_type, "method-classification") else {
+                panic!(":method-classification must be a map")
+            };
+            let hal_wrappers = classified(
+                classification.iter().find_map(|(key, value)| {
+                    matches!(key, Form::Keyword(name) if name == "hal-wrapper").then_some(value)
+                }),
+                &methods,
+                ":hal-wrapper",
+            );
+            let primitives = classified(
+                classification.iter().find_map(|(key, value)| {
+                    matches!(key, Form::Keyword(name) if name == "foundation-primitive")
+                        .then_some(value)
+                }),
+                &methods,
+                ":foundation-primitive",
+            );
+            let mut exposed = hal_wrappers.clone();
+            exposed.extend(primitives);
+            assert_eq!(
+                exposed.iter().collect::<std::collections::HashSet<_>>().len(),
+                methods.len(),
+                "{name} methods must have one Foundation exposure"
+            );
+            assert_eq!(
+                methods.iter().collect::<std::collections::HashSet<_>>(),
+                exposed.iter().collect::<std::collections::HashSet<_>>(),
+                "{name} method classifications are incomplete"
+            );
+            if !hal_wrappers.is_empty() {
+                let Form::String(path) = entry(native_type, "wrapper-source") else {
+                    panic!("{name} HAL wrappers require :wrapper-source")
+                };
+                let source = wrapper_source(path);
+                for method in &hal_wrappers {
+                    assert!(
+                        source.contains(&format!("std.native.{name}/{method}")),
+                        "missing HAL wrapper for std.native.{name}/{method}"
+                    );
+                }
+            }
+            let mut type_cases = Vec::new();
+            for method in &methods {
+                let symbol = format!("std.native.{name}/{method}");
+                type_cases.push(format!(
+                    "(native-method-result '{symbol} \
+                     (fn [] ({symbol} nil nil nil nil nil nil nil nil nil)))"
+                ));
+            }
+            direct_cases.push((name.clone(), type_cases));
+            specified.push((name.clone(), methods));
+        }
+
+        let runtime_inventory = core::NATIVE_TYPES
+            .iter()
+            .map(|(name, methods)| {
+                (
+                    (*name).to_owned(),
+                    methods.iter().map(|method| (*method).to_owned()).collect(),
+                )
+            })
+            .collect::<Vec<(String, Vec<String>)>>();
+        assert_eq!(specified, runtime_inventory);
+        assert_eq!(
+            specified.iter().map(|(_, methods)| methods.len()).sum::<usize>(),
+            110
+        );
+
+        for (type_name, type_cases) in &direct_cases {
+            let mut runtime = Runtime::new();
+            runtime
+                .eval_text(include_str!(
+                    "../../lib/test-fixtures/std/foundation/native_method_conformance.hal"
+                ))
+                .unwrap();
+            for direct_case in type_cases {
+                let result = runtime.eval_text(direct_case).unwrap();
+                assert!(
+                    result.contains(":pass true"),
+                    "{direct_case} returned {result}"
+                );
+            }
+            assert!(!type_cases.is_empty(), "{type_name} has no conformance cases");
+        }
+        assert_eq!(
+            direct_cases
+                .iter()
+                .map(|(_, type_cases)| type_cases.len())
+                .sum::<usize>(),
+            110
+        );
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "[(std.native.Error/message \
+                        (std.native.Error/new \"native failure\" {})) \
+                      (string? (std.native.Error/class \
+                        (std.native.Error/new \"native failure\" {}))) \
+                      (std.native.Runtime/load-string \"(+ 19 23)\")]"
+                )
+                .unwrap(),
+            "[\"native failure\" true 42]"
+        );
     }
 
     #[test]
