@@ -697,6 +697,8 @@ body[data-workspace="1"] .workspace-track { transform: none; }
 .hero-callout { position: relative; z-index: 2; }
 
 .hero-callout {
+  width: clamp(190px, 20vw, 290px);
+  min-height: clamp(86px, 9vw, 112px);
   display: grid;
   gap: .8rem;
   justify-items: stretch;
@@ -742,7 +744,8 @@ body[data-workspace="1"] .workspace-track { transform: none; }
 }
 
 .start-button {
-  min-width: clamp(190px, 20vw, 290px);
+  width: 100%;
+  min-width: 0;
   min-height: clamp(86px, 9vw, 112px);
   display: none;
   align-items: center;
@@ -2023,13 +2026,12 @@ body[data-workspace="1"] .source-toggle { display: none; }
   .welcome-kicker { font-size: .5rem; letter-spacing: .18em; }
   .welcome-tagline { font-size: 1rem; }
   .start-button {
-    width: min(220px, calc(100vw - 3rem));
-    min-width: 0;
     min-height: 64px;
     gap: .8rem;
     font-size: .9rem;
     justify-self: start;
   }
+  .hero-callout { width: min(220px, calc(100vw - 3rem)); min-height: 64px; }
   .start-mark { width: 3.9em; height: 3.1em; }
   .launcher-grid { grid-template-columns: repeat(2, 1fr); }
   .app-tile { min-height: 96px; }
