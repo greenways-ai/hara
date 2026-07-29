@@ -690,6 +690,7 @@ body[data-workspace="1"] .workspace-track { transform: none; }
   display: grid;
   gap: .8rem;
   justify-items: stretch;
+  isolation: isolate;
 }
 
 .welcome-kicker {
@@ -1578,9 +1579,13 @@ body[data-workspace="1"] .source-toggle { display: none; }
 .launcher-scrim.is-open { display: block; }
 
 .kernel-loading {
+  position: absolute;
+  top: calc(100% + .8rem);
+  left: 0;
   width: 100%;
   padding: .1rem .15rem;
   display: grid;
+  pointer-events: none;
   grid-template-columns: 1fr auto;
   gap: .3rem .8rem;
   color: var(--cyan-bright);
@@ -2046,6 +2051,35 @@ body[data-workspace="1"] .source-toggle { display: none; }
   .window-titlebar { min-height: 42px; }
   .window-controls button { min-width: 44px; }
   .window-toolbar { overflow-x: auto; }
+  .editor-toolbar { overflow: visible; }
+  .editor-toolbar > div {
+    display: flex;
+    align-items: center;
+    gap: .25rem;
+  }
+  .editor-toolbar button {
+    width: 40px;
+    min-width: 40px;
+    height: 32px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    font-size: 0;
+    letter-spacing: 0;
+  }
+  .editor-toolbar button::before {
+    font: 700 1rem/1 var(--mono);
+  }
+  .editor-toolbar .paredit-button::before { content: "()"; }
+  .editor-toolbar [data-save]::before { content: "⇩"; }
+  .editor-toolbar .run-button {
+    margin-left: 0;
+    padding: 0;
+  }
+  .editor-toolbar .run-button > span {
+    font-size: 1rem;
+    line-height: 1;
+  }
   .window-toolbar > span,
   .window-status span:last-child { display: none; }
   .toast-stack { right: 10px; bottom: var(--dock-height); }
