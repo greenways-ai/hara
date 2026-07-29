@@ -1,0 +1,45 @@
+{
+  "name": "Hara development",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "21",
+      "installMaven": true
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22"
+    },
+    "ghcr.io/devcontainers/features/rust:1": {
+      "version": "stable",
+      "profile": "minimal"
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "remoteUser": "vscode",
+  "containerEnv": {
+    "CARGO_TARGET_DIR": "${containerWorkspaceFolder}/target/cargo",
+    "HARA_CLOUD_ENV": "1"
+  },
+  "forwardPorts": [1311, 8000],
+  "portsAttributes": {
+    "1311": {
+      "label": "Hara RESP server"
+    },
+    "8000": {
+      "label": "MkDocs preview",
+      "onAutoForward": "notify"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "vscjava.vscode-java-pack",
+        "tamasfe.even-better-toml"
+      ]
+    }
+  }
+}

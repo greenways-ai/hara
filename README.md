@@ -86,6 +86,23 @@ cd extensions/hara-chrome && npm ci && npm run build       # Chrome extension
 cd docs && mkdocs build -f mkdocs.yml                      # docs site
 ```
 
+## Cloud development environment
+
+The repository includes a Dev Container definition for GitHub Codespaces and
+VS Code's **Dev Containers: Reopen in Container** command. On first creation it
+installs JDK 21 with Maven, Node.js 22, stable Rust with the browser and WASI
+targets, Python documentation tooling, the core Git submodules, and the web
+test dependencies. No host toolchain setup is required.
+
+The setup is reproducible from the repository root:
+
+```shell
+bash .devcontainer/post-create.sh
+```
+
+The container forwards the Hara RESP port (`1311`) and the MkDocs preview port
+(`8000`). See the commands printed by the setup script for the main checks.
+
 ## Current runtime boundary
 
 The language does not expose ambient JVM host interop. JVM reflection, compilation, mutable
