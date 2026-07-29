@@ -109,12 +109,6 @@
     </div>
   </aside>
   <div class="launcher-scrim" data-launcher-scrim></div>
-  <div class="kernel-loading" data-kernel-loading hidden role="status" aria-live="polite">
-    <span>KERNEL LOADING</span>
-    <strong data-kernel-progress>0%</strong>
-    <i><b data-kernel-meter></b></i>
-  </div>
-
   <main class="workspace-viewport">
     <div class="workspace-track" data-workspace-track>
       <section class="workspace welcome-workspace" aria-labelledby="welcome-title">
@@ -123,11 +117,19 @@
           <h1 id="welcome-title">HARA</h1>
           <p class="welcome-tagline">A Modern Lisp for the Agentic Age.</p>
         </div>
-        <button class="start-button" type="button" data-start>
-          <img class="start-mark" src="./assets/logo-white.svg" alt="">
-          <span>START</span>
-          <i aria-hidden="true">→</i>
-        </button>
+        <div class="hero-callout">
+          <button class="start-button" type="button" data-start>
+            <img class="start-mark" src="./assets/logo-white.svg" alt="">
+            <span>START</span>
+            <i aria-hidden="true">→</i>
+          </button>
+          <div class="kernel-loading" data-kernel-loading hidden role="status" aria-live="polite">
+            <span>KERNEL LOADING</span>
+            <strong data-kernel-progress>0%</strong>
+            <small data-kernel-detail>PREPARING RUNTIME</small>
+            <i><b data-kernel-meter></b></i>
+          </div>
+        </div>
       </section>
 
       <section class="workspace desktop-workspace" aria-label="Hara workspace" data-workspace-template="blank">

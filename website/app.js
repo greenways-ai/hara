@@ -242,6 +242,7 @@ const elements = {
   publishNote: query("[data-publish-note]"),
   kernelLoading: query("[data-kernel-loading]"),
   kernelProgress: query("[data-kernel-progress]"),
+  kernelDetail: query("[data-kernel-detail]"),
   kernelMeter: query("[data-kernel-meter]"),
   accountDialog: query("[data-account-dialog]"),
   accountName: query("[data-account-name]"),
@@ -476,17 +477,60 @@ function installKernelStatistics() {
   });
 }
 
-function setKernelProgress(percent, label = "KERNEL LOADING") {
+function setKernelProgress(percent, label = "KERNEL LOADING", detail = "") {
   const value = Math.max(0, Math.min(100, Math.round(percent)));
   elements.kernelLoading.hidden = false;
   elements.kernelLoading.firstElementChild.textContent = label;
   elements.kernelProgress.textContent = `${value}%`;
+  elements.kernelDetail.textContent = detail;
   elements.kernelMeter.style.width = `${value}%`;
   document.body.dataset.kernel = value === 100 ? "live" : "loading";
 }
 
 function hideKernelProgress() {
   elements.kernelLoading.hidden = true;
+}
+
+function formatDownloadBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function fetchRuntimeBytes(url, { start = 10, end = 45 } = {}) {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) throw new Error(`runtime fetch failed: ${response.status}`);
+  const total = Number(response.headers.get("content-length")) || 0;
+  if (!response.body) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    setKernelProgress(end, "RUNTIME DOWNLOADED", formatDownloadBytes(bytes.byteLength));
+    return bytes;
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.byteLength;
+    const ratio = total ? Math.min(received / total, 1) : 0;
+    const percent = total
+      ? start + (end - start) * ratio
+      : Math.min(end - 1, start + Math.log2(1 + received / 16384) * 3);
+    const detail = total
+      ? `${formatDownloadBytes(received)} / ${formatDownloadBytes(total)}`
+      : `${formatDownloadBytes(received)} RECEIVED`;
+    setKernelProgress(percent, "DOWNLOADING HARA.WASM", detail);
+  }
+  const bytes = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  setKernelProgress(end, "RUNTIME DOWNLOADED", formatDownloadBytes(received));
+  return bytes;
 }
 
 async function loadBackgroundWorkspace() {
@@ -2236,6 +2280,7 @@ async function bootRuntime() {
   state.runtimeStartedAt = performance.now();
   setRuntimeStatus("WASM // BOOTING", "booting");
   elements.editorStatus.textContent = "BOOTING HARA.WASM";
+  setKernelProgress(2, "PREPARING RUNTIME", "LOADING BROWSER MODULES");
   try {
     const runtimeBase = new URL("./runtime/", import.meta.url);
     const [
@@ -2261,21 +2306,37 @@ async function bootRuntime() {
       import(new URL("studio/capabilities/canvas.js", runtimeBase)),
       import(new URL("studio/capabilities/clock.js", runtimeBase))
     ]);
-    const wasmResponse = await fetch(new URL("hara.wasm", runtimeBase), { cache: "no-store" });
-    if (!wasmResponse.ok) throw new Error(`runtime fetch failed: ${wasmResponse.status}`);
-    const moduleBytes = new Uint8Array(await wasmResponse.arrayBuffer());
+    setKernelProgress(10, "MODULES READY", "STARTING RUNTIME DOWNLOAD");
+    const moduleBytes = await fetchRuntimeBytes(new URL("hara.wasm", runtimeBase));
     state.runtimeModuleBytes = moduleBytes.byteLength;
     const resources = {};
-    for (const name of ["store", "fs", "space", "boot", "node", "draw", "program", "graph", "session"]) {
+    const studioResources = ["store", "fs", "space", "boot", "node", "draw", "program", "graph", "session"];
+    const standardResources = ["substrate/protocol", "substrate/frame", "substrate"];
+    const resourceCount = studioResources.length + standardResources.length;
+    let resourceIndex = 0;
+    for (const name of studioResources) {
       const response = await fetch(new URL(`studio/hal/${name}.hal`, runtimeBase));
       if (!response.ok) throw new Error(`resource ${name} fetch failed: ${response.status}`);
       resources[`studio.${name}`] = await response.text();
+      resourceIndex += 1;
+      setKernelProgress(
+        45 + (resourceIndex / resourceCount) * 17,
+        "LOADING KERNEL LIBRARIES",
+        `${resourceIndex} / ${resourceCount} · STUDIO.${name.toUpperCase()}`
+      );
     }
-    for (const name of ["substrate/protocol", "substrate/frame", "substrate"]) {
+    for (const name of standardResources) {
       const response = await fetch(new URL(`std/${name}.hal`, runtimeBase));
       if (!response.ok) throw new Error(`resource std.${name.replaceAll("/", ".")} fetch failed: ${response.status}`);
       resources[`std.${name.replaceAll("/", ".")}`] = await response.text();
+      resourceIndex += 1;
+      setKernelProgress(
+        45 + (resourceIndex / resourceCount) * 17,
+        "LOADING KERNEL LIBRARIES",
+        `${resourceIndex} / ${resourceCount} · STD.${name.replaceAll("/", ".").toUpperCase()}`
+      );
     }
+    setKernelProgress(64, "CREATING KERNEL", "CONFIGURING ISOLATED WORKER");
     state.nodeRuntime = new NodeRuntime({ space: `workspace/${SPACE}` });
     state.canvasRuntime = instrumentCanvasTelemetry(new CanvasRuntime({
       onDiagnostic: (error) => {
@@ -2357,8 +2418,11 @@ async function bootRuntime() {
       }
     }));
     state.defaultBootstrap = defaultBootstrap;
+    setKernelProgress(74, "STARTING KERNEL", "BOOTSTRAPPING HOME SPACE");
     await state.broker.eval(ROOT, defaultBootstrap(SPACE));
+    setKernelProgress(84, "LOADING WORKSPACE", "READING PROJECT MANIFESTS");
     await loadBackgroundWorkspace();
+    setKernelProgress(92, "LOADING SOURCE", "EVALUATING BACKGROUND PROGRAM");
     await loadBackgroundSource(state.backgroundSource);
     const files = await listFiles();
     if (!files.length) await seedFiles();
@@ -2371,11 +2435,14 @@ async function bootRuntime() {
     syncHighlight();
     await renderSavedWorkspaces();
     setWorkspace(0);
+    setKernelProgress(100, "KERNEL READY", "HARA.WASM LIVE");
+    setTimeout(hideKernelProgress, 700);
   } catch (error) {
     state.telemetry.errors += 1;
     console.error("[hara www]", error);
     setRuntimeStatus("WASM // ERROR", "error");
     elements.editorStatus.textContent = `BOOT ERROR // ${errorText(error)}`;
+    hideKernelProgress();
     toast(`HARA RUNTIME FAILED: ${errorText(error)}`, true);
   }
 }
