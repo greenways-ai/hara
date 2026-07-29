@@ -176,16 +176,16 @@ body[data-workspace="1"] .system-bar {
   border-radius: 50%;
   background: currentColor;
   box-shadow:
-    0 0 5px rgba(65, 245, 228, .92),
-    0 0 13px rgba(65, 245, 228, .58);
+    0 0 4px rgba(65, 245, 228, .46),
+    0 0 10px rgba(65, 245, 228, .24);
 }
 
 .launcher-button,
 .workspace-nav-button:not(:disabled) {
-  color: var(--cyan-bright) !important;
+  color: #5c9da5 !important;
   text-shadow:
-    0 0 5px rgba(65, 245, 228, .72),
-    0 0 12px rgba(65, 245, 228, .4);
+    0 0 4px rgba(65, 245, 228, .28),
+    0 0 9px rgba(65, 245, 228, .16);
 }
 
 .system-bottom-bar .source-toggle {
@@ -199,6 +199,16 @@ body[data-workspace="1"] .system-bar {
   box-shadow:
     0 0 7px rgba(65, 245, 228, 1),
     0 0 20px rgba(65, 245, 228, .82);
+}
+
+.launcher-button:hover,
+.launcher-button[aria-expanded="true"],
+.workspace-nav-button:not(:disabled):hover,
+.workspace-nav-button:not(:disabled):active {
+  color: var(--cyan-bright) !important;
+  text-shadow:
+    0 0 6px rgba(65, 245, 228, .78),
+    0 0 18px rgba(65, 245, 228, .52);
 }
 
 .workspace-nav-button:disabled {
