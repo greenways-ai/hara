@@ -166,6 +166,9 @@ const state = {
     framesPerSecond: 0,
     frameRateWindowStartedAt: 0,
     frameRateWindowCount: 0,
+    kernelBusyMs: 0,
+    kernelBusyPercent: 0,
+    kernelBusyWindowStartedAt: 0,
     errors: 0
   }
 };
@@ -365,6 +368,7 @@ function renderKernelStatistics() {
       ["Frame requests", state.telemetry.frameRequests],
       ["Frames rendered", state.telemetry.renderCalls],
       ["Render rate", `${state.telemetry.framesPerSecond} FPS`],
+      ["Kernel busy estimate", `${state.telemetry.kernelBusyPercent}%`],
       ["Session messages", state.telemetry.deliveredMessages],
       ["Errors", state.telemetry.errors],
       ["Queue", state.broker.pending?.size ?? 0]
@@ -392,11 +396,14 @@ function instrumentBrokerTelemetry(broker) {
     const original = broker[method].bind(broker);
     broker[method] = async (...args) => {
       state.telemetry.evalRequests += 1;
+      const started = performance.now();
       try {
         return await original(...args);
       } catch (error) {
         state.telemetry.errors += 1;
         throw error;
+      } finally {
+        recordKernelBusy(started);
       }
     };
   }
@@ -404,15 +411,29 @@ function instrumentBrokerTelemetry(broker) {
     const original = broker[method].bind(broker);
     broker[method] = async (...args) => {
       state.telemetry.documentRuns += 1;
+      const started = performance.now();
       try {
         return await original(...args);
       } catch (error) {
         state.telemetry.errors += 1;
         throw error;
+      } finally {
+        recordKernelBusy(started);
       }
     };
   }
   return broker;
+}
+
+function recordKernelBusy(started) {
+  const now = performance.now();
+  if (!state.telemetry.kernelBusyWindowStartedAt) state.telemetry.kernelBusyWindowStartedAt = now;
+  state.telemetry.kernelBusyMs += Math.max(0, now - started);
+  const elapsed = now - state.telemetry.kernelBusyWindowStartedAt;
+  if (elapsed < 1000) return;
+  state.telemetry.kernelBusyPercent = Math.min(100, Math.round(state.telemetry.kernelBusyMs * 100 / elapsed));
+  state.telemetry.kernelBusyMs = 0;
+  state.telemetry.kernelBusyWindowStartedAt = now;
 }
 
 function instrumentCanvasTelemetry(canvasRuntime) {
