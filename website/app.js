@@ -730,6 +730,7 @@ async function loadBackgroundSource(name, sourceOverride = null) {
 }
 
 function setWorkspace(index) {
+  if (index === 1 && !document.body.classList.contains("is-start-ready")) return;
   state.workspace = index === 1 ? 1 : 0;
   document.body.dataset.workspace = String(state.workspace);
   queryAll("[data-home]").forEach((button) => {
@@ -1143,7 +1144,7 @@ function installWorkspaceNavigation() {
   startButton.disabled = nextButton.disabled;
   startButton.addEventListener("click", () => {
     if (startButton.disabled) return;
-    nextButton.click();
+    setWorkspace(1);
   });
   queryAll("[data-home]").forEach((button) => button.addEventListener("click", () => {
     transitionHome().catch((error) => toast(errorText(error), true));
@@ -2437,6 +2438,10 @@ async function bootRuntime() {
     setWorkspace(0);
     setKernelProgress(100, "KERNEL READY", "HARA.WASM LIVE");
     setTimeout(hideKernelProgress, 700);
+    setTimeout(() => {
+      document.body.classList.add("is-start-ready");
+      query("[data-start]").disabled = false;
+    }, 950);
   } catch (error) {
     state.telemetry.errors += 1;
     console.error("[hara www]", error);
