@@ -438,7 +438,7 @@
       (let [frame (co/await (draw/next-frame "canvas/background"))
             width (get frame "canvas/width")
             height (get frame "canvas/height")
-            should-step (= (mod frame-tick 3) 0)]
+            should-step true]
         (let [next-simulation
               (if should-step (step-world simulation) simulation)
               next-commands
