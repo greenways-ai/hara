@@ -217,6 +217,10 @@ export class KernelBroker {
     return document;
   }
 
+  hasDocument(name, documentId) {
+    return this.documents.has(`${name}\u0000${documentId}`);
+  }
+
   async close(name) {
     name = KernelBroker.normalizeName(name);
     if (name === ROOT) throw new Error("ROOT_CANNOT_CLOSE");

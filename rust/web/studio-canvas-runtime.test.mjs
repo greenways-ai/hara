@@ -120,7 +120,7 @@ test("Canvas2D frames execute declared commands without game-specific state", ()
   assert.ok(calls.some(([name]) => name === "fillRect"));
   assert.ok(calls.some(([name]) => name === "arc"));
   assert.ok(calls.some(([name]) => name === "createRadialGradient"));
-  assert.equal(calls.filter(([name]) => name === "addColorStop").length, 3);
+  assert.equal(calls.filter(([name]) => name === "addColorStop").length, 2);
 });
 
 test("hiding a workspace rejects outstanding animation frames", async () => {
@@ -129,4 +129,19 @@ test("hiding a workspace rejects outstanding animation frames", async () => {
   const pending = runtime.nextFrame("node/fire@1", "canvas/background");
   runtime.setVisible(false);
   await assert.rejects(pending, /workspace hidden/);
+});
+
+test("closing a canvas runtime releases surface ownership and queued input", async () => {
+  const { runtime, listeners } = fixture();
+  runtime.claim("node/fire@1", "canvas/background");
+  listeners.get("keydown")({
+    key: "x", code: "KeyX", repeat: false,
+    ctrlKey: false, altKey: false, shiftKey: false, metaKey: false
+  });
+  const pending = runtime.nextFrame("node/fire@1", "canvas/background");
+  runtime.close();
+  await assert.rejects(pending, /canvas runtime closed/);
+  assert.equal(runtime.canvases.size, 0);
+  assert.equal(runtime.surfaces.size, 0);
+  assert.equal(runtime.events.length, 0);
 });

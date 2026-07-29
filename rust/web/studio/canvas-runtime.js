@@ -398,6 +398,8 @@ export class CanvasRuntime {
       this.disposeWebGl(slot);
     }
     this.canvases.clear();
+    this.surfaces.clear();
+    this.events.length = 0;
   }
 }
 
