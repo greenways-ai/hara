@@ -130,7 +130,7 @@ test("stateful Tron frames retain trails in the canvas host", () => {
     ["type", { constructor: { name: "HtaKeyword" }, name: "canvas-2d" }],
     ["background", "#020408"], ["stateful", stateful]
   ]));
-  frame({ kind: "tron", init: true, trails: [[[10, 20]], [[30, 40]], [[50, 60]], [[70, 80]]],
+  frame({ kind: { constructor: { name: "HtaKeyword" }, name: "tron" }, init: true, trails: [[[10, 20]], [[30, 40]], [[50, 60]], [[70, 80]]],
     heads: [10, 20, 30, 40, 50, 60, 70, 80] });
   frame({ kind: "tron", heads: [46, 20, 30, 40, 50, 60, 70, 80], append: [[0, 46, 20]] });
   assert.deepEqual(runtime.canvases.get("canvas/background").stateful.trails[0], [[10, 20], [46, 20]]);
