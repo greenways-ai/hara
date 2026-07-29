@@ -125,6 +125,21 @@ test("workspace scoped stores cannot read, write, or list another workspace", as
   );
 });
 
+test("workspace scoped stores resolve scope from the owning kernel context", async () => {
+  const kernelContext = {};
+  const host = createHostServices({
+    dbName: "test-workspace-kernel-scope",
+    scopeForContext: (context) => context === kernelContext ? "alpha" : null
+  });
+  const invocation = { context: { session: "ROOT" }, kernelContext };
+
+  await host["store/put"].call(invocation, "spaces/alpha/files/src/main.hal", "alpha");
+  assert.equal(
+    await host["store/get"].call(invocation, "spaces/alpha/files/src/main.hal"),
+    "alpha"
+  );
+});
+
 test("http/get returns the response body as text", async () => {
   const calls = [];
   const fetch = async (url) => {

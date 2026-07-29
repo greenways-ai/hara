@@ -42,7 +42,11 @@ export function createHostServices(options = {}) {
       return { filesystem, key: key ?? "" };
     }
     if (!scopeForContext) return key;
-    const space = scopeForContext(invocation?.context);
+    // Host calls originate from an HtaSession, while website scope ownership
+    // is registered against its parent HtaContext when the kernel starts.
+    // Prefer that kernel context, retaining the session context for callers
+    // that scope sessions directly.
+    const space = scopeForContext(invocation?.kernelContext ?? invocation?.context);
     if (!space) throw new Error("store/workspace-scope-unavailable");
     const prefix = `spaces/${space}/`;
     if (keys && (key === undefined || key === null)) return prefix;
