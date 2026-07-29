@@ -1,5 +1,7 @@
 import { HtaKeyword, HtaSymbol } from "../hta.js";
 import { defaultBootstrap } from "./boot.js";
+import { editorFormAt, isAnonymousDocument, studioDocumentId } from "./editor-state.js";
+import { activateStudioDocument } from "./document-runtime.js";
 import { createStudioShell } from "../ui/studio-shell.js";
 
 /**
@@ -309,6 +311,12 @@ class StudioController {
       if ((event.ctrlKey || event.metaKey) && event.key === "s") {
         event.preventDefault();
         this.saveFile();
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "e") {
+        event.preventDefault();
+        this.runForm();
+      } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        event.preventDefault();
+        this.runFile();
       }
     });
     this.input.addEventListener("keydown", (event) => {
@@ -732,24 +740,56 @@ class StudioController {
     if (!this.state.open) return;
     const source = this.editor.value;
     await this.task(async () => {
-      if (/^\s*(?:;[^\n]*\n\s*)*\(ns\+/.test(source)) {
-        const documentId = `${this.activeProject?.id ?? "document"}:${this.state.open}`;
+      if (isAnonymousDocument(source)) {
+        const documentId = this.activeDocumentId();
         const nodeId = `node/${this.activeProject?.id ?? "document"}`;
-        this.canvasRuntime?.claim(nodeId, this.activeProject?.category === "audio"
+        const canvasId = this.activeProject?.category === "audio"
           ? "canvas/visualizer"
-          : "canvas/background");
-        const result = await this.broker.evalDocument(this.state.kernel, documentId, source, { nodeId });
-        if (typeof result.value === "string" && result.value.startsWith("task-")) {
-          this.broker.evalForm(
-            this.state.kernel,
-            documentId,
-            `(studio.node/run-task ${JSON.stringify(result.value)})`
-          ).catch((error) => this.logError(error));
-        }
+          : "canvas/background";
+        const ownsCanvas = this.activeProject?.capabilities?.some(
+          (value) => value === "canvas/2d" || value === "audio/playback"
+        ) ?? false;
+        const result = await activateStudioDocument({
+          broker: this.broker,
+          kernel: this.state.kernel,
+          documentId,
+          source,
+          nodeId,
+          canvasRuntime: this.canvasRuntime,
+          canvasId,
+          requireFirstFrame: ownsCanvas,
+          onTaskError: (error) => this.logError(error)
+        });
         this.logNote(`;; activated ${this.state.open} generation ${result.generation}`);
         return result;
       }
       const value = await this.broker.eval(this.state.kernel, source);
+      this.logValue(value);
+      return value;
+    });
+  }
+
+  activeDocumentId() {
+    return studioDocumentId({
+      projectId: this.activeProject?.id ?? "document",
+      space: this.state.space,
+      path: this.state.open
+    });
+  }
+
+  async runForm() {
+    if (!this.state.open) return;
+    const form = editorFormAt(
+      this.editor.value,
+      this.editor.selectionStart,
+      this.editor.selectionEnd
+    );
+    if (!form?.source.trim()) return;
+    await this.task(async () => {
+      const documentId = this.activeDocumentId();
+      const value = this.broker.hasDocument(this.state.kernel, documentId)
+        ? await this.broker.evalForm(this.state.kernel, documentId, form.source)
+        : await this.broker.eval(this.state.kernel, form.source);
       this.logValue(value);
       return value;
     });

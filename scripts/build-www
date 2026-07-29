@@ -43,6 +43,8 @@ cp "$ROOT/rust/web/hta.js" \
    "$OUT/runtime/"
 cp "$ROOT/rust/web/studio/boot.js" \
    "$ROOT/rust/web/studio/broker.js" \
+   "$ROOT/rust/web/studio/document-runtime.js" \
+   "$ROOT/rust/web/studio/editor-state.js" \
    "$ROOT/rust/web/studio/host-services.js" \
    "$ROOT/rust/web/studio/canvas-runtime.js" \
    "$ROOT/rust/web/studio/capability-registry.js" \

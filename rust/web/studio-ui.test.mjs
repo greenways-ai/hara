@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { HtaKeyword, HtaSymbol } from "./hta.js";
+import { editorFormAt, isAnonymousDocument, studioDocumentId } from "./studio/editor-state.js";
 import {
   buildTree,
   defaultFileContent,
@@ -137,4 +138,29 @@ test("defaultFileContent seeds a fresh file", () => {
 
 test("HtaSymbol values render as their name", () => {
   assert.equal(renderValue(new HtaSymbol("foo")), "foo");
+});
+
+test("editorFormAt prefers an explicit selection and otherwise finds the innermost form", () => {
+  const source = "(outer (inner 42))\n(next)";
+  assert.equal(editorFormAt(source, 8, 13).source, "inner");
+  assert.equal(editorFormAt(source, 10).source, "(inner 42)");
+  assert.equal(editorFormAt(source, source.indexOf("\n")).source, "(outer (inner 42))");
+});
+
+test("editor forms ignore delimiters in strings and comments", () => {
+  const source = '(show ")") ; )\n(+ 1 2)';
+  assert.equal(editorFormAt(source, source.length).source, "(+ 1 2)");
+});
+
+test("Studio document identity includes project, space, and path", () => {
+  assert.equal(
+    studioDocumentId({ projectId: "tictactoe", space: "home", path: "/board.hal" }),
+    "tictactoe:home:/board.hal"
+  );
+  assert.throws(() => studioDocumentId({ space: "home" }), /INVALID_DOCUMENT_ID/);
+});
+
+test("anonymous documents permit leading comments but require ns+", () => {
+  assert.equal(isAnonymousDocument(";; board\n\n(ns+ (:require [studio.draw]))"), true);
+  assert.equal(isAnonymousDocument("(ns board)"), false);
 });
