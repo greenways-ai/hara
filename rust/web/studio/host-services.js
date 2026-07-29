@@ -167,7 +167,8 @@ export function createHostServices(options = {}) {
       toHta(await options.audioPipeline.control(String(command), toPlain(value)));
   }
   if (options.renderCanvas && !options.canvasRuntime) {
-    services["studio.canvas/render"] = async (canvas, scene) => {
+    services["studio.canvas/render"] = async (...args) => {
+      const [canvas, scene] = args.length >= 3 ? args.slice(1) : args;
       await options.renderCanvas(canvas, scene);
       return true;
     };
@@ -287,6 +288,10 @@ function toPlain(value) {
 
 function toHta(value) {
   if (Array.isArray(value)) return value.map(toHta);
+  // Maps have already crossed an HTA boundary (or were deliberately built for
+  // one), so preserve them as-is. Walking them again can recurse through host
+  // runtime state, while encodeHta already knows how to serialize their values.
+  if (value instanceof Map) return value;
   if (value !== null && typeof value === "object" &&
       !(value instanceof Uint8Array) && !(value instanceof ArrayBuffer) && !ArrayBuffer.isView(value)) {
     return new Map(Object.entries(value).map(([key, entry]) => [key, toHta(entry)]));

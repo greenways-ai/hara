@@ -5,12 +5,14 @@ import { WorkspaceRepository, kernelName, workspaceTemplates } from "./workspace
 import { downloadWorkspace, GistPublisher, GreenwaysPublisher, workspaceBundle } from "./publishing.js";
 import { GitHubAuthClient, authBaseFromDocument } from "./github-auth.js";
 import { AiAdapterRepository, createAiCapability } from "./ai-adapters.js";
+import { seedAmpWorkspace } from "./amp-workspace.js";
 
 const SPACE = "home";
 const ROOT = "ROOT";
 const ACTIVE_FILE_KEY = "hara-www.active-file.v1";
 const WINDOWS_KEY = "hara-www.windows.v1";
 const BACKGROUND_WORKSPACE = "./examples/studio-backgrounds/";
+const AMP_WORKSPACE = "./examples/hara-amp/";
 const HAL_FORMS = [
   ["def", "bind a named value"], ["defn", "define a function"], ["fn", "anonymous function"],
   ["let", "local bindings"], ["if", "conditional branch"], ["when", "conditional body"],
@@ -751,7 +753,7 @@ async function loadBackgroundSource(name, sourceOverride = null) {
   }
 }
 
-function setWorkspace(index) {
+function setWorkspace(index, { reloadBackground = true } = {}) {
   if (index === 1 && !document.body.classList.contains("is-start-ready")) return;
   state.workspace = index === 1 ? 1 : 0;
   document.body.dataset.workspace = String(state.workspace);
@@ -768,7 +770,7 @@ function setWorkspace(index) {
   } else {
     state.canvasRuntime?.setVisible(true);
     query("[data-tron]").hidden = false;
-    if (state.broker) loadBackgroundSource(state.backgroundSource).catch(() => {});
+    if (state.broker && reloadBackground) loadBackgroundSource(state.backgroundSource).catch(() => {});
   }
   closeLauncher();
 }
@@ -777,6 +779,7 @@ const workspacePresentation = {
   blank: { files: "EXPLORER", editor: "SOURCE", canvas: "OUTPUT", tabs: ["explorer", "source", "output"] },
   canvas: { files: "EXPLORER", editor: "SOURCE", canvas: "CANVAS", tabs: ["explorer", "source", "canvas"] },
   music: { files: "PLAYLIST", editor: "PLAYER / SOURCE", canvas: "SPECTRUM", tabs: ["playlist", "source", "spectrum"] },
+  "hara-amp": { files: "SIGNAL GRAPH", editor: "HAL / SOURCE", canvas: "SPECTRUM", tabs: ["graph", "source", "spectrum"] },
   "3d": { files: "HIERARCHY", editor: "SOURCE", canvas: "3D VIEWPORT", tabs: ["hierarchy", "source", "viewport"] },
   graphs: { files: "SOURCE & DATA", editor: "SOURCE", canvas: "GRAPH", tabs: ["data", "source", "graph"] }
 };
@@ -1265,6 +1268,43 @@ function installWorkspaceCreation() {
     elements.templateGrid.append(button);
   }
   query("[data-template-close]").addEventListener("click", () => elements.templateDialog.close());
+  document.addEventListener("hara:create-amp-workspace", (event) => {
+    createAmpWorkspace(event.detail).catch((error) => {
+      document.dispatchEvent(new CustomEvent("hara:amp-workspace-error", {
+        detail: { message: errorText(error) }
+      }));
+    });
+  });
+}
+
+async function createAmpWorkspace({ preset = "hara", mode = "spectrum", source = "" } = {}) {
+  const load = async (path) => {
+    const response = await fetch(new URL(`${AMP_WORKSPACE}${path}`, import.meta.url));
+    if (!response.ok) throw new Error(`Hara Amp ${path}: ${response.status}`);
+    return response.text();
+  };
+  const [project, workspace, visualizer] = await Promise.all([
+    load("project.edn"),
+    load("workspace.edn"),
+    load("src/visualizer.hal")
+  ]);
+  const files = seedAmpWorkspace({
+    project,
+    workspace,
+    visualizer: typeof source === "string" && source.trim() ? source : visualizer,
+    preset,
+    mode
+  });
+  const record = await state.workspaceRepository.createFromFiles({
+    name: "Hara Amp",
+    template: "hara-amp",
+    files
+  });
+  await renderSavedWorkspaces();
+  await openWorkspace(record);
+  document.dispatchEvent(new CustomEvent("hara:amp-workspace-created", {
+    detail: { id: record.id }
+  }));
 }
 
 function installPublishing() {
@@ -2458,7 +2498,7 @@ async function bootRuntime() {
     if (path) await openFile(path, true, false);
     syncHighlight();
     await renderSavedWorkspaces();
-    setWorkspace(0);
+    setWorkspace(0, { reloadBackground: false });
     setKernelProgress(100, "KERNEL READY", "HARA.WASM LIVE");
     setTimeout(hideKernelProgress, 700);
     setTimeout(() => {

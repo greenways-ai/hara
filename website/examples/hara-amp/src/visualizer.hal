@@ -2,9 +2,9 @@
   (:require [studio.draw :as draw]))
 
 (defn visualize [input]
-  ;; The FFT node already emits the canvas scene in this first conformance
-  ;; example. This function is the document-owned transform seam.
-  input)
+  ;; Change these colours in the website source pane, then apply the file.
+  ;; The active HAL generation rebuilds while Web Audio keeps playing.
+  (assoc input "palette" ["#2fffe0" "#149df2" "#9b35ff"]))
 
 (defn run-visualizer []
   (loop []

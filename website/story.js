@@ -1,10 +1,21 @@
+import { HaraAmpRuntime } from "./amp-runtime.js";
+
 const query = (selector, root = document) => root.querySelector(selector);
 const queryAll = (selector, root = document) => [...root.querySelectorAll(selector)];
 
 const stylesheet = document.createElement("link");
 stylesheet.rel = "stylesheet";
-stylesheet.href = "./story.css?v=kernel-greenways-1";
+stylesheet.href = "./story.css?v=amp-story-1";
 document.head.append(stylesheet);
+
+const pipelineCopy = {
+  synth: ["SYNTH WASM", "Rust generates the deterministic signal locally. The silent preview and audible instrument use the same compiled oscillator."],
+  audio: ["WEB AUDIO + EQ", "The browser authorizes playback after your click, then routes the signal through a ten-band equalizer and analyser."],
+  fft: ["FFT WASM", "A second Rust module converts time-domain samples into frequency bins without sending audio away from the page."],
+  hta: ["HTA TRANSPORT", "Latest-value delivery keeps the visual path responsive. Old frames can drop without interrupting the audio clock."],
+  hal: ["HAL PROGRAM", "The live Hara document waits for FFT values, transforms ordinary data, and asks the host to render a canvas scene."],
+  canvas: ["CANVAS OUTPUT", "The browser adapter turns the HAL scene into spectrum, scope, or artwork views. The probe frame below is real."]
+};
 
 const story = document.createElement("div");
 story.className = "kernel-story";
@@ -12,70 +23,136 @@ story.dataset.kernelStory = "";
 story.hidden = true;
 story.setAttribute("aria-hidden", "true");
 story.innerHTML = `
-  <section class="story-screen" data-story-screen="1" aria-labelledby="kernel-story-title">
-    <article class="story-copy">
-      <p class="story-step">02 // THE HARA KERNEL</p>
-      <h2 id="kernel-story-title">One program.<br>Every medium.</h2>
-      <p>
-        The Hara kernel sits inside an isolated browser worker. HAL owns the program,
-        state and transformations; browser adapters provide audio, video, graphics,
-        input and recording. HTA messages cross the boundary as ordinary values.
-      </p>
-      <div class="story-principle">
-        A unified representation means the same content value can be inspected,
-        transformed, versioned, generated with an agent, played live and published.
+  <section class="story-screen" data-story-screen="1" aria-labelledby="connect-story-title">
+    <div class="story-layout story-connect">
+      <header class="story-heading">
+        <p class="story-step">02 // CONNECT THE SYSTEM</p>
+        <h2 id="connect-story-title">Sound becomes<br>a live program.</h2>
+        <p>
+          This is the actual Hara Amp path running in your browser. Select any
+          stage to see what it contributes; the kernel sends a silent probe
+          through the complete system while it starts.
+        </p>
+        <output class="story-runtime-state" data-amp-runtime-state aria-live="polite">
+          WAITING FOR RUNTIME
+        </output>
+      </header>
+
+      <div class="story-pipeline" aria-label="Interactive Hara Amp signal pipeline">
+        <button type="button" data-amp-node="synth" aria-pressed="true">
+          <i>01</i><strong>SYNTH</strong><span>RUST / WASM</span><em data-amp-node-state="synth">WAITING</em>
+        </button>
+        <span class="story-wire" aria-hidden="true"><b></b></span>
+        <button type="button" data-amp-node="audio" aria-pressed="false">
+          <i>02</i><strong>AUDIO + EQ</strong><span>WEB AUDIO</span><em data-amp-node-state="audio">WAITING</em>
+        </button>
+        <span class="story-wire" aria-hidden="true"><b></b></span>
+        <button type="button" data-amp-node="fft" aria-pressed="false">
+          <i>03</i><strong>FFT</strong><span>RUST / WASM</span><em data-amp-node-state="fft">WAITING</em>
+        </button>
+        <span class="story-wire" aria-hidden="true"><b></b></span>
+        <button type="button" data-amp-node="hta" aria-pressed="false">
+          <i>04</i><strong>HTA</strong><span>LATEST VALUE</span><em data-amp-node-state="hta">WAITING</em>
+        </button>
+        <span class="story-wire" aria-hidden="true"><b></b></span>
+        <button type="button" data-amp-node="hal" aria-pressed="false">
+          <i>05</i><strong>HAL</strong><span>LIVE DOCUMENT</span><em data-amp-node-state="hal">WAITING</em>
+        </button>
+        <span class="story-wire" aria-hidden="true"><b></b></span>
+        <button type="button" data-amp-node="canvas" aria-pressed="false">
+          <i>06</i><strong>CANVAS</strong><span>BROWSER HOST</span><em data-amp-node-state="canvas">WAITING</em>
+        </button>
       </div>
-      <div class="story-capabilities" aria-label="Browser media examples">
-        <div class="story-capability"><strong>AUDIO</strong><span>Web Audio graphs, synthesis, MIDI and FFT analysis.</span></div>
-        <div class="story-capability"><strong>VIDEO</strong><span>Clips, camera streams, timing and frame-driven effects.</span></div>
-        <div class="story-capability"><strong>VISUAL</strong><span>Canvas 2D, WebGL shaders, 3D entities and rigs.</span></div>
-        <div class="story-capability"><strong>OUTPUT</strong><span>MediaRecorder capture, workspace bundles and publishing.</span></div>
-      </div>
-      <pre class="story-code" aria-label="Unified creative scene example">{:creative/version 1
- :background "#020408"
- :entities [{:id "mesh/hero"
-             :mesh {:primitive :box}
-             :material {:color "#41f5e4"}}]
- :audio {:tempo 120 :midi true :voices []}
- :video {:src "/media/clip.webm" :muted true}}</pre>
-      <div class="story-actions">
-        <button type="button" class="story-primary" data-story-code>OPEN THE LIVE .HAL</button>
-        <a href="https://docs.hara-lang.org/" target="_blank" rel="noopener noreferrer">READ THE MODEL</a>
-      </div>
-    </article>
+
+      <aside class="story-node-detail" aria-live="polite">
+        <span data-amp-node-label>SYNTH WASM</span>
+        <p data-amp-node-copy>${pipelineCopy.synth[1]}</p>
+        <small>ONE SIGNAL · SIX REAL SYSTEMS · NO SERVER ROUND TRIP</small>
+      </aside>
+    </div>
   </section>
 
-  <section class="story-screen" data-story-screen="2" aria-labelledby="greenways-story-title">
-    <article class="story-copy">
-      <p class="story-step">03 // GREENWAYS OS</p>
-      <h2 id="greenways-story-title">Create where the work lives.</h2>
-      <p>
-        Greenways OS is the Chrome layer around Hara: open a creative workspace over
-        the current page, connect to its kernel when the page supports Hara, inspect
-        the live system, and publish the resulting project with identity and provenance.
-      </p>
-      <div class="story-principle">
-        The extension is not another website. It turns the browser tab itself into a
-        kernel-aware creative and debugging surface.
-      </div>
-      <div class="story-features">
-        <div class="story-feature"><strong>CREATE IN CONTEXT</strong><span>Use the page, its media and its data as the working material.</span></div>
-        <div class="story-feature"><strong>DEBUG LIVE KERNELS</strong><span>Inspect sessions, capabilities, HTA messages, frames and errors.</span></div>
-        <div class="story-feature"><strong>PUBLISH A WORKSPACE</strong><span>Bundle source, manifests, assets and runtime intent as one project.</span></div>
-        <div class="story-feature"><strong>KEEP PROVENANCE</strong><span>Attach versions, authorship and Greenways identity to the published work.</span></div>
-      </div>
-      <div class="story-flow" aria-label="Greenways OS workflow">
-        <strong>CHROME EXTENSION</strong><span>→</span>
-        <strong>PAGE KERNEL</strong><span>→</span>
-        <strong>HARA WORKSPACE</strong><span>→</span>
-        <strong>GREENWAYS PUBLISH</strong>
-      </div>
-      <div class="story-actions">
-        <button type="button" class="story-primary" data-story-debug>DEBUG THIS PAGE</button>
-        <button type="button" data-story-create>CREATE A WORKSPACE</button>
-        <button type="button" data-story-code>OPEN THE LIVE .HAL</button>
-      </div>
-    </article>
+  <section class="story-screen" data-story-screen="2" aria-labelledby="play-story-title">
+    <div class="story-layout story-play">
+      <header class="story-heading">
+        <p class="story-step">03 // PLAY THE SYSTEM</p>
+        <h2 id="play-story-title">Change the signal.<br>Keep it live.</h2>
+        <p>
+          Play the WASM synth, alter its Web Audio character, and switch the HAL
+          output. The counters come from the running node connection—not an animation.
+        </p>
+      </header>
+
+      <section class="story-source" aria-label="Live Hara visualizer source">
+        <header>
+          <span>src/visualizer.hal</span>
+          <output data-story-source-status>LOADING SOURCE</output>
+        </header>
+        <textarea data-story-source spellcheck="false" wrap="off"
+          aria-label="Editable Hara visualizer source">;; Loading the live .hal file…</textarea>
+        <footer>
+          <span>CHANGE A PALETTE COLOUR, THEN REBUILD</span>
+          <div>
+            <button type="button" data-story-source-reset>RESET</button>
+            <button type="button" class="story-source-apply" data-story-source-apply>APPLY + REBUILD</button>
+          </div>
+        </footer>
+        <output class="story-source-error" data-story-source-error aria-live="polite" hidden></output>
+      </section>
+
+      <section class="story-amp" aria-label="Compact Hara Amp instrument">
+        <div class="story-visual">
+          <canvas data-story-visualizer aria-label="Live Hara Amp visualizer"></canvas>
+          <img src="./assets/hara-amp/hara-amp-artwork-original.png" alt="" aria-hidden="true">
+          <div class="story-no-signal" data-story-no-signal>
+            <strong>SILENT PROBE READY</strong>
+            <span>PRESS PLAY TO AUTHORIZE AUDIO</span>
+          </div>
+          <output data-story-frame-status>HAL · PROBE</output>
+        </div>
+
+        <div class="story-controls">
+          <button type="button" class="story-play-toggle" data-story-play aria-pressed="false">
+            <i aria-hidden="true">▶</i><span>PLAY SIGNAL</span>
+          </button>
+          <label>
+            <span>EQ CHARACTER</span>
+            <select data-story-preset>
+              <option value="flat">FLAT</option>
+              <option value="hara" selected>HARA GLOW</option>
+              <option value="bass">BASS ARC</option>
+              <option value="voice">VOICE</option>
+            </select>
+          </label>
+          <fieldset>
+            <legend>HAL OUTPUT</legend>
+            <button type="button" data-story-mode="spectrum" aria-pressed="true">SPECTRUM</button>
+            <button type="button" data-story-mode="scope" aria-pressed="false">SCOPE</button>
+            <button type="button" data-story-mode="artwork" aria-pressed="false">ARTWORK</button>
+          </fieldset>
+        </div>
+
+        <dl class="story-telemetry" aria-label="Live kernel telemetry">
+          <div><dt>FFT → HTA</dt><dd data-story-emitted>0000</dd></div>
+          <div><dt>HAL → CANVAS</dt><dd data-story-rendered>0000</dd></div>
+          <div><dt>QUEUE</dt><dd data-story-queue>0 / LATEST</dd></div>
+          <div><dt>AUDIO</dt><dd data-story-audio>GESTURE REQUIRED</dd></div>
+        </dl>
+      </section>
+
+      <footer class="story-closeout">
+        <p>
+          <strong>MAKE IT YOURS.</strong>
+          Create the complete Hara Amp workspace with this EQ, visual mode, and edited HAL file.
+          Greenways OS can carry the same live project into the page where you work.
+        </p>
+        <div class="story-actions">
+          <button type="button" class="story-primary" data-story-create>CREATE THIS WORKSPACE</button>
+          <a href="./hara-amp.html" target="_blank" rel="noopener">OPEN FULL AMP</a>
+        </div>
+        <output class="story-inline-error" data-story-error aria-live="polite" hidden></output>
+      </footer>
+    </div>
   </section>`;
 
 document.body.append(story);
@@ -83,55 +160,14 @@ document.body.append(story);
 const start = query("[data-start]");
 const previous = query("[data-workspace-prev]");
 const next = query("[data-workspace-next]");
-const backgroundSelect = query("[data-background-source]");
-const sourceEditor = query("[data-background-editor]");
-const sourceApply = query("[data-background-apply]");
-const sourceSave = query("[data-background-save]");
 let activeScreen = 0;
-let returnBackground = null;
-let sourceSaveWasDisabled = false;
-let storyLoadGeneration = 0;
-
-const storyBackgrounds = {
-  1: "document/story/kernel-media",
-  2: "document/story/greenways-os"
-};
-
-const storySources = {
-  "document/story/kernel-media": "./sources/kernel-media.hal",
-  "document/story/greenways-os": "./sources/greenways-os.hal"
-};
+let amp = null;
+let ampBoot = null;
+let selectedPreset = "hara";
+let selectedMode = "spectrum";
 
 function runtimeReady() {
   return document.body.dataset.kernel === "live";
-}
-
-async function selectBackground(documentId) {
-  if (!backgroundSelect || !documentId) return false;
-  const generation = ++storyLoadGeneration;
-  const available = [...backgroundSelect.options].some((option) => option.value === documentId);
-  if (available) {
-    backgroundSelect.value = documentId;
-    backgroundSelect.dispatchEvent(new Event("change", { bubbles: true }));
-    return true;
-  }
-
-  const sourcePath = storySources[documentId];
-  if (!sourcePath || !sourceEditor || !sourceApply) return false;
-  const response = await fetch(sourcePath, { cache: "no-store" });
-  if (!response.ok) throw new Error(`story source fetch failed: ${response.status}`);
-  const source = await response.text();
-  if (generation !== storyLoadGeneration) return false;
-  sourceEditor.value = source;
-  sourceEditor.scrollTop = 0;
-  sourceEditor.scrollLeft = 0;
-  sourceEditor.dispatchEvent(new Event("scroll"));
-  sourceApply.click();
-  return true;
-}
-
-function restoreSourceSave() {
-  if (sourceSave) sourceSave.disabled = sourceSaveWasDisabled;
 }
 
 function updateNavigation() {
@@ -146,6 +182,133 @@ function updateNavigation() {
   start.disabled = false;
 }
 
+function selectNode(name) {
+  const detail = pipelineCopy[name];
+  if (!detail) return;
+  queryAll("[data-amp-node]", story).forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.ampNode === name));
+  });
+  query("[data-amp-node-label]", story).textContent = detail[0];
+  query("[data-amp-node-copy]", story).textContent = detail[1];
+}
+
+function updateNode(stage, state, detail) {
+  const output = query(`[data-amp-node-state="${stage}"]`, story);
+  const button = query(`[data-amp-node="${stage}"]`, story);
+  if (output) {
+    output.textContent = state === "gesture" ? "GESTURE" : state.toUpperCase();
+  }
+  if (button) button.dataset.state = state;
+  if (stage === "runtime") {
+    const runtimeState = query("[data-amp-runtime-state]", story);
+    runtimeState.textContent =
+      state === "ready" ? "LIVE // SILENT PROBE COMPLETED" :
+      state === "error" ? `UNAVAILABLE // ${detail}` :
+      detail?.toUpperCase() || "STARTING";
+    runtimeState.dataset.state = state;
+  }
+}
+
+function createAmp() {
+  const instance = new HaraAmpRuntime({
+    canvas: query("[data-story-visualizer]", story),
+    dbName: "hara-story-amp",
+    onStatus({ stage, state, detail }) {
+      updateNode(stage, state, detail);
+      if (stage === "hal") {
+        const sourceStatus = query("[data-story-source-status]", story);
+        sourceStatus.textContent =
+          state === "ready" ? `GEN ${instance.generation} // LIVE` :
+          state === "error" ? "REBUILD FAILED // PREVIOUS GEN LIVE" :
+          detail?.toUpperCase() || "REBUILDING";
+        sourceStatus.dataset.state = state;
+      }
+      if (state === "error") showError(detail);
+    },
+    onFrame({ count }) {
+      query("[data-story-frame-status]", story).textContent = `HAL · FRAME ${count}`;
+    },
+    onPlayback({ state }) {
+      const playing = state === "playing";
+      const control = query("[data-story-play]", story);
+      control.setAttribute("aria-pressed", String(playing));
+      query("i", control).textContent = playing ? "Ⅱ" : "▶";
+      query("span", control).textContent = playing ? "PAUSE SIGNAL" : "PLAY SIGNAL";
+      query("[data-story-no-signal]", story).classList.toggle("is-hidden", playing);
+      query("[data-story-audio]", story).textContent =
+        playing ? "PLAYING / WASM" : state.toUpperCase();
+    },
+    onTelemetry({ emittedFrames, renderedFrames, nodeQueued }) {
+      query("[data-story-emitted]", story).textContent = String(emittedFrames).padStart(4, "0");
+      query("[data-story-rendered]", story).textContent = String(renderedFrames).padStart(4, "0");
+      query("[data-story-queue]", story).textContent = `${nodeQueued} / LATEST`;
+    }
+  });
+  instance.setPreset(selectedPreset);
+  instance.setVisualMode(selectedMode);
+  return instance;
+}
+
+function ensureAmp() {
+  if (!amp) amp = createAmp();
+  if (!ampBoot) {
+    ampBoot = amp.boot().catch((error) => {
+      showError(`The live Amp could not start: ${String(error?.message ?? error)}`);
+      throw error;
+    });
+  }
+  return ampBoot.then((instance) => {
+    const editor = query("[data-story-source]", story);
+    if (!editor.dataset.loaded) {
+      editor.value = instance.source;
+      editor.dataset.loaded = "true";
+      query("[data-story-source-status]", story).textContent = `GEN ${instance.generation} // LIVE`;
+    }
+    return instance;
+  });
+}
+
+async function disposeAmp() {
+  const closing = amp;
+  amp = null;
+  ampBoot = null;
+  if (closing) await closing.dispose();
+}
+
+function showError(message) {
+  const output = query("[data-story-error]", story);
+  output.hidden = false;
+  output.textContent = message;
+}
+
+async function rebuildSource({ reset = false } = {}) {
+  const editor = query("[data-story-source]", story);
+  const apply = query("[data-story-source-apply]", story);
+  const resetButton = query("[data-story-source-reset]", story);
+  const status = query("[data-story-source-status]", story);
+  const errorOutput = query("[data-story-source-error]", story);
+  apply.disabled = true;
+  resetButton.disabled = true;
+  errorOutput.hidden = true;
+  status.textContent = "PREPARING NEW GENERATION";
+  status.dataset.state = "loading";
+  try {
+    const instance = await ensureAmp();
+    if (reset) editor.value = instance.originalSource;
+    const result = await instance.rebuild(editor.value);
+    status.textContent = `GEN ${result.generation} // LIVE`;
+    status.dataset.state = "ready";
+  } catch (error) {
+    status.textContent = `GEN ${amp?.generation ?? 0} // PREVIOUS VERSION LIVE`;
+    status.dataset.state = "error";
+    errorOutput.hidden = false;
+    errorOutput.textContent = String(error?.message ?? error);
+  } finally {
+    apply.disabled = false;
+    resetButton.disabled = false;
+  }
+}
+
 function showScreen(index) {
   const previousScreen = activeScreen;
   activeScreen = Math.max(0, Math.min(2, index));
@@ -153,30 +316,25 @@ function showScreen(index) {
   story.hidden = !open;
   story.setAttribute("aria-hidden", String(!open));
 
+  if (previousScreen === 2 && activeScreen !== 2) amp?.pause();
   if (!open) {
     delete document.body.dataset.storyScreen;
     queryAll("[data-story-screen]", story).forEach((screen) => screen.classList.remove("is-active"));
-    const restore = returnBackground;
-    returnBackground = null;
-    restoreSourceSave();
-    if (restore) void selectBackground(restore);
+    void disposeAmp();
     updateNavigation();
     start?.focus();
     return;
   }
 
-  if (previousScreen === 0) {
-    returnBackground = backgroundSelect?.value || null;
-    sourceSaveWasDisabled = Boolean(sourceSave?.disabled);
-    if (sourceSave) sourceSave.disabled = true;
-  }
   document.body.dataset.storyScreen = String(activeScreen);
   queryAll("[data-story-screen]", story).forEach((screen) => {
     screen.classList.toggle("is-active", Number(screen.dataset.storyScreen) === activeScreen);
   });
-  void selectBackground(storyBackgrounds[activeScreen]);
   updateNavigation();
-  query(".story-screen.is-active .story-copy", story)?.focus({ preventScroll: true });
+  void ensureAmp()
+    .then(() => amp?.setCanvas(query("[data-story-visualizer]", story)))
+    .catch(() => {});
+  query(".story-screen.is-active .story-heading", story)?.focus({ preventScroll: true });
 }
 
 start.addEventListener("click", (event) => {
@@ -208,21 +366,77 @@ next.addEventListener("click", (event) => {
 }, true);
 
 story.addEventListener("click", (event) => {
-  if (event.target.closest("[data-story-code]")) {
-    query("[data-source-toggle]")?.click();
+  const node = event.target.closest("[data-amp-node]");
+  if (node) {
+    selectNode(node.dataset.ampNode);
     return;
   }
-  if (event.target.closest("[data-story-debug]")) {
-    query("[data-runtime-toggle]")?.click();
+
+  if (event.target.closest("[data-story-play]")) {
+    const control = query("[data-story-play]", story);
+    control.disabled = true;
+    const action = amp?.audio?.playing ? Promise.resolve(amp.pause()) : ensureAmp().then(() => amp.play());
+    action.catch((error) => showError(`Audio could not start: ${String(error?.message ?? error)}`))
+      .finally(() => { control.disabled = false; });
     return;
   }
+
+  const mode = event.target.closest("[data-story-mode]");
+  if (mode) {
+    selectedMode = mode.dataset.storyMode;
+    amp?.setVisualMode(selectedMode);
+    query(".story-visual", story).classList.toggle("is-artwork", selectedMode === "artwork");
+    queryAll("[data-story-mode]", story).forEach((button) => {
+      button.setAttribute("aria-pressed", String(button === mode));
+    });
+    return;
+  }
+
+  if (event.target.closest("[data-story-source-apply]")) {
+    void rebuildSource();
+    return;
+  }
+
+  if (event.target.closest("[data-story-source-reset]")) {
+    void rebuildSource({ reset: true });
+    return;
+  }
+
   if (event.target.closest("[data-story-create]")) {
-    query("[data-new-workspace]")?.click();
+    const control = query("[data-story-create]", story);
+    control.disabled = true;
+    control.textContent = "CREATING…";
+    document.dispatchEvent(new CustomEvent("hara:create-amp-workspace", {
+      detail: {
+        preset: selectedPreset,
+        mode: selectedMode,
+        source: query("[data-story-source]", story).value
+      }
+    }));
   }
+});
+
+query("[data-story-preset]", story).addEventListener("change", (event) => {
+  selectedPreset = event.target.value;
+  amp?.setPreset(selectedPreset);
+});
+
+query("[data-story-source]", story).addEventListener("input", () => {
+  const status = query("[data-story-source-status]", story);
+  status.textContent = `GEN ${amp?.generation ?? 0} // CHANGED`;
+  status.dataset.state = "changed";
+});
+
+document.addEventListener("hara:amp-workspace-error", (event) => {
+  const control = query("[data-story-create]", story);
+  control.disabled = false;
+  control.textContent = "CREATE THIS WORKSPACE";
+  showError(`Workspace could not be created: ${event.detail?.message ?? "Unknown error"}`);
 });
 
 document.addEventListener("keydown", (event) => {
   if (!activeScreen || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.target.closest?.("button, a, input, select, textarea")) return;
   if (event.key === "ArrowLeft") {
     event.preventDefault();
     showScreen(activeScreen - 1);
@@ -237,17 +451,11 @@ document.addEventListener("keydown", (event) => {
 
 new MutationObserver(() => {
   if (document.body.dataset.workspace === "1" && activeScreen) {
-    storyLoadGeneration += 1;
     activeScreen = 0;
     story.hidden = true;
     story.setAttribute("aria-hidden", "true");
     delete document.body.dataset.storyScreen;
-    restoreSourceSave();
-  } else if (document.body.dataset.workspace === "0" && !activeScreen && returnBackground) {
-    const restore = returnBackground;
-    returnBackground = null;
-    restoreSourceSave();
-    void selectBackground(restore);
+    void disposeAmp();
   }
   updateNavigation();
 }).observe(document.body, {

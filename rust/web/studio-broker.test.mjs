@@ -102,6 +102,40 @@ test("one browser kernel hosts isolated named sessions", async () => {
   );
 });
 
+test("traceForms evaluates top-level forms in a disposable session and stops on error", async () => {
+  const { spawn, spawned } = mockSpawn();
+  const broker = new KernelBroker({
+    spawn: async (name) => {
+      const kernel = await spawn(name);
+      kernel.context.call = async function (target, args) {
+        this.calls.push([target, args]);
+        if (target === "session/eval" && args[1] === "(broken)") throw new Error("broken form");
+        if (target === "session/eval") return `value:${args[1]}`;
+        return true;
+      };
+      return kernel;
+    }
+  });
+  const forms = [
+    { start: 0, end: 4, source: "(+ 1 2)" },
+    { start: 5, end: 13, source: "(broken)" },
+    { start: 14, end: 20, source: "(+ 3 4)" }
+  ];
+  const ticks = [10, 12, 20, 25];
+  const rows = await broker.traceForms("ROOT", forms, { now: () => ticks.shift(), bootstrap: "(boot)" });
+
+  assert.deepEqual(rows.map(({ source, status, value, error, duration }) => ({ source, status, value, error, duration })), [
+    { source: "(+ 1 2)", status: "ok", value: "value:(+ 1 2)", error: undefined, duration: 2 },
+    { source: "(broken)", status: "error", value: undefined, error: "broken form", duration: 5 }
+  ]);
+  const calls = spawned[0].context.calls;
+  assert.deepEqual(
+    calls.filter(([target]) => target === "session/eval").map(([, args]) => args[1]),
+    ["(boot)", "(+ 1 2)", "(broken)"]
+  );
+  assert.equal(calls.at(-1)[0], "session/close");
+});
+
 test("resources are registered before the bootstrap eval", async () => {
   const { spawn } = mockSpawn();
   const broker = new KernelBroker({
@@ -408,6 +442,12 @@ test("real wasm kernel evals hara source through the broker", { skip: wasmBytes 
   });
 
   assert.equal(await broker.eval("ROOT", "(+ 1 2)"), 3);
+  const trace = await broker.traceForms("ROOT", [{ start: 0, end: 9, source: "(+ 19 23)" }]);
+  assert.deepEqual(
+    trace.map(({ source, status, value }) => ({ source, status, value })),
+    [{ source: "(+ 19 23)", status: "ok", value: 42 }]
+  );
+  assert.deepEqual(await broker.listSessions("ROOT"), ["ROOT"]);
   const root = await broker.require("ROOT");
   assert.equal(await root.context.call("register-resource", ["lib/extra.hal", "(ns lib.extra)"]), true);
   assert.ok(broker.list().includes("ROOT"));

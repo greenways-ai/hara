@@ -427,6 +427,60 @@ textarea.hara-studio-editor {
   caret-color: var(--hara-cyan);
 }
 
+.hara-studio-trace {
+  flex: none;
+  max-height: 12rem;
+  overflow: auto;
+  border-top: 1px solid var(--hara-line);
+  background: rgba(3, 5, 10, .72);
+  font-family: var(--hara-mono);
+  font-size: .64rem;
+}
+
+.hara-studio-trace-head {
+  padding: .45rem .9rem;
+  color: var(--hara-cyan);
+  letter-spacing: .16em;
+  border-bottom: 1px solid var(--hara-line);
+}
+
+.hara-studio-trace-note {
+  padding: .7rem .9rem;
+  color: var(--hara-muted);
+}
+
+.hara-studio-trace-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.hara-studio-trace-table th,
+.hara-studio-trace-table td {
+  padding: .38rem .55rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(65, 245, 228, .08);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hara-studio-trace-table th {
+  color: var(--hara-faint);
+  font-weight: 400;
+  letter-spacing: .12em;
+}
+
+.hara-studio-trace-table th:nth-child(1),
+.hara-studio-trace-table td:nth-child(1),
+.hara-studio-trace-table th:nth-child(4),
+.hara-studio-trace-table td:nth-child(4) { width: 2.5rem; }
+
+.hara-studio-trace-table tr.is-error { background: rgba(255, 46, 136, .07); }
+.hara-studio-trace-table tbody tr { cursor: pointer; }
+.hara-studio-trace-table tbody tr:hover { background: rgba(65, 245, 228, .06); }
+.hara-studio-trace-source { color: var(--hara-text); }
+
 .hara-studio-dirty {
   color: var(--hara-amber);
   margin-right: .6em;

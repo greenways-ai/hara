@@ -4435,6 +4435,18 @@ mod tests {
         assert_eq!(runtime.eval_hir(&artifact).unwrap(), "42");
     }
 
+    #[test]
+    #[ignore = "requires a Truffle-compiled foundation HIR artifact"]
+    fn truffle_compiled_foundation_hir_loads_with_foundation_semantics() {
+        let artifact = std::env::var("HARA_TRUFFLE_FOUNDATION_HIR")
+            .expect("HARA_TRUFFLE_FOUNDATION_HIR must point to the compiled artifact");
+        let bytes = std::fs::read(&artifact).expect("read Truffle-compiled foundation HIR");
+        let mut runtime = Runtime::new();
+
+        assert_eq!(runtime.eval_hir(&bytes).unwrap(), "<fn>");
+        assert_eq!(runtime.eval_native("((comp inc inc) 40)").unwrap(), "42");
+    }
+
     #[cfg(feature = "dev-trace")]
     #[test]
     fn development_trace_uses_the_real_macro_and_invocation_paths() {

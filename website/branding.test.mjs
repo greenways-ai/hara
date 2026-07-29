@@ -19,3 +19,26 @@ test("the Amp demo uses the shared page identity", async () => {
   assert.match(source, /<title>Hara \/ Amp Demo<\/title>/);
   assert.match(source, /HARA \/ AMP DEMO/);
 });
+
+test("the main story connects and plays the real Amp pipeline", async () => {
+  const [source, app] = await Promise.all([
+    websiteFile("story.js"),
+    websiteFile("app.js")
+  ]);
+
+  assert.match(source, /CONNECT THE SYSTEM/);
+  assert.match(source, /SYNTH WASM/);
+  assert.match(source, /WEB AUDIO \+ EQ/);
+  assert.match(source, /FFT WASM/);
+  assert.match(source, /HTA TRANSPORT/);
+  assert.match(source, /HAL PROGRAM/);
+  assert.match(source, /CANVAS OUTPUT/);
+  assert.match(source, /PLAY THE SYSTEM/);
+  assert.match(source, /src\/visualizer\.hal/);
+  assert.match(source, /APPLY \+ REBUILD/);
+  assert.match(source, /data-story-source/);
+  assert.match(source, /CREATE THIS WORKSPACE/);
+  assert.match(app, /setWorkspace\(0, \{ reloadBackground: false \}\)/);
+  assert.doesNotMatch(source, /One program\.<br>Every medium/);
+  assert.doesNotMatch(source, /03 \/\/ GREENWAYS OS/);
+});
