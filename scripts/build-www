@@ -29,6 +29,8 @@ cp "$ROOT/website/index.html" \
    "$ROOT/website/hara-amp.html" \
    "$ROOT/website/hara-amp.css" \
    "$ROOT/website/hara-amp.js" \
+   "$ROOT/website/amp-runtime.js" \
+   "$ROOT/website/amp-workspace.js" \
    "$ROOT/website/og.png" \
    "$ROOT/website/scene.js" \
    "$OUT/"

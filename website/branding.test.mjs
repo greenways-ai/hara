@@ -19,3 +19,19 @@ test("the Amp demo uses the shared page identity", async () => {
   assert.match(source, /<title>Hara \/ Amp Demo<\/title>/);
   assert.match(source, /HARA \/ AMP DEMO/);
 });
+
+test("the main story connects and plays the real Amp pipeline", async () => {
+  const source = await websiteFile("story.js");
+
+  assert.match(source, /CONNECT THE SYSTEM/);
+  assert.match(source, /SYNTH WASM/);
+  assert.match(source, /WEB AUDIO \+ EQ/);
+  assert.match(source, /FFT WASM/);
+  assert.match(source, /HTA TRANSPORT/);
+  assert.match(source, /HAL PROGRAM/);
+  assert.match(source, /CANVAS OUTPUT/);
+  assert.match(source, /PLAY THE SYSTEM/);
+  assert.match(source, /CREATE THIS WORKSPACE/);
+  assert.doesNotMatch(source, /One program\.<br>Every medium/);
+  assert.doesNotMatch(source, /03 \/\/ GREENWAYS OS/);
+});

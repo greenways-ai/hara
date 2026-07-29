@@ -166,6 +166,30 @@ export class WorkspaceRepository {
     return record;
   }
 
+  async createFromFiles({ name, template = "blank", files }) {
+    if (!(files instanceof Map) || files.size === 0) throw new Error("WORKSPACE_FILES_REQUIRED");
+    const base = safeId(name) || template;
+    let id = base;
+    let suffix = 2;
+    while (await this.get(id)) id = `${base}-${suffix++}`;
+    const record = {
+      id, name: name.trim() || template, template,
+      createdAt: now(), updatedAt: now(), providers: {}
+    };
+    const db = await this.open();
+    const tx = db.transaction([WORKSPACES, FILES], "readwrite");
+    tx.objectStore(WORKSPACES).put(record);
+    for (const [path, content] of files) {
+      if (typeof path !== "string" || !path.startsWith("/") || typeof content !== "string") {
+        tx.abort();
+        throw new Error("INVALID_WORKSPACE_FILE");
+      }
+      tx.objectStore(FILES).put({ workspaceId: id, path, content, updatedAt: record.updatedAt });
+    }
+    await transaction(tx);
+    return record;
+  }
+
   async list() {
     const db = await this.open();
     const records = await request(db.transaction(WORKSPACES).objectStore(WORKSPACES), "getAll");
