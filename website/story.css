@@ -277,6 +277,7 @@
   grid-template-columns: minmax(260px, .48fr) minmax(520px, 1fr);
   grid-template-areas:
     "heading amp"
+    "source amp"
     "closeout amp";
   align-content: center;
   gap: 28px clamp(38px, 5vw, 82px);
@@ -286,6 +287,126 @@
 
 .story-play .story-heading h2 {
   font-size: clamp(2.7rem, 5.3vw, 5.8rem);
+}
+
+.story-source {
+  grid-area: source;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(156, 123, 255, .28);
+  background: rgba(5, 4, 13, .9);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .025);
+}
+
+.story-source > header,
+.story-source > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+  padding: 0 11px;
+  color: #7f759d;
+  background: rgba(156, 123, 255, .055);
+  font: 700 .47rem var(--mono);
+  letter-spacing: .1em;
+}
+
+.story-source > header {
+  border-bottom: 1px solid rgba(156, 123, 255, .18);
+}
+
+.story-source > header span {
+  color: #d8ccff;
+  text-transform: none;
+}
+
+.story-source > header output[data-state="ready"] {
+  color: var(--cyan);
+}
+
+.story-source > header output[data-state="changed"] {
+  color: #f5d742;
+}
+
+.story-source > header output[data-state="error"] {
+  color: #ff83b7;
+}
+
+.story-source textarea {
+  display: block;
+  width: 100%;
+  height: clamp(190px, 24vh, 270px);
+  margin: 0;
+  padding: 13px 14px;
+  resize: none;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  color: #bafff8;
+  background: #03050b;
+  font: 500 clamp(.52rem, .65vw, .61rem)/1.62 var(--mono);
+  tab-size: 2;
+  white-space: pre;
+}
+
+.story-source textarea:focus {
+  box-shadow: inset 0 0 0 1px rgba(65, 245, 228, .34);
+}
+
+.story-source > footer {
+  min-height: 39px;
+  border-top: 1px solid rgba(156, 123, 255, .18);
+}
+
+.story-source > footer > span {
+  color: #6d6683;
+}
+
+.story-source > footer > div {
+  display: flex;
+  gap: 5px;
+}
+
+.story-source button {
+  min-height: 27px;
+  padding: 0 9px;
+  border: 1px solid rgba(156, 123, 255, .3);
+  border-radius: 0;
+  color: #cfc3f7;
+  background: rgba(156, 123, 255, .08);
+  font: 700 .45rem var(--mono);
+  letter-spacing: .08em;
+  cursor: pointer;
+}
+
+.story-source button:hover {
+  color: #020408;
+  background: var(--cyan);
+  border-color: var(--cyan);
+}
+
+.story-source .story-source-apply {
+  color: #020408;
+  background: #b69bff;
+}
+
+.story-source button:disabled {
+  opacity: .48;
+  cursor: wait;
+}
+
+.story-source-error {
+  display: block;
+  padding: 8px 11px;
+  border-top: 1px solid rgba(255, 46, 136, .2);
+  color: #ff9ebd;
+  background: rgba(255, 46, 136, .055);
+  font: 600 .49rem/1.45 var(--mono);
+}
+
+.story-source-error[hidden] {
+  display: none;
 }
 
 .story-amp {
@@ -605,6 +726,7 @@ body[data-workspace="1"] .system-bottom-bar .project-tabs {
     grid-template-columns: 1fr;
     grid-template-areas:
       "heading"
+      "source"
       "amp"
       "closeout";
     align-content: start;
@@ -650,6 +772,26 @@ body[data-workspace="1"] .system-bottom-bar .project-tabs {
   }
 
   .story-play { gap: 18px; }
+
+  .story-source textarea {
+    height: 220px;
+    font-size: .52rem;
+  }
+
+  .story-source > footer {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 8px;
+  }
+
+  .story-source > footer > div {
+    display: grid;
+    grid-template-columns: .65fr 1.35fr;
+  }
+
+  .story-source button {
+    min-height: 34px;
+  }
 
   .story-visual { min-height: 255px; }
 

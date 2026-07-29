@@ -21,7 +21,10 @@ test("the Amp demo uses the shared page identity", async () => {
 });
 
 test("the main story connects and plays the real Amp pipeline", async () => {
-  const source = await websiteFile("story.js");
+  const [source, app] = await Promise.all([
+    websiteFile("story.js"),
+    websiteFile("app.js")
+  ]);
 
   assert.match(source, /CONNECT THE SYSTEM/);
   assert.match(source, /SYNTH WASM/);
@@ -31,7 +34,11 @@ test("the main story connects and plays the real Amp pipeline", async () => {
   assert.match(source, /HAL PROGRAM/);
   assert.match(source, /CANVAS OUTPUT/);
   assert.match(source, /PLAY THE SYSTEM/);
+  assert.match(source, /src\/visualizer\.hal/);
+  assert.match(source, /APPLY \+ REBUILD/);
+  assert.match(source, /data-story-source/);
   assert.match(source, /CREATE THIS WORKSPACE/);
+  assert.match(app, /setWorkspace\(0, \{ reloadBackground: false \}\)/);
   assert.doesNotMatch(source, /One program\.<br>Every medium/);
   assert.doesNotMatch(source, /03 \/\/ GREENWAYS OS/);
 });

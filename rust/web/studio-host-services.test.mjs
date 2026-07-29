@@ -98,6 +98,35 @@ test("canvas host calls route by originating session", async () => {
   ]);
 });
 
+test("canvas render callbacks accept the node-aware HAL call shape", async () => {
+  const calls = [];
+  const host = createHostServices({
+    renderCanvas: async (...args) => calls.push(args)
+  });
+  const scene = new Map([["bins", [1, 2, 3]]]);
+
+  assert.equal(
+    await host["studio.canvas/render"]("node/visualizer", "canvas/visualizer", scene),
+    true
+  );
+  assert.deepEqual(calls, [["canvas/visualizer", scene]]);
+});
+
+test("node input preserves nested maps and vectors for HAL", async () => {
+  const runtime = {
+    in: async () => new Map([
+      ["bins", [1, 2, 3]],
+      ["meta", new Map([["source", "fft"]])]
+    ])
+  };
+  const host = createHostServices({ nodeRuntime: runtime });
+
+  const value = await host["node/in"]("node/visualizer", "fft/bins");
+  assert.ok(value instanceof Map);
+  assert.deepEqual(value.get("bins"), [1, 2, 3]);
+  assert.deepEqual(value.get("meta"), new Map([["source", "fft"]]));
+});
+
 test("workspace scoped stores cannot read, write, or list another workspace", async () => {
   const contexts = new Map([["alpha-context", "alpha"], ["beta-context", "beta"]]);
   const host = createHostServices({

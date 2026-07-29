@@ -753,7 +753,7 @@ async function loadBackgroundSource(name, sourceOverride = null) {
   }
 }
 
-function setWorkspace(index) {
+function setWorkspace(index, { reloadBackground = true } = {}) {
   if (index === 1 && !document.body.classList.contains("is-start-ready")) return;
   state.workspace = index === 1 ? 1 : 0;
   document.body.dataset.workspace = String(state.workspace);
@@ -770,7 +770,7 @@ function setWorkspace(index) {
   } else {
     state.canvasRuntime?.setVisible(true);
     query("[data-tron]").hidden = false;
-    if (state.broker) loadBackgroundSource(state.backgroundSource).catch(() => {});
+    if (state.broker && reloadBackground) loadBackgroundSource(state.backgroundSource).catch(() => {});
   }
   closeLauncher();
 }
@@ -1277,7 +1277,7 @@ function installWorkspaceCreation() {
   });
 }
 
-async function createAmpWorkspace({ preset = "hara", mode = "spectrum" } = {}) {
+async function createAmpWorkspace({ preset = "hara", mode = "spectrum", source = "" } = {}) {
   const load = async (path) => {
     const response = await fetch(new URL(`${AMP_WORKSPACE}${path}`, import.meta.url));
     if (!response.ok) throw new Error(`Hara Amp ${path}: ${response.status}`);
@@ -1288,7 +1288,13 @@ async function createAmpWorkspace({ preset = "hara", mode = "spectrum" } = {}) {
     load("workspace.edn"),
     load("src/visualizer.hal")
   ]);
-  const files = seedAmpWorkspace({ project, workspace, visualizer, preset, mode });
+  const files = seedAmpWorkspace({
+    project,
+    workspace,
+    visualizer: typeof source === "string" && source.trim() ? source : visualizer,
+    preset,
+    mode
+  });
   const record = await state.workspaceRepository.createFromFiles({
     name: "Hara Amp",
     template: "hara-amp",
@@ -2492,7 +2498,7 @@ async function bootRuntime() {
     if (path) await openFile(path, true, false);
     syncHighlight();
     await renderSavedWorkspaces();
-    setWorkspace(0);
+    setWorkspace(0, { reloadBackground: false });
     setKernelProgress(100, "KERNEL READY", "HARA.WASM LIVE");
     setTimeout(hideKernelProgress, 700);
     setTimeout(() => {

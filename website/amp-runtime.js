@@ -45,6 +45,9 @@ export class HaraAmpRuntime {
     this.emittedFrames = 0;
     this.peaks = new Float32Array(96);
     this.frameWaiters = [];
+    this.source = "";
+    this.originalSource = "";
+    this.generation = 0;
     this.bootPromise = null;
     this.ready = false;
     this.disposed = false;
@@ -104,6 +107,8 @@ export class HaraAmpRuntime {
 
     this.synth = synth;
     this.fft = fft;
+    this.source = visualizerSource;
+    this.originalSource = visualizerSource;
     this.audio = new AmpAudio(this, synth, fft);
     this.status("synth", "ready", "Rust/WASM oscillator ready");
     this.status("audio", "gesture", "Play authorizes Web Audio");
@@ -127,7 +132,17 @@ export class HaraAmpRuntime {
         "std.substrate": substrateSource
       }
     });
-    const prepared = await this.broker.prepareDocument(ROOT, DOCUMENT_ID, visualizerSource, {
+    await this.activateVisualizer(visualizerSource);
+
+    this.status("hta", "ready", "HTA latest-value connection open");
+    this.status("hal", "ready", `HAL visualizer generation ${this.generation} armed`);
+    await this.probe();
+    this.status("canvas", "ready", "Canvas received a real probe frame");
+    this.status("runtime", "ready", "WASM · HTA · HAL live");
+  }
+
+  async activateVisualizer(source) {
+    const prepared = await this.broker.prepareDocument(ROOT, DOCUMENT_ID, source, {
       nodeId: "node/visualizer"
     });
     try {
@@ -139,22 +154,39 @@ export class HaraAmpRuntime {
         prepare: (node) => {
           node.start(() => this.broker.evalPreparedDocument(prepared, "(run-visualizer)")
             .catch((error) => {
-              this.status("hal", "error", friendlyError(error));
+              const active = this.runtime.nodes.get("node/visualizer")?.active;
+              if (!this.disposed && active?.generation === prepared.generation) {
+                this.status("hal", "error", friendlyError(error));
+              }
               throw error;
             }));
         }
       });
       this.broker.commitDocument(prepared);
+      this.generation = prepared.generation;
+      return prepared.generation;
     } catch (error) {
       this.broker.discardDocument(prepared);
       throw error;
     }
+  }
 
-    this.status("hta", "ready", "HTA latest-value connection open");
-    this.status("hal", "ready", "HAL visualizer armed");
-    await this.probe();
-    this.status("canvas", "ready", "Canvas received a real probe frame");
-    this.status("runtime", "ready", "WASM · HTA · HAL live");
+  async rebuild(source) {
+    if (typeof source !== "string" || !source.trim()) throw new Error("HAL source is required");
+    await this.boot();
+    this.status("hal", "loading", "Preparing a new HAL generation");
+    const previousFrame = this.frameCount;
+    try {
+      const generation = await this.activateVisualizer(source);
+      this.source = source;
+      if (this.audio?.playing) await this.waitForFrame(previousFrame);
+      else await this.probe();
+      this.status("hal", "ready", `HAL visualizer generation ${generation} live`);
+      return { generation, frame: this.frameCount };
+    } catch (error) {
+      this.status("hal", "error", friendlyError(error));
+      throw error;
+    }
   }
 
   async probe() {
