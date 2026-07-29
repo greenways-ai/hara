@@ -446,8 +446,9 @@ export class CanvasRuntime {
 }
 
 function renderStateful2d(slot, context, stateful, width, height) {
-  if (stateful.kind === "ants") return renderAntsState(context, stateful, width, height);
-  if (stateful.kind !== "tron") throw new Error(`unsupported stateful canvas: ${stateful.kind}`);
+  const kind = keyName(stateful.kind);
+  if (kind === "ants") return renderAntsState(context, stateful, width, height);
+  if (kind !== "tron") throw new Error(`unsupported stateful canvas: ${kind ?? "nil"}`);
   if (stateful.init || !slot.stateful || slot.stateful.kind !== "tron") {
     slot.stateful = {
       kind: "tron",
