@@ -20,7 +20,11 @@ pub struct Tap {
     pub identity: Vec<String>,
     /// SHA-256 fingerprint of the policy-signing Ed25519 public key.
     pub identity_key: String,
+    pub trust: TrustMode,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrustMode { SignedRoot, GithubGoverned }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdentityPolicy {
@@ -54,6 +58,35 @@ pub fn add(root: &Path, tap: Tap) -> Result<(), String> {
     save(root, &taps)
 }
 
+/// Installs the only built-in bootstrap profile. It intentionally names the
+/// GitHub-governed official Hara repositories; arbitrary taps remain signed
+/// root-key taps added explicitly by the user.
+pub fn bootstrap(root: &Path, profile: &str) -> Result<Tap, String> {
+    let tap = match profile {
+        "hara" => Tap {
+            name: "hara".into(),
+            registry: vec!["https://github.com/hara-lang/hara-packages.git".into()],
+            identity: vec!["https://github.com/hara-lang/hara-identity.git".into()],
+            identity_key: String::new(),
+            trust: TrustMode::GithubGoverned,
+        },
+        _ => return Err(format!("unknown built-in tap profile: {profile}")),
+    };
+    add(root, tap.clone())?;
+    Ok(tap)
+}
+
+pub fn add_mirror(root: &Path, name: &str, registry: Option<String>, identity: Option<String>) -> Result<Tap, String> {
+    if registry.is_none() && identity.is_none() { return Err("mirror add requires --registry and/or --identity".into()); }
+    let mut taps = load(root)?;
+    let tap = taps.get_mut(name).ok_or_else(|| format!("tap is not trusted: {name}"))?;
+    if let Some(url) = registry { if !tap.registry.contains(&url) { tap.registry.push(url); } }
+    if let Some(url) = identity { if !tap.identity.contains(&url) { tap.identity.push(url); } }
+    let updated = tap.clone();
+    save(root, &taps)?;
+    Ok(updated)
+}
+
 pub fn remove(root: &Path, name: &str) -> Result<(), String> {
     let mut taps = load(root)?;
     if taps.remove(name).is_none() { return Err(format!("tap is not trusted: {name}")); }
@@ -77,6 +110,12 @@ pub fn load(root: &Path) -> Result<BTreeMap<String, Tap>, String> {
             registry: strings(required(values, "registry")?, "tap :registry")?,
             identity: strings(required(values, "identity")?, "tap :identity")?,
             identity_key: string(required(values, "identity-key")?, "tap :identity-key")?,
+            trust: match lookup(values, "trust") {
+                Some(Form::Keyword(value)) if value == "github-governed" => TrustMode::GithubGoverned,
+                Some(Form::Keyword(value)) if value == "signed-root" => TrustMode::SignedRoot,
+                Some(_) => return Err("tap :trust must be :signed-root or :github-governed".into()),
+                None => TrustMode::SignedRoot,
+            },
         };
         validate_tap(&tap)?;
         output.insert(name, tap);
@@ -123,7 +162,7 @@ pub fn initialize_signed(name: &str, registry: &Path, identity: &Path, root_key:
     fs::create_dir_all(registry.join(".github/workflows")).map_err(io)?;
     fs::write(registry.join(".github/workflows/verify-request.yml"), registry_workflow()).map_err(io)?;
     let fingerprint = format!("sha256:{}", sha256_hex(&root_key));
-    let tap = Tap { name: name.into(), registry: vec![registry.to_string_lossy().into_owned()], identity: vec![identity.to_string_lossy().into_owned()], identity_key: fingerprint.clone() };
+    let tap = Tap { name: name.into(), registry: vec![registry.to_string_lossy().into_owned()], identity: vec![identity.to_string_lossy().into_owned()], identity_key: fingerprint.clone(), trust: TrustMode::SignedRoot };
     Ok(InitializedTap { tap, fingerprint })
 }
 
@@ -133,24 +172,28 @@ pub fn fetch_verified_policy(tap: &Tap, scratch: &Path) -> Result<IdentityPolicy
     let checkout = scratch.join("identity");
     clone_first(&tap.identity, &checkout, "identity")?;
     let bytes = fs::read(checkout.join("identity.edn")).map_err(|error| format!("identity policy is missing identity.edn: {error}"))?;
-    let signature = fs::read_to_string(checkout.join("identity.edn.sig")).map_err(|error| format!("identity policy is missing identity.edn.sig: {error}"))?;
     let text = std::str::from_utf8(&bytes).map_err(|_| "identity.edn must be UTF-8")?;
     let document = parse(text).map_err(|error| format!("identity.edn: {error}"))?;
     let entries = map(&document, "identity.edn must be an EDN map")?;
-    let root_public = read_hex(&string(required(entries, "identity/root-key")?, "identity :identity/root-key")?, "identity root key")?;
-    if sha256_hex(&root_public) != tap.identity_key.trim_start_matches("sha256:") {
-        return Err("identity policy root key does not match the locally pinned tap fingerprint".into());
+    match tap.trust {
+        TrustMode::SignedRoot => {
+            let signature = fs::read_to_string(checkout.join("identity.edn.sig")).map_err(|error| format!("identity policy is missing identity.edn.sig: {error}"))?;
+            let root_public = read_hex(&string(required(entries, "identity/root-key")?, "identity :identity/root-key")?, "identity root key")?;
+            if sha256_hex(&root_public) != tap.identity_key.trim_start_matches("sha256:") { return Err("identity policy root key does not match the locally pinned tap fingerprint".into()); }
+            verify(&root_public, &bytes, signature.trim())?;
+        }
+        TrustMode::GithubGoverned => verify_official_hara_policy(tap, entries)?,
     }
-    verify(&root_public, &bytes, signature.trim())?;
     let revision = git(&checkout, ["rev-parse", "HEAD"])?;
-    let keys = map(required(entries, "publisher-keys")?, "identity :publisher-keys must be an EDN map")?;
+    let keys = lookup(entries, "publisher-keys").or_else(|| lookup(entries, "keys")).ok_or("identity policy is missing :publisher-keys or :keys")?;
+    let keys = map(keys, "identity publisher keys must be an EDN map")?;
     let mut publisher_keys = BTreeMap::new();
     for (id, value) in keys {
         let id = scalar(id, "publisher key id")?;
         let entry = map(value, "publisher key must be an EDN map")?;
         publisher_keys.insert(id, PublisherKey {
             public_key: string(required(entry, "public-key")?, "publisher :public-key")?,
-            coordinates: strings(required(entry, "coordinates")?, "publisher :coordinates")?,
+            coordinates: lookup(entry, "coordinates").map(|value| strings(value, "publisher :coordinates")).transpose()?.unwrap_or_default(),
             revoked: matches!(lookup(entry, "revoked"), Some(Form::Bool(true))),
         });
     }
@@ -202,7 +245,7 @@ pub fn clone_first(mirrors: &[String], destination: &Path, label: &str) -> Resul
 fn save(root: &Path, taps: &BTreeMap<String, Tap>) -> Result<(), String> {
     fs::create_dir_all(root).map_err(|error| format!("cannot create {}: {error}", root.display()))?;
     let mut text = String::from("{:tap-store/format 1\n :taps {\n");
-    for (name, tap) in taps { text.push_str(&format!("  \"{name}\" {{:registry {} :identity {} :identity-key \"{}\"}}\n", vector(&tap.registry), vector(&tap.identity), tap.identity_key)); }
+    for (name, tap) in taps { let trust = match tap.trust { TrustMode::SignedRoot => "signed-root", TrustMode::GithubGoverned => "github-governed" }; text.push_str(&format!("  \"{name}\" {{:registry {} :identity {} :identity-key \"{}\" :trust :{trust}}}\n", vector(&tap.registry), vector(&tap.identity), tap.identity_key)); }
     text.push_str(" }}\n");
     fs::write(root.join("taps.edn"), text).map_err(|error| format!("cannot write tap store: {error}"))
 }
@@ -221,7 +264,8 @@ fn registry_readme(name: &str) -> String { format!("# {name} package registry\n\
 fn registry_workflow() -> &'static str { "name: Verify package request\non:\n  pull_request:\n    paths: [\"requests/**\"]\npermissions:\n  contents: read\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - name: Verify signed request\n        run: |\n          echo 'Install a pinned hara CLI and invoke your registry verifier here.'\n          echo 'Do not expose publishing or signing credentials to this job.'\n          exit 1\n" }
 
 fn vector(values: &[String]) -> String { format!("[{}]", values.iter().map(|value| format!("\"{value}\"")).collect::<Vec<_>>().join(" ")) }
-fn validate_tap(tap: &Tap) -> Result<(), String> { if !valid_name(&tap.name) || tap.registry.is_empty() || tap.identity.is_empty() { return Err("tap requires a lowercase name plus at least one registry and identity mirror".into()); } if read_hex(tap.identity_key.trim_start_matches("sha256:"), "tap identity key fingerprint")?.len() != 32 { return Err("tap identity key fingerprint must be SHA-256 hex".into()); } Ok(()) }
+fn validate_tap(tap: &Tap) -> Result<(), String> { if !valid_name(&tap.name) || tap.registry.is_empty() || tap.identity.is_empty() { return Err("tap requires a lowercase name plus at least one registry and identity mirror".into()); } match tap.trust { TrustMode::SignedRoot if read_hex(tap.identity_key.trim_start_matches("sha256:"), "tap identity key fingerprint")?.len() != 32 => Err("tap identity key fingerprint must be SHA-256 hex".into()), TrustMode::GithubGoverned if tap.name != "hara" || !tap.registry.iter().any(|url| url.contains("github.com/hara-lang/hara-packages")) || !tap.identity.iter().any(|url| url.contains("github.com/hara-lang/hara-identity")) => Err("github-governed trust is reserved for the built-in hara profile".into()), _ => Ok(()) } }
+fn verify_official_hara_policy(tap: &Tap, entries: &[(Form, Form)]) -> Result<(), String> { if tap.name != "hara" || !matches!(lookup(entries, "identity/name"), Some(Form::String(value)) if value == "hara") || !matches!(lookup(entries, "identity/trust"), Some(Form::Keyword(value)) if value == "github-governed") { return Err("GitHub-governed trust only accepts the canonical hara identity policy".into()); } Ok(()) }
 fn valid_name(value: &str) -> bool { !value.is_empty() && value.chars().all(|value| value.is_ascii_lowercase() || value.is_ascii_digit() || value == '-') }
 fn verify(public_key: &[u8], message: &[u8], signature: &str) -> Result<(), String> { let key = VerifyingKey::from_bytes(&public_key.try_into().map_err(|_| "Ed25519 public key must be 32 bytes")?).map_err(|error| format!("invalid Ed25519 public key: {error}"))?; let signature = Signature::from_bytes(&read_hex(signature, "Ed25519 signature")?.try_into().map_err(|_| "Ed25519 signature must be 64 bytes")?); key.verify(message, &signature).map_err(|_| "Ed25519 signature verification failed".into()) }
 fn read_hex(value: &str, label: &str) -> Result<Vec<u8>, String> { let value = value.trim().trim_start_matches("sha256:"); if value.len() % 2 != 0 { return Err(format!("{label} must be hexadecimal")); } (0..value.len()).step_by(2).map(|index| u8::from_str_radix(&value[index..index + 2], 16).map_err(|_| format!("{label} must be hexadecimal"))).collect() }

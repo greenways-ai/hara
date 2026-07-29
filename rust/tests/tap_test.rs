@@ -1,5 +1,5 @@
 use ed25519_dalek::{Signer, SigningKey};
-use hara_wasm::tap::{self, IdentityPolicy, PublisherKey, Tap};
+use hara_wasm::tap::{self, IdentityPolicy, PublisherKey, Tap, TrustMode};
 use sha2::Digest;
 use std::collections::BTreeMap;
 use std::fs;
@@ -26,12 +26,25 @@ fn local_tap_trust_store_round_trips_without_private_keys() {
         registry: vec!["https://example.test/acme/packages.git".into()],
         identity: vec!["https://example.test/acme/identity.git".into()],
         identity_key: format!("sha256:{}", "11".repeat(32)),
+        trust: TrustMode::SignedRoot,
     }).unwrap();
     let loaded = tap::trusted(&root, "acme").unwrap();
     assert_eq!(loaded.registry.len(), 1);
     assert!(!fs::read_to_string(root.join("taps.edn")).unwrap().contains("private"));
     tap::remove(&root, "acme").unwrap();
     assert!(tap::trusted(&root, "acme").is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn official_bootstrap_is_narrowly_scoped_and_accepts_read_only_mirrors() {
+    let root = temp("bootstrap");
+    let tap = tap::bootstrap(&root, "hara").unwrap();
+    assert_eq!(tap.trust, TrustMode::GithubGoverned);
+    assert!(tap.registry[0].contains("github.com/hara-lang/hara-packages"));
+    let updated = tap::add_mirror(&root, "hara", Some("https://mirror.example.test/hara-packages.git".into()), None).unwrap();
+    assert_eq!(updated.registry.len(), 2);
+    assert!(tap::bootstrap(&root, "other").is_err());
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -70,7 +83,7 @@ fn signed_identity_policy_is_verified_against_the_pinned_tap_root() {
     let scratch = temp("checkout");
     fs::create_dir_all(&scratch).unwrap();
     let policy = tap::fetch_verified_policy(&Tap {
-        name: "acme".into(), registry: vec!["unused".into()], identity: vec![root.to_string_lossy().into_owned()], identity_key: format!("sha256:{fingerprint}"),
+        name: "acme".into(), registry: vec!["unused".into()], identity: vec![root.to_string_lossy().into_owned()], identity_key: format!("sha256:{fingerprint}"), trust: TrustMode::SignedRoot,
     }, &scratch).unwrap();
     assert!(policy.publisher_keys.contains_key("publisher-1"));
     fs::remove_dir_all(root).unwrap();

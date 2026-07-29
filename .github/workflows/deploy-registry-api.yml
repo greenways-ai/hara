@@ -1,0 +1,37 @@
+name: Deploy Hara registry API
+
+on:
+  push:
+    branches: [main]
+    paths: [registry-api/**, .github/workflows/deploy-registry-api.yml]
+  pull_request:
+    paths: [registry-api/**, .github/workflows/deploy-registry-api.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: registry-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+      - name: Deploy preview
+        if: github.event_name == 'pull_request'
+        run: npx --yes netlify-cli deploy --dir public --functions netlify/functions
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_API_HARA_LANG_ORG_SITE_ID }}
+      - name: Deploy production
+        if: github.event_name != 'pull_request'
+        run: npx --yes netlify-cli deploy --prod --dir public --functions netlify/functions
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_API_HARA_LANG_ORG_SITE_ID }}
