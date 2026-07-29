@@ -29,7 +29,6 @@ public final class HaraJavaAdapters {
     installNth(context.defineProtocol("INth", Map.of("nth", 2)));
     installEmpty(context.defineProtocol("IEmpty", Map.of("empty", 1)));
     installDisplay(context.defineProtocol("IDisplay", Map.of("display", 1)));
-    installCollection(context.defineProtocol("IColl", collectionMethods()));
     installCons(context.defineProtocol("ICons", Map.of("cons", 2)));
     installDissoc(context.defineProtocol("IDissoc", Map.of("dissoc", 2)));
     installIndexed(context.defineProtocol("IIndexed", Map.of("index-of", 2)));
@@ -41,14 +40,11 @@ public final class HaraJavaAdapters {
     installPopLast(context.defineProtocol("IPopLast", Map.of("pop-last", 1)));
     installPushFirst(context.defineProtocol("IPushFirst", Map.of("push-first", 2)));
     installPushLast(context.defineProtocol("IPushLast", Map.of("push-last", 2)));
-    installRanged(
-        context.defineProtocol("IRanged", Map.of("range-max", 1, "range-min", 1)));
     installRealize(context.defineProtocol("IRealize", Map.of("realized?", 1, "realize", 1)));
     installReset(context.defineProtocol("IReset", Map.of("reset", 2)));
     installConversion(
         context.defineProtocol("IToMutable", Map.of("to-mutable", 1)),
         context.defineProtocol("IToPersistent", Map.of("to-persistent", 1)));
-    installValidate(context.defineProtocol("IValidate", Map.of("validate", 2, "validator", 1)));
     installWatch(
         context.defineProtocol(
             "IWatch", Map.of("watch-add", 3, "watch-remove", 2, "watch-list", 1)));
@@ -75,16 +71,9 @@ public final class HaraJavaAdapters {
                 "rt-stopped?", 2,
                 "rt-stop", 2)));
     installInvokeIn(context.defineProtocol("IInvokeIn", Map.of("invoke-in", -1)));
-    installRuntime(context.defineProtocol("IHasRuntime", Map.of("runtime", 1)));
     installExceptionInfo(context.defineProtocol("IExInfo", Map.of("data", 1)));
-    installMetadataValue(context.defineProtocol("IMetadata", Map.of("metatype", 1)));
     installPair(context.defineProtocol("IPair", Map.of("key", 1, "value", 1)));
     installComponent(context.defineProtocol("IComponent", componentMethods()));
-    installComponentQuery(context.defineProtocol("IComponentQuery", Map.of(
-        "started?", 1, "stopped?", 1, "info", 2, "remote?", 1, "health", 1)));
-    installComponentProps(context.defineProtocol("IComponentProps", Map.of("props", 1)));
-    installComponentOptions(context.defineProtocol("IComponentOptions", Map.of("options", 1)));
-    installComponentTrack(context.defineProtocol("IComponentTrack", Map.of("track-path", 1)));
     installContextLifeCycle(
         context.defineProtocol(
             "IContextLifeCycle",
@@ -421,13 +410,6 @@ public final class HaraJavaAdapters {
         (receiver, arguments) -> pushLastValue((IPushLast<?>) receiver, arguments[0]));
   }
 
-  public static void installRanged(HaraProtocol protocol) {
-    protocol.extend(
-        IRanged.class, "range-max", (receiver, arguments) -> ((IRanged) receiver).rangeMax());
-    protocol.extend(
-        IRanged.class, "range-min", (receiver, arguments) -> ((IRanged) receiver).rangeMin());
-  }
-
   public static void installContextLifeCycle(HaraProtocol protocol) {
     protocol.extend(
         IContextLifeCycle.class,
@@ -638,17 +620,6 @@ public final class HaraJavaAdapters {
         (receiver, arguments) -> ((IToPersistent) receiver).toPersistent());
   }
 
-  public static void installValidate(HaraProtocol protocol) {
-    protocol.extend(
-        IValidate.class,
-        "validate",
-        (receiver, arguments) -> validateValue((IValidate<?>) receiver, arguments[0]));
-    protocol.extend(
-        IValidate.class,
-        "validator",
-        (receiver, arguments) -> ((IValidate<?>) receiver).getValidator());
-  }
-
   public static void installWatch(HaraProtocol protocol) {
     protocol.extend(
         IWatch.class,
@@ -704,20 +675,8 @@ public final class HaraJavaAdapters {
         });
   }
 
-  public static void installRuntime(HaraProtocol protocol) {
-    protocol.extend(
-        IHasRuntime.class,
-        "runtime",
-        (receiver, arguments) -> ((IHasRuntime) receiver).getRuntime());
-  }
-
   public static void installExceptionInfo(HaraProtocol protocol) {
     protocol.extend(IExInfo.class, "data", (receiver, arguments) -> ((IExInfo) receiver).getData());
-  }
-
-  public static void installMetadataValue(HaraProtocol protocol) {
-    protocol.extend(
-        IMetadata.class, "metatype", (receiver, arguments) -> ((IMetadata) receiver).getMetatype());
   }
 
   public static void installPair(HaraProtocol protocol) {
@@ -746,45 +705,10 @@ public final class HaraJavaAdapters {
         IComponent.class, "remote?", (receiver, arguments) -> ((IComponent) receiver).isRemote());
   }
 
-  public static void installComponentQuery(HaraProtocol protocol) {
-    protocol.extend(IComponentQuery.class, "started?", (receiver, arguments) -> ((IComponentQuery) receiver).started());
-    protocol.extend(IComponentQuery.class, "stopped?", (receiver, arguments) -> ((IComponentQuery) receiver).stopped());
-    protocol.extend(IComponentQuery.class, "info", (receiver, arguments) -> ((IComponentQuery) receiver).info(arguments[0]));
-    protocol.extend(IComponentQuery.class, "remote?", (receiver, arguments) -> ((IComponentQuery) receiver).remote());
-    protocol.extend(IComponentQuery.class, "health", (receiver, arguments) -> ((IComponentQuery) receiver).health());
-  }
-
-  public static void installComponentProps(HaraProtocol protocol) {
-    protocol.extend(IComponentProps.class, "props", (receiver, arguments) -> ((IComponentProps) receiver).props());
-  }
-
-  public static void installComponentOptions(HaraProtocol protocol) {
-    protocol.extend(
-        IComponentOptions.class,
-        "options",
-        (receiver, arguments) -> ((IComponentOptions) receiver).options());
-  }
-
-  public static void installComponentTrack(HaraProtocol protocol) {
-    protocol.extend(
-        IComponentTrack.class,
-        "track-path",
-        (receiver, arguments) -> ((IComponentTrack) receiver).trackPath());
-  }
-
   private static Map<String, Integer> metadataMethods() {
     Map<String, Integer> methods = new LinkedHashMap<>();
     methods.put("meta", 1);
     methods.put("with-meta", 2);
-    return methods;
-  }
-
-  private static Map<String, Integer> collectionMethods() {
-    Map<String, Integer> methods = new LinkedHashMap<>();
-    methods.put("start-string", 1);
-    methods.put("end-string", 1);
-    methods.put("sep-string", 1);
-    methods.put("iterator", 1);
     return methods;
   }
 
@@ -917,11 +841,6 @@ public final class HaraJavaAdapters {
   @SuppressWarnings("unchecked")
   private static Object resetValue(IReset<?> reset, Object value) {
     return ((IReset<Object>) reset).reset(value);
-  }
-
-  @SuppressWarnings("unchecked")
-  private static Object validateValue(IValidate<?> validate, Object value) {
-    return ((IValidate<Object>) validate).validate(value);
   }
 
   @SuppressWarnings("unchecked")

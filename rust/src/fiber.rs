@@ -851,17 +851,24 @@ fn finish_try(
 ) -> Step {
     match (r, catch) {
         (Err(x), Some(p)) => {
-            if p.len() != 3 {
-                return k(Err("catch expects name and body".into()));
-            }
-            let n = match &p[1] {
+            let (binding_index, body_index) = match p.len() {
+                3 => (1, 2),
+                4 => {
+                    if !matches!(&p[1], Form::Symbol(_)) {
+                        return k(Err("catch class must be symbol".into()));
+                    }
+                    (2, 3)
+                }
+                _ => return k(Err("catch expects class, name, and body".into())),
+            };
+            let n = match &p[binding_index] {
                 Form::Symbol(n) => n.clone(),
                 _ => return k(Err("catch name must be symbol".into())),
             };
             let old = env.borrow_mut().insert(n.clone(), Value::String(x));
             let e = env.clone();
             one(
-                p[2].clone(),
+                p[body_index].clone(),
                 env,
                 Box::new(move |r| {
                     restore(&mut e.borrow_mut(), vec![(n, old)]);

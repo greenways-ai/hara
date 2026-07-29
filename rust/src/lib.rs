@@ -14,6 +14,8 @@ pub mod package;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod project;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod tap;
+#[cfg(not(target_arch = "wasm32"))]
 mod process_extension;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod resp;
@@ -253,7 +255,9 @@ impl Runtime {
             namespace.intern(name, protocol);
         }
         for (namespace, name, method) in core::builtin_protocol_method_values() {
-            namespace_registry.find_or_create(namespace).intern(name, method);
+            namespace_registry
+                .find_or_create(namespace)
+                .intern(name, method);
         }
         Runtime {
             env: HashMap::new(),
@@ -295,13 +299,19 @@ impl Runtime {
     }
 
     fn refer_foundation_into(&mut self, namespace: &str) {
+        let target = self.namespace_registry.find_or_create(namespace);
+        for (protocol, _) in core::FOUNDATION_PROTOCOLS {
+            let protocol_namespace = core::builtin_protocol_namespace(protocol);
+            if let Some(source) = self.namespace_registry.find(&protocol_namespace) {
+                target.alias(protocol, source);
+            }
+        }
         if namespace == "std.foundation" {
             return;
         }
         let Some(foundation) = self.namespace_registry.find("std.foundation") else {
             return;
         };
-        let target = self.namespace_registry.find_or_create(namespace);
         for (name, var) in foundation.mappings() {
             if target.resolve(&name).is_none() {
                 target.map_var(name, var);
@@ -1159,13 +1169,19 @@ mod tests {
         let mut kernel = SessionKernel::new();
         kernel.create_session("alpha").unwrap();
         kernel.create_session("beta").unwrap();
-        assert_eq!(kernel.eval("alpha", "(def answer 41) answer").unwrap(), "41");
+        assert_eq!(
+            kernel.eval("alpha", "(def answer 41) answer").unwrap(),
+            "41"
+        );
         assert_eq!(kernel.eval("beta", "(def answer 6) answer").unwrap(), "6");
         kernel
             .attach_memory_filesystem("alpha", "memory:alpha", "/workspace")
             .unwrap();
         assert_eq!(kernel.filesystem("alpha"), Some("memory:alpha"));
-        assert!(kernel.eval("alpha", "answer").unwrap_err().contains("unbound"));
+        assert!(kernel
+            .eval("alpha", "answer")
+            .unwrap_err()
+            .contains("unbound"));
         assert_eq!(
             kernel.session_names(),
             vec!["ROOT".to_string(), "alpha".to_string(), "beta".to_string()]
@@ -1757,19 +1773,16 @@ mod tests {
     #[test]
     fn foundation_protocols_are_canonical_and_method_names_reject_bangs() {
         let mut runtime = Runtime::new();
-        let contract = include_str!(
-            "../../specs/language/draft/conformance/protocols.edn"
-        );
-        let fixture = include_str!(
-            "../../lib/test-fixtures/std/foundation/protocol_conformance.hal"
-        );
-        assert_eq!(core::FOUNDATION_PROTOCOLS.len(), 59);
+        let contract = include_str!("../../specs/language/draft/conformance/protocols.edn");
+        let fixture =
+            include_str!("../../lib/test-fixtures/std/foundation/protocol_conformance.hal");
+        assert_eq!(core::FOUNDATION_PROTOCOLS.len(), 50);
         assert_eq!(
             core::FOUNDATION_PROTOCOLS
                 .iter()
                 .map(|(_, methods)| methods.len())
                 .sum::<usize>(),
-            106
+            88
         );
         let foundation = runtime
             .namespace_registry
@@ -1794,7 +1807,10 @@ mod tests {
             };
             assert_eq!(descriptor.name, core::builtin_protocol_name(name));
             assert_eq!(descriptor.methods.len(), methods.len());
-            assert!(descriptor.methods.keys().all(|method| !method.ends_with('!')));
+            assert!(descriptor
+                .methods
+                .keys()
+                .all(|method| !method.ends_with('!')));
             assert_eq!(
                 foundation
                     .resolve(&lang::data::Symbol::parse(name))
@@ -1803,23 +1819,47 @@ mod tests {
                 protocol
             );
             for (method, _) in *methods {
-                assert!(
-                    namespace
-                        .resolve(&lang::data::Symbol::parse(method))
-                        .is_some(),
-                    "missing {namespace_name}/{method}"
-                );
-                assert!(
-                    foundation
-                        .resolve(&lang::data::Symbol::parse(&format!("{name}/{method}")))
-                        .is_none(),
-                    "obsolete std.foundation/{name}/{method} must not exist"
-                );
+                let canonical_method = namespace
+                    .resolve(&lang::data::Symbol::parse(method))
+                    .unwrap_or_else(|| panic!("missing {namespace_name}/{method}"))
+                    .deref_value();
+                let aliased_method = foundation
+                    .resolve(&lang::data::Symbol::parse(&format!("{name}/{method}")))
+                    .unwrap_or_else(|| panic!("missing global alias {name}/{method}"))
+                    .deref_value();
+                assert_eq!(aliased_method, canonical_method);
                 assert!(
                     fixture.contains(&format!("({namespace_name}/{method} fixture")),
                     "shared fixture does not directly call {namespace_name}/{method}"
                 );
             }
+        }
+        for protocol in [
+            "IColl",
+            "IMetadata",
+            "IHasRuntime",
+            "IRanged",
+            "IValidate",
+            "IComponentOptions",
+            "IComponentProps",
+            "IComponentQuery",
+            "IComponentTrack",
+        ] {
+            let namespace = core::builtin_protocol_namespace(protocol);
+            assert!(
+                runtime
+                    .eval_text(&format!("{namespace}/{protocol}"))
+                    .unwrap_err()
+                    .contains("unbound symbol"),
+                "{namespace}/{protocol} must not be guest-visible"
+            );
+            assert!(
+                runtime
+                    .eval_text(&format!("std.foundation/{protocol}"))
+                    .unwrap_err()
+                    .contains("unbound symbol"),
+                "std.foundation/{protocol} must not be guest-visible"
+            );
         }
         assert_eq!(
             runtime
@@ -1844,9 +1884,7 @@ mod tests {
         );
         assert_eq!(
             runtime
-                .eval_text(
-                    "(std.protocol.ipromise/state (std.foundation.promise/from 7))",
-                )
+                .eval_text("(std.protocol.ipromise/state (std.foundation.promise/from 7))")
                 .unwrap(),
             ":fulfilled"
         );
@@ -1877,7 +1915,88 @@ mod tests {
             ))
             .unwrap();
         assert!(!result.contains(":pass false"), "{result}");
-        assert_eq!(result.matches(":pass true").count(), 59, "{result}");
+        assert_eq!(result.matches(":pass true").count(), 50, "{result}");
+    }
+
+    #[test]
+    fn shared_foundation_protocol_functionality_fixture_runs_in_the_native_runtime() {
+        let source =
+            include_str!("../../lib/test-fixtures/std/foundation/protocol_functionality.hal");
+        let catalog =
+            include_str!("../../specs/language/draft/conformance/protocol-method-cases.edn");
+        assert_eq!(catalog.matches("{:protocol ").count(), 88);
+        let mut runtime = Runtime::new();
+        let result = runtime.eval_text(source).unwrap();
+        assert!(!result.contains(":pass false"), "{result}");
+        assert_eq!(result.matches(":pass true").count(), 88, "{result}");
+
+        let method_vars = source
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let start = line.find("(protocol-case ")?;
+                line[(start + "(protocol-case ".len())..]
+                    .split_whitespace()
+                    .nth(2)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(method_vars.len(), 88);
+        for method_var in method_vars {
+            let mut segments = method_var.split(['.', '/']);
+            let protocol_namespace = segments.nth(2).expect("protocol namespace");
+            let method = segments.next().expect("protocol method");
+            assert!(
+                catalog.contains(&format!(":method {method} ")),
+                "case catalog is missing {protocol_namespace}/{method}"
+            );
+            let error = runtime.eval_text(&format!("({method_var})")).unwrap_err();
+            assert!(
+                error.contains("protocol/arity"),
+                "{method_var} returned an uncategorized arity error: {error}"
+            );
+        }
+
+        let failure_forms = source
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let start = line.find("'(std.protocol.")? + 1;
+                let form = &line[start..];
+                let mut depth = 0_usize;
+                for (index, character) in form.char_indices() {
+                    match character {
+                        '(' => depth += 1,
+                        ')' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                return Some(form[..=index].to_owned());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                None
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(failure_forms.len(), 88);
+        for failure_form in failure_forms {
+            let call = failure_form.replacen("unsupported", "(UnsupportedUseCase)", 1);
+            let error = runtime.eval_text(&call).unwrap_err();
+            assert!(
+                error.contains("protocol/unsupported-receiver"),
+                "{call} returned an uncategorized dispatch error: {error}"
+            );
+        }
+
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(try (std.protocol.icount/count) false \
+                       (catch Throwable error true))"
+                )
+                .unwrap(),
+            "true"
+        );
     }
 
     #[test]
@@ -2067,12 +2186,7 @@ mod tests {
             .eval_text("(count #{1 2 2})")
             .unwrap_err()
             .contains("Duplicate item"));
-        assert_eq!(
-            runtime
-                .eval_text("(has? #{1 2} 2)")
-                .unwrap(),
-            "true"
-        );
+        assert_eq!(runtime.eval_text("(has? #{1 2} 2)").unwrap(), "true");
         assert_eq!(runtime.eval_text("(conj #{1} 2)").unwrap(), "#{1 2}");
         assert_eq!(runtime.eval_text("(= (set 1 2 1) #{1 2})").unwrap(), "true");
         assert_eq!(runtime.eval_text("(= #{1 2} #{2 1})").unwrap(), "true");
@@ -2312,28 +2426,11 @@ mod tests {
     #[test]
     fn map_membership_keys_and_values_are_portable() {
         let mut runtime = Runtime::new();
+        assert_eq!(runtime.eval_text(r#"(has? {"a" 1} "a")"#).unwrap(), "true");
+        assert_eq!(runtime.eval_text("(has? [1 2] 1)").unwrap(), "true");
+        assert_eq!(runtime.eval_text("(has? [1 2] 2)").unwrap(), "false");
         assert_eq!(
-            runtime
-                .eval_text(r#"(has? {"a" 1} "a")"#)
-                .unwrap(),
-            "true"
-        );
-        assert_eq!(
-            runtime
-                .eval_text("(has? [1 2] 1)")
-                .unwrap(),
-            "true"
-        );
-        assert_eq!(
-            runtime
-                .eval_text("(has? [1 2] 2)")
-                .unwrap(),
-            "false"
-        );
-        assert_eq!(
-            runtime
-                .eval_text(r#"(has? {"a" nil} "a")"#)
-                .unwrap(),
+            runtime.eval_text(r#"(has? {"a" nil} "a")"#).unwrap(),
             "true"
         );
         assert_eq!(
@@ -2377,13 +2474,13 @@ mod tests {
         );
         assert_eq!(
             runtime
-                .eval_text("(let [a (atom 1)] [(compare:set! a 1 2) @a])")
+                .eval_text("(let [a (atom 1)] [(cas! a 1 2) @a])")
                 .unwrap(),
             "[true 2]"
         );
         assert_eq!(
             runtime
-                .eval_text("(let [a (atom 1)] [(compare:set! a 0 2) @a])")
+                .eval_text("(let [a (atom 1)] [(cas! a 0 2) @a])")
                 .unwrap(),
             "[false 1]"
         );
@@ -2404,20 +2501,30 @@ mod tests {
             runtime.eval_text("(let [a (atom 1) seen (atom nil)] (do (watch-add a :log (fn [key ref old new] (reset! seen new))) (watch-remove a :log) (reset! a 2) @seen))").unwrap(),
             "nil"
         );
-        assert_eq!(
-            runtime
-                .eval_text("(watch-add (atom:basic 1) :log (fn [key ref old new] new))")
-                .unwrap_err(),
-            "watch-add expects a standard atom"
-        );
-        assert_eq!(
-            runtime.eval_text("(reset! 1 2)").unwrap_err(),
-            "reset! expects an atom"
-        );
-        assert_eq!(
-            runtime.eval_text("(swap! (atom 1) 2)").unwrap_err(),
-            "swap! expects a function"
-        );
+        assert!(runtime
+            .eval_text("(watch-add (atom:basic 1) :log (fn [key ref old new] new))")
+            .unwrap_err()
+            .contains("watch-add"));
+        assert!(runtime
+            .eval_text("(reset! 1 2)")
+            .unwrap_err()
+            .contains("IReset/reset"));
+        assert!(runtime
+            .eval_text("(swap! (atom 1) 2)")
+            .unwrap_err()
+            .contains("expects a function"));
+        for legacy in [
+            "compare:set!",
+            "compare-and-set!",
+            "add-watch",
+            "remove-watch",
+            "get-watches",
+        ] {
+            assert!(
+                runtime.eval_text(legacy).unwrap_err().contains("unbound"),
+                "{legacy} should not remain public"
+            );
+        }
     }
 
     #[test]
@@ -2509,6 +2616,7 @@ mod tests {
     #[test]
     fn namespace_values_and_operations_match_java_registry_semantics() {
         let mut runtime = Runtime::new();
+        let initial_namespace_count = runtime.namespace_registry.all().len();
         assert_eq!(
             runtime
                 .eval_text("(ns:name (ns:create (quote example.lib)))")
@@ -2527,7 +2635,10 @@ mod tests {
                 .unwrap(),
             "42"
         );
-        assert_eq!(runtime.eval_text("(count (ns:list))").unwrap(), "4");
+        assert_eq!(
+            runtime.eval_text("(count (ns:list))").unwrap(),
+            (initial_namespace_count + 1).to_string()
+        );
         assert_eq!(
             runtime.eval_text("(ns:find (quote missing.lib))").unwrap(),
             "nil"
@@ -3363,23 +3474,11 @@ mod tests {
             "9"
         );
         assert_eq!(
-            runtime
-                .eval_text(r#"(has? {"a" nil} "a")"#)
-                .unwrap(),
+            runtime.eval_text(r#"(has? {"a" nil} "a")"#).unwrap(),
             "true"
         );
-        assert_eq!(
-            runtime
-                .eval_text("(has? [10 20] 1)")
-                .unwrap(),
-            "true"
-        );
-        assert_eq!(
-            runtime
-                .eval_text("(has? [10 20] 10)")
-                .unwrap(),
-            "false"
-        );
+        assert_eq!(runtime.eval_text("(has? [10 20] 1)").unwrap(), "true");
+        assert_eq!(runtime.eval_text("(has? [10 20] 10)").unwrap(), "false");
         assert_eq!(
             runtime
                 .eval_text(r#"(protocol-call IAssoc assoc {"a" 9} "b" 10)"#)
@@ -4099,11 +4198,10 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing :{key}"))
         }
 
-        let manifest = kernel::parse_forms(include_str!(
-            "../../docs/docs/reference/l0-conformance.edn"
-        ))
-        .unwrap()
-        .remove(0);
+        let manifest =
+            kernel::parse_forms(include_str!("../../docs/docs/reference/l0-conformance.edn"))
+                .unwrap()
+                .remove(0);
         let Form::Map(manifest) = manifest else {
             panic!("conformance corpus must be a map")
         };
@@ -4123,7 +4221,9 @@ mod tests {
                     )
                 })
                 .unwrap_or_else(|| panic!("missing conformance case :{id}"));
-            let Form::Map(case) = case else { unreachable!() };
+            let Form::Map(case) = case else {
+                unreachable!()
+            };
             let Form::String(source) = entry(case, "source") else {
                 panic!(":{id} source must be a string")
             };

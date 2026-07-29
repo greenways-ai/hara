@@ -4,6 +4,7 @@
 //! are only activated after a registry and identity client has verified them.
 
 use crate::project::{self, Project};
+use crate::tap::{self, Tap};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{Read, Write};
@@ -45,8 +46,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
             println!("{}", inspect_archive(Path::new(archive))?);
             Ok(())
         }
-        Some("sync") | Some("add") | Some("remove") | Some("update") | Some("publish")
-        | Some("tap") | Some("search") | Some("info") => Err(format!(
+        Some("publish") => publish(&args[1..]),
+        Some("tap") => tap_command(&args[1..]),
+        Some("sync") | Some("add") | Some("remove") | Some("update") | Some("search") | Some("info") => Err(format!(
             "hara package {} requires a configured GitHub registry and identity client; local package commands available now: check, build, inspect",
             args[0]
         )),
@@ -55,7 +57,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 "hara package <check|build|inspect|sync|add|remove|update|publish|tap|search|info>\n\n\
                  check [PATH]                 validate project.edn\n\
                  build [PATH] [--output PATH] build deterministic .harp\n\
-                 inspect ARCHIVE.harp         print package.edn"
+                 inspect ARCHIVE.harp         print package.edn\n\
+                 tap init NAME --registry PATH --identity PATH --identity-root-key ED25519_HEX\n\
+                 tap add NAME --registry URL --identity URL --identity-key SHA256\n\
+                 tap list|remove NAME|verify NAME\n\
+                 publish --tap NAME [--dry-run] [PATH]"
             );
             Ok(())
         }
@@ -64,6 +70,110 @@ pub fn run(args: &[String]) -> Result<(), String> {
 }
 
 fn read_project(path: &Path) -> Result<Project, String> { project::read(path) }
+
+fn tap_command(args: &[String]) -> Result<(), String> {
+    let root = tap::config_root();
+    match args.first().map(String::as_str) {
+        Some("add") => {
+            let name = args.get(1).ok_or_else(|| "tap add requires NAME".to_owned())?;
+            let registry = option_values(args, "--registry");
+            let identity = option_values(args, "--identity");
+            let identity_key = option_value(args, "--identity-key")?;
+            tap::add(&root, Tap { name: name.clone(), registry, identity, identity_key })?;
+            println!("trusted tap {name}");
+            Ok(())
+        }
+        Some("init") => {
+            let name = args.get(1).ok_or_else(|| "tap init requires NAME".to_owned())?;
+            let registry = PathBuf::from(required_option(args, "--registry")?);
+            let identity = PathBuf::from(required_option(args, "--identity")?);
+            let root_key = required_option(args, "--identity-root-key")?;
+            let initialized = tap::initialize(name, &registry, &identity, &root_key)?;
+            tap::add(&root, initialized.tap)?;
+            println!("initialized tap {name}");
+            println!("identity-root fingerprint: {}", initialized.fingerprint);
+            println!("scaffolded registry: {}", registry.display());
+            println!("scaffolded identity: {}", identity.display());
+            Ok(())
+        }
+        Some("remove") => {
+            let name = args.get(1).ok_or_else(|| "tap remove requires NAME".to_owned())?;
+            tap::remove(&root, name)?;
+            println!("removed tap {name}");
+            Ok(())
+        }
+        Some("list") => {
+            for tap in tap::load(&root)?.values() { println!("{} registry={} identity={}", tap.name, tap.registry.join(","), tap.identity.join(",")); }
+            Ok(())
+        }
+        Some("verify") => {
+            let name = args.get(1).ok_or_else(|| "tap verify requires NAME".to_owned())?;
+            let tap = tap::trusted(&root, name)?;
+            let scratch = scratch("verify")?;
+            let result = tap::fetch_verified_policy(&tap, &scratch);
+            let _ = fs::remove_dir_all(&scratch);
+            let policy = result?;
+            println!("tap verify: {} identity={}", tap.name, policy.revision);
+            Ok(())
+        }
+        _ => Err("usage: hara package tap <init|add|remove|list|verify>".into()),
+    }
+}
+
+fn publish(args: &[String]) -> Result<(), String> {
+    let tap_name = option_value(args, "--tap")?;
+    let dry_run = args.iter().any(|arg| arg == "--dry-run");
+    let path = args.iter().skip(1).find(|arg| !arg.starts_with('-') && *arg != &tap_name).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let project = read_project(&path)?;
+    let (coordinate_tap, _) = split_coordinate(&project.id)?;
+    if coordinate_tap != tap_name { return Err(format!("project id {} belongs to tap {coordinate_tap}, not {tap_name}", project.id)); }
+    let trusted_tap = tap::trusted(&tap::config_root(), &tap_name)?;
+    let scratch = scratch("publish")?;
+    let result = publish_inner(&project, &trusted_tap, dry_run, &scratch);
+    let _ = fs::remove_dir_all(&scratch);
+    result
+}
+
+fn publish_inner(project: &Project, trusted_tap: &Tap, dry_run: bool, scratch_root: &Path) -> Result<(), String> {
+    let policy = tap::fetch_verified_policy(trusted_tap, scratch_root)?;
+    let tag = format!("v{}", project.version);
+    tap::git(&project.root, ["tag", "-v", &tag]).map_err(|error| format!("publish requires a valid signed tag {tag}: {error}"))?;
+    let commit = tap::git(&project.root, ["rev-list", "-n", "1", &tag])?;
+    let repository = tap::git(&project.root, ["config", "--get", "remote.origin.url"])?;
+    let archive = project.root.join("target").join(format!("{}-{}.harp", archive_name(&project.id), project.version));
+    build_archive(project, &archive)?;
+    let archive_sha256 = file_sha256(&archive)?;
+    let intent = tap::canonical_intent(&project.id, &project.version.to_string(), &repository, &tag, &commit, &archive_sha256, &trusted_tap.name, &policy.revision);
+    let (key_id, signature) = tap::sign(intent.as_bytes())?;
+    tap::authorize(&policy, &key_id, &project.id, intent.as_bytes(), &signature)?;
+    if dry_run {
+        println!("publish verified: {} {} tap={} archive=sha256:{}", project.id, project.version, trusted_tap.name, archive_sha256);
+        return Ok(());
+    }
+    let registry = scratch_root.join("registry");
+    tap::clone_first(&trusted_tap.registry, &registry, "registry")?;
+    let branch = format!("requests/{}/{}", project.id.replace(':', "-").replace('/', "-"), project.version);
+    tap::git(&registry, ["checkout", "-b", &branch])?;
+    let request = registry.join("requests").join(&trusted_tap.name).join(project.id.split(':').nth(1).unwrap_or(&project.id));
+    fs::create_dir_all(&request).map_err(io_error)?;
+    let base = format!("{}-{}", archive_name(&project.id), project.version);
+    fs::write(request.join(format!("{base}.publisher-intent.edn")), &intent).map_err(io_error)?;
+    fs::write(request.join(format!("{base}.publisher-intent.sig")), format!("{{:key/id \"{key_id}\" :signature \"{signature}\"}}\n")).map_err(io_error)?;
+    tap::git(&registry, ["add", "requests"])?;
+    tap::git(&registry, ["commit", "-m", &format!("request {} {}", project.id, project.version)])?;
+    tap::git(&registry, ["push", "origin", &format!("HEAD:{branch}")])?;
+    let output = std::process::Command::new("gh").current_dir(&registry).args(["pr", "create", "--head", &branch, "--title", &format!("Publish {} {}", project.id, project.version), "--body", "Signed Hara package publication request."]).output().map_err(|error| format!("request branch pushed but cannot start gh pr create: {error}"))?;
+    if !output.status.success() { return Err(format!("request branch pushed but GitHub PR creation failed: {}", String::from_utf8_lossy(&output.stderr).trim())); }
+    println!("publish requested: {}", String::from_utf8_lossy(&output.stdout).trim());
+    Ok(())
+}
+
+fn option_value(args: &[String], flag: &str) -> Result<String, String> { let index = args.iter().position(|arg| arg == flag).ok_or_else(|| format!("publish requires {flag}"))?; args.get(index + 1).cloned().ok_or_else(|| format!("{flag} requires a value")) }
+fn required_option(args: &[String], flag: &str) -> Result<String, String> { let index = args.iter().position(|arg| arg == flag).ok_or_else(|| format!("tap init requires {flag}"))?; args.get(index + 1).cloned().ok_or_else(|| format!("{flag} requires a value")) }
+fn option_values(args: &[String], flag: &str) -> Vec<String> { args.iter().enumerate().filter(|(_, value)| value.as_str() == flag).filter_map(|(index, _)| args.get(index + 1).cloned()).collect() }
+fn split_coordinate(value: &str) -> Result<(&str, &str), String> { let (tap, package) = value.split_once(':').ok_or_else(|| format!("package coordinate must use TAP:owner/name: {value}"))?; if tap.is_empty() || package.is_empty() || package.contains(':') { return Err(format!("invalid tap-qualified package coordinate: {value}")); } Ok((tap, package)) }
+fn scratch(label: &str) -> Result<PathBuf, String> { let root = std::env::temp_dir().join(format!("hara-{label}-{}", std::process::id())); if root.exists() { fs::remove_dir_all(&root).map_err(io_error)?; } fs::create_dir_all(&root).map_err(io_error)?; Ok(root) }
+fn file_sha256(path: &Path) -> Result<String, String> { Ok(hex(&Sha256::digest(fs::read(path).map_err(io_error)?))) }
 
 fn build_archive(project: &Project, output: &Path) -> Result<(), String> {
     let mut entries = Vec::new();
@@ -272,7 +382,7 @@ mod tests {
         ));
         fs::create_dir_all(root.join("src/example")).unwrap();
         fs::write(root.join("src/example/main.hal"), "(ns example.main) 42\n").unwrap();
-        fs::write(root.join("project.edn"), "{:hara/type :project :hara/version \"1.0.0\" :project/id example/app :project/version \"1.2.3\" :project/source-paths [\"src\"] :project/test-paths [\"test\"] :project/extension-paths [\"extensions\"] :project/capabilities #{} :project/dependencies {\"hara/graph\" {:version \"^1.2.0\"}}}").unwrap();
+        fs::write(root.join("project.edn"), "{:hara/type :project :hara/version \"1.0.0\" :project/id example/app :project/version \"1.2.3\" :project/source-paths [\"src\"] :project/test-paths [\"test\"] :project/extension-paths [\"extensions\"] :project/capabilities #{} :project/dependencies {\"hara:hara/graph\" {:version \"^1.2.0\"}}}").unwrap();
         root
     }
 

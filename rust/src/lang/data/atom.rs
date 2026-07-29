@@ -1,7 +1,7 @@
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-use crate::lang::protocol::{IDeref, IDisplay, IReset, IValidate, IWatch};
+use crate::lang::protocol::{IDeref, IDisplay, IReset, IWatch};
 
 type Validator<V> = Arc<dyn Fn(&V) -> bool + Send + Sync>;
 type Watch<V> = Arc<dyn Fn(&WatchEntry<V>) + Send + Sync>;
@@ -127,15 +127,6 @@ impl<V: Clone> IDeref for Atom<V> {
         self.deref_value()
     }
 }
-impl<V> IValidate<V> for Atom<V> {
-    type Error = String;
-
-    fn validate(&self, value: &V) -> Result<(), Self::Error> {
-        self.accepts(value)
-            .then_some(())
-            .ok_or_else(|| "atom validator rejected value".into())
-    }
-}
 impl<V: Clone> IReset<V> for Atom<V> {
     type Error = String;
 
@@ -178,7 +169,7 @@ impl<V> fmt::Debug for Atom<V> {
 #[cfg(test)]
 mod tests {
     use super::Atom;
-    use crate::lang::protocol::{IReset, IValidate, IWatch};
+    use crate::lang::protocol::{IReset, IWatch};
     use std::sync::{Arc, Mutex};
     #[test]
     fn validates_swaps_and_notifies() {
@@ -194,7 +185,6 @@ mod tests {
         assert_eq!(atom.swap(|v| v + 2).unwrap(), 3);
         assert!(atom.reset(-1).is_err());
         assert_eq!(&*seen.lock().unwrap(), &[(1, 3)]);
-        assert!(IValidate::validate(&atom, &4).is_ok());
         assert_eq!(IReset::reset(&atom, 4).unwrap(), 4);
         IWatch::remove_watch(&atom, &"test".to_string());
         IWatch::notify_watches(&atom, 4, 5);

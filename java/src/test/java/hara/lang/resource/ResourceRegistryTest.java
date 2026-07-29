@@ -16,7 +16,7 @@ public class ResourceRegistryTest {
     registry.add(new ResourceSpec("test", ResourceMode.SHARED, null, options -> component));
     ResourceInstance instance = registry.resolve("test", "default", "one", null);
     assertNotNull(instance);
-    assertTrue(instance.started());
+    assertTrue(instance.isStarted());
     assertEquals(1, component.starts);
     registry.stop("test", "default", "one");
     assertEquals(1, component.stops);
