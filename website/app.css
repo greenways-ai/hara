@@ -707,8 +707,8 @@ body[data-workspace="1"] .workspace-track { transform: none; }
 .hero-callout { position: relative; z-index: 2; }
 
 .hero-callout {
-  width: clamp(190px, 20vw, 290px);
-  height: clamp(86px, 9vw, 112px);
+  width: clamp(150px, 15vw, 210px);
+  height: clamp(60px, 6.3vw, 78px);
   display: grid;
   grid-template-areas: "stage";
   justify-items: stretch;
@@ -776,8 +776,6 @@ body[data-workspace="1"] .workspace-track { transform: none; }
   cursor: pointer;
   transition: transform .5s cubic-bezier(.16, 1, .3, 1), letter-spacing .5s, opacity .3s;
 }
-
-.start-mark { width: 5.6em; height: 4.5em; flex: 0 0 auto; object-fit: contain; filter: brightness(0); }
 
 .start-button i { font-size: 1.8em; font-style: normal; font-weight: 300; }
 
@@ -2046,8 +2044,7 @@ body[data-workspace="1"] .source-toggle { display: none; }
     font-size: .9rem;
     justify-self: start;
   }
-  .hero-callout { width: min(220px, calc(100vw - 3rem)); height: 64px; }
-  .start-mark { width: 3.9em; height: 3.1em; }
+  .hero-callout { width: min(180px, calc(100vw - 3rem)); height: 48px; }
   .launcher-grid { grid-template-columns: repeat(2, 1fr); }
   .app-tile { min-height: 96px; }
   .template-grid { grid-template-columns: repeat(2, 1fr); }
