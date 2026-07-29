@@ -1088,14 +1088,19 @@ function installWorkspaceNavigation() {
       if (event.key === "Escape" && !elements.backgroundMenu.hidden) closeBackgroundMenu();
     });
   }
-  query("[data-start]").addEventListener("click", () => {
-    window.location.href = query("[data-start]").dataset.playgroundUrl;
+  const startButton = query("[data-start]");
+  const previousButton = query("[data-workspace-prev]");
+  const nextButton = query("[data-workspace-next]");
+  previousButton.disabled = true;
+  nextButton.disabled = true;
+  startButton.disabled = nextButton.disabled;
+  startButton.addEventListener("click", () => {
+    if (startButton.disabled) return;
+    nextButton.click();
   });
   queryAll("[data-home]").forEach((button) => button.addEventListener("click", () => {
     transitionHome().catch((error) => toast(errorText(error), true));
   }));
-  query("[data-workspace-prev]").disabled = true;
-  query("[data-workspace-next]").disabled = true;
 
   const viewport = query(".workspace-viewport");
   let swipeStart = null;
