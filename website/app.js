@@ -181,6 +181,7 @@ const elements = {
   kernelStatisticsGrid: query("[data-kernel-statistics-grid]"),
   kernelStatisticsState: query("[data-kernel-state]"),
   kernelStatisticsUpdated: query("[data-kernel-statistics-updated]"),
+  backgroundPicker: query("[data-background-picker]"),
   backgroundSource: query("[data-background-source]"),
   backgroundMenu: query("[data-background-menu]"),
   backgroundMenuToggle: query("[data-background-menu-toggle]"),
@@ -2428,6 +2429,7 @@ async function bootRuntime() {
     const files = await listFiles();
     if (!files.length) await seedFiles();
     setRuntimeStatus("WASM // LIVE", "live");
+    elements.backgroundPicker.hidden = false;
     elements.editorStatus.textContent = "READY";
     const preferred = localStorage.getItem(ACTIVE_FILE_KEY);
     const path = state.files.includes(preferred) ? preferred :

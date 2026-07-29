@@ -18,6 +18,7 @@ test("www is a single Home screen with external site navigation", async ({ page 
   );
   await expect(page.locator("[data-workspace-prev]")).toBeDisabled();
   await expect(page.locator("[data-workspace-next]")).toBeDisabled();
+  await expect(page.locator("[data-background-picker]")).toBeHidden();
   await expect(page.locator(".desktop-workspace")).toBeHidden();
 
   await page.locator("[data-launcher-toggle]").click();
@@ -62,8 +63,7 @@ test("phone shell keeps the single-screen controls unobscured", async ({ page })
   await expect(page.locator(".system-bottom-bar [data-workspace-prev]")).toBeVisible();
   await expect(page.locator(".system-bottom-bar [data-workspace-next]")).toBeVisible();
   await expect(page.locator(".system-bottom-bar [data-runtime-toggle]")).toBeVisible();
-  await expect(page.locator("[data-background-source]")).toBeVisible();
-  await expect(page.locator("[data-background-source]")).toBeVisible();
+  await expect(page.locator("[data-background-picker]")).toBeHidden();
   await expect(page.locator(".desktop-workspace")).toBeHidden();
   await expect(page.locator("[data-workspace-prev]")).toBeDisabled();
   await expect(page.locator("[data-workspace-next]")).toBeDisabled();
