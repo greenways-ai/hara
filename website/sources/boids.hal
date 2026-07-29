@@ -140,7 +140,7 @@
             next (step-flock! current width height)]
         (do
           (co/await
-            (draw/render
+            (draw/publish
               "canvas/background"
               {:type :canvas-2d
                :background "#02050b"

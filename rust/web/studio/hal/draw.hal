@@ -6,3 +6,6 @@
 
 (defn render [canvas frame]
   (host/call "studio.canvas" "render" (node/current-id) canvas frame))
+
+(defn publish [canvas frame]
+  (host/call "studio.canvas" "publish" (node/current-id) canvas frame))
