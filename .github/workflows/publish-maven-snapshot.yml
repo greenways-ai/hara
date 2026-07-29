@@ -12,14 +12,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - name: Check out conformance specifications and documentation
+      run: git submodule update --init specs docs
+    - name: Set up Rust WASM toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+    - name: Build WASM test fixtures
+      run: |
+        ./scripts/build-hara-wasm-raw
+        ./scripts/build-crypto-hash-sha256-wasm
     - uses: actions/setup-java@v4
       with:
         distribution: temurin
         java-version: '21'
         cache: maven
         server-id: central
-        server-username: MAVEN_CENTRAL_USERNAME
-        server-password: MAVEN_CENTRAL_PASSWORD
+        server-username: CENTRAL_USERNAME
+        server-password: CENTRAL_PASSWORD
     - name: Verify snapshot version
       run: |
         VERSION=$(mvn -q -f java/pom.xml help:evaluate -Dexpression=project.version -DforceStdout)
@@ -30,5 +40,5 @@ jobs:
     - name: Test and publish snapshot
       run: mvn -B -f java/pom.xml deploy
       env:
-        MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-        MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+        CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+        CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
