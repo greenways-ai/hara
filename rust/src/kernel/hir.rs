@@ -450,4 +450,46 @@ mod tests {
         bytes[last] = bytes[last].wrapping_add(1);
         assert!(decode_hir(&bytes).unwrap_err().contains("checksum"));
     }
+
+    #[test]
+    fn decodes_the_truffle_portable_format_golden_artifact() {
+        // This is the canonical v1 artifact emitted by Truffle's
+        // HirArtifactTest.goldenBytesLockThePortableFormat.  Keep this test
+        // independent of Rust's test-only encoder: it is the cross-runtime
+        // compatibility boundary, rather than a Rust encoder/decoder
+        // round-trip.
+        let bytes = hex_bytes(concat!(
+            "48495200000100010000014b7640e14591506ea3c5e004467edc15b2ea8bb319",
+            "3b48a4596d99c242ca5531a000000001740000000174e3b0c44298fc1c149afb",
+            "f4c8996fb92427ae41e4649b934ca495991b7852b85500000012000102030000",
+            "00000000002a044004000000000000050000001e313233343536373839303132",
+            "3334353637383930313233343536373839300600000007332e31343135390700",
+            "00000668c3a172c3a008000000780901000000056d792e6e73000000066d792d",
+            "73796d000a00000000026b77000b000000020300000000000000010700000001",
+            "61000c00000002030000000000000001070000000161000d0000000203000000",
+            "0000000001070000000161030000000000000002070000000162000e00000002",
+            "030000000000000001030000000000000002000f000000020300000000000000",
+            "0207000000016203000000000000000107000000016100100000000203000000",
+            "0000000002030000000000000001001100000003612b62",
+        ));
+
+        let module = decode_hir(&bytes).unwrap();
+        assert_eq!(module.namespace, "t");
+        assert_eq!(module.resource, "t");
+        assert_eq!(module.forms.len(), 18);
+        assert_eq!(module.forms[0], Form::Nil);
+        assert_eq!(module.forms[3], Form::Number(42));
+        assert_eq!(module.forms[7], Form::String("hárà".into()));
+        assert_eq!(module.forms[8], Form::Character('x'));
+        assert_eq!(module.forms[9], Form::Symbol("my.ns/my-sym".into()));
+        assert_eq!(module.forms[10], Form::Keyword("kw".into()));
+        assert_eq!(module.forms[17], Form::Regex("a+b".into()));
+    }
+
+    fn hex_bytes(hex: &str) -> Vec<u8> {
+        (0..hex.len())
+            .step_by(2)
+            .map(|index| u8::from_str_radix(&hex[index..index + 2], 16).unwrap())
+            .collect()
+    }
 }
