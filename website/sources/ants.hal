@@ -19,7 +19,7 @@
 (def pher-unit 100)
 (def evap-percent 99)
 (def evap-cells-per-frame 256)
-(def pher-visible (* 2 pher-unit))
+(def pher-visible (/ pher-unit 2))
 (def home-off 20)
 
 ;; Directions are 0-7, starting at north and going clockwise.
@@ -469,12 +469,34 @@
                              (cell-number (cell-at world location) :food)])))
       events)))
 
+(defn maybe-pheromone [world location events]
+  (let [amount (cell-number (cell-at world location) :pher)]
+    (if (> amount pher-visible)
+      (conj events [(nth location 0) (nth location 1) amount])
+      events)))
+
+(defn pheromone-events [world ants]
+  ;; Sample active pheromone near moving ants, instead of scanning all 6,400
+  ;; cells before every render.
+  (loop [index 0 events []]
+    (if (< index (count ants))
+      (let [location (get (nth ants index) :loc)
+            nearby
+            (loop [direction 0 sampled (maybe-pheromone world location events)]
+              (if (< direction 8)
+                (recur (inc direction)
+                       (maybe-pheromone world (delta-loc location direction) sampled))
+                sampled))]
+        (recur (inc index) nearby))
+      events)))
+
 (defn render-events [simulation]
   {:type :canvas-2d
    :background "#071820"
    :stateful {:kind :ants
               :ants (ant-events (get simulation :ants))
-              :food (food-events (get simulation :world) (get simulation :active-food))}})
+              :food (food-events (get simulation :world) (get simulation :active-food))
+              :musk (pheromone-events (get simulation :world) (get simulation :ants))}})
 
 (node/start
   (fn []

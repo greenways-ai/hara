@@ -137,6 +137,17 @@ test("stateful Tron frames retain trails in the canvas host", () => {
   assert.ok(calls.filter(([name]) => name === "lineTo").length >= 2);
 });
 
+test("stateful Boid frames retain tails without replaying a published event", () => {
+  const { runtime, callbacks } = fixture();
+  runtime.claim("node/boids@1", "canvas/background");
+  const frame = new Map([["type", { constructor: { name: "HtaKeyword" }, name: "canvas-2d" }], ["stateful", {
+    kind: { constructor: { name: "HtaKeyword" }, name: "boids" }, init: true, boids: [[10, 20], [30, 40]]
+  }]]);
+  runtime.publish("node/boids@1", "canvas/background", frame);
+  callbacks.values().next().value(16);
+  assert.deepEqual(runtime.canvases.get("canvas/background").stateful.tails[0], [[10, 20], [10, 20]]);
+});
+
 test("published frames continue rendering from the latest event", () => {
   const { runtime, callbacks, calls } = fixture();
   runtime.claim("node/tron@1", "canvas/background");
