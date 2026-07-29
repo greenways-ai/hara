@@ -1,0 +1,275 @@
+.kernel-story[hidden] { display: none; }
+
+.kernel-story {
+  position: fixed;
+  z-index: 40;
+  inset: 0 0 var(--dock-height);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.kernel-story::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(2, 4, 8, .98) 0%, rgba(2, 4, 8, .92) 34%, rgba(2, 4, 8, .44) 55%, rgba(2, 4, 8, .08) 100%),
+    linear-gradient(180deg, rgba(2, 4, 8, .2), rgba(2, 4, 8, .58));
+  pointer-events: none;
+}
+
+.story-screen {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-items: center;
+  padding: clamp(54px, 7vw, 104px);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(32px);
+  transition: opacity .42s ease, transform .58s cubic-bezier(.16, 1, .3, 1), visibility .42s;
+}
+
+.story-screen.is-active {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+
+.story-copy {
+  position: relative;
+  z-index: 2;
+  width: min(610px, 44vw);
+  max-height: calc(100dvh - var(--dock-height) - 72px);
+  overflow: auto;
+  padding: clamp(20px, 2.5vw, 34px);
+  border: 1px solid rgba(65, 245, 228, .2);
+  background: rgba(3, 8, 15, .76);
+  box-shadow: 0 24px 90px rgba(0, 0, 0, .48), inset 0 1px rgba(255, 255, 255, .035);
+  backdrop-filter: blur(18px) saturate(1.16);
+  pointer-events: auto;
+  scrollbar-width: thin;
+}
+
+.story-step,
+.story-eyebrow {
+  margin: 0;
+  color: var(--cyan);
+  font-size: .58rem;
+  letter-spacing: .22em;
+}
+
+.story-copy h2 {
+  max-width: 13ch;
+  margin: .34em 0 .28em;
+  color: #edffff;
+  font-family: var(--display);
+  font-size: clamp(2.45rem, 5.6vw, 5.5rem);
+  font-weight: 850;
+  line-height: .9;
+  letter-spacing: -.035em;
+  text-wrap: balance;
+}
+
+.story-copy > p:not(.story-step):not(.story-eyebrow) {
+  max-width: 62ch;
+  margin: 0;
+  color: #a8bed0;
+  font-size: clamp(.76rem, 1.05vw, .94rem);
+  line-height: 1.72;
+}
+
+.story-principle {
+  margin: 1.2rem 0 0;
+  padding: .78rem .9rem;
+  border-left: 2px solid var(--cyan);
+  color: var(--cyan-bright);
+  background: rgba(65, 245, 228, .055);
+  font-size: .68rem;
+  line-height: 1.55;
+  letter-spacing: .07em;
+}
+
+.story-capabilities,
+.story-features {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 1.2rem;
+  background: rgba(65, 245, 228, .13);
+  border: 1px solid rgba(65, 245, 228, .13);
+}
+
+.story-capability,
+.story-feature {
+  min-width: 0;
+  padding: .82rem;
+  background: rgba(3, 8, 15, .94);
+}
+
+.story-capability strong,
+.story-feature strong {
+  display: block;
+  margin-bottom: .32rem;
+  color: #eaffff;
+  font-size: .62rem;
+  letter-spacing: .12em;
+}
+
+.story-capability span,
+.story-feature span {
+  display: block;
+  color: var(--muted);
+  font-size: .56rem;
+  line-height: 1.5;
+}
+
+.story-code {
+  margin: 1.15rem 0 0;
+  padding: .9rem 1rem;
+  overflow: auto;
+  border: 1px solid rgba(156, 123, 255, .25);
+  background: rgba(5, 4, 13, .9);
+  color: #bafff8;
+  font-size: clamp(.52rem, .72vw, .65rem);
+  line-height: 1.58;
+  white-space: pre;
+}
+
+.story-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .42rem;
+  margin-top: 1.15rem;
+  color: var(--muted);
+  font-size: .56rem;
+  letter-spacing: .08em;
+}
+
+.story-flow strong {
+  padding: .48rem .58rem;
+  color: #eaffff;
+  border: 1px solid rgba(156, 123, 255, .25);
+  background: rgba(13, 10, 28, .82);
+}
+
+.story-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .65rem;
+  margin-top: 1.2rem;
+}
+
+.story-actions button,
+.story-actions a {
+  min-height: 40px;
+  padding: 0 .92rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cyan-bright);
+  background: rgba(65, 245, 228, .065);
+  border: 1px solid rgba(65, 245, 228, .28);
+  text-decoration: none;
+  font: 700 .58rem var(--mono);
+  letter-spacing: .12em;
+  cursor: pointer;
+}
+
+.story-actions button:hover,
+.story-actions a:hover {
+  color: #020408;
+  background: var(--cyan);
+}
+
+.story-actions .story-primary {
+  color: #020408;
+  background: linear-gradient(110deg, var(--cyan-bright), var(--cyan));
+}
+
+.story-screen[data-story-screen="2"] .story-copy {
+  border-color: rgba(156, 123, 255, .28);
+}
+
+.story-screen[data-story-screen="2"] .story-step,
+.story-screen[data-story-screen="2"] .story-eyebrow {
+  color: #b69bff;
+}
+
+.story-screen[data-story-screen="2"] .story-principle {
+  border-left-color: var(--violet);
+  color: #d8ccff;
+  background: rgba(156, 123, 255, .06);
+}
+
+.story-screen[data-story-screen="2"] .story-actions .story-primary {
+  background: linear-gradient(110deg, #d8ccff, var(--violet));
+}
+
+body[data-story-screen] .floating-background-picker {
+  opacity: 0;
+  pointer-events: none;
+}
+
+body[data-story-screen] .welcome-workspace {
+  visibility: hidden;
+}
+
+body[data-story-screen] .atmosphere {
+  background: radial-gradient(circle at 72% 48%, transparent 0 24%, rgba(2, 4, 8, .18) 62%, rgba(2, 4, 8, .72) 100%);
+}
+
+/* Re-enable the existing live workspace once a project is opened. */
+.workspace-track {
+  transition: transform .65s cubic-bezier(.16, 1, .3, 1);
+}
+
+body[data-workspace="1"] .workspace-track {
+  transform: translate3d(-100vw, 0, 0);
+}
+
+body[data-workspace="1"] .desktop-workspace {
+  display: grid !important;
+}
+
+body[data-workspace="1"] .system-bottom-bar .project-tabs {
+  display: flex !important;
+}
+
+@media (max-width: 900px) {
+  .kernel-story::before {
+    background: linear-gradient(180deg, rgba(2, 4, 8, .93), rgba(2, 4, 8, .64));
+  }
+
+  .story-screen {
+    align-items: end;
+    padding: 18px 14px 18px;
+  }
+
+  .story-copy {
+    width: 100%;
+    max-height: min(72dvh, calc(100dvh - var(--dock-height) - 24px));
+    padding: 18px;
+  }
+
+  .story-copy h2 {
+    font-size: clamp(2.2rem, 12vw, 4rem);
+  }
+}
+
+@media (max-width: 560px) {
+  .story-capabilities,
+  .story-features {
+    grid-template-columns: 1fr;
+  }
+
+  .story-code {
+    font-size: .5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .story-screen,
+  .workspace-track { transition: none; }
+}
