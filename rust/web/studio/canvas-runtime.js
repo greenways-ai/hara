@@ -503,7 +503,7 @@ function renderStateful2d(slot, context, stateful, width, height) {
       position[0] = start[0] + (target[0] - start[0]) * progress;
       position[1] = start[1] + (target[1] - start[1]) * progress;
       const trail = slot.stateful.trails[cycle] ?? (slot.stateful.trails[cycle] = []);
-      trail.push([position[0], position[1]]); trimTronTrail(trail, width, height);
+      appendTronTrailPoint(trail, position[0], position[1]); trimTronTrail(trail, width, height);
     }
   }
   const trails = slot.stateful.trails;
@@ -573,7 +573,7 @@ function renderBoidsState(slot, context, stateful, width, height) {
       tails: boids.map(([x, y]) => [[Number(x), Number(y)]]),
       positions: boids.map(([x, y]) => [Number(x), Number(y)]),
       actualPositions: boids.map(([x, y]) => [Number(x), Number(y)]),
-      velocities: boids.map(([, , vx = 0, vy = 0]) => [Number(vx) * .06, Number(vy) * .06]),
+      velocities: boids.map(() => [0, 0]),
       lastTime: canvasNow(),
       lastEventTime: canvasNow(),
       lastEvent: null
@@ -585,7 +585,7 @@ function renderBoidsState(slot, context, stateful, width, height) {
     for (let index = 0; index < boids.length; index += 1) {
       const [x, y, vx = 0, vy = 0] = boids[index];
       const tail = slot.stateful.tails[index];
-      tail.push([Number(x), Number(y)]);
+      if (!reset) tail.push([Number(x), Number(y)]);
       while (tail.length > 18) tail.shift();
       const previous = slot.stateful.actualPositions[index] ?? [Number(x), Number(y)];
       slot.stateful.positions[index] = [Number(x), Number(y)];
@@ -628,6 +628,11 @@ function trimTronTrail(trail, width, height) {
     trail.splice(0, index);
     return;
   }
+}
+
+function appendTronTrailPoint(trail, x, y) {
+  const previous = trail.at(-1);
+  if (!previous || Math.hypot(x - previous[0], y - previous[1]) >= 3) trail.push([x, y]);
 }
 
 function drawTronTrail(context, points, color, headX, headY) {
