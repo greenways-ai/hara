@@ -19,6 +19,9 @@ const HANDLE: u8 = 12;
 const NAMESPACE: u8 = 13;
 const VAR: u8 = 14;
 const F64: u8 = 15;
+const ATOM: u8 = 16;
+const ARRAY: u8 = 17;
+const OBJECT: u8 = 18;
 
 pub fn encode(value: &Value) -> Result<Vec<u8>, String> {
     let mut output = MAGIC.to_vec();
@@ -137,7 +140,23 @@ fn encode_bare(value: &Value, output: &mut Vec<u8>) -> Result<(), String> {
         Value::Var(value) => {
             output.push(VAR);
             encode_bare(&Value::Symbol(value.symbol().clone()), output)?;
+            if encode_bare(&value.deref_value(), output).is_err() {
+                encode_bare(&Value::Nil, output)?;
+            }
+        }
+        Value::Atom(value) => {
+            output.push(ATOM);
             encode_bare(&value.deref_value(), output)?;
+        }
+        Value::Array(values) => encode_sequence(ARRAY, values.borrow().iter(), output)?,
+        Value::Object(values) => {
+            let values = values.borrow();
+            output.push(OBJECT);
+            encode_len(values.len(), output)?;
+            for (key, value) in values.iter() {
+                encode_bare(&Value::String(key.clone()), output)?;
+                encode_bare(value, output)?;
+            }
         }
         Value::Extension(value) => {
             output.push(HANDLE);
@@ -242,6 +261,26 @@ impl Reader<'_> {
                 };
                 let value = self.value()?;
                 Ok(Value::Var(crate::kernel::Var::new(symbol.as_str(), value)))
+            }
+            ATOM => Ok(Value::Atom(Box::new(crate::core::RuntimeAtom::new(
+                self.value()?,
+                true,
+            )))),
+            ARRAY => Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+                self.sequence()?,
+            )))),
+            OBJECT => {
+                let size = self.len()?;
+                let mut values = Vec::with_capacity(size);
+                for _ in 0..size {
+                    let Value::String(key) = self.value()? else {
+                        return Err("hta/value-malformed: invalid object key".into());
+                    };
+                    values.push((key, self.value()?));
+                }
+                Ok(Value::Object(std::rc::Rc::new(std::cell::RefCell::new(
+                    values,
+                ))))
             }
             HANDLE => {
                 let provider = String::from_utf8(self.data()?.to_vec())

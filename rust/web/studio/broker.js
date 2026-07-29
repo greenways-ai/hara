@@ -5,7 +5,8 @@ const NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
 
 /**
  * Owns studio kernel lifecycle: one kernel = one Web Worker running one raw
- * HTA wasm instance. Mirrors the JVM `HaraSessionBroker`
+ * HTA wasm instance, and each kernel owns many isolated evaluator sessions.
+ * Mirrors the JVM `HaraSessionBroker`
  * (java/src/main/java/hara/truffle/HaraSessionBroker.java) — same name
  * normalization (reject, never lowercase), same error codes
  * (INVALID_SESSION_NAME, SESSION_EXISTS, NO_SESSION, ROOT_CANNOT_CLOSE), and
@@ -70,10 +71,58 @@ export class KernelBroker {
     return kernel.context.call("eval", [source]);
   }
 
+  async createSession(kernelName, sessionName, { filesystem = null, bootstrap } = {}) {
+    const kernel = await this.require(kernelName);
+    sessionName = KernelBroker.normalizeName(sessionName);
+    if (sessionName === ROOT || kernel.sessions?.has(sessionName)) {
+      throw new Error(`SESSION_EXISTS ${sessionName}`);
+    }
+    await kernel.context.call("session/create", [sessionName]);
+    kernel.sessions ??= new Set([ROOT]);
+    kernel.sessions.add(sessionName);
+    try {
+      if (filesystem !== null) {
+        await kernel.context.session(sessionName).attachFilesystem(filesystem);
+      }
+      if (bootstrap !== undefined) {
+        await kernel.context.call("session/eval", [sessionName, bootstrap]);
+      }
+      return { kernel: kernelName, name: sessionName, context: kernel.context };
+    } catch (error) {
+      await kernel.context.call("session/close", [sessionName]).catch(() => {});
+      kernel.sessions.delete(sessionName);
+      throw error;
+    }
+  }
+
+  async evalSession(kernelName, sessionName, source) {
+    const kernel = await this.require(kernelName);
+    if (sessionName !== ROOT && !kernel.sessions?.has(sessionName)) {
+      throw new Error(`NO_SESSION ${sessionName}`);
+    }
+    return kernel.context.call("session/eval", [sessionName, source]);
+  }
+
+  async closeSession(kernelName, sessionName) {
+    const kernel = await this.require(kernelName);
+    sessionName = KernelBroker.normalizeName(sessionName);
+    if (sessionName === ROOT) throw new Error("ROOT_CANNOT_CLOSE");
+    if (!kernel.sessions?.has(sessionName)) throw new Error(`NO_SESSION ${sessionName}`);
+    await kernel.context.call("session/close", [sessionName]);
+    kernel.sessions.delete(sessionName);
+    return true;
+  }
+
+  async listSessions(kernelName) {
+    const kernel = await this.require(kernelName);
+    return kernel.context.call("session/list", []);
+  }
+
   /**
-   * Evaluate an ns+ document in an isolated candidate kernel. Only a
+   * Evaluate an ns+ document in an isolated candidate session. Only a
    * successful candidate becomes active; the previous generation is then
-   * terminated. Hidden document kernels never appear in list()/size().
+   * closed. Document sessions share the selected kernel's worker and never
+   * appear in the top-level kernel list.
    */
   async evalDocument(name, documentId, source, { nodeId = null } = {}) {
     const prepared = await this.prepareDocument(name, documentId, source, { nodeId });
@@ -94,10 +143,20 @@ export class KernelBroker {
     const compiled = compileAnonymousDocument(source, { documentId, nodeId });
     const key = `${name}\u0000${documentId}`;
     const generation = (this.documentGenerations.get(key) ?? 0) + 1;
-    const hiddenName = `DOC.${safeName(name)}.${safeName(documentId)}.${generation}`;
-    const candidate = await this.boot(hiddenName);
+    const sessionName = `DOC.${safeName(documentId)}.${generation}`;
+    const kernel = await this.require(name);
+    await this.createSession(name, sessionName);
+    const context = kernel.context.session(sessionName);
+    const candidate = {
+      name: sessionName,
+      sessionName,
+      context,
+      worker: kernel.worker,
+      sharedWorker: true,
+      kernelRecord: kernel
+    };
     try {
-      const value = await candidate.context.call("eval", [compiled.source]);
+      const value = await context.call("eval", [compiled.source]);
       return {
         ...candidate,
         key,
@@ -110,8 +169,8 @@ export class KernelBroker {
         prepared: true
       };
     } catch (error) {
-      candidate.context?.close?.();
-      candidate.worker?.terminate?.();
+      await context.close();
+      kernel.sessions?.delete(sessionName);
       throw error;
     }
   }
@@ -122,16 +181,14 @@ export class KernelBroker {
     candidate.prepared = false;
     this.documents.set(candidate.key, candidate);
     this.documentGenerations.set(candidate.key, candidate.generation);
-    previous?.context?.close?.();
-    previous?.worker?.terminate?.();
+    closeDocumentSession(previous);
     return documentResult(candidate);
   }
 
   discardDocument(candidate) {
     if (!candidate?.prepared) return false;
     candidate.prepared = false;
-    candidate.context?.close?.();
-    candidate.worker?.terminate?.();
+    closeDocumentSession(candidate);
     return true;
   }
 
@@ -150,8 +207,7 @@ export class KernelBroker {
     const document = this.documents.get(key);
     if (!document) return false;
     this.documents.delete(key);
-    document.context?.close?.();
-    document.worker?.terminate?.();
+    closeDocumentSession(document);
     return true;
   }
 
@@ -220,7 +276,7 @@ export class KernelBroker {
       worker?.terminate?.();
       throw error;
     }
-    return { name, context, worker };
+    return { name, context, worker, sessions: new Set([ROOT]) };
   }
 
   async afterCreate(kernel) {
@@ -387,6 +443,14 @@ function safeName(value) {
   return String(value).replace(/[^A-Za-z0-9_.-]/g, ".");
 }
 
+function closeDocumentSession(document) {
+  if (!document?.context || document.sessionClosed) return false;
+  document.sessionClosed = true;
+  document.kernelRecord?.sessions?.delete(document.sessionName);
+  document.context.close().catch(() => {});
+  return true;
+}
+
 /**
  * Production wiring for the website and hara-chrome: a broker whose spawn
  * creates a module Worker plus an `HtaContext`. `hostCalls` is passed through
@@ -417,7 +481,7 @@ export function createBrowserBroker({
       const worker = sharedWorkerUrl && typeof SharedWorker !== "undefined"
         ? sharedWorkerPort(sharedWorkerUrl)
         : new Worker(workerUrl, { type: "module", name: `hara-kernel-${name}` });
-      const context = new HtaContext({ worker, moduleBytes, hostCalls });
+      const context = new HtaContext({ worker, moduleBytes, hostCalls, kernelId: name });
       return { context, worker };
     }
   });

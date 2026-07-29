@@ -21,6 +21,10 @@ use std::rc::Rc;
 mod fiber;
 pub use fiber::{EvalFiber, EvalFiberState, Step};
 
+pub fn completion_symbols() -> &'static [&'static str] {
+    fiber::completion_symbols()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionValue {
     pub provider: String,
@@ -170,7 +174,7 @@ pub struct RuntimeAtom {
 }
 
 impl RuntimeAtom {
-    fn new(value: Value, watchable: bool) -> Self {
+    pub(crate) fn new(value: Value, watchable: bool) -> Self {
         Self {
             value: PAtom::new(value),
             watches: Rc::new(RefCell::new(Vec::new())),
@@ -183,7 +187,7 @@ impl RuntimeAtom {
     fn identity_address(&self) -> usize {
         self.value.identity_address()
     }
-    fn deref_value(&self) -> Value {
+    pub(crate) fn deref_value(&self) -> Value {
         self.value.deref_value()
     }
     fn reset(&self, new_value: Value) -> Result<Value, String> {
@@ -6334,7 +6338,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 };
                 cell.reset_value(function.clone());
                 cell.set_origin(definition_origin());
-                Ok(function)
+                Ok(Value::Var(cell))
             }
             Form::Symbol(n) if n == "do" => {
                 let mut result = Value::Nil;
@@ -7935,6 +7939,18 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 } else {
                     Ok(Value::Nil)
                 }
+            }
+            Form::Symbol(n) if n == "cond" => {
+                if fs.len() % 2 == 0 {
+                    return Err("cond expects test/expression pairs".into());
+                }
+                let mut clauses = fs[1..].chunks_exact(2);
+                for clause in &mut clauses {
+                    if eval(&clause[0], env)?.truthy() {
+                        return eval(&clause[1], env);
+                    }
+                }
+                Ok(Value::Nil)
             }
             Form::Symbol(n) if n == "let" => {
                 if fs.len() != 3 {

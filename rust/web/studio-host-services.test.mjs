@@ -46,6 +46,58 @@ test("two instances sharing a db name see the same IndexedDB data", async () => 
   assert.deepEqual(await second["store/keys"](), ["shared-key"]);
 });
 
+test("session memory filesystems isolate files inside one kernel context", async () => {
+  const mounts = new Map([
+    ["alpha", "memory:alpha"],
+    ["beta", "memory:beta"]
+  ]);
+  const context = { filesystemForSession: (session) => mounts.get(session) };
+  const host = createHostServices({ dbName: "test-session-memory" });
+  const alpha = { context, sessionId: "alpha" };
+  const beta = { context, sessionId: "beta" };
+
+  await host["store/put"].call(alpha, "/main.hal", "alpha");
+  await host["store/put"].call(beta, "/main.hal", "beta");
+
+  assert.equal(await host["store/get"].call(alpha, "/main.hal"), "alpha");
+  assert.equal(await host["store/get"].call(beta, "/main.hal"), "beta");
+  assert.deepEqual(await host["store/keys"].call(alpha), ["/main.hal"]);
+});
+
+test("explicit persistent filesystem keys share files across sessions", async () => {
+  const context = { filesystemForSession: () => "indexeddb:tutorial-board" };
+  const host = createHostServices({ dbName: "test-session-persistent" });
+  const first = { context, sessionId: "first" };
+  const second = { context, sessionId: "second" };
+
+  await host["store/put"].call(first, "/board.hal", "shared");
+
+  assert.equal(await host["store/get"].call(second, "/board.hal"), "shared");
+  assert.deepEqual(await host["store/keys"].call(second), ["/board.hal"]);
+});
+
+test("canvas host calls route by originating session", async () => {
+  const calls = [];
+  const runtimes = new Map(["alpha", "beta"].map((session) => [
+    session,
+    {
+      nextFrame: async (...args) => calls.push([session, "next", ...args]),
+      render: async (...args) => calls.push([session, "render", ...args])
+    }
+  ]));
+  const host = createHostServices({
+    canvasRuntimeForSession: (session) => runtimes.get(session)
+  });
+
+  await host["studio.canvas/next-frame"].call({ sessionId: "alpha" }, "node", "canvas");
+  await host["studio.canvas/render"].call({ sessionId: "beta" }, "node", "canvas", new Map());
+
+  assert.deepEqual(calls, [
+    ["alpha", "next", "node", "canvas"],
+    ["beta", "render", "node", "canvas", new Map()]
+  ]);
+});
+
 test("workspace scoped stores cannot read, write, or list another workspace", async () => {
   const contexts = new Map([["alpha-context", "alpha"], ["beta-context", "beta"]]);
   const host = createHostServices({

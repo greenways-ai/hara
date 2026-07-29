@@ -15,10 +15,32 @@ function mockSpawn({ failFor } = {}) {
       context: {
         calls: [],
         closed: false,
+        sessions: new Map(),
         async call(target, args) {
           this.calls.push([target, args]);
           if (target === "eval") return `${name}:${args[0]}`;
           return true;
+        },
+        session(sessionName) {
+          let session = this.sessions.get(sessionName);
+          if (!session) {
+            const context = this;
+            session = {
+              name: sessionName,
+              call(target, args = []) {
+                return context.call(
+                  target === "eval" ? "session/eval" : target,
+                  target === "eval" ? [sessionName, ...args] : args
+                );
+              },
+              close() {
+                context.sessions.delete(sessionName);
+                return context.call("session/close", [sessionName]);
+              }
+            };
+            this.sessions.set(sessionName, session);
+          }
+          return session;
         },
         close() {
           this.closed = true;
@@ -53,6 +75,31 @@ test("create, list, size, and eval route to the named kernel", async () => {
   assert.ok(names.includes("alpha"));
   assert.ok(names.includes("beta"));
   assert.equal(broker.size(), 3);
+});
+
+test("one browser kernel hosts isolated named sessions", async () => {
+  const { spawn, spawned } = mockSpawn();
+  const broker = new KernelBroker({ spawn });
+  await broker.create("page");
+
+  await broker.createSession("page", "example-1");
+  await broker.createSession("page", "example-2");
+  await broker.evalSession("page", "example-1", "(def answer 41)");
+  await broker.evalSession("page", "example-2", "(def answer 6)");
+  await broker.closeSession("page", "example-1");
+
+  assert.equal(spawned.filter(({ name }) => name === "page").length, 1);
+  assert.deepEqual(spawned[0].context.calls, [
+    ["session/create", ["example-1"]],
+    ["session/create", ["example-2"]],
+    ["session/eval", ["example-1", "(def answer 41)"]],
+    ["session/eval", ["example-2", "(def answer 6)"]],
+    ["session/close", ["example-1"]]
+  ]);
+  await assert.rejects(
+    broker.evalSession("page", "example-1", "answer"),
+    /^Error: NO_SESSION example-1$/
+  );
 });
 
 test("resources are registered before the bootstrap eval", async () => {
@@ -164,8 +211,9 @@ test("ns+ documents activate isolated generations and roll back failed reloads",
       const kernel = await spawn(name);
       kernel.context.call = async function (target, args) {
         this.calls.push([target, args]);
-        if (target === "eval" && args[0].includes("BROKEN")) throw new Error("bad reload");
-        return args[0].includes("(+ value 1)") ? 43 : 42;
+        const source = target === "session/eval" ? args[1] : args[0];
+        if (target === "session/eval" && source.includes("BROKEN")) throw new Error("bad reload");
+        return source?.includes("(+ value 1)") ? 43 : 42;
       };
       return kernel;
     },
@@ -184,12 +232,14 @@ test("ns+ documents activate isolated generations and roll back failed reloads",
     /bad reload/
   );
   assert.equal(broker.requireDocument("ROOT", "document/a"), active);
+  assert.equal(spawned.length, 1);
   assert.equal(active.worker.terminated, false);
-  assert.equal(spawned.at(-1).worker.terminated, true);
+  assert.ok(active.context.name.startsWith("DOC.document.a."));
 
   const third = await broker.evalDocument("ROOT", "document/a", "(ns+)\n43", { nodeId: "node/a" });
   assert.equal(third.generation, 2);
-  assert.equal(active.worker.terminated, true);
+  assert.equal(active.worker.terminated, false);
+  assert.equal(spawned.length, 1);
   assert.equal(broker.releaseDocument("ROOT", "document/a"), true);
   assert.throws(() => broker.requireDocument("ROOT", "document/a"), /NO_DOCUMENT/);
 });

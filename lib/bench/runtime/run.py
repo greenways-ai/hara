@@ -185,7 +185,7 @@ def markdown(data):
     for row in data["measurements"]:
         convergence = row["analysis"]["converged_window"]
         lines.append(f"| {row['runtime']} / {row['workload']} | {row['first_ns']/1e6:.3f} | {row['analysis']['steady_ns']/1e6:.3f} | {row['analysis']['throughput_per_sec']:.1f} | {convergence if convergence is not None else '—'} |")
-    lines += ["", "Warm samples are per-call nanoseconds. Convergence is the first five-window run within ±5% of the final ten-window median with CV ≤10%.", ""]
+    lines += ["", "Warm values above are per-call milliseconds (the raw samples are stored as nanoseconds). Lower is better. Each adapter re-reads, evaluates, and checks the same source form, but this is an implementation snapshot rather than a source-normalized language shootout. Convergence is the first five-window run within ±5% of the final ten-window median with CV ≤10%.", ""]
     return "\n".join(lines)
 
 

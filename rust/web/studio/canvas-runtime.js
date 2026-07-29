@@ -419,6 +419,19 @@ function execute2d(context, command, width, height) {
     for (let x = 0; x <= width; x += spacing) { context.moveTo(x, 0); context.lineTo(x, height); }
     for (let y = 0; y <= height; y += spacing) { context.moveTo(0, y); context.lineTo(width, y); }
     context.stroke();
+  } else if (name === "mist") {
+    const x = Number(command[1]);
+    const y = Number(command[2]);
+    const radius = Math.max(1, Number(command[3] ?? 48));
+    const color = command[4] ?? "#41f5e4";
+    const alpha = Number(command[5] ?? .12);
+    const glow = context.createRadialGradient(x, y, 0, x, y, radius);
+    glow.addColorStop(0, colorWithAlpha(color, alpha));
+    glow.addColorStop(1, colorWithAlpha(color, 0));
+    context.fillStyle = glow;
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fill();
   } else if (name === "line") {
     context.strokeStyle = command[5] ?? "#41f5e4";
     context.lineWidth = Number(command[6] ?? 2);
@@ -520,6 +533,19 @@ function toHta(value) {
 
 function keyName(value) {
   return value?.constructor?.name === "HtaKeyword" ? value.name : String(value);
+}
+
+function colorWithAlpha(color, alpha) {
+  if (typeof color !== "string" || !color.startsWith("#")) return color;
+  const hex = color.slice(1);
+  const normalized = hex.length === 3
+    ? hex.split("").map((part) => part + part).join("")
+    : hex;
+  if (!/^[0-9a-f]{6}$/i.test(normalized)) return color;
+  const red = parseInt(normalized.slice(0, 2), 16);
+  const green = parseInt(normalized.slice(2, 4), 16);
+  const blue = parseInt(normalized.slice(4, 6), 16);
+  return `rgba(${red}, ${green}, ${blue}, ${Math.max(0, Math.min(1, alpha))})`;
 }
 
 function point(event) {

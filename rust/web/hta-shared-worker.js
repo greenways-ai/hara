@@ -23,9 +23,10 @@ async function receive(port, message) {
       port.postMessage({ type: "ready" });
     } else if (message.type === "call") {
       await boot;
+      const session = requestSession(message.frame);
       const task = Number(callFrame(instance.exports.hta_start, message.frame));
       clients.get(port)?.set(message.id, task);
-      tasks.set(task, { port, id: message.id });
+      tasks.set(task, { port, id: message.id, session });
       pump();
     } else if (message.type === "delivery") {
       await boot;
@@ -73,6 +74,15 @@ function next() {
   return decodeHta(frame);
 }
 
+function requestSession(frame) {
+  const [target, args] = decodeHta(frame);
+  return typeof target === "string" &&
+    (target === "session/eval" || target === "session/eval-bound") &&
+    typeof args?.[0] === "string"
+    ? args[0]
+    : "ROOT";
+}
+
 function pump() {
   for (let event; (event = next()) !== null;) {
     const kind = Number(event[0]);
@@ -86,7 +96,7 @@ function pump() {
       request.port.postMessage({ type: "result", id: request.id, ok: kind === 0, frame: encodeHta(event[2]) });
     } else if (kind === 2) {
       const request = tasks.get(Number(event[2]));
-      if (request) request.port.postMessage({ type: "host-call", call: Number(event[1]), task: Number(event[2]), service: event[3], method: event[4], frame: encodeHta(event[5]) });
+      if (request) request.port.postMessage({ type: "host-call", call: Number(event[1]), task: Number(event[2]), session: request.session, service: event[3], method: event[4], frame: encodeHta(event[5]) });
     } else throw new Error("hta/event-unknown");
   }
 }

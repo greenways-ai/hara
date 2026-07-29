@@ -1,11 +1,13 @@
 package hara.truffle;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.PolyglotException;
 import org.graalvm.polyglot.Source;
@@ -48,6 +50,11 @@ final class HaraSessionBroker implements AutoCloseable {
     return session;
   }
 
+  void attachFilesystem(String session, Path root) {
+    if (!allowFile) throw new IllegalArgumentException("FILE_ACCESS_DENIED");
+    require(session).attachFilesystem(root);
+  }
+
   synchronized void closeSession(String value) {
     String name = normalizeName(value);
     if ("ROOT".equals(name)) throw new IllegalArgumentException("ROOT_CANNOT_CLOSE");
@@ -78,46 +85,84 @@ final class HaraSessionBroker implements AutoCloseable {
 
   static final class HaraSession implements AutoCloseable {
     private final String name;
-    private final Context context;
+    private final boolean allowFile;
+    private final boolean allowNetwork;
+    private final boolean allowProcess;
+    private Context context;
+    private Path filesystemRoot;
+    private final AtomicInteger activeEvaluations = new AtomicInteger();
 
     private HaraSession(
         String name, boolean allowFile, boolean allowNetwork, boolean allowProcess) {
       this.name = name;
-      context =
-          Context.newBuilder(HaraLanguage.ID)
-              .allowCreateProcess(allowProcess)
-              .allowIO(
-                  IOAccess.newBuilder()
-                      .allowHostFileAccess(allowFile)
-                      .allowHostSocketAccess(allowNetwork)
-                      .build())
-              .build();
+      this.allowFile = allowFile;
+      this.allowNetwork = allowNetwork;
+      this.allowProcess = allowProcess;
+      context = createContext(null);
+    }
+
+    private Context createContext(Path root) {
+      IOAccess.Builder io =
+          IOAccess.newBuilder().allowHostSocketAccess(allowNetwork);
+      if (root == null) {
+        io.allowHostFileAccess(allowFile);
+      } else {
+        io.allowHostFileAccess(false).fileSystem(new HaraMountedFileSystem(root));
+      }
+      return Context.newBuilder(HaraLanguage.ID)
+          .allowCreateProcess(allowProcess)
+          .allowIO(io.build())
+          .build();
+    }
+
+    void attachFilesystem(Path root) {
+      if (activeEvaluations.get() != 0) throw new IllegalArgumentException("SESSION_BUSY " + name);
+      Path normalized = root.toAbsolutePath().normalize();
+      if (!java.nio.file.Files.isDirectory(normalized)) {
+        throw new IllegalArgumentException("FILESYSTEM_NOT_FOUND " + normalized);
+      }
+      Context replacement = createContext(normalized);
+      synchronized (this) {
+        if (activeEvaluations.get() != 0) {
+          replacement.close(true);
+          throw new IllegalArgumentException("SESSION_BUSY " + name);
+        }
+        Context previous = context;
+        context = replacement;
+        filesystemRoot = normalized;
+        previous.close(true);
+      }
     }
 
     String name() {
       return name;
     }
 
-    synchronized Value eval(String source) {
+    Value eval(String source) {
       return eval(source, null, 1, 1);
     }
 
-    synchronized Value eval(String source, String file, int line, int column) {
+    Value eval(String source, String file, int line, int column) {
+      activeEvaluations.incrementAndGet();
       try {
-        if (file == null || file.isBlank()) return context.eval(HaraLanguage.ID, source);
-        int safeLine = Math.max(1, line);
-        int safeColumn = Math.max(1, column);
-        StringBuilder contextual = new StringBuilder(source.length() + safeLine + safeColumn);
-        contextual.append("\n".repeat(safeLine - 1));
-        contextual.append(" ".repeat(safeColumn - 1));
-        contextual.append(source);
-        Source contextualSource =
-            Source.newBuilder(HaraLanguage.ID, contextual.toString(), file).build();
-        return context.eval(contextualSource);
+        synchronized (this) {
+          if (file == null || file.isBlank()) return context.eval(HaraLanguage.ID, source);
+          int safeLine = Math.max(1, line);
+          int safeColumn = Math.max(1, column);
+          StringBuilder contextual = new StringBuilder(source.length() + safeLine + safeColumn);
+          contextual.append("\n".repeat(safeLine - 1));
+          contextual.append(" ".repeat(safeColumn - 1));
+          contextual.append(source);
+          Source contextualSource =
+              Source.newBuilder(HaraLanguage.ID, contextual.toString(), file).build();
+          return context.eval(contextualSource);
+        }
       } catch (IOException error) {
         throw new IllegalArgumentException("Unable to construct Hara source: " + error.getMessage(), error);
       } catch (PolyglotException error) {
         throw new IllegalArgumentException(error.getMessage(), error);
+      } finally {
+        activeEvaluations.decrementAndGet();
       }
     }
 
@@ -136,7 +181,10 @@ final class HaraSessionBroker implements AutoCloseable {
     }
 
     List<Object> info() {
-      return List.of("NAME", name, "STATE", "RUNNING");
+      return List.of(
+          "NAME", name,
+          "STATE", "RUNNING",
+          "FILESYSTEM", filesystemRoot == null ? "HOST" : filesystemRoot.toString());
     }
 
     @Override

@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyParedit, barfForward, killToFormEnd, localFormAt, slurpForward, structuralAlign } from "./editor.js";
+import {
+  applyCompletion,
+  applyParedit,
+  barfForward,
+  completionTokenAt,
+  killToFormEnd,
+  localFormAt,
+  slurpForward,
+  structuralAlign
+} from "./editor.js";
 
 function editor(value, start = value.length, end = start) {
   return {
@@ -95,4 +104,19 @@ test("local evaluation ignores delimiters inside comments and strings", () => {
 test("local evaluation uses the previous form after a trailing newline", () => {
   const source = "{:version 1 :commands []}\n";
   assert.equal(localFormAt(source, source.length).source, "{:version 1 :commands []}");
+});
+
+test("completion finds and replaces the symbol at the caret", () => {
+  const input = editor("(str/up)");
+  input.setSelectionRange(7, 7);
+  const token = completionTokenAt(input.value, input.selectionStart);
+  assert.deepEqual(token, { start: 1, end: 7, value: "str/up" });
+  applyCompletion(input, token, "str/upper");
+  assert.equal(input.value, "(str/upper)");
+  assert.equal(input.selectionStart, 10);
+});
+
+test("completion ignores keywords and numbers", () => {
+  assert.equal(completionTokenAt(":ready", 6), null);
+  assert.equal(completionTokenAt("42", 2), null);
 });

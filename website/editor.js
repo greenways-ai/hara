@@ -284,3 +284,18 @@ export function localFormAt(source, caret) {
   }
   return null;
 }
+
+/** Return the editable Hara symbol immediately before the caret. */
+export function completionTokenAt(source, caret) {
+  let start = caret;
+  while (start > 0 && /[A-Za-z0-9*+!?._/<>=:-]/.test(source[start - 1])) start -= 1;
+  const value = source.slice(start, caret);
+  if (!value || value.startsWith(":") || /^-?\d/.test(value)) return null;
+  return { start, end: caret, value };
+}
+
+/** Replace the current completion token and leave the caret after it. */
+export function applyCompletion(editor, token, candidate) {
+  replace(editor, token.start, token.end, candidate);
+  editor.setSelectionRange(token.start + candidate.length, token.start + candidate.length);
+}

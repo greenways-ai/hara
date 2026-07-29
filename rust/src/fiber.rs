@@ -247,6 +247,10 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "__map-transform",
 ];
 
+pub(crate) fn completion_symbols() -> &'static [&'static str] {
+    CORE_SPECIAL_FORMS
+}
+
 type Cont = Box<dyn FnOnce(Result<Value, String>) -> Step>;
 pub type Resume = Box<dyn FnOnce(PromiseState) -> Step>;
 pub enum Step {
@@ -659,7 +663,7 @@ fn restore(env: &mut HashMap<String, Value>, old: Previous) {
     }
 }
 fn scoped(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont, is_loop: bool) -> Step {
-    if v.len() != 3 {
+    if v.len() < 3 {
         return k(Err("binding form expects bindings and body".into()));
     }
     let b = match bindings(&v, if is_loop { "loop" } else { "let" }) {
@@ -677,7 +681,15 @@ fn scoped(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont, is_lo
             })
             .collect(),
     );
-    let body = v[2].clone();
+    let body = if v.len() == 3 {
+        v[2].clone()
+    } else {
+        Form::List(
+            std::iter::once(Form::Symbol("do".into()))
+                .chain(v[2..].iter().cloned())
+                .collect(),
+        )
+    };
     bind_values(
         Rc::new(b),
         0,

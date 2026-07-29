@@ -335,6 +335,11 @@ public final class HaraServer implements AutoCloseable {
                 : request.session();
         responder.result(requireSession(target).info());
         break;
+      case "FILESYSTEM":
+        String filesystemSession = HaraSessionBroker.normalizeName(request.argument(1));
+        broker.attachFilesystem(filesystemSession, Path.of(request.argument(2)));
+        responder.result(requireSession(filesystemSession).info());
+        break;
       case "CLOSE":
       case "KILL":
         String closed = HaraSessionBroker.normalizeName(request.argument(1));
@@ -556,6 +561,12 @@ public final class HaraServer implements AutoCloseable {
         String targetInfo = request.size() > 2 ? HaraSessionBroker.normalizeName(request.get(2)) : attached;
         HaraSessionBroker.HaraSession sessionInfo = requireSession(targetInfo);
         respond(conn, negotiated, request, sessionInfo.info());
+        return attached;
+      case "FILESYSTEM":
+        require(request, 4);
+        String filesystemSession = HaraSessionBroker.normalizeName(request.get(2));
+        broker.attachFilesystem(filesystemSession, Path.of(request.get(3)));
+        respond(conn, negotiated, request, requireSession(filesystemSession).info());
         return attached;
       case "CLOSE":
       case "KILL":

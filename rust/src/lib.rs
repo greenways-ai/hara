@@ -103,6 +103,138 @@ pub struct Runtime {
     extension_roots: Vec<std::path::PathBuf>,
 }
 
+/// A process-local kernel that multiplexes isolated evaluator sessions.
+///
+/// Raw HTA exposes the same lifecycle over its wire targets; this native
+/// facade keeps embedding hosts from treating a `Runtime` as the process
+/// boundary when several independent sessions can share one kernel.
+pub struct SessionKernel {
+    sessions: HashMap<String, Runtime>,
+    resources: HashMap<String, String>,
+    filesystems: HashMap<String, String>,
+}
+
+impl Default for SessionKernel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SessionKernel {
+    pub fn new() -> Self {
+        Self {
+            sessions: HashMap::from([("ROOT".into(), Runtime::new())]),
+            resources: HashMap::new(),
+            filesystems: HashMap::new(),
+        }
+    }
+
+    pub fn create_session(&mut self, name: &str) -> Result<(), String> {
+        validate_session_name(name)?;
+        if self.sessions.contains_key(name) {
+            return Err(format!("SESSION_EXISTS {name}"));
+        }
+        let mut runtime = Runtime::new();
+        for (resource, source) in &self.resources {
+            runtime.register_resource(resource, source);
+        }
+        self.sessions.insert(name.into(), runtime);
+        Ok(())
+    }
+
+    pub fn session_names(&self) -> Vec<String> {
+        let mut names = self.sessions.keys().cloned().collect::<Vec<_>>();
+        names.sort();
+        names
+    }
+
+    pub fn eval(&mut self, session: &str, source: &str) -> Result<String, String> {
+        self.sessions
+            .get_mut(session)
+            .ok_or_else(|| format!("NO_SESSION {session}"))?
+            .eval_text(source)
+    }
+
+    pub fn register_resource(&mut self, name: &str, source: &str) {
+        self.resources.insert(name.into(), source.into());
+        for runtime in self.sessions.values_mut() {
+            runtime.register_resource(name, source);
+        }
+    }
+
+    pub fn attach_memory_filesystem(
+        &mut self,
+        session: &str,
+        provider_id: &str,
+        root: &str,
+    ) -> Result<(), String> {
+        self.reset_with_filesystem(session, provider_id, |runtime| {
+            runtime.install_memory_file_provider(root);
+        })
+    }
+
+    #[cfg(any(not(target_arch = "wasm32"), target_os = "wasi"))]
+    pub fn attach_native_filesystem(
+        &mut self,
+        session: &str,
+        provider_id: &str,
+        root: &str,
+    ) -> Result<(), String> {
+        self.reset_with_filesystem(session, provider_id, |runtime| {
+            runtime.install_native_file_provider(root);
+        })
+    }
+
+    fn reset_with_filesystem(
+        &mut self,
+        session: &str,
+        provider_id: &str,
+        install: impl FnOnce(&mut Runtime),
+    ) -> Result<(), String> {
+        if provider_id.is_empty() {
+            return Err("INVALID_FILESYSTEM_ID".into());
+        }
+        if !self.sessions.contains_key(session) {
+            return Err(format!("NO_SESSION {session}"));
+        }
+        let mut replacement = Runtime::new();
+        for (resource, source) in &self.resources {
+            replacement.register_resource(resource, source);
+        }
+        install(&mut replacement);
+        self.sessions.insert(session.into(), replacement);
+        self.filesystems.insert(session.into(), provider_id.into());
+        Ok(())
+    }
+
+    pub fn filesystem(&self, session: &str) -> Option<&str> {
+        self.filesystems.get(session).map(String::as_str)
+    }
+
+    pub fn close_session(&mut self, name: &str) -> Result<(), String> {
+        validate_session_name(name)?;
+        if name == "ROOT" {
+            return Err("ROOT_CANNOT_CLOSE".into());
+        }
+        self.sessions
+            .remove(name)
+            .ok_or_else(|| format!("NO_SESSION {name}"))?;
+        self.filesystems.remove(name);
+        Ok(())
+    }
+}
+
+fn validate_session_name(name: &str) -> Result<(), String> {
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'-'))
+    {
+        return Err("INVALID_SESSION_NAME".into());
+    }
+    Ok(())
+}
+
 #[wasm_bindgen]
 impl Runtime {
     fn empty() -> Runtime {
@@ -998,6 +1130,24 @@ pub fn version() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_kernel_isolates_state_and_resets_on_filesystem_attach() {
+        let mut kernel = SessionKernel::new();
+        kernel.create_session("alpha").unwrap();
+        kernel.create_session("beta").unwrap();
+        assert_eq!(kernel.eval("alpha", "(def answer 41) answer").unwrap(), "41");
+        assert_eq!(kernel.eval("beta", "(def answer 6) answer").unwrap(), "6");
+        kernel
+            .attach_memory_filesystem("alpha", "memory:alpha", "/workspace")
+            .unwrap();
+        assert_eq!(kernel.filesystem("alpha"), Some("memory:alpha"));
+        assert!(kernel.eval("alpha", "answer").unwrap_err().contains("unbound"));
+        assert_eq!(
+            kernel.session_names(),
+            vec!["ROOT".to_string(), "alpha".to_string(), "beta".to_string()]
+        );
+    }
 
     fn ignore_socket_event(_event: core::SocketEvent) {}
 
@@ -3693,11 +3843,84 @@ mod tests {
     fn conditional_and_let() {
         let mut runtime = Runtime::new();
         assert_eq!(
+            runtime.eval_text("(defn rank [score] score)").unwrap(),
+            "#'rank"
+        );
+        assert_eq!(
             runtime
                 .eval_text("(let (x 19) (if true (+ x 23) 0))")
                 .unwrap(),
             "42"
         );
+        assert_eq!(
+            runtime
+                .eval_text("(cond false \"gold\" (>= 70 50) \"silver\" :else \"bronze\")")
+                .unwrap(),
+            "\"silver\""
+        );
+        assert_eq!(runtime.eval_text("(cond false 1)").unwrap(), "nil");
+        assert!(runtime
+            .eval_text("(cond true 1 false)")
+            .unwrap_err()
+            .contains("test/expression pairs"));
+    }
+
+    #[test]
+    fn lesson_definition_cases_run_from_the_l0_conformance_corpus() {
+        fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> &'a Form {
+            entries
+                .iter()
+                .find_map(|(candidate, value)| match candidate {
+                    Form::Keyword(name) if name == key => Some(value),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing :{key}"))
+        }
+
+        let manifest = kernel::parse_forms(include_str!(
+            "../../docs/docs/reference/l0-conformance.edn"
+        ))
+        .unwrap()
+        .remove(0);
+        let Form::Map(manifest) = manifest else {
+            panic!("conformance corpus must be a map")
+        };
+        let Form::Vector(cases) = entry(&manifest, "cases") else {
+            panic!("conformance :cases must be a vector")
+        };
+        let mut runtime = Runtime::new();
+
+        for id in ["compiler/defn-var", "runtime/cond-defined-function"] {
+            let case = cases
+                .iter()
+                .find(|case| {
+                    matches!(
+                        case,
+                        Form::Map(entries)
+                            if matches!(entry(entries, "id"), Form::Keyword(name) if name == id)
+                    )
+                })
+                .unwrap_or_else(|| panic!("missing conformance case :{id}"));
+            let Form::Map(case) = case else { unreachable!() };
+            let Form::String(source) = entry(case, "source") else {
+                panic!(":{id} source must be a string")
+            };
+            let Form::Map(expect) = entry(case, "expect") else {
+                panic!(":{id} expect must be a map")
+            };
+            let Form::String(expected) = entry(expect, "value") else {
+                panic!(":{id} expected value must be a string")
+            };
+            let Form::Keyword(expected_type) = entry(expect, "type") else {
+                panic!(":{id} expected type must be a keyword")
+            };
+            let expected = if expected_type == "string" {
+                format!("{expected:?}")
+            } else {
+                expected.clone()
+            };
+            assert_eq!(runtime.eval_text(source).unwrap(), expected, ":{id}");
+        }
     }
 
     #[test]
@@ -3821,6 +4044,22 @@ mod tests {
             "42"
         );
         assert_eq!(runtime.eval_text("(c/resume co 20)").unwrap(), "21");
+    }
+    #[test]
+    fn binding_forms_evaluate_multiple_body_expressions() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text("(let [a (array 1 2 3)] (. a (push-last 4)) (. a (get 3)))")
+                .unwrap(),
+            "4"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(loop [n 0] (+ n 1) (if (< n 2) (recur (+ n 1)) n))")
+                .unwrap(),
+            "2"
+        );
     }
     #[test]
     fn fiber_cli_path_awaits_promise_inside_coroutine() {

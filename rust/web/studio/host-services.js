@@ -11,6 +11,7 @@ export function createHostServices(options = {}) {
   const dbName = options.dbName ?? DEFAULT_DATABASE;
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   const scopeForContext = options.scopeForContext ?? null;
+  const memoryFilesystems = options.memoryFilesystems ?? new Map();
   let opening = null;
 
   function open() {
@@ -31,6 +32,15 @@ export function createHostServices(options = {}) {
   }
 
   function scopedKey(invocation, key, { keys = false } = {}) {
+    const filesystem = invocation?.context?.filesystemForSession?.(
+      invocation?.sessionId ?? "ROOT"
+    );
+    if (filesystem) {
+      if (typeof key !== "string" && !(keys && (key === undefined || key === null))) {
+        throw new Error("file/path-invalid");
+      }
+      return { filesystem, key: key ?? "" };
+    }
     if (!scopeForContext) return key;
     const space = scopeForContext(invocation?.context);
     if (!space) throw new Error("store/workspace-scope-unavailable");
@@ -42,21 +52,75 @@ export function createHostServices(options = {}) {
     return key;
   }
 
+  function mount(invocation, key, options = {}) {
+    const scoped = scopedKey(invocation, key, options);
+    return scoped && typeof scoped === "object" && "filesystem" in scoped ? scoped : null;
+  }
+
+  function memory(filesystem) {
+    let entries = memoryFilesystems.get(filesystem);
+    if (!entries) memoryFilesystems.set(filesystem, entries = new Map());
+    return entries;
+  }
+
+  function persistentKey(filesystem, key) {
+    return `filesystems/${encodeURIComponent(filesystem)}/${key}`;
+  }
+
+  async function mountedGet({ filesystem, key }) {
+    if (filesystem.startsWith("memory:")) return memory(filesystem).get(key) ?? null;
+    return request(await store("readonly"), "get", persistentKey(filesystem, key));
+  }
+
+  async function mountedPut({ filesystem, key }, value) {
+    if (filesystem.startsWith("memory:")) {
+      memory(filesystem).set(key, value);
+      return true;
+    }
+    await request(await store("readwrite"), "put", value, persistentKey(filesystem, key));
+    return true;
+  }
+
+  async function mountedDelete({ filesystem, key }) {
+    if (filesystem.startsWith("memory:")) return memory(filesystem).delete(key);
+    await request(await store("readwrite"), "delete", persistentKey(filesystem, key));
+    return true;
+  }
+
+  async function mountedKeys({ filesystem, key }) {
+    if (filesystem.startsWith("memory:")) {
+      return [...memory(filesystem).keys()].filter((entry) => entry.startsWith(key));
+    }
+    const prefix = persistentKey(filesystem, key);
+    const root = persistentKey(filesystem, "");
+    return (await request(await store("readonly"), "getAllKeys"))
+      .filter((entry) => entry.startsWith(prefix))
+      .map((entry) => entry.slice(root.length));
+  }
+
   const services = {
     "store/get": async function(key) {
+      const mounted = mount(this, key);
+      if (mounted) return mountedGet(mounted);
       return request(await store("readonly"), "get", scopedKey(this, key));
     },
     "store/put": async function(key, value) {
+      const mounted = mount(this, key);
+      if (mounted) return mountedPut(mounted, value);
       key = scopedKey(this, key);
       await request(await store("readwrite"), "put", value, key);
       return true;
     },
     "store/del": async function(key) {
+      const mounted = mount(this, key);
+      if (mounted) return mountedDelete(mounted);
       key = scopedKey(this, key);
       await request(await store("readwrite"), "delete", key);
       return true;
     },
     "store/keys": async function(prefix) {
+      const mounted = mount(this, prefix, { keys: true });
+      if (mounted) return mountedKeys(mounted);
       prefix = scopedKey(this, prefix, { keys: true });
       const keys = await request(await store("readonly"), "getAllKeys");
       return prefix === undefined || prefix === null
@@ -72,11 +136,20 @@ export function createHostServices(options = {}) {
   };
   if (options.nodeRuntime) Object.assign(services, createNodeHostServices(options.nodeRuntime));
   if (options.graphHost) Object.assign(services, createGraphHostServices(options.graphHost, options.graphHostOptions));
-  if (options.canvasRuntime) {
-    services["studio.canvas/next-frame"] = (nodeId, canvasId) =>
-      options.canvasRuntime.nextFrame(nodeId, canvasId);
-    services["studio.canvas/render"] = (nodeId, canvasId, frame) =>
-      options.canvasRuntime.render(nodeId, canvasId, frame);
+  if (options.canvasRuntime || options.canvasRuntimeForSession) {
+    const canvasFor = (invocation) =>
+      options.canvasRuntimeForSession?.(invocation.sessionId ?? "ROOT") ??
+      options.canvasRuntime;
+    services["studio.canvas/next-frame"] = function(nodeId, canvasId) {
+      const runtime = canvasFor(this);
+      if (!runtime) throw new Error(`canvas/session-unavailable:${this.sessionId ?? "ROOT"}`);
+      return runtime.nextFrame(nodeId, canvasId);
+    };
+    services["studio.canvas/render"] = function(nodeId, canvasId, frame) {
+      const runtime = canvasFor(this);
+      if (!runtime) throw new Error(`canvas/session-unavailable:${this.sessionId ?? "ROOT"}`);
+      return runtime.render(nodeId, canvasId, frame);
+    };
   }
   if (options.audioPipeline) {
     services["studio.audio/configure"] = async (spec) =>

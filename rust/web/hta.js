@@ -1,10 +1,15 @@
 const MAGIC = new Uint8Array([0x48, 0x54, 0x41, 0x31]);
-const TAG = { nil: 0, false: 1, true: 2, i64: 3, string: 4, bytes: 5, keyword: 6, symbol: 7, list: 8, vector: 9, set: 10, map: 11, handle: 12, f64: 15 };
+const TAG = { nil: 0, false: 1, true: 2, i64: 3, string: 4, bytes: 5, keyword: 6, symbol: 7, list: 8, vector: 9, set: 10, map: 11, handle: 12, namespace: 13, var: 14, f64: 15, atom: 16, array: 17, object: 18 };
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
 export class HtaKeyword { constructor(name) { this.name = name; } }
 export class HtaSymbol { constructor(name) { this.name = name; } }
+export class HtaVar { constructor(symbol,value=null){this.symbol=symbol;this.value=value;} toString(){return `#'${this.symbol.name}`;} }
+export class HtaAtom { constructor(value){this.value=value;} toString(){return `#atom <${displayHta(this.value)}>`;} }
+export class HtaArray { constructor(values){this.values=values;} toString(){return `(array${this.values.length?` ${this.values.map(displayHta).join(" ")}`:""})`;} }
+export class HtaObject { constructor(entries){this.entries=entries;} toString(){return `(object${this.entries.length?` ${this.entries.map(([key,value])=>`${JSON.stringify(key)} ${displayHta(value)}`).join(" ")}`:""})`;} }
+function displayHta(value){if(value===null)return"nil";if(typeof value==="string")return JSON.stringify(value);if(value instanceof HtaKeyword)return`:${value.name}`;if(value instanceof Map)return`{${[...value].map(([key,item])=>`${displayHta(key)} ${displayHta(item)}`).join(" ")}}`;if(Array.isArray(value))return`[${value.map(displayHta).join(" ")}]`;return String(value);}
 export class HtaHandle { constructor(owner,type,id,context=null,displayTag="ht",displayKind="handle"){this.owner=owner;this.type=type;this.id=BigInt(id);this.context=context;this.displayTag=displayTag;this.displayKind=displayKind;this.released=false;} release(){if(this.released)return;this.released=true;if(this.context)this.context.releaseHandle(this);} toString(){return `#${this.displayTag}[:${this.displayKind} ${this.id}]`;} }
 
 /** Browser host adapter for the portable Hara promise-provider contract. */
@@ -151,6 +156,10 @@ function writeValue(output, value) {
   else if (value instanceof Uint8Array) { output.push(TAG.bytes); writeBytes(output, value); }
   else if (value instanceof HtaKeyword) { output.push(TAG.keyword); writeBytes(output, encoder.encode(value.name)); }
   else if (value instanceof HtaSymbol) { output.push(TAG.symbol); writeBytes(output, encoder.encode(value.name)); }
+  else if (value instanceof HtaVar) { output.push(TAG.var); writeValue(output,value.symbol); writeValue(output,value.value); }
+  else if (value instanceof HtaAtom) { output.push(TAG.atom); writeValue(output,value.value); }
+  else if (value instanceof HtaArray) { output.push(TAG.array); writeSequence(output,value.values); }
+  else if (value instanceof HtaObject) { output.push(TAG.object); writeU32(output,value.entries.length);for(const [key,item] of value.entries){writeValue(output,key);writeValue(output,item);} }
   else if (value instanceof HtaHandle) { if(value.released)throw new Error("hta/handle-released");output.push(TAG.handle);writeBytes(output,encoder.encode(value.owner));writeBytes(output,encoder.encode(value.type));writeI64(output,value.id); }
   else if (Array.isArray(value)) { output.push(TAG.vector); writeSequence(output, value); }
   else if (value instanceof Set) { output.push(TAG.set); writeCanonical(output, [...value]); }
@@ -185,14 +194,18 @@ class Reader {
     if(tag===TAG.keyword)return new HtaKeyword(decoder.decode(this.data()));if(tag===TAG.symbol)return new HtaSymbol(decoder.decode(this.data()));
     if(tag===TAG.list||tag===TAG.vector)return this.sequence();if(tag===TAG.set)return new Set(this.sequence());
     if(tag===TAG.map){const size=this.u32(),result=new Map();for(let i=0;i<size;i++)result.set(this.value(),this.value());return result;}
+    if(tag===TAG.var){const symbol=this.value(),value=this.value();if(!(symbol instanceof HtaSymbol))throw new Error("hta/value-malformed: invalid var symbol");return new HtaVar(symbol,value);}
+    if(tag===TAG.atom)return new HtaAtom(this.value());
+    if(tag===TAG.array)return new HtaArray(this.sequence());
+    if(tag===TAG.object){const size=this.u32(),entries=[];for(let i=0;i<size;i++){const key=this.value();if(typeof key!=="string")throw new Error("hta/value-malformed: invalid object key");entries.push([key,this.value()]);}return new HtaObject(entries);}
     if(tag===TAG.handle){const owner=decoder.decode(this.data()),type=decoder.decode(this.data()),bytes=this.take(8);let id=0n;for(const byte of bytes)id=(id<<8n)|BigInt(byte);return new HtaHandle(owner,type,id);}
     throw new Error("hta/value-malformed: unknown value tag");
   }
 }
 
 export class HtaContext {
-  constructor({ worker, moduleUrl, moduleBytes, hostCalls = {}, handleTags = {}, promiseProvider = new BrowserPromiseProvider() }) {
-    this.worker=worker;this.hostCalls=hostCalls;this.handleTags=handleTags;this.promiseProvider=promiseProvider;this.next=1;this.pending=new Map();
+  constructor({ worker, moduleUrl, moduleBytes, hostCalls = {}, handleTags = {}, promiseProvider = new BrowserPromiseProvider(), kernelId = null }) {
+    this.worker=worker;this.hostCalls=hostCalls;this.handleTags=handleTags;this.promiseProvider=promiseProvider;this.kernelId=kernelId;this.next=1;this.pending=new Map();this.sessionFilesystems=new Map();this.sessions=new Map();
     this.ready=new Promise((resolve,reject)=>{this.readyResolve=resolve;this.readyReject=reject;});
     worker.addEventListener("message", event=>this.message(event.data));
     worker.addEventListener("error", error=>this.fail(error));
@@ -205,13 +218,29 @@ export class HtaContext {
     });
   }
   releaseHandle(handle){if(handle.context!==this)throw new Error("hta/handle-owner-mismatch");const wireHandle=new HtaHandle(handle.owner,handle.type,handle.id);this.worker.postMessage({type:"release",frame:encodeHta(wireHandle)});}
+  async createSession(name){await this.call("session/create",[name]);return this.session(name);}
+  session(name="ROOT"){let session=this.sessions.get(name);if(!session){session=new HtaSession(this,name);this.sessions.set(name,session);}return session;}
+  listSessions(){return this.call("session/list",[]);}
+  filesystemForSession(name){return this.sessionFilesystems.get(name)??null;}
   async message(message) {
     if(message.type==="ready"){this.readyResolve();return;}if(message.type==="fatal"){this.fail(new Error(message.error?.message??"HTA worker failed"));return;}
     if(message.type==="result"){const pending=this.pending.get(message.id);if(!pending)return;this.pending.delete(message.id);const value=bindHandles(decodeHta(message.frame),this);message.ok?pending.resolve(value):pending.reject(errorFrom(value));return;}
-    if(message.type==="host-call"){const key=`${message.service}/${message.method}`,handler=this.hostCalls[key];try{if(!handler)throw new Error(`hta/host-call-denied: ${key}`);const value=await handler.call({context:this,task:message.task},...decodeHta(message.frame));this.worker.postMessage({type:"delivery",call:message.call,ok:true,frame:encodeHta(value)});}catch(error){this.worker.postMessage({type:"delivery",call:message.call,ok:false,frame:encodeHta(errorValue(error))});}}
+    if(message.type==="host-call"){const key=`${message.service}/${message.method}`,handler=this.hostCalls[key],sessionId=message.session??"ROOT";try{if(!handler)throw new Error(`hta/host-call-denied: ${key}`);const value=await handler.call({context:this.session(sessionId),kernelContext:this,kernelId:this.kernelId??null,sessionId,task:message.task},...decodeHta(message.frame));this.worker.postMessage({type:"delivery",call:message.call,ok:true,frame:encodeHta(value)});}catch(error){this.worker.postMessage({type:"delivery",call:message.call,ok:false,frame:encodeHta(errorValue(error))});}}
   }
   fail(error){this.readyReject(error);for(const pending of this.pending.values())pending.reject(error);this.pending.clear();}
   close(){this.worker.postMessage({type:"close"});this.worker.terminate();}
+}
+
+export class HtaSession {
+  constructor(context,name){if(typeof name!=="string"||!name.length)throw new Error("INVALID_SESSION_NAME");this.context=context;this.name=name;}
+  call(target,args=[]){if(target==="eval")return this.eval(args[0]);if(target==="eval-bound")return this.evalBound(args[0],args[1]);if(target==="complete")return this.complete(args[0]);return this.context.call(target,args);}
+  filesystemForSession(name){return this.context.filesystemForSession(name);}
+  eval(source){return this.context.call("session/eval",[this.name,source]);}
+  evalBound(source,bindings=[]){return this.context.call("session/eval-bound",[this.name,source,bindings]);}
+  complete(prefix){return this.context.call("session/complete",[this.name,prefix]);}
+  info(){return this.context.call("session/info",[this.name]);}
+  async attachFilesystem(providerId){await this.context.call("session/attach-filesystem",[this.name,providerId]);this.context.sessionFilesystems.set(this.name,providerId);return true;}
+  async close(){const result=await this.context.call("session/close",[this.name]);this.context.sessionFilesystems.delete(this.name);this.context.sessions.delete(this.name);return result;}
 }
 
 function bindHandles(value,context){if(value instanceof HtaHandle){value.context=context;const tag=context.handleTags[value.type];if(tag){value.displayTag=tag;value.displayKind=value.type;}return value;}if(Array.isArray(value)){value.forEach(item=>bindHandles(item,context));}else if(value instanceof Set){for(const item of value)bindHandles(item,context);}else if(value instanceof Map){for(const [key,item]of value){bindHandles(key,context);bindHandles(item,context);}}return value;}

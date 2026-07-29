@@ -5,6 +5,8 @@ import static org.junit.Assert.assertTrue;
 
 import hara.kernel.Conn;
 import java.net.Socket;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.Test;
 
 public class HaraSessionBrokerTest {
@@ -38,6 +40,39 @@ public class HaraSessionBrokerTest {
       assertEquals("RESP ○ offline", resp.command("/resp stop"));
       assertTrue(resp.command("/resp restart 0").startsWith("RESP ● 127.0.0.1:"));
       assertEquals("42", broker.root().eval("retained").toString());
+    }
+  }
+
+  @Test
+  public void sessionsIsolateDefinitionsInsideOneBroker() {
+    try (HaraSessionBroker broker = new HaraSessionBroker(false, false)) {
+      HaraSessionBroker.HaraSession alpha = broker.create("alpha");
+      HaraSessionBroker.HaraSession beta = broker.create("beta");
+      alpha.eval("(def answer 41)");
+      beta.eval("(def answer 6)");
+      assertEquals("41", alpha.eval("answer").toString());
+      assertEquals("6", beta.eval("answer").toString());
+    }
+  }
+
+  @Test
+  public void filesystemAttachmentConfinesFilesAndResetsSessionState() throws Exception {
+    Path root = Files.createTempDirectory("hara-session-files");
+    try (HaraSessionBroker broker = new HaraSessionBroker(true, false)) {
+      HaraSessionBroker.HaraSession session = broker.create("mounted");
+      session.eval("(def stale-value 42)");
+      broker.attachFilesystem("mounted", root);
+      session.eval("(deref (file/write \"/state.bin\" (bytes 1 2 3)))");
+      assertTrue(Files.exists(root.resolve("state.bin")));
+      try {
+        session.eval("stale-value");
+        throw new AssertionError("reattachment must reset namespace state");
+      } catch (IllegalArgumentException expected) {
+        assertTrue(expected.getMessage().contains("Unbound"));
+      }
+    } finally {
+      Files.deleteIfExists(root.resolve("state.bin"));
+      Files.deleteIfExists(root);
     }
   }
 
