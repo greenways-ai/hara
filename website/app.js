@@ -575,7 +575,7 @@ function closeBackgroundMenu() {
 }
 
 function sourceStorageKey(documentId, kind) {
-  return `hara-www.background.${kind}.v1:${documentId}`;
+  return `hara-www.background.${kind}.v2:${documentId}`;
 }
 
 async function fetchBackgroundSource(descriptor) {
@@ -584,10 +584,13 @@ async function fetchBackgroundSource(descriptor) {
   const bundled = await response.text();
   const saved = localStorage.getItem(sourceStorageKey(descriptor.id, "saved"));
   const recovery = localStorage.getItem(sourceStorageKey(descriptor.id, "recovery"));
+  const base = localStorage.getItem(sourceStorageKey(descriptor.id, "base"));
+  const overlayMatchesBundle = base === bundled;
+  const overlay = overlayMatchesBundle ? recovery ?? saved : null;
   return {
     bundled,
-    source: recovery ?? saved ?? bundled,
-    recovered: recovery !== null
+    source: overlay ?? bundled,
+    recovered: overlayMatchesBundle && recovery !== null
   };
 }
 
@@ -1739,6 +1742,10 @@ function scheduleBackgroundPreview() {
   clearTimeout(state.sourceTimer);
   const documentId = elements.sourceEditor.dataset.documentId;
   if (!documentId) return;
+  localStorage.setItem(
+    sourceStorageKey(documentId, "base"),
+    elements.sourceEditor.dataset.baseSource ?? ""
+  );
   localStorage.setItem(sourceStorageKey(documentId, "recovery"), elements.sourceEditor.value);
   elements.sourceStatus.textContent = "EVALUATING CANDIDATE";
   state.sourceTimer = setTimeout(() => {
@@ -1756,6 +1763,7 @@ async function saveBackgroundSource() {
     toast("SOURCE CONFLICT: RELOAD BEFORE SAVING", true);
     return;
   }
+  localStorage.setItem(sourceStorageKey(descriptor.id, "base"), currentSource);
   localStorage.setItem(sourceStorageKey(descriptor.id, "saved"), elements.sourceEditor.value);
   localStorage.removeItem(sourceStorageKey(descriptor.id, "recovery"));
   elements.sourceStatus.textContent = "SAVED // INDEXEDDB OVERLAY";
