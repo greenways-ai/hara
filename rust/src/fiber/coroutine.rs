@@ -158,7 +158,9 @@ pub fn resume_protocol_form(
     k: Cont,
 ) -> Step {
     if v.len() < 2 {
-        return k(Err("ICoroutine/resume expects a receiver".into()));
+        return k(Err(
+            "protocol/arity: ICoroutine/resume expects a receiver".into()
+        ));
     }
     let arg_forms = v[2..].to_vec();
     one(

@@ -10,14 +10,6 @@ pub mod iclose;
 pub mod icoll;
 #[path = "protocol/icomponent.rs"]
 pub mod icomponent;
-#[path = "protocol/icomponentoptions.rs"]
-pub mod icomponentoptions;
-#[path = "protocol/icomponentprops.rs"]
-pub mod icomponentprops;
-#[path = "protocol/icomponentquery.rs"]
-pub mod icomponentquery;
-#[path = "protocol/icomponenttrack.rs"]
-pub mod icomponenttrack;
 #[path = "protocol/iconj.rs"]
 pub mod iconj;
 #[path = "protocol/icons.rs"]
@@ -52,8 +44,6 @@ pub mod ifn;
 pub mod ihash;
 #[path = "protocol/ihashcached.rs"]
 pub mod ihashcached;
-#[path = "protocol/ihasruntime.rs"]
-pub mod ihasruntime;
 #[path = "protocol/iindexed.rs"]
 pub mod iindexed;
 #[path = "protocol/iindexedkv.rs"]
@@ -98,8 +88,6 @@ pub mod ipromise;
 pub mod ipushfirst;
 #[path = "protocol/ipushlast.rs"]
 pub mod ipushlast;
-#[path = "protocol/iranged.rs"]
-pub mod iranged;
 #[path = "protocol/irealize.rs"]
 pub mod irealize;
 #[path = "protocol/ireduce.rs"]
@@ -112,8 +100,6 @@ pub mod ispace;
 pub mod itomutable;
 #[path = "protocol/itopersistent.rs"]
 pub mod itopersistent;
-#[path = "protocol/ivalidate.rs"]
-pub mod ivalidate;
 #[path = "protocol/iwatch.rs"]
 pub mod iwatch;
 
@@ -123,10 +109,6 @@ pub use icas::ICas;
 pub use iclose::IClose;
 pub use icoll::IColl;
 pub use icomponent::IComponent;
-pub use icomponentoptions::IComponentOptions;
-pub use icomponentprops::IComponentProps;
-pub use icomponentquery::IComponentQuery;
-pub use icomponenttrack::IComponentTrack;
 pub use iconj::IConj;
 pub use icons::ICons;
 pub use icontext::IContext;
@@ -144,7 +126,6 @@ pub use ifind::IFind;
 pub use ifn::IFn;
 pub use ihash::{HashType, IHash};
 pub use ihashcached::IHashCached;
-pub use ihasruntime::IHasRuntime;
 pub use iindexed::IIndexed;
 pub use iindexedkv::IIndexedKV;
 pub use iinvokein::IInvokeIn;
@@ -167,14 +148,12 @@ pub use ipoplast::IPopLast;
 pub use ipromise::IPromise;
 pub use ipushfirst::IPushFirst;
 pub use ipushlast::IPushLast;
-pub use iranged::IRanged;
 pub use irealize::IRealize;
 pub use ireduce::IReduce;
 pub use ireset::IReset;
 pub use ispace::ISpace;
 pub use itomutable::IToMutable;
 pub use itopersistent::IToPersistent;
-pub use ivalidate::IValidate;
 pub use iwatch::IWatch;
 
 #[cfg(test)]

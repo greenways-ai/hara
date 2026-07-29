@@ -7,7 +7,6 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.function.Predicate;
 
 import static org.junit.Assert.*;
 
@@ -173,28 +172,6 @@ public class ProtocolTest {
           }
         };
     pair.setValue("new");
-  }
-
-  @Test
-  public void testIValidateDefaults() {
-    IValidate<String> valid =
-        new IValidate<String>() {
-          @Override
-          public Predicate<String> getValidator() {
-            return s -> s.length() > 0;
-          }
-        };
-    assertTrue(valid.validate("a"));
-
-    try {
-      valid.validate("");
-      fail("Should throw IllegalStateException");
-    } catch (IllegalStateException e) {
-      assertTrue(e.getMessage().contains("Validator rejected value"));
-    }
-
-    IValidate<String> noValidator = new IValidate<String>() {};
-    assertTrue(noValidator.validate("anything"));
   }
 
   @Test

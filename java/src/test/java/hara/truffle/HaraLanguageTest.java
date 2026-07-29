@@ -1227,39 +1227,208 @@ public class HaraLanguageTest {
     while (names.find()) {
       protocols.add(names.group(1));
     }
-    assertEquals(59, protocols.size());
+    Set<String> hiddenProtocols = Set.of("IColl", "IMetadata");
+    protocols.removeAll(hiddenProtocols);
+    assertEquals(50, protocols.size());
+    Set<String> unavailableProtocols =
+        Set.of(
+            "IColl",
+            "IMetadata",
+            "IHasRuntime",
+            "IRanged",
+            "IValidate",
+            "IComponentOptions",
+            "IComponentProps",
+            "IComponentQuery",
+            "IComponentTrack");
     try (Context context = context()) {
       for (String protocol : protocols) {
+        String protocolNamespace = "std.protocol." + protocol.toLowerCase(java.util.Locale.ROOT);
         assertTrue(
             protocol,
             context
-                .eval(HaraLanguage.ID, "std.foundation/" + protocol)
+                .eval(HaraLanguage.ID, protocolNamespace + "/" + protocol)
                 .toString()
-                .contains("std.foundation/" + protocol));
+                .contains(protocolNamespace + "/" + protocol));
+        assertTrue(
+            protocol,
+            context
+                .eval(
+                    HaraLanguage.ID,
+                    "(= std.foundation/"
+                        + protocol
+                        + " "
+                        + protocolNamespace
+                        + "/"
+                        + protocol
+                        + ")")
+                .asBoolean());
       }
       assertEquals(
           3L,
           context
-              .eval(HaraLanguage.ID, "(std.foundation/ICount/count [1 2 3])")
+              .eval(HaraLanguage.ID, "(std.protocol.icount/count [1 2 3])")
               .asLong());
       assertTrue(
           context
-              .eval(HaraLanguage.ID, "(std.foundation/ICas/cas (atom 1) 1 2)")
+              .eval(HaraLanguage.ID, "(std.protocol.icas/cas (atom 1) 1 2)")
               .asBoolean());
       assertEquals(
           6L,
           context
               .eval(
                   HaraLanguage.ID,
-                  "(std.foundation/IReduce/reduce [1 2 3] + 0)")
+                  "(std.protocol.ireduce/reduce [1 2 3] + 0)")
               .asLong());
       assertEquals(
           ":fulfilled",
           context
               .eval(
                   HaraLanguage.ID,
-                  "(std.foundation/IPromise/state (std.foundation.promise/from 7))")
+                  "(std.protocol.ipromise/state (std.foundation.promise/from 7))")
               .toString());
+      assertEquals(
+          ":loaded",
+          context
+              .eval(HaraLanguage.ID, "(require 'std.protocol.ifind) :loaded")
+              .toString());
+      PolyglotException obsoleteMethod =
+          assertThrows(
+              PolyglotException.class,
+              () -> context.eval(HaraLanguage.ID, "std.foundation/ICount/count"));
+      assertTrue(obsoleteMethod.getMessage().contains("Unbound symbol"));
+      for (String unavailableProtocol : unavailableProtocols) {
+        String hiddenNamespace =
+            "std.protocol." + unavailableProtocol.toLowerCase(java.util.Locale.ROOT);
+        PolyglotException hiddenCanonical =
+            assertThrows(
+                PolyglotException.class,
+                () ->
+                    context.eval(
+                        HaraLanguage.ID,
+                        hiddenNamespace + "/" + unavailableProtocol));
+        assertTrue(hiddenCanonical.getMessage().contains("Unbound symbol"));
+        PolyglotException hiddenFoundation =
+            assertThrows(
+                PolyglotException.class,
+                () ->
+                    context.eval(
+                        HaraLanguage.ID,
+                        "std.foundation/" + unavailableProtocol));
+        assertTrue(hiddenFoundation.getMessage().contains("Unbound symbol"));
+      }
+    }
+  }
+
+  @Test
+  public void sharedFoundationProtocolConformanceFixtureRuns() throws Exception {
+    String source =
+        Files.readString(
+            Path.of("lib/test-fixtures/std/foundation/protocol_conformance.hal"));
+    Matcher calls =
+        Pattern.compile("\\(std\\.protocol\\.[a-z]+/[a-z?\\-]+\\s+fixture").matcher(source);
+    int callCount = 0;
+    while (calls.find()) callCount++;
+    assertEquals(88, callCount);
+    assertTrue(!source.contains("protocol-call"));
+
+    try (Context context = context()) {
+      String result = context.eval(HaraLanguage.ID, source).toString();
+      assertTrue(result, !result.contains(":pass false"));
+      assertEquals(50, result.split(":pass true", -1).length - 1);
+    }
+  }
+
+  @Test
+  public void sharedFoundationProtocolFunctionalityFixtureRuns() throws Exception {
+    String source =
+        Files.readString(
+            Path.of("lib/test-fixtures/std/foundation/protocol_functionality.hal"));
+    String catalog =
+        Files.readString(
+            Path.of("specs/language/draft/conformance/protocol-method-cases.edn"));
+    assertEquals(88, catalog.split("\\{:protocol ", -1).length - 1);
+    Matcher methodVars =
+        Pattern.compile(
+                "(?m)^\\s*\\[?\\(protocol-case\\s+:[^\\s]+\\s+:[^\\s]+\\s+"
+                    + "(std\\.protocol\\.[a-z]+/[a-z?\\-]+)")
+            .matcher(source);
+
+    try (Context context = context()) {
+      String result = context.eval(HaraLanguage.ID, source).toString();
+      assertTrue(result, !result.contains(":pass false"));
+      assertEquals(88, result.split(":pass true", -1).length - 1);
+
+      int methodCount = 0;
+      while (methodVars.find()) {
+        methodCount++;
+        String methodVar = methodVars.group(1);
+        PolyglotException error =
+            assertThrows(
+                methodVar,
+                PolyglotException.class,
+                () -> context.eval(HaraLanguage.ID, "(" + methodVar + ")"));
+        assertTrue(
+            methodVar + " returned an uncategorized arity error: " + error.getMessage(),
+            error.getMessage().contains("protocol/arity"));
+      }
+      assertEquals(88, methodCount);
+
+      int failureCount = 0;
+      for (String line : source.split("\\R")) {
+        int quote = line.indexOf("'(std.protocol.");
+        if (quote < 0) continue;
+        failureCount++;
+        String quoted = line.substring(quote + 1);
+        int depth = 0;
+        int end = -1;
+        for (int index = 0; index < quoted.length(); index++) {
+          char character = quoted.charAt(index);
+          if (character == '(') depth++;
+          if (character == ')' && --depth == 0) {
+            end = index + 1;
+            break;
+          }
+        }
+        assertTrue("unbalanced failure form: " + line, end > 0);
+        String failureForm = quoted.substring(0, end);
+        String categorizedCall = null;
+        String uncategorizedError = null;
+        for (String receiver :
+            new String[] {
+              "(UnsupportedUseCase)",
+              "std.protocol.icount/ICount",
+              "nil",
+              "1",
+              ":unsupported",
+              "(fn [value] value)"
+            }) {
+          String call = failureForm.replaceFirst("unsupported", receiver);
+          try {
+            context.eval(HaraLanguage.ID, call);
+          } catch (PolyglotException error) {
+            if (error.getMessage().contains("protocol/unsupported-receiver")) {
+              categorizedCall = call;
+              break;
+            }
+            uncategorizedError = call + ": " + error.getMessage();
+          }
+        }
+        assertTrue(
+            "no receiver produced a categorized dispatch failure for "
+                + failureForm
+                + "; last error was "
+                + uncategorizedError,
+            categorizedCall != null);
+      }
+      assertEquals(88, failureCount);
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(try (std.protocol.icount/count) false "
+                      + "(catch Throwable error true))")
+              .asBoolean());
     }
   }
 

@@ -65,11 +65,21 @@
    (test/check "atom watches receive four arguments"
                (let [a (atom 1)
                      seen (atom [])]
-                 (add-watch a :log (fn [key ref old new] (swap! seen conj [key old new])))
-                 (swap! a + 2)
+                 (watch-add
+                   a :log
+                   (fn [key ref old new]
+                     (swap! seen
+                            (fn [values item] (conj values item))
+                            [key old new])))
+                 (swap! a (fn [value amount] (+ value amount)) 2)
                  (reset! a 9)
-                 [(deref a) (deref seen) (count (get-watches a)) (compare-and-set! a 9 10) (deref a)])
-               [9 [[:log 1 3] [:log 3 9]] 1 true 10])
+                 [(deref a)
+                  (deref seen)
+                  (std.protocol.iiterator/iter-next?
+                    (std.protocol.iiter/iter (watch-list a)))
+                  (cas! a 9 10)
+                  (deref a)])
+               [9 [[:log 1 3] [:log 3 9]] true true 10])
 
    (test/check "foundation macros expand portably"
                [(if-not false :yes :no)

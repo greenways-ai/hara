@@ -1,14 +1,10 @@
 package hara.lang.resource;
 
-import hara.lang.protocol.ComponentSupport;
 import hara.lang.protocol.IComponent;
-import hara.lang.protocol.IComponentOptions;
-import hara.lang.protocol.IComponentProps;
-import hara.lang.protocol.IComponentQuery;
-import hara.lang.protocol.IComponentTrack;
+import hara.lang.protocol.IMetadata;
 import java.util.Map;
 
-public final class ResourceInstance implements IComponentQuery, IComponentProps, IComponentOptions, IComponentTrack {
+public final class ResourceInstance implements IComponent {
   private final String type;
   private final String variant;
   private final Object key;
@@ -26,13 +22,32 @@ public final class ResourceInstance implements IComponentQuery, IComponentProps,
   public Object value() { return value; }
   public Map<String, Object> config() { return config; }
 
-  @Override public boolean started() { return ComponentSupport.started(value); }
-  @Override public boolean stopped() { return ComponentSupport.stopped(value); }
-  @Override public Object info(Object level) { return ComponentSupport.info(value, level); }
-  @Override public boolean remote() { return ComponentSupport.remote(value); }
-  @Override public Object health() { return ComponentSupport.health(value); }
-  @Override public Object props() { return ComponentSupport.props(value); }
-  @Override public Object options() { return ComponentSupport.options(value); }
-  @Override public Object trackPath() { return ComponentSupport.trackPath(value); }
+  @Override public IMetadata getProps() {
+    return value instanceof IComponent ? ((IComponent) value).getProps() : null;
+  }
+  @Override public IMetadata getStatus() {
+    return value instanceof IComponent ? ((IComponent) value).getStatus() : null;
+  }
+  @Override public boolean isStarted() {
+    return !(value instanceof IComponent) || ((IComponent) value).isStarted();
+  }
+  @Override public boolean isStopped() {
+    return value instanceof IComponent && ((IComponent) value).isStopped();
+  }
+  @Override public boolean isRemote() {
+    return value instanceof IComponent && ((IComponent) value).isRemote();
+  }
+  @Override public IComponent start() {
+    if (value instanceof IComponent) ((IComponent) value).start();
+    return this;
+  }
+  @Override public IComponent stop() {
+    if (value instanceof IComponent) ((IComponent) value).stop();
+    return this;
+  }
+  @Override public IComponent kill() {
+    if (value instanceof IComponent) ((IComponent) value).kill();
+    return this;
+  }
   @Override public String toString() { return "#resource[" + type + " " + variant + " " + key + "]"; }
 }

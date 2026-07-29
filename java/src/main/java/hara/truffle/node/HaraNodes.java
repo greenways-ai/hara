@@ -1180,6 +1180,21 @@ public final class HaraNodes {
           }
         }
         throw failure;
+      } catch (HaraException failure) {
+        for (CatchClause clause : catches) {
+          if (clause.matches(failure)) {
+            return clause.executeCatch(frame, failure);
+          }
+        }
+        throw failure;
+      } catch (RuntimeException failure) {
+        if (failure instanceof RecurException) throw failure;
+        for (CatchClause clause : catches) {
+          if (clause.matches(failure)) {
+            return clause.executeCatch(frame, failure);
+          }
+        }
+        throw failure;
       } finally {
         if (finallyBody != null) {
           finallyBody.execute(frame);

@@ -135,7 +135,52 @@
   has?
   "Returns true if collection contains key, including when its value is nil."
   [collection key]
-  (not (nil? (std.protocol.ifind/find collection key))))
+  (not (nil? (IFind/find collection key))))
+
+;; ---------------------------------------------------------------------------
+;; References
+;; ---------------------------------------------------------------------------
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  reset!
+  "Sets reference to value through IReset and returns value."
+  [reference value]
+  (IReset/reset reference value))
+
+(defn ^{:schema [:fn [:any :any :any] :bool]}
+  cas!
+  "Atomically replaces old-value with new-value through ICas."
+  [reference old-value new-value]
+  (ICas/cas reference old-value new-value))
+
+(defn ^{:schema [:fn [:any :fn & :any] :any]}
+  swap!
+  "Atomically applies function to reference through an ICas retry loop."
+  [reference function & arguments]
+  (loop []
+    (let [old-value (IDeref/deref reference)
+          new-value (apply function old-value arguments)]
+      (if (ICas/cas reference old-value new-value)
+        new-value
+        (recur)))))
+
+(defn ^{:schema [:fn [:any :any :fn] :any]}
+  watch-add
+  "Adds a keyed watch callback through IWatch and returns reference."
+  [reference key function]
+  (IWatch/watch-add reference key function))
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  watch-remove
+  "Removes keyed watch through IWatch and returns reference."
+  [reference key]
+  (IWatch/watch-remove reference key))
+
+(defn ^{:schema [:fn [:any] :any]}
+  watch-list
+  "Returns reference's watch iterator through IWatch."
+  [reference]
+  (IWatch/watch-list reference))
 
 ;; ---------------------------------------------------------------------------
 ;; Sequence access

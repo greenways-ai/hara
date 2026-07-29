@@ -5,6 +5,7 @@ import com.oracle.truffle.api.interop.InteropLibrary;
 import com.oracle.truffle.api.interop.TruffleObject;
 import com.oracle.truffle.api.library.ExportLibrary;
 import com.oracle.truffle.api.library.ExportMessage;
+import hara.lang.base.Ex;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -105,7 +106,8 @@ public final class HaraProtocol implements TruffleObject {
     }
     if (!method.acceptsCallArity(arguments.length + 1)) {
       throw new HaraException(
-          name
+          "protocol/arity: "
+              + name
               + "/"
               + methodName
               + " expects "
@@ -115,10 +117,26 @@ public final class HaraProtocol implements TruffleObject {
     }
     HaraProtocolImplementation implementation = implementation(receiver, methodName);
     if (implementation == null) {
-      throw new HaraException("No " + name + "/" + methodName + " implementation ("
-          + HaraDispatchKey.describeReceiver(receiver) + ")");
+      throw new HaraException(
+          "protocol/unsupported-receiver: No "
+              + name
+              + "/"
+              + methodName
+              + " implementation ("
+              + HaraDispatchKey.describeReceiver(receiver)
+              + ")");
     }
-    return implementation.invoke(receiver, arguments);
+    try {
+      return implementation.invoke(receiver, arguments);
+    } catch (Ex.Unsupported error) {
+      throw new HaraException(
+          "protocol/unsupported-receiver: "
+              + name
+              + "/"
+              + methodName
+              + " does not support "
+              + HaraDispatchKey.describeReceiver(receiver));
+    }
   }
 
   private static HaraProtocolInvoker functionInvoker(HaraFunction function) {

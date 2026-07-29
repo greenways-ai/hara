@@ -64,15 +64,6 @@ pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
     ("ICas", &[("cas", 3)]),
     ("IClose", &[("close", 1)]),
     (
-        "IColl",
-        &[
-            ("start-string", 1),
-            ("end-string", 1),
-            ("sep-string", 1),
-            ("iterator", 1),
-        ],
-    ),
-    (
         "IComponent",
         &[
             ("props", 1),
@@ -85,19 +76,6 @@ pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
             ("remote?", 1),
         ],
     ),
-    ("IComponentOptions", &[("options", 1)]),
-    ("IComponentProps", &[("props", 1)]),
-    (
-        "IComponentQuery",
-        &[
-            ("started?", 1),
-            ("stopped?", 1),
-            ("info", 2),
-            ("remote?", 1),
-            ("health", 1),
-        ],
-    ),
-    ("IComponentTrack", &[("track-path", 1)]),
     ("IConj", &[("conj", 2)]),
     ("ICons", &[("cons", 2)]),
     ("IContext", &[("call", usize::MAX)]),
@@ -123,7 +101,6 @@ pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
     ("IExInfo", &[("data", 1)]),
     ("IFind", &[("find", 2)]),
     ("IFn", &[("invoke", usize::MAX)]),
-    ("IHasRuntime", &[("runtime", 1)]),
     ("IHash", &[("hash", 1)]),
     ("IHashCached", &[("hash-current", 1), ("hash-put", 2)]),
     ("IIndexed", &[("index-of", 2)]),
@@ -132,7 +109,6 @@ pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
     ("IIter", &[("iter", 1)]),
     ("IIterator", &[("iter-next?", 1), ("iter-next", 1)]),
     ("ILookup", &[("lookup", usize::MAX)]),
-    ("IMetadata", &[("metatype", 1)]),
     ("IMutable", &[]),
     ("INamespaced", &[("name", 1), ("namespace", 1)]),
     ("INth", &[("nth", 2)]),
@@ -161,7 +137,6 @@ pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
     ("IPopLast", &[("pop-last", 1)]),
     ("IPushFirst", &[("push-first", 2)]),
     ("IPushLast", &[("push-last", 2)]),
-    ("IRanged", &[("range-max", 1), ("range-min", 1)]),
     ("IRealize", &[("realized?", 1), ("realize", 1)]),
     ("IReduce", &[("reduce", usize::MAX)]),
     ("IReset", &[("reset", 2)]),
@@ -182,7 +157,6 @@ pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
     ),
     ("IToMutable", &[("to-mutable", 1)]),
     ("IToPersistent", &[("to-persistent", 1)]),
-    ("IValidate", &[("validate", 2), ("validator", 1)]),
     (
         "IWatch",
         &[("watch-add", 3), ("watch-remove", 2), ("watch-list", 1)],
@@ -231,21 +205,54 @@ pub(crate) fn builtin_protocol_method_values() -> Vec<(String, String, Value)> {
     FOUNDATION_PROTOCOLS
         .iter()
         .flat_map(|(protocol, methods)| {
-            methods.iter().map(move |(method, _)| {
+            methods.iter().map(move |(method, arity)| {
                 let namespace = builtin_protocol_namespace(protocol);
                 let protocol_name = builtin_protocol_name(protocol);
                 let method_name = (*method).to_owned();
                 let display_name = format!("{namespace}/{method}");
+                let arity_display_name = display_name.clone();
+                let (minimum_arity, maximum_arity) =
+                    builtin_protocol_arity_range(protocol, method, *arity);
                 (
                     namespace,
                     (*method).to_owned(),
                     native_variadic_function(&display_name, move |arguments| {
+                        if arguments.len() < minimum_arity
+                            || maximum_arity.is_some_and(|maximum| arguments.len() > maximum)
+                        {
+                            let expected = match maximum_arity {
+                                Some(maximum) if maximum == minimum_arity => {
+                                    minimum_arity.to_string()
+                                }
+                                Some(maximum) => format!("{minimum_arity} to {maximum}"),
+                                None => format!("at least {minimum_arity}"),
+                            };
+                            return Err(format!(
+                                "protocol/arity: {arity_display_name} expects {expected} arguments, received {}",
+                                arguments.len()
+                            ));
+                        }
                         protocol_call(&protocol_name, &method_name, &arguments)
                     }),
                 )
             })
         })
         .collect()
+}
+
+fn builtin_protocol_arity_range(
+    protocol: &str,
+    method: &str,
+    declared_arity: usize,
+) -> (usize, Option<usize>) {
+    if declared_arity != usize::MAX {
+        return (declared_arity, Some(declared_arity));
+    }
+    match (protocol, method) {
+        ("ILookup", "lookup") | ("IReduce", "reduce") => (2, Some(3)),
+        ("IInvokeIn", "invoke-in") => (2, None),
+        _ => (1, None),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1717,6 +1724,14 @@ impl ProtocolRegistry {
             )) {
                 return call_function(function, arguments.to_vec());
             }
+            if FOUNDATION_PROTOCOLS
+                .iter()
+                .any(|(name, _)| builtin_protocol_name(name) == protocol)
+            {
+                return Err(format!(
+                    "protocol/unsupported-receiver: missing protocol implementation: {protocol}/{method}"
+                ));
+            }
         }
         if self
             .guest_declarations
@@ -1765,90 +1780,136 @@ impl ProtocolRegistry {
                 });
             }
         }
-        registry.register("std.foundation/ICount", "count", protocol_count);
-        registry.register("std.foundation/INth", "nth", protocol_nth);
-        registry.register("std.foundation/ILookup", "lookup", protocol_lookup);
-        registry.register("std.foundation/IFind", "find", protocol_find);
-        registry.register("std.foundation/IAssoc", "assoc", protocol_assoc);
-        registry.register("std.foundation/IConj", "conj", protocol_conj);
-        registry.register("std.foundation/ICons", "cons", protocol_cons);
-        registry.register("std.foundation/IDissoc", "dissoc", protocol_dissoc);
-        registry.register("std.foundation/IEmpty", "empty", protocol_empty);
-        registry.register("std.foundation/IEquality", "equality", protocol_equality);
-        registry.register("std.foundation/IDisplay", "display", protocol_display);
-        registry.register("std.foundation/IHash", "hash", protocol_hash);
-        registry.register("std.foundation/IFn", "invoke", protocol_invoke);
-        registry.register("std.foundation/IPair", "key", protocol_pair_key);
-        registry.register("std.foundation/IPair", "value", protocol_pair_value);
+        registry.register("std.protocol.icount/ICount", "count", protocol_count);
+        registry.register("std.protocol.inth/INth", "nth", protocol_nth);
+        registry.register("std.protocol.ilookup/ILookup", "lookup", protocol_lookup);
+        registry.register("std.protocol.ifind/IFind", "find", protocol_find);
+        registry.register("std.protocol.iassoc/IAssoc", "assoc", protocol_assoc);
+        registry.register("std.protocol.iconj/IConj", "conj", protocol_conj);
+        registry.register("std.protocol.icons/ICons", "cons", protocol_cons);
+        registry.register("std.protocol.idissoc/IDissoc", "dissoc", protocol_dissoc);
+        registry.register("std.protocol.iempty/IEmpty", "empty", protocol_empty);
         registry.register(
-            "std.foundation/IPeekFirst",
+            "std.protocol.iequality/IEquality",
+            "equality",
+            protocol_equality,
+        );
+        registry.register(
+            "std.protocol.idisplay/IDisplay",
+            "display",
+            protocol_display,
+        );
+        registry.register("std.protocol.ihash/IHash", "hash", protocol_hash);
+        registry.register("std.protocol.ifn/IFn", "invoke", protocol_invoke);
+        registry.register("std.protocol.ipair/IPair", "key", protocol_pair_key);
+        registry.register("std.protocol.ipair/IPair", "value", protocol_pair_value);
+        registry.register(
+            "std.protocol.ipeekfirst/IPeekFirst",
             "peek-first",
             protocol_peek_first,
         );
-        registry.register("std.foundation/IPeekLast", "peek-last", protocol_peek_last);
-        registry.register("std.foundation/IIter", "iter", protocol_iter);
-        registry.register("std.foundation/IIterator", "iter-next?", |arguments| {
-            arguments
-                .first()
-                .ok_or_else(|| "IIterator/iter-next? expects one argument".to_string())
-                .and_then(iterator_has_next)
-        });
-        registry.register("std.foundation/IIterator", "iter-next", |arguments| {
-            arguments
-                .first()
-                .ok_or_else(|| "IIterator/iter-next expects one argument".to_string())
-                .and_then(iterator_next)
-        });
-        registry.register("std.foundation/IClose", "close", |arguments| {
-            match arguments {
+        registry.register(
+            "std.protocol.ipeeklast/IPeekLast",
+            "peek-last",
+            protocol_peek_last,
+        );
+        registry.register("std.protocol.iiter/IIter", "iter", protocol_iter);
+        registry.register(
+            "std.protocol.iiterator/IIterator",
+            "iter-next?",
+            |arguments| {
+                arguments
+                    .first()
+                    .ok_or_else(|| "IIterator/iter-next? expects one argument".to_string())
+                    .and_then(iterator_has_next)
+            },
+        );
+        registry.register(
+            "std.protocol.iiterator/IIterator",
+            "iter-next",
+            |arguments| {
+                arguments
+                    .first()
+                    .ok_or_else(|| "IIterator/iter-next expects one argument".to_string())
+                    .and_then(iterator_next)
+            },
+        );
+        registry.register(
+            "std.protocol.iclose/IClose",
+            "close",
+            |arguments| match arguments {
                 [Value::Coroutine(coroutine)] => {
                     coroutine_close(coroutine)?;
                     Ok(Value::Coroutine(coroutine.clone()))
                 }
                 [value] => iterator_close(value),
                 _ => Err("IClose/close expects one argument".into()),
-            }
-        });
+            },
+        );
         registry.register(
-            "std.foundation/INamespaced",
+            "std.protocol.inamespaced/INamespaced",
             "name",
             protocol_namespaced_name,
         );
         registry.register(
-            "std.foundation/INamespaced",
+            "std.protocol.inamespaced/INamespaced",
             "namespace",
             protocol_namespaced_namespace,
         );
-        registry.register("std.foundation/IObjType", "meta", protocol_meta);
-        registry.register("std.foundation/IObjType", "with-meta", protocol_with_meta);
-        registry.register("std.foundation/IDeref", "deref", protocol_deref);
-        registry.register("std.foundation/IReset", "reset", protocol_reset);
-        registry.register("std.foundation/ICas", "cas", protocol_cas);
-        registry.register("std.foundation/IReduce", "reduce", protocol_reduce);
-        registry.register("std.foundation/IPromise", "state", protocol_promise_state);
-        registry.register("std.foundation/IPromise", "value", protocol_promise_value);
-        registry.register("std.foundation/IPromise", "then", |arguments| {
+        registry.register("std.protocol.iobjtype/IObjType", "meta", protocol_meta);
+        registry.register(
+            "std.protocol.iobjtype/IObjType",
+            "with-meta",
+            protocol_with_meta,
+        );
+        registry.register("std.protocol.ideref/IDeref", "deref", protocol_deref);
+        registry.register("std.protocol.ireset/IReset", "reset", protocol_reset);
+        registry.register("std.protocol.icas/ICas", "cas", protocol_cas);
+        registry.register("std.protocol.ireduce/IReduce", "reduce", protocol_reduce);
+        registry.register(
+            "std.protocol.ipromise/IPromise",
+            "state",
+            protocol_promise_state,
+        );
+        registry.register(
+            "std.protocol.ipromise/IPromise",
+            "value",
+            protocol_promise_value,
+        );
+        registry.register("std.protocol.ipromise/IPromise", "then", |arguments| {
             protocol_promise_chain("promise/then", arguments)
         });
-        registry.register("std.foundation/IPromise", "catch", |arguments| {
+        registry.register("std.protocol.ipromise/IPromise", "catch", |arguments| {
             protocol_promise_chain("promise/catch", arguments)
         });
-        registry.register("std.foundation/IPromise", "finally", |arguments| {
+        registry.register("std.protocol.ipromise/IPromise", "finally", |arguments| {
             protocol_promise_chain("promise/finally", arguments)
         });
-        registry.register("std.foundation/IPromise", "cancel", protocol_promise_cancel);
         registry.register(
-            "std.foundation/ICoroutine",
+            "std.protocol.ipromise/IPromise",
+            "cancel",
+            protocol_promise_cancel,
+        );
+        registry.register(
+            "std.protocol.icoroutine/ICoroutine",
             "status",
             protocol_coroutine_status,
         );
-        registry.register("std.foundation/IWatch", "watch-add", protocol_watch_add);
         registry.register(
-            "std.foundation/IWatch",
+            "std.protocol.iwatch/IWatch",
+            "watch-add",
+            protocol_watch_add,
+        );
+        registry.register(
+            "std.protocol.iwatch/IWatch",
             "watch-remove",
             protocol_watch_remove,
         );
-        registry.register("std.foundation/IWatch", "watch-list", protocol_watch_list);
+        registry.register(
+            "std.protocol.iwatch/IWatch",
+            "watch-list",
+            protocol_watch_list,
+        );
         registry
     }
 }
@@ -3407,7 +3468,32 @@ fn protocol_find(arguments: &[Value]) -> Result<Value, String> {
 
 fn protocol_iter(arguments: &[Value]) -> Result<Value, String> {
     match arguments {
-        [value] => make_iterator(value.clone()),
+        [value]
+            if matches!(
+                value,
+                Value::Iterator(_)
+                    | Value::Nil
+                    | Value::String(_)
+                    | Value::Bytes(_)
+                    | Value::ByteBuffer(_)
+                    | Value::Array(_)
+                    | Value::Object(_)
+                    | Value::Map(_)
+                    | Value::OrderedMap(_)
+                    | Value::SortedMap(_)
+                    | Value::Trie(_)
+                    | Value::Set(_)
+                    | Value::OrderedSet(_)
+                    | Value::SortedSet(_)
+                    | Value::List(_)
+                    | Value::Cons(_)
+                    | Value::Queue(_)
+                    | Value::Tuple(_)
+                    | Value::Vector(_)
+            ) =>
+        {
+            make_iterator(value.clone())
+        }
         _ => Err("IIter/iter expects one value".into()),
     }
 }
@@ -3439,9 +3525,7 @@ fn protocol_cas(arguments: &[Value]) -> Result<Value, String> {
 
 fn protocol_reduce(arguments: &[Value]) -> Result<Value, String> {
     let (source, function, mut accumulator) = match arguments {
-        [source, Value::Function(function), initial] => {
-            (source, function, Some(initial.clone()))
-        }
+        [source, Value::Function(function), initial] => (source, function, Some(initial.clone())),
         [source, Value::Function(function)] => (source, function, None),
         _ => {
             return Err(
@@ -3481,10 +3565,14 @@ fn protocol_promise_value(arguments: &[Value]) -> Result<Value, String> {
 
 fn protocol_promise_chain(operation: &str, arguments: &[Value]) -> Result<Value, String> {
     match arguments {
-        [Value::Promise(promise), Value::Function(function)] => Ok(Value::Promise(
-            promise_chain(promise.clone(), operation, function.clone()),
+        [Value::Promise(promise), Value::Function(function)] => Ok(Value::Promise(promise_chain(
+            promise.clone(),
+            operation,
+            function.clone(),
+        ))),
+        _ => Err(format!(
+            "IPromise/{operation} expects a promise and function"
         )),
-        _ => Err(format!("IPromise/{operation} expects a promise and function")),
     }
 }
 
@@ -6126,87 +6214,6 @@ fn eval_atom_form(
                 operation == "atom",
             ))))
         }
-        "reset!" => {
-            if forms.len() != 3 {
-                return Err("reset! expects an atom and value".into());
-            }
-            let atom = match eval(&forms[1], env)? {
-                Value::Atom(atom) => atom,
-                _ => return Err("reset! expects an atom".into()),
-            };
-            atom.reset(eval(&forms[2], env)?)
-        }
-        "compare:set!" => {
-            if forms.len() != 4 {
-                return Err("compare:set! expects an atom, old value, and new value".into());
-            }
-            let atom = match eval(&forms[1], env)? {
-                Value::Atom(atom) => atom,
-                _ => return Err("compare:set! expects an atom".into()),
-            };
-            let old = eval(&forms[2], env)?;
-            Ok(Value::Bool(
-                atom.compare_and_set(&old, eval(&forms[3], env)?)?,
-            ))
-        }
-        "watch-add" => {
-            if forms.len() != 4 {
-                return Err("watch-add expects an atom, key, and function".into());
-            }
-            let atom = match eval(&forms[1], env)? {
-                Value::Atom(atom) => atom,
-                _ => return Err("watch-add expects an atom".into()),
-            };
-            let key = eval(&forms[2], env)?;
-            let function = match eval(&forms[3], env)? {
-                Value::Function(function) => function,
-                _ => return Err("watch-add expects a function".into()),
-            };
-            atom.add_watch(key, function)?;
-            Ok(Value::Atom(atom))
-        }
-        "watch-remove" => {
-            if forms.len() != 3 {
-                return Err("watch-remove expects an atom and key".into());
-            }
-            let atom = match eval(&forms[1], env)? {
-                Value::Atom(atom) => atom,
-                _ => return Err("watch-remove expects an atom".into()),
-            };
-            atom.remove_watch(&eval(&forms[2], env)?)?;
-            Ok(Value::Atom(atom))
-        }
-        "watch-list" => {
-            if forms.len() != 2 {
-                return Err("watch-list expects an atom".into());
-            }
-            let atom = match eval(&forms[1], env)? {
-                Value::Atom(atom) => atom,
-                _ => return Err("watch-list expects an atom".into()),
-            };
-            Ok(iterator_from_values(atom.watch_entries()?))
-        }
-        "swap!" => {
-            if forms.len() < 3 {
-                return Err("swap! expects an atom, function, and optional arguments".into());
-            }
-            let atom = match eval(&forms[1], env)? {
-                Value::Atom(atom) => atom,
-                _ => return Err("swap! expects an atom".into()),
-            };
-            let function = match eval(&forms[2], env)? {
-                Value::Function(function) => function,
-                _ => return Err("swap! expects a function".into()),
-            };
-            let mut arguments = vec![atom.deref_value()];
-            arguments.extend(
-                forms[3..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?,
-            );
-            atom.reset(call_function(&function, arguments)?)
-        }
         _ => unreachable!("eval_atom_form called for an unknown operation"),
     }
 }
@@ -6328,19 +6335,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             {
                 eval_basic_object_form(n, fs, env)
             }
-            Form::Symbol(n)
-                if [
-                    "atom",
-                    "atom:basic",
-                    "reset!",
-                    "compare:set!",
-                    "swap!",
-                    "watch-add",
-                    "watch-remove",
-                    "watch-list",
-                ]
-                .contains(&n.as_str()) =>
-            {
+            Form::Symbol(n) if ["atom", "atom:basic"].contains(&n.as_str()) => {
                 eval_atom_form(n, fs, env)
             }
             Form::Symbol(n) if n == "deref" => {
@@ -6444,15 +6439,22 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 if let Err(ref error) = result {
                     if let Some(parts) = catch_form {
-                        if parts.len() != 3 {
-                            return Err("catch expects a name and body".into());
-                        }
-                        let name = match &parts[1] {
+                        let (binding_index, body_index) = match parts.len() {
+                            3 => (1, 2),
+                            4 => {
+                                if !matches!(&parts[1], Form::Symbol(_)) {
+                                    return Err("catch class must be a symbol".into());
+                                }
+                                (2, 3)
+                            }
+                            _ => return Err("catch expects a class, name, and body".into()),
+                        };
+                        let name = match &parts[binding_index] {
                             Form::Symbol(name) => name.clone(),
                             _ => return Err("catch name must be a symbol".into()),
                         };
                         let old = env.insert(name.clone(), Value::String(error.clone()));
-                        result = eval(&parts[2], env);
+                        result = eval(&parts[body_index], env);
                         if let Some(old) = old {
                             env.insert(name, old);
                         } else {

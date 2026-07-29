@@ -36,7 +36,6 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
-import java.util.IdentityHashMap;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
@@ -155,9 +154,6 @@ public final class HaraContext {
   private String collectingBuiltinNamespace;
   private final HaraProtocol ifnProtocol;
   private final AtomicLong gensymCounter = new AtomicLong();
-  private final Map<Object, LinkedHashMap<Object, Object>> guestWatches =
-      Collections.synchronizedMap(new IdentityHashMap<>());
-
   HaraContext(TruffleLanguage.Env environment) {
     this.environment = environment;
     currentNamespace = namespace(INTRINSIC_NAMESPACE);
@@ -377,6 +373,7 @@ public final class HaraContext {
     currentNamespace = namespace(declaration.name.getName());
     referRuntimeIntrinsics(currentNamespace);
     if (!declaration.blank) referFoundation(currentNamespace);
+    configureProtocolAliases(currentNamespace);
     configureFoundationAliases(declaration);
     activateBuiltins(declaration);
     configureNativeFlavor(declaration.structuralClauses);
@@ -396,6 +393,18 @@ public final class HaraContext {
               library.getKey(), DEFAULT_LIBRARY_ALIASES.get(library.getKey()));
       putAlias(namespaceAliases, alias, library.getValue());
     }
+  }
+
+  private void configureProtocolAliases(HaraNamespace target) {
+    Map<String, String> namespaceAliases =
+        aliases.computeIfAbsent(target.name(), ignored -> new ConcurrentHashMap<>());
+    HaraNamespace foundation = namespace(FOUNDATION_NAMESPACE);
+    foundation.vars.forEach(
+        (name, variable) -> {
+          if (name.startsWith("I") && variable.get() instanceof HaraProtocol) {
+            putAlias(namespaceAliases, name, builtinProtocolNamespace(name));
+          }
+        });
   }
 
   private void applyNamespaceRequires(Object[] clauses) {
@@ -488,6 +497,7 @@ public final class HaraContext {
   private void initializeUserNamespace(HaraNamespace target) {
     referRuntimeIntrinsics(target);
     referFoundation(target);
+    configureProtocolAliases(target);
     Map<String, String> namespaceAliases =
         aliases.computeIfAbsent(target.name(), ignored -> new ConcurrentHashMap<>());
     for (Map.Entry<String, String> entry : DEFAULT_LIBRARY_ALIASES.entrySet()) {
@@ -948,7 +958,8 @@ public final class HaraContext {
   private Object invokeProtocolMethod(
       HaraProtocol protocol, String methodName, Object[] values) {
     if (values.length == 0) {
-      throw new HaraException(protocol.name() + "/" + methodName + " expects a receiver");
+      throw new HaraException(
+          "protocol/arity: " + protocol.name() + "/" + methodName + " expects a receiver");
     }
     Object receiver = HaraBox.unwrap(values[0]);
     if (isHostObject(receiver)) receiver = asHostObject(receiver);
@@ -1690,22 +1701,6 @@ public final class HaraContext {
         "atom",
         new UnaryBuiltin(
             "atom", value -> new hara.lang.data.Atom.Standard<>(HaraBox.unwrap(value))));
-    target.define(
-        "reset!",
-        new VariadicBuiltin(
-            "reset!",
-            values -> {
-              if (values.length != 2) {
-                throw new HaraException("reset! expects a reference and value");
-              }
-              return protocolCall("IReset", "reset", values);
-            }));
-    target.define("swap!", new VariadicBuiltin("swap!", this::swapAtom));
-    target.define(
-        "compare-and-set!", new VariadicBuiltin("compare-and-set!", this::compareAndSetAtom));
-    target.define("add-watch", new VariadicBuiltin("add-watch", this::addAtomWatch));
-    target.define("remove-watch", new VariadicBuiltin("remove-watch", this::removeAtomWatch));
-    target.define("get-watches", new UnaryBuiltin("get-watches", this::getAtomWatches));
     target.define("gensym", new VariadicBuiltin("gensym", values -> {
       if (values.length > 1) throw new HaraException("gensym expects zero or one prefix");
       return gensym(values.length == 0 ? null : String.valueOf(HaraBox.unwrap(values[0])));
@@ -1760,95 +1755,6 @@ public final class HaraContext {
       result[i] = (byte) byteNumber(values[i], "bytes");
     }
     return result;
-  }
-
-  @SuppressWarnings({"rawtypes", "unchecked"})
-  private Object swapAtom(Object[] values) {
-    if (values.length < 2) throw new HaraException("swap! expects an atom, function, and arguments");
-    Object raw = HaraBox.unwrap(values[0]);
-    if (!(raw instanceof hara.lang.data.Atom.Swap swap)) {
-      throw new HaraException("swap! expects an atom");
-    }
-    for (;;) {
-      Object oldValue = swap.deref();
-      Object[] arguments = new Object[values.length - 1];
-      arguments[0] = oldValue;
-      if (values.length > 2) System.arraycopy(values, 2, arguments, 1, values.length - 2);
-      Object newValue = HaraBox.unwrap(invokeCallable(values[1], arguments));
-      swap.validate(newValue);
-      if (swap.cas(oldValue, newValue)) {
-        swap.notifyWatches(oldValue, newValue);
-        return newValue;
-      }
-    }
-  }
-
-  @SuppressWarnings({"rawtypes", "unchecked"})
-  private Object compareAndSetAtom(Object[] values) {
-    requireMethodArity("compare-and-set!", values, 3);
-    Object raw = HaraBox.unwrap(values[0]);
-    if (!(raw instanceof hara.lang.data.Atom.Swap swap)) {
-      throw new HaraException("compare-and-set! expects an atom");
-    }
-    Object oldValue = HaraBox.unwrap(values[1]);
-    Object newValue = HaraBox.unwrap(values[2]);
-    swap.validate(newValue);
-    boolean changed = swap.cas(oldValue, newValue);
-    if (changed) swap.notifyWatches(oldValue, newValue);
-    return changed;
-  }
-
-  @SuppressWarnings({"rawtypes", "unchecked"})
-  private Object addAtomWatch(Object[] values) {
-    requireMethodArity("add-watch", values, 3);
-    Object reference = HaraBox.unwrap(values[0]);
-    if (!(reference instanceof hara.lang.protocol.IWatch watch)) {
-      throw new HaraException("add-watch expects a watchable reference");
-    }
-    Object key = HaraBox.unwrap(values[1]);
-    Object callback = values[2];
-    watch.addWatch(key, entry -> invokeCallable(callback, new Object[] {
-        key, reference, ((hara.lang.protocol.IWatch.WatchEntry) entry).oldVal(),
-        ((hara.lang.protocol.IWatch.WatchEntry) entry).newVal()}));
-    synchronized (guestWatches) {
-      guestWatches.computeIfAbsent(reference, ignored -> new LinkedHashMap<>()).put(key, callback);
-    }
-    return reference;
-  }
-
-  @SuppressWarnings({"rawtypes", "unchecked"})
-  private Object removeAtomWatch(Object[] values) {
-    requireMethodArity("remove-watch", values, 2);
-    Object reference = HaraBox.unwrap(values[0]);
-    if (!(reference instanceof hara.lang.protocol.IWatch watch)) {
-      throw new HaraException("remove-watch expects a watchable reference");
-    }
-    Object key = HaraBox.unwrap(values[1]);
-    watch.removeWatch(key);
-    synchronized (guestWatches) {
-      LinkedHashMap<Object, Object> watches = guestWatches.get(reference);
-      if (watches != null) {
-        watches.remove(key);
-        if (watches.isEmpty()) guestWatches.remove(reference);
-      }
-    }
-    return reference;
-  }
-
-  private Object getAtomWatches(Object value) {
-    Object reference = HaraBox.unwrap(value);
-    if (!(reference instanceof hara.lang.protocol.IWatch)) {
-      throw new HaraException("get-watches expects a watchable reference");
-    }
-    ArrayList<Object> entries = new ArrayList<>();
-    synchronized (guestWatches) {
-      for (Map.Entry<Object, Object> entry :
-          guestWatches.getOrDefault(reference, new LinkedHashMap<>()).entrySet()) {
-        entries.add(entry.getKey());
-        entries.add(entry.getValue());
-      }
-    }
-    return hara.lang.data.Map.Standard.from(null, entries.toArray());
   }
 
   private void installNativeLibraries() {
