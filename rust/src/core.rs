@@ -7357,10 +7357,6 @@ fn binding_value(env: &HashMap<String, Value>, name: &str) -> Option<Value> {
                 .resolve(&crate::lang::data::Symbol::parse(name))
                 .map(|var| var.deref_value())
         })
-        .or_else(|| {
-            name.rsplit_once('/')
-                .and_then(|(_, local)| env.get(local).cloned().map(deref_value))
-        })
 }
 
 fn binding_var(env: &mut HashMap<String, Value>, name: &str) -> Option<KernelVar<Value>> {
