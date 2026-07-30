@@ -298,7 +298,14 @@ impl Runtime {
         Ok(())
     }
     fn start_hir_fiber(&mut self, task: u64, bytes: &[u8]) -> Result<(), String> {
-        let module = kernel::hir::decode_hir(bytes)?;
+        self.start_hir_bundle(task, &[bytes])
+    }
+    fn start_hir_bundle(&mut self, task: u64, modules: &[&[u8]]) -> Result<(), String> {
+        let mut forms = Vec::new();
+        for bytes in modules {
+            forms.extend(kernel::hir::decode_hir(bytes)?.forms);
+        }
+        forms.push(kernel::Form::Bool(true));
         let environment = self.env.clone();
         let (handler, pending, next) = self.host_handler(task);
         let file_provider = self.mount_id.map(|_| {
@@ -315,7 +322,7 @@ impl Runtime {
                 core::with_namespace_source(provider, || {
                     core::with_protocols(&protocols, || {
                         core::with_host_calls(handler, || {
-                            EvalFiber::start_forms(module.forms, environment)
+                            EvalFiber::start_forms(forms, environment)
                         })
                     })
                 })
@@ -773,6 +780,20 @@ fn dispatch(
     match target {
         "eval" => dispatch_eval(kernel, task, "ROOT", &args, false),
         "eval-hir" => dispatch_eval_hir(kernel, task, "ROOT", &args),
+        "eval-hir-bundle" => dispatch_eval_hir_bundle(kernel, task, "ROOT", &args),
+        "session/eval-hir" => match args.as_slice() {
+            [Value::String(session), Value::Bytes(bytes)] => {
+                dispatch_eval_hir_bytes(kernel, task, session, bytes)
+            }
+            _ => Err("hta session/eval-hir expects session and byte array".into()),
+        },
+        "session/eval-hir-bundle" => match args.as_slice() {
+            [Value::String(session), Value::Vector(modules)] => {
+                let modules = modules.iter().cloned().collect::<Vec<_>>();
+                dispatch_eval_hir_bundle_values(kernel, task, session, &modules)
+            }
+            _ => Err("hta session/eval-hir-bundle expects session and byte arrays".into()),
+        },
         "eval-bound" => dispatch_eval(kernel, task, "ROOT", &args, true),
         "complete" => dispatch_complete(kernel, task, "ROOT", &args),
         "session/eval" => match args.as_slice() {
@@ -1033,10 +1054,51 @@ fn dispatch_eval_hir(
     let [Value::Bytes(bytes)] = args else {
         return Err("hta eval-hir expects one byte array".into());
     };
+    dispatch_eval_hir_bytes(kernel, task, session, bytes)
+}
+
+fn dispatch_eval_hir_bytes(
+    kernel: &mut KernelRuntime,
+    task: u64,
+    session: &str,
+    bytes: &[u8],
+) -> Result<(), String> {
     validate_session_name(session)?;
     kernel.session(session)?;
     kernel.task_sessions.insert(task, session.into());
     kernel.session_mut(session)?.start_hir_fiber(task, bytes)
+}
+
+fn dispatch_eval_hir_bundle(
+    kernel: &mut KernelRuntime,
+    task: u64,
+    session: &str,
+    args: &[Value],
+) -> Result<(), String> {
+    let [Value::Vector(modules)] = args else {
+        return Err("hta eval-hir-bundle expects one vector of byte arrays".into());
+    };
+    let modules = modules.iter().cloned().collect::<Vec<_>>();
+    dispatch_eval_hir_bundle_values(kernel, task, session, &modules)
+}
+
+fn dispatch_eval_hir_bundle_values(
+    kernel: &mut KernelRuntime,
+    task: u64,
+    session: &str,
+    modules: &[Value],
+) -> Result<(), String> {
+    let bytes = modules
+        .iter()
+        .map(|module| match module {
+            Value::Bytes(bytes) => Ok(bytes.as_slice()),
+            _ => Err("hta eval-hir-bundle expects byte arrays".to_owned()),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    validate_session_name(session)?;
+    kernel.session(session)?;
+    kernel.task_sessions.insert(task, session.into());
+    kernel.session_mut(session)?.start_hir_bundle(task, &bytes)
 }
 
 fn dispatch_complete(

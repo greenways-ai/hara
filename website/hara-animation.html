@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#030811">
+  <title>Hara / Animation Pipeline</title>
+  <link rel="stylesheet" href="./hara-animation.css">
+</head>
+<body>
+  <header class="system"><a href="./">HARA</a><span>ANIMATION PIPELINE</span><output data-status>HAL SOURCE · READY</output></header>
+  <main>
+    <section class="stage panel">
+      <header><span>01</span><h1>DIRECT A CHARACTER</h1><i>CANVAS / LIVE PLAN</i></header>
+      <canvas data-stage aria-label="Animated character preview"></canvas>
+      <div class="transport">
+        <button data-play>▶ PLAY PIPELINE</button><button data-pause>Ⅱ PAUSE</button>
+        <output><b data-current-action>WAITING</b><small data-frame>FRAME 0000</small></output>
+      </div>
+    </section>
+    <section class="cast panel">
+      <header><span>02</span><h2>CHOOSE CHARACTER</h2><i>CAST</i></header>
+      <div data-characters></div>
+    </section>
+    <section class="actions panel">
+      <header><span>03</span><h2>ACTION SCRIPT</h2><i>ORDERED / REPEATABLE</i></header>
+      <div class="action-bank" data-action-bank></div>
+      <ol data-timeline></ol>
+      <button data-clear>CLEAR SCRIPT</button>
+    </section>
+    <section class="pipeline panel">
+      <header><span>04</span><h2>PIPELINE</h2><i>SOURCE → RIG → MOTION → STAGE</i></header>
+      <div class="flow"><b>CHARACTER</b><i>→</i><b>HAL ACTIONS</b><i>→</i><b>RIG</b><i>→</i><b>MIXER</b><i>→</i><b>CANVAS</b></div>
+    </section>
+    <section class="source panel">
+      <header><span>05</span><h2>HAL SOURCE</h2><i>AUTHORITATIVE PLAN</i></header>
+      <textarea data-source spellcheck="false" aria-label="Editable animation pipeline source"></textarea>
+      <footer><output data-source-state>SYNCED</output><button data-reset>RESET</button><button data-apply>APPLY SOURCE</button></footer>
+    </section>
+  </main>
+  <script type="module" src="./hara-animation.js"></script>
+</body>
+</html>
