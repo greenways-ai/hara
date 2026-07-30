@@ -89,10 +89,18 @@ story.innerHTML = `
    <div class="story-actions"><button type="button" class="story-primary" data-story-create>CREATE THIS WORKSPACE</button></div>
    <output class="story-inline-error" data-story-error hidden></output></footer>
  </div>
+</section>
+<section class="story-screen story-animation-screen" data-story-screen="3" aria-label="Animation stage view">
+ <iframe src="./hara-animation.html?view=stage&amp;embedded=1" title="Hara animation stage view"></iframe>
+</section>
+<section class="story-screen story-animation-screen" data-story-screen="4" aria-label="Animation build view">
+ <iframe src="./hara-animation.html?view=build&amp;embedded=1" title="Hara animation build view"></iframe>
 </section>`;
 document.body.append(story);
 
 const start = $("[data-start]"), previous = $("[data-workspace-prev]"), next = $("[data-workspace-next]");
+const storyScreens = $$("[data-story-screen]", story);
+const lastScreen = Math.max(...storyScreens.map((panel) => Number(panel.dataset.storyScreen)));
 let screen = 0, amp = null, boot = null, graphView = null, sourceModel = null;
 let chosenNote = 0, activeCompletion = 0, longPress = null, preset = "hara", mode = "spectrum";
 let draggedStep = null;
@@ -100,7 +108,7 @@ let draggedStep = null;
 function ready() { return document.body.dataset.kernel === "live"; }
 function navigation() {
   previous.disabled = !screen;
-  next.disabled = screen ? screen >= 2 : !ready();
+  next.disabled = screen ? screen >= lastScreen : !ready();
   start.disabled = !ready();
 }
 function sourceStatus(state, detail = "") {
@@ -351,16 +359,16 @@ function commitSequenceDrop(value, target) {
   }, 150);
 }
 function show(index) {
-  screen = Math.max(0, Math.min(2, index));
+  screen = Math.max(0, Math.min(lastScreen, index));
   story.hidden = !screen;
   if (!screen) {
     delete document.body.dataset.storyScreen;
-    $$("[data-story-screen]", story).forEach((panel) => panel.classList.remove("is-active"));
+    storyScreens.forEach((panel) => panel.classList.remove("is-active"));
     void dispose();
   } else {
     document.body.dataset.storyScreen = screen;
-    $$("[data-story-screen]", story).forEach((panel) => panel.classList.toggle("is-active", Number(panel.dataset.storyScreen) === screen));
-    void ensureAmp().catch(() => {});
+    storyScreens.forEach((panel) => panel.classList.toggle("is-active", Number(panel.dataset.storyScreen) === screen));
+    if (screen <= 2) void ensureAmp().catch(() => {});
   }
   navigation();
 }
@@ -372,7 +380,13 @@ async function dispose() {
 
 start.addEventListener("click", (event) => { if (ready()) { event.preventDefault(); event.stopImmediatePropagation(); show(1); } }, true);
 previous.addEventListener("click", (event) => { if (screen) { event.preventDefault(); event.stopImmediatePropagation(); show(screen - 1); } }, true);
-next.addEventListener("click", (event) => { if ((!screen && ready()) || screen === 1) { event.preventDefault(); event.stopImmediatePropagation(); show(screen + 1); } }, true);
+next.addEventListener("click", (event) => {
+  if ((!screen && ready()) || (screen && screen < lastScreen)) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    show(screen + 1);
+  }
+}, true);
 story.addEventListener("click", (event) => {
   const view = event.target.closest("[data-program-view]");
   if (view) return setView(view.dataset.programView);
