@@ -184,12 +184,11 @@
                 :staged staged
                 :rewritten rewritten}
        :provenance
-       (vec
-        (concat
-         (:provenance selected)
-         [(phase-record :normalize normalized)
-          (phase-record :stage staged)
-          (phase-record :infer inference)
-          (phase-record :lint diagnostics)
-          (phase-record :rewrite rewritten)
-          (phase-record :emit output)]))})))
+       {:grammar (:provenance selected)
+        :phases
+        [(phase-record :normalize normalized)
+         (phase-record :stage staged)
+         (phase-record :infer inference)
+         (phase-record :lint diagnostics)
+         (phase-record :rewrite rewritten)
+         (phase-record :emit output)]}})))

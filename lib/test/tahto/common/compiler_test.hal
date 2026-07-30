@@ -118,7 +118,7 @@
                 (:inference compiled-v2)
                 (:diagnostics compiled-v2)
                 (map (fn [entry] (:phase entry))
-                     (filter map? (:provenance compiled-v2)))]
+                     (get-in compiled-v2 [:provenance :phases]))]
                ['(+ 1 2)
                 '(+ 1 2)
                 '(+ 2 3)
