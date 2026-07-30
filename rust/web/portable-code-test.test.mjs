@@ -13,12 +13,36 @@ test("portable code.test runs through the browser wasm runtime", () => {
   const runtime = new Runtime();
   const result = runtime.eval(
     '(ns code.test-browser-probe (:use code.test))' +
-      ' (fact "promise assertion" (promise/from 42) => 42)' +
-      ' (let [summary (run {:namespace "code.test-browser-probe"})]' +
-      ' [(:status summary) (:passed (:counts summary))])',
+      " (def lifecycle (atom []))" +
+      ' (fact "promise assertion"' +
+      "   {:before (fn []" +
+      "              (swap! lifecycle" +
+      "                     (fn [events] (conj events :before))))" +
+      "    :after (fn []" +
+      "             (swap! lifecycle" +
+      "                    (fn [events] (conj events :after))))}" +
+      "   (promise/from 42) => 42" +
+      "   (+ 1 1) => 2)" +
+      ' (let [summary (run {:namespace "code.test-browser-probe"})' +
+      "       timer (function-timer" +
+      "              (fn [promise milliseconds]" +
+      "                {:promise (promise/from {:test/status :timeout})" +
+      "                 :timeout milliseconds})" +
+      "              (fn [timeout] timeout))" +
+      "       timed (check (fn [] (promise/from 42)) 42" +
+      "                    {:timer timer :timeout 25})" +
+      "       cancelled" +
+      '       (run {:namespace "code.test-browser-probe"' +
+      "             :control (function-control (fn [fact] true))})]" +
+      " [(:status summary)" +
+      "  (:passed (:counts summary))" +
+      "  (count (:checks (first (:results summary))))" +
+      "  (:status timed)" +
+      "  (:timeout timed)" +
+      "  (:cancelled (:counts cancelled))])",
   );
 
-  assert.equal(result, "[:passed 1]");
+  assert.equal(result, "[:passed 1 2 :timeout 25 1]");
 });
 
 test("canonical component and context libraries run through browser wasm", () => {

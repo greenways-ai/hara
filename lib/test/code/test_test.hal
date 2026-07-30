@@ -3,7 +3,8 @@
   (:require [std.lib.test :as legacy]))
 
 (fact "evaluates ordinary equality"
-  (+ 20 22) => 42)
+  (+ 20 22) => 42
+  (+ 1 2 3) => 6)
 
 (fact "awaits promise-returning assertions"
   (promise/from 42) => 42)
@@ -14,16 +15,56 @@
 (fact "supports predicate matchers"
   42 => (satisfies (fn [value] (= 42 value))))
 
+(def lifecycle (atom []))
+
+(fact "runs promise-aware fixtures"
+  {:before (fn []
+             (swap! lifecycle (fn [events] (conj events :before))))
+   :after (fn []
+            (swap! lifecycle (fn [events] (conj events :after))))}
+  (promise/from :ready) => :ready)
+
 (def reporter (event-reporter))
 (def summary (run {:namespace "code.test-test"
                    :reporter reporter}))
+
+(def timeout-timer
+  (function-timer
+   (fn [promise milliseconds]
+     {:promise (promise/from {:test/status :timeout})
+      :timeout milliseconds})
+   (fn [timeout] timeout)))
+
+(def timeout-result
+  (check (fn [] (promise/from 42))
+         42
+         {:timer timeout-timer
+          :timeout 25}))
+
+(def cancelled-summary
+  (run {:namespace "code.test-test"
+        :control (function-control (fn [fact] true))}))
+
+(def clock-values (atom [10 18]))
+(def timed-result
+  (run-fact
+   (get-fact "code.test-test" "evaluates ordinary equality")
+   +null-reporter+
+   {:clock
+    (function-clock
+     (fn []
+       (let [value (first (deref clock-values))]
+         (swap! clock-values rest)
+         value)))}))
 
 (def results
   [(legacy/check "portable facts pass"
                  [(:status summary)
                   (:passed (:counts summary))
-                  (count (:results summary))]
-                 [:passed 4 4])
+                  (count (:results summary))
+                  (count (:checks (first (:results summary))))
+                  (deref lifecycle)]
+                 [:passed 5 5 2 [:before :after]])
    (legacy/check "runner emits structured events without printing"
                  (vec (map :event (reporter-events reporter)))
                  [:run/start
@@ -31,6 +72,20 @@
                   :fact/start :fact/end
                   :fact/start :fact/end
                   :fact/start :fact/end
-                  :run/end])])
+                  :fact/start :fact/end
+                  :run/end])
+   (legacy/check "host timers classify timeout diagnostics"
+                 [(:status timeout-result)
+                  (:pass timeout-result)
+                  (:timeout timeout-result)]
+                 [:timeout false 25])
+   (legacy/check "host control cancels facts without invoking them"
+                 [(:status cancelled-summary)
+                  (:cancelled (:counts cancelled-summary))
+                  (deref lifecycle)]
+                 [:passed 5 [:before :after]])
+   (legacy/check "host clocks attach deterministic elapsed time"
+                 [(:status timed-result) (:elapsed timed-result)]
+                 [:passed 8])])
 
 (legacy/print-results results)

@@ -23,5 +23,8 @@
   (timeout-promise [timer promise milliseconds])
   (cancel-timeout [timer timeout]))
 
+(defprotocol ITestControl
+  (cancelled? [control fact]))
+
 (defprotocol IMatcher
   (match-value [matcher actual]))
