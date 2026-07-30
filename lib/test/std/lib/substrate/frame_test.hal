@@ -1,6 +1,6 @@
-(ns std.substrate.frame-test
+(ns std.lib.substrate.frame-test
   (:require [std.lib.test :as test]
-            [std.substrate.frame :as frame]))
+            [std.lib.substrate.frame :as frame]))
 
 (def results
   [(test/check "keyword inputs normalize to substrate.v1 string-keyed wire maps"

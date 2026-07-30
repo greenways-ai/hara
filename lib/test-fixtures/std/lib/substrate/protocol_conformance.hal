@@ -1,5 +1,5 @@
-(ns std.substrate.protocol-conformance
-  (:require [std.substrate.protocol :as protocol]))
+(ns std.lib.substrate.protocol-conformance
+  (:require [std.lib.substrate.protocol :as protocol]))
 
 (defstruct CapabilityFixture [value])
 

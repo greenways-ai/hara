@@ -55,7 +55,7 @@ struct Runtime {
     /// Guest protocol declarations and extensions must survive across HTA
     /// evaluations just like namespace bindings.  The native runtime owns the
     /// same registry; without this raw WASM kernels could load frame helpers
-    /// but not the concrete `std.substrate` node.
+    /// but not the concrete `std.lib.substrate` node.
     protocols: core::ProtocolRegistry,
     next_call: u64,
     events: Rc<RefCell<VecDeque<Vec<u8>>>>,
@@ -920,6 +920,31 @@ fn dispatch(
             }
             _ => Err("hta register-resource expects name and source strings".into()),
         },
+        "register-resources" => match args.as_slice() {
+            [Value::Vector(resources)] => {
+                let mut staged = Vec::with_capacity(resources.len());
+                for entry in resources.iter() {
+                    let Value::Vector(entry) = entry else {
+                        return Err(
+                            "hta register-resources expects string pairs".into(),
+                        );
+                    };
+                    let (Some(Value::String(name)), Some(Value::String(source))) =
+                        (entry.get(0), entry.get(1))
+                    else {
+                        return Err("hta register-resources expects string pairs".into());
+                    };
+                    if entry.len() != 2 {
+                        return Err("hta register-resources expects string pairs".into());
+                    }
+                    staged.push((name.clone(), source.clone()));
+                }
+                kernel.resources.borrow_mut().extend(staged);
+                enqueue_event(&kernel.events, event(0, task, Value::Bool(true)));
+                Ok(())
+            }
+            _ => Err("hta register-resources expects one vector of string pairs".into()),
+        },
         _ => Err(format!("hta/target-unknown: {target}")),
     }
 }
@@ -1313,7 +1338,9 @@ mod tests {
             "session/eval",
             vec![
                 Value::String("busy".into()),
-                Value::String("(host/call \"wait\" \"forever\")".into()),
+                Value::String(
+                    "(deref (std.native.Host/call \"wait\" \"forever\" []))".into(),
+                ),
             ],
         )
         .unwrap();
@@ -1519,20 +1546,20 @@ mod tests {
 
     #[test]
     fn raw_kernels_expose_the_foundation_data_namespaces() {
-        assert_eq!(crate::core::NATIVE_TYPES.len(), 18);
+        assert_eq!(crate::core::NATIVE_TYPES.len(), 19);
         assert_eq!(
             crate::core::NATIVE_TYPES
                 .iter()
                 .map(|(_, methods)| methods.len())
                 .sum::<usize>(),
-            110
+            120
         );
         let mut runtime = Runtime::new();
         assert!(runtime.env.contains_key("edn/write"));
         assert!(runtime.env.contains_key("ICount"));
         for native_type in [
             "Maths", "Numbers", "Bits", "String", "Bytes", "File", "Socket", "Promise",
-            "Coroutine", "Array", "Object", "Runtime", "Printer", "Edn", "Json", "Regex",
+            "Coroutine", "Arr", "Obj", "Runtime", "Printer", "Edn", "Json", "Host", "Regex",
             "UUID", "Error",
         ] {
             assert!(runtime.env.contains_key(native_type), "{native_type}");
@@ -1634,13 +1661,13 @@ mod tests {
     fn raw_kernels_run_the_shared_substrate_frame_fixture() {
         let mut runtime = Runtime::new();
         runtime.resources.borrow_mut().insert(
-            "std.substrate.frame".into(),
-            include_str!("../../../lib/src/std/substrate/frame.hal").into(),
+            "std.lib.substrate.frame".into(),
+            include_str!("../../../lib/src/std/lib/substrate/frame.hal").into(),
         );
         runtime
             .start_fiber(
                 1,
-                include_str!("../../../lib/test-fixtures/std/substrate/frame_conformance.hal"),
+                include_str!("../../../lib/test-fixtures/std/lib/substrate/frame_conformance.hal"),
             )
             .unwrap();
         assert_eq!(
@@ -1656,19 +1683,19 @@ mod tests {
         let mut runtime = Runtime::new();
         runtime.resources.borrow_mut().extend([
             (
-                "std.substrate.protocol".into(),
-                include_str!("../../../lib/src/std/substrate/protocol.hal").into(),
+                "std.lib.substrate.protocol".into(),
+                include_str!("../../../lib/src/std/lib/substrate/protocol.hal").into(),
             ),
             (
-                "std.substrate".into(),
-                include_str!("../../../lib/src/std/substrate.hal").into(),
+                "std.lib.substrate".into(),
+                include_str!("../../../lib/src/std/lib/substrate.hal").into(),
             ),
         ]);
         runtime
             .start_fiber(
                 1,
                 include_str!(
-                    "../../../lib/test-fixtures/std/substrate/node_lifecycle_conformance.hal"
+                    "../../../lib/test-fixtures/std/lib/substrate/node_lifecycle_conformance.hal"
                 ),
             )
             .unwrap();

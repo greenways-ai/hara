@@ -1,5 +1,6 @@
 (ns studio.draw
-  (:require [studio.node :as node]))
+  (:require [studio.node :as node]
+            [std.foundation.host :as host]))
 
 (defn next-frame [canvas]
   (host/call "studio.canvas" "next-frame" (node/current-id) canvas))

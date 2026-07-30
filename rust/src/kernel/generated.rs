@@ -144,7 +144,10 @@ impl GeneratedNamespaceConfig {
         match form {
             Form::Symbol(name) => Form::Symbol(self.resolve_symbol(&name)),
             Form::List(values) => {
-                if matches!(values.first(), Some(Form::Symbol(name)) if name == "quote") {
+                if matches!(
+                    values.first(),
+                    Some(Form::Symbol(name)) if name == "quote" || name == "require"
+                ) {
                     Form::List(values)
                 } else {
                     Form::List(
@@ -256,6 +259,16 @@ impl GeneratedNamespaceConfig {
         if options.len() % 2 != 0 {
             return Err(format!("Malformed :require options for {target}"));
         }
+        let lazy = options.chunks(2).any(|option| {
+            matches!(&option[0], Form::Keyword(name) if name == "lazy")
+                && matches!(&option[1], Form::Bool(true))
+        });
+        let has_alias = options
+            .chunks(2)
+            .any(|option| matches!(&option[0], Form::Keyword(name) if name == "as"));
+        if lazy && !has_alias {
+            return Err(":require :lazy requires :as".into());
+        }
         for option in options.chunks(2) {
             let name = keyword(&option[0], "Malformed :require options")?;
             match name {
@@ -267,6 +280,9 @@ impl GeneratedNamespaceConfig {
                     self.put_alias(alias, target)?;
                 }
                 "refer" => {
+                    if lazy {
+                        return Err(":require :lazy cannot be combined with :refer".into());
+                    }
                     let names = vector(&option[1], ":require :refer expects a vector of symbols")?;
                     for value in names {
                         let name = symbol(value, ":require :refer expects unqualified symbols")?;
@@ -279,6 +295,36 @@ impl GeneratedNamespaceConfig {
                                 "Referred symbol already exists: {name} ({previous})"
                             ));
                         }
+                    }
+                }
+                "refer-macros" => {
+                    if lazy {
+                        return Err(":require :lazy cannot be combined with :refer-macros".into());
+                    }
+                    let names = vector(
+                        &option[1],
+                        ":require :refer-macros expects a vector of symbols",
+                    )?;
+                    for value in names {
+                        let name = symbol(
+                            value,
+                            ":require :refer-macros expects unqualified symbols",
+                        )?;
+                        if name.contains('/') {
+                            return Err(
+                                ":require :refer-macros expects unqualified symbols".into(),
+                            );
+                        }
+                    }
+                }
+                "lazy" => {
+                    if !matches!(&option[1], Form::Bool(true)) {
+                        return Err(":require :lazy expects true".into());
+                    }
+                }
+                "reload" => {
+                    if !matches!(&option[1], Form::Bool(true)) {
+                        return Err(":require :reload expects true".into());
                     }
                 }
                 other => return Err(format!("Unsupported :require option: :{other}")),
@@ -455,10 +501,10 @@ fn canonical(namespace: &str, method: &str) -> String {
         ("std.native.Promise", method) => format!("promise/{method}"),
         ("std.native.Coroutine", "instance?") => "std.foundation.coroutine/coroutine?".into(),
         ("std.native.Coroutine", method) => format!("std.foundation.coroutine/{method}"),
-        ("std.native.Array", "new") => "array".into(),
-        ("std.native.Array", "instance?") => "array?".into(),
-        ("std.native.Object", "new") => "object".into(),
-        ("std.native.Object", "instance?") => "object?".into(),
+        ("std.native.Arr", "new") => "array".into(),
+        ("std.native.Arr", "instance?") => "array?".into(),
+        ("std.native.Obj", "new") => "object".into(),
+        ("std.native.Obj", "instance?") => "object?".into(),
         ("std.native.Runtime", method) => method.into(),
         ("std.native.Printer", method) => method.into(),
         ("std.native.Edn", method) => format!("std.native.Edn/{method}"),

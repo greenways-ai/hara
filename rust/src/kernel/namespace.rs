@@ -6,6 +6,25 @@ use crate::kernel::{Var, VarMetadata, VarOrigin};
 use crate::lang::data::Symbol;
 use crate::lang::protocol::INamespaced;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NamespaceLoadState {
+    Unloaded,
+    Loading,
+    Loaded,
+    Failed,
+}
+
+impl NamespaceLoadState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unloaded => "unloaded",
+            Self::Loading => "loading",
+            Self::Loaded => "loaded",
+            Self::Failed => "failed",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Namespace<V> {
     name: Symbol,
@@ -184,6 +203,24 @@ impl<V> Namespace<V> {
 pub struct NamespaceRegistry<V> {
     namespaces: Rc<RefCell<HashMap<Symbol, Namespace<V>>>>,
     current: Rc<RefCell<Symbol>>,
+    loading_states: Rc<RefCell<HashMap<Symbol, NamespaceLoadState>>>,
+    module_revisions: Rc<RefCell<HashMap<Symbol, u64>>>,
+}
+
+pub struct NamespaceRegistrySnapshot<V> {
+    namespaces: HashMap<Symbol, NamespaceSnapshot<V>>,
+    current: Symbol,
+    loading_states: HashMap<Symbol, NamespaceLoadState>,
+    module_revisions: HashMap<Symbol, u64>,
+}
+
+struct NamespaceSnapshot<V> {
+    namespace: Namespace<V>,
+    mappings: HashMap<Symbol, (Var<V>, V, VarMetadata)>,
+    aliases: HashMap<Symbol, Namespace<V>>,
+    lazy_aliases: HashMap<Symbol, Symbol>,
+    imports: HashMap<Symbol, String>,
+    native_flavor: Option<String>,
 }
 impl<V: Clone> Default for NamespaceRegistry<V> {
     fn default() -> Self {
@@ -196,9 +233,13 @@ impl<V: Clone> NamespaceRegistry<V> {
         let namespace = Namespace::new(name.as_str());
         let mut namespaces = HashMap::new();
         namespaces.insert(name.clone(), namespace);
+        let mut loading_states = HashMap::new();
+        loading_states.insert(name.clone(), NamespaceLoadState::Loaded);
         Self {
             namespaces: Rc::new(RefCell::new(namespaces)),
             current: Rc::new(RefCell::new(name)),
+            loading_states: Rc::new(RefCell::new(loading_states)),
+            module_revisions: Rc::new(RefCell::new(HashMap::new())),
         }
     }
     pub fn current(&self) -> Namespace<V> {
@@ -222,7 +263,11 @@ impl<V: Clone> NamespaceRegistry<V> {
         let namespace = Namespace::new(symbol.as_str());
         self.namespaces
             .borrow_mut()
-            .insert(symbol, namespace.clone());
+            .insert(symbol.clone(), namespace.clone());
+        self.loading_states
+            .borrow_mut()
+            .entry(symbol)
+            .or_insert(NamespaceLoadState::Loaded);
         namespace
     }
     pub fn set_current(&self, name: impl AsRef<str>) -> Namespace<V> {
@@ -233,11 +278,107 @@ impl<V: Clone> NamespaceRegistry<V> {
     pub fn all(&self) -> Vec<Namespace<V>> {
         self.namespaces.borrow().values().cloned().collect()
     }
+    pub fn load_state(&self, name: impl AsRef<str>) -> Option<NamespaceLoadState> {
+        self.loading_states
+            .borrow()
+            .get(&Symbol::parse(name.as_ref()))
+            .copied()
+    }
+    pub fn set_load_state(&self, name: impl AsRef<str>, state: NamespaceLoadState) {
+        self.loading_states
+            .borrow_mut()
+            .insert(Symbol::parse(name.as_ref()), state);
+    }
+    pub fn clear_load_state(&self, name: impl AsRef<str>) {
+        self.loading_states
+            .borrow_mut()
+            .remove(&Symbol::parse(name.as_ref()));
+    }
+    pub fn module_revision(&self, name: impl AsRef<str>) -> u64 {
+        self.module_revisions
+            .borrow()
+            .get(&Symbol::parse(name.as_ref()))
+            .copied()
+            .unwrap_or(0)
+    }
+    pub fn commit_module_revision(&self, name: impl AsRef<str>) -> u64 {
+        let name = Symbol::parse(name.as_ref());
+        let next = self.module_revision(name.as_str()) + 1;
+        self.module_revisions.borrow_mut().insert(name, next);
+        next
+    }
+    pub fn snapshot(&self) -> NamespaceRegistrySnapshot<V>
+    where
+        V: 'static,
+    {
+        let namespaces = self
+            .namespaces
+            .borrow()
+            .iter()
+            .map(|(name, namespace)| {
+                let mappings = namespace
+                    .mappings
+                    .borrow()
+                    .iter()
+                    .map(|(name, var)| {
+                        (
+                            name.clone(),
+                            (var.clone(), var.deref_value(), var.metadata()),
+                        )
+                    })
+                    .collect();
+                (
+                    name.clone(),
+                    NamespaceSnapshot {
+                        namespace: namespace.clone(),
+                        mappings,
+                        aliases: namespace.aliases.borrow().clone(),
+                        lazy_aliases: namespace.lazy_aliases.borrow().clone(),
+                        imports: namespace.imports.borrow().clone(),
+                        native_flavor: namespace.native_flavor.borrow().clone(),
+                    },
+                )
+            })
+            .collect();
+        NamespaceRegistrySnapshot {
+            namespaces,
+            current: self.current.borrow().clone(),
+            loading_states: self.loading_states.borrow().clone(),
+            module_revisions: self.module_revisions.borrow().clone(),
+        }
+    }
+    pub fn restore(&self, snapshot: NamespaceRegistrySnapshot<V>)
+    where
+        V: 'static,
+    {
+        let mut namespaces = HashMap::new();
+        for (name, saved) in snapshot.namespaces {
+            let namespace = saved.namespace;
+            let mut mappings = HashMap::new();
+            for (local, (var, value, metadata)) in saved.mappings {
+                var.reset_value(value);
+                var.set_metadata(metadata);
+                mappings.insert(local, var);
+            }
+            *namespace.mappings.borrow_mut() = mappings;
+            *namespace.aliases.borrow_mut() = saved.aliases;
+            *namespace.lazy_aliases.borrow_mut() = saved.lazy_aliases;
+            *namespace.imports.borrow_mut() = saved.imports;
+            *namespace.native_flavor.borrow_mut() = saved.native_flavor;
+            namespaces.insert(name, namespace);
+        }
+        *self.namespaces.borrow_mut() = namespaces;
+        *self.current.borrow_mut() = snapshot.current;
+        *self.loading_states.borrow_mut() = snapshot.loading_states;
+        *self.module_revisions.borrow_mut() = snapshot.module_revisions;
+    }
     pub fn remove(&self, name: impl AsRef<str>) -> Option<Namespace<V>> {
         let symbol = Symbol::parse(name.as_ref());
         if symbol == *self.current.borrow() {
             return None;
         }
+        self.loading_states.borrow_mut().remove(&symbol);
+        self.module_revisions.borrow_mut().remove(&symbol);
         self.namespaces.borrow_mut().remove(&symbol)
     }
     pub fn resolve(&self, symbol: &Symbol) -> Option<Var<V>>
@@ -296,7 +437,7 @@ impl<V: Clone> NamespaceRegistry<V> {
 
 #[cfg(test)]
 mod tests {
-    use super::Namespace;
+    use super::{Namespace, NamespaceLoadState};
     use crate::lang::data::Symbol;
     use crate::lang::protocol::IDeref;
     #[test]
@@ -353,5 +494,27 @@ mod tests {
         );
         assert!(registry.remove("user").is_none());
         assert!(registry.remove("example.lib").is_some());
+    }
+
+    #[test]
+    fn registry_tracks_session_local_namespace_loading_state() {
+        let first = super::NamespaceRegistry::<i32>::new("user");
+        let second = super::NamespaceRegistry::<i32>::new("user");
+
+        assert_eq!(
+            first.load_state("user"),
+            Some(NamespaceLoadState::Loaded)
+        );
+        assert_eq!(first.load_state("example.lazy"), None);
+
+        first.set_load_state("example.lazy", NamespaceLoadState::Unloaded);
+        first.set_load_state("example.lazy", NamespaceLoadState::Loading);
+        first.set_load_state("example.lazy", NamespaceLoadState::Failed);
+
+        assert_eq!(
+            first.load_state("example.lazy"),
+            Some(NamespaceLoadState::Failed)
+        );
+        assert_eq!(second.load_state("example.lazy"), None);
     }
 }

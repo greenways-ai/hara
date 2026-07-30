@@ -3,7 +3,9 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 pub use crate::kernel::Form;
-use crate::kernel::{NamespaceRegistry, Var as KernelVar, VarOrigin};
+use crate::kernel::{
+    NamespaceLoadState, NamespaceRegistry, Var as KernelVar, VarOrigin,
+};
 use crate::lang::data::List as PList;
 use crate::lang::data::{
     Atom as PAtom, Cons as PCons, Keyword, Map as PMap, OrderedMap as POrderedMap,
@@ -67,12 +69,13 @@ pub(crate) const NATIVE_TYPES: &[(&str, &[&str])] = &[
     ("Socket", &["connect", "listen", "endpoint", "events", "next", "send", "close"]),
     ("Promise", &["run", "new", "from", "all", "delay", "instance?"]),
     ("Coroutine", &["create", "yield", "await", "instance?"]),
-    ("Array", &["new", "instance?"]),
-    ("Object", &["new", "instance?"]),
+    ("Arr", &["new", "instance?", "get-index", "set-index"]),
+    ("Obj", &["new", "instance?", "get-key", "set-key", "has-key?", "delete-key"]),
     ("Runtime", &["load-string", "macroexpand-1", "gensym", "var-sym"]),
     ("Printer", &["str", "pr-str"]),
     ("Edn", &["read"]),
     ("Json", &["read", "write", "pretty"]),
+    ("Host", &["call", "describe", "capabilities", "capability?"]),
     ("Regex", &["instance?"]),
     ("UUID", &["instance?"]),
     ("Error", &["new", "message", "class"]),
@@ -1226,6 +1229,77 @@ pub(crate) fn map_entries(value: &Value) -> Option<Vec<(Value, Value)>> {
                 .collect(),
         ),
         _ => None,
+    }
+}
+
+/// Returns whether a value may leave the evaluator session as immutable HAL data.
+///
+/// Session transfer is deliberately narrower than displayability. Functions,
+/// Vars, mutable containers, iterators, asynchronous values, and native handles
+/// all have printable representations, but those representations must not turn
+/// a live session-owned value into an apparently successful transfer.
+pub(crate) fn session_transferable(value: &Value) -> bool {
+    match value {
+        Value::Number(_)
+        | Value::Float(_)
+        | Value::BigInteger(_)
+        | Value::Decimal(_)
+        | Value::Character(_)
+        | Value::Regex(_)
+        | Value::Tagged(_)
+        | Value::Bool(_)
+        | Value::String(_)
+        | Value::Keyword(_)
+        | Value::Bytes(_)
+        | Value::Symbol(_)
+        | Value::Nil => true,
+        value @ (Value::Map(_)
+        | Value::OrderedMap(_)
+        | Value::SortedMap(_)
+        | Value::Trie(_)) => map_entries(value)
+            .is_some_and(|entries| {
+                entries
+                    .iter()
+                    .all(|(key, value)| session_transferable(key) && session_transferable(value))
+            }),
+        value @ (Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_)) => {
+            set_items(value).is_some_and(|values| {
+                values
+                    .iter()
+                    .all(|value| session_transferable(value))
+            })
+        }
+        Value::List(values) => values.iter().all(session_transferable),
+        Value::Cons(values) => values
+            .iter()
+            .all(|value| session_transferable(&value)),
+        Value::Queue(values) => values.iter().all(session_transferable),
+        Value::Tuple(values) => values.iter().all(session_transferable),
+        Value::Vector(values) => values.iter().all(session_transferable),
+        Value::Struct(value) => value.values.iter().all(session_transferable),
+        Value::ExceptionInfo(value) => {
+            session_transferable(&value.data)
+                && value
+                    .cause
+                    .as_deref()
+                    .is_none_or(session_transferable)
+        }
+        Value::ByteBuffer(_)
+        | Value::Array(_)
+        | Value::Object(_)
+        | Value::Promise(_)
+        | Value::Atom(_)
+        | Value::Recur(_)
+        | Value::Pointer(_)
+        | Value::Function(_)
+        | Value::Iterator(_)
+        | Value::Var(_)
+        | Value::Namespace(_)
+        | Value::Extension(_)
+        | Value::StructType(_)
+        | Value::Protocol(_)
+        | Value::NativeType(_)
+        | Value::Coroutine(_) => false,
     }
 }
 
@@ -2566,6 +2640,58 @@ fn socket_handle(value: &Value, operation: &str) -> Result<SocketHandle, String>
         _ => Err(format!("{operation} expects a socket handle")),
     }
 }
+
+fn native_host_operation(
+    operation: &str,
+    forms: &[Form],
+    env: &mut HashMap<String, Value>,
+) -> Result<Value, String> {
+    let method = operation
+        .strip_prefix("std.native.Host/")
+        .unwrap_or(operation);
+    let (service, target, arguments) = match method {
+        "call" => {
+            if forms.len() != 3 {
+                return Err("std.native.Host/call expects service, method, and an argument vector"
+                    .into());
+            }
+            let service = match eval(&forms[0], env)? {
+                Value::String(value) => value,
+                _ => return Err("std.native.Host/call service must be a string".into()),
+            };
+            let target = match eval(&forms[1], env)? {
+                Value::String(value) => value,
+                _ => return Err("std.native.Host/call method must be a string".into()),
+            };
+            let arguments = match eval(&forms[2], env)? {
+                Value::Vector(values) => values.iter().cloned().collect(),
+                _ => return Err("std.native.Host/call arguments must be a vector".into()),
+            };
+            (service, target, arguments)
+        }
+        "describe" | "capabilities" => {
+            if !forms.is_empty() {
+                return Err(format!("std.native.Host/{method} expects no arguments"));
+            }
+            ("host".into(), method.into(), Vec::new())
+        }
+        "capability?" => {
+            if forms.len() != 1 {
+                return Err("std.native.Host/capability? expects one capability".into());
+            }
+            ("host".into(), "capability?".into(), vec![eval(&forms[0], env)?])
+        }
+        _ => return Err(format!("unknown std.native.Host method: {method}")),
+    };
+    HOST_CALL_HANDLER.with(|active| {
+        let Some(handler) = active.borrow().as_ref().cloned() else {
+            let promise = Promise::new();
+            promise.reject("host/unavailable");
+            return Ok(Value::Promise(promise));
+        };
+        handler(service, target, arguments)
+    })
+}
 /// Installs the explicit host-call boundary for one evaluation.
 pub fn with_host_calls<R>(
     handler: Rc<dyn Fn(String, String, Vec<Value>) -> Result<Value, String>>,
@@ -3506,7 +3632,7 @@ impl SocketProvider for UnsupportedSocketProvider {
     }
 }
 
-fn portable_type_name(value: &Value) -> &str {
+pub(crate) fn portable_type_name(value: &Value) -> &str {
     match value {
         Value::Nil => "nil",
         Value::Number(_) => "integer",
@@ -5036,6 +5162,50 @@ fn marker_key(value: &Value, operation: &str) -> Result<String, String> {
         Value::Keyword(key) => Ok(key.as_str().to_owned()),
         _ => Err(format!("{operation} expects a string key")),
     }
+}
+
+fn native_mutable_operation(
+    operation: &str,
+    forms: &[Form],
+    env: &mut HashMap<String, Value>,
+) -> Result<Value, String> {
+    let (type_name, method) = operation
+        .strip_prefix("std.native.")
+        .and_then(|name| name.split_once('/'))
+        .ok_or_else(|| format!("invalid native mutable operation: {operation}"))?;
+    if method == "new" {
+        let constructor = if type_name == "Arr" { "array" } else { "object" };
+        let mut call = vec![Form::Symbol(constructor.into())];
+        call.extend_from_slice(forms);
+        return eval(&Form::List(call), env);
+    }
+    if method == "instance?" {
+        if forms.len() != 1 {
+            return Err(format!("std.native.{type_name}/instance? expects one value"));
+        }
+        let value = eval(&forms[0], env)?;
+        return Ok(Value::Bool(match type_name {
+            "Arr" => matches!(value, Value::Array(_)),
+            "Obj" => matches!(value, Value::Object(_)),
+            _ => false,
+        }));
+    }
+    if forms.is_empty() {
+        return Err(format!("std.native.{type_name}/{method} expects a receiver"));
+    }
+    let dot_method = match (type_name, method) {
+        ("Arr", "get-index") => "get",
+        ("Arr", "set-index") => "set",
+        ("Obj", "get-key") => "get",
+        ("Obj", "set-key") => "set",
+        ("Obj", "has-key?") => "has?",
+        ("Obj", "delete-key") => "delete",
+        _ => return Err(format!("unknown std.native.{type_name} method: {method}")),
+    };
+    let receiver = eval(&forms[0], env)?;
+    let mut call = vec![Form::Symbol(dot_method.into())];
+    call.extend_from_slice(&forms[1..]);
+    dot_call(receiver, &Form::List(call), env)
 }
 
 fn dot_call(
@@ -6924,18 +7094,61 @@ fn ensure_namespace(
     registry: &NamespaceRegistry<Value>,
     env: &mut HashMap<String, Value>,
     name: &str,
+    reload: bool,
 ) -> Result<(), String> {
-    if registry.find(name).is_some() {
-        return Ok(());
+    match registry.load_state(name) {
+        Some(NamespaceLoadState::Loaded) if !reload => return Ok(()),
+        Some(NamespaceLoadState::Loading) => {
+            return Err(format!("Cyclic namespace require: {name}"));
+        }
+        Some(NamespaceLoadState::Failed) if !reload => {
+            return Err(format!(
+                "Namespace load previously failed; use explicit reload to retry: {name}"
+            ));
+        }
+        _ => {}
     }
-    let source = NAMESPACE_SOURCE_PROVIDER
-        .with(|active| active.borrow().as_ref().and_then(|provider| provider(name)))
-        .ok_or_else(|| format!("Cannot require missing namespace: {name}"))?;
+
     let requiring = registry.current().name().as_str().to_owned();
-    for form in crate::kernel::parse_forms(&source)? {
-        eval(&form, env)?;
-    }
+    let previous_state = registry.load_state(name);
+    let registry_before = registry.snapshot();
+    let environment_before = env.clone();
+    let macros_before =
+        ACTIVE_MACROS.with(|active| active.borrow().as_ref().map(|macros| macros.borrow().clone()));
+    registry.set_load_state(name, NamespaceLoadState::Loading);
+
+    let loaded = (|| {
+        let source = NAMESPACE_SOURCE_PROVIDER
+            .with(|active| active.borrow().as_ref().and_then(|provider| provider(name)))
+            .ok_or_else(|| format!("Cannot require missing namespace: {name}"))?;
+        for form in crate::kernel::parse_forms(&source)? {
+            eval(&form, env)?;
+        }
+        if registry.find(name).is_none() {
+            return Err(format!("Namespace source did not define expected namespace: {name}"));
+        }
+        Ok(())
+    })();
+
     select_namespace_environment(registry, env, &requiring);
+    if let Err(error) = loaded {
+        *env = environment_before;
+        registry.restore(registry_before);
+        if previous_state != Some(NamespaceLoadState::Loaded) {
+            registry.set_load_state(name, NamespaceLoadState::Failed);
+        }
+        if let Some(saved) = macros_before {
+            ACTIVE_MACROS.with(|active| {
+                if let Some(macros) = active.borrow().as_ref() {
+                    *macros.borrow_mut() = saved;
+                }
+            });
+        }
+        return Err(error);
+    }
+
+    registry.set_load_state(name, NamespaceLoadState::Loaded);
+    registry.commit_module_revision(name);
     Ok(())
 }
 
@@ -6972,6 +7185,10 @@ fn eval_require_spec(
         matches!(&option[0], Form::Keyword(keyword) if keyword.as_str() == "lazy")
             && matches!(&option[1], Form::Bool(true))
     });
+    let reload = options.chunks(2).any(|option| {
+        matches!(&option[0], Form::Keyword(keyword) if keyword.as_str() == "reload")
+            && matches!(&option[1], Form::Bool(true))
+    });
     if lazy {
         let has_alias = options.chunks(2).any(|option| {
             matches!(&option[0], Form::Keyword(keyword) if keyword.as_str() == "as")
@@ -6994,8 +7211,14 @@ fn eval_require_spec(
                 _ => {}
             }
         }
+    }
+    let deferred = lazy && !reload;
+    if deferred {
+        if registry.load_state(&target).is_none() {
+            registry.set_load_state(&target, NamespaceLoadState::Unloaded);
+        }
     } else {
-        ensure_namespace(registry, env, &target)?;
+        ensure_namespace(registry, env, &target, reload)?;
     }
     for option in options.chunks(2) {
         let name = match &option[0] {
@@ -7008,7 +7231,7 @@ fn eval_require_spec(
                     Form::Symbol(alias) if !alias.contains('/') => alias.clone(),
                     _ => return Err("require :as expects an unqualified symbol".into()),
                 };
-                if lazy {
+                if deferred {
                     registry.current().lazy_alias(alias, &target);
                 } else {
                     let namespace = registry
@@ -7017,7 +7240,66 @@ fn eval_require_spec(
                     registry.current().alias(alias, namespace);
                 }
             }
+            "refer" => {
+                let Form::Vector(names) = &option[1] else {
+                    return Err("require :refer expects a vector of symbols".into());
+                };
+                let source = registry
+                    .find(&target)
+                    .ok_or_else(|| format!("Cannot require missing namespace: {target}"))?;
+                let destination = registry.current();
+                for name in names {
+                    let Form::Symbol(name) = name else {
+                        return Err("require :refer expects unqualified symbols".into());
+                    };
+                    if name.contains('/') {
+                        return Err("require :refer expects unqualified symbols".into());
+                    }
+                    let var = source
+                        .resolve(&crate::lang::data::Symbol::parse(name))
+                        .ok_or_else(|| format!("Cannot refer missing Var: {target}/{name}"))?;
+                    destination.map_var(crate::lang::data::Symbol::parse(name), var);
+                }
+            }
+            "refer-macros" => {
+                let Form::Vector(names) = &option[1] else {
+                    return Err("require :refer-macros expects a vector of symbols".into());
+                };
+                let destination = registry.current().name().as_str().to_owned();
+                ACTIVE_MACROS.with(|active| -> Result<(), String> {
+                    let active = active.borrow();
+                    let macros = active
+                        .as_ref()
+                        .ok_or_else(|| "macro runtime is unavailable".to_string())?;
+                    let mut macros = macros.borrow_mut();
+                    for name in names {
+                        let Form::Symbol(name) = name else {
+                            return Err(
+                                "require :refer-macros expects unqualified symbols".into(),
+                            );
+                        };
+                        if name.contains('/') {
+                            return Err(
+                                "require :refer-macros expects unqualified symbols".into(),
+                            );
+                        }
+                        let macro_fn = macros
+                            .get(&(target.clone(), name.clone()))
+                            .cloned()
+                            .ok_or_else(|| {
+                                format!("Cannot refer missing macro: {target}/{name}")
+                            })?;
+                        macros.insert((destination.clone(), name.clone()), macro_fn);
+                    }
+                    Ok(())
+                })?;
+            }
             "lazy" => {}
+            "reload" => {
+                if !matches!(&option[1], Form::Bool(true)) {
+                    return Err("require :reload expects true".into());
+                }
+            }
             other => return Err(format!("Unsupported require option: :{other}")),
         }
     }
@@ -7044,10 +7326,21 @@ fn force_lazy_alias(
     let Some((alias, _)) = symbol.split_once('/') else {
         return Ok(());
     };
-    let Some(target) = registry.current().lazy_target(alias) else {
+    let target = registry.current().lazy_target(alias).or_else(|| {
+        matches!(
+            registry.load_state(alias),
+            Some(
+                NamespaceLoadState::Unloaded
+                    | NamespaceLoadState::Loading
+                    | NamespaceLoadState::Failed
+            )
+        )
+        .then(|| crate::lang::data::Symbol::parse(alias))
+    });
+    let Some(target) = target else {
         return Ok(());
     };
-    ensure_namespace(registry, env, target.as_str())?;
+    ensure_namespace(registry, env, target.as_str(), false)?;
     let namespace = registry
         .find(target.as_str())
         .ok_or_else(|| format!("Cannot require missing namespace: {target}"))?;
@@ -7346,7 +7639,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             ))
         }
         Form::Symbol(n) => {
-            if !env.contains_key(n) {
+            if n.contains('/') {
                 if let Ok(registry) = namespace_registry() {
                     force_lazy_alias(&registry, env, n)?;
                 }
@@ -7398,6 +7691,23 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     _ => Err("var-sym expects a var".into()),
                 }
             }
+            Form::Symbol(n) if n == "module-revision" => {
+                if fs.len() != 2 {
+                    return Err("module-revision expects one namespace".into());
+                }
+                let name = match eval(&fs[1], env)? {
+                    Value::Symbol(value) => value.as_str().to_owned(),
+                    Value::String(value) => value,
+                    _ => {
+                        return Err(
+                            "module-revision expects a namespace symbol or string".into(),
+                        )
+                    }
+                };
+                Ok(Value::Number(
+                    namespace_registry()?.module_revision(&name) as i64,
+                ))
+            }
             Form::Symbol(n) if n == "ns-state" || n == "ns-loaded?" => {
                 if fs.len() != 2 {
                     return Err(format!("{n} expects one namespace"));
@@ -7408,17 +7718,20 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     _ => return Err(format!("{n} expects a namespace symbol or string")),
                 };
                 let registry = namespace_registry()?;
-                let loaded = registry.find(&name).is_some();
+                let state = registry.load_state(&name).or_else(|| {
+                    registry
+                        .find(&name)
+                        .map(|_| NamespaceLoadState::Loaded)
+                });
+                let loaded = state == Some(NamespaceLoadState::Loaded);
                 if n == "ns-loaded?" {
                     Ok(Value::Bool(loaded))
                 } else {
-                    let deferred = registry
-                        .all()
-                        .into_iter()
-                        .flat_map(|namespace| namespace.lazy_aliases())
-                        .any(|(_, target)| target.as_str() == name);
                     Ok(Value::Keyword(
-                        if loaded { "loaded" } else if deferred { "unloaded" } else { "unknown" }.into(),
+                        state
+                            .map(NamespaceLoadState::as_str)
+                            .unwrap_or("unknown")
+                            .into(),
                     ))
                 }
             }
@@ -7452,7 +7765,15 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         .map(|(_, target)| target.name().clone())
                 });
                 let Some(target) = target else { return Ok(Value::Nil); };
-                let state = if registry.find(target.as_str()).is_some() { "loaded" } else { "unloaded" };
+                let state = registry
+                    .load_state(target.as_str())
+                    .or_else(|| {
+                        registry
+                            .find(target.as_str())
+                            .map(|_| NamespaceLoadState::Loaded)
+                    })
+                    .map(NamespaceLoadState::as_str)
+                    .unwrap_or("unknown");
                 Ok(Value::Map(PMap::from_iter([
                     (Value::Keyword("alias".into()), Value::Symbol(alias)),
                     (Value::Keyword("target".into()), Value::Symbol(target)),
@@ -7501,9 +7822,23 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     Value::Symbol(name) if name.get_namespace().is_none() => name,
                     _ => return Err("intern-var expects an unqualified target symbol".into()),
                 };
+                let registry = namespace_registry()?;
                 let source = match eval(&fs[3], env)? {
                     Value::Var(var) => var,
-                    _ => return Err("intern-var expects a source Var".into()),
+                    _ => match &fs[3] {
+                        Form::List(var_form)
+                            if var_form.len() == 2
+                                && matches!(&var_form[0], Form::Symbol(form) if form == "var") =>
+                        {
+                            let Form::Symbol(source) = &var_form[1] else {
+                                return Err("intern-var expects a source Var".into());
+                            };
+                            registry
+                                .resolve(&crate::lang::data::Symbol::parse(source))
+                                .ok_or_else(|| "intern-var expects a source Var".to_string())?
+                        }
+                        _ => return Err("intern-var expects a source Var".into()),
+                    },
                 };
                 let mut metadata = source.metadata();
                 if fs.len() == 5 {
@@ -7516,7 +7851,6 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         _ => return Err("intern-var metadata extension must be a map".into()),
                     }
                 }
-                let registry = namespace_registry()?;
                 let output = registry.find_or_create(&target).intern_with_metadata(
                     name.as_str(),
                     source.deref_value(),
@@ -7532,7 +7866,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     Form::Symbol(name) => name,
                     _ => return Err("var expects a symbol".into()),
                 };
-                if !env.contains_key(name) {
+                if name.contains('/') {
                     if let Ok(registry) = namespace_registry() {
                         force_lazy_alias(&registry, env, name)?;
                     }
@@ -8343,30 +8677,13 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     _ => unreachable!(),
                 }))
             }
-            Form::Symbol(n) if n == "host/call" => {
-                if fs.len() < 3 {
-                    return Err("host/call expects service, method, and optional arguments".into());
-                }
-                let service = match eval(&fs[1], env)? {
-                    Value::String(value) => value,
-                    _ => return Err("host/call service must be a string".into()),
-                };
-                let method = match eval(&fs[2], env)? {
-                    Value::String(value) => value,
-                    _ => return Err("host/call method must be a string".into()),
-                };
-                let arguments = fs[3..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                HOST_CALL_HANDLER.with(|active| {
-                    let handler = active
-                        .borrow()
-                        .as_ref()
-                        .cloned()
-                        .ok_or_else(|| "host/call is unavailable".to_string())?;
-                    handler(service, method, arguments)
-                })
+            Form::Symbol(n) if n.starts_with("std.native.Host/") => {
+                native_host_operation(n, &fs[1..], env)
+            }
+            Form::Symbol(n)
+                if n.starts_with("std.native.Arr/") || n.starts_with("std.native.Obj/") =>
+            {
+                native_mutable_operation(n, &fs[1..], env)
             }
             Form::Symbol(n) if n == "promise/new" => {
                 if fs.len() != 2 {

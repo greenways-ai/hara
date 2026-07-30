@@ -15,7 +15,7 @@ pub mod var;
 
 pub use form::Form;
 pub use generated::GeneratedNamespaceConfig;
-pub use namespace::{Namespace, NamespaceRegistry};
+pub use namespace::{Namespace, NamespaceLoadState, NamespaceRegistry};
 pub use parser::{parse, parse_forms, read_forms, ParseError, Parser, Span, SpannedForm};
 pub use reader::{Position, Reader};
 pub use var::{Var, VarMetadata, VarOrigin};

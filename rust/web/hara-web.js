@@ -3,11 +3,10 @@
  *
  * `hara-web` owns host capability composition and kernel/session lifecycle.
  * Greenways Studio is one consumer of this surface; it should not own the
- * browser runtime contract.  The broker and service implementation remain in
- * `studio/` temporarily while their stable interfaces are extracted.
+ * browser runtime contract.
  */
-import { createBrowserBroker } from "./studio/broker.js";
-import { createHostDescription, createHostServices } from "./studio/host-services.js";
+import { createBrowserBroker } from "./host/broker.js";
+import { createHostDescription, createHostServices } from "./host/services.js";
 
 export function createHaraWebHost({
   workerUrl,
@@ -38,8 +37,8 @@ export function createHaraWebHost({
 
   return Object.freeze({
     describe: () => description,
-    capabilities: () => description["host/capabilities"],
-    capability: (name) => description["host/capabilities"].includes(String(name).replace(/^:/, "")),
+    capabilities: () => description["host/granted"],
+    capability: (name) => description["host/granted"].includes(String(name).replace(/^:/, "")),
     kernels: Object.freeze({
       create: (...args) => broker.create(...args),
       require: (...args) => broker.require(...args),

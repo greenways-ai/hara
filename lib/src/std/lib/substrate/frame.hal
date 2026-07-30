@@ -1,14 +1,14 @@
 ;; ============================================================================
-;; std.substrate.frame — portable substrate.v1 frame construction and JSON wire.
+;; std.lib.substrate.frame — portable substrate.v1 frame construction and JSON wire.
 ;;
 ;; This module is intentionally transport-neutral. It produces canonical
 ;; string-keyed wire maps which direct, structured-clone, and JSON transports
 ;; can share without depending on Studio or browser state.
 ;; ============================================================================
-(ns std.substrate.frame)
+(ns std.lib.substrate.frame)
 
 (def substrate-version "substrate.v1")
-(def frame-missing "__std.substrate.frame/missing__")
+(def frame-missing "__std.lib.substrate.frame/missing__")
 
 (defn frame-id [prefix]
   (str (gensym (if prefix prefix "evt"))))

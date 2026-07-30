@@ -1,4 +1,5 @@
-(ns studio.audio)
+(ns studio.audio
+  (:require [std.foundation.host :as host]))
 
 (defn configure [spec]
   (deref (host/call "studio.audio" "configure" spec)))

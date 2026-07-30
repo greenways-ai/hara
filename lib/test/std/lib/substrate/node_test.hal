@@ -1,7 +1,7 @@
-(ns std.substrate.node-test
+(ns std.lib.substrate.node-test
   (:require [std.lib.test :as test]
-            [std.substrate :as substrate]
-            [std.substrate.protocol :as protocol]))
+            [std.lib.substrate :as substrate]
+            [std.lib.substrate.protocol :as protocol]))
 
 (def results
   [(test/check "spaces and services are isolated in a node atom"
