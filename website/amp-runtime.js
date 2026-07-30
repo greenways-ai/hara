@@ -2,6 +2,7 @@ import { HtaKeyword } from "./runtime/hta.js";
 import { createBrowserBroker } from "./runtime/studio/broker.js";
 import { createHostServices } from "./runtime/studio/host-services.js";
 import { NodeRuntime } from "./runtime/studio/node-runtime.js";
+import { SupersonicProvider } from "./runtime/studio/supersonic.js";
 
 export const AMP_FREQUENCIES = Object.freeze([31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]);
 export const AMP_PRESETS = Object.freeze({
@@ -12,7 +13,7 @@ export const AMP_PRESETS = Object.freeze({
 });
 
 const ROOT = "ROOT";
-const DOCUMENT_ID = "document/visualizer";
+const DOCUMENT_ID = "document/amp";
 const NOOP = () => {};
 
 export class HaraAmpRuntime {
@@ -23,7 +24,8 @@ export class HaraAmpRuntime {
     onFrame = NOOP,
     onPlayback = NOOP,
     onTime = NOOP,
-    onTelemetry = NOOP
+    onTelemetry = NOOP,
+    onGraph = NOOP
   } = {}) {
     this.canvas = canvas;
     this.dbName = dbName;
@@ -32,9 +34,12 @@ export class HaraAmpRuntime {
     this.onPlayback = onPlayback;
     this.onTime = onTime;
     this.onTelemetry = onTelemetry;
+    this.onGraph = onGraph;
     this.runtime = new NodeRuntime({ space: `workspace/${dbName}` });
     this.broker = null;
     this.audio = null;
+    this.supersonic = null;
+    this.graphSnapshot = null;
     this.synth = null;
     this.fft = null;
     this.visualMode = "spectrum";
@@ -91,25 +96,39 @@ export class HaraAmpRuntime {
     this.status("runtime", "loading", "Loading the browser kernel");
     this.status("synth", "loading", "Loading synth WASM");
     this.status("fft", "loading", "Loading FFT WASM");
-    const [runtimeBytes, synth, fft, nodeSource, drawSource, protocolSource, frameSource, substrateSource, visualizerSource] =
+    const [runtimeBytes, synth, fft, nodeSource, drawSource, sonicSource, protocolSource, frameSource, substrateSource, ampSource] =
       await Promise.all([
         bytes("./runtime/hara.wasm"),
         wasm("./assets/wasm/demo-synth.wasm"),
         wasm("./assets/wasm/demo-fft.wasm"),
         text("./runtime/studio/hal/node.hal"),
         text("./runtime/studio/hal/draw.hal"),
+        text("./runtime/studio/hal/supersonic.hal"),
         text("./runtime/std/lib/substrate/protocol.hal"),
         text("./runtime/std/lib/substrate/frame.hal"),
         text("./runtime/std/lib/substrate.hal"),
-        text("./examples/hara-amp/src/visualizer.hal")
+        text("./examples/hara-amp/src/amp.hal")
       ]);
     if (this.disposed) throw new Error("Amp runtime was closed");
 
     this.synth = synth;
     this.fft = fft;
-    this.source = visualizerSource;
-    this.originalSource = visualizerSource;
+    this.source = ampSource;
+    this.originalSource = ampSource;
     this.audio = new AmpAudio(this, synth, fft);
+    this.supersonic = new SupersonicProvider({
+      storage: globalThis.localStorage,
+      engine: {
+        prepare: async (graph) => this.audio.prepareGraph(graph),
+        update: async (_graph, node, control, value) =>
+          this.audio.updateGraphParameter(node.id, control.parameter, value),
+        stop: async () => this.audio.stop()
+      },
+      onSnapshot: (snapshot) => {
+        this.graphSnapshot = snapshot;
+        this.onGraph(snapshot);
+      }
+    });
     this.status("synth", "ready", "Rust/WASM oscillator ready");
     this.status("audio", "gesture", "Play authorizes Web Audio");
     this.status("fft", "ready", "Rust/WASM analysis ready");
@@ -118,6 +137,7 @@ export class HaraAmpRuntime {
     const hostCalls = createHostServices({
       dbName: this.dbName,
       nodeRuntime: this.runtime,
+      supersonic: this.supersonic,
       renderCanvas: (canvasId, scene) => this.renderCanvas(canvasId, scene)
     });
     this.broker = createBrowserBroker({
@@ -127,12 +147,13 @@ export class HaraAmpRuntime {
       resources: {
         "studio.node": nodeSource,
         "studio.draw": drawSource,
+        "gw.audio.supersonic": sonicSource,
         "std.lib.substrate.protocol": protocolSource,
         "std.lib.substrate.frame": frameSource,
         "std.lib.substrate": substrateSource
       }
     });
-    await this.activateVisualizer(visualizerSource);
+    await this.activateVisualizer(ampSource);
 
     this.status("hta", "ready", "HTA latest-value connection open");
     this.status("hal", "ready", `HAL visualizer generation ${this.generation} armed`);
@@ -284,6 +305,7 @@ export class HaraAmpRuntime {
   setVisualMode(mode) {
     if (!["spectrum", "scope", "artwork"].includes(mode)) return false;
     this.visualMode = mode;
+    void this.update("visualizer", "mode", mode);
     this.drawFrame();
     return true;
   }
@@ -292,12 +314,14 @@ export class HaraAmpRuntime {
     if (!AMP_PRESETS[name]) return false;
     this.preset = name;
     this.audio?.setEq(AMP_PRESETS[name]);
+    void this.update("eq", "character", name);
     return true;
   }
 
   setPreamp(decibels) {
     this.preamp = Number(decibels) || 0;
     this.audio?.setPreamp(this.preamp);
+    void this.update("gain", "preamp", this.preamp);
   }
 
   setEqEnabled(enabled) {
@@ -308,10 +332,17 @@ export class HaraAmpRuntime {
 
   setVolume(value) {
     this.audio?.setVolume(value);
+    void this.update("pan", "volume", Number(value));
   }
 
   setBalance(value) {
     this.audio?.setBalance(value);
+    void this.update("pan", "balance", Number(value));
+  }
+
+  async update(nodeId, parameter, value) {
+    if (!this.supersonic?.graphs.has("hara-amp")) return null;
+    return this.supersonic.update("hara-amp", nodeId, parameter, value);
   }
 
   async play(offset) {
@@ -394,6 +425,47 @@ class AmpAudio {
     this.raf = 0;
   }
 
+  async prepareGraph(graph) {
+    const previous = this.graph;
+    return {
+      commit: async () => {
+        this.graph = graph;
+        for (const node of graph.nodes) {
+          for (const [parameter, value] of Object.entries(node.params)) {
+            await this.updateGraphParameter(node.id, parameter, value);
+          }
+        }
+      },
+      discard: async () => { this.graph = previous; }
+    };
+  }
+
+  async updateGraphParameter(nodeId, parameter, value) {
+    if (nodeId === "synth" && parameter === "waveform") {
+      const waveform = { sine: 0, square: 1, saw: 2 }[value];
+      if (waveform == null || this.synth.exports.synth_set_waveform(waveform) !== 1) {
+        throw new Error(`supersonic/waveform-unsupported:${value}`);
+      }
+      if (this.context) {
+        this.buffer = this.renderSynth();
+        if (this.playing) await this.play(this.position());
+      }
+    } else if (nodeId === "eq" && parameter === "character") {
+      this.owner.preset = value;
+      this.setEq(AMP_PRESETS[value] ?? AMP_PRESETS.flat);
+    } else if (nodeId === "gain" && parameter === "preamp") {
+      this.owner.preamp = Number(value);
+      this.setPreamp(Number(value));
+    } else if (nodeId === "pan" && parameter === "volume") {
+      this.setVolume(value);
+    } else if (nodeId === "pan" && parameter === "balance") {
+      this.setBalance(value);
+    } else if (nodeId === "visualizer" && parameter === "mode") {
+      this.owner.visualMode = value;
+      this.owner.drawFrame();
+    }
+  }
+
   async initialize() {
     if (this.context) return;
     this.context = new AudioContext({ latencyHint: "interactive" });
@@ -411,6 +483,11 @@ class AmpAudio {
     }
     previous.connect(this.balance).connect(this.master).connect(this.analyser).connect(this.context.destination);
     this.timeData = new Float32Array(this.analyser.fftSize);
+    for (const node of this.graph?.nodes ?? []) {
+      for (const [parameter, value] of Object.entries(node.params)) {
+        await this.updateGraphParameter(node.id, parameter, value);
+      }
+    }
     this.buffer = this.renderSynth();
     this.duration = this.buffer.duration;
     this.visualLoop();

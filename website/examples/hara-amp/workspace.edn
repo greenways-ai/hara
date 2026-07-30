@@ -18,8 +18,8 @@
    :layout/first {:layout/type :area :layout/area "area/playlist"}
    :layout/second {:layout/type :area :layout/area "area/visualizer"}}}
  :workspace/documents
- [{:document/id "document/visualizer"
-   :document/path "src/visualizer.hal"
+ [{:document/id "document/amp"
+   :document/path "src/amp.hal"
    :document/language :hal
    :document/anonymous true}]
  :workspace/areas

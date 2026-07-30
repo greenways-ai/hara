@@ -22,6 +22,6 @@ export function seedAmpWorkspace({
   return new Map([
     ["/project.edn", project],
     ["/workspace.edn", customized],
-    ["/src/visualizer.hal", visualizer]
+    ["/src/amp.hal", visualizer]
   ]);
 }

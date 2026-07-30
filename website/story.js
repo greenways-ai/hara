@@ -8,51 +8,6 @@ stylesheet.rel = "stylesheet";
 stylesheet.href = "./story.css?v=amp-story-2";
 document.head.append(stylesheet);
 
-const pipelineCopy = {
-  synth: {
-    label: "01 · SYNTH WASM",
-    summary: "Rust generates the sound signal locally using the compiled oscillator shared by the silent probe and the playable instrument.",
-    input: "Note, waveform, and playback position",
-    output: "Stereo PCM audio samples",
-    runtime: "Rust compiled to WebAssembly"
-  },
-  audio: {
-    label: "02 · WEB AUDIO + EQ",
-    summary: "After you press Play on the next page, the browser authorizes sound and routes the samples through gain, ten-band EQ, and an analyser.",
-    input: "Stereo samples from Synth",
-    output: "Audible sound plus analyser samples",
-    runtime: "Browser Web Audio API · click required"
-  },
-  fft: {
-    label: "03 · FFT WASM",
-    summary: "A second Rust module converts the analyser waveform into frequency-energy bins without uploading any audio.",
-    input: "Time-domain analyser samples",
-    output: "Frequency bins for one frame",
-    runtime: "Rust compiled to WebAssembly"
-  },
-  hta: {
-    label: "04 · HTA TRANSPORT",
-    summary: "HTA carries only the newest FFT frame across the runtime boundary, keeping visuals responsive without slowing the audio clock.",
-    input: "Successive FFT frames",
-    output: "Latest available frame",
-    runtime: "Session-local latest-value channel"
-  },
-  hal: {
-    label: "05 · HAL LIVE DOCUMENT",
-    summary: "The editable Hara program receives each FFT frame as ordinary data, selects a visual mode, and produces a host-neutral scene description.",
-    input: "Latest FFT frame plus visual settings",
-    output: "Canvas drawing commands",
-    runtime: "Live src/visualizer.hal generation"
-  },
-  canvas: {
-    label: "06 · CANVAS OUTPUT",
-    summary: "The browser host executes those drawing commands as the spectrum, scope, or artwork view shown on the next page.",
-    input: "Host-neutral drawing commands",
-    output: "Pixels in the browser",
-    runtime: "Browser Canvas host capability"
-  }
-};
-
 const story = document.createElement("div");
 story.className = "kernel-story";
 story.dataset.kernelStory = "";
@@ -74,42 +29,19 @@ story.innerHTML = `
         </output>
       </header>
 
-      <div class="story-pipeline" aria-label="Interactive Hara Amp signal pipeline">
-        <button type="button" data-amp-node="synth" aria-pressed="true">
-          <i>01</i><strong>SYNTH</strong><span>RUST / WASM</span><em data-amp-node-state="synth">WAITING</em>
-        </button>
-        <span class="story-wire" aria-hidden="true"><b></b></span>
-        <button type="button" data-amp-node="audio" aria-pressed="false">
-          <i>02</i><strong>AUDIO + EQ</strong><span>WEB AUDIO</span><em data-amp-node-state="audio">WAITING</em>
-        </button>
-        <span class="story-wire" aria-hidden="true"><b></b></span>
-        <button type="button" data-amp-node="fft" aria-pressed="false">
-          <i>03</i><strong>FFT</strong><span>RUST / WASM</span><em data-amp-node-state="fft">WAITING</em>
-        </button>
-        <span class="story-wire" aria-hidden="true"><b></b></span>
-        <button type="button" data-amp-node="hta" aria-pressed="false">
-          <i>04</i><strong>HTA</strong><span>LATEST VALUE</span><em data-amp-node-state="hta">WAITING</em>
-        </button>
-        <span class="story-wire" aria-hidden="true"><b></b></span>
-        <button type="button" data-amp-node="hal" aria-pressed="false">
-          <i>05</i><strong>HAL</strong><span>LIVE DOCUMENT</span><em data-amp-node-state="hal">WAITING</em>
-        </button>
-        <span class="story-wire" aria-hidden="true"><b></b></span>
-        <button type="button" data-amp-node="canvas" aria-pressed="false">
-          <i>06</i><strong>CANVAS</strong><span>BROWSER HOST</span><em data-amp-node-state="canvas">WAITING</em>
-        </button>
-      </div>
+      <div class="story-pipeline" data-story-pipeline
+        aria-label="Interactive Hara Amp signal pipeline"></div>
 
       <aside class="story-node-detail" aria-live="polite">
         <header>
-          <span data-amp-node-label>${pipelineCopy.synth.label}</span>
-          <p data-amp-node-copy>${pipelineCopy.synth.summary}</p>
+          <span data-amp-node-label>LOADING GRAPH</span>
+          <p data-amp-node-copy>The blocks are read from the live HAL graph.</p>
           <output data-amp-node-error hidden></output>
         </header>
         <dl>
-          <div><dt>INPUT</dt><dd data-amp-node-input>${pipelineCopy.synth.input}</dd></div>
-          <div><dt>OUTPUT</dt><dd data-amp-node-output>${pipelineCopy.synth.output}</dd></div>
-          <div><dt>RUNS IN</dt><dd data-amp-node-runtime>${pipelineCopy.synth.runtime}</dd></div>
+          <div><dt>INPUT</dt><dd data-amp-node-input>—</dd></div>
+          <div><dt>OUTPUT</dt><dd data-amp-node-output>—</dd></div>
+          <div><dt>RUNS IN</dt><dd data-amp-node-runtime>—</dd></div>
         </dl>
         <small>SELECT EACH BLOCK · PAGE 03 PLAYS THE SIGNAL</small>
       </aside>
@@ -129,7 +61,7 @@ story.innerHTML = `
 
       <section class="story-source" aria-label="Live Hara visualizer source">
         <header>
-          <span>src/visualizer.hal</span>
+          <span>src/amp.hal</span>
           <output data-story-source-status>LOADING SOURCE</output>
         </header>
         <textarea data-story-source spellcheck="false" wrap="off"
@@ -159,21 +91,7 @@ story.innerHTML = `
           <button type="button" class="story-play-toggle" data-story-play aria-pressed="false">
             <i aria-hidden="true">▶</i><span>PLAY SIGNAL</span>
           </button>
-          <label>
-            <span>EQ CHARACTER</span>
-            <select data-story-preset>
-              <option value="flat">FLAT</option>
-              <option value="hara" selected>HARA GLOW</option>
-              <option value="bass">BASS ARC</option>
-              <option value="voice">VOICE</option>
-            </select>
-          </label>
-          <fieldset>
-            <legend>HAL OUTPUT</legend>
-            <button type="button" data-story-mode="spectrum" aria-pressed="true">SPECTRUM</button>
-            <button type="button" data-story-mode="scope" aria-pressed="false">SCOPE</button>
-            <button type="button" data-story-mode="artwork" aria-pressed="false">ARTWORK</button>
-          </fieldset>
+          <div data-story-controls></div>
         </div>
 
         <dl class="story-telemetry" aria-label="Live kernel telemetry">
@@ -209,6 +127,7 @@ let amp = null;
 let ampBoot = null;
 let selectedPreset = "hara";
 let selectedMode = "spectrum";
+let selectedNode = null;
 
 function runtimeReady() {
   return document.body.dataset.kernel === "live";
@@ -227,7 +146,7 @@ function updateNavigation() {
 }
 
 function selectNode(name) {
-  const detail = pipelineCopy[name];
+  const detail = amp?.graphSnapshot?.nodes.find((node) => node.id === name);
   if (!detail) return;
   queryAll("[data-amp-node]", story).forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.ampNode === name));
@@ -242,6 +161,78 @@ function selectNode(name) {
   const message = stage?.dataset.error;
   error.hidden = !message;
   error.textContent = message ? `ERROR · ${message}` : "";
+}
+
+function renderGraph(snapshot) {
+  const pipeline = query("[data-story-pipeline]", story);
+  pipeline.replaceChildren();
+  snapshot.nodes.forEach((node, index) => {
+    if (index) {
+      const wire = document.createElement("span");
+      wire.className = "story-wire";
+      wire.setAttribute("aria-hidden", "true");
+      wire.innerHTML = "<b></b>";
+      pipeline.append(wire);
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.ampNode = node.id;
+    button.dataset.state = snapshot.status === "running" ? "ready" : snapshot.status;
+    button.setAttribute("aria-pressed", String((selectedNode ?? snapshot.nodes[0]?.id) === node.id));
+    button.innerHTML =
+      `<i>${String(index + 1).padStart(2, "0")}</i>` +
+      `<strong>${escapeHtml(node.label.replace(/^\\d+\\s*·\\s*/, ""))}</strong>` +
+      `<span>${escapeHtml(node.type.toUpperCase())}</span>` +
+      `<em data-amp-node-state="${escapeHtml(node.id)}">${snapshot.status.toUpperCase()}</em>`;
+    pipeline.append(button);
+  });
+  selectedNode = snapshot.nodes.some((node) => node.id === selectedNode)
+    ? selectedNode : snapshot.nodes[0]?.id;
+  selectedPreset = snapshot.nodes.find((node) => node.id === "eq")?.params.character
+    ?? selectedPreset;
+  selectedMode = snapshot.nodes.find((node) => node.id === "visualizer")?.params.mode
+    ?? selectedMode;
+  if (selectedNode) selectNode(selectedNode);
+  renderControls(snapshot);
+}
+
+function renderControls(snapshot) {
+  const root = query("[data-story-controls]", story);
+  root.replaceChildren();
+  for (const node of snapshot.nodes) {
+    for (const control of node.controls ?? []) {
+      const label = document.createElement("label");
+      label.dataset.graphNode = node.id;
+      label.dataset.graphParameter = control.parameter;
+      const title = document.createElement("span");
+      title.textContent = control.label;
+      let input;
+      if (control.type === "choice") {
+        input = document.createElement("select");
+        for (const candidate of control.choices) {
+          const option = document.createElement("option");
+          option.value = typeof candidate === "object" ? candidate.value : candidate;
+          option.textContent = typeof candidate === "object"
+            ? candidate.label : String(candidate).toUpperCase();
+          input.append(option);
+        }
+      } else if (control.type === "boolean") {
+        input = document.createElement("input");
+        input.type = "checkbox";
+      } else {
+        input = document.createElement("input");
+        input.type = "range";
+        if (control.min != null) input.min = control.min;
+        if (control.max != null) input.max = control.max;
+        if (control.step != null) input.step = control.step;
+      }
+      const value = node.params[control.parameter];
+      if (input.type === "checkbox") input.checked = Boolean(value);
+      else input.value = value;
+      label.append(title, input);
+      root.append(label);
+    }
+  }
 }
 
 function updateNode(stage, state, detail) {
@@ -299,10 +290,9 @@ function createAmp() {
       query("[data-story-emitted]", story).textContent = String(emittedFrames).padStart(4, "0");
       query("[data-story-rendered]", story).textContent = String(renderedFrames).padStart(4, "0");
       query("[data-story-queue]", story).textContent = `${nodeQueued} / LATEST`;
-    }
+    },
+    onGraph(snapshot) { renderGraph(snapshot); }
   });
-  instance.setPreset(selectedPreset);
-  instance.setVisualMode(selectedMode);
   return instance;
 }
 
@@ -425,6 +415,7 @@ next.addEventListener("click", (event) => {
 story.addEventListener("click", (event) => {
   const node = event.target.closest("[data-amp-node]");
   if (node) {
+    selectedNode = node.dataset.ampNode;
     selectNode(node.dataset.ampNode);
     return;
   }
@@ -435,17 +426,6 @@ story.addEventListener("click", (event) => {
     const action = amp?.audio?.playing ? Promise.resolve(amp.pause()) : ensureAmp().then(() => amp.play());
     action.catch((error) => showError(`Audio could not start: ${String(error?.message ?? error)}`))
       .finally(() => { control.disabled = false; });
-    return;
-  }
-
-  const mode = event.target.closest("[data-story-mode]");
-  if (mode) {
-    selectedMode = mode.dataset.storyMode;
-    amp?.setVisualMode(selectedMode);
-    query(".story-visual", story).classList.toggle("is-artwork", selectedMode === "artwork");
-    queryAll("[data-story-mode]", story).forEach((button) => {
-      button.setAttribute("aria-pressed", String(button === mode));
-    });
     return;
   }
 
@@ -473,9 +453,17 @@ story.addEventListener("click", (event) => {
   }
 });
 
-query("[data-story-preset]", story).addEventListener("change", (event) => {
-  selectedPreset = event.target.value;
-  amp?.setPreset(selectedPreset);
+query("[data-story-controls]", story).addEventListener("change", async (event) => {
+  const label = event.target.closest("[data-graph-node]");
+  if (!label || !amp) return;
+  const value = event.target.type === "checkbox" ? event.target.checked :
+    event.target.type === "range" ? Number(event.target.value) : event.target.value;
+  await amp.update(label.dataset.graphNode, label.dataset.graphParameter, value);
+  if (label.dataset.graphNode === "visualizer") {
+    selectedMode = String(value);
+    query(".story-visual", story).classList.toggle("is-artwork", selectedMode === "artwork");
+  }
+  if (label.dataset.graphNode === "eq") selectedPreset = String(value);
 });
 
 query("[data-story-source]", story).addEventListener("input", () => {
@@ -521,3 +509,9 @@ new MutationObserver(() => {
 });
 
 updateNavigation();
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[character]);
+}

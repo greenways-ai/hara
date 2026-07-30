@@ -1284,7 +1284,7 @@ async function createAmpWorkspace({ preset = "hara", mode = "spectrum", source =
   const [project, workspace, visualizer] = await Promise.all([
     load("project.edn"),
     load("workspace.edn"),
-    load("src/visualizer.hal")
+    load("src/amp.hal")
   ]);
   const files = seedAmpWorkspace({
     project,

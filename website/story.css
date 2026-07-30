@@ -532,6 +532,15 @@
   border-top: 1px solid rgba(65, 245, 228, .14);
 }
 
+[data-story-controls] {
+  display: contents;
+}
+
+.story-controls input[type="range"] {
+  width: 100%;
+  accent-color: var(--cyan);
+}
+
 .story-controls button,
 .story-controls select,
 .story-actions button,

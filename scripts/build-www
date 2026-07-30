@@ -57,6 +57,7 @@ cp "$ROOT/rust/web/studio/boot.js" \
    "$ROOT/rust/web/studio/program-host.js" \
    "$ROOT/rust/web/studio/program-worker.js" \
    "$ROOT/rust/web/studio/session-router.js" \
+   "$ROOT/rust/web/studio/supersonic.js" \
    "$ROOT/rust/web/studio/workspace.js" \
    "$OUT/runtime/studio/"
 cp "$ROOT/rust/web/studio/hal/"*.hal "$OUT/runtime/studio/hal/"
@@ -78,7 +79,7 @@ cp "$ROOT/website/og-hara-ribbon.png" "$OUT/"
 cp "$ROOT/website/examples/hara-amp/project.edn" \
    "$ROOT/website/examples/hara-amp/workspace.edn" \
    "$OUT/examples/hara-amp/"
-cp "$ROOT/website/examples/hara-amp/src/visualizer.hal" "$OUT/examples/hara-amp/src/"
+cp "$ROOT/website/examples/hara-amp/src/amp.hal" "$OUT/examples/hara-amp/src/"
 mkdir -p "$OUT/examples/studio-backgrounds"
 cp "$ROOT/website/examples/studio-backgrounds/project.edn" \
    "$ROOT/website/examples/studio-backgrounds/workspace.edn" \

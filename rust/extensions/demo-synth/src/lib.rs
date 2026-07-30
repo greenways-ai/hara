@@ -9,9 +9,12 @@
 //! All math is f64 internally: absolute sample times grow large, and f32
 //! phase arithmetic drifts audibly across the loop boundary.
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 const CAPACITY: usize = 4096;
 
 static mut BUFFER: [f32; CAPACITY] = [0.0; CAPACITY];
+static WAVEFORM: AtomicU32 = AtomicU32::new(2);
 
 /// Eighth note at 120 BPM.
 const STEP: f64 = 0.25;
@@ -31,6 +34,15 @@ fn saw(phase: f64) -> f64 {
     2.0 * (phase - (phase + 0.5).floor())
 }
 
+fn oscillator(phase: f64) -> f64 {
+    let tau = 2.0 * std::f64::consts::PI;
+    match WAVEFORM.load(Ordering::Relaxed) {
+        0 => (tau * phase).sin(),
+        1 => if (tau * phase).sin() >= 0.0 { 1.0 } else { -1.0 },
+        _ => saw(phase),
+    }
+}
+
 /// One arpeggio voice at time `t`: detuned dual saw with a decay envelope.
 /// `step_offset` > 0 gives a stateless echo `step_offset` steps back. Notes
 /// before t=0 wrap around the pattern (the loop runs forever), keeping the
@@ -42,7 +54,7 @@ fn voice(t: f64, step_offset: i64, gain: f64) -> f64 {
     let f = freq(PATTERN[idx]);
     let env = (-since * 6.0).exp();
     // phase is relative to note onset so every 16-step cycle is identical
-    let body = (saw(f * since) + saw(f * 1.007 * since)) * 0.5;
+    let body = (oscillator(f * since) + oscillator(f * 1.007 * since)) * 0.5;
     body * env * gain
 }
 
@@ -67,6 +79,16 @@ pub extern "C" fn synth_capacity() -> usize {
     CAPACITY
 }
 
+/// Select the oscillator used by subsequent fills: 0 sine, 1 square, 2 saw.
+#[no_mangle]
+pub extern "C" fn synth_set_waveform(waveform: u32) -> bool {
+    if waveform > 2 {
+        return false;
+    }
+    WAVEFORM.store(waveform, Ordering::Relaxed);
+    true
+}
+
 /// Fill BUFFER with `frames` samples starting at absolute sample index
 /// `start_sample`. `frames` is clamped to `synth_capacity()`; returns the
 /// number of frames written.
@@ -78,4 +100,20 @@ pub extern "C" fn synth_fill(start_sample: u64, frames: usize, sample_rate: f32)
         *slot = sample_at(start_sample + i as u64, sample_rate as f64);
     }
     count
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn waveform_changes_samples_and_rejects_unknown_values() {
+        assert!(synth_set_waveform(0));
+        let sine = sample_at(137, 48_000.0);
+        assert!(synth_set_waveform(2));
+        let saw = sample_at(137, 48_000.0);
+        assert_ne!(sine, saw);
+        assert!(!synth_set_waveform(3));
+        assert_eq!(WAVEFORM.load(Ordering::Relaxed), 2);
+    }
 }

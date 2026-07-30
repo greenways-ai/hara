@@ -1,0 +1,15 @@
+(ns gw.audio.supersonic
+  (:require [std.foundation.host :as host]))
+
+(defn start [graph]
+  (deref (host/call "gw.audio.supersonic" "start" graph)))
+
+(defn update [graph-id node-id parameter value]
+  (deref (host/call "gw.audio.supersonic" "update"
+                    graph-id node-id parameter value)))
+
+(defn status [graph-id]
+  (deref (host/call "gw.audio.supersonic" "status" graph-id)))
+
+(defn stop [graph-id]
+  (deref (host/call "gw.audio.supersonic" "stop" graph-id)))

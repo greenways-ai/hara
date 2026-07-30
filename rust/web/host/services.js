@@ -42,7 +42,7 @@ export function createHostServices(options = {}) {
     graphHost: options.graphHost,
     nodeRuntime: options.nodeRuntime,
     canvasRuntime: options.canvasRuntime ?? options.canvasRuntimeForSession,
-    audioPipeline: options.audioPipeline
+    audioPipeline: options.supersonic ?? options.audioPipeline
   });
 
   function scopedKey(invocation, key, { keys = false } = {}) {
@@ -134,6 +134,23 @@ export function createHostServices(options = {}) {
       toHta(await options.audioPipeline.configure(toPlain(spec)));
     services["studio.audio/control"] = async (command, value) =>
       toHta(await options.audioPipeline.control(String(command), toPlain(value)));
+  }
+  if (options.supersonic) {
+    services["gw.audio.supersonic/start"] = async (graph) =>
+      toHta(await options.supersonic.start(toPlain(graph)));
+    services["gw.audio.supersonic/update"] = async (graphId, nodeId, parameter, value) =>
+      toHta(await options.supersonic.update(
+        String(graphId), String(nodeId), String(parameter), toPlain(value)));
+    services["gw.audio.supersonic/status"] = async (graphId) =>
+      toHta(await options.supersonic.status(String(graphId)));
+    services["gw.audio.supersonic/stop"] = async (graphId) =>
+      toHta(await options.supersonic.stop(String(graphId)));
+    // Compatibility for early Studio documents. Both names reach the same
+    // provider; new code should use gw.audio.supersonic directly.
+    services["studio.audio/configure"] = async (graph) =>
+      toHta(await options.supersonic.start(toPlain(graph)));
+    services["studio.audio/control"] = async (command, value) =>
+      toHta(await options.supersonic.engine?.control?.(String(command), toPlain(value)) ?? false);
   }
   if (options.renderCanvas && !options.canvasRuntime) {
     services["studio.canvas/render"] = async (...args) => {
@@ -245,7 +262,8 @@ function defaultCapabilityForService(service) {
     graph: "graph",
     node: "transport/node",
     "studio.canvas": "surface/canvas-2d",
-    "studio.audio": "audio/playback"
+    "studio.audio": "audio/playback",
+    "gw.audio.supersonic": "audio/playback"
   })[service] ?? null;
 }
 

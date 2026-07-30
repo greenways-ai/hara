@@ -16,7 +16,7 @@ test("the Amp workspace seed carries the selected controls", () => {
   });
 
   assert.equal(files.get("/project.edn"), project);
-  assert.equal(files.get("/src/visualizer.hal"), visualizer);
+  assert.equal(files.get("/src/amp.hal"), visualizer);
   assert.match(files.get("/workspace.edn"), /:amp\/eq-preset :bass/);
   assert.match(files.get("/workspace.edn"), /:amp\/visual-mode :scope/);
 });

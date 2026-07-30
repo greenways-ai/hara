@@ -1,0 +1,106 @@
+(ns+
+  (:require [gw.audio.supersonic :as sonic]
+            [studio.draw :as draw]))
+
+(def amp-graph
+  {"graph/id" "hara-amp"
+   "title" "Hara Amp"
+   "nodes"
+   [{"id" "synth"
+     "type" "wasm/sequencer-oscillator"
+     "label" "01 · SYNTH"
+     "summary" "Rust/WASM generates the sequenced oscillator samples."
+     "input" "Root note, tempo, waveform, and playback position"
+     "output" "Stereo PCM samples"
+     "runtime" "Rust compiled to WebAssembly"
+     "params" {"waveform" "sine"}
+     "controls" [{"parameter" "waveform" "type" "choice" "label" "WAVEFORM"
+                   "choices" ["sine" "square" "saw"]}]}
+    {"id" "gain"
+     "type" "audio/gain"
+     "label" "02 · GAIN"
+     "summary" "Web Audio applies input gain before tonal processing."
+     "input" "Stereo PCM samples"
+     "output" "Gain-adjusted samples"
+     "runtime" "Browser Web Audio"
+     "params" {"preamp" 0}
+     "controls" [{"parameter" "preamp" "type" "number" "label" "PREAMP (DB)"
+                   "min" -12 "max" 12 "step" 1}]}
+    {"id" "eq"
+     "type" "audio/equalizer"
+     "label" "03 · EQUALIZER"
+     "summary" "A ten-band equalizer selects the signal character."
+     "input" "Gain-adjusted samples"
+     "output" "Equalized samples"
+     "runtime" "Browser Web Audio"
+     "params" {"character" "hara"}
+     "controls" [{"parameter" "character" "type" "choice" "label" "EQ CHARACTER"
+                   "choices" [{"value" "flat" "label" "FLAT"}
+                              {"value" "hara" "label" "HARA GLOW"}
+                              {"value" "bass" "label" "BASS ARC"}
+                              {"value" "voice" "label" "VOICE"}]}]}
+    {"id" "pan"
+     "type" "audio/panner"
+     "label" "04 · PANNER"
+     "summary" "Stereo position and final level are applied before analysis."
+     "input" "Equalized samples"
+     "output" "Positioned output samples"
+     "runtime" "Browser Web Audio"
+     "params" {"balance" 0 "volume" 0.78}
+     "controls" [{"parameter" "balance" "type" "number" "label" "BALANCE"
+                   "min" -1 "max" 1 "step" 0.05}
+                  {"parameter" "volume" "type" "number" "label" "VOLUME"
+                   "min" 0 "max" 1 "step" 0.01}]}
+    {"id" "fft"
+     "type" "wasm/analyser-fft"
+     "label" "05 · FFT"
+     "summary" "Rust/WASM converts analyser samples into frequency bins."
+     "input" "Time-domain analyser samples"
+     "output" "Latest frequency-bin frame"
+     "runtime" "Rust compiled to WebAssembly"}
+    {"id" "visualizer"
+     "type" "hal/transform"
+     "label" "06 · HAL DOCUMENT"
+     "summary" "This live document turns each FFT frame into a host-neutral scene."
+     "input" "Latest FFT frame and visual settings"
+     "output" "Canvas scene description"
+     "runtime" "Live src/amp.hal generation"
+     "params" {"mode" "spectrum"}
+     "controls" [{"parameter" "mode" "type" "choice" "label" "HAL OUTPUT"
+                   "choices" ["spectrum" "scope" "artwork"]}]}
+    {"id" "canvas"
+     "type" "host/canvas"
+     "label" "07 · CANVAS"
+     "summary" "The browser host draws the scene produced by HAL."
+     "input" "Host-neutral scene descriptions"
+     "output" "Browser pixels"
+     "runtime" "Browser Canvas host capability"}
+    {"id" "output"
+     "type" "audio/output"
+     "label" "08 · OUTPUT"
+     "summary" "The browser sends the processed signal to the selected speakers."
+     "input" "Processed stereo samples"
+     "output" "Audible sound"
+     "runtime" "Browser Web Audio · user gesture required"}]
+   "connections"
+   [{"from" ["synth" "audio"] "to" ["gain" "audio"] "kind" "audio"}
+    {"from" ["gain" "audio"] "to" ["eq" "audio"] "kind" "audio"}
+    {"from" ["eq" "audio"] "to" ["pan" "audio"] "kind" "audio"}
+    {"from" ["pan" "audio"] "to" ["output" "audio"] "kind" "audio"}
+    {"from" ["pan" "samples"] "to" ["fft" "samples"] "kind" "analysis"}
+    {"from" ["fft" "bins"] "to" ["visualizer" "bins"] "kind" "hta/latest"}
+    {"from" ["visualizer" "scene"] "to" ["canvas" "scene"] "kind" "host"}]})
+
+(def amp-state (sonic/start amp-graph))
+
+(defn visualize [input]
+  (assoc input "palette" ["#2fffe0" "#149df2" "#9b35ff"]))
+
+(defn run-visualizer []
+  (loop []
+    (let [input (co/await (node/in "fft/bins"))]
+      (do
+        (co/await (draw/render "canvas/visualizer" (visualize input)))
+        (recur)))))
+
+(node/start run-visualizer)

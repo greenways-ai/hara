@@ -58,7 +58,9 @@ cp "$ROOT/website/sources/tron.hal" "$STAGE/examples/game/src/tron.hal"
 
 cp "$ROOT/website/examples/hara-amp/project.edn" "$ROOT/website/examples/hara-amp/workspace.edn" \
    "$STAGE/examples/music/"
-cp "$ROOT/website/examples/hara-amp/src/main.hal" "$ROOT/website/examples/hara-amp/src/visualizer.hal" \
+cp "$ROOT/website/examples/hara-amp/src/main.hal" \
+   "$ROOT/website/examples/hara-amp/src/visualizer.hal" \
+   "$ROOT/website/examples/hara-amp/src/amp.hal" \
    "$STAGE/examples/music/src/"
 cp "$ROOT/website/hara-amp.html" "$ROOT/website/hara-amp.css" "$ROOT/website/hara-amp.js" \
    "$STAGE/examples/music/"
@@ -71,7 +73,7 @@ cp "$ROOT"/rust/web/studio/hal/*.hal "$STAGE/examples/music/runtime/studio/hal/"
 cp "$ROOT/lib/src/std/lib/substrate.hal" "$STAGE/examples/music/runtime/std/lib/substrate.hal"
 cp "$ROOT/lib/src/std/lib/substrate/frame.hal" "$ROOT/lib/src/std/lib/substrate/protocol.hal" \
    "$STAGE/examples/music/runtime/std/lib/substrate/"
-cp "$ROOT/website/examples/hara-amp/src/visualizer.hal" \
+cp "$ROOT/website/examples/hara-amp/src/amp.hal" \
    "$STAGE/examples/music/examples/hara-amp/src/"
 cp "$ROOT/website/assets/wasm/demo-synth.wasm" "$ROOT/website/assets/wasm/demo-fft.wasm" \
    "$STAGE/assets/wasm/"

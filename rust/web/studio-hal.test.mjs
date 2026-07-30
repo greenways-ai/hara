@@ -26,6 +26,7 @@ const resources = wasmBytes === null
       "studio.program": await hal("program"),
       "studio.graph": await hal("graph"),
       "studio.session": await hal("session"),
+      "gw.audio.supersonic": await hal("supersonic"),
       "std.lib.substrate.protocol": await readFile(new URL("../../lib/src/std/lib/substrate/protocol.hal", import.meta.url), "utf8"),
       "std.lib.substrate.frame": await readFile(new URL("../../lib/src/std/lib/substrate/frame.hal", import.meta.url), "utf8"),
       "std.lib.substrate": await readFile(new URL("../../lib/src/std/lib/substrate.hal", import.meta.url), "utf8")
@@ -98,11 +99,12 @@ async function spawnRealKernel(hostCalls) {
   return { context: new HtaContext({ worker, moduleBytes: wasmBytes, hostCalls }), worker };
 }
 
-function makeBroker({ fetch, nodeRuntime } = {}) {
+function makeBroker({ fetch, nodeRuntime, supersonic } = {}) {
   const hostCalls = createHostServices({
     dbName: `hara-studio-hal-test-${++brokerCounter}`,
     fetch: fetch ?? mockFetch(),
-    nodeRuntime
+    nodeRuntime,
+    supersonic
   });
   return new KernelBroker({
     resources,
@@ -143,6 +145,31 @@ test("std.foundation.host exposes the generic browser host descriptor", { skip: 
   assert.equal(mapGet(description, "host/version"), "hara.host.v1");
   assert.equal(await evaluate(broker, '(deref (host/capability? "filesystem"))'), true);
   assert.equal(await evaluate(broker, '(deref (host/capability? "missing"))'), false);
+});
+
+test("gw.audio.supersonic exposes the portable graph lifecycle", { skip: wasmBytes === null }, async () => {
+  const calls = [];
+  const supersonic = {
+    start: async (graph) => {
+      calls.push(["start", graph]);
+      return { "graph/id": "test", generation: 1, status: "running" };
+    },
+    update: async (...args) => {
+      calls.push(["update", ...args]);
+      return { "graph/id": "test", generation: 1, status: "running" };
+    },
+    status: async (id) => ({ "graph/id": id, generation: 1, status: "running" }),
+    stop: async (id) => ({ "graph/id": id, generation: 1, status: "stopped" })
+  };
+  const broker = makeBroker({ supersonic });
+  const result = await broker.eval("ROOT",
+    '(do (require [gw.audio.supersonic :as sonic]) ' +
+    '(sonic/start {"graph/id" "test" "nodes" [] "connections" []}))');
+  assert.equal(mapGet(result, "status"), "running");
+  await broker.eval("ROOT",
+    '(sonic/update "test" "gain" "volume" 0.5)');
+  assert.deepEqual(calls.map(([operation]) => operation), ["start", "update"]);
+  assert.equal(mapGet(await broker.eval("ROOT", '(sonic/stop "test")'), "status"), "stopped");
 });
 
 test("studio.node sends std.lib.substrate.frame envelopes through the browser adapter", { skip: wasmBytes === null }, async () => {
