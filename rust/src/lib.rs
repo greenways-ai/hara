@@ -490,6 +490,14 @@ impl Runtime {
                 include_str!("../../lib/src/std/lib/test.hal"),
             ),
             (
+                "std.lib.component",
+                include_str!("../../lib/src/std/lib/component.hal"),
+            ),
+            (
+                "std.lib.context",
+                include_str!("../../lib/src/std/lib/context.hal"),
+            ),
+            (
                 "code.test.protocol",
                 include_str!("../../lib/src/code/test/protocol.hal"),
             ),
@@ -3448,6 +3456,28 @@ mod tests {
                 .unwrap(),
             "[:passed 1]"
         );
+    }
+
+    #[test]
+    fn canonical_component_and_context_libraries_load_without_old_aliases() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(ns std-lib-context-rust-probe \
+                       (:require [std.lib.component :as component] \
+                                 [std.lib.context :as context])) \
+                     (let [runtime (context/runtime-null)] \
+                       [(component/started? runtime) \
+                        (context/call runtime :a :b)])"
+                )
+                .unwrap(),
+            "[true [:a :b]]"
+        );
+        assert!(runtime
+            .eval_text("(require [std.foundation.component :as old])")
+            .unwrap_err()
+            .contains("missing"));
     }
 
     #[test]

@@ -1,6 +1,6 @@
-(ns std.foundation.component-test
+(ns std.lib.component-test
   (:require [std.lib.test :as test]
-            [std.foundation.component :as component]))
+            [std.lib.component :as component]))
 
 (defstruct component-fixture [events])
 
@@ -15,7 +15,7 @@
   (remote? [fixture] false))
 
 (defn fixture []
-  (std.foundation.component-test/component-fixture (atom [])))
+  (std.lib.component-test/component-fixture (atom [])))
 
 (def functions
   {:pre-start (fn [value] (do (swap! (:events value) conj :pre-start) value))
