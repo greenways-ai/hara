@@ -1,86 +1,21 @@
-;; Portable task descriptions and invocation. Presentation is deliberately
-;; absent: std.task.bulk reports data through std.task.protocol.
+;; Temporary compatibility facade. New code should use std.lib.task.
 (ns std.task
-  (:require [std.task.process :as process]))
+  (:require [std.lib.task :as task]))
 
-(defn task-defaults
-  [kind]
-  {:main {:arglists '([] [entry])
-          :argcount 1}})
-
-(defstruct Task
-  [type name main construct arglists item result summary params])
-
-(defn task-from-map
-  [config]
-  (std.task/Task (:type config)
-                 (:name config)
-                 (:main config)
-                 (:construct config)
-                 (:arglists config)
-                 (:item config)
-                 (:result config)
-                 (:summary config)
-                 (:params config)))
-
-(defn task-status
-  [task]
-  (field task :type))
-
-(defn task-info
-  [task]
-  {:fn (field task :name)})
-
-(defn single-function-print
-  "Retains the Foundation option normalisation without performing output."
-  [params]
-  (if (and (not (:bulk params))
-           (nil? (get-in params [:print :function])))
-    (assoc-in params [:print :function] true)
-    params))
-
-(defn task
-  ([config]
-   (task-from-map config))
-  ([type name argument]
-   (let [defaults (task-defaults type)
-         options (if (map? argument) argument {})
-         main-config (if (map? argument)
-                       (:main argument)
-                       {:fn argument})
-         function (:fn main-config)
-         argcount (or (:argcount main-config)
-                      (get-in defaults [:main :argcount])
-                      1)
-         adapted (first (process/main-function function argcount))
-         config (merge defaults
-                       options
-                       {:type type
-                        :name name
-                        :main (merge (:main defaults)
-                                     main-config
-                                     {:fn adapted
-                                      :argcount argcount})})]
-     (task-from-map config))))
-
-(defn task?
-  [value]
-  (instance? std.task/Task value))
-
-(defn invoke-intern-task
-  ([name config]
-   (invoke-intern-task :task name config nil))
-  ([type name config body]
-   `(def ~name
-      (std.task/task
-       ~(or (:template config) :default)
-       ~(str name)
-       ~config))))
+(def Task task/Task)
+(def task-defaults task/task-defaults)
+(def task-from-map task/task-from-map)
+(def task-status task/task-status)
+(def task-info task/task-info)
+(def single-function-print task/single-function-print)
+(def task task/task)
+(def task? task/task?)
+(def invoke-intern-task task/invoke-intern-task)
 
 (defmacro deftask
   [name config & body]
-  (invoke-intern-task :task name config body))
+  (task/invoke-intern-task :task name config body))
 
-(defn invoke
-  [task & arguments]
-  (apply process/invoke task arguments))
+(def invoke task/invoke)
+(def select-filter task/select-filter)
+(def select-inputs task/select-inputs)

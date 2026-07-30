@@ -1,0 +1,58 @@
+(ns std.lib.block.type
+  (:require [std.lib.block.protocol :as protocol]))
+
+(defstruct Block [type tag string value children props])
+
+(extend-type Block protocol/IBlock
+  (block-type [block] (field block :type))
+  (block-tag [block] (field block :tag))
+  (block-string [block] (field block :string))
+  (block-value [block] (field block :value))
+  (block-children [block] (field block :children))
+  (block-verify [block] true)
+  (block-info [block] (field block :props)))
+
+(defn block?
+  [value]
+  (instance? std.lib.block.type/Block value))
+
+(defn void-block?
+  [block]
+  (= :void (protocol-call protocol/IBlock block-type block)))
+
+(defn token-block?
+  [block]
+  (= :token (protocol-call protocol/IBlock block-type block)))
+
+(defn container-block?
+  [block]
+  (= :container (protocol-call protocol/IBlock block-type block)))
+
+(defn modifier-block?
+  [block]
+  (= :modifier (protocol-call protocol/IBlock block-type block)))
+
+(defn code-block?
+  [block]
+  (or (token-block? block)
+      (container-block? block)))
+
+(defn space-block?
+  [block]
+  (= :space (protocol-call protocol/IBlock block-tag block)))
+
+(defn linebreak-block?
+  [block]
+  (= :linebreak (protocol-call protocol/IBlock block-tag block)))
+
+(defn linespace-block?
+  [block]
+  (= :linespace (protocol-call protocol/IBlock block-tag block)))
+
+(defn eof-block?
+  [block]
+  (= :eof (protocol-call protocol/IBlock block-tag block)))
+
+(defn comment-block?
+  [block]
+  (= :comment (protocol-call protocol/IBlock block-tag block)))

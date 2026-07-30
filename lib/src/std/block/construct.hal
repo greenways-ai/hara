@@ -1,77 +1,32 @@
+;; Temporary compatibility facade. New code should use std.lib.block.construct.
 (ns std.block.construct
-  (:require [std.block.type :as type]))
+  (:require [std.lib.block.construct :as construct]))
 
-(defn raw-block
-  [kind tag string value children props]
-  (std.block.type/Block kind tag string value children props))
-
-(defn void
-  [tag string]
-  (raw-block :void tag string nil [] {}))
-
-(defn repeat-string
-  [text amount]
-  (loop [output ""
-         remaining amount]
-    (if (= 0 remaining)
-      output
-      (recur (str output text) (dec remaining)))))
-
-(defn join-strings
-  [strings]
-  (reduce (fn [output string] (str output string)) "" strings))
-
-(defn space [] (void :space " "))
-(defn spaces [amount] (void :space (repeat-string " " amount)))
-(defn tab [] (void :tab "\t"))
-(defn tabs [amount] (void :tab (repeat-string "\t" amount)))
-(defn newline [] (void :linebreak "\n"))
-(defn newlines [amount] (void :linespace (repeat-string "\n" amount)))
-(defn comment [string] (raw-block :void :comment string nil [] {}))
-
-(defn container-tag
-  [value]
-  (cond
-    (vector? value) :vector
-    (list? value) :list
-    (map? value) :map
-    (set? value) :set
-    :else nil))
-
-(defn block
-  [value]
-  (if (type/block? value)
-    value
-    (let [tag (container-tag value)]
-      (if tag
-        (raw-block :container tag (pr-str value) value
-                   (if (or (map? value) (set? value))
-                     []
-                     (vec (map std.block.construct/block value)))
-                   {})
-        (raw-block :token :token (pr-str value) value [] {})))))
-
-(defn container
-  [tag children]
-  (raw-block :container tag
-             (join-strings (map (fn [child]
-                                  (field child :string))
-                                children))
-             nil
-             (vec children)
-             {}))
-
-(defn root
-  ([children]
-   (root children
-         (join-strings (map (fn [child] (field child :string)) children))))
-  ([children source]
-   (raw-block :container :root source
-              (if (= 1 (count children))
-                (field (first children) :value)
-                (vec (map (fn [child] (field child :value)) children)))
-              (vec children)
-              {:source source})))
-
-(defn contents [block] (field block :children))
-(defn max-width [block] (count (field block :string)))
+(def raw-block construct/raw-block)
+(def void construct/void)
+(def repeat-string construct/repeat-string)
+(def join-strings construct/join-strings)
+(def space construct/space)
+(def spaces construct/spaces)
+(def tab construct/tab)
+(def tabs construct/tabs)
+(def newline construct/newline)
+(def newlines construct/newlines)
+(def comment construct/comment)
+(def token-from-string construct/token-from-string)
+(def token construct/token-from-string)
+(def modifier construct/modifier)
+(def uneval construct/uneval)
+(def cursor construct/cursor)
+(def container-tag construct/container-tag)
+(def block construct/block)
+(def container construct/container)
+(def root construct/root)
+(def contents construct/contents)
+(def max-width construct/max-width)
+(def add-child construct/add-child)
+(def empty construct/empty)
+(def line-width construct/line-width)
+(def get-lines construct/get-lines)
+(def rep construct/rep)
+(def indent-body construct/indent-body)

@@ -1,0 +1,82 @@
+(ns std.lib.block.check
+  (:require [std.foundation.string :as string]))
+
+(def boundaries
+  #{" " ":" ";" "'" "@" "^" "`" "~"
+    "(" ")" "[" "]" "{" "}" "\\" "\""})
+
+(def linebreaks #{"\n" "\r" "\f"})
+(def delimiters #{"(" ")" "[" "]" "{" "}"})
+
+(defn member?
+  [values value]
+  (reduce (fn [found current] (or found (= current value)))
+          false
+          values))
+
+(defn boundary?
+  [character]
+  (or (nil? character) (member? boundaries character)))
+(defn whitespace?
+  [character]
+  (or (= character " ")
+      (= character "\t")
+      (member? linebreaks character)))
+(defn comma? [character] (= character ","))
+(defn linebreak? [character] (member? linebreaks character))
+(defn delimiter? [character] (member? delimiters character))
+(defn voidspace? [character] (or (whitespace? character) (comma? character)))
+(defn linetab? [character] (= character "\t"))
+(defn linespace?
+  [character]
+  (and (whitespace? character)
+       (not (linebreak? character))
+       (not (linetab? character))))
+(defn voidspace-or-boundary?
+  [character]
+  (or (voidspace? character) (boundary? character)))
+
+(defn void-tag
+  [character]
+  (if (nil? character)
+    :eof
+    (if (linetab? character)
+      :linetab
+      (if (linebreak? character)
+        :linebreak
+        (if (comma? character)
+          :comma
+          (if (linespace? character) :linespace nil))))))
+
+(defn void? [character] (not (nil? (void-tag character))))
+
+(defn token-tag
+  [value]
+  (if (nil? value)
+    :nil
+    (if (boolean? value)
+      :boolean
+      (if (number? value)
+        :number
+        (if (keyword? value)
+          :keyword
+          (if (symbol? value)
+            :symbol
+            (if (string? value) :string nil)))))))
+
+(defn token? [value] (not (nil? (token-tag value))))
+
+(defn collection-tag
+  [value]
+  (if (list? value)
+    :list
+    (if (map? value)
+      :map
+      (if (set? value)
+        :set
+        (if (vector? value) :vector nil)))))
+
+(defn collection? [value] (not (nil? (collection-tag value))))
+(defn comment?
+  [value]
+  (and (string? value) (string/starts-with? value ";")))

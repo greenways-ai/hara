@@ -247,7 +247,7 @@ public final class HaraContext {
     if (eagerFallbacksLoaded || eagerFallbacksLoading) return;
     eagerFallbacksLoading = true;
     try {
-      libraryLoader.installEagerFallbacks(this);
+      libraryLoader.installEagerResources(this);
       eagerFallbacksLoaded = true;
     } finally {
       eagerFallbacksLoading = false;
@@ -795,7 +795,9 @@ public final class HaraContext {
 
   private synchronized HaraNamespace requiredNamespace(String target) {
     HaraNamespace existing = namespaces.get(target);
-    if (existing != null && namespaceStates.get(target) == NamespaceLoadState.LOADED) {
+    if (existing != null
+        && namespaceStates.get(target) == NamespaceLoadState.LOADED
+        && (!libraryLoader.provides(target) || sourceNamespaceLoaded(target))) {
       return existing;
     }
     NamespaceLoadState state = namespaceStates.get(target);
@@ -811,7 +813,11 @@ public final class HaraContext {
     namespaceStates.put(target, NamespaceLoadState.LOADING);
     try {
       libraryLoader.ensure(this, target);
-      HaraNamespace loaded = namespaces.get(target);
+      HaraNamespace loaded =
+          libraryLoader.provides(target)
+              ? loadLibraryResource(target, false)
+              : namespaces.get(target);
+      if (loaded == null) loaded = namespaces.get(target);
       if (loaded == null) loaded = requireSourceNamespace(target);
       if (loaded == null) {
         Path extensionRoot = null;
@@ -836,31 +842,14 @@ public final class HaraContext {
     }
   }
 
-  void loadLibraryFallback(String namespaceName, String resourceName, boolean reload) {
+  HaraNamespace loadLibraryResource(String namespaceName, boolean reload) {
     String previousNamespace = currentNamespace.name();
     HaraVar.Origin previousOrigin = definitionOrigin;
     ContextSnapshot snapshot = snapshot();
     currentNamespace = namespace(namespaceName);
     definitionOrigin = HaraVar.Origin.HAL_FALLBACK;
     try {
-      requireModule(
-          reload
-              ? new Object[] {
-                "classpath:" + resourceName,
-                hara.lang.data.Map.Standard.from(
-                    null, Keyword.create("reload"), Boolean.TRUE)
-              }
-              : new Object[] {"classpath:" + resourceName});
-      ModuleRecord loaded = modules.get("classpath:" + resourceName);
-      if (loaded != null && !namespaceName.equals(loaded.namespace)) {
-        throw new HaraException(
-            "Library fallback "
-                + resourceName
-                + " loaded namespace "
-                + loaded.namespace
-                + " instead of "
-                + namespaceName);
-      }
+      return requireSourceNamespace(namespaceName, reload);
     } catch (RuntimeException error) {
       restore(snapshot);
       throw error;
@@ -915,6 +904,10 @@ public final class HaraContext {
           "Namespace source " + source + " did not declare requested namespace " + target);
     }
     return loaded;
+  }
+
+  private boolean sourceNamespaceLoaded(String target) {
+    return modules.values().stream().anyMatch(module -> target.equals(module.namespace));
   }
 
   private HaraProject project() {
@@ -973,14 +966,15 @@ public final class HaraContext {
           aliases.getOrDefault(currentNamespace.name(), Map.of());
       boolean alias = currentAliases.containsKey(namespaceName);
       namespaceName = currentAliases.getOrDefault(namespaceName, namespaceName);
-      if (alias && !namespaces.containsKey(namespaceName)) {
+      if (alias) {
         HaraNamespace required = requiredNamespace(namespaceName);
         if (required == null) return null;
       }
       String nativeSource = NATIVE_LIBRARY_SOURCES.get(namespaceName);
       if (nativeSource != null) libraryLoader.ensure(this, nativeSource);
-      if (!namespaces.containsKey(namespaceName) && libraryLoader.provides(namespaceName)) {
-        libraryLoader.ensure(this, namespaceName);
+      if (libraryLoader.provides(namespaceName)) {
+        HaraNamespace required = requiredNamespace(namespaceName);
+        if (required == null) return null;
       }
     }
     HaraNamespace namespace =
@@ -1403,6 +1397,7 @@ public final class HaraContext {
     target.define(
         "symbol?",
         new UnaryBuiltin("symbol?", value -> HaraBox.unwrap(value) instanceof Symbol));
+    target.define("fn?", new UnaryBuiltin("fn?", this::isFunctionValue));
     target.define(
         "keyword?",
         new UnaryBuiltin("keyword?", value -> HaraBox.unwrap(value) instanceof Keyword));
@@ -3907,12 +3902,12 @@ public final class HaraContext {
       ContextSnapshot snapshot = snapshot();
       namespaceStates.put(target, NamespaceLoadState.LOADING);
       try {
-        if (libraryLoader.provides(target)) {
-          libraryLoader.reload(this, target);
-          required = namespaces.get(target);
-        } else {
-          required = requireSourceNamespace(target, true);
-        }
+        libraryLoader.ensure(this, target);
+        required =
+            libraryLoader.provides(target)
+                ? loadLibraryResource(target, true)
+                : requireSourceNamespace(target, true);
+        if (required == null) required = namespaces.get(target);
         if (required == null) {
           restore(snapshot);
           if (previousState != NamespaceLoadState.LOADED) {

@@ -1,57 +1,16 @@
+;; Temporary compatibility facade. New code should use std.lib.block.type.
 (ns std.block.type
-  (:require [std.block.protocol :as protocol]))
+  (:require [std.lib.block.type :as type]))
 
-(defstruct Block [type tag string value children props])
-
-(extend-type Block protocol/IBlock
-  (block-type [block] (field block :type))
-  (block-tag [block] (field block :tag))
-  (block-string [block] (field block :string))
-  (block-value [block] (field block :value))
-  (block-children [block] (field block :children))
-  (block-verify [block] true)
-  (block-info [block] (field block :props)))
-
-(defn block?
-  [value]
-  (instance? std.block.type/Block value))
-
-(defn void-block?
-  [block]
-  (= :void (protocol-call protocol/IBlock block-type block)))
-
-(defn token-block?
-  [block]
-  (= :token (protocol-call protocol/IBlock block-type block)))
-
-(defn container-block?
-  [block]
-  (= :container (protocol-call protocol/IBlock block-type block)))
-
-(defn modifier-block?
-  [block]
-  (= :modifier (protocol-call protocol/IBlock block-type block)))
-
-(defn code-block?
-  [block]
-  (not (void-block? block)))
-
-(defn space-block?
-  [block]
-  (= :space (protocol-call protocol/IBlock block-tag block)))
-
-(defn linebreak-block?
-  [block]
-  (= :linebreak (protocol-call protocol/IBlock block-tag block)))
-
-(defn linespace-block?
-  [block]
-  (= :linespace (protocol-call protocol/IBlock block-tag block)))
-
-(defn eof-block?
-  [block]
-  (= :eof (protocol-call protocol/IBlock block-tag block)))
-
-(defn comment-block?
-  [block]
-  (= :comment (protocol-call protocol/IBlock block-tag block)))
+(def Block type/Block)
+(def block? type/block?)
+(def void-block? type/void-block?)
+(def token-block? type/token-block?)
+(def container-block? type/container-block?)
+(def modifier-block? type/modifier-block?)
+(def code-block? type/code-block?)
+(def space-block? type/space-block?)
+(def linebreak-block? type/linebreak-block?)
+(def linespace-block? type/linespace-block?)
+(def eof-block? type/eof-block?)
+(def comment-block? type/comment-block?)

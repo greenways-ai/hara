@@ -1,15 +1,7 @@
+;; Temporary compatibility facade. New code should use std.lib.block.parse.
 (ns std.block.parse
-  (:require [std.block.construct :as construct]
-            [std.foundation.edn :as edn]))
+  (:require [std.lib.block.parse :as parse]))
 
-(defn parse-string
-  [source]
-  (construct/root [(construct/block (edn/read source))] source))
-
-(defn parse-root
-  [source]
-  (parse-string source))
-
-(defn parse-first
-  [source]
-  (first (construct/contents (parse-string source))))
+(def parse-string parse/parse-string)
+(def parse-root parse/parse-root)
+(def parse-first parse/parse-first)

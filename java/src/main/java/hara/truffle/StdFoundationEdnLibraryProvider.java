@@ -18,10 +18,5 @@ public final class StdFoundationEdnLibraryProvider implements HaraLibraryProvide
   }
 
   @Override
-  public String fallbackResource() {
-    return "std/foundation/edn.hal";
-  }
-
-  @Override
   public void install(HaraContext context) {}
 }

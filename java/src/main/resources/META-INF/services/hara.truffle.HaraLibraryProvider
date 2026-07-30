@@ -7,5 +7,3 @@ hara.truffle.StdFoundationCoroutineLibraryProvider
 hara.truffle.StdFoundationSocketLibraryProvider
 hara.truffle.StdFoundationEdnLibraryProvider
 hara.truffle.StdJsonLibraryProvider
-hara.truffle.StdFoundationPrettyEngineLibraryProvider
-hara.truffle.StdFoundationPrettyLibraryProvider

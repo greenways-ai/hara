@@ -627,6 +627,19 @@ pub(crate) fn exception_function_values() -> Vec<(&'static str, Value)> {
     ]
 }
 
+pub(crate) fn basic_function_values() -> Vec<(&'static str, Value)> {
+    vec![(
+        "compare",
+        native_function("compare", 2, |arguments| {
+            Ok(Value::Number(match arguments[0].cmp(&arguments[1]) {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            }))
+        }),
+    )]
+}
+
 pub fn with_macros<R>(
     macros: Rc<RefCell<HashMap<(String, String), Rc<Function>>>>,
     operation: impl FnOnce() -> R,
@@ -6302,10 +6315,25 @@ fn collection_assoc(value: &Value, key: &Value, replacement: Value) -> Result<Va
             }
             Ok(Value::Object(Rc::new(RefCell::new(output))))
         }
+        Value::Struct(value) => {
+            let name = marker_key(key, "struct")?;
+            let index = value
+                .ty
+                .fields
+                .iter()
+                .position(|candidate| candidate == &name)
+                .ok_or_else(|| format!("unknown struct field: {name}"))?;
+            let mut values = value.values.clone();
+            values[index] = replacement;
+            Ok(Value::Struct(Rc::new(StructValue {
+                ty: value.ty.clone(),
+                values,
+            })))
+        }
         Value::Nil => Ok(Value::Map(
             PMap::new().assoc_value(key.clone(), replacement),
         )),
-        _ => Err("assoc expects a map or object".into()),
+        _ => Err("assoc expects a map, object, or struct".into()),
     }
 }
 
@@ -10112,7 +10140,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             Form::Symbol(n)
                 if [
                     "list?", "vector?", "map?", "set?", "keyword?", "symbol?", "string?",
-                    "number?",
+                    "number?", "fn?",
                 ]
                 .contains(&n.as_str()) =>
             {
@@ -10141,6 +10169,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                             | Value::BigInteger(_)
                             | Value::Decimal(_)
                     ),
+                    "fn?" => matches!(value, Value::Function(_)),
                     _ => unreachable!(),
                 }))
             }

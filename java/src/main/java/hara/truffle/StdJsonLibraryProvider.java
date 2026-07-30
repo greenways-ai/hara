@@ -8,8 +8,6 @@ public final class StdJsonLibraryProvider implements HaraLibraryProvider {
 
   @Override public boolean eager() { return true; }
 
-  @Override public String fallbackResource() { return "std/foundation/json.hal"; }
-
   @Override public void install(HaraContext context) {
     context.installJsonLibrary();
   }

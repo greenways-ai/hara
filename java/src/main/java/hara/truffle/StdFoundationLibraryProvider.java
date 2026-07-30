@@ -13,11 +13,6 @@ public final class StdFoundationLibraryProvider implements HaraLibraryProvider {
   }
 
   @Override
-  public String fallbackResource() {
-    return "std/foundation.hal";
-  }
-
-  @Override
   public boolean eager() {
     return true;
   }

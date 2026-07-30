@@ -1,0 +1,96 @@
+(ns std.lib.block.layout
+  (:require [std.lib.block.construct :as construct]))
+
+(def bindings
+  '#{if let while ns if-let if-some if-not try when when-not
+     when-some when-first doto dotimes binding with-bindings
+     with-local-vars with-redefs for loop doseq with-open})
+
+(def definitions
+  '#{fn defn defn- defmacro defrecord deftype})
+
+(def pairing
+  '#{case cond-> cond->> some-> some->> as->})
+
+(defn member?
+  [values value]
+  (reduce (fn [found candidate]
+            (or found (= candidate value)))
+          false
+          values))
+
+(defn layout-hiccup-like [value]
+  (and (vector? value) (keyword? (first value))))
+
+(defn layout-spec-fn
+  [form multiline]
+  (if (and multiline (list? form) (not (empty? form)))
+    (let [head (first form)]
+      (if (member? bindings head)
+        {:col-from 1 :col-start 2}
+        (if (member? definitions head)
+          {:col-from 1 :col-start 2}
+          (if (member? pairing head)
+            {:columns 2 :col-from 1 :col-start 2
+             :col-align true :col-call true}
+            {:col-from 1 :col-call true}))))
+    nil))
+
+(defn layout-annotate-arglist [arguments] arguments)
+(defn layout-annotate-bindings [bindings] bindings)
+(defn layout-annotate-fn-named [form] form)
+(defn layout-annotate-fn-anon [form] form)
+(defn layout-annotate-svg-path [form] form)
+(defn layout-annotate [form] form)
+
+(defn collection-values
+  [form]
+  (if (map? form)
+    (reduce (fn [output entry]
+              (conj (conj output (nth entry 0)) (nth entry 1)))
+            []
+            form)
+    (vec form)))
+
+(defn layout-block
+  [form options depth]
+  (let [flat (construct/block form)
+        width (or (get options :width) 80)
+        indent (or (get options :indent) 2)
+        tag (construct/container-tag form)]
+    (if (or (nil? tag)
+            (= 0 (count (field flat :children)))
+            (<= (+ (* depth indent) (construct/max-width flat)) width))
+      flat
+      (let [values (construct/expression-values (field flat :children))
+            padding (construct/spaces (* (inc depth) indent))
+            closing (construct/spaces (* depth indent))
+            inline-head (and (= tag :list) (not (= 0 (count values))))
+            children
+            (loop [index (if inline-head 1 0)
+                   output (if inline-head
+                            [(layout-block (first values)
+                                           options
+                                           (inc depth))]
+                            [])]
+              (if (= index (count values))
+                (conj (conj output (construct/newline)) closing)
+                (recur
+                 (inc index)
+                 (conj
+                  (conj
+                   (conj output (construct/newline))
+                   padding)
+                  (layout-block
+                   (nth values index)
+                   options
+                   (inc depth))))))]
+        (construct/container tag children)))))
+
+(defn layout-default-fn
+  [form options]
+  (layout-block form (or options {}) 0))
+
+(defn layout-main
+  ([form] (layout-main form {}))
+  ([form options] (layout-default-fn form options)))

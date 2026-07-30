@@ -32,7 +32,19 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 
-const FOUNDATION_FALLBACK: &str = include_str!("../../lib/src/std/foundation.hal");
+include!(concat!(env!("OUT_DIR"), "/embedded_hal.rs"));
+
+const EAGER_HAL_RESOURCES: &[&str] = &[
+    "std.foundation.string",
+    "std.foundation.promise",
+    "std.foundation.bytes",
+    "std.foundation.coroutine",
+    "std.foundation.file",
+    "std.foundation.host",
+    "std.foundation.socket",
+    "std.foundation.edn",
+    "std.foundation.json",
+];
 
 fn ignore_socket_event(_event: core::SocketEvent) {}
 
@@ -324,6 +336,9 @@ impl Runtime {
         for (name, value) in core::exception_function_values() {
             foundation.intern(name, value);
         }
+        for (name, value) in core::basic_function_values() {
+            foundation.intern(name, value);
+        }
         for (name, protocol) in core::foundation_protocol_values() {
             foundation.intern(&name, protocol.clone());
             let namespace =
@@ -402,9 +417,18 @@ impl Runtime {
     }
 
     fn bootstrap_foundation(&mut self) -> Result<(), String> {
+        for &(name, _, source) in EMBEDDED_HAL_RESOURCES {
+            self.register_resource(name, source);
+        }
+        let foundation = self
+            .resources
+            .get("std.foundation")
+            .cloned()
+            .ok_or_else(|| "embedded HAL catalog is missing std.foundation".to_owned())?;
         core::with_definition_origin(kernel::VarOrigin::HalFallback, || {
-            self.eval_text(FOUNDATION_FALLBACK)
+            self.eval_text(&foundation)
         })?;
+        self.loaded_resources.insert("std.foundation".into());
         let json = self.namespace_registry.find_or_create("std.native.Json");
         json.intern(
             "read",
@@ -430,166 +454,14 @@ impl Runtime {
                 json::write_pretty(&arguments[0]).map(core::Value::String)
             }),
         );
-        for (name, source) in [
-            (
-                "std.foundation.string",
-                include_str!("../../lib/src/std/foundation/string.hal"),
-            ),
-            (
-                "std.foundation.promise",
-                include_str!("../../lib/src/std/foundation/promise.hal"),
-            ),
-            (
-                "std.foundation.bytes",
-                include_str!("../../lib/src/std/foundation/bytes.hal"),
-            ),
-            (
-                "std.foundation.coroutine",
-                include_str!("../../lib/src/std/foundation/coroutine.hal"),
-            ),
-            (
-                "std.foundation.file",
-                include_str!("../../lib/src/std/foundation/file.hal"),
-            ),
-            (
-                "std.foundation.host",
-                include_str!("../../lib/src/std/foundation/host.hal"),
-            ),
-            (
-                "std.foundation.os",
-                include_str!("../../lib/src/std/foundation/os.hal"),
-            ),
-            (
-                "std.foundation.socket",
-                include_str!("../../lib/src/std/foundation/socket.hal"),
-            ),
-            (
-                "std.foundation.set",
-                include_str!("../../lib/src/std/foundation/set.hal"),
-            ),
-            (
-                "std.foundation.edn",
-                include_str!("../../lib/src/std/foundation/edn.hal"),
-            ),
-            (
-                "std.foundation.json",
-                include_str!("../../lib/src/std/foundation/json.hal"),
-            ),
-            (
-                "std.foundation.pretty.engine",
-                include_str!("../../lib/src/std/foundation/pretty/engine.hal"),
-            ),
-            (
-                "std.foundation.pretty",
-                include_str!("../../lib/src/std/foundation/pretty.hal"),
-            ),
-            ("std.pretty", include_str!("../../lib/src/std/pretty.hal")),
-            (
-                "std.lib.substrate.protocol",
-                include_str!("../../lib/src/std/lib/substrate/protocol.hal"),
-            ),
-            (
-                "std.lib.substrate.frame",
-                include_str!("../../lib/src/std/lib/substrate/frame.hal"),
-            ),
-            (
-                "std.lib.substrate",
-                include_str!("../../lib/src/std/lib/substrate.hal"),
-            ),
-            (
-                "std.lib.test",
-                include_str!("../../lib/src/std/lib/test.hal"),
-            ),
-            (
-                "std.lib.component",
-                include_str!("../../lib/src/std/lib/component.hal"),
-            ),
-            (
-                "std.lib.context",
-                include_str!("../../lib/src/std/lib/context.hal"),
-            ),
-            (
-                "std.task.protocol",
-                include_str!("../../lib/src/std/task/protocol.hal"),
-            ),
-            (
-                "std.task.bulk",
-                include_str!("../../lib/src/std/task/bulk.hal"),
-            ),
-            (
-                "std.task.process",
-                include_str!("../../lib/src/std/task/process.hal"),
-            ),
-            ("std.task", include_str!("../../lib/src/std/task.hal")),
-            (
-                "std.block.protocol",
-                include_str!("../../lib/src/std/block/protocol.hal"),
-            ),
-            (
-                "std.block.type",
-                include_str!("../../lib/src/std/block/type.hal"),
-            ),
-            (
-                "std.block.base",
-                include_str!("../../lib/src/std/block/base.hal"),
-            ),
-            (
-                "std.block.construct",
-                include_str!("../../lib/src/std/block/construct.hal"),
-            ),
-            (
-                "std.block.parse",
-                include_str!("../../lib/src/std/block/parse.hal"),
-            ),
-            ("std.block", include_str!("../../lib/src/std/block.hal")),
-            (
-                "code.test.protocol",
-                include_str!("../../lib/src/code/test/protocol.hal"),
-            ),
-            ("code.test", include_str!("../../lib/src/code/test.hal")),
-        ] {
-            self.register_resource(name, source);
-        }
-        for (name, source) in [
-            (
-                "std.foundation.string",
-                include_str!("../../lib/src/std/foundation/string.hal"),
-            ),
-            (
-                "std.foundation.promise",
-                include_str!("../../lib/src/std/foundation/promise.hal"),
-            ),
-            (
-                "std.foundation.bytes",
-                include_str!("../../lib/src/std/foundation/bytes.hal"),
-            ),
-            (
-                "std.foundation.coroutine",
-                include_str!("../../lib/src/std/foundation/coroutine.hal"),
-            ),
-            (
-                "std.foundation.file",
-                include_str!("../../lib/src/std/foundation/file.hal"),
-            ),
-            (
-                "std.foundation.host",
-                include_str!("../../lib/src/std/foundation/host.hal"),
-            ),
-            (
-                "std.foundation.socket",
-                include_str!("../../lib/src/std/foundation/socket.hal"),
-            ),
-            (
-                "std.foundation.edn",
-                include_str!("../../lib/src/std/foundation/edn.hal"),
-            ),
-            (
-                "std.foundation.json",
-                include_str!("../../lib/src/std/foundation/json.hal"),
-            ),
-        ] {
+        for &name in EAGER_HAL_RESOURCES {
+            let source = self
+                .resources
+                .get(name)
+                .cloned()
+                .ok_or_else(|| format!("embedded HAL catalog is missing {name}"))?;
             core::with_definition_origin(kernel::VarOrigin::HalFallback, || {
-                self.eval_text(source)
+                self.eval_text(&source)
             })?;
             self.loaded_resources.insert(name.into());
         }
@@ -1034,7 +906,14 @@ impl Runtime {
 
     /// Registers a host-supplied Hara resource. Resources are source text, not executable host code.
     pub fn register_resource(&mut self, name: &str, source: &str) {
+        let changed = self
+            .resources
+            .get(name)
+            .is_some_and(|existing| existing != source);
         self.resources.insert(name.into(), source.into());
+        if changed {
+            self.loaded_resources.remove(name);
+        }
     }
 
     /// Evaluates a registered resource in the current lexical namespace.
@@ -2293,6 +2172,64 @@ mod tests {
     }
 
     #[test]
+    fn embedded_hal_catalog_matches_declared_namespaces() {
+        let mut seen = HashSet::new();
+        for &(expected, _, source) in EMBEDDED_HAL_RESOURCES {
+            assert!(seen.insert(expected), "duplicate embedded namespace {expected}");
+            let declared = kernel::parse_forms(source)
+                .unwrap()
+                .into_iter()
+                .find_map(|form| match form {
+                    Form::List(values)
+                        if matches!(
+                            values.first(),
+                            Some(Form::Symbol(head)) if head == "ns" || head == "ns+"
+                        ) =>
+                    {
+                        match values.get(1) {
+                            Some(Form::Symbol(namespace)) => Some(namespace.clone()),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("embedded resource {expected} has no namespace"));
+            assert_eq!(declared, expected);
+        }
+        assert!(seen.contains("std.logic"));
+        assert!(seen.contains("std.lib.simple"));
+        assert!(seen.contains("tahto.core"));
+    }
+
+    #[test]
+    fn generated_catalog_loads_logic_without_manual_registration() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(require [std.logic :as logic]) \
+                     (logic/run* (fn [query] (logic/== query 42)))"
+                )
+                .unwrap(),
+            "[42]"
+        );
+    }
+
+    #[test]
+    fn host_resource_replaces_an_embedded_resource() {
+        let mut runtime = Runtime::new();
+        runtime.require_resource("std.lib.simple").unwrap();
+        assert_eq!(runtime.eval_text("(std.lib.simple/foo 1)").unwrap(), "2");
+
+        runtime.register_resource(
+            "std.lib.simple",
+            "(ns std.lib.simple) (defn foo [value] (+ value 40))",
+        );
+        runtime.require_resource("std.lib.simple").unwrap();
+        assert_eq!(runtime.eval_text("(std.lib.simple/foo 2)").unwrap(), "42");
+    }
+
+    #[test]
     fn substrate_protocol_resource_loads_in_the_native_runtime() {
         let mut runtime = Runtime::new();
         assert_eq!(
@@ -2897,40 +2834,12 @@ mod tests {
             }
         }
         fn wrapper_source(path: &str) -> &'static str {
-            match path {
-                "lib/src/std/foundation.hal" => include_str!("../../lib/src/std/foundation.hal"),
-                "lib/src/std/foundation/string.hal" => {
-                    include_str!("../../lib/src/std/foundation/string.hal")
-                }
-                "lib/src/std/foundation/bytes.hal" => {
-                    include_str!("../../lib/src/std/foundation/bytes.hal")
-                }
-                "lib/src/std/foundation/file.hal" => {
-                    include_str!("../../lib/src/std/foundation/file.hal")
-                }
-                "lib/src/std/foundation/host.hal" => {
-                    include_str!("../../lib/src/std/foundation/host.hal")
-                }
-                "lib/src/std/foundation/socket.hal" => {
-                    include_str!("../../lib/src/std/foundation/socket.hal")
-                }
-                "lib/src/std/foundation/promise.hal" => {
-                    include_str!("../../lib/src/std/foundation/promise.hal")
-                }
-                "lib/src/std/foundation/coroutine.hal" => {
-                    include_str!("../../lib/src/std/foundation/coroutine.hal")
-                }
-                "lib/src/std/foundation/kernel.hal" => {
-                    include_str!("../../lib/src/std/foundation/kernel.hal")
-                }
-                "lib/src/std/foundation/edn.hal" => {
-                    include_str!("../../lib/src/std/foundation/edn.hal")
-                }
-                "lib/src/std/foundation/json.hal" => {
-                    include_str!("../../lib/src/std/foundation/json.hal")
-                }
-                _ => panic!("unknown wrapper source: {path}"),
-            }
+            EMBEDDED_HAL_RESOURCES
+                .iter()
+                .find_map(|(_, resource_path, source)| {
+                    (*resource_path == path).then_some(*source)
+                })
+                .unwrap_or_else(|| panic!("unknown wrapper source: {path}"))
         }
 
         let contract = kernel::parse_forms(include_str!(
@@ -3666,20 +3575,63 @@ mod tests {
             runtime
                 .eval_text(
                     "(ns std-task-rust-probe \
-                       (:require [std.task :as task] [std.task.bulk :as bulk])) \
+                       (:require [std.lib.task :as task] \
+                                 [std.lib.task.bulk :as bulk] \
+                                 [std.task :as compat])) \
                      (task/deftask double-task \
                        {:template :default \
                         :main {:fn (fn [value] (* 2 value))}}) \
+                     (task/deftask selected-task \
+                       {:template :default \
+                        :main {:fn (fn [value suffix] (str value suffix))} \
+                        :item {:list (fn [lookup env] \
+                                      ['code.alpha 'code.beta 'std.gamma])}}) \
+                     (task/deftask aggregate-task \
+                       {:template :default \
+                        :main {:fn (fn [value] {:score value})} \
+                        :result {:ignore (fn [data] \
+                                           (= 0 (get data :score))) \
+                                 :output (fn [data] (get data :score))} \
+                        :summary {:aggregate \
+                                  {:score-total \
+                                   [(fn [data] (get data :score)) \
+                                    (fn [total score] (+ total score)) 0]}}}) \
+                     (task/deftask constructed-task \
+                       {:template :default \
+                        :main {:argcount 4 \
+                               :fn (fn [input params lookup env] \
+                                     [input (get params :flag) \
+                                      (get lookup :input) \
+                                      (get env :environment)])} \
+                        :construct \
+                        {:input (fn [task] 7) \
+                         :env (fn [options] {:environment :ready}) \
+                         :lookup (fn [task options] \
+                                   {:input (get options :environment)})} \
+                        :params {:flag true}}) \
                      (let [reporter (bulk/event-reporter) \
                            output (task/invoke double-task [1 2 3] \
-                                               {:reporter reporter :return :all})] \
+                                               {:reporter reporter :return :all \
+                                                :package :records}) \
+                           aggregate-output \
+                           (task/invoke aggregate-task [0 2 3] \
+                                        {:return :all})] \
                        [(get output :summary) \
                         (vec (map (fn [result] (get result :data)) \
                                   (get output :results))) \
-                        (count (bulk/reporter-events reporter))])"
+                        (count (bulk/reporter-events reporter)) \
+                        (compat/invoke double-task 4) \
+                        (vec (map (fn [result] (get result :data)) \
+                                  (task/invoke selected-task 'code \
+                                               {:package :records} \
+                                               :args \"!\"))) \
+                        (get aggregate-output :results) \
+                        (get (get aggregate-output :summary) \
+                             :score-total) \
+                        (task/invoke constructed-task)])"
                 )
                 .unwrap(),
-            "[{:items 3 :results 3 :warnings 0 :errors 0} [2 4 6] 8]"
+            "[{:items 3 :results 3 :warnings 0 :errors 0 :cumulative 0 :elapsed 0} [2 4 6] 8 8 [\"code.alpha!\" \"code.beta!\"] {2 2 3 3} 5 [7 true :ready :ready]]"
         );
     }
 
@@ -3690,20 +3642,73 @@ mod tests {
             runtime
                 .eval_text(
                     "(ns std-block-rust-probe \
-                       (:require [std.block :as block])) \
+                       (:require [std.lib.block :as block] \
+                                 [std.lib.block.grid :as grid] \
+                                 [std.lib.block.reader :as reader] \
+                                 [std.block :as compat])) \
                      (let [parsed (block/parse-string \"[1 2 3]\") \
                            first-block (block/parse-first \"[1 2 3]\") \
-                           spaces (block/spaces 3)] \
+                           spaces (block/spaces 3) \
+                           wrapped (block/layout '(if ready [1 2] [3 4]) \
+                                                 {:width 10}) \
+                           gridded (grid/grid \
+                                    (block/parse-first \"(if\\nready\\ndone)\") \
+                                    0 {:rules {'if {:indent 1}}}) \
+                           modified (block/parse-first \"[1 #_2 3]\") \
+                           original (block/block [1 2]) \
+                           input-reader (reader/create \"ab\\ncd\") \
+                           first-two (reader/read-times input-reader \
+                                                        reader/read-char 2) \
+                           newline (reader/read-char input-reader) \
+                           edited (std.lib.zip/result \
+                                   (std.lib.zip/replace-right \
+                                    (std.lib.zip/step-right \
+                                     (std.lib.zip/step-right \
+                                     (std.lib.zip/step-inside \
+                                      (block/block-zip original)))) \
+                                    (block/block 3)))] \
                        [(block/string parsed) \
                         (block/value parsed) \
                         (block/type first-block) \
                         (block/tag first-block) \
-                        (vec (map block/value (block/children first-block))) \
+                        (vec (map block/value \
+                                  (filter block/code? \
+                                          (block/children first-block)))) \
                         (block/string spaces) \
-                        (block/space? spaces)])"
+                        (block/space? spaces) \
+                        (block/string wrapped) \
+                        (block/string gridded) \
+                        (block/value modified) \
+                        (block/child-values modified) \
+                        (block/string original) \
+                        (block/string edited) \
+                        first-two \
+                        (reader/reader-position input-reader) \
+                        (reader/read-to-boundary input-reader) \
+                        (compat/value (compat/parse-string \"[4 5]\"))])"
                 )
                 .unwrap(),
-            "[\"[1 2 3]\" [1 2 3] :container :vector [1 2 3] \"   \" true]"
+            "[\"[1 2 3]\" [1 2 3] :container :vector [1 2 3] \"   \" true \"(if\\n  ready\\n  [1 2]\\n  [3 4]\\n)\" \"(if\\n  ready\\n  done)\" [1 3] [1 3] \"[1 2]\" \"[1 3]\" [\"a\" \"b\"] [2 1] \"cd\" [4 5]]"
+        );
+    }
+
+    #[test]
+    fn portable_zip_is_embedded_and_preserves_original_values() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(ns std-lib-zip-rust-probe \
+                       (:require [std.lib.zip :as zip])) \
+                     (let [root [1 2 3] \
+                           location (zip/step-right \
+                                     (zip/step-inside (zip/vector-zip root))) \
+                           edited (zip/replace-right \
+                                   (zip/insert-left location 9) 8)] \
+                       [(zip/result edited) root])"
+                )
+                .unwrap(),
+            "[[1 9 8 3] [1 2 3]]"
         );
     }
 

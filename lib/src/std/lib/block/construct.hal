@@ -1,0 +1,278 @@
+(ns std.lib.block.construct
+  (:require [std.lib.block.type :as type]
+            [std.foundation.string :as string]
+            [std.foundation.edn :as edn]))
+
+(defn raw-block
+  [kind tag string value children props]
+  (std.lib.block.type/Block kind tag string value children props))
+
+(defn text-height
+  [text]
+  (loop [index 0
+         height 0]
+    (if (= index (string/length text))
+      height
+      (recur (inc index)
+             (if (= "\n" (string/char-at text index))
+               (inc height)
+               height)))))
+
+(defn text-width
+  [text]
+  (let [index (string/last-index-of text "\n")]
+    (if (= -1 index)
+      (string/length text)
+      (- (string/length text) (inc index)))))
+
+(defn void
+  [tag text]
+  (raw-block :void tag text nil [] {:width (text-width text)
+                                     :height (text-height text)}))
+
+(defn repeat-string
+  [text amount]
+  (loop [output ""
+         remaining amount]
+    (if (= 0 remaining)
+      output
+      (recur (str output text) (dec remaining)))))
+
+(defn join-strings
+  [strings]
+  (reduce (fn [output string] (str output string)) "" strings))
+
+(defn space [] (void :space " "))
+(defn spaces [amount] (void :space (repeat-string " " amount)))
+(defn tab [] (void :tab "\t"))
+(defn tabs [amount] (void :tab (repeat-string "\t" amount)))
+(defn newline [] (void :linebreak "\n"))
+(defn newlines [amount] (void :linespace (repeat-string "\n" amount)))
+(defn comment [text]
+  (raw-block :comment :comment text nil [] {:width (string/length text)
+                                             :height 0}))
+
+(defn token-from-string
+  ([text]
+   (token-from-string text
+                      (try
+                        (edn/read text)
+                        (catch Throwable error text))))
+  ([text value]
+   (raw-block :token :token text value []
+              {:width (text-width text)
+               :height (text-height text)
+               :value-string text})))
+
+(defn modifier
+  [tag text]
+  (raw-block :modifier tag text nil [] {:width (text-width text)
+                                         :height (text-height text)}))
+
+(defn uneval [] (modifier :hash-uneval "#_"))
+(defn cursor [] (modifier :hash-cursor "|"))
+
+(def container-limits
+  {:root {:start "" :end ""}
+   :fn {:start "#(" :end ")"}
+   :list {:start "(" :end ")"}
+   :map {:start "{" :end "}"}
+   :set {:start "#{" :end "}"}
+   :vector {:start "[" :end "]"}
+   :deref {:start "@" :end ""}
+   :meta {:start "^" :end ""}
+   :quote {:start "'" :end ""}
+   :syntax {:start "`" :end ""}
+   :var {:start "#'" :end ""}
+   :select {:start "#?(" :end ")"}
+   :select-splice {:start "#?@(" :end ")"}
+   :unquote {:start "~" :end ""}
+   :unquote-splice {:start "~@" :end ""}})
+
+(defn container-tag
+  [value]
+  (cond
+    (vector? value) :vector
+    (list? value) :list
+    (map? value) :map
+    (set? value) :set
+    :else nil))
+
+(defn child-strings
+  [children]
+  (reduce (fn [output child]
+            (str output (field child :string)))
+          ""
+          children))
+
+(defn expression-values
+  [children]
+  (loop [index 0
+         values []
+         suppress-next false]
+    (if (= index (count children))
+      values
+      (let [child (nth children index)]
+        (if (type/modifier-block? child)
+          (recur (inc index)
+                 values
+                 (= :hash-uneval (field child :tag)))
+          (if (type/code-block? child)
+            (recur (inc index)
+                   (if suppress-next
+                     values
+                     (conj values (field child :value)))
+                   false)
+            (recur (inc index) values suppress-next)))))))
+
+(defn pair-map
+  [values]
+  (loop [index 0
+         output {}]
+    (if (= index (count values))
+      output
+      (if (= (inc index) (count values))
+        (throw "Map block requires an even number of values")
+        (recur (+ index 2)
+               (assoc output
+                      (nth values index)
+                      (nth values (inc index))))))))
+
+(defn container-value
+  [tag children]
+  (let [values (expression-values children)]
+    (if (= tag :root)
+      (if (= 1 (count values)) (first values) values)
+      (if (= tag :vector)
+        values
+        (if (= tag :list)
+          (apply list values)
+          (if (= tag :map)
+            (pair-map values)
+            (if (= tag :set)
+              (into #{} values)
+              (if (= tag :quote)
+                (list 'quote (first values))
+                (if (= tag :deref)
+                  (list 'deref (first values))
+                  (if (= tag :syntax)
+                    (list 'syntax-quote (first values))
+                    (if (= tag :unquote)
+                      (list 'unquote (first values))
+                      (if (= tag :unquote-splice)
+                        (list 'unquote-splicing (first values))
+                        (if (= tag :var)
+                          (list 'var (first values))
+                          (if (= tag :select)
+                            (list '? (pair-map values))
+                            (if (= tag :select-splice)
+                              (list '?-splicing (pair-map values))
+                              nil)))))))))))))))
+
+(defn make-container
+  [tag children value]
+  (let [limits (or (get container-limits tag) {:start "" :end ""})
+        start (:start limits)
+        end (:end limits)
+        child-text (child-strings children)
+        text (str start child-text end)]
+    (raw-block :container tag text
+               (if (nil? value) (container-value tag children) value)
+               (vec children)
+               {:start start
+                :end end
+                :width (text-width text)
+                :height (text-height text)
+                :value-string (pr-str value)
+                :replace-children
+                (fn [old new-children]
+                  (make-container (field old :tag) new-children nil))})))
+
+(defn block
+  [value]
+  (if (type/block? value)
+    value
+    (let [tag (container-tag value)]
+      (if tag
+        (make-container tag
+                        (let [values (if (map? value)
+                                       (reduce (fn [output entry]
+                                                 (conj (conj output (nth entry 0))
+                                                       (nth entry 1)))
+                                               []
+                                               value)
+                                       (vec value))]
+                          (loop [index 0
+                                 children []]
+                            (if (= index (count values))
+                              children
+                              (recur
+                               (inc index)
+                               (conj
+                                (if (= index 0)
+                                  children
+                                  (conj children (space)))
+                                (std.lib.block.construct/block
+                                 (nth values index)))))))
+                        value)
+        (let [text (pr-str value)]
+          (token-from-string text value))))))
+
+(defn container
+  ([tag children]
+   (container tag children nil))
+  ([tag children value]
+   (make-container tag children value)))
+
+(defn root
+  ([children]
+   (root children
+         (child-strings children)))
+  ([children source]
+   (let [value (container-value :root children)
+         block (container :root children value)]
+     (assoc
+      (assoc block :string source)
+      :props
+      (assoc
+       (assoc (field block :props) :source source)
+       :width (text-width source)
+       :height (text-height source))))))
+
+(defn contents [block] (field block :children))
+(defn add-child [block child]
+  ((:replace-children (field block :props))
+   block
+   (conj (field block :children) child)))
+
+(defn empty [] (container :list []))
+
+(defn line-width
+  ([block] (line-width block 0))
+  ([block offset]
+   (if (= 0 (text-height (field block :string)))
+     (text-width (field block :string))
+     (- (text-width (field block :string)) offset))))
+
+(defn get-lines
+  [block]
+  (string/split-lines (field block :string)))
+
+(defn max-width
+  ([block]
+   (max-width block 0))
+  ([block offset]
+   (let [lines (get-lines block)]
+     (loop [index 0
+            widest 0]
+       (if (= index (count lines))
+         (- widest offset)
+         (let [width (+ (string/length (nth lines index))
+                        (if (= index 0) offset 0))]
+           (recur (inc index) (if (> width widest) width widest))))))))
+
+(defn rep [block] block)
+
+(defn indent-body
+  [block offset]
+  block)

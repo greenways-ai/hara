@@ -5,7 +5,8 @@
 ;; receives structured events; hosts decide whether and how to print them.
 ;; ============================================================================
 (ns code.test
-  (:require [code.test.protocol :as protocol]))
+  (:require [code.test.protocol :as protocol]
+            [std.lib.task :as task]))
 
 (defstruct TestRegistry [state])
 (defstruct NullReporter [value])
@@ -298,15 +299,45 @@
   [description & body]
   (fact-form description body (meta &form)))
 
-(defn selected?
-  "Returns true when fact matches run selection options."
+(defn selector-match?
+  [selector value]
+  (if (nil? selector)
+    true
+    (task/select-filter selector value)))
+
+(defn tag-selected?
+  [fact options]
+  (let [tags (or (:tags (:meta fact)) #{})
+        include (:include-tags options)
+        exclude (:exclude-tags options)
+        included (if include
+                   (reduce (fn [found tag]
+                             (or found (task/select-filter include tag)))
+                           false
+                           tags)
+                   true)
+        excluded (if exclude
+                   (reduce (fn [found tag]
+                             (or found (task/select-filter exclude tag)))
+                           false
+                           tags)
+                   false)]
+    (and included (not excluded))))
+
+(defn matches-selection?
+  "Returns true when a fact matches namespace, name, and tag selectors."
   [fact options]
   (and
-   (or (nil? (:namespace options))
-       (= (:namespace options) (:namespace fact)))
-   (or (nil? (:name options))
-       (= (:name options) (:name fact)))
-   (not (:skip (:meta fact)))))
+   (selector-match? (:namespace options) (:namespace fact))
+   (selector-match? (:name options) (:name fact))
+   (tag-selected? fact options)))
+
+(defn selected?
+  "Compatibility predicate: matching facts explicitly marked :skip are not
+   executable, though the runner retains them as structured skipped results."
+  [fact options]
+  (and (matches-selection? fact options)
+       (not (:skip (:meta fact)))))
 
 (defn report!
   "Sends event to reporter and returns event."
@@ -354,11 +385,19 @@
     (settle (hook) options)
     nil))
 
+(defn run-hooks
+  [hooks options]
+  (reduce (fn [output hook]
+            (do (run-hook hook options) output))
+          nil
+          hooks))
+
 (defn fact-cancelled?
   [fact options]
-  (if (:control options)
-    (protocol-call protocol/ITestControl cancelled? (:control options) fact)
-    false))
+  (or (:cancelled options)
+      (if (:control options)
+        (protocol-call protocol/ITestControl cancelled? (:control options) fact)
+        false)))
 
 (defn run-fact
   "Runs one fact and emits start/end events."
@@ -371,17 +410,23 @@
          start (clock-now options)]
      (report! reporter (merge {:event :fact/start} identity))
      (let [result
-           (if (fact-cancelled? fact options)
+           (if (:skip (:meta fact))
+             (merge identity {:status :skipped :checks []})
+             (if (fact-cancelled? fact options)
              (merge identity {:status :cancelled :checks []})
              (try
                (let [checks
                      (try
                        (do
-                         (run-hook (:before (:meta fact)) options)
+                         (run-hooks [(:before-each options)
+                                     (:before (:meta fact))]
+                                    options)
                          (normalize-checks
                           (settle ((:function fact) options) options)))
                        (finally
-                         (run-hook (:after (:meta fact)) options)))
+                         (run-hooks [(:after (:meta fact))
+                                     (:after-each options)]
+                                    options)))
                      status (if (checks-timeout? checks)
                               :timeout
                               (if (checks-error? checks)
@@ -394,7 +439,7 @@
                  (merge identity
                         {:status :error
                          :checks []
-                         :error (str error)}))))
+                         :error (str error)})))))
            end (clock-now options)
            timed-result (if (and start end)
                           (assoc result :elapsed (- end start))
@@ -414,26 +459,111 @@
            :cancelled 0}
           results))
 
+(defn check-counts
+  [results]
+  (reduce
+   (fn [counts result]
+     (reduce (fn [current check-result]
+               (update current
+                       (if (:pass check-result) :passed :failed)
+                       (fn [count] (inc (or count 0)))))
+             counts
+             (:checks result)))
+   {:total 0 :passed 0 :failed 0}
+   results))
+
+(defn attach-check-total
+  [counts]
+  (assoc counts :total (+ (:passed counts) (:failed counts))))
+
+(defn failing-status?
+  [status]
+  (or (= status :failed)
+      (= status :error)
+      (= status :timeout)))
+
+(defn fact-order-key
+  [fact]
+  (str (:namespace fact) "/" (:name fact)))
+
+(defn insert-fact
+  [facts fact]
+  (loop [index 0
+         output []]
+    (if (= index (count facts))
+      (conj output fact)
+      (if (< (compare (fact-order-key fact)
+                      (fact-order-key (nth facts index)))
+             0)
+        (loop [remaining index
+               inserted (conj output fact)]
+          (if (= remaining (count facts))
+            inserted
+            (recur (inc remaining)
+                   (conj inserted (nth facts remaining)))))
+        (recur (inc index) (conj output (nth facts index)))))))
+
+(defn order-facts
+  [facts]
+  (reduce insert-fact [] facts))
+
+(defn run-facts
+  [facts reporter options]
+  (loop [index 0
+         results []
+         cancelled false]
+    (if (= index (count facts))
+      results
+      (let [result (run-fact (nth facts index)
+                             reporter
+                             (assoc options :cancelled cancelled))
+            stop (or cancelled
+                     (and (:fail-fast options)
+                          (failing-status? (:status result))))]
+        (recur (inc index) (conj results result) stop)))))
+
+(defn run-selected
+  [input options]
+  (let [reporter (or (:reporter options) +null-reporter+)
+        selected (order-facts
+                  (filter (fn [fact] (matches-selection? fact options))
+                          (tests)))
+        start-report (report! reporter {:event :run/start :count (count selected)})
+        results (try
+                  (do
+                    (run-hook (:before-all options) options)
+                    (run-facts selected reporter options))
+                  (finally
+                    (run-hook (:after-all options) options)))
+        counts (result-counts results)
+        checks (attach-check-total (check-counts results))
+        status (if (and (= 0 (:failed counts))
+                        (= 0 (:error counts))
+                        (= 0 (:timeout counts)))
+                 :passed
+                 :failed)
+        summary {:status status
+                 :counts counts
+                 :checks checks
+                 :facts (count results)
+                 :results results}
+        end-report (report! reporter (merge {:event :run/end} summary))]
+    summary))
+
+(defn run-task-main
+  [package]
+  (run-selected nil (first package)))
+
+(def +runner-task+
+  (task/task :default
+             "code.test/run"
+             {:main {:fn run-task-main}}))
+
 (defn run
-  "Runs selected facts sequentially and returns a structured summary."
+  "Runs selected facts through std.lib.task and returns a structured summary."
   ([] (run {}))
   ([options]
-   (let [reporter (or (:reporter options) +null-reporter+)
-         selected (vec (filter (fn [fact] (selected? fact options)) (tests)))]
-     (report! reporter {:event :run/start :count (count selected)})
-     (let [results (vec (map (fn [fact] (run-fact fact reporter options))
-                             selected))
-           counts (result-counts results)
-           status (if (and (= 0 (:failed counts))
-                           (= 0 (:error counts))
-                           (= 0 (:timeout counts)))
-                    :passed
-                    :failed)
-           summary {:status status
-                    :counts counts
-                    :results results}]
-       (report! reporter (merge {:event :run/end} summary))
-       summary))))
+   (task/invoke +runner-task+ (list options))))
 
 (defn run-tests
   "Compatibility name for run."

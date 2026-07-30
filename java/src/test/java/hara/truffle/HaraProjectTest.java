@@ -79,6 +79,31 @@ public class HaraProjectTest {
   }
 
   @Test
+  public void projectSourceOverridesPackagedHalResource() throws Exception {
+    Path root = Files.createTempDirectory("hara-project-resource-override");
+    Files.writeString(
+        root.resolve("project.edn"),
+        "{:hara/type :project :project/id override :project/source-paths [\"src\"]}");
+    Path source = root.resolve("src/std/lib/simple.hal");
+    Files.createDirectories(source.getParent());
+    Files.writeString(source, "(ns std.lib.simple) (defn foo [value] (+ value 40))");
+
+    try (Context context =
+        Context.newBuilder(HaraLanguage.ID)
+            .currentWorkingDirectory(root)
+            .allowIO(IOAccess.ALL)
+            .build()) {
+      assertEquals(
+          42,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(require 'std.lib.simple) (std.lib.simple/foo 2)")
+              .asInt());
+    }
+  }
+
+  @Test
   public void lazyNamespaceStateIsNonForcingAndFailedLoadsRequireExplicitReload()
       throws Exception {
     Path root = Files.createTempDirectory("hara-project-lazy");

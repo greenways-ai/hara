@@ -1,10 +1,12 @@
-(ns std.block.protocol)
+;; Temporary compatibility facade. New code should use std.lib.block.protocol.
+(ns std.block.protocol
+  (:require [std.lib.block.protocol :as protocol]))
 
-(defprotocol IBlock
-  (block-type [block])
-  (block-tag [block])
-  (block-string [block])
-  (block-value [block])
-  (block-children [block])
-  (block-verify [block])
-  (block-info [block]))
+(def IBlock protocol/IBlock)
+(def block-type protocol/block-type)
+(def block-tag protocol/block-tag)
+(def block-string protocol/block-string)
+(def block-value protocol/block-value)
+(def block-children protocol/block-children)
+(def block-verify protocol/block-verify)
+(def block-info protocol/block-info)

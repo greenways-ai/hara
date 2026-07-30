@@ -13,11 +13,6 @@ public final class StdFoundationCoroutineLibraryProvider implements HaraLibraryP
   }
 
   @Override
-  public String fallbackResource() {
-    return "std/foundation/coroutine.hal";
-  }
-
-  @Override
   public void install(HaraContext context) {
     context.collectBuiltins(namespace(), () -> {
       HaraStaticLibrary.install(context, namespace(), StdFoundationCoroutine.class);

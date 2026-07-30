@@ -1,0 +1,18 @@
+(ns std.lib.block.editor
+  (:require [std.lib.block.zip :as block-zip]
+            [std.lib.block.construct :as construct]
+            [std.lib.zip :as zip]))
+
+(defn create [block] (block-zip/block-zip block))
+(defn current [editor] (zip/right-element editor))
+(defn result [editor] (zip/result editor))
+(defn move-next [editor] (or (zip/step-next editor) editor))
+(defn move-prev [editor] (or (zip/step-prev editor) editor))
+(defn move-left [editor] (zip/step-left editor))
+(defn move-right [editor] (zip/step-right editor))
+(defn move-in [editor] (zip/step-inside editor))
+(defn move-out [editor] (zip/step-outside editor))
+(defn insert-left [editor value] (zip/insert-left editor (construct/block value)))
+(defn insert-right [editor value] (zip/insert-right editor (construct/block value)))
+(defn replace [editor value] (zip/replace-right editor (construct/block value)))
+(defn delete [editor] (zip/delete-right editor))
