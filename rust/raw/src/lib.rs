@@ -1441,7 +1441,7 @@ mod tests {
             "session/eval",
             vec![
                 Value::String("busy".into()),
-                Value::String("(deref (Host/call \"wait\" \"forever\" []))".into()),
+                Value::String("(deref (std.native.Host/call \"wait\" \"forever\" []))".into()),
             ],
         )
         .unwrap();
