@@ -6,7 +6,6 @@ import { editorFormAt, editorTopLevelForms, isAnonymousDocument, studioDocumentI
 import {
   buildTree,
   defaultFileContent,
-  importGithubSource,
   normalizeNewFilePath,
   normalizePath,
   parseGithubSpec,
@@ -115,19 +114,10 @@ test("parseGithubSpec rejects malformed specs", () => {
   }
 });
 
-test("importGithubSource emits an UNQUOTED require vector and escaped args", () => {
-  const source = importGithubSource({ space: "lessons", repo: "octo/lessons", ref: "main" });
+test("studioSource wraps a form with canonical file and boot requires", () => {
   assert.equal(
-    source,
-    '(do (require [studio.space :as space]) (space/import-github! "lessons" "octo/lessons" {:ref "main"}))'
-  );
-  assert.ok(!source.includes("(require '"), "require vector must stay unquoted");
-});
-
-test("studioSource wraps a form with unquoted studio requires", () => {
-  assert.equal(
-    studioSource('(fs/read "home" "/a.hal")'),
-    '(do (require [studio.space :as space]) (require [studio.fs :as fs]) (require [studio.boot :as boot]) (fs/read "home" "/a.hal"))'
+    studioSource('(deref (file/read "/a.hal"))'),
+    '(do (require [std.foundation.file :as file]) (require [studio.boot :as boot]) (deref (file/read "/a.hal")))'
   );
   assert.ok(!studioSource("x").includes("(require '"));
 });

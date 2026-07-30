@@ -24,6 +24,6 @@
   (:pass result))
 
 (defn print-results
-  "Prints the result vector so the runner can parse it."
+  "Returns the result vector so the runner can parse the CLI value directly."
   [results]
-  (pr-str results))
+  results)

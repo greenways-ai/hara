@@ -5127,6 +5127,7 @@ public final class HaraContext {
                 && name.equals(existing.namespaceName())
                 && (existing.origin() == HaraVar.Origin.JAVA_LIBRARY
                     || existing.origin() == HaraVar.Origin.RUNTIME_PRIMITIVE)) {
+              existing.setMetadata(mergeMetadata(existing.meta(), metadata));
               return existing;
             }
             if (existing == null) {
@@ -5140,6 +5141,22 @@ public final class HaraContext {
             existing.setOrigin(origin);
             return existing;
           });
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static IMetadata mergeMetadata(IMetadata existing, IMetadata fallback) {
+      if (!(fallback instanceof hara.lang.data.types.IMapType)) return existing;
+      hara.lang.data.types.IMapType merged =
+          existing instanceof hara.lang.data.types.IMapType
+              ? (hara.lang.data.types.IMapType) existing
+              : hara.lang.data.Map.Standard.EMPTY;
+      java.util.Iterator<java.util.Map.Entry> entries =
+          ((hara.lang.data.types.IMapType) fallback).iterator();
+      while (entries.hasNext()) {
+        java.util.Map.Entry entry = entries.next();
+        merged = (hara.lang.data.types.IMapType) merged.assoc(entry.getKey(), entry.getValue());
+      }
+      return merged;
     }
 
     private HaraVar refer(String symbolName, HaraVar value) {

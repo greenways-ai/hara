@@ -795,7 +795,9 @@ fn bind_form(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) ->
             Ok(x) => {
                 let mut env = e.borrow_mut();
                 if op == "def" {
-                    if let Some(protected) = crate::core::protected_fallback_binding(&env, &name) {
+                    if let Some(protected) =
+                        crate::core::protected_fallback_binding(&env, &name, metadata.clone())
+                    {
                         drop(env);
                         return k(Ok(protected));
                     }

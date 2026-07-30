@@ -46,34 +46,65 @@ test("two instances sharing a db name see the same IndexedDB data", async () => 
   assert.deepEqual(await second["store/keys"](), ["shared-key"]);
 });
 
-test("session memory filesystems isolate files inside one kernel context", async () => {
-  const mounts = new Map([
-    ["alpha", "memory:alpha"],
-    ["beta", "memory:beta"]
-  ]);
-  const context = { filesystemForSession: (session) => mounts.get(session) };
+test("kernel-issued memory mounts isolate files and enforce directory semantics", async () => {
   const host = createHostServices({ dbName: "test-session-memory" });
-  const alpha = { context, sessionId: "alpha" };
-  const beta = { context, sessionId: "beta" };
-
-  await host["store/put"].call(alpha, "/main.hal", "alpha");
-  await host["store/put"].call(beta, "/main.hal", "beta");
-
-  assert.equal(await host["store/get"].call(alpha, "/main.hal"), "alpha");
-  assert.equal(await host["store/get"].call(beta, "/main.hal"), "beta");
-  assert.deepEqual(await host["store/keys"].call(alpha), ["/main.hal"]);
+  const context = {};
+  await host.filesystemHost.register(context, 1, { provider: "memory" });
+  await host.filesystemHost.register(context, 2, { provider: "memory" });
+  const alpha = { kernelContext: context, mountId: 1 };
+  const beta = { kernelContext: context, mountId: 2 };
+  await host["file/mkdir"].call(alpha, "/src");
+  await host["file/mkdir"].call(beta, "/src");
+  await host["file/write"].call(alpha, "/src/main.hal", new Uint8Array([1]));
+  await host["file/write"].call(beta, "/src/main.hal", new Uint8Array([2]));
+  assert.deepEqual(await host["file/read"].call(alpha, "/src/main.hal"), new Uint8Array([1]));
+  assert.deepEqual(await host["file/read"].call(beta, "/src/main.hal"), new Uint8Array([2]));
+  assert.deepEqual(await host["file/list"].call(alpha, "/src"), ["/src/main.hal"]);
+  await assert.rejects(
+    host["file/write"].call(alpha, "/missing/main.hal", new Uint8Array()),
+    /parent-missing/
+  );
 });
 
-test("explicit persistent filesystem keys share files across sessions", async () => {
-  const context = { filesystemForSession: () => "indexeddb:tutorial-board" };
-  const host = createHostServices({ dbName: "test-session-persistent" });
-  const first = { context, sessionId: "first" };
-  const second = { context, sessionId: "second" };
+test("equal mount ids in different kernels do not collide", async () => {
+  const host = createHostServices({ dbName: "test-kernel-local-mount-ids" });
+  const firstContext = {};
+  const secondContext = {};
+  await host.filesystemHost.register(firstContext, 1, { provider: "memory" });
+  await host.filesystemHost.register(secondContext, 1, { provider: "memory" });
+  await host["file/write"].call(
+    { kernelContext: firstContext, mountId: 1 }, "/value.bin", new Uint8Array([1])
+  );
+  await host["file/write"].call(
+    { kernelContext: secondContext, mountId: 1 }, "/value.bin", new Uint8Array([2])
+  );
+  assert.deepEqual(
+    await host["file/read"].call({ kernelContext: firstContext, mountId: 1 }, "/value.bin"),
+    new Uint8Array([1])
+  );
+  assert.deepEqual(
+    await host["file/read"].call({ kernelContext: secondContext, mountId: 1 }, "/value.bin"),
+    new Uint8Array([2])
+  );
+});
 
-  await host["store/put"].call(first, "/board.hal", "shared");
-
-  assert.equal(await host["store/get"].call(second, "/board.hal"), "shared");
-  assert.deepEqual(await host["store/keys"].call(second), ["/board.hal"]);
+test("indexeddb provider keys persist across fresh kernel-local mount ids", async () => {
+  const firstHost = createHostServices({ dbName: "test-session-persistent" });
+  const firstContext = {};
+  await firstHost.filesystemHost.register(firstContext, 1, { provider: "indexeddb", key: "tutorial-board" });
+  await firstHost["file/write"].call({ kernelContext: firstContext, mountId: 1 }, "/board.hal", new Uint8Array([7, 8]));
+  await firstHost.filesystemHost.close(firstContext, 1);
+  const secondHost = createHostServices({ dbName: "test-session-persistent" });
+  const secondContext = {};
+  await secondHost.filesystemHost.register(secondContext, 9, { provider: "indexeddb", key: "tutorial-board" });
+  assert.deepEqual(
+    await secondHost["file/read"].call({ kernelContext: secondContext, mountId: 9 }, "/board.hal"),
+    new Uint8Array([7, 8])
+  );
+  await assert.rejects(
+    secondHost["file/read"].call({ kernelContext: secondContext, mountId: 1 }, "/board.hal"),
+    /mount-closed/
+  );
 });
 
 test("canvas host calls route by originating session", async () => {

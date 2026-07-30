@@ -31,16 +31,12 @@ export function createHostServices(options = {}) {
     return db.transaction(STORE, mode).objectStore(STORE);
   }
 
+  const filesystemHost = createFilesystemHost({
+    store,
+    memoryFilesystems: options.memoryFilesystems ?? new Map()
+  });
+
   function scopedKey(invocation, key, { keys = false } = {}) {
-    const filesystem = invocation?.context?.filesystemForSession?.(
-      invocation?.sessionId ?? "ROOT"
-    );
-    if (filesystem) {
-      if (typeof key !== "string" && !(keys && (key === undefined || key === null))) {
-        throw new Error("file/path-invalid");
-      }
-      return { filesystem, key: key ?? "" };
-    }
     if (!scopeForContext) return key;
     // Host calls originate from an HtaSession, while website scope ownership
     // is registered against its parent HtaContext when the kernel starts.
@@ -56,80 +52,44 @@ export function createHostServices(options = {}) {
     return key;
   }
 
-  function mount(invocation, key, options = {}) {
-    const scoped = scopedKey(invocation, key, options);
-    return scoped && typeof scoped === "object" && "filesystem" in scoped ? scoped : null;
-  }
-
-  function memory(filesystem) {
-    let entries = memoryFilesystems.get(filesystem);
-    if (!entries) memoryFilesystems.set(filesystem, entries = new Map());
-    return entries;
-  }
-
-  function persistentKey(filesystem, key) {
-    return `filesystems/${encodeURIComponent(filesystem)}/${key}`;
-  }
-
-  async function mountedGet({ filesystem, key }) {
-    if (filesystem.startsWith("memory:")) return memory(filesystem).get(key) ?? null;
-    return request(await store("readonly"), "get", persistentKey(filesystem, key));
-  }
-
-  async function mountedPut({ filesystem, key }, value) {
-    if (filesystem.startsWith("memory:")) {
-      memory(filesystem).set(key, value);
-      return true;
-    }
-    await request(await store("readwrite"), "put", value, persistentKey(filesystem, key));
-    return true;
-  }
-
-  async function mountedDelete({ filesystem, key }) {
-    if (filesystem.startsWith("memory:")) return memory(filesystem).delete(key);
-    await request(await store("readwrite"), "delete", persistentKey(filesystem, key));
-    return true;
-  }
-
-  async function mountedKeys({ filesystem, key }) {
-    if (filesystem.startsWith("memory:")) {
-      return [...memory(filesystem).keys()].filter((entry) => entry.startsWith(key));
-    }
-    const prefix = persistentKey(filesystem, key);
-    const root = persistentKey(filesystem, "");
-    return (await request(await store("readonly"), "getAllKeys"))
-      .filter((entry) => entry.startsWith(prefix))
-      .map((entry) => entry.slice(root.length));
-  }
-
   const services = {
     "store/get": async function(key) {
-      const mounted = mount(this, key);
-      if (mounted) return mountedGet(mounted);
       return request(await store("readonly"), "get", scopedKey(this, key));
     },
     "store/put": async function(key, value) {
-      const mounted = mount(this, key);
-      if (mounted) return mountedPut(mounted, value);
       key = scopedKey(this, key);
       await request(await store("readwrite"), "put", value, key);
       return true;
     },
     "store/del": async function(key) {
-      const mounted = mount(this, key);
-      if (mounted) return mountedDelete(mounted);
       key = scopedKey(this, key);
       await request(await store("readwrite"), "delete", key);
       return true;
     },
     "store/keys": async function(prefix) {
-      const mounted = mount(this, prefix, { keys: true });
-      if (mounted) return mountedKeys(mounted);
       prefix = scopedKey(this, prefix, { keys: true });
       const keys = await request(await store("readonly"), "getAllKeys");
       return prefix === undefined || prefix === null
         ? keys
         : keys.filter((key) => key.startsWith(prefix));
+    },
+    "file/read": function(path) {
+      return filesystemHost.invoke(this.kernelContext, this.mountId, "read", [path]);
+    },
+    "file/write": function(path, bytes) {
+      return filesystemHost.invoke(this.kernelContext, this.mountId, "write", [path, bytes]);
+    },
+    "file/exists": function(path) {
+      return filesystemHost.invoke(this.kernelContext, this.mountId, "exists", [path]);
+    },
+    "file/list": function(path) {
+      return filesystemHost.invoke(this.kernelContext, this.mountId, "list", [path]);
+    },
+    "file/mkdir": function(path) {
+      return filesystemHost.invoke(this.kernelContext, this.mountId, "mkdir", [path]);
+    },
+    "file/delete": function(path) {
+      return filesystemHost.invoke(this.kernelContext, this.mountId, "delete", [path]);
     },
     "http/get": async (url) => {
       const response = await fetchImpl(url);
@@ -173,7 +133,165 @@ export function createHostServices(options = {}) {
       return true;
     };
   }
+  Object.defineProperty(services, "filesystemHost", {
+    value: filesystemHost,
+    enumerable: false
+  });
   return services;
+}
+
+export function createFilesystemHost({ store, memoryFilesystems = new Map() }) {
+  const contexts = new WeakMap();
+
+  function normalize(path) {
+    if (typeof path !== "string" || path.includes("\0")) throw new Error("file/path-invalid");
+    const parts = [];
+    for (const part of path.split("/")) {
+      if (part === "" || part === ".") continue;
+      if (part === "..") {
+        if (parts.length === 0) throw new Error("file/path-denied");
+        parts.pop();
+      } else parts.push(part);
+    }
+    return `/${parts.join("/")}`;
+  }
+
+  const parent = (path) => path === "/" ? null : path.slice(0, path.lastIndexOf("/")) || "/";
+  const prefix = (mount) => `filesystems/${encodeURIComponent(mount.key)}/entries/`;
+  const recordKey = (mount, path) => `${prefix(mount)}${encodeURIComponent(path)}`;
+
+  async function records(mount) {
+    if (mount.provider === "memory") return mount.entries;
+    const keys = await request(await store("readonly"), "getAllKeys");
+    const output = new Map();
+    for (const key of keys.filter((key) => typeof key === "string" && key.startsWith(prefix(mount)))) {
+      output.set(decodeURIComponent(key.slice(prefix(mount).length)),
+        await request(await store("readonly"), "get", key));
+    }
+    return output;
+  }
+
+  async function getRecord(mount, path) {
+    if (path === "/") return { kind: "directory" };
+    if (mount.provider === "memory") return mount.entries.get(path) ?? null;
+    return request(await store("readonly"), "get", recordKey(mount, path));
+  }
+
+  async function putRecord(mount, path, value) {
+    if (mount.provider === "memory") {
+      mount.entries.set(path, value);
+      return;
+    }
+    await request(await store("readwrite"), "put", value, recordKey(mount, path));
+  }
+
+  async function deleteRecord(mount, path) {
+    if (mount.provider === "memory") {
+      mount.entries.delete(path);
+      return;
+    }
+    await request(await store("readwrite"), "delete", recordKey(mount, path));
+  }
+
+  function mountsFor(context, create = false) {
+    if (!context || (typeof context !== "object" && typeof context !== "function")) {
+      throw new Error("filesystem/kernel-context-invalid");
+    }
+    let mounts = contexts.get(context);
+    if (!mounts && create) contexts.set(context, mounts = new Map());
+    return mounts;
+  }
+
+  async function requireMount(context, mountId) {
+    if (!Number.isSafeInteger(mountId) || mountId <= 0) throw new Error("file/unattached");
+    const mount = mountsFor(context)?.get(mountId);
+    if (!mount) throw new Error(`file/mount-closed:${mountId}`);
+    return mount;
+  }
+
+  return {
+    async register(context, mountId, descriptor) {
+      const mounts = mountsFor(context, true);
+      if (!Number.isSafeInteger(mountId) || mountId <= 0 || mounts.has(mountId)) {
+        throw new Error("filesystem/mount-id-invalid");
+      }
+      const provider = descriptor.provider;
+      if (provider !== "memory" && provider !== "indexeddb") {
+        throw new Error(`filesystem/provider-unsupported:${provider}`);
+      }
+      if (provider === "indexeddb" && (typeof descriptor.key !== "string" || descriptor.key.length === 0)) {
+        throw new Error("filesystem/indexeddb-key-invalid");
+      }
+      let entries;
+      if (provider === "memory") {
+        let contextFilesystems = memoryFilesystems.get(context);
+        if (!contextFilesystems) memoryFilesystems.set(context, contextFilesystems = new Map());
+        entries = contextFilesystems.get(mountId) ?? new Map();
+        contextFilesystems.set(mountId, entries);
+      }
+      mounts.set(mountId, { provider, key: descriptor.key ?? String(mountId), entries });
+      return true;
+    },
+    async close(context, mountId) {
+      const mounts = mountsFor(context);
+      if (!mounts) throw new Error(`file/mount-closed:${mountId}`);
+      if (!mounts.delete(mountId)) throw new Error(`file/mount-closed:${mountId}`);
+      memoryFilesystems.get(context)?.delete(mountId);
+      return true;
+    },
+    async invoke(context, mountId, method, args) {
+      const mount = await requireMount(context, mountId);
+      const path = normalize(args[0]);
+      if (method === "read") {
+        const entry = await getRecord(mount, path);
+        if (!entry || entry.kind !== "file") throw new Error(`file/not-found:${path}`);
+        return new Uint8Array(entry.bytes);
+      }
+      if (method === "write") {
+        const bytes = args[1];
+        if (!(bytes instanceof Uint8Array)) throw new Error("file/bytes-required");
+        const directory = parent(path);
+        const parentEntry = await getRecord(mount, directory);
+        if (!parentEntry || parentEntry.kind !== "directory") throw new Error(`file/parent-missing:${directory}`);
+        await putRecord(mount, path, { kind: "file", bytes: new Uint8Array(bytes) });
+        return null;
+      }
+      if (method === "exists") return (await getRecord(mount, path)) !== null;
+      if (method === "mkdir") {
+        let current = "";
+        for (const part of path.split("/").filter(Boolean)) {
+          current += `/${part}`;
+          const entry = await getRecord(mount, current);
+          if (entry?.kind === "file") throw new Error(`file/not-directory:${current}`);
+          if (!entry) await putRecord(mount, current, { kind: "directory" });
+        }
+        return null;
+      }
+      if (method === "list") {
+        const directory = await getRecord(mount, path);
+        if (!directory || directory.kind !== "directory") throw new Error(`file/not-directory:${path}`);
+        const start = path === "/" ? "/" : `${path}/`;
+        return [...(await records(mount)).keys()]
+          .filter((candidate) => candidate.startsWith(start) &&
+            !candidate.slice(start.length).includes("/"))
+          .sort();
+      }
+      if (method === "delete") {
+        if (path === "/") throw new Error("file/root-delete-denied");
+        const entry = await getRecord(mount, path);
+        if (!entry) throw new Error(`file/not-found:${path}`);
+        if (entry.kind === "directory") {
+          const start = `${path}/`;
+          if ([...(await records(mount)).keys()].some((candidate) => candidate.startsWith(start))) {
+            throw new Error(`file/directory-not-empty:${path}`);
+          }
+        }
+        await deleteRecord(mount, path);
+        return null;
+      }
+      throw new Error(`file/method-unsupported:${method}`);
+    }
+  };
 }
 
 export function createNodeHostServices(runtime) {

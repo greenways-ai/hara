@@ -25,8 +25,6 @@ const required = [
   "rust/ui/studio.css",
   "rust/ui/studio-shell.js",
   "rust/studio/hal/store.hal",
-  "rust/studio/hal/fs.hal",
-  "rust/studio/hal/space.hal",
   "rust/studio/hal/boot.hal",
   "rust/studio/hal/graph.hal",
   "rust/studio/hal/program.hal",

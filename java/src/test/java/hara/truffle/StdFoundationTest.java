@@ -135,6 +135,25 @@ public class StdFoundationTest {
   }
 
   @Test
+  public void fallbackSourceDocumentsNativeFoundationVars() {
+    try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
+      assertEquals(
+          "[\"Returns the portable character count of value.\" [[value]]"
+              + " [:fn [:str] :int]]",
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(do (require 'std.foundation.string)"
+                      + " (let [m (meta #'std.foundation.string/length)]"
+                      + "   [(get m :doc) (get m :arglists) (get m :schema)]))")
+              .toString());
+      assertEquals(
+          "4",
+          context.eval(HaraLanguage.ID, "(std.foundation.string/length \"hara\")").toString());
+    }
+  }
+
+  @Test
   public void publicMapDotoAndSetHelpersArePortable() {
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
       assertEquals(

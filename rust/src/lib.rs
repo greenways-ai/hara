@@ -115,7 +115,16 @@ pub struct Runtime {
 pub struct SessionKernel {
     sessions: HashMap<String, Runtime>,
     resources: HashMap<String, String>,
-    filesystems: HashMap<String, String>,
+    mounts: HashMap<u64, FilesystemMount>,
+    session_mounts: HashMap<String, u64>,
+    next_mount_id: u64,
+}
+
+struct FilesystemMount {
+    provider: Rc<dyn core::FileProvider>,
+    kind: &'static str,
+    key: String,
+    attachments: usize,
 }
 
 impl Default for SessionKernel {
@@ -129,7 +138,9 @@ impl SessionKernel {
         Self {
             sessions: HashMap::from([("ROOT".into(), Runtime::new())]),
             resources: HashMap::new(),
-            filesystems: HashMap::new(),
+            mounts: HashMap::new(),
+            session_mounts: HashMap::new(),
+            next_mount_id: 1,
         }
     }
 
@@ -166,53 +177,105 @@ impl SessionKernel {
         }
     }
 
-    pub fn attach_memory_filesystem(
-        &mut self,
-        session: &str,
-        provider_id: &str,
-        root: &str,
-    ) -> Result<(), String> {
-        self.reset_with_filesystem(session, provider_id, |runtime| {
-            runtime.install_memory_file_provider(root);
-        })
+    pub fn create_memory_filesystem(&mut self, root: &str) -> u64 {
+        self.create_filesystem(
+            Rc::new(core::MemoryFileProvider::new(root)),
+            "memory",
+            root,
+        )
     }
 
     #[cfg(any(not(target_arch = "wasm32"), target_os = "wasi"))]
-    pub fn attach_native_filesystem(
-        &mut self,
-        session: &str,
-        provider_id: &str,
-        root: &str,
-    ) -> Result<(), String> {
-        self.reset_with_filesystem(session, provider_id, |runtime| {
-            runtime.install_native_file_provider(root);
-        })
+    pub fn create_native_filesystem(&mut self, root: &str) -> u64 {
+        self.create_filesystem(
+            Rc::new(core::NativeFileProvider::new(root)),
+            "native",
+            root,
+        )
     }
 
-    fn reset_with_filesystem(
+    fn create_filesystem(
         &mut self,
-        session: &str,
-        provider_id: &str,
-        install: impl FnOnce(&mut Runtime),
-    ) -> Result<(), String> {
-        if provider_id.is_empty() {
-            return Err("INVALID_FILESYSTEM_ID".into());
-        }
+        provider: Rc<dyn core::FileProvider>,
+        kind: &'static str,
+        key: &str,
+    ) -> u64 {
+        let id = self.next_mount_id;
+        self.next_mount_id = self
+            .next_mount_id
+            .checked_add(1)
+            .expect("filesystem mount identifiers exhausted");
+        self.mounts.insert(
+            id,
+            FilesystemMount {
+                provider,
+                kind,
+                key: key.into(),
+                attachments: 0,
+            },
+        );
+        id
+    }
+
+    pub fn attach_filesystem(&mut self, session: &str, mount_id: u64) -> Result<(), String> {
         if !self.sessions.contains_key(session) {
             return Err(format!("NO_SESSION {session}"));
         }
-        let mut replacement = Runtime::new();
-        for (resource, source) in &self.resources {
-            replacement.register_resource(resource, source);
+        let provider = self
+            .mounts
+            .get(&mount_id)
+            .ok_or_else(|| format!("NO_FILESYSTEM {mount_id}"))?
+            .provider
+            .clone();
+        if self.session_mounts.get(session) == Some(&mount_id) {
+            return Ok(());
         }
-        install(&mut replacement);
-        self.sessions.insert(session.into(), replacement);
-        self.filesystems.insert(session.into(), provider_id.into());
+        self.detach_filesystem(session)?;
+        self.mounts.get_mut(&mount_id).unwrap().attachments += 1;
+        self.session_mounts.insert(session.into(), mount_id);
+        self.sessions
+            .get_mut(session)
+            .unwrap()
+            .providers
+            .set_file(Some(provider));
         Ok(())
     }
 
-    pub fn filesystem(&self, session: &str) -> Option<&str> {
-        self.filesystems.get(session).map(String::as_str)
+    pub fn detach_filesystem(&mut self, session: &str) -> Result<(), String> {
+        let runtime = self
+            .sessions
+            .get_mut(session)
+            .ok_or_else(|| format!("NO_SESSION {session}"))?;
+        runtime.providers.set_file(None);
+        if let Some(mount_id) = self.session_mounts.remove(session) {
+            if let Some(mount) = self.mounts.get_mut(&mount_id) {
+                mount.attachments = mount.attachments.saturating_sub(1);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn filesystem(&self, session: &str) -> Option<u64> {
+        self.session_mounts.get(session).copied()
+    }
+
+    pub fn filesystem_info(&self, mount_id: u64) -> Result<(&str, &str, usize), String> {
+        self.mounts
+            .get(&mount_id)
+            .map(|mount| (mount.kind, mount.key.as_str(), mount.attachments))
+            .ok_or_else(|| format!("NO_FILESYSTEM {mount_id}"))
+    }
+
+    pub fn close_filesystem(&mut self, mount_id: u64) -> Result<(), String> {
+        let mount = self
+            .mounts
+            .get(&mount_id)
+            .ok_or_else(|| format!("NO_FILESYSTEM {mount_id}"))?;
+        if mount.attachments != 0 {
+            return Err(format!("FILESYSTEM_ATTACHED {mount_id}"));
+        }
+        self.mounts.remove(&mount_id);
+        Ok(())
     }
 
     pub fn close_session(&mut self, name: &str) -> Result<(), String> {
@@ -220,10 +283,11 @@ impl SessionKernel {
         if name == "ROOT" {
             return Err("ROOT_CANNOT_CLOSE".into());
         }
-        self.sessions
-            .remove(name)
-            .ok_or_else(|| format!("NO_SESSION {name}"))?;
-        self.filesystems.remove(name);
+        if !self.sessions.contains_key(name) {
+            return Err(format!("NO_SESSION {name}"));
+        }
+        self.detach_filesystem(name)?;
+        self.sessions.remove(name);
         Ok(())
     }
 }
@@ -1255,7 +1319,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn session_kernel_isolates_state_and_resets_on_filesystem_attach() {
+    fn session_kernel_mounts_preserve_state_and_enforce_lifetime() {
         let mut kernel = SessionKernel::new();
         kernel.create_session("alpha").unwrap();
         kernel.create_session("beta").unwrap();
@@ -1264,14 +1328,38 @@ mod tests {
             "41"
         );
         assert_eq!(kernel.eval("beta", "(def answer 6) answer").unwrap(), "6");
-        kernel
-            .attach_memory_filesystem("alpha", "memory:alpha", "/workspace")
-            .unwrap();
-        assert_eq!(kernel.filesystem("alpha"), Some("memory:alpha"));
-        assert!(kernel
-            .eval("alpha", "answer")
-            .unwrap_err()
-            .contains("unbound"));
+        let mount = kernel.create_memory_filesystem("/workspace");
+        kernel.attach_filesystem("alpha", mount).unwrap();
+        kernel.attach_filesystem("beta", mount).unwrap();
+        assert_eq!(kernel.filesystem("alpha"), Some(mount));
+        assert_eq!(kernel.eval("alpha", "answer").unwrap(), "41");
+        assert_eq!(
+            kernel
+                .eval(
+                    "alpha",
+                    "(do (require [std.foundation.file :as file]) \
+                     (deref (file/write \"/workspace/shared.bin\" (bytes 7 8))))",
+                )
+                .unwrap(),
+            "nil"
+        );
+        assert_eq!(
+            kernel
+                .eval(
+                    "beta",
+                    "(do (require [std.foundation.file :as file]) \
+                     (deref (file/exists? \"/workspace/shared.bin\")))",
+                )
+                .unwrap(),
+            "true"
+        );
+        assert_eq!(
+            kernel.close_filesystem(mount).unwrap_err(),
+            format!("FILESYSTEM_ATTACHED {mount}")
+        );
+        kernel.detach_filesystem("alpha").unwrap();
+        kernel.detach_filesystem("beta").unwrap();
+        kernel.close_filesystem(mount).unwrap();
         assert_eq!(
             kernel.session_names(),
             vec!["ROOT".to_string(), "alpha".to_string(), "beta".to_string()]
@@ -3087,7 +3175,11 @@ mod tests {
         );
         let identity = native.identity_address();
         core::with_definition_origin(kernel::VarOrigin::HalFallback, || {
-            runtime.eval_text("(ns std.foundation) (def optimized 9)")
+            runtime.eval_text(concat!(
+                "(ns std.foundation)",
+                " (defn ^{:schema [:fn [:int] :int]} optimized",
+                " \"Documents the native implementation.\" [value] 9)"
+            ))
         })
         .unwrap();
         let refreshed = foundation
@@ -3096,6 +3188,39 @@ mod tests {
         assert_eq!(refreshed.identity_address(), identity);
         assert_eq!(refreshed.origin(), kernel::VarOrigin::RustLibrary);
         assert_eq!(refreshed.deref_value().display(), "7");
+        assert_eq!(
+            refreshed
+                .hara_metadata()
+                .and_then(|metadata| metadata.doc().map(str::to_owned)),
+            Some("Documents the native implementation.".into())
+        );
+        let metadata = refreshed.hara_metadata().expect("fallback metadata");
+        assert_eq!(
+            metadata.get_keyword("arglists"),
+            Some(&crate::lang::data::MetadataValue::Vector(vec![
+                crate::lang::data::MetadataValue::Vector(vec![
+                    crate::lang::data::MetadataValue::Symbol(
+                        crate::lang::data::Symbol::from("value")
+                    )
+                ])
+            ]))
+        );
+        assert_eq!(
+            metadata.get_keyword("schema"),
+            Some(&crate::lang::data::MetadataValue::Vector(vec![
+                crate::lang::data::MetadataValue::Keyword(
+                    crate::lang::data::Keyword::from("fn")
+                ),
+                crate::lang::data::MetadataValue::Vector(vec![
+                    crate::lang::data::MetadataValue::Keyword(
+                        crate::lang::data::Keyword::from("int")
+                    )
+                ]),
+                crate::lang::data::MetadataValue::Keyword(
+                    crate::lang::data::Keyword::from("int")
+                )
+            ]))
+        );
     }
 
     #[test]

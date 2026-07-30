@@ -2102,6 +2102,7 @@ pub(crate) fn binding_is_local(var: &KernelVar<Value>) -> bool {
 pub(crate) fn protected_fallback_binding(
     env: &HashMap<String, Value>,
     name: &str,
+    metadata: Option<Rc<Metadata>>,
 ) -> Option<Value> {
     if definition_origin() != VarOrigin::HalFallback {
         return None;
@@ -2113,6 +2114,7 @@ pub(crate) fn protected_fallback_binding(
                 VarOrigin::RustLibrary | VarOrigin::RuntimePrimitive
             ) =>
         {
+            var.set_hara_metadata(merge_metadata(var.hara_metadata(), metadata));
             Some(var.deref_value())
         }
         _ => None,
@@ -3218,6 +3220,9 @@ impl ProviderRegistry {
 
     pub fn install_file<P: FileProvider + 'static>(&mut self, provider: P) {
         self.file = Some(Rc::new(provider));
+    }
+    pub fn set_file(&mut self, provider: Option<Rc<dyn FileProvider>>) {
+        self.file = provider;
     }
     pub fn install_socket<P: SocketProvider + 'static>(&mut self, provider: P) {
         self.socket = Some(Rc::new(provider));
@@ -6107,6 +6112,76 @@ pub(crate) fn metadata_from_form(form: &Form) -> Result<Rc<Metadata>, String> {
     Ok(Metadata::new(entries))
 }
 
+fn merge_metadata(
+    existing: Option<Rc<Metadata>>,
+    overlay: Option<Rc<Metadata>>,
+) -> Option<Rc<Metadata>> {
+    match (existing, overlay) {
+        (None, None) => None,
+        (Some(metadata), None) | (None, Some(metadata)) => Some(metadata),
+        (Some(existing), Some(overlay)) => {
+            let mut entries = existing.entries().to_vec();
+            for (key, value) in overlay.entries() {
+                entries.retain(|(candidate, _)| candidate != key);
+                entries.push((key.clone(), value.clone()));
+            }
+            Some(Metadata::new(entries))
+        }
+    }
+}
+
+fn assoc_metadata(
+    metadata: Option<Rc<Metadata>>,
+    key: &str,
+    value: MetadataValue,
+) -> Option<Rc<Metadata>> {
+    merge_metadata(
+        metadata,
+        Some(Metadata::new(vec![(
+            MetadataValue::Keyword(Keyword::from(key)),
+            value,
+        )])),
+    )
+}
+
+fn definition_metadata(
+    mut metadata: Option<Rc<Metadata>>,
+    forms: &[Form],
+    private: bool,
+    macro_form: bool,
+) -> Result<(Option<Rc<Metadata>>, &[Form]), String> {
+    let mut rest = forms;
+    if let Some(Form::String(doc)) = rest.first() {
+        metadata = assoc_metadata(metadata, "doc", MetadataValue::String(doc.clone()));
+        rest = &rest[1..];
+    }
+    if let Some(Form::Map(_)) = rest.first() {
+        metadata = merge_metadata(metadata, Some(metadata_from_form(&rest[0])?));
+        rest = &rest[1..];
+    }
+    if rest.is_empty() {
+        return Ok((metadata, rest));
+    }
+    let arglists = if matches!(rest.first(), Some(Form::Vector(_))) {
+        vec![metadata_value(&rest[0])?]
+    } else {
+        rest.iter()
+            .map(|clause| match clause {
+                Form::List(parts) if !parts.is_empty() => metadata_value(&parts[0]),
+                _ => Err("function arity must be a list beginning with parameters".into()),
+            })
+            .collect::<Result<Vec<_>, String>>()?
+    };
+    metadata = assoc_metadata(metadata, "arglists", MetadataValue::Vector(arglists));
+    if private {
+        metadata = assoc_metadata(metadata, "private", MetadataValue::Boolean(true));
+    }
+    if macro_form {
+        metadata = assoc_metadata(metadata, "macro", MetadataValue::Boolean(true));
+    }
+    Ok((metadata, rest))
+}
+
 fn attach_metadata(value: Value, metadata: Rc<Metadata>) -> Result<Value, String> {
     Ok(match value {
         Value::Symbol(value) => Value::Symbol(value.with_meta(Some(metadata.clone()))),
@@ -7281,6 +7356,48 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             Form::Symbol(n) if ["atom", "atom:basic"].contains(&n.as_str()) => {
                 eval_atom_form(n, fs, env)
             }
+            Form::Symbol(n) if n == "reset!" => {
+                if fs.len() != 3 {
+                    return Err("reset! expects a reference and value".into());
+                }
+                protocol_reset(&[eval(&fs[1], env)?, eval(&fs[2], env)?])
+            }
+            Form::Symbol(n) if n == "cas!" => {
+                if fs.len() != 4 {
+                    return Err("cas! expects a reference, old value, and new value".into());
+                }
+                protocol_cas(&[
+                    eval(&fs[1], env)?,
+                    eval(&fs[2], env)?,
+                    eval(&fs[3], env)?,
+                ])
+            }
+            Form::Symbol(n) if n == "swap!" => {
+                if fs.len() < 3 {
+                    return Err("swap! expects a reference, function, and optional arguments".into());
+                }
+                let reference = eval(&fs[1], env)?;
+                let function = eval(&fs[2], env)?;
+                let arguments = fs[3..]
+                    .iter()
+                    .map(|form| eval(form, env))
+                    .collect::<Result<Vec<_>, _>>()?;
+                loop {
+                    let old_value = protocol_deref(std::slice::from_ref(&reference))?;
+                    let mut call_arguments = Vec::with_capacity(arguments.len() + 1);
+                    call_arguments.push(old_value.clone());
+                    call_arguments.extend(arguments.iter().cloned());
+                    let new_value = call_value(function.clone(), call_arguments)?;
+                    if protocol_cas(&[
+                        reference.clone(),
+                        old_value,
+                        new_value.clone(),
+                    ])? == Value::Bool(true)
+                    {
+                        break Ok(new_value);
+                    }
+                }
+            }
             Form::Symbol(n) if n == "deref" => {
                 if fs.len() != 2 {
                     return Err("deref expects a var".into());
@@ -7418,7 +7535,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("def expects a name and value".into());
                 }
                 let (name, metadata) = binding_symbol(&fs[1], "def name")?;
-                if let Some(value) = protected_fallback_binding(env, &name) {
+                if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
                     return Ok(value);
                 }
                 let value = eval(&fs[2], env)?;
@@ -7462,7 +7579,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 Ok(Value::Nil)
             }
             Form::Symbol(n) if n == "defstruct" => {
-                if fs.len() != 3 {
+                if fs.len() < 3 {
                     return Err("defstruct expects a name and field vector".into());
                 }
                 let name = match &fs[1] {
@@ -7515,10 +7632,32 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     var.set_origin(definition_origin());
                     env.insert(binding, Value::Var(var));
                 }
+                let mut index = 3;
+                while index < fs.len() {
+                    let Form::Symbol(protocol) = &fs[index] else {
+                        return Err("defstruct protocol clause expects a protocol symbol".into());
+                    };
+                    index += 1;
+                    let start = index;
+                    while index < fs.len() && matches!(&fs[index], Form::List(_)) {
+                        index += 1;
+                    }
+                    if start == index {
+                        return Err("defstruct protocol clause requires method implementations".into());
+                    }
+                    let extension = Form::List(
+                        std::iter::once(Form::Symbol("extend-type".into()))
+                            .chain(std::iter::once(Form::Symbol(name.clone())))
+                            .chain(std::iter::once(Form::Symbol(protocol.clone())))
+                            .chain(fs[start..index].iter().cloned())
+                            .collect(),
+                    );
+                    eval(&extension, env)?;
+                }
                 Ok(Value::Nil)
             }
             Form::Symbol(n) if n == "field" => {
-                if fs.len() < 3 {
+                if fs.len() != 3 {
                     return Err("field expects a struct and field name".into());
                 }
                 let field = match &fs[2] {
@@ -7557,28 +7696,6 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     Form::Symbol(name) if !name.contains('/') => name.clone(),
                     _ => return Err("defprotocol name must be an unqualified symbol".into()),
                 };
-                let mut index = 3;
-                while index < fs.len() {
-                    let Form::Symbol(protocol) = &fs[index] else {
-                        return Err("defstruct protocol clause expects a protocol symbol".into());
-                    };
-                    index += 1;
-                    let start = index;
-                    while index < fs.len() && matches!(&fs[index], Form::List(_)) {
-                        index += 1;
-                    }
-                    if start == index {
-                        return Err("defstruct protocol clause requires method implementations".into());
-                    }
-                    let extension = Form::List(
-                        std::iter::once(Form::Symbol("extend-type".into()))
-                            .chain(std::iter::once(Form::Symbol(name.clone())))
-                            .chain(std::iter::once(Form::Symbol(protocol.clone())))
-                            .chain(fs[start..index].iter().cloned())
-                            .collect(),
-                    );
-                    eval(&extension, env)?;
-                }
                 let mut methods = HashMap::new();
                 for declaration in &fs[2..] {
                     let Form::List(parts) = declaration else {
@@ -7711,48 +7828,6 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 Ok(Value::Protocol(protocol))
             }
-            Form::Symbol(n) if n == "defmacro" => {
-                if fs.len() < 4 {
-                    return Err("defmacro expects a name, parameters, and a body".into());
-                }
-                let (name, metadata) = binding_symbol(&fs[1], "defmacro name")?;
-                if let Some(value) = protected_fallback_binding(env, &name) {
-                    return Ok(value);
-                }
-                let cell = match env.get(&name) {
-                    Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
-                    _ => KernelVar::new(name.clone(), Value::Nil),
-                };
-                if metadata.is_some() {
-                    cell.set_hara_metadata(metadata);
-                }
-                env.insert(name.clone(), Value::Var(cell.clone()));
-                let mut rest = &fs[2..];
-                if matches!(rest.first(), Some(Form::String(_))) {
-                    rest = &rest[1..];
-                }
-                if matches!(rest.first(), Some(Form::Map(_))) {
-                    rest = &rest[1..];
-                }
-                if rest.is_empty() {
-                    return Err("defmacro expects a name, parameters, and a body".into());
-                }
-                let function = if matches!(rest.first(), Some(Form::Vector(_))) {
-                    let params = match &rest[0] {
-                        Form::Vector(params) => params,
-                        _ => unreachable!(),
-                    };
-                    let mut macro_params =
-                        vec![Form::Symbol("&form".into()), Form::Symbol("&env".into())];
-                    macro_params.extend_from_slice(params);
-                    let (params, variadic) = function_parts(&Form::Vector(macro_params))?;
-                    Value::Function(Rc::new(Function {
-                        params,
-                        variadic,
-                        body: rest[1..].to_vec(),
-                        captured: Rc::new(RefCell::new(env.clone())),
-                        name: Some(name.clone()),
-                        native: None,
             Form::Symbol(n) if n == "defmulti" => {
                 if fs.len() != 3 { return Err("defmulti expects a name and dispatch function".into()); }
                 let Form::Symbol(name) = &fs[1] else { return Err("defmulti name must be an unqualified symbol".into()); };
@@ -7793,6 +7868,42 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     Ok(Value::Nil)
                 })
             }
+            Form::Symbol(n) if n == "defmacro" => {
+                if fs.len() < 4 {
+                    return Err("defmacro expects a name, parameters, and a body".into());
+                }
+                let (name, metadata) = binding_symbol(&fs[1], "defmacro name")?;
+                let (metadata, rest) = definition_metadata(metadata, &fs[2..], false, true)?;
+                if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
+                    return Ok(value);
+                }
+                let cell = match env.get(&name) {
+                    Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
+                    _ => KernelVar::new(name.clone(), Value::Nil),
+                };
+                if metadata.is_some() {
+                    cell.set_hara_metadata(metadata);
+                }
+                env.insert(name.clone(), Value::Var(cell.clone()));
+                if rest.is_empty() {
+                    return Err("defmacro expects a name, parameters, and a body".into());
+                }
+                let function = if matches!(rest.first(), Some(Form::Vector(_))) {
+                    let params = match &rest[0] {
+                        Form::Vector(params) => params,
+                        _ => unreachable!(),
+                    };
+                    let mut macro_params =
+                        vec![Form::Symbol("&form".into()), Form::Symbol("&env".into())];
+                    macro_params.extend_from_slice(params);
+                    let (params, variadic) = function_parts(&Form::Vector(macro_params))?;
+                    Value::Function(Rc::new(Function {
+                        params,
+                        variadic,
+                        body: rest[1..].to_vec(),
+                        captured: Rc::new(RefCell::new(env.clone())),
+                        name: Some(name.clone()),
+                        native: None,
                         clauses: Vec::new(),
                         is_macro: true,
                     }))
@@ -7816,7 +7927,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("defn expects a name, parameters, and a body".into());
                 }
                 let (name, metadata) = binding_symbol(&fs[1], "defn name")?;
-                if let Some(value) = protected_fallback_binding(env, &name) {
+                let (metadata, rest) =
+                    definition_metadata(metadata, &fs[2..], n == "defn-", false)?;
+                if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
                     return Ok(value);
                 }
                 let cell = match env.get(&name) {
@@ -7827,15 +7940,6 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     cell.set_hara_metadata(metadata);
                 }
                 env.insert(name.clone(), Value::Var(cell.clone()));
-                // Optional docstring and attr-map sit between the name and
-                // the parameter vector (or arity clauses).
-                let mut rest = &fs[2..];
-                if matches!(rest.first(), Some(Form::String(_))) {
-                    rest = &rest[1..];
-                }
-                if matches!(rest.first(), Some(Form::Map(_))) {
-                    rest = &rest[1..];
-                }
                 if rest.is_empty() {
                     return Err("defn expects a name, parameters, and a body".into());
                 }

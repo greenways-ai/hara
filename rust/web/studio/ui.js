@@ -35,7 +35,7 @@ export function renderValue(value) {
   return String(value);
 }
 
-/** Normalize a user-supplied file path to the studio.fs shape ("/a/b.hal").
+/** Normalize a user-supplied file path to the attached filesystem shape ("/a/b.hal").
  *  Returns null for empty, root-only, or parent-escaping paths. */
 export function normalizePath(input) {
   if (typeof input !== "string") return null;
@@ -104,21 +104,11 @@ export function parseGithubSpec(input) {
   return { repo, ref: match[2] ?? "main", space: repo.split("/").pop() };
 }
 
-/** Source that imports a GitHub repo into a space. Evaluated in the ACTIVE
- *  kernel (spaces live in the shared host store, so any kernel can import);
- *  a dedicated bootstrap kernel would only add lifecycle bookkeeping. */
-export function importGithubSource({ space, repo, ref }) {
-  return (
-    "(do (require [studio.space :as space]) " +
-    `(space/import-github! ${JSON.stringify(space)} ${JSON.stringify(repo)} {:ref ${JSON.stringify(ref)}}))`
-  );
-}
-
 /** Wrap an internal studio form with the requires it needs. Raw wasm
  *  require vectors are UNQUOTED — keep them that way. */
 export function studioSource(form) {
   return (
-    "(do (require [studio.space :as space]) (require [studio.fs :as fs]) " +
+    "(do (require [std.foundation.file :as file]) " +
     `(require [studio.boot :as boot]) ${form})`
   );
 }
@@ -151,6 +141,8 @@ class StudioController {
     this.projects = projects;
     this.runtimeVersion = runtimeVersion;
     this.canvasRuntime = canvasRuntime;
+    this.spaces = new Set(projects.map((project) => this.projectSpace(project)));
+    this.mounts = new WeakMap();
     this.state = {
       kernel: "ROOT",
       space: null,
@@ -363,9 +355,9 @@ class StudioController {
   async init() {
     try {
       this.refreshKernelSelect();
-      let spaces = await this.evalStudio("(space/list-spaces)");
-      spaces = Array.isArray(spaces) ? spaces.map(String).sort() : [];
+      let spaces = await this.listSpaces();
       if (spaces.length === 0) {
+        await this.attachSpace("home");
         await this.broker.eval(this.state.kernel, defaultBootstrap("home"));
         spaces = ["home"];
       }
@@ -435,17 +427,15 @@ class StudioController {
 
   async openProject(project, { reset = false } = {}) {
     const space = this.projectSpace(project);
+    await this.attachSpace(space);
     await this.task(async () => {
-      await this.evalStudio(`(space/create! ${JSON.stringify(space)})`);
-      const existing = await this.evalStudio(`(space/files ${JSON.stringify(space)})`);
+      const existing = await this.listFilesRecursive("/");
       if (reset) {
         for (const path of existing ?? []) {
-          await this.evalStudio(`(fs/delete! ${JSON.stringify(space)} ${JSON.stringify(String(path))})`);
+          await this.deletePath(String(path));
         }
         for (const [path, content] of Object.entries(project.files)) {
-          await this.evalStudio(
-            `(fs/write! ${JSON.stringify(space)} ${JSON.stringify(`/${path}`)} ${JSON.stringify(content)})`
-          );
+          await this.writeText(`/${path}`, content);
         }
       }
     });
@@ -504,6 +494,39 @@ class StudioController {
   // Eval a studio-lib form in the active kernel (requires wrapped in).
   evalStudio(form) {
     return this.broker.eval(this.state.kernel, studioSource(form));
+  }
+
+  readText(path) {
+    return this.evalStudio(
+      `(str/decode-utf8 (deref (file/read ${JSON.stringify(path)})))`
+    );
+  }
+
+  async writeText(path, content) {
+    const parent = path.slice(0, path.lastIndexOf("/")) || "/";
+    if (parent !== "/") {
+      await this.evalStudio(`(deref (file/mkdir ${JSON.stringify(parent)}))`);
+    }
+    return this.evalStudio(
+      `(deref (file/write ${JSON.stringify(path)} (str/encode-utf8 ${JSON.stringify(content)})))`
+    );
+  }
+
+  deletePath(path) {
+    return this.evalStudio(`(deref (file/delete ${JSON.stringify(path)}))`);
+  }
+
+  async listFilesRecursive(path = "/") {
+    const children = await this.evalStudio(`(deref (file/list ${JSON.stringify(path)}))`);
+    const files = [];
+    for (const child of children ?? []) {
+      try {
+        files.push(...await this.listFilesRecursive(String(child)));
+      } catch {
+        files.push(String(child));
+      }
+    }
+    return files;
   }
 
   // Run an async operation, tracking busy/error state. Errors are logged to
@@ -569,8 +592,21 @@ class StudioController {
   }
 
   async listSpaces() {
-    const spaces = await this.evalStudio("(space/list-spaces)");
-    return Array.isArray(spaces) ? spaces.map(String).sort() : [];
+    return [...this.spaces].sort();
+  }
+
+  async attachSpace(name, kernelName = this.state.kernel) {
+    const kernel = await this.broker.require(kernelName);
+    let mounts = this.mounts.get(kernel.context);
+    if (!mounts) this.mounts.set(kernel.context, mounts = new Map());
+    let mount = mounts.get(name);
+    if (!mount) {
+      mount = await kernel.context.createFilesystem({ provider: "indexeddb", key: name });
+      mounts.set(name, mount);
+    }
+    await kernel.context.session().attachFilesystem(mount);
+    this.spaces.add(name);
+    return mount;
   }
 
   async switchSpace(name) {
@@ -579,6 +615,7 @@ class StudioController {
       this.spaceSelect.value = this.state.space ?? "";
       return;
     }
+    await this.attachSpace(name);
     this.state.space = name;
     this.clearEditor();
     this.renderSpaceSelect(await this.task(() => this.listSpaces()) ?? [name]);
@@ -593,7 +630,10 @@ class StudioController {
       this.logError(new Error("space names cannot contain '/'"));
       return;
     }
-    const booted = await this.task(() => this.evalStudio(`(boot/boot! ${JSON.stringify(trimmed)})`));
+    const booted = await this.task(async () => {
+      await this.attachSpace(trimmed);
+      return this.evalStudio(`(boot/boot! ${JSON.stringify(trimmed)})`);
+    });
     if (booted === undefined) return;
     this.state.space = trimmed;
     this.clearEditor();
@@ -602,9 +642,8 @@ class StudioController {
     this.logNote(`;; space ${trimmed} ready`);
   }
 
-  // Import from GitHub: prompt for owner/repo[@ref], then import-github! in
-  // the ACTIVE kernel (see importGithubSource). The imported space takes the
-  // repo's bare name.
+  // GitHub project discovery and fetching are host responsibilities. File
+  // bytes still cross the canonical std.foundation.file HAL boundary.
   async importGithub() {
     const spec = await this.askInput("Import from GitHub", "owner/repo[@ref]", "");
     if (!spec || !spec.trim()) return;
@@ -614,7 +653,26 @@ class StudioController {
       return;
     }
     this.logNote(`;; importing ${parsed.repo}@${parsed.ref} into space ${parsed.space} …`);
-    const summary = await this.task(() => this.evalStudio(importGithubSource(parsed)));
+    const summary = await this.task(async () => {
+      await this.attachSpace(parsed.space);
+      const listingResponse = await fetch(`https://data.jsdelivr.com/v1/packages/gh/${parsed.repo}@${parsed.ref}`);
+      if (!listingResponse.ok) throw new Error(`GitHub listing failed: ${listingResponse.status}`);
+      const listing = await listingResponse.json();
+      const paths = [];
+      const collect = (entries) => {
+        for (const entry of entries ?? []) {
+          if (entry.type === "directory") collect(entry.files);
+          else paths.push(entry.name);
+        }
+      };
+      collect(listing.files);
+      for (const path of paths) {
+        const response = await fetch(`https://cdn.jsdelivr.net/gh/${parsed.repo}@${parsed.ref}${path}`);
+        if (!response.ok) throw new Error(`GitHub file fetch failed: ${path}`);
+        await this.writeText(path, await response.text());
+      }
+      return new Map([["project", parsed.space], ["repo", parsed.repo], ["ref", parsed.ref], ["imported", paths.length]]);
+    });
     if (summary === undefined) return;
     this.state.space = parsed.space;
     this.clearEditor();
@@ -639,9 +697,10 @@ class StudioController {
 
   // Switching kernels never closes them — everything stays alive in the
   // broker, so nothing is lost.
-  switchKernel(name) {
+  async switchKernel(name) {
     if (!name || name === this.state.kernel) return;
     this.state.kernel = name;
+    if (this.state.space) await this.attachSpace(this.state.space, name);
     this.refreshKernelSelect();
     this.renderStatus();
     this.logNote(`;; active kernel ${name}`);
@@ -660,6 +719,7 @@ class StudioController {
       return;
     }
     this.state.kernel = trimmed;
+    if (this.state.space) await this.attachSpace(this.state.space, trimmed);
     this.refreshKernelSelect();
     this.renderStatus();
     this.logNote(`;; kernel ${trimmed} booted`);
@@ -685,9 +745,7 @@ class StudioController {
   // ------------------------------------------------------------------ files
 
   async refreshFiles() {
-    const files = await this.task(() =>
-      this.evalStudio(`(space/files ${JSON.stringify(this.state.space)})`)
-    );
+    const files = await this.task(() => this.listFilesRecursive("/"));
     this.state.files = (Array.isArray(files) ? files.map(String) : []).sort();
     this.renderTree();
     this.renderStatus();
@@ -720,9 +778,7 @@ class StudioController {
   async openFile(path) {
     if (path === this.state.open && !this.state.dirty) return;
     if (!(await this.confirmDiscard())) return;
-    const content = await this.task(() =>
-      this.evalStudio(`(fs/read ${JSON.stringify(this.state.space)} ${JSON.stringify(path)})`)
-    );
+    const content = await this.task(() => this.readText(path));
     if (content === undefined) return;
     this.state.open = path;
     this.state.dirty = false;
@@ -737,11 +793,7 @@ class StudioController {
     if (!this.state.open) return;
     const path = this.state.open;
     const content = this.editor.value;
-    const ok = await this.task(() =>
-      this.evalStudio(
-        `(fs/write! ${JSON.stringify(this.state.space)} ${JSON.stringify(path)} ${JSON.stringify(content)})`
-      )
-    );
+    const ok = await this.task(() => this.writeText(path, content));
     if (ok === undefined) return;
     this.state.dirty = false;
     this.renderEditorHead();
@@ -870,11 +922,7 @@ class StudioController {
       this.logError(new Error(`invalid file path: ${input.trim()}`));
       return;
     }
-    const ok = await this.task(() =>
-      this.evalStudio(
-        `(fs/write! ${JSON.stringify(this.state.space)} ${JSON.stringify(path)} ${JSON.stringify(defaultFileContent(path))})`
-      )
-    );
+    const ok = await this.task(() => this.writeText(path, defaultFileContent(path)));
     if (ok === undefined) return;
     // The file is created either way; only switch to it when any unsaved
     // edits in the currently open file may go (same guard as file/space
