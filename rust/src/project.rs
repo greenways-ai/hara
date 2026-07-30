@@ -3,7 +3,8 @@
 //! `project.edn` is data, never evaluator input.  Keeping this model separate
 //! from `Runtime` makes command behaviour portable to other Hara hosts.
 
-use crate::kernel::{parse, Form};
+use crate::kernel::{parse, parse_forms, Form};
+use crate::Runtime;
 use semver::{Version, VersionReq};
 use std::collections::BTreeMap;
 use std::fs;
@@ -143,6 +144,17 @@ pub fn files_in(root: &Path, paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> 
     Ok(output)
 }
 
+/// Registers namespaces from `:project/source-paths` for runtime `require`.
+pub fn register_sources(project: &Project, runtime: &mut Runtime) -> Result<(), String> {
+    for path in files_in(&project.root, &project.source_paths)? {
+        let source = fs::read_to_string(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        let namespace = declared_namespace(&source).map_err(|error| format!("{}: {error}", path.display()))?
+            .ok_or_else(|| format!("{} does not declare an ns or ns+ namespace", path.display()))?;
+        runtime.register_resource(&namespace, &source);
+    }
+    Ok(())
+}
+
 pub fn main_file(project: &Project) -> Result<PathBuf, String> {
     let namespace = project.main.as_ref().ok_or_else(|| "project.edn is missing :project/main".to_owned())?;
     let relative = format!("{}.hal", namespace.replace('.', "/").replace('-', "_"));
@@ -151,6 +163,15 @@ pub fn main_file(project: &Project) -> Result<PathBuf, String> {
         if candidate.is_file() { return Ok(candidate); }
     }
     Err(format!("cannot find :project/main {namespace} in :project/source-paths"))
+}
+
+fn declared_namespace(source: &str) -> Result<Option<String>, String> {
+    Ok(parse_forms(source)?.into_iter().find_map(|form| match form {
+        Form::List(values) if matches!(values.first(), Some(Form::Symbol(head)) if head == "ns" || head == "ns+") => {
+            match values.get(1) { Some(Form::Symbol(namespace)) => Some(namespace.clone()), _ => None }
+        }
+        _ => None,
+    }))
 }
 
 /// Creates or validates the lockfile for graphs that need no remote packages.
@@ -238,4 +259,15 @@ mod tests {
     #[test] fn scaffolds_discovers_and_edits_dependencies() { let root = temp("app"); let project = new_app(&root, "hello-app").unwrap(); assert_eq!(discover(&root.join("src/hello_app")).unwrap().id, "hello-app"); set_dependency(&project, "hara:hara/graph", Some("^1.2.0")).unwrap(); assert_eq!(read(&root).unwrap().dependencies["hara:hara/graph"], "^1.2.0"); set_dependency(&project, "hara:hara/graph", None).unwrap(); assert!(read(&root).unwrap().dependencies.is_empty()); fs::remove_dir_all(root).unwrap(); }
     #[test] fn rejects_escaping_source_paths() { let root = temp("unsafe"); fs::create_dir_all(&root).unwrap(); fs::write(root.join("project.edn"), "{:hara/type :project :hara/version \"1\" :project/id x :project/version \"1.0.0\" :project/source-paths [\"../src\"] :project/test-paths [] :project/extension-paths [] :project/capabilities #{}}" ).unwrap(); assert!(read(&root).unwrap_err().contains("cannot escape")); fs::remove_dir_all(root).unwrap(); }
     #[test] fn creates_and_validates_an_empty_lock() { let root = temp("lock"); let project = new_app(&root, "lock-app").unwrap(); let lock = sync_lock(&project, LockMode::Default).unwrap(); assert_eq!(fs::read_to_string(&lock).unwrap(), "{:lock/format 1 :packages {}}\n"); sync_lock(&project, LockMode::Frozen).unwrap(); fs::remove_dir_all(root).unwrap(); }
+    #[test] fn registers_project_sources_for_cross_file_requires() {
+        let root = temp("resources");
+        fs::create_dir_all(root.join("src/demo")).unwrap();
+        fs::write(root.join("project.edn"), "{:hara/type :project :hara/version \"1.0.0\" :project/id demo/app :project/version \"1.0.0\" :project/source-paths [\"src\"] :project/test-paths [] :project/extension-paths [] :project/capabilities #{}}").unwrap();
+        fs::write(root.join("src/demo/helper.hal"), "(ns demo.helper) (defn answer [] 42)").unwrap();
+        let project = read(&root).unwrap();
+        let mut runtime = Runtime::new();
+        register_sources(&project, &mut runtime).unwrap();
+        assert_eq!(runtime.eval_native("(ns demo.main (:require [demo.helper :as helper])) (helper/answer)").unwrap(), "42");
+        fs::remove_dir_all(root).unwrap();
+    }
 }

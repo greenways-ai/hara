@@ -222,6 +222,7 @@ fn run_project(options: &Options) -> Result<(), String> {
     let source = fs::read_to_string(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
     let mut runtime = Runtime::new();
     runtime.install_native_file_provider(project.root.to_string_lossy().as_ref());
+    project::register_sources(&project, &mut runtime)?;
     if options.native_sockets { runtime.install_native_socket_provider(); }
     println!("{}", runtime.eval_native(&source)?);
     Ok(())
@@ -237,6 +238,7 @@ fn test_project(options: &Options, args: &[String]) -> Result<(), String> {
         let source = fs::read_to_string(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
         let mut runtime = Runtime::new();
         runtime.install_native_file_provider(project.root.to_string_lossy().as_ref());
+        project::register_sources(&project, &mut runtime)?;
         runtime.eval_native(include_str!("../../../../lib/src/std/lib/test.hal"))?;
         match test_results(&runtime.eval_native(&source)?) {
             Ok((file_passed, file_failed)) => { passed += file_passed; failed += file_failed; println!("test {}: {} passed, {} failed", path.display(), file_passed, file_failed); }
