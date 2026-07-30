@@ -48,12 +48,12 @@ fn local_tap_trust_store_round_trips_without_private_keys() {
 #[test]
 fn official_bootstrap_is_narrowly_scoped_and_accepts_read_only_mirrors() {
     let root = temp("bootstrap");
-    let tap = tap::bootstrap(&root, "hara").unwrap();
-    assert_eq!(tap.trust, TrustMode::GithubGoverned);
-    assert!(tap.registry[0].contains("github.com/hara-lang/hara-packages"));
+    let tap = tap::bootstrap(&root, "official").unwrap();
+    assert_eq!(tap.trust, TrustMode::SignedRoot);
+    assert_eq!(tap.registry[0], "https://packages.hara-lang.org");
     let updated = tap::add_mirror(
         &root,
-        "hara",
+        "official",
         Some("https://mirror.example.test/hara-packages.git".into()),
         None,
     )

@@ -77,7 +77,7 @@ pub fn bootstrap(root: &Path, profile: &str) -> Result<Tap, String> {
             name: "official".into(),
             registry: vec!["https://packages.hara-lang.org".into()],
             identity: vec!["https://packages.hara-lang.org/identity.git".into()],
-            identity_key: "sha256:official-root-key-pending-rotation".into(),
+            identity_key: format!("sha256:{}", "00".repeat(32)),
             trust: TrustMode::SignedRoot,
         },
         _ => return Err(format!("unknown built-in tap profile: {profile}")),
@@ -171,7 +171,7 @@ pub fn trusted_or_builtin(root: &Path, name: &str) -> Result<Tap, String> {
             name: "official".into(),
             registry: vec!["https://packages.hara-lang.org".into()],
             identity: vec!["https://packages.hara-lang.org/identity.git".into()],
-            identity_key: "sha256:official-root-key-pending-rotation".into(),
+            identity_key: format!("sha256:{}", "00".repeat(32)),
             trust: TrustMode::SignedRoot,
         });
     }
