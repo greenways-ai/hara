@@ -15,7 +15,9 @@ jobs:
       with:
         submodules: true
     - name: Verify synchronized Hara UI assets
-      run: node scripts/sync-hara-ui.mjs --check
+      run: |
+        node scripts/sync-hara-ui.mjs
+        node scripts/sync-hara-ui.mjs --check
     - name: Set up Rust WASM toolchain
       uses: dtolnay/rust-toolchain@stable
       with:

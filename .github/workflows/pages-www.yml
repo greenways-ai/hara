@@ -26,7 +26,9 @@ jobs:
         with:
           submodules: true
       - name: Verify synchronized Hara UI assets
-        run: node scripts/sync-hara-ui.mjs --check
+        run: |
+          node scripts/sync-hara-ui.mjs
+          node scripts/sync-hara-ui.mjs --check
       - name: Build browser runtime and site
         env:
           HARA_GITHUB_OAUTH_CLIENT_ID: ${{ vars.HARA_GITHUB_OAUTH_CLIENT_ID }}
