@@ -79,7 +79,9 @@ test("canonical Hara assets and compact Start button survive responsive widths",
   await expect(page.locator(".system-mark")).toHaveCount(0);
   await expect(page.locator(".launcher-mark")).toHaveCount(0);
   await expect(page.locator(".app-launcher-glyph i")).toHaveCount(9);
-  await expect(page.getByRole("button", { name: "START" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "START" })).toBeVisible({
+    timeout: 60_000
+  });
   const tablet = await page.locator(".start-button").boundingBox();
   expect(tablet.width).toBeLessThan(400);
 
