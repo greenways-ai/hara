@@ -33,7 +33,7 @@ export class SupersonicProvider {
       throw error;
     }
 
-    const state = { graph, generation, status: "running" };
+    const state = { graph, generation, revision: 1, status: "running", pending: [] };
     this.graphs.set(id, state);
     this.generations.set(id, generation);
     return this.publish(id);
@@ -46,9 +46,27 @@ export class SupersonicProvider {
     const control = node.controls.find((candidate) => candidate.parameter === String(parameter));
     if (!control) throw new Error(`supersonic/parameter-not-found:${nodeId}/${parameter}`);
     const normalized = normalizeControlValue(control, value);
-    await this.engine?.update?.(state.graph, node, control, normalized);
+    const result = await this.engine?.update?.(state.graph, node, control, normalized);
     node.params[control.parameter] = normalized;
+    state.pending = state.pending.filter((entry) =>
+      entry.node !== node.id || entry.parameter !== control.parameter);
+    if (result?.pending) {
+      state.pending.push({
+        node: node.id,
+        parameter: control.parameter,
+        effectiveAt: result.effectiveAt ?? null
+      });
+    } else state.revision += 1;
     this.writeOverlay(String(graphId), node.id, control.parameter, normalized);
+    return this.publish(String(graphId));
+  }
+
+  effective(graphId, nodeId, parameter) {
+    const state = requiredGraph(this.graphs, graphId);
+    state.pending = state.pending.filter((entry) =>
+      entry.node !== String(nodeId) ||
+      parameter != null && entry.parameter !== String(parameter));
+    state.revision += 1;
     return this.publish(String(graphId));
   }
 
@@ -68,7 +86,9 @@ export class SupersonicProvider {
     return clone({
       "graph/id": state.graph[GRAPH_ID],
       generation: state.generation,
+      "active/revision": state.revision,
       status: state.status,
+      pending: state.pending,
       title: state.graph.title,
       nodes: state.graph.nodes,
       connections: state.graph.connections
@@ -145,7 +165,7 @@ function normalizeControl(value, nodeId, params) {
   const parameter = text(control.parameter ?? control.id);
   const type = text(control.type) || "number";
   if (!parameter) throw new Error(`supersonic/control-parameter-required:${nodeId}`);
-  if (!["number", "boolean", "choice"].includes(type)) {
+  if (!["number", "boolean", "choice", "steps"].includes(type)) {
     throw new Error(`supersonic/control-type-unsupported:${nodeId}/${parameter}`);
   }
   const normalized = {
@@ -155,6 +175,7 @@ function normalizeControl(value, nodeId, params) {
     min: finite(control.min),
     max: finite(control.max),
     step: finite(control.step),
+    integer: Boolean(control.integer),
     choices: array(control.choices).map(plain)
   };
   if (!(parameter in params) && "default" in control) params[parameter] = plain(control.default);
@@ -178,6 +199,19 @@ function normalizeConnection(value, index, nodeIds) {
 }
 
 function normalizeControlValue(control, value) {
+  if (control.type === "steps") {
+    if (!Array.isArray(value) || value.length < 1 || value.length > 64) {
+      throw new Error(`supersonic/control-steps-length-invalid:${control.parameter}`);
+    }
+    return value.map((step) => {
+      if (step == null) return null;
+      const note = Number(step);
+      if (!Number.isInteger(note) || note < -48 || note > 48) {
+        throw new Error(`supersonic/control-step-invalid:${control.parameter}`);
+      }
+      return note;
+    });
+  }
   if (control.type === "boolean") return Boolean(value);
   if (control.type === "choice") {
     const choices = control.choices.map((choice) =>
@@ -189,6 +223,9 @@ function normalizeControlValue(control, value) {
   }
   const number = Number(value);
   if (!Number.isFinite(number)) throw new Error(`supersonic/control-number-invalid:${control.parameter}`);
+  if (control.integer && !Number.isInteger(number)) {
+    throw new Error(`supersonic/control-integer-invalid:${control.parameter}`);
+  }
   if (control.min != null && number < control.min ||
       control.max != null && number > control.max) {
     throw new Error(`supersonic/control-range-invalid:${control.parameter}`);

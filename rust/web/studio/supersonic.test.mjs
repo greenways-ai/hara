@@ -48,3 +48,41 @@ test("start is atomic, update is typed, and overlay survives replacement", async
   assert.equal(replaced.generation, 2);
   assert.equal(replaced.nodes[0].params.volume, .4);
 });
+
+test("step controls validate compact tunes and report pending activation", async () => {
+  const tune = graph();
+  tune.nodes[0].params.steps = [0, null, 7, 12];
+  tune.nodes[0].controls.push({ parameter: "steps", type: "steps" });
+  const provider = new SupersonicProvider({
+    engine: { update: async () => ({ pending: true, effectiveAt: 4 }) }
+  });
+  await provider.start(tune);
+  const pending = await provider.update("amp", "gain", "steps", [0, 3, null, 10]);
+  assert.deepEqual(pending.nodes[0].params.steps, [0, 3, null, 10]);
+  assert.deepEqual(pending.pending, [{ node: "gain", parameter: "steps", effectiveAt: 4 }]);
+  const effective = provider.effective("amp", "gain", "steps");
+  assert.equal(effective.pending.length, 0);
+  assert.equal(effective["active/revision"], 2);
+  await assert.rejects(
+    () => provider.update("amp", "gain", "steps", [49]),
+    /control-step-invalid/
+  );
+  await assert.rejects(
+    () => provider.update("amp", "gain", "steps", []),
+    /control-steps-length-invalid/
+  );
+});
+
+test("integer number controls reject fractional MIDI values", async () => {
+  const tune = graph();
+  tune.nodes[0].params.root = 57;
+  tune.nodes[0].controls.push({
+    parameter: "root", type: "number", min: 0, max: 127, integer: true
+  });
+  const provider = new SupersonicProvider();
+  await provider.start(tune);
+  await assert.rejects(
+    () => provider.update("amp", "gain", "root", 57.5),
+    /control-integer-invalid/
+  );
+});

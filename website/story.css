@@ -314,6 +314,7 @@
   grid-template-areas:
     "heading amp"
     "source amp"
+    "repl amp"
     "closeout amp";
   align-content: center;
   gap: 28px clamp(38px, 5vw, 82px);
@@ -445,6 +446,65 @@
   display: none;
 }
 
+.story-repl {
+  grid-area: repl;
+  min-width: 0;
+  border: 1px solid rgba(65, 245, 228, .2);
+  background: rgba(2, 8, 13, .9);
+  font: 600 .5rem var(--mono);
+}
+
+.story-repl > header,
+.story-repl form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 31px;
+  padding: 5px 8px;
+}
+
+.story-repl > header {
+  justify-content: space-between;
+  color: #76b9b6;
+  border-bottom: 1px solid rgba(65, 245, 228, .12);
+}
+
+.story-repl button {
+  border: 1px solid rgba(65, 245, 228, .25);
+  color: #bafff8;
+  background: rgba(65, 245, 228, .06);
+  font: inherit;
+  cursor: pointer;
+}
+
+[data-story-repl-history] {
+  max-height: 92px;
+  overflow: auto;
+}
+
+[data-story-repl-history] > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(65, 245, 228, .08);
+}
+
+[data-story-repl-history] code { color: #88a9b2; overflow-wrap: anywhere; }
+[data-story-repl-history] output { color: var(--cyan); overflow-wrap: anywhere; }
+[data-story-repl-history] [data-state="error"] output { color: #ff83b7; }
+
+.story-repl form label { color: var(--cyan); }
+.story-repl form input {
+  min-width: 0;
+  flex: 1;
+  padding: 7px 8px;
+  border: 1px solid rgba(65, 245, 228, .18);
+  color: #dff;
+  background: #020408;
+  font: inherit;
+}
+
 .story-amp {
   grid-area: amp;
   min-width: 0;
@@ -539,6 +599,31 @@
 .story-controls input[type="range"] {
   width: 100%;
   accent-color: var(--cyan);
+}
+
+.story-step-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(8, minmax(32px, 1fr));
+  gap: 4px;
+}
+
+.story-step-grid > span {
+  grid-column: 1 / -1;
+  color: #627a85;
+  font: 700 .45rem var(--mono);
+  letter-spacing: .1em;
+}
+
+.story-step-grid input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 2px;
+  border: 1px solid rgba(65, 245, 228, .18);
+  color: #bafff8;
+  background: rgba(65, 245, 228, .04);
+  font: 700 .52rem var(--mono);
+  text-align: center;
 }
 
 .story-controls button,
@@ -772,6 +857,7 @@ body[data-workspace="1"] .system-bottom-bar .project-tabs {
     grid-template-areas:
       "heading"
       "source"
+      "repl"
       "amp"
       "closeout";
     align-content: start;

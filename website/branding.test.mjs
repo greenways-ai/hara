@@ -31,6 +31,9 @@ test("the main story connects and plays the real Amp pipeline", async () => {
   assert.match(source, /graphSnapshot/);
   assert.match(source, /renderGraph/);
   assert.match(source, /renderControls/);
+  assert.match(source, /story-step-grid/);
+  assert.match(source, /AMP REPL · ACTIVE DOCUMENT/);
+  assert.match(source, /instance\.eval/);
   assert.match(source, /data-amp-node-input/);
   assert.match(source, /data-amp-node-output/);
   assert.match(source, /data-amp-node-runtime/);

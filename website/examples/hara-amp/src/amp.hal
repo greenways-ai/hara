@@ -13,9 +13,24 @@
      "input" "Root note, tempo, waveform, and playback position"
      "output" "Stereo PCM samples"
      "runtime" "Rust compiled to WebAssembly"
-     "params" {"waveform" "sine"}
+     "params" {"waveform" "sine"
+               "tempo" 120
+               "root" 57
+               "gate" 0.72
+               "steps-per-beat" 2
+               "steps" [0 7 12 15 19 15 12 7
+                        0 7 12 17 19 22 19 15]}
      "controls" [{"parameter" "waveform" "type" "choice" "label" "WAVEFORM"
-                   "choices" ["sine" "square" "saw"]}]}
+                   "choices" ["sine" "square" "saw"]}
+                  {"parameter" "tempo" "type" "number" "label" "TEMPO"
+                   "min" 30 "max" 300 "step" 1}
+                  {"parameter" "root" "type" "number" "label" "MIDI ROOT"
+                   "min" 0 "max" 127 "step" 1 "integer" true}
+                  {"parameter" "gate" "type" "number" "label" "GATE"
+                   "min" 0 "max" 1 "step" 0.01}
+                  {"parameter" "steps-per-beat" "type" "number" "label" "STEPS / BEAT"
+                   "min" 1 "max" 16 "step" 1}
+                  {"parameter" "steps" "type" "steps" "label" "SEQUENCE"}]}
     {"id" "gain"
      "type" "audio/gain"
      "label" "02 · GAIN"

@@ -76,6 +76,17 @@ story.innerHTML = `
         <output class="story-source-error" data-story-source-error aria-live="polite" hidden></output>
       </section>
 
+      <section class="story-repl" aria-label="Live Hara Amp REPL">
+        <header><span>AMP REPL · ACTIVE DOCUMENT</span><button type="button" data-story-repl-clear>CLEAR</button></header>
+        <div data-story-repl-history aria-live="polite"></div>
+        <form data-story-repl-form>
+          <label for="story-repl-input">HAL</label>
+          <input id="story-repl-input" data-story-repl-input
+            value="(sonic/status &quot;hara-amp&quot;)" autocomplete="off" spellcheck="false">
+          <button type="submit">EVAL</button>
+        </form>
+      </section>
+
       <section class="story-amp" aria-label="Compact Hara Amp instrument">
         <div class="story-visual">
           <canvas data-story-visualizer aria-label="Live Hara Amp visualizer"></canvas>
@@ -206,6 +217,7 @@ function renderControls(snapshot) {
       label.dataset.graphParameter = control.parameter;
       const title = document.createElement("span");
       title.textContent = control.label;
+      const value = node.params[control.parameter];
       let input;
       if (control.type === "choice") {
         input = document.createElement("select");
@@ -219,6 +231,38 @@ function renderControls(snapshot) {
       } else if (control.type === "boolean") {
         input = document.createElement("input");
         input.type = "checkbox";
+      } else if (control.type === "steps") {
+        const grid = document.createElement("div");
+        grid.className = "story-step-grid";
+        grid.dataset.graphNode = node.id;
+        grid.dataset.graphParameter = control.parameter;
+        value.forEach((step, index) => {
+          const input = document.createElement("input");
+          input.type = "number";
+          input.min = -48;
+          input.max = 48;
+          input.step = 1;
+          input.value = step ?? "";
+          input.placeholder = "—";
+          input.title = `Step ${index + 1}; blank is a rest`;
+          input.setAttribute("aria-label", `Sequence step ${index + 1}`);
+          grid.append(input);
+        });
+        const heading = document.createElement("span");
+        heading.textContent = `${control.label} · BLANK = REST`;
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.dataset.stepAction = "remove";
+        remove.textContent = "− STEP";
+        remove.disabled = value.length <= 1;
+        const add = document.createElement("button");
+        add.type = "button";
+        add.dataset.stepAction = "add";
+        add.textContent = "+ STEP";
+        add.disabled = value.length >= 64;
+        grid.prepend(heading, remove, add);
+        root.append(grid);
+        continue;
       } else {
         input = document.createElement("input");
         input.type = "range";
@@ -226,7 +270,6 @@ function renderControls(snapshot) {
         if (control.max != null) input.max = control.max;
         if (control.step != null) input.step = control.step;
       }
-      const value = node.params[control.parameter];
       if (input.type === "checkbox") input.checked = Boolean(value);
       else input.value = value;
       label.append(title, input);
@@ -413,6 +456,22 @@ next.addEventListener("click", (event) => {
 }, true);
 
 story.addEventListener("click", (event) => {
+  const stepAction = event.target.closest("[data-step-action]");
+  if (stepAction) {
+    const grid = stepAction.closest(".story-step-grid");
+    const inputs = queryAll("input", grid);
+    if (stepAction.dataset.stepAction === "add" && inputs.length < 64) {
+      const input = inputs.at(-1).cloneNode();
+      input.value = "";
+      input.setAttribute("aria-label", `Sequence step ${inputs.length + 1}`);
+      grid.append(input);
+    } else if (stepAction.dataset.stepAction === "remove" && inputs.length > 1) {
+      inputs.at(-1).remove();
+    }
+    void applyStepGrid(grid);
+    return;
+  }
+
   const node = event.target.closest("[data-amp-node]");
   if (node) {
     selectedNode = node.dataset.ampNode;
@@ -456,14 +515,49 @@ story.addEventListener("click", (event) => {
 query("[data-story-controls]", story).addEventListener("change", async (event) => {
   const label = event.target.closest("[data-graph-node]");
   if (!label || !amp) return;
-  const value = event.target.type === "checkbox" ? event.target.checked :
-    event.target.type === "range" ? Number(event.target.value) : event.target.value;
+  if (label.classList.contains("story-step-grid")) {
+    await applyStepGrid(label);
+    return;
+  }
+  const value = event.target.type === "checkbox" ? event.target.checked
+    : event.target.type === "range" ? Number(event.target.value) : event.target.value;
   await amp.update(label.dataset.graphNode, label.dataset.graphParameter, value);
   if (label.dataset.graphNode === "visualizer") {
     selectedMode = String(value);
     query(".story-visual", story).classList.toggle("is-artwork", selectedMode === "artwork");
   }
   if (label.dataset.graphNode === "eq") selectedPreset = String(value);
+});
+
+async function applyStepGrid(grid) {
+  if (!amp) return;
+  const value = queryAll("input", grid)
+    .map((input) => input.value === "" ? null : Number(input.value));
+  await amp.update(grid.dataset.graphNode, grid.dataset.graphParameter, value);
+}
+
+query("[data-story-repl-form]", story).addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = query("[data-story-repl-input]", story);
+  const form = input.value.trim();
+  if (!form) return;
+  const history = query("[data-story-repl-history]", story);
+  const entry = document.createElement("div");
+  entry.innerHTML = `<code>${escapeHtml(form)}</code><output>…</output>`;
+  history.append(entry);
+  try {
+    const value = await ensureAmp().then((instance) => instance.eval(form));
+    query("output", entry).textContent = renderReplValue(value);
+    entry.dataset.state = "ready";
+  } catch (error) {
+    query("output", entry).textContent = String(error?.message ?? error);
+    entry.dataset.state = "error";
+  }
+  history.scrollTop = history.scrollHeight;
+});
+
+query("[data-story-repl-clear]", story).addEventListener("click", () => {
+  query("[data-story-repl-history]", story).replaceChildren();
 });
 
 query("[data-story-source]", story).addEventListener("input", () => {
@@ -514,4 +608,22 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   })[character]);
+}
+
+function renderReplValue(value) {
+  if (value instanceof Map) {
+    return JSON.stringify(Object.fromEntries([...value].map(([key, item]) =>
+      [String(key?.name ?? key), replPlain(item)])));
+  }
+  if (typeof value === "string") return value;
+  return JSON.stringify(replPlain(value)) ?? String(value);
+}
+
+function replPlain(value) {
+  if (value instanceof Map) {
+    return Object.fromEntries([...value].map(([key, item]) =>
+      [String(key?.name ?? key), replPlain(item)]));
+  }
+  if (Array.isArray(value)) return value.map(replPlain);
+  return value;
 }
