@@ -1103,7 +1103,7 @@ final class HaraAnalyzer {
       patternInitializers.add(values.toArray(new HaraExpressionNode[0]));
     }
 
-    HaraNodes.RecurTarget target = new HaraNodes.RecurTarget(bindingCount);
+    HaraNodes.RecurTarget target = new HaraNodes.RecurTarget(rawSlots);
     for (int i = 2; i < form.count() - 1; i++) {
       validateTailRecurs(form.nth(i), false);
     }
