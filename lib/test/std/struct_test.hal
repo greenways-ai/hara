@@ -3,6 +3,10 @@
 
 (defstruct Point [x y])
 
+(defstruct InlinePoint [x]
+  ICount
+  (count [point] (field point :x)))
+
 (def results
   [(test/check "keyword field lookup" (:x (Point 1 2)) 1)
    (test/check "get field" (get (Point 1 2) :y) 2)
@@ -15,6 +19,16 @@
    (test/check "extend-type override"
                (do (extend-type Point ICount (count [p] 2))
                    (count (Point 1 2)))
-               2)])
+               2)
+   (test/check "defstruct installs protocol implementations"
+               (ICount/count (InlinePoint 7))
+               7)
+   (test/check "multimethod exact default and replacement"
+               (do (defmulti classify (fn [value] value))
+                   (defmethod classify :point [value] 1)
+                   (defmethod classify :point [value] 2)
+                   (defmethod classify :default [value] 3)
+                   [(classify :point) (classify :other)])
+               [2 3])])
 
 (test/print-results results)

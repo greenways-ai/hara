@@ -367,6 +367,12 @@ pub struct Function {
     is_macro: bool,
 }
 
+struct MultiMethod {
+    dispatch: Rc<Function>,
+    methods: Vec<(Value, Rc<Function>)>,
+    default: Option<Rc<Function>>,
+}
+
 impl std::fmt::Debug for Function {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -2037,6 +2043,7 @@ thread_local! {
     static HOST_CALL_HANDLER: RefCell<Option<Rc<dyn Fn(String, String, Vec<Value>) -> Result<Value, String>>>> = const { RefCell::new(None) };
     static NAMESPACE_SOURCE_PROVIDER: RefCell<Option<Rc<dyn Fn(&str) -> Option<String>>>> = const { RefCell::new(None) };
     static ACTIVE_THROWN_VALUE: RefCell<Option<(String, Value)>> = const { RefCell::new(None) };
+    static ACTIVE_MULTIMETHODS: RefCell<HashMap<String, Rc<RefCell<MultiMethod>>>> = RefCell::new(HashMap::new());
 }
 
 pub(crate) fn thrown_error(value: Value) -> String {
@@ -7511,7 +7518,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 Ok(Value::Nil)
             }
             Form::Symbol(n) if n == "field" => {
-                if fs.len() != 3 {
+                if fs.len() < 3 {
                     return Err("field expects a struct and field name".into());
                 }
                 let field = match &fs[2] {
@@ -7550,6 +7557,28 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     Form::Symbol(name) if !name.contains('/') => name.clone(),
                     _ => return Err("defprotocol name must be an unqualified symbol".into()),
                 };
+                let mut index = 3;
+                while index < fs.len() {
+                    let Form::Symbol(protocol) = &fs[index] else {
+                        return Err("defstruct protocol clause expects a protocol symbol".into());
+                    };
+                    index += 1;
+                    let start = index;
+                    while index < fs.len() && matches!(&fs[index], Form::List(_)) {
+                        index += 1;
+                    }
+                    if start == index {
+                        return Err("defstruct protocol clause requires method implementations".into());
+                    }
+                    let extension = Form::List(
+                        std::iter::once(Form::Symbol("extend-type".into()))
+                            .chain(std::iter::once(Form::Symbol(name.clone())))
+                            .chain(std::iter::once(Form::Symbol(protocol.clone())))
+                            .chain(fs[start..index].iter().cloned())
+                            .collect(),
+                    );
+                    eval(&extension, env)?;
+                }
                 let mut methods = HashMap::new();
                 for declaration in &fs[2..] {
                     let Form::List(parts) = declaration else {
@@ -7724,6 +7753,46 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         captured: Rc::new(RefCell::new(env.clone())),
                         name: Some(name.clone()),
                         native: None,
+            Form::Symbol(n) if n == "defmulti" => {
+                if fs.len() != 3 { return Err("defmulti expects a name and dispatch function".into()); }
+                let Form::Symbol(name) = &fs[1] else { return Err("defmulti name must be an unqualified symbol".into()); };
+                if name.contains('/') { return Err("defmulti name must be an unqualified symbol".into()); }
+                let Value::Function(dispatch) = eval(&fs[2], env)? else { return Err("defmulti dispatch function must be callable".into()); };
+                let namespace = namespace_registry()?.current().name().as_str().to_owned();
+                let qualified = format!("{namespace}/{name}");
+                let state = Rc::new(RefCell::new(MultiMethod { dispatch, methods: Vec::new(), default: None }));
+                let invoke_state = state.clone();
+                let value = native_variadic_function(&qualified, move |arguments| {
+                    let state = invoke_state.borrow();
+                    let key = call_function(&state.dispatch, arguments.clone())?;
+                    let method = state.methods.iter().find(|(candidate, _)| *candidate == key).map(|(_, method)| method.clone()).or_else(|| state.default.clone())
+                        .ok_or_else(|| format!("No multimethod method for dispatch value {}", key.display()))?;
+                    call_function(&method, arguments)
+                });
+                let var = namespace_registry()?.current().intern(name, value.clone());
+                var.set_origin(definition_origin());
+                env.insert(name.clone(), Value::Var(var.clone()));
+                env.insert(qualified.clone(), Value::Var(var));
+                ACTIVE_MULTIMETHODS.with(|active| { active.borrow_mut().insert(qualified, state); });
+                Ok(value)
+            }
+            Form::Symbol(n) if n == "defmethod" => {
+                if fs.len() < 5 { return Err("defmethod expects a multifn, dispatch value, parameters, and body".into()); }
+                let Form::Symbol(name) = &fs[1] else { return Err("defmethod multifn must be a symbol".into()); };
+                let namespace = namespace_registry()?.current().name().as_str().to_owned();
+                let qualified = if name.contains('/') { name.clone() } else { format!("{namespace}/{name}") };
+                let key = eval(&fs[2], env)?;
+                let function = eval(&Form::List(std::iter::once(Form::Symbol("fn".into())).chain(fs[3..].iter().cloned()).collect()), env)?;
+                let Value::Function(function) = function else { unreachable!() };
+                ACTIVE_MULTIMETHODS.with(|active| {
+                    let state = active.borrow().get(&qualified).cloned().ok_or_else(|| "defmethod expects an existing multifn".to_string())?;
+                    let mut state = state.borrow_mut();
+                    if matches!(&key, Value::Keyword(keyword) if keyword.get_namespace().is_none() && keyword.get_name() == "default") { state.default = Some(function); }
+                    else if let Some((_, existing)) = state.methods.iter_mut().find(|(candidate, _)| *candidate == key) { *existing = function; }
+                    else { state.methods.push((key, function)); }
+                    Ok(Value::Nil)
+                })
+            }
                         clauses: Vec::new(),
                         is_macro: true,
                     }))
