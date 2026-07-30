@@ -1567,7 +1567,9 @@ impl PartialEq for Value {
         }
         match (self, other) {
             (Value::Number(a), Value::Number(b)) => a == b,
-            (Value::Float(a), Value::Float(b)) => a.to_bits() == b.to_bits(),
+            (Value::Float(a), Value::Float(b)) => {
+                (a.is_nan() && b.is_nan()) || a.to_bits() == b.to_bits()
+            }
             (Value::BigInteger(a), Value::BigInteger(b)) => a == b,
             (Value::Decimal(a), Value::Decimal(b)) => a == b,
             (Value::Character(a), Value::Character(b)) => a == b,
@@ -4603,6 +4605,7 @@ fn protocol_with_meta(arguments: &[Value]) -> Result<Value, String> {
 fn protocol_count(arguments: &[Value]) -> Result<Value, String> {
     if arguments.len() == 1 {
         collection_count(&arguments[0])
+            .map_err(|error| format!("protocol/unsupported-receiver: {error}"))
     } else {
         Err("ICount/count expects one argument".into())
     }
@@ -7348,12 +7351,37 @@ fn deref_value(value: Value) -> Value {
 }
 
 fn binding_value(env: &HashMap<String, Value>, name: &str) -> Option<Value> {
-    env.get(name).cloned().map(deref_value).or_else(|| {
-        namespace_registry()
-            .ok()?
-            .resolve(&crate::lang::data::Symbol::parse(name))
-            .map(|var| var.deref_value())
-    })
+    env.get(name)
+        .cloned()
+        .map(deref_value)
+        .or_else(|| {
+            namespace_registry()
+                .ok()?
+                .resolve(&crate::lang::data::Symbol::parse(name))
+                .map(|var| var.deref_value())
+        })
+        .or_else(|| {
+            name.rsplit_once('/').and_then(|(qualifier, local)| {
+                let qualifier_is_protocol = matches!(
+                    env.get(qualifier).cloned().map(deref_value),
+                    Some(Value::Protocol(_))
+                ) || FOUNDATION_PROTOCOLS
+                    .iter()
+                    .any(|(protocol, _)| *protocol == qualifier)
+                    || namespace_registry().ok().is_some_and(|registry| {
+                        matches!(
+                            registry
+                                .resolve(&crate::lang::data::Symbol::parse(qualifier))
+                                .map(|var| var.deref_value()),
+                            Some(Value::Protocol(_))
+                        )
+                    });
+                if qualifier_is_protocol {
+                    return None;
+                }
+                env.get(local).cloned().map(deref_value)
+            })
+        })
 }
 
 fn binding_var(env: &mut HashMap<String, Value>, name: &str) -> Option<KernelVar<Value>> {

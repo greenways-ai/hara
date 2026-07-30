@@ -1265,9 +1265,7 @@ public class HaraLanguageTest {
     while (names.find()) {
       protocols.add(names.group(1));
     }
-    Set<String> hiddenProtocols = Set.of("IColl", "IMetadata");
-    protocols.removeAll(hiddenProtocols);
-    assertEquals(50, protocols.size());
+    assertEquals(53, protocols.size());
     Set<String> unavailableProtocols =
         Set.of(
             "IColl",

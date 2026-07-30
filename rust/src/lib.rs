@@ -328,10 +328,12 @@ impl Runtime {
                 .find_or_create(namespace)
                 .intern(name, method);
         }
+        let native = namespace_registry.find_or_create("std.native");
         for (name, descriptor) in core::native_type_values() {
             let canonical_name = format!("std.native.{name}");
             let var = foundation.intern(&canonical_name, descriptor);
-            foundation.map_var(crate::lang::data::Symbol::parse(&name), var);
+            foundation.map_var(crate::lang::data::Symbol::parse(&name), var.clone());
+            native.map_var(crate::lang::data::Symbol::parse(&name), var);
             namespace_registry.find_or_create(canonical_name);
         }
         Runtime {
@@ -3184,14 +3186,14 @@ mod tests {
                 let source = wrapper_source(path);
                 for method in &hal_wrappers {
                     assert!(
-                        source.contains(&format!("std.native.{name}/{method}")),
-                        "missing HAL wrapper for std.native.{name}/{method}"
+                        source.contains(&format!("{name}/{method}")),
+                        "missing HAL wrapper for {name}/{method}"
                     );
                 }
             }
             let mut type_cases = Vec::new();
             for method in &methods {
-                let symbol = format!("std.native.{name}/{method}");
+                let symbol = format!("{name}/{method}");
                 type_cases.push(format!(
                     "(native-method-result '{symbol} \
                      (fn [] ({symbol} nil nil nil nil nil nil nil nil nil)))"

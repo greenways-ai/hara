@@ -280,6 +280,7 @@ public final class HaraContext {
   }
 
   private void installNativeTypeDescriptors() {
+    namespace("std.native");
     HaraNamespace intrinsic = namespace(INTRINSIC_NAMESPACE);
     HaraNamespace foundation = namespace(FOUNDATION_NAMESPACE);
     NATIVE_TYPES.forEach(
