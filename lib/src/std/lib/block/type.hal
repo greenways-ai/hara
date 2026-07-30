@@ -1,5 +1,5 @@
-(ns std.block.type
-  (:require [std.block.protocol :as protocol]))
+(ns std.lib.block.type
+  (:require [std.lib.block.protocol :as protocol]))
 
 (defstruct Block [type tag string value children props])
 
@@ -14,7 +14,7 @@
 
 (defn block?
   [value]
-  (instance? std.block.type/Block value))
+  (instance? std.lib.block.type/Block value))
 
 (defn void-block?
   [block]
@@ -34,7 +34,8 @@
 
 (defn code-block?
   [block]
-  (not (void-block? block)))
+  (or (token-block? block)
+      (container-block? block)))
 
 (defn space-block?
   [block]

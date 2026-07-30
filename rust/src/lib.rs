@@ -322,6 +322,9 @@ impl Runtime {
         for (name, value) in core::exception_function_values() {
             foundation.intern(name, value);
         }
+        for (name, value) in core::basic_function_values() {
+            foundation.intern(name, value);
+        }
         for (name, protocol) in core::foundation_protocol_values() {
             foundation.intern(&name, protocol.clone());
             let namespace =
@@ -507,42 +510,156 @@ impl Runtime {
                 include_str!("../../lib/src/std/lib/context.hal"),
             ),
             (
-                "std.task.protocol",
-                include_str!("../../lib/src/std/task/protocol.hal"),
+                "std.lib.zip",
+                include_str!("../../lib/src/std/lib/zip.hal"),
             ),
             (
-                "std.task.bulk",
-                include_str!("../../lib/src/std/task/bulk.hal"),
+                "std.lib.block.protocol",
+                include_str!("../../lib/src/std/lib/block/protocol.hal"),
             ),
             (
-                "std.task.process",
-                include_str!("../../lib/src/std/task/process.hal"),
-            ),
-            ("std.task", include_str!("../../lib/src/std/task.hal")),
-            (
-                "std.block.protocol",
-                include_str!("../../lib/src/std/block/protocol.hal"),
+                "std.lib.block.type",
+                include_str!("../../lib/src/std/lib/block/type.hal"),
             ),
             (
-                "std.block.type",
-                include_str!("../../lib/src/std/block/type.hal"),
+                "std.lib.block.base",
+                include_str!("../../lib/src/std/lib/block/base.hal"),
             ),
             (
-                "std.block.base",
-                include_str!("../../lib/src/std/block/base.hal"),
+                "std.lib.block.construct",
+                include_str!("../../lib/src/std/lib/block/construct.hal"),
             ),
             (
-                "std.block.construct",
-                include_str!("../../lib/src/std/block/construct.hal"),
+                "std.lib.block.parse",
+                include_str!("../../lib/src/std/lib/block/parse.hal"),
             ),
             (
-                "std.block.parse",
-                include_str!("../../lib/src/std/block/parse.hal"),
+                "std.lib.block.zip",
+                include_str!("../../lib/src/std/lib/block/zip.hal"),
             ),
-            ("std.block", include_str!("../../lib/src/std/block.hal")),
+            (
+                "std.lib.block.value",
+                include_str!("../../lib/src/std/lib/block/value.hal"),
+            ),
+            (
+                "std.lib.block.editor",
+                include_str!("../../lib/src/std/lib/block/editor.hal"),
+            ),
+            (
+                "std.lib.block.check",
+                include_str!("../../lib/src/std/lib/block/check.hal"),
+            ),
+            (
+                "std.lib.block.reader",
+                include_str!("../../lib/src/std/lib/block/reader.hal"),
+            ),
+            (
+                "std.lib.block.grid",
+                include_str!("../../lib/src/std/lib/block/grid.hal"),
+            ),
+            (
+                "std.lib.block.layout",
+                include_str!("../../lib/src/std/lib/block/layout.hal"),
+            ),
+            (
+                "std.lib.block",
+                include_str!("../../lib/src/std/lib/block.hal"),
+            ),
+            (
+                "std.lib.task.protocol",
+                include_str!("../../lib/src/std/lib/task/protocol.hal"),
+            ),
+            (
+                "std.lib.task.bulk",
+                include_str!("../../lib/src/std/lib/task/bulk.hal"),
+            ),
+            (
+                "std.lib.task.process",
+                include_str!("../../lib/src/std/lib/task/process.hal"),
+            ),
+            (
+                "std.lib.task.print",
+                include_str!("../../lib/src/std/lib/task/print.hal"),
+            ),
+            (
+                "std.lib.task",
+                include_str!("../../lib/src/std/lib/task.hal"),
+            ),
             (
                 "code.test.protocol",
                 include_str!("../../lib/src/code/test/protocol.hal"),
+            ),
+            (
+                "code.test.checker.common",
+                include_str!("../../lib/src/code/test/checker/common.hal"),
+            ),
+            (
+                "code.test.checker.collection",
+                include_str!("../../lib/src/code/test/checker/collection.hal"),
+            ),
+            (
+                "code.test.checker.logic",
+                include_str!("../../lib/src/code/test/checker/logic.hal"),
+            ),
+            (
+                "code.test.checker.util",
+                include_str!("../../lib/src/code/test/checker/util.hal"),
+            ),
+            (
+                "code.test.checker.diff",
+                include_str!("../../lib/src/code/test/checker/diff.hal"),
+            ),
+            (
+                "code.test.base.context",
+                include_str!("../../lib/src/code/test/base/context.hal"),
+            ),
+            (
+                "code.test.base.match",
+                include_str!("../../lib/src/code/test/base/match.hal"),
+            ),
+            (
+                "code.test.base.listener",
+                include_str!("../../lib/src/code/test/base/listener.hal"),
+            ),
+            (
+                "code.test.base.print",
+                include_str!("../../lib/src/code/test/base/print.hal"),
+            ),
+            (
+                "code.test.base.process",
+                include_str!("../../lib/src/code/test/base/process.hal"),
+            ),
+            (
+                "code.test.base.executive",
+                include_str!("../../lib/src/code/test/base/executive.hal"),
+            ),
+            (
+                "code.test.base.runtime",
+                include_str!("../../lib/src/code/test/base/runtime.hal"),
+            ),
+            (
+                "code.test.compile",
+                include_str!("../../lib/src/code/test/compile.hal"),
+            ),
+            (
+                "code.test.compile.types",
+                include_str!("../../lib/src/code/test/compile/types.hal"),
+            ),
+            (
+                "code.test.compile.snippet",
+                include_str!("../../lib/src/code/test/compile/snippet.hal"),
+            ),
+            (
+                "code.test.compile.rewrite",
+                include_str!("../../lib/src/code/test/compile/rewrite.hal"),
+            ),
+            (
+                "code.test.manage",
+                include_str!("../../lib/src/code/test/manage.hal"),
+            ),
+            (
+                "code.test.task",
+                include_str!("../../lib/src/code/test/task.hal"),
             ),
             ("code.test", include_str!("../../lib/src/code/test.hal")),
         ] {
@@ -3620,6 +3737,7 @@ mod tests {
                     "              (fn [timeout] timeout))",
                     "       timed (check (fn [] (promise/from 42)) 42",
                     "                    {:timer timer :timeout 25})",
+                    "       positional (run '[code])",
                     "       cancelled",
                     "       (run {:namespace \"code.test-rust-probe\"",
                     "             :control (function-control (fn [fact] true))})]",
@@ -3628,10 +3746,47 @@ mod tests {
                     "  (count (:checks (first (:results summary))))",
                     "  (:status timed)",
                     "  (:timeout timed)",
+                    "  (:facts positional)",
                     "  (:cancelled (:counts cancelled))])"
                 ))
                 .unwrap(),
-            "[:passed 1 2 :timeout 25 1]"
+            "[:passed 1 2 :timeout 25 1 1]"
+        );
+    }
+
+    #[test]
+    fn foundation_code_test_compatibility_namespaces_are_embedded() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(ns code-test-compat-rust-probe \
+                       (:require [code.test :as test] \
+                                 [code.test.checker.common :as common] \
+                                 [code.test.checker.collection :as collection] \
+                                 [code.test.checker.logic :as logic] \
+                                 [code.test.base.runtime :as runtime] \
+                                 [code.test.compile.types :as types] \
+                                 [code.test.task :as task])) \
+                     (let [fact (types/Fact :core 'id 'probe nil nil \
+                                            \"portable\" 1 1 nil nil \
+                                            (fn [] 42) {})] \
+                       [(common/succeeded? \
+                         (common/verify (common/exactly 1) 1)) \
+                        (:pass (test/check \
+                                (fn [] {:a 1 :b 2}) \
+                                (collection/contains-map {:a 1}))) \
+                        (:pass (test/check \
+                                (fn [] 3) \
+                                (logic/all (fn [value] (number? value)) \
+                                           (fn [value] (= 1 (mod value 2)))))) \
+                        (types/fact? fact) \
+                        (fact) \
+                        (task/process-test-args \
+                         [\":only\" \"std\" \"code\"])])"
+                )
+                .unwrap(),
+            "[true true true true 42 {:ns [std code]}]"
         );
     }
 
@@ -3664,20 +3819,62 @@ mod tests {
             runtime
                 .eval_text(
                     "(ns std-task-rust-probe \
-                       (:require [std.task :as task] [std.task.bulk :as bulk])) \
+                       (:require [std.lib.task :as task] \
+                                 [std.lib.task.bulk :as bulk])) \
                      (task/deftask double-task \
                        {:template :default \
                         :main {:fn (fn [value] (* 2 value))}}) \
+                     (task/deftask selected-task \
+                       {:template :default \
+                        :main {:fn (fn [value suffix] (str value suffix))} \
+                        :item {:list (fn [lookup env] \
+                                      ['code.alpha 'code.beta 'std.gamma])}}) \
+                     (task/deftask aggregate-task \
+                       {:template :default \
+                        :main {:fn (fn [value] {:score value})} \
+                        :result {:ignore (fn [data] \
+                                           (= 0 (get data :score))) \
+                                 :output (fn [data] (get data :score))} \
+                        :summary {:aggregate \
+                                  {:score-total \
+                                   [(fn [data] (get data :score)) \
+                                    (fn [total score] (+ total score)) 0]}}}) \
+                     (task/deftask constructed-task \
+                       {:template :default \
+                        :main {:argcount 4 \
+                               :fn (fn [input params lookup env] \
+                                     [input (get params :flag) \
+                                      (get lookup :input) \
+                                      (get env :environment)])} \
+                        :construct \
+                        {:input (fn [task] 7) \
+                         :env (fn [options] {:environment :ready}) \
+                         :lookup (fn [task options] \
+                                   {:input (get options :environment)})} \
+                        :params {:flag true}}) \
                      (let [reporter (bulk/event-reporter) \
                            output (task/invoke double-task [1 2 3] \
-                                               {:reporter reporter :return :all})] \
+                                               {:reporter reporter :return :all \
+                                                :package :records}) \
+                           aggregate-output \
+                           (task/invoke aggregate-task [0 2 3] \
+                                        {:return :all})] \
                        [(get output :summary) \
                         (vec (map (fn [result] (get result :data)) \
                                   (get output :results))) \
-                        (count (bulk/reporter-events reporter))])"
+                        (count (bulk/reporter-events reporter)) \
+                        (task/invoke double-task 4) \
+                        (vec (map (fn [result] (get result :data)) \
+                                  (task/invoke selected-task 'code \
+                                               {:package :records} \
+                                               :args \"!\"))) \
+                        (get aggregate-output :results) \
+                        (get (get aggregate-output :summary) \
+                             :score-total) \
+                        (task/invoke constructed-task)])"
                 )
                 .unwrap(),
-            "[{:items 3 :results 3 :warnings 0 :errors 0} [2 4 6] 8]"
+            "[{:items 3 :results 3 :warnings 0 :errors 0 :cumulative 0 :elapsed 0} [2 4 6] 8 8 [\"code.alpha!\" \"code.beta!\"] {2 2 3 3} 5 [7 true :ready :ready]]"
         );
     }
 
@@ -3688,20 +3885,72 @@ mod tests {
             runtime
                 .eval_text(
                     "(ns std-block-rust-probe \
-                       (:require [std.block :as block])) \
+                       (:require [std.lib.block :as block] \
+                                 [std.lib.block.grid :as grid] \
+                                 [std.lib.block.reader :as reader])) \
                      (let [parsed (block/parse-string \"[1 2 3]\") \
                            first-block (block/parse-first \"[1 2 3]\") \
-                           spaces (block/spaces 3)] \
+                           spaces (block/spaces 3) \
+                           wrapped (block/layout '(if ready [1 2] [3 4]) \
+                                                 {:width 10}) \
+                           gridded (grid/grid \
+                                    (block/parse-first \"(if\\nready\\ndone)\") \
+                                    0 {:rules {'if {:indent 1}}}) \
+                           modified (block/parse-first \"[1 #_2 3]\") \
+                           original (block/block [1 2]) \
+                           input-reader (reader/create \"ab\\ncd\") \
+                           first-two (reader/read-times input-reader \
+                                                        reader/read-char 2) \
+                           newline (reader/read-char input-reader) \
+                           edited (std.lib.zip/result \
+                                   (std.lib.zip/replace-right \
+                                    (std.lib.zip/step-right \
+                                     (std.lib.zip/step-right \
+                                     (std.lib.zip/step-inside \
+                                      (block/block-zip original)))) \
+                                    (block/block 3)))] \
                        [(block/string parsed) \
                         (block/value parsed) \
                         (block/type first-block) \
                         (block/tag first-block) \
-                        (vec (map block/value (block/children first-block))) \
+                        (vec (map block/value \
+                                  (filter block/code? \
+                                          (block/children first-block)))) \
                         (block/string spaces) \
-                        (block/space? spaces)])"
+                        (block/space? spaces) \
+                        (block/string wrapped) \
+                        (block/string gridded) \
+                        (block/value modified) \
+                        (block/child-values modified) \
+                        (block/string original) \
+                        (block/string edited) \
+                        first-two \
+                        (reader/reader-position input-reader) \
+                        (reader/read-to-boundary input-reader) \
+                        (block/value (block/parse-string \"[4 5]\"))])"
                 )
                 .unwrap(),
-            "[\"[1 2 3]\" [1 2 3] :container :vector [1 2 3] \"   \" true]"
+            "[\"[1 2 3]\" [1 2 3] :container :vector [1 2 3] \"   \" true \"(if\\n  ready\\n  [1 2]\\n  [3 4]\\n)\" \"(if\\n  ready\\n  done)\" [1 3] [1 3] \"[1 2]\" \"[1 3]\" [\"a\" \"b\"] [2 1] \"cd\" [4 5]]"
+        );
+    }
+
+    #[test]
+    fn portable_zip_is_embedded_and_preserves_original_values() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(ns std-lib-zip-rust-probe \
+                       (:require [std.lib.zip :as zip])) \
+                     (let [root [1 2 3] \
+                           location (zip/step-right \
+                                     (zip/step-inside (zip/vector-zip root))) \
+                           edited (zip/replace-right \
+                                   (zip/insert-left location 9) 8)] \
+                       [(zip/result edited) root])"
+                )
+                .unwrap(),
+            "[[1 9 8 3] [1 2 3]]"
         );
     }
 

@@ -1,0 +1,38 @@
+(ns std.lib.zip-test
+  (:require [std.lib.zip :as zip]
+            [std.lib.test :as test]))
+
+(def results
+  [(test/check
+    "constructs and navigates persistent vector zippers"
+    (let [root [1 [2 3] 4]
+          inside (zip/step-inside (zip/vector-zip root))
+          moved (zip/step-right inside)
+          nested (zip/step-inside moved)]
+      [(zip/right-element nested)
+       (field nested :depth)
+       (vec (zip/left-elements moved))])
+    [2 2 [1]])
+   (test/check
+    "propagates edits without mutating the original value"
+    (let [root [1 2 3]
+          location (zip/step-right (zip/step-inside (zip/vector-zip root)))
+          edited (zip/replace-right (zip/insert-left location 9) 8)]
+      [(zip/result edited) root])
+    [[1 9 8 3] [1 2 3]])
+   (test/check
+    "round trips status and supports depth-first traversal"
+    (let [location (zip/from-status '[1 [2 | 3] 4])
+          found (zip/find-next (zip/vector-zip [1 [2 3] 4])
+                               (fn [value] (= value 3)))]
+      [(zip/status location) (zip/right-element found)])
+    ['([1 [2 | 3] 4]) 3])
+   (test/check
+    "prewalk and postwalk rebuild nested persistent values"
+    (let [root [1 [2]]
+          increment (fn [value] (if (number? value) (inc value) value))]
+      [(zip/result (zip/prewalk (zip/form-zip root) increment))
+       (zip/result (zip/postwalk (zip/form-zip root) increment))])
+    [[2 [3]] [2 [3]]])])
+
+(test/print-results results)

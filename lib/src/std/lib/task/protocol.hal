@@ -1,4 +1,4 @@
-(ns std.task.protocol)
+(ns std.lib.task.protocol)
 
 (defprotocol ITaskReporter
   (report-task [reporter report]))

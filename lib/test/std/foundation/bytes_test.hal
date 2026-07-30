@@ -1,9 +1,9 @@
 (ns std.foundation.bytes-test
-  (:require [std.lib.test :as test]))
+  (:use code.test))
 
 (def results
-  [(test/check "get returns signed byte value as unsigned"
-               (bytes/get (bytes -1) 0)
-               255)])
+  [(fact "get returns signed byte value as unsigned"
+     (bytes/get (bytes -1) 0)
+     => 255)])
 
-(test/print-results results)
+(pr-str (run '[std.foundation.bytes-test]))

@@ -5,7 +5,8 @@
 ;; receives structured events; hosts decide whether and how to print them.
 ;; ============================================================================
 (ns code.test
-  (:require [code.test.protocol :as protocol]))
+  (:require [code.test.protocol :as protocol]
+            [std.lib.task :as task]))
 
 (defstruct TestRegistry [state])
 (defstruct NullReporter [value])
@@ -85,9 +86,12 @@
 (def +registry+ (code.test/TestRegistry (atom {})))
 (def +null-reporter+ (code.test/NullReporter nil))
 (def => '=>)
+(def +listeners+ {})
+(def +global-settings+ (atom {}))
 
-(def anything
-  (code.test/Matcher (fn [value] true) :anything))
+(defn anything
+  [value]
+  true)
 
 (defn event-reporter
   "Creates a reporter that records structured events in an atom."
@@ -128,6 +132,168 @@
   "Matches when predicate returns truthy."
   [predicate]
   (code.test/Matcher predicate :satisfies))
+
+(defn approx
+  ([expected]
+   (approx expected 0.001))
+  ([expected threshold]
+   (code.test/Matcher
+    (fn [actual]
+      (and (number? actual)
+           (< (- expected threshold) actual)
+           (< actual (+ expected threshold))))
+    expected)))
+
+(defn stores
+  [expected]
+  (code.test/Matcher
+   (fn [actual]
+     (try
+       (= expected (deref actual))
+       (catch Throwable error false)))
+   expected))
+
+(defn matcher-for
+  [expected]
+  (if (instance? code.test/Matcher expected)
+    expected
+    (if (fn? expected)
+      (code.test/Matcher expected expected)
+      (exactly expected))))
+
+(defn sequence-exact?
+  [expected actual]
+  (and (= (count expected) (count actual))
+       (reduce (fn [passing entry]
+                 (and passing
+                      (:pass
+                       (protocol-call
+                        protocol/IMatcher match-value
+                        (matcher-for (nth expected (nth entry 0)))
+                        (nth actual (nth entry 0))))))
+               true
+               (loop [index 0 output []]
+                 (if (= index (count expected))
+                   output
+                   (recur (inc index) (conj output [index])))))))
+
+(defn sequence-prefix?
+  [expected actual]
+  (and (<= (count expected) (count actual))
+       (sequence-exact? expected
+                        (loop [index 0 output []]
+                          (if (= index (count expected))
+                            output
+                            (recur (inc index)
+                                   (conj output (nth actual index))))))))
+
+(defn map-contains?
+  [expected actual]
+  (and
+   (map? actual)
+   (reduce
+    (fn [passing entry]
+      (and passing
+           (:pass
+            (protocol-call protocol/IMatcher match-value
+                           (matcher-for (nth entry 1))
+                           (get actual (nth entry 0))))))
+    true
+    expected)))
+
+(defn contains
+  [expected & modifiers]
+  (code.test/Matcher
+   (fn [actual]
+     (if (map? expected)
+       (map-contains? expected actual)
+       (if (or (vector? expected) (list? expected) (set? expected))
+         (if (set? expected)
+           (reduce (fn [passing value]
+                     (and passing
+                          (reduce
+                           (fn [found candidate]
+                             (or found
+                                 (:pass
+                                  (protocol-call
+                                   protocol/IMatcher match-value
+                                   (matcher-for value) candidate))))
+                           false actual)))
+                   true expected)
+           (sequence-prefix? (vec expected) (vec actual)))
+         (:pass
+          (protocol-call protocol/IMatcher match-value
+                         (matcher-for expected) actual)))))
+   expected))
+
+(defn just
+  [expected & modifiers]
+  (code.test/Matcher
+   (fn [actual]
+     (if (map? expected)
+       (and (= (count expected) (count actual))
+            (map-contains? expected actual))
+       (sequence-exact? (vec expected) (vec actual))))
+   expected))
+
+(defmacro contains-in
+  [expected]
+  `(code.test/contains ~expected))
+
+(defmacro just-in
+  [expected]
+  `(code.test/just ~expected))
+
+(defn throws-info
+  ([] (throws))
+  ([expected] (throws)))
+
+(defn is-not
+  [expected]
+  (let [matcher (matcher-for expected)]
+    (code.test/Matcher
+     (fn [actual]
+       (not (:pass
+             (protocol-call protocol/IMatcher match-value matcher actual))))
+     expected)))
+
+(defn any
+  [& expected]
+  (let [matchers
+        (loop [remaining (vec expected)
+               output []]
+          (if (empty? remaining)
+            output
+            (recur (vec (rest remaining))
+                   (conj output (matcher-for (first remaining))))))]
+    (code.test/Matcher
+     (fn [actual]
+       (reduce
+        (fn [passing matcher]
+          (or passing
+              (:pass
+               (protocol-call protocol/IMatcher match-value matcher actual))))
+        false matchers))
+     expected)))
+
+(defn all
+  [& expected]
+  (let [matchers
+        (loop [remaining (vec expected)
+               output []]
+          (if (empty? remaining)
+            output
+            (recur (vec (rest remaining))
+                   (conj output (matcher-for (first remaining))))))]
+    (code.test/Matcher
+     (fn [actual]
+       (reduce
+        (fn [passing matcher]
+          (and passing
+               (:pass
+                (protocol-call protocol/IMatcher match-value matcher actual))))
+        true matchers))
+     expected)))
 
 (defn throws
   "Matches any value thrown while evaluating an assertion."
@@ -182,9 +348,13 @@
           :timeout (field actual :milliseconds)}
          (if (instance? code.test/Matcher expected)
            (protocol-call protocol/IMatcher match-value expected actual)
-           {:pass (= actual expected)
-            :actual actual
-            :expected expected})))
+           (if (fn? expected)
+             {:pass (if (expected actual) true false)
+              :actual actual
+              :expected expected}
+             {:pass (= actual expected)
+              :actual actual
+              :expected expected}))))
      (catch Throwable error
        (let [actual (code.test/ThrownValue error)]
          (if (instance? code.test/Matcher expected)
@@ -298,15 +468,45 @@
   [description & body]
   (fact-form description body (meta &form)))
 
-(defn selected?
-  "Returns true when fact matches run selection options."
+(defn selector-match?
+  [selector value]
+  (if (nil? selector)
+    true
+    (task/select-filter selector value)))
+
+(defn tag-selected?
+  [fact options]
+  (let [tags (or (:tags (:meta fact)) #{})
+        include (:include-tags options)
+        exclude (:exclude-tags options)
+        included (if include
+                   (reduce (fn [found tag]
+                             (or found (task/select-filter include tag)))
+                           false
+                           tags)
+                   true)
+        excluded (if exclude
+                   (reduce (fn [found tag]
+                             (or found (task/select-filter exclude tag)))
+                           false
+                           tags)
+                   false)]
+    (and included (not excluded))))
+
+(defn matches-selection?
+  "Returns true when a fact matches namespace, name, and tag selectors."
   [fact options]
   (and
-   (or (nil? (:namespace options))
-       (= (:namespace options) (:namespace fact)))
-   (or (nil? (:name options))
-       (= (:name options) (:name fact)))
-   (not (:skip (:meta fact)))))
+   (selector-match? (:namespace options) (:namespace fact))
+   (selector-match? (:name options) (:name fact))
+   (tag-selected? fact options)))
+
+(defn selected?
+  "Compatibility predicate: matching facts explicitly marked :skip are not
+   executable, though the runner retains them as structured skipped results."
+  [fact options]
+  (and (matches-selection? fact options)
+       (not (:skip (:meta fact)))))
 
 (defn report!
   "Sends event to reporter and returns event."
@@ -354,11 +554,19 @@
     (settle (hook) options)
     nil))
 
+(defn run-hooks
+  [hooks options]
+  (reduce (fn [output hook]
+            (do (run-hook hook options) output))
+          nil
+          hooks))
+
 (defn fact-cancelled?
   [fact options]
-  (if (:control options)
-    (protocol-call protocol/ITestControl cancelled? (:control options) fact)
-    false))
+  (or (:cancelled options)
+      (if (:control options)
+        (protocol-call protocol/ITestControl cancelled? (:control options) fact)
+        false)))
 
 (defn run-fact
   "Runs one fact and emits start/end events."
@@ -371,17 +579,23 @@
          start (clock-now options)]
      (report! reporter (merge {:event :fact/start} identity))
      (let [result
-           (if (fact-cancelled? fact options)
+           (if (:skip (:meta fact))
+             (merge identity {:status :skipped :checks []})
+             (if (fact-cancelled? fact options)
              (merge identity {:status :cancelled :checks []})
              (try
                (let [checks
                      (try
                        (do
-                         (run-hook (:before (:meta fact)) options)
+                         (run-hooks [(:before-each options)
+                                     (:before (:meta fact))]
+                                    options)
                          (normalize-checks
                           (settle ((:function fact) options) options)))
                        (finally
-                         (run-hook (:after (:meta fact)) options)))
+                         (run-hooks [(:after (:meta fact))
+                                     (:after-each options)]
+                                    options)))
                      status (if (checks-timeout? checks)
                               :timeout
                               (if (checks-error? checks)
@@ -394,7 +608,7 @@
                  (merge identity
                         {:status :error
                          :checks []
-                         :error (str error)}))))
+                         :error (str error)})))))
            end (clock-now options)
            timed-result (if (and start end)
                           (assoc result :elapsed (- end start))
@@ -414,28 +628,173 @@
            :cancelled 0}
           results))
 
+(defn check-counts
+  [results]
+  (reduce
+   (fn [counts result]
+     (reduce (fn [current check-result]
+               (update current
+                       (if (:pass check-result) :passed :failed)
+                       (fn [count] (inc (or count 0)))))
+             counts
+             (:checks result)))
+   {:total 0 :passed 0 :failed 0}
+   results))
+
+(defn attach-check-total
+  [counts]
+  (assoc counts :total (+ (:passed counts) (:failed counts))))
+
+(defn failing-status?
+  [status]
+  (or (= status :failed)
+      (= status :error)
+      (= status :timeout)))
+
+(defn fact-order-key
+  [fact]
+  (str (:namespace fact) "/" (:name fact)))
+
+(defn insert-fact
+  [facts fact]
+  (loop [index 0
+         output []]
+    (if (= index (count facts))
+      (conj output fact)
+      (if (< (compare (fact-order-key fact)
+                      (fact-order-key (nth facts index)))
+             0)
+        (loop [remaining index
+               inserted (conj output fact)]
+          (if (= remaining (count facts))
+            inserted
+            (recur (inc remaining)
+                   (conj inserted (nth facts remaining)))))
+        (recur (inc index) (conj output (nth facts index)))))))
+
+(defn order-facts
+  [facts]
+  (reduce insert-fact [] facts))
+
+(defn run-facts
+  [facts reporter options]
+  (loop [index 0
+         results []
+         cancelled false]
+    (if (= index (count facts))
+      results
+      (let [result (run-fact (nth facts index)
+                             reporter
+                             (assoc options :cancelled cancelled))
+            stop (or cancelled
+                     (and (:fail-fast options)
+                          (failing-status? (:status result))))]
+        (recur (inc index) (conj results result) stop)))))
+
+(defn run-selected
+  [input options]
+  (let [reporter (or (:reporter options) +null-reporter+)
+        selected (order-facts
+                  (filter (fn [fact] (matches-selection? fact options))
+                          (tests)))
+        start-report (report! reporter {:event :run/start :count (count selected)})
+        results (try
+                  (do
+                    (run-hook (:before-all options) options)
+                    (run-facts selected reporter options))
+                  (finally
+                    (run-hook (:after-all options) options)))
+        counts (result-counts results)
+        checks (attach-check-total (check-counts results))
+        status (if (and (= 0 (:failed counts))
+                        (= 0 (:error counts))
+                        (= 0 (:timeout counts)))
+                 :passed
+                 :failed)
+        namespaces
+        (reduce (fn [output result]
+                  (conj output (:namespace result)))
+                #{}
+                results)
+        summary {:status status
+                 :counts counts
+                 :check-counts checks
+                 :files (count namespaces)
+                 :facts (count results)
+                 :checks (:total checks)
+                 :passed (:passed checks)
+                 :failed (:failed checks)
+                 :throw (:error counts)
+                 :timeout (:timeout counts)
+                 :results results}
+        end-report (report! reporter (merge {:event :run/end} summary))]
+    summary))
+
+(defn run-task-main
+  [package]
+  (run-selected nil (first package)))
+
+(def +runner-task+
+  (task/task :default
+             "code.test/run"
+             {:main {:fn run-task-main}}))
+
 (defn run
-  "Runs selected facts sequentially and returns a structured summary."
+  "Runs selected facts through std.lib.task and returns a structured summary."
   ([] (run {}))
-  ([options]
-   (let [reporter (or (:reporter options) +null-reporter+)
-         selected (vec (filter (fn [fact] (selected? fact options)) (tests)))]
-     (report! reporter {:event :run/start :count (count selected)})
-     (let [results (vec (map (fn [fact] (run-fact fact reporter options))
-                             selected))
-           counts (result-counts results)
-           status (if (and (= 0 (:failed counts))
-                           (= 0 (:error counts))
-                           (= 0 (:timeout counts)))
-                    :passed
-                    :failed)
-           summary {:status status
-                    :counts counts
-                    :results results}]
-       (report! reporter (merge {:event :run/end} summary))
-       summary))))
+  ([selector-or-options]
+   (let [options (if (map? selector-or-options)
+                   selector-or-options
+                   {:namespace selector-or-options})]
+     (task/invoke +runner-task+ (list options)))))
 
 (defn run-tests
   "Compatibility name for run."
   ([] (run {}))
   ([options] (run options)))
+
+(defn fact:purge [] (purge-facts))
+(defn fact:list [] (map :name (tests)))
+(defn fact:missing [] [])
+(defmacro fact:all [& body] `(do ~@body))
+(defmacro fact:get [name] `(code.test/get-fact ~name))
+(defmacro fact:exec [name]
+  `((:function (code.test/get-fact ~name)) {}))
+(defmacro fact:setup [& body] `(do ~@body))
+(defmacro fact:setup? [& body] `(do ~@body))
+(defmacro fact:teardown [& body] `(do ~@body))
+(defmacro fact:remove [name] `(code.test/remove-fact ~name))
+(defmacro fact:symbol [name] name)
+(defmacro fact:template [description & body]
+  `(code.test/fact ~description ~@body))
+(defmacro fact:global [settings]
+  `(reset! +global-settings+ ~settings))
+(defmacro fact:ns [& body] `(do ~@body))
+(defn fact:ns-load [namespace] namespace)
+
+(def run:current run)
+(def run:test run)
+(def run:load run)
+(def run:unload run)
+(def run-errored run)
+
+(defn run:interrupt [] true)
+(defn run:report
+  ([path] (run {:report path}))
+  ([path options] (run (assoc options :report path)))
+  ([path options project] (run (assoc options :report path))))
+
+(defn print-options
+  ([] (print-options :help))
+  ([options]
+   (if (= options :help)
+     #{:help :current :default :disable :all}
+     options)))
+
+(defn process-test-args
+  [arguments]
+  (task/process-ns-args (task/collapse-only arguments)))
+
+(defn -main
+  [& arguments]
+  (run (process-test-args arguments)))

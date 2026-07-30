@@ -1,11 +1,43 @@
-(ns std.task-test
+(ns std.lib.task-test
   (:require [std.lib.test :as test]
-            [std.task :as task]
-            [std.task.bulk :as bulk]))
+            [std.lib.task :as task]
+            [std.lib.task.bulk :as bulk]
+            [std.lib.task.print :as print]))
 
 (task/deftask double-task
   {:template :default
    :main {:fn (fn [value] (* 2 value))}})
+
+(task/deftask selectable-task
+  {:template :default
+   :main {:fn (fn [value suffix] (str value suffix))}
+   :item {:list (fn [lookup env] ['code.alpha 'code.beta 'std.gamma])}})
+
+(task/deftask aggregate-task
+  {:template :default
+   :main {:fn (fn [value] {:score value})}
+   :result {:ignore (fn [data] (= 0 (get data :score)))
+            :output (fn [data] (get data :score))}
+   :summary
+   {:aggregate
+    {:score-total [(fn [data] (get data :score))
+                   (fn [total score] (+ total score))
+                   0]}
+    :finalise (fn [summary items results]
+                (assoc summary :finalised true))}})
+
+(task/deftask constructed-task
+  {:template :default
+   :main {:argcount 4
+          :fn (fn [input params lookup env]
+                [input (get params :flag)
+                 (get lookup :input)
+                 (get env :environment)])}
+   :construct
+   {:input (fn [task] 7)
+    :env (fn [options] {:environment :ready})
+    :lookup (fn [task options] {:input (get options :environment)})}
+   :params {:flag true}})
 
 (def results
   [(test/check "deftask creates a portable task"
@@ -13,25 +45,73 @@
                 (task/task-status double-task)
                 (task/task-info double-task)
                 (task/invoke double-task 3)]
-               [true :default {:fn "double-task"} 6])
+               [true :default {:fn 'double-task} 6])
    (test/check "bulk execution reports data without printing"
                (let [reporter (bulk/event-reporter)
                      output (task/invoke
                              double-task
                              [1 2 3]
                              {:reporter reporter
-                              :return :all})]
+                              :return :all
+                              :package :records})]
                  [(get output :summary)
                   (vec (map (fn [result] (get result :data))
                             (get output :results)))
                   (vec (map (fn [report] (get report :event))
                             (bulk/reporter-events reporter)))])
-               [{:items 3 :results 3 :warnings 0 :errors 0}
+               [{:items 3 :results 3 :warnings 0 :errors 0
+                 :cumulative 0 :elapsed 0}
                 [2 4 6]
                 [:task/bulk-start
                  :task/item-start :task/item-end
                  :task/item-start :task/item-end
                  :task/item-start :task/item-end
-                 :task/bulk-end]])])
+                 :task/bulk-end]])
+   (test/check "selection and :args follow the archived invocation contract"
+               [(task/select-filter 'code 'code.alpha)
+                (task/select-filter ['std 'code.beta] 'code.beta)
+                (task/invoke selectable-task :list)
+                (vec (map (fn [result] (get result :data))
+                          (task/invoke selectable-task
+                                       'code
+                                       {:package :records}
+                                       :args
+                                       "!")))]
+               [true true
+                '[code.alpha code.beta std.gamma]
+                ["code.alpha!" "code.beta!"]])
+   (test/check "result filtering, aggregation, and map packaging are data-first"
+               (let [output (task/invoke aggregate-task
+                                         [0 2 3]
+                                         {:return :all})
+                     summary (get output :summary)]
+                 [(get output :results)
+                  (get summary :items)
+                  (get summary :results)
+                  (get summary :score-total)
+                  (get summary :finalised)])
+               [{2 2 3 3} 3 2 5 true])
+   (test/check "zero-argument invocation constructs input, env, and lookup"
+               (task/invoke constructed-task)
+               [7 true :ready :ready])
+   (test/check "tasks retain Foundation callable and display behavior"
+               [(double-task 4)
+                (protocol-call std.protocol.idisplay/IDisplay
+                               display double-task)]
+               [8 "#task:default {:fn double-task}"])
+   (test/check "task report formatting preserves ANSI title and table output"
+               [(print/report-title "TASK")
+                (print/report-header
+                 [:id :value]
+                 {:padding 0
+                  :spacing 1
+                  :columns [{:length 4 :align :right}
+                            {:length 7 :align :left}]})
+                (task/process-ns-args
+                 (task/collapse-only
+                  [":only" "std" "code" ":parallel" "true"]))]
+               [(str "\u001b[1m\n----\nTASK\n----\u001b[0m")
+                (str "\u001b[1m  id value  \u001b[0m")
+                {:ns ['std 'code] :parallel true}])])
 
 (test/print-results results)

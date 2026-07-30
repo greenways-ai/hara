@@ -1,0 +1,35 @@
+(ns code.test.task
+  (:require [code.test :as test]
+            [std.lib.task :as task]))
+
+(def run test/run)
+(def run:current test/run)
+(def run:test test/run)
+(def run:load test/run)
+(def run:unload test/run)
+(def run-errored test/run)
+
+(defn resolve-files
+  ([files] (resolve-files files nil))
+  ([files project]
+   (if (or (vector? files) (list? files) (set? files))
+     (vec files)
+     [files])))
+
+(defn run:interrupt [] true)
+(defn run:report
+  ([path] (test/run {:report path}))
+  ([path options] (test/run (assoc options :report path)))
+  ([path options project] (test/run (assoc options :report path))))
+(defn print-options
+  ([] (print-options :help))
+  ([options]
+   (if (= options :help)
+     #{:help :current :default :disable :all}
+     options)))
+(defn process-test-args
+  [arguments]
+  (task/process-ns-args (task/collapse-only arguments)))
+(defn -main
+  [& arguments]
+  (test/run (process-test-args arguments)))

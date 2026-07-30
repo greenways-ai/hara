@@ -1,0 +1,12 @@
+(ns code.test.base.match
+  (:require [std.lib.task :as task]))
+
+(defn match-base [selector value] (task/select-filter selector value))
+(defn match-include [selector value] (match-base selector value))
+(defn match-exclude [selector value] (not (match-base selector value)))
+(defn match-options
+  [value options]
+  (and (match-include (or (:include options) (fn [x] true)) value)
+       (if (:exclude options)
+         (match-exclude (:exclude options) value)
+         true)))

@@ -1,8 +1,12 @@
-(ns std.block
-  (:require [std.block.base :as base]
-            [std.block.construct :as construct]
-            [std.block.parse :as parse]
-            [std.block.type :as type]))
+(ns std.lib.block
+  (:require [std.lib.block.base :as base]
+            [std.lib.block.construct :as construct]
+            [std.lib.block.parse :as parse]
+            [std.lib.block.type :as type]
+            [std.lib.block.zip :as block-zip]
+            [std.lib.block.value :as block-value]
+            [std.lib.block.editor :as editor]
+            [std.lib.block.layout :as layout]))
 
 (def block? base/block?)
 (def expression? base/expression?)
@@ -18,6 +22,7 @@
 (def value base/block-value)
 (def value-string base/block-value-string)
 (def children base/block-children)
+(def replace-children base/replace-children)
 (def info base/block-info)
 
 (def block construct/block)
@@ -29,10 +34,25 @@
 (def tab construct/tab)
 (def tabs construct/tabs)
 (def comment construct/comment)
+(def token construct/token-from-string)
+(def uneval construct/uneval)
+(def cursor construct/cursor)
 (def contents construct/contents)
 (def container construct/container)
 (def root construct/root)
 (def max-width construct/max-width)
+(def add-child construct/add-child)
+(def empty construct/empty)
+(def line-width construct/line-width)
+(def get-lines construct/get-lines)
+(def rep construct/rep)
+(def indent-body construct/indent-body)
+(def block-context block-zip/block-context)
+(def block-zip block-zip/block-zip)
+(def child-values block-value/child-values)
+(def root-value block-value/root-value)
+(def editor editor/create)
+(def layout layout/layout-main)
 
 (def parse-string parse/parse-string)
 (def parse-root parse/parse-root)

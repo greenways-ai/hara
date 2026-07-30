@@ -1,0 +1,37 @@
+(ns code.test.compile
+  (:require [code.test :as test]))
+
+(def => test/=>)
+(def +arrows+ {'=> :test-equal})
+(defn arrow? [value] (= value '=>))
+(defn fact-allowed? [metadata] (not (:skip metadata)))
+(defn fact-skip? [metadata] (if (:skip metadata) true false))
+(defn rewrite-top-level [form] form)
+(defn fact-id [description] description)
+(defn fact-prepare-meta [metadata] metadata)
+(defn fact-prepare-core [core] core)
+(defn fact-thunk [function] function)
+(defn create-fact [description function metadata]
+  {:namespace (current-namespace)
+   :name description
+   :function function
+   :meta metadata})
+(defn install-fact [fact]
+  (test/register! (:name fact) (:function fact) (:meta fact)))
+(defn fact:compile [description function metadata]
+  (install-fact (create-fact description function metadata)))
+(defn fact-eval [fact] ((:function fact) {}))
+(defn fact:purge [] (test/purge-facts))
+(defn fact:list [] (map :name (test/tests)))
+(defn fact:missing [] [])
+(defmacro fact [description & body] `(code.test/fact ~description ~@body))
+(defmacro fact:template [description & body] `(code.test/fact ~description ~@body))
+(defmacro fact:all [& body] `(do ~@body))
+(defmacro fact:get [name] `(code.test/get-fact ~name))
+(defmacro fact:exec [name]
+  `((:function (code.test/get-fact ~name)) {}))
+(defmacro fact:setup [& body] `(do ~@body))
+(defmacro fact:setup? [& body] `(do ~@body))
+(defmacro fact:teardown [& body] `(do ~@body))
+(defmacro fact:remove [name] `(code.test/remove-fact ~name))
+(defmacro fact:symbol [name] name)

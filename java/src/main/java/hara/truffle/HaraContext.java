@@ -1403,6 +1403,7 @@ public final class HaraContext {
     target.define(
         "symbol?",
         new UnaryBuiltin("symbol?", value -> HaraBox.unwrap(value) instanceof Symbol));
+    target.define("fn?", new UnaryBuiltin("fn?", this::isFunctionValue));
     target.define(
         "keyword?",
         new UnaryBuiltin("keyword?", value -> HaraBox.unwrap(value) instanceof Keyword));

@@ -1,0 +1,13 @@
+(ns code.test.checker.util
+  (:require [code.test :as test]))
+
+(defn contains-exact [data checkers]
+  (:pass (test/check (fn [] (vec data)) (test/just (vec checkers)))))
+(defn contains-with-gaps [data checkers]
+  (:pass (test/check (fn [] (vec data)) (test/contains (vec checkers)))))
+(defn contains-any-order [data checkers]
+  (:pass (test/check (fn [] (set data)) (test/contains (set checkers)))))
+(defn contains-all [data checkers]
+  (contains-any-order data checkers))
+(defn perm-check [data checkers] (contains-any-order data checkers))
+(defn perm-build [data checkers] [data checkers])

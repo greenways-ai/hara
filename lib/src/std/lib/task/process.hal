@@ -1,0 +1,192 @@
+(ns std.lib.task.process
+  (:require [std.lib.task.bulk :as bulk]
+            [std.foundation.string :as string]))
+
+(defn task-section
+  [task key]
+  (if (map? task)
+    (get task key)
+    (cond
+      (= key :main) (field task :main)
+      (= key :construct) (field task :construct)
+      (= key :item) (field task :item)
+      (= key :result) (field task :result)
+      (= key :summary) (field task :summary)
+      (= key :params) (field task :params)
+      :else nil)))
+
+(defn main-function
+  "Adapts a task function to the portable four-slot invocation contract.
+   Arity is explicit because portable HAL does not depend on host reflection."
+  [function argcount]
+  (let [main (if (= argcount 4)
+               (fn [input params lookup env & args]
+                 (apply function input params lookup env args))
+               (if (= argcount 3)
+                 (fn [input params lookup env & args]
+                   (apply function input params env args))
+                 (if (= argcount 2)
+                   (fn [input params lookup env & args]
+                     (apply function input params args))
+                   (if (= argcount 1)
+                     (fn [input params lookup env & args]
+                       (apply function input args))
+                     (throw
+                      (ex-info "Task :argcount must be between 1 and 4"
+                               {:argcount argcount}))))))]
+    [main false]))
+
+(defn wrap-execute
+  [function task]
+  (fn [input params lookup env & args]
+    (let [item (task-section task :item)
+          pre (or (get item :pre) identity)
+          post (or (get item :post) identity)
+          output (or (get item :output) identity)
+          result (apply function (pre input) params lookup env args)
+          result (post result)]
+      (output result))))
+
+(defn select-filter
+  "Matches one archived task selector against an input identifier. Lists are
+   conjunctions and vectors are disjunctions."
+  [selector identifier]
+  (cond
+    (fn? selector) (if (selector identifier) true false)
+    (or (string? selector) (symbol? selector) (keyword? selector))
+    (string/starts-with? (str identifier) (str selector))
+    (set? selector)
+    (reduce (fn [matched value]
+              (or matched (= value identifier)))
+            false
+            selector)
+    (list? selector)
+    (reduce (fn [matched part]
+              (and matched (select-filter part identifier)))
+            true
+            selector)
+    (vector? selector)
+    (reduce (fn [matched part]
+              (or matched (select-filter part identifier)))
+            false
+            selector)
+    :else
+    (throw (ex-info "Selector not valid" {:selector selector}))))
+
+(defn select-inputs
+  [task lookup env selector]
+  (let [item (task-section task :item)
+        list-function (get item :list)]
+    (if (nil? list-function)
+      (throw (ex-info "No :item/:list function defined"
+                      {:key [:item :list]}))
+      (let [inputs (vec (list-function lookup env))]
+        (if (= selector :all)
+          inputs
+          (vec (filter (fn [input] (select-filter selector input))
+                       inputs)))))))
+
+(defn wrap-input
+  [function task]
+  (fn [input params lookup env & args]
+    (let [item (task-section task :item)
+          selectable (not (nil? (get item :list)))]
+      (cond
+        (and selectable (= input :list))
+        ((get item :list) lookup env)
+
+        (and selectable
+             (or (keyword? input)
+                 (symbol? input)
+                 (string? input)
+                 (vector? input)
+                 (set? input)
+                 (list? input)))
+        (apply bulk/bulk task function
+               (select-inputs task lookup env input)
+               params lookup env args)
+
+        (vector? input)
+        (apply bulk/bulk task function input params lookup env args)
+
+        :else
+        (apply function input params lookup env args)))))
+
+(defn argument-index
+  [arguments]
+  (loop [index 0]
+    (if (= index (count arguments))
+      -1
+      (if (= :args (nth arguments index))
+        index
+        (recur (inc index))))))
+
+(defn vector-slice
+  [values start end]
+  (loop [index start
+         output []]
+    (if (= index end)
+      output
+      (recur (inc index) (conj output (nth values index))))))
+
+(defn split-arguments
+  [arguments]
+  (let [arguments (vec arguments)
+        index (argument-index arguments)]
+    (if (= -1 index)
+      [arguments []]
+      [(vector-slice arguments 0 index)
+       (vector-slice arguments (inc index) (count arguments))])))
+
+(defn task-inputs
+  ([task]
+   (let [construct (task-section task :construct)
+         input-function (get (or construct {}) :input)]
+     (task-inputs task
+                  (if input-function (input-function task) nil)
+                  {})))
+  ([task input]
+   (if (map? input)
+     (let [construct (task-section task :construct)
+           input-function (get (or construct {}) :input)]
+       (task-inputs task
+                    (if input-function (input-function task) nil)
+                    input))
+     (task-inputs task input {})))
+  ([task input params]
+   (let [construct (task-section task :construct)
+         env-function (or (get (or construct {}) :env)
+                          (fn [options] {}))]
+     (task-inputs task input params
+                  (env-function params))))
+  ([task input params env]
+   (let [construct (task-section task :construct)
+         lookup-function (or (get (or construct {}) :lookup)
+                             (fn [task options] {}))]
+     (task-inputs task input params
+                  (lookup-function task (merge env params))
+                  env)))
+  ([task input params lookup env]
+   [input params lookup env]))
+
+(defn invoke
+  [task & arguments]
+  (let [arguments (vec arguments)
+        marker-index (argument-index arguments)
+        requires-arguments (get (task-section task :main) :args?)
+        _ (if (and requires-arguments (= -1 marker-index))
+            (throw (ex-info "Require :args to specify additional arguments"
+                            {:input arguments}))
+            nil)
+        [task-arguments function-arguments] (split-arguments arguments)
+        input (first task-arguments)
+        provided-params (or (second task-arguments) {})
+        [input params lookup env]
+        (if (empty? task-arguments)
+          (task-inputs task)
+          (task-inputs task input provided-params))
+        params (merge (or (task-section task :params) {}) params)
+        function (wrap-input
+                  (wrap-execute (get (task-section task :main) :fn) task)
+                  task)]
+    (apply function input params lookup env function-arguments)))

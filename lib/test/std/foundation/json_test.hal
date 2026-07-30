@@ -1,21 +1,22 @@
 (ns std.foundation.json-test
-  (:require [std.lib.test :as test]
-            [std.foundation.json :as json]))
+  (:use code.test)
+  (:require [std.foundation.json :as json]))
 
 (def results
-  [(test/check "read"
-               (json/read "{\"a\":[1,2]}")
-               {"a" [1 2]})
-   (test/check "write"
-               (json/write {"a" [1 2]})
-               "{\"a\":[1,2]}")
-   (test/check "pretty"
-               (json/pretty {"a" 1} {})
-               "{\n  \"a\": 1\n}")
-   (test/check-error "pretty requires an options map"
-                     (json/pretty {"a" 1} nil))
-   (test/check "native implementation"
-               (std.native.Json/write {"a" 1})
-               "{\"a\":1}")])
+  [(fact "read"
+     (json/read "{\"a\":[1,2]}")
+     => {"a" [1 2]})
+   (fact "write"
+     (json/write {"a" [1 2]})
+     => "{\"a\":[1,2]}")
+   (fact "pretty"
+     (json/pretty {"a" 1} {})
+     => "{\n  \"a\": 1\n}")
+   (fact "pretty requires an options map"
+     (json/pretty {"a" 1} nil)
+     => (throws))
+   (fact "native implementation"
+     (std.native.Json/write {"a" 1})
+     => "{\"a\":1}")])
 
-(test/print-results results)
+(pr-str (run '[std.foundation.json-test]))

@@ -627,6 +627,19 @@ pub(crate) fn exception_function_values() -> Vec<(&'static str, Value)> {
     ]
 }
 
+pub(crate) fn basic_function_values() -> Vec<(&'static str, Value)> {
+    vec![(
+        "compare",
+        native_function("compare", 2, |arguments| {
+            Ok(Value::Number(match arguments[0].cmp(&arguments[1]) {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            }))
+        }),
+    )]
+}
+
 pub fn with_macros<R>(
     macros: Rc<RefCell<HashMap<(String, String), Rc<Function>>>>,
     operation: impl FnOnce() -> R,
@@ -6166,6 +6179,7 @@ fn collection_count(value: &Value) -> Result<Value, String> {
         Value::ByteBuffer(v) => v.borrow().len(),
         Value::Array(v) => v.borrow().len(),
         Value::Object(v) => v.borrow().len(),
+        Value::Struct(v) => v.values.len(),
         Value::Iterator(_) => {
             if !iterator_is_finite(value) {
                 return Err("count expects a finite collection".into());
@@ -6264,6 +6278,22 @@ fn collection_get(value: &Value, key: &Value, default: Value) -> Result<Value, S
                 .map(|(_, value)| value.clone())
                 .unwrap_or(default))
         }
+        Value::Struct(value) => {
+            let name = match key {
+                Value::String(name) => name.as_str(),
+                Value::Keyword(name) => name.as_str(),
+                Value::Symbol(name) if name.get_namespace().is_none() => name.get_name(),
+                _ => return Ok(default),
+            };
+            Ok(value
+                .ty
+                .fields
+                .iter()
+                .position(|candidate| candidate == name)
+                .and_then(|index| value.values.get(index))
+                .cloned()
+                .unwrap_or(default))
+        }
         _ => Err("get expects a collection".into()),
     }
 }
@@ -6302,10 +6332,25 @@ fn collection_assoc(value: &Value, key: &Value, replacement: Value) -> Result<Va
             }
             Ok(Value::Object(Rc::new(RefCell::new(output))))
         }
+        Value::Struct(value) => {
+            let name = marker_key(key, "struct")?;
+            let index = value
+                .ty
+                .fields
+                .iter()
+                .position(|candidate| candidate == &name)
+                .ok_or_else(|| format!("unknown struct field: {name}"))?;
+            let mut values = value.values.clone();
+            values[index] = replacement;
+            Ok(Value::Struct(Rc::new(StructValue {
+                ty: value.ty.clone(),
+                values,
+            })))
+        }
         Value::Nil => Ok(Value::Map(
             PMap::new().assoc_value(key.clone(), replacement),
         )),
-        _ => Err("assoc expects a map or object".into()),
+        _ => Err("assoc expects a map, object, or struct".into()),
     }
 }
 
@@ -6969,6 +7014,16 @@ pub(crate) fn call_value(callable: Value, arguments: Vec<Value>) -> Result<Value
                 ty,
                 values: arguments,
             })))
+        }
+        value @ Value::Struct(_) => {
+            let mut protocol_arguments = Vec::with_capacity(arguments.len() + 1);
+            protocol_arguments.push(value);
+            protocol_arguments.extend(arguments);
+            protocol_call(
+                "std.protocol.ifn/IFn",
+                "invoke",
+                &protocol_arguments,
+            )
         }
         Value::Keyword(keyword) => match arguments.as_slice() {
             [target] => lookup(target, &Value::Keyword(keyword), Value::Nil),
@@ -10112,7 +10167,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             Form::Symbol(n)
                 if [
                     "list?", "vector?", "map?", "set?", "keyword?", "symbol?", "string?",
-                    "number?",
+                    "number?", "fn?",
                 ]
                 .contains(&n.as_str()) =>
             {
@@ -10141,6 +10196,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                             | Value::BigInteger(_)
                             | Value::Decimal(_)
                     ),
+                    "fn?" => matches!(value, Value::Function(_)),
                     _ => unreachable!(),
                 }))
             }
