@@ -8831,12 +8831,24 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }));
                 if let Value::Protocol(protocol_value) = &protocol {
                     let current = namespace_registry()?.current();
-                    let previous_protocol = current
-                        .resolve(&crate::lang::data::Symbol::parse(&name))
-                        .filter(|var| var.get_namespace() == Some(namespace.as_str()))
-                        .and_then(|var| match var.deref_value() {
-                            Value::Protocol(previous) => Some(previous),
+                    let previous_protocol = env
+                        .get(&name)
+                        .cloned()
+                        .map(deref_value)
+                        .and_then(|value| match value {
+                            Value::Protocol(previous) if previous.name == protocol_value.name => {
+                                Some(previous)
+                            }
                             _ => None,
+                        })
+                        .or_else(|| {
+                            current
+                                .resolve(&crate::lang::data::Symbol::parse(&name))
+                                .filter(|var| var.get_namespace() == Some(namespace.as_str()))
+                                .and_then(|var| match var.deref_value() {
+                                    Value::Protocol(previous) => Some(previous),
+                                    _ => None,
+                                })
                         });
                     for method in protocol_value.methods.keys() {
                         for (local, var) in current.mappings() {
@@ -8854,14 +8866,19 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                                 }
                             }
                         }
-                        let existing = current
+                        let existing_namespace_var = current
                             .resolve(&crate::lang::data::Symbol::parse(method))
                             .filter(|var| var.get_namespace() == Some(namespace.as_str()));
-                        let same_protocol_reload = existing.is_some()
+                        let existing_environment_var =
+                            matches!(env.get(method), Some(Value::Var(_)));
+                        let same_protocol_reload = (existing_namespace_var.is_some()
+                            || existing_environment_var)
                             && previous_protocol
                                 .as_ref()
                                 .is_some_and(|previous| previous.methods.contains_key(method));
-                        if existing.is_some() && !same_protocol_reload {
+                        if (existing_namespace_var.is_some() || existing_environment_var)
+                            && !same_protocol_reload
+                        {
                             return Err(format!(
                                 "Protocol method Var already exists: {namespace}/{method}"
                             ));
