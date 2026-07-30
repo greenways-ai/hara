@@ -1,12 +1,10 @@
 ;; ============================================================================
 ;; std.foundation.file — small portable filesystem boundary.
 ;;
-;; Pure activation declaration: every public Var is a host builtin; kind,
-;; docstring, and arglists come from the host export catalog (@HaraExport).
-;; Schema annotations for these symbols belong in std.typed.core-sigs
-;; (specs/hara/data/typed.edn).
+;; HAL functions provide discoverable docs and schemas while delegating
+;; capability-gated filesystem access to std.native.File.
 ;;
-;; Contract (specs/hara/data/foundation.edn, :semantics :file):
+;; Contract:
 ;;   * Every operation except resolve touches the filesystem, returns a
 ;;     promise, and requires the :file capability.
 ;;   * (resolve root path) is synchronous, touches nothing, and returns a
@@ -17,14 +15,69 @@
 ;;   * mkdir creates missing parents and succeeds when the directory exists.
 ;;   * delete removes a file or an empty directory; it is never recursive.
 ;;
-;; Authority: specs/hara/data/foundation.edn (:runtime-libraries std.foundation.file)
+;; Native inventory: specs/language/draft/conformance/native.edn
+;;
+;;                         root + path
+;;                              |
+;;                              v
+;;                    synchronous resolve
+;;                              |
+;;                              v
+;;                      normalized path
+;;                              |
+;;          +---------+---------+---------+---------+
+;;          |         |         |         |         |
+;;          v         v         v         v         v
+;;        read      write     exists?    list    mkdir/delete
+;;          |         |         |         |         |
+;;          +---------+---------+---------+---------+
+;;                              |
+;;                              v
+;;                       Promise<result>
+;;                              |
+;;                              v
+;;                   host filesystem provider
 ;; ============================================================================
-(ns std.foundation.file
-  (:config
-   {:builtins [resolve
-               read
-               write
-               exists?
-               list
-               mkdir
-               delete]}))
+(ns std.foundation.file)
+
+(defn ^{:schema [:fn [:str :str] :str]}
+  resolve
+  "Returns normalized path relative to root without touching the filesystem."
+  [root path]
+  (std.native.File/resolve root path))
+
+(defn ^{:schema [:fn [:str] :promise]}
+  read
+  "Returns a promise of bytes read from path."
+  [path]
+  (std.native.File/read path))
+
+(defn ^{:schema [:fn [:str :any] :promise]}
+  write
+  "Returns a promise after overwriting or creating path with contents."
+  [path contents]
+  (std.native.File/write path contents))
+
+(defn ^{:schema [:fn [:str] :promise]}
+  exists?
+  "Returns a promise of whether path exists."
+  [path]
+  (std.native.File/exists? path))
+
+(defn ^{:schema [:fn [:str] :promise]}
+  list
+  "Returns a promise of normalized child paths in deterministic order."
+  [path]
+  (std.native.File/list path))
+
+(defn ^{:schema [:fn [:str] :promise]}
+  mkdir
+  "Returns a promise after creating path and missing parent directories."
+  [path]
+  (std.native.File/mkdir path))
+
+(defn ^{:schema [:fn [:str] :promise]}
+  delete
+  "Returns a promise after deleting a file or empty directory."
+  [path]
+  (std.native.File/delete path))

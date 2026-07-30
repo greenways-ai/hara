@@ -83,6 +83,23 @@ story.innerHTML = `
         </p>
       </header>
 
+      <section class="story-source" aria-label="Live Hara visualizer source">
+        <header>
+          <span>src/visualizer.hal</span>
+          <output data-story-source-status>LOADING SOURCE</output>
+        </header>
+        <textarea data-story-source spellcheck="false" wrap="off"
+          aria-label="Editable Hara visualizer source">;; Loading the live .hal file…</textarea>
+        <footer>
+          <span>CHANGE A PALETTE COLOUR, THEN REBUILD</span>
+          <div>
+            <button type="button" data-story-source-reset>RESET</button>
+            <button type="button" class="story-source-apply" data-story-source-apply>APPLY + REBUILD</button>
+          </div>
+        </footer>
+        <output class="story-source-error" data-story-source-error aria-live="polite" hidden></output>
+      </section>
+
       <section class="story-amp" aria-label="Compact Hara Amp instrument">
         <div class="story-visual">
           <canvas data-story-visualizer aria-label="Live Hara Amp visualizer"></canvas>
@@ -126,7 +143,7 @@ story.innerHTML = `
       <footer class="story-closeout">
         <p>
           <strong>MAKE IT YOURS.</strong>
-          Create the complete Hara Amp workspace with this EQ and visual mode.
+          Create the complete Hara Amp workspace with this EQ, visual mode, and edited HAL file.
           Greenways OS can carry the same live project into the page where you work.
         </p>
         <div class="story-actions">
@@ -198,6 +215,14 @@ function createAmp() {
     dbName: "hara-story-amp",
     onStatus({ stage, state, detail }) {
       updateNode(stage, state, detail);
+      if (stage === "hal") {
+        const sourceStatus = query("[data-story-source-status]", story);
+        sourceStatus.textContent =
+          state === "ready" ? `GEN ${instance.generation} // LIVE` :
+          state === "error" ? "REBUILD FAILED // PREVIOUS GEN LIVE" :
+          detail?.toUpperCase() || "REBUILDING";
+        sourceStatus.dataset.state = state;
+      }
       if (state === "error") showError(detail);
     },
     onFrame({ count }) {
@@ -232,7 +257,15 @@ function ensureAmp() {
       throw error;
     });
   }
-  return ampBoot;
+  return ampBoot.then((instance) => {
+    const editor = query("[data-story-source]", story);
+    if (!editor.dataset.loaded) {
+      editor.value = instance.source;
+      editor.dataset.loaded = "true";
+      query("[data-story-source-status]", story).textContent = `GEN ${instance.generation} // LIVE`;
+    }
+    return instance;
+  });
 }
 
 async function disposeAmp() {
@@ -246,6 +279,34 @@ function showError(message) {
   const output = query("[data-story-error]", story);
   output.hidden = false;
   output.textContent = message;
+}
+
+async function rebuildSource({ reset = false } = {}) {
+  const editor = query("[data-story-source]", story);
+  const apply = query("[data-story-source-apply]", story);
+  const resetButton = query("[data-story-source-reset]", story);
+  const status = query("[data-story-source-status]", story);
+  const errorOutput = query("[data-story-source-error]", story);
+  apply.disabled = true;
+  resetButton.disabled = true;
+  errorOutput.hidden = true;
+  status.textContent = "PREPARING NEW GENERATION";
+  status.dataset.state = "loading";
+  try {
+    const instance = await ensureAmp();
+    if (reset) editor.value = instance.originalSource;
+    const result = await instance.rebuild(editor.value);
+    status.textContent = `GEN ${result.generation} // LIVE`;
+    status.dataset.state = "ready";
+  } catch (error) {
+    status.textContent = `GEN ${amp?.generation ?? 0} // PREVIOUS VERSION LIVE`;
+    status.dataset.state = "error";
+    errorOutput.hidden = false;
+    errorOutput.textContent = String(error?.message ?? error);
+  } finally {
+    apply.disabled = false;
+    resetButton.disabled = false;
+  }
 }
 
 function showScreen(index) {
@@ -331,12 +392,26 @@ story.addEventListener("click", (event) => {
     return;
   }
 
+  if (event.target.closest("[data-story-source-apply]")) {
+    void rebuildSource();
+    return;
+  }
+
+  if (event.target.closest("[data-story-source-reset]")) {
+    void rebuildSource({ reset: true });
+    return;
+  }
+
   if (event.target.closest("[data-story-create]")) {
     const control = query("[data-story-create]", story);
     control.disabled = true;
     control.textContent = "CREATING…";
     document.dispatchEvent(new CustomEvent("hara:create-amp-workspace", {
-      detail: { preset: selectedPreset, mode: selectedMode }
+      detail: {
+        preset: selectedPreset,
+        mode: selectedMode,
+        source: query("[data-story-source]", story).value
+      }
     }));
   }
 });
@@ -344,6 +419,12 @@ story.addEventListener("click", (event) => {
 query("[data-story-preset]", story).addEventListener("change", (event) => {
   selectedPreset = event.target.value;
   amp?.setPreset(selectedPreset);
+});
+
+query("[data-story-source]", story).addEventListener("input", () => {
+  const status = query("[data-story-source-status]", story);
+  status.textContent = `GEN ${amp?.generation ?? 0} // CHANGED`;
+  status.dataset.state = "changed";
 });
 
 document.addEventListener("hara:amp-workspace-error", (event) => {

@@ -1180,6 +1180,21 @@ public final class HaraNodes {
           }
         }
         throw failure;
+      } catch (HaraException failure) {
+        for (CatchClause clause : catches) {
+          if (clause.matches(failure)) {
+            return clause.executeCatch(frame, failure);
+          }
+        }
+        throw failure;
+      } catch (RuntimeException failure) {
+        if (failure instanceof RecurException) throw failure;
+        for (CatchClause clause : catches) {
+          if (clause.matches(failure)) {
+            return clause.executeCatch(frame, failure);
+          }
+        }
+        throw failure;
       } finally {
         if (finallyBody != null) {
           finallyBody.execute(frame);
@@ -1623,7 +1638,7 @@ public final class HaraNodes {
         try {
           return Math.addExact(asLong(leftValue), asLong(rightValue));
         } catch (ArithmeticException overflow) {
-          return addPromoting(leftValue, rightValue);
+          throw new HaraException("integer overflow", this);
         }
       }
       if (leftValue instanceof Number && rightValue instanceof Number) {
@@ -1652,10 +1667,6 @@ public final class HaraNodes {
       return Num.add(left, right);
     }
 
-    @TruffleBoundary
-    private static Number addPromoting(Object left, Object right) {
-      return Num.addP((Number) left, (Number) right);
-    }
   }
 
   public static final class Numeric extends HaraExpressionNode {
@@ -1686,13 +1697,13 @@ public final class HaraNodes {
             try {
               return Math.subtractExact(left, right);
             } catch (ArithmeticException overflow) {
-              return applyPromoting(left, right);
+              throw new HaraException("integer overflow");
             }
           case MULTIPLY:
             try {
               return Math.multiplyExact(left, right);
             } catch (ArithmeticException overflow) {
-              return applyPromoting(left, right);
+              throw new HaraException("integer overflow");
             }
           case DIVIDE:
             return divideLongs(left, right);
@@ -1706,18 +1717,6 @@ public final class HaraNodes {
       @TruffleBoundary
       private Number divideLongs(long left, long right) {
         return Num.divide(left, right);
-      }
-
-      @TruffleBoundary
-      private Number applyPromoting(long left, long right) {
-        switch (this) {
-          case SUBTRACT:
-            return Num.minusP((Number) left, (Number) right);
-          case MULTIPLY:
-            return Num.multiplyP((Number) left, (Number) right);
-          default:
-            throw unsupportedOperator(this);
-        }
       }
 
       @TruffleBoundary

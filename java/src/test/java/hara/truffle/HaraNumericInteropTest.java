@@ -10,6 +10,7 @@ import com.oracle.truffle.api.interop.UnsupportedMessageException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.PolyglotException;
 import org.graalvm.polyglot.Value;
 import org.junit.Test;
 
@@ -45,17 +46,22 @@ public class HaraNumericInteropTest {
   }
 
   @Test
-  public void preservesExactNumbersAcrossThePolyglotBoundary() {
+  public void exposesOnlyLongsAndDoublesAtTheLanguageBoundary() {
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
-      Value integer = context.eval(HaraLanguage.ID, LARGE_INTEGER.toString());
+      Value integer = context.eval(HaraLanguage.ID, Long.toString(Long.MAX_VALUE));
       assertTrue(integer.isNumber());
-      assertEquals(LARGE_INTEGER, integer.as(BigInteger.class));
+      assertEquals(Long.MAX_VALUE, integer.asLong());
 
-      Value decimal = context.eval(HaraLanguage.ID, "1.2300M");
-      assertFalse(decimal.isNumber());
-      assertTrue(decimal.hasMembers());
-      assertEquals("1.23", decimal.getMember("value").asString());
-      assertEquals(2, decimal.getMember("scale").asInt());
+      Value floating = context.eval(HaraLanguage.ID, "1.23");
+      assertTrue(floating.isNumber());
+      assertEquals(1.23, floating.asDouble(), 0.0);
+
+      assertThrows(
+          PolyglotException.class,
+          () -> context.eval(HaraLanguage.ID, LARGE_INTEGER.toString()));
+      assertThrows(
+          PolyglotException.class,
+          () -> context.eval(HaraLanguage.ID, "1.2300M"));
     }
   }
 }

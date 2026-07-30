@@ -1,4 +1,4 @@
-(ns talo.common.grammar-spec)
+(ns tahto.common.grammar-spec)
 
 (def ^:dynamic *symbol* nil)
 

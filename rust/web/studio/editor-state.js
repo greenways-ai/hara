@@ -1,6 +1,82 @@
 const PAIRS = { "(": ")", "[": "]", "{": "}" };
 const CLOSERS = new Set(Object.values(PAIRS));
 
+/** Return complete top-level source forms, retaining their editor ranges.
+ * Comments and whitespace belong to neither adjacent form. An incomplete
+ * final form is retained so the evaluator can report its syntax error. */
+export function editorTopLevelForms(source) {
+  const forms = [];
+  let cursor = 0;
+  while (cursor < source.length) {
+    cursor = skipTrivia(source, cursor);
+    if (cursor >= source.length) break;
+    const start = cursor;
+    cursor = scanForm(source, cursor);
+    forms.push({ start, end: cursor, source: source.slice(start, cursor) });
+  }
+  return forms;
+}
+
+function skipTrivia(source, cursor) {
+  while (cursor < source.length) {
+    if (/\s/.test(source[cursor])) { cursor += 1; continue; }
+    if (source[cursor] !== ";") return cursor;
+    while (cursor < source.length && source[cursor] !== "\n") cursor += 1;
+  }
+  return cursor;
+}
+
+function scanForm(source, start) {
+  const first = source[start];
+  if (Object.hasOwn(PAIRS, first)) return scanCollection(source, start);
+  if (first === '"') return scanString(source, start);
+  if (first === "'" || first === "`" || first === "~" || first === "^" || first === "@") {
+    return scanForm(source, skipTrivia(source, start + 1));
+  }
+  if (first === "#" && Object.hasOwn(PAIRS, source[start + 1])) return scanCollection(source, start + 1);
+  let cursor = start;
+  while (cursor < source.length && !/\s/.test(source[cursor]) && !Object.hasOwn(PAIRS, source[cursor]) && !CLOSERS.has(source[cursor])) {
+    cursor += 1;
+  }
+  return cursor === start ? start + 1 : cursor;
+}
+
+function scanString(source, start) {
+  let cursor = start + 1;
+  let escaped = false;
+  while (cursor < source.length) {
+    const character = source[cursor++];
+    if (!escaped && character === '"') break;
+    escaped = !escaped && character === "\\";
+  }
+  return cursor;
+}
+
+function scanCollection(source, start) {
+  const stack = [PAIRS[source[start]]];
+  let cursor = start + 1;
+  let inString = false;
+  let inComment = false;
+  let escaped = false;
+  while (cursor < source.length && stack.length) {
+    const character = source[cursor++];
+    if (inComment) {
+      if (character === "\n") inComment = false;
+      continue;
+    }
+    if (inString) {
+      if (!escaped && character === '"') inString = false;
+      escaped = !escaped && character === "\\";
+      continue;
+    }
+    if (character === ";") { inComment = true; continue; }
+    if (character === '"') { inString = true; escaped = false; continue; }
+    if (Object.hasOwn(PAIRS, character)) { stack.push(PAIRS[character]); continue; }
+    if (character === stack.at(-1)) stack.pop();
+  }
+  return cursor;
+}
+
 function formsIn(source) {
   const forms = [];
   const stack = [];

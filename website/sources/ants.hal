@@ -21,6 +21,7 @@
 (def evap-cells-per-frame 256)
 (def pher-visible (/ pher-unit 2))
 (def home-off 20)
+(def steps-per-frame 2)
 
 ;; Directions are 0-7, starting at north and going clockwise.
 (def dir-delta
@@ -37,6 +38,7 @@
 
 (defn smaller [a b] (if (< a b) a b))
 (defn larger [a b] (if (> a b) a b))
+(defn absolute [value] (if (< value 0) (- 0 value) value))
 (defn array-get [values index] (. values (get index)))
 (defn array-set [values index value] (. values (set index value)))
 
@@ -344,6 +346,12 @@
      :evaporation-index evaporation-index
      :active-food (get simulation :active-food)}))
 
+(defn advance-world [simulation]
+  (loop [index 0 current simulation]
+    (if (< index steps-per-frame)
+      (recur (inc index) (step-world current))
+      current)))
+
 (defn cell-geometry [width height]
   (let [size (/ (larger width height) dim)]
     {:size size
@@ -530,7 +538,7 @@
             height (get frame "canvas/height")
             should-step true]
         (let [next-simulation
-              (if should-step (step-world simulation) simulation)
+              (if should-step (advance-world simulation) simulation)
               next-commands (render-events next-simulation)]
           (do
             (co/await

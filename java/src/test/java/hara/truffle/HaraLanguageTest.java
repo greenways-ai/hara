@@ -5,7 +5,6 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import hara.kernel.base.RT;
-import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
@@ -370,14 +369,13 @@ public class HaraLanguageTest {
       assertTrue(context.eval(HaraLanguage.ID, "(= 1 1.0)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(not= 1 2)").asBoolean());
       assertEquals(1, context.eval(HaraLanguage.ID, "(mod 7 3)").asLong());
-      assertTrue(context.eval(HaraLanguage.ID, "(< 1N 2N)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(< 1 2 3)").asBoolean());
       assertTrue(!context.eval(HaraLanguage.ID, "(< 1 3 2)").asBoolean());
-      assertTrue(context.eval(HaraLanguage.ID, "(< 1N 1.1M)").asBoolean());
-      assertTrue(context.eval(HaraLanguage.ID, "(= 1N 1.0M)").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(< 1 1.1)").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(= 1 1.0)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(= 1 1 1)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(not= 1 1 2)").asBoolean());
-      assertTrue(context.eval(HaraLanguage.ID, "(< 1.2M 1.3M)").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(< 1.2 1.3)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(< 1 2)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(apply < [1 2 3])").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(reduce < [1 2])").asBoolean());
@@ -389,9 +387,11 @@ public class HaraLanguageTest {
   @Test
   public void numericOverflowAndDivisionErrorsAreExplicit() {
     try (Context context = context()) {
-      Value overflow = context.eval(HaraLanguage.ID, "(+ 9223372036854775807 1)");
-      assertEquals(
-          BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.ONE), overflow.as(BigInteger.class));
+      PolyglotException overflow =
+          assertThrows(
+              PolyglotException.class,
+              () -> context.eval(HaraLanguage.ID, "(+ 9223372036854775807 1)"));
+      assertTrue(overflow.getMessage().contains("overflow"));
       PolyglotException divideByZero =
           assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(/ 1 0)"));
       assertTrue(divideByZero.getMessage().contains("Divide by zero"));
@@ -416,7 +416,7 @@ public class HaraLanguageTest {
       assertTrue(context.eval(HaraLanguage.ID, "(= ##NaN ##NaN)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(not= ##NaN 1)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(= -0.0 0.0)").asBoolean());
-      assertTrue(context.eval(HaraLanguage.ID, "(= 1.0M 1.00M)").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(= 1.0 1.00)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(= ##Inf ##Inf)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(< 1 ##Inf)").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(not= ##Inf 1)").asBoolean());
@@ -499,16 +499,13 @@ public class HaraLanguageTest {
   @Test
   public void convertsBetweenNumericRepresentationsExplicitly() {
     try (Context context = context()) {
-      assertEquals(
-          BigInteger.ONE, context.eval(HaraLanguage.ID, "(bigint 1.9)").as(BigInteger.class));
-
-      Value decimal = context.eval(HaraLanguage.ID, "(bigdec 1.2300)");
-      assertTrue(decimal.hasMembers());
-      assertEquals("1.23", decimal.getMember("value").asString());
-
-      assertEquals(2.25, context.eval(HaraLanguage.ID, "(+ (double 1.25M) 1.0)").asDouble(), 0.0);
-      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(+ 1.25M 1.0)"));
-      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(bigint \"1\")"));
+      assertEquals(1, context.eval(HaraLanguage.ID, "(long 1.9)").asLong());
+      assertEquals(-1, context.eval(HaraLanguage.ID, "(long -1.9)").asLong());
+      assertEquals(2.0, context.eval(HaraLanguage.ID, "(double 2)").asDouble(), 0.0);
+      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(long ##NaN)"));
+      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(long \"1\")"));
+      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "1N"));
+      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "1M"));
     }
   }
 
@@ -1227,39 +1224,208 @@ public class HaraLanguageTest {
     while (names.find()) {
       protocols.add(names.group(1));
     }
-    assertEquals(59, protocols.size());
+    Set<String> hiddenProtocols = Set.of("IColl", "IMetadata");
+    protocols.removeAll(hiddenProtocols);
+    assertEquals(50, protocols.size());
+    Set<String> unavailableProtocols =
+        Set.of(
+            "IColl",
+            "IMetadata",
+            "IHasRuntime",
+            "IRanged",
+            "IValidate",
+            "IComponentOptions",
+            "IComponentProps",
+            "IComponentQuery",
+            "IComponentTrack");
     try (Context context = context()) {
       for (String protocol : protocols) {
+        String protocolNamespace = "std.protocol." + protocol.toLowerCase(java.util.Locale.ROOT);
         assertTrue(
             protocol,
             context
-                .eval(HaraLanguage.ID, "std.foundation/" + protocol)
+                .eval(HaraLanguage.ID, protocolNamespace + "/" + protocol)
                 .toString()
-                .contains("std.foundation/" + protocol));
+                .contains(protocolNamespace + "/" + protocol));
+        assertTrue(
+            protocol,
+            context
+                .eval(
+                    HaraLanguage.ID,
+                    "(= std.foundation/"
+                        + protocol
+                        + " "
+                        + protocolNamespace
+                        + "/"
+                        + protocol
+                        + ")")
+                .asBoolean());
       }
       assertEquals(
           3L,
           context
-              .eval(HaraLanguage.ID, "(std.foundation/ICount/count [1 2 3])")
+              .eval(HaraLanguage.ID, "(std.protocol.icount/count [1 2 3])")
               .asLong());
       assertTrue(
           context
-              .eval(HaraLanguage.ID, "(std.foundation/ICas/cas (atom 1) 1 2)")
+              .eval(HaraLanguage.ID, "(std.protocol.icas/cas (atom 1) 1 2)")
               .asBoolean());
       assertEquals(
           6L,
           context
               .eval(
                   HaraLanguage.ID,
-                  "(std.foundation/IReduce/reduce [1 2 3] + 0)")
+                  "(std.protocol.ireduce/reduce [1 2 3] + 0)")
               .asLong());
       assertEquals(
           ":fulfilled",
           context
               .eval(
                   HaraLanguage.ID,
-                  "(std.foundation/IPromise/state (std.foundation.promise/from 7))")
+                  "(std.protocol.ipromise/state (std.foundation.promise/from 7))")
               .toString());
+      assertEquals(
+          ":loaded",
+          context
+              .eval(HaraLanguage.ID, "(require 'std.protocol.ifind) :loaded")
+              .toString());
+      PolyglotException obsoleteMethod =
+          assertThrows(
+              PolyglotException.class,
+              () -> context.eval(HaraLanguage.ID, "std.foundation/ICount/count"));
+      assertTrue(obsoleteMethod.getMessage().contains("Unbound symbol"));
+      for (String unavailableProtocol : unavailableProtocols) {
+        String hiddenNamespace =
+            "std.protocol." + unavailableProtocol.toLowerCase(java.util.Locale.ROOT);
+        PolyglotException hiddenCanonical =
+            assertThrows(
+                PolyglotException.class,
+                () ->
+                    context.eval(
+                        HaraLanguage.ID,
+                        hiddenNamespace + "/" + unavailableProtocol));
+        assertTrue(hiddenCanonical.getMessage().contains("Unbound symbol"));
+        PolyglotException hiddenFoundation =
+            assertThrows(
+                PolyglotException.class,
+                () ->
+                    context.eval(
+                        HaraLanguage.ID,
+                        "std.foundation/" + unavailableProtocol));
+        assertTrue(hiddenFoundation.getMessage().contains("Unbound symbol"));
+      }
+    }
+  }
+
+  @Test
+  public void sharedFoundationProtocolConformanceFixtureRuns() throws Exception {
+    String source =
+        Files.readString(
+            Path.of("lib/test-fixtures/std/foundation/protocol_conformance.hal"));
+    Matcher calls =
+        Pattern.compile("\\(std\\.protocol\\.[a-z]+/[a-z?\\-]+\\s+fixture").matcher(source);
+    int callCount = 0;
+    while (calls.find()) callCount++;
+    assertEquals(88, callCount);
+    assertTrue(!source.contains("protocol-call"));
+
+    try (Context context = context()) {
+      String result = context.eval(HaraLanguage.ID, source).toString();
+      assertTrue(result, !result.contains(":pass false"));
+      assertEquals(50, result.split(":pass true", -1).length - 1);
+    }
+  }
+
+  @Test
+  public void sharedFoundationProtocolFunctionalityFixtureRuns() throws Exception {
+    String source =
+        Files.readString(
+            Path.of("lib/test-fixtures/std/foundation/protocol_functionality.hal"));
+    String catalog =
+        Files.readString(
+            Path.of("specs/language/draft/conformance/protocol-method-cases.edn"));
+    assertEquals(88, catalog.split("\\{:protocol ", -1).length - 1);
+    Matcher methodVars =
+        Pattern.compile(
+                "(?m)^\\s*\\[?\\(protocol-case\\s+:[^\\s]+\\s+:[^\\s]+\\s+"
+                    + "(std\\.protocol\\.[a-z]+/[a-z?\\-]+)")
+            .matcher(source);
+
+    try (Context context = context()) {
+      String result = context.eval(HaraLanguage.ID, source).toString();
+      assertTrue(result, !result.contains(":pass false"));
+      assertEquals(88, result.split(":pass true", -1).length - 1);
+
+      int methodCount = 0;
+      while (methodVars.find()) {
+        methodCount++;
+        String methodVar = methodVars.group(1);
+        PolyglotException error =
+            assertThrows(
+                methodVar,
+                PolyglotException.class,
+                () -> context.eval(HaraLanguage.ID, "(" + methodVar + ")"));
+        assertTrue(
+            methodVar + " returned an uncategorized arity error: " + error.getMessage(),
+            error.getMessage().contains("protocol/arity"));
+      }
+      assertEquals(88, methodCount);
+
+      int failureCount = 0;
+      for (String line : source.split("\\R")) {
+        int quote = line.indexOf("'(std.protocol.");
+        if (quote < 0) continue;
+        failureCount++;
+        String quoted = line.substring(quote + 1);
+        int depth = 0;
+        int end = -1;
+        for (int index = 0; index < quoted.length(); index++) {
+          char character = quoted.charAt(index);
+          if (character == '(') depth++;
+          if (character == ')' && --depth == 0) {
+            end = index + 1;
+            break;
+          }
+        }
+        assertTrue("unbalanced failure form: " + line, end > 0);
+        String failureForm = quoted.substring(0, end);
+        String categorizedCall = null;
+        String uncategorizedError = null;
+        for (String receiver :
+            new String[] {
+              "(UnsupportedUseCase)",
+              "std.protocol.icount/ICount",
+              "nil",
+              "1",
+              ":unsupported",
+              "(fn [value] value)"
+            }) {
+          String call = failureForm.replaceFirst("unsupported", receiver);
+          try {
+            context.eval(HaraLanguage.ID, call);
+          } catch (PolyglotException error) {
+            if (error.getMessage().contains("protocol/unsupported-receiver")) {
+              categorizedCall = call;
+              break;
+            }
+            uncategorizedError = call + ": " + error.getMessage();
+          }
+        }
+        assertTrue(
+            "no receiver produced a categorized dispatch failure for "
+                + failureForm
+                + "; last error was "
+                + uncategorizedError,
+            categorizedCall != null);
+      }
+      assertEquals(88, failureCount);
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(try (std.protocol.icount/count) false "
+                      + "(catch Throwable error true))")
+              .asBoolean());
     }
   }
 

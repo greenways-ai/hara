@@ -1,0 +1,22 @@
+(ns tahto.protocol.compiler)
+
+(defprotocol INormalizer
+  (normalize-form [normalizer raw context]))
+
+(defprotocol IStager
+  (stage-form [stager input grammar context]))
+
+(defprotocol IInferencer
+  (infer-form [inferencer staged grammar context]))
+
+(defprotocol ILinter
+  (lint-form [linter staged inference grammar context]))
+
+(defprotocol IRewriter
+  (rewrite-form [rewriter staged grammar context]))
+
+(defprotocol IEmitter
+  (emit-form [emitter rewritten grammar context]))
+
+(defprotocol ICompiler
+  (compile-form [compiler raw options]))

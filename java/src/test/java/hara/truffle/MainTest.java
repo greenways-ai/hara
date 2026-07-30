@@ -9,10 +9,48 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.Base64;
 import org.junit.Test;
 
 public class MainTest {
+  @Test
+  public void projectCommandsRunAndReportStandardTestResults() throws Exception {
+    Path root = Files.createTempDirectory("hara-cli-project-");
+    try {
+      Files.createDirectories(root.resolve("src/demo_app"));
+      Files.createDirectories(root.resolve("test/demo_app"));
+      Files.writeString(
+          root.resolve("project.edn"),
+          "{:hara/type :project :hara/version \"1.0.0\" :project/id demo-app "
+              + ":project/version \"0.1.0\" :project/source-paths [\"src\"] "
+              + ":project/test-paths [\"test\"] :project/extension-paths [\"extensions\"] "
+              + ":project/main demo_app.main :project/capabilities #{} :project/dependencies {}}");
+      Files.writeString(
+          root.resolve("src/demo_app/main.hal"),
+          "(ns demo_app.main) (defn main [] \"Hello from demo-app\") (main)");
+      Files.writeString(
+          root.resolve("test/demo_app/main_test.hal"),
+          "(ns demo_app.main-test (:require [std.lib.test :as test])) "
+              + "(test/print-results [(test/check \"starter project runs\" true true)])");
+      ByteArrayOutputStream output = new ByteArrayOutputStream();
+      ByteArrayOutputStream error = new ByteArrayOutputStream();
+      PrintStream stdout = new PrintStream(output, true, StandardCharsets.UTF_8);
+      PrintStream stderr = new PrintStream(error, true, StandardCharsets.UTF_8);
+      assertEquals(0, Main.run(new String[] {"--project", root.toString(), "check"}, stdout, stderr));
+      assertEquals(0, Main.run(new String[] {"--project", root.toString(), "sync"}, stdout, stderr));
+      assertEquals(0, Main.run(new String[] {"--project", root.toString(), "sync", "--frozen"}, stdout, stderr));
+      assertEquals(0, Main.run(new String[] {"--project", root.toString(), "run"}, stdout, stderr));
+      assertEquals(0, Main.run(new String[] {"--project", root.toString(), "test"}, stdout, stderr));
+      assertEquals("", error.toString(StandardCharsets.UTF_8));
+      assertTrue(output.toString(StandardCharsets.UTF_8).contains("project check: demo-app 0.1.0"));
+      assertTrue(output.toString(StandardCharsets.UTF_8).contains("Hello from demo-app"));
+      assertTrue(output.toString(StandardCharsets.UTF_8).contains("test result: 1 passed, 0 failed"));
+    } finally {
+      Files.walk(root).sorted(Comparator.reverseOrder()).forEach(path -> { try { Files.deleteIfExists(path); } catch (Exception ignored) {} });
+    }
+  }
+
   @Test
   public void fileLibraryIsDefaultDeniedAndExplicitlyGranted() throws Exception {
     ByteArrayOutputStream deniedOutput = new ByteArrayOutputStream();
@@ -130,7 +168,7 @@ public class MainTest {
             new PrintStream(output, true, StandardCharsets.UTF_8),
             new PrintStream(error, true, StandardCharsets.UTF_8));
 
-    assertEquals(0, status);
+    assertEquals(error.toString(StandardCharsets.UTF_8), 0, status);
     assertEquals("42\n", output.toString(StandardCharsets.UTF_8));
     assertEquals("", error.toString(StandardCharsets.UTF_8));
   }
@@ -145,7 +183,7 @@ public class MainTest {
             new ByteArrayInputStream(new byte[0]),
             new PrintStream(output, true, StandardCharsets.UTF_8),
             new PrintStream(error, true, StandardCharsets.UTF_8));
-    assertEquals(0, status);
+    assertEquals(error.toString(StandardCharsets.UTF_8), 0, status);
     assertEquals("", error.toString(StandardCharsets.UTF_8));
   }
 
@@ -178,7 +216,7 @@ public class MainTest {
             new PrintStream(output, true, StandardCharsets.UTF_8),
             new PrintStream(error, true, StandardCharsets.UTF_8));
 
-    assertEquals(0, status);
+    assertEquals(error.toString(StandardCharsets.UTF_8), 0, status);
     assertTrue(output.toString(StandardCharsets.UTF_8).contains("L0 conformance passed:"));
     assertEquals("", error.toString(StandardCharsets.UTF_8));
   }

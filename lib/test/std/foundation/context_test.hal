@@ -1,0 +1,29 @@
+(ns std.foundation.context-test
+  (:require [std.lib.test :as test]
+            [std.foundation.context :as context]))
+
+(def results
+  [(test/check "space creates, starts, invokes, and stops a registered runtime"
+               (let [runtime (context/runtime-null)
+                     space (context/space)
+                     pointer (context/pointer :context-test {:answer 42})]
+                 (context/registry-install
+                  :context-test
+                  {:runtimes {:default {:create (fn [config] (context/runtime-null))
+                                        :config {:base 1}}}})
+                 (context/registry-scratch-set! :context-test runtime)
+                 (context/context-set space :context-test :default {:local 2})
+                 (let [started (context/rt-start space :context-test)]
+                   [(context/ptr-context pointer)
+                    (context/ptr-val pointer :answer)
+                    (context/context-list space)
+                    (context/rt-started? space :context-test)
+                    (context/call started :a :b)
+                    (std.foundation/invoke-as pointer :x :y)
+                    (context/invoke-in pointer runtime :z)
+                    (context/rt-stop space :context-test)
+                    (context/rt-stopped? space :context-test)]))
+               [:context-test 42 [:context-test] true [:a :b] [:x :y]
+                [:z] nil true])])
+
+(test/print-results results)

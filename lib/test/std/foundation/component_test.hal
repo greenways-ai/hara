@@ -1,0 +1,47 @@
+(ns std.foundation.component-test
+  (:require [std.lib.test :as test]
+            [std.foundation.component :as component]))
+
+(defstruct component-fixture [events])
+
+(extend-type component-fixture IComponent
+  (props [fixture] {})
+  (status [fixture] :ready)
+  (started? [fixture] false)
+  (stopped? [fixture] false)
+  (start [fixture] (do (swap! (:events fixture) conj :start) fixture))
+  (stop [fixture] (do (swap! (:events fixture) conj :stop) fixture))
+  (kill [fixture] (do (swap! (:events fixture) conj :kill) fixture))
+  (remote? [fixture] false))
+
+(defn fixture []
+  (std.foundation.component-test/component-fixture (atom [])))
+
+(def functions
+  {:pre-start (fn [value] (do (swap! (:events value) conj :pre-start) value))
+   :post-start (fn [value] (do (swap! (:events value) conj :post-start) value))
+   :pre-stop (fn [value] (do (swap! (:events value) conj :pre-stop) value))
+   :post-stop (fn [value] (do (swap! (:events value) conj :post-stop) value))})
+
+(def results
+  [(test/check "component start and stop preserve lifecycle hook order"
+               (let [value (fixture)
+                     options {:functions functions
+                              :hooks {:pre-start [:pre-start]
+                                      :post-start [:post-start]
+                                      :pre-stop [:pre-stop]
+                                      :post-stop [:post-stop]}}]
+                 (component/start value options)
+                 (component/stop value options)
+                 (deref (:events value)))
+               [:pre-start :start :post-start :pre-stop :stop :post-stop])
+   (test/check "component kill uses stop hooks around the kill protocol method"
+               (let [value (fixture)
+                     options {:functions functions
+                              :hooks {:pre-stop [:pre-stop]
+                                      :post-stop [:post-stop]}}]
+                 (component/kill value options)
+                 (deref (:events value)))
+               [:pre-stop :kill :post-stop])])
+
+(test/print-results results)

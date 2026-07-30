@@ -1,10 +1,8 @@
 ;; ============================================================================
 ;; std.foundation.coroutine — portable coroutine library (foundation boundary).
 ;;
-;; Pure activation declaration: every public Var is a host builtin; kind,
-;; docstring, and arglists come from the host export catalog (@HaraExport).
-;; Schema annotations for these symbols belong in std.typed.core-sigs
-;; (specs/hara/data/typed.edn).
+;; HAL functions provide discoverable docs and schemas while delegating
+;; coroutine creation, yielding, and awaiting to std.native.Coroutine.
 ;;
 ;; Contract:
 ;;   * create builds a suspended coroutine; resume steps it past the next
@@ -12,14 +10,69 @@
 ;;   * close releases a live coroutine; await bridges a coroutine to a
 ;;     promise.
 ;;
-;; Authority: specs/hara/data/foundation.edn (:runtime-libraries std.foundation.coroutine)
+;; Native inventory: specs/language/draft/conformance/native.edn
+;;
+;;                       function
+;;                          |
+;;                          v
+;;                       create
+;;                          |
+;;                          v
+;;                     :suspended
+;;                          |
+;;                 resume(arguments)
+;;                          |
+;;                          v
+;;                      :running
+;;                    /          \
+;;                   v            v
+;;            yield(value)      return/error
+;;                   |            |
+;;                   v            v
+;;              :suspended       :done
+;;                   |
+;;                   +--- await(Promise) pauses until settlement
 ;; ============================================================================
-(ns std.foundation.coroutine
-  (:config
-   {:builtins [create
-               resume
-               yield
-               status
-               coroutine?
-               close
-               await]}))
+(ns std.foundation.coroutine)
+
+(defn ^{:schema [:fn [:fn] :any]}
+  create
+  "Creates a suspended coroutine from function."
+  [function]
+  (std.native.Coroutine/create function))
+
+(defn ^{:schema [:fn [:any] :bool]}
+  coroutine?
+  "Returns true when value is a coroutine."
+  [value]
+  (std.native.Coroutine/instance? value))
+
+(defn ^{:schema [:fn [:any] :keyword]}
+  status
+  "Returns coroutine's scheduler state."
+  [coroutine]
+  (ICoroutine/status coroutine))
+
+(defn ^{:schema [:fn [:any & :any] :any]}
+  resume
+  "Advances coroutine, supplying optional resume arguments."
+  [coroutine & arguments]
+  (apply ICoroutine/resume coroutine arguments))
+
+(defn ^{:schema [:fn [:any] :any]}
+  close
+  "Closes coroutine and releases its scheduler state."
+  [coroutine]
+  (IClose/close coroutine))
+
+(defn ^{:schema [:fn [:any] :any]}
+  yield
+  "Suspends the current coroutine with value."
+  [value]
+  (std.native.Coroutine/yield value))
+
+(defn ^{:schema [:fn [:promise] :any]}
+  await
+  "Suspends until promise settles, then returns or throws its result."
+  [promise]
+  (std.native.Coroutine/await promise))

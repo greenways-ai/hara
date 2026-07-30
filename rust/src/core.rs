@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_lines)] // Temporary compatibility facade during Java-port split.
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 pub use crate::kernel::Form;
 use crate::kernel::{NamespaceRegistry, Var as KernelVar, VarOrigin};
@@ -50,6 +50,50 @@ pub struct GuestProtocol {
     pub methods: HashMap<String, usize>,
 }
 
+#[derive(Debug, Clone)]
+pub struct NativeType {
+    pub name: String,
+    pub methods: Vec<String>,
+    pub metadata: Option<Rc<Metadata>>,
+}
+
+pub(crate) const NATIVE_TYPES: &[(&str, &[&str])] = &[
+    ("Maths", &["abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "ceil", "cos", "cosh", "exp", "floor", "pow", "sin", "sinh", "sqrt", "tan", "tanh"]),
+    ("Numbers", &["long", "double"]),
+    ("Bits", &["and", "or", "xor", "not", "shift-left", "shift-right"]),
+    ("String", &["length", "blank?", "includes?", "starts-with?", "ends-with?", "char-at", "slice", "index-of", "last-index-of", "join", "split", "split-lines", "repeat", "replace", "replace-first", "trim", "trim-left", "trim-right", "upper", "lower", "capitalize", "decapitalize", "pad-left", "pad-right", "reverse", "encode-utf8", "decode-utf8", "comp", "lt?", "gt?", "to-fixed"]),
+    ("Bytes", &["new", "instance?", "count", "get", "set", "copy", "slice", "u8", "s8"]),
+    ("File", &["resolve", "read", "write", "exists?", "list", "mkdir", "delete"]),
+    ("Socket", &["connect", "listen", "endpoint", "events", "next", "send", "close"]),
+    ("Promise", &["run", "new", "from", "all", "delay", "instance?"]),
+    ("Coroutine", &["create", "yield", "await", "instance?"]),
+    ("Array", &["new", "instance?"]),
+    ("Object", &["new", "instance?"]),
+    ("Runtime", &["load-string", "macroexpand-1", "gensym", "var-sym"]),
+    ("Printer", &["str", "pr-str"]),
+    ("Edn", &["read"]),
+    ("Json", &["read", "write", "pretty"]),
+    ("Regex", &["instance?"]),
+    ("UUID", &["instance?"]),
+    ("Error", &["new", "message", "class"]),
+];
+
+pub(crate) fn native_type_values() -> Vec<(String, Value)> {
+    NATIVE_TYPES
+        .iter()
+        .map(|(name, methods)| {
+            (
+                (*name).to_owned(),
+                Value::NativeType(Rc::new(NativeType {
+                    name: format!("std.native/{name}"),
+                    methods: methods.iter().map(|method| (*method).to_owned()).collect(),
+                    metadata: None,
+                })),
+            )
+        })
+        .collect()
+}
+
 pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
     (
         "IApplicable",
@@ -64,15 +108,6 @@ pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
     ("ICas", &[("cas", 3)]),
     ("IClose", &[("close", 1)]),
     (
-        "IColl",
-        &[
-            ("start-string", 1),
-            ("end-string", 1),
-            ("sep-string", 1),
-            ("iterator", 1),
-        ],
-    ),
-    (
         "IComponent",
         &[
             ("props", 1),
@@ -85,19 +120,6 @@ pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
             ("remote?", 1),
         ],
     ),
-    ("IComponentOptions", &[("options", 1)]),
-    ("IComponentProps", &[("props", 1)]),
-    (
-        "IComponentQuery",
-        &[
-            ("started?", 1),
-            ("stopped?", 1),
-            ("info", 2),
-            ("remote?", 1),
-            ("health", 1),
-        ],
-    ),
-    ("IComponentTrack", &[("track-path", 1)]),
     ("IConj", &[("conj", 2)]),
     ("ICons", &[("cons", 2)]),
     ("IContext", &[("call", usize::MAX)]),
@@ -123,7 +145,6 @@ pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
     ("IExInfo", &[("data", 1)]),
     ("IFind", &[("find", 2)]),
     ("IFn", &[("invoke", usize::MAX)]),
-    ("IHasRuntime", &[("runtime", 1)]),
     ("IHash", &[("hash", 1)]),
     ("IHashCached", &[("hash-current", 1), ("hash-put", 2)]),
     ("IIndexed", &[("index-of", 2)]),
@@ -132,7 +153,6 @@ pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
     ("IIter", &[("iter", 1)]),
     ("IIterator", &[("iter-next?", 1), ("iter-next", 1)]),
     ("ILookup", &[("lookup", usize::MAX)]),
-    ("IMetadata", &[("metatype", 1)]),
     ("IMutable", &[]),
     ("INamespaced", &[("name", 1), ("namespace", 1)]),
     ("INth", &[("nth", 2)]),
@@ -161,7 +181,6 @@ pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
     ("IPopLast", &[("pop-last", 1)]),
     ("IPushFirst", &[("push-first", 2)]),
     ("IPushLast", &[("push-last", 2)]),
-    ("IRanged", &[("range-max", 1), ("range-min", 1)]),
     ("IRealize", &[("realized?", 1), ("realize", 1)]),
     ("IReduce", &[("reduce", usize::MAX)]),
     ("IReset", &[("reset", 2)]),
@@ -182,7 +201,6 @@ pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
     ),
     ("IToMutable", &[("to-mutable", 1)]),
     ("IToPersistent", &[("to-persistent", 1)]),
-    ("IValidate", &[("validate", 2), ("validator", 1)]),
     (
         "IWatch",
         &[("watch-add", 3), ("watch-remove", 2), ("watch-list", 1)],
@@ -231,21 +249,61 @@ pub(crate) fn builtin_protocol_method_values() -> Vec<(String, String, Value)> {
     FOUNDATION_PROTOCOLS
         .iter()
         .flat_map(|(protocol, methods)| {
-            methods.iter().map(move |(method, _)| {
+            methods.iter().map(move |(method, arity)| {
                 let namespace = builtin_protocol_namespace(protocol);
                 let protocol_name = builtin_protocol_name(protocol);
                 let method_name = (*method).to_owned();
                 let display_name = format!("{namespace}/{method}");
+                let arity_display_name = display_name.clone();
+                let (minimum_arity, maximum_arity) =
+                    builtin_protocol_arity_range(protocol, method, *arity);
                 (
                     namespace,
                     (*method).to_owned(),
                     native_variadic_function(&display_name, move |arguments| {
+                        if arguments.len() < minimum_arity
+                            || maximum_arity.is_some_and(|maximum| arguments.len() > maximum)
+                        {
+                            let expected = match maximum_arity {
+                                Some(maximum) if maximum == minimum_arity => {
+                                    minimum_arity.to_string()
+                                }
+                                Some(maximum) => format!("{minimum_arity} to {maximum}"),
+                                None => format!("at least {minimum_arity}"),
+                            };
+                            return Err(format!(
+                                "protocol/arity: {arity_display_name} expects {expected} arguments, received {}",
+                                arguments.len()
+                            ));
+                        }
                         protocol_call(&protocol_name, &method_name, &arguments)
                     }),
                 )
             })
         })
         .collect()
+}
+
+fn builtin_protocol_arity_range(
+    protocol: &str,
+    method: &str,
+    declared_arity: usize,
+) -> (usize, Option<usize>) {
+    if declared_arity != usize::MAX {
+        return (declared_arity, Some(declared_arity));
+    }
+    match (protocol, method) {
+        ("ILookup", "lookup") | ("IReduce", "reduce") => (2, Some(3)),
+        ("IInvokeIn", "invoke-in") => (2, None),
+        _ => (1, None),
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExceptionInfo {
+    pub message: String,
+    pub data: Box<Value>,
+    pub cause: Option<Box<Value>>,
 }
 
 #[derive(Debug, Clone)]
@@ -289,7 +347,9 @@ pub enum Value {
     StructType(Rc<StructType>),
     Struct(Rc<StructValue>),
     Protocol(Rc<GuestProtocol>),
+    NativeType(Rc<NativeType>),
     Coroutine(Rc<Coroutine>),
+    ExceptionInfo(Rc<ExceptionInfo>),
     Nil,
 }
 
@@ -305,6 +365,12 @@ pub struct Function {
     clauses: Vec<Rc<Function>>,
     /// Whether this function is a macro expander.
     is_macro: bool,
+}
+
+struct MultiMethod {
+    dispatch: Rc<Function>,
+    methods: Vec<(Value, Rc<Function>)>,
+    default: Option<Rc<Function>>,
 }
 
 impl std::fmt::Debug for Function {
@@ -488,6 +554,45 @@ pub(crate) fn native_variadic_function(
         clauses: Vec::new(),
         is_macro: false,
     }))
+}
+
+pub(crate) fn exception_function_values() -> Vec<(&'static str, Value)> {
+    vec![
+        (
+            "ex-info",
+            native_variadic_function("ex-info", |arguments| {
+                if !(2..=3).contains(&arguments.len()) {
+                    return Err("ex-info expects a message, data map, and optional cause".into());
+                }
+                let Value::String(message) = &arguments[0] else {
+                    return Err("ex-info expects a string message".into());
+                };
+                if map_entries(&arguments[1]).is_none() {
+                    return Err("ex-info expects a data map".into());
+                }
+                Ok(Value::ExceptionInfo(Rc::new(ExceptionInfo {
+                    message: message.clone(),
+                    data: Box::new(arguments[1].clone()),
+                    cause: arguments.get(2).cloned().map(Box::new),
+                })))
+            }),
+        ),
+        (
+            "ex-data",
+            native_function("ex-data", 1, |arguments| match &arguments[0] {
+                Value::ExceptionInfo(value) => Ok((*value.data).clone()),
+                _ => Ok(Value::Nil),
+            }),
+        ),
+        (
+            "ex-message",
+            native_function("ex-message", 1, |arguments| match &arguments[0] {
+                Value::ExceptionInfo(value) => Ok(Value::String(value.message.clone())),
+                Value::String(value) => Ok(Value::String(value.clone())),
+                value => Ok(Value::String(value.display())),
+            }),
+        ),
+    ]
 }
 
 pub fn with_macros<R>(
@@ -1256,7 +1361,9 @@ impl PartialEq for Value {
             (Value::StructType(a), Value::StructType(b)) => Rc::ptr_eq(a, b),
             (Value::Struct(a), Value::Struct(b)) => Rc::ptr_eq(a, b),
             (Value::Protocol(a), Value::Protocol(b)) => Rc::ptr_eq(a, b),
+            (Value::NativeType(a), Value::NativeType(b)) => a.name == b.name,
             (Value::Coroutine(a), Value::Coroutine(b)) => Rc::ptr_eq(a, b),
+            (Value::ExceptionInfo(a), Value::ExceptionInfo(b)) => Rc::ptr_eq(a, b),
             (Value::Nil, Value::Nil) => true,
             _ => false,
         }
@@ -1322,7 +1429,9 @@ impl Ord for Value {
                 Value::StructType(_) => 27,
                 Value::Struct(_) => 28,
                 Value::Protocol(_) => 29,
-                Value::Coroutine(_) => 30,
+                Value::NativeType(_) => 30,
+                Value::Coroutine(_) => 31,
+                Value::ExceptionInfo(_) => 32,
             }
         }
         rank(self)
@@ -1496,6 +1605,7 @@ impl Value {
                     .join(" ")
             ),
             Self::Protocol(value) => format!("#protocol[{}]", value.name),
+            Self::NativeType(value) => format!("#<native-type {}>", value.name),
             Self::Coroutine(value) => {
                 let status = match &*value.state.borrow() {
                     CoroutineState::New(_) | CoroutineState::Suspended(_) => "suspended",
@@ -1503,6 +1613,9 @@ impl Value {
                     CoroutineState::Dead => "dead",
                 };
                 format!("#<coroutine {status}>")
+            }
+            Self::ExceptionInfo(value) => {
+                format!("#error[{} {}]", Self::String(value.message.clone()).display(), value.data.display())
             }
             Self::Nil => "nil".into(),
         }
@@ -1543,7 +1656,9 @@ impl Value {
                 Value::StructType(_) => 26,
                 Value::Struct(_) => 27,
                 Value::Protocol(_) => 28,
-                Value::Coroutine(_) => 29,
+                Value::NativeType(_) => 29,
+                Value::Coroutine(_) => 30,
+                Value::ExceptionInfo(_) => 31,
                 Value::Nil => 19,
                 Value::Float(_) => 20,
                 Value::BigInteger(_) => 21,
@@ -1624,9 +1739,11 @@ impl Value {
                 Value::StructType(v) => v.name.hash(state),
                 Value::Struct(v) => Rc::as_ptr(v).hash(state),
                 Value::Protocol(v) => v.name.hash(state),
+                Value::NativeType(v) => v.name.hash(state),
                 Value::Coroutine(v) => {
                     Rc::as_ptr(v).hash(state);
                 }
+                Value::ExceptionInfo(v) => Rc::as_ptr(v).hash(state),
                 Value::Nil => {}
             }
         }
@@ -1717,6 +1834,14 @@ impl ProtocolRegistry {
             )) {
                 return call_function(function, arguments.to_vec());
             }
+            if FOUNDATION_PROTOCOLS
+                .iter()
+                .any(|(name, _)| builtin_protocol_name(name) == protocol)
+            {
+                return Err(format!(
+                    "protocol/unsupported-receiver: missing protocol implementation: {protocol}/{method}"
+                ));
+            }
         }
         if self
             .guest_declarations
@@ -1765,90 +1890,145 @@ impl ProtocolRegistry {
                 });
             }
         }
-        registry.register("std.foundation/ICount", "count", protocol_count);
-        registry.register("std.foundation/INth", "nth", protocol_nth);
-        registry.register("std.foundation/ILookup", "lookup", protocol_lookup);
-        registry.register("std.foundation/IFind", "find", protocol_find);
-        registry.register("std.foundation/IAssoc", "assoc", protocol_assoc);
-        registry.register("std.foundation/IConj", "conj", protocol_conj);
-        registry.register("std.foundation/ICons", "cons", protocol_cons);
-        registry.register("std.foundation/IDissoc", "dissoc", protocol_dissoc);
-        registry.register("std.foundation/IEmpty", "empty", protocol_empty);
-        registry.register("std.foundation/IEquality", "equality", protocol_equality);
-        registry.register("std.foundation/IDisplay", "display", protocol_display);
-        registry.register("std.foundation/IHash", "hash", protocol_hash);
-        registry.register("std.foundation/IFn", "invoke", protocol_invoke);
-        registry.register("std.foundation/IPair", "key", protocol_pair_key);
-        registry.register("std.foundation/IPair", "value", protocol_pair_value);
+        registry.register("std.protocol.icount/ICount", "count", protocol_count);
+        registry.register("std.protocol.inth/INth", "nth", protocol_nth);
+        registry.register("std.protocol.ilookup/ILookup", "lookup", protocol_lookup);
+        registry.register("std.protocol.ifind/IFind", "find", protocol_find);
+        registry.register("std.protocol.iassoc/IAssoc", "assoc", protocol_assoc);
+        registry.register("std.protocol.iconj/IConj", "conj", protocol_conj);
+        registry.register("std.protocol.icons/ICons", "cons", protocol_cons);
+        registry.register("std.protocol.idissoc/IDissoc", "dissoc", protocol_dissoc);
+        registry.register("std.protocol.iempty/IEmpty", "empty", protocol_empty);
         registry.register(
-            "std.foundation/IPeekFirst",
+            "std.protocol.iequality/IEquality",
+            "equality",
+            protocol_equality,
+        );
+        registry.register(
+            "std.protocol.idisplay/IDisplay",
+            "display",
+            protocol_display,
+        );
+        registry.register(
+            "std.protocol.iexinfo/IExInfo",
+            "data",
+            |arguments| match arguments {
+                [Value::ExceptionInfo(value)] => Ok((*value.data).clone()),
+                [_] => Err("missing protocol implementation: std.protocol.iexinfo/IExInfo/data".into()),
+                _ => Err("IExInfo/data expects one argument".into()),
+            },
+        );
+        registry.register("std.protocol.ihash/IHash", "hash", protocol_hash);
+        registry.register("std.protocol.ifn/IFn", "invoke", protocol_invoke);
+        registry.register("std.protocol.ipair/IPair", "key", protocol_pair_key);
+        registry.register("std.protocol.ipair/IPair", "value", protocol_pair_value);
+        registry.register(
+            "std.protocol.ipeekfirst/IPeekFirst",
             "peek-first",
             protocol_peek_first,
         );
-        registry.register("std.foundation/IPeekLast", "peek-last", protocol_peek_last);
-        registry.register("std.foundation/IIter", "iter", protocol_iter);
-        registry.register("std.foundation/IIterator", "iter-next?", |arguments| {
-            arguments
-                .first()
-                .ok_or_else(|| "IIterator/iter-next? expects one argument".to_string())
-                .and_then(iterator_has_next)
-        });
-        registry.register("std.foundation/IIterator", "iter-next", |arguments| {
-            arguments
-                .first()
-                .ok_or_else(|| "IIterator/iter-next expects one argument".to_string())
-                .and_then(iterator_next)
-        });
-        registry.register("std.foundation/IClose", "close", |arguments| {
-            match arguments {
+        registry.register(
+            "std.protocol.ipeeklast/IPeekLast",
+            "peek-last",
+            protocol_peek_last,
+        );
+        registry.register("std.protocol.iiter/IIter", "iter", protocol_iter);
+        registry.register(
+            "std.protocol.iiterator/IIterator",
+            "iter-next?",
+            |arguments| {
+                arguments
+                    .first()
+                    .ok_or_else(|| "IIterator/iter-next? expects one argument".to_string())
+                    .and_then(iterator_has_next)
+            },
+        );
+        registry.register(
+            "std.protocol.iiterator/IIterator",
+            "iter-next",
+            |arguments| {
+                arguments
+                    .first()
+                    .ok_or_else(|| "IIterator/iter-next expects one argument".to_string())
+                    .and_then(iterator_next)
+            },
+        );
+        registry.register(
+            "std.protocol.iclose/IClose",
+            "close",
+            |arguments| match arguments {
                 [Value::Coroutine(coroutine)] => {
                     coroutine_close(coroutine)?;
                     Ok(Value::Coroutine(coroutine.clone()))
                 }
                 [value] => iterator_close(value),
                 _ => Err("IClose/close expects one argument".into()),
-            }
-        });
+            },
+        );
         registry.register(
-            "std.foundation/INamespaced",
+            "std.protocol.inamespaced/INamespaced",
             "name",
             protocol_namespaced_name,
         );
         registry.register(
-            "std.foundation/INamespaced",
+            "std.protocol.inamespaced/INamespaced",
             "namespace",
             protocol_namespaced_namespace,
         );
-        registry.register("std.foundation/IObjType", "meta", protocol_meta);
-        registry.register("std.foundation/IObjType", "with-meta", protocol_with_meta);
-        registry.register("std.foundation/IDeref", "deref", protocol_deref);
-        registry.register("std.foundation/IReset", "reset", protocol_reset);
-        registry.register("std.foundation/ICas", "cas", protocol_cas);
-        registry.register("std.foundation/IReduce", "reduce", protocol_reduce);
-        registry.register("std.foundation/IPromise", "state", protocol_promise_state);
-        registry.register("std.foundation/IPromise", "value", protocol_promise_value);
-        registry.register("std.foundation/IPromise", "then", |arguments| {
+        registry.register("std.protocol.iobjtype/IObjType", "meta", protocol_meta);
+        registry.register(
+            "std.protocol.iobjtype/IObjType",
+            "with-meta",
+            protocol_with_meta,
+        );
+        registry.register("std.protocol.ideref/IDeref", "deref", protocol_deref);
+        registry.register("std.protocol.ireset/IReset", "reset", protocol_reset);
+        registry.register("std.protocol.icas/ICas", "cas", protocol_cas);
+        registry.register("std.protocol.ireduce/IReduce", "reduce", protocol_reduce);
+        registry.register(
+            "std.protocol.ipromise/IPromise",
+            "state",
+            protocol_promise_state,
+        );
+        registry.register(
+            "std.protocol.ipromise/IPromise",
+            "value",
+            protocol_promise_value,
+        );
+        registry.register("std.protocol.ipromise/IPromise", "then", |arguments| {
             protocol_promise_chain("promise/then", arguments)
         });
-        registry.register("std.foundation/IPromise", "catch", |arguments| {
+        registry.register("std.protocol.ipromise/IPromise", "catch", |arguments| {
             protocol_promise_chain("promise/catch", arguments)
         });
-        registry.register("std.foundation/IPromise", "finally", |arguments| {
+        registry.register("std.protocol.ipromise/IPromise", "finally", |arguments| {
             protocol_promise_chain("promise/finally", arguments)
         });
-        registry.register("std.foundation/IPromise", "cancel", protocol_promise_cancel);
         registry.register(
-            "std.foundation/ICoroutine",
+            "std.protocol.ipromise/IPromise",
+            "cancel",
+            protocol_promise_cancel,
+        );
+        registry.register(
+            "std.protocol.icoroutine/ICoroutine",
             "status",
             protocol_coroutine_status,
         );
-        registry.register("std.foundation/IWatch", "watch-add", protocol_watch_add);
         registry.register(
-            "std.foundation/IWatch",
+            "std.protocol.iwatch/IWatch",
+            "watch-add",
+            protocol_watch_add,
+        );
+        registry.register(
+            "std.protocol.iwatch/IWatch",
             "watch-remove",
             protocol_watch_remove,
         );
-        registry.register("std.foundation/IWatch", "watch-list", protocol_watch_list);
+        registry.register(
+            "std.protocol.iwatch/IWatch",
+            "watch-list",
+            protocol_watch_list,
+        );
         registry
     }
 }
@@ -1862,6 +2042,29 @@ thread_local! {
     static ACTIVE_SOCKET_PROVIDER: RefCell<Option<Rc<dyn SocketProvider>>> = const { RefCell::new(None) };
     static HOST_CALL_HANDLER: RefCell<Option<Rc<dyn Fn(String, String, Vec<Value>) -> Result<Value, String>>>> = const { RefCell::new(None) };
     static NAMESPACE_SOURCE_PROVIDER: RefCell<Option<Rc<dyn Fn(&str) -> Option<String>>>> = const { RefCell::new(None) };
+    static ACTIVE_THROWN_VALUE: RefCell<Option<(String, Value)>> = const { RefCell::new(None) };
+    static ACTIVE_MULTIMETHODS: RefCell<HashMap<String, Rc<RefCell<MultiMethod>>>> = RefCell::new(HashMap::new());
+}
+
+pub(crate) fn thrown_error(value: Value) -> String {
+    let error = format!("thrown: {}", value.display());
+    ACTIVE_THROWN_VALUE.with(|active| {
+        *active.borrow_mut() = Some((error.clone(), value));
+    });
+    error
+}
+
+pub(crate) fn caught_error(error: &str) -> Value {
+    ACTIVE_THROWN_VALUE.with(|active| {
+        let mut active = active.borrow_mut();
+        if active
+            .as_ref()
+            .is_some_and(|(thrown_error, _)| thrown_error == error)
+        {
+            return active.take().unwrap().1;
+        }
+        Value::String(error.to_owned())
+    })
 }
 
 /// Runs an evaluation with a namespace registry available to namespace builtins.
@@ -1899,6 +2102,7 @@ pub(crate) fn binding_is_local(var: &KernelVar<Value>) -> bool {
 pub(crate) fn protected_fallback_binding(
     env: &HashMap<String, Value>,
     name: &str,
+    metadata: Option<Rc<Metadata>>,
 ) -> Option<Value> {
     if definition_origin() != VarOrigin::HalFallback {
         return None;
@@ -1910,6 +2114,7 @@ pub(crate) fn protected_fallback_binding(
                 VarOrigin::RustLibrary | VarOrigin::RuntimePrimitive
             ) =>
         {
+            var.set_hara_metadata(merge_metadata(var.hara_metadata(), metadata));
             Some(var.deref_value())
         }
         _ => None,
@@ -1985,6 +2190,31 @@ pub fn select_namespace_environment(
         .map(|(name, var)| (name.as_str().to_owned(), Value::Var(var)))
         .collect();
     refresh_namespace_environment(registry, env);
+}
+
+pub(crate) fn refer_startup_defaults(
+    registry: &NamespaceRegistry<Value>,
+    namespace: &str,
+) {
+    let target = registry.find_or_create(namespace);
+    if namespace != "std.foundation" {
+        if let Some(foundation) = registry.find("std.foundation") {
+            for (name, var) in foundation.mappings() {
+                if target.resolve(&name).is_none() {
+                    target.map_var(name, var);
+                }
+            }
+        }
+    }
+    for (protocol, _) in FOUNDATION_PROTOCOLS {
+        let protocol_namespace = builtin_protocol_namespace(protocol);
+        if let Some(source) = registry.find(&protocol_namespace) {
+            target.alias(protocol, source);
+        }
+    }
+    if let Some(edn) = registry.find("std.foundation.edn") {
+        target.alias("edn", edn);
+    }
 }
 
 /// Runs an evaluation with a registry available to protocol dispatch.
@@ -2177,6 +2407,7 @@ fn socket_operation(
     forms: &[Form],
     env: &mut HashMap<String, Value>,
 ) -> Result<Value, String> {
+    let operation = operation.strip_prefix("std.native.Socket/").unwrap_or(operation);
     match operation {
         "socket/connect" => {
             if forms.len() != 4 {
@@ -2212,6 +2443,65 @@ fn socket_operation(
                 .map(|handle| Value::Number(handle as i64))
                 .map_err(|error| socket_error(operation, error))
         }
+        "socket/listen" => {
+            if forms.len() != 4 {
+                return Err("socket/listen expects a host, port, options, and callback".into());
+            }
+            let host = match eval(&forms[0], env)? {
+                Value::String(value) => value,
+                _ => return Err("socket/listen expects a host string".into()),
+            };
+            let port = match eval(&forms[1], env)? {
+                Value::Number(value) if (0..=u16::MAX as i64).contains(&value) => value as u16,
+                _ => return Err("socket/listen expects a valid port".into()),
+            };
+            let _options = eval(&forms[2], env)?;
+            let callback = match eval(&forms[3], env)? {
+                Value::Function(value) => value,
+                _ => return Err("socket/listen expects a callback".into()),
+            };
+            let callback = Rc::new(move |event| {
+                let _ = call_function(&callback, vec![socket_server_event_value(event)]);
+            });
+            socket_provider(operation)?
+                .listen(&host, port, callback)
+                .map(|handle| Value::Number(handle as i64))
+                .map_err(|error| socket_error(operation, error))
+        }
+        "socket/endpoint" => {
+            if forms.len() != 1 {
+                return Err("socket/endpoint expects a server".into());
+            }
+            let server = socket_handle(&eval(&forms[0], env)?, "socket/endpoint")?;
+            socket_provider(operation)?
+                .endpoint(server)
+                .map(|(host, port)| Value::Map(PMap::from_iter([
+                    (Value::Keyword("host".into()), Value::String(host)),
+                    (Value::Keyword("port".into()), Value::Number(port as i64)),
+                ])))
+                .map_err(|error| socket_error(operation, error))
+        }
+        "socket/events" => {
+            if forms.len() != 2 {
+                return Err("socket/events expects a socket handle and options".into());
+            }
+            let handle = socket_handle(&eval(&forms[0], env)?, "socket/events")?;
+            let _options = eval(&forms[1], env)?;
+            socket_provider(operation)?
+                .events(handle)
+                .map(|stream| Value::Number(stream as i64))
+                .map_err(|error| socket_error(operation, error))
+        }
+        "socket/next" => {
+            if forms.len() != 1 {
+                return Err("socket/next expects a socket stream".into());
+            }
+            let stream = socket_handle(&eval(&forms[0], env)?, "socket/next")?;
+            socket_provider(operation)?
+                .next(stream)
+                .map(Value::Promise)
+                .map_err(|error| socket_error(operation, error))
+        }
         "socket/send" => {
             if forms.len() != 2 {
                 return Err("socket/send expects a socket connection and bytes".into());
@@ -2244,6 +2534,13 @@ fn socket_operation(
                 .map_err(|error| socket_error(operation, error))
         }
         _ => unreachable!(),
+    }
+}
+
+fn socket_handle(value: &Value, operation: &str) -> Result<SocketHandle, String> {
+    match value {
+        Value::Number(value) if *value >= 0 => Ok(*value as SocketHandle),
+        _ => Err(format!("{operation} expects a socket handle")),
     }
 }
 /// Installs the explicit host-call boundary for one evaluation.
@@ -2387,6 +2684,45 @@ pub enum SocketEvent {
     Failed(SocketHandle, String),
 }
 
+pub type SocketServerCallback = Rc<dyn Fn(SocketServerEvent)>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SocketServerEvent {
+    Open { server: SocketHandle, connection: SocketHandle },
+    Data { server: SocketHandle, connection: SocketHandle, bytes: Vec<u8> },
+    Closed { server: SocketHandle, connection: SocketHandle },
+    Failed { server: SocketHandle, connection: SocketHandle, error: String },
+}
+
+fn socket_server_event_value(event: SocketServerEvent) -> Value {
+    let mut entries = Vec::new();
+    match event {
+        SocketServerEvent::Open { server, connection } => {
+            entries.push((Value::Keyword("type".into()), Value::Keyword("open".into())));
+            entries.push((Value::Keyword("server".into()), Value::Number(server as i64)));
+            entries.push((Value::Keyword("connection".into()), Value::Number(connection as i64)));
+        }
+        SocketServerEvent::Data { server, connection, bytes } => {
+            entries.push((Value::Keyword("type".into()), Value::Keyword("data".into())));
+            entries.push((Value::Keyword("server".into()), Value::Number(server as i64)));
+            entries.push((Value::Keyword("connection".into()), Value::Number(connection as i64)));
+            entries.push((Value::Keyword("bytes".into()), Value::Bytes(bytes)));
+        }
+        SocketServerEvent::Closed { server, connection } => {
+            entries.push((Value::Keyword("type".into()), Value::Keyword("close".into())));
+            entries.push((Value::Keyword("server".into()), Value::Number(server as i64)));
+            entries.push((Value::Keyword("connection".into()), Value::Number(connection as i64)));
+        }
+        SocketServerEvent::Failed { server, connection, error } => {
+            entries.push((Value::Keyword("type".into()), Value::Keyword("error".into())));
+            entries.push((Value::Keyword("server".into()), Value::Number(server as i64)));
+            entries.push((Value::Keyword("connection".into()), Value::Number(connection as i64)));
+            entries.push((Value::Keyword("error".into()), Value::String(error)));
+        }
+    }
+    Value::Map(PMap::from_iter(entries))
+}
+
 pub trait SocketProvider {
     fn connect(
         &self,
@@ -2396,12 +2732,33 @@ pub trait SocketProvider {
     ) -> Result<SocketHandle, SocketError>;
     fn send(&self, socket: SocketHandle, bytes: &[u8]) -> Result<usize, SocketError>;
     fn close(&self, socket: SocketHandle) -> Result<(), SocketError>;
+    fn listen(
+        &self,
+        _host: &str,
+        _port: u16,
+        _callback: SocketServerCallback,
+    ) -> Result<SocketHandle, SocketError> {
+        Err(SocketError::Unsupported)
+    }
+    fn endpoint(&self, _server: SocketHandle) -> Result<(String, u16), SocketError> {
+        Err(SocketError::Unsupported)
+    }
+    fn events(&self, _handle: SocketHandle) -> Result<SocketHandle, SocketError> {
+        Err(SocketError::Unsupported)
+    }
+    fn next(&self, _stream: SocketHandle) -> Result<Promise, SocketError> {
+        Err(SocketError::Unsupported)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::io::Write;
+use std::io::{Read, Write};
 #[cfg(not(target_arch = "wasm32"))]
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpListener, TcpStream};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{mpsc, Arc, Mutex};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(any(not(target_arch = "wasm32"), target_os = "wasi"))]
 use std::path::{Path, PathBuf};
 
@@ -2533,11 +2890,159 @@ impl FileProvider for NativeFileProvider {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Default)]
+#[derive(Clone)]
+enum RawSocketEvent {
+    Open { server: SocketHandle, connection: SocketHandle, stream: Arc<Mutex<TcpStream>> },
+    Data { server: SocketHandle, connection: SocketHandle, bytes: Vec<u8> },
+    Closed { server: SocketHandle, connection: SocketHandle },
+    Failed { server: SocketHandle, connection: SocketHandle, error: String },
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct NativeServer {
+    host: String,
+    port: u16,
+    alive: Arc<AtomicBool>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct NativeSocketStream {
+    handle: SocketHandle,
+    queue: VecDeque<Value>,
+    queued_bytes: usize,
+    pending: Option<Promise>,
+    closed: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct NativeSocketState {
+    next_handle: Arc<AtomicU64>,
+    sockets: HashMap<SocketHandle, TcpStream>,
+    callbacks: HashMap<SocketHandle, SocketCallback>,
+    servers: HashMap<SocketHandle, NativeServer>,
+    connections: HashMap<SocketHandle, Arc<Mutex<TcpStream>>>,
+    connection_servers: HashMap<SocketHandle, SocketHandle>,
+    server_callbacks: HashMap<SocketHandle, SocketServerCallback>,
+    streams: HashMap<SocketHandle, NativeSocketStream>,
+    sender: mpsc::Sender<RawSocketEvent>,
+    receiver: mpsc::Receiver<RawSocketEvent>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone)]
 pub struct NativeSocketProvider {
-    next_handle: Cell<SocketHandle>,
-    sockets: RefCell<HashMap<SocketHandle, TcpStream>>,
-    callbacks: RefCell<HashMap<SocketHandle, SocketCallback>>,
+    state: Rc<RefCell<NativeSocketState>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Default for NativeSocketProvider {
+    fn default() -> Self {
+        let (sender, receiver) = mpsc::channel();
+        Self {
+            state: Rc::new(RefCell::new(NativeSocketState {
+                next_handle: Arc::new(AtomicU64::new(1)),
+                sockets: HashMap::new(),
+                callbacks: HashMap::new(),
+                servers: HashMap::new(),
+                connections: HashMap::new(),
+                connection_servers: HashMap::new(),
+                server_callbacks: HashMap::new(),
+                streams: HashMap::new(),
+                sender,
+                receiver,
+            })),
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl NativeSocketProvider {
+    fn next_handle(&self) -> SocketHandle {
+        self.state.borrow().next_handle.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn pump(&self) {
+        loop {
+            let event = { self.state.borrow().receiver.try_recv().ok() };
+            let Some(event) = event else { break; };
+            self.dispatch(event);
+        }
+    }
+
+    fn wait_and_pump(&self) {
+        let event = { self.state.borrow().receiver.recv().ok() };
+        if let Some(event) = event {
+            self.dispatch(event);
+        }
+        self.pump();
+    }
+
+    fn dispatch(&self, raw: RawSocketEvent) {
+        let event = match raw {
+            RawSocketEvent::Open { server, connection, stream } => {
+                let mut state = self.state.borrow_mut();
+                state.connections.insert(connection, stream);
+                state.connection_servers.insert(connection, server);
+                SocketServerEvent::Open { server, connection }
+            }
+            RawSocketEvent::Data { server, connection, bytes } => {
+                SocketServerEvent::Data { server, connection, bytes }
+            }
+            RawSocketEvent::Closed { server, connection } => {
+                self.state.borrow_mut().connections.remove(&connection);
+                SocketServerEvent::Closed { server, connection }
+            }
+            RawSocketEvent::Failed { server, connection, error } => {
+                SocketServerEvent::Failed { server, connection, error }
+            }
+        };
+        let callback = {
+            self.state.borrow().server_callbacks.get(&match &event {
+                SocketServerEvent::Open { server, .. }
+                | SocketServerEvent::Data { server, .. }
+                | SocketServerEvent::Closed { server, .. }
+                | SocketServerEvent::Failed { server, .. } => *server,
+            }).cloned()
+        };
+        if let Some(callback) = callback {
+            callback(event.clone());
+        }
+        let (server, connection, bytes) = match &event {
+            SocketServerEvent::Open { server, connection }
+            | SocketServerEvent::Closed { server, connection }
+            | SocketServerEvent::Failed { server, connection, .. } => (*server, *connection, 0),
+            SocketServerEvent::Data { server, connection, bytes } => (*server, *connection, bytes.len()),
+        };
+        let value = socket_server_event_value(event);
+        let overflow = {
+            let mut state = self.state.borrow_mut();
+            let mut overflow = false;
+            for stream in state.streams.values_mut().filter(|stream| stream.handle == server || stream.handle == connection) {
+                if stream.closed { continue; }
+                if stream.queue.len() >= 256 || stream.queued_bytes.saturating_add(bytes) > 1_048_576 {
+                    stream.closed = true;
+                    if let Some(promise) = stream.pending.take() {
+                        promise.resolve(Value::Map(PMap::from_iter([
+                            (Value::Keyword("type".into()), Value::Keyword("error".into())),
+                            (Value::Keyword("error".into()), Value::String("buffer-overflow".into())),
+                        ])));
+                    }
+                    overflow = true;
+                    continue;
+                }
+                if let Some(promise) = stream.pending.take() {
+                    promise.resolve(value.clone());
+                } else {
+                    stream.queued_bytes += bytes;
+                    stream.queue.push_back(value.clone());
+                }
+            }
+            overflow
+        };
+        if overflow {
+            let _ = self.close(connection);
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2553,37 +3058,136 @@ impl SocketProvider for NativeSocketProvider {
         }
         let stream = TcpStream::connect((host, port))
             .map_err(|error| SocketError::Invalid(error.to_string()))?;
-        let handle = self.next_handle.get();
-        self.next_handle.set(handle + 1);
-        self.sockets.borrow_mut().insert(handle, stream);
-        self.callbacks.borrow_mut().insert(handle, callback.clone());
+        let handle = self.next_handle();
+        self.state.borrow_mut().sockets.insert(handle, stream);
+        self.state.borrow_mut().callbacks.insert(handle, callback.clone());
         callback(SocketEvent::Connected(handle));
         Ok(handle)
     }
 
     fn send(&self, socket: SocketHandle, bytes: &[u8]) -> Result<usize, SocketError> {
-        let mut sockets = self.sockets.borrow_mut();
-        let stream = sockets
+        let mut state = self.state.borrow_mut();
+        let stream = state.sockets
             .get_mut(&socket)
             .ok_or_else(|| SocketError::Invalid("unknown socket".into()))?;
         stream
             .write_all(bytes)
             .map_err(|error| SocketError::Invalid(error.to_string()))?;
-        drop(sockets);
-        if let Some(callback) = self.callbacks.borrow().get(&socket).cloned() {
+        drop(state);
+        if let Some(callback) = self.state.borrow().callbacks.get(&socket).cloned() {
             callback(SocketEvent::Data(socket, bytes.to_vec()));
         }
         Ok(bytes.len())
     }
 
     fn close(&self, socket: SocketHandle) -> Result<(), SocketError> {
-        if self.sockets.borrow_mut().remove(&socket).is_none() {
-            return Err(SocketError::Invalid("unknown socket".into()));
+        if self.state.borrow_mut().sockets.remove(&socket).is_some() {
+            if let Some(callback) = self.state.borrow_mut().callbacks.remove(&socket) {
+                callback(SocketEvent::Closed(socket));
+            }
+            return Ok(());
         }
-        if let Some(callback) = self.callbacks.borrow_mut().remove(&socket) {
-            callback(SocketEvent::Closed(socket));
+        let server = { self.state.borrow_mut().servers.remove(&socket) };
+        if let Some(server) = server {
+            server.alive.store(false, Ordering::Relaxed);
+            self.state.borrow_mut().server_callbacks.remove(&socket);
+            return Ok(());
         }
-        Ok(())
+        if let Some(stream) = self.state.borrow_mut().connections.remove(&socket) {
+            let server = self.state.borrow().connection_servers.get(&socket).copied().unwrap_or(0);
+            let _ = stream.lock().map(|stream| stream.shutdown(Shutdown::Both));
+            let _ = self.state.borrow().sender.send(RawSocketEvent::Closed { server, connection: socket });
+            self.pump();
+            return Ok(());
+        }
+        Err(SocketError::Invalid("unknown socket".into()))
+    }
+
+    fn listen(&self, host: &str, port: u16, callback: SocketServerCallback) -> Result<SocketHandle, SocketError> {
+        if host.is_empty() { return Err(SocketError::Invalid("host is required".into())); }
+        let listener = TcpListener::bind((host, port)).map_err(|error| SocketError::Invalid(error.to_string()))?;
+        let endpoint = listener.local_addr().map_err(|error| SocketError::Invalid(error.to_string()))?;
+        listener.set_nonblocking(true).map_err(|error| SocketError::Invalid(error.to_string()))?;
+        let server = self.next_handle();
+        let alive = Arc::new(AtomicBool::new(true));
+        let sender = self.state.borrow().sender.clone();
+        let next_handle = self.state.borrow().next_handle.clone();
+        let thread_alive = alive.clone();
+        std::thread::Builder::new().name(format!("hara-socket-{server}")).spawn(move || {
+            while thread_alive.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let connection = next_handle.fetch_add(1, Ordering::Relaxed);
+                        if let Err(error) = stream.set_nonblocking(false) {
+                            let _ = sender.send(RawSocketEvent::Failed { server, connection, error: error.to_string() });
+                            continue;
+                        }
+                        let shared = Arc::new(Mutex::new(stream));
+                        let _ = sender.send(RawSocketEvent::Open { server, connection, stream: shared.clone() });
+                        let reader = shared.clone();
+                        let reader_sender = sender.clone();
+                        std::thread::spawn(move || {
+                            let mut buffer = [0u8; 8192];
+                            loop {
+                                let read = match reader.lock() { Ok(mut stream) => stream.read(&mut buffer), Err(_) => return };
+                                match read {
+                                    Ok(0) => { let _ = reader_sender.send(RawSocketEvent::Closed { server, connection }); break; }
+                                    Ok(count) => { let _ = reader_sender.send(RawSocketEvent::Data { server, connection, bytes: buffer[..count].to_vec() }); }
+                                    Err(error) => { let _ = reader_sender.send(RawSocketEvent::Failed { server, connection, error: error.to_string() }); break; }
+                                }
+                            }
+                        });
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(std::time::Duration::from_millis(5)),
+                    Err(error) => { let _ = sender.send(RawSocketEvent::Failed { server, connection: 0, error: error.to_string() }); break; }
+                }
+            }
+        }).map_err(|error| SocketError::Invalid(error.to_string()))?;
+        let mut state = self.state.borrow_mut();
+        state.servers.insert(server, NativeServer { host: endpoint.ip().to_string(), port: endpoint.port(), alive });
+        state.server_callbacks.insert(server, callback);
+        Ok(server)
+    }
+
+    fn endpoint(&self, server: SocketHandle) -> Result<(String, u16), SocketError> {
+        let state = self.state.borrow();
+        let server = state.servers.get(&server).ok_or_else(|| SocketError::Invalid("unknown socket server".into()))?;
+        Ok((server.host.clone(), server.port))
+    }
+
+    fn events(&self, handle: SocketHandle) -> Result<SocketHandle, SocketError> {
+        let mut state = self.state.borrow_mut();
+        if !state.servers.contains_key(&handle) && !state.connections.contains_key(&handle) {
+            return Err(SocketError::Invalid("unknown socket handle".into()));
+        }
+        let stream = state.next_handle.fetch_add(1, Ordering::Relaxed);
+        state.streams.insert(stream, NativeSocketStream { handle, queue: VecDeque::new(), queued_bytes: 0, pending: None, closed: false });
+        Ok(stream)
+    }
+
+    fn next(&self, stream: SocketHandle) -> Result<Promise, SocketError> {
+        self.pump();
+        let promise = Promise::new();
+        {
+            let mut state = self.state.borrow_mut();
+            let stream = state.streams.get_mut(&stream).ok_or_else(|| SocketError::Invalid("unknown socket stream".into()))?;
+            if let Some(event) = stream.queue.pop_front() {
+                stream.queued_bytes = 0;
+                promise.resolve(event);
+                return Ok(promise);
+            }
+            if stream.closed {
+                promise.resolve(Value::Map(PMap::from_iter([ (Value::Keyword("type".into()), Value::Keyword("close".into())) ])));
+                return Ok(promise);
+            }
+            if stream.pending.is_some() { return Err(SocketError::Invalid("socket stream already has a pending next".into())); }
+            stream.pending = Some(promise.clone());
+        }
+        let provider = self.clone();
+        promise.set_poller(Rc::new(move || provider.pump()));
+        let provider = self.clone();
+        promise.set_waiter(Rc::new(move || provider.wait_and_pump()));
+        Ok(promise)
     }
 }
 
@@ -2616,6 +3220,9 @@ impl ProviderRegistry {
 
     pub fn install_file<P: FileProvider + 'static>(&mut self, provider: P) {
         self.file = Some(Rc::new(provider));
+    }
+    pub fn set_file(&mut self, provider: Option<Rc<dyn FileProvider>>) {
+        self.file = provider;
     }
     pub fn install_socket<P: SocketProvider + 'static>(&mut self, provider: P) {
         self.socket = Some(Rc::new(provider));
@@ -2918,7 +3525,9 @@ fn portable_type_name(value: &Value) -> &str {
         Value::StructType(_) => "struct-type",
         Value::Struct(_) => "struct",
         Value::Protocol(_) => "protocol",
+        Value::NativeType(_) => "native-type",
         Value::Coroutine(_) => "coroutine",
+        Value::ExceptionInfo(_) => "error",
     }
 }
 
@@ -2955,7 +3564,9 @@ pub fn receiver_category(value: &Value) -> &'static str {
         Value::StructType(_) => "struct-type",
         Value::Struct(_) => "struct",
         Value::Protocol(_) => "protocol",
+        Value::NativeType(_) => "native-type",
         Value::Coroutine(_) => "coroutine",
+        Value::ExceptionInfo(_) => "error",
     }
 }
 
@@ -2987,6 +3598,14 @@ fn parse_forms(source: &str) -> Result<Vec<Form>, String> {
     crate::kernel::parse_forms(source)
 }
 
+pub fn read_edn(source: &str) -> Result<Value, String> {
+    let forms = parse_forms(source).map_err(|error| format!("edn/read: {error}"))?;
+    if forms.len() != 1 {
+        return Err("edn/read expects exactly one value".into());
+    }
+    form_to_value(&forms[0]).map_err(|error| format!("edn/read: {error}"))
+}
+
 fn arithmetic(op: &str, args: &[Form], env: &mut HashMap<String, Value>) -> Result<Value, String> {
     if args.is_empty() {
         return Err(format!("{op} expects arguments"));
@@ -3000,21 +3619,21 @@ fn arithmetic(op: &str, args: &[Form], env: &mut HashMap<String, Value>) -> Resu
         .collect();
     let values = values?;
     let result = values.iter().skip(1).try_fold(values[0], |r, v| match op {
-        "+" => Ok::<i64, String>(r + v),
-        "-" => Ok::<i64, String>(r - v),
-        "*" => Ok::<i64, String>(r * v),
+        "+" => r.checked_add(*v).ok_or_else(|| "integer overflow".to_string()),
+        "-" => r.checked_sub(*v).ok_or_else(|| "integer overflow".to_string()),
+        "*" => r.checked_mul(*v).ok_or_else(|| "integer overflow".to_string()),
         "/" => {
             if *v == 0 {
                 Err("division by zero".into())
             } else {
-                Ok::<i64, String>(r / v)
+                r.checked_div(*v).ok_or_else(|| "integer overflow".to_string())
             }
         }
         "%" => {
             if *v == 0 {
                 Err("division by zero".into())
             } else {
-                Ok::<i64, String>(r % v)
+                r.checked_rem(*v).ok_or_else(|| "integer overflow".to_string())
             }
         }
         _ => unreachable!(),
@@ -3027,6 +3646,15 @@ fn bit_operation(
     args: &[Form],
     env: &mut HashMap<String, Value>,
 ) -> Result<Value, String> {
+    let op = match op.strip_prefix("std.native.Bits/").unwrap_or(op) {
+        "and" => "bit-and",
+        "or" => "bit-or",
+        "xor" => "bit-xor",
+        "not" => "bit-not",
+        "shift-left" => "bit-shift-left",
+        "shift-right" => "bit-shift-right",
+        operation => operation,
+    };
     let values = args
         .iter()
         .map(|form| eval(form, env))
@@ -3072,6 +3700,167 @@ fn bit_operation(
             Ok(Value::Number(result as i64))
         }
         _ => Err(format!("unknown bit operation: {op}")),
+    }
+}
+
+fn number_conversion(
+    operation: &str,
+    args: &[Form],
+    env: &mut HashMap<String, Value>,
+) -> Result<Value, String> {
+    let operation = operation
+        .strip_prefix("std.native.Numbers/")
+        .unwrap_or(operation);
+    if args.len() != 1 {
+        return Err(format!("{operation} expects one numeric value"));
+    }
+    let value = eval(&args[0], env)?;
+    match (operation, value) {
+        ("long", Value::Number(value)) => Ok(Value::Number(value)),
+        ("long", Value::Float(value))
+            if value.is_finite()
+                && value.trunc() >= i64::MIN as f64
+                && value.trunc() < -(i64::MIN as f64) =>
+        {
+            Ok(Value::Number(value.trunc() as i64))
+        }
+        ("double", Value::Number(value)) => Ok(Value::Float(value as f64)),
+        ("double", Value::Float(value)) => Ok(Value::Float(value)),
+        ("long" | "double", _) => {
+            Err(format!("{operation} cannot convert non-numeric value"))
+        }
+        _ => Err(format!("unknown number conversion: {operation}")),
+    }
+}
+
+fn numeric_to_f64(value: &Value, operation: &str) -> Result<f64, String> {
+    match value {
+        Value::Number(value) => Ok(*value as f64),
+        Value::Float(value) => Ok(*value),
+        Value::BigInteger(value) | Value::Decimal(value) => value
+            .parse::<f64>()
+            .map_err(|_| format!("{operation} expects a numeric value")),
+        _ => Err(format!("{operation} expects a numeric value")),
+    }
+}
+
+fn numeric_abs(value: Value) -> Result<Value, String> {
+    match value {
+        Value::Number(value) => match value.checked_abs() {
+            Some(value) => Ok(Value::Number(value)),
+            None => Err("integer overflow".into()),
+        },
+        Value::Float(value) => Ok(Value::Float(value.abs())),
+        Value::BigInteger(value) => Ok(Value::BigInteger(
+            value.strip_prefix('-').unwrap_or(&value).to_string(),
+        )),
+        Value::Decimal(value) => Ok(Value::Decimal(
+            value.strip_prefix('-').unwrap_or(&value).to_string(),
+        )),
+        _ => Err("abs expects a numeric value".into()),
+    }
+}
+
+fn math_operation(
+    operation: &str,
+    args: &[Form],
+    env: &mut HashMap<String, Value>,
+) -> Result<Value, String> {
+    let operation = operation
+        .strip_prefix("std.native.Maths/")
+        .unwrap_or(operation);
+    let expected = if matches!(operation, "atan2" | "pow") {
+        2
+    } else {
+        1
+    };
+    if args.len() != expected {
+        return Err(format!(
+            "{operation} expects {} numeric {}",
+            if expected == 1 { "one" } else { "two" },
+            if expected == 1 { "value" } else { "values" }
+        ));
+    }
+    let values = args
+        .iter()
+        .map(|form| eval(form, env))
+        .collect::<Result<Vec<_>, _>>()?;
+    if operation == "abs" {
+        return numeric_abs(values.into_iter().next().unwrap());
+    }
+    let first = numeric_to_f64(&values[0], operation)?;
+    let result = match operation {
+        "acos" => first.acos(),
+        "acosh" => first.acosh(),
+        "asin" => first.asin(),
+        "asinh" => first.asinh(),
+        "atan" => first.atan(),
+        "atan2" => first.atan2(numeric_to_f64(&values[1], operation)?),
+        "atanh" => first.atanh(),
+        "ceil" => first.ceil(),
+        "cos" => first.cos(),
+        "cosh" => first.cosh(),
+        "exp" => first.exp(),
+        "floor" => first.floor(),
+        "pow" => first.powf(numeric_to_f64(&values[1], operation)?),
+        "sin" => first.sin(),
+        "sinh" => first.sinh(),
+        "sqrt" => first.sqrt(),
+        "tan" => first.tan(),
+        "tanh" => first.tanh(),
+        _ => return Err(format!("unknown math operation: {operation}")),
+    };
+    Ok(Value::Float(result))
+}
+
+fn native_error_operation(
+    operation: &str,
+    args: &[Form],
+    env: &mut HashMap<String, Value>,
+) -> Result<Value, String> {
+    let operation = operation
+        .strip_prefix("std.native.Error/")
+        .unwrap_or(operation);
+    match operation {
+        "new" => {
+            if !(2..=3).contains(&args.len()) {
+                return Err("std.native.Error/new expects a message, data map, and optional cause"
+                    .into());
+            }
+            let values = args
+                .iter()
+                .map(|form| eval(form, env))
+                .collect::<Result<Vec<_>, _>>()?;
+            let Value::String(message) = &values[0] else {
+                return Err("std.native.Error/new expects a string message".into());
+            };
+            if map_entries(&values[1]).is_none() {
+                return Err("std.native.Error/new expects a data map".into());
+            }
+            Ok(Value::ExceptionInfo(Rc::new(ExceptionInfo {
+                message: message.clone(),
+                data: Box::new(values[1].clone()),
+                cause: values.get(2).cloned().map(Box::new),
+            })))
+        }
+        "message" => {
+            if args.len() != 1 {
+                return Err("std.native.Error/message expects one value".into());
+            }
+            Ok(match eval(&args[0], env)? {
+                Value::ExceptionInfo(value) => Value::String(value.message.clone()),
+                Value::String(value) => Value::String(value),
+                value => Value::String(value.display()),
+            })
+        }
+        "class" => {
+            if args.len() != 1 {
+                return Err("std.native.Error/class expects one value".into());
+            }
+            let value = eval(&args[0], env)?;
+            Ok(Value::String(portable_type_name(&value).into()))
+        }
+        _ => Err(format!("unknown native error operation: {operation}")),
     }
 }
 
@@ -3216,6 +4005,7 @@ fn value_metadata(value: &Value) -> Option<Rc<Metadata>> {
         Value::OrderedSet(value) => value.meta().cloned(),
         Value::SortedSet(value) => value.meta().cloned(),
         Value::Var(value) => value.hara_metadata(),
+        Value::NativeType(value) => value.metadata.clone(),
         _ => None,
     }
 }
@@ -3284,6 +4074,10 @@ fn namespaced_parts(value: &Value) -> Option<(String, Option<String>)> {
             value.get_name().to_owned(),
             value.get_namespace().map(str::to_owned),
         )),
+        Value::NativeType(value) => value
+            .name
+            .rsplit_once('/')
+            .map(|(namespace, name)| (name.to_owned(), Some(namespace.to_owned()))),
         _ => None,
     }
 }
@@ -3407,7 +4201,32 @@ fn protocol_find(arguments: &[Value]) -> Result<Value, String> {
 
 fn protocol_iter(arguments: &[Value]) -> Result<Value, String> {
     match arguments {
-        [value] => make_iterator(value.clone()),
+        [value]
+            if matches!(
+                value,
+                Value::Iterator(_)
+                    | Value::Nil
+                    | Value::String(_)
+                    | Value::Bytes(_)
+                    | Value::ByteBuffer(_)
+                    | Value::Array(_)
+                    | Value::Object(_)
+                    | Value::Map(_)
+                    | Value::OrderedMap(_)
+                    | Value::SortedMap(_)
+                    | Value::Trie(_)
+                    | Value::Set(_)
+                    | Value::OrderedSet(_)
+                    | Value::SortedSet(_)
+                    | Value::List(_)
+                    | Value::Cons(_)
+                    | Value::Queue(_)
+                    | Value::Tuple(_)
+                    | Value::Vector(_)
+            ) =>
+        {
+            make_iterator(value.clone())
+        }
         _ => Err("IIter/iter expects one value".into()),
     }
 }
@@ -3439,9 +4258,7 @@ fn protocol_cas(arguments: &[Value]) -> Result<Value, String> {
 
 fn protocol_reduce(arguments: &[Value]) -> Result<Value, String> {
     let (source, function, mut accumulator) = match arguments {
-        [source, Value::Function(function), initial] => {
-            (source, function, Some(initial.clone()))
-        }
+        [source, Value::Function(function), initial] => (source, function, Some(initial.clone())),
         [source, Value::Function(function)] => (source, function, None),
         _ => {
             return Err(
@@ -3481,10 +4298,14 @@ fn protocol_promise_value(arguments: &[Value]) -> Result<Value, String> {
 
 fn protocol_promise_chain(operation: &str, arguments: &[Value]) -> Result<Value, String> {
     match arguments {
-        [Value::Promise(promise), Value::Function(function)] => Ok(Value::Promise(
-            promise_chain(promise.clone(), operation, function.clone()),
+        [Value::Promise(promise), Value::Function(function)] => Ok(Value::Promise(promise_chain(
+            promise.clone(),
+            operation,
+            function.clone(),
+        ))),
+        _ => Err(format!(
+            "IPromise/{operation} expects a promise and function"
         )),
-        _ => Err(format!("IPromise/{operation} expects a promise and function")),
     }
 }
 
@@ -5291,6 +6112,76 @@ pub(crate) fn metadata_from_form(form: &Form) -> Result<Rc<Metadata>, String> {
     Ok(Metadata::new(entries))
 }
 
+fn merge_metadata(
+    existing: Option<Rc<Metadata>>,
+    overlay: Option<Rc<Metadata>>,
+) -> Option<Rc<Metadata>> {
+    match (existing, overlay) {
+        (None, None) => None,
+        (Some(metadata), None) | (None, Some(metadata)) => Some(metadata),
+        (Some(existing), Some(overlay)) => {
+            let mut entries = existing.entries().to_vec();
+            for (key, value) in overlay.entries() {
+                entries.retain(|(candidate, _)| candidate != key);
+                entries.push((key.clone(), value.clone()));
+            }
+            Some(Metadata::new(entries))
+        }
+    }
+}
+
+fn assoc_metadata(
+    metadata: Option<Rc<Metadata>>,
+    key: &str,
+    value: MetadataValue,
+) -> Option<Rc<Metadata>> {
+    merge_metadata(
+        metadata,
+        Some(Metadata::new(vec![(
+            MetadataValue::Keyword(Keyword::from(key)),
+            value,
+        )])),
+    )
+}
+
+fn definition_metadata(
+    mut metadata: Option<Rc<Metadata>>,
+    forms: &[Form],
+    private: bool,
+    macro_form: bool,
+) -> Result<(Option<Rc<Metadata>>, &[Form]), String> {
+    let mut rest = forms;
+    if let Some(Form::String(doc)) = rest.first() {
+        metadata = assoc_metadata(metadata, "doc", MetadataValue::String(doc.clone()));
+        rest = &rest[1..];
+    }
+    if let Some(Form::Map(_)) = rest.first() {
+        metadata = merge_metadata(metadata, Some(metadata_from_form(&rest[0])?));
+        rest = &rest[1..];
+    }
+    if rest.is_empty() {
+        return Ok((metadata, rest));
+    }
+    let arglists = if matches!(rest.first(), Some(Form::Vector(_))) {
+        vec![metadata_value(&rest[0])?]
+    } else {
+        rest.iter()
+            .map(|clause| match clause {
+                Form::List(parts) if !parts.is_empty() => metadata_value(&parts[0]),
+                _ => Err("function arity must be a list beginning with parameters".into()),
+            })
+            .collect::<Result<Vec<_>, String>>()?
+    };
+    metadata = assoc_metadata(metadata, "arglists", MetadataValue::Vector(arglists));
+    if private {
+        metadata = assoc_metadata(metadata, "private", MetadataValue::Boolean(true));
+    }
+    if macro_form {
+        metadata = assoc_metadata(metadata, "macro", MetadataValue::Boolean(true));
+    }
+    Ok((metadata, rest))
+}
+
 fn attach_metadata(value: Value, metadata: Rc<Metadata>) -> Result<Value, String> {
     Ok(match value {
         Value::Symbol(value) => Value::Symbol(value.with_meta(Some(metadata.clone()))),
@@ -5311,6 +6202,11 @@ fn attach_metadata(value: Value, metadata: Rc<Metadata>) -> Result<Value, String
             value.set_hara_metadata(Some(metadata));
             Value::Var(value)
         }
+        Value::NativeType(value) => Value::NativeType(Rc::new(NativeType {
+            name: value.name.clone(),
+            methods: value.methods.clone(),
+            metadata: Some(metadata),
+        })),
         Value::Keyword(value) => Value::Keyword(value),
         _ => return Err("metadata can only be applied to object values".into()),
     })
@@ -5870,9 +6766,37 @@ fn eval_require_spec(
         }
         _ => return Err("require expects vectors such as [chrome.api :as api]".into()),
     };
-    ensure_namespace(registry, env, &target)?;
     if options.len() % 2 != 0 {
         return Err(format!("Malformed require options for {target}"));
+    }
+    let lazy = options.chunks(2).any(|option| {
+        matches!(&option[0], Form::Keyword(keyword) if keyword.as_str() == "lazy")
+            && matches!(&option[1], Form::Bool(true))
+    });
+    if lazy {
+        let has_alias = options.chunks(2).any(|option| {
+            matches!(&option[0], Form::Keyword(keyword) if keyword.as_str() == "as")
+        });
+        if !has_alias {
+            return Err("require :lazy requires :as".into());
+        }
+        for option in options.chunks(2) {
+            match &option[0] {
+                Form::Keyword(keyword)
+                    if keyword.as_str() == "refer" || keyword.as_str() == "refer-macros" =>
+                {
+                    return Err(format!("require :lazy cannot be combined with :{}", keyword));
+                }
+                Form::Keyword(keyword)
+                    if keyword.as_str() == "lazy" && !matches!(&option[1], Form::Bool(true)) =>
+                {
+                    return Err("require :lazy expects true".into());
+                }
+                _ => {}
+            }
+        }
+    } else {
+        ensure_namespace(registry, env, &target)?;
     }
     for option in options.chunks(2) {
         let name = match &option[0] {
@@ -5885,11 +6809,16 @@ fn eval_require_spec(
                     Form::Symbol(alias) if !alias.contains('/') => alias.clone(),
                     _ => return Err("require :as expects an unqualified symbol".into()),
                 };
-                let namespace = registry
-                    .find(&target)
-                    .ok_or_else(|| format!("Cannot require missing namespace: {target}"))?;
-                registry.current().alias(alias, namespace);
+                if lazy {
+                    registry.current().lazy_alias(alias, &target);
+                } else {
+                    let namespace = registry
+                        .find(&target)
+                        .ok_or_else(|| format!("Cannot require missing namespace: {target}"))?;
+                    registry.current().alias(alias, namespace);
+                }
             }
+            "lazy" => {}
             other => return Err(format!("Unsupported require option: :{other}")),
         }
     }
@@ -5904,6 +6833,26 @@ fn eval_require_specs(
     for spec in specs {
         eval_require_spec(registry, env, spec)?;
     }
+    refresh_namespace_environment(registry, env);
+    Ok(())
+}
+
+fn force_lazy_alias(
+    registry: &NamespaceRegistry<Value>,
+    env: &mut HashMap<String, Value>,
+    symbol: &str,
+) -> Result<(), String> {
+    let Some((alias, _)) = symbol.split_once('/') else {
+        return Ok(());
+    };
+    let Some(target) = registry.current().lazy_target(alias) else {
+        return Ok(());
+    };
+    ensure_namespace(registry, env, target.as_str())?;
+    let namespace = registry
+        .find(target.as_str())
+        .ok_or_else(|| format!("Cannot require missing namespace: {target}"))?;
+    registry.current().alias(alias, namespace);
     refresh_namespace_environment(registry, env);
     Ok(())
 }
@@ -5932,6 +6881,7 @@ fn eval_namespace_form(fs: &[Form], env: &mut HashMap<String, Value>) -> Result<
         _ => return Err("ns expects a namespace symbol".into()),
     };
     let registry = namespace_registry()?;
+    refer_startup_defaults(&registry, &name);
     select_namespace_environment(&registry, env, &name);
     for clause in &fs[2..] {
         match clause {
@@ -6126,87 +7076,6 @@ fn eval_atom_form(
                 operation == "atom",
             ))))
         }
-        "reset!" => {
-            if forms.len() != 3 {
-                return Err("reset! expects an atom and value".into());
-            }
-            let atom = match eval(&forms[1], env)? {
-                Value::Atom(atom) => atom,
-                _ => return Err("reset! expects an atom".into()),
-            };
-            atom.reset(eval(&forms[2], env)?)
-        }
-        "compare:set!" => {
-            if forms.len() != 4 {
-                return Err("compare:set! expects an atom, old value, and new value".into());
-            }
-            let atom = match eval(&forms[1], env)? {
-                Value::Atom(atom) => atom,
-                _ => return Err("compare:set! expects an atom".into()),
-            };
-            let old = eval(&forms[2], env)?;
-            Ok(Value::Bool(
-                atom.compare_and_set(&old, eval(&forms[3], env)?)?,
-            ))
-        }
-        "watch-add" => {
-            if forms.len() != 4 {
-                return Err("watch-add expects an atom, key, and function".into());
-            }
-            let atom = match eval(&forms[1], env)? {
-                Value::Atom(atom) => atom,
-                _ => return Err("watch-add expects an atom".into()),
-            };
-            let key = eval(&forms[2], env)?;
-            let function = match eval(&forms[3], env)? {
-                Value::Function(function) => function,
-                _ => return Err("watch-add expects a function".into()),
-            };
-            atom.add_watch(key, function)?;
-            Ok(Value::Atom(atom))
-        }
-        "watch-remove" => {
-            if forms.len() != 3 {
-                return Err("watch-remove expects an atom and key".into());
-            }
-            let atom = match eval(&forms[1], env)? {
-                Value::Atom(atom) => atom,
-                _ => return Err("watch-remove expects an atom".into()),
-            };
-            atom.remove_watch(&eval(&forms[2], env)?)?;
-            Ok(Value::Atom(atom))
-        }
-        "watch-list" => {
-            if forms.len() != 2 {
-                return Err("watch-list expects an atom".into());
-            }
-            let atom = match eval(&forms[1], env)? {
-                Value::Atom(atom) => atom,
-                _ => return Err("watch-list expects an atom".into()),
-            };
-            Ok(iterator_from_values(atom.watch_entries()?))
-        }
-        "swap!" => {
-            if forms.len() < 3 {
-                return Err("swap! expects an atom, function, and optional arguments".into());
-            }
-            let atom = match eval(&forms[1], env)? {
-                Value::Atom(atom) => atom,
-                _ => return Err("swap! expects an atom".into()),
-            };
-            let function = match eval(&forms[2], env)? {
-                Value::Function(function) => function,
-                _ => return Err("swap! expects a function".into()),
-            };
-            let mut arguments = vec![atom.deref_value()];
-            arguments.extend(
-                forms[3..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?,
-            );
-            atom.reset(call_function(&function, arguments)?)
-        }
         _ => unreachable!("eval_atom_form called for an unknown operation"),
     }
 }
@@ -6277,7 +7146,14 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 vec![],
             ))
         }
-        Form::Symbol(n) => binding_value(env, n).ok_or_else(|| format!("unbound symbol: {n}")),
+        Form::Symbol(n) => {
+            if !env.contains_key(n) {
+                if let Ok(registry) = namespace_registry() {
+                    force_lazy_alias(&registry, env, n)?;
+                }
+            }
+            binding_value(env, n).ok_or_else(|| format!("unbound symbol: {n}"))
+        }
         Form::List(fs) if fs.is_empty() => Ok(Value::Nil),
         Form::List(fs) => match &fs[0] {
             Form::Symbol(n) if n == "fn" || n == "fn*" => {
@@ -6302,6 +7178,150 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 eval(&fs[1], env)
             }
+            Form::Symbol(n) if n == "load-string" => {
+                if fs.len() != 2 {
+                    return Err("load-string expects one string".into());
+                }
+                match eval(&fs[1], env)? {
+                    Value::String(source) => eval_value_text(&source, env),
+                    _ => Err("load-string expects a string".into()),
+                }
+            }
+            Form::Symbol(n) if n == "var-sym" => {
+                if fs.len() != 2 {
+                    return Err("var-sym expects one var".into());
+                }
+                match eval(&fs[1], env)? {
+                    Value::Var(var) => Ok(Value::Symbol(var.symbol().clone())),
+                    _ => Err("var-sym expects a var".into()),
+                }
+            }
+            Form::Symbol(n) if n == "ns-state" || n == "ns-loaded?" => {
+                if fs.len() != 2 {
+                    return Err(format!("{n} expects one namespace"));
+                }
+                let name = match eval(&fs[1], env)? {
+                    Value::Symbol(value) => value.as_str().to_owned(),
+                    Value::String(value) => value,
+                    _ => return Err(format!("{n} expects a namespace symbol or string")),
+                };
+                let registry = namespace_registry()?;
+                let loaded = registry.find(&name).is_some();
+                if n == "ns-loaded?" {
+                    Ok(Value::Bool(loaded))
+                } else {
+                    let deferred = registry
+                        .all()
+                        .into_iter()
+                        .flat_map(|namespace| namespace.lazy_aliases())
+                        .any(|(_, target)| target.as_str() == name);
+                    Ok(Value::Keyword(
+                        if loaded { "loaded" } else if deferred { "unloaded" } else { "unknown" }.into(),
+                    ))
+                }
+            }
+            Form::Symbol(n) if n == "ns-alias-state" => {
+                if fs.len() != 2 && fs.len() != 3 {
+                    return Err("ns-alias-state expects alias or namespace and alias".into());
+                }
+                let registry = namespace_registry()?;
+                let (owner, alias_form) = if fs.len() == 3 {
+                    let owner = match eval(&fs[1], env)? {
+                        Value::Symbol(value) => value.as_str().to_owned(),
+                        Value::String(value) => value,
+                        _ => return Err("ns-alias-state expects a namespace symbol or string".into()),
+                    };
+                    (owner, &fs[2])
+                } else {
+                    (registry.current().name().as_str().to_owned(), &fs[1])
+                };
+                let alias = match eval(alias_form, env)? {
+                    Value::Symbol(value) if value.get_namespace().is_none() => value,
+                    _ => return Err("ns-alias-state expects an unqualified alias symbol".into()),
+                };
+                let Some(namespace) = registry.find(&owner) else {
+                    return Ok(Value::Nil);
+                };
+                let target = namespace.lazy_target(alias.as_str()).or_else(|| {
+                    namespace
+                        .aliases()
+                        .into_iter()
+                        .find(|(name, _)| name == &alias)
+                        .map(|(_, target)| target.name().clone())
+                });
+                let Some(target) = target else { return Ok(Value::Nil); };
+                let state = if registry.find(target.as_str()).is_some() { "loaded" } else { "unloaded" };
+                Ok(Value::Map(PMap::from_iter([
+                    (Value::Keyword("alias".into()), Value::Symbol(alias)),
+                    (Value::Keyword("target".into()), Value::Symbol(target)),
+                    (Value::Keyword("state".into()), Value::Keyword(state.into())),
+                ])))
+            }
+            Form::Symbol(n) if n == "eval-in-ns" => {
+                if fs.len() != 3 {
+                    return Err("eval-in-ns expects namespace and forms".into());
+                }
+                let target = match eval(&fs[1], env)? {
+                    Value::Symbol(name) => name.as_str().to_owned(),
+                    Value::String(name) => name,
+                    _ => return Err("eval-in-ns expects a namespace symbol or string".into()),
+                };
+                let forms = iterator_values(eval(&fs[2], env)?)?
+                    .into_iter()
+                    .map(|value| value_to_form(&value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let registry = namespace_registry()?;
+                if registry.find(&target).is_none() {
+                    return Err(format!("eval-in-ns requires an existing namespace: {target}"));
+                }
+                let previous = registry.current().name().as_str().to_owned();
+                select_namespace_environment(&registry, env, &target);
+                let result = (|| {
+                    let mut result = Value::Nil;
+                    for form in &forms {
+                        result = eval(form, env)?;
+                    }
+                    Ok(result)
+                })();
+                select_namespace_environment(&registry, env, &previous);
+                result
+            }
+            Form::Symbol(n) if n == "intern-var" => {
+                if fs.len() != 4 && fs.len() != 5 {
+                    return Err("intern-var expects namespace, symbol, var, and optional metadata".into());
+                }
+                let target = match eval(&fs[1], env)? {
+                    Value::Symbol(name) => name.as_str().to_owned(),
+                    Value::String(name) => name,
+                    _ => return Err("intern-var expects a namespace symbol or string".into()),
+                };
+                let name = match eval(&fs[2], env)? {
+                    Value::Symbol(name) if name.get_namespace().is_none() => name,
+                    _ => return Err("intern-var expects an unqualified target symbol".into()),
+                };
+                let source = match eval(&fs[3], env)? {
+                    Value::Var(var) => var,
+                    _ => return Err("intern-var expects a source Var".into()),
+                };
+                let mut metadata = source.metadata();
+                if fs.len() == 5 {
+                    match eval(&fs[4], env)? {
+                        Value::OrderedMap(entries) => {
+                            for (key, value) in entries.iter() {
+                                metadata.extra.insert(key.display(), value.display());
+                            }
+                        }
+                        _ => return Err("intern-var metadata extension must be a map".into()),
+                    }
+                }
+                let registry = namespace_registry()?;
+                let output = registry.find_or_create(&target).intern_with_metadata(
+                    name.as_str(),
+                    source.deref_value(),
+                    metadata,
+                );
+                Ok(Value::Var(output))
+            }
             Form::Symbol(n) if n == "var" => {
                 if fs.len() != 2 {
                     return Err("var expects a symbol".into());
@@ -6310,6 +7330,11 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     Form::Symbol(name) => name,
                     _ => return Err("var expects a symbol".into()),
                 };
+                if !env.contains_key(name) {
+                    if let Ok(registry) = namespace_registry() {
+                        force_lazy_alias(&registry, env, name)?;
+                    }
+                }
                 let cell =
                     binding_var(env, name).ok_or_else(|| format!("unbound symbol: {name}"))?;
                 Ok(Value::Var(cell))
@@ -6328,20 +7353,50 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             {
                 eval_basic_object_form(n, fs, env)
             }
-            Form::Symbol(n)
-                if [
-                    "atom",
-                    "atom:basic",
-                    "reset!",
-                    "compare:set!",
-                    "swap!",
-                    "watch-add",
-                    "watch-remove",
-                    "watch-list",
-                ]
-                .contains(&n.as_str()) =>
-            {
+            Form::Symbol(n) if ["atom", "atom:basic"].contains(&n.as_str()) => {
                 eval_atom_form(n, fs, env)
+            }
+            Form::Symbol(n) if n == "reset!" => {
+                if fs.len() != 3 {
+                    return Err("reset! expects a reference and value".into());
+                }
+                protocol_reset(&[eval(&fs[1], env)?, eval(&fs[2], env)?])
+            }
+            Form::Symbol(n) if n == "cas!" => {
+                if fs.len() != 4 {
+                    return Err("cas! expects a reference, old value, and new value".into());
+                }
+                protocol_cas(&[
+                    eval(&fs[1], env)?,
+                    eval(&fs[2], env)?,
+                    eval(&fs[3], env)?,
+                ])
+            }
+            Form::Symbol(n) if n == "swap!" => {
+                if fs.len() < 3 {
+                    return Err("swap! expects a reference, function, and optional arguments".into());
+                }
+                let reference = eval(&fs[1], env)?;
+                let function = eval(&fs[2], env)?;
+                let arguments = fs[3..]
+                    .iter()
+                    .map(|form| eval(form, env))
+                    .collect::<Result<Vec<_>, _>>()?;
+                loop {
+                    let old_value = protocol_deref(std::slice::from_ref(&reference))?;
+                    let mut call_arguments = Vec::with_capacity(arguments.len() + 1);
+                    call_arguments.push(old_value.clone());
+                    call_arguments.extend(arguments.iter().cloned());
+                    let new_value = call_value(function.clone(), call_arguments)?;
+                    if protocol_cas(&[
+                        reference.clone(),
+                        old_value,
+                        new_value.clone(),
+                    ])? == Value::Bool(true)
+                    {
+                        break Ok(new_value);
+                    }
+                }
             }
             Form::Symbol(n) if n == "deref" => {
                 if fs.len() != 2 {
@@ -6408,7 +7463,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("throw expects one value".into());
                 }
                 let value = eval(&fs[1], env)?;
-                Err(format!("thrown: {}", value.display()))
+                Err(thrown_error(value))
             }
             Form::Symbol(n) if n == "try" => {
                 if fs.len() < 2 {
@@ -6444,15 +7499,22 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 if let Err(ref error) = result {
                     if let Some(parts) = catch_form {
-                        if parts.len() != 3 {
-                            return Err("catch expects a name and body".into());
-                        }
-                        let name = match &parts[1] {
+                        let (binding_index, body_index) = match parts.len() {
+                            3 => (1, 2),
+                            4 => {
+                                if !matches!(&parts[1], Form::Symbol(_)) {
+                                    return Err("catch class must be a symbol".into());
+                                }
+                                (2, 3)
+                            }
+                            _ => return Err("catch expects a class, name, and body".into()),
+                        };
+                        let name = match &parts[binding_index] {
                             Form::Symbol(name) => name.clone(),
                             _ => return Err("catch name must be a symbol".into()),
                         };
-                        let old = env.insert(name.clone(), Value::String(error.clone()));
-                        result = eval(&parts[2], env);
+                        let old = env.insert(name.clone(), caught_error(error));
+                        result = eval(&parts[body_index], env);
                         if let Some(old) = old {
                             env.insert(name, old);
                         } else {
@@ -6473,7 +7535,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("def expects a name and value".into());
                 }
                 let (name, metadata) = binding_symbol(&fs[1], "def name")?;
-                if let Some(value) = protected_fallback_binding(env, &name) {
+                if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
                     return Ok(value);
                 }
                 let value = eval(&fs[2], env)?;
@@ -6517,7 +7579,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 Ok(Value::Nil)
             }
             Form::Symbol(n) if n == "defstruct" => {
-                if fs.len() != 3 {
+                if fs.len() < 3 {
                     return Err("defstruct expects a name and field vector".into());
                 }
                 let name = match &fs[1] {
@@ -6569,6 +7631,28 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     let var = KernelVar::new(format!("{namespace}/{binding}"), value);
                     var.set_origin(definition_origin());
                     env.insert(binding, Value::Var(var));
+                }
+                let mut index = 3;
+                while index < fs.len() {
+                    let Form::Symbol(protocol) = &fs[index] else {
+                        return Err("defstruct protocol clause expects a protocol symbol".into());
+                    };
+                    index += 1;
+                    let start = index;
+                    while index < fs.len() && matches!(&fs[index], Form::List(_)) {
+                        index += 1;
+                    }
+                    if start == index {
+                        return Err("defstruct protocol clause requires method implementations".into());
+                    }
+                    let extension = Form::List(
+                        std::iter::once(Form::Symbol("extend-type".into()))
+                            .chain(std::iter::once(Form::Symbol(name.clone())))
+                            .chain(std::iter::once(Form::Symbol(protocol.clone())))
+                            .chain(fs[start..index].iter().cloned())
+                            .collect(),
+                    );
+                    eval(&extension, env)?;
                 }
                 Ok(Value::Nil)
             }
@@ -6744,12 +7828,53 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 Ok(Value::Protocol(protocol))
             }
+            Form::Symbol(n) if n == "defmulti" => {
+                if fs.len() != 3 { return Err("defmulti expects a name and dispatch function".into()); }
+                let Form::Symbol(name) = &fs[1] else { return Err("defmulti name must be an unqualified symbol".into()); };
+                if name.contains('/') { return Err("defmulti name must be an unqualified symbol".into()); }
+                let Value::Function(dispatch) = eval(&fs[2], env)? else { return Err("defmulti dispatch function must be callable".into()); };
+                let namespace = namespace_registry()?.current().name().as_str().to_owned();
+                let qualified = format!("{namespace}/{name}");
+                let state = Rc::new(RefCell::new(MultiMethod { dispatch, methods: Vec::new(), default: None }));
+                let invoke_state = state.clone();
+                let value = native_variadic_function(&qualified, move |arguments| {
+                    let state = invoke_state.borrow();
+                    let key = call_function(&state.dispatch, arguments.clone())?;
+                    let method = state.methods.iter().find(|(candidate, _)| *candidate == key).map(|(_, method)| method.clone()).or_else(|| state.default.clone())
+                        .ok_or_else(|| format!("No multimethod method for dispatch value {}", key.display()))?;
+                    call_function(&method, arguments)
+                });
+                let var = namespace_registry()?.current().intern(name, value.clone());
+                var.set_origin(definition_origin());
+                env.insert(name.clone(), Value::Var(var.clone()));
+                env.insert(qualified.clone(), Value::Var(var));
+                ACTIVE_MULTIMETHODS.with(|active| { active.borrow_mut().insert(qualified, state); });
+                Ok(value)
+            }
+            Form::Symbol(n) if n == "defmethod" => {
+                if fs.len() < 5 { return Err("defmethod expects a multifn, dispatch value, parameters, and body".into()); }
+                let Form::Symbol(name) = &fs[1] else { return Err("defmethod multifn must be a symbol".into()); };
+                let namespace = namespace_registry()?.current().name().as_str().to_owned();
+                let qualified = if name.contains('/') { name.clone() } else { format!("{namespace}/{name}") };
+                let key = eval(&fs[2], env)?;
+                let function = eval(&Form::List(std::iter::once(Form::Symbol("fn".into())).chain(fs[3..].iter().cloned()).collect()), env)?;
+                let Value::Function(function) = function else { unreachable!() };
+                ACTIVE_MULTIMETHODS.with(|active| {
+                    let state = active.borrow().get(&qualified).cloned().ok_or_else(|| "defmethod expects an existing multifn".to_string())?;
+                    let mut state = state.borrow_mut();
+                    if matches!(&key, Value::Keyword(keyword) if keyword.get_namespace().is_none() && keyword.get_name() == "default") { state.default = Some(function); }
+                    else if let Some((_, existing)) = state.methods.iter_mut().find(|(candidate, _)| *candidate == key) { *existing = function; }
+                    else { state.methods.push((key, function)); }
+                    Ok(Value::Nil)
+                })
+            }
             Form::Symbol(n) if n == "defmacro" => {
                 if fs.len() < 4 {
                     return Err("defmacro expects a name, parameters, and a body".into());
                 }
                 let (name, metadata) = binding_symbol(&fs[1], "defmacro name")?;
-                if let Some(value) = protected_fallback_binding(env, &name) {
+                let (metadata, rest) = definition_metadata(metadata, &fs[2..], false, true)?;
+                if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
                     return Ok(value);
                 }
                 let cell = match env.get(&name) {
@@ -6760,13 +7885,6 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     cell.set_hara_metadata(metadata);
                 }
                 env.insert(name.clone(), Value::Var(cell.clone()));
-                let mut rest = &fs[2..];
-                if matches!(rest.first(), Some(Form::String(_))) {
-                    rest = &rest[1..];
-                }
-                if matches!(rest.first(), Some(Form::Map(_))) {
-                    rest = &rest[1..];
-                }
                 if rest.is_empty() {
                     return Err("defmacro expects a name, parameters, and a body".into());
                 }
@@ -6809,7 +7927,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("defn expects a name, parameters, and a body".into());
                 }
                 let (name, metadata) = binding_symbol(&fs[1], "defn name")?;
-                if let Some(value) = protected_fallback_binding(env, &name) {
+                let (metadata, rest) =
+                    definition_metadata(metadata, &fs[2..], n == "defn-", false)?;
+                if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
                     return Ok(value);
                 }
                 let cell = match env.get(&name) {
@@ -6820,15 +7940,6 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     cell.set_hara_metadata(metadata);
                 }
                 env.insert(name.clone(), Value::Var(cell.clone()));
-                // Optional docstring and attr-map sit between the name and
-                // the parameter vector (or arity clauses).
-                let mut rest = &fs[2..];
-                if matches!(rest.first(), Some(Form::String(_))) {
-                    rest = &rest[1..];
-                }
-                if matches!(rest.first(), Some(Form::Map(_))) {
-                    rest = &rest[1..];
-                }
                 if rest.is_empty() {
                     return Err("defn expects a name, parameters, and a body".into());
                 }
@@ -6990,6 +8101,24 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("promise? expects one value".into());
                 }
                 Ok(Value::Bool(matches!(eval(&fs[1], env)?, Value::Promise(_))))
+            }
+            Form::Symbol(n)
+                if ["bytes?", "array?", "object?", "regexp?", "uuid?"]
+                    .contains(&n.as_str()) =>
+            {
+                if fs.len() != 2 {
+                    return Err(format!("{n} expects one value"));
+                }
+                let value = eval(&fs[1], env)?;
+                Ok(Value::Bool(match n.as_str() {
+                    "bytes?" => matches!(value, Value::Bytes(_) | Value::ByteBuffer(_)),
+                    "array?" => matches!(value, Value::Array(_)),
+                    "object?" => matches!(value, Value::Object(_)),
+                    "regexp?" => matches!(value, Value::Regex(_)),
+                    // UUID values are not yet represented by the Rust value model.
+                    "uuid?" => false,
+                    _ => unreachable!(),
+                }))
             }
             Form::Symbol(n) if n == "host/call" => {
                 if fs.len() < 3 {
@@ -7229,7 +8358,8 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 Ok(Value::ByteBuffer(Rc::new(RefCell::new(values))))
             }
             Form::Symbol(n)
-                if ["socket/connect", "socket/send", "socket/close"].contains(&n.as_str()) =>
+                if ["socket/connect", "socket/listen", "socket/endpoint", "socket/events", "socket/next", "socket/send", "socket/close"].contains(&n.as_str())
+                    || n.starts_with("std.native.Socket/") =>
             {
                 socket_operation(n, &fs[1..], env)
             }
@@ -7880,6 +9010,47 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             {
                 bit_operation(n, &fs[1..], env)
             }
+            Form::Symbol(n)
+                if n.starts_with("std.native.Bits/")
+                    && ["and", "or", "xor", "not", "shift-left", "shift-right"]
+                        .contains(&n.trim_start_matches("std.native.Bits/")) =>
+            {
+                bit_operation(n, &fs[1..], env)
+            }
+            Form::Symbol(n)
+                if n.starts_with("std.native.Numbers/")
+                    && ["long", "double"]
+                        .contains(&n.trim_start_matches("std.native.Numbers/")) =>
+            {
+                number_conversion(n, &fs[1..], env)
+            }
+            Form::Symbol(n)
+                if n.starts_with("std.native.Maths/")
+                    && [
+                        "abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh",
+                        "ceil", "cos", "cosh", "exp", "floor", "pow", "sin", "sinh", "sqrt",
+                        "tan", "tanh",
+                    ]
+                    .contains(&n.trim_start_matches("std.native.Maths/")) =>
+            {
+                math_operation(n, &fs[1..], env)
+            }
+            Form::Symbol(n) if n == "std.native.Edn/read" => {
+                if fs.len() != 2 {
+                    return Err("edn/read expects one string".into());
+                }
+                match eval(&fs[1], env)? {
+                    Value::String(source) => read_edn(&source),
+                    _ => Err("edn/read expects a string".into()),
+                }
+            }
+            Form::Symbol(n)
+                if n.starts_with("std.native.Error/")
+                    && ["new", "message", "class"]
+                        .contains(&n.trim_start_matches("std.native.Error/")) =>
+            {
+                native_error_operation(n, &fs[1..], env)
+            }
             Form::Symbol(n) if ["inc", "dec"].contains(&n.as_str()) => {
                 if fs.len() != 2 {
                     return Err(format!("{n} expects one number"));
@@ -8103,13 +9274,17 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         if numbers.is_empty() {
                             return Err("apply expects a function".into());
                         }
-                        let result = match name {
-                            "+" => numbers.iter().sum(),
-                            "-" => numbers[1..].iter().fold(numbers[0], |a, b| a - b),
-                            "*" => numbers.iter().product(),
-                            "/" => numbers[1..].iter().fold(numbers[0], |a, b| a / b),
-                            _ => return Err("apply expects a function".into()),
-                        };
+                        let result = numbers[1..].iter().try_fold(numbers[0], |a, b| {
+                            match name {
+                                "+" => a.checked_add(*b),
+                                "-" => a.checked_sub(*b),
+                                "*" => a.checked_mul(*b),
+                                "/" if *b == 0 => return Err("division by zero".into()),
+                                "/" => a.checked_div(*b),
+                                _ => return Err("apply expects a function".into()),
+                            }
+                            .ok_or_else(|| "integer overflow".to_string())
+                        })?;
                         Ok(Value::Number(result))
                     }
                 }

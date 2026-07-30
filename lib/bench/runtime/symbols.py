@@ -62,6 +62,7 @@ HARA_LIBRARIES = {
     "std.foundation.coroutine": "co",
     "std.foundation.promise": "promise",
     "std.foundation.file": "file",
+    "std.foundation.edn": "edn",
     "std.foundation.json": "json",
     "std.foundation.os": "os",
     "std.foundation.socket": "socket",
@@ -69,7 +70,7 @@ HARA_LIBRARIES = {
     "std.pretty": "pretty",
 }
 HARA_NATIVE_LIBRARY_DECLARATIONS = {
-    "json": {"read", "write", "write-pp"},
+    "json": {"pretty", "read", "write"},
 }
 
 
@@ -159,12 +160,6 @@ def hal_public_definitions(path):
     return definitions
 
 
-def hal_builtin_declarations(path):
-    source = path.read_text()
-    match = re.search(r':builtins\s*\[(.*?)\]', source, re.DOTALL)
-    return set() if match is None else set(re.findall(r'[^\s\[\]]+', match.group(1)))
-
-
 def hara_inventory():
     foundation = hara_namespace_publics("std.foundation")
     intrinsic = hara_namespace_publics("hara.lang.intrinsic")
@@ -180,7 +175,7 @@ def hara_inventory():
         path = ROOT / "lib/src" / Path(*namespace.split(".")).with_suffix(".hal")
         names = set(HARA_NATIVE_LIBRARY_DECLARATIONS.get(alias, set()))
         if path.exists():
-            names |= hal_builtin_declarations(path) | hal_public_definitions(path)
+            names |= hal_public_definitions(path)
         names |= {
             symbol.split("/", 1)[1]
             for symbol in current_symbols

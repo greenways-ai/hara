@@ -15,6 +15,32 @@ test("descriptor loader fetches EDN when given its URL",async()=>{const worker=n
 test("context releases bound handles once and rejects later use",async()=>{const worker=new FakeWorker();const context=new HtaContext({worker,moduleUrl:"runtime.wasm"});worker.emit({type:"ready"});const result=context.call("open",[]);await Promise.resolve();const call=worker.sent.find(message=>message.type==="call");worker.emit({type:"result",id:call.id,ok:true,frame:encodeHta(new HtaHandle("runtime","cursor",42n))});const handle=await result;handle.release();handle.release();const releases=worker.sent.filter(message=>message.type==="release");assert.equal(releases.length,1);const released=decodeHta(releases[0].frame);assert.equal(released.id,42n);await assert.rejects(context.call("use",[handle]),/hta\/handle-released/);context.close();});
 test("context exposes worker results as promises",async()=>{const worker=new FakeWorker();const context=new HtaContext({worker,moduleUrl:"runtime.wasm"});worker.emit({type:"ready"});const result=context.call("eval",["(+ 1 2)"]);await Promise.resolve();const call=worker.sent.find(message=>message.type==="call");worker.emit({type:"result",id:call.id,ok:true,frame:encodeHta(3)});assert.equal(await result,3);context.close();});
 test("context cancellation is forwarded to its worker",async()=>{const worker=new FakeWorker();const context=new HtaContext({worker,moduleUrl:"runtime.wasm"});worker.emit({type:"ready"});const result=context.call("eval",["slow"]);const rejection=assert.rejects(result,/cancelled/);result.cancel();await Promise.resolve();await Promise.resolve();assert.equal(worker.sent.at(-1).type,"cancel");await rejection;context.close();});
+test("context registers kernel-issued mounts and sessions attach numeric ids",async()=>{
+  const worker=new FakeWorker(),events=[];
+  const filesystemHost={register:async(_context,id,descriptor)=>events.push(["register",id,descriptor]),close:async(_context,id)=>events.push(["close",id])};
+  const context=new HtaContext({worker,moduleUrl:"runtime.wasm",filesystemHost});
+  worker.emit({type:"ready"});
+  const creating=context.createFilesystem({provider:"memory"});
+  await Promise.resolve();await Promise.resolve();
+  let call=worker.sent.find(message=>message.type==="call");
+  assert.equal(decodeHta(call.frame)[0],"filesystem/create");
+  worker.emit({type:"result",id:call.id,ok:true,frame:encodeHta(7)});
+  assert.equal(await creating,7);
+  assert.deepEqual(events,[["register",7,{provider:"memory"}]]);
+  const attaching=context.session("alpha").attachFilesystem(7);
+  await Promise.resolve();await Promise.resolve();
+  call=worker.sent.filter(message=>message.type==="call").at(-1);
+  assert.deepEqual(decodeHta(call.frame),["session/attach-filesystem",["alpha",7]]);
+  worker.emit({type:"result",id:call.id,ok:true,frame:encodeHta(true)});
+  assert.equal(await attaching,true);
+  const closing=context.closeFilesystem(7);
+  await Promise.resolve();await Promise.resolve();
+  call=worker.sent.filter(message=>message.type==="call").at(-1);
+  worker.emit({type:"result",id:call.id,ok:true,frame:encodeHta(true)});
+  assert.equal(await closing,true);
+  assert.deepEqual(events.at(-1),["close",7]);
+  context.close();
+});
 
 class FakeWorker{constructor(){this.listeners={};this.sent=[];}addEventListener(type,handler){this.listeners[type]=handler;}postMessage(message){this.sent.push(message);}emit(data){this.listeners.message({data});}terminate(){this.terminated=true;}}
 

@@ -90,7 +90,19 @@ public interface Atom<V> {
     }
   }
 
-  public interface Swap<R, V> extends IWatch<R, V>, IValidate<V>, IDeref<V>, ICas<V> {
+  public interface Swap<R, V> extends IWatch<R, V>, IDeref<V>, ICas<V> {
+
+    default Predicate<V> getValidator() {
+      return null;
+    }
+
+    default boolean validate(V value) {
+      Predicate<V> validator = getValidator();
+      if (validator != null && !validator.test(value)) {
+        throw new IllegalStateException("Validator rejected value: " + value);
+      }
+      return true;
+    }
 
     @Override
     boolean cas(V oldVal, V newVal);

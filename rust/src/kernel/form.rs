@@ -116,8 +116,6 @@ mod tests {
             "nil",
             "true",
             "-42",
-            "123N",
-            "123.45M",
             "\\newline",
             "\\u0000",
             "\"line\\nvalue\"",

@@ -75,6 +75,13 @@ jobs:
     - name: Build and test with Maven
       run: mvn -B -Ptruffle package --file java/pom.xml
 
+    - name: Verify Truffle HIR loads in Rust
+      run: |
+        ARTIFACT="$PWD/java/target/classes/std/foundation.hir"
+        test -f "$ARTIFACT"
+        test "$(cargo run --quiet --manifest-path rust/Cargo.toml --bin hara -- run "$ARTIFACT")" = "<fn>"
+        HARA_TRUFFLE_FOUNDATION_HIR="$ARTIFACT" cargo test --manifest-path rust/Cargo.toml truffle_compiled_foundation_hir_loads_with_foundation_semantics -- --ignored
+
     - name: Run library .hal tests
       run: ./scripts/run-lib-tests
 

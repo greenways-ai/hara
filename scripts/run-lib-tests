@@ -21,10 +21,10 @@ run_file() {
         return 1
     fi
 
-    # The test file should pr-str a vector of result maps as its final output.
-    # Look for any :pass false in the output vector.
+    # Accept either a result vector or its pr-str representation. Older tests
+    # return the serialized form, while std.lib.test returns the vector itself.
     local last_vector
-    last_vector=$(echo "$output" | grep '^\[' | tail -n 1)
+    last_vector=$(echo "$output" | grep -E '^"?\[' | tail -n 1)
 
     if [ -z "$last_vector" ]; then
         echo "FAIL  $file (no result vector found)"

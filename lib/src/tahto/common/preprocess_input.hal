@@ -1,7 +1,6 @@
-(ns talo.common.preprocess-input
-  (:require [talo.common.preprocess-base :as preprocess-base]
-            [talo.common.util :as util]
-            [std.lib.context :as ptr]
+(ns tahto.common.preprocess-input
+  (:require [tahto.common.preprocess-base :as preprocess-base]
+            [tahto.common.util :as util]
             [std.foundation :as foundation]
             [std.foundation.string :as string]
             [std.lib.walk :as walk]))
@@ -80,9 +79,6 @@
      (fn [x]
        (or
         (cond
-          (ptr/pointer? x)
-          (util/sym-full x)
-
           (and preprocess-base/*macro-splice*
                (or (vector? x) (list? x))
                (reduce (fn [found child]

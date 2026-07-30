@@ -1333,7 +1333,7 @@ final class HaraAnalyzer {
   }
 
   private HaraExpressionNode analyzeDefStruct(List<?> form) {
-    requireCount(form, 3, "defstruct");
+    if (form.count() < 3) throw error("defstruct expects a name and field vector");
     Object name = form.nth(1);
     if (!(name instanceof Symbol)) {
       throw error("defstruct name must be a symbol");
@@ -1395,8 +1395,25 @@ final class HaraAnalyzer {
                 hara.lang.data.Vector.Standard.from(null, recordMap),
                 new Object[] {List.Standard.from(null, mapArgs)}));
 
-    return new HaraNodes.Do(
-        new HaraExpressionNode[] {typeDefinition, arrowConstructor, mapConstructor});
+    java.util.ArrayList<HaraExpressionNode> definitions = new java.util.ArrayList<>();
+    definitions.add(typeDefinition);
+    definitions.add(arrowConstructor);
+    definitions.add(mapConstructor);
+    int index = 3;
+    while (index < form.count()) {
+      Object protocol = form.nth(index++);
+      if (!(protocol instanceof Symbol)) throw error("defstruct protocol clause expects a protocol symbol");
+      int start = index;
+      while (index < form.count() && form.nth(index) instanceof List<?>) index++;
+      if (start == index) throw error("defstruct protocol clause requires method implementations");
+      Object[] extension = new Object[index - start + 3];
+      extension[0] = Symbol.create("extend-type");
+      extension[1] = Symbol.create(symbol.getName());
+      extension[2] = protocol;
+      for (int i = start; i < index; i++) extension[i - start + 3] = form.nth(i);
+      definitions.add(analyzeExtendType(List.Standard.from(null, extension)));
+    }
+    return new HaraNodes.Do(definitions.toArray(new HaraExpressionNode[0]));
   }
 
   private HaraExpressionNode analyzeField(List<?> form) {

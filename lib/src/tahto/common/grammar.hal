@@ -1,7 +1,7 @@
-(ns talo.common.grammar
-  (:require [talo.common.grammar-macro :as grammar-macro]
-            [talo.common.grammar-spec :as spec]
-            [talo.common.grammar-xtalk-system :as xtalk-system]
+(ns tahto.common.grammar
+  (:require [tahto.common.grammar-macro :as grammar-macro]
+            [tahto.common.grammar-spec :as spec]
+            [tahto.common.grammar-xtalk-system :as xtalk-system]
             [std.foundation.string :as string]))
 
 (defn key-member?

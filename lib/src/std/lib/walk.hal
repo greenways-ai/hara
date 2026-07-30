@@ -1,0 +1,58 @@
+(ns std.lib.walk)
+
+(defn form?
+  "Returns true for a persistent Hara source form."
+  [value]
+  (list? value))
+
+(defn walk
+  "Traverses persistent Hara data while preserving collection metadata."
+  [inner outer form]
+  (cond (list? form)
+        (outer (with-meta (apply list (map inner form)) (meta form)))
+
+        (vector? form)
+        (outer (with-meta (mapv inner form) (meta form)))
+
+        (set? form)
+        (outer (with-meta (reduce (fn [out value]
+                                    (conj out (inner value)))
+                                  #{}
+                                  form)
+                          (meta form)))
+
+        (map? form)
+        (outer (with-meta (reduce-kv (fn [out key value]
+                                       (assoc out (inner key) (inner value)))
+                                     {}
+                                     form)
+                          (meta form)))
+
+        :else
+        (outer form)))
+
+(defn postwalk
+  "Performs a depth-first, post-order traversal."
+  [f form]
+  (walk (fn [value] (postwalk f value)) f form))
+
+(defn prewalk
+  "Performs a depth-first, pre-order traversal."
+  [f form]
+  (walk (fn [value] (prewalk f value)) identity (f form)))
+
+(defn prewalk-replace
+  "Recursively replaces keys found in replacements."
+  [replacements form]
+  (prewalk (fn [value]
+             (let [replacement (get replacements value)]
+               (if replacement replacement value)))
+           form))
+
+(defn postwalk-replace
+  "Recursively replaces keys found in replacements."
+  [replacements form]
+  (postwalk (fn [value]
+              (let [replacement (get replacements value)]
+                (if replacement replacement value)))
+            form))

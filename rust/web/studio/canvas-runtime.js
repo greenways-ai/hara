@@ -456,12 +456,20 @@ function renderStateful2d(slot, context, stateful, width, height) {
       kind: "tron",
       trails: (stateful.trails ?? []).map((trail) => trail.map(([x, y]) => [Number(x), Number(y)])),
       positions: [],
+      actualPositions: [],
+      starts: [],
+      targets: [],
       velocities: [],
       lastTime: canvasNow(),
+      lastEventTime: canvasNow(),
+      transitionStartedAt: canvasNow(),
+      transitionDuration: 0,
       lastEvent: null
     };
   }
   if (reset || slot.stateful.lastEvent !== stateful) {
+    const now = canvasNow();
+    const interval = Math.max(1, now - slot.stateful.lastEventTime);
     const trails = slot.stateful.trails;
     for (const [cycle, x, y] of stateful.append ?? []) {
       const trail = trails[Number(cycle)] ?? (trails[Number(cycle)] = []);
@@ -472,21 +480,30 @@ function renderStateful2d(slot, context, stateful, width, height) {
       trails[Number(cycle)] = [[Number(x), Number(y)]];
     }
     for (let cycle = 0; cycle < 4; cycle += 1) {
-      slot.stateful.positions[cycle] = [Number((stateful.heads ?? [])[cycle * 2]), Number((stateful.heads ?? [])[cycle * 2 + 1])];
+      const x = Number((stateful.heads ?? [])[cycle * 2]), y = Number((stateful.heads ?? [])[cycle * 2 + 1]);
+      const previous = slot.stateful.actualPositions[cycle] ?? [x, y];
+      slot.stateful.starts[cycle] = reset ? [x, y] : [...(slot.stateful.positions[cycle] ?? [x, y])];
+      slot.stateful.targets[cycle] = [x, y];
+      if (reset) slot.stateful.positions[cycle] = [x, y];
+      slot.stateful.actualPositions[cycle] = [x, y];
       const [vx = 0, vy = 0] = (stateful.velocities ?? [])[cycle] ?? [];
-      slot.stateful.velocities[cycle] = [Number(vx), Number(vy)];
+      slot.stateful.velocities[cycle] = reset ? [Number(vx) * .06, Number(vy) * .06] : [(x - previous[0]) / interval, (y - previous[1]) / interval];
     }
     slot.stateful.lastEvent = stateful;
-    slot.stateful.lastTime = canvasNow();
+    slot.stateful.lastTime = now;
+    slot.stateful.lastEventTime = now;
+    slot.stateful.transitionStartedAt = now;
+    slot.stateful.transitionDuration = reset ? 0 : Math.min(500, interval);
   } else {
     const now = canvasNow();
-    const elapsed = Math.min(50, Math.max(0, now - slot.stateful.lastTime)) * 0.06;
+    const progress = slot.stateful.transitionDuration === 0 ? 1 : Math.min(1, Math.max(0, now - slot.stateful.transitionStartedAt) / slot.stateful.transitionDuration);
     slot.stateful.lastTime = now;
     for (let cycle = 0; cycle < 4; cycle += 1) {
-      const position = slot.stateful.positions[cycle], [vx, vy] = slot.stateful.velocities[cycle];
-      position[0] += vx * elapsed; position[1] += vy * elapsed;
+      const position = slot.stateful.positions[cycle], start = slot.stateful.starts[cycle], target = slot.stateful.targets[cycle];
+      position[0] = start[0] + (target[0] - start[0]) * progress;
+      position[1] = start[1] + (target[1] - start[1]) * progress;
       const trail = slot.stateful.trails[cycle] ?? (slot.stateful.trails[cycle] = []);
-      trail.push([position[0], position[1]]); trimTronTrail(trail, width, height);
+      appendTronTrailPoint(trail, position[0], position[1]); trimTronTrail(trail, width, height);
     }
   }
   const trails = slot.stateful.trails;
@@ -555,25 +572,32 @@ function renderBoidsState(slot, context, stateful, width, height) {
       kind: "boids",
       tails: boids.map(([x, y]) => [[Number(x), Number(y)]]),
       positions: boids.map(([x, y]) => [Number(x), Number(y)]),
-      velocities: boids.map(([, , vx = 0, vy = 0]) => [Number(vx), Number(vy)]),
+      actualPositions: boids.map(([x, y]) => [Number(x), Number(y)]),
+      velocities: boids.map(() => [0, 0]),
       lastTime: canvasNow(),
+      lastEventTime: canvasNow(),
       lastEvent: null
     };
   }
   if (reset || slot.stateful.lastEvent !== stateful) {
+    const now = canvasNow();
+    const interval = Math.max(1, now - slot.stateful.lastEventTime);
     for (let index = 0; index < boids.length; index += 1) {
       const [x, y, vx = 0, vy = 0] = boids[index];
       const tail = slot.stateful.tails[index];
-      tail.push([Number(x), Number(y)]);
+      if (!reset) tail.push([Number(x), Number(y)]);
       while (tail.length > 18) tail.shift();
+      const previous = slot.stateful.actualPositions[index] ?? [Number(x), Number(y)];
       slot.stateful.positions[index] = [Number(x), Number(y)];
-      slot.stateful.velocities[index] = [Number(vx), Number(vy)];
+      slot.stateful.actualPositions[index] = [Number(x), Number(y)];
+      slot.stateful.velocities[index] = reset ? [Number(vx) * .06, Number(vy) * .06] : [(Number(x) - previous[0]) / interval, (Number(y) - previous[1]) / interval];
     }
     slot.stateful.lastEvent = stateful;
-    slot.stateful.lastTime = canvasNow();
+    slot.stateful.lastTime = now;
+    slot.stateful.lastEventTime = now;
   } else {
     const now = canvasNow();
-    const elapsed = Math.min(50, Math.max(0, now - slot.stateful.lastTime)) * 0.06;
+    const elapsed = Math.min(50, Math.max(0, now - slot.stateful.lastTime));
     slot.stateful.lastTime = now;
     for (let index = 0; index < boids.length; index += 1) {
       const position = slot.stateful.positions[index];
@@ -595,8 +619,20 @@ function renderBoidsState(slot, context, stateful, width, height) {
 }
 
 function trimTronTrail(trail, width, height) {
-  const limit = Math.max(1, Math.floor(Math.max(width, height) * 2 / 72));
-  while (trail.length > limit) trail.shift();
+  const limit = Math.max(width, height);
+  let distance = 0;
+  for (let index = trail.length - 1; index > 0; index -= 1) {
+    const [x, y] = trail[index], [previousX, previousY] = trail[index - 1];
+    distance += Math.hypot(x - previousX, y - previousY);
+    if (distance <= limit) continue;
+    trail.splice(0, index);
+    return;
+  }
+}
+
+function appendTronTrailPoint(trail, x, y) {
+  const previous = trail.at(-1);
+  if (!previous || Math.hypot(x - previous[0], y - previous[1]) >= 3) trail.push([x, y]);
 }
 
 function drawTronTrail(context, points, color, headX, headY) {

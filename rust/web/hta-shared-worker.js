@@ -54,7 +54,7 @@ async function instantiate(message) {
   for (const name of ["memory", "hta_abi_version", "hta_alloc", "hta_dealloc", "hta_start", "hta_next_event", "hta_deliver", "hta_cancel", "hta_drop_task", "hta_release"]) {
     if (!(name in instance.exports)) throw new Error(`hta/export-missing: ${name}`);
   }
-  if (instance.exports.hta_abi_version() !== 1) throw new Error("hta/version-unsupported");
+  if (instance.exports.hta_abi_version() !== 2) throw new Error("hta/version-unsupported");
 }
 
 function callFrame(fn, frame) {
@@ -96,7 +96,7 @@ function pump() {
       request.port.postMessage({ type: "result", id: request.id, ok: kind === 0, frame: encodeHta(event[2]) });
     } else if (kind === 2) {
       const request = tasks.get(Number(event[2]));
-      if (request) request.port.postMessage({ type: "host-call", call: Number(event[1]), task: Number(event[2]), session: request.session, service: event[3], method: event[4], frame: encodeHta(event[5]) });
+      if (request) request.port.postMessage({ type: "host-call", call: Number(event[1]), task: Number(event[2]), session: event[3], mount: event[4] ?? null, service: event[5], method: event[6], frame: encodeHta(event[7]) });
     } else throw new Error("hta/event-unknown");
   }
 }

@@ -9,6 +9,9 @@ public final class StdFoundationFileLibraryProvider implements HaraLibraryProvid
   public int order() { return 20; }
 
   @Override
+  public String fallbackResource() { return "std/foundation/file.hal"; }
+
+  @Override
   public void install(HaraContext context) {
     context.collectBuiltins(namespace(), context::installFileLibrary);
   }

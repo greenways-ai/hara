@@ -14,7 +14,7 @@ const bytes = new Uint8Array(
   await (await fetch("/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm")).arrayBuffer()
 );
 const resources = {};
-for (const name of ["store", "fs", "space", "boot", "node", "draw", "program", "graph", "session"]) {
+for (const name of ["store", "boot", "node", "draw", "program", "graph", "session"]) {
   resources[`studio.${name}`] = await (await fetch(`./studio/hal/${name}.hal`)).text();
 }
 for (const name of ["protocol", "frame"]) {
@@ -33,6 +33,10 @@ const broker = createBrowserBroker({
   moduleBytes: bytes,
   hostCalls: createHostServices({ canvasRuntime, graphHost, graphHostOptions: { sessionRouter } }),
   resources,
+  onKernelStarting: async (kernel) => {
+    const mount = await kernel.context.createFilesystem({ provider: "indexeddb", key: "studio-default" });
+    await kernel.context.session().attachFilesystem(mount);
+  },
   onKernelCreated: async (kernel) => sessionRouter.register(kernel.name, kernel.context, {
     onRelease: (sessionId) => graphHost.releaseSession(sessionId)
   }),

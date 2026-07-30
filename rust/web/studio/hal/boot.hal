@@ -1,14 +1,7 @@
-; Default bootstrap entry point for studio kernels: (boot/boot! "<space>")
-; ensures the space exists and reports a small summary. Use via
+; Default bootstrap entry point for studio kernels. Filesystem selection is a
+; host-owned mount operation completed before this HAL bootstrap runs.
 ; (require [studio.boot :as boot]).
-(ns studio.boot
-  (:require [studio.space :as space]))
+(ns studio.boot)
 
 (defn boot! [name]
-  (let [created (not (space/exists? name))]
-    ; let takes a single body form in this dialect — sequence with do.
-    (do
-      (if created (space/create! name) nil)
-      {:space name
-       :created created
-       :files (count (space/files name))})))
+  {:project name})

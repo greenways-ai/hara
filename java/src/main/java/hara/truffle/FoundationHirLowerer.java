@@ -92,6 +92,7 @@ final class FoundationHirLowerer {
       case "loop" -> lowerLoop(list);
       case "recur" -> lowerRecur(list);
       case "fn" -> lowerFn(list);
+      case "def" -> lowerDef(list);
       case "defn" -> lowerDefn(list);
       case "defn-" -> lowerPrivateDefn(list);
       case "declare" -> lowerDeclare(list);
@@ -305,6 +306,18 @@ final class FoundationHirLowerer {
           lowerFunction((ILinearType<?>) clause.nth(0), bodyForms(clause, 1));
     }
     return new HaraNodes.MultiFunction(alternatives);
+  }
+
+  private HaraExpressionNode lowerDef(List<?> form) {
+    requireCount(form, 3, "def");
+    if (!(form.nth(1) instanceof Symbol)) {
+      fail("def expects an unqualified symbol and value");
+    }
+    Symbol rawName = (Symbol) form.nth(1);
+    if (rawName.getNamespace() != null) fail("def expects an unqualified symbol and value");
+    Symbol name = definitionSymbol(rawName, form);
+    context.declareCurrent(name);
+    return new HaraNodes.DefineGlobal(name, lower(form.nth(2)));
   }
 
   private HaraExpressionNode lowerFunction(ILinearType<?> parameters, Object[] bodyForms) {

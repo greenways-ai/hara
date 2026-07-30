@@ -168,6 +168,9 @@ const state = {
     framesPerSecond: 0,
     frameRateWindowStartedAt: 0,
     frameRateWindowCount: 0,
+    kernelBusyMs: 0,
+    kernelBusyPercent: 0,
+    kernelBusyWindowStartedAt: 0,
     errors: 0
   }
 };
@@ -367,6 +370,7 @@ function renderKernelStatistics() {
       ["Frame requests", state.telemetry.frameRequests],
       ["Frames rendered", state.telemetry.renderCalls],
       ["Render rate", `${state.telemetry.framesPerSecond} FPS`],
+      ["Kernel busy estimate", `${state.telemetry.kernelBusyPercent}%`],
       ["Session messages", state.telemetry.deliveredMessages],
       ["Errors", state.telemetry.errors],
       ["Queue", state.broker.pending?.size ?? 0]
@@ -394,11 +398,14 @@ function instrumentBrokerTelemetry(broker) {
     const original = broker[method].bind(broker);
     broker[method] = async (...args) => {
       state.telemetry.evalRequests += 1;
+      const started = performance.now();
       try {
         return await original(...args);
       } catch (error) {
         state.telemetry.errors += 1;
         throw error;
+      } finally {
+        recordKernelBusy(started);
       }
     };
   }
@@ -406,15 +413,29 @@ function instrumentBrokerTelemetry(broker) {
     const original = broker[method].bind(broker);
     broker[method] = async (...args) => {
       state.telemetry.documentRuns += 1;
+      const started = performance.now();
       try {
         return await original(...args);
       } catch (error) {
         state.telemetry.errors += 1;
         throw error;
+      } finally {
+        recordKernelBusy(started);
       }
     };
   }
   return broker;
+}
+
+function recordKernelBusy(started) {
+  const now = performance.now();
+  if (!state.telemetry.kernelBusyWindowStartedAt) state.telemetry.kernelBusyWindowStartedAt = now;
+  state.telemetry.kernelBusyMs += Math.max(0, now - started);
+  const elapsed = now - state.telemetry.kernelBusyWindowStartedAt;
+  if (elapsed < 1000) return;
+  state.telemetry.kernelBusyPercent = Math.min(100, Math.round(state.telemetry.kernelBusyMs * 100 / elapsed));
+  state.telemetry.kernelBusyMs = 0;
+  state.telemetry.kernelBusyWindowStartedAt = now;
 }
 
 function instrumentCanvasTelemetry(canvasRuntime) {
@@ -732,7 +753,7 @@ async function loadBackgroundSource(name, sourceOverride = null) {
   }
 }
 
-function setWorkspace(index) {
+function setWorkspace(index, { reloadBackground = true } = {}) {
   if (index === 1 && !document.body.classList.contains("is-start-ready")) return;
   state.workspace = index === 1 ? 1 : 0;
   document.body.dataset.workspace = String(state.workspace);
@@ -749,7 +770,7 @@ function setWorkspace(index) {
   } else {
     state.canvasRuntime?.setVisible(true);
     query("[data-tron]").hidden = false;
-    if (state.broker) loadBackgroundSource(state.backgroundSource).catch(() => {});
+    if (state.broker && reloadBackground) loadBackgroundSource(state.backgroundSource).catch(() => {});
   }
   closeLauncher();
 }
@@ -840,9 +861,7 @@ async function renderSavedWorkspaces() {
 async function syncProjectIntoKernel(record) {
   const files = await state.workspaceRepository.files(record.id);
   for (const [path, content] of files) {
-    await state.broker.eval(kernelName(record.id), studioSource(
-      `(fs/write! ${JSON.stringify(`workspace-${record.id}`)} ${JSON.stringify(path)} ${JSON.stringify(content)})`
-    ));
+    await writeStudioText(path, content, kernelName(record.id));
   }
 }
 
@@ -1256,7 +1275,7 @@ function installWorkspaceCreation() {
   });
 }
 
-async function createAmpWorkspace({ preset = "hara", mode = "spectrum" } = {}) {
+async function createAmpWorkspace({ preset = "hara", mode = "spectrum", source = "" } = {}) {
   const load = async (path) => {
     const response = await fetch(new URL(`${AMP_WORKSPACE}${path}`, import.meta.url));
     if (!response.ok) throw new Error(`Hara Amp ${path}: ${response.status}`);
@@ -1267,7 +1286,13 @@ async function createAmpWorkspace({ preset = "hara", mode = "spectrum" } = {}) {
     load("workspace.edn"),
     load("src/visualizer.hal")
   ]);
-  const files = seedAmpWorkspace({ project, workspace, visualizer, preset, mode });
+  const files = seedAmpWorkspace({
+    project,
+    workspace,
+    visualizer: typeof source === "string" && source.trim() ? source : visualizer,
+    preset,
+    mode
+  });
   const record = await state.workspaceRepository.createFromFiles({
     name: "Hara Amp",
     template: "hara-amp",
@@ -1453,15 +1478,47 @@ function installWorkspaceTabs() {
 }
 
 function studioSource(form) {
-  return `(do (require [studio.space :as space]) (require [studio.fs :as fs]) ${form})`;
+  return `(do (require [std.foundation.file :as file]) ${form})`;
 }
 
-function evalStudio(form) {
-  return state.broker.eval(state.activeKernel, studioSource(form));
+function evalStudio(form, kernel = state.activeKernel) {
+  return state.broker.eval(kernel, studioSource(form));
+}
+
+function readStudioText(path, kernel = state.activeKernel) {
+  return evalStudio(`(str/decode-utf8 (deref (file/read ${JSON.stringify(path)})))`, kernel);
+}
+
+async function writeStudioText(path, content, kernel = state.activeKernel) {
+  const parent = path.slice(0, path.lastIndexOf("/")) || "/";
+  if (parent !== "/") {
+    await evalStudio(`(deref (file/mkdir ${JSON.stringify(parent)}))`, kernel);
+  }
+  return evalStudio(
+    `(deref (file/write ${JSON.stringify(path)} (str/encode-utf8 ${JSON.stringify(content)})))`,
+    kernel
+  );
+}
+
+function deleteStudioPath(path, kernel = state.activeKernel) {
+  return evalStudio(`(deref (file/delete ${JSON.stringify(path)}))`, kernel);
+}
+
+async function listStudioFiles(path = "/", kernel = state.activeKernel) {
+  const children = await evalStudio(`(deref (file/list ${JSON.stringify(path)}))`, kernel);
+  const files = [];
+  for (const child of children ?? []) {
+    try {
+      files.push(...await listStudioFiles(String(child), kernel));
+    } catch {
+      files.push(String(child));
+    }
+  }
+  return files;
 }
 
 async function listFiles() {
-  const result = await evalStudio(`(space/files ${JSON.stringify(state.activeSpace)})`);
+  const result = await listStudioFiles();
   state.files = (Array.isArray(result) ? result.map(String) : []).sort();
   renderFiles();
   return state.files;
@@ -1633,7 +1690,7 @@ async function openFile(path, force = false, activateWorkspace = true) {
     const discard = await confirmDialog("UNSAVED CHANGES", "Discard the current editor changes?");
     if (!discard) return;
   }
-  const content = await evalStudio(`(fs/read ${JSON.stringify(state.activeSpace)} ${JSON.stringify(path)})`);
+  const content = await readStudioText(path);
   if (state.activeDocument && state.activeDocument.path !== path) {
     state.broker.releaseDocument(state.activeKernel, state.activeDocument.id);
     state.nodeRuntime?.releaseDocument(state.activeDocument.id);
@@ -1676,9 +1733,7 @@ async function saveFile(showToast = true) {
       return false;
     }
   }
-  await evalStudio(
-    `(fs/write! ${JSON.stringify(state.activeSpace)} ${JSON.stringify(state.activeFile)} ${JSON.stringify(elements.editor.value)})`
-  );
+  await writeStudioText(state.activeFile, elements.editor.value);
   if (state.currentProject) {
     await state.workspaceRepository.writeFile(state.currentProject.id, state.activeFile, elements.editor.value);
   }
@@ -2195,13 +2250,11 @@ function normalizePath(value) {
 async function seedFiles(force = false) {
   if (force) {
     for (const path of await listFiles()) {
-      await evalStudio(`(fs/delete! ${JSON.stringify(state.activeSpace)} ${JSON.stringify(path)})`);
+      await deleteStudioPath(path);
     }
   }
   for (const [path, content] of DEFAULT_FILES) {
-    await evalStudio(
-      `(fs/write! ${JSON.stringify(state.activeSpace)} ${JSON.stringify(path)} ${JSON.stringify(content)})`
-    );
+    await writeStudioText(path, content);
   }
   await listFiles();
 }
@@ -2248,7 +2301,7 @@ function installFileActions() {
     if (!path) return toast("INVALID HARA FILE PATH", true);
     if (state.files.includes(path)) return toast("FILE ALREADY EXISTS", true);
     const content = `;; ${path}\n\n{:version 1\n :width 960\n :height 600\n :background "#020408"\n :commands []}\n`;
-    await evalStudio(`(fs/write! ${JSON.stringify(state.activeSpace)} ${JSON.stringify(path)} ${JSON.stringify(content)})`);
+    await writeStudioText(path, content);
     if (state.currentProject) {
       await state.workspaceRepository.writeFile(state.currentProject.id, path, content);
     }
@@ -2271,14 +2324,12 @@ function installFileActions() {
     if (state.files.includes(nextPath) && nextPath !== state.activeFile) return toast("FILE ALREADY EXISTS", true);
     await saveFile(false);
     const oldPath = state.activeFile;
-    await evalStudio(
-      `(fs/write! ${JSON.stringify(state.activeSpace)} ${JSON.stringify(nextPath)} ${JSON.stringify(elements.editor.value)})`
-    );
+    await writeStudioText(nextPath, elements.editor.value);
     if (state.currentProject) {
       await state.workspaceRepository.writeFile(state.currentProject.id, nextPath, elements.editor.value);
     }
     if (nextPath !== oldPath) {
-      await evalStudio(`(fs/delete! ${JSON.stringify(state.activeSpace)} ${JSON.stringify(oldPath)})`);
+      await deleteStudioPath(oldPath);
       if (state.currentProject) {
         await state.workspaceRepository.deleteFile(state.currentProject.id, oldPath);
       }
@@ -2295,7 +2346,7 @@ function installFileActions() {
     if (!state.activeFile) return;
     const path = state.activeFile;
     if (!await confirmDialog("DELETE HARA FILE", `Delete ${path}? This cannot be undone.`)) return;
-    await evalStudio(`(fs/delete! ${JSON.stringify(state.activeSpace)} ${JSON.stringify(path)})`);
+    await deleteStudioPath(path);
     if (state.currentProject) {
       await state.workspaceRepository.deleteFile(state.currentProject.id, path);
     }
@@ -2346,7 +2397,7 @@ async function bootRuntime() {
     const moduleBytes = await fetchRuntimeBytes(new URL("hara.wasm", runtimeBase));
     state.runtimeModuleBytes = moduleBytes.byteLength;
     const resources = {};
-    const studioResources = ["store", "fs", "space", "boot", "node", "draw", "program", "graph", "session"];
+    const studioResources = ["store", "boot", "node", "draw", "program", "graph", "session"];
     const standardResources = ["substrate/protocol", "substrate/frame", "substrate"];
     const resourceCount = studioResources.length + standardResources.length;
     let resourceIndex = 0;
@@ -2432,6 +2483,8 @@ async function bootRuntime() {
         }
         if (!space) throw new Error(`NO_WORKSPACE_SCOPE ${kernel.name}`);
         state.contextSpaces.set(kernel.context, space);
+        const mount = await kernel.context.createFilesystem({ provider: "indexeddb", key: space });
+        await kernel.context.session().attachFilesystem(mount);
       },
       onKernelCreated: async (kernel) => {
         const session = sessionRouter.register(kernel.name, kernel.context, {
@@ -2471,7 +2524,7 @@ async function bootRuntime() {
     if (path) await openFile(path, true, false);
     syncHighlight();
     await renderSavedWorkspaces();
-    setWorkspace(0);
+    setWorkspace(0, { reloadBackground: false });
     setKernelProgress(100, "KERNEL READY", "HARA.WASM LIVE");
     setTimeout(hideKernelProgress, 700);
     setTimeout(() => {

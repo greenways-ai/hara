@@ -1,6 +1,7 @@
 package hara.truffle;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -21,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Iterator;
+import java.util.Comparator;
 import org.jline.reader.Candidate;
 import org.jline.reader.Completer;
 import org.jline.reader.EndOfFileException;
@@ -46,7 +48,11 @@ public final class Main {
   private Main() {}
 
   public static void main(String[] args) {
-    int status = run(args, System.out, System.err);
+    ByteArrayOutputStream errorBytes = new ByteArrayOutputStream();
+    PrintStream error = new PrintStream(errorBytes, true, StandardCharsets.UTF_8);
+    int status = run(args, System.in, System.out, error);
+    if (errorBytes.size() > 0)
+      System.err.print("hara: " + errorBytes.toString(StandardCharsets.UTF_8));
     if (status != 0) {
       System.exit(status);
     }
@@ -134,6 +140,14 @@ public final class Main {
     }
 
     try {
+      if ("new".equals(args[0])) return newProject(args, output);
+      if ("check".equals(args[0])) return checkProject(args, capabilities, output);
+      if ("add".equals(args[0])) return editDependency(args, capabilities, output, true);
+      if ("remove".equals(args[0])) return editDependency(args, capabilities, output, false);
+      if ("sync".equals(args[0])) return syncProject(args, capabilities, output);
+      if ("update".equals(args[0])) throw new HaraException("project update requires the reviewed registry client");
+      if ("test".equals(args[0])) return testProject(args, capabilities, output);
+      if ("run".equals(args[0]) && args.length == 1) return runProject(capabilities, output);
       String source;
       switch (args[0]) {
         case "eval":
@@ -170,7 +184,187 @@ public final class Main {
     } catch (IOException exception) {
       error.println(exception.getMessage());
       return 1;
+    } catch (RuntimeException exception) {
+      error.println(exception.getMessage());
+      return 1;
     }
+  }
+
+  private static HaraProject cliProject(String[] args, Capabilities capabilities) {
+    Path start =
+        args.length > 1 ? Path.of(args[1]) : capabilities.project == null ? Path.of(".") : capabilities.project;
+    HaraProject project = HaraProject.discover(start);
+    if (project == null) throw new HaraException("no project.edn found above " + start);
+    project.validateCliProject();
+    return project;
+  }
+
+  private static int newProject(String[] args, PrintStream output) throws IOException {
+    if (args.length != 2) throw new HaraException("new requires a project name");
+    String name = args[1];
+    if (!name.matches("[a-z0-9-]+"))
+      throw new HaraException("project name must contain only lowercase letters, numbers, and hyphens");
+    Path root = Path.of(name);
+    if (Files.exists(root)) throw new HaraException("destination already exists: " + root);
+    String namespace = name.replace('-', '_');
+    Files.createDirectories(root.resolve("src").resolve(namespace));
+    Files.createDirectories(root.resolve("test").resolve(namespace));
+    Files.createDirectories(root.resolve("extensions"));
+    Files.writeString(
+        root.resolve("project.edn"),
+        "{:hara/type :project\n :hara/version \"1.0.0\"\n :project/id " + name
+            + "\n :project/version \"0.1.0\"\n :project/source-paths [\"src\"]\n"
+            + " :project/test-paths [\"test\"]\n :project/extension-paths [\"extensions\"]\n"
+            + " :project/main " + namespace + ".main\n :project/capabilities #{}\n :project/dependencies {}}\n");
+    Files.writeString(root.resolve("workspace.edn"), "{:hara/type :workspace :hara/version \"1.0.0\"}\n");
+    Files.writeString(root.resolve("src").resolve(namespace).resolve("main.hal"),
+        "(ns " + namespace + ".main)\n\n(defn main []\n  \"Hello from " + name + "\")\n\n(main)\n");
+    Files.writeString(root.resolve("test").resolve(namespace).resolve("main_test.hal"),
+        "(ns " + namespace + ".main-test\n  (:require [std.lib.test :as test]))\n\n"
+            + "(test/print-results\n [(test/check \"starter project runs\" true true)])\n");
+    output.println("created " + name);
+    return 0;
+  }
+
+  private static int checkProject(String[] args, Capabilities capabilities, PrintStream output) {
+    if (args.length > 2) throw new HaraException("check accepts at most one path");
+    HaraProject project = cliProject(args, capabilities);
+    output.println("project check: " + project.name().display() + " " + project.version());
+    return 0;
+  }
+
+  private static int editDependency(String[] args, Capabilities capabilities, PrintStream output, boolean add)
+      throws IOException {
+    if (args.length != 2) throw new HaraException(add ? "add requires COORDINATE@RANGE" : "remove requires COORDINATE");
+    String coordinate = args[1];
+    String version = null;
+    if (add) {
+      int at = coordinate.lastIndexOf('@');
+      if (at <= 0 || at == coordinate.length() - 1) throw new HaraException("add requires COORDINATE@RANGE");
+      version = coordinate.substring(at + 1);
+      coordinate = coordinate.substring(0, at);
+      if (!version.matches("[0-9A-Za-z^~<>=.*+| -]+")) throw new HaraException("invalid dependency range " + version);
+    }
+    if (!coordinate.matches("[a-z0-9_.-]+/[a-z0-9_.-]+")) throw new HaraException("invalid package coordinate: " + coordinate);
+    HaraProject project = cliProject(new String[] {add ? "add" : "remove"}, capabilities);
+    rewriteDependency(project.descriptor(), coordinate, version);
+    output.println((add ? "added " : "removed ") + coordinate);
+    return 0;
+  }
+
+  private static void rewriteDependency(Path manifest, String coordinate, String version) throws IOException {
+    String source = Files.readString(manifest);
+    int key = source.indexOf(":project/dependencies");
+    if (key < 0) throw new HaraException("project.edn is missing :project/dependencies");
+    int open = source.indexOf('{', key);
+    int close = matchingBrace(source, open);
+    if (open < 0 || close < 0) throw new HaraException("project.edn :project/dependencies must be an EDN map");
+    String body = source.substring(open + 1, close).trim();
+    String entry = "\"" + coordinate + "\" {:version \"" + version + "\"}";
+    String rewritten;
+    if (version == null) {
+      rewritten = body.replaceAll("\\s*\\\"" + java.util.regex.Pattern.quote(coordinate) + "\\\"\\s*\\{\\s*:version\\s*\\\"[^\\\"]+\\\"\\s*}\\s*", "").trim();
+    } else if (body.isEmpty()) {
+      rewritten = entry;
+    } else if (body.matches("(?s).*\\\"" + java.util.regex.Pattern.quote(coordinate) + "\\\"\\s*\\{\\s*:version\\s*\\\"[^\\\"]+\\\"\\s*}.*")) {
+      rewritten = body.replaceAll("\\\"" + java.util.regex.Pattern.quote(coordinate) + "\\\"\\s*\\{\\s*:version\\s*\\\"[^\\\"]+\\\"\\s*}", entry);
+    } else {
+      rewritten = body + " " + entry;
+    }
+    Files.writeString(manifest, source.substring(0, open + 1) + rewritten + source.substring(close));
+  }
+
+  private static int matchingBrace(String source, int open) {
+    int depth = 0;
+    boolean string = false;
+    boolean escape = false;
+    for (int i = open; i < source.length(); i++) {
+      char ch = source.charAt(i);
+      if (string) {
+        if (escape) escape = false;
+        else if (ch == '\\') escape = true;
+        else if (ch == '"') string = false;
+      } else if (ch == '"') string = true;
+      else if (ch == '{') depth++;
+      else if (ch == '}' && --depth == 0) return i;
+    }
+    return -1;
+  }
+
+  private static int syncProject(String[] args, Capabilities capabilities, PrintStream output)
+      throws IOException {
+    if (args.length > 2 || (args.length == 2 && !java.util.Set.of("--offline", "--locked", "--frozen").contains(args[1])))
+      throw new HaraException("sync accepts at most one of --offline, --locked, or --frozen");
+    HaraProject project = cliProject(new String[] {"sync"}, capabilities);
+    String manifest = Files.readString(project.descriptor());
+    int dependencyKey = manifest.indexOf(":project/dependencies");
+    int dependencyOpen = dependencyKey < 0 ? -1 : manifest.indexOf('{', dependencyKey);
+    int dependencyClose = dependencyOpen < 0 ? -1 : matchingBrace(manifest, dependencyOpen);
+    if (dependencyOpen < 0 || dependencyClose < 0)
+      throw new HaraException("project.edn :project/dependencies must be an EDN map");
+    String dependencies = manifest.substring(dependencyOpen + 1, dependencyClose).trim();
+    if (!dependencies.isEmpty()) {
+      java.util.regex.Matcher coordinates =
+          java.util.regex.Pattern.compile("\\\"[^\\\"]+\\\"\\s*\\{").matcher(dependencies);
+      int count = 0;
+      while (coordinates.find()) count++;
+      throw new HaraException("project sync requires the reviewed registry client to resolve " + count + " declared dependencies");
+    }
+    Path lock = project.root().resolve("project.lock.edn");
+    boolean locked = args.length == 2 && ("--locked".equals(args[1]) || "--frozen".equals(args[1]));
+    if (locked && !Files.isRegularFile(lock)) throw new HaraException(args[1] + " requires an existing project.lock.edn");
+    if (locked && !"{:lock/format 1 :packages {}}\n".equals(Files.readString(lock)))
+      throw new HaraException(lock + " is not a lockfile written by this CLI");
+    if (!locked) Files.writeString(lock, "{:lock/format 1 :packages {}}\n");
+    output.println("project sync: " + lock);
+    return 0;
+  }
+
+  private static int runProject(Capabilities capabilities, PrintStream output) throws IOException {
+    HaraProject project = cliProject(new String[] {"run"}, capabilities);
+    try (Context context = context(capabilities, project.root())) {
+      output.println(display(context.eval(HaraLanguage.ID, Files.readString(project.mainFile()))));
+    }
+    return 0;
+  }
+
+  @SuppressWarnings("rawtypes")
+  private static int testProject(String[] args, Capabilities capabilities, PrintStream output) throws IOException {
+    if (args.length > 2) throw new HaraException("test accepts at most one path");
+    HaraProject project = cliProject(args, capabilities);
+    ArrayList<Path> files = new ArrayList<>();
+    for (Path root : project.testPaths()) {
+      if (Files.exists(root)) try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
+        paths.filter(path -> path.toString().endsWith(".hal")).forEach(files::add);
+      }
+    }
+    files.sort(Comparator.naturalOrder());
+    if (files.isEmpty()) throw new HaraException("project has no .hal files under :project/test-paths");
+    int passed = 0;
+    int failed = 0;
+    for (Path file : files) {
+      try (Context context = context(capabilities, project.root())) {
+        Value value = context.eval(HaraLanguage.ID, Files.readString(file));
+        Object results = Parser.LispReader.readString(value.asString(), null);
+        if (!(results instanceof ILinearType<?> items)) throw new HaraException("test/print-results must return a vector");
+        int filePassed = 0;
+        int fileFailed = 0;
+        for (Object item : items) {
+          if (!(item instanceof IMapType map) || !(map.lookup(Keyword.create("pass")) instanceof Boolean result))
+            throw new HaraException("test result is missing boolean :pass");
+          if (result) filePassed++; else fileFailed++;
+        }
+        passed += filePassed;
+        failed += fileFailed;
+        output.println("test " + file + ": " + filePassed + " passed, " + fileFailed + " failed");
+      } catch (RuntimeException failure) {
+        failed++;
+        output.println("test " + file + ": " + failure.getMessage());
+      }
+    }
+    output.println("test result: " + passed + " passed, " + failed + " failed");
+    if (failed > 0) throw new HaraException("test failures");
+    return 0;
   }
 
   private static int runServer(PrintStream output, PrintStream error, Capabilities capabilities) {
@@ -297,11 +491,25 @@ public final class Main {
         String className = ((Keyword) testCase.lookup(Keyword.create("class"))).getName();
         IMapType expected = (IMapType) testCase.lookup(Keyword.create("expect"));
         if ("reader".equals(className)) {
-          Object actual = Parser.LispReader.readString(form, null);
-          Object expectedForm = expected.lookup(Keyword.create("form"));
-          if (expectedForm != null && !expectedForm.toString().equals(G.display(actual))) {
-            throw new IllegalStateException(
-                id + " expected " + expectedForm + ", got " + G.display(actual));
+          Object expectedError = expected.lookup(Keyword.create("error"));
+          Object expectedMessage = expected.lookup(Keyword.create("message"));
+          try {
+            Object actual = Parser.LispReader.readString(form, null);
+            if (expectedError != null) {
+              throw new IllegalStateException(id + " expected a reader error");
+            }
+            Object expectedForm = expected.lookup(Keyword.create("form"));
+            if (expectedForm != null && !expectedForm.toString().equals(G.display(actual))) {
+              throw new IllegalStateException(
+                  id + " expected " + expectedForm + ", got " + G.display(actual));
+            }
+          } catch (RuntimeException readerError) {
+            if (expectedError == null) throw readerError;
+            if (expectedMessage != null
+                && !readerError.getMessage().contains(expectedMessage.toString())) {
+              throw new IllegalStateException(
+                  id + " reader error mismatch: expected message containing " + expectedMessage);
+            }
           }
         } else {
           String setup = (String) testCase.lookup(Keyword.create("setup"));
@@ -424,15 +632,20 @@ public final class Main {
   }
 
   private static Context context(Capabilities capabilities) {
+    return context(capabilities, null);
+  }
+
+  private static Context context(Capabilities capabilities, Path projectRoot) {
     IOAccess access =
         IOAccess.newBuilder()
-            .allowHostFileAccess(capabilities.file)
+            .allowHostFileAccess(capabilities.file || projectRoot != null)
             .allowHostSocketAccess(capabilities.network)
             .build();
-    return Context.newBuilder(HaraLanguage.ID)
+    Context.Builder builder = Context.newBuilder(HaraLanguage.ID)
         .allowCreateProcess(capabilities.process)
-        .allowIO(access)
-        .build();
+        .allowIO(access);
+    if (projectRoot != null) builder.currentWorkingDirectory(projectRoot);
+    return builder.build();
   }
 
   private static Capabilities parseCapabilities(String[] arguments) {
@@ -446,6 +659,7 @@ public final class Main {
     boolean noSplash = false;
     boolean noColor = false;
     Path historyFile = null;
+    Path project = null;
     String host = HaraServer.DEFAULT_HOST;
     int port = HaraServer.DEFAULT_PORT;
     boolean options = true;
@@ -461,6 +675,10 @@ public final class Main {
       else if (options && "--no-history".equals(argument)) noHistory = true;
       else if (options && "--no-splash".equals(argument)) noSplash = true;
       else if (options && "--no-color".equals(argument)) noColor = true;
+      else if (options && argument.startsWith("--project="))
+        project = Path.of(requiredOption("--project", argument.substring("--project=".length())));
+      else if (options && "--project".equals(argument))
+        project = Path.of(nextOption(arguments, ++index, "--project"));
       else if (options && argument.startsWith("--host="))
         host = requiredOption("--host", argument.substring("--host=".length()));
       else if (options && "--host".equals(argument))
@@ -475,7 +693,10 @@ public final class Main {
         historyFile = Path.of(nextOption(arguments, ++index, "--history"));
       else if (options && argument.startsWith("--"))
         throw new IllegalArgumentException("Unknown option: " + argument);
-      else positional.add(argument);
+      else {
+        positional.add(argument);
+        options = false;
+      }
     }
     return new Capabilities(
         file,
@@ -489,6 +710,7 @@ public final class Main {
         noSplash,
         noColor,
         historyFile,
+        project,
         positional.toArray(new String[0]));
   }
 
@@ -525,6 +747,7 @@ public final class Main {
     private final boolean noSplash;
     private final boolean noColor;
     private final Path historyFile;
+    private final Path project;
     private final String[] arguments;
 
     private Capabilities(
@@ -539,6 +762,7 @@ public final class Main {
         boolean noSplash,
         boolean noColor,
         Path historyFile,
+        Path project,
         String[] arguments) {
       this.file = file;
       this.network = network;
@@ -551,6 +775,7 @@ public final class Main {
       this.noSplash = noSplash;
       this.noColor = noColor;
       this.historyFile = historyFile;
+      this.project = project;
       this.arguments = arguments;
     }
   }
@@ -1055,6 +1280,7 @@ public final class Main {
       return "#<lazy-iterator>";
     }
     if (result.hasIterator() && !result.hasArrayElements()) return "#<lazy-iterator>";
+    if (result.isString()) return G.display(result.asString());
     return result.toString();
   }
 
@@ -1101,8 +1327,9 @@ public final class Main {
     output.println("hara server [OPTIONS]                 compatibility alias for headless");
     output.println("hara standalone [OPTIONS]             compatibility alias for --offline");
     output.println("hara remote HOST:PORT");
+    output.println("hara new NAME | check [PATH] | add COORDINATE@RANGE | remove COORDINATE | sync | test [PATH]");
     output.println("hara [--allow-file] [--allow-net] eval <expression>");
-    output.println("hara [--allow-file] [--allow-net] run <file>");
+    output.println("hara [--allow-file] [--allow-net] run [file]");
     output.println("hara [--allow-file] [--allow-net] stdin");
     output.println("hara conformance");
     output.println("hara extension [check|build|install|test] ...");
@@ -1111,7 +1338,7 @@ public final class Main {
     output.println("  --host HOST, --host=HOST");
     output.println("  --port PORT, --port=PORT");
     output.println("  --offline  --log-requests  --allow-file  --allow-net  --allow-process");
-    output.println("  --history PATH  --no-history  --no-splash  --no-color");
+    output.println("  --history PATH  --project PATH  --no-history  --no-splash  --no-color");
   }
 
 

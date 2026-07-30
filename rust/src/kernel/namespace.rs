@@ -11,6 +11,7 @@ pub struct Namespace<V> {
     name: Symbol,
     mappings: Rc<RefCell<HashMap<Symbol, Var<V>>>>,
     aliases: Rc<RefCell<HashMap<Symbol, Namespace<V>>>>,
+    lazy_aliases: Rc<RefCell<HashMap<Symbol, Symbol>>>,
     imports: Rc<RefCell<HashMap<Symbol, String>>>,
     native_flavor: Rc<RefCell<Option<String>>>,
 }
@@ -20,6 +21,7 @@ impl<V> Namespace<V> {
             name: Symbol::parse(name.as_ref()),
             mappings: Rc::new(RefCell::new(HashMap::new())),
             aliases: Rc::new(RefCell::new(HashMap::new())),
+            lazy_aliases: Rc::new(RefCell::new(HashMap::new())),
             imports: Rc::new(RefCell::new(HashMap::new())),
             native_flavor: Rc::new(RefCell::new(None)),
         }
@@ -102,14 +104,38 @@ impl<V> Namespace<V> {
         self.mappings.borrow().get(symbol).cloned()
     }
     pub fn unalias(&self, alias: impl AsRef<str>) -> Option<Namespace<V>> {
+        let alias = Symbol::parse(alias.as_ref());
+        self.lazy_aliases.borrow_mut().remove(&alias);
         self.aliases
             .borrow_mut()
-            .remove(&Symbol::parse(alias.as_ref()))
+            .remove(&alias)
     }
     pub fn alias(&self, alias: impl AsRef<str>, namespace: Namespace<V>) {
+        let alias = Symbol::parse(alias.as_ref());
+        self.lazy_aliases.borrow_mut().remove(&alias);
         self.aliases
             .borrow_mut()
-            .insert(Symbol::parse(alias.as_ref()), namespace);
+            .insert(alias, namespace);
+    }
+    pub fn lazy_alias(&self, alias: impl AsRef<str>, target: impl AsRef<str>) {
+        let alias = Symbol::parse(alias.as_ref());
+        self.aliases.borrow_mut().remove(&alias);
+        self.lazy_aliases
+            .borrow_mut()
+            .insert(alias, Symbol::parse(target.as_ref()));
+    }
+    pub fn lazy_target(&self, alias: impl AsRef<str>) -> Option<Symbol> {
+        self.lazy_aliases
+            .borrow()
+            .get(&Symbol::parse(alias.as_ref()))
+            .cloned()
+    }
+    pub fn lazy_aliases(&self) -> Vec<(Symbol, Symbol)> {
+        self.lazy_aliases
+            .borrow()
+            .iter()
+            .map(|(alias, target)| (alias.clone(), target.clone()))
+            .collect()
     }
     pub fn import(&self, name: impl AsRef<str>, host_type: impl Into<String>) {
         self.imports

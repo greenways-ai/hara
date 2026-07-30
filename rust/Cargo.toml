@@ -30,5 +30,6 @@ rustyline = "14.0.0"
 home = "=0.5.9"
 semver = "1.0"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
+ed25519-dalek = { version = "2.1", default-features = false, features = ["std"] }
 
 [dev-dependencies]

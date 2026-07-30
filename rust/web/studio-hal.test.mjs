@@ -11,7 +11,7 @@ import { NodeRuntime } from "./studio/node-runtime.js";
 import { SessionRouter } from "./studio/session-router.js";
 
 // Real-wasm integration tests for the studio hara libraries
-// (rust/web/studio/hal/*.hal): store/fs/space/boot behaviour is asserted by
+// (rust/web/studio/hal/*.hal): store/boot and canonical file behaviour is asserted by
 // evaluating hara source in actual HTA kernels. Skipped when the raw wasm
 // artifact has not been built.
 const wasmUrl = new URL("../raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm", import.meta.url);
@@ -21,8 +21,6 @@ const resources = wasmBytes === null
   ? null
   : {
       "studio.store": await hal("store"),
-      "studio.fs": await hal("fs"),
-      "studio.space": await hal("space"),
       "studio.boot": await hal("boot"),
       "studio.node": await hal("node"),
       "studio.program": await hal("program"),
@@ -106,13 +104,19 @@ function makeBroker({ fetch, nodeRuntime } = {}) {
     fetch: fetch ?? mockFetch(),
     nodeRuntime
   });
-  return new KernelBroker({ resources, spawn: () => spawnRealKernel(hostCalls) });
+  return new KernelBroker({
+    resources,
+    spawn: () => spawnRealKernel(hostCalls),
+    onKernelStarting: async (kernel) => {
+      const mount = await kernel.context.createFilesystem({ provider: "memory" });
+      await kernel.context.session().attachFilesystem(mount);
+    }
+  });
 }
 
 const REQUIRE_ALL =
   "(require [studio.store :as store]) " +
-  "(require [studio.fs :as fs]) " +
-  "(require [studio.space :as space]) " +
+  "(require [std.foundation.file :as file]) " +
   "(require [studio.boot :as boot])";
 const evaluate = (broker, source) => broker.eval("ROOT", `(do ${REQUIRE_ALL} ${source})`);
 
@@ -319,96 +323,66 @@ test("studio.store round trips string values and lists keys", { skip: wasmBytes 
   assert.ok((await evaluate(broker, "(count (store/keys))")) > 0);
 });
 
-test("studio.fs scopes files per space and lists by directory", { skip: wasmBytes === null }, async () => {
+test("std.foundation.file performs canonical byte filesystem operations", { skip: wasmBytes === null }, async () => {
   const broker = makeBroker();
-  await evaluate(broker, '(fs/write! "alpha" "/intro.hal" "alpha-intro")');
-  await evaluate(broker, '(fs/write! "alpha" "/docs/day1.hal" "day-one")');
-  await evaluate(broker, '(fs/write! "beta" "/intro.hal" "beta-intro")');
-
-  assert.equal(await evaluate(broker, '(fs/read "alpha" "/intro.hal")'), "alpha-intro");
-  assert.equal(await evaluate(broker, '(fs/read "beta" "/intro.hal")'), "beta-intro");
-  assert.equal(await evaluate(broker, '(fs/read "alpha" "/absent.hal")'), null);
-  assert.equal(await evaluate(broker, '(fs/exists? "alpha" "/intro.hal")'), true);
-  assert.equal(await evaluate(broker, '(fs/exists? "alpha" "/absent.hal")'), false);
-
-  // Space A's listing never sees space B's files.
-  assert.deepEqual(await evaluate(broker, '(fs/list "alpha" "/")'), ["/docs/day1.hal", "/intro.hal"]);
-  assert.deepEqual(await evaluate(broker, '(fs/list "alpha" "/docs")'), ["/docs/day1.hal"]);
-  assert.deepEqual(await evaluate(broker, '(fs/list "beta" "/")'), ["/intro.hal"]);
-
-  await evaluate(broker, '(fs/delete! "alpha" "/intro.hal")');
-  assert.equal(await evaluate(broker, '(fs/exists? "alpha" "/intro.hal")'), false);
-  assert.equal(await evaluate(broker, '(fs/read "beta" "/intro.hal")'), "beta-intro");
-});
-
-test("studio.space creates, checks, and lists spaces and their files", { skip: wasmBytes === null }, async () => {
-  const broker = makeBroker();
-  assert.equal(await evaluate(broker, '(space/create! "gamma")'), true);
-  assert.equal(await evaluate(broker, '(space/exists? "gamma")'), true);
-  assert.equal(await evaluate(broker, '(space/exists? "ghost-space")'), false);
-
-  await evaluate(broker, '(fs/write! "gamma" "/a.hal" "a")');
-  await evaluate(broker, '(fs/write! "delta" "/b.hal" "b")'); // files before meta
-  assert.deepEqual(await evaluate(broker, '(space/files "gamma")'), ["/a.hal"]);
-  assert.deepEqual(await evaluate(broker, '(space/tree "gamma")'), ["/a.hal"]);
-
-  const spaces = await evaluate(broker, "(space/list-spaces)");
-  assert.ok(spaces.includes("gamma"));
-  assert.ok(spaces.includes("delta")); // discovered from file keys too
-  assert.ok(!spaces.includes("ghost-space"));
-  assert.equal(new Set(spaces).size, spaces.length); // no duplicates
-});
-
-test("studio.space import-github! fetches the listing and writes every file", { skip: wasmBytes === null }, async () => {
-  const broker = makeBroker();
-  const summary = await evaluate(broker, '(space/import-github! "imported" "octo/lessons" {:ref "main"})');
-  assert.equal(mapGet(summary, "space"), "imported");
-  assert.equal(mapGet(summary, "repo"), "octo/lessons");
-  assert.equal(mapGet(summary, "ref"), "main");
-  assert.equal(mapGet(summary, "imported"), 3);
-
-  assert.equal(await evaluate(broker, '(space/exists? "imported")'), true);
-  assert.equal(await evaluate(broker, '(fs/read "imported" "/README.md")'), "# Lessons");
-  assert.equal(await evaluate(broker, '(fs/read "imported" "/src/intro.hal")'), "(+ 1 2)");
-  assert.deepEqual(await evaluate(broker, '(fs/list "imported" "/src")'), ["/src/advanced.hal", "/src/intro.hal"]);
-});
-
-test("studio.space import-github! defaults the ref to main", { skip: wasmBytes === null }, async () => {
-  const broker = makeBroker();
-  const summary = await evaluate(broker, '(space/import-github! "imported-default" "octo/lessons")');
-  assert.equal(mapGet(summary, "ref"), "main");
-  assert.equal(mapGet(summary, "imported"), 3);
-});
-
-test("studio.space import-github! fails the whole import when one file fetch fails", { skip: wasmBytes === null }, async () => {
-  const broker = makeBroker({ fetch: mockFetch({ failFor: "/src/advanced.hal" }) });
-  await assert.rejects(
-    evaluate(broker, '(space/import-github! "imported-broken" "octo/lessons")'),
-    /import-github! failed to fetch \/src\/advanced\.hal/
+  assert.equal(await evaluate(broker, '(deref (file/mkdir "/docs"))'), null);
+  assert.equal(
+    await evaluate(broker, '(deref (file/write "/docs/note.bin" (bytes 1 2 255)))'),
+    null
   );
+  assert.equal(await evaluate(broker, '(deref (file/exists? "/docs/note.bin"))'), true);
+  assert.deepEqual(await evaluate(broker, '(deref (file/read "/docs/note.bin"))'), new Uint8Array([1, 2, 255]));
+  assert.deepEqual(await evaluate(broker, '(deref (file/list "/docs"))'), ["/docs/note.bin"]);
+  assert.equal(await evaluate(broker, '(deref (file/delete "/docs/note.bin"))'), null);
+  assert.equal(await evaluate(broker, '(deref (file/exists? "/docs/note.bin"))'), false);
 });
 
-test("default bootstrap boots the space in a fresh kernel", { skip: wasmBytes === null }, async () => {
+test("browser sessions share or isolate mounts without losing language state", { skip: wasmBytes === null }, async () => {
+  const hostCalls = createHostServices({ dbName: `hara-mount-parity-${++brokerCounter}` });
+  const { context } = await spawnRealKernel(hostCalls);
+  await context.ready;
+  const alpha = await context.createSession("alpha");
+  const beta = await context.createSession("beta");
+  const isolated = await context.createSession("isolated");
+  assert.equal(await alpha.eval("(def retained 42)"), 42);
+  const sharedMount = await context.createFilesystem({ provider: "memory" });
+  const isolatedMount = await context.createFilesystem({ provider: "memory" });
+  await alpha.attachFilesystem(sharedMount);
+  await beta.attachFilesystem(sharedMount);
+  await isolated.attachFilesystem(isolatedMount);
+  assert.equal(await alpha.eval("retained"), 42);
+  await alpha.eval(
+    '(do (require [std.foundation.file :as file]) (deref (file/write "/shared.bin" (bytes 9))))'
+  );
+  assert.equal(
+    await beta.eval(
+      '(do (require [std.foundation.file :as file]) (deref (file/exists? "/shared.bin")))'
+    ),
+    true
+  );
+  assert.equal(
+    await isolated.eval(
+      '(do (require [std.foundation.file :as file]) (deref (file/exists? "/shared.bin")))'
+    ),
+    false
+  );
+  await assert.rejects(context.closeFilesystem(sharedMount), /FILESYSTEM_ATTACHED/);
+  await alpha.detachFilesystem();
+  await beta.detachFilesystem();
+  await context.closeFilesystem(sharedMount);
+  await isolated.detachFilesystem();
+  await context.closeFilesystem(isolatedMount);
+  context.close();
+});
+
+test("default bootstrap reports project identity in a mounted kernel", { skip: wasmBytes === null }, async () => {
   const broker = makeBroker();
   await broker.create("booted", { bootstrap: defaultBootstrap("boot-space") });
-
-  assert.equal(await broker.eval("booted", '(do (require [studio.space :as space]) (space/exists? "boot-space"))'), true);
   const summary = await broker.eval(
     "booted",
     '(do (require [studio.boot :as boot]) (boot/boot! "boot-space"))'
   );
-  assert.equal(mapGet(summary, "space"), "boot-space");
-  assert.equal(mapGet(summary, "created"), false); // the bootstrap already created it
-  assert.equal(mapGet(summary, "files"), 0);
-});
-
-test("boot! creates a missing space and reports the summary", { skip: wasmBytes === null }, async () => {
-  const broker = makeBroker();
-  const summary = await evaluate(broker, '(boot/boot! "fresh-space")');
-  assert.equal(mapGet(summary, "space"), "fresh-space");
-  assert.equal(mapGet(summary, "created"), true);
-  assert.equal(mapGet(summary, "files"), 0);
-  assert.equal(await evaluate(broker, '(space/exists? "fresh-space")'), true);
+  assert.equal(mapGet(summary, "project"), "boot-space");
 });
 
 test("a custom bootstrap can build its own store layout without studio.fs", { skip: wasmBytes === null }, async () => {

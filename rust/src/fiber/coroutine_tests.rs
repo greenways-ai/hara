@@ -145,31 +145,16 @@ fn close_on_never_resumed_coroutine() {
 }
 
 #[test]
-fn multi_yield_packs_vector_and_zero_yields_nil() {
+fn yield_requires_one_explicit_value() {
     let mut f = EvalFiber::start(
-        "(do (def c (std.foundation.coroutine/create \
-         (fn [] (std.foundation.coroutine/yield 1 2 3) (std.foundation.coroutine/yield)))) \
-         [(std.foundation.coroutine/resume c) \
-          (std.foundation.coroutine/resume c 9 8) \
-          (std.foundation.coroutine/status c) \
-          (std.foundation.coroutine/resume c) \
-          (std.foundation.coroutine/status c)])",
+        "(std.foundation.coroutine/yield 1 2 3)",
         HashMap::new(),
     )
     .unwrap();
-    assert_eq!(
+    assert!(matches!(
         f.state(),
-        EvalFiberState::Completed(Value::Vector(
-            vec![
-                Value::Vector(vec![Value::Number(1), Value::Number(2), Value::Number(3)].into()),
-                Value::Nil,
-                keyword("suspended"),
-                Value::Nil,
-                keyword("dead"),
-            ]
-            .into()
-        ))
-    );
+        EvalFiberState::Failed(message) if message.contains("expects one value")
+    ));
 }
 
 #[test]

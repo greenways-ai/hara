@@ -204,8 +204,8 @@ class Reader {
 }
 
 export class HtaContext {
-  constructor({ worker, moduleUrl, moduleBytes, hostCalls = {}, handleTags = {}, promiseProvider = new BrowserPromiseProvider(), kernelId = null }) {
-    this.worker=worker;this.hostCalls=hostCalls;this.handleTags=handleTags;this.promiseProvider=promiseProvider;this.kernelId=kernelId;this.next=1;this.pending=new Map();this.sessionFilesystems=new Map();this.sessions=new Map();
+  constructor({ worker, moduleUrl, moduleBytes, hostCalls = {}, filesystemHost = hostCalls.filesystemHost ?? null, handleTags = {}, promiseProvider = new BrowserPromiseProvider(), kernelId = null }) {
+    this.worker=worker;this.hostCalls=hostCalls;this.filesystemHost=filesystemHost;this.handleTags=handleTags;this.promiseProvider=promiseProvider;this.kernelId=kernelId;this.next=1;this.pending=new Map();this.sessions=new Map();this.mounts=new Set();
     this.ready=new Promise((resolve,reject)=>{this.readyResolve=resolve;this.readyReject=reject;});
     worker.addEventListener("message", event=>this.message(event.data));
     worker.addEventListener("error", error=>this.fail(error));
@@ -219,28 +219,37 @@ export class HtaContext {
   }
   releaseHandle(handle){if(handle.context!==this)throw new Error("hta/handle-owner-mismatch");const wireHandle=new HtaHandle(handle.owner,handle.type,handle.id);this.worker.postMessage({type:"release",frame:encodeHta(wireHandle)});}
   async createSession(name){await this.call("session/create",[name]);return this.session(name);}
+  async createFilesystem(descriptor={provider:"memory"}){
+    if(!descriptor||typeof descriptor!=="object")throw new Error("filesystem/descriptor-invalid");
+    if(!this.filesystemHost)throw new Error("filesystem/host-unavailable");
+    const wire=new Map(Object.entries(descriptor));
+    const mountId=await this.call("filesystem/create",[wire]);
+    try{await this.filesystemHost.register(this,mountId,descriptor);this.mounts.add(mountId);return mountId;}
+    catch(error){await this.call("filesystem/close",[mountId]).catch(()=>{});throw error;}
+  }
+  async filesystemInfo(mountId){return this.call("filesystem/info",[mountId]);}
+  async closeFilesystem(mountId){const result=await this.call("filesystem/close",[mountId]);await this.filesystemHost.close(this,mountId);this.mounts.delete(mountId);return result;}
   session(name="ROOT"){let session=this.sessions.get(name);if(!session){session=new HtaSession(this,name);this.sessions.set(name,session);}return session;}
   listSessions(){return this.call("session/list",[]);}
-  filesystemForSession(name){return this.sessionFilesystems.get(name)??null;}
   async message(message) {
     if(message.type==="ready"){this.readyResolve();return;}if(message.type==="fatal"){this.fail(new Error(message.error?.message??"HTA worker failed"));return;}
     if(message.type==="result"){const pending=this.pending.get(message.id);if(!pending)return;this.pending.delete(message.id);const value=bindHandles(decodeHta(message.frame),this);message.ok?pending.resolve(value):pending.reject(errorFrom(value));return;}
-    if(message.type==="host-call"){const key=`${message.service}/${message.method}`,handler=this.hostCalls[key],sessionId=message.session??"ROOT";try{if(!handler)throw new Error(`hta/host-call-denied: ${key}`);const value=await handler.call({context:this.session(sessionId),kernelContext:this,kernelId:this.kernelId??null,sessionId,task:message.task},...decodeHta(message.frame));this.worker.postMessage({type:"delivery",call:message.call,ok:true,frame:encodeHta(value)});}catch(error){this.worker.postMessage({type:"delivery",call:message.call,ok:false,frame:encodeHta(errorValue(error))});}}
+    if(message.type==="host-call"){const key=`${message.service}/${message.method}`,handler=this.hostCalls[key],sessionId=message.session??"ROOT";try{if(!handler)throw new Error(`hta/host-call-denied: ${key}`);const value=await handler.call({context:this.session(sessionId),kernelContext:this,kernelId:this.kernelId??null,sessionId,mountId:message.mount??null,task:message.task},...decodeHta(message.frame));this.worker.postMessage({type:"delivery",call:message.call,ok:true,frame:encodeHta(value)});}catch(error){this.worker.postMessage({type:"delivery",call:message.call,ok:false,frame:encodeHta(errorValue(error))});}}
   }
   fail(error){this.readyReject(error);for(const pending of this.pending.values())pending.reject(error);this.pending.clear();}
-  close(){this.worker.postMessage({type:"close"});this.worker.terminate();}
+  close(){for(const mountId of this.mounts)this.filesystemHost?.close(this,mountId).catch(()=>{});this.mounts.clear();this.worker.postMessage({type:"close"});this.worker.terminate();}
 }
 
 export class HtaSession {
   constructor(context,name){if(typeof name!=="string"||!name.length)throw new Error("INVALID_SESSION_NAME");this.context=context;this.name=name;}
   call(target,args=[]){if(target==="eval")return this.eval(args[0]);if(target==="eval-bound")return this.evalBound(args[0],args[1]);if(target==="complete")return this.complete(args[0]);return this.context.call(target,args);}
-  filesystemForSession(name){return this.context.filesystemForSession(name);}
   eval(source){return this.context.call("session/eval",[this.name,source]);}
   evalBound(source,bindings=[]){return this.context.call("session/eval-bound",[this.name,source,bindings]);}
   complete(prefix){return this.context.call("session/complete",[this.name,prefix]);}
   info(){return this.context.call("session/info",[this.name]);}
-  async attachFilesystem(providerId){await this.context.call("session/attach-filesystem",[this.name,providerId]);this.context.sessionFilesystems.set(this.name,providerId);return true;}
-  async close(){const result=await this.context.call("session/close",[this.name]);this.context.sessionFilesystems.delete(this.name);this.context.sessions.delete(this.name);return result;}
+  async attachFilesystem(mountId){return this.context.call("session/attach-filesystem",[this.name,mountId]);}
+  async detachFilesystem(){return this.context.call("session/detach-filesystem",[this.name]);}
+  async close(){const result=await this.context.call("session/close",[this.name]);this.context.sessions.delete(this.name);return result;}
 }
 
 function bindHandles(value,context){if(value instanceof HtaHandle){value.context=context;const tag=context.handleTags[value.type];if(tag){value.displayTag=tag;value.displayKind=value.type;}return value;}if(Array.isArray(value)){value.forEach(item=>bindHandles(item,context));}else if(value instanceof Set){for(const item of value)bindHandles(item,context);}else if(value instanceof Map){for(const [key,item]of value){bindHandles(key,context);bindHandles(item,context);}}return value;}

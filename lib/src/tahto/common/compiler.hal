@@ -1,0 +1,194 @@
+(ns tahto.common.compiler
+  (:require [tahto.common.emit :as emit]
+            [tahto.common.preprocess-input :as input]
+            [tahto.common.registry :as registry]
+            [tahto.protocol.compiler :as protocol]))
+
+(defstruct InputNormalizer [])
+
+(extend-type InputNormalizer protocol/INormalizer
+  (normalize-form [normalizer raw context]
+    (input/to-input raw)))
+
+(defstruct StructuralStager [])
+
+(extend-type StructuralStager protocol/IStager
+  (stage-form [stager input selected context]
+    {:form input
+     :dependencies #{}}
+    ))
+
+(defstruct EmptyInferencer [])
+
+(extend-type EmptyInferencer protocol/IInferencer
+  (infer-form [inferencer staged selected context]
+    {:types {}}))
+
+(defstruct EmptyLinter [])
+
+(extend-type EmptyLinter protocol/ILinter
+  (lint-form [linter staged inference selected context]
+    []))
+
+(defn- rewrite-phases
+  [context]
+  (or (:rewrite/phases context)
+      [:canonical :target :staging]))
+
+(defn apply-rewrite-plan
+  "Runs the selected grammar's ordered rewrite hooks.
+
+  A hook receives the current form and compiler context, then returns a form."
+  [form selected context]
+  (reduce
+   (fn [current phase]
+     (reduce
+      (fn [rewritten hook]
+        (hook rewritten context))
+      current
+      (or (get-in selected [:rewrite phase]) [])))
+   form
+   (rewrite-phases context)))
+
+(defstruct GrammarRewriter [])
+
+(extend-type GrammarRewriter protocol/IRewriter
+  (rewrite-form [rewriter staged selected context]
+    (apply-rewrite-plan staged selected context)))
+
+(defn input-normalizer
+  []
+  (tahto.common.compiler/InputNormalizer))
+
+(defn structural-stager
+  []
+  (tahto.common.compiler/StructuralStager))
+
+(defn empty-inferencer
+  []
+  (tahto.common.compiler/EmptyInferencer))
+
+(defn empty-linter
+  []
+  (tahto.common.compiler/EmptyLinter))
+
+(defn grammar-rewriter
+  []
+  (tahto.common.compiler/GrammarRewriter))
+
+(defn- phase-context
+  [context phase]
+  (assoc context :compiler/phase phase))
+
+(defn- stage-result
+  [value]
+  (if (and (map? value)
+           (get value :form))
+    value
+    {:form value
+     :dependencies #{}}))
+
+(defn- phase-record
+  [phase value]
+  {:phase phase
+   :value value})
+
+(defstruct Compiler [catalog normalizer stager inferencer linter rewriter emitter])
+
+(defn compiler
+  "Creates a protocol-composed compiler over a grammar catalog."
+  ([catalog]
+   (compiler catalog {}))
+  ([catalog components]
+   (tahto.common.compiler/Compiler
+    catalog
+    (or (:normalizer components) (input-normalizer))
+    (or (:stager components) (structural-stager))
+    (or (:inferencer components) (empty-inferencer))
+    (or (:linter components) (empty-linter))
+    (or (:rewriter components) (grammar-rewriter))
+    (or (:emitter components) (emit/emitter)))))
+
+(defn compile
+  "Compiles one form through an ICompiler implementation."
+  [compiler raw options]
+  (protocol-call protocol/ICompiler
+                 compile-form
+                 compiler
+                 raw
+                 options))
+
+(extend-type Compiler protocol/ICompiler
+  (compile-form [compiler raw options]
+    (let [selected (registry/resolve (:catalog compiler) options)
+          base-context (assoc options :grammar selected)
+          normalized
+          (protocol-call protocol/INormalizer
+                         normalize-form
+                         (:normalizer compiler)
+                         raw
+                         (phase-context base-context :normalize))
+          staged-result
+          (stage-result
+           (protocol-call protocol/IStager
+                          stage-form
+                          (:stager compiler)
+                          normalized
+                          selected
+                          (phase-context base-context :stage)))
+          staged (:form staged-result)
+          inference
+          (protocol-call protocol/IInferencer
+                         infer-form
+                         (:inferencer compiler)
+                         staged
+                         selected
+                         (phase-context base-context :infer))
+          diagnostics
+          (protocol-call protocol/ILinter
+                         lint-form
+                         (:linter compiler)
+                         staged
+                         inference
+                         selected
+                         (phase-context base-context :lint))
+          rewritten
+          (protocol-call protocol/IRewriter
+                         rewrite-form
+                         (:rewriter compiler)
+                         staged
+                         selected
+                         (phase-context
+                          (assoc base-context
+                                 :inference inference
+                                 :diagnostics diagnostics)
+                          :rewrite))
+          output
+          (protocol-call protocol/IEmitter
+                         emit-form
+                         (:emitter compiler)
+                         rewritten
+                         selected
+                         (phase-context
+                          (assoc base-context
+                                 :inference inference
+                                 :diagnostics diagnostics)
+                          :emit))]
+      {:output output
+       :grammar selected
+       :dependencies (:dependencies staged-result)
+       :inference inference
+       :diagnostics (vec diagnostics)
+       :stages {:raw raw
+                :normalized normalized
+                :staged staged
+                :rewritten rewritten}
+       :provenance
+       {:grammar (:provenance selected)
+        :phases
+        [(phase-record :normalize normalized)
+         (phase-record :stage staged)
+         (phase-record :infer inference)
+         (phase-record :lint diagnostics)
+         (phase-record :rewrite rewritten)
+         (phase-record :emit output)]}})))

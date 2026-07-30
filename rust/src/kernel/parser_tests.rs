@@ -51,16 +51,27 @@ fn reports_delimited_errors_with_position() {
 #[test]
 fn matches_canonical_numbers_characters_and_duplicate_errors() {
     assert_eq!(
-        parse_forms("123 123.45 123N 123.45M 0xFF 2r1010").unwrap(),
+        parse_forms("123 123.45 0xFF 2r1010").unwrap(),
         vec![
             Form::Number(123),
             Form::Float(123.45),
-            Form::BigInteger("123".into()),
-            Form::Decimal("123.45".into()),
             Form::Number(255),
             Form::Number(10)
         ]
     );
+    for unsupported in [
+        "123N",
+        "0N",
+        "+0N",
+        "-0N",
+        "123.45M",
+        "0M",
+        "9223372036854775808",
+    ] {
+        assert!(parse_forms(unsupported)
+            .unwrap_err()
+            .contains("Invalid number"));
+    }
     assert_eq!(
         parse_forms("\\newline \\u03bb \\o377").unwrap(),
         vec![
@@ -116,14 +127,19 @@ fn preserves_metadata_and_rejects_unknown_dispatch_forms() {
 }
 #[test]
 fn matches_extended_canonical_reader_categories() {
-    assert_eq!(
-        parse_forms("1.00M 9223372036854775808 123N").unwrap(),
-        vec![
-            Form::Decimal("1".into()),
-            Form::BigInteger("9223372036854775808".into()),
-            Form::BigInteger("123".into())
-        ]
-    );
+    for unsupported in [
+        "1.00M",
+        "0M",
+        "9223372036854775808",
+        "123N",
+        "0N",
+        "+0N",
+        "-0N",
+    ] {
+        assert!(parse_forms(unsupported)
+            .unwrap_err()
+            .contains("Invalid number"));
+    }
     assert!(parse_forms("1/2")
         .unwrap_err()
         .contains("Ratios are not supported"));

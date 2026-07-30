@@ -8,7 +8,6 @@ import hara.lang.data.Atom;
 import hara.lang.data.Keyword;
 import hara.lang.data.Map;
 import hara.lang.data.Vector;
-import hara.lang.protocol.Constant;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Value;
 import org.junit.Test;
@@ -56,14 +55,10 @@ public class LanguageAgnosticProtocolAcceptanceTest {
     Keyword keyword = Keyword.create("core/value");
     assertNull(metadata.invoke("meta", keyword, new Object[0]));
 
-    HaraProtocol metadataValue = new HaraProtocol("IMetadata", java.util.Map.of("metatype", 1));
-    HaraJavaAdapters.installMetadataValue(metadataValue);
-    assertEquals(
-        Constant.MetaType.STRING, metadataValue.invoke("metatype", keyword, new Object[0]));
   }
 
   @Test
-  public void haraStructsCanBeExtendedForFunctionAndMetadataProtocols() {
+  public void haraStructsCanBeExtendedForFunctionProtocols() {
     HaraType type = new HaraType("CallableBox", new String[] {"value"});
     HaraStruct value = new HaraStruct(type, new Object[] {41L});
 
@@ -72,10 +67,6 @@ public class LanguageAgnosticProtocolAcceptanceTest {
     ifn.extend(type, "invoke", (receiver, arguments) -> 41L + ((Number) arguments[0]).longValue());
     assertEquals(43L, ifn.invoke("invoke", value, new Object[] {2L}));
 
-    HaraProtocol metadata = new HaraProtocol("IMetadata", java.util.Map.of("metatype", 1));
-    HaraJavaAdapters.installMetadataValue(metadata);
-    metadata.extend(type, "metatype", (receiver, arguments) -> Constant.MetaType.OBJECT);
-    assertEquals(Constant.MetaType.OBJECT, metadata.invoke("metatype", value, new Object[0]));
     assertTrue(value.toString().contains("CallableBox"));
   }
   @Test

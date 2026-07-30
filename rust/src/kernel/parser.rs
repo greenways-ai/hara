@@ -1,28 +1,6 @@
 use super::form::Form;
 use super::reader::{Position, Reader};
 
-fn canonical_decimal(value: &str) -> String {
-    let (mantissa, exponent) = value
-        .split_once(['e', 'E'])
-        .map_or((value, None), |(m, e)| (m, Some(e)));
-    let mut mantissa = mantissa.to_owned();
-    if mantissa.contains('.') {
-        while mantissa.ends_with('0') {
-            mantissa.pop();
-        }
-        if mantissa.ends_with('.') {
-            mantissa.pop();
-        }
-    }
-    if mantissa == "-0" || mantissa == "+0" {
-        mantissa = "0".into();
-    }
-    exponent.map_or(mantissa.clone(), |e| {
-        let sign = if e.starts_with(['+', '-']) { "" } else { "+" };
-        format!("{mantissa}E{sign}{e}")
-    })
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Span {
     pub start: Position,
@@ -364,7 +342,6 @@ impl<'a> Parser<'a> {
         let numeric = body.chars().next().is_some_and(|ch| ch.is_ascii_digit());
         if numeric {
             let negative = token.starts_with('-');
-            let sign = if negative { "-" } else { "" };
             if let Some((radix_text, digits)) = body.split_once(['r', 'R']) {
                 let radix = radix_text.parse::<u32>().map_err(|_| ParseError {
                     message: format!("Invalid number: {token}"),
@@ -385,15 +362,8 @@ impl<'a> Parser<'a> {
                     i64::from_str_radix(hex, 16)
                         .ok()
                         .map(|value| Form::Number(if negative { -value } else { value }))
-                } else if let Some(big) = body.strip_suffix('N') {
-                    big.chars()
-                        .all(|ch| ch.is_ascii_digit())
-                        .then(|| Form::BigInteger(format!("{sign}{big}")))
-                } else if let Some(decimal) = body.strip_suffix('M') {
-                    decimal
-                        .parse::<f64>()
-                        .ok()
-                        .map(|_| Form::Decimal(canonical_decimal(&format!("{sign}{decimal}"))))
+                } else if body.ends_with(['N', 'M']) {
+                    None
                 } else if let Some((radix, digits)) = body.split_once(['r', 'R']) {
                     radix
                         .parse::<u32>()
@@ -413,11 +383,7 @@ impl<'a> Parser<'a> {
                 } else if body.contains(['.', 'e', 'E']) {
                     token.parse::<f64>().ok().map(Form::Float)
                 } else {
-                    token.parse::<i64>().ok().map(Form::Number).or_else(|| {
-                        body.chars()
-                            .all(|ch| ch.is_ascii_digit())
-                            .then(|| Form::BigInteger(token.clone()))
-                    })
+                    token.parse::<i64>().ok().map(Form::Number)
                 };
             return parsed.ok_or_else(|| ParseError {
                 message: format!("Invalid number: {token}"),

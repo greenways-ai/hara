@@ -2,11 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { HtaKeyword, HtaSymbol } from "./hta.js";
-import { editorFormAt, isAnonymousDocument, studioDocumentId } from "./studio/editor-state.js";
+import { editorFormAt, editorTopLevelForms, isAnonymousDocument, studioDocumentId } from "./studio/editor-state.js";
 import {
   buildTree,
   defaultFileContent,
-  importGithubSource,
   normalizeNewFilePath,
   normalizePath,
   parseGithubSpec,
@@ -115,19 +114,10 @@ test("parseGithubSpec rejects malformed specs", () => {
   }
 });
 
-test("importGithubSource emits an UNQUOTED require vector and escaped args", () => {
-  const source = importGithubSource({ space: "lessons", repo: "octo/lessons", ref: "main" });
+test("studioSource wraps a form with canonical file and boot requires", () => {
   assert.equal(
-    source,
-    '(do (require [studio.space :as space]) (space/import-github! "lessons" "octo/lessons" {:ref "main"}))'
-  );
-  assert.ok(!source.includes("(require '"), "require vector must stay unquoted");
-});
-
-test("studioSource wraps a form with unquoted studio requires", () => {
-  assert.equal(
-    studioSource('(fs/read "home" "/a.hal")'),
-    '(do (require [studio.space :as space]) (require [studio.fs :as fs]) (require [studio.boot :as boot]) (fs/read "home" "/a.hal"))'
+    studioSource('(deref (file/read "/a.hal"))'),
+    '(do (require [std.foundation.file :as file]) (require [studio.boot :as boot]) (deref (file/read "/a.hal")))'
   );
   assert.ok(!studioSource("x").includes("(require '"));
 });
@@ -150,6 +140,18 @@ test("editorFormAt prefers an explicit selection and otherwise finds the innermo
 test("editor forms ignore delimiters in strings and comments", () => {
   const source = '(show ")") ; )\n(+ 1 2)';
   assert.equal(editorFormAt(source, source.length).source, "(+ 1 2)");
+});
+
+test("editorTopLevelForms retains source ranges while ignoring nested syntax and comments", () => {
+  const source = ';; setup\n(def answer (+ 19 23))\n"ready" ; note\n#{1 2}';
+  assert.deepEqual(
+    editorTopLevelForms(source).map(({ start, end, source: form }) => ({ start, end, form })),
+    [
+      { start: source.indexOf("(def"), end: source.indexOf("\n\"ready\""), form: "(def answer (+ 19 23))" },
+      { start: source.indexOf('"ready"'), end: source.indexOf(" ; note"), form: '"ready"' },
+      { start: source.indexOf("#{1 2}"), end: source.length, form: "#{1 2}" }
+    ]
+  );
 });
 
 test("Studio document identity includes project, space, and path", () => {

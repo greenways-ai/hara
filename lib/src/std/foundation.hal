@@ -4,7 +4,7 @@
 ;; Contract:
 ;;   * Keep this layer free of host interop and Java-specific values.
 ;;   * Every public definition carries a docstring and a ^{:schema ...}
-;;     annotation in the std.typed surface grammar (specs/hara/data/typed.edn).
+;;     annotation in the portable schema grammar.
 ;;     Annotations are data: checked by the std.typed linter, never required
 ;;     at runtime. This file is the linter's dogfood target.
 ;;   * Variadic signatures use & in the schema input vector, e.g.
@@ -13,16 +13,42 @@
 ;;   * Macros carry docstrings only; macro signatures are form-level and
 ;;     outside the value-type schema grammar.
 ;;
+;;                            HAL program
+;;                                |
+;;                                v
+;;                    +-------------------------+
+;;                    | std.foundation          |
+;;                    | portable value layer    |
+;;                    +-------------------------+
+;;                      |       |       |      |
+;;          +-----------+       |       |      +-----------+
+;;          |                   |       |                  |
+;;          v                   v       v                  v
+;;   function tools       collections  macros        protocol calls
+;;   comp/partial         map/reduce   doto/cond->   ISeq/IApplicable
+;;          |                   |       |                  |
+;;          +-------------------+-------+------------------+
+;;                              |
+;;                              v
+;;                    immutable HAL values
+;;                              |
+;;              +---------------+---------------+
+;;              |                               |
+;;              v                               v
+;;   std.foundation/* libraries          std.native.* boundary
+;;   string/file/context/etc.            Maths/Bits/Numbers
+;;              |                               |
+;;              +---------------+---------------+
+;;                              |
+;;                              v
+;;                 Java / Rust / Wasm runtimes
+;;
 ;; Authoritative references:
-;;   * specs/hara/data/foundation.edn — the namespace boundary (what exists).
-;;   * specs/hara/data/typed.edn      — the schema grammar (how types are written).
+;;   * specs/language/draft/hal-langspec.edn — portable language contract.
+;;   * specs/language/draft/conformance/native.edn — native wrapper inventory.
+;;   * specs/archive/planning/language/typed.edn — current schema vocabulary.
 ;; ============================================================================
-(ns std.foundation
-  (:config
-   {:builtins
-    [+ - < <= = > >= apply array? assoc compare concat conj cons count
-     empty gensym get iter list list? map? mod not= nth reduce set?
-     vec vector?]}))
+(ns std.foundation)
 
 ;; ---------------------------------------------------------------------------
 ;; Functions and composition
@@ -135,7 +161,52 @@
   has?
   "Returns true if collection contains key, including when its value is nil."
   [collection key]
-  (not (nil? (std.protocol.ifind/find collection key))))
+  (not (nil? (IFind/find collection key))))
+
+;; ---------------------------------------------------------------------------
+;; References
+;; ---------------------------------------------------------------------------
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  reset!
+  "Sets reference to value through IReset and returns value."
+  [reference value]
+  (IReset/reset reference value))
+
+(defn ^{:schema [:fn [:any :any :any] :bool]}
+  cas!
+  "Atomically replaces old-value with new-value through ICas."
+  [reference old-value new-value]
+  (ICas/cas reference old-value new-value))
+
+(defn ^{:schema [:fn [:any :fn & :any] :any]}
+  swap!
+  "Atomically applies function to reference through an ICas retry loop."
+  [reference function & arguments]
+  (loop []
+    (let [old-value (IDeref/deref reference)
+          new-value (apply function old-value arguments)]
+      (if (ICas/cas reference old-value new-value)
+        new-value
+        (recur)))))
+
+(defn ^{:schema [:fn [:any :any :fn] :any]}
+  watch-add
+  "Adds a keyed watch callback through IWatch and returns reference."
+  [reference key function]
+  (IWatch/watch-add reference key function))
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  watch-remove
+  "Removes keyed watch through IWatch and returns reference."
+  [reference key]
+  (IWatch/watch-remove reference key))
+
+(defn ^{:schema [:fn [:any] :any]}
+  watch-list
+  "Returns reference's watch iterator through IWatch."
+  [reference]
+  (IWatch/watch-list reference))
 
 ;; ---------------------------------------------------------------------------
 ;; Sequence access
@@ -429,6 +500,175 @@
 ;; ---------------------------------------------------------------------------
 ;; Truth and fixed-point combinators retained from Foundation
 ;; ---------------------------------------------------------------------------
+
+(def ^{:schema :num :doc "Euler's number."} E 2.718281828459045)
+
+(def ^{:schema :num
+       :doc "The ratio of a circle's circumference to its diameter."}
+  PI
+  3.141592653589793)
+
+(defn ^{:schema [:fn [:num] :int]}
+  long
+  "Converts a numeric value to a signed 64-bit integer by truncating toward zero."
+  [value]
+  (std.native.Numbers/long value))
+
+(defn ^{:schema [:fn [:num] :float]}
+  double
+  "Converts a numeric value to an IEEE-754 double."
+  [value]
+  (std.native.Numbers/double value))
+
+(defn ^{:schema [:fn [& :any] :any]}
+  bit-and
+  "Returns the bitwise conjunction of values through the portable Bits boundary."
+  [& values]
+  (apply std.native.Bits/and values))
+
+(defn ^{:schema [:fn [& :any] :any]}
+  bit-or
+  "Returns the bitwise disjunction of values through the portable Bits boundary."
+  [& values]
+  (apply std.native.Bits/or values))
+
+(defn ^{:schema [:fn [& :any] :any]}
+  bit-xor
+  "Returns the bitwise exclusive-or of values through the portable Bits boundary."
+  [& values]
+  (apply std.native.Bits/xor values))
+
+(defn ^{:schema [:fn [:any] :any]}
+  bit-not
+  "Returns the bitwise complement of value through the portable Bits boundary."
+  [value]
+  (std.native.Bits/not value))
+
+(defn ^{:schema [:fn [& :any] :any]}
+  bit-shift-left
+  "Left-shifts the first value by the remaining shift counts."
+  [& values]
+  (apply std.native.Bits/shift-left values))
+
+(defn ^{:schema [:fn [& :any] :any]}
+  bit-shift-right
+  "Right-shifts the first value by the remaining shift counts."
+  [& values]
+  (apply std.native.Bits/shift-right values))
+
+(defn ^{:schema [:fn [:num] :num]}
+  abs
+  "Returns the absolute magnitude of value."
+  [value]
+  (std.native.Maths/abs value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  acos
+  "Returns the arc cosine of value in radians."
+  [value]
+  (std.native.Maths/acos value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  acosh
+  "Returns the inverse hyperbolic cosine of value."
+  [value]
+  (std.native.Maths/acosh value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  asin
+  "Returns the arc sine of value in radians."
+  [value]
+  (std.native.Maths/asin value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  asinh
+  "Returns the inverse hyperbolic sine of value."
+  [value]
+  (std.native.Maths/asinh value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  atan
+  "Returns the arc tangent of value in radians."
+  [value]
+  (std.native.Maths/atan value))
+
+(defn ^{:schema [:fn [:num :num] :num]}
+  atan2
+  "Returns the angle for y and x in radians."
+  [y x]
+  (std.native.Maths/atan2 y x))
+
+(defn ^{:schema [:fn [:num] :num]}
+  atanh
+  "Returns the inverse hyperbolic tangent of value."
+  [value]
+  (std.native.Maths/atanh value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  ceil
+  "Rounds value upward to the nearest integral number."
+  [value]
+  (std.native.Maths/ceil value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  cos
+  "Returns the cosine of value in radians."
+  [value]
+  (std.native.Maths/cos value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  cosh
+  "Returns the hyperbolic cosine of value."
+  [value]
+  (std.native.Maths/cosh value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  exp
+  "Returns Euler's number raised to value."
+  [value]
+  (std.native.Maths/exp value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  floor
+  "Rounds value downward to the nearest integral number."
+  [value]
+  (std.native.Maths/floor value))
+
+(defn ^{:schema [:fn [:num :num] :num]}
+  pow
+  "Returns value raised to exponent."
+  [value exponent]
+  (std.native.Maths/pow value exponent))
+
+(defn ^{:schema [:fn [:num] :num]}
+  sin
+  "Returns the sine of value in radians."
+  [value]
+  (std.native.Maths/sin value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  sinh
+  "Returns the hyperbolic sine of value."
+  [value]
+  (std.native.Maths/sinh value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  sqrt
+  "Returns the non-negative square root of value."
+  [value]
+  (std.native.Maths/sqrt value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  tan
+  "Returns the tangent of value in radians."
+  [value]
+  (std.native.Maths/tan value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  tanh
+  "Returns the hyperbolic tangent of value."
+  [value]
+  (std.native.Maths/tanh value))
 
 (defn ^{:schema [:fn [& :any] :bool]}
   T
@@ -854,6 +1094,30 @@
 ;; Macros
 ;; ---------------------------------------------------------------------------
 
+;; ---------------------------------------------------------------------------
+;; Application
+;; ---------------------------------------------------------------------------
+
+(defn ^{:schema [:fn [:any :any :any] :any]}
+  apply-in
+  "Invokes value in runtime after IApplicable input and output transforms."
+  [value runtime args]
+  (let [input (IApplicable/transform-in value runtime args)
+        result (IApplicable/apply-in value runtime input)]
+    (IApplicable/transform-out value runtime args result)))
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  apply-as
+  "Invokes value using its default IApplicable runtime."
+  [value args]
+  (apply-in value (IApplicable/apply-default value) args))
+
+(defn ^{:schema [:fn [:any & :any] :any]}
+  invoke-as
+  "Invokes value using its default IApplicable runtime and arguments."
+  [value & args]
+  (apply-as value args))
+
 (defn- ^{:schema [:fn [:any :any] :vector]}
   doto-forms
   "Builds the target-first calls used by doto."
@@ -908,6 +1172,88 @@
    last argument."
   [value & clauses]
   (conditional-thread-form value clauses true))
+
+(defmacro with-ns
+  "Evaluates body forms in an existing namespace and restores the caller."
+  [namespace & forms]
+  `(eval-in-ns ~namespace '~(vec forms)))
+
+(defmacro intern-in
+  "Copies selected Vars into a namespace as its public façade."
+  [ns? & syms]
+  (let [implicit? (if (vector? ns?) true (if (namespace ns?) true false))
+        target (if implicit? (list 'current-namespace) ns?)
+        entries (if implicit? (apply list ns? syms) syms)]
+    (vec
+     (map
+      (fn [entry]
+        (let [to (if (vector? entry) (first entry) entry)
+              from (if (vector? entry) (second entry) entry)]
+          (list 'intern-var
+                target
+                (list 'quote (symbol (name to)))
+                (list 'var from))))
+      entries))))
+
+(defmacro intern-all
+  "Copies every public Var from each source namespace into the current namespace."
+  [& namespaces]
+  (vec
+   (mapcat
+    (fn [source]
+      (map
+       (fn [entry]
+         (list 'intern-var
+               (list 'current-namespace)
+               (list 'quote entry)
+               (list 'var (symbol source (name entry)))))
+       (keys (ns-publics source))))
+    namespaces)))
+
+(def ^:dynamic *template-meta* nil)
+
+(defmacro with:template-meta
+  "Binds template metadata for the duration of body."
+  [metadata & body]
+  `(binding [*template-meta* ~metadata] ~@body))
+
+(defn ^{:schema [:fn [] :any]}
+  template-meta
+  "Returns metadata supplied to the active template expansion."
+  []
+  *template-meta*)
+
+(defmacro template-vars
+  "Evaluates template forms for named source Vars."
+  [spec & entries]
+  (let [template (first spec)
+        metadata (second spec)
+        forms
+        (map
+         (fn [entry]
+           (let [to (if (vector? entry) (first entry) (symbol (name entry)))
+                 from (if (vector? entry) (second entry) entry)
+                 args (if (vector? entry) (vec (drop 2 entry)) [])]
+             (list 'eval
+                   (apply list template (list 'quote to) (list 'var from) args))))
+         entries)]
+    (list 'binding [ '*template-meta* metadata] (apply list 'do forms))))
+
+(defmacro template-entries
+  "Evaluates template forms for literal entries."
+  [spec & entries]
+  (let [template (first spec)
+        metadata (second spec)
+        forms (map (fn [entry]
+                     (list 'eval (list template (list 'quote entry))))
+                   entries)]
+    (list 'binding [ '*template-meta* metadata] (apply list 'do forms))))
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  template-ensure
+  "Returns generated template Vars after the caller has materialized them."
+  [symbols variables]
+  variables)
 
 (defmacro code-line
   "Expands to the line number of the invocation form."

@@ -45,10 +45,11 @@ pub extern "C" fn hta_dealloc(pointer: *mut u8, size: usize) {
 }
 #[no_mangle]
 pub extern "C" fn hta_abi_version() -> i32 {
-    1
+    2
 }
 
 struct Runtime {
+    name: String,
     env: HashMap<String, Value>,
     namespaces: kernel::NamespaceRegistry<Value>,
     /// Guest protocol declarations and extensions must survive across HTA
@@ -63,44 +64,106 @@ struct Runtime {
     fibers: HashMap<u64, EvalFiber>,
     tasks: HashMap<u64, Promise>,
     resources: Rc<RefCell<HashMap<String, String>>>,
-    filesystem: Option<String>,
+    mount_id: Option<u64>,
 }
 impl Runtime {
     fn new() -> Self {
         Self::shared(
+            "ROOT",
             Rc::new(RefCell::new(HashMap::new())),
             Rc::new(RefCell::new(VecDeque::new())),
         )
     }
 
     fn shared(
+        name: &str,
         resources: Rc<RefCell<HashMap<String, String>>>,
         events: Rc<RefCell<VecDeque<Vec<u8>>>>,
     ) -> Self {
         let namespaces = kernel::NamespaceRegistry::new("user");
-        let json_namespace = namespaces.find_or_create("std.foundation.json");
-        json_namespace.intern(
+        let foundation_namespace = namespaces.find_or_create("std.foundation");
+        for (name, value) in core::exception_function_values() {
+            foundation_namespace.intern(name, value);
+        }
+        for (name, protocol) in core::foundation_protocol_values() {
+            foundation_namespace.intern(&name, protocol.clone());
+            namespaces
+                .find_or_create(core::builtin_protocol_namespace(&name))
+                .intern(name, protocol);
+        }
+        for (namespace, name, method) in core::builtin_protocol_method_values() {
+            namespaces.find_or_create(namespace).intern(name, method);
+        }
+        let native_namespace = namespaces.find_or_create("std.native");
+        for (name, descriptor) in core::native_type_values() {
+            let var = native_namespace.intern(&name, descriptor);
+            foundation_namespace.map_var(lang::data::Symbol::parse(&name), var);
+        }
+        let native_json = namespaces.find_or_create("std.native.Json");
+        let json_read = native_json.intern(
             "read",
-            core::native_function("json/read", 1, |arguments| match arguments.as_slice() {
-                [Value::String(source)] => json::read(source),
-                _ => Err("json/read expects a string".into()),
-            }),
+            core::native_function(
+                "std.native.Json/read",
+                1,
+                |arguments| match arguments.as_slice() {
+                    [Value::String(source)] => json::read(source),
+                    _ => Err("json/read expects a string".into()),
+                },
+            ),
         );
-        json_namespace.intern(
+        let json_write = native_json.intern(
             "write",
-            core::native_function("json/write", 1, |arguments| {
+            core::native_function("std.native.Json/write", 1, |arguments| {
                 json::write(&arguments[0]).map(Value::String)
             }),
         );
-        json_namespace.intern(
-            "write-pp",
-            core::native_function("json/write-pp", 1, |arguments| {
+        let json_pretty = native_json.intern(
+            "pretty",
+            core::native_function("std.native.Json/pretty", 2, |arguments| {
+                if core::map_entries(&arguments[1]).is_none() {
+                    return Err("json/pretty expects an options map".into());
+                }
                 json::write_pretty(&arguments[0]).map(Value::String)
             }),
         );
+        let json_namespace = namespaces.find_or_create("std.foundation.json");
+        json_namespace.map_var(lang::data::Symbol::parse("read"), json_read);
+        json_namespace.map_var(lang::data::Symbol::parse("write"), json_write);
+        json_namespace.map_var(lang::data::Symbol::parse("pretty"), json_pretty);
+        let native_edn = namespaces.find_or_create("std.native.Edn");
+        let edn_read = native_edn.intern(
+            "read",
+            core::native_function(
+                "std.native.Edn/read",
+                1,
+                |arguments| match arguments.as_slice() {
+                    [Value::String(source)] => core::read_edn(source),
+                    _ => Err("edn/read expects a string".into()),
+                },
+            ),
+        );
+        let edn_namespace = namespaces.find_or_create("std.foundation.edn");
+        edn_namespace.map_var(lang::data::Symbol::parse("read"), edn_read);
+        edn_namespace.intern(
+            "write",
+            core::native_function("edn/write", 1, |arguments| {
+                Ok(Value::String(arguments[0].display()))
+            }),
+        );
+        edn_namespace.intern(
+            "pretty",
+            core::native_function("edn/pretty", 2, |arguments| {
+                if core::map_entries(&arguments[1]).is_none() {
+                    return Err("edn/pretty expects an options map".into());
+                }
+                Ok(Value::String(arguments[0].display()))
+            }),
+        );
+        core::refer_startup_defaults(&namespaces, "user");
         let mut env = HashMap::new();
-        core::refresh_namespace_environment(&namespaces, &mut env);
+        core::select_namespace_environment(&namespaces, &mut env, "user");
         Self {
+            name: name.into(),
             env,
             namespaces,
             protocols: core::ProtocolRegistry::core(),
@@ -111,7 +174,7 @@ impl Runtime {
             fibers: HashMap::new(),
             tasks: HashMap::new(),
             resources,
-            filesystem: None,
+            mount_id: None,
         }
     }
 
@@ -177,6 +240,10 @@ impl Runtime {
                     Value::Number(2),
                     Value::Number(call as i64),
                     Value::Number(task as i64),
+                    Value::String(self.name.clone()),
+                    self.mount_id
+                        .map(|mount| Value::Number(mount as i64))
+                        .unwrap_or(Value::Nil),
                     Value::String(service),
                     Value::String(method),
                     Value::Vector(args.into()),
@@ -204,6 +271,11 @@ impl Runtime {
         bindings: Vec<Value>,
     ) -> Result<(), String> {
         let (handler, pending, next) = self.host_handler(task);
+        let file_provider = self.mount_id.map(|_| {
+            Rc::new(HostFileProvider {
+                handler: handler.clone(),
+            }) as Rc<dyn core::FileProvider>
+        });
         let namespaces = self.namespaces.clone();
         let protocols = self.protocols.clone();
         let resources = self.resources.clone();
@@ -212,10 +284,12 @@ impl Runtime {
         for (index, value) in bindings.into_iter().enumerate() {
             environment.insert(format!("__hta_arg_{index}"), value);
         }
-        let fiber = core::with_namespace_registry(&namespaces, || {
-            core::with_namespace_source(provider, || {
-                core::with_protocols(&protocols, || {
-                    core::with_host_calls(handler, || EvalFiber::start(source, environment))
+        let fiber = core::with_capability_providers(file_provider, None, || {
+            core::with_namespace_registry(&namespaces, || {
+                core::with_namespace_source(provider, || {
+                    core::with_protocols(&protocols, || {
+                        core::with_host_calls(handler, || EvalFiber::start(source, environment))
+                    })
                 })
             })
         })?;
@@ -228,15 +302,22 @@ impl Runtime {
             return;
         };
         let (handler, pending, next) = self.host_handler(task);
+        let file_provider = self.mount_id.map(|_| {
+            Rc::new(HostFileProvider {
+                handler: handler.clone(),
+            }) as Rc<dyn core::FileProvider>
+        });
         let namespaces = self.namespaces.clone();
         let protocols = self.protocols.clone();
         let resources = self.resources.clone();
         let provider = Rc::new(move |name: &str| resources.borrow().get(name).cloned());
-        core::with_namespace_registry(&namespaces, || {
-            core::with_namespace_source(provider, || {
-                core::with_protocols(&protocols, || {
-                    core::with_host_calls(handler, || {
-                        fiber.resume(state);
+        core::with_capability_providers(file_provider, None, || {
+            core::with_namespace_registry(&namespaces, || {
+                core::with_namespace_source(provider, || {
+                    core::with_protocols(&protocols, || {
+                        core::with_host_calls(handler, || {
+                            fiber.resume(state);
+                        });
                     });
                 });
             });
@@ -291,22 +372,99 @@ impl Runtime {
     }
 }
 
+struct HostFileProvider {
+    handler: Rc<dyn Fn(String, String, Vec<Value>) -> Result<Value, String>>,
+}
+
+impl HostFileProvider {
+    fn promise(&self, method: &str, arguments: Vec<Value>) -> Result<Promise, core::FileError> {
+        match (self.handler)("file".into(), method.into(), arguments) {
+            Ok(Value::Promise(promise)) => Ok(promise),
+            Ok(_) => Err(core::FileError::Invalid(
+                "file host call did not return a promise".into(),
+            )),
+            Err(error) => Err(core::FileError::Invalid(error)),
+        }
+    }
+}
+
+impl core::FileProvider for HostFileProvider {
+    fn resolve(&self, root: &str, path: &str) -> Result<String, core::FileError> {
+        if path.contains('\0') {
+            return Err(core::FileError::Invalid("path contains NUL".into()));
+        }
+        let combined = format!("{}/{}", root.trim_end_matches('/'), path);
+        let mut segments = Vec::new();
+        for segment in combined.split('/') {
+            match segment {
+                "" | "." => {}
+                ".." => {
+                    if segments.pop().is_none() {
+                        return Err(core::FileError::Denied);
+                    }
+                }
+                value => segments.push(value),
+            }
+        }
+        Ok(format!("/{}", segments.join("/")))
+    }
+
+    fn read(&self, path: &str) -> Result<Promise, core::FileError> {
+        self.promise("read", vec![Value::String(path.into())])
+    }
+
+    fn write(&self, path: &str, bytes: Vec<u8>) -> Result<Promise, core::FileError> {
+        self.promise(
+            "write",
+            vec![Value::String(path.into()), Value::Bytes(bytes)],
+        )
+    }
+
+    fn exists(&self, path: &str) -> Result<Promise, core::FileError> {
+        self.promise("exists", vec![Value::String(path.into())])
+    }
+
+    fn list(&self, path: &str) -> Result<Promise, core::FileError> {
+        self.promise("list", vec![Value::String(path.into())])
+    }
+
+    fn mkdir(&self, path: &str) -> Result<Promise, core::FileError> {
+        self.promise("mkdir", vec![Value::String(path.into())])
+    }
+
+    fn delete(&self, path: &str) -> Result<Promise, core::FileError> {
+        self.promise("delete", vec![Value::String(path.into())])
+    }
+}
+
+struct FilesystemMount {
+    provider: String,
+    key: Option<String>,
+    attachments: usize,
+}
+
 struct KernelRuntime {
     next_task: u64,
     resources: Rc<RefCell<HashMap<String, String>>>,
     events: Rc<RefCell<VecDeque<Vec<u8>>>>,
     sessions: HashMap<String, Runtime>,
     task_sessions: HashMap<u64, String>,
+    mounts: HashMap<u64, FilesystemMount>,
+    next_mount_id: u64,
 }
 
 impl KernelRuntime {
     fn new() -> Self {
         let resources = Rc::new(RefCell::new(HashMap::new()));
+        resources.borrow_mut().insert(
+            "std.foundation.file".into(),
+            include_str!("../../../lib/src/std/foundation/file.hal").into(),
+        );
         let events = Rc::new(RefCell::new(VecDeque::new()));
         let mut sessions = HashMap::new();
         sessions.insert(
             "ROOT".into(),
-            Runtime::shared(resources.clone(), events.clone()),
+            Runtime::shared("ROOT", resources.clone(), events.clone()),
         );
         Self {
             next_task: 1,
@@ -314,6 +472,8 @@ impl KernelRuntime {
             events,
             sessions,
             task_sessions: HashMap::new(),
+            mounts: HashMap::new(),
+            next_mount_id: 1,
         }
     }
 
@@ -342,22 +502,93 @@ impl KernelRuntime {
         }
         self.sessions.insert(
             name.into(),
-            Runtime::shared(self.resources.clone(), self.events.clone()),
+            Runtime::shared(name, self.resources.clone(), self.events.clone()),
         );
         Ok(())
     }
 
-    fn attach_filesystem(&mut self, name: &str, filesystem: &str) -> Result<(), String> {
-        if filesystem.is_empty() {
-            return Err("INVALID_FILESYSTEM_ID".into());
+    fn create_filesystem(&mut self, descriptor: &Value) -> Result<u64, String> {
+        let entries = core::map_entries(descriptor)
+            .ok_or_else(|| "filesystem/create expects a provider descriptor map".to_string())?;
+        let field = |name: &str| {
+            entries.iter().find_map(|(key, value)| match key {
+                Value::String(key) if key == name => Some(value.clone()),
+                Value::Keyword(key) if key.as_str() == name => Some(value.clone()),
+                _ => None,
+            })
+        };
+        let provider = match field("provider") {
+            Some(Value::String(provider)) => provider,
+            Some(Value::Keyword(provider)) => provider.as_str().to_owned(),
+            _ => return Err("filesystem/create requires a provider".into()),
+        };
+        if !matches!(provider.as_str(), "memory" | "indexeddb") {
+            return Err(format!("FILESYSTEM_PROVIDER_UNSUPPORTED {provider}"));
         }
+        let key = match field("key") {
+            Some(Value::String(key)) if !key.is_empty() => Some(key),
+            Some(Value::Nil) | None if provider == "memory" => None,
+            None => return Err("filesystem/create indexeddb requires a key".into()),
+            _ => return Err("filesystem/create key must be a non-empty string".into()),
+        };
+        let mount_id = self.next_mount_id;
+        self.next_mount_id = self
+            .next_mount_id
+            .checked_add(1)
+            .filter(|value| *value <= i64::MAX as u64)
+            .ok_or_else(|| "FILESYSTEM_IDS_EXHAUSTED".to_string())?;
+        self.mounts.insert(
+            mount_id,
+            FilesystemMount {
+                provider,
+                key,
+                attachments: 0,
+            },
+        );
+        Ok(mount_id)
+    }
+
+    fn attach_filesystem(&mut self, name: &str, mount_id: u64) -> Result<(), String> {
         let current = self.session(name)?;
         if current.busy() {
             return Err(format!("SESSION_BUSY {name}"));
         }
-        let mut replacement = Runtime::shared(self.resources.clone(), self.events.clone());
-        replacement.filesystem = Some(filesystem.into());
-        self.sessions.insert(name.into(), replacement);
+        if !self.mounts.contains_key(&mount_id) {
+            return Err(format!("NO_FILESYSTEM {mount_id}"));
+        }
+        if self.session(name)?.mount_id == Some(mount_id) {
+            return Ok(());
+        }
+        self.detach_filesystem(name)?;
+        self.mounts.get_mut(&mount_id).unwrap().attachments += 1;
+        self.session_mut(name)?.mount_id = Some(mount_id);
+        Ok(())
+    }
+
+    fn detach_filesystem(&mut self, name: &str) -> Result<(), String> {
+        let current = self.session(name)?;
+        if current.busy() {
+            return Err(format!("SESSION_BUSY {name}"));
+        }
+        let mount_id = current.mount_id;
+        self.session_mut(name)?.mount_id = None;
+        if let Some(mount_id) = mount_id {
+            if let Some(mount) = self.mounts.get_mut(&mount_id) {
+                mount.attachments = mount.attachments.saturating_sub(1);
+            }
+        }
+        Ok(())
+    }
+
+    fn close_filesystem(&mut self, mount_id: u64) -> Result<(), String> {
+        let mount = self
+            .mounts
+            .get(&mount_id)
+            .ok_or_else(|| format!("NO_FILESYSTEM {mount_id}"))?;
+        if mount.attachments != 0 {
+            return Err(format!("FILESYSTEM_ATTACHED {mount_id}"));
+        }
+        self.mounts.remove(&mount_id);
         Ok(())
     }
 
@@ -385,7 +616,12 @@ impl KernelRuntime {
                 ),
             );
         }
-        self.sessions.remove(name);
+        let mount_id = self.sessions.remove(name).and_then(|runtime| runtime.mount_id);
+        if let Some(mount_id) = mount_id {
+            if let Some(mount) = self.mounts.get_mut(&mount_id) {
+                mount.attachments = mount.attachments.saturating_sub(1);
+            }
+        }
         Ok(())
     }
 
@@ -576,9 +812,8 @@ fn dispatch(
                         (
                             Value::Keyword("session/filesystem".into()),
                             runtime
-                                .filesystem
-                                .clone()
-                                .map(Value::String)
+                                .mount_id
+                                .map(|mount| Value::Number(mount as i64))
                                 .unwrap_or(Value::Nil),
                         ),
                     ]
@@ -591,12 +826,76 @@ fn dispatch(
             _ => Err("hta session/info expects one session string".into()),
         },
         "session/attach-filesystem" => match args.as_slice() {
-            [Value::String(session), Value::String(filesystem)] => {
-                kernel.attach_filesystem(session, filesystem)?;
+            [Value::String(session), Value::Number(mount_id)] if *mount_id > 0 => {
+                kernel.attach_filesystem(session, *mount_id as u64)?;
                 enqueue_event(&kernel.events, event(0, task, Value::Bool(true)));
                 Ok(())
             }
-            _ => Err("hta session/attach-filesystem expects session and filesystem strings".into()),
+            _ => Err("hta session/attach-filesystem expects a session string and mount id".into()),
+        },
+        "session/detach-filesystem" => match args.as_slice() {
+            [Value::String(session)] => {
+                kernel.detach_filesystem(session)?;
+                enqueue_event(&kernel.events, event(0, task, Value::Bool(true)));
+                Ok(())
+            }
+            _ => Err("hta session/detach-filesystem expects one session string".into()),
+        },
+        "filesystem/create" => match args.as_slice() {
+            [descriptor] => {
+                let mount_id = kernel.create_filesystem(descriptor)?;
+                enqueue_event(
+                    &kernel.events,
+                    event(0, task, Value::Number(mount_id as i64)),
+                );
+                Ok(())
+            }
+            _ => Err("hta filesystem/create expects one provider descriptor".into()),
+        },
+        "filesystem/info" => match args.as_slice() {
+            [Value::Number(mount_id)] if *mount_id > 0 => {
+                let mount = kernel
+                    .mounts
+                    .get(&(*mount_id as u64))
+                    .ok_or_else(|| format!("NO_FILESYSTEM {mount_id}"))?;
+                let value = Value::Map(
+                    vec![
+                        (
+                            Value::Keyword("filesystem/id".into()),
+                            Value::Number(*mount_id),
+                        ),
+                        (
+                            Value::Keyword("filesystem/provider".into()),
+                            Value::Keyword(mount.provider.clone().into()),
+                        ),
+                        (
+                            Value::Keyword("filesystem/key".into()),
+                            mount
+                                .key
+                                .clone()
+                                .map(Value::String)
+                                .unwrap_or(Value::Nil),
+                        ),
+                        (
+                            Value::Keyword("filesystem/attachments".into()),
+                            Value::Number(mount.attachments as i64),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                );
+                enqueue_event(&kernel.events, event(0, task, value));
+                Ok(())
+            }
+            _ => Err("hta filesystem/info expects one mount id".into()),
+        },
+        "filesystem/close" => match args.as_slice() {
+            [Value::Number(mount_id)] if *mount_id > 0 => {
+                kernel.close_filesystem(*mount_id as u64)?;
+                enqueue_event(&kernel.events, event(0, task, Value::Bool(true)));
+                Ok(())
+            }
+            _ => Err("hta filesystem/close expects one mount id".into()),
         },
         "session/close" => match args.as_slice() {
             [Value::String(session)] => {
@@ -954,7 +1253,7 @@ mod tests {
     }
 
     #[test]
-    fn filesystem_reattachment_resets_idle_session_state() {
+    fn filesystem_reattachment_preserves_idle_session_state() {
         let mut kernel = KernelRuntime::new();
         kernel.create_session("example").unwrap();
         dispatch(
@@ -969,22 +1268,35 @@ mod tests {
         .unwrap();
         result(&mut kernel);
 
-        kernel
-            .attach_filesystem("example", "memory:replacement")
+        let mount_id = kernel
+            .create_filesystem(&Value::Map(
+                vec![(
+                    Value::Keyword("provider".into()),
+                    Value::String("memory".into()),
+                )]
+                .into_iter()
+                .collect(),
+            ))
             .unwrap();
-        assert!(matches!(
+        kernel.attach_filesystem("example", mount_id).unwrap();
+        assert_eq!(
             kernel
                 .session("example")
                 .unwrap()
                 .complete("stale")
-                .display()
-                .as_str(),
-            "[]"
-        ));
-        assert_eq!(
-            kernel.session("example").unwrap().filesystem.as_deref(),
-            Some("memory:replacement")
+                .display(),
+            "[\"stale-value\"]"
         );
+        assert_eq!(
+            kernel.session("example").unwrap().mount_id,
+            Some(mount_id)
+        );
+        assert_eq!(
+            kernel.close_filesystem(mount_id).unwrap_err(),
+            format!("FILESYSTEM_ATTACHED {mount_id}")
+        );
+        kernel.detach_filesystem("example").unwrap();
+        kernel.close_filesystem(mount_id).unwrap();
     }
 
     #[test]
@@ -1001,10 +1313,65 @@ mod tests {
             ],
         )
         .unwrap();
-        assert_eq!(
-            kernel.attach_filesystem("busy", "memory:next").unwrap_err(),
-            "SESSION_BUSY busy"
-        );
+        let mount_id = kernel
+            .create_filesystem(&Value::Map(
+                vec![(
+                    Value::Keyword("provider".into()),
+                    Value::String("memory".into()),
+                )]
+                .into_iter()
+                .collect(),
+            ))
+            .unwrap();
+        assert_eq!(kernel.attach_filesystem("busy", mount_id).unwrap_err(), "SESSION_BUSY busy");
+    }
+
+    #[test]
+    fn mounted_file_calls_use_the_canonical_hal_module_and_v2_identity() {
+        let mut kernel = KernelRuntime::new();
+        kernel.create_session("files").unwrap();
+        let mount_id = kernel
+            .create_filesystem(&Value::Map(
+                vec![(
+                    Value::Keyword("provider".into()),
+                    Value::String("memory".into()),
+                )]
+                .into_iter()
+                .collect(),
+            ))
+            .unwrap();
+        kernel.attach_filesystem("files", mount_id).unwrap();
+        dispatch(
+            &mut kernel,
+            1,
+            "session/eval",
+            vec![
+                Value::String("files".into()),
+                Value::String(
+                    "(do (require [std.foundation.file :as file]) \
+                     (file/write \"/note.bin\" (bytes 1 2 3)))"
+                        .into(),
+                ),
+            ],
+        )
+        .unwrap();
+        let call = result(&mut kernel);
+        assert!(matches!(
+            call.as_slice(),
+            [
+                Value::Number(2),
+                Value::Number(_),
+                Value::Number(1),
+                Value::String(session),
+                Value::Number(found_mount),
+                Value::String(service),
+                Value::String(method),
+                Value::Vector(_)
+            ] if session == "files"
+                && *found_mount == mount_id as i64
+                && service == "file"
+                && method == "write"
+        ));
     }
 
     #[test]
@@ -1054,7 +1421,13 @@ mod tests {
             .expect("completion event");
         match super::hta::decode(&frame).unwrap() {
             crate::core::Value::Vector(values) => {
-                assert_eq!(values[0], crate::core::Value::Number(0), "eval failed");
+                assert_eq!(
+                    values[0],
+                    crate::core::Value::Number(0),
+                    "eval failed for task {}: {}",
+                    values[1].display(),
+                    values[2].display()
+                );
                 assert_eq!(values[1], crate::core::Value::Number(task as i64));
                 values[2].clone()
             }
@@ -1141,8 +1514,25 @@ mod tests {
     }
 
     #[test]
-    fn raw_kernels_expose_the_foundation_json_namespace() {
+    fn raw_kernels_expose_the_foundation_data_namespaces() {
+        assert_eq!(crate::core::NATIVE_TYPES.len(), 18);
+        assert_eq!(
+            crate::core::NATIVE_TYPES
+                .iter()
+                .map(|(_, methods)| methods.len())
+                .sum::<usize>(),
+            110
+        );
         let mut runtime = Runtime::new();
+        assert!(runtime.env.contains_key("edn/write"));
+        assert!(runtime.env.contains_key("ICount"));
+        for native_type in [
+            "Maths", "Numbers", "Bits", "String", "Bytes", "File", "Socket", "Promise",
+            "Coroutine", "Array", "Object", "Runtime", "Printer", "Edn", "Json", "Regex",
+            "UUID", "Error",
+        ] {
+            assert!(runtime.env.contains_key(native_type), "{native_type}");
+        }
         runtime
             .start_fiber(
                 1,
@@ -1152,6 +1542,87 @@ mod tests {
         assert_eq!(
             completion_value(&mut runtime, 1),
             Value::String("{\"answer\":42}".into())
+        );
+        runtime
+            .start_fiber(2, "(std.foundation.edn/read \"{:answer 42}\")")
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 2).display(),
+            "{:answer 42}"
+        );
+        runtime
+            .start_fiber(
+                3,
+                "(std.foundation.json/pretty {\"answer\" 42} {})",
+            )
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 3),
+            Value::String("{\n  \"answer\": 42\n}".into())
+        );
+        runtime
+            .start_fiber(4, "(std.foundation.edn/pretty {:answer 42} {})")
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 4),
+            Value::String("{:answer 42}".into())
+        );
+        runtime
+            .start_fiber(
+                5,
+                "(try \
+                   (throw (std.foundation/ex-info \"bad input\" {:kind :invalid})) \
+                   (catch Throwable error \
+                     [(std.foundation/ex-message error) \
+                      (std.foundation/ex-data error)]))",
+            )
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 5).display(),
+            "[\"bad input\" {:kind :invalid}]"
+        );
+        runtime
+            .start_fiber(6, "(edn/write {:answer 42})")
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 6),
+            Value::String("{:answer 42}".into())
+        );
+        runtime.start_fiber(7, "(= Maths std.native/Maths)").unwrap();
+        assert_eq!(completion_value(&mut runtime, 7), Value::Bool(true));
+        runtime
+            .start_fiber(
+                8,
+                "[(= Edn std.native/Edn std.foundation/Edn) \
+                  (= Json std.native/Json std.foundation/Json) \
+                  (= Maths std.native/Maths std.foundation/Maths)]",
+            )
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 8).display(),
+            "[true true true]"
+        );
+        runtime.start_fiber(9, "(ICount/count [1 2 3])").unwrap();
+        assert_eq!(completion_value(&mut runtime, 9), Value::Number(3));
+    }
+
+    #[test]
+    fn raw_kernel_keeps_the_three_bang_name_compatibility_operations() {
+        let mut runtime = Runtime::new();
+        runtime
+            .start_fiber(
+                1,
+                "(let (reference (atom 1)) \
+                   [(reset! reference 2) \
+                    (cas! reference 2 3) \
+                    (cas! reference 2 4) \
+                    (swap! reference (fn [value amount] (+ value amount)) 39) \
+                    (deref reference)])",
+            )
+            .unwrap();
+        assert_eq!(
+            completion_value(&mut runtime, 1).display(),
+            "[2 true false 42 42]"
         );
     }
 

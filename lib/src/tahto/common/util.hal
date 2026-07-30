@@ -1,6 +1,5 @@
-(ns talo.common.util
-  (:require [talo.common.provenance :as provenance]
-            [std.lib.context :as context]
+(ns tahto.common.util
+  (:require [tahto.common.provenance :as provenance]
             [std.foundation.string :as string]))
 
 (defn sym-id
@@ -61,68 +60,6 @@
   (if lang
     (keyword (str "lang/" (name lang)))
     (throw (ex-info "No Lang Input" {:input lang}))))
-
-(defn lang-rt-list
-  "Lists language runtime contexts in a namespace."
-  ([]
-   (lang-rt-list (symbol (current-namespace))))
-  ([namespace]
-   (let [space (context/space namespace)]
-     (vec
-      (keep (fn [key]
-              (if (= 'lang (sym-module key))
-                (keyword (name key))
-                nil))
-            (context/space:context-list space))))))
-
-(defn lang-rt
-  "Returns current language runtimes."
-  ([]
-   (reduce (fn [result lang]
-             (assoc result lang (lang-rt lang)))
-           {}
-           (lang-rt-list)))
-  ([lang]
-   (context/space:rt-current (lang-context lang)))
-  ([namespace lang]
-   (context/space:rt-current namespace (lang-context lang))))
-
-(defn lang-rt-default
-  "Selects the default runtime for a language pointer."
-  [pointer]
-  (let [namespace (symbol (current-namespace))
-        active (lang-rt-list namespace)
-        module (:module pointer)
-        lang (:lang pointer)]
-    (or (if (first (filter (fn [active-lang] (= active-lang lang)) active))
-          (lang-rt lang)
-          nil)
-        (let [runtimes (map (fn [active-lang]
-                              (lang-rt namespace active-lang))
-                            active)]
-          (or (first (filter (fn [runtime]
-                               (get-in runtime [:module/primary module]))
-                             runtimes))
-              (first (filter (fn [runtime]
-                               (get-in runtime [:module/internal module]))
-                             runtimes))))
-        (context/space:rt-current namespace (:context pointer)))))
-
-(defn lang-pointer
-  "Creates a context-qualified language pointer."
-  ([lang]
-   (lang-pointer lang {}))
-  ([lang options]
-   (let [module (:module options)
-         id (:id options)
-         pointer-context (lang-context lang)]
-     (context/pointer
-      (assoc options
-             :module module
-             :id id
-             :lang lang
-             :context pointer-context
-             :context/fn #'talo.common.util/lang-rt-default)))))
 
 (defn module-id
   "Gets the module id from a module symbol or descriptor."

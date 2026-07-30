@@ -1,47 +1,276 @@
-;; ============================================================================
-;; std.foundation.string — portable string library (foundation boundary).
+;; ==========================================================================
+;; std.foundation.string — portable Unicode string operations.
 ;;
-;; This namespace is a pure activation declaration: every public Var is a host
-;; builtin activated by the :builtins clause below. Kind, docstring, and
-;; arglists come from the host export catalog (@HaraExport); no Hara-level
-;; definitions live here. Schema annotations for these symbols belong in
-;; std.typed.core-sigs (specs/hara/data/typed.edn).
+;;                            string
+;;                               |
+;;       +-----------------------+-----------------------+
+;;       |                       |                       |
+;;       v                       v                       v
+;;   inspection              transformation           search
+;;   length/blank?           trim/case/pad           index-of
+;;   char-at                 replace/reverse         includes?
+;;       |                       |                       |
+;;       +-----------------------+-----------------------+
+;;                               |
+;;                               v
+;;                      std.native.String
+;;                               |
+;;                  +------------+------------+
+;;                  |                         |
+;;                  v                         v
+;;              UTF-8 bytes            compatibility names
+;;             encode/decode          len/char/substring
 ;;
-;; Contract (specs/hara/data/foundation.edn, :semantics :string):
-;;   * All indexes and offsets are Unicode code points, not UTF-16 units:
-;;     length, char-at, slice, index-of, last-index-of, and regex offsets.
-;;   * split, replace, and replace-first treat their pattern argument as a
-;;     literal string, not a regex.
-;;   * encode-utf8 / decode-utf8 convert between strings and byte vectors.
-;;
-;; Authority: specs/hara/data/foundation.edn (:runtime-libraries std.foundation.string)
-;; ============================================================================
-(ns std.foundation.string
-  (:config
-   {:builtins [length
-               blank?
-               includes?
-               starts-with?
-               ends-with?
-               char-at
-               slice
-               index-of
-               last-index-of
-               join
-               split
-               split-lines
-               repeat
-               replace
-               replace-first
-               trim
-               trim-left
-               trim-right
-               upper
-               lower
-               capitalize
-               decapitalize
-               pad-left
-               pad-right
-               reverse
-               encode-utf8
-               decode-utf8]}))
+;; Indexes and lengths follow the portable native String contract. Canonical
+;; names appear first; compatibility spellings are thin HAL calls into them.
+;; ==========================================================================
+(ns std.foundation.string)
+
+(defn ^{:schema [:fn [:str] :int]}
+  length
+  "Returns the portable character count of value."
+  [value]
+  (std.native.String/length value))
+
+(defn ^{:schema [:fn [:str] :bool]}
+  blank?
+  "Returns true when value is empty or contains only whitespace."
+  [value]
+  (std.native.String/blank? value))
+
+(defn ^{:schema [:fn [:str :str] :bool]}
+  includes?
+  "Returns true when value contains part."
+  [value part]
+  (std.native.String/includes? value part))
+
+(defn ^{:schema [:fn [:str :str] :bool]}
+  starts-with?
+  "Returns true when value begins with part."
+  [value part]
+  (std.native.String/starts-with? value part))
+
+(defn ^{:schema [:fn [:str :str] :bool]}
+  ends-with?
+  "Returns true when value ends with part."
+  [value part]
+  (std.native.String/ends-with? value part))
+
+(defn ^{:schema [:fn [:str :int] :str]}
+  char-at
+  "Returns the character at index as a one-character string."
+  [value index]
+  (std.native.String/char-at value index))
+
+(defn ^{:schema [:function [:fn [:str :int] :str]
+                            [:fn [:str :int :int] :str]]}
+  slice
+  "Returns the portion of value from start up to optional end."
+  ([value start]
+   (std.native.String/slice value start))
+  ([value start end]
+   (std.native.String/slice value start end)))
+
+(defn ^{:schema [:function [:fn [:str :str] :int]
+                            [:fn [:str :str :int] :int]]}
+  index-of
+  "Returns the first index of part at or after optional offset."
+  ([value part]
+   (std.native.String/index-of value part))
+  ([value part offset]
+   (std.native.String/index-of value part offset)))
+
+(defn ^{:schema [:function [:fn [:str :str] :int]
+                            [:fn [:str :str :int] :int]]}
+  last-index-of
+  "Returns the last index of part, optionally bounded by offset."
+  ([value part]
+   (std.native.String/last-index-of value part))
+  ([value part offset]
+   (std.native.String/last-index-of value part offset)))
+
+(defn ^{:schema [:fn [:str :any] :str]}
+  join
+  "Joins values into one string, placing separator between adjacent items."
+  [separator values]
+  (std.native.String/join separator values))
+
+(defn ^{:schema [:fn [:str :str] :vector]}
+  split
+  "Splits value around separator and returns the resulting strings."
+  [value separator]
+  (std.native.String/split value separator))
+
+(defn ^{:schema [:fn [:str] :vector]}
+  split-lines
+  "Splits value at portable line boundaries."
+  [value]
+  (std.native.String/split-lines value))
+
+(defn ^{:schema [:fn [:str :int] :str]}
+  repeat
+  "Returns value repeated count times."
+  [value count]
+  (std.native.String/repeat value count))
+
+(defn ^{:schema [:fn [:str :str :str] :str]}
+  replace
+  "Replaces every occurrence of match in value with replacement."
+  [value match replacement]
+  (std.native.String/replace value match replacement))
+
+(defn ^{:schema [:fn [:str :str :str] :str]}
+  replace-first
+  "Replaces the first occurrence of match in value with replacement."
+  [value match replacement]
+  (std.native.String/replace-first value match replacement))
+
+(defn ^{:schema [:fn [:str] :str]}
+  trim
+  "Removes leading and trailing whitespace from value."
+  [value]
+  (std.native.String/trim value))
+
+(defn ^{:schema [:fn [:str] :str]}
+  trim-left
+  "Removes leading whitespace from value."
+  [value]
+  (std.native.String/trim-left value))
+
+(defn ^{:schema [:fn [:str] :str]}
+  trim-right
+  "Removes trailing whitespace from value."
+  [value]
+  (std.native.String/trim-right value))
+
+(defn ^{:schema [:fn [:str] :str]}
+  upper
+  "Returns value converted to uppercase."
+  [value]
+  (std.native.String/upper value))
+
+(defn ^{:schema [:fn [:str] :str]}
+  lower
+  "Returns value converted to lowercase."
+  [value]
+  (std.native.String/lower value))
+
+(defn ^{:schema [:fn [:str] :str]}
+  capitalize
+  "Uppercases value's first character according to the native contract."
+  [value]
+  (std.native.String/capitalize value))
+
+(defn ^{:schema [:fn [:str] :str]}
+  decapitalize
+  "Lowercases value's first character according to the native contract."
+  [value]
+  (std.native.String/decapitalize value))
+
+(defn ^{:schema [:fn [:str :int :str] :str]}
+  pad-left
+  "Prepends padding until value reaches length."
+  [value length padding]
+  (std.native.String/pad-left value length padding))
+
+(defn ^{:schema [:fn [:str :int :str] :str]}
+  pad-right
+  "Appends padding until value reaches length."
+  [value length padding]
+  (std.native.String/pad-right value length padding))
+
+(defn ^{:schema [:fn [:str] :str]}
+  reverse
+  "Returns value with its portable character order reversed."
+  [value]
+  (std.native.String/reverse value))
+
+(defn ^{:schema [:fn [:str] :bytes]}
+  encode-utf8
+  "Encodes value as UTF-8 bytes."
+  [value]
+  (std.native.String/encode-utf8 value))
+
+(defn ^{:schema [:fn [:bytes] :str]}
+  decode-utf8
+  "Decodes UTF-8 bytes into a string."
+  [value]
+  (std.native.String/decode-utf8 value))
+
+;; Compatibility names remain ordinary HAL wrappers so their metadata is
+;; independently discoverable while their behavior stays canonical.
+
+(defn ^{:schema [:fn [:str] :int]}
+  len
+  "Compatibility name for length."
+  [value]
+  (length value))
+
+(defn ^{:schema [:fn [:str] :int]}
+  count
+  "Compatibility name for length."
+  [value]
+  (length value))
+
+(defn ^{:schema [:fn [:str :int] :str]}
+  char
+  "Compatibility name for char-at."
+  [value index]
+  (char-at value index))
+
+(defn ^{:schema [:function [:fn [:str :int] :str]
+                            [:fn [:str :int :int] :str]]}
+  substring
+  "Compatibility name for slice."
+  ([value start]
+   (slice value start))
+  ([value start end]
+   (slice value start end)))
+
+(defn ^{:schema [:fn [:str] :str]}
+  to-upper
+  "Compatibility name for upper."
+  [value]
+  (upper value))
+
+(defn ^{:schema [:fn [:str] :str]}
+  to-lower
+  "Compatibility name for lower."
+  [value]
+  (lower value))
+
+(defn ^{:schema [:fn [:str] :bytes]}
+  encode
+  "Compatibility name for encode-utf8."
+  [value]
+  (encode-utf8 value))
+
+(defn ^{:schema [:fn [:bytes] :str]}
+  decode
+  "Compatibility name for decode-utf8."
+  [value]
+  (decode-utf8 value))
+
+(defn ^{:schema [:fn [:str :str] :int]}
+  comp
+  "Compares left with right and returns a negative, zero, or positive integer."
+  [left right]
+  (std.native.String/comp left right))
+
+(defn ^{:schema [:fn [:str :str] :bool]}
+  lt?
+  "Returns true when left sorts before right."
+  [left right]
+  (std.native.String/lt? left right))
+
+(defn ^{:schema [:fn [:str :str] :bool]}
+  gt?
+  "Returns true when left sorts after right."
+  [left right]
+  (std.native.String/gt? left right))
+
+(defn ^{:schema [:fn [:num :int] :str]}
+  to-fixed
+  "Formats numeric value with exactly precision fractional digits."
+  [value precision]
+  (std.native.String/to-fixed value precision))

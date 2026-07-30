@@ -32,11 +32,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
-import java.util.IdentityHashMap;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
@@ -51,6 +51,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.DoubleUnaryOperator;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -97,14 +98,16 @@ public final class HaraContext {
           "promise", "std.foundation.promise",
           "bytes", "std.foundation.bytes",
           "file", "std.foundation.file",
-          "socket", "std.foundation.socket");
+          "socket", "std.foundation.socket",
+          "edn", "std.foundation.edn");
   private static final Map<String, String> DEFAULT_LIBRARY_ALIASES =
       Map.of(
           "string", "str",
           "promise", "promise",
           "bytes", "bytes",
           "file", "file",
-          "socket", "socket");
+          "socket", "socket",
+          "edn", "edn");
   private static final Set<String> MARKER_METHOD_NAMES =
       Set.of(
           "get",
@@ -127,6 +130,36 @@ public final class HaraContext {
           "keys",
           "vals",
           "pairs");
+  private static final Map<String, java.util.List<String>> NATIVE_TYPES =
+      Map.ofEntries(
+          Map.entry("Maths", java.util.List.of("abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "ceil", "cos", "cosh", "exp", "floor", "pow", "sin", "sinh", "sqrt", "tan", "tanh")),
+          Map.entry("Numbers", java.util.List.of("long", "double")),
+          Map.entry("Bits", java.util.List.of("and", "or", "xor", "not", "shift-left", "shift-right")),
+          Map.entry("String", java.util.List.of("length", "blank?", "includes?", "starts-with?", "ends-with?", "char-at", "slice", "index-of", "last-index-of", "join", "split", "split-lines", "repeat", "replace", "replace-first", "trim", "trim-left", "trim-right", "upper", "lower", "capitalize", "decapitalize", "pad-left", "pad-right", "reverse", "encode-utf8", "decode-utf8", "comp", "lt?", "gt?", "to-fixed")),
+          Map.entry("Bytes", java.util.List.of("new", "instance?", "count", "get", "set", "copy", "slice", "u8", "s8")),
+          Map.entry("File", java.util.List.of("resolve", "read", "write", "exists?", "list", "mkdir", "delete")),
+          Map.entry("Socket", java.util.List.of("connect", "listen", "endpoint", "events", "next", "send", "close")),
+          Map.entry("Promise", java.util.List.of("run", "new", "from", "all", "delay", "instance?")),
+          Map.entry("Coroutine", java.util.List.of("create", "yield", "await", "instance?")),
+          Map.entry("Array", java.util.List.of("new", "instance?")),
+          Map.entry("Object", java.util.List.of("new", "instance?")),
+          Map.entry("Runtime", java.util.List.of("load-string", "macroexpand-1", "gensym", "var-sym")),
+          Map.entry("Printer", java.util.List.of("str", "pr-str")),
+          Map.entry("Edn", java.util.List.of("read")),
+          Map.entry("Json", java.util.List.of("read", "write", "pretty")),
+          Map.entry("Regex", java.util.List.of("instance?")),
+          Map.entry("UUID", java.util.List.of("instance?")),
+          Map.entry("Error", java.util.List.of("new", "message", "class")));
+  private static final Map<String, String> NATIVE_LIBRARY_SOURCES =
+      Map.of(
+          "std.native.String", "std.foundation.string",
+          "std.native.Bytes", "std.foundation.bytes",
+          "std.native.File", "std.foundation.file",
+          "std.native.Socket", "std.foundation.socket",
+          "std.native.Promise", "std.foundation.promise",
+          "std.native.Coroutine", "std.foundation.coroutine",
+          "std.native.Edn", "std.foundation.edn",
+          "std.native.Json", "std.foundation.json");
   private final TruffleLanguage.Env environment;
   private final Map<String, HaraNamespace> namespaces = new ConcurrentHashMap<>();
   private final Map<String, Map<String, HaraMacro>> macros = new ConcurrentHashMap<>();
@@ -155,9 +188,6 @@ public final class HaraContext {
   private String collectingBuiltinNamespace;
   private final HaraProtocol ifnProtocol;
   private final AtomicLong gensymCounter = new AtomicLong();
-  private final Map<Object, LinkedHashMap<Object, Object>> guestWatches =
-      Collections.synchronizedMap(new IdentityHashMap<>());
-
   HaraContext(TruffleLanguage.Env environment) {
     this.environment = environment;
     currentNamespace = namespace(INTRINSIC_NAMESPACE);
@@ -167,6 +197,7 @@ public final class HaraContext {
     withDefinitionOrigin(
         HaraVar.Origin.RUNTIME_PRIMITIVE,
         () -> {
+          installNativeTypeDescriptors();
           HaraJavaAdapters.install(this);
           collectBuiltins(
               FOUNDATION_NAMESPACE,
@@ -229,6 +260,97 @@ public final class HaraContext {
       collectingBuiltins = previousCollecting;
       collectingBuiltinNamespace = previousNamespace;
     }
+    installNativeExports(namespaceName);
+  }
+
+  private void installNativeTypeDescriptors() {
+    HaraNamespace nativeNamespace = namespace("std.native");
+    HaraNamespace foundation = namespace(FOUNDATION_NAMESPACE);
+    NATIVE_TYPES.forEach(
+        (name, methods) -> {
+          HaraVar descriptor =
+              nativeNamespace.define(name, new HaraNativeType(name, methods));
+          foundation.refer(name, descriptor);
+        });
+  }
+
+  private void installNativeExports(String sourceNamespace) {
+    Map<String, BuiltinExport> exports = builtinCatalogs.getOrDefault(sourceNamespace, Map.of());
+    if (exports.isEmpty()) return;
+    if (FOUNDATION_NAMESPACE.equals(sourceNamespace)) {
+      installNativeExportGroup("Maths", exports, NATIVE_TYPES.get("Maths"), Map.of());
+      installNativeExportGroup("Numbers", exports, NATIVE_TYPES.get("Numbers"), Map.of());
+      installNativeExportGroup(
+          "Bits",
+          exports,
+          NATIVE_TYPES.get("Bits"),
+          Map.of(
+              "and", "bit-and",
+              "or", "bit-or",
+              "xor", "bit-xor",
+              "not", "bit-not",
+              "shift-left", "bit-shift-left",
+              "shift-right", "bit-shift-right"));
+      installNativeExportGroup(
+          "Bytes", exports, java.util.List.of("new", "instance?"),
+          Map.of("new", "bytes", "instance?", "bytes?"));
+      installNativeExportGroup(
+          "Promise", exports, java.util.List.of("run", "instance?"),
+          Map.of("run", "promise", "instance?", "promise?"));
+      installNativeExportGroup(
+          "Array", exports, NATIVE_TYPES.get("Array"),
+          Map.of("new", "array", "instance?", "array?"));
+      installNativeExportGroup(
+          "Object", exports, NATIVE_TYPES.get("Object"),
+          Map.of("new", "object", "instance?", "object?"));
+      installNativeExportGroup(
+          "Runtime", exports, NATIVE_TYPES.get("Runtime"), Map.of());
+      installNativeExportGroup(
+          "Printer", exports, NATIVE_TYPES.get("Printer"), Map.of());
+      installNativeExportGroup(
+          "Regex", exports, NATIVE_TYPES.get("Regex"), Map.of("instance?", "regexp?"));
+      installNativeExportGroup(
+          "UUID", exports, NATIVE_TYPES.get("UUID"), Map.of("instance?", "uuid?"));
+      installNativeExportGroup(
+          "Error",
+          exports,
+          NATIVE_TYPES.get("Error"),
+          Map.of(
+              "new", "ex-info",
+              "message", "ex-message",
+              "class", "ex-class"));
+      return;
+    }
+    String type =
+        switch (sourceNamespace) {
+          case "std.foundation.string" -> "String";
+          case "std.foundation.bytes" -> "Bytes";
+          case "std.foundation.file" -> "File";
+          case "std.foundation.socket" -> "Socket";
+          case "std.foundation.promise" -> "Promise";
+          case "std.foundation.coroutine" -> "Coroutine";
+          default -> null;
+        };
+    if (type != null) {
+      Map<String, String> sourceNames =
+          "Coroutine".equals(type) ? Map.of("instance?", "coroutine?") : Map.of();
+      installNativeExportGroup(type, exports, NATIVE_TYPES.get(type), sourceNames);
+    }
+  }
+
+  private void installNativeExportGroup(
+      String type,
+      Map<String, BuiltinExport> exports,
+      java.util.List<String> methods,
+      Map<String, String> sourceNames) {
+    HaraNamespace target = namespace("std.native." + type);
+    for (String method : methods) {
+      String sourceName = sourceNames.getOrDefault(method, method);
+      BuiltinExport export = exports.get(sourceName);
+      if (export != null) {
+        target.define(method, export.value, export.metadata, HaraVar.Origin.RUNTIME_PRIMITIVE);
+      }
+    }
   }
 
   private void registerBuiltin(
@@ -274,8 +396,7 @@ public final class HaraContext {
                 + "/"
                 + requested.getName());
       }
-      target.define(
-          requested.getName(), export.value, export.metadata, export.origin);
+      target.define(requested.getName(), export.value, export.metadata, export.origin);
       if (export.value instanceof HaraMacro macro) {
         macros
             .computeIfAbsent(declaration.name.getName(), ignored -> new ConcurrentHashMap<>())
@@ -377,6 +498,7 @@ public final class HaraContext {
     currentNamespace = namespace(declaration.name.getName());
     referRuntimeIntrinsics(currentNamespace);
     if (!declaration.blank) referFoundation(currentNamespace);
+    configureProtocolAliases(currentNamespace);
     configureFoundationAliases(declaration);
     activateBuiltins(declaration);
     configureNativeFlavor(declaration.structuralClauses);
@@ -396,6 +518,18 @@ public final class HaraContext {
               library.getKey(), DEFAULT_LIBRARY_ALIASES.get(library.getKey()));
       putAlias(namespaceAliases, alias, library.getValue());
     }
+  }
+
+  private void configureProtocolAliases(HaraNamespace target) {
+    Map<String, String> namespaceAliases =
+        aliases.computeIfAbsent(target.name(), ignored -> new ConcurrentHashMap<>());
+    HaraNamespace foundation = namespace(FOUNDATION_NAMESPACE);
+    foundation.vars.forEach(
+        (name, variable) -> {
+          if (name.startsWith("I") && variable.get() instanceof HaraProtocol) {
+            putAlias(namespaceAliases, name, builtinProtocolNamespace(name));
+          }
+        });
   }
 
   private void applyNamespaceRequires(Object[] clauses) {
@@ -488,6 +622,7 @@ public final class HaraContext {
   private void initializeUserNamespace(HaraNamespace target) {
     referRuntimeIntrinsics(target);
     referFoundation(target);
+    configureProtocolAliases(target);
     Map<String, String> namespaceAliases =
         aliases.computeIfAbsent(target.name(), ignored -> new ConcurrentHashMap<>());
     for (Map.Entry<String, String> entry : DEFAULT_LIBRARY_ALIASES.entrySet()) {
@@ -525,8 +660,31 @@ public final class HaraContext {
       throw new HaraException(":require namespace must be a symbol");
     }
     String target = ((Symbol) spec.nth(0)).display();
-    HaraNamespace required = requiredNamespace(target);
-    if (required == null) throw new HaraException("Cannot require missing namespace: " + target);
+    boolean lazy = false;
+    for (int i = 1; i < spec.count(); i += 2) {
+      if (i + 1 >= spec.count() || !(spec.nth(i) instanceof Keyword)) {
+        throw new HaraException("Malformed :require options for " + target);
+      }
+      if ("lazy".equals(((Keyword) spec.nth(i)).getName())) {
+        if (!Boolean.TRUE.equals(spec.nth(i + 1))) {
+          throw new HaraException(":require :lazy expects true");
+        }
+        lazy = true;
+      }
+    }
+    if (lazy) {
+      boolean hasAlias = false;
+      for (int i = 1; i < spec.count(); i += 2) {
+        String option = ((Keyword) spec.nth(i)).getName();
+        if ("as".equals(option)) hasAlias = true;
+        if ("refer".equals(option) || "refer-macros".equals(option)) {
+          throw new HaraException(":require :lazy cannot be combined with :" + option);
+        }
+      }
+      if (!hasAlias) throw new HaraException(":require :lazy requires :as");
+    }
+    HaraNamespace required = lazy ? null : requiredNamespace(target);
+    if (!lazy && required == null) throw new HaraException("Cannot require missing namespace: " + target);
     java.util.Set<String> excludedRefers = new java.util.HashSet<>();
     for (int i = 1; i < spec.count(); i += 2) {
       if (i + 1 >= spec.count() || !(spec.nth(i) instanceof Keyword)) {
@@ -556,6 +714,8 @@ public final class HaraContext {
           throw new HaraException(":require :as expects an unqualified symbol");
         }
         putAlias(namespaceAliases, ((Symbol) value).getName(), target);
+      } else if ("lazy".equals(option)) {
+        // Validated above; aliases retain the target name until first resolution.
       } else if ("refer".equals(option)) {
         if (value instanceof Keyword && "all".equals(((Keyword) value).getName())) {
           for (String referred : required.symbolNames()) {
@@ -752,10 +912,16 @@ public final class HaraContext {
   public HaraVar resolve(Symbol symbol) {
     String namespaceName = symbol.getNamespace();
     if (namespaceName != null) {
-      namespaceName =
-          aliases
-              .getOrDefault(currentNamespace.name(), Map.of())
-              .getOrDefault(namespaceName, namespaceName);
+      Map<String, String> currentAliases =
+          aliases.getOrDefault(currentNamespace.name(), Map.of());
+      boolean alias = currentAliases.containsKey(namespaceName);
+      namespaceName = currentAliases.getOrDefault(namespaceName, namespaceName);
+      if (alias && !namespaces.containsKey(namespaceName)) {
+        HaraNamespace required = requiredNamespace(namespaceName);
+        if (required == null) return null;
+      }
+      String nativeSource = NATIVE_LIBRARY_SOURCES.get(namespaceName);
+      if (nativeSource != null) libraryLoader.ensure(this, nativeSource);
       if (!namespaces.containsKey(namespaceName) && libraryLoader.provides(namespaceName)) {
         libraryLoader.ensure(this, namespaceName);
       }
@@ -806,9 +972,6 @@ public final class HaraContext {
         });
     for (Map.Entry<String, String> alias :
         aliases.getOrDefault(currentNamespace.name(), Map.of()).entrySet()) {
-      if (!namespaces.containsKey(alias.getValue()) && libraryLoader.provides(alias.getValue())) {
-        libraryLoader.ensure(this, alias.getValue());
-      }
       HaraNamespace target = namespaces.get(alias.getValue());
       if (target == null) continue;
       for (String name : target.symbolNames()) names.add(alias.getKey() + "/" + name);
@@ -948,7 +1111,8 @@ public final class HaraContext {
   private Object invokeProtocolMethod(
       HaraProtocol protocol, String methodName, Object[] values) {
     if (values.length == 0) {
-      throw new HaraException(protocol.name() + "/" + methodName + " expects a receiver");
+      throw new HaraException(
+          "protocol/arity: " + protocol.name() + "/" + methodName + " expects a receiver");
     }
     Object receiver = HaraBox.unwrap(values[0]);
     if (isHostObject(receiver)) receiver = asHostObject(receiver);
@@ -1135,9 +1299,9 @@ public final class HaraContext {
     target.define("<=", new VariadicBuiltin("<=", values -> compare("<=", values)));
     target.define(">", new VariadicBuiltin(">", values -> compare(">", values)));
     target.define(">=", new VariadicBuiltin(">=", values -> compare(">=", values)));
-    target.define("bigint", new UnaryBuiltin("bigint", HaraNumericConversions::toBigInteger));
-    target.define("bigdec", new UnaryBuiltin("bigdec", HaraNumericConversions::toBigDecimal));
-    target.define("double", new UnaryBuiltin("double", HaraNumericConversions::toDouble));
+    HaraNamespace numbers = namespace("std.native.Numbers");
+    numbers.define("long", new UnaryBuiltin("std.native.Numbers/long", HaraNumericConversions::toLong));
+    numbers.define("double", new UnaryBuiltin("std.native.Numbers/double", HaraNumericConversions::toDouble));
     target.define(
         "not", new UnaryBuiltin("not", value -> value == null || Boolean.FALSE.equals(value)));
     target.define("boolean?", new UnaryBuiltin("boolean?", value ->
@@ -1370,6 +1534,11 @@ public final class HaraContext {
     target.define("ns-name", new UnaryBuiltin("ns-name", this::namespaceName));
     target.define("ns-publics", new UnaryBuiltin("ns-publics", this::namespacePublics));
     target.define("ns-aliases", new UnaryBuiltin("ns-aliases", this::namespaceAliases));
+    target.define("intern-var", new VariadicBuiltin("intern-var", this::internVar));
+    target.define("ns-state", new UnaryBuiltin("ns-state", this::namespaceState));
+    target.define("ns-loaded?", new UnaryBuiltin("ns-loaded?", this::namespaceLoaded));
+    target.define("ns-alias-state", new VariadicBuiltin("ns-alias-state", this::namespaceAliasState));
+    target.define("eval-in-ns", new VariadicBuiltin("eval-in-ns", this::evalInNamespace));
     target.define(
         "resolve",
         new UnaryBuiltin(
@@ -1690,22 +1859,6 @@ public final class HaraContext {
         "atom",
         new UnaryBuiltin(
             "atom", value -> new hara.lang.data.Atom.Standard<>(HaraBox.unwrap(value))));
-    target.define(
-        "reset!",
-        new VariadicBuiltin(
-            "reset!",
-            values -> {
-              if (values.length != 2) {
-                throw new HaraException("reset! expects a reference and value");
-              }
-              return protocolCall("IReset", "reset", values);
-            }));
-    target.define("swap!", new VariadicBuiltin("swap!", this::swapAtom));
-    target.define(
-        "compare-and-set!", new VariadicBuiltin("compare-and-set!", this::compareAndSetAtom));
-    target.define("add-watch", new VariadicBuiltin("add-watch", this::addAtomWatch));
-    target.define("remove-watch", new VariadicBuiltin("remove-watch", this::removeAtomWatch));
-    target.define("get-watches", new UnaryBuiltin("get-watches", this::getAtomWatches));
     target.define("gensym", new VariadicBuiltin("gensym", values -> {
       if (values.length > 1) throw new HaraException("gensym expects zero or one prefix");
       return gensym(values.length == 0 ? null : String.valueOf(HaraBox.unwrap(values[0])));
@@ -1743,15 +1896,36 @@ public final class HaraContext {
     target.define("bytes", new VariadicBuiltin("bytes", this::createBytes));
     target.define("array", new VariadicBuiltin("array", HaraArray::new));
     target.define("object", new VariadicBuiltin("object", HaraObject::new));
-    target.define("bit-and", new VariadicBuiltin("bit-and", values -> bitOperation("and", values)));
-    target.define("bit-or", new VariadicBuiltin("bit-or", values -> bitOperation("or", values)));
-    target.define("bit-xor", new VariadicBuiltin("bit-xor", values -> bitOperation("xor", values)));
-    target.define("bit-not", new UnaryBuiltin("bit-not", value -> (long) ~int32(value, "bit-not")));
-    target.define(
-        "bit-shift-left", new VariadicBuiltin("bit-shift-left", values -> bitShift(values, true)));
-    target.define(
-        "bit-shift-right",
-        new VariadicBuiltin("bit-shift-right", values -> bitShift(values, false)));
+    HaraNamespace bits = namespace("std.native.Bits");
+    bits.define("and", new VariadicBuiltin("std.native.Bits/and", values -> bitOperation("and", values)));
+    bits.define("or", new VariadicBuiltin("std.native.Bits/or", values -> bitOperation("or", values)));
+    bits.define("xor", new VariadicBuiltin("std.native.Bits/xor", values -> bitOperation("xor", values)));
+    bits.define("not", new UnaryBuiltin("std.native.Bits/not", value -> (long) ~int32(value, "bit-not")));
+    bits.define(
+        "shift-left", new VariadicBuiltin("std.native.Bits/shift-left", values -> bitShift(values, true)));
+    bits.define(
+        "shift-right",
+        new VariadicBuiltin("std.native.Bits/shift-right", values -> bitShift(values, false)));
+    HaraNamespace maths = namespace("std.native.Maths");
+    maths.define("abs", new UnaryBuiltin("std.native.Maths/abs", HaraContext::numericAbs));
+    maths.define("acos", mathUnary("std.native.Maths/acos", Math::acos));
+    maths.define("acosh", mathUnary("std.native.Maths/acosh", HaraContext::acosh));
+    maths.define("asin", mathUnary("std.native.Maths/asin", Math::asin));
+    maths.define("asinh", mathUnary("std.native.Maths/asinh", HaraContext::asinh));
+    maths.define("atan", mathUnary("std.native.Maths/atan", Math::atan));
+    maths.define("atan2", new VariadicBuiltin("std.native.Maths/atan2", values -> mathBinary("atan2", values)));
+    maths.define("atanh", mathUnary("std.native.Maths/atanh", HaraContext::atanh));
+    maths.define("ceil", mathUnary("std.native.Maths/ceil", Math::ceil));
+    maths.define("cos", mathUnary("std.native.Maths/cos", Math::cos));
+    maths.define("cosh", mathUnary("std.native.Maths/cosh", Math::cosh));
+    maths.define("exp", mathUnary("std.native.Maths/exp", Math::exp));
+    maths.define("floor", mathUnary("std.native.Maths/floor", Math::floor));
+    maths.define("pow", new VariadicBuiltin("std.native.Maths/pow", values -> mathBinary("pow", values)));
+    maths.define("sin", mathUnary("std.native.Maths/sin", Math::sin));
+    maths.define("sinh", mathUnary("std.native.Maths/sinh", Math::sinh));
+    maths.define("sqrt", mathUnary("std.native.Maths/sqrt", Math::sqrt));
+    maths.define("tan", mathUnary("std.native.Maths/tan", Math::tan));
+    maths.define("tanh", mathUnary("std.native.Maths/tanh", Math::tanh));
   }
 
   private Object createBytes(Object[] values) {
@@ -1760,95 +1934,6 @@ public final class HaraContext {
       result[i] = (byte) byteNumber(values[i], "bytes");
     }
     return result;
-  }
-
-  @SuppressWarnings({"rawtypes", "unchecked"})
-  private Object swapAtom(Object[] values) {
-    if (values.length < 2) throw new HaraException("swap! expects an atom, function, and arguments");
-    Object raw = HaraBox.unwrap(values[0]);
-    if (!(raw instanceof hara.lang.data.Atom.Swap swap)) {
-      throw new HaraException("swap! expects an atom");
-    }
-    for (;;) {
-      Object oldValue = swap.deref();
-      Object[] arguments = new Object[values.length - 1];
-      arguments[0] = oldValue;
-      if (values.length > 2) System.arraycopy(values, 2, arguments, 1, values.length - 2);
-      Object newValue = HaraBox.unwrap(invokeCallable(values[1], arguments));
-      swap.validate(newValue);
-      if (swap.cas(oldValue, newValue)) {
-        swap.notifyWatches(oldValue, newValue);
-        return newValue;
-      }
-    }
-  }
-
-  @SuppressWarnings({"rawtypes", "unchecked"})
-  private Object compareAndSetAtom(Object[] values) {
-    requireMethodArity("compare-and-set!", values, 3);
-    Object raw = HaraBox.unwrap(values[0]);
-    if (!(raw instanceof hara.lang.data.Atom.Swap swap)) {
-      throw new HaraException("compare-and-set! expects an atom");
-    }
-    Object oldValue = HaraBox.unwrap(values[1]);
-    Object newValue = HaraBox.unwrap(values[2]);
-    swap.validate(newValue);
-    boolean changed = swap.cas(oldValue, newValue);
-    if (changed) swap.notifyWatches(oldValue, newValue);
-    return changed;
-  }
-
-  @SuppressWarnings({"rawtypes", "unchecked"})
-  private Object addAtomWatch(Object[] values) {
-    requireMethodArity("add-watch", values, 3);
-    Object reference = HaraBox.unwrap(values[0]);
-    if (!(reference instanceof hara.lang.protocol.IWatch watch)) {
-      throw new HaraException("add-watch expects a watchable reference");
-    }
-    Object key = HaraBox.unwrap(values[1]);
-    Object callback = values[2];
-    watch.addWatch(key, entry -> invokeCallable(callback, new Object[] {
-        key, reference, ((hara.lang.protocol.IWatch.WatchEntry) entry).oldVal(),
-        ((hara.lang.protocol.IWatch.WatchEntry) entry).newVal()}));
-    synchronized (guestWatches) {
-      guestWatches.computeIfAbsent(reference, ignored -> new LinkedHashMap<>()).put(key, callback);
-    }
-    return reference;
-  }
-
-  @SuppressWarnings({"rawtypes", "unchecked"})
-  private Object removeAtomWatch(Object[] values) {
-    requireMethodArity("remove-watch", values, 2);
-    Object reference = HaraBox.unwrap(values[0]);
-    if (!(reference instanceof hara.lang.protocol.IWatch watch)) {
-      throw new HaraException("remove-watch expects a watchable reference");
-    }
-    Object key = HaraBox.unwrap(values[1]);
-    watch.removeWatch(key);
-    synchronized (guestWatches) {
-      LinkedHashMap<Object, Object> watches = guestWatches.get(reference);
-      if (watches != null) {
-        watches.remove(key);
-        if (watches.isEmpty()) guestWatches.remove(reference);
-      }
-    }
-    return reference;
-  }
-
-  private Object getAtomWatches(Object value) {
-    Object reference = HaraBox.unwrap(value);
-    if (!(reference instanceof hara.lang.protocol.IWatch)) {
-      throw new HaraException("get-watches expects a watchable reference");
-    }
-    ArrayList<Object> entries = new ArrayList<>();
-    synchronized (guestWatches) {
-      for (Map.Entry<Object, Object> entry :
-          guestWatches.getOrDefault(reference, new LinkedHashMap<>()).entrySet()) {
-        entries.add(entry.getKey());
-        entries.add(entry.getValue());
-      }
-    }
-    return hara.lang.data.Map.Standard.from(null, entries.toArray());
   }
 
   private void installNativeLibraries() {
@@ -1875,6 +1960,28 @@ public final class HaraContext {
     namespace("hara.native.jvm.reflect");
     namespace("hara.native.jvm.classpath");
     namespace("hara.native.jvm.compiler");
+    HaraNamespace edn = namespace("std.native.Edn");
+    edn.define(
+        "read",
+        new UnaryBuiltin(
+            "std.native.Edn/read",
+            value -> {
+              Object unwrapped = HaraBox.unwrap(value);
+              if (!(unwrapped instanceof String source)) {
+                throw new HaraException("edn/read expects a string");
+              }
+              try {
+                Object[] forms = HaraLanguage.readAll(source, "<edn>");
+                if (forms.length != 1) {
+                  throw new HaraException("edn/read expects exactly one value");
+                }
+                return forms[0];
+              } catch (HaraException error) {
+                throw error;
+              } catch (RuntimeException error) {
+                throw new HaraException("edn/read: " + error.getMessage());
+              }
+            }));
     installJvmNativeLibraries();
   }
 
@@ -2139,11 +2246,11 @@ public final class HaraContext {
   }
 
   private void defineJsonLibrary() {
-    HaraNamespace json = namespace("std.foundation.json");
+    HaraNamespace json = namespace("std.native.Json");
     json.define(
         "read",
         new UnaryBuiltin(
-            "json/read",
+            "std.native.Json/read",
             value -> {
               if (!(HaraBox.unwrap(value) instanceof String source)) {
                 throw new HaraException("json/read expects a string");
@@ -2157,7 +2264,7 @@ public final class HaraContext {
     json.define(
         "write",
         new UnaryBuiltin(
-            "json/write",
+            "std.native.Json/write",
             value -> {
               try {
                 return StdJson.write(HaraBox.unwrap(value));
@@ -2166,14 +2273,18 @@ public final class HaraContext {
               }
             }));
     json.define(
-        "write-pp",
-        new UnaryBuiltin(
-            "json/write-pp",
-            value -> {
+        "pretty",
+        new VariadicBuiltin(
+            "std.native.Json/pretty",
+            values -> {
+              requireMethodArity("json/pretty", values, 2);
+              if (!(HaraBox.unwrap(values[1]) instanceof IMapType<?, ?>)) {
+                throw new HaraException("json/pretty expects an options map");
+              }
               try {
-                return StdJson.writePretty(HaraBox.unwrap(value));
+                return StdJson.writePretty(HaraBox.unwrap(values[0]));
               } catch (IllegalArgumentException error) {
-                throw new HaraException("json/write-pp: " + error.getMessage());
+                throw new HaraException("json/pretty: " + error.getMessage());
               }
             }));
   }
@@ -2196,6 +2307,10 @@ public final class HaraContext {
   private void defineSocketLibrary() {
     HaraNamespace socket = namespace("std.foundation.socket");
     socket.define("connect", new VariadicBuiltin("socket/connect", this::socketConnect));
+    socket.define("listen", new VariadicBuiltin("socket/listen", this::socketListen));
+    socket.define("endpoint", new UnaryBuiltin("socket/endpoint", this::socketEndpoint));
+    socket.define("events", new VariadicBuiltin("socket/events", this::socketEvents));
+    socket.define("next", new UnaryBuiltin("socket/next", this::socketNext));
     socket.define("send", new VariadicBuiltin("socket/send", this::socketSend));
     socket.define("close", new UnaryBuiltin("socket/close", this::socketClose));
   }
@@ -2228,6 +2343,63 @@ public final class HaraContext {
       throw new HaraException(name + " distance must be in the range 0..31");
     }
     return (long) (left ? value << distance : value >> distance);
+  }
+
+  private static Number numericValue(Object value, String operation) {
+    Object input = HaraBox.unwrap(value);
+    if (!(input instanceof Byte
+        || input instanceof Short
+        || input instanceof Integer
+        || input instanceof Long
+        || input instanceof Float
+        || input instanceof Double)) {
+      throw new HaraException(operation + " expects a numeric value");
+    }
+    return (Number) input;
+  }
+
+  private static Object numericAbs(Object value) {
+    Number input = numericValue(value, "abs");
+    if (input instanceof Byte
+        || input instanceof Short
+        || input instanceof Integer
+        || input instanceof Long) {
+      long integer = input.longValue();
+      if (integer == Long.MIN_VALUE) throw new HaraException("integer overflow");
+      return Math.abs(integer);
+    }
+    return Math.abs(input.doubleValue());
+  }
+
+  private static UnaryBuiltin mathUnary(String operation, DoubleUnaryOperator implementation) {
+    return new UnaryBuiltin(
+        operation,
+        value -> implementation.applyAsDouble(numericValue(value, operation).doubleValue()));
+  }
+
+  private static Object mathBinary(String operation, Object[] values) {
+    requireMethodArity(operation, values, 2);
+    double first = numericValue(values[0], operation).doubleValue();
+    double second = numericValue(values[1], operation).doubleValue();
+    return "atan2".equals(operation) ? Math.atan2(first, second) : Math.pow(first, second);
+  }
+
+  private static double asinh(double value) {
+    double magnitude = Math.abs(value);
+    if (Double.isInfinite(magnitude) || Double.isNaN(magnitude)) return value;
+    if (magnitude > 1.0e154) {
+      return Math.copySign(Math.log(magnitude) + Math.log(2.0), value);
+    }
+    return Math.copySign(Math.log(magnitude + Math.hypot(magnitude, 1.0)), value);
+  }
+
+  private static double acosh(double value) {
+    if (value > 1.0e154) return Math.log(value) + Math.log(2.0);
+    return Math.log(value + Math.sqrt(value - 1.0) * Math.sqrt(value + 1.0));
+  }
+
+  private static double atanh(double value) {
+    return 0.5 * (Math.log1p(value) - Math.log1p(-value));
   }
 
   private static String stringValue(Object value, String operation) {
@@ -2676,8 +2848,61 @@ public final class HaraContext {
     }
   }
 
+  private Object socketListen(Object[] values) {
+    requireSocketIO("socket/listen");
+    if (values.length != 4 || !(HaraBox.unwrap(values[1]) instanceof Number)) {
+      throw new HaraException("socket/listen expects host, port, options, and callback");
+    }
+    String host = stringValue(values[0], "socket/listen");
+    int port = ((Number) HaraBox.unwrap(values[1])).intValue();
+    if (port < 0 || port > 65535) throw new HaraException("socket/listen expects a valid port");
+    try {
+      ServerSocket listener = new ServerSocket();
+      listener.bind(new InetSocketAddress(host, port));
+      HaraSocketServer server = new HaraSocketServer(listener, values[3]);
+      server.start();
+      return server;
+    } catch (IOException error) {
+      throw new HaraException("socket/listen failed: " + error.getMessage());
+    }
+  }
+
+  private Object socketEndpoint(Object value) {
+    requireSocketIO("socket/endpoint");
+    Object input = HaraBox.unwrap(value);
+    if (!(input instanceof HaraSocketServer server)) {
+      throw new HaraException("socket/endpoint expects a socket server");
+    }
+    return hara.lang.data.Map.Standard.from(
+        null,
+        new Object[] {Keyword.create("host"), server.host(), Keyword.create("port"), (long) server.port()});
+  }
+
+  private Object socketEvents(Object[] values) {
+    requireSocketIO("socket/events");
+    if (values.length != 2) throw new HaraException("socket/events expects a handle and options");
+    Object input = HaraBox.unwrap(values[0]);
+    if (input instanceof HaraSocket socket) return socket.events();
+    if (input instanceof HaraSocketServer server) return server.events();
+    throw new HaraException("socket/events expects a socket connection or server");
+  }
+
+  private Object socketNext(Object value) {
+    requireSocketIO("socket/next");
+    Object input = HaraBox.unwrap(value);
+    if (!(input instanceof HaraSocketStream stream)) {
+      throw new HaraException("socket/next expects a socket stream");
+    }
+    return stream.next();
+  }
+
   private Object socketClose(Object value) {
     requireSocketIO("socket/close");
+    Object input = HaraBox.unwrap(value);
+    if (input instanceof HaraSocketServer server) {
+      server.close();
+      return null;
+    }
     HaraSocket connection = requireSocket(value, "socket/close");
     try {
       connection.socket.close();
@@ -2987,8 +3212,12 @@ public final class HaraContext {
     if (operator.equals("mod") && values.length != 2) {
       throw new HaraException("mod expects two numbers");
     }
-    if (operator.equals("-") && values.length == 1) return Num.minusP(values[0]);
-    if (operator.equals("/") && values.length == 1) return Num.divide(1L, values[0]);
+    if (operator.equals("-") && values.length == 1) {
+      return requireL0Number(Num.minusP(values[0]));
+    }
+    if (operator.equals("/") && values.length == 1) {
+      return requireL0Number(Num.divide(1L, values[0]));
+    }
     Object result = values[0];
     for (int i = 1; i < values.length; i++) {
       Object value = values[i];
@@ -3006,7 +3235,15 @@ public final class HaraContext {
         throw new HaraException("Unknown arithmetic operator: " + operator);
       }
     }
-    return result;
+    return requireL0Number(result);
+  }
+
+  private static Object requireL0Number(Object value) {
+    Object raw = HaraBox.unwrap(value);
+    if (raw instanceof java.math.BigInteger || raw instanceof java.math.BigDecimal) {
+      throw new HaraException("integer overflow");
+    }
+    return value;
   }
 
   @TruffleBoundary
@@ -3173,6 +3410,104 @@ public final class HaraContext {
       throw new HaraException("No such namespace: " + name);
     }
     return Symbol.create(name);
+  }
+
+  private Object internVar(Object[] values) {
+    if (values.length != 3 && values.length != 4) {
+      throw new HaraException("intern-var expects namespace, symbol, var, and optional metadata");
+    }
+    String namespaceName = namespaceIdentifier(values[0], "intern-var");
+    Object rawSymbol = HaraBox.unwrap(values[1]);
+    if (!(rawSymbol instanceof Symbol symbol) || symbol.getNamespace() != null) {
+      throw new HaraException("intern-var expects an unqualified target symbol");
+    }
+    Object rawVar = HaraBox.unwrap(values[2]);
+    if (!(rawVar instanceof HaraVar source)) {
+      throw new HaraException("intern-var expects a source Var");
+    }
+    IMetadata metadata = source.meta();
+    if (values.length == 4 && values[3] != null) {
+      Object extension = HaraBox.unwrap(values[3]);
+      if (!(extension instanceof IMapType<?, ?> extra)) {
+        throw new HaraException("intern-var metadata extension must be a map");
+      }
+      java.util.ArrayList<Object> entries = new java.util.ArrayList<>();
+      if (metadata instanceof IMapType<?, ?> sourceMetadata) {
+        for (Object entry : sourceMetadata) {
+          java.util.Map.Entry<?, ?> pair = (java.util.Map.Entry<?, ?>) entry;
+          entries.add(pair.getKey());
+          entries.add(pair.getValue());
+        }
+      }
+      for (Object entry : extra) {
+        java.util.Map.Entry<?, ?> pair = (java.util.Map.Entry<?, ?>) entry;
+        entries.add(pair.getKey());
+        entries.add(pair.getValue());
+      }
+      metadata = hara.lang.data.Map.Standard.from(null, entries.toArray());
+    }
+    return namespace(namespaceName).define(symbol.getName(), source.get(), metadata, HaraVar.Origin.SOURCE);
+  }
+
+  private Object namespaceState(Object value) {
+    String name = namespaceIdentifier(value, "ns-state");
+    if (namespaces.containsKey(name)) return Keyword.create("loaded");
+    for (Map<String, String> namespaceAliases : aliases.values()) {
+      if (namespaceAliases.containsValue(name)) return Keyword.create("unloaded");
+    }
+    return Keyword.create("unknown");
+  }
+
+  private Object namespaceLoaded(Object value) {
+    return namespaces.containsKey(namespaceIdentifier(value, "ns-loaded?"));
+  }
+
+  private Object namespaceAliasState(Object[] values) {
+    if (values.length != 1 && values.length != 2) {
+      throw new HaraException("ns-alias-state expects alias or namespace and alias");
+    }
+    String owner = currentNamespace.name();
+    Object aliasValue = values[0];
+    if (values.length == 2) {
+      owner = namespaceIdentifier(values[0], "ns-alias-state");
+      aliasValue = values[1];
+    }
+    Object rawAlias = HaraBox.unwrap(aliasValue);
+    if (!(rawAlias instanceof Symbol alias) || alias.getNamespace() != null) {
+      throw new HaraException("ns-alias-state expects an unqualified alias symbol");
+    }
+    String target = aliases.getOrDefault(owner, Map.of()).get(alias.getName());
+    if (target == null) return null;
+    return hara.lang.data.Map.Standard.from(
+        null,
+        new Object[] {
+          Keyword.create("alias"), Symbol.create(alias.getName()),
+          Keyword.create("target"), Symbol.create(target),
+          Keyword.create("state"), namespaceState(Symbol.create(target))
+        });
+  }
+
+  private Object evalInNamespace(Object[] values) {
+    if (values.length != 2) throw new HaraException("eval-in-ns expects namespace and forms");
+    String target = namespaceIdentifier(values[0], "eval-in-ns");
+    if (!namespaces.containsKey(target)) {
+      throw new HaraException("eval-in-ns requires an existing namespace: " + target);
+    }
+    Object forms = HaraBox.unwrap(values[1]);
+    if (!(forms instanceof ILinearType<?>)) {
+      throw new HaraException("eval-in-ns expects a vector or list of forms");
+    }
+    HaraNamespace previous = currentNamespace;
+    try {
+      currentNamespace = namespaces.get(target);
+      Object result = null;
+      for (Object form : (ILinearType<?>) forms) {
+        result = parseAndExecute(hara.kernel.builtin.BuiltinUtil.prStr(HaraBox.unwrap(form)), "<with-ns>");
+      }
+      return result;
+    } finally {
+      currentNamespace = previous;
+    }
   }
 
   @TruffleBoundary
@@ -4451,11 +4786,37 @@ public final class HaraContext {
     }
   }
 
-  private static final class HaraSocket implements IDisplay {
+  private final class HaraSocket implements IDisplay {
     private final Socket socket;
+    private final Object eventCallback;
+    private final java.util.List<HaraSocketStream> streams = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     private HaraSocket(Socket socket) {
+      this(socket, null);
+    }
+
+    private HaraSocket(Socket socket, Object eventCallback) {
       this.socket = socket;
+      this.eventCallback = eventCallback;
+    }
+
+    private HaraSocketStream events() {
+      HaraSocketStream stream = new HaraSocketStream(this::closeQuietly);
+      streams.add(stream);
+      return stream;
+    }
+
+    private void emit(Object event) {
+      emit(event, 0);
+    }
+
+    private void emit(Object event, int byteCount) {
+      for (HaraSocketStream stream : streams) stream.publish(event, byteCount);
+      if (eventCallback != null) invokeInContext(() -> invokeCallable(eventCallback, new Object[] {event}));
+    }
+
+    private void closeQuietly() {
+      try { socket.close(); } catch (IOException ignored) { }
     }
 
     private void startDrainer() {
@@ -4464,9 +4825,14 @@ public final class HaraContext {
               () -> {
                 try (InputStream input = socket.getInputStream()) {
                   byte[] buffer = new byte[8192];
-                  while (input.read(buffer) >= 0) {}
-                } catch (IOException ignored) {
-                  // Closing a socket or a peer disconnecting terminates the background drain.
+                  int read;
+                  while ((read = input.read(buffer)) >= 0) {
+                    byte[] bytes = java.util.Arrays.copyOf(buffer, read);
+                    emit(socketEvent("data", this, bytes, null), bytes.length);
+                  }
+                  emit(socketEvent("close", this, null, null));
+                } catch (IOException error) {
+                  emit(socketEvent("error", this, null, error.getMessage()));
                 }
               },
               "hara-socket-reader");
@@ -4478,6 +4844,95 @@ public final class HaraContext {
     public String display() {
       return "#<socket " + socket.getRemoteSocketAddress() + ">";
     }
+  }
+
+  private final class HaraSocketServer implements IDisplay {
+    private final ServerSocket server;
+    private final Object callback;
+    private final java.util.List<HaraSocketStream> streams = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    private HaraSocketServer(ServerSocket server, Object callback) {
+      this.server = server;
+      this.callback = callback;
+    }
+
+    private String host() { return server.getInetAddress().getHostAddress(); }
+    private int port() { return server.getLocalPort(); }
+    private HaraSocketStream events() {
+      HaraSocketStream stream = new HaraSocketStream(() -> {});
+      streams.add(stream);
+      return stream;
+    }
+    private void emit(Object event) {
+      for (HaraSocketStream stream : streams) stream.publish(event, 0);
+      invokeInContext(() -> invokeCallable(callback, new Object[] {event}));
+    }
+    private void start() {
+      Thread acceptor = new Thread(() -> {
+        while (!server.isClosed()) {
+          try {
+            HaraSocket connection = new HaraSocket(server.accept(), callback);
+            emit(socketEvent("open", connection, null, null, this));
+            connection.startDrainer();
+          } catch (IOException error) {
+            if (!server.isClosed()) emit(socketEvent("error", null, null, error.getMessage(), this));
+            return;
+          }
+        }
+      }, "hara-socket-listener");
+      acceptor.setDaemon(true);
+      acceptor.start();
+    }
+    private void close() {
+      try { server.close(); } catch (IOException error) { throw new HaraException("socket/close failed: " + error.getMessage()); }
+    }
+    @Override public String display() { return "#<socket-server " + host() + ":" + port() + ">"; }
+  }
+
+  private final class HaraSocketStream implements IDisplay {
+    private final java.util.ArrayDeque<SocketStreamEntry> events = new java.util.ArrayDeque<>();
+    private final Runnable overflow;
+    private CompletableFuture<Object> waiting;
+    private int queuedBytes;
+    private boolean closed;
+    private HaraSocketStream(Runnable overflow) { this.overflow = overflow; }
+    private synchronized void publish(Object event, int byteCount) {
+      if (closed) return;
+      if (waiting != null) { waiting.complete(event); waiting = null; return; }
+      if (events.size() >= 256 || queuedBytes + byteCount > 1_048_576) {
+        closed = true;
+        overflow.run();
+        return;
+      }
+      queuedBytes += byteCount;
+      events.addLast(new SocketStreamEntry(event, byteCount));
+    }
+    private synchronized HaraPromise next() {
+      if (!events.isEmpty()) {
+        SocketStreamEntry entry = events.removeFirst();
+        queuedBytes -= entry.byteCount();
+        return new HaraPromise(CompletableFuture.completedFuture(entry.event()));
+      }
+      if (closed) return new HaraPromise(CompletableFuture.completedFuture(socketEvent("close", null, null, null)));
+      if (waiting == null) waiting = new CompletableFuture<>();
+      return new HaraPromise(waiting);
+    }
+    @Override public String display() { return "#<socket-stream>"; }
+  }
+
+  private record SocketStreamEntry(Object event, int byteCount) {}
+
+  private Object socketEvent(String type, HaraSocket connection, byte[] bytes, String error) {
+    return socketEvent(type, connection, bytes, error, null);
+  }
+  private Object socketEvent(String type, HaraSocket connection, byte[] bytes, String error, HaraSocketServer server) {
+    java.util.ArrayList<Object> entries = new java.util.ArrayList<>();
+    entries.add(Keyword.create("type")); entries.add(Keyword.create(type));
+    if (server != null) { entries.add(Keyword.create("server")); entries.add(server); }
+    if (connection != null) { entries.add(Keyword.create("connection")); entries.add(connection); }
+    if (bytes != null) { entries.add(Keyword.create("bytes")); entries.add(bytes); }
+    if (error != null) { entries.add(Keyword.create("error")); entries.add(error); }
+    return hara.lang.data.Map.Standard.from(null, entries.toArray());
   }
 
   private final class HaraPromise implements IPromise {
@@ -4660,14 +5115,19 @@ public final class HaraContext {
         String symbolName, Object value, IMetadata metadata, HaraVar.Origin origin) {
       if (collectingBuiltins && name.equals(collectingBuiltinNamespace)) {
         registerBuiltin(name, symbolName, value, metadata, origin);
+        if (!FOUNDATION_NAMESPACE.equals(name)) {
+          return new HaraVar(name, symbolName, value, metadata, origin);
+        }
       }
       return vars.compute(
           symbolName,
           (ignored, existing) -> {
             if (origin == HaraVar.Origin.HAL_FALLBACK
                 && existing != null
+                && name.equals(existing.namespaceName())
                 && (existing.origin() == HaraVar.Origin.JAVA_LIBRARY
                     || existing.origin() == HaraVar.Origin.RUNTIME_PRIMITIVE)) {
+              existing.setMetadata(mergeMetadata(existing.meta(), metadata));
               return existing;
             }
             if (existing == null) {
@@ -4681,6 +5141,22 @@ public final class HaraContext {
             existing.setOrigin(origin);
             return existing;
           });
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static IMetadata mergeMetadata(IMetadata existing, IMetadata fallback) {
+      if (!(fallback instanceof hara.lang.data.types.IMapType)) return existing;
+      hara.lang.data.types.IMapType merged =
+          existing instanceof hara.lang.data.types.IMapType
+              ? (hara.lang.data.types.IMapType) existing
+              : hara.lang.data.Map.Standard.EMPTY;
+      java.util.Iterator<java.util.Map.Entry> entries =
+          ((hara.lang.data.types.IMapType) fallback).iterator();
+      while (entries.hasNext()) {
+        java.util.Map.Entry entry = entries.next();
+        merged = (hara.lang.data.types.IMapType) merged.assoc(entry.getKey(), entry.getValue());
+      }
+      return merged;
     }
 
     private HaraVar refer(String symbolName, HaraVar value) {

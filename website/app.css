@@ -1621,6 +1621,14 @@ body[data-workspace="1"] .source-toggle { display: none; }
 }
 
 .kernel-loading[hidden] { display: none; }
+.kernel-loading > span,
+.kernel-loading > strong {
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .kernel-loading small {
   grid-column: 1 / -1;
   min-width: 0;

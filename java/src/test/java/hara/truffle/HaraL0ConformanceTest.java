@@ -48,6 +48,18 @@ public class HaraL0ConformanceTest {
   }
 
   private void assertReaderCase(String id, String form, IMapType expected) {
+    if (expected.lookup(key("error")) != null) {
+      try {
+        Parser.LispReader.readString(form, null);
+        fail(id + " should fail");
+      } catch (RuntimeException error) {
+        Object message = expectedMessage(expected);
+        if (message != null) {
+          assertTrue(id, error.getMessage().contains(message.toString()));
+        }
+      }
+      return;
+    }
     Object value = Parser.LispReader.readString(form, null);
     java.util.Map.Entry valueEntry = (java.util.Map.Entry) expected.find(key("value"));
     if (valueEntry == null) {
