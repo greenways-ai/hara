@@ -1,629 +1,449 @@
 import { HaraAmpRuntime } from "./amp-runtime.js";
+import { ampLineDecorations, completionOptions, completionPrefix, patchAmpParameter, projectAmpSource } from "./amp-source-model.js";
+import { createNodeGraph } from "./amp-node-graph.js";
 
-const query = (selector, root = document) => root.querySelector(selector);
-const queryAll = (selector, root = document) => [...root.querySelectorAll(selector)];
+const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const NOTES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
+const RECIPES = [
+  ["STATUS", '(sonic/status "hara-amp")'],
+  ["PLAY", '(sonic/update "hara-amp" "transport" "playing" true)'],
+  ["PAUSE", '(sonic/update "hara-amp" "transport" "playing" false)'],
+  ["TEMPO", '(sonic/update "hara-amp" "transport" "tempo" 96)'],
+  ["SEQUENCE", '(sonic/update "hara-amp" "sequence" "steps" [0 7 12 7 nil 15])'],
+  ["VISUAL", '(sonic/update "hara-amp" "visualizer" "mode" "scope")']
+];
 
-const stylesheet = document.createElement("link");
-stylesheet.rel = "stylesheet";
-stylesheet.href = "./story.css?v=amp-story-2";
-document.head.append(stylesheet);
+const sheet = document.createElement("link");
+sheet.rel = "stylesheet";
+sheet.href = "./story.css?v=amp-editor-1";
+document.head.append(sheet);
 
 const story = document.createElement("div");
 story.className = "kernel-story";
 story.dataset.kernelStory = "";
 story.hidden = true;
-story.setAttribute("aria-hidden", "true");
 story.innerHTML = `
-  <section class="story-screen" data-story-screen="1" aria-labelledby="connect-story-title">
-    <div class="story-layout story-connect">
-      <header class="story-heading">
-        <p class="story-step">02 // CONNECT THE SYSTEM</p>
-        <h2 id="connect-story-title">Sound becomes<br>a live program.</h2>
-        <p>
-          Follow one signal from generated samples to browser pixels. Select a
-          block to see exactly what enters it, what it does, and what leaves it.
-          This page runs a silent probe; audible playback is on Page 03.
-        </p>
-        <output class="story-runtime-state" data-amp-runtime-state aria-live="polite">
-          WAITING FOR RUNTIME
-        </output>
-      </header>
-
-      <div class="story-pipeline" data-story-pipeline
-        aria-label="Interactive Hara Amp signal pipeline"></div>
-
-      <aside class="story-node-detail" aria-live="polite">
-        <header>
-          <span data-amp-node-label>LOADING GRAPH</span>
-          <p data-amp-node-copy>The blocks are read from the live HAL graph.</p>
-          <output data-amp-node-error hidden></output>
-        </header>
-        <dl>
-          <div><dt>INPUT</dt><dd data-amp-node-input>—</dd></div>
-          <div><dt>OUTPUT</dt><dd data-amp-node-output>—</dd></div>
-          <div><dt>RUNS IN</dt><dd data-amp-node-runtime>—</dd></div>
-        </dl>
-        <small>SELECT EACH BLOCK · PAGE 03 PLAYS THE SIGNAL</small>
-      </aside>
-    </div>
+<section class="story-screen" data-story-screen="1" aria-labelledby="instrument-title">
+ <div class="story-layout story-instrument">
+  <header class="story-heading"><p class="story-step">02 // PLAY THE PROGRAM</p>
+   <h2 id="instrument-title">Make a signal.<br>Make it yours.</h2>
+   <p>The silent probe starts automatically. Press Play for sound, then tap or drag notes to rewrite the live sequence.</p>
+   <output class="story-runtime-state" data-amp-runtime-state aria-live="polite">WAITING FOR RUNTIME</output>
+  </header>
+  <section class="story-amp story-amp-first" aria-label="Playable Hara Amp">
+   <button type="button" class="story-hero-play" data-story-play aria-pressed="false"><i>▶</i><span>PLAY HARA AMP</span></button>
+   <div class="story-visual"><canvas data-story-visualizer aria-label="Live Hara Amp visualizer"></canvas>
+    <img src="./assets/hara-amp/hara-amp-artwork-original.png" alt="">
+    <div class="story-no-signal" data-story-no-signal><strong>SILENT PROBE LIVE</strong><span>PRESS PLAY TO AUTHORIZE AUDIO</span></div>
+    <output data-story-frame-status>HAL · PROBE</output></div>
+   <div class="story-quick-controls" data-story-controls></div>
+   <section class="story-sequencer"><header><div><strong>NOTE SEQUENCE</strong><span>NAME · OFFSET FROM ROOT</span></div>
+    <button type="button" data-step-rest>SELECT REST</button></header>
+    <div class="story-step-slots" data-step-slots aria-label="Editable note sequence"></div>
+    <div class="story-note-bank" data-note-bank aria-label="Two octave note palette"></div>
+    <p>Tap a note, then a slot. Drag to replace or insert. Long-press a slot on touch to reorder.</p>
+   </section>
+   <dl class="story-telemetry"><div><dt>FFT → HTA</dt><dd data-story-emitted>0000</dd></div>
+    <div><dt>HAL → CANVAS</dt><dd data-story-rendered>0000</dd></div>
+    <div><dt>QUEUE</dt><dd data-story-queue>0 / LATEST</dd></div>
+    <div><dt>AUDIO</dt><dd data-story-audio>GESTURE REQUIRED</dd></div></dl>
   </section>
-
-  <section class="story-screen" data-story-screen="2" aria-labelledby="play-story-title">
-    <div class="story-layout story-play">
-      <header class="story-heading">
-        <p class="story-step">03 // PLAY THE SYSTEM</p>
-        <h2 id="play-story-title">Change the signal.<br>Keep it live.</h2>
-        <p>
-          Play the WASM synth, alter its Web Audio character, and switch the HAL
-          output. The counters come from the running node connection—not an animation.
-        </p>
-      </header>
-
-      <section class="story-source" aria-label="Live Hara visualizer source">
-        <header>
-          <span>src/amp.hal</span>
-          <output data-story-source-status>LOADING SOURCE</output>
-        </header>
-        <textarea data-story-source spellcheck="false" wrap="off"
-          aria-label="Editable Hara visualizer source">;; Loading the live .hal file…</textarea>
-        <footer>
-          <span>CHANGE A PALETTE COLOUR, THEN REBUILD</span>
-          <div>
-            <button type="button" data-story-source-reset>RESET</button>
-            <button type="button" class="story-source-apply" data-story-source-apply>APPLY + REBUILD</button>
-          </div>
-        </footer>
-        <output class="story-source-error" data-story-source-error aria-live="polite" hidden></output>
-      </section>
-
-      <section class="story-repl" aria-label="Live Hara Amp REPL">
-        <header><span>AMP REPL · ACTIVE DOCUMENT</span><button type="button" data-story-repl-clear>CLEAR</button></header>
-        <div data-story-repl-history aria-live="polite"></div>
-        <form data-story-repl-form>
-          <label for="story-repl-input">HAL</label>
-          <input id="story-repl-input" data-story-repl-input
-            value="(sonic/status &quot;hara-amp&quot;)" autocomplete="off" spellcheck="false">
-          <button type="submit">EVAL</button>
-        </form>
-      </section>
-
-      <section class="story-amp" aria-label="Compact Hara Amp instrument">
-        <div class="story-visual">
-          <canvas data-story-visualizer aria-label="Live Hara Amp visualizer"></canvas>
-          <img src="./assets/hara-amp/hara-amp-artwork-original.png" alt="" aria-hidden="true">
-          <div class="story-no-signal" data-story-no-signal>
-            <strong>SILENT PROBE READY</strong>
-            <span>PRESS PLAY TO AUTHORIZE AUDIO</span>
-          </div>
-          <output data-story-frame-status>HAL · PROBE</output>
-        </div>
-
-        <div class="story-controls">
-          <button type="button" class="story-play-toggle" data-story-play aria-pressed="false">
-            <i aria-hidden="true">▶</i><span>PLAY SIGNAL</span>
-          </button>
-          <div data-story-controls></div>
-        </div>
-
-        <dl class="story-telemetry" aria-label="Live kernel telemetry">
-          <div><dt>FFT → HTA</dt><dd data-story-emitted>0000</dd></div>
-          <div><dt>HAL → CANVAS</dt><dd data-story-rendered>0000</dd></div>
-          <div><dt>QUEUE</dt><dd data-story-queue>0 / LATEST</dd></div>
-          <div><dt>AUDIO</dt><dd data-story-audio>GESTURE REQUIRED</dd></div>
-        </dl>
-      </section>
-
-      <footer class="story-closeout">
-        <p>
-          <strong>MAKE IT YOURS.</strong>
-          Create the complete Hara Amp workspace with this EQ, visual mode, and edited HAL file.
-          Greenways OS can carry the same live project into the page where you work.
-        </p>
-        <div class="story-actions">
-          <button type="button" class="story-primary" data-story-create>CREATE THIS WORKSPACE</button>
-          <a href="./hara-amp.html" target="_blank" rel="noopener">OPEN FULL AMP</a>
-        </div>
-        <output class="story-inline-error" data-story-error aria-live="polite" hidden></output>
-      </footer>
-    </div>
-  </section>`;
-
+  <footer class="story-next-copy"><strong>NOW OPEN THE PROGRAM →</strong>The next screen is the same Amp as nodes and an editable HAL file.</footer>
+ </div>
+</section>
+<section class="story-screen" data-story-screen="2" aria-labelledby="editor-title">
+ <div class="story-layout story-editor">
+  <header class="story-heading"><p class="story-step">03 // EDIT THE SYSTEM</p>
+   <h2 id="editor-title">A player is<br>a program.</h2>
+   <p>Every component below is real. Node and Text are synchronized views of <code>src/amp.hal</code>.</p>
+  </header>
+  <section class="story-program">
+   <header class="story-program-bar"><div role="tablist">
+    <button type="button" data-program-view="node" role="tab" aria-selected="true">NODE VIEW</button>
+    <button type="button" data-program-view="text" role="tab" aria-selected="false">TEXT VIEW</button></div>
+    <output data-story-source-status>LOADING SOURCE</output></header>
+   <div class="story-node-view" data-program-panel="node"><div data-amp-node-graph></div></div>
+   <div class="story-text-view" data-program-panel="text" hidden>
+    <div class="story-source-editor"><pre data-source-colors aria-hidden="true"></pre>
+     <textarea data-story-source spellcheck="false" wrap="off" aria-label="Editable Hara Amp source">;; Loading src/amp.hal…</textarea></div>
+    <footer><span>LINES USE THE SAME COLOUR AS THEIR NODE TYPE</span><div>
+     <button type="button" data-story-source-reset>RESET</button>
+     <button type="button" class="story-source-apply" data-story-source-apply>APPLY + REBUILD</button></div></footer>
+    <output class="story-source-error" data-story-source-error hidden></output>
+   </div>
+  </section>
+  <section class="story-repl">
+   <header><div><strong>AMP REPL · ACTIVE DOCUMENT</strong><span>SELECT A RECIPE OR USE AUTOCOMPLETE</span></div>
+    <button type="button" data-story-repl-clear>CLEAR</button></header>
+   <div class="story-repl-recipes" data-repl-recipes></div>
+   <label class="story-repl-select"><span>COMMAND</span><select data-repl-recipe-select></select></label>
+   <div data-story-repl-history aria-live="polite"></div>
+   <form data-story-repl-form><label for="story-repl-input">HAL</label>
+    <div class="story-repl-input"><textarea id="story-repl-input" data-story-repl-input spellcheck="false"
+     aria-autocomplete="list" aria-controls="story-repl-completions">(sonic/status "hara-amp")</textarea>
+     <div id="story-repl-completions" data-repl-completions role="listbox" hidden></div></div>
+    <button type="submit">EVAL</button></form>
+  </section>
+  <footer class="story-closeout"><p><strong>MAKE IT YOURS.</strong>Create a workspace containing this tune and HAL file.</p>
+   <div class="story-actions"><button type="button" class="story-primary" data-story-create>CREATE THIS WORKSPACE</button></div>
+   <output class="story-inline-error" data-story-error hidden></output></footer>
+ </div>
+</section>`;
 document.body.append(story);
 
-const start = query("[data-start]");
-const previous = query("[data-workspace-prev]");
-const next = query("[data-workspace-next]");
-let activeScreen = 0;
-let amp = null;
-let ampBoot = null;
-let selectedPreset = "hara";
-let selectedMode = "spectrum";
-let selectedNode = null;
+const start = $("[data-start]"), previous = $("[data-workspace-prev]"), next = $("[data-workspace-next]");
+let screen = 0, amp = null, boot = null, graphView = null, sourceModel = null;
+let chosenNote = 0, activeCompletion = 0, longPress = null, preset = "hara", mode = "spectrum";
 
-function runtimeReady() {
-  return document.body.dataset.kernel === "live";
+function ready() { return document.body.dataset.kernel === "live"; }
+function navigation() {
+  previous.disabled = !screen;
+  next.disabled = screen ? screen >= 2 : !ready();
+  start.disabled = !ready();
 }
-
-function updateNavigation() {
-  if (activeScreen === 0) {
-    previous.disabled = true;
-    next.disabled = !runtimeReady();
-    start.disabled = !runtimeReady();
-    return;
-  }
-  previous.disabled = false;
-  next.disabled = activeScreen >= 2;
-  start.disabled = false;
+function sourceStatus(state, detail = "") {
+  const output = $("[data-story-source-status]", story);
+  output.textContent = state === "ready" ? `GEN ${amp?.generation ?? 0} // LIVE`
+    : state === "unsaved" ? `GEN ${amp?.generation ?? 0} // LIVE · UNSAVED`
+    : state === "changed" ? `GEN ${amp?.generation ?? 0} // STALE`
+    : state === "error" ? `GEN ${amp?.generation ?? 0} // PREVIOUS VERSION LIVE`
+    : detail.toUpperCase() || "REBUILDING";
+  output.dataset.state = state;
 }
-
-function selectNode(name) {
-  const detail = amp?.graphSnapshot?.nodes.find((node) => node.id === name);
-  if (!detail) return;
-  queryAll("[data-amp-node]", story).forEach((button) => {
-    button.setAttribute("aria-pressed", String(button.dataset.ampNode === name));
-  });
-  query("[data-amp-node-label]", story).textContent = detail.label;
-  query("[data-amp-node-copy]", story).textContent = detail.summary;
-  query("[data-amp-node-input]", story).textContent = detail.input;
-  query("[data-amp-node-output]", story).textContent = detail.output;
-  query("[data-amp-node-runtime]", story).textContent = detail.runtime;
-  const error = query("[data-amp-node-error]", story);
-  const stage = query(`[data-amp-node="${name}"]`, story);
-  const message = stage?.dataset.error;
-  error.hidden = !message;
-  error.textContent = message ? `ERROR · ${message}` : "";
-}
-
-function renderGraph(snapshot) {
-  const pipeline = query("[data-story-pipeline]", story);
-  pipeline.replaceChildren();
-  snapshot.nodes.forEach((node, index) => {
-    if (index) {
-      const wire = document.createElement("span");
-      wire.className = "story-wire";
-      wire.setAttribute("aria-hidden", "true");
-      wire.innerHTML = "<b></b>";
-      pipeline.append(wire);
-    }
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.ampNode = node.id;
-    button.dataset.state = snapshot.status === "running" ? "ready" : snapshot.status;
-    button.setAttribute("aria-pressed", String((selectedNode ?? snapshot.nodes[0]?.id) === node.id));
-    button.innerHTML =
-      `<i>${String(index + 1).padStart(2, "0")}</i>` +
-      `<strong>${escapeHtml(node.label.replace(/^\\d+\\s*·\\s*/, ""))}</strong>` +
-      `<span>${escapeHtml(node.type.toUpperCase())}</span>` +
-      `<em data-amp-node-state="${escapeHtml(node.id)}">${snapshot.status.toUpperCase()}</em>`;
-    pipeline.append(button);
-  });
-  selectedNode = snapshot.nodes.some((node) => node.id === selectedNode)
-    ? selectedNode : snapshot.nodes[0]?.id;
-  selectedPreset = snapshot.nodes.find((node) => node.id === "eq")?.params.character
-    ?? selectedPreset;
-  selectedMode = snapshot.nodes.find((node) => node.id === "visualizer")?.params.mode
-    ?? selectedMode;
-  if (selectedNode) selectNode(selectedNode);
-  renderControls(snapshot);
-}
-
-function renderControls(snapshot) {
-  const root = query("[data-story-controls]", story);
-  root.replaceChildren();
-  for (const node of snapshot.nodes) {
-    for (const control of node.controls ?? []) {
-      const label = document.createElement("label");
-      label.dataset.graphNode = node.id;
-      label.dataset.graphParameter = control.parameter;
-      const title = document.createElement("span");
-      title.textContent = control.label;
-      const value = node.params[control.parameter];
-      let input;
-      if (control.type === "choice") {
-        input = document.createElement("select");
-        for (const candidate of control.choices) {
-          const option = document.createElement("option");
-          option.value = typeof candidate === "object" ? candidate.value : candidate;
-          option.textContent = typeof candidate === "object"
-            ? candidate.label : String(candidate).toUpperCase();
-          input.append(option);
-        }
-      } else if (control.type === "boolean") {
-        input = document.createElement("input");
-        input.type = "checkbox";
-      } else if (control.type === "steps") {
-        const grid = document.createElement("div");
-        grid.className = "story-step-grid";
-        grid.dataset.graphNode = node.id;
-        grid.dataset.graphParameter = control.parameter;
-        value.forEach((step, index) => {
-          const input = document.createElement("input");
-          input.type = "number";
-          input.min = -48;
-          input.max = 48;
-          input.step = 1;
-          input.value = step ?? "";
-          input.placeholder = "—";
-          input.title = `Step ${index + 1}; blank is a rest`;
-          input.setAttribute("aria-label", `Sequence step ${index + 1}`);
-          grid.append(input);
-        });
-        const heading = document.createElement("span");
-        heading.textContent = `${control.label} · BLANK = REST`;
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.dataset.stepAction = "remove";
-        remove.textContent = "− STEP";
-        remove.disabled = value.length <= 1;
-        const add = document.createElement("button");
-        add.type = "button";
-        add.dataset.stepAction = "add";
-        add.textContent = "+ STEP";
-        add.disabled = value.length >= 64;
-        grid.prepend(heading, remove, add);
-        root.append(grid);
-        continue;
-      } else {
-        input = document.createElement("input");
-        input.type = "range";
-        if (control.min != null) input.min = control.min;
-        if (control.max != null) input.max = control.max;
-        if (control.step != null) input.step = control.step;
-      }
-      if (input.type === "checkbox") input.checked = Boolean(value);
-      else input.value = value;
-      label.append(title, input);
-      root.append(label);
-    }
-  }
-}
-
-function updateNode(stage, state, detail) {
-  const output = query(`[data-amp-node-state="${stage}"]`, story);
-  const button = query(`[data-amp-node="${stage}"]`, story);
-  if (output) {
-    output.textContent = state === "gesture" ? "GESTURE" : state.toUpperCase();
-  }
-  if (button) button.dataset.state = state;
-  if (button) {
-    if (state === "error" && detail) button.dataset.error = detail;
-    else delete button.dataset.error;
-    if (button.getAttribute("aria-pressed") === "true") selectNode(stage);
-  }
-  if (stage === "runtime") {
-    const runtimeState = query("[data-amp-runtime-state]", story);
-    runtimeState.textContent =
-      state === "ready" ? "LIVE // SILENT PROBE COMPLETED" :
-      state === "error" ? `UNAVAILABLE // ${detail}` :
-      detail?.toUpperCase() || "STARTING";
-    runtimeState.dataset.state = state;
-  }
-}
-
-function createAmp() {
-  const instance = new HaraAmpRuntime({
-    canvas: query("[data-story-visualizer]", story),
-    dbName: "hara-story-amp",
-    onStatus({ stage, state, detail }) {
-      updateNode(stage, state, detail);
-      if (stage === "hal") {
-        const sourceStatus = query("[data-story-source-status]", story);
-        sourceStatus.textContent =
-          state === "ready" ? `GEN ${instance.generation} // LIVE` :
-          state === "error" ? "REBUILD FAILED // PREVIOUS GEN LIVE" :
-          detail?.toUpperCase() || "REBUILDING";
-        sourceStatus.dataset.state = state;
-      }
-      if (state === "error") showError(detail);
-    },
-    onFrame({ count }) {
-      query("[data-story-frame-status]", story).textContent = `HAL · FRAME ${count}`;
-    },
-    onPlayback({ state }) {
-      const playing = state === "playing";
-      const control = query("[data-story-play]", story);
-      control.setAttribute("aria-pressed", String(playing));
-      query("i", control).textContent = playing ? "Ⅱ" : "▶";
-      query("span", control).textContent = playing ? "PAUSE SIGNAL" : "PLAY SIGNAL";
-      query("[data-story-no-signal]", story).classList.toggle("is-hidden", playing);
-      query("[data-story-audio]", story).textContent =
-        playing ? "PLAYING / WASM" : state.toUpperCase();
-    },
-    onTelemetry({ emittedFrames, renderedFrames, nodeQueued }) {
-      query("[data-story-emitted]", story).textContent = String(emittedFrames).padStart(4, "0");
-      query("[data-story-rendered]", story).textContent = String(renderedFrames).padStart(4, "0");
-      query("[data-story-queue]", story).textContent = `${nodeQueued} / LATEST`;
-    },
-    onGraph(snapshot) { renderGraph(snapshot); }
-  });
-  return instance;
-}
-
-function ensureAmp() {
-  if (!amp) amp = createAmp();
-  if (!ampBoot) {
-    ampBoot = amp.boot().catch((error) => {
-      showError(`The live Amp could not start: ${String(error?.message ?? error)}`);
-      throw error;
-    });
-  }
-  return ampBoot.then((instance) => {
-    const editor = query("[data-story-source]", story);
-    if (!editor.dataset.loaded) {
-      editor.value = instance.source;
-      editor.dataset.loaded = "true";
-      query("[data-story-source-status]", story).textContent = `GEN ${instance.generation} // LIVE`;
-    }
-    return instance;
-  });
-}
-
-async function disposeAmp() {
-  const closing = amp;
-  amp = null;
-  ampBoot = null;
-  if (closing) await closing.dispose();
-}
-
 function showError(message) {
-  const output = query("[data-story-error]", story);
+  const output = $("[data-story-error]", story);
   output.hidden = false;
   output.textContent = message;
 }
-
-async function rebuildSource({ reset = false } = {}) {
-  const editor = query("[data-story-source]", story);
-  const apply = query("[data-story-source-apply]", story);
-  const resetButton = query("[data-story-source-reset]", story);
-  const status = query("[data-story-source-status]", story);
-  const errorOutput = query("[data-story-source-error]", story);
-  apply.disabled = true;
-  resetButton.disabled = true;
-  errorOutput.hidden = true;
-  status.textContent = "PREPARING NEW GENERATION";
-  status.dataset.state = "loading";
+function createAmp() {
+  return new HaraAmpRuntime({
+    canvas: $("[data-story-visualizer]", story), dbName: "hara-story-amp",
+    onStatus({ stage, state, detail }) {
+      if (stage === "runtime") {
+        const output = $("[data-amp-runtime-state]", story);
+        output.textContent = state === "ready" ? "LIVE // SILENT PROBE COMPLETED"
+          : state === "error" ? `UNAVAILABLE // ${detail}` : detail.toUpperCase();
+        output.dataset.state = state;
+      }
+      if (stage === "hal") sourceStatus(state, detail);
+      if (state === "error") showError(detail);
+    },
+    onFrame({ count }) { $("[data-story-frame-status]", story).textContent = `HAL · FRAME ${count}`; },
+    onPlayback({ state }) {
+      const playing = state === "playing", button = $("[data-story-play]", story);
+      button.setAttribute("aria-pressed", String(playing));
+      $("i", button).textContent = playing ? "Ⅱ" : "▶";
+      $("span", button).textContent = playing ? "PAUSE HARA AMP" : "PLAY HARA AMP";
+      $("[data-story-no-signal]", story).classList.toggle("is-hidden", playing);
+      $("[data-story-audio]", story).textContent = playing ? "PLAYING / WASM" : state.toUpperCase();
+    },
+    onTelemetry({ emittedFrames, renderedFrames, nodeQueued }) {
+      $("[data-story-emitted]", story).textContent = String(emittedFrames).padStart(4, "0");
+      $("[data-story-rendered]", story).textContent = String(renderedFrames).padStart(4, "0");
+      $("[data-story-queue]", story).textContent = `${nodeQueued} / LATEST`;
+    },
+    onGraph(snapshot) {
+      renderInstrument(snapshot);
+      if (!graphView) mountGraph(snapshot); else graphView.replaceModel(snapshot);
+      renderCompletions();
+    }
+  });
+}
+async function ensureAmp() {
+  if (!amp) amp = createAmp();
+  if (!boot) boot = amp.boot().catch((error) => { showError(error.message); throw error; });
+  const instance = await boot, editor = $("[data-story-source]", story);
+  if (!editor.dataset.loaded) {
+    editor.value = instance.source;
+    editor.dataset.loaded = "true";
+    renderSource();
+    sourceStatus("ready");
+  }
+  return instance;
+}
+function mountGraph(snapshot) {
+  graphView = createNodeGraph($("[data-amp-node-graph]", story), {
+    model: snapshot,
+    onSelect: (node) => revealNode(node.id),
+    onParameter: ({ node, control, value }) => void updateParameter(node.id, control.parameter, value)
+  });
+}
+function renderInstrument(snapshot) {
+  const controls = $("[data-story-controls]", story);
+  controls.replaceChildren();
+  const visible = new Set(["transport/tempo", "source/waveform", "eq/character", "mixer/volume", "visualizer/mode"]);
+  for (const node of snapshot.nodes) for (const control of node.controls ?? []) {
+    if (!visible.has(`${node.id}/${control.parameter}`)) continue;
+    const label = document.createElement("label");
+    label.dataset.graphNode = node.id;
+    label.dataset.graphParameter = control.parameter;
+    label.innerHTML = `<span>${html(control.label)}</span>`;
+    let input = document.createElement(control.type === "choice" ? "select" : "input");
+    if (control.type === "choice") for (const choice of control.choices) {
+      const option = document.createElement("option");
+      option.value = typeof choice === "object" ? choice.value : choice;
+      option.textContent = typeof choice === "object" ? choice.label : String(choice).toUpperCase();
+      input.append(option);
+    } else Object.assign(input, { type: "range", min: control.min, max: control.max, step: control.step });
+    input.value = node.params[control.parameter];
+    label.append(input);
+    controls.append(label);
+  }
+  const source = snapshot.nodes.find((node) => node.id === "source");
+  const sequence = snapshot.nodes.find((node) => node.id === "sequence");
+  if (source && sequence) renderSequence(source.params.root, sequence.params.steps);
+  preset = snapshot.nodes.find((node) => node.id === "eq")?.params.character ?? preset;
+  mode = snapshot.nodes.find((node) => node.id === "visualizer")?.params.mode ?? mode;
+}
+function renderSequence(root, steps) {
+  const slots = $("[data-step-slots]", story), bank = $("[data-note-bank]", story);
+  slots.replaceChildren(...steps.map((step, index) => noteButton(step, root, index)));
+  bank.replaceChildren(...Array.from({ length: 24 }, (_, offset) => noteButton(offset, root)));
+}
+function noteButton(offset, root, index = null) {
+  const button = document.createElement("button"), rest = offset == null;
+  button.type = "button";
+  button.className = index == null ? "story-note" : "story-step";
+  button.innerHTML = rest ? "<strong>REST</strong><small>—</small>"
+    : `<strong>${noteName(root + offset)}</strong><small>${offset >= 0 ? "+" : ""}${offset}</small>`;
+  button.draggable = true;
+  if (index == null) {
+    button.dataset.noteOffset = offset;
+    button.setAttribute("aria-pressed", String(chosenNote === offset));
+  } else button.dataset.stepIndex = index;
+  return button;
+}
+function noteName(midi) { return `${NOTES[((midi % 12) + 12) % 12]}${Math.floor(midi / 12) - 1}`; }
+async function updateParameter(nodeId, parameter, value) {
+  const instance = await ensureAmp();
+  await instance.update(nodeId, parameter, value);
+  const editor = $("[data-story-source]", story);
+  editor.value = patchAmpParameter(editor.value, nodeId, parameter, value);
+  instance.source = editor.value;
+  renderSource();
+  sourceStatus("unsaved");
+}
+function renderSource() {
+  const editor = $("[data-story-source]", story), layer = $("[data-source-colors]", story);
+  try {
+    sourceModel = projectAmpSource(editor.value);
+    const lines = new Map();
+    for (const item of ampLineDecorations(editor.value, sourceModel)) if (!lines.has(item.line)) lines.set(item.line, item);
+    layer.innerHTML = editor.value.split("\n").map((line, index) => {
+      const item = lines.get(index);
+      return `<span data-node-id="${html(item?.nodeId ?? "")}" data-color="${item?.color ?? ""}">${html(line) || " "}</span>`;
+    }).join("");
+    $("[data-story-source-error]", story).hidden = true;
+  } catch (error) {
+    sourceModel = null;
+    layer.textContent = editor.value;
+    const output = $("[data-story-source-error]", story);
+    output.hidden = false;
+    output.textContent = error.message;
+  }
+}
+function revealNode(id) {
+  const range = sourceModel?.nodes.find((node) => node.id === id)?.range;
+  if (!range) return;
+  $("[data-story-source]", story).setSelectionRange(range.start, range.end);
+  $$("[data-source-colors] span", story).forEach((line) => line.classList.toggle("is-selected", line.dataset.nodeId === id));
+}
+async function rebuildSource(reset = false) {
+  const editor = $("[data-story-source]", story), output = $("[data-story-source-error]", story);
+  output.hidden = true;
   try {
     const instance = await ensureAmp();
     if (reset) editor.value = instance.originalSource;
-    const result = await instance.rebuild(editor.value);
-    status.textContent = `GEN ${result.generation} // LIVE`;
-    status.dataset.state = "ready";
+    projectAmpSource(editor.value);
+    await instance.rebuild(editor.value);
+    renderSource();
+    sourceStatus("ready");
   } catch (error) {
-    status.textContent = `GEN ${amp?.generation ?? 0} // PREVIOUS VERSION LIVE`;
-    status.dataset.state = "error";
-    errorOutput.hidden = false;
-    errorOutput.textContent = String(error?.message ?? error);
-  } finally {
-    apply.disabled = false;
-    resetButton.disabled = false;
+    sourceStatus("error");
+    output.hidden = false;
+    output.textContent = error.message;
   }
 }
-
-function showScreen(index) {
-  const previousScreen = activeScreen;
-  activeScreen = Math.max(0, Math.min(2, index));
-  const open = activeScreen > 0;
-  story.hidden = !open;
-  story.setAttribute("aria-hidden", String(!open));
-
-  if (previousScreen === 2 && activeScreen !== 2) amp?.pause();
-  if (!open) {
-    delete document.body.dataset.storyScreen;
-    queryAll("[data-story-screen]", story).forEach((screen) => screen.classList.remove("is-active"));
-    void disposeAmp();
-    updateNavigation();
-    start?.focus();
-    return;
-  }
-
-  document.body.dataset.storyScreen = String(activeScreen);
-  queryAll("[data-story-screen]", story).forEach((screen) => {
-    screen.classList.toggle("is-active", Number(screen.dataset.storyScreen) === activeScreen);
-  });
-  updateNavigation();
-  void ensureAmp()
-    .then(() => amp?.setCanvas(query("[data-story-visualizer]", story)))
-    .catch(() => {});
-  query(".story-screen.is-active .story-heading", story)?.focus({ preventScroll: true });
+function setView(view) {
+  $$("[data-program-view]", story).forEach((button) => button.setAttribute("aria-selected", String(button.dataset.programView === view)));
+  $$("[data-program-panel]", story).forEach((panel) => { panel.hidden = panel.dataset.programPanel !== view; });
 }
-
-start.addEventListener("click", (event) => {
-  if (!runtimeReady()) return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  showScreen(1);
-}, true);
-
-previous.addEventListener("click", (event) => {
-  if (!activeScreen) return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  showScreen(activeScreen - 1);
-}, true);
-
-next.addEventListener("click", (event) => {
-  if (!activeScreen && runtimeReady()) {
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    showScreen(1);
-    return;
+function renderRecipes() {
+  const chips = $("[data-repl-recipes]", story), select = $("[data-repl-recipe-select]", story);
+  for (const [label, form] of RECIPES) {
+    const button = document.createElement("button"), option = document.createElement("option");
+    button.type = "button"; button.textContent = label; button.dataset.replRecipe = form; chips.append(button);
+    option.value = form; option.textContent = label; select.append(option);
   }
-  if (activeScreen === 1) {
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    showScreen(2);
-  }
-}, true);
-
-story.addEventListener("click", (event) => {
-  const stepAction = event.target.closest("[data-step-action]");
-  if (stepAction) {
-    const grid = stepAction.closest(".story-step-grid");
-    const inputs = queryAll("input", grid);
-    if (stepAction.dataset.stepAction === "add" && inputs.length < 64) {
-      const input = inputs.at(-1).cloneNode();
-      input.value = "";
-      input.setAttribute("aria-label", `Sequence step ${inputs.length + 1}`);
-      grid.append(input);
-    } else if (stepAction.dataset.stepAction === "remove" && inputs.length > 1) {
-      inputs.at(-1).remove();
-    }
-    void applyStepGrid(grid);
-    return;
-  }
-
-  const node = event.target.closest("[data-amp-node]");
-  if (node) {
-    selectedNode = node.dataset.ampNode;
-    selectNode(node.dataset.ampNode);
-    return;
-  }
-
-  if (event.target.closest("[data-story-play]")) {
-    const control = query("[data-story-play]", story);
-    control.disabled = true;
-    const action = amp?.audio?.playing ? Promise.resolve(amp.pause()) : ensureAmp().then(() => amp.play());
-    action.catch((error) => showError(`Audio could not start: ${String(error?.message ?? error)}`))
-      .finally(() => { control.disabled = false; });
-    return;
-  }
-
-  if (event.target.closest("[data-story-source-apply]")) {
-    void rebuildSource();
-    return;
-  }
-
-  if (event.target.closest("[data-story-source-reset]")) {
-    void rebuildSource({ reset: true });
-    return;
-  }
-
-  if (event.target.closest("[data-story-create]")) {
-    const control = query("[data-story-create]", story);
-    control.disabled = true;
-    control.textContent = "CREATING…";
-    document.dispatchEvent(new CustomEvent("hara:create-amp-workspace", {
-      detail: {
-        preset: selectedPreset,
-        mode: selectedMode,
-        source: query("[data-story-source]", story).value
-      }
-    }));
-  }
-});
-
-query("[data-story-controls]", story).addEventListener("change", async (event) => {
-  const label = event.target.closest("[data-graph-node]");
-  if (!label || !amp) return;
-  if (label.classList.contains("story-step-grid")) {
-    await applyStepGrid(label);
-    return;
-  }
-  const value = event.target.type === "checkbox" ? event.target.checked
-    : event.target.type === "range" ? Number(event.target.value) : event.target.value;
-  await amp.update(label.dataset.graphNode, label.dataset.graphParameter, value);
-  if (label.dataset.graphNode === "visualizer") {
-    selectedMode = String(value);
-    query(".story-visual", story).classList.toggle("is-artwork", selectedMode === "artwork");
-  }
-  if (label.dataset.graphNode === "eq") selectedPreset = String(value);
-});
-
-async function applyStepGrid(grid) {
-  if (!amp) return;
-  const value = queryAll("input", grid)
-    .map((input) => input.value === "" ? null : Number(input.value));
-  await amp.update(grid.dataset.graphNode, grid.dataset.graphParameter, value);
 }
-
-query("[data-story-repl-form]", story).addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const input = query("[data-story-repl-input]", story);
-  const form = input.value.trim();
+function renderCompletions(force = false) {
+  const input = $("[data-story-repl-input]", story), list = $("[data-repl-completions]", story);
+  const prefix = completionPrefix(input.value, input.selectionStart);
+  const options = completionOptions({ graph: amp?.graphSnapshot, prefix: force ? "" : prefix.value });
+  activeCompletion = Math.min(activeCompletion, Math.max(0, options.length - 1));
+  list.replaceChildren(...options.map((option, index) => {
+    const button = document.createElement("button");
+    button.type = "button"; button.role = "option"; button.dataset.completion = option.insert;
+    button.dataset.completionStart = prefix.start;
+    button.setAttribute("aria-selected", String(index === activeCompletion));
+    button.innerHTML = `<strong>${html(option.label)}</strong><small>${html(option.kind)}</small>`;
+    return button;
+  }));
+  list.hidden = !options.length || (!force && prefix.value.length < 2);
+}
+function acceptCompletion(button = $$("[data-completion]", story)[activeCompletion]) {
+  if (!button) return;
+  const input = $("[data-story-repl-input]", story), startAt = Number(button.dataset.completionStart);
+  input.value = input.value.slice(0, startAt) + button.dataset.completion + input.value.slice(input.selectionStart);
+  const caret = startAt + button.dataset.completion.length;
+  input.setSelectionRange(caret, caret);
+  $("[data-repl-completions]", story).hidden = true;
+  input.focus();
+}
+async function evalRepl() {
+  const input = $("[data-story-repl-input]", story), form = input.value.trim();
   if (!form) return;
-  const history = query("[data-story-repl-history]", story);
   const entry = document.createElement("div");
-  entry.innerHTML = `<code>${escapeHtml(form)}</code><output>…</output>`;
-  history.append(entry);
+  entry.innerHTML = `<code>${html(form)}</code><output>…</output>`;
+  $("[data-story-repl-history]", story).append(entry);
   try {
-    const value = await ensureAmp().then((instance) => instance.eval(form));
-    query("output", entry).textContent = renderReplValue(value);
+    $("output", entry).textContent = renderValue(await ensureAmp().then((instance) => instance.eval(form)));
     entry.dataset.state = "ready";
-  } catch (error) {
-    query("output", entry).textContent = String(error?.message ?? error);
-    entry.dataset.state = "error";
-  }
-  history.scrollTop = history.scrollHeight;
-});
-
-query("[data-story-repl-clear]", story).addEventListener("click", () => {
-  query("[data-story-repl-history]", story).replaceChildren();
-});
-
-query("[data-story-source]", story).addEventListener("input", () => {
-  const status = query("[data-story-source-status]", story);
-  status.textContent = `GEN ${amp?.generation ?? 0} // CHANGED`;
-  status.dataset.state = "changed";
-});
-
-document.addEventListener("hara:amp-workspace-error", (event) => {
-  const control = query("[data-story-create]", story);
-  control.disabled = false;
-  control.textContent = "CREATE THIS WORKSPACE";
-  showError(`Workspace could not be created: ${event.detail?.message ?? "Unknown error"}`);
-});
-
-document.addEventListener("keydown", (event) => {
-  if (!activeScreen || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-  if (event.target.closest?.("button, a, input, select, textarea")) return;
-  if (event.key === "ArrowLeft") {
-    event.preventDefault();
-    showScreen(activeScreen - 1);
-  } else if (event.key === "ArrowRight" && activeScreen < 2) {
-    event.preventDefault();
-    showScreen(activeScreen + 1);
-  } else if (event.key === "Escape") {
-    event.preventDefault();
-    showScreen(0);
-  }
-}, true);
-
-new MutationObserver(() => {
-  if (document.body.dataset.workspace === "1" && activeScreen) {
-    activeScreen = 0;
-    story.hidden = true;
-    story.setAttribute("aria-hidden", "true");
+  } catch (error) { $("output", entry).textContent = error.message; entry.dataset.state = "error"; }
+}
+function steps() { return amp?.graphSnapshot?.nodes.find((node) => node.id === "sequence")?.params.steps ?? []; }
+function setSteps(value) { if (value.length && value.length <= 64) void updateParameter("sequence", "steps", value); }
+function show(index) {
+  const was = screen;
+  screen = Math.max(0, Math.min(2, index));
+  story.hidden = !screen;
+  if (was === 1 && screen !== 1) amp?.pause();
+  if (!screen) {
     delete document.body.dataset.storyScreen;
-    void disposeAmp();
+    $$("[data-story-screen]", story).forEach((panel) => panel.classList.remove("is-active"));
+    void dispose();
+  } else {
+    document.body.dataset.storyScreen = screen;
+    $$("[data-story-screen]", story).forEach((panel) => panel.classList.toggle("is-active", Number(panel.dataset.storyScreen) === screen));
+    void ensureAmp().catch(() => {});
   }
-  updateNavigation();
-}).observe(document.body, {
-  attributes: true,
-  attributeFilter: ["data-kernel", "data-workspace"]
+  navigation();
+}
+async function dispose() {
+  const current = amp;
+  amp = null; boot = null; graphView?.destroy(); graphView = null;
+  if (current) await current.dispose();
+}
+
+start.addEventListener("click", (event) => { if (ready()) { event.preventDefault(); event.stopImmediatePropagation(); show(1); } }, true);
+previous.addEventListener("click", (event) => { if (screen) { event.preventDefault(); event.stopImmediatePropagation(); show(screen - 1); } }, true);
+next.addEventListener("click", (event) => { if ((!screen && ready()) || screen === 1) { event.preventDefault(); event.stopImmediatePropagation(); show(screen + 1); } }, true);
+story.addEventListener("click", (event) => {
+  const view = event.target.closest("[data-program-view]");
+  if (view) return setView(view.dataset.programView);
+  const recipe = event.target.closest("[data-repl-recipe]");
+  if (recipe) { $("[data-story-repl-input]", story).value = recipe.dataset.replRecipe; return; }
+  const completion = event.target.closest("[data-completion]");
+  if (completion) return acceptCompletion(completion);
+  const note = event.target.closest("[data-note-offset]");
+  if (note) { chosenNote = Number(note.dataset.noteOffset); return renderInstrument(amp.graphSnapshot); }
+  const slot = event.target.closest("[data-step-index]");
+  if (slot) { const nextSteps = [...steps()]; nextSteps[Number(slot.dataset.stepIndex)] = chosenNote; return setSteps(nextSteps); }
+  if (event.target.closest("[data-step-rest]")) chosenNote = null;
+  if (event.target.closest("[data-story-play]")) {
+    const playing = amp?.audio?.playing;
+    const action = playing ? Promise.resolve(amp.pause()) : ensureAmp().then((instance) => instance.play());
+    action.then(() => updateParameter("transport", "playing", !playing)).catch((error) => showError(error.message));
+  }
+  if (event.target.closest("[data-story-source-apply]")) void rebuildSource();
+  if (event.target.closest("[data-story-source-reset]")) void rebuildSource(true);
+  if (event.target.closest("[data-story-repl-clear]")) $("[data-story-repl-history]", story).replaceChildren();
+  if (event.target.closest("[data-story-create]")) document.dispatchEvent(new CustomEvent("hara:create-amp-workspace", {
+    detail: { preset, mode, source: $("[data-story-source]", story).value }
+  }));
 });
-
-updateNavigation();
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-  })[character]);
-}
-
-function renderReplValue(value) {
-  if (value instanceof Map) {
-    return JSON.stringify(Object.fromEntries([...value].map(([key, item]) =>
-      [String(key?.name ?? key), replPlain(item)])));
+$("[data-story-controls]", story).addEventListener("change", (event) => {
+  const label = event.target.closest("[data-graph-node]");
+  if (label) void updateParameter(label.dataset.graphNode, label.dataset.graphParameter,
+    event.target.type === "range" ? Number(event.target.value) : event.target.value);
+});
+story.addEventListener("dragstart", (event) => {
+  const note = event.target.closest("[data-note-offset]"), step = event.target.closest("[data-step-index]");
+  if (note) event.dataTransfer.setData("application/x-hara-note", note.dataset.noteOffset);
+  if (step) event.dataTransfer.setData("application/x-hara-step", step.dataset.stepIndex);
+});
+$("[data-step-slots]", story).addEventListener("dragover", (event) => event.preventDefault());
+$("[data-step-slots]", story).addEventListener("drop", (event) => {
+  event.preventDefault();
+  const target = event.target.closest("[data-step-index]");
+  if (!target) return;
+  const value = [...steps()], targetIndex = Number(target.dataset.stepIndex);
+  const sourceIndex = event.dataTransfer.getData("application/x-hara-step"), note = event.dataTransfer.getData("application/x-hara-note");
+  if (sourceIndex !== "") { const [moved] = value.splice(Number(sourceIndex), 1); value.splice(targetIndex, 0, moved); }
+  else if (note !== "") {
+    const box = target.getBoundingClientRect(), offset = Number(note);
+    if (event.clientX < box.left + box.width / 4) value.splice(targetIndex, 0, offset);
+    else if (event.clientX > box.right - box.width / 4) value.splice(targetIndex + 1, 0, offset);
+    else value[targetIndex] = offset;
   }
-  if (typeof value === "string") return value;
-  return JSON.stringify(replPlain(value)) ?? String(value);
-}
-
-function replPlain(value) {
-  if (value instanceof Map) {
-    return Object.fromEntries([...value].map(([key, item]) =>
-      [String(key?.name ?? key), replPlain(item)]));
+  setSteps(value);
+});
+$("[data-step-slots]", story).addEventListener("pointerdown", (event) => {
+  const step = event.target.closest("[data-step-index]");
+  if (!step || event.pointerType === "mouse") return;
+  longPress = setTimeout(() => { step.classList.add("is-dragging"); longPress = { index: Number(step.dataset.stepIndex) }; }, 450);
+});
+$("[data-step-slots]", story).addEventListener("pointerup", (event) => {
+  if (typeof longPress === "number") clearTimeout(longPress);
+  if (longPress && typeof longPress === "object") {
+    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-step-index]");
+    if (target) { const value = [...steps()], [moved] = value.splice(longPress.index, 1); value.splice(Number(target.dataset.stepIndex), 0, moved); setSteps(value); }
+    $$(".is-dragging", story).forEach((node) => node.classList.remove("is-dragging"));
   }
-  if (Array.isArray(value)) return value.map(replPlain);
+  longPress = null;
+});
+$("[data-story-source]", story).addEventListener("input", () => { renderSource(); sourceStatus("changed"); });
+$("[data-story-source]", story).addEventListener("scroll", (event) => {
+  const layer = $("[data-source-colors]", story); layer.scrollTop = event.target.scrollTop; layer.scrollLeft = event.target.scrollLeft;
+});
+$("[data-story-source]", story).addEventListener("keyup", (event) => {
+  const node = sourceModel?.nodes.find(({ range }) => event.target.selectionStart >= range.start && event.target.selectionStart <= range.end);
+  if (node) { graphView?.select(node.id, { notify: false }); revealNode(node.id); }
+});
+$("[data-story-source]", story).addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void rebuildSource(); }
+});
+$("[data-repl-recipe-select]", story).addEventListener("change", (event) => { $("[data-story-repl-input]", story).value = event.target.value; });
+$("[data-story-repl-form]", story).addEventListener("submit", (event) => { event.preventDefault(); void evalRepl(); });
+$("[data-story-repl-input]", story).addEventListener("input", () => renderCompletions());
+$("[data-story-repl-input]", story).addEventListener("keydown", (event) => {
+  const list = $("[data-repl-completions]", story);
+  if (event.ctrlKey && event.code === "Space") { event.preventDefault(); renderCompletions(true); }
+  else if (!list.hidden && ["ArrowDown", "ArrowUp"].includes(event.key)) {
+    event.preventDefault();
+    const count = $$("[data-completion]", list).length;
+    activeCompletion = (activeCompletion + (event.key === "ArrowDown" ? 1 : -1) + count) % count;
+    renderCompletions(true);
+  } else if (!list.hidden && ["Tab", "Enter"].includes(event.key)) { event.preventDefault(); acceptCompletion(); }
+  else if (event.key === "Escape") list.hidden = true;
+  else if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void evalRepl(); }
+});
+document.addEventListener("hara:amp-workspace-error", (event) => showError(event.detail?.message ?? "Workspace failed"));
+new MutationObserver(() => {
+  if (document.body.dataset.workspace === "1" && screen) show(0);
+  else if (!screen && ready() && new URLSearchParams(location.search).get("amp") === "editor") show(2);
+  navigation();
+})
+  .observe(document.body, { attributes: true, attributeFilter: ["data-kernel", "data-workspace"] });
+
+renderRecipes();
+navigation();
+
+function html(value) { return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
+function renderValue(value) { return typeof value === "string" ? value : JSON.stringify(plain(value)) ?? String(value); }
+function plain(value) {
+  if (value instanceof Map) return Object.fromEntries([...value].map(([key, item]) => [String(key?.name ?? key), plain(item)]));
+  if (Array.isArray(value)) return value.map(plain);
   return value;
 }

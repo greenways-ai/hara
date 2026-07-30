@@ -5,8 +5,24 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/target/www"
 RAW_WASM="$ROOT/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm"
+HIR_OUT="$ROOT/target/www-hir"
+HARA_COMPILER="$ROOT/rust/target/debug/hara"
 
 bash "$ROOT/scripts/build-hara-wasm-raw"
+cargo build --manifest-path "$ROOT/rust/Cargo.toml" --features hir-encoder --bin hara
+rm -rf "$HIR_OUT"
+mkdir -p "$HIR_OUT"
+"$HARA_COMPILER" compile-hir "$ROOT/lib/src/std/lib/substrate/protocol.hal" --output "$HIR_OUT/substrate-protocol.hir"
+"$HARA_COMPILER" compile-hir "$ROOT/lib/src/std/lib/substrate/frame.hal" --output "$HIR_OUT/substrate-frame.hir"
+"$HARA_COMPILER" compile-hir "$ROOT/lib/src/std/lib/substrate.hal" --output "$HIR_OUT/substrate.hir"
+"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/store.hal" --output "$HIR_OUT/studio-store.hir"
+"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/boot.hal" --output "$HIR_OUT/studio-boot.hir"
+"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/node.hal" --output "$HIR_OUT/studio-node.hir"
+"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/draw.hal" --output "$HIR_OUT/studio-draw.hir"
+"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/program.hal" --output "$HIR_OUT/studio-program.hir"
+"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/graph.hal" --output "$HIR_OUT/studio-graph.hir"
+"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/session.hal" --output "$HIR_OUT/studio-session.hir"
+"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/supersonic.hal" --output "$HIR_OUT/supersonic.hir"
 
 rm -rf "$OUT"
 mkdir -p "$OUT/runtime/host" "$OUT/runtime/studio/hal" "$OUT/runtime/std/lib/substrate"
@@ -30,6 +46,8 @@ cp "$ROOT/website/index.html" \
    "$ROOT/website/hara-amp.css" \
    "$ROOT/website/hara-amp.js" \
    "$ROOT/website/amp-runtime.js" \
+   "$ROOT/website/amp-node-graph.js" \
+   "$ROOT/website/amp-source-model.js" \
    "$ROOT/website/amp-workspace.js" \
    "$ROOT/website/og.png" \
    "$ROOT/website/scene.js" \
@@ -42,7 +60,20 @@ cp "$RAW_WASM" "$OUT/runtime/hara.wasm"
 cp "$ROOT/rust/web/hta.js" \
    "$ROOT/rust/web/hta-worker.js" \
    "$ROOT/rust/web/hta-shared-worker.js" \
+   "$ROOT/rust/web/package-cache.js" \
    "$OUT/runtime/"
+node "$ROOT/scripts/build-www-harp.mjs" "$OUT/runtime/kernel.harp" \
+  "std.lib.substrate.protocol=$HIR_OUT/substrate-protocol.hir" \
+  "std.lib.substrate.frame=$HIR_OUT/substrate-frame.hir" \
+  "std.lib.substrate=$HIR_OUT/substrate.hir" \
+  "studio.store=$HIR_OUT/studio-store.hir" \
+  "studio.boot=$HIR_OUT/studio-boot.hir" \
+  "studio.node=$HIR_OUT/studio-node.hir" \
+  "studio.draw=$HIR_OUT/studio-draw.hir" \
+  "studio.program=$HIR_OUT/studio-program.hir" \
+  "studio.graph=$HIR_OUT/studio-graph.hir" \
+  "studio.session=$HIR_OUT/studio-session.hir" \
+  "gw.audio.supersonic=$HIR_OUT/supersonic.hir"
 cp "$ROOT/rust/web/host/"*.js "$OUT/runtime/host/"
 cp "$ROOT/rust/web/studio/boot.js" \
    "$ROOT/rust/web/studio/broker.js" \

@@ -20,26 +20,24 @@ test("the Amp demo uses the shared page identity", async () => {
   assert.match(source, /HARA \/ AMP DEMO/);
 });
 
-test("the main story connects and plays the real Amp pipeline", async () => {
+test("the main story plays and edits the real Amp pipeline", async () => {
   const [source, app] = await Promise.all([
     websiteFile("story.js"),
     websiteFile("app.js")
   ]);
 
-  assert.match(source, /CONNECT THE SYSTEM/);
-  assert.match(source, /data-story-pipeline/);
-  assert.match(source, /graphSnapshot/);
-  assert.match(source, /renderGraph/);
-  assert.match(source, /renderControls/);
-  assert.match(source, /story-step-grid/);
+  assert.match(source, /PLAY THE PROGRAM/);
+  assert.match(source, /EDIT THE SYSTEM/);
+  assert.match(source, /data-amp-node-graph/);
+  assert.match(source, /createNodeGraph/);
+  assert.match(source, /patchAmpParameter/);
+  assert.match(source, /data-step-slots/);
+  assert.match(source, /data-note-bank/);
   assert.match(source, /AMP REPL · ACTIVE DOCUMENT/);
+  assert.match(source, /data-repl-completions/);
   assert.match(source, /instance\.eval/);
-  assert.match(source, /data-amp-node-input/);
-  assert.match(source, /data-amp-node-output/);
-  assert.match(source, /data-amp-node-runtime/);
-  assert.match(source, /data-amp-node-error/);
-  assert.match(source, /audible playback is on Page 03/);
-  assert.match(source, /PLAY THE SYSTEM/);
+  assert.match(source, /NODE VIEW/);
+  assert.match(source, /TEXT VIEW/);
   assert.match(source, /src\/amp\.hal/);
   assert.match(source, /APPLY \+ REBUILD/);
   assert.match(source, /data-story-source/);

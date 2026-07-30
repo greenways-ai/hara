@@ -75,11 +75,13 @@ export async function inspectHarp(input) {
   const resources = new Map();
   for (const [namespace, path] of resourceIndex) {
     if (typeof namespace !== "string" || typeof path !== "string"
-        || !entries.has(path) || !path.endsWith(".hal")) {
+        || !entries.has(path) || (!path.endsWith(".hal") && !path.endsWith(".hir"))) {
       throw new Error("package/resource-invalid");
     }
     if (resources.has(namespace)) throw new Error(`package/resource-duplicate:${namespace}`);
-    resources.set(namespace, decoder.decode(entries.get(path)));
+    resources.set(namespace, Object.freeze(path.endsWith(".hir")
+      ? { format: "hir", bytes: entries.get(path).slice() }
+      : { format: "hal", source: decoder.decode(entries.get(path)) }));
   }
   const extensions = [];
   for (const path of extensionPaths) {
@@ -122,13 +124,19 @@ export async function activateLockedPackages({ packages, context }) {
       throw new Error("package/digest-mismatch");
     }
     const archive = await inspectHarp(bytes);
-    for (const [namespace, source] of archive.resources) {
+    for (const [namespace, resource] of archive.resources) {
       if (staged.has(namespace)) throw new Error(`package/namespace-collision:${namespace}`);
-      staged.set(namespace, source);
+      staged.set(namespace, resource);
     }
     inspected.push(archive);
   }
-  await context.call("register-resources", [[...staged]]);
+  const sourceResources = [...staged]
+    .filter(([, resource]) => resource.format === "hal")
+    .map(([namespace, resource]) => [namespace, resource.source]);
+  if (sourceResources.length) await context.call("register-resources", [sourceResources]);
+  for (const resource of staged.values()) {
+    if (resource.format === "hir") await context.call("eval-hir", [resource.bytes]);
+  }
   return Object.freeze({ packages: Object.freeze(inspected), resources: staged });
 }
 

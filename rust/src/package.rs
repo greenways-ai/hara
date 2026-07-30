@@ -416,6 +416,10 @@ fn package_manifest(project: &Project, contents: &[(PathBuf, Vec<u8>)]) -> Resul
             {
                 resources.push((namespace, path.clone()));
             }
+        } else if path.ends_with(".hir") {
+            let module = crate::kernel::hir::decode_hir(bytes)
+                .map_err(|error| format!("cannot decode package resource {path}: {error}"))?;
+            resources.push((module.namespace, path.clone()));
         }
         if path.ends_with("hara.extension.edn") {
             extensions.push(path.clone());

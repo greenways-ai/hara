@@ -297,6 +297,34 @@ impl Runtime {
         self.drive(task, fiber);
         Ok(())
     }
+    fn start_hir_fiber(&mut self, task: u64, bytes: &[u8]) -> Result<(), String> {
+        let module = kernel::hir::decode_hir(bytes)?;
+        let environment = self.env.clone();
+        let (handler, pending, next) = self.host_handler(task);
+        let file_provider = self.mount_id.map(|_| {
+            Rc::new(HostFileProvider {
+                handler: handler.clone(),
+            }) as Rc<dyn core::FileProvider>
+        });
+        let namespaces = self.namespaces.clone();
+        let protocols = self.protocols.clone();
+        let resources = self.resources.clone();
+        let provider = Rc::new(move |name: &str| resources.borrow().get(name).cloned());
+        let fiber = core::with_capability_providers(file_provider, None, || {
+            core::with_namespace_registry(&namespaces, || {
+                core::with_namespace_source(provider, || {
+                    core::with_protocols(&protocols, || {
+                        core::with_host_calls(handler, || {
+                            EvalFiber::start_forms(module.forms, environment)
+                        })
+                    })
+                })
+            })
+        })?;
+        self.collect_calls(task, pending, next);
+        self.drive(task, fiber);
+        Ok(())
+    }
     fn resume_fiber(&mut self, task: u64, state: PromiseState) {
         let Some(mut fiber) = self.fibers.remove(&task) else {
             return;
@@ -744,6 +772,7 @@ fn dispatch(
 ) -> Result<(), String> {
     match target {
         "eval" => dispatch_eval(kernel, task, "ROOT", &args, false),
+        "eval-hir" => dispatch_eval_hir(kernel, task, "ROOT", &args),
         "eval-bound" => dispatch_eval(kernel, task, "ROOT", &args, true),
         "complete" => dispatch_complete(kernel, task, "ROOT", &args),
         "session/eval" => match args.as_slice() {
@@ -993,6 +1022,21 @@ fn dispatch_eval_values(
         Some(bindings) => runtime.start_fiber_with_bindings(task, source, bindings),
         None => runtime.start_fiber(task, source),
     }
+}
+
+fn dispatch_eval_hir(
+    kernel: &mut KernelRuntime,
+    task: u64,
+    session: &str,
+    args: &[Value],
+) -> Result<(), String> {
+    let [Value::Bytes(bytes)] = args else {
+        return Err("hta eval-hir expects one byte array".into());
+    };
+    validate_session_name(session)?;
+    kernel.session(session)?;
+    kernel.task_sessions.insert(task, session.into());
+    kernel.session_mut(session)?.start_hir_fiber(task, bytes)
 }
 
 fn dispatch_complete(

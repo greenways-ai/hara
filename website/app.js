@@ -6,6 +6,7 @@ import { downloadWorkspace, GistPublisher, GreenwaysPublisher, workspaceBundle }
 import { GitHubAuthClient, authBaseFromDocument } from "./github-auth.js";
 import { AiAdapterRepository, createAiCapability } from "./ai-adapters.js";
 import { seedAmpWorkspace } from "./amp-workspace.js";
+import { inspectHarp } from "./runtime/package-cache.js";
 
 const SPACE = "home";
 const ROOT = "ROOT";
@@ -445,7 +446,10 @@ function instrumentCanvasTelemetry(canvasRuntime) {
     try {
       return await nextFrame(...args);
     } catch (error) {
-      state.telemetry.errors += 1;
+      // Replacing a live document cancels the old generation's outstanding
+      // animation-frame request. That is normal lifecycle control, not a
+      // failed render, and must not inflate the kernel error counter.
+      if (!isExpectedCanvasLifecycle(error)) state.telemetry.errors += 1;
       throw error;
     }
   };
@@ -469,6 +473,11 @@ function instrumentCanvasTelemetry(canvasRuntime) {
     }
   };
   return canvasRuntime;
+}
+
+function isExpectedCanvasLifecycle(error) {
+  return error?.code === "canvas/cancelled"
+    || error?.code === "canvas/generation-inactive";
 }
 
 function installKernelStatistics() {
@@ -522,7 +531,7 @@ function formatDownloadBytes(bytes) {
 }
 
 async function fetchRuntimeBytes(url, { start = 10, end = 45 } = {}) {
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await fetch(url);
   if (!response.ok) throw new Error(`runtime fetch failed: ${response.status}`);
   const total = Number(response.headers.get("content-length")) || 0;
   if (!response.body) {
@@ -2370,6 +2379,32 @@ async function bootRuntime() {
   setKernelProgress(2, "PREPARING RUNTIME", "LOADING BROWSER MODULES");
   try {
     const runtimeBase = new URL("./runtime/", import.meta.url);
+    const runtimeDownload = fetchRuntimeBytes(
+      new URL("hara.wasm", runtimeBase),
+      { start: 5, end: 45 }
+    );
+    const kernelDownload = fetch(new URL("kernel.harp", runtimeBase))
+      .then((response) => {
+        if (!response.ok) throw new Error(`kernel package fetch failed: ${response.status}`);
+        return response.arrayBuffer();
+      })
+      .then(inspectHarp);
+    const [browserModules, moduleBytes, kernelPackage] = await Promise.all([
+      Promise.all([
+        import(new URL("studio/broker.js", runtimeBase)),
+        import(new URL("studio/host-services.js", runtimeBase)),
+        import(new URL("studio/boot.js", runtimeBase)),
+        import(new URL("studio/node-runtime.js", runtimeBase)),
+        import(new URL("studio/canvas-runtime.js", runtimeBase)),
+        import(new URL("studio/graph-host.js", runtimeBase)),
+        import(new URL("studio/session-router.js", runtimeBase)),
+        import(new URL("studio/capability-registry.js", runtimeBase)),
+        import(new URL("studio/capabilities/canvas.js", runtimeBase)),
+        import(new URL("studio/capabilities/clock.js", runtimeBase))
+      ]),
+      runtimeDownload,
+      kernelDownload
+    ]);
     const [
       { createBrowserBroker },
       { createHostServices },
@@ -2381,52 +2416,13 @@ async function bootRuntime() {
       { CapabilityRegistry },
       { createCanvasCapability },
       { createClockCapability }
-    ] = await Promise.all([
-      import(new URL("studio/broker.js", runtimeBase)),
-      import(new URL("studio/host-services.js", runtimeBase)),
-      import(new URL("studio/boot.js", runtimeBase)),
-      import(new URL("studio/node-runtime.js", runtimeBase)),
-      import(new URL("studio/canvas-runtime.js", runtimeBase)),
-      import(new URL("studio/graph-host.js", runtimeBase)),
-      import(new URL("studio/session-router.js", runtimeBase)),
-      import(new URL("studio/capability-registry.js", runtimeBase)),
-      import(new URL("studio/capabilities/canvas.js", runtimeBase)),
-      import(new URL("studio/capabilities/clock.js", runtimeBase))
-    ]);
-    setKernelProgress(10, "MODULES READY", "STARTING RUNTIME DOWNLOAD");
-    const moduleBytes = await fetchRuntimeBytes(new URL("hara.wasm", runtimeBase));
+    ] = browserModules;
     state.runtimeModuleBytes = moduleBytes.byteLength;
-    const resources = {};
-    const studioResources = ["store", "boot", "node", "draw", "program", "graph", "session"];
-    const standardResources = [
-      "lib/substrate/protocol",
-      "lib/substrate/frame",
-      "lib/substrate"
-    ];
-    const resourceCount = studioResources.length + standardResources.length;
-    let resourceIndex = 0;
-    for (const name of studioResources) {
-      const response = await fetch(new URL(`studio/hal/${name}.hal`, runtimeBase));
-      if (!response.ok) throw new Error(`resource ${name} fetch failed: ${response.status}`);
-      resources[`studio.${name}`] = await response.text();
-      resourceIndex += 1;
-      setKernelProgress(
-        45 + (resourceIndex / resourceCount) * 17,
-        "LOADING KERNEL LIBRARIES",
-        `${resourceIndex} / ${resourceCount} · STUDIO.${name.toUpperCase()}`
-      );
-    }
-    for (const name of standardResources) {
-      const response = await fetch(new URL(`std/${name}.hal`, runtimeBase));
-      if (!response.ok) throw new Error(`resource std.${name.replaceAll("/", ".")} fetch failed: ${response.status}`);
-      resources[`std.${name.replaceAll("/", ".")}`] = await response.text();
-      resourceIndex += 1;
-      setKernelProgress(
-        45 + (resourceIndex / resourceCount) * 17,
-        "LOADING KERNEL LIBRARIES",
-        `${resourceIndex} / ${resourceCount} · STD.${name.replaceAll("/", ".").toUpperCase()}`
-      );
-    }
+    setKernelProgress(
+      62,
+      "KERNEL PACKAGE READY",
+      `${kernelPackage.resources.size} COMPILED HIR MODULES`
+    );
     setKernelProgress(64, "CREATING KERNEL", "CONFIGURING ISOLATED WORKER");
     state.nodeRuntime = new NodeRuntime({ space: `workspace/${SPACE}` });
     state.canvasRuntime = instrumentCanvasTelemetry(new CanvasRuntime({
@@ -2477,7 +2473,6 @@ async function bootRuntime() {
         ? new URL("hta-shared-worker.js", runtimeBase) : undefined,
       moduleBytes,
       hostCalls,
-      resources,
       onKernelStarting: async (kernel) => {
         state.telemetry.kernelsCreated += 1;
         let space = state.kernelSpaces.get(kernel.name);
@@ -2511,6 +2506,20 @@ async function bootRuntime() {
       }
     }));
     state.defaultBootstrap = defaultBootstrap;
+    const rootKernel = await state.broker.require(ROOT);
+    let hirLoaded = 0;
+    for (const [namespace, resource] of kernelPackage.resources) {
+      if (resource.format !== "hir") {
+        throw new Error(`kernel package contains non-HIR resource: ${namespace}`);
+      }
+      await rootKernel.context.call("eval-hir", [resource.bytes]);
+      hirLoaded += 1;
+      setKernelProgress(
+        64 + (hirLoaded / kernelPackage.resources.size) * 10,
+        "LOADING COMPILED KERNEL",
+        `${hirLoaded} / ${kernelPackage.resources.size} · ${namespace.toUpperCase()}`
+      );
+    }
     setKernelProgress(74, "STARTING KERNEL", "BOOTSTRAPPING HOME SPACE");
     await state.broker.eval(ROOT, defaultBootstrap(SPACE));
     setKernelProgress(84, "LOADING WORKSPACE", "READING PROJECT MANIFESTS");
