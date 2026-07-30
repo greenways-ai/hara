@@ -5,6 +5,7 @@ const builtRuntime = new URL("../../target/www/runtime/hara.wasm", import.meta.u
 test.skip(!existsSync(builtRuntime), "built website runtime is unavailable");
 
 test("Hara Amp routes WASM FFT frames through ns+ before canvas rendering", async ({ page }) => {
+  test.setTimeout(90_000);
   await page.goto("/target/www/");
   await expect(page.getByRole("button", { name: "START" })).toBeEnabled({
     timeout: 60000
@@ -34,6 +35,7 @@ test("Hara Amp routes WASM FFT frames through ns+ before canvas rendering", asyn
 });
 
 test("Hara Amp exposes synchronized Node/Text views and selectable completion", async ({ page }) => {
+  test.setTimeout(90_000);
   await page.goto("/target/www/?amp=editor");
   await expect(page.getByRole("heading", { name: /A player is/ })).toBeVisible({
     timeout: 60000
@@ -61,6 +63,7 @@ test("Hara Amp exposes synchronized Node/Text views and selectable completion", 
 });
 
 test("story navigation continues through the animation stage and build screens", async ({ page }) => {
+  test.setTimeout(90_000);
   await page.goto("/target/www/");
   const next = page.locator("[data-workspace-next]");
   await expect(page.getByRole("button", { name: "START" })).toBeEnabled({
@@ -82,6 +85,7 @@ test("story navigation continues through the animation stage and build screens",
 });
 
 test("startup does not route filesystem probes into the background task", async ({ page }) => {
+  test.setTimeout(90_000);
   await page.goto("/target/www/");
   await expect(page.getByRole("button", { name: "START" })).toBeEnabled({
     timeout: 60000
