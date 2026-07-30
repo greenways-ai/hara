@@ -36,6 +36,7 @@ pub struct Project {
     pub package_workspace: bool,
     pub main: Option<String>,
     pub dependencies: BTreeMap<String, String>,
+    pub recipe: Option<PathBuf>,
 }
 
 pub fn discover(start: &Path) -> Result<Project, String> {
@@ -86,7 +87,15 @@ pub fn read(input: &Path) -> Result<Project, String> {
         .unwrap_or(false);
     let main = lookup(entries, "project/main").map(|value| scalar(value, "project.edn :project/main")).transpose()?;
     let dependencies = lookup(entries, "project/dependencies").map(dependencies).transpose()?.unwrap_or_default();
-    Ok(Project { root, manifest_path, id, version, source_paths, test_paths, extension_paths, artifact_paths, archive_root, package_workspace, main, dependencies })
+    let recipe = lookup(entries, "project/recipe")
+        .map(|value| relative_path(&string(value, "project/recipe")?, "project/recipe"))
+        .transpose()?;
+    if let Some(path) = &recipe {
+        if !root.join(path).is_file() {
+            return Err(format!("project.edn :project/recipe does not exist: {}", path.display()));
+        }
+    }
+    Ok(Project { root, manifest_path, id, version, source_paths, test_paths, extension_paths, artifact_paths, archive_root, package_workspace, main, dependencies, recipe })
 }
 
 pub fn new_app(destination: &Path, name: &str) -> Result<Project, String> {
@@ -208,8 +217,15 @@ fn package_workspace(form: &Form) -> Result<bool, String> {
         Some(_) => Err("project.edn :project/package :workspace must be a boolean".into()),
     }
 }
-fn dependencies(form: &Form) -> Result<BTreeMap<String, String>, String> { let mut output = BTreeMap::new(); for (key, value) in map(form, "project.edn :project/dependencies must be an EDN map")? { let coordinate = scalar(key, "dependency coordinate")?; validate_coordinate(&coordinate)?; let version = lookup(map(value, "dependency declaration must be an EDN map")?, "version").ok_or_else(|| format!("dependency {coordinate} is missing :version"))?; let version = string(version, "dependency :version")?; VersionReq::parse(&version).map_err(|error| format!("invalid dependency range {version}: {error}"))?; output.insert(coordinate, version); } Ok(output) }
-fn validate_coordinate(value: &str) -> Result<(), String> { let (tap, package) = value.split_once(':').ok_or_else(|| format!("package coordinate must use TAP:owner/name: {value}"))?; let mut parts = package.split('/'); let valid = !tap.is_empty() && tap.chars().all(valid_coordinate_char) && matches!((parts.next(), parts.next(), parts.next()), (Some(owner), Some(name), None) if !owner.is_empty() && !name.is_empty() && owner.chars().all(valid_coordinate_char) && name.chars().all(valid_coordinate_char)); if valid { Ok(()) } else { Err(format!("invalid package coordinate: {value}")) } }
+fn dependencies(form: &Form) -> Result<BTreeMap<String, String>, String> { let mut output = BTreeMap::new(); for (key, value) in map(form, "project.edn :project/dependencies must be an EDN map")? { let coordinate = normalize_coordinate(&scalar(key, "dependency coordinate")?)?; let version = lookup(map(value, "dependency declaration must be an EDN map")?, "version").ok_or_else(|| format!("dependency {coordinate} is missing :version"))?; let version = string(version, "dependency :version")?; VersionReq::parse(&version).map_err(|error| format!("invalid dependency range {version}: {error}"))?; output.insert(coordinate, version); } Ok(output) }
+pub fn normalize_coordinate(value: &str) -> Result<String, String> {
+    let qualified = if value.contains(':') { value.to_owned() } else { format!("official:{value}") };
+    let (tap, package) = qualified.split_once(':').ok_or_else(|| format!("invalid package coordinate: {value}"))?;
+    let mut parts = package.split('/');
+    let valid = !tap.is_empty() && tap.chars().all(valid_coordinate_char) && matches!((parts.next(), parts.next(), parts.next()), (Some(owner), Some(name), None) if !owner.is_empty() && !name.is_empty() && owner.chars().all(valid_coordinate_char) && name.chars().all(valid_coordinate_char));
+    if valid { Ok(qualified) } else { Err(format!("invalid package coordinate: {value}")) }
+}
+fn validate_coordinate(value: &str) -> Result<(), String> { normalize_coordinate(value).map(|_| ()) }
 fn valid_coordinate_char(value: char) -> bool { value.is_ascii_lowercase() || value.is_ascii_digit() || matches!(value, '-' | '_' | '.') }
 fn valid_name(value: &str) -> bool { !value.is_empty() && value.chars().all(|value| value.is_ascii_lowercase() || value.is_ascii_digit() || value == '-') }
 fn io(error: std::io::Error) -> String { error.to_string() }

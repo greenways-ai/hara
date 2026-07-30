@@ -199,26 +199,28 @@ impl<'a> ByteReader<'a> {
             SYMBOL => {
                 let namespace = self.read_nullable_string()?;
                 let name = self.read_string()?;
-                self.read_metadata()?;
-                Ok(Form::Symbol(namespaced(namespace, name)))
+                Ok(with_metadata(
+                    Form::Symbol(namespaced(namespace, name)),
+                    self.read_metadata()?,
+                ))
             }
             KEYWORD => {
                 let namespace = self.read_nullable_string()?;
                 let name = self.read_string()?;
-                self.read_metadata()?;
-                Ok(Form::Keyword(namespaced(namespace, name)))
+                Ok(with_metadata(
+                    Form::Keyword(namespaced(namespace, name)),
+                    self.read_metadata()?,
+                ))
             }
             LIST => {
                 let count = self.read_count()?;
                 let items = self.read_values(count)?;
-                self.read_metadata()?;
-                Ok(Form::List(items))
+                Ok(with_metadata(Form::List(items), self.read_metadata()?))
             }
             VECTOR => {
                 let count = self.read_count()?;
                 let items = self.read_values(count)?;
-                self.read_metadata()?;
-                Ok(Form::Vector(items))
+                Ok(with_metadata(Form::Vector(items), self.read_metadata()?))
             }
             MAP | ORDERED_MAP => {
                 let count = self.read_count()?;
@@ -228,14 +230,12 @@ impl<'a> ByteReader<'a> {
                     let value = self.read_value()?;
                     entries.push((key, value));
                 }
-                self.read_metadata()?;
-                Ok(Form::Map(entries))
+                Ok(with_metadata(Form::Map(entries), self.read_metadata()?))
             }
             SET | ORDERED_SET => {
                 let count = self.read_count()?;
                 let items = self.read_values(count)?;
-                self.read_metadata()?;
-                Ok(Form::Set(items))
+                Ok(with_metadata(Form::Set(items), self.read_metadata()?))
             }
             REGEX => Ok(Form::Regex(self.read_string()?)),
             _ => Err(format!("unknown value opcode {opcode}")),
@@ -248,6 +248,13 @@ impl<'a> ByteReader<'a> {
             values.push(self.read_value()?);
         }
         Ok(values)
+    }
+}
+
+fn with_metadata(value: Form, metadata: Option<Form>) -> Form {
+    match metadata {
+        Some(metadata) => Form::Metadata(Box::new(metadata), Box::new(value)),
+        None => value,
     }
 }
 
@@ -292,6 +299,25 @@ fn write_values(output: &mut Vec<u8>, values: &[Form]) {
 #[cfg(any(test, feature = "hir-encoder"))]
 fn write_value(output: &mut Vec<u8>, form: &Form) {
     match form {
+        Form::Metadata(metadata, value) => write_value_with_metadata(output, value, Some(metadata)),
+        _ => write_value_with_metadata(output, form, None),
+    }
+}
+
+#[cfg(any(test, feature = "hir-encoder"))]
+fn write_metadata(output: &mut Vec<u8>, metadata: Option<&Form>) {
+    match metadata {
+        Some(metadata) => {
+            output.push(1);
+            write_value(output, metadata);
+        }
+        None => output.push(0),
+    }
+}
+
+#[cfg(any(test, feature = "hir-encoder"))]
+fn write_value_with_metadata(output: &mut Vec<u8>, form: &Form, metadata: Option<&Form>) {
+    match form {
         Form::Nil => output.push(NIL),
         Form::Bool(false) => output.push(FALSE),
         Form::Bool(true) => output.push(TRUE),
@@ -322,22 +348,22 @@ fn write_value(output: &mut Vec<u8>, form: &Form) {
         Form::Symbol(s) => {
             output.push(SYMBOL);
             write_namespaced(output, s);
-            output.push(0);
+            write_metadata(output, metadata);
         }
         Form::Keyword(s) => {
             output.push(KEYWORD);
             write_namespaced(output, s);
-            output.push(0);
+            write_metadata(output, metadata);
         }
         Form::List(items) => {
             output.push(LIST);
             write_values(output, items);
-            output.push(0);
+            write_metadata(output, metadata);
         }
         Form::Vector(items) => {
             output.push(VECTOR);
             write_values(output, items);
-            output.push(0);
+            write_metadata(output, metadata);
         }
         Form::Map(entries) => {
             output.push(MAP);
@@ -346,12 +372,12 @@ fn write_value(output: &mut Vec<u8>, form: &Form) {
                 write_value(output, key);
                 write_value(output, value);
             }
-            output.push(0);
+            write_metadata(output, metadata);
         }
         Form::Set(items) => {
             output.push(SET);
             write_values(output, items);
-            output.push(0);
+            write_metadata(output, metadata);
         }
         Form::Regex(s) => {
             output.push(REGEX);
@@ -433,6 +459,14 @@ mod tests {
         let decoded = decode_hir(&bytes).unwrap();
         assert_eq!(decoded.forms.len(), 1);
         assert_eq!(decoded.forms[0], original);
+    }
+
+    #[test]
+    fn round_trips_metadata() {
+        let original = parse("^:dynamic *value*").unwrap();
+        let bytes = artifact_payload(vec![original.clone()]);
+        let decoded = decode_hir(&bytes).unwrap();
+        assert_eq!(decoded.forms, vec![original]);
     }
 
     #[test]

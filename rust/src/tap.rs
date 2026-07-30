@@ -63,12 +63,12 @@ pub fn add(root: &Path, tap: Tap) -> Result<(), String> {
 /// root-key taps added explicitly by the user.
 pub fn bootstrap(root: &Path, profile: &str) -> Result<Tap, String> {
     let tap = match profile {
-        "hara" => Tap {
-            name: "hara".into(),
-            registry: vec!["https://github.com/hara-lang/hara-packages.git".into()],
-            identity: vec!["https://github.com/hara-lang/hara-identity.git".into()],
-            identity_key: String::new(),
-            trust: TrustMode::GithubGoverned,
+        "official" => Tap {
+            name: "official".into(),
+            registry: vec!["https://packages.hara-lang.org".into()],
+            identity: vec!["https://packages.hara-lang.org/identity.git".into()],
+            identity_key: "sha256:official-root-key-pending-rotation".into(),
+            trust: TrustMode::SignedRoot,
         },
         _ => return Err(format!("unknown built-in tap profile: {profile}")),
     };
@@ -125,6 +125,19 @@ pub fn load(root: &Path) -> Result<BTreeMap<String, Tap>, String> {
 
 pub fn trusted(root: &Path, name: &str) -> Result<Tap, String> {
     load(root)?.remove(name).ok_or_else(|| format!("tap is not trusted: {name}; add it with `hara package tap add`"))
+}
+
+pub fn trusted_or_builtin(root: &Path, name: &str) -> Result<Tap, String> {
+    if name == "official" {
+        return Ok(Tap {
+            name: "official".into(),
+            registry: vec!["https://packages.hara-lang.org".into()],
+            identity: vec!["https://packages.hara-lang.org/identity.git".into()],
+            identity_key: "sha256:official-root-key-pending-rotation".into(),
+            trust: TrustMode::SignedRoot,
+        });
+    }
+    trusted(root, name)
 }
 
 /// Creates the two local repositories that make up a new tap.
@@ -223,6 +236,10 @@ pub fn sign(intent: &[u8]) -> Result<(String, String), String> {
 
 pub fn canonical_intent(coordinate: &str, version: &str, repository: &str, tag: &str, commit: &str, archive_sha256: &str, tap: &str, identity_revision: &str) -> String {
     format!("{{:intent/format 1 :tap \"{tap}\" :coordinate \"{coordinate}\" :version \"{version}\" :repository \"{repository}\" :tag \"{tag}\" :commit \"{commit}\" :archive-sha256 \"sha256:{archive_sha256}\" :identity-revision \"{identity_revision}\"}}\n")
+}
+
+pub fn canonical_recipe_intent(coordinate: &str, version: &str, repository: &str, tag: &str, commit: &str, recipe_sha256: &str, tap: &str, identity_revision: &str) -> String {
+    format!("{{:intent/format 2 :tap \"{tap}\" :coordinate \"{coordinate}\" :version \"{version}\" :repository \"{repository}\" :tag \"{tag}\" :commit \"{commit}\" :recipe-sha256 \"sha256:{recipe_sha256}\" :identity-revision \"{identity_revision}\"}}\n")
 }
 
 pub fn git(root: &Path, arguments: impl IntoIterator<Item = impl AsRef<std::ffi::OsStr>>) -> Result<String, String> {

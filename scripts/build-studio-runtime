@@ -18,6 +18,7 @@ if [ -e "$STAGE" ]; then
   exit 1
 fi
 mkdir -p "$STAGE/rust/host" "$STAGE/rust/studio/hal" "$STAGE/rust/studio/capabilities" "$STAGE/rust/ui" \
+         "$STAGE/rust/std/lib/substrate" \
          "$STAGE/examples/starter/src" \
          "$STAGE/examples/game/src" \
          "$STAGE/examples/music/src" \
@@ -38,7 +39,8 @@ cp "$ROOT/website/vendor/hara-ui/tokens.css" \
    "$ROOT/website/vendor/hara-ui/studio.css" \
    "$ROOT/website/vendor/hara-ui/studio-shell.js" \
    "$STAGE/rust/ui/"
-cp "$ROOT/rust/web/hta.js" "$ROOT/rust/web/hta-worker.js" "$STAGE/rust/"
+cp "$ROOT/rust/web/hta.js" "$ROOT/rust/web/hta-worker.js" "$ROOT/rust/web/hta-shared-worker.js" \
+   "$STAGE/rust/"
 cp "$ROOT"/rust/web/host/*.js "$STAGE/rust/host/"
 cp "$ROOT"/rust/web/studio/*.js "$ROOT/rust/web/studio/studio.css" "$STAGE/rust/studio/"
 cp "$ROOT"/rust/web/studio/capabilities/*.js "$STAGE/rust/studio/capabilities/"
@@ -46,6 +48,10 @@ cp "$ROOT"/rust/web/studio/hal/*.hal "$STAGE/rust/studio/hal/"
 cp "$ROOT/lib/src/std/lib/substrate.hal" "$STAGE/rust/studio/hal/substrate.hal"
 cp "$ROOT/lib/src/std/lib/substrate/frame.hal" "$STAGE/rust/studio/hal/substrate-frame.hal"
 cp "$ROOT/lib/src/std/lib/substrate/protocol.hal" "$STAGE/rust/studio/hal/substrate-protocol.hal"
+cp "$ROOT/lib/src/std/lib/substrate.hal" "$STAGE/rust/std/lib/substrate.hal"
+cp "$ROOT/lib/src/std/lib/substrate/frame.hal" \
+   "$ROOT/lib/src/std/lib/substrate/protocol.hal" \
+   "$STAGE/rust/std/lib/substrate/"
 
 cp "$ROOT/website/examples/index.json" "$STAGE/examples/index.json"
 cp "$ROOT/website/examples/starter/project.edn" "$ROOT/website/examples/starter/workspace.edn" \

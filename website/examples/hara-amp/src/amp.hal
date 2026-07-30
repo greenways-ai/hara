@@ -6,34 +6,54 @@
   {"graph/id" "hara-amp"
    "title" "Hara Amp"
    "nodes"
-   [{"id" "synth"
-     "type" "wasm/sequencer-oscillator"
-     "label" "01 · SYNTH"
-     "summary" "Rust/WASM generates the sequenced oscillator samples."
-     "input" "Root note, tempo, waveform, and playback position"
-     "output" "Stereo PCM samples"
-     "runtime" "Rust compiled to WebAssembly"
-     "params" {"waveform" "sine"
-               "tempo" 120
-               "root" 57
-               "gate" 0.72
-               "steps-per-beat" 2
-               "steps" [0 7 12 15 19 15 12 7
-                        0 7 12 17 19 22 19 15]}
-     "controls" [{"parameter" "waveform" "type" "choice" "label" "WAVEFORM"
-                   "choices" ["sine" "square" "saw"]}
+   [{"id" "playlist"
+     "type" "data/playlist"
+     "label" "01 · PLAYLIST"
+     "summary" "The editable program owns the material that can be played."
+     "input" "Files, generated tunes, and ordering"
+     "output" "Selected playable item"
+     "runtime" "HAL workspace data"
+     "params" {"selected" 0}}
+    {"id" "transport"
+     "type" "control/transport"
+     "label" "02 · TRANSPORT"
+     "summary" "Playback state and musical time drive the selected sequence."
+     "input" "Play, pause, tempo, and position"
+     "output" "Clock ticks and playback state"
+     "runtime" "Supersonic browser provider"
+     "params" {"playing" false "tempo" 120 "steps-per-beat" 2}
+     "controls" [{"parameter" "playing" "type" "boolean" "label" "PLAYING"}
                   {"parameter" "tempo" "type" "number" "label" "TEMPO"
                    "min" 30 "max" 300 "step" 1}
+                  {"parameter" "steps-per-beat" "type" "number" "label" "STEPS / BEAT"
+                   "min" 1 "max" 16 "step" 1 "integer" true}]}
+    {"id" "sequence"
+     "type" "data/sequence"
+     "label" "03 · SEQUENCE"
+     "summary" "Named notes and rests are stored as offsets from the root."
+     "input" "Playlist selection and transport ticks"
+     "output" "Current note and gate"
+     "runtime" "Supersonic tune state"
+     "params" {"steps" [0 7 12 15 19 15 12 7
+                        0 7 12 17 19 22 19 15]}
+     "controls" [{"parameter" "steps" "type" "steps" "label" "SEQUENCE"}]}
+    {"id" "source"
+     "type" "wasm/oscillator"
+     "label" "04 · WASM SOURCE"
+     "summary" "Rust/WASM turns each scheduled note into stereo samples."
+     "input" "Current note, root, gate, and waveform"
+     "output" "Stereo PCM samples"
+     "runtime" "Rust compiled to WebAssembly"
+     "params" {"waveform" "sine" "root" 57 "gate" 0.72}
+     "controls" [{"parameter" "waveform" "type" "choice" "label" "WAVEFORM"
+                   "choices" ["sine" "square" "saw"]}
                   {"parameter" "root" "type" "number" "label" "MIDI ROOT"
                    "min" 0 "max" 127 "step" 1 "integer" true}
                   {"parameter" "gate" "type" "number" "label" "GATE"
-                   "min" 0 "max" 1 "step" 0.01}
-                  {"parameter" "steps-per-beat" "type" "number" "label" "STEPS / BEAT"
-                   "min" 1 "max" 16 "step" 1}
-                  {"parameter" "steps" "type" "steps" "label" "SEQUENCE"}]}
+                   "min" 0 "max" 1 "step" 0.01}]}
     {"id" "gain"
      "type" "audio/gain"
-     "label" "02 · GAIN"
+     "label" "05 · GAIN"
      "summary" "Web Audio applies input gain before tonal processing."
      "input" "Stereo PCM samples"
      "output" "Gain-adjusted samples"
@@ -43,7 +63,7 @@
                    "min" -12 "max" 12 "step" 1}]}
     {"id" "eq"
      "type" "audio/equalizer"
-     "label" "03 · EQUALIZER"
+     "label" "06 · EQUALIZER"
      "summary" "A ten-band equalizer selects the signal character."
      "input" "Gain-adjusted samples"
      "output" "Equalized samples"
@@ -54,10 +74,10 @@
                               {"value" "hara" "label" "HARA GLOW"}
                               {"value" "bass" "label" "BASS ARC"}
                               {"value" "voice" "label" "VOICE"}]}]}
-    {"id" "pan"
-     "type" "audio/panner"
-     "label" "04 · PANNER"
-     "summary" "Stereo position and final level are applied before analysis."
+    {"id" "mixer"
+     "type" "audio/mixer"
+     "label" "07 · MIXER"
+     "summary" "Stereo position and final level are applied before output."
      "input" "Equalized samples"
      "output" "Positioned output samples"
      "runtime" "Browser Web Audio"
@@ -66,16 +86,23 @@
                    "min" -1 "max" 1 "step" 0.05}
                   {"parameter" "volume" "type" "number" "label" "VOLUME"
                    "min" 0 "max" 1 "step" 0.01}]}
+    {"id" "output"
+     "type" "audio/output"
+     "label" "08 · OUTPUT"
+     "summary" "The browser sends the processed signal to the selected speakers."
+     "input" "Processed stereo samples"
+     "output" "Audible sound"
+     "runtime" "Browser Web Audio · user gesture required"}
     {"id" "fft"
-     "type" "wasm/analyser-fft"
-     "label" "05 · FFT"
+     "type" "analysis/fft"
+     "label" "09 · FFT"
      "summary" "Rust/WASM converts analyser samples into frequency bins."
      "input" "Time-domain analyser samples"
      "output" "Latest frequency-bin frame"
      "runtime" "Rust compiled to WebAssembly"}
     {"id" "visualizer"
      "type" "hal/transform"
-     "label" "06 · HAL DOCUMENT"
+     "label" "10 · HAL DOCUMENT"
      "summary" "This live document turns each FFT frame into a host-neutral scene."
      "input" "Latest FFT frame and visual settings"
      "output" "Canvas scene description"
@@ -83,28 +110,24 @@
      "params" {"mode" "spectrum"}
      "controls" [{"parameter" "mode" "type" "choice" "label" "HAL OUTPUT"
                    "choices" ["spectrum" "scope" "artwork"]}]}
-    {"id" "canvas"
-     "type" "host/canvas"
-     "label" "07 · CANVAS"
-     "summary" "The browser host draws the scene produced by HAL."
-     "input" "Host-neutral scene descriptions"
-     "output" "Browser pixels"
-     "runtime" "Browser Canvas host capability"}
-    {"id" "output"
-     "type" "audio/output"
-     "label" "08 · OUTPUT"
-     "summary" "The browser sends the processed signal to the selected speakers."
-     "input" "Processed stereo samples"
-     "output" "Audible sound"
-     "runtime" "Browser Web Audio · user gesture required"}]
+    {"id" "ui"
+     "type" "host/canvas-ui"
+     "label" "11 · CANVAS / UI"
+     "summary" "The host draws the scene and exposes controls that edit this graph."
+     "input" "Host-neutral scene and graph status"
+     "output" "Browser pixels and control events"
+     "runtime" "Browser Canvas and Hara UI"}]
    "connections"
-   [{"from" ["synth" "audio"] "to" ["gain" "audio"] "kind" "audio"}
+   [{"from" ["playlist" "selected"] "to" ["sequence" "selection"] "kind" "control"}
+    {"from" ["transport" "tick"] "to" ["sequence" "tick"] "kind" "control"}
+    {"from" ["sequence" "note"] "to" ["source" "note"] "kind" "control"}
+    {"from" ["source" "audio"] "to" ["gain" "audio"] "kind" "audio"}
     {"from" ["gain" "audio"] "to" ["eq" "audio"] "kind" "audio"}
-    {"from" ["eq" "audio"] "to" ["pan" "audio"] "kind" "audio"}
-    {"from" ["pan" "audio"] "to" ["output" "audio"] "kind" "audio"}
-    {"from" ["pan" "samples"] "to" ["fft" "samples"] "kind" "analysis"}
+    {"from" ["eq" "audio"] "to" ["mixer" "audio"] "kind" "audio"}
+    {"from" ["mixer" "audio"] "to" ["output" "audio"] "kind" "audio"}
+    {"from" ["mixer" "samples"] "to" ["fft" "samples"] "kind" "analysis"}
     {"from" ["fft" "bins"] "to" ["visualizer" "bins"] "kind" "hta/latest"}
-    {"from" ["visualizer" "scene"] "to" ["canvas" "scene"] "kind" "host"}]})
+    {"from" ["visualizer" "scene"] "to" ["ui" "scene"] "kind" "host"}]})
 
 (def amp-state (sonic/start amp-graph))
 
