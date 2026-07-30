@@ -64,6 +64,7 @@ jobs:
       run: |
         npm run test:hta
         npm run test:noir
+        ../../scripts/build-www
         npm run test:browser
     - name: Set up JDK 21
       uses: actions/setup-java@v4
@@ -180,7 +181,7 @@ jobs:
         test "$(target/hara-truffle conformance)" = "L0 conformance passed: 80 cases"
         test "$(HARA_EXTENSION_PATH="$PWD/target/native-extensions" target/hara-truffle eval '(ns app (:require [demo.000-answer-42 :as answer])) (answer/add 20 22)')" = "42"
         test "$(HARA_EXTENSION_PATH="$PWD/rust/extensions/ledger-noir/target/package" target/hara-truffle --allow-process eval '(ns app (:require [ledger.noir :as noir])) (get (deref (noir/compile {:name "native_smoke" :source "fn main(x: pub Field) { assert(x == 42); }"})) :format)')" = "hara/ledger.noir/v1"
-        test "$(HARA_EXTENSION_PATH="$PWD/target/native-extensions" target/hara-truffle eval '(ns app (:require [hara.runtime.wasm :as runtime])) (deref (runtime/eval "(+ 10 (count (deref (host/call \"crypto.hash.sha256\" \"digest\" (bytes 97 98 99)))))"))')" = "42"
+        test "$(HARA_EXTENSION_PATH="$PWD/target/native-extensions" target/hara-truffle eval '(ns app (:require [hara.runtime.wasm :as runtime])) (deref (runtime/eval "(+ 10 (count (deref (std.native.Host/call \"crypto.hash.sha256\" \"digest\" [(bytes 97 98 99)]))))"))')" = "42"
         test "$(target/hara-truffle eval '(+ 19 23)')" = "42"
         test "$(target/hara-truffle eval '(bytes/u8 -1)')" = "255"
         test "$(target/hara-truffle eval '(protocol-call ICount count (bytes 1 2 3))')" = "3"

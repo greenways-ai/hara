@@ -309,8 +309,11 @@ public class HirArtifactTest {
                       + " ((juxt inc dec) 8)]")
               .toString());
       assertEquals(
-          "[[f g] [f g h]]",
+          "[[f g] [f g h] [f g h l & more]]",
           context.eval(HaraLanguage.ID, "(:arglists (meta (var comp)))").toString());
+      assertEquals(
+          42,
+          context.eval(HaraLanguage.ID, "((comp inc inc inc inc) 38)").asLong());
     }
   }
 }

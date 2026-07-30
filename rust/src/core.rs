@@ -10591,11 +10591,11 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 let expected = match n.as_str() {
                     "comp2" => arity == 2,
                     "comp3" => arity == 3,
-                    _ => arity == 2 || arity == 3,
+                    _ => arity >= 2,
                 };
                 if !expected {
                     let arities = if n == "comp" {
-                        "2 or 3"
+                        "2 or more"
                     } else if n == "comp2" {
                         "2"
                     } else {
@@ -10613,36 +10613,18 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 {
                     return Err(format!("{n} expects functions"));
                 }
-                let body = if arity == 2 {
-                    Form::List(vec![
-                        Form::Symbol("__f".into()),
-                        Form::List(vec![
-                            Form::Symbol("__g".into()),
-                            Form::Symbol("value".into()),
-                        ]),
-                    ])
-                } else {
-                    Form::List(vec![
-                        Form::Symbol("__f".into()),
-                        Form::List(vec![
-                            Form::Symbol("__g".into()),
-                            Form::List(vec![
-                                Form::Symbol("__h".into()),
-                                Form::Symbol("value".into()),
-                            ]),
-                        ]),
-                    ])
-                };
-                let mut bindings =
-                    vec![("__f", functions[0].clone()), ("__g", functions[1].clone())];
-                if arity == 3 {
-                    bindings.push(("__h", functions[2].clone()));
+                let mut body = Form::Symbol("value".into());
+                let mut captured = env.clone();
+                for (index, function) in functions.into_iter().enumerate().rev() {
+                    let binding = format!("__comp_{index}");
+                    body = Form::List(vec![Form::Symbol(binding.clone()), body]);
+                    captured.insert(binding, function);
                 }
                 Ok(generated_function(
                     vec!["value".into()],
                     vec![body],
-                    env.clone(),
-                    bindings,
+                    captured,
+                    Vec::new(),
                 ))
             }
             Form::Symbol(n) if n == "identity" => {

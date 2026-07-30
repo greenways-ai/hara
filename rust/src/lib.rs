@@ -6279,6 +6279,12 @@ mod tests {
                 .unwrap(),
             "42"
         );
+        assert_eq!(
+            runtime
+                .eval_text("((comp inc inc inc inc) 38)")
+                .unwrap(),
+            "42"
+        );
     }
 
     #[test]

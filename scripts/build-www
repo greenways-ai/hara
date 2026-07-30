@@ -25,7 +25,7 @@ mkdir -p "$HIR_OUT"
 "$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/supersonic.hal" --output "$HIR_OUT/supersonic.hir"
 
 rm -rf "$OUT"
-mkdir -p "$OUT/runtime/host" "$OUT/runtime/studio/hal" "$OUT/runtime/std/lib/substrate"
+mkdir -p "$OUT/runtime/host" "$OUT/runtime/packages/hta" "$OUT/runtime/studio/hal" "$OUT/runtime/std/lib/substrate"
 mkdir -p "$OUT/runtime/studio/capabilities"
 mkdir -p "$OUT/assets/wasm" "$OUT/assets/hara-amp" "$OUT/examples/hara-amp/src" "$OUT/examples/hara-animation/src"
 mkdir -p "$OUT/sources"
@@ -67,6 +67,7 @@ cp "$ROOT/rust/web/hta.js" \
    "$ROOT/rust/web/hta-shared-worker.js" \
    "$ROOT/rust/web/package-cache.js" \
    "$OUT/runtime/"
+cp "$ROOT/rust/web/packages/hta/"*.js "$OUT/runtime/packages/hta/"
 node "$ROOT/scripts/build-www-harp.mjs" "$OUT/runtime/kernel.harp" \
   "std.lib.substrate.protocol=$HIR_OUT/substrate-protocol.hir" \
   "std.lib.substrate.frame=$HIR_OUT/substrate-frame.hir" \

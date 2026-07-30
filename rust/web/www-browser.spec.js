@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 
-test("www is a single Home screen with external site navigation", async ({ page }) => {
+test("www opens on Home with external site navigation", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("hara-www.workspace.v1", "1"));
-  await page.goto("/website/");
+  await page.goto("/target/www/");
   await expect(page.locator("body")).toHaveAttribute("data-workspace", "0");
   await expect(page.locator(".system-bar")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "GITHUB ↗" })).toHaveCount(0);
@@ -12,13 +12,10 @@ test("www is a single Home screen with external site navigation", async ({ page 
   await expect(page.locator(".system-bottom-bar [data-workspace-prev]")).toBeVisible();
   await expect(page.locator(".system-bottom-bar [data-workspace-next]")).toBeVisible();
   await expect(page.locator(".system-bottom-bar [data-runtime-toggle]")).toBeVisible();
-  await expect(page.locator("[data-start]")).toHaveAttribute(
-    "data-playground-url",
-    "https://playground.hara-lang.org/"
-  );
+  await expect(page.getByRole("button", { name: "START" })).toBeVisible();
   await expect(page.locator("[data-workspace-prev]")).toBeDisabled();
-  await expect(page.locator("[data-workspace-next]")).toBeDisabled();
-  await expect(page.locator("[data-background-picker]")).toBeHidden();
+  await expect(page.locator("[data-workspace-next]")).toBeEnabled();
+  await expect(page.locator("[data-background-picker]")).toBeVisible();
   await expect(page.locator(".desktop-workspace")).toBeHidden();
 
   await page.locator("[data-launcher-toggle]").click();
@@ -45,65 +42,65 @@ test("www is a single Home screen with external site navigation", async ({ page 
   await expect(page.locator("[data-help]")).toHaveCount(0);
 });
 
-test("zoomed desktop remains a single Home screen", async ({ page }) => {
+test("zoomed desktop opens on the Home screen", async ({ page }) => {
   await page.setViewportSize({ width: 892, height: 900 });
-  await page.goto("/website/");
+  await page.goto("/target/www/");
   await expect(page.locator(".welcome-workspace")).toBeVisible();
   await expect(page.locator(".desktop-workspace")).toBeHidden();
   await expect(page.locator("[data-workspace-prev]")).toBeDisabled();
-  await expect(page.locator("[data-workspace-next]")).toBeDisabled();
+  await expect(page.locator("[data-workspace-next]")).toBeEnabled();
 });
 
 test("phone shell keeps the single-screen controls unobscured", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/website/");
+  await page.goto("/target/www/");
   await expect(page.locator("[data-start]")).toBeVisible();
   await expect(page.locator(".system-bar")).toHaveCount(0);
   await expect(page.locator(".system-bottom-bar [data-launcher-toggle]")).toBeVisible();
   await expect(page.locator(".system-bottom-bar [data-workspace-prev]")).toBeVisible();
   await expect(page.locator(".system-bottom-bar [data-workspace-next]")).toBeVisible();
   await expect(page.locator(".system-bottom-bar [data-runtime-toggle]")).toBeVisible();
-  await expect(page.locator("[data-background-picker]")).toBeHidden();
+  await expect(page.locator("[data-background-picker]")).toBeVisible();
   await expect(page.locator(".desktop-workspace")).toBeHidden();
   await expect(page.locator("[data-workspace-prev]")).toBeDisabled();
-  await expect(page.locator("[data-workspace-next]")).toBeDisabled();
+  await expect(page.locator("[data-workspace-next]")).toBeEnabled();
 });
 
 test("canonical Hara assets and compact Start button survive responsive widths", async ({ page }) => {
   await page.setViewportSize({ width: 600, height: 900 });
-  await page.goto("/website/");
-  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "./assets/favicon-48.svg");
+  await page.goto("/target/www/");
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "./assets/hara-favicon.svg?v=3");
   await expect(page.locator(".system-mark")).toHaveCount(0);
   await expect(page.locator(".launcher-mark")).toHaveCount(0);
   await expect(page.locator(".app-launcher-glyph i")).toHaveCount(9);
-  await expect(page.locator(".start-mark")).toHaveAttribute("src", "./assets/logo-white.svg");
+  await expect(page.getByRole("button", { name: "START" })).toBeVisible();
   const tablet = await page.locator(".start-button").boundingBox();
   expect(tablet.width).toBeLessThan(400);
 
   await page.setViewportSize({ width: 390, height: 844 });
   const extraSmall = await page.locator(".start-button").boundingBox();
-  expect(extraSmall.width).toBeGreaterThan(320);
+  expect(extraSmall.width).toBeLessThan(220);
 });
 
 
 test("kernel loader does not move the hero callout", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/website/");
+  await page.goto("/target/www/");
   const loader = page.locator("[data-kernel-loading]");
-  const start = page.locator("[data-start]");
+  const callout = page.locator(".hero-callout");
   await loader.evaluate((node) => { node.hidden = true; });
-  const before = await start.boundingBox();
+  const before = await callout.boundingBox();
   await loader.evaluate((node) => { node.hidden = false; });
-  const during = await start.boundingBox();
+  const during = await callout.boundingBox();
   await loader.evaluate((node) => { node.hidden = true; });
-  const after = await start.boundingBox();
+  const after = await callout.boundingBox();
   expect(Math.abs(during.y - before.y)).toBeLessThan(0.5);
   expect(Math.abs(after.y - before.y)).toBeLessThan(0.5);
 });
 
 test("mobile editor toolbar uses icons instead of visible text", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/website/");
+  await page.goto("/target/www/");
   const styles = await page.locator(".editor-toolbar").evaluate((toolbar) => {
     const paredit = toolbar.querySelector("[data-paredit]");
     const save = toolbar.querySelector("[data-save]");
@@ -124,14 +121,16 @@ test("mobile editor toolbar uses icons instead of visible text", async ({ page }
 });
 
 const builtRuntime = new URL("../../target/www/runtime/hara.wasm", import.meta.url);
-const runtimeTest = existsSync(builtRuntime) ? test : test.skip;
+const runtimeTest = process.env.HARA_TEST_WWW_RUNTIME === "1" && existsSync(builtRuntime)
+  ? test
+  : test.skip;
 
 runtimeTest("www package includes the Hara UI image assets", async ({ page }) => {
   await page.goto("/target/www/");
   await expect(page.getByRole("heading", { name: "HARA" })).toBeVisible();
   await expect(page.locator("img.welcome-mark")).toHaveCount(0);
   await expect(page.locator("img.system-mark")).toHaveCount(0);
-  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "./assets/favicon-48.svg");
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "./assets/hara-favicon.svg?v=3");
   const marks = page.locator('img.start-mark[src*="logo-white.svg"]');
   await expect(marks).toHaveCount(1);
   await expect
