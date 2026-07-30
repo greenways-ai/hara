@@ -32,7 +32,9 @@ jobs:
           rustup target add wasm32-unknown-unknown
           bash scripts/build-www
       - name: Test website scene contract
-        run: node --test website/branding.test.mjs website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
+        run: |
+          node --test website/branding.test.mjs website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
+          test -s target/www/og-hara-ribbon.jpg
       - name: Configure custom domain
         run: echo "www.hara-lang.org" > ./target/www/CNAME
       - name: Setup Pages

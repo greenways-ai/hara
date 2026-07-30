@@ -75,7 +75,9 @@ cp "$ROOT/website/assets/favicon-48.svg" \
    "$ROOT/website/assets/hara-favicon.svg" \
    "$ROOT/website/assets/logo-white.svg" \
    "$OUT/assets/"
-cp "$ROOT/website/og-hara-ribbon.png" "$OUT/"
+cp "$ROOT/website/og-hara-ribbon.png" \
+   "$ROOT/website/og-hara-ribbon.jpg" \
+   "$OUT/"
 cp "$ROOT/website/examples/hara-amp/project.edn" \
    "$ROOT/website/examples/hara-amp/workspace.edn" \
    "$OUT/examples/hara-amp/"
