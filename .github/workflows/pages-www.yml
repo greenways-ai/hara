@@ -24,7 +24,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
+      - name: Verify synchronized Hara UI assets
+        run: node scripts/sync-hara-ui.mjs --check
       - name: Build browser runtime and site
         env:
           HARA_GITHUB_OAUTH_CLIENT_ID: ${{ vars.HARA_GITHUB_OAUTH_CLIENT_ID }}

@@ -24,16 +24,15 @@ require_text() {
 
 require_text LICENSE 'Eclipse Public License - v 2.0'
 require_text LICENSES/README.md 'License inventory'
-require_text extensions/hara-chrome/ui/hara-ui/LICENSE 'MIT License'
+require_text website/vendor/hara-ui/LICENSE 'MIT License'
+require_text docs/vendor/hara-ui/LICENSE 'MIT License'
+require_text specs/vendor/hara-ui/LICENSE 'MIT License'
 
 while IFS= read -r -d '' manifest; do
   require_text "$manifest" 'license = "EPL-2.0"'
 done < <(find rust -path '*/target' -prune -o -name Cargo.toml -print0)
 
 while IFS= read -r -d '' manifest; do
-  case "$manifest" in
-    extensions/hara-chrome/ui/hara-ui/package.json) continue ;;
-  esac
   require_text "$manifest" '"license": "EPL-2.0"'
 done < <(find rust extensions -path '*/node_modules' -prune -o -name package.json -print0)
 
