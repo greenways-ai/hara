@@ -19,8 +19,6 @@ pub mod tap;
 mod process_extension;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod resp;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod service;
 pub mod task;
 #[cfg(feature = "dev-trace")]
 pub mod trace;
