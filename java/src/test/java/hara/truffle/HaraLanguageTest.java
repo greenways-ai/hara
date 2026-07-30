@@ -544,6 +544,94 @@ public class HaraLanguageTest {
   }
 
   @Test
+  public void evaluatesNestedLoopsWithDistinctRecurTargets() {
+    try (Context context = context()) {
+      assertEquals(
+          18,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(loop [i 0 acc 0] "
+                      + "(if (< i 3) "
+                      + "  (recur (+ i 1) "
+                      + "    (+ acc (loop [j 0 inner 0] "
+                      + "             (if (< j 4) (recur (+ j 1) (+ inner j)) inner)))) "
+                      + "  acc))")
+              .asLong());
+    }
+  }
+
+  @Test
+  public void evaluatesRecurInIfDoAndLetTailPositions() {
+    try (Context context = context()) {
+      assertEquals(
+          2, context.eval(HaraLanguage.ID, "(loop [i 0] (if (< i 2) (recur (+ i 1)) i))").asLong());
+      assertEquals(
+          2,
+          context
+              .eval(HaraLanguage.ID, "(loop [i 0] (do 42 (if (< i 2) (recur (+ i 1)) i)))")
+              .asLong());
+      assertEquals(
+          3,
+          context
+              .eval(HaraLanguage.ID, "(loop [i 0] (let [x (+ i 1)] (if (< x 3) (recur x) x)))")
+              .asLong());
+    }
+  }
+
+  @Test
+  public void rejectsRecurArityMismatch() {
+    try (Context context = context()) {
+      PolyglotException mismatch =
+          assertThrows(
+              PolyglotException.class,
+              () -> context.eval(HaraLanguage.ID, "(loop [left 1 right 2] (recur 3))"));
+      assertTrue(mismatch.getMessage().contains("recur expects 2 arguments"));
+    }
+  }
+
+  @Test
+  public void rejectsRecurInsideTryAsNonTail() {
+    try (Context context = context()) {
+      PolyglotException nonTail =
+          assertThrows(
+              PolyglotException.class,
+              () ->
+                  context.eval(
+                      HaraLanguage.ID, "(loop [i 0] (try (recur (+ i 1)) (finally 42)))"));
+      assertTrue(nonTail.getMessage().contains("tail position"));
+    }
+  }
+
+  @Test
+  public void guestCatchDoesNotInterceptRecurrence() {
+    try (Context context = context()) {
+      assertEquals(
+          5,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(try (loop [i 0] (if (< i 5) (recur (+ i 1)) i)) (catch Throwable t 99))")
+              .asLong());
+    }
+  }
+
+  @Test
+  public void finallyRunsOnceWhenEnclosingLoopCompletes() {
+    try (Context context = context()) {
+      assertEquals(
+          3,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(try (loop [i 0] (if (< i 3) (recur (+ i 1)) i)) "
+                      + "(finally (def loop-finally-runs 1)))")
+              .asLong());
+      assertEquals(1, context.eval(HaraLanguage.ID, "loop-finally-runs").asLong());
+    }
+  }
+
+  @Test
   public void evaluatesThrowCatchAndFinally() {
     try (Context context = context()) {
       assertEquals(

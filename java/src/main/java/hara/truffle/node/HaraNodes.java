@@ -10,8 +10,10 @@ import com.oracle.truffle.api.interop.InteropLibrary;
 import com.oracle.truffle.api.interop.UnknownIdentifierException;
 import com.oracle.truffle.api.interop.UnsupportedMessageException;
 import com.oracle.truffle.api.interop.UnsupportedTypeException;
+import com.oracle.truffle.api.nodes.ControlFlowException;
 import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
+import com.oracle.truffle.api.nodes.LoopNode;
 import hara.kernel.builtin.BuiltinStruct;
 import hara.lang.base.Eq;
 import hara.lang.base.primitive.Cast;
@@ -42,24 +44,32 @@ public final class HaraNodes {
   private HaraNodes() {}
 
   public static final class RecurTarget {
-    private final int arity;
+    private final int[] slots;
 
-    public RecurTarget(int arity) {
-      this.arity = arity;
+    public RecurTarget(int[] slots) {
+      this.slots = slots;
     }
 
     public int arity() {
-      return arity;
+      return slots.length;
+    }
+
+    public int[] slots() {
+      return slots;
     }
   }
 
-  private static final class RecurException extends RuntimeException {
+  /**
+   * Lightweight, stackless recurrence signal. Graal treats {@link ControlFlowException} as a
+   * canonical control-transfer mechanism, so a thrown recur compiles to a plain loop back-edge
+   * once the loop body is inlined; no stack trace is ever captured.
+   */
+  @SuppressWarnings("serial")
+  private static final class RecurException extends ControlFlowException {
     private final RecurTarget target;
-    private final Object[] values;
 
-    private RecurException(RecurTarget target, Object[] values) {
+    private RecurException(RecurTarget target) {
       this.target = target;
-      this.values = values;
     }
   }
 
@@ -1051,21 +1061,19 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      Object[] values = new Object[initializers.length];
       for (int i = 0; i < initializers.length; i++) {
-        values[i] = initializers[i].execute(frame);
+        frame.setObject(slots[i], initializers[i].execute(frame));
       }
+      int recurrences = 0;
       while (true) {
-        for (int i = 0; i < slots.length; i++) {
-          frame.setObject(slots[i], values[i]);
-        }
         try {
           return body.execute(frame);
         } catch (RecurException recur) {
           if (recur.target != target) {
             throw recur;
           }
-          values = recur.values;
+          recurrences++;
+          LoopNode.reportLoopCount(this, recurrences);
         }
       }
     }
@@ -1082,11 +1090,17 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
+      // Evaluate every recurrence value before touching the loop slots so that
+      // expressions such as (recur (+ i 1) (+ acc i)) observe the current bindings.
       Object[] evaluated = new Object[values.length];
       for (int i = 0; i < values.length; i++) {
         evaluated[i] = values[i].execute(frame);
       }
-      throw new RecurException(target, evaluated);
+      int[] slots = target.slots();
+      for (int i = 0; i < slots.length; i++) {
+        frame.setObject(slots[i], evaluated[i]);
+      }
+      throw new RecurException(target);
     }
   }
 
