@@ -96,8 +96,7 @@
                [7 true :ready :ready])
    (test/check "tasks retain Foundation callable and display behavior"
                [(double-task 4)
-                (protocol-call std.protocol.idisplay/IDisplay
-                               display double-task)]
+                (std.protocol.idisplay/display double-task)]
                [8 "#task:default {:fn double-task}"])
    (test/check "task report formatting preserves ANSI title and table output"
                [(print/report-title "TASK")

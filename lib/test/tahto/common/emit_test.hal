@@ -70,9 +70,7 @@
 
 (def results
   [(test/check "emit recursively uses a resolved grammar"
-               (protocol-call
-                compiler/IEmitter
-                emit-form
+               (compiler/emit-form
                 emitter-instance
                 '(+ 1 (+ 2 3))
                 selected-v1

@@ -37,11 +37,11 @@
 
 (defn report!
   [reporter report]
-  (protocol-call protocol/ITaskReporter report-task reporter report))
+  (protocol/report-task reporter report))
 
 (defn now-ms
   [clock]
-  (protocol-call protocol/ITaskClock task-now-ms clock))
+  (protocol/task-now-ms clock))
 
 (defn normalize-result
   [input value]

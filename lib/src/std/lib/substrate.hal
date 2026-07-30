@@ -46,7 +46,7 @@
 (defn route-stream-loop [node transport-ids frame index]
   (if (= index (count transport-ids))
     frame
-    (do (protocol-call protocol/ITransport send-transport node (nth transport-ids index) frame)
+    (do (protocol/send-transport node (nth transport-ids index) frame)
         (route-stream-loop node transport-ids frame (+ index 1)))))
 
 (defn reject-pending-loop [pending request-ids reason index]
@@ -57,14 +57,14 @@
           (reject-pending-loop pending request-ids reason (+ index 1))))))
 
 (defn router-add [node transport-id frame]
-  (let [key [(protocol-call protocol/IFrame frame-space frame) (field frame :signal)]]
+  (let [key [(protocol/frame-space frame) (field frame :signal)]]
     (section-put node :router key
                  (assoc (get (node-section node :router) key {}) transport-id
-                        {:id (protocol-call protocol/IFrame frame-id frame)
-                         :meta (protocol-call protocol/IFrame frame-meta frame)}))))
+                        {:id (protocol/frame-id frame)
+                         :meta (protocol/frame-meta frame)}))))
 
 (defn router-remove [node transport-id frame]
-  (let [key [(protocol-call protocol/IFrame frame-space frame) (field frame :signal)]]
+  (let [key [(protocol/frame-space frame) (field frame :signal)]]
     (section-put node :router key
                  (dissoc (get (node-section node :router) key {}) transport-id))))
 
@@ -83,19 +83,19 @@
       (section-put node :spaces space-id
                    {:id space-id :state (get opts :state {}) :meta (get opts :meta {})})))
   (ensure-space [node space-id opts]
-    (let [space (protocol-call protocol/ISpace get-space node space-id)]
-      (if space space (protocol-call protocol/ISpace create-space node space-id opts))))
+    (let [space (protocol/get-space node space-id)]
+      (if space space (protocol/create-space node space-id opts))))
   (remove-space [node space-id] (section-remove node :spaces (node-space-id space-id)))
   (list-spaces [node] (vec (keys (node-section node :spaces))))
   (get-space-state [node space-id]
-    (get (protocol-call protocol/ISpace ensure-space node space-id {}) :state))
+    (get (protocol/ensure-space node space-id {}) :state))
   (set-space-state [node space-id value]
-    (let [space (protocol-call protocol/ISpace ensure-space node space-id {})]
+    (let [space (protocol/ensure-space node space-id {})]
       (do (section-put node :spaces (node-space-id space-id) (assoc space :state value))
           value)))
   (update-space-state [node space-id updater]
-    (protocol-call protocol/ISpace set-space-state node space-id
-                   (updater (protocol-call protocol/ISpace get-space-state node space-id)))))
+    (protocol/set-space-state node space-id
+                   (updater (protocol/get-space-state node space-id)))))
 
 (extend-type std.lib.substrate/SubstrateNode protocol/IService
   (get-service [node service-id] (get (node-section node :services) service-id))
@@ -120,16 +120,16 @@
   (get-transport [node transport-id] (get (node-section node :transports) transport-id))
   (list-transports [node] (vec (keys (node-section node :transports))))
   (send-transport [node transport-id frame]
-    (let [transport (protocol-call protocol/ITransport get-transport node transport-id)]
+    (let [transport (protocol/get-transport node transport-id)]
       (if transport (transport frame) nil)))
   (receive-frame [node frame context]
-    (let [kind (protocol-call protocol/IFrame frame-kind frame)]
+    (let [kind (protocol/frame-kind frame)]
       (if (= kind :request)
-        (protocol-call protocol/IRequest receive-request node frame context)
+        (protocol/receive-request node frame context)
         (if (= kind :response)
-          (protocol-call protocol/IRequest receive-response node frame)
+          (protocol/receive-response node frame)
           (if (= kind :stream)
-            (protocol-call protocol/IStream receive-publish node frame context)
+            (protocol/receive-publish node frame context)
             (if (= kind :subscribe)
               (let [transport-id (get context :transport-id)]
                 (if transport-id (router-add node transport-id frame) frame))
@@ -146,15 +146,15 @@
           (if transport-id
             (promise/new
              (fn [resolve reject]
-               (do (section-put node :pending (protocol-call protocol/IFrame frame-id frame)
+               (do (section-put node :pending (protocol/frame-id frame)
                                 {:frame frame :resolve resolve :reject reject :transport-id transport-id})
-                   (protocol-call protocol/ITransport send-transport node transport-id frame))))
-            (protocol-call protocol/IRequest receive-request node frame {:local true}))))))
+                   (protocol/send-transport node transport-id frame))))
+            (protocol/receive-request node frame {:local true}))))))
   (receive-request [node frame context]
-    (let [entry (protocol-call protocol/IHandler get-handler node (field frame :action))]
+    (let [entry (protocol/get-handler node (field frame :action))]
       (if entry
         ((get entry :fn)
-         (protocol-call protocol/ISpace ensure-space node (protocol-call protocol/IFrame frame-space frame) {})
+         (protocol/ensure-space node (protocol/frame-space frame) {})
          (field frame :args)
          frame
          node)
@@ -185,15 +185,15 @@
     (let [stream-meta (node-meta meta)]
       (let [space-id (node-space-id space-id)]
       (let [frame (node-frame :stream (get stream-meta :id (node-id "evt-")) space-id stream-meta nil [] nil nil data nil signal (get stream-meta :cause))]
-      (do (protocol-call protocol/IStream receive-publish node frame {:local true})
+      (do (protocol/receive-publish node frame {:local true})
           (route-stream-loop node
-                             (protocol-call protocol/IStream list-subscriptions node space-id signal)
+                             (protocol/list-subscriptions node space-id signal)
                              frame
                              0)
           frame)))))
   (receive-publish [node frame context]
-    (let [entry (protocol-call protocol/IHandler get-trigger node (field frame :signal))]
-      (if entry ((get entry :fn) (protocol-call protocol/ISpace ensure-space node (protocol-call protocol/IFrame frame-space frame) {}) frame node) frame)))
+    (let [entry (protocol/get-trigger node (field frame :signal))]
+      (if entry ((get entry :fn) (protocol/ensure-space node (protocol/frame-space frame) {}) frame node) frame)))
   (subscribe [node space-id signal subscription-id meta]
     (node-frame :subscribe (if subscription-id subscription-id (node-id "sub-"))
                 (node-space-id space-id) (node-meta meta) nil [] nil nil nil nil signal nil))

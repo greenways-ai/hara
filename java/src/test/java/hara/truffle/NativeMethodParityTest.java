@@ -66,8 +66,8 @@ public class NativeMethodParityTest {
         String source = Files.readString(Path.of(type.wrapperSource));
         for (String method : type.halWrappers) {
           assertTrue(
-              "Missing HAL wrapper call std.native." + type.name + "/" + method,
-              source.contains("std.native." + type.name + "/" + method));
+              "Missing HAL wrapper call " + type.name + "/" + method,
+              source.contains(type.name + "/" + method));
         }
       }
     }
@@ -79,7 +79,7 @@ public class NativeMethodParityTest {
     StringBuilder source = new StringBuilder(Files.readString(FIXTURE)).append("\n[");
     for (NativeTypeSpec type : types.values()) {
       for (String method : type.methods) {
-        String symbol = "std.native." + type.name + "/" + method;
+        String symbol = type.name + "/" + method;
         source
             .append("(native-method-result '")
             .append(symbol)
@@ -101,10 +101,25 @@ public class NativeMethodParityTest {
           context
               .eval(
                   HaraLanguage.ID,
-                  "[(std.native.Error/message "
-                      + "(std.native.Error/new \"native failure\" {})) "
-                      + "(string? (std.native.Error/class "
-                      + "(std.native.Error/new \"native failure\" {})))]")
+                  "[(Error/message "
+                      + "(Error/new \"native failure\" {})) "
+                      + "(string? (Error/class "
+                      + "(Error/new \"native failure\" {})))]")
+              .toString());
+    }
+  }
+
+  @Test
+  public void nativeTypeObjectsAndAliasesAreUniversalIncludingBlankNamespaces() {
+    try (Context context = Context.newBuilder(HaraLanguage.ID).allowAllAccess(true).build()) {
+      assertEquals(
+          "[true 1]",
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(ns blank.native (:config {:blank true})) "
+                      + "[(= Iter std.native.Iter) "
+                      + " (Iter/iter-next (Iter/iter-map (fn [value] value) [1]))]")
               .toString());
     }
   }

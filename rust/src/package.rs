@@ -3,15 +3,20 @@
 //! Network reconciliation deliberately does not live here yet: package roots
 //! are only activated after a registry and identity client has verified them.
 
+use crate::kernel::{parse, parse_forms, Form};
 use crate::project::{self, Project};
 use crate::tap::{self, Tap};
-use crate::kernel::{parse, parse_forms, Form};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
+
+mod install;
+#[cfg(test)]
+use install::install_archive_at;
+use install::{install_archive, json_string, validate_recipe};
 
 /// Handles the public `hara package` command group.
 pub fn run(args: &[String]) -> Result<(), String> {
@@ -86,7 +91,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
 }
 
-fn read_project(path: &Path) -> Result<Project, String> { project::read(path) }
+fn read_project(path: &Path) -> Result<Project, String> {
+    project::read(path)
+}
 
 fn registry_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
@@ -97,20 +104,55 @@ fn registry_command(args: &[String]) -> Result<(), String> {
             println!("registry request verified: {}", request.display());
             Ok(())
         }
-        _ => Err("usage: hara package registry verify-request --request PATH --identity PATH".into()),
+        _ => {
+            Err("usage: hara package registry verify-request --request PATH --identity PATH".into())
+        }
     }
 }
 
 fn verify_registry_request(request: &Path, identity: &Path) -> Result<(), String> {
     let policy = fs::read_to_string(identity).map_err(io_error)?;
-    let Form::Map(policy) = parse(&policy)? else { return Err("identity policy must be an EDN map".into()); };
-    let trust = policy.iter().find(|(key, _)| matches!(key, Form::Keyword(name) if name == "identity/trust")).map(|(_, value)| value);
-    if !matches!(trust, Some(Form::Keyword(mode)) if mode == "github-governed") { return Err("registry bootstrap verifier requires :identity/trust :github-governed".into()); }
-    let intent_path = fs::read_dir(request).map_err(io_error)?.filter_map(Result::ok).map(|entry| entry.path()).find(|path| path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.ends_with(".publisher-intent.edn"))).ok_or("request is missing publisher intent")?;
+    let Form::Map(policy) = parse(&policy)? else {
+        return Err("identity policy must be an EDN map".into());
+    };
+    let trust = policy
+        .iter()
+        .find(|(key, _)| matches!(key, Form::Keyword(name) if name == "identity/trust"))
+        .map(|(_, value)| value);
+    if !matches!(trust, Some(Form::Keyword(mode)) if mode == "github-governed") {
+        return Err("registry bootstrap verifier requires :identity/trust :github-governed".into());
+    }
+    let intent_path = fs::read_dir(request)
+        .map_err(io_error)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".publisher-intent.edn"))
+        })
+        .ok_or("request is missing publisher intent")?;
     let intent = fs::read_to_string(&intent_path).map_err(io_error)?;
-    let Form::Map(entries) = parse(&intent)? else { return Err("publisher intent must be an EDN map".into()); };
-    for key in ["intent/format", "tap", "coordinate", "version", "repository", "tag", "commit", "archive-sha256", "identity-revision"] {
-        if !entries.iter().any(|(candidate, _)| matches!(candidate, Form::Keyword(name) if name == key)) { return Err(format!("publisher intent is missing :{key}")); }
+    let Form::Map(entries) = parse(&intent)? else {
+        return Err("publisher intent must be an EDN map".into());
+    };
+    for key in [
+        "intent/format",
+        "tap",
+        "coordinate",
+        "version",
+        "repository",
+        "tag",
+        "commit",
+        "archive-sha256",
+        "identity-revision",
+    ] {
+        if !entries
+            .iter()
+            .any(|(candidate, _)| matches!(candidate, Form::Keyword(name) if name == key))
+        {
+            return Err(format!("publisher intent is missing :{key}"));
+        }
     }
     Ok(())
 }
@@ -119,28 +161,55 @@ fn tap_command(args: &[String]) -> Result<(), String> {
     let root = tap::config_root();
     match args.first().map(String::as_str) {
         Some("add") => {
-            let name = args.get(1).ok_or_else(|| "tap add requires NAME".to_owned())?;
+            let name = args
+                .get(1)
+                .ok_or_else(|| "tap add requires NAME".to_owned())?;
             let registry = option_values(args, "--registry");
             let identity = option_values(args, "--identity");
             let identity_key = option_value(args, "--identity-key")?;
-            tap::add(&root, Tap { name: name.clone(), registry, identity, identity_key, trust: tap::TrustMode::SignedRoot })?;
+            tap::add(
+                &root,
+                Tap {
+                    name: name.clone(),
+                    registry,
+                    identity,
+                    identity_key,
+                    trust: tap::TrustMode::SignedRoot,
+                },
+            )?;
             println!("trusted tap {name}");
             Ok(())
         }
         Some("bootstrap") => {
-            let profile = args.get(1).ok_or_else(|| "tap bootstrap requires PROFILE".to_owned())?;
+            let profile = args
+                .get(1)
+                .ok_or_else(|| "tap bootstrap requires PROFILE".to_owned())?;
             let tap = tap::bootstrap(&root, profile)?;
             println!("bootstrapped tap {} (GitHub-governed)", tap.name);
             Ok(())
         }
         Some("mirror") if args.get(1).map(String::as_str) == Some("add") => {
-            let name = args.get(2).ok_or_else(|| "tap mirror add requires NAME".to_owned())?;
-            let tap = tap::add_mirror(&root, name, optional_option(args, "--registry"), optional_option(args, "--identity"))?;
-            println!("updated tap {} registry={} identity={}", tap.name, tap.registry.join(","), tap.identity.join(","));
+            let name = args
+                .get(2)
+                .ok_or_else(|| "tap mirror add requires NAME".to_owned())?;
+            let tap = tap::add_mirror(
+                &root,
+                name,
+                optional_option(args, "--registry"),
+                optional_option(args, "--identity"),
+            )?;
+            println!(
+                "updated tap {} registry={} identity={}",
+                tap.name,
+                tap.registry.join(","),
+                tap.identity.join(",")
+            );
             Ok(())
         }
         Some("init") => {
-            let name = args.get(1).ok_or_else(|| "tap init requires NAME".to_owned())?;
+            let name = args
+                .get(1)
+                .ok_or_else(|| "tap init requires NAME".to_owned())?;
             let registry = PathBuf::from(required_option(args, "--registry")?);
             let identity = PathBuf::from(required_option(args, "--identity")?);
             let root_key = required_option(args, "--identity-root-key")?;
@@ -153,17 +222,28 @@ fn tap_command(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         Some("remove") => {
-            let name = args.get(1).ok_or_else(|| "tap remove requires NAME".to_owned())?;
+            let name = args
+                .get(1)
+                .ok_or_else(|| "tap remove requires NAME".to_owned())?;
             tap::remove(&root, name)?;
             println!("removed tap {name}");
             Ok(())
         }
         Some("list") => {
-            for tap in tap::load(&root)?.values() { println!("{} registry={} identity={}", tap.name, tap.registry.join(","), tap.identity.join(",")); }
+            for tap in tap::load(&root)?.values() {
+                println!(
+                    "{} registry={} identity={}",
+                    tap.name,
+                    tap.registry.join(","),
+                    tap.identity.join(",")
+                );
+            }
             Ok(())
         }
         Some("verify") => {
-            let name = args.get(1).ok_or_else(|| "tap verify requires NAME".to_owned())?;
+            let name = args
+                .get(1)
+                .ok_or_else(|| "tap verify requires NAME".to_owned())?;
             let tap = tap::trusted(&root, name)?;
             let scratch = scratch("verify")?;
             let result = tap::fetch_verified_policy(&tap, &scratch);
@@ -172,18 +252,30 @@ fn tap_command(args: &[String]) -> Result<(), String> {
             println!("tap verify: {} identity={}", tap.name, policy.revision);
             Ok(())
         }
-        _ => Err("usage: hara package tap <bootstrap|init|add|mirror add|remove|list|verify>".into()),
+        _ => {
+            Err("usage: hara package tap <bootstrap|init|add|mirror add|remove|list|verify>".into())
+        }
     }
 }
 
 fn publish(args: &[String]) -> Result<(), String> {
     let tap_name = optional_option(args, "--tap").unwrap_or_else(|| "official".into());
     let dry_run = args.iter().any(|arg| arg == "--dry-run");
-    let path = args.iter().skip(1).find(|arg| !arg.starts_with('-') && *arg != &tap_name).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let path = args
+        .iter()
+        .skip(1)
+        .find(|arg| !arg.starts_with('-') && *arg != &tap_name)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
     let project = read_project(&path)?;
     let coordinate = project::normalize_coordinate(&project.id)?;
     let (coordinate_tap, _) = split_coordinate(&coordinate)?;
-    if coordinate_tap != tap_name { return Err(format!("project id {} belongs to tap {coordinate_tap}, not {tap_name}", project.id)); }
+    if coordinate_tap != tap_name {
+        return Err(format!(
+            "project id {} belongs to tap {coordinate_tap}, not {tap_name}",
+            project.id
+        ));
+    }
     let trusted_tap = tap::trusted_or_builtin(&tap::config_root(), &tap_name)?;
     let scratch = scratch("publish")?;
     let result = publish_inner(&project, &trusted_tap, dry_run, &scratch);
@@ -191,102 +283,126 @@ fn publish(args: &[String]) -> Result<(), String> {
     result
 }
 
-fn publish_inner(project: &Project, trusted_tap: &Tap, dry_run: bool, scratch_root: &Path) -> Result<(), String> {
+fn publish_inner(
+    project: &Project,
+    trusted_tap: &Tap,
+    dry_run: bool,
+    scratch_root: &Path,
+) -> Result<(), String> {
     let policy = tap::fetch_verified_policy(trusted_tap, scratch_root)?;
     let tag = format!("v{}", project.version);
-    tap::git(&project.root, ["tag", "-v", &tag]).map_err(|error| format!("publish requires a valid signed tag {tag}: {error}"))?;
+    tap::git(&project.root, ["tag", "-v", &tag])
+        .map_err(|error| format!("publish requires a valid signed tag {tag}: {error}"))?;
     let commit = tap::git(&project.root, ["rev-list", "-n", "1", &tag])?;
     let repository = tap::git(&project.root, ["config", "--get", "remote.origin.url"])?;
     let recipe = validate_recipe(project)?;
     let recipe_sha256 = file_sha256(&recipe)?;
     let coordinate = project::normalize_coordinate(&project.id)?;
-    let intent = tap::canonical_recipe_intent(&coordinate, &project.version.to_string(), &repository, &tag, &commit, &recipe_sha256, &trusted_tap.name, &policy.revision);
+    let intent = tap::canonical_recipe_intent(
+        &coordinate,
+        &project.version.to_string(),
+        &repository,
+        &tag,
+        &commit,
+        &recipe_sha256,
+        &trusted_tap.name,
+        &policy.revision,
+    );
     let (key_id, signature) = tap::sign(intent.as_bytes())?;
     tap::authorize(&policy, &key_id, &coordinate, intent.as_bytes(), &signature)?;
     if dry_run {
-        println!("publish recipe verified: {} {} tap={} recipe=sha256:{}", coordinate, project.version, trusted_tap.name, recipe_sha256);
+        println!(
+            "publish recipe verified: {} {} tap={} recipe=sha256:{}",
+            coordinate, project.version, trusted_tap.name, recipe_sha256
+        );
         return Ok(());
     }
-    let endpoint = trusted_tap.registry.first().ok_or("official tap has no publication endpoint")?;
-    let body = format!("{{\"intent\":{},\"key_id\":\"{}\",\"signature\":\"{}\"}}", json_string(&intent), key_id, signature);
-    let output = std::process::Command::new("curl").args(["--fail-with-body", "--silent", "--show-error", "-H", "content-type: application/json", "--data-binary", &body, &format!("{}/v1/publications", endpoint.trim_end_matches('/'))]).output().map_err(|error| format!("cannot start publication client: {error}"))?;
-    if !output.status.success() { return Err(format!("publication request failed: {}", String::from_utf8_lossy(&output.stderr).trim())); }
-    println!("publish requested: {}", String::from_utf8_lossy(&output.stdout).trim());
+    let endpoint = trusted_tap
+        .registry
+        .first()
+        .ok_or("official tap has no publication endpoint")?;
+    let body = format!(
+        "{{\"intent\":{},\"key_id\":\"{}\",\"signature\":\"{}\"}}",
+        json_string(&intent),
+        key_id,
+        signature
+    );
+    let output = std::process::Command::new("curl")
+        .args([
+            "--fail-with-body",
+            "--silent",
+            "--show-error",
+            "-H",
+            "content-type: application/json",
+            "--data-binary",
+            &body,
+            &format!("{}/v1/publications", endpoint.trim_end_matches('/')),
+        ])
+        .output()
+        .map_err(|error| format!("cannot start publication client: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "publication request failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    println!(
+        "publish requested: {}",
+        String::from_utf8_lossy(&output.stdout).trim()
+    );
     Ok(())
 }
 
-fn validate_recipe(project: &Project) -> Result<PathBuf, String> {
-    let relative = project.recipe.as_ref().ok_or("publication requires :project/recipe")?;
-    let path = project.root.join(relative);
-    let source = fs::read_to_string(&path).map_err(io_error)?;
-    let Form::Map(entries) = parse(&source)? else { return Err("hara.recipe.edn must be an EDN map".into()); };
-    for key in ["recipe/format", "recipe/adapter", "recipe/toolchain", "recipe/inputs", "recipe/outputs"] {
-        if !entries.iter().any(|(candidate, _)| matches!(candidate, Form::Keyword(name) if name == key)) { return Err(format!("hara.recipe.edn is missing :{key}")); }
+fn option_value(args: &[String], flag: &str) -> Result<String, String> {
+    let index = args
+        .iter()
+        .position(|arg| arg == flag)
+        .ok_or_else(|| format!("publish requires {flag}"))?;
+    args.get(index + 1)
+        .cloned()
+        .ok_or_else(|| format!("{flag} requires a value"))
+}
+fn required_option(args: &[String], flag: &str) -> Result<String, String> {
+    let index = args
+        .iter()
+        .position(|arg| arg == flag)
+        .ok_or_else(|| format!("tap init requires {flag}"))?;
+    args.get(index + 1)
+        .cloned()
+        .ok_or_else(|| format!("{flag} requires a value"))
+}
+fn option_values(args: &[String], flag: &str) -> Vec<String> {
+    args.iter()
+        .enumerate()
+        .filter(|(_, value)| value.as_str() == flag)
+        .filter_map(|(index, _)| args.get(index + 1).cloned())
+        .collect()
+}
+fn optional_option(args: &[String], flag: &str) -> Option<String> {
+    args.iter()
+        .position(|arg| arg == flag)
+        .and_then(|index| args.get(index + 1).cloned())
+}
+fn split_coordinate(value: &str) -> Result<(&str, &str), String> {
+    let (tap, package) = value
+        .split_once(':')
+        .ok_or_else(|| format!("package coordinate must use TAP:owner/name: {value}"))?;
+    if tap.is_empty() || package.is_empty() || package.contains(':') {
+        return Err(format!("invalid tap-qualified package coordinate: {value}"));
     }
-    let adapter = entries.iter().find(|(candidate, _)| matches!(candidate, Form::Keyword(name) if name == "recipe/adapter")).map(|(_, value)| value);
-    if !matches!(adapter, Some(Form::Keyword(name)) if matches!(name.as_str(), "rust-wasm" | "node-hta" | "hal")) {
-        return Err("hara.recipe.edn :recipe/adapter must be :rust-wasm, :node-hta, or :hal".into());
+    Ok((tap, package))
+}
+fn scratch(label: &str) -> Result<PathBuf, String> {
+    let root = std::env::temp_dir().join(format!("hara-{label}-{}", std::process::id()));
+    if root.exists() {
+        fs::remove_dir_all(&root).map_err(io_error)?;
     }
-    if source.contains(":command") || source.contains(":script") || source.contains(":shell") {
-        return Err("official recipes cannot declare commands, scripts, or shell fragments".into());
-    }
-    Ok(path)
+    fs::create_dir_all(&root).map_err(io_error)?;
+    Ok(root)
 }
-
-fn dist_root() -> PathBuf {
-    if let Some(root) = std::env::var_os("HARA_DIST_HOME") { return PathBuf::from(root); }
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(".")).join(".hara/dist")
+fn file_sha256(path: &Path) -> Result<String, String> {
+    Ok(hex(&Sha256::digest(fs::read(path).map_err(io_error)?)))
 }
-
-fn install_archive(archive: &Path) -> Result<PathBuf, String> {
-    install_archive_at(archive, &dist_root())
-}
-
-fn install_archive_at(archive: &Path, root: &Path) -> Result<PathBuf, String> {
-    let digest = file_sha256(archive)?;
-    let archive_target = root.join("archives/sha256").join(format!("{digest}.harp"));
-    let package_root = root.join("roots/sha256").join(&digest);
-    fs::create_dir_all(archive_target.parent().unwrap()).map_err(io_error)?;
-    fs::create_dir_all(package_root.parent().unwrap()).map_err(io_error)?;
-    if !archive_target.exists() { fs::copy(archive, &archive_target).map_err(io_error)?; }
-    if !package_root.exists() {
-        let scratch = root.join("roots/sha256").join(format!(".{digest}.tmp-{}", std::process::id()));
-        if scratch.exists() { fs::remove_dir_all(&scratch).map_err(io_error)?; }
-        fs::create_dir_all(&scratch).map_err(io_error)?;
-        let mut zip = ZipArchive::new(File::open(&archive_target).map_err(io_error)?).map_err(zip_error)?;
-        for index in 0..zip.len() {
-            let mut entry = zip.by_index(index).map_err(zip_error)?;
-            let relative = entry.enclosed_name().ok_or("archive contains an unsafe path")?.to_path_buf();
-            validate_relative_path(&relative)?;
-            if entry.is_dir() { fs::create_dir_all(scratch.join(relative)).map_err(io_error)?; continue; }
-            let output = scratch.join(relative);
-            if let Some(parent) = output.parent() { fs::create_dir_all(parent).map_err(io_error)?; }
-            let mut file = File::create(output).map_err(io_error)?;
-            std::io::copy(&mut entry, &mut file).map_err(io_error)?;
-        }
-        fs::rename(&scratch, &package_root).map_err(io_error)?;
-    }
-    let project = read_project(&package_root)?;
-    let coordinate = project::normalize_coordinate(&project.id)?;
-    let (_, package) = split_coordinate(&coordinate)?;
-    let mut parts = package.split('/');
-    let registration = root.join("packages/official").join(parts.next().unwrap()).join(parts.next().unwrap()).join(format!("{}.edn", project.version));
-    fs::create_dir_all(registration.parent().unwrap()).map_err(io_error)?;
-    fs::write(&registration, format!("{{:coordinate \"{}\" :version \"{}\" :archive-sha256 \"sha256:{}\" :root \"{}\"}}\n", coordinate, project.version, digest, package_root.display())).map_err(io_error)?;
-    Ok(package_root)
-}
-
-fn json_string(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n"))
-}
-
-fn option_value(args: &[String], flag: &str) -> Result<String, String> { let index = args.iter().position(|arg| arg == flag).ok_or_else(|| format!("publish requires {flag}"))?; args.get(index + 1).cloned().ok_or_else(|| format!("{flag} requires a value")) }
-fn required_option(args: &[String], flag: &str) -> Result<String, String> { let index = args.iter().position(|arg| arg == flag).ok_or_else(|| format!("tap init requires {flag}"))?; args.get(index + 1).cloned().ok_or_else(|| format!("{flag} requires a value")) }
-fn option_values(args: &[String], flag: &str) -> Vec<String> { args.iter().enumerate().filter(|(_, value)| value.as_str() == flag).filter_map(|(index, _)| args.get(index + 1).cloned()).collect() }
-fn optional_option(args: &[String], flag: &str) -> Option<String> { args.iter().position(|arg| arg == flag).and_then(|index| args.get(index + 1).cloned()) }
-fn split_coordinate(value: &str) -> Result<(&str, &str), String> { let (tap, package) = value.split_once(':').ok_or_else(|| format!("package coordinate must use TAP:owner/name: {value}"))?; if tap.is_empty() || package.is_empty() || package.contains(':') { return Err(format!("invalid tap-qualified package coordinate: {value}")); } Ok((tap, package)) }
-fn scratch(label: &str) -> Result<PathBuf, String> { let root = std::env::temp_dir().join(format!("hara-{label}-{}", std::process::id())); if root.exists() { fs::remove_dir_all(&root).map_err(io_error)?; } fs::create_dir_all(&root).map_err(io_error)?; Ok(root) }
-fn file_sha256(path: &Path) -> Result<String, String> { Ok(hex(&Sha256::digest(fs::read(path).map_err(io_error)?))) }
 
 fn build_archive(project: &Project, output: &Path) -> Result<(), String> {
     let mut entries = Vec::new();
@@ -301,12 +417,17 @@ fn build_archive(project: &Project, output: &Path) -> Result<(), String> {
     // A release archive must be self-describing.  These entries intentionally
     // stay at its root even when :project/archive-root relocates artifacts.
     entries.push(PathBuf::from("project.edn"));
-    if let Some(recipe) = &project.recipe { entries.push(recipe.clone()); }
+    if let Some(recipe) = &project.recipe {
+        entries.push(recipe.clone());
+    }
     let lock = project.root.join("project.lock.edn");
     if lock.is_file() {
         entries.push(PathBuf::from("project.lock.edn"));
     } else if !project.dependencies.is_empty() {
-        return Err("package build requires project.lock.edn when :project/dependencies is non-empty".into());
+        return Err(
+            "package build requires project.lock.edn when :project/dependencies is non-empty"
+                .into(),
+        );
     }
     if project.package_workspace {
         let workspace = project.root.join("workspace.edn");
@@ -317,15 +438,18 @@ fn build_archive(project: &Project, output: &Path) -> Result<(), String> {
     }
     let mut archive_entries = Vec::new();
     for source in entries {
-        let archive = if matches!(source.as_path(), path if path == Path::new("project.edn") || path == Path::new("project.lock.edn") || path == Path::new("workspace.edn")) {
+        let archive = if matches!(source.as_path(), path if path == Path::new("project.edn") || path == Path::new("project.lock.edn") || path == Path::new("workspace.edn"))
+        {
             source.clone()
-        } else { match &project.archive_root {
-            Some(root) => source
-                .strip_prefix(root)
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| source.clone()),
-            None => source.clone(),
-        }};
+        } else {
+            match &project.archive_root {
+                Some(root) => source
+                    .strip_prefix(root)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| source.clone()),
+                None => source.clone(),
+            }
+        };
         validate_relative_path(&archive)?;
         if archive.as_os_str().is_empty() {
             return Err("package archive path must name a file".into());
@@ -434,9 +558,7 @@ fn package_manifest(project: &Project, contents: &[(PathBuf, Vec<u8>)]) -> Resul
     extensions.sort();
     let resources = resources
         .iter()
-        .map(|(namespace, path)| {
-            format!("  {} {}\n", edn_string(namespace), edn_string(path))
-        })
+        .map(|(namespace, path)| format!("  {} {}\n", edn_string(namespace), edn_string(path)))
         .collect::<String>();
     let extensions = extensions
         .iter()
@@ -539,7 +661,6 @@ fn archive_name(id: &str) -> String {
     id.replace('/', "-")
 }
 
-
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -551,150 +672,4 @@ fn zip_error(error: zip::result::ZipError) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
-
-    fn fixture() -> PathBuf {
-        let root = std::env::temp_dir().join(format!(
-            "hara-package-{}-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-            NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(root.join("src/example")).unwrap();
-        fs::write(root.join("src/example/main.hal"), "(ns example.main) 42\n").unwrap();
-        fs::write(root.join("project.edn"), "{:hara/type :project :hara/version \"1.0.0\" :project/id example/app :project/version \"1.2.3\" :project/source-paths [\"src\"] :project/test-paths [\"test\"] :project/extension-paths [\"extensions\"] :project/capabilities #{} :project/dependencies {\"hara:hara/graph\" {:version \"^1.2.0\"}}}").unwrap();
-        fs::write(root.join("project.lock.edn"), "{:lock/format 1 :packages {}}\n").unwrap();
-        root
-    }
-
-    #[test]
-    fn validates_and_builds_deterministic_archive() {
-        let root = fixture();
-        let project = read_project(&root).unwrap();
-        let first = root.join("one.harp");
-        let second = root.join("two.harp");
-        build_archive(&project, &first).unwrap();
-        build_archive(&project, &second).unwrap();
-        assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap());
-        let manifest = inspect_archive(&first).unwrap();
-        assert!(manifest.contains(":harp/format 1"));
-        assert!(manifest.contains("\"example.main\" \"src/example/main.hal\""));
-        let file = File::open(&first).unwrap();
-        let mut zip = ZipArchive::new(file).unwrap();
-        assert!(zip.by_name("project.edn").is_ok());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn rejects_missing_project_keys_and_bad_ranges() {
-        let root = fixture();
-        fs::write(root.join("project.edn"), "{:hara/type :project}").unwrap();
-        assert!(read_project(&root).unwrap_err().contains(":hara/version"));
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn packages_declared_artifacts_under_the_archive_root() {
-        let root = fixture();
-        fs::create_dir_all(root.join("target/package/ledger/noir/assets")).unwrap();
-        fs::write(
-            root.join("target/package/ledger/noir/hara.extension.edn"),
-            "{:namespace \"ledger.noir\"}\n",
-        )
-        .unwrap();
-        fs::write(
-            root.join("target/package/ledger/noir/assets/worker.mjs"),
-            "export {};\n",
-        )
-        .unwrap();
-        fs::write(
-            root.join("project.edn"),
-            "{:hara/type :project :hara/version \"1.0.0\" :project/id hara/ledger-noir :project/version \"0.1.0\" :project/source-paths [] :project/test-paths [\"test\"] :project/extension-paths [\"target/package\"] :project/capabilities #{} :project/artifact-paths [\"target/package\"] :project/archive-root \"target/package\"}",
-        )
-        .unwrap();
-        let project = read_project(&root).unwrap();
-        let archive = root.join("ledger-noir.harp");
-        build_archive(&project, &archive).unwrap();
-        let file = File::open(&archive).unwrap();
-        let mut zip = ZipArchive::new(file).unwrap();
-        assert!(zip.by_name("ledger/noir/hara.extension.edn").is_ok());
-        assert!(zip.by_name("ledger/noir/assets/worker.mjs").is_ok());
-        assert!(zip
-            .by_name("target/package/ledger/noir/hara.extension.edn")
-            .is_err());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn rejects_missing_declared_artifacts() {
-        let root = fixture();
-        fs::write(
-            root.join("project.edn"),
-            "{:hara/type :project :hara/version \"1.0.0\" :project/id example/app :project/version \"1.2.3\" :project/source-paths [] :project/test-paths [\"test\"] :project/extension-paths [\"extensions\"] :project/capabilities #{} :project/artifact-paths [\"target/package\"]}",
-        )
-        .unwrap();
-        let project = read_project(&root).unwrap();
-        assert!(build_archive(&project, &root.join("missing.harp"))
-            .unwrap_err()
-            .contains("does not exist"));
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn packages_lock_and_explicit_portable_workspace_only() {
-        let root = fixture();
-        fs::write(root.join("project.lock.edn"), "{:lock/format 1 :packages {}}\n").unwrap();
-        fs::write(root.join("workspace.edn"), "{:hara/type :workspace :hara/version \"1.0.0\"}\n").unwrap();
-        let undeclared = root.join("undeclared-workspace.harp");
-        build_archive(&read_project(&root).unwrap(), &undeclared).unwrap();
-        let file = File::open(&undeclared).unwrap();
-        let mut zip = ZipArchive::new(file).unwrap();
-        assert!(zip.by_name("workspace.edn").is_err());
-        fs::write(
-            root.join("project.edn"),
-            "{:hara/type :project :hara/version \"1.0.0\" :project/id example/app :project/version \"1.2.3\" :project/source-paths [\"src\"] :project/test-paths [\"test\"] :project/extension-paths [\"extensions\"] :project/capabilities #{} :project/dependencies {\"hara:hara/graph\" {:version \"^1.2.0\"}} :project/package {:workspace true}}",
-        )
-        .unwrap();
-        let archive = root.join("workspace.harp");
-        build_archive(&read_project(&root).unwrap(), &archive).unwrap();
-        let file = File::open(&archive).unwrap();
-        let mut zip = ZipArchive::new(file).unwrap();
-        assert!(zip.by_name("project.lock.edn").is_ok());
-        assert!(zip.by_name("workspace.edn").is_ok());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn validates_typed_recipes_and_installs_content_addressed_roots() {
-        let root = fixture();
-        fs::write(root.join("hara.recipe.edn"), "{:recipe/format 1 :recipe/adapter :hal :recipe/toolchain {} :recipe/inputs {} :recipe/outputs []}\n").unwrap();
-        let source = fs::read_to_string(root.join("project.edn")).unwrap();
-        fs::write(root.join("project.edn"), source.trim().strip_suffix('}').unwrap().to_owned() + " :project/recipe \"hara.recipe.edn\"}\n").unwrap();
-        let project = read_project(&root).unwrap();
-        assert_eq!(validate_recipe(&project).unwrap(), root.join("hara.recipe.edn"));
-        let archive = root.join("package.harp");
-        build_archive(&project, &archive).unwrap();
-        let dist = root.join("dist");
-        let installed = install_archive_at(&archive, &dist).unwrap();
-        assert!(installed.join("hara.recipe.edn").is_file());
-        assert!(dist.join("packages/official/example/app/1.2.3.edn").is_file());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn rejects_shell_recipe_escape_hatches() {
-        let root = fixture();
-        fs::write(root.join("hara.recipe.edn"), "{:recipe/format 1 :recipe/adapter :hal :recipe/toolchain {} :recipe/inputs {:command [\"sh\"]} :recipe/outputs []}\n").unwrap();
-        let source = fs::read_to_string(root.join("project.edn")).unwrap();
-        fs::write(root.join("project.edn"), source.trim().strip_suffix('}').unwrap().to_owned() + " :project/recipe \"hara.recipe.edn\"}\n").unwrap();
-        assert!(validate_recipe(&read_project(&root).unwrap()).unwrap_err().contains("cannot declare commands"));
-        fs::remove_dir_all(root).unwrap();
-    }
-}
+mod tests;

@@ -261,7 +261,7 @@ public class HaraModuleConformanceTest {
             context
                 .eval(
                     HaraLanguage.ID,
-                    "(pr-str (resolve 'std.native.Host/shadow-loaded))")
+                    "(pr-str (resolve 'Host/shadow-loaded))")
                 .asString());
       }
     } finally {
@@ -327,7 +327,7 @@ public class HaraModuleConformanceTest {
             "(var answer)",
             "(atom 1)",
             "(iter [1 2 3])",
-            "(std.native.Host/call \"missing\" \"missing\" [])"
+            "(Host/call \"missing\" \"missing\" [])"
           }) {
         IllegalArgumentException error =
             assertThrows(IllegalArgumentException.class, () -> session.evalTransfer(source));

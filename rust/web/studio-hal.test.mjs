@@ -328,8 +328,8 @@ test("Studio kernels load the atom-backed std.lib.substrate node", { skip: wasmB
       "(require [std.lib.substrate :as substrate]) " +
       "(require [std.lib.substrate.protocol :as protocol]) " +
       '(def node (substrate/node-create "node/studio")) ' +
-      '(protocol-call protocol/IService set-service node "answer" 42) ' +
-      '(protocol-call protocol/IService get-service node "answer"))'
+      '(protocol/set-service node "answer" 42) ' +
+      '(protocol/get-service node "answer"))'
   );
   assert.equal(value, 42);
 });

@@ -114,27 +114,27 @@ public class HaraLanguageTest {
       assertEquals(
           1,
           context
-              .eval(HaraLanguage.ID, "(iter-next (take-while (fn [x] (< x 3)) [1 2 3]))")
+              .eval(HaraLanguage.ID, "(first (take-while (fn [x] (< x 3)) [1 2 3]))")
               .asLong());
       assertEquals(
           3,
           context
-              .eval(HaraLanguage.ID, "(iter-next (drop-while (fn [x] (< x 3)) [1 2 3]))")
+              .eval(HaraLanguage.ID, "(first (drop-while (fn [x] (< x 3)) [1 2 3]))")
               .asLong());
       assertEquals(
           2,
-          context.eval(HaraLanguage.ID, "(nth (iter-next (partition-all 2 [1 2 3])) 1)").asLong());
+          context.eval(HaraLanguage.ID, "(nth (first (partition-all 2 [1 2 3])) 1)").asLong());
       assertEquals(
-          2, context.eval(HaraLanguage.ID, "(nth (iter-next (partition 2 [1 2 3])) 1)").asLong());
-      assertEquals(1, context.eval(HaraLanguage.ID, "(iter-next (interpose 0 [1 2]))").asLong());
+          2, context.eval(HaraLanguage.ID, "(nth (first (partition 2 [1 2 3])) 1)").asLong());
+      assertEquals(1, context.eval(HaraLanguage.ID, "(first (interpose 0 [1 2]))").asLong());
       assertTrue(
           context
               .eval(
                   HaraLanguage.ID,
-                  "(let [it (interpose 0 [1 2])] (iter-next it) (iter-next it) (iter-next it) (not (iter-has? it)))")
+                  "(= (interpose 0 [1 2]) [1 0 2])")
               .asBoolean());
       assertEquals(
-          1, context.eval(HaraLanguage.ID, "(iter-next (interleave [1 2] [3 4]))").asLong());
+          1, context.eval(HaraLanguage.ID, "(first (interleave [1 2] [3 4]))").asLong());
       assertEquals(
           3,
           context
@@ -146,20 +146,20 @@ public class HaraLanguageTest {
       assertEquals(4, context.eval(HaraLanguage.ID, "(first (map + [1 2] [3 4]))").asLong());
       assertEquals(
           2,
-          context.eval(HaraLanguage.ID, "(iter-next (filter (fn [x] (= x 2)) [1 2 3]))").asLong());
+          context.eval(HaraLanguage.ID, "(first (filter (fn [x] (= x 2)) [1 2 3]))").asLong());
       assertEquals(
-          2, context.eval(HaraLanguage.ID, "(iter-next (take 1 (drop 1 [1 2])))").asLong());
+          2, context.eval(HaraLanguage.ID, "(first (take 1 (drop 1 [1 2])))").asLong());
       assertEquals(
-          2, context.eval(HaraLanguage.ID, "(iter-next (mapcat (fn [x] [x x]) [2]))").asLong());
+          2, context.eval(HaraLanguage.ID, "(first (mapcat (fn [x] [x x]) [2]))").asLong());
       assertEquals(
           2,
           context
-              .eval(HaraLanguage.ID, "(iter-next (keep (fn [x] (if (= x 2) x nil)) [1 2]))")
+              .eval(HaraLanguage.ID, "(first (keep (fn [x] (if (= x 2) x nil)) [1 2]))")
               .asLong());
       assertEquals(1, context.eval(HaraLanguage.ID, "(iter-next (cycle [1 2]))").asLong());
-      assertEquals(2, context.eval(HaraLanguage.ID, "(nth (iter-next (zip [1] [2])) 1)").asLong());
+      assertEquals(2, context.eval(HaraLanguage.ID, "(nth (first (zip [1] [2])) 1)").asLong());
       assertEquals(
-          2, context.eval(HaraLanguage.ID, "(nth (iter-next (partition-pair [1 2])) 1)").asLong());
+          2, context.eval(HaraLanguage.ID, "(nth (first (partition-pair [1 2])) 1)").asLong());
       assertTrue(context.eval(HaraLanguage.ID, "(every? (fn [x] (> x 0)) [1 2])").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(any? (fn [x] (= x 2)) [1 2])").asBoolean());
       assertEquals(6, context.eval(HaraLanguage.ID, "(reduce + [1 2 3])").asLong());
@@ -315,7 +315,7 @@ public class HaraLanguageTest {
           context
               .eval(
                   HaraLanguage.ID,
-                  "(protocol-call ILookup lookup (protocol-call IObjType meta (var private-answer)) :private)")
+                  "(ILookup/lookup (IObjType/meta (var private-answer)) :private)")
               .asBoolean());
     }
   }
@@ -443,13 +443,13 @@ public class HaraLanguageTest {
       assertEquals(2, bytes.getArrayElement(1).asLong());
       assertEquals(-3, bytes.getArrayElement(2).asLong());
       assertEquals(
-          3, context.eval(HaraLanguage.ID, "(protocol-call ICount count (bytes 1 2 -3))").asLong());
+          3, context.eval(HaraLanguage.ID, "(ICount/count (bytes 1 2 -3))").asLong());
       assertEquals(
-          2, context.eval(HaraLanguage.ID, "(protocol-call INth nth (bytes 1 2 -3) 1)").asLong());
+          2, context.eval(HaraLanguage.ID, "(INth/nth (bytes 1 2 -3) 1)").asLong());
       assertEquals(
           7,
           context
-              .eval(HaraLanguage.ID, "(protocol-call ILookup lookup (bytes 1 2 -3) 8 7)")
+              .eval(HaraLanguage.ID, "(ILookup/lookup (bytes 1 2 -3) 8 7)")
               .asLong());
       bytes.setArrayElement(0, 9);
       assertEquals(9, bytes.getArrayElement(0).asLong());
@@ -1155,9 +1155,9 @@ public class HaraLanguageTest {
           context.eval(
               HaraLanguage.ID,
               "(defstruct Person [name]) "
-                  + "(protocol-call ILookup lookup "
-                  + "  (protocol-call IObjType meta "
-                  + "    (protocol-call IObjType with-meta (Person \"Ada\") {:doc \"person\"})) "
+                  + "(ILookup/lookup "
+                  + "  (IObjType/meta "
+                  + "    (IObjType/with-meta (Person \"Ada\") {:doc \"person\"})) "
                   + "  :doc)");
       assertEquals("person", result.asString());
     }
@@ -1176,7 +1176,7 @@ public class HaraLanguageTest {
                       + "(extend-type Counter CounterOps "
                       + "  (value [self] (field self :base)) "
                       + "  (add [self amount] (+ (field self :base) amount))) "
-                      + "(protocol-call CounterOps add (Counter 41) 2)")
+                      + "(add (Counter 41) 2)")
               .asLong());
 
       assertEquals(
@@ -1202,9 +1202,9 @@ public class HaraLanguageTest {
               .contains("user/PredicateProtocol"));
       assertTrue(
           context
-              .eval(HaraLanguage.ID, "user/PredicateProtocol/ready?")
+              .eval(HaraLanguage.ID, "user/ready?")
               .toString()
-              .contains("user/PredicateProtocol/ready?"));
+              .contains("user/ready?"));
       PolyglotException error =
           assertThrows(
               PolyglotException.class,
@@ -1212,6 +1212,47 @@ public class HaraLanguageTest {
                   context.eval(
                       HaraLanguage.ID, "(defprotocol MutatingProtocol (mutate! [self]))"));
       assertTrue(error.getMessage().contains("protocol method names must not end with !"));
+    }
+  }
+
+  @Test
+  public void guestProtocolMethodsAreDirectReloadableAndCollisionSafe() {
+    try (Context context = context()) {
+      assertEquals(
+          "[41 42]",
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(defstruct Box [value]) "
+                      + "(defprotocol BoxOps (read [self])) "
+                      + "(extend-type Box BoxOps (read [self] (field self :value))) "
+                      + "[(read (Box 41)) (user/read (Box 42))]")
+              .toString());
+
+      assertTrue(
+          context
+              .eval(HaraLanguage.ID, "(defprotocol BoxOps (read [self]))")
+              .toString()
+              .contains("user/BoxOps"));
+
+      PolyglotException collision =
+          assertThrows(
+              PolyglotException.class,
+              () ->
+                  context.eval(
+                      HaraLanguage.ID,
+                      "(def ordinary 1) (defprotocol Broken (fresh [self]) (ordinary [self]))"));
+      assertTrue(collision.getMessage().contains("Protocol method Var already exists"));
+      assertEquals("1", context.eval(HaraLanguage.ID, "ordinary").toString());
+      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "fresh"));
+      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "Broken"));
+
+      assertThrows(
+          PolyglotException.class,
+          () -> context.eval(HaraLanguage.ID, "(protocol-call BoxOps read (Box 1))"));
+      assertThrows(
+          PolyglotException.class,
+          () -> context.eval(HaraLanguage.ID, "(BoxOps/read (Box 1))"));
     }
   }
 
@@ -1224,8 +1265,6 @@ public class HaraLanguageTest {
     while (names.find()) {
       protocols.add(names.group(1));
     }
-    Set<String> hiddenProtocols = Set.of("IColl", "IMetadata");
-    protocols.removeAll(hiddenProtocols);
     assertEquals(53, protocols.size());
     Set<String> unavailableProtocols =
         Set.of(
@@ -1445,7 +1484,7 @@ public class HaraLanguageTest {
                       + "(extend-type NumberValue Describable "
                       + "  (describe [self] (field self :value))) "
                       + "(def describe-value "
-                      + "  (fn [value] (protocol-call Describable describe value))) "
+                      + "  (fn [value] (describe value))) "
                       + "(describe-value (Person \"Ada\"))")
               .asString());
       assertEquals(42, context.eval(HaraLanguage.ID, "(describe-value (NumberValue 42))").asLong());
@@ -1472,7 +1511,7 @@ public class HaraLanguageTest {
                   "(defstruct Box [size]) "
                       + "(extend-type Box ICount "
                       + "  (count [self] (field self :size))) "
-                      + "(protocol-call ICount count (Box 41))")
+                      + "(ICount/count (Box 41))")
               .asLong());
     }
   }

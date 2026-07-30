@@ -20,8 +20,8 @@ public class HaraMutableBoundaryTest {
           context
               .eval(
                   HaraLanguage.ID,
-                  "(= (protocol-call IHash hash (bytes 1 2 -3)) "
-                      + "(protocol-call IHash hash (bytes 1 2 -3)))")
+                  "(= (IHash/hash (bytes 1 2 -3)) "
+                      + "(IHash/hash (bytes 1 2 -3)))")
               .asBoolean());
       assertEquals(
           2,
@@ -82,7 +82,7 @@ public class HaraMutableBoundaryTest {
     try (Context context = context()) {
       assertEquals(255, context.eval(HaraLanguage.ID, "(bytes/get (bytes -1) 0)").asLong());
       assertEquals(
-          -1, context.eval(HaraLanguage.ID, "(protocol-call INth nth (bytes -1) 0)").asLong());
+          -1, context.eval(HaraLanguage.ID, "(INth/nth (bytes -1) 0)").asLong());
       assertEquals(
           2,
           context

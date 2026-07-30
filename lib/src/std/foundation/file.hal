@@ -44,40 +44,40 @@
   resolve
   "Returns normalized path relative to root without touching the filesystem."
   [root path]
-  (std.native.File/resolve root path))
+  (File/resolve root path))
 
 (defn ^{:schema [:fn [:str] :promise]}
   read
   "Returns a promise of bytes read from path."
   [path]
-  (std.native.File/read path))
+  (File/read path))
 
 (defn ^{:schema [:fn [:str :any] :promise]}
   write
   "Returns a promise after overwriting or creating path with contents."
   [path contents]
-  (std.native.File/write path contents))
+  (File/write path contents))
 
 (defn ^{:schema [:fn [:str] :promise]}
   exists?
   "Returns a promise of whether path exists."
   [path]
-  (std.native.File/exists? path))
+  (File/exists? path))
 
 (defn ^{:schema [:fn [:str] :promise]}
   list
   "Returns a promise of normalized child paths in deterministic order."
   [path]
-  (std.native.File/list path))
+  (File/list path))
 
 (defn ^{:schema [:fn [:str] :promise]}
   mkdir
   "Returns a promise after creating path and missing parent directories."
   [path]
-  (std.native.File/mkdir path))
+  (File/mkdir path))
 
 (defn ^{:schema [:fn [:str] :promise]}
   delete
   "Returns a promise after deleting a file or empty directory."
   [path]
-  (std.native.File/delete path))
+  (File/delete path))

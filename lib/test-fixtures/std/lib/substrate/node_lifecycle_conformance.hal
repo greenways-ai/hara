@@ -4,30 +4,30 @@
 
 (def node (substrate/node-create "node/conformance"))
 
-(protocol-call protocol/ITransport attach-transport node "peer"
+(protocol/attach-transport node "peer"
                (fn [frame]
-                 (if (= :request (protocol-call protocol/IFrame frame-kind frame))
-                   (protocol-call protocol/ITransport receive-frame node
+                 (if (= :request (protocol/frame-kind frame))
+                   (protocol/receive-frame node
                                   (substrate/node-frame :response "res-1" "main" {} nil []
-                                                        (protocol-call protocol/IFrame frame-id frame)
+                                                        (protocol/frame-id frame)
                                                         :ok 84 nil nil nil)
                                   {:transport-id "peer"})
-                   (protocol-call protocol/IService set-service node "stream"
-                                  (protocol-call protocol/IFrame frame-data frame)))))
+                   (protocol/set-service node "stream"
+                                  (protocol/frame-data frame)))))
 
-(def subscription (protocol-call protocol/IStream subscribe node "main" "changed" "sub-1" {}))
-(protocol-call protocol/ITransport receive-frame node subscription {:transport-id "peer"})
-(protocol-call protocol/IStream publish node "main" "changed" 42 {:id "evt-1"})
+(def subscription (protocol/subscribe node "main" "changed" "sub-1" {}))
+(protocol/receive-frame node subscription {:transport-id "peer"})
+(protocol/publish node "main" "changed" 42 {:id "evt-1"})
 
-(def reply (protocol-call protocol/IRequest request node "main" "sum" []
+(def reply (protocol/request node "main" "sum" []
                           {:id "req-1" :transport-id "peer"}))
 
 (def cancelled-node (substrate/node-create "node/cancel"))
-(protocol-call protocol/ITransport attach-transport cancelled-node "peer" (fn [frame] nil))
-(def pending (protocol-call protocol/IRequest request cancelled-node "main" "wait" []
+(protocol/attach-transport cancelled-node "peer" (fn [frame] nil))
+(def pending (protocol/request cancelled-node "main" "wait" []
                             {:id "req-cancel" :transport-id "peer"}))
-(protocol-call protocol/IRequest cancel-request cancelled-node "req-cancel" :cancelled)
+(protocol/cancel-request cancelled-node "req-cancel" :cancelled)
 
 [(promise/value reply)
- (protocol-call protocol/IService get-service node "stream")
+ (protocol/get-service node "stream")
  (promise/state pending)]
