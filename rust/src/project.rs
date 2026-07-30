@@ -31,6 +31,9 @@ pub struct Project {
     pub extension_paths: Vec<PathBuf>,
     pub artifact_paths: Vec<PathBuf>,
     pub archive_root: Option<PathBuf>,
+    /// Whether the intentionally portable workspace declaration is a package
+    /// resource.  This never includes a live Studio workspace or cache.
+    pub package_workspace: bool,
     pub main: Option<String>,
     pub dependencies: BTreeMap<String, String>,
 }
@@ -77,9 +80,13 @@ pub fn read(input: &Path) -> Result<Project, String> {
     let extension_paths = paths(lookup(entries, "project/extension-paths").unwrap(), "project/extension-paths")?;
     let artifact_paths = lookup(entries, "project/artifact-paths").map(|value| paths(value, "project/artifact-paths")).transpose()?.unwrap_or_default();
     let archive_root = lookup(entries, "project/archive-root").map(|value| relative_path(&string(value, "project/archive-root")?, "project/archive-root")).transpose()?;
+    let package_workspace = lookup(entries, "project/package")
+        .map(package_workspace)
+        .transpose()?
+        .unwrap_or(false);
     let main = lookup(entries, "project/main").map(|value| scalar(value, "project.edn :project/main")).transpose()?;
     let dependencies = lookup(entries, "project/dependencies").map(dependencies).transpose()?.unwrap_or_default();
-    Ok(Project { root, manifest_path, id, version, source_paths, test_paths, extension_paths, artifact_paths, archive_root, main, dependencies })
+    Ok(Project { root, manifest_path, id, version, source_paths, test_paths, extension_paths, artifact_paths, archive_root, package_workspace, main, dependencies })
 }
 
 pub fn new_app(destination: &Path, name: &str) -> Result<Project, String> {
@@ -193,6 +200,14 @@ fn scalar(form: &Form, label: &str) -> Result<String, String> { match form { For
 fn string(form: &Form, label: &str) -> Result<String, String> { match form { Form::String(value) => Ok(value.clone()), _ => Err(format!("{label} must be a string")) } }
 fn relative_path(value: &str, label: &str) -> Result<PathBuf, String> { let path = PathBuf::from(value); if path.components().any(|component| matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_))) { Err(format!("project.edn :{label} cannot escape the project root")) } else { Ok(path) } }
 fn paths(form: &Form, label: &str) -> Result<Vec<PathBuf>, String> { match form { Form::Vector(values) => values.iter().map(|value| relative_path(&string(value, &format!("project.edn :{label}"))?, label)).collect(), _ => Err(format!("project.edn :{label} must be a vector of strings")) } }
+fn package_workspace(form: &Form) -> Result<bool, String> {
+    let entries = map(form, "project.edn :project/package must be an EDN map")?;
+    match lookup(entries, "workspace") {
+        None | Some(Form::Bool(false)) => Ok(false),
+        Some(Form::Bool(true)) => Ok(true),
+        Some(_) => Err("project.edn :project/package :workspace must be a boolean".into()),
+    }
+}
 fn dependencies(form: &Form) -> Result<BTreeMap<String, String>, String> { let mut output = BTreeMap::new(); for (key, value) in map(form, "project.edn :project/dependencies must be an EDN map")? { let coordinate = scalar(key, "dependency coordinate")?; validate_coordinate(&coordinate)?; let version = lookup(map(value, "dependency declaration must be an EDN map")?, "version").ok_or_else(|| format!("dependency {coordinate} is missing :version"))?; let version = string(version, "dependency :version")?; VersionReq::parse(&version).map_err(|error| format!("invalid dependency range {version}: {error}"))?; output.insert(coordinate, version); } Ok(output) }
 fn validate_coordinate(value: &str) -> Result<(), String> { let (tap, package) = value.split_once(':').ok_or_else(|| format!("package coordinate must use TAP:owner/name: {value}"))?; let mut parts = package.split('/'); let valid = !tap.is_empty() && tap.chars().all(valid_coordinate_char) && matches!((parts.next(), parts.next(), parts.next()), (Some(owner), Some(name), None) if !owner.is_empty() && !name.is_empty() && owner.chars().all(valid_coordinate_char) && name.chars().all(valid_coordinate_char)); if valid { Ok(()) } else { Err(format!("invalid package coordinate: {value}")) } }
 fn valid_coordinate_char(value: char) -> bool { value.is_ascii_lowercase() || value.is_ascii_digit() || matches!(value, '-' | '_' | '.') }

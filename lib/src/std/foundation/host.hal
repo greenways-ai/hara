@@ -1,0 +1,50 @@
+;; ============================================================================
+;; std.foundation.host — portable host capability boundary.
+;;
+;; This namespace exposes the generic capability protocol used by embedders.
+;; It deliberately owns no browser, filesystem, editor, or product semantics:
+;; those belong to a host implementation (for example hara-web) and to
+;; higher-level Foundation or application libraries respectively.
+;;
+;; Domain libraries such as std.foundation.file remain the preferred API for
+;; ordinary program code. host/* is for capability discovery and explicitly
+;; declared host operations that have no narrower Foundation abstraction.
+;; ============================================================================
+(ns std.foundation.host)
+
+(defn ^{:schema [:fn [:str :str & :any] :promise]}
+  call
+  "Invokes a capability-gated host operation and returns its promise.
+   The fixed arities preserve the raw host/call special form in all runtimes."
+  ([service method]
+   (host/call service method))
+  ([service method a]
+   (host/call service method a))
+  ([service method a b]
+   (host/call service method a b))
+  ([service method a b c]
+   (host/call service method a b c))
+  ([service method a b c d]
+   (host/call service method a b c d))
+  ([service method a b c d e]
+   (host/call service method a b c d e))
+  ([service method a b c d e f]
+   (host/call service method a b c d e f)))
+
+(defn ^{:schema [:fn [] :promise]}
+  describe
+  "Returns a promise of the host descriptor: version, capability names, scopes, and limits."
+  []
+  (call "host" "describe"))
+
+(defn ^{:schema [:fn [] :promise]}
+  capabilities
+  "Returns a promise of the host's available capability names."
+  []
+  (call "host" "capabilities"))
+
+(defn ^{:schema [:fn [:any] :promise]}
+  capability?
+  "Returns a promise of whether capability is available to this session."
+  [capability]
+  (call "host" "capability?" capability))

@@ -460,6 +460,10 @@ impl KernelRuntime {
             "std.foundation.file".into(),
             include_str!("../../../lib/src/std/foundation/file.hal").into(),
         );
+        resources.borrow_mut().insert(
+            "std.foundation.host".into(),
+            include_str!("../../../lib/src/std/foundation/host.hal").into(),
+        );
         let events = Rc::new(RefCell::new(VecDeque::new()));
         let mut sessions = HashMap::new();
         sessions.insert(

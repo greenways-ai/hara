@@ -442,6 +442,10 @@ impl Runtime {
                 include_str!("../../lib/src/std/foundation/file.hal"),
             ),
             (
+                "std.foundation.host",
+                include_str!("../../lib/src/std/foundation/host.hal"),
+            ),
+            (
                 "std.foundation.os",
                 include_str!("../../lib/src/std/foundation/os.hal"),
             ),
@@ -497,6 +501,10 @@ impl Runtime {
             (
                 "std.foundation.file",
                 include_str!("../../lib/src/std/foundation/file.hal"),
+            ),
+            (
+                "std.foundation.host",
+                include_str!("../../lib/src/std/foundation/host.hal"),
             ),
             (
                 "std.foundation.socket",
@@ -2624,6 +2632,9 @@ mod tests {
                 "lib/src/std/foundation/file.hal" => {
                     include_str!("../../lib/src/std/foundation/file.hal")
                 }
+                "lib/src/std/foundation/host.hal" => {
+                    include_str!("../../lib/src/std/foundation/host.hal")
+                }
                 "lib/src/std/foundation/socket.hal" => {
                     include_str!("../../lib/src/std/foundation/socket.hal")
                 }
@@ -3220,6 +3231,34 @@ mod tests {
                     crate::lang::data::Keyword::from("int")
                 )
             ]))
+        );
+    }
+
+    #[test]
+    fn function_metadata_is_visible_through_meta_and_var_literals() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(concat!(
+                    "(defn ^{:schema [:fn [:int] :int]} documented",
+                    " \"Returns its argument.\" [value] value)",
+                    " (let [m (meta #'documented)]",
+                    " [(get m :doc) (get m :arglists) (get m :schema)])"
+                ))
+                .unwrap(),
+            "[\"Returns its argument.\" [[value]] [:fn [:int] :int]]"
+        );
+        assert_eq!(
+            runtime
+                .eval_text(concat!(
+                    "(let [m (meta #'std.foundation.string/length)]",
+                    " [(get m :doc) (get m :arglists) (get m :schema)])"
+                ))
+                .unwrap(),
+            concat!(
+                "[\"Returns the portable character count of value.\"",
+                " [[value]] [:fn [:str] :int]]"
+            )
         );
     }
 
@@ -4208,20 +4247,146 @@ mod tests {
     }
 
     #[test]
+    fn issue_133_cases_run_from_the_shared_l0_conformance_corpus() {
+        fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> &'a Form {
+            entries
+                .iter()
+                .find_map(|(candidate, value)| match candidate {
+                    Form::Keyword(name) if name == key => Some(value),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing :{key}"))
+        }
+
+        let manifest =
+            kernel::parse_forms(include_str!("../../specs/language/draft/conformance/l0.edn"))
+                .unwrap()
+                .remove(0);
+        let Form::Map(manifest) = manifest else {
+            panic!("L0 conformance corpus must be a map")
+        };
+        let Form::Vector(cases) = entry(&manifest, "cases") else {
+            panic!("L0 conformance :cases must be a vector")
+        };
+        let ids = [
+            "function/closure-capture",
+            "function/fixed-arity",
+            "function/variadic-arity",
+            "function/multiple-arities",
+            "function/arity-error",
+            "binding/let-sequential",
+            "binding/sequential-destructuring",
+            "binding/map-destructuring",
+            "binding/missing-destructuring",
+            "binding/nil-map-default",
+            "definition/doc-metadata",
+            "definition/schema-metadata",
+            "definition/arglists-metadata",
+            "runtime/recur-outside-target",
+            "runtime/recur-arity",
+            "error/catch-guest-value",
+            "error/catch-order",
+            "error/unmatched-catch",
+            "error/finally-normal",
+            "error/finally-unwind",
+        ];
+
+        for id in ids {
+            let case = cases
+                .iter()
+                .find(|case| {
+                    matches!(
+                        case,
+                        Form::Map(entries)
+                            if matches!(entry(entries, "id"), Form::Keyword(name) if name == id)
+                    )
+                })
+                .unwrap_or_else(|| panic!("missing conformance case :{id}"));
+            let Form::Map(case) = case else {
+                unreachable!()
+            };
+            let Form::String(source) = entry(case, "source") else {
+                panic!(":{id} source must be a string")
+            };
+            let Form::Map(expect) = entry(case, "expect") else {
+                panic!(":{id} expect must be a map")
+            };
+            let mut runtime = Runtime::new();
+            if expect
+                .iter()
+                .any(|(key, _)| matches!(key, Form::Keyword(name) if name == "error"))
+            {
+                assert!(runtime.eval_text(source).is_err(), ":{id} should fail");
+            } else {
+                let expected = match entry(expect, "value") {
+                    Form::Number(value) => value.to_string(),
+                    Form::String(value) => format!("{value:?}"),
+                    Form::Bool(value) => value.to_string(),
+                    Form::Nil => "nil".to_owned(),
+                    value => panic!(":{id} has unsupported expected value {value:?}"),
+                };
+                let actual = runtime
+                    .eval_text(source)
+                    .unwrap_or_else(|error| panic!(":{id} unexpectedly failed: {error}"));
+                assert_eq!(actual, expected, ":{id}");
+            }
+        }
+    }
+
+    #[test]
+    fn issue_134_module_scenarios_have_machine_readable_acceptance_data() {
+        fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> Option<&'a Form> {
+            entries.iter().find_map(|(candidate, value)| match candidate {
+                Form::Keyword(name) if name == key => Some(value),
+                _ => None,
+            })
+        }
+
+        let manifest = kernel::parse_forms(include_str!(
+            "../../specs/language/draft/conformance/modules.edn"
+        ))
+        .unwrap()
+        .remove(0);
+        let Form::Map(manifest) = manifest else {
+            panic!("module conformance corpus must be a map")
+        };
+        let Some(Form::Vector(cases)) = entry(&manifest, "cases") else {
+            panic!("module conformance :cases must be a vector")
+        };
+        assert!(cases.len() >= 20);
+        let mut ids = HashSet::new();
+        for case in cases {
+            let Form::Map(case) = case else {
+                panic!("module conformance cases must be maps")
+            };
+            let Some(Form::Keyword(id)) = entry(case, "id") else {
+                panic!("module conformance case is missing :id")
+            };
+            assert!(ids.insert(id.clone()), "duplicate module case :{id}");
+            assert!(matches!(entry(case, "area"), Some(Form::Keyword(_))), ":{id}");
+            assert!(
+                matches!(entry(case, "scenario"), Some(Form::Keyword(_))),
+                ":{id}"
+            );
+            assert!(matches!(entry(case, "expect"), Some(Form::Map(_))), ":{id}");
+        }
+    }
+
+    #[test]
     fn throw_and_try_catch_finally_are_host_neutral() {
         let mut runtime = Runtime::new();
         assert_eq!(
             runtime
                 .eval_text("(try (throw :failed) (catch error error))")
                 .unwrap(),
-            "\"thrown: :failed\""
+            ":failed"
         );
         assert_eq!(runtime.eval_text("(try 42 (finally 0))").unwrap(), "42");
         assert_eq!(
             runtime
                 .eval_text("(try (throw :failed) (catch error (str error :handled)))")
                 .unwrap(),
-            "\"thrown: :failed:handled\""
+            "\":failed:handled\""
         );
         assert!(runtime
             .eval_text("(throw :failed)")

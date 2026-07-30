@@ -117,6 +117,7 @@ function makeBroker({ fetch, nodeRuntime } = {}) {
 const REQUIRE_ALL =
   "(require [studio.store :as store]) " +
   "(require [std.foundation.file :as file]) " +
+  "(require [std.foundation.host :as host]) " +
   "(require [studio.boot :as boot])";
 const evaluate = (broker, source) => broker.eval("ROOT", `(do ${REQUIRE_ALL} ${source})`);
 
@@ -134,6 +135,14 @@ test("defaultBootstrap renders the shared bootstrap template", { skip: wasmBytes
     defaultBootstrap("boot-space"),
     '(do (require [studio.boot :as boot]) (boot/boot! "boot-space"))'
   );
+});
+
+test("std.foundation.host exposes the generic browser host descriptor", { skip: wasmBytes === null }, async () => {
+  const broker = makeBroker();
+  const description = await evaluate(broker, "(deref (host/describe))");
+  assert.equal(mapGet(description, "host/version"), "hara.host.v1");
+  assert.equal(await evaluate(broker, '(deref (host/capability? "filesystem"))'), true);
+  assert.equal(await evaluate(broker, '(deref (host/capability? "missing"))'), false);
 });
 
 test("studio.node sends std.substrate.frame envelopes through the browser adapter", { skip: wasmBytes === null }, async () => {

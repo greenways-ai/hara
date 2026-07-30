@@ -357,6 +357,8 @@ pub enum Value {
 pub struct Function {
     params: Vec<String>,
     variadic: Option<String>,
+    patterns: Vec<Form>,
+    variadic_pattern: Option<Form>,
     body: Vec<Form>,
     captured: Rc<RefCell<HashMap<String, Value>>>,
     pub name: Option<String>,
@@ -531,6 +533,8 @@ pub(crate) fn native_function(
     Value::Function(Rc::new(Function {
         params: (0..arity).map(|index| format!("arg{index}")).collect(),
         variadic: None,
+        patterns: Vec::new(),
+        variadic_pattern: None,
         body: Vec::new(),
         captured: Rc::new(RefCell::new(HashMap::new())),
         name: Some(name.into()),
@@ -547,6 +551,8 @@ pub(crate) fn native_variadic_function(
     Value::Function(Rc::new(Function {
         params: Vec::new(),
         variadic: Some("arguments".into()),
+        patterns: Vec::new(),
+        variadic_pattern: None,
         body: Vec::new(),
         captured: Rc::new(RefCell::new(HashMap::new())),
         name: Some(name.into()),
@@ -2059,11 +2065,28 @@ pub(crate) fn caught_error(error: &str) -> Value {
         let mut active = active.borrow_mut();
         if active
             .as_ref()
-            .is_some_and(|(thrown_error, _)| thrown_error == error)
+            .is_some_and(|(thrown_error, _)| error.starts_with(thrown_error))
         {
             return active.take().unwrap().1;
         }
         Value::String(error.to_owned())
+    })
+}
+
+pub(crate) fn catch_matches(error: &str, class: &str) -> bool {
+    if class == "Exception" || class == "Throwable" {
+        return true;
+    }
+    ACTIVE_THROWN_VALUE.with(|active| {
+        active.borrow().as_ref().is_some_and(|(message, value)| {
+            error.starts_with(message)
+                && matches!(
+                    value,
+                    Value::Struct(value)
+                        if value.ty.name == class
+                            || value.ty.name.ends_with(&format!("/{class}"))
+                )
+        })
     })
 }
 
@@ -6350,8 +6373,10 @@ fn generated_function(
         captured.insert(name.to_string(), value);
     }
     Value::Function(Rc::new(Function {
+        patterns: params.iter().cloned().map(Form::Symbol).collect(),
         params,
         variadic: None,
+        variadic_pattern: None,
         body,
         captured: Rc::new(RefCell::new(captured)),
         name: None,
@@ -6361,13 +6386,17 @@ fn generated_function(
     }))
 }
 
-fn function_parts(form: &Form) -> Result<(Vec<String>, Option<String>), String> {
+fn function_parts(
+    form: &Form,
+) -> Result<(Vec<String>, Option<String>, Vec<Form>, Option<Form>), String> {
     let list = match form {
         Form::Vector(values) => values,
         _ => return Err("function parameters must be a vector".into()),
     };
     let mut params = Vec::new();
     let mut variadic = None;
+    let mut patterns = Vec::new();
+    let mut variadic_pattern = None;
     let mut index = 0;
     while index < list.len() {
         match &list[index] {
@@ -6375,20 +6404,177 @@ fn function_parts(form: &Form) -> Result<(Vec<String>, Option<String>), String> 
                 if variadic.is_some() || index + 1 >= list.len() || index + 2 != list.len() {
                     return Err("variadic marker must precede the final parameter".into());
                 }
-                match &list[index + 1] {
-                    Form::Symbol(name) => variadic = Some(name.clone()),
-                    _ => return Err("variadic parameter must be a symbol".into()),
-                }
+                let pattern = list[index + 1].clone();
+                variadic = Some(match &pattern {
+                    Form::Symbol(name) => name.clone(),
+                    _ => format!("__rest_{}", params.len()),
+                });
+                variadic_pattern = Some(pattern);
                 index += 2;
             }
-            Form::Symbol(name) => {
-                params.push(name.clone());
+            pattern @ (Form::Symbol(_) | Form::Vector(_) | Form::Map(_)) => {
+                params.push(match pattern {
+                    Form::Symbol(name) => name.clone(),
+                    _ => format!("__arg_{}", params.len()),
+                });
+                patterns.push(pattern.clone());
                 index += 1;
             }
-            _ => return Err("function parameters must be symbols".into()),
+            _ => return Err("function parameters must be binding patterns".into()),
         }
     }
-    Ok((params, variadic))
+    Ok((params, variadic, patterns, variadic_pattern))
+}
+
+fn destructuring_default<'a>(defaults: Option<&'a Form>, name: &str) -> Option<&'a Form> {
+    let Form::Map(entries) = defaults? else {
+        return None;
+    };
+    entries.iter().find_map(|(key, value)| {
+        matches!(key, Form::Symbol(candidate) if candidate == name).then_some(value)
+    })
+}
+
+pub(crate) fn bind_pattern(
+    pattern: &Form,
+    value: Value,
+    env: &mut HashMap<String, Value>,
+    bound: &mut Vec<String>,
+    defaults: Option<&Form>,
+) -> Result<(), String> {
+    match pattern {
+        Form::Symbol(name) => {
+            if name.contains('/') || bound.iter().any(|candidate| candidate == name) {
+                return Err(format!("invalid or duplicate binding: {name}"));
+            }
+            let value = if matches!(value, Value::Nil) {
+                match destructuring_default(defaults, name) {
+                    Some(default) => eval(default, env)?,
+                    None => value,
+                }
+            } else {
+                value
+            };
+            env.insert(name.clone(), value);
+            bound.push(name.clone());
+            Ok(())
+        }
+        Form::Vector(patterns) => {
+            let original = value.clone();
+            let values = if matches!(value, Value::Nil) {
+                Vec::new()
+            } else {
+                iterator_values(value).map_err(|_| "cannot destructure non-sequential value".to_owned())?
+            };
+            let mut index = 0;
+            let mut position = 0;
+            while index < patterns.len() {
+                match &patterns[index] {
+                    Form::Symbol(marker) if marker == "&" => {
+                        if index + 1 >= patterns.len() {
+                            return Err("& in a destructuring vector requires a binding".into());
+                        }
+                        bind_pattern(
+                            &patterns[index + 1],
+                            Value::List(values.iter().skip(position).cloned().collect()),
+                            env,
+                            bound,
+                            defaults,
+                        )?;
+                        index += 2;
+                    }
+                    Form::Keyword(marker) if marker.as_str() == "as" => {
+                        if index + 2 != patterns.len() {
+                            return Err(
+                                ":as in a destructuring vector must precede its final binding"
+                                    .into(),
+                            );
+                        }
+                        bind_pattern(
+                            &patterns[index + 1],
+                            original,
+                            env,
+                            bound,
+                            defaults,
+                        )?;
+                        return Ok(());
+                    }
+                    nested => {
+                        bind_pattern(
+                            nested,
+                            values.get(position).cloned().unwrap_or(Value::Nil),
+                            env,
+                            bound,
+                            defaults,
+                        )?;
+                        position += 1;
+                        index += 1;
+                    }
+                }
+            }
+            Ok(())
+        }
+        Form::Map(entries) => {
+            if !matches!(value, Value::Nil) && map_entries(&value).is_none() {
+                return Err("cannot destructure non-map value".into());
+            }
+            let defaults = entries.iter().find_map(|(key, value)| {
+                matches!(key, Form::Keyword(keyword) if keyword.as_str() == "or")
+                    .then_some(value)
+            });
+            for (key, binding) in entries {
+                match key {
+                    Form::Keyword(keyword) if keyword.as_str() == "or" => {}
+                    Form::Keyword(keyword) if keyword.as_str() == "as" => {
+                        bind_pattern(binding, value.clone(), env, bound, defaults)?;
+                    }
+                    Form::Keyword(keyword)
+                        if ["keys", "strs", "syms"].contains(&keyword.as_str()) =>
+                    {
+                        let Form::Vector(names) = binding else {
+                            return Err(format!(
+                                ":{} destructuring expects a vector of symbols",
+                                keyword.as_str()
+                            ));
+                        };
+                        for name in names {
+                            let Form::Symbol(name) = name else {
+                                return Err(format!(
+                                    ":{} destructuring expects symbols",
+                                    keyword.as_str()
+                                ));
+                            };
+                            let lookup = match keyword.as_str() {
+                                "keys" => Value::Keyword(name.clone().into()),
+                                "strs" => Value::String(name.clone()),
+                                "syms" => Value::Symbol(name.clone().into()),
+                                _ => unreachable!(),
+                            };
+                            bind_pattern(
+                                &Form::Symbol(name.clone()),
+                                map_value(&value, &lookup).cloned().unwrap_or(Value::Nil),
+                                env,
+                                bound,
+                                defaults,
+                            )?;
+                        }
+                    }
+                    key => {
+                        let lookup = literal_value(key)?;
+                        bind_pattern(
+                            binding,
+                            map_value(&value, &lookup).cloned().unwrap_or(Value::Nil),
+                            env,
+                            bound,
+                            defaults,
+                        )?;
+                    }
+                }
+            }
+            Ok(())
+        }
+        _ => Err("unsupported binding pattern".into()),
+    }
 }
 
 fn select_clause(functions: &[Rc<Function>], argument_count: usize) -> Option<Rc<Function>> {
@@ -6418,10 +6604,12 @@ fn multi_arity_function(
             Form::List(parts) if parts.len() >= 2 => parts,
             _ => return Err("defn arity must contain parameters and a body".into()),
         };
-        let (params, variadic) = function_parts(&parts[0])?;
+        let (params, variadic, patterns, variadic_pattern) = function_parts(&parts[0])?;
         functions.push(Rc::new(Function {
             params,
             variadic,
+            patterns,
+            variadic_pattern,
             body: parts[1..].to_vec(),
             captured: Rc::new(RefCell::new(captured.clone())),
             name: Some(name.into()),
@@ -6438,6 +6626,8 @@ fn multi_arity_function(
     Ok(Value::Function(Rc::new(Function {
         params: Vec::new(),
         variadic: Some("arguments".into()),
+        patterns: Vec::new(),
+        variadic_pattern: None,
         body: Vec::new(),
         captured: Rc::new(RefCell::new(HashMap::new())),
         name: Some(dispatch_name.clone()),
@@ -6578,11 +6768,20 @@ pub(crate) fn call_function(function: &Function, arguments: Vec<Value>) -> Resul
         {
             env.insert(name.clone(), value.clone());
         }
+        let mut bound = Vec::new();
+        for (pattern, value) in function
+            .patterns
+            .iter()
+            .zip(arguments.iter().take(function.params.len()))
+        {
+            bind_pattern(pattern, value.clone(), &mut env, &mut bound, None)?;
+        }
         if let Some(name) = &function.variadic {
-            env.insert(
-                name.clone(),
-                Value::List(arguments.into_iter().skip(function.params.len()).collect()),
-            );
+            let rest = Value::List(arguments.into_iter().skip(function.params.len()).collect());
+            env.insert(name.clone(), rest.clone());
+            if let Some(pattern) = &function.variadic_pattern {
+                bind_pattern(pattern, rest, &mut env, &mut bound, None)?;
+            }
         }
         let mut result = Value::Nil;
         for form in &function.body {
@@ -7160,10 +7359,13 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 if fs.len() < 3 {
                     return Err("fn expects parameters and a body".into());
                 }
-                let (params, variadic) = function_parts(&fs[1])?;
+                let (params, variadic, patterns, variadic_pattern) =
+                    function_parts(&fs[1])?;
                 Ok(Value::Function(Rc::new(Function {
                     params,
                     variadic,
+                    patterns,
+                    variadic_pattern,
                     body: fs[2..].to_vec(),
                     captured: Rc::new(RefCell::new(env.clone())),
                     name: None,
@@ -7470,23 +7672,26 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("try expects a body".into());
                 }
                 let mut body = Vec::new();
-                let mut catch_form = None;
+                let mut catch_forms = Vec::new();
                 let mut finally_forms = Vec::new();
+                let mut clauses_started = false;
                 for form in &fs[1..] {
                     match form {
                         Form::List(parts)
                             if !parts.is_empty()
                                 && matches!(&parts[0],Form::Symbol(name) if name=="catch") =>
                         {
-                            catch_form = Some(parts)
+                            clauses_started = true;
+                            catch_forms.push(parts)
                         }
                         Form::List(parts)
                             if !parts.is_empty()
                                 && matches!(&parts[0],Form::Symbol(name) if name=="finally") =>
                         {
+                            clauses_started = true;
                             finally_forms.extend_from_slice(&parts[1..])
                         }
-                        _ if catch_form.is_none() => body.push(form),
+                        _ if !clauses_started => body.push(form),
                         _ => return Err("try clauses must follow the body".into()),
                     }
                 }
@@ -7498,28 +7703,40 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     }
                 }
                 if let Err(ref error) = result {
-                    if let Some(parts) = catch_form {
-                        let (binding_index, body_index) = match parts.len() {
-                            3 => (1, 2),
-                            4 => {
-                                if !matches!(&parts[1], Form::Symbol(_)) {
-                                    return Err("catch class must be a symbol".into());
-                                }
-                                (2, 3)
+                    for parts in catch_forms {
+                        if parts.len() < 3 {
+                            return Err("catch expects a class, name, and body".into());
+                        }
+                        let (class, binding_index, body_index) = match parts.as_slice() {
+                            [_, Form::Symbol(name), ..] if parts.len() == 3 => {
+                                ("Exception", 1, 2)
+                            }
+                            [_, Form::Symbol(class), Form::Symbol(_), ..] => {
+                                (class.as_str(), 2, 3)
                             }
                             _ => return Err("catch expects a class, name, and body".into()),
                         };
+                        if !catch_matches(error, class) {
+                            continue;
+                        }
                         let name = match &parts[binding_index] {
                             Form::Symbol(name) => name.clone(),
                             _ => return Err("catch name must be a symbol".into()),
                         };
                         let old = env.insert(name.clone(), caught_error(error));
-                        result = eval(&parts[body_index], env);
+                        result = Ok(Value::Nil);
+                        for form in &parts[body_index..] {
+                            result = eval(form, env);
+                            if result.is_err() {
+                                break;
+                            }
+                        }
                         if let Some(old) = old {
                             env.insert(name, old);
                         } else {
                             env.remove(&name);
                         }
+                        break;
                     }
                 }
                 for form in finally_forms {
@@ -7896,10 +8113,13 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     let mut macro_params =
                         vec![Form::Symbol("&form".into()), Form::Symbol("&env".into())];
                     macro_params.extend_from_slice(params);
-                    let (params, variadic) = function_parts(&Form::Vector(macro_params))?;
+                    let (params, variadic, patterns, variadic_pattern) =
+                        function_parts(&Form::Vector(macro_params))?;
                     Value::Function(Rc::new(Function {
                         params,
                         variadic,
+                        patterns,
+                        variadic_pattern,
                         body: rest[1..].to_vec(),
                         captured: Rc::new(RefCell::new(env.clone())),
                         name: Some(name.clone()),
@@ -7944,10 +8164,13 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("defn expects a name, parameters, and a body".into());
                 }
                 let function = if matches!(rest.first(), Some(Form::Vector(_))) {
-                    let (params, variadic) = function_parts(&rest[0])?;
+                    let (params, variadic, patterns, variadic_pattern) =
+                        function_parts(&rest[0])?;
                     Value::Function(Rc::new(Function {
                         params,
                         variadic,
+                        patterns,
+                        variadic_pattern,
                         body: rest[1..].to_vec(),
                         captured: Rc::new(RefCell::new(env.clone())),
                         name: Some(name.clone()),
@@ -9145,6 +9368,8 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 Ok(Value::Function(Rc::new(Function {
                     params: Vec::new(),
                     variadic: Some("_rest".into()),
+                    patterns: Vec::new(),
+                    variadic_pattern: None,
                     body: vec![Form::Symbol("__constant".into())],
                     captured: Rc::new(RefCell::new(captured)),
                     name: None,
@@ -9596,25 +9821,37 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 if bindings.len() % 2 != 0 {
                     return Err("loop bindings require name/value pairs".into());
                 }
-                let mut names = Vec::new();
                 let mut previous = Vec::new();
+                let mut patterns = Vec::new();
+                let mut pattern_names = Vec::new();
                 for pair in bindings.chunks(2) {
-                    let name = match &pair[0] {
-                        Form::Symbol(name) => name.clone(),
-                        _ => return Err("loop binding name must be a symbol".into()),
-                    };
                     let value = eval(&pair[1], env)?;
-                    names.push(name.clone());
-                    previous.push((name.clone(), env.insert(name, value)));
+                    let before = env.clone();
+                    let mut names = Vec::new();
+                    bind_pattern(&pair[0], value, env, &mut names, None)
+                        .map_err(|error| format!("loop destructuring failed: {error}"))?;
+                    for name in &names {
+                        previous.push((name.clone(), before.get(name).cloned()));
+                    }
+                    patterns.push(pair[0].clone());
+                    pattern_names.push(names);
                 }
                 let result = loop {
                     match eval(&fs[2], env)? {
                         Value::Recur(values) => {
-                            if values.len() != names.len() {
+                            if values.len() != patterns.len() {
                                 break Err("loop recur arity mismatch".into());
                             }
-                            for (name, value) in names.iter().cloned().zip(values) {
-                                env.insert(name, value);
+                            for names in &pattern_names {
+                                for name in names {
+                                    env.remove(name);
+                                }
+                            }
+                            pattern_names.clear();
+                            for (pattern, value) in patterns.iter().zip(values) {
+                                let mut names = Vec::new();
+                                bind_pattern(pattern, value, env, &mut names, None)?;
+                                pattern_names.push(names);
                             }
                         }
                         result => break Ok(result),
@@ -9666,12 +9903,14 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 let mut previous = Vec::new();
                 for pair in bindings.chunks(2) {
-                    let name = match &pair[0] {
-                        Form::Symbol(name) => name.clone(),
-                        _ => return Err("let binding name must be a symbol".into()),
-                    };
                     let value = eval(&pair[1], env)?;
-                    previous.push((name.clone(), env.insert(name, value)));
+                    let before = env.clone();
+                    let mut names = Vec::new();
+                    bind_pattern(&pair[0], value, env, &mut names, None)
+                        .map_err(|error| format!("let destructuring failed: {error}"))?;
+                    for name in names {
+                        previous.push((name.clone(), before.get(&name).cloned()));
+                    }
                 }
                 let result = eval(&fs[2], env);
                 for (name, old) in previous.into_iter().rev() {

@@ -229,15 +229,33 @@ fn build_archive(project: &Project, output: &Path) -> Result<(), String> {
         let base = project.root.join(artifact_path);
         collect_files(&base, &project.root, true, true, &mut entries)?;
     }
+    // A release archive must be self-describing.  These entries intentionally
+    // stay at its root even when :project/archive-root relocates artifacts.
+    entries.push(PathBuf::from("project.edn"));
+    let lock = project.root.join("project.lock.edn");
+    if lock.is_file() {
+        entries.push(PathBuf::from("project.lock.edn"));
+    } else if !project.dependencies.is_empty() {
+        return Err("package build requires project.lock.edn when :project/dependencies is non-empty".into());
+    }
+    if project.package_workspace {
+        let workspace = project.root.join("workspace.edn");
+        if !workspace.is_file() {
+            return Err("project.edn declares :project/package {:workspace true}, but workspace.edn is missing".into());
+        }
+        entries.push(PathBuf::from("workspace.edn"));
+    }
     let mut archive_entries = Vec::new();
     for source in entries {
-        let archive = match &project.archive_root {
+        let archive = if matches!(source.as_path(), path if path == Path::new("project.edn") || path == Path::new("project.lock.edn") || path == Path::new("workspace.edn")) {
+            source.clone()
+        } else { match &project.archive_root {
             Some(root) => source
                 .strip_prefix(root)
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| source.clone()),
             None => source.clone(),
-        };
+        }};
         validate_relative_path(&archive)?;
         if archive.as_os_str().is_empty() {
             return Err("package archive path must name a file".into());
@@ -427,6 +445,7 @@ mod tests {
         fs::create_dir_all(root.join("src/example")).unwrap();
         fs::write(root.join("src/example/main.hal"), "(ns example.main) 42\n").unwrap();
         fs::write(root.join("project.edn"), "{:hara/type :project :hara/version \"1.0.0\" :project/id example/app :project/version \"1.2.3\" :project/source-paths [\"src\"] :project/test-paths [\"test\"] :project/extension-paths [\"extensions\"] :project/capabilities #{} :project/dependencies {\"hara:hara/graph\" {:version \"^1.2.0\"}}}").unwrap();
+        fs::write(root.join("project.lock.edn"), "{:lock/format 1 :packages {}}\n").unwrap();
         root
     }
 
@@ -440,6 +459,9 @@ mod tests {
         build_archive(&project, &second).unwrap();
         assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap());
         assert!(inspect_archive(&first).unwrap().contains(":harp/format 1"));
+        let file = File::open(&first).unwrap();
+        let mut zip = ZipArchive::new(file).unwrap();
+        assert!(zip.by_name("project.edn").is_ok());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -495,6 +517,30 @@ mod tests {
         assert!(build_archive(&project, &root.join("missing.harp"))
             .unwrap_err()
             .contains("does not exist"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn packages_lock_and_explicit_portable_workspace_only() {
+        let root = fixture();
+        fs::write(root.join("project.lock.edn"), "{:lock/format 1 :packages {}}\n").unwrap();
+        fs::write(root.join("workspace.edn"), "{:hara/type :workspace :hara/version \"1.0.0\"}\n").unwrap();
+        let undeclared = root.join("undeclared-workspace.harp");
+        build_archive(&read_project(&root).unwrap(), &undeclared).unwrap();
+        let file = File::open(&undeclared).unwrap();
+        let mut zip = ZipArchive::new(file).unwrap();
+        assert!(zip.by_name("workspace.edn").is_err());
+        fs::write(
+            root.join("project.edn"),
+            "{:hara/type :project :hara/version \"1.0.0\" :project/id example/app :project/version \"1.2.3\" :project/source-paths [\"src\"] :project/test-paths [\"test\"] :project/extension-paths [\"extensions\"] :project/capabilities #{} :project/dependencies {\"hara:hara/graph\" {:version \"^1.2.0\"}} :project/package {:workspace true}}",
+        )
+        .unwrap();
+        let archive = root.join("workspace.harp");
+        build_archive(&read_project(&root).unwrap(), &archive).unwrap();
+        let file = File::open(&archive).unwrap();
+        let mut zip = ZipArchive::new(file).unwrap();
+        assert!(zip.by_name("project.lock.edn").is_ok());
+        assert!(zip.by_name("workspace.edn").is_ok());
         fs::remove_dir_all(root).unwrap();
     }
 }

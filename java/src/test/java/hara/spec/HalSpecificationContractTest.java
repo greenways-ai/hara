@@ -24,6 +24,8 @@ public class HalSpecificationContractTest {
       Path.of("specs/language/draft/conformance/l0.edn");
   private static final Path READER_CORPUS =
       Path.of("specs/language/draft/conformance/reader.edn");
+  private static final Path MODULE_CORPUS =
+      Path.of("specs/language/draft/conformance/modules.edn");
   private static final Path PARITY_CORPUS =
       Path.of("specs/language/draft/conformance/parity/jvm-truffle.edn");
 
@@ -70,6 +72,7 @@ public class HalSpecificationContractTest {
         Map.of(
             Keyword.create("hal", "l0"), caseIds(L0_CORPUS),
             Keyword.create("hal", "reader"), caseIds(READER_CORPUS),
+            Keyword.create("hal", "modules"), caseIds(MODULE_CORPUS),
             Keyword.create("hal", "parity"), caseIds(PARITY_CORPUS));
     Set<Object> requirementIds = new HashSet<>();
     collectRequirements(

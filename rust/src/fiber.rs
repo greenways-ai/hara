@@ -37,6 +37,8 @@ const SYNC_SPECIAL_FORMS: &[&str] = &[
     "instance?",
     "let",
     "loop",
+    "macroexpand-1",
+    "meta",
     "ns",
     "protocol-call",
     "recur",
@@ -44,9 +46,11 @@ const SYNC_SPECIAL_FORMS: &[&str] = &[
     "set!",
     "syntax-quote",
     "throw",
+    "type",
     "try",
     "var",
     "var/set",
+    "with-meta",
 ];
 
 /// All names that `core::eval` handles as special forms. Used in `application`
@@ -657,10 +661,7 @@ fn bind_values(
     if i == v.len() {
         return k(Ok(old), env);
     }
-    let name = match &v[i] {
-        Form::Symbol(n) => n.clone(),
-        _ => return k(Err("binding name must be a symbol".into()), env),
-    };
+    let pattern = v[i].clone();
     let vv = v.clone();
     let e = env.clone();
     one(
@@ -669,8 +670,24 @@ fn bind_values(
         Box::new(move |r| match r {
             Ok(x) => {
                 let mut old = old;
-                let prior = { e.borrow_mut().insert(name.clone(), x) };
-                old.push((name, prior));
+                let before = e.borrow().clone();
+                let mut names = Vec::new();
+                let binding = {
+                    let mut environment = e.borrow_mut();
+                    crate::core::bind_pattern(
+                        &pattern,
+                        x,
+                        &mut environment,
+                        &mut names,
+                        None,
+                    )
+                };
+                if let Err(error) = binding {
+                    return k(Err(format!("destructuring failed: {error}")), e);
+                }
+                for name in names {
+                    old.push((name.clone(), before.get(&name).cloned()));
+                }
                 bind_values(vv, i + 2, old, e, k)
             }
             Err(x) => k(Err(x), e),
@@ -694,17 +711,7 @@ fn scoped(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont, is_lo
         Ok(x) => x,
         Err(x) => return k(Err(x)),
     };
-    let names = Rc::new(
-        b.chunks(2)
-            .filter_map(|p| {
-                if let Form::Symbol(n) = &p[0] {
-                    Some(n.clone())
-                } else {
-                    None
-                }
-            })
-            .collect(),
-    );
+    let patterns = Rc::new(b.chunks(2).map(|pair| pair[0].clone()).collect());
     let body = if v.len() == 3 {
         v[2].clone()
     } else {
@@ -720,7 +727,7 @@ fn scoped(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont, is_lo
         Vec::new(),
         env,
         Box::new(move |r, e| match r {
-            Ok(old) if is_loop => loop_body(names, body, old, e, k),
+            Ok(old) if is_loop => loop_body(patterns, body, old, e, k),
             Ok(old) => {
                 let re = e.clone();
                 one(
@@ -737,13 +744,13 @@ fn scoped(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont, is_lo
     )
 }
 fn loop_body(
-    names: Rc<Vec<String>>,
+    patterns: Rc<Vec<Form>>,
     body: Form,
     old: Previous,
     env: Rc<RefCell<HashMap<String, Value>>>,
     k: Cont,
 ) -> Step {
-    let nn = names.clone();
+    let pp = patterns.clone();
     let bb = body.clone();
     let oo = old.clone();
     let ee = env.clone();
@@ -752,14 +759,24 @@ fn loop_body(
         env,
         Box::new(move |r| match r {
             Ok(Value::Recur(v)) => {
-                if v.len() != nn.len() {
+                if v.len() != pp.len() {
                     restore(&mut ee.borrow_mut(), oo);
                     return k(Err("loop recur arity mismatch".into()));
                 }
-                for (n, x) in nn.iter().zip(v) {
-                    ee.borrow_mut().insert(n.clone(), x);
+                for (pattern, value) in pp.iter().zip(v) {
+                    let mut names = Vec::new();
+                    if let Err(error) = crate::core::bind_pattern(
+                        pattern,
+                        value,
+                        &mut ee.borrow_mut(),
+                        &mut names,
+                        None,
+                    ) {
+                        restore(&mut ee.borrow_mut(), oo);
+                        return k(Err(format!("loop destructuring failed: {error}")));
+                    }
                 }
-                loop_body(nn, bb, oo, ee, k)
+                loop_body(pp, bb, oo, ee, k)
             }
             r => {
                 restore(&mut ee.borrow_mut(), oo);
@@ -844,17 +861,20 @@ fn bind_form(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) ->
 
 fn try_cps(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step {
     let mut body = Vec::new();
-    let mut catch = None;
+    let mut catches = Vec::new();
     let mut finals = Vec::new();
+    let mut clauses_started = false;
     for f in v.into_iter().skip(1) {
         match &f {
             Form::List(p) if !p.is_empty() && matches!(&p[0],Form::Symbol(n)if n=="catch") => {
-                catch = Some(p.clone())
+                clauses_started = true;
+                catches.push(p.clone())
             }
             Form::List(p) if !p.is_empty() && matches!(&p[0],Form::Symbol(n)if n=="finally") => {
+                clauses_started = true;
                 finals.extend_from_slice(&p[1..])
             }
-            _ if catch.is_none() => body.push(f),
+            _ if !clauses_started => body.push(f),
             _ => return k(Err("try clauses must follow body".into())),
         }
     }
@@ -864,21 +884,32 @@ fn try_cps(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> S
         0,
         Value::Nil,
         env,
-        Box::new(move |r| finish_try(r, catch, finals, e, k)),
+        Box::new(move |r| finish_try(r, catches, finals, e, k)),
     )
 }
 fn finish_try(
     r: Result<Value, String>,
-    catch: Option<Vec<Form>>,
+    catches: Vec<Vec<Form>>,
     finals: Vec<Form>,
     env: Rc<RefCell<HashMap<String, Value>>>,
     k: Cont,
 ) -> Step {
-    match (r, catch) {
-        (Err(x), Some(p)) => {
+    match r {
+        Err(x) => {
+            let Some(p) = catches.into_iter().find(|parts| {
+                match parts.as_slice() {
+                    [_, Form::Symbol(_), _] => crate::core::catch_matches(&x, "Exception"),
+                    [_, Form::Symbol(class), Form::Symbol(_), ..] => {
+                        crate::core::catch_matches(&x, class)
+                    }
+                    _ => false,
+                }
+            }) else {
+                return finally(Err(x), finals, env, k);
+            };
             let (binding_index, body_index) = match p.len() {
                 3 => (1, 2),
-                4 => {
+                length if length >= 4 => {
                     if !matches!(&p[1], Form::Symbol(_)) {
                         return k(Err("catch class must be symbol".into()));
                     }
@@ -892,8 +923,10 @@ fn finish_try(
             };
             let old = env.borrow_mut().insert(n.clone(), caught_error(&x));
             let e = env.clone();
-            one(
-                p[body_index].clone(),
+            forms_cps(
+                Rc::new(p[body_index..].to_vec()),
+                0,
+                Value::Nil,
                 env,
                 Box::new(move |r| {
                     restore(&mut e.borrow_mut(), vec![(n, old)]);
@@ -901,7 +934,7 @@ fn finish_try(
                 }),
             )
         }
-        (r, _) => finally(r, finals, env, k),
+        result => finally(result, finals, env, k),
     }
 }
 fn finally(

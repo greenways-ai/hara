@@ -35,6 +35,14 @@ export function createHostServices(options = {}) {
     store,
     memoryFilesystems: options.memoryFilesystems ?? new Map()
   });
+  const hostDescription = createHostDescription({
+    capabilities: options.capabilities,
+    limits: options.limits,
+    graphHost: options.graphHost,
+    nodeRuntime: options.nodeRuntime,
+    canvasRuntime: options.canvasRuntime ?? options.canvasRuntimeForSession,
+    audioPipeline: options.audioPipeline
+  });
 
   function scopedKey(invocation, key, { keys = false } = {}) {
     if (!scopeForContext) return key;
@@ -133,11 +141,50 @@ export function createHostServices(options = {}) {
       return true;
     };
   }
+  Object.assign(services, createHostIntrospection(hostDescription));
   Object.defineProperty(services, "filesystemHost", {
     value: filesystemHost,
     enumerable: false
   });
   return services;
+}
+
+/**
+ * Creates the serializable, versioned descriptor for a browser host. It is
+ * deliberately independent of a Studio shell: products may expose it to
+ * tooling, while providers remain private to the embedding host.
+ */
+export function createHostDescription({
+  capabilities = [], limits = {}, graphHost = null, nodeRuntime = null,
+  canvasRuntime = null, audioPipeline = null
+} = {}) {
+  const available = new Set(capabilities);
+  available.add("filesystem");
+  available.add("store");
+  available.add("network/http");
+  if (nodeRuntime) available.add("transport/node");
+  if (graphHost) {
+    available.add("program");
+    available.add("graph");
+    for (const capability of graphHost.availableCapabilities?.() ?? []) available.add(capability);
+  }
+  if (canvasRuntime) available.add("surface/canvas-2d");
+  if (audioPipeline) available.add("audio/playback");
+  return {
+    "host/version": "hara.host.v1",
+    "host/capabilities": [...available].sort(),
+    "host/limits": { ...limits }
+  };
+}
+
+export function createHostIntrospection(description) {
+  const capabilities = description["host/capabilities"] ?? [];
+  return {
+    "host/describe": async () => toHta(description),
+    "host/capabilities": async () => toHta(capabilities),
+    "host/capability?": async (capability) =>
+      capabilities.includes(String(capability?.name ?? capability).replace(/^:/, ""))
+  };
 }
 
 export function createFilesystemHost({ store, memoryFilesystems = new Map() }) {

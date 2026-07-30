@@ -18,6 +18,17 @@ test("store get of a missing key returns null", async () => {
   assert.equal(await host["store/get"]("absent"), null);
 });
 
+test("generic host introspection reports versioned capability families", async () => {
+  const host = createHostServices({ capabilities: ["custom/example"] });
+  const description = await host["host/describe"]();
+  assert.equal(description.get("host/version"), "hara.host.v1");
+  assert.deepEqual(description.get("host/capabilities"), [
+    "custom/example", "filesystem", "network/http", "store"
+  ]);
+  assert.equal(await host["host/capability?"]("filesystem"), true);
+  assert.equal(await host["host/capability?"]("missing"), false);
+});
+
 test("store del removes a key and returns true", async () => {
   const host = createHostServices({ dbName: "test-del" });
   await host["store/put"]("gone", "value");

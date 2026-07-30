@@ -924,9 +924,28 @@ final class HaraAnalyzer {
       ILinearType<?> vector = (ILinearType<?>) pattern;
       for (int i = 0; i < vector.count(); i++) {
         Object element = vector.nth(i);
-        if (element instanceof Symbol && "&".equals(((Symbol) element).getName())) {
+        if (element instanceof Keyword && "as".equals(((Keyword) element).getName())) {
           if (i + 2 != vector.count()) {
-            throw error("& in a destructuring vector must precede its final binding");
+            throw error(":as in a destructuring vector must precede its final binding");
+          }
+          addPatternBindings(
+              vector.nth(i + 1),
+              source,
+              patternFrames,
+              patternLocals,
+              patternSlots,
+              patternInitializers,
+              defaults);
+          return;
+        }
+        if (element instanceof Symbol && "&".equals(((Symbol) element).getName())) {
+          int remaining = (int) vector.count() - i;
+          if (remaining != 2
+              && !(remaining == 4
+                  && vector.nth(i + 2) instanceof Keyword
+                  && "as".equals(((Keyword) vector.nth(i + 2)).getName()))) {
+            throw error(
+                "& in a destructuring vector must precede its final binding and optional :as");
           }
           addPatternBindings(
               vector.nth(i + 1),
@@ -936,6 +955,16 @@ final class HaraAnalyzer {
               patternSlots,
               patternInitializers,
               defaults);
+          if (remaining == 4) {
+            addPatternBindings(
+                vector.nth(i + 3),
+                source,
+                patternFrames,
+                patternLocals,
+                patternSlots,
+                patternInitializers,
+                defaults);
+          }
           return;
         }
         addPatternBindings(
