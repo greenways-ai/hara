@@ -1,0 +1,17 @@
+{:conformance/id :greenways.supersonic/provider-cases
+ :conformance/version "0.1.0"
+ :conformance/cases
+ [{:case/id :greenways.supersonic.provider/stable-snapshot
+   :case/type :codec
+   :case/input :canonical-graph
+   :case/expected :exact-equality}
+  {:case/id :greenways.supersonic.provider/reject-unknown-control
+   :case/type :control-update
+   :case/input {:node/id :oscillator
+                :control/id :unknown
+                :control/value 1}
+   :case/expected :fail}
+  {:case/id :greenways.supersonic.provider/atomic-replacement
+   :case/type :graph-replacement
+   :case/input [:graph-a :graph-b]
+   :case/expected :graph-b}]}

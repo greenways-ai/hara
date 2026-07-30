@@ -18,6 +18,10 @@ import { normalizeCreative } from "../../website/creative.js";
 const wasmUrl = new URL("../raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm", import.meta.url);
 const wasmBytes = await readFile(wasmUrl).catch(() => null);
 const hal = (name) => readFile(new URL(`./studio/hal/${name}.hal`, import.meta.url), "utf8");
+const supersonicHal = () => readFile(
+  new URL("../../contrib/greenways/supersonic/src/hal/gw/audio/supersonic.hal", import.meta.url),
+  "utf8"
+);
 const resources = wasmBytes === null
   ? null
   : {
@@ -27,7 +31,7 @@ const resources = wasmBytes === null
       "studio.program": await hal("program"),
       "studio.graph": await hal("graph"),
       "studio.session": await hal("session"),
-      "gw.audio.supersonic": await hal("supersonic"),
+      "gw.audio.supersonic": await supersonicHal(),
       "std.lib.substrate.protocol": await readFile(new URL("../../lib/src/std/lib/substrate/protocol.hal", import.meta.url), "utf8"),
       "std.lib.substrate.frame": await readFile(new URL("../../lib/src/std/lib/substrate/frame.hal", import.meta.url), "utf8"),
       "std.lib.substrate": await readFile(new URL("../../lib/src/std/lib/substrate.hal", import.meta.url), "utf8")
