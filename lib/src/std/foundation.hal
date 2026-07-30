@@ -74,22 +74,18 @@
   "Returns a function that ignores its arguments and always returns value."
   [value] (fn [ignored & rest] value))
 
-(defn- ^{:schema [:fn [:fn :fn] :fn]}
-  comp2
-  "Composes two functions right-to-left: (comp2 f g)(x) = f(g(x))."
-  [f g] (fn [value] (f (g value))))
-
-(defn- ^{:schema [:fn [:fn :fn :fn] :fn]}
-  comp3
-  "Composes three functions right-to-left: (comp3 f g h)(x) = f(g(h(x)))."
-  [f g h] (fn [value] (f (g (h value)))))
-
 (defn ^{:schema [:function [:fn [:fn :fn] :fn]
                             [:fn [:fn :fn :fn] :fn]]}
   comp
   "Composes two or three functions right-to-left."
-  ([f g] (comp2 f g))
-  ([f g h] (comp3 f g h)))
+  ([f g]   (fn [value] (f (g value))))
+  ([f g h] (fn [value] (f (g (h value))))
+  ([f g h l & more]
+   (fn [value]
+     (reduce (fn [result f] (f result))
+             value
+             (concat (reverse more)
+                     [l h g f]))))
 
 (defn ^{:schema [:fn [:fn] :fn]}
   complement
