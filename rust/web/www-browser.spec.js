@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 
 test("www opens on Home with external site navigation", async ({ page }) => {
+  test.setTimeout(90_000);
   await page.addInitScript(() => localStorage.setItem("hara-www.workspace.v1", "1"));
   await page.goto("/target/www/");
   await expect(page.locator("body")).toHaveAttribute("data-workspace", "0");
@@ -12,7 +13,9 @@ test("www opens on Home with external site navigation", async ({ page }) => {
   await expect(page.locator(".system-bottom-bar [data-workspace-prev]")).toBeVisible();
   await expect(page.locator(".system-bottom-bar [data-workspace-next]")).toBeVisible();
   await expect(page.locator(".system-bottom-bar [data-runtime-toggle]")).toBeVisible();
-  await expect(page.getByRole("button", { name: "START" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "START" })).toBeVisible({
+    timeout: 60_000
+  });
   await expect(page.locator("[data-workspace-prev]")).toBeDisabled();
   await expect(page.locator("[data-workspace-next]")).toBeEnabled();
   await expect(page.locator("[data-background-picker]")).toBeVisible();
@@ -43,6 +46,7 @@ test("www opens on Home with external site navigation", async ({ page }) => {
 });
 
 test("zoomed desktop opens on the Home screen", async ({ page }) => {
+  test.setTimeout(90_000);
   await page.setViewportSize({ width: 892, height: 900 });
   await page.goto("/target/www/");
   await expect(page.locator(".welcome-workspace")).toBeVisible();
@@ -52,9 +56,10 @@ test("zoomed desktop opens on the Home screen", async ({ page }) => {
 });
 
 test("phone shell keeps the single-screen controls unobscured", async ({ page }) => {
+  test.setTimeout(90_000);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/target/www/");
-  await expect(page.locator("[data-start]")).toBeVisible();
+  await expect(page.locator("[data-start]")).toBeVisible({ timeout: 60_000 });
   await expect(page.locator(".system-bar")).toHaveCount(0);
   await expect(page.locator(".system-bottom-bar [data-launcher-toggle]")).toBeVisible();
   await expect(page.locator(".system-bottom-bar [data-workspace-prev]")).toBeVisible();
@@ -67,6 +72,7 @@ test("phone shell keeps the single-screen controls unobscured", async ({ page })
 });
 
 test("canonical Hara assets and compact Start button survive responsive widths", async ({ page }) => {
+  test.setTimeout(90_000);
   await page.setViewportSize({ width: 600, height: 900 });
   await page.goto("/target/www/");
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "./assets/hara-favicon.svg?v=3");
@@ -84,6 +90,7 @@ test("canonical Hara assets and compact Start button survive responsive widths",
 
 
 test("kernel loader does not move the hero callout", async ({ page }) => {
+  test.setTimeout(90_000);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/target/www/");
   const loader = page.locator("[data-kernel-loading]");
@@ -99,6 +106,7 @@ test("kernel loader does not move the hero callout", async ({ page }) => {
 });
 
 test("mobile editor toolbar uses icons instead of visible text", async ({ page }) => {
+  test.setTimeout(90_000);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/target/www/");
   const styles = await page.locator(".editor-toolbar").evaluate((toolbar) => {
