@@ -7348,15 +7348,12 @@ fn deref_value(value: Value) -> Value {
 }
 
 fn binding_value(env: &HashMap<String, Value>, name: &str) -> Option<Value> {
-    env.get(name)
-        .cloned()
-        .map(deref_value)
-        .or_else(|| {
-            namespace_registry()
-                .ok()?
-                .resolve(&crate::lang::data::Symbol::parse(name))
-                .map(|var| var.deref_value())
-        })
+    env.get(name).cloned().map(deref_value).or_else(|| {
+        namespace_registry()
+            .ok()?
+            .resolve(&crate::lang::data::Symbol::parse(name))
+            .map(|var| var.deref_value())
+    })
 }
 
 fn binding_var(env: &mut HashMap<String, Value>, name: &str) -> Option<KernelVar<Value>> {
