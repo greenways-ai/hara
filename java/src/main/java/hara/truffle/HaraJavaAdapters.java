@@ -1,8 +1,14 @@
 package hara.truffle;
 
 import hara.lang.data.types.ISequentialLookupType;
+import hara.lang.data.types.ISequentialType;
 import hara.lang.data.types.ISetType;
+import hara.lang.data.types.IMapType;
+import hara.lang.data.types.IVectorType;
+import hara.lang.data.Keyword;
 import hara.lang.data.List;
+import hara.lang.data.Symbol;
+import hara.lang.data.TaggedLiteral;
 import hara.lang.protocol.*;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -29,6 +35,24 @@ public final class HaraJavaAdapters {
     installNth(context.defineProtocol("INth", Map.of("nth", 2)));
     installEmpty(context.defineProtocol("IEmpty", Map.of("empty", 1)));
     installDisplay(context.defineProtocol("IDisplay", Map.of("display", 1)));
+    installEncodable(context, context.defineProtocol("IEncodable", Map.of("encode-with", 2)));
+    context.defineProtocol("IEncode", Map.of("encode", 2));
+    context.defineProtocol(
+        "IEncodeVisitor",
+        Map.ofEntries(
+            Map.entry("visit-nil", 1),
+            Map.entry("visit-boolean", 2),
+            Map.entry("visit-number", 2),
+            Map.entry("visit-character", 2),
+            Map.entry("visit-string", 2),
+            Map.entry("visit-keyword", 2),
+            Map.entry("visit-symbol", 2),
+            Map.entry("visit-seq", 2),
+            Map.entry("visit-vector", 2),
+            Map.entry("visit-map", 2),
+            Map.entry("visit-set", 2),
+            Map.entry("visit-tagged", 3),
+            Map.entry("visit-unknown", 2)));
     installCons(context.defineProtocol("ICons", Map.of("cons", 2)));
     installDissoc(context.defineProtocol("IDissoc", Map.of("dissoc", 2)));
     installIndexed(context.defineProtocol("IIndexed", Map.of("index-of", 2)));
@@ -328,6 +352,45 @@ public final class HaraJavaAdapters {
   public static void installDisplay(HaraProtocol protocol) {
     protocol.extend(
         IDisplay.class, "display", (receiver, arguments) -> ((IDisplay) receiver).display());
+  }
+
+  public static void installEncodable(HaraContext context, HaraProtocol protocol) {
+    protocol.extendNil(
+        "encode-with",
+        (receiver, arguments) ->
+            context.invokeProtocol("IEncodeVisitor", "visit-nil", arguments[0]));
+    protocol.extendDefault(
+        "encode-with",
+        (receiver, arguments) -> {
+          Object visitor = arguments[0];
+          if (receiver instanceof TaggedLiteral tagged) {
+            return context.invokeProtocol(
+                "IEncodeVisitor", "visit-tagged", visitor, tagged.tag(), tagged.form());
+          }
+          String method =
+              receiver instanceof Boolean
+                  ? "visit-boolean"
+                  : receiver instanceof Number
+                      ? "visit-number"
+                      : receiver instanceof Character
+                          ? "visit-character"
+                          : receiver instanceof String
+                              ? "visit-string"
+                              : receiver instanceof Keyword
+                                  ? "visit-keyword"
+                                  : receiver instanceof Symbol
+                                      ? "visit-symbol"
+                                      : receiver instanceof IVectorType<?>
+                                          ? "visit-vector"
+                                          : receiver instanceof IMapType<?, ?>
+                                              ? "visit-map"
+                                              : receiver instanceof ISetType<?>
+                                                  ? "visit-set"
+                                                  : receiver instanceof ISequentialType<?>
+                                                      ? "visit-seq"
+                                                      : "visit-unknown";
+          return context.invokeProtocol("IEncodeVisitor", method, visitor, receiver);
+        });
   }
 
   public static void installCollection(HaraProtocol protocol) {

@@ -1226,7 +1226,7 @@ public class HaraLanguageTest {
     }
     Set<String> hiddenProtocols = Set.of("IColl", "IMetadata");
     protocols.removeAll(hiddenProtocols);
-    assertEquals(50, protocols.size());
+    assertEquals(53, protocols.size());
     Set<String> unavailableProtocols =
         Set.of(
             "IColl",
@@ -1326,13 +1326,13 @@ public class HaraLanguageTest {
         Pattern.compile("\\(std\\.protocol\\.[a-z]+/[a-z?\\-]+\\s+fixture").matcher(source);
     int callCount = 0;
     while (calls.find()) callCount++;
-    assertEquals(88, callCount);
+    assertEquals(103, callCount);
     assertTrue(!source.contains("protocol-call"));
 
     try (Context context = context()) {
       String result = context.eval(HaraLanguage.ID, source).toString();
       assertTrue(result, !result.contains(":pass false"));
-      assertEquals(50, result.split(":pass true", -1).length - 1);
+      assertEquals(53, result.split(":pass true", -1).length - 1);
     }
   }
 

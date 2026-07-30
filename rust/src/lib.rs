@@ -475,6 +475,14 @@ impl Runtime {
                 "std.foundation.json",
                 include_str!("../../lib/src/std/foundation/json.hal"),
             ),
+            (
+                "std.foundation.pretty.engine",
+                include_str!("../../lib/src/std/foundation/pretty/engine.hal"),
+            ),
+            (
+                "std.foundation.pretty",
+                include_str!("../../lib/src/std/foundation/pretty.hal"),
+            ),
             ("std.pretty", include_str!("../../lib/src/std/pretty.hal")),
             (
                 "std.lib.substrate.protocol",
@@ -1747,6 +1755,33 @@ mod tests {
     }
 
     #[test]
+    fn portable_pretty_renderer_groups_and_breaks_documents() {
+        let mut runtime = Runtime::new();
+        runtime.require_resource("std.foundation.pretty").unwrap();
+        assert_eq!(
+            runtime.eval_text("(std.foundation.pretty/render \"abc\")").unwrap(),
+            "\"abc\""
+        );
+        let document = "[:group \"(\" [:nest 2 [:line] \"alpha\" [:line] \"beta\"] \")\"]";
+        assert_eq!(
+            runtime
+                .eval_text(&format!(
+                    "(std.foundation.pretty/render {document} {{:width 80}})"
+                ))
+                .unwrap(),
+            "\"( alpha beta)\""
+        );
+        assert_eq!(
+            runtime
+                .eval_text(&format!(
+                    "(std.foundation.pretty/render {document} {{:width 8}})"
+                ))
+                .unwrap(),
+            "\"(\\n  alpha\\n  beta)\""
+        );
+    }
+
+    #[test]
     fn threading_macros_expand_finite_iterator_clauses() {
         let mut runtime = Runtime::new();
         assert_eq!(runtime.eval_text("(cond-> 1 (= 1 1) inc)").unwrap(), "2");
@@ -2302,13 +2337,13 @@ mod tests {
         let contract = include_str!("../../specs/language/draft/conformance/protocols.edn");
         let fixture =
             include_str!("../../lib/test-fixtures/std/foundation/protocol_conformance.hal");
-        assert_eq!(core::FOUNDATION_PROTOCOLS.len(), 50);
+        assert_eq!(core::FOUNDATION_PROTOCOLS.len(), 53);
         assert_eq!(
             core::FOUNDATION_PROTOCOLS
                 .iter()
                 .map(|(_, methods)| methods.len())
                 .sum::<usize>(),
-            88
+            103
         );
         let foundation = runtime
             .namespace_registry
@@ -2441,7 +2476,7 @@ mod tests {
             ))
             .unwrap();
         assert!(!result.contains(":pass false"), "{result}");
-        assert_eq!(result.matches(":pass true").count(), 50, "{result}");
+        assert_eq!(result.matches(":pass true").count(), 53, "{result}");
     }
 
     #[test]

@@ -1,0 +1,28 @@
+(ns std.foundation.pretty-test
+  (:require [std.lib.test :as test]
+            [std.foundation.pretty :as pretty]))
+
+(def document
+  [:group
+   "("
+   [:nest 2 [:line] "alpha" [:line] "beta"]
+   ")"])
+
+(def results
+  [(test/check "plain text"
+               (pretty/render "abc")
+               "abc")
+   (test/check "group stays flat within width"
+               (pretty/render document {:width 80})
+               "( alpha beta)")
+   (test/check "group breaks and nests beyond width"
+               (pretty/render document {:width 8})
+               "(\n  alpha\n  beta)")
+   (test/check "pass text has zero visible width"
+               (pretty/render [:group [:pass "<color>"] "123" [:line] "4"]
+                              {:width 5})
+               "<color>123 4")
+   (test/check-error "options must be a map"
+                     (pretty/render "abc" nil))])
+
+(test/print-results results)

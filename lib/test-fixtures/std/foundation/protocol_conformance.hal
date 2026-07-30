@@ -84,6 +84,30 @@
   (empty [fixture] :iempty/empty)
 )
 
+(extend-type ProtocolFixture std.protocol.iencodable/IEncodable
+  (encode-with [fixture arg1] :iencodable/encode-with)
+)
+
+(extend-type ProtocolFixture std.protocol.iencode/IEncode
+  (encode [fixture arg1] :iencode/encode)
+)
+
+(extend-type ProtocolFixture std.protocol.iencodevisitor/IEncodeVisitor
+  (visit-nil [fixture] :iencodevisitor/visit-nil)
+  (visit-boolean [fixture arg1] :iencodevisitor/visit-boolean)
+  (visit-number [fixture arg1] :iencodevisitor/visit-number)
+  (visit-character [fixture arg1] :iencodevisitor/visit-character)
+  (visit-string [fixture arg1] :iencodevisitor/visit-string)
+  (visit-keyword [fixture arg1] :iencodevisitor/visit-keyword)
+  (visit-symbol [fixture arg1] :iencodevisitor/visit-symbol)
+  (visit-seq [fixture arg1] :iencodevisitor/visit-seq)
+  (visit-vector [fixture arg1] :iencodevisitor/visit-vector)
+  (visit-map [fixture arg1] :iencodevisitor/visit-map)
+  (visit-set [fixture arg1] :iencodevisitor/visit-set)
+  (visit-tagged [fixture arg1 arg2] :iencodevisitor/visit-tagged)
+  (visit-unknown [fixture arg1] :iencodevisitor/visit-unknown)
+)
+
 (extend-type ProtocolFixture std.protocol.iequality/IEquality
   (equality [fixture arg1] :iequality/equality)
 )
@@ -300,6 +324,42 @@
        methods (= [(std.protocol.iempty/empty fixture)]
                   [:iempty/empty])]
    {:protocol :IEmpty :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IEncodable std.protocol.iencodable/IEncodable)
+       methods (= [(std.protocol.iencodable/encode-with fixture :arg1)]
+                  [:iencodable/encode-with])]
+   {:protocol :IEncodable :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IEncode std.protocol.iencode/IEncode)
+       methods (= [(std.protocol.iencode/encode fixture :arg1)]
+                  [:iencode/encode])]
+   {:protocol :IEncode :alias alias :methods methods :pass (if alias methods false)})
+ (let [alias (= std.foundation/IEncodeVisitor std.protocol.iencodevisitor/IEncodeVisitor)
+       methods (= [(std.protocol.iencodevisitor/visit-boolean fixture :arg1)
+                   (std.protocol.iencodevisitor/visit-character fixture :arg1)
+                   (std.protocol.iencodevisitor/visit-keyword fixture :arg1)
+                   (std.protocol.iencodevisitor/visit-map fixture :arg1)
+                   (std.protocol.iencodevisitor/visit-nil fixture)
+                   (std.protocol.iencodevisitor/visit-number fixture :arg1)
+                   (std.protocol.iencodevisitor/visit-seq fixture :arg1)
+                   (std.protocol.iencodevisitor/visit-set fixture :arg1)
+                   (std.protocol.iencodevisitor/visit-string fixture :arg1)
+                   (std.protocol.iencodevisitor/visit-symbol fixture :arg1)
+                   (std.protocol.iencodevisitor/visit-tagged fixture :arg1 :arg2)
+                   (std.protocol.iencodevisitor/visit-unknown fixture :arg1)
+                   (std.protocol.iencodevisitor/visit-vector fixture :arg1)]
+                  [:iencodevisitor/visit-boolean
+                   :iencodevisitor/visit-character
+                   :iencodevisitor/visit-keyword
+                   :iencodevisitor/visit-map
+                   :iencodevisitor/visit-nil
+                   :iencodevisitor/visit-number
+                   :iencodevisitor/visit-seq
+                   :iencodevisitor/visit-set
+                   :iencodevisitor/visit-string
+                   :iencodevisitor/visit-symbol
+                   :iencodevisitor/visit-tagged
+                   :iencodevisitor/visit-unknown
+                   :iencodevisitor/visit-vector])]
+   {:protocol :IEncodeVisitor :alias alias :methods methods :pass (if alias methods false)})
  (let [alias (= std.foundation/IEquality std.protocol.iequality/IEquality)
        methods (= [(std.protocol.iequality/equality fixture :arg1)]
                   [:iequality/equality])]

@@ -145,7 +145,7 @@ public final class HaraContext {
           Map.entry("Arr", java.util.List.of("new", "instance?", "get-index", "set-index")),
           Map.entry("Obj", java.util.List.of("new", "instance?", "get-key", "set-key", "has-key?", "delete-key")),
           Map.entry("Runtime", java.util.List.of("load-string", "macroexpand-1", "gensym", "var-sym")),
-          Map.entry("Printer", java.util.List.of("str", "pr-str")),
+          Map.entry("Printer", java.util.List.of("p", "println")),
           Map.entry("Edn", java.util.List.of("read")),
           Map.entry("Json", java.util.List.of("read", "write", "pretty")),
           Map.entry("Host", java.util.List.of("call", "describe", "capabilities", "capability?")),
@@ -1910,8 +1910,36 @@ public final class HaraContext {
     return result.toString();
   }
 
+  private Object printValues(Object[] values, boolean newline) {
+    String text;
+    if (newline) {
+      java.util.List<String> parts = new java.util.ArrayList<>(values.length);
+      for (Object value : values) {
+        Object unwrapped = HaraBox.unwrap(value);
+        parts.add(unwrapped == null || unwrapped == HaraNull.SINGLETON
+            ? "nil"
+            : unwrapped instanceof IDisplay
+                ? ((IDisplay) unwrapped).display()
+                : String.valueOf(unwrapped));
+      }
+      text = String.join(" ", parts) + "\n";
+    } else {
+      text = concatenateStrings(values);
+    }
+    try {
+      environment.out().write(text.getBytes(StandardCharsets.UTF_8));
+      environment.out().flush();
+      return null;
+    } catch (IOException error) {
+      throw new HaraException("Printer output failed: " + error.getMessage());
+    }
+  }
+
   private void installCoreBuiltins(HaraNamespace target) {
     target.define("str", new VariadicBuiltin("str", HaraContext::concatenateStrings));
+    target.define("p", new VariadicBuiltin("p", values -> printValues(values, false)));
+    target.define(
+        "println", new VariadicBuiltin("println", values -> printValues(values, true)));
     target.define(
         "list",
         new VariadicBuiltin(
@@ -3547,6 +3575,10 @@ public final class HaraContext {
     Object[] arguments = new Object[values.length - 1];
     System.arraycopy(values, 1, arguments, 0, arguments.length);
     return ((HaraProtocol) variable.get()).invoke(methodName, receiver, arguments);
+  }
+
+  Object invokeProtocol(String protocolName, String methodName, Object... values) {
+    return protocolCall(protocolName, methodName, values);
   }
 
   private void requireHalPath(String path, String operation) {

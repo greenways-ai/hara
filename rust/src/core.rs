@@ -75,7 +75,7 @@ pub(crate) const NATIVE_TYPES: &[(&str, &[&str])] = &[
     ("Arr", &["new", "instance?", "get-index", "set-index"]),
     ("Obj", &["new", "instance?", "get-key", "set-key", "has-key?", "delete-key"]),
     ("Runtime", &["load-string", "macroexpand-1", "gensym", "var-sym"]),
-    ("Printer", &["str", "pr-str"]),
+    ("Printer", &["p", "println"]),
     ("Edn", &["read"]),
     ("Json", &["read", "write", "pretty"]),
     ("Host", &["call", "describe", "capabilities", "capability?"]),
@@ -147,6 +147,26 @@ pub(crate) const FOUNDATION_PROTOCOLS: &[(&str, &[(&str, usize)])] = &[
     ("IDisplay", &[("display", 1)]),
     ("IDissoc", &[("dissoc", 2)]),
     ("IEmpty", &[("empty", 1)]),
+    ("IEncodable", &[("encode-with", 2)]),
+    ("IEncode", &[("encode", 2)]),
+    (
+        "IEncodeVisitor",
+        &[
+            ("visit-nil", 1),
+            ("visit-boolean", 2),
+            ("visit-number", 2),
+            ("visit-character", 2),
+            ("visit-string", 2),
+            ("visit-keyword", 2),
+            ("visit-symbol", 2),
+            ("visit-seq", 2),
+            ("visit-vector", 2),
+            ("visit-map", 2),
+            ("visit-set", 2),
+            ("visit-tagged", 3),
+            ("visit-unknown", 2),
+        ],
+    ),
     ("IEquality", &[("equality", 2)]),
     ("IExInfo", &[("data", 1)]),
     ("IFind", &[("find", 2)]),
@@ -1991,6 +2011,11 @@ impl ProtocolRegistry {
             "std.protocol.idisplay/IDisplay",
             "display",
             protocol_display,
+        );
+        registry.register(
+            "std.protocol.iencodable/IEncodable",
+            "encode-with",
+            protocol_encode_with,
         );
         registry.register(
             "std.protocol.iexinfo/IExInfo",
@@ -4550,6 +4575,50 @@ fn protocol_display(arguments: &[Value]) -> Result<Value, String> {
         [value] => Ok(Value::String(value.display())),
         _ => Err("IDisplay/display expects one value".into()),
     }
+}
+
+fn protocol_encode_with(arguments: &[Value]) -> Result<Value, String> {
+    let [value, visitor] = arguments else {
+        return Err("IEncodable/encode-with expects a value and visitor".into());
+    };
+    let (method, visitor_arguments) = match value {
+        Value::Nil => ("visit-nil", vec![visitor.clone()]),
+        Value::Bool(_) => ("visit-boolean", vec![visitor.clone(), value.clone()]),
+        Value::Number(_) | Value::Float(_) | Value::BigInteger(_) | Value::Decimal(_) => {
+            ("visit-number", vec![visitor.clone(), value.clone()])
+        }
+        Value::Character(_) => ("visit-character", vec![visitor.clone(), value.clone()]),
+        Value::String(_) => ("visit-string", vec![visitor.clone(), value.clone()]),
+        Value::Keyword(_) => ("visit-keyword", vec![visitor.clone(), value.clone()]),
+        Value::Symbol(_) => ("visit-symbol", vec![visitor.clone(), value.clone()]),
+        Value::List(_) | Value::Cons(_) | Value::Queue(_) => {
+            ("visit-seq", vec![visitor.clone(), value.clone()])
+        }
+        Value::Vector(_) | Value::Tuple(_) => {
+            ("visit-vector", vec![visitor.clone(), value.clone()])
+        }
+        Value::Map(_)
+        | Value::OrderedMap(_)
+        | Value::SortedMap(_)
+        | Value::Trie(_) => ("visit-map", vec![visitor.clone(), value.clone()]),
+        Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_) => {
+            ("visit-set", vec![visitor.clone(), value.clone()])
+        }
+        Value::Tagged(tagged) => (
+            "visit-tagged",
+            vec![
+                visitor.clone(),
+                Value::Symbol(tagged.tag().clone()),
+                tagged.form().clone(),
+            ],
+        ),
+        _ => ("visit-unknown", vec![visitor.clone(), value.clone()]),
+    };
+    protocol_call(
+        "std.protocol.iencodevisitor/IEncodeVisitor",
+        method,
+        &visitor_arguments,
+    )
 }
 
 fn protocol_hash(arguments: &[Value]) -> Result<Value, String> {
@@ -9013,6 +9082,52 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 Ok(Value::String(eval(&fs[1], env)?.display()))
             }
             Form::Symbol(n)
+                if n == "p" || n == "std.native.Printer/p" =>
+            {
+                use std::io::Write;
+                let values = fs[1..]
+                    .iter()
+                    .map(|form| eval(form, env))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let text = values
+                    .iter()
+                    .map(|value| match value {
+                        Value::Nil => String::new(),
+                        Value::String(text) => text.clone(),
+                        _ => value.display(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("");
+                print!("{text}");
+                std::io::stdout()
+                    .flush()
+                    .map_err(|error| format!("Printer output failed: {error}"))?;
+                Ok(Value::Nil)
+            }
+            Form::Symbol(n)
+                if n == "println" || n == "std.native.Printer/println" =>
+            {
+                use std::io::Write;
+                let values = fs[1..]
+                    .iter()
+                    .map(|form| eval(form, env))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let text = values
+                    .iter()
+                    .map(|value| match value {
+                        Value::Nil => "nil".to_owned(),
+                        Value::String(text) => text.clone(),
+                        _ => value.display(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                println!("{text}");
+                std::io::stdout()
+                    .flush()
+                    .map_err(|error| format!("Printer output failed: {error}"))?;
+                Ok(Value::Nil)
+            }
+            Form::Symbol(n)
                 if [
                     "str/comp",
                     "str/lt?",
@@ -9997,6 +10112,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             Form::Symbol(n)
                 if [
                     "list?", "vector?", "map?", "set?", "keyword?", "symbol?", "string?",
+                    "number?",
                 ]
                 .contains(&n.as_str()) =>
             {
@@ -10018,6 +10134,13 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     "keyword?" => matches!(value, Value::Keyword(_)),
                     "symbol?" => matches!(value, Value::Symbol(_)),
                     "string?" => matches!(value, Value::String(_)),
+                    "number?" => matches!(
+                        value,
+                        Value::Number(_)
+                            | Value::Float(_)
+                            | Value::BigInteger(_)
+                            | Value::Decimal(_)
+                    ),
                     _ => unreachable!(),
                 }))
             }
