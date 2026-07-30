@@ -2473,6 +2473,7 @@ async function bootRuntime() {
         ? new URL("hta-shared-worker.js", runtimeBase) : undefined,
       moduleBytes,
       hostCalls,
+      hirResources: [...kernelPackage.resources.values()].map((resource) => resource.bytes),
       onKernelStarting: async (kernel) => {
         state.telemetry.kernelsCreated += 1;
         let space = state.kernelSpaces.get(kernel.name);
@@ -2484,6 +2485,15 @@ async function bootRuntime() {
         state.contextSpaces.set(kernel.context, space);
         const mount = await kernel.context.createFilesystem({ provider: "indexeddb", key: space });
         await kernel.context.session().attachFilesystem(mount);
+        const hirModules = [...kernelPackage.resources.values()].map((resource) => resource.bytes);
+        await kernel.context.call("eval-hir-bundle", [hirModules]);
+        if (kernel.name === ROOT) {
+          setKernelProgress(
+            74,
+            "COMPILED KERNEL READY",
+            `${kernelPackage.resources.size} HIR MODULES`
+          );
+        }
       },
       onKernelCreated: async (kernel) => {
         const session = sessionRouter.register(kernel.name, kernel.context, {
@@ -2506,20 +2516,6 @@ async function bootRuntime() {
       }
     }));
     state.defaultBootstrap = defaultBootstrap;
-    const rootKernel = await state.broker.require(ROOT);
-    let hirLoaded = 0;
-    for (const [namespace, resource] of kernelPackage.resources) {
-      if (resource.format !== "hir") {
-        throw new Error(`kernel package contains non-HIR resource: ${namespace}`);
-      }
-      await rootKernel.context.call("eval-hir", [resource.bytes]);
-      hirLoaded += 1;
-      setKernelProgress(
-        64 + (hirLoaded / kernelPackage.resources.size) * 10,
-        "LOADING COMPILED KERNEL",
-        `${hirLoaded} / ${kernelPackage.resources.size} · ${namespace.toUpperCase()}`
-      );
-    }
     setKernelProgress(74, "STARTING KERNEL", "BOOTSTRAPPING HOME SPACE");
     await state.broker.eval(ROOT, defaultBootstrap(SPACE));
     setKernelProgress(84, "LOADING WORKSPACE", "READING PROJECT MANIFESTS");

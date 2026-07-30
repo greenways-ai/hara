@@ -21,11 +21,12 @@ const NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
  */
 export class KernelBroker {
   constructor({
-    spawn, resources = {}, onKernelStarting = async () => {},
+    spawn, resources = {}, hirResources = [], onKernelStarting = async () => {},
     onKernelCreated = async () => {}, onKernelClosed = async () => {}
   }) {
     this.spawn = spawn;
     this.resources = resources;
+    this.hirResources = hirResources;
     this.onKernelStarting = onKernelStarting;
     this.onKernelCreated = onKernelCreated;
     this.onKernelClosed = onKernelClosed;
@@ -81,6 +82,9 @@ export class KernelBroker {
     kernel.sessions ??= new Set([ROOT]);
     kernel.sessions.add(sessionName);
     try {
+      if (this.hirResources.length) {
+        await kernel.context.call("session/eval-hir-bundle", [sessionName, this.hirResources]);
+      }
       if (filesystem !== null) {
         await kernel.context.session(sessionName).attachFilesystem(filesystem);
       }
@@ -502,11 +506,12 @@ function sharedWorkerPort(url) {
 }
 
 export function createBrowserBroker({
-  workerUrl, sharedWorkerUrl, moduleBytes, hostCalls = {}, resources,
+  workerUrl, sharedWorkerUrl, moduleBytes, hostCalls = {}, resources, hirResources,
   onKernelStarting, onKernelCreated, onKernelClosed
 }) {
   return new KernelBroker({
     resources,
+    hirResources,
     onKernelStarting,
     onKernelCreated,
     onKernelClosed,
