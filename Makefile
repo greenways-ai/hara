@@ -23,7 +23,6 @@ DOCS_CONFIG := docs/mkdocs.yml
         java java-offline java-headless java-build java-test java-conformance \
         rust rust-offline rust-headless rust-build rust-build-release rust-release \
         rust-test rust-raw-test rust-layout lib-test \
-        fabric fabric-build fabric-test fabric-benchmark \
         native-image native-image-run native-image-offline \
         wasm wasm-build wasm-web wasm-web-build \
         web-install hta-test studio-build studio-test \
@@ -40,7 +39,6 @@ help: ## Show the available runtime targets
 	@echo '  make rust [ARGS="..."]          Rust native REPL'
 	@echo '  make rust-offline               Rust native REPL without RESP'
 	@echo '  make rust-headless              Rust native RESP server'
-	@echo '  make fabric [ARGS="..."]        Rust Fabric coordination service'
 	@echo '  make native-image-run           GraalVM native-image REPL'
 	@echo '  make native-image-offline       GraalVM native-image REPL without RESP'
 	@echo '  make wasm                       Build the raw WASM module (no terminal REPL)'
@@ -56,14 +54,11 @@ help: ## Show the available runtime targets
 	@echo '  make rust-raw-test              Run raw WASM crate tests'
 	@echo '  make rust-layout                Check Rust module layout'
 	@echo '  make lib-test                   Run portable .hal library tests'
-	@echo '  make fabric-test                Run focused Fabric and RESP tests'
 	@echo '  make hta-test                   Run HTA browser-loader Node tests'
 	@echo '  make studio-test                Build raw WASM and run Studio tests'
 	@echo '  make chrome-build               Build the Chrome extension'
 	@echo '  make chrome-test                Test the Chrome extension'
 	@echo '  make docs-build                 Build documentation strictly'
-	@echo '  make fabric-benchmark [ARGS="..."]'
-	@echo '                                  Run the agent-workroom benchmark'
 	@echo '  make runtime-benchmark [ARGS="..."]'
 	@echo '                                  Run the cross-runtime benchmark'
 	@echo '  make clean                      Remove Maven and Cargo build output'
@@ -73,8 +68,6 @@ help: ## Show the available runtime targets
 	@echo '  make java ARGS="eval '\''(+ 19 23)'\''"'
 	@echo '  make rust ARGS="run lib/examples/hello.hal"'
 	@echo '  make rust ARGS="remote 127.0.0.1:1311"'
-	@echo '  make fabric ARGS="--data target/fabric --shards 4"'
-	@echo '  make fabric-benchmark ARGS="--rooms 8 --tasks 1000 --clients 4"'
 
 all: help
 
@@ -127,18 +120,6 @@ rust-layout: ## Check the Rust module layout
 
 lib-test: ## Run portable .hal library tests
 	scripts/run-lib-tests
-
-fabric-build: rust-build ## Build the Rust Fabric service
-
-fabric: fabric-build ## Run the Rust Fabric coordination service
-	$(RUST_DEBUG) $(ARGS) fabric
-
-fabric-test: ## Run focused Fabric service and RESP protocol tests
-	$(CARGO) test --manifest-path $(RUST_MANIFEST) --lib service::tests
-	$(CARGO) test --manifest-path $(RUST_MANIFEST) --lib resp::tests::fabric_protocol
-
-fabric-benchmark: ## Run the Fabric agent-workroom benchmark
-	scripts/run-fabric-benchmark $(ARGS)
 
 native-image: $(TRUFFLE_NATIVE) ## Build the GraalVM native-image runtime
 
