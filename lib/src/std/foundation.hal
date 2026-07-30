@@ -77,7 +77,7 @@
 (defn ^{:schema [:function [:fn [:fn :fn] :fn]
                             [:fn [:fn :fn :fn] :fn]]}
   comp
-  "Composes two or three functions right-to-left."
+  "Composes two or more functions right-to-left."
   ([f g]   (fn [value] (f (g value))))
   ([f g h] (fn [value] (f (g (h value)))))
   ([f g h l & more]

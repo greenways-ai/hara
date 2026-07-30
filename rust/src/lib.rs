@@ -3504,6 +3504,29 @@ mod tests {
     }
 
     #[test]
+    fn definitions_accept_source_metadata_around_hir_syntax() {
+        let mut runtime = Runtime::new();
+        runtime
+            .eval_text(concat!(
+                "(defn wrapped ^{:line 1} [value] value)",
+                " (defn wrapped-many",
+                " ^{:line 2} ([value] value)",
+                " ^{:line 3} ([left right] (+ left right)))"
+            ))
+            .unwrap();
+        assert_eq!(
+            runtime
+                .eval_text(concat!(
+                    "[(wrapped 42)",
+                    " (wrapped-many 42)",
+                    " (wrapped-many 19 23)]"
+                ))
+                .unwrap(),
+            "[42 42 42]"
+        );
+    }
+
+    #[test]
     fn namespace_values_and_operations_match_java_registry_semantics() {
         let mut runtime = Runtime::new();
         let initial_namespace_count = runtime.namespace_registry.all().len();
@@ -6013,6 +6036,12 @@ mod tests {
         assert_eq!(
             runtime
                 .eval_text("((comp (fn [x] (+ x 1)) (fn [x] (+ x 1)) (fn [x] (+ x 1))) 39)")
+                .unwrap(),
+            "42"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("((comp inc inc inc inc) 38)")
                 .unwrap(),
             "42"
         );

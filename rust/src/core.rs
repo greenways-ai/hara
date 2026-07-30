@@ -950,10 +950,17 @@ fn macroexpand_call(
     Ok(Some(expansion))
 }
 
+fn form_without_metadata(mut form: &Form) -> &Form {
+    while let Form::Metadata(_, value) = form {
+        form = value.as_ref();
+    }
+    form
+}
+
 fn macro_clause_with_implicit_params(clause: &Form) -> Result<Form, String> {
-    match clause {
+    match form_without_metadata(clause) {
         Form::List(parts) if !parts.is_empty() => {
-            let params = match &parts[0] {
+            let params = match form_without_metadata(&parts[0]) {
                 Form::Vector(params) => params,
                 _ => return Err("macro arity must start with a parameter vector".into()),
             };
@@ -6856,24 +6863,34 @@ fn definition_metadata(
     macro_form: bool,
 ) -> Result<(Option<Rc<Metadata>>, &[Form]), String> {
     let mut rest = forms;
-    if let Some(Form::String(doc)) = rest.first() {
+    if let Some(Form::String(doc)) = rest.first().map(form_without_metadata) {
         metadata = assoc_metadata(metadata, "doc", MetadataValue::String(doc.clone()));
         rest = &rest[1..];
     }
-    if let Some(Form::Map(_)) = rest.first() {
-        metadata = merge_metadata(metadata, Some(metadata_from_form(&rest[0])?));
+    if let Some(Form::Map(_)) = rest.first().map(form_without_metadata) {
+        metadata = merge_metadata(
+            metadata,
+            Some(metadata_from_form(form_without_metadata(&rest[0]))?),
+        );
         rest = &rest[1..];
     }
     if rest.is_empty() {
         return Ok((metadata, rest));
     }
-    let arglists = if matches!(rest.first(), Some(Form::Vector(_))) {
-        vec![metadata_value(&rest[0])?]
+    let arglists = if matches!(
+        rest.first().map(form_without_metadata),
+        Some(Form::Vector(_))
+    ) {
+        vec![metadata_value(form_without_metadata(&rest[0]))?]
     } else {
         rest.iter()
-            .map(|clause| match clause {
-                Form::List(parts) if !parts.is_empty() => metadata_value(&parts[0]),
-                _ => Err("function arity must be a list beginning with parameters".into()),
+            .map(|clause| match form_without_metadata(clause) {
+                Form::List(parts) if !parts.is_empty() => {
+                    metadata_value(form_without_metadata(&parts[0]))
+                }
+                _ => Err(format!(
+                    "function arity must be a list beginning with parameters: {clause:?}"
+                )),
             })
             .collect::<Result<Vec<_>, String>>()?
     };
@@ -7093,7 +7110,7 @@ fn generated_unary_operation(
 fn function_parts(
     form: &Form,
 ) -> Result<(Vec<String>, Option<String>, Vec<Form>, Option<Form>), String> {
-    let list = match form {
+    let list = match form_without_metadata(form) {
         Form::Vector(values) => values,
         _ => return Err("function parameters must be a vector".into()),
     };
@@ -7103,12 +7120,12 @@ fn function_parts(
     let mut variadic_pattern = None;
     let mut index = 0;
     while index < list.len() {
-        match &list[index] {
+        match form_without_metadata(&list[index]) {
             Form::Symbol(name) if name == "&" => {
                 if variadic.is_some() || index + 1 >= list.len() || index + 2 != list.len() {
                     return Err("variadic marker must precede the final parameter".into());
                 }
-                let pattern = list[index + 1].clone();
+                let pattern = form_without_metadata(&list[index + 1]).clone();
                 variadic = Some(match &pattern {
                     Form::Symbol(name) => name.clone(),
                     _ => format!("__rest_{}", params.len()),
@@ -7298,7 +7315,7 @@ fn multi_arity_function(
 ) -> Result<Value, String> {
     let mut functions = Vec::with_capacity(clauses.len());
     for clause in clauses {
-        let parts = match clause {
+        let parts = match form_without_metadata(clause) {
             Form::List(parts) if parts.len() >= 2 => parts,
             _ => return Err("defn arity must contain parameters and a body".into()),
         };
@@ -9101,8 +9118,11 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 if rest.is_empty() {
                     return Err("defmacro expects a name, parameters, and a body".into());
                 }
-                let function = if matches!(rest.first(), Some(Form::Vector(_))) {
-                    let params = match &rest[0] {
+                let function = if matches!(
+                    rest.first().map(form_without_metadata),
+                    Some(Form::Vector(_))
+                ) {
+                    let params = match form_without_metadata(&rest[0]) {
                         Form::Vector(params) => params,
                         _ => unreachable!(),
                     };
@@ -9143,8 +9163,8 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("defn expects a name, parameters, and a body".into());
                 }
                 let (name, metadata) = binding_symbol(&fs[1], "defn name")?;
-                let (metadata, rest) =
-                    definition_metadata(metadata, &fs[2..], n == "defn-", false)?;
+                let (metadata, rest) = definition_metadata(metadata, &fs[2..], n == "defn-", false)
+                    .map_err(|error| format!("{name}: {error}"))?;
                 if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
                     return Ok(value);
                 }
@@ -9159,7 +9179,10 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 if rest.is_empty() {
                     return Err("defn expects a name, parameters, and a body".into());
                 }
-                let function = if matches!(rest.first(), Some(Form::Vector(_))) {
+                let function = if matches!(
+                    rest.first().map(form_without_metadata),
+                    Some(Form::Vector(_))
+                ) {
                     let (params, variadic, patterns, variadic_pattern) = function_parts(&rest[0])?;
                     Value::Function(Rc::new(Function {
                         params,
@@ -10591,11 +10614,11 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 let expected = match n.as_str() {
                     "comp2" => arity == 2,
                     "comp3" => arity == 3,
-                    _ => arity == 2 || arity == 3,
+                    _ => arity >= 2,
                 };
                 if !expected {
                     let arities = if n == "comp" {
-                        "2 or 3"
+                        "2 or more"
                     } else if n == "comp2" {
                         "2"
                     } else {
@@ -10613,36 +10636,18 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 {
                     return Err(format!("{n} expects functions"));
                 }
-                let body = if arity == 2 {
-                    Form::List(vec![
-                        Form::Symbol("__f".into()),
-                        Form::List(vec![
-                            Form::Symbol("__g".into()),
-                            Form::Symbol("value".into()),
-                        ]),
-                    ])
-                } else {
-                    Form::List(vec![
-                        Form::Symbol("__f".into()),
-                        Form::List(vec![
-                            Form::Symbol("__g".into()),
-                            Form::List(vec![
-                                Form::Symbol("__h".into()),
-                                Form::Symbol("value".into()),
-                            ]),
-                        ]),
-                    ])
-                };
-                let mut bindings =
-                    vec![("__f", functions[0].clone()), ("__g", functions[1].clone())];
-                if arity == 3 {
-                    bindings.push(("__h", functions[2].clone()));
+                let mut body = Form::Symbol("value".into());
+                let mut captured = env.clone();
+                for (index, function) in functions.into_iter().enumerate().rev() {
+                    let binding = format!("__comp_{index}");
+                    body = Form::List(vec![Form::Symbol(binding.clone()), body]);
+                    captured.insert(binding, function);
                 }
                 Ok(generated_function(
                     vec!["value".into()],
                     vec![body],
-                    env.clone(),
-                    bindings,
+                    captured,
+                    Vec::new(),
                 ))
             }
             Form::Symbol(n) if n == "identity" => {
