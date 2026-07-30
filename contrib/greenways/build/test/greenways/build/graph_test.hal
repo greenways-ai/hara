@@ -1,0 +1,40 @@
+(ns greenways.build.graph-test
+  (:require [greenways.build.graph :as graph]
+            [greenways.build.normalize :as normalize]
+            [std.lib.test :as test]))
+
+(def linear
+  (normalize/normalize-build
+   {:build/id :linear
+    :build/artifact {:artifact/kind :application/service
+                     :artifact/output "dist/linear.hal"}
+    :build/stages
+    [{:stage/id :source :stage/produces :hal/forms}
+     {:stage/id :analyze :stage/requires [:source]
+      :stage/produces :greenways/analysis}
+     {:stage/id :output :stage/requires [:analyze]
+      :stage/produces :application/service}]}))
+
+(def cyclic
+  (assoc linear :build/stages
+         [{:stage/id :parse :stage/requires [:emit]
+           :stage/produces :hal/forms :stage/checkers []}
+          {:stage/id :analyze :stage/requires [:parse]
+           :stage/produces :greenways/analysis :stage/checkers []}
+          {:stage/id :emit :stage/requires [:analyze]
+           :stage/produces :application/service :stage/checkers []}]))
+
+(test/print-results
+ [(test/check "stable topological order follows source order"
+              (graph/topological-order linear)
+              [:source :analyze :output])
+  (test/check "cycle reports include the closed path"
+              (graph/find-cycles cyclic)
+              [[:parse :emit :analyze :parse]])
+  (test/check "failed prerequisites block dependants only"
+              (graph/blocked-stages linear
+                                    {:source :fail
+                                     :analyze :pass
+                                     :output :pass})
+              {:analyze [:source]
+               :output [:analyze]})])
