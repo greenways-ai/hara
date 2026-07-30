@@ -4,15 +4,15 @@
             [tahto.common.registry :as registry]))
 
 (def plus-entry
-  {:op-key '+
-   :op-symbol '+
-   :op-type :operator
+  {:op :add
+   :symbol #{'+}
+   :type :operator
    :raw "+"})
 
 (def cast-entry
-  {:op-key 'cast
-   :op-symbol 'cast
-   :op-type :operator
+  {:op :cast
+   :symbol #{'cast}
+   :type :operator
    :raw "cast"})
 
 (def template
@@ -30,7 +30,7 @@
     {:template/id :default
      :template/version 1}
     :operators
-    {:define {'+ plus-entry}}}))
+    {:define {:add plus-entry}}}))
 
 (def child
   (grammar/definition
@@ -41,20 +41,20 @@
     {:grammar/id :base-js
      :grammar/version 1}
     :operators
-    {:override {'+ {:raw "plus"}}}
+    {:override {:add {:raw "plus"}}}
     :grammar/rewrite
     {:staging
      {:append ['tahto.common.grammar-api/fingerprint]}}
     :grammar/facets
     {:typed
      {:operators
-      {:define {'cast cast-entry}}
+      {:define {:cast cast-entry}}
       :grammar/sections
       [[:lint [:no-eval]]]}
      :jsx
      {:requires #{:typed}
       :operators
-      {:override {'+ {:raw "jsx-plus"}}}}}
+      {:override {:add {:raw "jsx-plus"}}}}}
     :grammar/facet-order [:typed :jsx]}))
 
 (def catalog
@@ -86,8 +86,8 @@
    (test/check
     "materialization preserves order and shared facet customizations"
     [(get-in resolved [:grammar :token :nil])
-     (:raw (get-in resolved [:grammar :operators '+]))
-     (:raw (get-in resolved [:grammar :operators 'cast]))
+     (:raw (get-in resolved [:grammar :reserved '+]))
+     (:raw (get-in resolved [:grammar :reserved 'cast]))
      (get-in resolved [:coordinate :grammar/facets])
      (get-in resolved [:extensions :lint])
      (count (get-in resolved [:rewrite :staging]))]
