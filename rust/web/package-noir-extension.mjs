@@ -3,8 +3,12 @@ import { resolve } from "node:path";
 
 const web = import.meta.dirname;
 const repository = resolve(web, "../..");
-const source = resolve(repository, "rust/extensions/ledger-noir");
-const output = resolve(source, "target/package/ledger/noir");
+const source = process.env.HARA_NOIR_SOURCE
+  ? resolve(process.env.HARA_NOIR_SOURCE)
+  : resolve(repository, "rust/extensions/ledger-noir");
+const output = process.env.HARA_NOIR_OUTPUT
+  ? resolve(process.env.HARA_NOIR_OUTPUT)
+  : resolve(source, "target/package/ledger/noir");
 const assets = resolve(output, "assets");
 
 await rm(output, { recursive: true, force: true });

@@ -1,6 +1,10 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
 
+const noirSource = process.env.HARA_NOIR_SOURCE
+  ? resolve(process.env.HARA_NOIR_SOURCE)
+  : resolve(import.meta.dirname, "../extensions/ledger-noir");
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -13,7 +17,7 @@ export default defineConfig({
     outDir: "dist-node",
     emptyOutDir: true,
     lib: {
-      entry: resolve(import.meta.dirname, "../extensions/ledger-noir/node/worker.mjs"),
+      entry: resolve(noirSource, "node/worker.mjs"),
       formats: ["es"],
       fileName: () => "worker.mjs"
     },
