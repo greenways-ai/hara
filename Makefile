@@ -4,21 +4,32 @@ SHELL := /usr/bin/env bash
 
 MAVEN ?= mvn
 CARGO ?= cargo
+NPM ?= npm
+MKDOCS ?= mkdocs
 ARGS ?=
 
 TRUFFLE_JAR := java/target/hara-truffle.jar
 TRUFFLE_NATIVE := target/hara-truffle
 RUST_MANIFEST := rust/Cargo.toml
+RUST_RAW_MANIFEST := rust/raw/Cargo.toml
 RUST_DEBUG := rust/target/debug/hara
 RUST_RELEASE := rust/target/release/hara
 WASM_RAW := rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm
+WEB_DIR := rust/web
+CHROME_DIR := extensions/hara-chrome
+DOCS_CONFIG := docs/mkdocs.yml
 
-.PHONY: help all build-all test-all clean \
-        java java-offline java-headless java-build \
+.PHONY: help all build-all check-all test-all clean \
+        java java-offline java-headless java-build java-test java-conformance \
         rust rust-offline rust-headless rust-build rust-build-release rust-release \
+        rust-test rust-raw-test rust-layout lib-test \
         fabric fabric-build fabric-test fabric-benchmark \
         native-image native-image-run native-image-offline \
-        wasm wasm-build
+        wasm wasm-build wasm-web wasm-web-build \
+        web-install hta-test studio-build studio-test \
+        chrome-install chrome-build chrome-test \
+        docs-build www-build \
+        runtime-benchmark truffle-benchmark parity-benchmark
 
 help: ## Show the available runtime targets
 	@echo 'Hara runtimes'
@@ -33,14 +44,28 @@ help: ## Show the available runtime targets
 	@echo '  make native-image-run           GraalVM native-image REPL'
 	@echo '  make native-image-offline       GraalVM native-image REPL without RESP'
 	@echo '  make wasm                       Build the raw WASM module (no terminal REPL)'
+	@echo '  make wasm-web                   Build browser WASM package'
 	@echo
 	@echo 'Build and verification'
 	@echo
 	@echo '  make build-all                  Build JVM, Rust release, and raw WASM'
-	@echo '  make test-all                   Run Java and Rust test suites'
+	@echo '  make check-all                  Run core layout and runtime test suites'
+	@echo '  make java-test                  Run the Truffle test suite'
+	@echo '  make java-conformance           Run JVM L0 conformance'
+	@echo '  make rust-test                  Run the native Rust test suite'
+	@echo '  make rust-raw-test              Run raw WASM crate tests'
+	@echo '  make rust-layout                Check Rust module layout'
+	@echo '  make lib-test                   Run portable .hal library tests'
 	@echo '  make fabric-test                Run focused Fabric and RESP tests'
+	@echo '  make hta-test                   Run HTA browser-loader Node tests'
+	@echo '  make studio-test                Build raw WASM and run Studio tests'
+	@echo '  make chrome-build               Build the Chrome extension'
+	@echo '  make chrome-test                Test the Chrome extension'
+	@echo '  make docs-build                 Build documentation strictly'
 	@echo '  make fabric-benchmark [ARGS="..."]'
 	@echo '                                  Run the agent-workroom benchmark'
+	@echo '  make runtime-benchmark [ARGS="..."]'
+	@echo '                                  Run the cross-runtime benchmark'
 	@echo '  make clean                      Remove Maven and Cargo build output'
 	@echo
 	@echo 'Examples'
@@ -67,6 +92,12 @@ java-offline: java-build ## Run the JVM Truffle REPL without RESP
 java-headless: java-build ## Run the JVM Truffle RESP server
 	./hara headless $(ARGS)
 
+java-test: ## Run the JVM Truffle test suite
+	$(MAVEN) -f java/pom.xml -Ptruffle test
+
+java-conformance: ## Run JVM L0 conformance
+	$(MAVEN) -f java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraL0ConformanceTest test
+
 rust-build: ## Build the Rust native runtime
 	$(CARGO) build --manifest-path $(RUST_MANIFEST) --bin hara
 
@@ -84,6 +115,18 @@ rust-headless: rust-build ## Run the Rust native RESP server
 
 rust-release: rust-build-release ## Run optimized Rust native
 	$(RUST_RELEASE) $(ARGS)
+
+rust-test: ## Run the Rust native test suite
+	$(CARGO) test --manifest-path $(RUST_MANIFEST)
+
+rust-raw-test: ## Run raw WASM crate tests
+	$(CARGO) test --manifest-path $(RUST_RAW_MANIFEST)
+
+rust-layout: ## Check the Rust module layout
+	bash rust/scripts/check-layout.sh
+
+lib-test: ## Run portable .hal library tests
+	scripts/run-lib-tests
 
 fabric-build: rust-build ## Build the Rust Fabric service
 
@@ -113,13 +156,54 @@ wasm: wasm-build ## Build the raw WASM runtime
 wasm-build: ## Build the raw WASM module
 	scripts/build-hara-wasm-raw
 
+wasm-web: wasm-web-build ## Build the browser WASM runtime
+
+wasm-web-build: ## Build the browser WASM package
+	scripts/build-hara-wasm-web
+
+web-install: ## Install browser-loader and Studio dependencies
+	$(NPM) --prefix $(WEB_DIR) ci
+
+hta-test: ## Run HTA browser-loader Node tests
+	$(NPM) --prefix $(WEB_DIR) run test:hta
+
+studio-build: ## Build the shared Studio runtime artifacts
+	scripts/build-studio-runtime
+
+studio-test: wasm-build ## Run Studio Node tests against current raw WASM
+	$(NPM) --prefix $(WEB_DIR) run test:studio
+
+chrome-install: ## Install Chrome extension dependencies
+	$(NPM) --prefix $(CHROME_DIR) ci
+
+chrome-build: ## Build the Chrome extension
+	$(NPM) --prefix $(CHROME_DIR) run build
+
+chrome-test: ## Test the Chrome extension
+	$(NPM) --prefix $(CHROME_DIR) test
+
+docs-build: ## Build documentation with strict link and nav checks
+	$(MKDOCS) build --strict -f $(DOCS_CONFIG)
+
+www-build: ## Build the complete website and runtime payload
+	scripts/build-www
+
+runtime-benchmark: ## Run the cross-runtime benchmark suite
+	scripts/run-runtime-benchmarks $(ARGS)
+
+truffle-benchmark: ## Run the JVM Truffle benchmark
+	scripts/run-truffle-benchmark $(ARGS)
+
+parity-benchmark: ## Benchmark Rust WASM and Truffle parity
+	scripts/run-wasm-truffle-parity-benchmark $(ARGS)
+
 build-all: java-build rust-build-release wasm-build ## Build all portable runtime artifacts
 
-test-all: ## Run Java and Rust tests
-	$(MAVEN) -q -f java/pom.xml test
-	$(CARGO) test --manifest-path $(RUST_MANIFEST)
+test-all: java-test rust-test ## Run Java and Rust test suites
+
+check-all: rust-layout java-test rust-test rust-raw-test lib-test hta-test studio-test ## Run core repository checks
 
 clean: ## Remove generated build output
 	$(MAVEN) -f java/pom.xml clean
 	$(CARGO) clean --manifest-path $(RUST_MANIFEST)
-	$(CARGO) clean --manifest-path rust/raw/Cargo.toml
+	$(CARGO) clean --manifest-path $(RUST_RAW_MANIFEST)
