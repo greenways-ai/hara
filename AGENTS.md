@@ -24,9 +24,15 @@ component map and `website/docs/development.md` for the developer guide.
   Put nothing here that belongs on the website.
 - `specs/` — normative specifications:
   - `metaspec/draft/hal-metaspec.edn` defines the language-spec document model
+  - `metaspec/draft/hal-metaspec-metaspec.edn` defines the self-describing
+    metaspec contract and AI generation/repair workflow
+  - `metaspec/draft/hal-artifact-metaspec.edn` defines artifact-format specs
   - `language/draft/hal-langspec.edn` is the current portable HAL contract
   - `language/draft/conformance/` contains machine-checked conformance/parity corpora
   - `archive/planning/` contains non-normative source material grouped by domain
+- `contrib/` — separately owned specifications and reference implementations.
+  Greenways formats live under `contrib/greenways/`; Hara may publish verified
+  snapshots but does not own their domain vocabulary.
 - `books/`, `registry/` — book series and the planned extension registry
 - `archive/` — legacy material, kept for history only
 
