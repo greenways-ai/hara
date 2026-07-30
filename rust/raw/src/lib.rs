@@ -11,7 +11,7 @@ mod lang;
 #[path = "../../src/task.rs"]
 mod task;
 
-use core::{EvalFiber, EvalFiberState, Promise, PromiseState, Value};
+use core::{EvalFiber, EvalFiberState, Promise, PromiseRejection, PromiseState, Value};
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
@@ -670,7 +670,10 @@ fn emit_settlement(events: &Rc<RefCell<VecDeque<Vec<u8>>>>, task: u64, state: Pr
     let value = match state {
         PromiseState::Pending => return,
         PromiseState::Fulfilled(value) => event(0, task, value),
-        PromiseState::Rejected(error) => event(1, task, error_value("promise/rejected", error)),
+        PromiseState::Rejected(PromiseRejection::Value(value)) => event(1, task, value),
+        PromiseState::Rejected(PromiseRejection::Message(message)) => {
+            event(1, task, error_value("promise/rejected", message))
+        }
     };
     enqueue_event(events, value);
 }
@@ -1211,10 +1214,13 @@ pub extern "C" fn eval_error_code(source_ptr: *const u8, source_len: usize) -> i
 
 #[cfg(test)]
 mod tests {
-    use super::{dispatch, eval_error_code, evaluate, KernelRuntime, Runtime};
-    use crate::core::Value;
+    use super::{dispatch, emit_settlement, eval_error_code, evaluate, KernelRuntime, Runtime};
+    use crate::core::{PromiseRejection, PromiseState, Value};
     use crate::lang::data::Symbol;
     use crate::lang::protocol::IDeref;
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+    use std::rc::Rc;
 
     fn result(kernel: &mut KernelRuntime) -> Vec<Value> {
         kernel.drain_ready();
@@ -1546,13 +1552,13 @@ mod tests {
 
     #[test]
     fn raw_kernels_expose_the_foundation_data_namespaces() {
-        assert_eq!(crate::core::NATIVE_TYPES.len(), 19);
+        assert_eq!(crate::core::NATIVE_TYPES.len(), 20);
         assert_eq!(
             crate::core::NATIVE_TYPES
                 .iter()
                 .map(|(_, methods)| methods.len())
                 .sum::<usize>(),
-            120
+            136
         );
         let mut runtime = Runtime::new();
         assert!(runtime.env.contains_key("edn/write"));
@@ -1727,6 +1733,31 @@ mod tests {
             }
             other => panic!("unexpected event: {other:?}"),
         }
+    }
+
+    #[test]
+    fn structured_promise_rejections_survive_hta_settlement() {
+        let events = Rc::new(RefCell::new(VecDeque::new()));
+        let rejection = Value::Map(
+            vec![(
+                Value::Keyword("error/code".into()),
+                Value::Keyword("host/unavailable".into()),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        emit_settlement(
+            &events,
+            7,
+            PromiseState::Rejected(PromiseRejection::Value(rejection.clone())),
+        );
+        let frame = events.borrow_mut().pop_front().expect("rejection event");
+        let Value::Vector(values) = crate::hta::decode(&frame).expect("valid HTA event") else {
+            panic!("expected rejection vector")
+        };
+        assert_eq!(values[0], Value::Number(1));
+        assert_eq!(values[1], Value::Number(7));
+        assert_eq!(values[2], rejection);
     }
 
     #[test]

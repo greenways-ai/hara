@@ -9,7 +9,7 @@ RAW_WASM="$ROOT/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.was
 bash "$ROOT/scripts/build-hara-wasm-raw"
 
 rm -rf "$OUT"
-mkdir -p "$OUT/runtime/studio/hal" "$OUT/runtime/std/lib/substrate"
+mkdir -p "$OUT/runtime/host" "$OUT/runtime/studio/hal" "$OUT/runtime/std/lib/substrate"
 mkdir -p "$OUT/runtime/studio/capabilities"
 mkdir -p "$OUT/assets/wasm" "$OUT/assets/hara-amp" "$OUT/examples/hara-amp/src"
 mkdir -p "$OUT/sources"
@@ -43,6 +43,7 @@ cp "$ROOT/rust/web/hta.js" \
    "$ROOT/rust/web/hta-worker.js" \
    "$ROOT/rust/web/hta-shared-worker.js" \
    "$OUT/runtime/"
+cp "$ROOT/rust/web/host/"*.js "$OUT/runtime/host/"
 cp "$ROOT/rust/web/studio/boot.js" \
    "$ROOT/rust/web/studio/broker.js" \
    "$ROOT/rust/web/studio/document-runtime.js" \

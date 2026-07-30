@@ -142,6 +142,79 @@ final class HaraSessionBroker implements AutoCloseable {
       return eval(source, null, 1, 1);
     }
 
+    Object evalTransfer(String source) {
+      return transferValue(eval(source));
+    }
+
+    private static Object transferValue(Value value) {
+      if (value.isNull()) return null;
+      if (value.isBoolean()) return value.asBoolean();
+      if (value.isString()) return value.asString();
+      if (value.fitsInLong()) return value.asLong();
+      if (value.fitsInDouble()) return value.asDouble();
+      String display = value.toString();
+      if (display.contains("#'")
+          || display.contains("#atom")
+          || display.contains("#<")
+          || display.contains("#object")
+          || display.contains("#array")
+          || display.contains("#bytes")
+          || display.contains("@")) {
+        throw new IllegalArgumentException("SESSION_TRANSFER_REJECTED " + display);
+      }
+      if (value.hasIterator() && display.startsWith("#{")) {
+        java.util.LinkedHashSet<Object> transferred = new java.util.LinkedHashSet<>();
+        Value iterator = value.getIterator();
+        while (iterator.hasIteratorNextElement()) {
+          transferred.add(transferValue(iterator.getIteratorNextElement()));
+        }
+        return HaraPersistentValues.normalize(transferred);
+      }
+      if (value.hasArrayElements()) {
+        java.util.ArrayList<Object> transferred = new java.util.ArrayList<>();
+        for (long index = 0; index < value.getArraySize(); index++) {
+          transferred.add(transferValue(value.getArrayElement(index)));
+        }
+        return HaraPersistentValues.normalize(transferred);
+      }
+      if (value.hasHashEntries()) {
+        java.util.LinkedHashMap<Object, Object> transferred = new java.util.LinkedHashMap<>();
+        Value entries = value.getHashEntriesIterator();
+        while (entries.hasIteratorNextElement()) {
+          Value entry = entries.getIteratorNextElement();
+          transferred.put(
+              transferValue(entry.getArrayElement(0)),
+              transferValue(entry.getArrayElement(1)));
+        }
+        return HaraPersistentValues.normalize(transferred);
+      }
+      if (value.hasIterator()) {
+        throw new IllegalArgumentException("SESSION_TRANSFER_REJECTED " + display);
+      }
+      try {
+        Object[] forms = HaraLanguage.readAll(display, "<session-transfer>");
+        if (forms.length != 1) {
+          throw new IllegalArgumentException("SESSION_TRANSFER_REJECTED " + display);
+        }
+        return forms[0];
+      } catch (RuntimeException error) {
+        if (error instanceof IllegalArgumentException
+            && error.getMessage() != null
+            && error.getMessage().startsWith("SESSION_TRANSFER_REJECTED")) {
+          throw error;
+        }
+        throw new IllegalArgumentException(
+            "SESSION_TRANSFER_REJECTED "
+                + display
+                + " ("
+                + error.getClass().getSimpleName()
+                + ": "
+                + error.getMessage()
+                + ")",
+            error);
+      }
+    }
+
     Value eval(String source, String file, int line, int column) {
       activeEvaluations.incrementAndGet();
       try {

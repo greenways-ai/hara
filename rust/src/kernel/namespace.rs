@@ -205,6 +205,7 @@ pub struct NamespaceRegistry<V> {
     current: Rc<RefCell<Symbol>>,
     loading_states: Rc<RefCell<HashMap<Symbol, NamespaceLoadState>>>,
     module_revisions: Rc<RefCell<HashMap<Symbol, u64>>>,
+    module_dependencies: Rc<RefCell<HashMap<Symbol, Vec<Symbol>>>>,
 }
 
 pub struct NamespaceRegistrySnapshot<V> {
@@ -212,6 +213,7 @@ pub struct NamespaceRegistrySnapshot<V> {
     current: Symbol,
     loading_states: HashMap<Symbol, NamespaceLoadState>,
     module_revisions: HashMap<Symbol, u64>,
+    module_dependencies: HashMap<Symbol, Vec<Symbol>>,
 }
 
 struct NamespaceSnapshot<V> {
@@ -240,6 +242,7 @@ impl<V: Clone> NamespaceRegistry<V> {
             current: Rc::new(RefCell::new(name)),
             loading_states: Rc::new(RefCell::new(loading_states)),
             module_revisions: Rc::new(RefCell::new(HashMap::new())),
+            module_dependencies: Rc::new(RefCell::new(HashMap::new())),
         }
     }
     pub fn current(&self) -> Namespace<V> {
@@ -307,6 +310,31 @@ impl<V: Clone> NamespaceRegistry<V> {
         self.module_revisions.borrow_mut().insert(name, next);
         next
     }
+    pub fn module_dependencies(&self, name: impl AsRef<str>) -> Vec<Symbol> {
+        self.module_dependencies
+            .borrow()
+            .get(&Symbol::parse(name.as_ref()))
+            .cloned()
+            .unwrap_or_default()
+    }
+    pub fn clear_module_dependencies(&self, name: impl AsRef<str>) {
+        self.module_dependencies
+            .borrow_mut()
+            .insert(Symbol::parse(name.as_ref()), Vec::new());
+    }
+    pub fn record_module_dependency(
+        &self,
+        module: impl AsRef<str>,
+        dependency: impl AsRef<str>,
+    ) {
+        let module = Symbol::parse(module.as_ref());
+        let dependency = Symbol::parse(dependency.as_ref());
+        let mut dependencies = self.module_dependencies.borrow_mut();
+        let values = dependencies.entry(module).or_default();
+        if !values.contains(&dependency) {
+            values.push(dependency);
+        }
+    }
     pub fn snapshot(&self) -> NamespaceRegistrySnapshot<V>
     where
         V: 'static,
@@ -345,6 +373,7 @@ impl<V: Clone> NamespaceRegistry<V> {
             current: self.current.borrow().clone(),
             loading_states: self.loading_states.borrow().clone(),
             module_revisions: self.module_revisions.borrow().clone(),
+            module_dependencies: self.module_dependencies.borrow().clone(),
         }
     }
     pub fn restore(&self, snapshot: NamespaceRegistrySnapshot<V>)
@@ -371,6 +400,7 @@ impl<V: Clone> NamespaceRegistry<V> {
         *self.current.borrow_mut() = snapshot.current;
         *self.loading_states.borrow_mut() = snapshot.loading_states;
         *self.module_revisions.borrow_mut() = snapshot.module_revisions;
+        *self.module_dependencies.borrow_mut() = snapshot.module_dependencies;
     }
     pub fn remove(&self, name: impl AsRef<str>) -> Option<Namespace<V>> {
         let symbol = Symbol::parse(name.as_ref());
@@ -379,6 +409,7 @@ impl<V: Clone> NamespaceRegistry<V> {
         }
         self.loading_states.borrow_mut().remove(&symbol);
         self.module_revisions.borrow_mut().remove(&symbol);
+        self.module_dependencies.borrow_mut().remove(&symbol);
         self.namespaces.borrow_mut().remove(&symbol)
     }
     pub fn resolve(&self, symbol: &Symbol) -> Option<Var<V>>

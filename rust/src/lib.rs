@@ -82,7 +82,7 @@ impl PromiseHandle {
         match self.promise.state() {
             core::PromiseState::Pending => Err(JsValue::from_str("promise is pending")),
             core::PromiseState::Fulfilled(value) => Ok(value.display()),
-            core::PromiseState::Rejected(error) => Err(JsValue::from_str(&error)),
+            core::PromiseState::Rejected(error) => Err(JsValue::from_str(&error.message())),
         }
     }
 }
@@ -337,6 +337,7 @@ impl Runtime {
         for (name, descriptor) in core::native_type_values() {
             let var = native.intern(&name, descriptor);
             foundation.map_var(crate::lang::data::Symbol::parse(&name), var);
+            namespace_registry.find_or_create(format!("std.native.{name}"));
         }
         Runtime {
             env: HashMap::new(),
@@ -1042,6 +1043,11 @@ impl Runtime {
         if self.loaded_resources.contains(name) {
             return Ok(":loaded".into());
         }
+        if self.resources.contains_key(name) {
+            let result = self.load_resource(name)?;
+            self.loaded_resources.insert(name.into());
+            return Ok(result);
+        }
         if self.extensions.contains(name) {
             let result = self.require_extension(name)?;
             self.loaded_resources.insert(name.into());
@@ -1054,9 +1060,7 @@ impl Runtime {
             self.loaded_resources.insert(name.into());
             return Ok(result);
         }
-        let result = self.load_resource(name)?;
-        self.loaded_resources.insert(name.into());
-        Ok(result)
+        Err(JsValue::from_str("module/not-found"))
     }
 
     pub fn file_supported(&self) -> bool {
@@ -1496,6 +1500,37 @@ mod tests {
             .unwrap_or_else(|| panic!("module runtime profile :{runtime} has no :{key}"))
     }
 
+    fn host_conformance_case(id: &str) -> Vec<(Form, Form)> {
+        fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> Option<&'a Form> {
+            entries.iter().find_map(|(candidate, value)| match candidate {
+                Form::Keyword(name) if name == key => Some(value),
+                _ => None,
+            })
+        }
+
+        let document = kernel::parse_forms(include_str!(
+            "../../specs/runtime/draft/hal-host-runtime.edn"
+        ))
+        .expect("Host runtime specification must parse")
+        .remove(0);
+        let Form::Map(document) = document else {
+            panic!("Host runtime specification must be a map")
+        };
+        let Some(Form::Vector(cases)) = entry(&document, "host/conformance") else {
+            panic!("Host runtime specification must declare :host/conformance")
+        };
+        cases
+            .iter()
+            .find_map(|case| {
+                let Form::Map(case) = case else {
+                    return None;
+                };
+                matches!(entry(case, "id"), Some(Form::Keyword(candidate)) if candidate == id)
+                    .then(|| case.clone())
+            })
+            .unwrap_or_else(|| panic!("missing Host conformance case :{id}"))
+    }
+
     #[test]
     fn session_kernel_mounts_preserve_state_and_enforce_lifetime() {
         let mut kernel = SessionKernel::new();
@@ -1530,6 +1565,28 @@ mod tests {
                 )
                 .unwrap(),
             "true"
+        );
+        assert_eq!(
+            kernel
+                .eval(
+                    "alpha",
+                    "(do (require [std.foundation.file :as file]) \
+                     (deref (file/write \"/workspace/source.hal\" \
+                       (str/encode-utf8 \"(+ 19 23)\"))))",
+                )
+                .unwrap(),
+            "nil"
+        );
+        assert_eq!(
+            kernel
+                .eval(
+                    "beta",
+                    "(do (require [std.foundation.file :as file]) \
+                     (str/decode-utf8 \
+                       (deref (file/read \"/workspace/source.hal\"))))",
+                )
+                .unwrap(),
+            "\"(+ 19 23)\""
         );
         assert_eq!(
             kernel.close_filesystem(mount).unwrap_err(),
@@ -2806,6 +2863,9 @@ mod tests {
                 "lib/src/std/foundation/coroutine.hal" => {
                     include_str!("../../lib/src/std/foundation/coroutine.hal")
                 }
+                "lib/src/std/foundation/kernel.hal" => {
+                    include_str!("../../lib/src/std/foundation/kernel.hal")
+                }
                 "lib/src/std/foundation/edn.hal" => {
                     include_str!("../../lib/src/std/foundation/edn.hal")
                 }
@@ -2828,11 +2888,13 @@ mod tests {
             panic!(":inventory must be a map")
         };
         assert!(matches!(entry(inventory, "closed"), Form::Bool(true)));
-        assert!(matches!(entry(inventory, "type-count"), Form::Number(18)));
-        assert!(matches!(entry(inventory, "method-count"), Form::Number(110)));
         let Form::Vector(types) = entry(&contract, "types") else {
             panic!(":types must be a vector")
         };
+        assert_eq!(
+            entry(inventory, "type-count"),
+            &Form::Number(types.len() as i64)
+        );
 
         let mut specified = Vec::new();
         let mut direct_cases = Vec::new();
@@ -2916,8 +2978,10 @@ mod tests {
             .collect::<Vec<(String, Vec<String>)>>();
         assert_eq!(specified, runtime_inventory);
         assert_eq!(
-            specified.iter().map(|(_, methods)| methods.len()).sum::<usize>(),
-            110
+            entry(inventory, "method-count"),
+            &Form::Number(
+                specified.iter().map(|(_, methods)| methods.len()).sum::<usize>() as i64
+            )
         );
 
         for (type_name, type_cases) in &direct_cases {
@@ -2941,7 +3005,7 @@ mod tests {
                 .iter()
                 .map(|(_, type_cases)| type_cases.len())
                 .sum::<usize>(),
-            110
+            specified.iter().map(|(_, methods)| methods.len()).sum::<usize>()
         );
         let mut runtime = Runtime::new();
         assert_eq!(
@@ -4812,6 +4876,15 @@ mod tests {
             ":failed"
         );
         assert!(runtime.namespace_registry.find("example.broken").is_none());
+        assert_eq!(runtime.current_namespace(), "user");
+        assert_eq!(
+            runtime
+                .namespace_registry
+                .current()
+                .lazy_target("broken")
+                .map(|name| name.as_str().to_owned()),
+            Some("example.broken".into())
+        );
 
         runtime.register_resource(
             "example.broken",
@@ -4895,6 +4968,15 @@ mod tests {
                 .unwrap(),
             "1"
         );
+        assert_eq!(
+            runtime
+                .namespace_registry
+                .module_dependencies("graph.root")
+                .iter()
+                .map(|name| name.as_str().to_owned())
+                .collect::<Vec<_>>(),
+            vec!["graph.dependency"]
+        );
 
         runtime
             .eval_text("(require [graph.root :as graph])")
@@ -4939,6 +5021,32 @@ mod tests {
                 .unwrap(),
             "0"
         );
+        assert!(runtime
+            .namespace_registry
+            .module_dependencies("cycle.first")
+            .is_empty());
+        assert!(runtime
+            .namespace_registry
+            .module_dependencies("cycle.second")
+            .is_empty());
+
+        runtime.register_resource(
+            "failure.root",
+            concat!(
+                "(ns failure.root) ",
+                "(require [graph.dependency :as dependency]) ",
+                "(def leaked dependency/value) ",
+                "(throw :failure)"
+            ),
+        );
+        assert!(runtime
+            .eval_text("(require [failure.root :as failure])")
+            .is_err());
+        assert!(runtime.namespace_registry.find("failure.root").is_none());
+        assert!(runtime
+            .namespace_registry
+            .module_dependencies("failure.root")
+            .is_empty());
     }
 
     #[test]
@@ -5229,6 +5337,19 @@ mod tests {
                 Form::Keyword("registered-extension".into()),
             ])
         );
+
+        let mut runtime = Runtime::new();
+        runtime.extensions.install(RangeExtension);
+        runtime.register_resource(
+            "range",
+            "(def resource-precedence-marker 42) resource-precedence-marker",
+        );
+        assert_eq!(runtime.require_resource("range").unwrap(), "42");
+        assert_eq!(runtime.require_resource("range").unwrap(), ":loaded");
+        assert_eq!(
+            runtime.eval_text("resource-precedence-marker").unwrap(),
+            "42"
+        );
     }
 
     #[test]
@@ -5349,6 +5470,99 @@ mod tests {
             "retained.repl"
         );
         assert_eq!(kernel.eval("repl", "answer").unwrap(), "42");
+    }
+
+    #[test]
+    fn issue_134_host_facades_are_loaded_session_local_and_non_transferable() {
+        for id in [
+            "host/type-identity",
+            "host/session-local-facade",
+            "host/namespace-loaded",
+            "host/no-live-transfer",
+            "host/rejected-ex-info",
+        ] {
+            assert!(!host_conformance_case(id).is_empty());
+        }
+
+        let mut first = Runtime::new();
+        let second = Runtime::new();
+        assert_eq!(
+            first
+                .eval_text("(= Host std.native/Host std.foundation/Host)")
+                .unwrap(),
+            "true"
+        );
+        assert_eq!(
+            first.eval_text("(ns-state 'std.native)").unwrap(),
+            ":loaded"
+        );
+        assert_eq!(
+            first.eval_text("(ns-state 'std.native.Host)").unwrap(),
+            ":loaded"
+        );
+
+        let first_host = first
+            .namespace_registry
+            .find("std.native")
+            .unwrap()
+            .resolve(&crate::lang::data::Symbol::parse("Host"))
+            .unwrap()
+            .deref_value();
+        let second_host = second
+            .namespace_registry
+            .find("std.native")
+            .unwrap()
+            .resolve(&crate::lang::data::Symbol::parse("Host"))
+            .unwrap()
+            .deref_value();
+        let (core::Value::NativeType(first_host), core::Value::NativeType(second_host)) =
+            (first_host, second_host)
+        else {
+            panic!("Host must be a native façade descriptor")
+        };
+        assert!(!Rc::ptr_eq(&first_host, &second_host));
+
+        let mut kernel = SessionKernel::new();
+        kernel.create_session("host-transfer").unwrap();
+        let error = kernel.eval("host-transfer", "Host").unwrap_err();
+        assert!(error.contains("SESSION_TRANSFER_REJECTED"), "{error}");
+
+        assert_eq!(
+            first
+                .eval_text(
+                    "(try
+                       (deref (std.native.Host/call \"missing\" \"missing\" []))
+                       (catch error
+                         [(ex-message error)
+                          (get (ex-data error) :error/code)]))"
+                )
+                .unwrap(),
+            "[\"Host capability provider is unavailable\" :host/unavailable]"
+        );
+        assert_eq!(
+            first
+                .eval_text(
+                    "(deref
+                       (promise/catch
+                         (std.native.Host/call \"missing\" \"missing\" [])
+                         (fn [error]
+                           (get (ex-data error) :error/code))))"
+                )
+                .unwrap(),
+            ":host/unavailable"
+        );
+        assert_eq!(
+            kernel
+                .eval(
+                    "host-transfer",
+                    "(try
+                       (deref (std.native.Host/call \"missing\" \"missing\" []))
+                       (catch error
+                         (get (ex-data error) :error/code)))"
+                )
+                .unwrap(),
+            ":host/unavailable"
+        );
     }
 
     #[test]

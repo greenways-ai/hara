@@ -548,12 +548,16 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
                         Value::Atom(x) => k(Ok(x.deref_value())),
                         Value::Promise(p) => match p.state() {
                             PromiseState::Fulfilled(x) => k(Ok(x)),
-                            PromiseState::Rejected(e) => k(Err(e)),
+                            PromiseState::Rejected(e) => {
+                                k(Err(crate::core::promise_rejection_error(e)))
+                            }
                             PromiseState::Pending => Step::Wait(
                                 p,
                                 Box::new(move |s| match s {
                                     PromiseState::Fulfilled(x) => k(Ok(x)),
-                                    PromiseState::Rejected(e) => k(Err(e)),
+                                    PromiseState::Rejected(e) => {
+                                        k(Err(crate::core::promise_rejection_error(e)))
+                                    }
                                     PromiseState::Pending => k(Err("fiber resumed pending".into())),
                                 }),
                             ),
@@ -570,12 +574,16 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
                     Ok(Value::Atom(x)) => k(Ok(x.deref_value())),
                     Ok(Value::Promise(p)) => match p.state() {
                         PromiseState::Fulfilled(x) => k(Ok(x)),
-                        PromiseState::Rejected(e) => k(Err(e)),
+                        PromiseState::Rejected(e) => {
+                            k(Err(crate::core::promise_rejection_error(e)))
+                        }
                         PromiseState::Pending => Step::Wait(
                             p,
                             Box::new(move |s| match s {
                                 PromiseState::Fulfilled(x) => k(Ok(x)),
-                                PromiseState::Rejected(e) => k(Err(e)),
+                                PromiseState::Rejected(e) => {
+                                    k(Err(crate::core::promise_rejection_error(e)))
+                                }
                                 PromiseState::Pending => k(Err("fiber resumed pending".into())),
                             }),
                         ),

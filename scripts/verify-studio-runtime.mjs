@@ -9,6 +9,8 @@ const required = [
   "rust/hara.wasm",
   "rust/hta.js",
   "rust/hta-worker.js",
+  "rust/host/broker.js",
+  "rust/host/services.js",
   "rust/studio/broker.js",
   "rust/studio/capability-registry.js",
   "rust/studio/capabilities/canvas.js",
@@ -37,7 +39,9 @@ const required = [
   "examples/music/hara-amp.html",
   "examples/music/hara-amp.css",
   "examples/music/hara-amp.js",
-  "examples/music/runtime/hara.wasm"
+  "examples/music/runtime/hara.wasm",
+  "examples/music/runtime/host/broker.js",
+  "examples/music/runtime/host/services.js"
 ];
 
 for (const path of required) await access(join(root, path));

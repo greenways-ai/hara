@@ -95,7 +95,8 @@ final class HaraWasmExtension implements HaraExtensionRuntime {
       htaRelease = isHta ? requireExport(members, "hta_release", manifest.module()) : null;
       if (isHta) {
         Value version = requireExport(members, "hta_abi_version", manifest.module());
-        if (version.execute().asInt() != 1) {
+        int abiVersion = version.execute().asInt();
+        if (abiVersion != 1 && abiVersion != 2) {
           throw new HaraException("extension/abi-version-unsupported: " + manifest.namespace());
         }
       }
@@ -311,11 +312,14 @@ final class HaraWasmExtension implements HaraExtensionRuntime {
 
   @SuppressWarnings("unchecked")
   private void hostCall(List<Object> event) {
-    if (event.size() != 6) throw new HaraException("hta/host-call-malformed");
+    if (event.size() != 6 && event.size() != 8) {
+      throw new HaraException("hta/host-call-malformed");
+    }
     long call = number(event, 1, "call id");
-    String service = string(event.get(3), "service");
-    String method = string(event.get(4), "method");
-    List<Object> arguments = (List<Object>) event.get(5);
+    int serviceIndex = event.size() == 8 ? 5 : 3;
+    String service = string(event.get(serviceIndex), "service");
+    String method = string(event.get(serviceIndex + 1), "method");
+    List<Object> arguments = (List<Object>) event.get(serviceIndex + 2);
     if (!manifest.permitsHostCall(service, method)) {
       mailbox.add(new Delivery(call, false, error("hta/host-call-denied", service + "/" + method)));
       return;

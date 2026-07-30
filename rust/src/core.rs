@@ -15,7 +15,9 @@ use crate::lang::data::{
 };
 use crate::lang::data::{Metadata, MetadataValue};
 use crate::lang::protocol::{IDisplay, IMetadata, INamespaced};
-pub use crate::task::{LocalPromiseProvider, Promise, PromiseProvider, PromiseState};
+pub use crate::task::{
+    LocalPromiseProvider, Promise, PromiseProvider, PromiseRejection, PromiseState,
+};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
@@ -63,6 +65,7 @@ pub(crate) const NATIVE_TYPES: &[(&str, &[&str])] = &[
     ("Maths", &["abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "ceil", "cos", "cosh", "exp", "floor", "pow", "sin", "sinh", "sqrt", "tan", "tanh"]),
     ("Numbers", &["long", "double"]),
     ("Bits", &["and", "or", "xor", "not", "shift-left", "shift-right"]),
+    ("Kernel", &["session-create", "session-close", "session-list", "session-info", "session-eval", "session-namespace", "session-complete", "resource-register", "resource-remove", "resource-list", "filesystem-create", "filesystem-attach", "filesystem-detach", "filesystem-info", "filesystem-close", "capabilities"]),
     ("String", &["length", "blank?", "includes?", "starts-with?", "ends-with?", "char-at", "slice", "index-of", "last-index-of", "join", "split", "split-lines", "repeat", "replace", "replace-first", "trim", "trim-left", "trim-right", "upper", "lower", "capitalize", "decapitalize", "pad-left", "pad-right", "reverse", "encode-utf8", "decode-utf8", "comp", "lt?", "gt?", "to-fixed"]),
     ("Bytes", &["new", "instance?", "count", "get", "set", "copy", "slice", "u8", "s8"]),
     ("File", &["resolve", "read", "write", "exists?", "list", "mkdir", "delete"]),
@@ -2134,6 +2137,13 @@ pub(crate) fn thrown_error(value: Value) -> String {
     error
 }
 
+pub(crate) fn promise_rejection_error(error: PromiseRejection) -> String {
+    match error {
+        PromiseRejection::Message(message) => message,
+        PromiseRejection::Value(value) => thrown_error(value),
+    }
+}
+
 pub(crate) fn caught_error(error: &str) -> Value {
     ACTIVE_THROWN_VALUE.with(|active| {
         let mut active = active.borrow_mut();
@@ -2665,6 +2675,7 @@ fn native_host_operation(
             };
             let arguments = match eval(&forms[2], env)? {
                 Value::Vector(values) => values.iter().cloned().collect(),
+                Value::Tuple(values) => values.iter().cloned().collect(),
                 _ => return Err("std.native.Host/call arguments must be a vector".into()),
             };
             (service, target, arguments)
@@ -2686,11 +2697,29 @@ fn native_host_operation(
     HOST_CALL_HANDLER.with(|active| {
         let Some(handler) = active.borrow().as_ref().cloned() else {
             let promise = Promise::new();
-            promise.reject("host/unavailable");
+            promise.reject_value(host_error(
+                "host/unavailable",
+                "Host capability provider is unavailable",
+            ));
             return Ok(Value::Promise(promise));
         };
         handler(service, target, arguments)
     })
+}
+
+fn host_error(code: &str, message: &str) -> Value {
+    Value::ExceptionInfo(Rc::new(ExceptionInfo {
+        message: message.into(),
+        data: Box::new(Value::Map(
+            vec![(
+                Value::Keyword("error/code".into()),
+                Value::Keyword(code.into()),
+            )]
+            .into_iter()
+            .collect(),
+        )),
+        cause: None,
+    }))
 }
 /// Installs the explicit host-call boundary for one evaluation.
 pub fn with_host_calls<R>(
@@ -4674,7 +4703,7 @@ fn promise_state_value(promise: &Promise) -> Value {
         match promise.state() {
             PromiseState::Pending => "pending",
             PromiseState::Fulfilled(_) => "fulfilled",
-            PromiseState::Rejected(error) if error == "cancelled" => "cancelled",
+            PromiseState::Rejected(error) if error.is_cancelled() => "cancelled",
             PromiseState::Rejected(_) => "rejected",
         }
         .into(),
@@ -4685,7 +4714,7 @@ fn promise_value_result(promise: &Promise) -> Result<Value, String> {
     match promise.state() {
         PromiseState::Pending => Err("promise is pending".into()),
         PromiseState::Fulfilled(value) => Ok(value),
-        PromiseState::Rejected(error) => Err(error),
+        PromiseState::Rejected(error) => Err(promise_rejection_error(error)),
     }
 }
 
@@ -4733,7 +4762,7 @@ fn promise_all(values: Vec<Value>) -> Promise {
                 }
             }
             PromiseState::Rejected(error) => {
-                destination.reject(error);
+                destination.reject_rejection(error);
             }
             PromiseState::Pending => {}
         }));
@@ -4761,7 +4790,7 @@ fn finish_promise(destination: Promise, original: PromiseState, cleanup: Result<
             preserved_destination.resolve(value);
         }
         PromiseState::Rejected(error) => {
-            preserved_destination.reject(error);
+            preserved_destination.reject_rejection(error);
         }
         PromiseState::Pending => {}
     };
@@ -4770,7 +4799,7 @@ fn finish_promise(destination: Promise, original: PromiseState, cleanup: Result<
             cleanup.on_settle(Rc::new(move |state| match state {
                 PromiseState::Fulfilled(_) => preserve(),
                 PromiseState::Rejected(error) => {
-                    destination.reject(error);
+                    destination.reject_rejection(error);
                 }
                 PromiseState::Pending => {}
             }));
@@ -4793,7 +4822,7 @@ fn promise_chain(source: Promise, operation: &str, function: Rc<Function>) -> Pr
         PromiseState::Rejected(error) if operation == "promise/catch" => {
             settle_promise_result(
                 &destination,
-                call_function(&function, vec![Value::String(error)]),
+                call_function(&function, vec![error.value()]),
             );
         }
         PromiseState::Fulfilled(_) | PromiseState::Rejected(_)
@@ -4809,7 +4838,7 @@ fn promise_chain(source: Promise, operation: &str, function: Rc<Function>) -> Pr
             destination.resolve(value);
         }
         PromiseState::Rejected(error) => {
-            destination.reject(error);
+            destination.reject_rejection(error);
         }
         PromiseState::Pending => {}
     }));
@@ -5147,8 +5176,7 @@ fn string_operation(operation: &str, values: Vec<Value>) -> Result<Value, String
             if values.len() != 1 {
                 return Err(format!("{operation} expects bytes"));
             }
-            let bytes = byte_buffer(&values[0], operation)?;
-            let raw = bytes.borrow().clone();
+            let raw = byte_values(&values[0], operation)?;
             String::from_utf8(raw)
                 .map(Value::String)
                 .map_err(|_| format!("{operation} invalid UTF-8"))
@@ -5491,6 +5519,14 @@ fn byte_input(value: &Value, operation: &str) -> Result<u8, String> {
 fn byte_buffer(value: &Value, operation: &str) -> Result<Rc<RefCell<Vec<u8>>>, String> {
     match value {
         Value::ByteBuffer(bytes) => Ok(bytes.clone()),
+        _ => Err(format!("{operation} expects bytes")),
+    }
+}
+
+fn byte_values(value: &Value, operation: &str) -> Result<Vec<u8>, String> {
+    match value {
+        Value::Bytes(bytes) => Ok(bytes.clone()),
+        Value::ByteBuffer(bytes) => Ok(bytes.borrow().clone()),
         _ => Err(format!("{operation} expects bytes")),
     }
 }
@@ -7116,6 +7152,7 @@ fn ensure_namespace(
     let environment_before = env.clone();
     let macros_before =
         ACTIVE_MACROS.with(|active| active.borrow().as_ref().map(|macros| macros.borrow().clone()));
+    registry.clear_module_dependencies(name);
     registry.set_load_state(name, NamespaceLoadState::Loading);
 
     let loaded = (|| {
@@ -7220,6 +7257,12 @@ fn eval_require_spec(
         }
     } else {
         ensure_namespace(registry, env, &target, reload)?;
+    }
+    let requiring = registry.current().name().as_str().to_owned();
+    if requiring != target
+        && registry.load_state(&requiring) == Some(NamespaceLoadState::Loading)
+    {
+        registry.record_module_dependency(&requiring, &target);
     }
     for option in options.chunks(2) {
         let name = match &option[0] {
@@ -7333,11 +7376,7 @@ fn force_lazy_alias(
     let target = registry.current().lazy_target(alias).or_else(|| {
         matches!(
             registry.load_state(alias),
-            Some(
-                NamespaceLoadState::Unloaded
-                    | NamespaceLoadState::Loading
-                    | NamespaceLoadState::Failed
-            )
+            Some(NamespaceLoadState::Unloaded)
         )
         .then(|| crate::lang::data::Symbol::parse(alias))
     });
@@ -7645,6 +7684,13 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
         Form::Symbol(n) => {
             if n.contains('/') {
                 if let Ok(registry) = namespace_registry() {
+                    if let Some((namespace, _)) = n.split_once('/') {
+                        if registry.load_state(namespace) == Some(NamespaceLoadState::Failed) {
+                            return Err(format!(
+                                "Namespace load previously failed; use explicit reload to retry: {namespace}"
+                            ));
+                        }
+                    }
                     force_lazy_alias(&registry, env, n)?;
                 }
             }
@@ -7872,6 +7918,15 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 };
                 if name.contains('/') {
                     if let Ok(registry) = namespace_registry() {
+                        if let Some((namespace, _)) = name.split_once('/') {
+                            if registry.load_state(namespace)
+                                == Some(NamespaceLoadState::Failed)
+                            {
+                                return Err(format!(
+                                    "Namespace load previously failed; use explicit reload to retry: {namespace}"
+                                ));
+                            }
+                        }
                         force_lazy_alias(&registry, env, name)?;
                     }
                 }
@@ -7954,7 +8009,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     Value::Atom(value) => Ok(value.deref_value()),
                     Value::Promise(promise) => match promise.wait_state() {
                         PromiseState::Fulfilled(value) => Ok(value),
-                        PromiseState::Rejected(error) => Err(error),
+                        PromiseState::Rejected(error) => Err(promise_rejection_error(error)),
                         PromiseState::Pending => Err(
                             "deref cannot block on a pending promise outside an HTA fiber".into(),
                         ),
@@ -8692,6 +8747,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             Form::Symbol(n) if n.starts_with("std.native.Host/") => {
                 native_host_operation(n, &fs[1..], env)
             }
+            Form::Symbol(n) if n.starts_with("std.native.Kernel/") => Err(format!(
+                "{n} requires a kernel embedding"
+            )),
             Form::Symbol(n)
                 if n.starts_with("std.native.Arr/") || n.starts_with("std.native.Obj/") =>
             {
@@ -9028,8 +9086,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 if fs.len() != 2 {
                     return Err("str/decode expects bytes".into());
                 }
-                let bytes = byte_buffer(&eval(&fs[1], env)?, "str/decode")?;
-                let raw = bytes.borrow().clone();
+                let raw = byte_values(&eval(&fs[1], env)?, "str/decode")?;
                 String::from_utf8(raw)
                     .map(Value::String)
                     .map_err(|_| "str/decode invalid UTF-8".into())

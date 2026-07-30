@@ -135,18 +135,20 @@ public final class HaraContext {
           Map.entry("Maths", java.util.List.of("abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "ceil", "cos", "cosh", "exp", "floor", "pow", "sin", "sinh", "sqrt", "tan", "tanh")),
           Map.entry("Numbers", java.util.List.of("long", "double")),
           Map.entry("Bits", java.util.List.of("and", "or", "xor", "not", "shift-left", "shift-right")),
+          Map.entry("Kernel", java.util.List.of("session-create", "session-close", "session-list", "session-info", "session-eval", "session-namespace", "session-complete", "resource-register", "resource-remove", "resource-list", "filesystem-create", "filesystem-attach", "filesystem-detach", "filesystem-info", "filesystem-close", "capabilities")),
           Map.entry("String", java.util.List.of("length", "blank?", "includes?", "starts-with?", "ends-with?", "char-at", "slice", "index-of", "last-index-of", "join", "split", "split-lines", "repeat", "replace", "replace-first", "trim", "trim-left", "trim-right", "upper", "lower", "capitalize", "decapitalize", "pad-left", "pad-right", "reverse", "encode-utf8", "decode-utf8", "comp", "lt?", "gt?", "to-fixed")),
           Map.entry("Bytes", java.util.List.of("new", "instance?", "count", "get", "set", "copy", "slice", "u8", "s8")),
           Map.entry("File", java.util.List.of("resolve", "read", "write", "exists?", "list", "mkdir", "delete")),
           Map.entry("Socket", java.util.List.of("connect", "listen", "endpoint", "events", "next", "send", "close")),
           Map.entry("Promise", java.util.List.of("run", "new", "from", "all", "delay", "instance?")),
           Map.entry("Coroutine", java.util.List.of("create", "yield", "await", "instance?")),
-          Map.entry("Array", java.util.List.of("new", "instance?")),
-          Map.entry("Object", java.util.List.of("new", "instance?")),
+          Map.entry("Arr", java.util.List.of("new", "instance?", "get-index", "set-index")),
+          Map.entry("Obj", java.util.List.of("new", "instance?", "get-key", "set-key", "has-key?", "delete-key")),
           Map.entry("Runtime", java.util.List.of("load-string", "macroexpand-1", "gensym", "var-sym")),
           Map.entry("Printer", java.util.List.of("str", "pr-str")),
           Map.entry("Edn", java.util.List.of("read")),
           Map.entry("Json", java.util.List.of("read", "write", "pretty")),
+          Map.entry("Host", java.util.List.of("call", "describe", "capabilities", "capability?")),
           Map.entry("Regex", java.util.List.of("instance?")),
           Map.entry("UUID", java.util.List.of("instance?")),
           Map.entry("Error", java.util.List.of("new", "message", "class")));
@@ -164,6 +166,7 @@ public final class HaraContext {
   private final Map<String, HaraNamespace> namespaces = new ConcurrentHashMap<>();
   private final Map<String, Map<String, HaraMacro>> macros = new ConcurrentHashMap<>();
   private final Map<String, Map<String, String>> aliases = new ConcurrentHashMap<>();
+  private final Map<String, NamespaceLoadState> namespaceStates = new ConcurrentHashMap<>();
   private final Map<String, String> nativeFlavors = new ConcurrentHashMap<>();
   private final Map<String, Map<String, Object>> nativeImports = new ConcurrentHashMap<>();
   private final NativeFlavorRegistry nativeFlavorRegistry =
@@ -225,7 +228,9 @@ public final class HaraContext {
   }
 
   private HaraNamespace namespace(String name) {
-    return namespaces.computeIfAbsent(name, HaraNamespace::new);
+    HaraNamespace namespace = namespaces.computeIfAbsent(name, HaraNamespace::new);
+    namespaceStates.putIfAbsent(name, NamespaceLoadState.LOADED);
+    return namespace;
   }
 
   private void withDefinitionOrigin(HaraVar.Origin origin, Runnable action) {
@@ -298,10 +303,10 @@ public final class HaraContext {
           "Promise", exports, java.util.List.of("run", "instance?"),
           Map.of("run", "promise", "instance?", "promise?"));
       installNativeExportGroup(
-          "Array", exports, NATIVE_TYPES.get("Array"),
+          "Arr", exports, java.util.List.of("new", "instance?"),
           Map.of("new", "array", "instance?", "array?"));
       installNativeExportGroup(
-          "Object", exports, NATIVE_TYPES.get("Object"),
+          "Obj", exports, java.util.List.of("new", "instance?"),
           Map.of("new", "object", "instance?", "object?"));
       installNativeExportGroup(
           "Runtime", exports, NATIVE_TYPES.get("Runtime"), Map.of());
@@ -705,6 +710,9 @@ public final class HaraContext {
       }
       if (!hasAlias) throw new HaraException(":require :lazy requires :as");
     }
+    if (lazy && !namespaces.containsKey(target)) {
+      namespaceStates.putIfAbsent(target, NamespaceLoadState.UNLOADED);
+    }
     HaraNamespace required = lazy ? null : requiredNamespace(target);
     if (!lazy && required == null) throw new HaraException("Cannot require missing namespace: " + target);
     java.util.Set<String> excludedRefers = new java.util.HashSet<>();
@@ -786,19 +794,46 @@ public final class HaraContext {
   }
 
   private synchronized HaraNamespace requiredNamespace(String target) {
-    libraryLoader.ensure(this, target);
     HaraNamespace existing = namespaces.get(target);
-    if (existing != null) return existing;
-    HaraNamespace sourceNamespace = requireSourceNamespace(target);
-    if (sourceNamespace != null) return sourceNamespace;
-    Path extensionRoot = null;
-    if (environment.isFileIOAllowed()) {
-      HaraProject currentProject = project();
-      extensionRoot = currentProject == null ? null : currentProject.extensionRoot();
+    if (existing != null && namespaceStates.get(target) == NamespaceLoadState.LOADED) {
+      return existing;
     }
-    HaraExtensionPackage extensionPackage = extensionRegistry.discover(target, extensionRoot);
-    if (extensionPackage == null) return null;
-    return installExtension(extensionPackage);
+    NamespaceLoadState state = namespaceStates.get(target);
+    if (state == NamespaceLoadState.LOADING) {
+      throw new HaraException("Cyclic namespace require: " + target);
+    }
+    if (state == NamespaceLoadState.FAILED) {
+      throw new HaraException(
+          "Namespace load previously failed; use explicit reload to retry: " + target);
+    }
+
+    ContextSnapshot snapshot = snapshot();
+    namespaceStates.put(target, NamespaceLoadState.LOADING);
+    try {
+      libraryLoader.ensure(this, target);
+      HaraNamespace loaded = namespaces.get(target);
+      if (loaded == null) loaded = requireSourceNamespace(target);
+      if (loaded == null) {
+        Path extensionRoot = null;
+        if (environment.isFileIOAllowed()) {
+          HaraProject currentProject = project();
+          extensionRoot = currentProject == null ? null : currentProject.extensionRoot();
+        }
+        HaraExtensionPackage extensionPackage = extensionRegistry.discover(target, extensionRoot);
+        if (extensionPackage != null) loaded = installExtension(extensionPackage);
+      }
+      if (loaded == null) {
+        restore(snapshot);
+        namespaceStates.put(target, NamespaceLoadState.FAILED);
+        return null;
+      }
+      namespaceStates.put(target, NamespaceLoadState.LOADED);
+      return loaded;
+    } catch (RuntimeException failure) {
+      restore(snapshot);
+      namespaceStates.put(target, NamespaceLoadState.FAILED);
+      throw failure;
+    }
   }
 
   void loadLibraryFallback(String namespaceName, String resourceName, boolean reload) {
@@ -954,6 +989,7 @@ public final class HaraContext {
   }
 
   Symbol canonicalSymbol(Symbol symbol) {
+    if (hasNativeSymbol(symbol)) return symbol;
     HaraVar variable = resolve(symbol);
     if (variable != null) {
       return Symbol.create(variable.namespaceName(), variable.symbolName());
@@ -995,6 +1031,9 @@ public final class HaraContext {
     for (Map.Entry<String, String> alias :
         aliases.getOrDefault(currentNamespace.name(), Map.of()).entrySet()) {
       HaraNamespace target = namespaces.get(alias.getValue());
+      if (target == null && libraryLoader.provides(alias.getValue())) {
+        target = requiredNamespace(alias.getValue());
+      }
       if (target == null) continue;
       for (String name : target.symbolNames()) names.add(alias.getKey() + "/" + name);
     }
@@ -1918,6 +1957,38 @@ public final class HaraContext {
     target.define("bytes", new VariadicBuiltin("bytes", this::createBytes));
     target.define("array", new VariadicBuiltin("array", HaraArray::new));
     target.define("object", new VariadicBuiltin("object", HaraObject::new));
+    HaraNamespace arr = namespace("std.native.Arr");
+    arr.define(
+        "get-index",
+        new VariadicBuiltin(
+            "std.native.Arr/get-index",
+            values -> nativeMutableCall("Arr", "get", values)));
+    arr.define(
+        "set-index",
+        new VariadicBuiltin(
+            "std.native.Arr/set-index",
+            values -> nativeMutableCall("Arr", "set", values)));
+    HaraNamespace obj = namespace("std.native.Obj");
+    obj.define(
+        "get-key",
+        new VariadicBuiltin(
+            "std.native.Obj/get-key",
+            values -> nativeMutableCall("Obj", "get", values)));
+    obj.define(
+        "set-key",
+        new VariadicBuiltin(
+            "std.native.Obj/set-key",
+            values -> nativeMutableCall("Obj", "set", values)));
+    obj.define(
+        "has-key?",
+        new VariadicBuiltin(
+            "std.native.Obj/has-key?",
+            values -> nativeMutableCall("Obj", "has?", values)));
+    obj.define(
+        "delete-key",
+        new VariadicBuiltin(
+            "std.native.Obj/delete-key",
+            values -> nativeMutableCall("Obj", "delete", values)));
     HaraNamespace bits = namespace("std.native.Bits");
     bits.define("and", new VariadicBuiltin("std.native.Bits/and", values -> bitOperation("and", values)));
     bits.define("or", new VariadicBuiltin("std.native.Bits/or", values -> bitOperation("or", values)));
@@ -1948,6 +2019,112 @@ public final class HaraContext {
     maths.define("sqrt", mathUnary("std.native.Maths/sqrt", Math::sqrt));
     maths.define("tan", mathUnary("std.native.Maths/tan", Math::tan));
     maths.define("tanh", mathUnary("std.native.Maths/tanh", Math::tanh));
+    HaraNamespace host = namespace("std.native.Host");
+    host.define("call", new VariadicBuiltin("std.native.Host/call", this::hostCall));
+    host.define("describe", new VariadicBuiltin("std.native.Host/describe", this::hostDescribe));
+    host.define(
+        "capabilities",
+        new VariadicBuiltin("std.native.Host/capabilities", this::hostCapabilities));
+    host.define(
+        "capability?",
+        new VariadicBuiltin("std.native.Host/capability?", this::hostCapability));
+  }
+
+  private Object hostCall(Object[] values) {
+    if (values.length != 3
+        || !(HaraBox.unwrap(values[0]) instanceof String service)
+        || !(HaraBox.unwrap(values[1]) instanceof String method)
+        || !(HaraBox.unwrap(values[2]) instanceof hara.lang.data.types.IVectorType<?> arguments)) {
+      throw new HaraException(
+          "std.native.Host/call expects service, method, and an argument vector");
+    }
+    if ("host".equals(service)) {
+      return switch (method) {
+        case "describe" -> hostDescribe(new Object[0]);
+        case "capabilities" -> hostCapabilities(new Object[0]);
+        case "capability?" ->
+            hostCapability(
+                java.util.stream.StreamSupport.stream(arguments.spliterator(), false).toArray());
+        default ->
+            rejectedHostPromise(
+                "host/method-unavailable",
+                "Host method is unavailable: " + service + "/" + method);
+      };
+    }
+    return rejectedHostPromise(
+        "host/method-unavailable",
+        "Host method is unavailable: " + service + "/" + method);
+  }
+
+  private Object hostDescribe(Object[] values) {
+    if (values.length != 0) throw new HaraException("std.native.Host/describe expects no arguments");
+    Object capabilities = hostCapabilityVector();
+    Object descriptor =
+        hara.lang.data.Map.Standard.from(
+            null,
+            Keyword.create("host/version"),
+            "hara.host.v1",
+            Keyword.create("host/available"),
+            capabilities,
+            Keyword.create("host/granted"),
+            capabilities,
+            Keyword.create("host/limits"),
+            hara.lang.data.Map.Standard.from(null));
+    return new HaraPromise(CompletableFuture.completedFuture(descriptor));
+  }
+
+  private Object hostCapabilities(Object[] values) {
+    if (values.length != 0) {
+      throw new HaraException("std.native.Host/capabilities expects no arguments");
+    }
+    return new HaraPromise(CompletableFuture.completedFuture(hostCapabilityVector()));
+  }
+
+  private Object hostCapability(Object[] values) {
+    if (values.length != 1) {
+      throw new HaraException("std.native.Host/capability? expects one capability");
+    }
+    Object value = HaraBox.unwrap(values[0]);
+    String capability =
+        value instanceof Keyword keyword
+            ? keyword.getName()
+            : value instanceof String string ? string.replaceFirst("^:", "") : null;
+    if (capability == null) {
+      throw new HaraException("std.native.Host/capability? expects a keyword or string");
+    }
+    boolean granted =
+        java.util.Arrays.asList(hostCapabilityNames()).contains(capability);
+    return new HaraPromise(CompletableFuture.completedFuture(granted));
+  }
+
+  private Object hostCapabilityVector() {
+    return BuiltinStruct.vector(hostCapabilityNames());
+  }
+
+  private Object[] hostCapabilityNames() {
+    java.util.List<Object> capabilities = new ArrayList<>();
+    if (environment.isFileIOAllowed()) capabilities.add("filesystem");
+    if (environment.isSocketIOAllowed()) capabilities.add("network/socket");
+    return capabilities.toArray();
+  }
+
+  private Object rejectedHostPromise(String code, String message) {
+    CompletableFuture<Object> future = new CompletableFuture<>();
+    future.completeExceptionally(
+        new hara.lang.base.Ex.Info(
+            message,
+            hara.lang.data.Map.Standard.from(
+                null,
+                Keyword.create("error", "code"),
+                keyword(code))));
+    return new HaraPromise(future);
+  }
+
+  private static Keyword keyword(String value) {
+    int separator = value.indexOf('/');
+    return Keyword.create(
+        value.substring(0, separator),
+        value.substring(separator + 1));
   }
 
   private Object createBytes(Object[] values) {
@@ -1959,6 +2136,17 @@ public final class HaraContext {
   }
 
   private void installNativeLibraries() {
+    HaraNamespace kernel = namespace("std.native.Kernel");
+    for (String method : NATIVE_TYPES.get("Kernel")) {
+      kernel.define(
+          method,
+          new VariadicBuiltin(
+              "std.native.Kernel/" + method,
+              values -> {
+                throw new HaraException(
+                    "std.native.Kernel/" + method + " requires a kernel embedding");
+              }));
+    }
     HaraNamespace jvm = namespace("hara.native.jvm");
     jvm.define(
         "set!",
@@ -3066,6 +3254,24 @@ public final class HaraContext {
     return provider.invokeMember(receiver, method, arguments, nativeAccess());
   }
 
+  private Object nativeMutableCall(String type, String method, Object[] values) {
+    if (values.length == 0) {
+      throw new HaraException("std.native." + type + "/" + method + " expects a receiver");
+    }
+    Object receiver = HaraBox.unwrap(values[0]);
+    Object[] arguments = new Object[values.length - 1];
+    for (int index = 1; index < values.length; index++) {
+      arguments[index - 1] = HaraBox.unwrap(values[index]);
+    }
+    if ("Arr".equals(type) && receiver instanceof HaraArray array) {
+      return invokeArrayMethod(array, method, arguments);
+    }
+    if ("Obj".equals(type) && receiver instanceof HaraObject object) {
+      return invokeObjectMethod(object, method, arguments);
+    }
+    throw new HaraException("std.native." + type + "/" + method + " receiver type mismatch");
+  }
+
   private Object invokeArrayMethod(HaraArray array, String method, Object[] arguments) {
     switch (method) {
       case "get":
@@ -3473,15 +3679,13 @@ public final class HaraContext {
 
   private Object namespaceState(Object value) {
     String name = namespaceIdentifier(value, "ns-state");
-    if (namespaces.containsKey(name)) return Keyword.create("loaded");
-    for (Map<String, String> namespaceAliases : aliases.values()) {
-      if (namespaceAliases.containsValue(name)) return Keyword.create("unloaded");
-    }
-    return Keyword.create("unknown");
+    NamespaceLoadState state = namespaceStates.get(name);
+    return Keyword.create(state == null ? "unknown" : state.keyword);
   }
 
   private Object namespaceLoaded(Object value) {
-    return namespaces.containsKey(namespaceIdentifier(value, "ns-loaded?"));
+    return namespaceStates.get(namespaceIdentifier(value, "ns-loaded?"))
+        == NamespaceLoadState.LOADED;
   }
 
   private Object namespaceAliasState(Object[] values) {
@@ -3666,11 +3870,34 @@ public final class HaraContext {
     String target = symbol.display();
     boolean reload = options != null && Boolean.TRUE.equals(requireOption(options, "reload"));
     HaraNamespace required;
-    if (reload && libraryLoader.provides(target)) {
-      libraryLoader.reload(this, target);
-      required = namespaces.get(target);
+    if (reload) {
+      NamespaceLoadState previousState = namespaceStates.get(target);
+      ContextSnapshot snapshot = snapshot();
+      namespaceStates.put(target, NamespaceLoadState.LOADING);
+      try {
+        if (libraryLoader.provides(target)) {
+          libraryLoader.reload(this, target);
+          required = namespaces.get(target);
+        } else {
+          required = requireSourceNamespace(target, true);
+        }
+        if (required == null) {
+          restore(snapshot);
+          if (previousState != NamespaceLoadState.LOADED) {
+            namespaceStates.put(target, NamespaceLoadState.FAILED);
+          }
+        } else {
+          namespaceStates.put(target, NamespaceLoadState.LOADED);
+        }
+      } catch (RuntimeException failure) {
+        restore(snapshot);
+        if (previousState != NamespaceLoadState.LOADED) {
+          namespaceStates.put(target, NamespaceLoadState.FAILED);
+        }
+        throw failure;
+      }
     } else {
-      required = reload ? requireSourceNamespace(target, true) : requiredNamespace(target);
+      required = requiredNamespace(target);
     }
     if (required == null) {
       throw new HaraException("Cannot require missing namespace: " + target);
@@ -4623,7 +4850,8 @@ public final class HaraContext {
         macroValues,
         aliasValues,
         new LinkedHashMap<>(modules),
-        dependencyValues);
+        dependencyValues,
+        new LinkedHashMap<>(namespaceStates));
   }
 
   @TruffleBoundary
@@ -4659,6 +4887,8 @@ public final class HaraContext {
       moduleDependencies.put(entry.getKey(), ConcurrentHashMap.newKeySet());
       moduleDependencies.get(entry.getKey()).addAll(entry.getValue());
     }
+    namespaceStates.clear();
+    namespaceStates.putAll(snapshot.namespaceStates);
   }
 
   private static final class BuiltinExport {
@@ -4692,6 +4922,7 @@ public final class HaraContext {
     private final Map<String, Map<String, String>> aliases;
     private final Map<String, ModuleRecord> modules;
     private final Map<String, Set<String>> moduleDependencies;
+    private final Map<String, NamespaceLoadState> namespaceStates;
 
     private ContextSnapshot(
         String currentNamespace,
@@ -4702,7 +4933,8 @@ public final class HaraContext {
         Map<String, Map<String, HaraMacro>> macros,
         Map<String, Map<String, String>> aliases,
         Map<String, ModuleRecord> modules,
-        Map<String, Set<String>> moduleDependencies) {
+        Map<String, Set<String>> moduleDependencies,
+        Map<String, NamespaceLoadState> namespaceStates) {
       this.currentNamespace = currentNamespace;
       this.values = values;
       this.bindings = bindings;
@@ -4712,6 +4944,7 @@ public final class HaraContext {
       this.aliases = aliases;
       this.modules = modules;
       this.moduleDependencies = moduleDependencies;
+      this.namespaceStates = namespaceStates;
     }
   }
 
@@ -5006,7 +5239,10 @@ public final class HaraContext {
         return HaraPersistentValues.normalize(future.join());
       } catch (CompletionException error) {
         Throwable cause = error.getCause() == null ? error : error.getCause();
-        if (cause instanceof HaraException) throw (HaraException) cause;
+        if (cause instanceof HaraException haraError) throw haraError;
+        if (cause instanceof hara.lang.protocol.IExInfo && cause instanceof RuntimeException runtime) {
+          throw runtime;
+        }
         throw new HaraException("Promise rejected: " + cause.getMessage());
       } catch (java.util.concurrent.CancellationException error) {
         throw new HaraException("Promise cancelled");
@@ -5184,6 +5420,19 @@ public final class HaraContext {
     private HaraVar refer(String symbolName, HaraVar value) {
       vars.put(symbolName, value);
       return value;
+    }
+  }
+
+  private enum NamespaceLoadState {
+    UNLOADED("unloaded"),
+    LOADING("loading"),
+    LOADED("loaded"),
+    FAILED("failed");
+
+    private final String keyword;
+
+    NamespaceLoadState(String keyword) {
+      this.keyword = keyword;
     }
   }
 }

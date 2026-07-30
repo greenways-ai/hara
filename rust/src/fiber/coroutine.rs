@@ -229,12 +229,14 @@ pub fn await_form(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Con
             Ok(Value::Var(x)) => k(Ok(x.deref_value())),
             Ok(Value::Promise(p)) => match p.state() {
                 PromiseState::Fulfilled(x) => k(Ok(x)),
-                PromiseState::Rejected(e) => k(Err(e)),
+                PromiseState::Rejected(e) => k(Err(crate::core::promise_rejection_error(e))),
                 PromiseState::Pending => Step::Wait(
                     p,
                     Box::new(move |s| match s {
                         PromiseState::Fulfilled(x) => k(Ok(x)),
-                        PromiseState::Rejected(e) => k(Err(e)),
+                        PromiseState::Rejected(e) => {
+                            k(Err(crate::core::promise_rejection_error(e)))
+                        }
                         PromiseState::Pending => k(Err("coroutine/await resumed pending".into())),
                     }),
                 ),

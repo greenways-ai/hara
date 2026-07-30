@@ -1,0 +1,2 @@
+(ns precedence.demo)
+(def source :classpath)
