@@ -7,6 +7,6 @@
  :contribution/source
  {:source/provider :github
   :source/repository "hara-lang/hara"
-  :source/commit "43102413c0b1f7de779cfb8999836df988398dbc"
+  :source/commit "34d74feba8c37361da2c3a5196aa2a6adc445561"
   :source/path "contrib/greenways/usdskel"}
  :contribution/specs []}

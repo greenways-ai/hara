@@ -7,7 +7,7 @@
  :contribution/source
  {:source/provider :github
   :source/repository "hara-lang/hara"
-  :source/commit "43102413c0b1f7de779cfb8999836df988398dbc"
+  :source/commit "f36a3c6891a0abba53b3517b7aa73dce3e925d96"
   :source/path "contrib/greenways/build"}
  :contribution/specs
  [{:spec/id :greenways/buildspec
