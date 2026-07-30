@@ -93,6 +93,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "ArrowLeft") setView("stage");
   if (event.key === "ArrowRight") setView("build");
 });
+setView(new URLSearchParams(location.search).get("view"));
 
 function state(message, error = false) {
   $("[data-source-state]").textContent = message.toUpperCase();
