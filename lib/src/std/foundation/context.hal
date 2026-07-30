@@ -1,61 +1,193 @@
+;; ==========================================================================
+;; std.foundation.context — named runtimes, spaces, and portable pointers.
+;;
+;;                         global registry
+;;                               |
+;;                  context + runtime variant
+;;                               |
+;;                               v
+;;                    +--------------------+
+;;                    | runtime spec       |
+;;                    | create + defaults  |
+;;                    +--------------------+
+;;                               |
+;;                         context-set
+;;                               |
+;;                               v
+;;                    +--------------------+
+;;                    | space entry        |
+;;                    | config + live rt?  |
+;;                    +--------------------+
+;;                       |             |
+;;                  rt-start        rt-stop
+;;                       |             |
+;;                       v             v
+;;                 component/start  component/stop
+;;
+;; pointer ----------------> explicit runtime
+;;    |                      resolver(pointer)
+;;    +--- pointer-default -> registry scratch
+;;                           runtime-null
+;;                                  |
+;;                                  v
+;;                           IApplicable/apply-in
+;;                                  |
+;;                                  v
+;;                            IContext/call
+;;
+;; Spaces own live runtime instances; the registry owns reusable runtime
+;; specifications. Pointers describe invocation but do not own the runtime.
+;; ==========================================================================
 (ns std.foundation.context
   (:require [std.foundation.component :as component]))
 
+;; Runtime and pointer value shapes.
+
 (defstruct runtime-null-type [])
+
 (defstruct space-type [state])
+
 (defstruct pointer-type [context fields runtime resolver])
 
-(defn runtime-null [] (std.foundation.context/runtime-null-type))
+(defn ^{:schema [:fn [] :any]}
+  runtime-null
+  "Creates the inert fallback runtime.
+
+   Calling it returns its arguments as a vector; lifecycle operations are
+   successful no-ops."
+  []
+  (std.foundation.context/runtime-null-type))
+
+;; The null runtime gives pointer invocation a total fallback.
 
 (extend-type runtime-null-type IContext
-  (call [runtime & args] (vec args)))
+  (call [runtime & args]
+    (vec args)))
 
 (extend-type runtime-null-type IComponent
-  (props [runtime] {})
-  (status [runtime] :started)
-  (started? [runtime] true)
-  (stopped? [runtime] false)
-  (start [runtime] runtime)
-  (stop [runtime] runtime)
-  (kill [runtime] runtime)
-  (remote? [runtime] false))
+  (props [runtime]
+    {})
+  (status [runtime]
+    :started)
+  (started? [runtime]
+    true)
+  (stopped? [runtime]
+    false)
+  (start [runtime]
+    runtime)
+  (stop [runtime]
+    runtime)
+  (kill [runtime]
+    runtime)
+  (remote? [runtime]
+    false))
 
 (extend-type runtime-null-type IContextLifeCycle
-  (has-module? [runtime module] false)
-  (setup-module [runtime module] runtime)
-  (teardown-module [runtime module] runtime)
-  (has-pointer? [runtime pointer] false)
-  (setup-pointer [runtime pointer] runtime)
-  (teardown-pointer [runtime pointer] runtime))
+  (has-module? [runtime module]
+    false)
+  (setup-module [runtime module]
+    runtime)
+  (teardown-module [runtime module]
+    runtime)
+  (has-pointer? [runtime pointer]
+    false)
+  (setup-pointer [runtime pointer]
+    runtime)
+  (teardown-pointer [runtime pointer]
+    runtime))
 
-(def ^:dynamic *registry* (atom {:null {:runtimes {:default {:create (fn [config] (runtime-null))
-                                                        :config {}}}
-                                        :scratch (runtime-null)}}))
+(def ^{:dynamic true
+       :doc "Dynamic atom containing context runtime specifications and scratch runtimes."}
+  *registry*
+  (atom {:null {:runtimes {:default {:create (fn [config] (runtime-null))
+                                     :config {}}}
+                :scratch (runtime-null)}}))
 
-(defn registry-list [] (keys (deref *registry*)))
-(defn registry-get [context] (get (deref *registry*) context))
-(defn registry-install [context options]
-  (swap! *registry* (fn [registry] (assoc registry context (merge {:runtimes {}} options))))
+;; Registry operations mutate only the dynamically bound registry atom.
+
+(defn ^{:schema [:fn [] :any]}
+  registry-list
+  "Returns the names of all registered contexts."
+  []
+  (keys (deref *registry*)))
+
+(defn ^{:schema [:fn [:any] :any]}
+  registry-get
+  "Returns the registry entry for context, or nil when it is absent."
+  [context]
+  (get (deref *registry*) context))
+
+(defn ^{:schema [:fn [:any :map] :any]}
+  registry-install
+  "Installs options for context and returns the resulting registry entry."
+  [context options]
+  (swap! *registry*
+         (fn [registry]
+           (assoc registry context (merge {:runtimes {}} options))))
   (registry-get context))
-(defn registry-uninstall [context]
+
+(defn ^{:schema [:fn [:any] :any]}
+  registry-uninstall
+  "Removes context from the registry and returns the updated registry."
+  [context]
   (swap! *registry* dissoc context))
-(defn registry-runtime [context variant]
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  registry-runtime
+  "Returns context's runtime specification for variant.
+
+   A nil variant selects `:default`."
+  [context variant]
   (get-in (registry-get context) [:runtimes (or variant :default)]))
-(defn registry-runtime-add [context variant spec]
+
+(defn ^{:schema [:fn [:any :any :map] :any]}
+  registry-runtime-add
+  "Associates spec with context's runtime variant."
+  [context variant spec]
   (swap! *registry* assoc-in [context :runtimes variant] spec))
-(defn registry-runtime-remove [context variant]
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  registry-runtime-remove
+  "Removes variant from context's runtime specifications."
+  [context variant]
   (swap! *registry* update-in [context :runtimes] dissoc variant))
-(defn registry-scratch [context] (get-in (registry-get context) [:scratch]))
-(defn registry-scratch-set! [context runtime]
+
+(defn ^{:schema [:fn [:any] :any]}
+  registry-scratch
+  "Returns context's fallback scratch runtime."
+  [context]
+  (get-in (registry-get context) [:scratch]))
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  registry-scratch-set!
+  "Sets context's fallback scratch runtime."
+  [context runtime]
   (swap! *registry* assoc-in [context :scratch] runtime))
 
-(defn space [] (std.foundation.context/space-type (atom {})))
-(defn space? [value] (instance? space-type value))
+;; A space contains configuration immediately and creates runtimes lazily.
 
-(defn- space-entry [space context]
+(defn ^{:schema [:fn [] :any]}
+  space
+  "Creates an empty context space backed by an atom."
+  []
+  (std.foundation.context/space-type (atom {})))
+
+(defn ^{:schema [:fn [:any] :bool]}
+  space?
+  "Returns true when value is a context space."
+  [value]
+  (instance? space-type value))
+
+(defn- ^{:schema [:fn [:any :any] :any]}
+  space-entry
+  "Returns context's raw entry from space."
+  [space context]
   (get (deref (:state space)) context))
 
-(defn- space-context-set [space context variant options]
+(defn- ^{:schema [:fn [:any :any :any :map] :any]}
+  space-context-set
+  "Configures context in space without starting its runtime."
+  [space context variant options]
   (let [spec (registry-runtime context variant)]
     (if (not spec)
       (throw (ex-info "Context runtime is not registered" {:context context :variant variant}))
@@ -66,13 +198,19 @@
         (swap! (:state space) assoc context entry)
         entry))))
 
-(defn- space-context-unset [space context]
+(defn- ^{:schema [:fn [:any :any] :any]}
+  space-context-unset
+  "Stops context when necessary, removes its entry, and returns that entry."
+  [space context]
   (let [entry (space-entry space context)]
     (if (:runtime entry) (ISpace/rt-stop space context))
     (swap! (:state space) dissoc context)
     entry))
 
-(defn- space-rt-start [space context]
+(defn- ^{:schema [:fn [:any :any] :any]}
+  space-rt-start
+  "Creates and starts context's runtime once, returning the live instance."
+  [space context]
   (let [entry (space-entry space context)
         current (:runtime entry)]
     (if current current
@@ -81,7 +219,10 @@
           (swap! (:state space) assoc context (assoc entry :runtime runtime))
           runtime))))
 
-(defn- space-rt-stop [space context]
+(defn- ^{:schema [:fn [:any :any] :any]}
+  space-rt-stop
+  "Stops context's runtime and removes the live instance from its entry."
+  [space context]
   (let [entry (space-entry space context)
         runtime (:runtime entry)]
     (if runtime
@@ -90,64 +231,203 @@
           nil))))
 
 (extend-type space-type ISpace
-  (context-set [space context variant options] (space-context-set space context variant options))
-  (context-unset [space context] (space-context-unset space context))
-  (context-list [space] (vec (keys (deref (:state space)))))
-  (context-get [space context] (space-entry space context))
+  (context-set [space context variant options]
+    (space-context-set space context variant options))
+  (context-unset [space context]
+    (space-context-unset space context))
+  (context-list [space]
+    (vec (keys (deref (:state space)))))
+  (context-get [space context]
+    (space-entry space context))
   (rt-active [space]
     (vec (map (fn [pair] (first pair))
               (filter (fn [pair] (:runtime (second pair))) (deref (:state space))))))
-  (rt-get [space context] (:runtime (space-entry space context)))
-  (rt-start [space context] (space-rt-start space context))
-  (rt-started? [space context] (not (nil? (:runtime (space-entry space context)))))
-  (rt-stopped? [space context] (nil? (:runtime (space-entry space context))))
-  (rt-stop [space context] (space-rt-stop space context)))
+  (rt-get [space context]
+    (:runtime (space-entry space context)))
+  (rt-start [space context]
+    (space-rt-start space context))
+  (rt-started? [space context]
+    (not (nil? (:runtime (space-entry space context)))))
+  (rt-stopped? [space context]
+    (nil? (:runtime (space-entry space context))))
+  (rt-stop [space context]
+    (space-rt-stop space context)))
 
-(defn pointer
-  ([context] (pointer context {}))
-  ([context fields] (std.foundation.context/pointer-type context fields nil nil)))
+;; Pointers carry descriptive fields and resolve a runtime only when invoked.
 
-(defn pointer? [value] (instance? pointer-type value))
+(defn ^{:schema [:function [:fn [:any] :any]
+                            [:fn [:any :map] :any]]}
+  pointer
+  "Creates a pointer that resolves calls into a named context."
+  ([context]
+   (pointer context {}))
+  ([context fields]
+   (std.foundation.context/pointer-type context fields nil nil)))
 
-(defn pointer-default [pointer]
+(defn ^{:schema [:fn [:any] :bool]}
+  pointer?
+  "Returns true when value is a context pointer."
+  [value]
+  (instance? pointer-type value))
+
+(defn ^{:schema [:fn [:any] :any]}
+  pointer-default
+  "Resolves pointer's explicit, computed, scratch, or null runtime.
+
+   Resolution follows that order and returns the first available runtime."
+  [pointer]
   (or (:runtime pointer)
       (if (:resolver pointer) ((:resolver pointer) pointer))
       (registry-scratch (:context pointer))
       (runtime-null)))
 
 (extend-type pointer-type IPointer
-  (ptr-context [pointer] (:context pointer))
-  (ptr-keys [pointer] (keys (:fields pointer)))
-  (ptr-val [pointer key] (get (:fields pointer) key)))
+  (ptr-context [pointer]
+    (:context pointer))
+  (ptr-keys [pointer]
+    (keys (:fields pointer)))
+  (ptr-val [pointer key]
+    (get (:fields pointer) key)))
 
 (extend-type pointer-type IApplicable
-  (apply-default [pointer] (pointer-default pointer))
-  (apply-in [pointer runtime args] (apply IContext/call runtime args))
-  (transform-in [pointer runtime args] args)
-  (transform-out [pointer runtime args value] value))
+  (apply-default [pointer]
+    (pointer-default pointer))
+  (apply-in [pointer runtime args]
+    (apply IContext/call runtime args))
+  (transform-in [pointer runtime args]
+    args)
+  (transform-out [pointer runtime args value]
+    value))
 
 (extend-type pointer-type IInvokeIn
   (invoke-in [pointer runtime & args]
     (IApplicable/apply-in pointer runtime args)))
 
-(defn call [runtime & args] (apply IContext/call runtime args))
-(defn has-module? [runtime module] (IContextLifeCycle/has-module? runtime module))
-(defn setup-module [runtime module] (IContextLifeCycle/setup-module runtime module))
-(defn teardown-module [runtime module] (IContextLifeCycle/teardown-module runtime module))
-(defn has-pointer? [runtime pointer] (IContextLifeCycle/has-pointer? runtime pointer))
-(defn setup-pointer [runtime pointer] (IContextLifeCycle/setup-pointer runtime pointer))
-(defn teardown-pointer [runtime pointer] (IContextLifeCycle/teardown-pointer runtime pointer))
-(defn invoke-in [value runtime & args] (apply IInvokeIn/invoke-in value runtime args))
-(defn ptr-context [pointer] (IPointer/ptr-context pointer))
-(defn ptr-keys [pointer] (IPointer/ptr-keys pointer))
-(defn ptr-val [pointer key] (IPointer/ptr-val pointer key))
-(defn context-set [space context variant options] (ISpace/context-set space context variant options))
-(defn context-unset [space context] (ISpace/context-unset space context))
-(defn context-list [space] (ISpace/context-list space))
-(defn context-get [space context] (ISpace/context-get space context))
-(defn rt-active [space] (ISpace/rt-active space))
-(defn rt-get [space context] (ISpace/rt-get space context))
-(defn rt-start [space context] (ISpace/rt-start space context))
-(defn rt-started? [space context] (ISpace/rt-started? space context))
-(defn rt-stopped? [space context] (ISpace/rt-stopped? space context))
-(defn rt-stop [space context] (ISpace/rt-stop space context))
+;; Public protocol functions keep callers independent of concrete runtime,
+;; pointer, and space representations.
+
+(defn ^{:schema [:fn [:any & :any] :any]}
+  call
+  "Calls runtime with arguments through IContext."
+  [runtime & args]
+  (apply IContext/call runtime args))
+
+(defn ^{:schema [:fn [:any :any] :bool]}
+  has-module?
+  "Returns true when runtime has module installed."
+  [runtime module]
+  (IContextLifeCycle/has-module? runtime module))
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  setup-module
+  "Installs module into runtime and returns the protocol result."
+  [runtime module]
+  (IContextLifeCycle/setup-module runtime module))
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  teardown-module
+  "Removes module from runtime and returns the protocol result."
+  [runtime module]
+  (IContextLifeCycle/teardown-module runtime module))
+
+(defn ^{:schema [:fn [:any :any] :bool]}
+  has-pointer?
+  "Returns true when runtime has pointer installed."
+  [runtime pointer]
+  (IContextLifeCycle/has-pointer? runtime pointer))
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  setup-pointer
+  "Installs pointer into runtime and returns the protocol result."
+  [runtime pointer]
+  (IContextLifeCycle/setup-pointer runtime pointer))
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  teardown-pointer
+  "Removes pointer from runtime and returns the protocol result."
+  [runtime pointer]
+  (IContextLifeCycle/teardown-pointer runtime pointer))
+
+(defn ^{:schema [:fn [:any :any & :any] :any]}
+  invoke-in
+  "Invokes value with args against the explicitly supplied runtime."
+  [value runtime & args]
+  (apply IInvokeIn/invoke-in value runtime args))
+
+(defn ^{:schema [:fn [:any] :any]}
+  ptr-context
+  "Returns pointer's context name."
+  [pointer]
+  (IPointer/ptr-context pointer))
+
+(defn ^{:schema [:fn [:any] :any]}
+  ptr-keys
+  "Returns pointer's declared field keys."
+  [pointer]
+  (IPointer/ptr-keys pointer))
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  ptr-val
+  "Returns pointer's field value for key."
+  [pointer key]
+  (IPointer/ptr-val pointer key))
+
+(defn ^{:schema [:fn [:any :any :any :map] :any]}
+  context-set
+  "Configures context and variant in space without starting it."
+  [space context variant options]
+  (ISpace/context-set space context variant options))
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  context-unset
+  "Stops and removes context from space."
+  [space context]
+  (ISpace/context-unset space context))
+
+(defn ^{:schema [:fn [:any] :vector]}
+  context-list
+  "Returns the configured context names in space."
+  [space]
+  (ISpace/context-list space))
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  context-get
+  "Returns context's configured space entry."
+  [space context]
+  (ISpace/context-get space context))
+
+(defn ^{:schema [:fn [:any] :vector]}
+  rt-active
+  "Returns context names whose runtimes are currently live."
+  [space]
+  (ISpace/rt-active space))
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  rt-get
+  "Returns context's live runtime, or nil before it starts."
+  [space context]
+  (ISpace/rt-get space context))
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  rt-start
+  "Starts context lazily and returns its live runtime."
+  [space context]
+  (ISpace/rt-start space context))
+
+(defn ^{:schema [:fn [:any :any] :bool]}
+  rt-started?
+  "Returns true when context has a live runtime."
+  [space context]
+  (ISpace/rt-started? space context))
+
+(defn ^{:schema [:fn [:any :any] :bool]}
+  rt-stopped?
+  "Returns true when context has no live runtime."
+  [space context]
+  (ISpace/rt-stopped? space context))
+
+(defn ^{:schema [:fn [:any :any] :any]}
+  rt-stop
+  "Stops context's live runtime and clears it from space."
+  [space context]
+  (ISpace/rt-stop space context))

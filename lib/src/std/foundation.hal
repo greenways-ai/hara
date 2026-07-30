@@ -4,7 +4,7 @@
 ;; Contract:
 ;;   * Keep this layer free of host interop and Java-specific values.
 ;;   * Every public definition carries a docstring and a ^{:schema ...}
-;;     annotation in the std.typed surface grammar (specs/hara/data/typed.edn).
+;;     annotation in the portable schema grammar.
 ;;     Annotations are data: checked by the std.typed linter, never required
 ;;     at runtime. This file is the linter's dogfood target.
 ;;   * Variadic signatures use & in the schema input vector, e.g.
@@ -13,9 +13,40 @@
 ;;   * Macros carry docstrings only; macro signatures are form-level and
 ;;     outside the value-type schema grammar.
 ;;
+;;                            HAL program
+;;                                |
+;;                                v
+;;                    +-------------------------+
+;;                    | std.foundation          |
+;;                    | portable value layer    |
+;;                    +-------------------------+
+;;                      |       |       |      |
+;;          +-----------+       |       |      +-----------+
+;;          |                   |       |                  |
+;;          v                   v       v                  v
+;;   function tools       collections  macros        protocol calls
+;;   comp/partial         map/reduce   doto/cond->   ISeq/IApplicable
+;;          |                   |       |                  |
+;;          +-------------------+-------+------------------+
+;;                              |
+;;                              v
+;;                    immutable HAL values
+;;                              |
+;;              +---------------+---------------+
+;;              |                               |
+;;              v                               v
+;;   std.foundation/* libraries          std.native.* boundary
+;;   string/file/context/etc.            Maths/Bits/Numbers
+;;              |                               |
+;;              +---------------+---------------+
+;;                              |
+;;                              v
+;;                 Java / Rust / Wasm runtimes
+;;
 ;; Authoritative references:
-;;   * specs/hara/data/foundation.edn — the namespace boundary (what exists).
-;;   * specs/hara/data/typed.edn      — the schema grammar (how types are written).
+;;   * specs/language/draft/hal-langspec.edn — portable language contract.
+;;   * specs/language/draft/conformance/native.edn — native wrapper inventory.
+;;   * specs/archive/planning/language/typed.edn — current schema vocabulary.
 ;; ============================================================================
 (ns std.foundation)
 
@@ -489,34 +520,155 @@
   [value]
   (std.native.Numbers/double value))
 
-(defn bit-and [& values] (apply std.native.Bits/and values))
-(defn bit-or [& values] (apply std.native.Bits/or values))
-(defn bit-xor [& values] (apply std.native.Bits/xor values))
-(defn bit-not [value] (std.native.Bits/not value))
-(defn bit-shift-left [& values]
+(defn ^{:schema [:fn [& :any] :any]}
+  bit-and
+  "Returns the bitwise conjunction of values through the portable Bits boundary."
+  [& values]
+  (apply std.native.Bits/and values))
+
+(defn ^{:schema [:fn [& :any] :any]}
+  bit-or
+  "Returns the bitwise disjunction of values through the portable Bits boundary."
+  [& values]
+  (apply std.native.Bits/or values))
+
+(defn ^{:schema [:fn [& :any] :any]}
+  bit-xor
+  "Returns the bitwise exclusive-or of values through the portable Bits boundary."
+  [& values]
+  (apply std.native.Bits/xor values))
+
+(defn ^{:schema [:fn [:any] :any]}
+  bit-not
+  "Returns the bitwise complement of value through the portable Bits boundary."
+  [value]
+  (std.native.Bits/not value))
+
+(defn ^{:schema [:fn [& :any] :any]}
+  bit-shift-left
+  "Left-shifts the first value by the remaining shift counts."
+  [& values]
   (apply std.native.Bits/shift-left values))
-(defn bit-shift-right [& values]
+
+(defn ^{:schema [:fn [& :any] :any]}
+  bit-shift-right
+  "Right-shifts the first value by the remaining shift counts."
+  [& values]
   (apply std.native.Bits/shift-right values))
 
-(defn abs [value] (std.native.Maths/abs value))
-(defn acos [value] (std.native.Maths/acos value))
-(defn acosh [value] (std.native.Maths/acosh value))
-(defn asin [value] (std.native.Maths/asin value))
-(defn asinh [value] (std.native.Maths/asinh value))
-(defn atan [value] (std.native.Maths/atan value))
-(defn atan2 [y x] (std.native.Maths/atan2 y x))
-(defn atanh [value] (std.native.Maths/atanh value))
-(defn ceil [value] (std.native.Maths/ceil value))
-(defn cos [value] (std.native.Maths/cos value))
-(defn cosh [value] (std.native.Maths/cosh value))
-(defn exp [value] (std.native.Maths/exp value))
-(defn floor [value] (std.native.Maths/floor value))
-(defn pow [value exponent] (std.native.Maths/pow value exponent))
-(defn sin [value] (std.native.Maths/sin value))
-(defn sinh [value] (std.native.Maths/sinh value))
-(defn sqrt [value] (std.native.Maths/sqrt value))
-(defn tan [value] (std.native.Maths/tan value))
-(defn tanh [value] (std.native.Maths/tanh value))
+(defn ^{:schema [:fn [:num] :num]}
+  abs
+  "Returns the absolute magnitude of value."
+  [value]
+  (std.native.Maths/abs value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  acos
+  "Returns the arc cosine of value in radians."
+  [value]
+  (std.native.Maths/acos value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  acosh
+  "Returns the inverse hyperbolic cosine of value."
+  [value]
+  (std.native.Maths/acosh value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  asin
+  "Returns the arc sine of value in radians."
+  [value]
+  (std.native.Maths/asin value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  asinh
+  "Returns the inverse hyperbolic sine of value."
+  [value]
+  (std.native.Maths/asinh value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  atan
+  "Returns the arc tangent of value in radians."
+  [value]
+  (std.native.Maths/atan value))
+
+(defn ^{:schema [:fn [:num :num] :num]}
+  atan2
+  "Returns the angle for y and x in radians."
+  [y x]
+  (std.native.Maths/atan2 y x))
+
+(defn ^{:schema [:fn [:num] :num]}
+  atanh
+  "Returns the inverse hyperbolic tangent of value."
+  [value]
+  (std.native.Maths/atanh value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  ceil
+  "Rounds value upward to the nearest integral number."
+  [value]
+  (std.native.Maths/ceil value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  cos
+  "Returns the cosine of value in radians."
+  [value]
+  (std.native.Maths/cos value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  cosh
+  "Returns the hyperbolic cosine of value."
+  [value]
+  (std.native.Maths/cosh value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  exp
+  "Returns Euler's number raised to value."
+  [value]
+  (std.native.Maths/exp value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  floor
+  "Rounds value downward to the nearest integral number."
+  [value]
+  (std.native.Maths/floor value))
+
+(defn ^{:schema [:fn [:num :num] :num]}
+  pow
+  "Returns value raised to exponent."
+  [value exponent]
+  (std.native.Maths/pow value exponent))
+
+(defn ^{:schema [:fn [:num] :num]}
+  sin
+  "Returns the sine of value in radians."
+  [value]
+  (std.native.Maths/sin value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  sinh
+  "Returns the hyperbolic sine of value."
+  [value]
+  (std.native.Maths/sinh value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  sqrt
+  "Returns the non-negative square root of value."
+  [value]
+  (std.native.Maths/sqrt value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  tan
+  "Returns the tangent of value in radians."
+  [value]
+  (std.native.Maths/tan value))
+
+(defn ^{:schema [:fn [:num] :num]}
+  tanh
+  "Returns the hyperbolic tangent of value."
+  [value]
+  (std.native.Maths/tanh value))
 
 (defn ^{:schema [:fn [& :any] :bool]}
   T
@@ -946,19 +1098,22 @@
 ;; Application
 ;; ---------------------------------------------------------------------------
 
-(defn apply-in
+(defn ^{:schema [:fn [:any :any :any] :any]}
+  apply-in
   "Invokes value in runtime after IApplicable input and output transforms."
   [value runtime args]
   (let [input (IApplicable/transform-in value runtime args)
         result (IApplicable/apply-in value runtime input)]
     (IApplicable/transform-out value runtime args result)))
 
-(defn apply-as
+(defn ^{:schema [:fn [:any :any] :any]}
+  apply-as
   "Invokes value using its default IApplicable runtime."
   [value args]
   (apply-in value (IApplicable/apply-default value) args))
 
-(defn invoke-as
+(defn ^{:schema [:fn [:any & :any] :any]}
+  invoke-as
   "Invokes value using its default IApplicable runtime and arguments."
   [value & args]
   (apply-as value args))
@@ -1062,7 +1217,8 @@
   [metadata & body]
   `(binding [*template-meta* ~metadata] ~@body))
 
-(defn template-meta
+(defn ^{:schema [:fn [] :any]}
+  template-meta
   "Returns metadata supplied to the active template expansion."
   []
   *template-meta*)
@@ -1093,7 +1249,8 @@
                    entries)]
     (list 'binding [ '*template-meta* metadata] (apply list 'do forms))))
 
-(defn template-ensure
+(defn ^{:schema [:fn [:any :any] :any]}
+  template-ensure
   "Returns generated template Vars after the caller has materialized them."
   [symbols variables]
   variables)

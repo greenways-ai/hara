@@ -2,7 +2,10 @@
   (:require [std.lib.test :as test]))
 
 (def results
-  [(test/check "comp composes right-to-left"
+  [(test/check "test config is inert at evaluation time"
+               (test/config {:session-scope :shared})
+               nil)
+   (test/check "comp composes right-to-left"
                ((comp inc inc) 40)
                42)
    (test/check "map is eager on vectors"

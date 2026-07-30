@@ -1,10 +1,8 @@
 ;; ============================================================================
 ;; std.foundation.promise — portable promise library (foundation boundary).
 ;;
-;; Pure activation declaration: every public Var is a host builtin; kind,
-;; docstring, and arglists come from the host export catalog (@HaraExport).
-;; Schema annotations for these symbols belong in std.typed.core-sigs
-;; (specs/hara/data/typed.edn).
+;; HAL functions provide discoverable docs and schemas while delegating
+;; scheduling and construction to std.native.Promise and IPromise.
 ;;
 ;; Contract:
 ;;   * Promises are the single async boundary; new/from/then/catch/finally
@@ -12,19 +10,95 @@
 ;;   * cancel is best-effort.
 ;;   * delay defers evaluation into the promise scheduler.
 ;;
-;; Authority: specs/hara/data/foundation.edn (:runtime-libraries std.foundation.promise)
+;; Native inventory: specs/language/draft/conformance/native.edn
+;;
+;;                      function / value
+;;                            |
+;;          +-----------------+-----------------+
+;;          |                 |                 |
+;;          v                 v                 v
+;;         run               from              new
+;;          |                 |             executor owns
+;;          +-----------------+-----------------+
+;;                            |
+;;                            v
+;;                         Promise
+;;                      /     |      \
+;;                     v      v       v
+;;                   then    catch  finally
+;;                     \      |       /
+;;                      +-----+------+
+;;                            |
+;;                            v
+;;                     chained Promise
+;;
+;; `all` joins multiple promises; `delay` schedules later work; cancellation
+;; is best-effort and never exposes a host executor.
 ;; ============================================================================
 (ns std.foundation.promise)
 
-(defn run [function] (std.native.Promise/run function))
-(defn new [executor] (std.native.Promise/new executor))
-(defn from [value] (std.native.Promise/from value))
-(defn all [values] (std.native.Promise/all values))
-(defn delay [milliseconds function]
+(defn ^{:schema [:fn [:fn] :promise]}
+  run
+  "Runs function asynchronously and returns its promise."
+  [function]
+  (std.native.Promise/run function))
+
+(defn ^{:schema [:fn [:fn] :promise]}
+  new
+  "Creates a promise controlled by executor."
+  [executor]
+  (std.native.Promise/new executor))
+
+(defn ^{:schema [:fn [:any] :promise]}
+  from
+  "Returns a settled promise containing value."
+  [value]
+  (std.native.Promise/from value))
+
+(defn ^{:schema [:fn [:any] :promise]}
+  all
+  "Returns a promise of all values after every input succeeds."
+  [values]
+  (std.native.Promise/all values))
+
+(defn ^{:schema [:fn [:num :fn] :promise]}
+  delay
+  "Runs function after milliseconds and returns its promise."
+  [milliseconds function]
   (std.native.Promise/delay milliseconds function))
-(defn state [promise] (IPromise/state promise))
-(defn value [promise] (IPromise/value promise))
-(defn then [promise function] (IPromise/then promise function))
-(defn catch [promise function] (IPromise/catch promise function))
-(defn finally [promise function] (IPromise/finally promise function))
-(defn cancel [promise] (IPromise/cancel promise))
+
+(defn ^{:schema [:fn [:promise] :keyword]}
+  state
+  "Returns promise's scheduler state."
+  [promise]
+  (IPromise/state promise))
+
+(defn ^{:schema [:fn [:promise] :any]}
+  value
+  "Returns promise's settled value or provider-specific failure."
+  [promise]
+  (IPromise/value promise))
+
+(defn ^{:schema [:fn [:promise :fn] :promise]}
+  then
+  "Chains function after promise succeeds."
+  [promise function]
+  (IPromise/then promise function))
+
+(defn ^{:schema [:fn [:promise :fn] :promise]}
+  catch
+  "Chains function after promise fails."
+  [promise function]
+  (IPromise/catch promise function))
+
+(defn ^{:schema [:fn [:promise :fn] :promise]}
+  finally
+  "Chains cleanup function after promise settles."
+  [promise function]
+  (IPromise/finally promise function))
+
+(defn ^{:schema [:fn [:promise] :any]}
+  cancel
+  "Requests best-effort cancellation of promise."
+  [promise]
+  (IPromise/cancel promise))

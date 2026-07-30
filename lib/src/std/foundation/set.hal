@@ -3,6 +3,30 @@
 ;;
 ;; This namespace is implemented entirely in HAL so its behavior is identical
 ;; in Truffle, native Rust, and Wasm runtimes.
+;;
+;;                         immutable sets
+;;                               |
+;;             +-----------------+-----------------+
+;;             |                 |                 |
+;;             v                 v                 v
+;;           union          intersection       difference
+;;        add all values    keep shared       remove values
+;;             |                 |                 |
+;;             +-----------------+-----------------+
+;;                               |
+;;                               v
+;;                        resulting set
+;;
+;;            left -------------------------- right
+;;              |                               |
+;;              +--> subset? / superset? <------+
+;;                               |
+;;                               v
+;;                       containment result
+;;
+;; `select` filters one set without changing its set identity. Internal
+;; helpers iterate explicitly so no runtime-specific set implementation leaks
+;; into the portable semantics.
 ;; ============================================================================
 (ns std.foundation.set)
 

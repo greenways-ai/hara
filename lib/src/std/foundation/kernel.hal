@@ -1,0 +1,127 @@
+;; ============================================================================
+;; std.foundation.kernel — local evaluator-kernel automation boundary.
+;;
+;; The namespace is a portable HAL facade over std.native.Kernel. It manages
+;; only the embedding process: named evaluator sessions, injected .hal module
+;; resources, and opaque filesystem mounts. Host capability policy is reported
+;; by capabilities; unavailable operations fail explicitly.
+;;
+;;                    local process kernel
+;;                             |
+;;          +------------------+------------------+
+;;          |                  |                  |
+;;          v                  v                  v
+;;       sessions           resources         filesystems
+;;          |                  |                  |
+;;   create/list/info     register/list      create/info
+;;          |                  |                  |
+;;          v                  +--------+---------+
+;;    +-----------+                     |
+;;    | evaluator |<--- require --------+--- attach ---> session
+;;    +-----------+                     |
+;;          |                            |
+;;   eval/complete/namespace          detach/close
+;;          |
+;;          v
+;;   transferable HAL data
+;;
+;; Sessions isolate evaluator state. Resources are executable `.hal` source.
+;; Filesystems are opaque host handles and may be closed only after detaching.
+;; ============================================================================
+(ns std.foundation.kernel)
+
+(defn ^{:schema [:fn [:str] :any]}
+  session-create
+  "Creates an isolated evaluator session named name."
+  [name]
+  (std.native.Kernel/session-create name))
+
+(defn ^{:schema [:fn [:str] :nil]}
+  session-close
+  "Closes a non-ROOT evaluator session and releases its attached state."
+  [name]
+  (std.native.Kernel/session-close name))
+
+(defn ^{:schema [:fn [] :vector]}
+  session-list
+  "Returns the names of every live evaluator session."
+  []
+  (std.native.Kernel/session-list))
+
+(defn ^{:schema [:fn [:str] :map]}
+  session-info
+  "Returns lifecycle, namespace, and attachment information for session."
+  [name]
+  (std.native.Kernel/session-info name))
+
+(defn ^{:schema [:fn [:str :str] :any]}
+  session-eval
+  "Evaluates HAL source in session and returns transferable immutable data."
+  [name source]
+  (std.native.Kernel/session-eval name source))
+
+(defn ^{:schema [:fn [:str] :symbol]}
+  session-namespace
+  "Returns session's current namespace symbol."
+  [name]
+  (std.native.Kernel/session-namespace name))
+
+(defn ^{:schema [:fn [:str :str] :vector]}
+  session-complete
+  "Returns completion candidates for prefix in session's current namespace."
+  [name prefix]
+  (std.native.Kernel/session-complete name prefix))
+
+(defn ^{:schema [:fn [:str :str] :any]}
+  resource-register
+  "Registers executable HAL source under name for subsequent session requires."
+  [name source]
+  (std.native.Kernel/resource-register name source))
+
+(defn ^{:schema [:fn [:str] :nil]}
+  resource-remove
+  "Removes the registered HAL resource named name."
+  [name]
+  (std.native.Kernel/resource-remove name))
+
+(defn ^{:schema [:fn [] :vector]}
+  resource-list
+  "Returns the names of registered HAL resources."
+  []
+  (std.native.Kernel/resource-list))
+
+(defn ^{:schema [:fn [:map] :any]}
+  filesystem-create
+  "Creates an opaque filesystem handle according to options."
+  [options]
+  (std.native.Kernel/filesystem-create options))
+
+(defn ^{:schema [:fn [:str :any] :any]}
+  filesystem-attach
+  "Attaches filesystem to session without resetting evaluator state."
+  [session filesystem]
+  (std.native.Kernel/filesystem-attach session filesystem))
+
+(defn ^{:schema [:fn [:str] :any]}
+  filesystem-detach
+  "Detaches and returns session's filesystem handle."
+  [session]
+  (std.native.Kernel/filesystem-detach session))
+
+(defn ^{:schema [:fn [:any] :map]}
+  filesystem-info
+  "Returns descriptive state for filesystem without exposing its host object."
+  [filesystem]
+  (std.native.Kernel/filesystem-info filesystem))
+
+(defn ^{:schema [:fn [:any] :nil]}
+  filesystem-close
+  "Closes an unattached filesystem and releases its host resources."
+  [filesystem]
+  (std.native.Kernel/filesystem-close filesystem))
+
+(defn ^{:schema [:fn [] :map]}
+  capabilities
+  "Returns the host kernel's supported operations and availability policy."
+  []
+  (std.native.Kernel/capabilities))

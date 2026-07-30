@@ -1,5 +1,10 @@
 (ns std.lib.test)
 
+(defn config
+  "Declares static test-runner configuration. The runner reads this form before evaluation."
+  [options]
+  nil)
+
 (defn check
   "Returns a test result map."
   [name actual expected]

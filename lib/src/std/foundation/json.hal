@@ -1,16 +1,45 @@
+;; ==========================================================================
+;; std.foundation.json — strict JSON conversion at the native boundary.
+;;
+;;                       JSON text
+;;                           |
+;;                           v
+;;                    +-------------+
+;;                    | strict read |
+;;                    +-------------+
+;;                           |
+;;                           v
+;;                       HAL value
+;;                           |
+;;                 +---------+---------+
+;;                 |                   |
+;;                 v                   v
+;;           compact write        pretty write
+;;                 |                   |
+;;                 +---------+---------+
+;;                           |
+;;                           v
+;;                       JSON text
+;;
+;; Parsing rejects non-JSON extensions. Encoding crosses std.native.Json so
+;; every runtime shares the same supported-value and error contract.
+;; ==========================================================================
 (ns std.foundation.json)
 
-(defn read
-  "Reads one strict JSON value."
+(defn ^{:schema [:fn [:str] :any]}
+  read
+  "Reads one strict JSON value from source."
   [source]
   (std.native.Json/read source))
 
-(defn write
-  "Returns the compact JSON representation of value."
+(defn ^{:schema [:fn [:any] :str]}
+  write
+  "Returns value's compact JSON representation."
   [value]
   (std.native.Json/write value))
 
-(defn pretty
-  "Returns the indented JSON representation of value."
+(defn ^{:schema [:fn [:any :map] :str]}
+  pretty
+  "Returns value's indented JSON representation using opts."
   [value opts]
   (std.native.Json/pretty value opts))

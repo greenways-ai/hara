@@ -1,17 +1,49 @@
+;; ==========================================================================
+;; std.foundation.edn — portable HAL data notation.
+;;
+;;                         EDN text
+;;                            |
+;;                            v
+;;                  +-------------------+
+;;                  | restricted reader |
+;;                  +-------------------+
+;;                            |
+;;                            v
+;;                         HAL value
+;;                            |
+;;                    +-------+-------+
+;;                    |               |
+;;                    v               v
+;;                 write           pretty
+;;                    |               |
+;;                    +-------+-------+
+;;                            |
+;;                            v
+;;                 canonical readable text
+;;
+;; Reading accepts exactly one value in the restricted HAL EDN profile.
+;; Writing is deterministic and readable by the same profile. Pretty-print
+;; options are reserved for future formatting controls.
+;; ==========================================================================
 (ns std.foundation.edn)
 
-(defn read
-  "Reads exactly one value using the restricted Hara EDN profile."
+(defn ^{:schema [:fn [:str] :any]}
+  read
+  "Reads exactly one value using the restricted HAL EDN profile."
   [source]
   (std.native.Edn/read source))
 
-(defn write
-  "Returns the canonical readable representation of value."
+(defn ^{:schema [:fn [:any] :str]}
+  write
+  "Returns value's canonical, readable EDN representation."
   [value]
   (pr-str value))
 
-(defn pretty
-  "Returns the canonical readable representation of value. Options are reserved."
+(defn ^{:schema [:fn [:any :map] :str]}
+  pretty
+  "Returns value's canonical readable representation.
+
+   Options are reserved and must currently be supplied as a map."
   [value opts]
   (if (map? opts)
     (pr-str value)

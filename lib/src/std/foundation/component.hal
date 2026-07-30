@@ -1,32 +1,89 @@
+;; ==========================================================================
+;; std.foundation.component — managed component lifecycle and properties.
+;;
+;;                         component
+;;                             |
+;;                    merge call options
+;;                    with Var metadata
+;;                             |
+;;                             v
+;;                 +-----------------------+
+;;                 | ordered pre-* hooks   |
+;;                 +-----------------------+
+;;                             |
+;;                       setup/teardown
+;;                             |
+;;                             v
+;;                 +-----------------------+
+;;                 | IComponent operation  |
+;;                 | start / stop / kill   |
+;;                 +-----------------------+
+;;                             |
+;;                             v
+;;                 +-----------------------+
+;;                 | ordered post-* hooks  |
+;;                 +-----------------------+
+;;                             |
+;;                             v
+;;                    resulting component
+;;
+;; `with-component` guarantees stop in a finally clause. Property descriptors
+;; expose optional `:get` and `:set` functions without host reflection.
+;; ==========================================================================
 (ns std.foundation.component)
 
-(defn props [component]
+(defn ^{:schema [:fn [:any] :map]}
+  props
+  "Returns the declared property descriptors for component."
+  [component]
   (IComponent/props component))
 
-(defn status [component]
+(defn ^{:schema [:fn [:any] :any]}
+  status
+  "Returns component's current lifecycle status."
+  [component]
   (IComponent/status component))
 
-(defn started? [component]
+(defn ^{:schema [:fn [:any] :bool]}
+  started?
+  "Returns true when component reports that it has started."
+  [component]
   (IComponent/started? component))
 
-(defn stopped? [component]
+(defn ^{:schema [:fn [:any] :bool]}
+  stopped?
+  "Returns true when component reports that it has stopped."
+  [component]
   (IComponent/stopped? component))
 
-(defn remote? [component]
+(defn ^{:schema [:fn [:any] :bool]}
+  remote?
+  "Returns true when component represents a remote resource."
+  [component]
   (IComponent/remote? component))
 
-(defn- run-hooks [component functions keys]
+(defn- ^{:schema [:fn [:any :map :any] :any]}
+  run-hooks
+  "Runs the named lifecycle hooks in order, threading component through each one."
+  [component functions keys]
   (reduce (fn [current key]
             (let [hook (get functions key)]
               (if hook (hook current) current)))
           component
           keys))
 
-(defn- merged-options [component options]
+(defn- ^{:schema [:fn [:any :map] :map]}
+  merged-options
+  "Merges per-component lifecycle defaults with one invocation's options."
+  [component options]
   (merge (:component/options (meta component)) options))
 
-(defn start
-  ([component] (start component {}))
+(defn ^{:schema [:function [:fn [:any] :any]
+                            [:fn [:any :map] :any]]}
+  start
+  "Starts component after its pre-start hooks and before its post-start hooks."
+  ([component]
+   (start component {}))
   ([component options]
    (let [options (merged-options component options)
          hooks (:hooks options)
@@ -37,8 +94,12 @@
                 functions
                 (:post-start hooks)))))
 
-(defn stop
-  ([component] (stop component {}))
+(defn ^{:schema [:function [:fn [:any] :any]
+                            [:fn [:any :map] :any]]}
+  stop
+  "Stops component with its configured pre-stop and post-stop hooks."
+  ([component]
+   (stop component {}))
   ([component options]
    (let [options (merged-options component options)
          hooks (:hooks options)
@@ -49,8 +110,12 @@
                 functions
                 (:post-stop hooks)))))
 
-(defn kill
-  ([component] (kill component {}))
+(defn ^{:schema [:function [:fn [:any] :any]
+                            [:fn [:any :map] :any]]}
+  kill
+  "Force-stops component while preserving the normal stop-hook envelope."
+  ([component]
+   (kill component {}))
   ([component options]
    (let [options (merged-options component options)
          hooks (:hooks options)
@@ -61,19 +126,33 @@
                 functions
                 (:post-stop hooks)))))
 
-(defn all-props [component]
+(defn ^{:schema [:fn [:any] :any]}
+  all-props
+  "Returns the keys of component's declared property descriptors."
+  [component]
   (keys (props component)))
 
-(defn get-prop [component key]
+(defn ^{:schema [:fn [:any :any] :any]}
+  get-prop
+  "Reads a property through its optional descriptor getter."
+  [component key]
   (let [getter (get-in (props component) [key :get])]
     (if getter (getter))))
 
-(defn set-prop [component key value]
+(defn ^{:schema [:fn [:any :any :any] :any]}
+  set-prop
+  "Writes a property through its descriptor setter or throws when it is read-only."
+  [component key value]
   (let [setter (get-in (props component) [key :set])]
     (if setter (setter value)
         (throw (ex-info "Component property is not writable" {:key key})))))
 
-(defmacro with-component [binding & body]
+(defmacro with-component
+  "Starts the component in binding, evaluates body, and always stops it.
+
+   Binding has the form `[name component-expression]`. The component
+   expression is evaluated once and stop runs from a finally clause."
+  [binding & body]
   `(let [component# (start ~(second binding))]
      (try
        (let [~(first binding) component#] ~@body)
