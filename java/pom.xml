@@ -11,6 +11,13 @@
 	<name>Hara Language Runtime</name>
 	<description>Hara language runtime for the JVM and GraalVM Truffle.</description>
 	<url>https://www.hara-lang.org/</url>
+	<licenses>
+		<license>
+			<name>Eclipse Public License 2.0</name>
+			<url>https://www.eclipse.org/legal/epl-2.0/</url>
+			<distribution>repo</distribution>
+		</license>
+	</licenses>
 	<developers>
 		<developer>
 			<id>hara-lang</id>

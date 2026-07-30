@@ -1,5 +1,6 @@
 {
   "name": "hara-wasm-browser",
+  "license": "EPL-2.0",
   "private": true,
   "type": "module",
   "scripts": {

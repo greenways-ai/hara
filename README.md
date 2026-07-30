@@ -135,3 +135,10 @@ git submodule update --init --recursive
 Hara is an active experimental runtime. The L0 slice and focused conformance suites are the source
 of truth. Provider discovery and WASM execution are documented contracts with
 implementation work still in progress.
+
+## License
+
+Hara-owned source code is available under the [Eclipse Public License 2.0](LICENSE).
+Some directories contain separately licensed or provenance-sensitive material; see
+[the license inventory](LICENSES/README.md). Run `bash scripts/check-licenses` to
+validate the repository's license metadata and documented exceptions.
