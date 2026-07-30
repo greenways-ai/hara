@@ -87,6 +87,42 @@ reports with optional SQLite retention, and redacted topology/traffic
 analytics over RESP4. See the
 [Fabric service reference](docs/docs/reference/fabric-service.md).
 
+The root Makefile provides the common Fabric workflows:
+
+```shell
+make fabric-build
+make fabric ARGS="--data target/fabric --shards 4"
+make fabric-test
+make fabric-benchmark ARGS="--rooms 8 --tasks 1000 --clients 4"
+```
+
+`ARGS` is passed to the service or benchmark unchanged. The service listens on
+`127.0.0.1:1311` by default; use the normal `--host` and `--port` CLI options
+when a different endpoint is needed.
+
+The Makefile also mirrors the main repository and CI workflows:
+
+```shell
+make java-test java-conformance
+make rust-test rust-raw-test rust-layout
+make lib-test
+
+make wasm-web
+make hta-test
+make studio-test
+
+make chrome-build chrome-test
+make docs-build
+make www-build
+```
+
+Run `make web-install` or `make chrome-install` before the corresponding Node
+workflows on a fresh checkout. `make check-all` runs the core Java, Rust, raw
+WASM, portable library, HTA, and Studio checks. Runtime performance entry
+points are available as `runtime-benchmark`, `truffle-benchmark`,
+`parity-benchmark`, and `fabric-benchmark`; each accepts additional arguments
+through `ARGS`.
+
 Per-component builds:
 
 ```shell
