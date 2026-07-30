@@ -31,7 +31,12 @@ test("the main story connects and plays the real Amp pipeline", async () => {
   assert.match(source, /WEB AUDIO \+ EQ/);
   assert.match(source, /FFT WASM/);
   assert.match(source, /HTA TRANSPORT/);
-  assert.match(source, /HAL PROGRAM/);
+  assert.match(source, /HAL LIVE DOCUMENT/);
+  assert.match(source, /data-amp-node-input/);
+  assert.match(source, /data-amp-node-output/);
+  assert.match(source, /data-amp-node-runtime/);
+  assert.match(source, /data-amp-node-error/);
+  assert.match(source, /audible playback is on Page 03/);
   assert.match(source, /CANVAS OUTPUT/);
   assert.match(source, /PLAY THE SYSTEM/);
   assert.match(source, /src\/visualizer\.hal/);

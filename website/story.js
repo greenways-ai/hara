@@ -5,16 +5,52 @@ const queryAll = (selector, root = document) => [...root.querySelectorAll(select
 
 const stylesheet = document.createElement("link");
 stylesheet.rel = "stylesheet";
-stylesheet.href = "./story.css?v=amp-story-1";
+stylesheet.href = "./story.css?v=amp-story-2";
 document.head.append(stylesheet);
 
 const pipelineCopy = {
-  synth: ["SYNTH WASM", "Rust generates the deterministic signal locally. The silent preview and audible instrument use the same compiled oscillator."],
-  audio: ["WEB AUDIO + EQ", "The browser authorizes playback after your click, then routes the signal through a ten-band equalizer and analyser."],
-  fft: ["FFT WASM", "A second Rust module converts time-domain samples into frequency bins without sending audio away from the page."],
-  hta: ["HTA TRANSPORT", "Latest-value delivery keeps the visual path responsive. Old frames can drop without interrupting the audio clock."],
-  hal: ["HAL PROGRAM", "The live Hara document waits for FFT values, transforms ordinary data, and asks the host to render a canvas scene."],
-  canvas: ["CANVAS OUTPUT", "The browser adapter turns the HAL scene into spectrum, scope, or artwork views. The probe frame below is real."]
+  synth: {
+    label: "01 · SYNTH WASM",
+    summary: "Rust generates the sound signal locally using the compiled oscillator shared by the silent probe and the playable instrument.",
+    input: "Note, waveform, and playback position",
+    output: "Stereo PCM audio samples",
+    runtime: "Rust compiled to WebAssembly"
+  },
+  audio: {
+    label: "02 · WEB AUDIO + EQ",
+    summary: "After you press Play on the next page, the browser authorizes sound and routes the samples through gain, ten-band EQ, and an analyser.",
+    input: "Stereo samples from Synth",
+    output: "Audible sound plus analyser samples",
+    runtime: "Browser Web Audio API · click required"
+  },
+  fft: {
+    label: "03 · FFT WASM",
+    summary: "A second Rust module converts the analyser waveform into frequency-energy bins without uploading any audio.",
+    input: "Time-domain analyser samples",
+    output: "Frequency bins for one frame",
+    runtime: "Rust compiled to WebAssembly"
+  },
+  hta: {
+    label: "04 · HTA TRANSPORT",
+    summary: "HTA carries only the newest FFT frame across the runtime boundary, keeping visuals responsive without slowing the audio clock.",
+    input: "Successive FFT frames",
+    output: "Latest available frame",
+    runtime: "Session-local latest-value channel"
+  },
+  hal: {
+    label: "05 · HAL LIVE DOCUMENT",
+    summary: "The editable Hara program receives each FFT frame as ordinary data, selects a visual mode, and produces a host-neutral scene description.",
+    input: "Latest FFT frame plus visual settings",
+    output: "Canvas drawing commands",
+    runtime: "Live src/visualizer.hal generation"
+  },
+  canvas: {
+    label: "06 · CANVAS OUTPUT",
+    summary: "The browser host executes those drawing commands as the spectrum, scope, or artwork view shown on the next page.",
+    input: "Host-neutral drawing commands",
+    output: "Pixels in the browser",
+    runtime: "Browser Canvas host capability"
+  }
 };
 
 const story = document.createElement("div");
@@ -29,9 +65,9 @@ story.innerHTML = `
         <p class="story-step">02 // CONNECT THE SYSTEM</p>
         <h2 id="connect-story-title">Sound becomes<br>a live program.</h2>
         <p>
-          This is the actual Hara Amp path running in your browser. Select any
-          stage to see what it contributes; the kernel sends a silent probe
-          through the complete system while it starts.
+          Follow one signal from generated samples to browser pixels. Select a
+          block to see exactly what enters it, what it does, and what leaves it.
+          This page runs a silent probe; audible playback is on Page 03.
         </p>
         <output class="story-runtime-state" data-amp-runtime-state aria-live="polite">
           WAITING FOR RUNTIME
@@ -65,9 +101,17 @@ story.innerHTML = `
       </div>
 
       <aside class="story-node-detail" aria-live="polite">
-        <span data-amp-node-label>SYNTH WASM</span>
-        <p data-amp-node-copy>${pipelineCopy.synth[1]}</p>
-        <small>ONE SIGNAL · SIX REAL SYSTEMS · NO SERVER ROUND TRIP</small>
+        <header>
+          <span data-amp-node-label>${pipelineCopy.synth.label}</span>
+          <p data-amp-node-copy>${pipelineCopy.synth.summary}</p>
+          <output data-amp-node-error hidden></output>
+        </header>
+        <dl>
+          <div><dt>INPUT</dt><dd data-amp-node-input>${pipelineCopy.synth.input}</dd></div>
+          <div><dt>OUTPUT</dt><dd data-amp-node-output>${pipelineCopy.synth.output}</dd></div>
+          <div><dt>RUNS IN</dt><dd data-amp-node-runtime>${pipelineCopy.synth.runtime}</dd></div>
+        </dl>
+        <small>SELECT EACH BLOCK · PAGE 03 PLAYS THE SIGNAL</small>
       </aside>
     </div>
   </section>
@@ -188,8 +232,16 @@ function selectNode(name) {
   queryAll("[data-amp-node]", story).forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.ampNode === name));
   });
-  query("[data-amp-node-label]", story).textContent = detail[0];
-  query("[data-amp-node-copy]", story).textContent = detail[1];
+  query("[data-amp-node-label]", story).textContent = detail.label;
+  query("[data-amp-node-copy]", story).textContent = detail.summary;
+  query("[data-amp-node-input]", story).textContent = detail.input;
+  query("[data-amp-node-output]", story).textContent = detail.output;
+  query("[data-amp-node-runtime]", story).textContent = detail.runtime;
+  const error = query("[data-amp-node-error]", story);
+  const stage = query(`[data-amp-node="${name}"]`, story);
+  const message = stage?.dataset.error;
+  error.hidden = !message;
+  error.textContent = message ? `ERROR · ${message}` : "";
 }
 
 function updateNode(stage, state, detail) {
@@ -199,6 +251,11 @@ function updateNode(stage, state, detail) {
     output.textContent = state === "gesture" ? "GESTURE" : state.toUpperCase();
   }
   if (button) button.dataset.state = state;
+  if (button) {
+    if (state === "error" && detail) button.dataset.error = detail;
+    else delete button.dataset.error;
+    if (button.getAttribute("aria-pressed") === "true") selectNode(stage);
+  }
   if (stage === "runtime") {
     const runtimeState = query("[data-amp-runtime-state]", story);
     runtimeState.textContent =
