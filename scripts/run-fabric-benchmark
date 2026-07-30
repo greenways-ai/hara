@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec cargo run --release --quiet \
+  --manifest-path "$REPO_ROOT/rust/Cargo.toml" \
+  --bin hara-fabric-benchmark -- "$@"

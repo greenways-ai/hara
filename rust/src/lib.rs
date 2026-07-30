@@ -19,6 +19,8 @@ pub mod tap;
 mod process_extension;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod resp;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod service;
 pub mod task;
 #[cfg(feature = "dev-trace")]
 pub mod trace;
@@ -1118,6 +1120,26 @@ impl Runtime {
             .get(name)
             .ok_or_else(|| format!("extension/not-found: {name}"))?
             .cancel(request)
+    }
+
+    /// Invokes an installed WASM extension without routing the call through
+    /// source text. Service hosts use this binary-safe boundary for HTA1
+    /// arguments and results.
+    pub fn invoke_wasm_extension(
+        &mut self,
+        namespace: &str,
+        export: &str,
+        arguments: &[extension::Value],
+    ) -> Result<extension::Value, String> {
+        let binding = self
+            .wasm_extensions
+            .get_mut(namespace)
+            .ok_or_else(|| format!("extension/not-found: {namespace}"))?
+            .require()?
+            .into_iter()
+            .find(|binding| binding.name == export)
+            .ok_or_else(|| format!("extension/export-missing: {namespace}/{export}"))?;
+        binding.invoke(arguments)
     }
 
     fn namespace_source(&self) -> Rc<dyn Fn(&str) -> Option<String>> {

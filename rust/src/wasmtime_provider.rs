@@ -12,6 +12,34 @@ struct Session {
     instance: Instance,
 }
 
+/// Process-shareable compiled code. Fabric stores one of these per artifact
+/// digest and creates a fresh provider/store for every session that loads it.
+#[derive(Clone)]
+pub struct CompiledWasmModule {
+    engine: Engine,
+    module: Module,
+}
+
+impl CompiledWasmModule {
+    pub fn compile(bytes: &[u8]) -> Result<Self, String> {
+        let engine = Engine::default();
+        let module = Module::new(&engine, bytes)
+            .map_err(|error| format!("extension/module-invalid: {error}"))?;
+        if module.imports().next().is_some() {
+            return Err("extension/module-invalid: extension modules must be import-free".into());
+        }
+        Ok(Self { engine, module })
+    }
+
+    pub fn provider(&self) -> WasmtimeExtensionProvider {
+        WasmtimeExtensionProvider {
+            engine: self.engine.clone(),
+            module: self.module.clone(),
+            session: RefCell::new(None),
+        }
+    }
+}
+
 /// Import-free Wasmtime host for the direct scalar core.v1 ABI.
 pub struct WasmtimeExtensionProvider {
     engine: Engine,
@@ -21,17 +49,7 @@ pub struct WasmtimeExtensionProvider {
 
 impl WasmtimeExtensionProvider {
     pub fn compile(bytes: &[u8]) -> Result<Self, String> {
-        let engine = Engine::default();
-        let module = Module::new(&engine, bytes)
-            .map_err(|error| format!("extension/module-invalid: {error}"))?;
-        if !module.imports().next().is_none() {
-            return Err("extension/module-invalid: extension modules must be import-free".into());
-        }
-        Ok(Self {
-            engine,
-            module,
-            session: RefCell::new(None),
-        })
+        Ok(CompiledWasmModule::compile(bytes)?.provider())
     }
 }
 

@@ -81,6 +81,12 @@ session through RESP on `127.0.0.1:1311`. Use `--offline` to start without the l
 `headless` for a listener without terminal UI, and `remote HOST:PORT` for a client connection. The CLI also supports `run <file>`, `stdin`, and `help`. For a native-image build, see the
 [developer guide](docs/docs/development.md); native mode intentionally removes dynamic JVM services.
 
+The experimental Rust coordination service starts with `hara fabric`. It adds
+spaces, sharded isolated sessions, session-owned WASM namespaces, bounded
+reports with optional SQLite retention, and redacted topology/traffic
+analytics over RESP4. See the
+[Fabric service reference](docs/docs/reference/fabric-service.md).
+
 Per-component builds:
 
 ```shell

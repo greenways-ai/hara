@@ -2,7 +2,8 @@ use crate::repl;
 use hara_wasm::native_cli::RuntimeBroker;
 use hara_wasm::package;
 use hara_wasm::project;
-use hara_wasm::resp::{RespConnection, RespServer, RespValue};
+use hara_wasm::resp::{FabricRespServer, RespConnection, RespServer, RespValue};
+use hara_wasm::service::{FabricService, ServiceConfig};
 use hara_wasm::kernel::{parse, Form};
 use hara_wasm::Runtime;
 use std::env;
@@ -24,12 +25,19 @@ pub(crate) struct Options {
     pub(crate) no_history: bool,
     pub(crate) no_splash: bool,
     pub(crate) no_color: bool,
+    data_dir: Option<PathBuf>,
+    shards: Option<usize>,
+    node_id: String,
+    peers: Vec<String>,
+    cluster_epoch: String,
 }
 
 pub(crate) fn parse_options() -> Result<Options, String> {
     let mut options = Options {
         host: "127.0.0.1".into(),
         port: 1311,
+        node_id: "local".into(),
+        cluster_epoch: "local.v1".into(),
         ..Options::default()
     };
     let mut args = env::args().skip(1);
@@ -58,6 +66,19 @@ pub(crate) fn parse_options() -> Result<Options, String> {
                 options.port = required(&mut args, "--port")?
                     .parse()
                     .map_err(|_| "--port must be between 0 and 65535".to_owned())?
+            }
+            "--data" => options.data_dir = Some(PathBuf::from(required(&mut args, "--data")?)),
+            "--shards" => {
+                options.shards = Some(
+                    required(&mut args, "--shards")?
+                        .parse()
+                        .map_err(|_| "--shards must be a positive integer".to_owned())?,
+                )
+            }
+            "--node-id" => options.node_id = required(&mut args, "--node-id")?,
+            "--peer" => options.peers.push(required(&mut args, "--peer")?),
+            "--cluster-epoch" => {
+                options.cluster_epoch = required(&mut args, "--cluster-epoch")?
             }
             value if value.starts_with("--history=") => {
                 options.history_file = Some(PathBuf::from(&value[10..]))
@@ -93,6 +114,7 @@ pub(crate) fn run(options: Options) -> Result<(), String> {
         Some("run") | Some("--file") => run_file(&options, options.command.get(1).ok_or_else(|| "run requires a file path".to_owned())?),
         Some("stdin") => { let mut source = String::new(); io::stdin().read_to_string(&mut source).map_err(|error| format!("stdin: {error}"))?; direct_eval(&options, &source) }
         Some("headless" | "server") => run_headless(&options),
+        Some("fabric" | "service") => run_fabric(&options),
         Some("remote") => run_remote(
             options
                 .command
@@ -247,6 +269,33 @@ fn run_headless(options: &Options) -> Result<(), String> {
     }
 }
 
+fn run_fabric(options: &Options) -> Result<(), String> {
+    if options.offline {
+        return Err("--offline cannot be used with fabric".into());
+    }
+    let service = FabricService::start(ServiceConfig {
+        shards: options.shards.unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(usize::from)
+                .unwrap_or(1)
+        }),
+        data_dir: options.data_dir.clone(),
+        node_id: options.node_id.clone(),
+        peers: options.peers.clone(),
+        cluster_epoch: options.cluster_epoch.clone(),
+        ..ServiceConfig::default()
+    })?;
+    let server = FabricRespServer::start(&options.host, options.port, service)?;
+    println!(
+        "HARA FABRIC {} · node {} · space default · session ROOT",
+        server.endpoint(),
+        options.node_id
+    );
+    loop {
+        std::thread::park();
+    }
+}
+
 fn run_remote(endpoint: &str) -> Result<(), String> {
     let (host, port) = repl::parse_endpoint(endpoint, "127.0.0.1")?;
     let stream = TcpStream::connect((host.as_str(), port))
@@ -290,8 +339,9 @@ fn response_text(value: RespValue) -> String {
 }
 
 fn usage() {
-    println!("hara [OPTIONS] [new NAME|check [PATH]|add COORDINATE@RANGE|remove COORDINATE|sync|test [PATH]|repl|standalone|headless|server|remote HOST:PORT|eval SOURCE|run [FILE]|stdin]");
+    println!("hara [OPTIONS] [new NAME|check [PATH]|add COORDINATE@RANGE|remove COORDINATE|sync|test [PATH]|repl|standalone|headless|server|fabric|remote HOST:PORT|eval SOURCE|run [FILE]|stdin]");
     println!("  --offline --host HOST --port PORT --root PATH --project PATH --allow-net");
+    println!("  --data PATH --shards N --node-id NAME --peer NAME --cluster-epoch NAME");
     println!("  --history PATH --no-history --no-splash --no-color");
 }
 

@@ -36,6 +36,19 @@ enum Request {
         session: String,
         reply: mpsc::Sender<Result<String, String>>,
     },
+    InstallModule {
+        session: String,
+        manifest: String,
+        module: crate::wasmtime_provider::CompiledWasmModule,
+        reply: mpsc::Sender<Result<String, String>>,
+    },
+    InvokeModule {
+        session: String,
+        namespace: String,
+        export: String,
+        arguments: Vec<u8>,
+        reply: mpsc::Sender<Result<Vec<u8>, String>>,
+    },
     Shutdown,
 }
 
@@ -114,6 +127,36 @@ impl RuntimeBroker {
     pub fn info(&self, session: &str) -> Result<String, String> {
         self.call(|reply| Request::Info {
             session: session.into(),
+            reply,
+        })
+    }
+
+    pub fn install_module(
+        &self,
+        session: &str,
+        manifest: &str,
+        module: &crate::wasmtime_provider::CompiledWasmModule,
+    ) -> Result<String, String> {
+        self.call(|reply| Request::InstallModule {
+            session: session.into(),
+            manifest: manifest.into(),
+            module: module.clone(),
+            reply,
+        })
+    }
+
+    pub fn invoke_module(
+        &self,
+        session: &str,
+        namespace: &str,
+        export: &str,
+        arguments: &[u8],
+    ) -> Result<Vec<u8>, String> {
+        self.call(|reply| Request::InvokeModule {
+            session: session.into(),
+            namespace: namespace.into(),
+            export: export.into(),
+            arguments: arguments.into(),
             reply,
         })
     }
@@ -215,6 +258,57 @@ fn run(receiver: mpsc::Receiver<Request>, root: Option<PathBuf>, native_sockets:
                     .get(&session)
                     .map(|runtime| format!("{session} {}", runtime.current_namespace()))
                     .ok_or_else(|| format!("No session: {session}"));
+                let _ = reply.send(result);
+            }
+            Request::InstallModule {
+                session,
+                manifest,
+                module,
+                reply,
+            } => {
+                let result = sessions
+                    .get_mut(&session)
+                    .ok_or_else(|| format!("No session: {session}"))
+                    .and_then(|runtime| {
+                        let provider = module.provider();
+                        let parsed =
+                            crate::extension::ExtensionManifest::parse(&manifest, "MODULE PUT")?;
+                        let namespace = parsed.namespace.clone();
+                        runtime.install_wasm_extension(&manifest, "MODULE PUT", provider)?;
+                        Ok(namespace)
+                    });
+                let _ = reply.send(result);
+            }
+            Request::InvokeModule {
+                session,
+                namespace,
+                export,
+                arguments,
+                reply,
+            } => {
+                let result = sessions
+                    .get_mut(&session)
+                    .ok_or_else(|| format!("No session: {session}"))
+                    .and_then(|runtime| {
+                        let arguments = crate::hta::decode(&arguments)?;
+                        let arguments: Vec<crate::extension::Value> = match arguments {
+                            crate::extension::Value::Vector(values) => {
+                                values.iter().cloned().collect()
+                            }
+                            crate::extension::Value::Tuple(values) => {
+                                values.iter().cloned().collect()
+                            }
+                            other => {
+                                return Err(format!(
+                                    "hta/arguments: expected vector, got {}",
+                                    other.display()
+                                ))
+                            }
+                        };
+                        let result =
+                            runtime.invoke_wasm_extension(&namespace, &export, &arguments)?;
+                        crate::hta::encode(&result)
+                    });
                 let _ = reply.send(result);
             }
             Request::Shutdown => break,

@@ -1,0 +1,31 @@
+{:benchmark/format 1
+ :workload :agent-workroom
+ :semantics
+ {:sessions-per-room 4
+  :reports-per-task 5
+  :retained-reports-per-task 1
+  :delivery :live-at-most-once
+  :retention :ack-after-durable-write}
+ :matrix
+ {:rooms [1 100 1000]
+  :payload-bytes [256 4096 65536]
+  :nodes [1 3]
+  :repetitions 5
+  :warmup-seconds 30
+  :measure-seconds 300}
+ :systems
+ [{:id :hara-fabric
+   :runner "scripts/run-fabric-benchmark"}
+  {:id :wasmcloud-nats
+   :runner nil
+   :required true
+   :note "Pin the current wasmCloud and NATS images when the adapter is added."}
+  {:id :valkey-nats-wasmtime
+   :runner nil
+   :required true
+   :note "Reference composition; use Valkey state, NATS/JetStream reports, and Wasmtime."}]
+ :headline-gate
+ {:p99-improvement-percent 25
+  :cpu-per-task-improvement-percent 20
+  :required-room-scales [100 1000]
+  :accepted-report-loss 0}}
