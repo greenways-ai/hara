@@ -1,0 +1,143 @@
+(ns greenways.build.report
+  (:require [greenways.build.graph :as graph]
+            [greenways.build.model :as model]))
+
+(def +statuses+ [:pass :fail :unknown :blocked])
+
+(defn- member?
+  [value values]
+  (not (empty? (filter (fn [candidate] (= value candidate)) values))))
+
+(defn- append-values
+  [left right]
+  (reduce (fn [output value] (conj output value))
+          (vec left)
+          right))
+
+(defn- finding-status
+  [finding]
+  (or (:status finding)
+      (if (= :error (:level finding)) :fail :pass)))
+
+(defn- stage-findings
+  [findings stage-id]
+  (vec
+   (filter (fn [finding]
+             (= stage-id (:stage/id finding)))
+           findings)))
+
+(defn- initial-stage-results
+  [build findings]
+  (reduce
+   (fn [output stage]
+     (let [stage-id (:stage/id stage)
+           statuses (map finding-status
+                         (stage-findings findings stage-id))
+           status
+           (if (not (empty? (filter (fn [value] (= :fail value))
+                                   statuses)))
+             :fail
+             (if (not (empty? (filter (fn [value] (= :unknown value))
+                                     statuses)))
+               :unknown
+               :pass))]
+       (assoc output stage-id status)))
+   {}
+   (:build/stages build)))
+
+(defn- stage-entry
+  [stage findings results blocked]
+  (let [stage-id (:stage/id stage)
+        own-findings (stage-findings findings stage-id)
+        blockers (get blocked stage-id [])
+        status (if (empty? blockers)
+                 (get results stage-id :unknown)
+                 :blocked)]
+    (merge
+     {:stage/id stage-id
+      :stage/status status}
+     (if (empty? own-findings)
+       {}
+       {:stage/findings own-findings})
+     (if (empty? blockers)
+       {}
+       {:stage/blocked-by blockers}))))
+
+(defn- status-counts
+  [stages global-findings]
+  (let [values
+        (append-values
+         (vec (map (fn [stage] (:stage/status stage)) stages))
+         (vec (map (fn [finding] (finding-status finding))
+                   global-findings)))
+        counts (frequencies values)]
+    {:pass (get counts :pass 0)
+     :fail (get counts :fail 0)
+     :unknown (get counts :unknown 0)
+     :blocked (get counts :blocked 0)}))
+
+(defn- overall-status
+  [summary]
+  (if (pos? (:blocked summary))
+    :blocked
+    (if (pos? (:fail summary))
+      :fail
+      (if (pos? (:unknown summary))
+        :unknown
+        :pass))))
+
+(defn- action
+  [finding]
+  (merge
+   {:action/type :repair
+    :action/requirement (or (:requirement/id finding)
+                            (:type finding))}
+   (if (:stage/id finding)
+     {:action/stage (:stage/id finding)}
+     {})
+   (if (:file finding) {:file (:file finding)} {})
+   (if (:row finding) {:row (:row finding)} {})
+   (if (:col finding) {:col (:col finding)} {})))
+
+(defn- checker-identities
+  [build]
+  (reduce
+   (fn [output stage]
+     (append-values
+      output
+      (vec
+       (filter (fn [checker] (:checker/source checker))
+               (:stage/checkers stage)))))
+   []
+   (:build/stages build)))
+
+(defn build-report
+  "Builds a stable agent-oriented obligation report."
+  ([build findings] (build-report build findings nil))
+  ([build findings identities]
+   (let [stage-ids (vec (map (fn [stage] (:stage/id stage))
+                             (:build/stages build)))
+         global-findings
+         (vec (filter (fn [finding]
+                        (not (member? (:stage/id finding)
+                                      stage-ids)))
+                      findings))
+         initial (initial-stage-results build findings)
+         blocked (graph/blocked-stages build initial)
+         stages (vec (map (fn [stage]
+                            (stage-entry stage findings initial blocked))
+                          (:build/stages build)))
+         summary (status-counts stages global-findings)
+         actionable
+         (filter (fn [finding]
+                   (let [status (finding-status finding)]
+                     (or (= :fail status)
+                         (= :unknown status))))
+                 findings)]
+     (model/obligation-report
+      (:build/id build)
+      (overall-status summary)
+      summary
+      stages
+      (vec (map action actionable))
+      (or identities (checker-identities build))))))
