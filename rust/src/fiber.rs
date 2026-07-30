@@ -41,7 +41,6 @@ const SYNC_SPECIAL_FORMS: &[&str] = &[
     "macroexpand-1",
     "meta",
     "ns",
-    "protocol-call",
     "recur",
     "require",
     "set!",
@@ -124,6 +123,7 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "deref",
     "do",
     "drop",
+    "drop-while",
     "empty",
     "empty?",
     "eval",
@@ -149,10 +149,15 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "if",
     "interleave",
     "interpose",
+    "interpose",
     "iter",
     "iter-close",
     "iter-cycle",
     "iter-drop",
+    "iter-drop-while",
+    "iter-every?",
+    "iter-any?",
+    "iter-finite?",
     "iter-has?",
     "iter-interleave",
     "iter-interpose",
@@ -160,12 +165,17 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "iter-keep",
     "iter-map",
     "iter-mapcat",
+    "iter-materialize",
     "iter-next",
     "iter-partition-pair",
+    "iter-partition",
+    "iter-partition-all",
+    "iter-range",
     "iter-repeatedly",
     "iter-constantly",
     "iter-filter",
     "iter-take",
+    "iter-take-while",
     "iter-zip",
     "iter?",
     "keep",
@@ -180,6 +190,7 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "map",
     "map?",
     "mapcat",
+    "keep",
     "mod",
     "neg?",
     "nil?",
@@ -191,6 +202,8 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "odd?",
     "pair",
     "partition-pair",
+    "partition",
+    "partition-all",
     "pointer",
     "pos?",
     "pow",
@@ -202,7 +215,6 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "promise/delay",
     "promise/from",
     "promise/new",
-    "protocol-call",
     "range",
     "recur",
     "repeat",
@@ -254,6 +266,7 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "sqrt",
     "symbol",
     "take",
+    "take-while",
     "tan",
     "tanh",
     "throw",
@@ -272,6 +285,7 @@ const CORE_SPECIAL_FORMS: &[&str] = &[
     "zero?",
     "zip",
     "__map-transform",
+    "__iterator-transform",
 ];
 
 pub(crate) fn completion_symbols() -> &'static [&'static str] {
@@ -682,13 +696,7 @@ fn bind_values(
                 let mut names = Vec::new();
                 let binding = {
                     let mut environment = e.borrow_mut();
-                    crate::core::bind_pattern(
-                        &pattern,
-                        x,
-                        &mut environment,
-                        &mut names,
-                        None,
-                    )
+                    crate::core::bind_pattern(&pattern, x, &mut environment, &mut names, None)
                 };
                 if let Err(error) = binding {
                     return k(Err(format!("destructuring failed: {error}")), e);
@@ -904,14 +912,12 @@ fn finish_try(
 ) -> Step {
     match r {
         Err(x) => {
-            let Some(p) = catches.into_iter().find(|parts| {
-                match parts.as_slice() {
-                    [_, Form::Symbol(_), _] => crate::core::catch_matches(&x, "Exception"),
-                    [_, Form::Symbol(class), Form::Symbol(_), ..] => {
-                        crate::core::catch_matches(&x, class)
-                    }
-                    _ => false,
+            let Some(p) = catches.into_iter().find(|parts| match parts.as_slice() {
+                [_, Form::Symbol(_), _] => crate::core::catch_matches(&x, "Exception"),
+                [_, Form::Symbol(class), Form::Symbol(_), ..] => {
+                    crate::core::catch_matches(&x, class)
                 }
+                _ => false,
             }) else {
                 return finally(Err(x), finals, env, k);
             };

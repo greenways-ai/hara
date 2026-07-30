@@ -94,22 +94,21 @@ impl Runtime {
         for (namespace, name, method) in core::builtin_protocol_method_values() {
             namespaces.find_or_create(namespace).intern(name, method);
         }
-        let native_namespace = namespaces.find_or_create("std.native");
         for (name, descriptor) in core::native_type_values() {
-            let var = native_namespace.intern(&name, descriptor);
+            let canonical_name = format!("std.native.{name}");
+            let var = foundation_namespace.intern(&canonical_name, descriptor);
             foundation_namespace.map_var(lang::data::Symbol::parse(&name), var);
+            namespaces.find_or_create(canonical_name);
         }
         let native_json = namespaces.find_or_create("std.native.Json");
         let json_read = native_json.intern(
             "read",
-            core::native_function(
-                "std.native.Json/read",
-                1,
-                |arguments| match arguments.as_slice() {
+            core::native_function("std.native.Json/read", 1, |arguments| {
+                match arguments.as_slice() {
                     [Value::String(source)] => json::read(source),
                     _ => Err("json/read expects a string".into()),
-                },
-            ),
+                }
+            }),
         );
         let json_write = native_json.intern(
             "write",
@@ -133,14 +132,12 @@ impl Runtime {
         let native_edn = namespaces.find_or_create("std.native.Edn");
         let edn_read = native_edn.intern(
             "read",
-            core::native_function(
-                "std.native.Edn/read",
-                1,
-                |arguments| match arguments.as_slice() {
+            core::native_function("std.native.Edn/read", 1, |arguments| {
+                match arguments.as_slice() {
                     [Value::String(source)] => core::read_edn(source),
                     _ => Err("edn/read expects a string".into()),
-                },
-            ),
+                }
+            }),
         );
         let edn_namespace = namespaces.find_or_create("std.foundation.edn");
         edn_namespace.map_var(lang::data::Symbol::parse("read"), edn_read);
@@ -655,7 +652,10 @@ impl KernelRuntime {
                 ),
             );
         }
-        let mount_id = self.sessions.remove(name).and_then(|runtime| runtime.mount_id);
+        let mount_id = self
+            .sessions
+            .remove(name)
+            .and_then(|runtime| runtime.mount_id);
         if let Some(mount_id) = mount_id {
             if let Some(mount) = self.mounts.get_mut(&mount_id) {
                 mount.attachments = mount.attachments.saturating_sub(1);
@@ -927,11 +927,7 @@ fn dispatch(
                         ),
                         (
                             Value::Keyword("filesystem/key".into()),
-                            mount
-                                .key
-                                .clone()
-                                .map(Value::String)
-                                .unwrap_or(Value::Nil),
+                            mount.key.clone().map(Value::String).unwrap_or(Value::Nil),
                         ),
                         (
                             Value::Keyword("filesystem/attachments".into()),
@@ -978,9 +974,7 @@ fn dispatch(
                 let mut staged = Vec::with_capacity(resources.len());
                 for entry in resources.iter() {
                     let Value::Vector(entry) = entry else {
-                        return Err(
-                            "hta register-resources expects string pairs".into(),
-                        );
+                        return Err("hta register-resources expects string pairs".into());
                     };
                     let (Some(Value::String(name)), Some(Value::String(source))) =
                         (entry.get(0), entry.get(1))
@@ -1428,10 +1422,7 @@ mod tests {
                 .display(),
             "[\"stale-value\"]"
         );
-        assert_eq!(
-            kernel.session("example").unwrap().mount_id,
-            Some(mount_id)
-        );
+        assert_eq!(kernel.session("example").unwrap().mount_id, Some(mount_id));
         assert_eq!(
             kernel.close_filesystem(mount_id).unwrap_err(),
             format!("FILESYSTEM_ATTACHED {mount_id}")
@@ -1450,9 +1441,7 @@ mod tests {
             "session/eval",
             vec![
                 Value::String("busy".into()),
-                Value::String(
-                    "(deref (std.native.Host/call \"wait\" \"forever\" []))".into(),
-                ),
+                Value::String("(deref (std.native.Host/call \"wait\" \"forever\" []))".into()),
             ],
         )
         .unwrap();
@@ -1466,7 +1455,10 @@ mod tests {
                 .collect(),
             ))
             .unwrap();
-        assert_eq!(kernel.attach_filesystem("busy", mount_id).unwrap_err(), "SESSION_BUSY busy");
+        assert_eq!(
+            kernel.attach_filesystem("busy", mount_id).unwrap_err(),
+            "SESSION_BUSY busy"
+        );
     }
 
     #[test]
@@ -1633,9 +1625,7 @@ mod tests {
             Value::Keyword(_)
         ));
 
-        runtime
-            .start_fiber(2, "(protocol-call ReadBox read-box (Box 42))")
-            .unwrap();
+        runtime.start_fiber(2, "(read-box (Box 42))").unwrap();
         assert_eq!(completion_value(&mut runtime, 2), Value::Number(42));
     }
 
@@ -1658,21 +1648,37 @@ mod tests {
 
     #[test]
     fn raw_kernels_expose_the_foundation_data_namespaces() {
-        assert_eq!(crate::core::NATIVE_TYPES.len(), 20);
+        assert_eq!(crate::core::NATIVE_TYPES.len(), 21);
         assert_eq!(
             crate::core::NATIVE_TYPES
                 .iter()
                 .map(|(_, methods)| methods.len())
                 .sum::<usize>(),
-            136
+            164
         );
         let mut runtime = Runtime::new();
         assert!(runtime.env.contains_key("edn/write"));
         assert!(runtime.env.contains_key("ICount"));
         for native_type in [
-            "Maths", "Numbers", "Bits", "String", "Bytes", "File", "Socket", "Promise",
-            "Coroutine", "Arr", "Obj", "Runtime", "Printer", "Edn", "Json", "Host", "Regex",
-            "UUID", "Error",
+            "Maths",
+            "Numbers",
+            "Bits",
+            "String",
+            "Bytes",
+            "File",
+            "Socket",
+            "Promise",
+            "Coroutine",
+            "Arr",
+            "Obj",
+            "Runtime",
+            "Printer",
+            "Edn",
+            "Json",
+            "Host",
+            "Regex",
+            "UUID",
+            "Error",
         ] {
             assert!(runtime.env.contains_key(native_type), "{native_type}");
         }
@@ -1689,15 +1695,9 @@ mod tests {
         runtime
             .start_fiber(2, "(std.foundation.edn/read \"{:answer 42}\")")
             .unwrap();
-        assert_eq!(
-            completion_value(&mut runtime, 2).display(),
-            "{:answer 42}"
-        );
+        assert_eq!(completion_value(&mut runtime, 2).display(), "{:answer 42}");
         runtime
-            .start_fiber(
-                3,
-                "(std.foundation.json/pretty {\"answer\" 42} {})",
-            )
+            .start_fiber(3, "(std.foundation.json/pretty {\"answer\" 42} {})")
             .unwrap();
         assert_eq!(
             completion_value(&mut runtime, 3),
@@ -1724,21 +1724,21 @@ mod tests {
             completion_value(&mut runtime, 5).display(),
             "[\"bad input\" {:kind :invalid}]"
         );
-        runtime
-            .start_fiber(6, "(edn/write {:answer 42})")
-            .unwrap();
+        runtime.start_fiber(6, "(edn/write {:answer 42})").unwrap();
         assert_eq!(
             completion_value(&mut runtime, 6),
             Value::String("{:answer 42}".into())
         );
-        runtime.start_fiber(7, "(= Maths std.native/Maths)").unwrap();
+        runtime
+            .start_fiber(7, "(= Maths std.native.Maths)")
+            .unwrap();
         assert_eq!(completion_value(&mut runtime, 7), Value::Bool(true));
         runtime
             .start_fiber(
                 8,
-                "[(= Edn std.native/Edn std.foundation/Edn) \
-                  (= Json std.native/Json std.foundation/Json) \
-                  (= Maths std.native/Maths std.foundation/Maths)]",
+                "[(= Edn std.native.Edn std.foundation/Edn) \
+                  (= Json std.native.Json std.foundation/Json) \
+                  (= Maths std.native.Maths std.foundation/Maths)]",
             )
             .unwrap();
         assert_eq!(

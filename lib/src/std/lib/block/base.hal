@@ -1,0 +1,29 @@
+(ns std.lib.block.base
+  (:require [std.lib.block.protocol :as protocol]
+            [std.lib.block.type :as type]
+            [std.foundation.string :as string]))
+
+(defn block? [value] (type/block? value))
+(defn expression? [block] (type/code-block? block))
+(defn void? [block] (type/void-block? block))
+(defn token? [block] (type/token-block? block))
+(defn container? [block] (type/container-block? block))
+(defn modifier? [block] (type/modifier-block? block))
+(defn block-type [block] (protocol/block-type block))
+(defn block-tag [block] (protocol/block-tag block))
+(defn block-string [block] (protocol/block-string block))
+(defn block-info [block] (protocol/block-info block))
+(defn block-length [block] (string/length (block-string block)))
+(defn block-width [block] (or (:width (block-info block)) (block-length block)))
+(defn block-height [block] (or (:height (block-info block)) 0))
+(defn block-prefixed [block] (string/length (or (:start (block-info block)) "")))
+(defn block-suffixed [block] (string/length (or (:end (block-info block)) "")))
+(defn block-verify [block] (protocol/block-verify block))
+(defn block-value [block] (protocol/block-value block))
+(defn block-value-string [block]
+  (or (:value-string (block-info block))
+      (pr-str (block-value block))))
+(defn block-children [block] (protocol/block-children block))
+(defn replace-children
+  [block children]
+  ((:replace-children (block-info block)) block (vec children)))

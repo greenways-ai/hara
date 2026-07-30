@@ -1,0 +1,17 @@
+(ns code.test.manage
+  (:require [code.test.base.runtime :as runtime]))
+
+(defn fact:global-map [value] value)
+(defn fact:global-fn [value] value)
+(defmacro fact:global [value]
+  `(code.test.base.runtime/set-global ~value))
+(defn fact:ns-load [namespace] namespace)
+(defn fact:ns-unload [namespace] namespace)
+(defn fact:ns-alias [alias namespace] [alias namespace])
+(defn fact:ns-unalias [alias] alias)
+(defn fact:ns-intern [symbol value] [symbol value])
+(defn fact:ns-unintern [symbol] symbol)
+(defn fact:ns-import [symbol] symbol)
+(defn fact:ns-unimport [symbol] symbol)
+(defn fact:ns-fn [function] (function))
+(defmacro fact:ns [& body] `(do ~@body))

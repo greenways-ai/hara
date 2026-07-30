@@ -43,28 +43,25 @@ public final class StdFoundationSequence {
 
   @HaraExport(
       name = "filter",
-      doc = "Returns a lazy sequence of values for which predicate is truthy.",
-      arglists = {"[predicate value]"})
+      doc = "Returns an iterator transform or eagerly filters a collection.",
+      arglists = {"[predicate]", "[predicate value]"})
   public static Object filter(HaraContext context, Object[] values) {
-    HaraContext.requireMethodArity("filter", values, 2);
-    return context.seqValue(new Object[] {context.iterFilter(values)});
+    return context.filterValues(values);
   }
 
   @HaraExport(
       name = "take",
-      doc = "Returns a lazy sequence containing at most amount values.",
-      arglists = {"[amount value]"})
+      doc = "Returns an iterator transform or eagerly takes from a collection.",
+      arglists = {"[amount]", "[amount value]"})
   public static Object take(HaraContext context, Object[] values) {
-    HaraContext.requireMethodArity("take", values, 2);
-    return context.seqValue(new Object[] {context.iterTake(values)});
+    return context.takeValues(values);
   }
 
   @HaraExport(
       name = "drop",
-      doc = "Returns a lazy sequence without the first amount values.",
-      arglists = {"[amount value]"})
+      doc = "Returns an iterator transform or eagerly drops from a collection.",
+      arglists = {"[amount]", "[amount value]"})
   public static Object drop(HaraContext context, Object[] values) {
-    HaraContext.requireMethodArity("drop", values, 2);
-    return context.seqValue(new Object[] {context.iterDrop(values)});
+    return context.dropValues(values);
   }
 }

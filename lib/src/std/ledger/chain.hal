@@ -49,7 +49,7 @@
      :timestamp (common/block-get b :timestamp)
      :source    (common/block-get b :source)})
   (content-hash [b]
-    (djb2-32 (pr-str (protocol-call protocol/IHashable header b)))))
+    (djb2-32 (pr-str (protocol/header b)))))
 
 (extend-type common/Block protocol/IReplayable
   (replay [b prev-state]
@@ -60,7 +60,7 @@
 
 (extend-type common/Block protocol/IValid
   (valid? [b]
-    (= (common/block-get b :hash) (protocol-call protocol/IHashable content-hash b))))
+    (= (common/block-get b :hash) (protocol/content-hash b))))
 
 (extend-type common/Chain protocol/IValid
   (valid? [chain]
@@ -75,9 +75,9 @@
                (let [block (nth blocks index)
                      expected-state (if (= index 0)
                                       (common/block-get block :state)
-                                      (protocol-call protocol/IReplayable replay block
+                                      (protocol/replay block
                                                 (common/block-get prev :state)))
-                     ok (and (protocol-call protocol/IValid valid? block)
+                     ok (and (protocol/valid? block)
                              (= (common/block-get block :state) expected-state)
                              (or (= index 0)
                                  (and (= (common/block-get block :index)
@@ -96,14 +96,14 @@
   (state [chain]
     (common/chain-get chain :state))
   (append [chain actor timestamp source]
-    (let [prev    (protocol-call protocol/IChainOps head chain)
+    (let [prev    (protocol/head chain)
           index   (inc (common/block-get prev :index))
           p-hash  (common/block-get prev :hash)
           p-state (common/chain-get chain :state)
           ctx     {:actor actor :timestamp timestamp :index index :prev-hash p-hash}
           state   (if (nil? source) p-state (apply-source source p-state ctx))
           block   (common/Block index p-hash actor timestamp source state nil)
-          block   (common/block-assoc block :hash (protocol-call protocol/IHashable content-hash block))]
+          block   (common/block-assoc block :hash (protocol/content-hash block))]
       (common/Chain (conj (common/chain-get chain :blocks) block)
                     (common/block-get block :state)))))
 
@@ -111,36 +111,36 @@
   "Creates a new chain with the given genesis state."
   [genesis-state]
   (let [genesis (common/Block 0 0 :std.ledger/genesis 0 nil genesis-state nil)
-        genesis (common/block-assoc genesis :hash (protocol-call protocol/IHashable content-hash genesis))]
+        genesis (common/block-assoc genesis :hash (protocol/content-hash genesis))]
     (common/Chain [genesis] genesis-state)))
 
 (defn head
   "Returns the last block of the chain."
   [chain]
-  (protocol-call protocol/IChainOps head chain))
+  (protocol/head chain))
 
 (defn blocks
   "Returns all blocks in the chain."
   [chain]
-  (protocol-call protocol/IChainOps blocks chain))
+  (protocol/blocks chain))
 
 (defn state
   "Returns the current state of the chain."
   [chain]
-  (protocol-call protocol/IChainOps state chain))
+  (protocol/state chain))
 
 (defn append
   "Appends a block to the chain. The source form must evaluate to a function
    of two arguments: the previous state and a context map."
   [chain actor timestamp source]
-  (protocol-call protocol/IChainOps append chain actor timestamp source))
+  (protocol/append chain actor timestamp source))
 
 (defn valid?
   "Replays the chain from the genesis block, verifying every hash link and
    every state transition. Returns true only if the stored chain is internally
    consistent."
   [chain]
-  (protocol-call protocol/IValid valid? chain))
+  (protocol/valid? chain))
 
 (defmacro tx
   "Wraps a transaction body in a quoted function of `state` and `ctx`.

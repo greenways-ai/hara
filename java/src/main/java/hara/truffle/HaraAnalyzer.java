@@ -207,8 +207,6 @@ final class HaraAnalyzer {
           return analyzeField(list);
         case ".":
           return analyzeMarkerCall(list);
-        case "protocol-call":
-          return analyzeProtocolCall(list);
         case "+":
           return analyzeAdd(list);
         case "-":
@@ -1547,33 +1545,6 @@ final class HaraAnalyzer {
               methodKey, analyzeFunction((ILinearType<?>) method.nth(1), body));
     }
     return new HaraNodes.ExtendType(analyze(form.nth(1)), analyze(protocol), methods);
-  }
-
-  private HaraExpressionNode analyzeProtocolCall(List<?> form) {
-    if (form.count() < 4) {
-      throw error("protocol-call expects a protocol, method, receiver, and arguments");
-    }
-    Object method = form.nth(2);
-    String methodName;
-    if (method instanceof Keyword) {
-      if (((Keyword) method).getNamespace() != null) {
-        throw error("protocol method must not be qualified");
-      }
-      methodName = ((Keyword) method).getName();
-    } else if (method instanceof Symbol) {
-      if (((Symbol) method).getNamespace() != null) {
-        throw error("protocol method must not be qualified");
-      }
-      methodName = ((Symbol) method).getName();
-    } else {
-      throw error("protocol method must be a keyword or symbol");
-    }
-    HaraExpressionNode[] arguments = new HaraExpressionNode[(int) form.count() - 4];
-    for (int i = 4; i < form.count(); i++) {
-      arguments[i - 4] = analyze(form.nth(i));
-    }
-    return new HaraNodes.ProtocolInvoke(
-        analyze(form.nth(1)), methodName, analyze(form.nth(3)), arguments);
   }
 
   private HaraExpressionNode analyzeMarkerCall(List<?> form) {

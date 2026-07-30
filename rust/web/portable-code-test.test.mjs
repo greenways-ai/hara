@@ -66,12 +66,13 @@ test("portable tasks emit structured reports through browser wasm", () => {
   const runtime = new Runtime();
   const result = runtime.eval(
     "(ns std-task-browser-probe" +
-      " (:require [std.task :as task] [std.task.bulk :as bulk]))" +
+      " (:require [std.lib.task :as task] [std.lib.task.bulk :as bulk]))" +
       " (task/deftask double-task" +
       "   {:template :default :main {:fn (fn [value] (* 2 value))}})" +
       " (let [reporter (bulk/event-reporter)" +
       "       output (task/invoke double-task [1 2 3]" +
-      "                           {:reporter reporter :return :all})]" +
+      "                           {:reporter reporter :return :all" +
+      "                            :package :records})]" +
       " [(get output :summary)" +
       "  (vec (map (fn [item] (get item :data)) (get output :results)))" +
       "  (count (bulk/reporter-events reporter))])",
@@ -79,7 +80,7 @@ test("portable tasks emit structured reports through browser wasm", () => {
 
   assert.equal(
     result,
-    "[{:items 3 :results 3 :warnings 0 :errors 0} [2 4 6] 8]",
+    "[{:items 3 :results 3 :warnings 0 :errors 0 :cumulative 0 :elapsed 0} [2 4 6] 8]",
   );
 });
 
@@ -87,7 +88,7 @@ test("portable blocks preserve source, value, and structure through browser wasm
   const runtime = new Runtime();
   const result = runtime.eval(
     "(ns std-block-browser-probe" +
-      " (:require [std.block :as block]))" +
+      " (:require [std.lib.block :as block]))" +
       ' (let [parsed (block/parse-string "[1 2 3]")' +
       '       first-block (block/parse-first "[1 2 3]")' +
       "       spaces (block/spaces 3)]" +
@@ -95,7 +96,8 @@ test("portable blocks preserve source, value, and structure through browser wasm
       "  (block/value parsed)" +
       "  (block/type first-block)" +
       "  (block/tag first-block)" +
-      "  (vec (map block/value (block/children first-block)))" +
+      "  (vec (map block/value" +
+      "            (filter block/code? (block/children first-block))))" +
       "  (block/string spaces)" +
       "  (block/space? spaces)])",
   );

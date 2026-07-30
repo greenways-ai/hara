@@ -146,11 +146,7 @@ fn close_on_never_resumed_coroutine() {
 
 #[test]
 fn yield_requires_one_explicit_value() {
-    let mut f = EvalFiber::start(
-        "(std.foundation.coroutine/yield 1 2 3)",
-        HashMap::new(),
-    )
-    .unwrap();
+    let mut f = EvalFiber::start("(std.foundation.coroutine/yield 1 2 3)", HashMap::new()).unwrap();
     assert!(matches!(
         f.state(),
         EvalFiberState::Failed(message) if message.contains("expects one value")

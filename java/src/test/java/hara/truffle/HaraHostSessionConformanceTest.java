@@ -32,11 +32,11 @@ public class HaraHostSessionConformanceTest {
       HaraSessionBroker.HaraSession beta = broker.create("beta");
       assertTrue(
           alpha
-              .eval("(= Host std.native/Host std.foundation/Host)")
+              .eval("(= Host std.native.Host std.foundation/Host)")
               .asBoolean());
       assertTrue(
           beta
-              .eval("(= Host std.native/Host std.foundation/Host)")
+              .eval("(= Host std.native.Host std.foundation/Host)")
               .asBoolean());
       Value alphaHost = alpha.eval("Host");
       Value betaHost = beta.eval("Host");
@@ -59,13 +59,13 @@ public class HaraHostSessionConformanceTest {
           denied
               .eval(
                   HaraLanguage.ID,
-                  "(deref (std.native.Host/capability? \"filesystem\"))")
+                  "(deref (Host/capability? \"filesystem\"))")
               .asBoolean());
       assertTrue(
           granted
               .eval(
                   HaraLanguage.ID,
-                  "(deref (std.native.Host/capability? \"filesystem\"))")
+                  "(deref (Host/capability? \"filesystem\"))")
               .asBoolean());
     }
   }
@@ -94,7 +94,7 @@ public class HaraHostSessionConformanceTest {
               HaraLanguage.ID,
               """
               (try
-                (deref (std.native.Host/call "missing" "missing" []))
+                (deref (Host/call "missing" "missing" []))
                 (catch Throwable error
                   [(ex-message error)
                    (name (get (ex-data error) :error/code))]))
@@ -110,7 +110,7 @@ public class HaraHostSessionConformanceTest {
                   """
                   (deref
                     (promise/catch
-                      (std.native.Host/call "missing" "missing" [])
+                      (Host/call "missing" "missing" [])
                       (fn [error]
                         (name (get (ex-data error) :error/code)))))
                   """)
@@ -126,7 +126,7 @@ public class HaraHostSessionConformanceTest {
                   .evalTransfer(
                       """
                       (try
-                        (deref (std.native.Host/call "missing" "missing" []))
+                        (deref (Host/call "missing" "missing" []))
                         (catch Throwable error
                           (get (ex-data error) :error/code)))
                       """)));

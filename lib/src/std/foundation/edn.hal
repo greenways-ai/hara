@@ -31,7 +31,7 @@
   read
   "Reads exactly one value using the restricted HAL EDN profile."
   [source]
-  (std.native.Edn/read source))
+  (Edn/read source))
 
 (defn ^{:schema [:fn [:any] :str]}
   write

@@ -73,9 +73,7 @@
           "Grammar resolution requires an explicit id and version"
           {:request request}))
         (let [source
-              (protocol-call protocol/IGrammarCatalog
-                             find-source
-                             registry
+              (protocol/find-source registry
                              [:grammar grammar-id version])]
           (if source
             (grammar/materialize registry source request)
@@ -85,37 +83,30 @@
 
 (defn install
   [registry source]
-  (protocol-call protocol/IGrammarRegistry
-                 install-source registry source))
+  (protocol/install-source registry source))
 
 (defn replace
   [registry source]
-  (protocol-call protocol/IGrammarRegistry
-                 replace-source registry source))
+  (protocol/replace-source registry source))
 
 (defn remove
   [registry coordinate]
-  (protocol-call protocol/IGrammarRegistry
-                 remove-source registry coordinate))
+  (protocol/remove-source registry coordinate))
 
 (defn find
   [registry coordinate]
-  (protocol-call protocol/IGrammarCatalog
-                 find-source registry coordinate))
+  (protocol/find-source registry coordinate))
 
 (defn list
   ([registry]
    (list registry {}))
   ([registry query]
-   (protocol-call protocol/IGrammarCatalog
-                  list-sources registry query)))
+   (protocol/list-sources registry query)))
 
 (defn versions
   [registry grammar-id]
-  (protocol-call protocol/IGrammarCatalog
-                 available-versions registry grammar-id))
+  (protocol/available-versions registry grammar-id))
 
 (defn resolve
   [registry request]
-  (protocol-call protocol/IGrammarResolver
-                 resolve-grammar registry request))
+  (protocol/resolve-grammar registry request))

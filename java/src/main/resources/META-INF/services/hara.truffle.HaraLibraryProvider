@@ -9,3 +9,7 @@ hara.truffle.StdFoundationEdnLibraryProvider
 hara.truffle.StdJsonLibraryProvider
 hara.truffle.StdFoundationPrettyEngineLibraryProvider
 hara.truffle.StdFoundationPrettyLibraryProvider
+hara.truffle.StdLibZipLibraryProvider
+hara.truffle.StdLibBlockLibraryProvider
+hara.truffle.StdLibTaskLibraryProvider
+hara.truffle.CodeTestLibraryProvider

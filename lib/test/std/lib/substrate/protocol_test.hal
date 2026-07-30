@@ -65,64 +65,64 @@
 
 (def results
   [(test/check "frame capability methods dispatch"
-               [(protocol-call protocol/IFrame frame-id fixture)
-                (protocol-call protocol/IFrame frame-kind fixture)
-                (protocol-call protocol/IFrame frame-space fixture)
-                (protocol-call protocol/IFrame frame-meta fixture)
-                (protocol-call protocol/IFrame frame-cause fixture)
-                (protocol-call protocol/IFrame frame-data fixture)]
+               [(protocol/frame-id fixture)
+                (protocol/frame-kind fixture)
+                (protocol/frame-space fixture)
+                (protocol/frame-meta fixture)
+                (protocol/frame-cause fixture)
+                (protocol/frame-data fixture)]
                ["frame-1" :request "space/test" {:trace "trace-1"} "evt-1" 42])
    (test/check "space capability methods dispatch"
-               [(protocol-call protocol/ISpace get-space fixture "space/a")
-                (protocol-call protocol/ISpace create-space fixture "space/a" {:x 1})
-                (protocol-call protocol/ISpace ensure-space fixture "space/a" {})
-                (protocol-call protocol/ISpace remove-space fixture "space/a")
-                (protocol-call protocol/ISpace list-spaces fixture)
-                (protocol-call protocol/ISpace get-space-state fixture "space/a")
-                (protocol-call protocol/ISpace set-space-state fixture "space/a" 9)
-                (protocol-call protocol/ISpace update-space-state fixture "space/a"
+               [(protocol/get-space fixture "space/a")
+                (protocol/create-space fixture "space/a" {:x 1})
+                (protocol/ensure-space fixture "space/a" {})
+                (protocol/remove-space fixture "space/a")
+                (protocol/list-spaces fixture)
+                (protocol/get-space-state fixture "space/a")
+                (protocol/set-space-state fixture "space/a" 9)
+                (protocol/update-space-state fixture "space/a"
                                (fn [state] (get state :space)))]
                [["space/a" :get] ["space/a" {:x 1}] ["space/a" {} :ensure]
                 "space/a" ["space/test"] {:space "space/a"} 9 "space/a"])
    (test/check "service capability methods dispatch"
-               [(protocol-call protocol/IService get-service fixture "cache")
-                (protocol-call protocol/IService set-service fixture "cache" 42)
-                (protocol-call protocol/IService remove-service fixture "cache")]
+               [(protocol/get-service fixture "cache")
+                (protocol/set-service fixture "cache" 42)
+                (protocol/remove-service fixture "cache")]
                ["cache" 42 "cache"])
    (test/check "handler capability methods dispatch"
-               [(protocol-call protocol/IHandler register-handler fixture "demo/echo" identity {:stable true})
-                (protocol-call protocol/IHandler unregister-handler fixture "demo/echo")
-                (protocol-call protocol/IHandler get-handler fixture "demo/echo")
-                (protocol-call protocol/IHandler list-handlers fixture)
-                (protocol-call protocol/IHandler register-trigger fixture "signal/out" identity {})
-                (protocol-call protocol/IHandler unregister-trigger fixture "signal/out")
-                (protocol-call protocol/IHandler get-trigger fixture "signal/out")
-                (protocol-call protocol/IHandler list-triggers fixture)]
+               [(protocol/register-handler fixture "demo/echo" identity {:stable true})
+                (protocol/unregister-handler fixture "demo/echo")
+                (protocol/get-handler fixture "demo/echo")
+                (protocol/list-handlers fixture)
+                (protocol/register-trigger fixture "signal/out" identity {})
+                (protocol/unregister-trigger fixture "signal/out")
+                (protocol/get-trigger fixture "signal/out")
+                (protocol/list-triggers fixture)]
                [["demo/echo" {:stable true}] "demo/echo" "demo/echo" ["demo/echo"]
                 ["signal/out" {}] "signal/out" "signal/out" ["signal/out"]])
    (test/check "transport capability methods dispatch"
-               [(protocol-call protocol/ITransport attach-transport fixture "peer/a" {:kind :direct})
-                (protocol-call protocol/ITransport detach-transport fixture "peer/a")
-                (protocol-call protocol/ITransport get-transport fixture "peer/a")
-                (protocol-call protocol/ITransport list-transports fixture)
-                (protocol-call protocol/ITransport send-transport fixture "peer/a" {:id "evt-1"})
-                (protocol-call protocol/ITransport receive-frame fixture {:id "evt-1"} {:from "peer/a"})]
+               [(protocol/attach-transport fixture "peer/a" {:kind :direct})
+                (protocol/detach-transport fixture "peer/a")
+                (protocol/get-transport fixture "peer/a")
+                (protocol/list-transports fixture)
+                (protocol/send-transport fixture "peer/a" {:id "evt-1"})
+                (protocol/receive-frame fixture {:id "evt-1"} {:from "peer/a"})]
                [["peer/a" {:kind :direct}] "peer/a" "peer/a" ["peer/a"]
                 ["peer/a" {:id "evt-1"}] [{:id "evt-1"} {:from "peer/a"}]])
    (test/check "request capability methods dispatch"
-               [(protocol-call protocol/IRequest request fixture "space/a" "demo/echo" [1] {:local true})
-                (protocol-call protocol/IRequest receive-request fixture {:id "req-1"} {})
-                (protocol-call protocol/IRequest receive-response fixture {:id "res-1"})
-                (protocol-call protocol/IRequest cancel-request fixture "req-1" :cancelled)
-                (protocol-call protocol/IRequest reject-pending fixture :released)]
+               [(protocol/request fixture "space/a" "demo/echo" [1] {:local true})
+                (protocol/receive-request fixture {:id "req-1"} {})
+                (protocol/receive-response fixture {:id "res-1"})
+                (protocol/cancel-request fixture "req-1" :cancelled)
+                (protocol/reject-pending fixture :released)]
                [["space/a" "demo/echo" [1] {:local true}] [{:id "req-1"} {}]
                 {:id "res-1"} ["req-1" :cancelled] :released])
    (test/check "stream capability methods dispatch"
-               [(protocol-call protocol/IStream publish fixture "space/a" "signal/out" 42 {})
-                (protocol-call protocol/IStream receive-publish fixture {:id "evt-1"} {})
-                (protocol-call protocol/IStream subscribe fixture "space/a" "signal/out" "sub-1" {})
-                (protocol-call protocol/IStream unsubscribe fixture "space/a" "signal/out" "sub-1" {})
-                (protocol-call protocol/IStream list-subscriptions fixture "space/a" "signal/out")]
+               [(protocol/publish fixture "space/a" "signal/out" 42 {})
+                (protocol/receive-publish fixture {:id "evt-1"} {})
+                (protocol/subscribe fixture "space/a" "signal/out" "sub-1" {})
+                (protocol/unsubscribe fixture "space/a" "signal/out" "sub-1" {})
+                (protocol/list-subscriptions fixture "space/a" "signal/out")]
                [["space/a" "signal/out" 42 {}] [{:id "evt-1"} {}]
                 ["space/a" "signal/out" "sub-1" {}]
                 ["space/a" "signal/out" "sub-1" {}]

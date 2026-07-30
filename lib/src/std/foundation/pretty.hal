@@ -11,4 +11,4 @@
   ([document]
    (write document {}))
   ([document options]
-   (std.native.Printer/p (engine/render document options))))
+   (Printer/p (engine/render document options))))

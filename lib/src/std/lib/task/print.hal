@@ -1,0 +1,130 @@
+(ns std.lib.task.print
+  (:require [std.foundation.string :as string]))
+
+(def +ansi+
+  {:reset 0
+   :bold 1
+   :grey 30
+   :red 31
+   :green 32
+   :yellow 33
+   :blue 34
+   :magenta 35
+   :cyan 36
+   :white 37
+   :warn 33
+   :info 34
+   :error 31
+   :critical 35})
+
+(defn ansi-code
+  [modifier]
+  (cond
+    (= modifier :reset) 0
+    (= modifier :bold) 1
+    (= modifier :grey) 30
+    (= modifier :red) 31
+    (= modifier :green) 32
+    (or (= modifier :yellow) (= modifier :warn)) 33
+    (or (= modifier :blue) (= modifier :info)) 34
+    (or (= modifier :magenta) (= modifier :critical)) 35
+    (= modifier :cyan) 36
+    (= modifier :white) 37
+    (= modifier :error) 31
+    :else
+    (throw (ex-info "Modifier not available." {:input modifier}))))
+
+(defn ansi-encode
+  [modifiers]
+  (let [codes
+        (loop [remaining (vec modifiers)
+               output []]
+          (if (empty? remaining)
+            output
+            (recur (vec (rest remaining))
+                   (conj output (str (ansi-code (first remaining)))))))]
+    (str "\u001b[" (string/join ";" codes) "m")))
+
+(defn ansi-style
+  [text modifiers]
+  (str (ansi-encode modifiers)
+       text
+       (ansi-encode [:reset])))
+
+(defn report-title
+  [title]
+  (let [line (string/repeat "-" (string/length title))]
+    (ansi-style (str "\n" line "\n" title "\n" line) [:bold])))
+
+(defn report-bold
+  [text]
+  (ansi-style text [:bold]))
+
+(defn justify
+  [alignment text length]
+  (let [text (str text)
+        missing (- length (string/length text))
+        missing (if (< missing 0) 0 missing)]
+    (if (= alignment :right)
+      (str (string/repeat " " missing) text)
+      (if (= alignment :center)
+        (let [left (quot missing 2)]
+          (str (string/repeat " " left)
+               text
+               (string/repeat " " (- missing left))))
+        (str text (string/repeat " " missing))))))
+
+(defn column-text
+  [value column]
+  (let [padding (or (:padding column) 0)
+        length (or (:length column) (string/length (str value)))
+        alignment (or (:align column) :left)
+        text (justify alignment
+                      (str (string/repeat " " padding) value)
+                      length)
+        color (:color column)]
+    (if color (ansi-style text color) text)))
+
+(defn row-cells
+  [row columns]
+  (loop [index 0
+         output []]
+    (if (= index (count row))
+      output
+      (recur (inc index)
+             (conj output
+                   (column-text (nth row index)
+                                (nth columns index)))))))
+
+(defn report-row
+  [row {:keys [padding spacing columns]}]
+  (let [padding (or padding 0)
+        spacing (or spacing 1)
+        columns
+        (map (fn [column]
+               (assoc column :padding padding))
+             columns)]
+    (string/join
+     (string/repeat " " spacing)
+     (row-cells row columns))))
+
+(defn report-header
+  [keys options]
+  (report-bold
+   (report-row
+    (map (fn [key] (name key)) keys)
+    (assoc options
+           :columns
+           (map (fn [column] (dissoc column :color))
+                (:columns options))))))
+
+(defn print-title [title] (println (report-title title)))
+(defn print-subtitle [subtitle] (println (report-bold subtitle)))
+(defn print-row [row options] (println (report-row row options)))
+(defn print-header [keys options] (println (str (report-header keys options) "\n")))
+
+(defn format-ms
+  [milliseconds]
+  (if (< milliseconds 1000)
+    (str milliseconds "ms")
+    (str (/ milliseconds 1000.0) "s")))

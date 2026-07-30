@@ -1,0 +1,6 @@
+(ns code.test.checker.logic
+  (:require [code.test :as test]))
+
+(def is-not test/is-not)
+(def any test/any)
+(def all test/all)

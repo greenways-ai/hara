@@ -315,17 +315,23 @@
 
 (defn ^{:schema [:fn [:any] :any]}
   keys
-  "Returns a lazy sequence of the map's keys."
+  "Returns a vector of the map's keys."
   [value] (map key value))
 
 (defn ^{:schema [:fn [:any] :any]}
   vals
-  "Returns a lazy sequence of the map's values."
+  "Returns a vector of the map's values."
   [value] (map val value))
 
 ;; ---------------------------------------------------------------------------
 ;; Lazy producers and transformers
 ;; ---------------------------------------------------------------------------
+
+(defn- ^{:schema [:fn [:any :any] :any]}
+  materialize-vector
+  "Materializes iterator values into a persistent vector."
+  [_ values]
+  (vec values))
 
 (defn ^{:schema [:function [:fn [] :any]
                             [:fn [:num] :any]
@@ -333,165 +339,156 @@
   range
   "Returns a lazy seq of numbers: from 0 upward, below end, or from start
    below end."
-  ([] (seq (iter-range 0)))
-  ([end] (seq (iter-range end)))
-  ([start end] (seq (iter-range start end))))
+  ([] (seq (Iter/iter-range 0)))
+  ([end] (seq (Iter/iter-range end)))
+  ([start end] (seq (Iter/iter-range start end))))
 
 (defn ^{:schema [:function [:fn [:any] :any]
                             [:fn [:num :any] :any]]}
   repeat
   "Returns a lazy seq of value repeated forever, or amount times."
-  ([value] (seq (iter-constantly value)))
-  ([amount value] (take amount (seq (iter-constantly value)))))
+  ([value] (seq (Iter/iter-constantly value)))
+  ([amount value] (seq (Iter/iter-take amount (Iter/iter-constantly value)))))
 
 (defn ^{:schema [:function [:fn [:fn] :any]
                             [:fn [:num :fn] :any]]}
   repeatedly
   "Returns a lazy seq of calls to function, forever or amount times."
-  ([function] (seq (iter-repeatedly function)))
-  ([amount function] (take amount (seq (iter-repeatedly function)))))
+  ([function] (seq (Iter/iter-repeatedly function)))
+  ([amount function] (seq (Iter/iter-take amount (Iter/iter-repeatedly function)))))
 
 (defn ^{:schema [:fn [:fn :any] :any]}
   iterate
   "Returns a lazy seq of seed, (function seed), (function (function seed)), …"
-  [function seed] (seq (iter-iterate function seed)))
+  [function seed] (seq (Iter/iter-iterate function seed)))
 
 (defn ^{:schema [:fn [:fn :any] :any]}
   take-while
-  "Returns a lazy seq of items while predicate holds."
-  [predicate value] (seq (iter-take-while predicate value)))
+  "Unary form returns an iterator transform; collection form eagerly
+   materializes items while predicate holds."
+  ([predicate] (partial Iter/iter-take-while predicate))
+  ([predicate value]
+   (materialize-vector value (Iter/iter-take-while predicate value))))
 
 (defn ^{:schema [:fn [:fn :any] :any]}
   drop-while
-  "Returns a lazy seq dropping items while predicate holds."
-  [predicate value] (seq (iter-drop-while predicate value)))
-
-(defn- ^{:schema [:fn [:num] :fn]}
-  partition-all-transform
-  "Returns a transform partitioning its input into groups of amount items,
-   preserving array origins."
-  [amount]
-  (fn [value]
-    (if (array? value)
-      (apply array (iter-partition-all amount value))
-      (vec (iter-partition-all amount value)))))
+  "Unary form returns an iterator transform; collection form eagerly
+   materializes after dropping items while predicate holds."
+  ([predicate] (partial Iter/iter-drop-while predicate))
+  ([predicate value]
+   (materialize-vector value (Iter/iter-drop-while predicate value))))
 
 (defn ^{:schema [:function [:fn [:num] :fn]
                             [:fn [:num :any] :any]]}
   partition-all
   "Partitions value into groups of at most amount items; unary form returns a
    transform."
-  ([amount] (partition-all-transform amount))
-  ([amount value] (seq (iter-partition-all amount value))))
-
-(defn- ^{:schema [:fn [:num] :fn]}
-  partition-transform
-  "Returns a transform partitioning its input into groups of exactly amount
-   items, preserving array origins."
-  [amount]
-  (fn [value]
-    (if (array? value)
-      (apply array (iter-partition amount value))
-      (vec (iter-partition amount value)))))
+  ([amount] (partial Iter/iter-partition-all amount))
+  ([amount value]
+   (materialize-vector value (Iter/iter-partition-all amount value))))
 
 (defn ^{:schema [:function [:fn [:num] :fn]
                             [:fn [:num :any] :any]]}
   partition
   "Partitions value into groups of exactly amount items; unary form returns a
    transform."
-  ([amount] (partition-transform amount))
-  ([amount value] (seq (iter-partition amount value))))
+  ([amount] (partial Iter/iter-partition amount))
+  ([amount value]
+   (materialize-vector value (Iter/iter-partition amount value))))
 
 (defn ^{:schema [:fn [:any :any] :any]}
   interpose
-  "Returns a lazy seq of the items of value with separator between them."
-  [separator value] (seq (iter-interpose separator value)))
+  "Unary form returns an iterator transform; collection form eagerly inserts
+   separator between items."
+  ([separator] (partial Iter/iter-interpose separator))
+  ([separator value]
+   (materialize-vector value (Iter/iter-interpose separator value))))
 
 (defn ^{:schema [:fn [:any & :any] :any]}
   interleave
-  "Returns a lazy seq of the first items of each source, then the second
-   items, and so on, stopping at the shortest source."
-  [value & rest] (seq (apply iter-interleave value rest)))
-
-(defn- ^{:schema [:fn [:any :any] :any]}
-  materialize-like
-  "Materializes values into a collection of the same origin kind: arrays stay
-   arrays, lists stay lists, everything else becomes a vector."
-  [origin values]
-  (if (array? origin)
-    (apply array values)
-    (if (list? origin)
-      (apply list values)
-      (vec values))))
-
-(defn- ^{:schema [:fn [:fn] :fn]}
-  map-transform
-  "Returns a lazy iterator transform mapping function over its input."
-  [function]
-  (fn [value & rest]
-    (seq (apply iter-map function (concat [value] rest)))))
+  "Eagerly returns the first items of each source, then the second items, and
+   so on, stopping at the shortest source."
+  [value & rest]
+  (materialize-vector value
+                    (apply Iter/iter-interleave (concat [value] rest))))
 
 (defn ^{:schema [:function [:fn [:fn] :fn]
                             [:fn [:fn :any & :any] :any]]}
   map
-  "Unary form returns a lazy transform. Otherwise eagerly maps function over
-   one or more sources, stopping at the shortest, preserving the first
-   source's origin."
-  ([function] (map-transform function))
+  "Unary form returns an iterator transform. Otherwise eagerly maps function
+   over one or more sources into a vector, stopping at the shortest."
+  ([function] (partial Iter/iter-map function))
   ([function value & rest]
-   (materialize-like value
-                     (apply iter-map function (concat [value] rest)))))
+   (materialize-vector value
+                     (apply Iter/iter-map function (concat [value] rest)))))
 
 (defn ^{:schema [:fn [:fn :any] :any]}
   filter
-  "Returns a lazy seq of the items of value for which predicate returns true."
-  [predicate value] (seq (iter-filter predicate value)))
+  "Unary form returns an iterator transform; collection form eagerly keeps
+   items for which predicate returns true."
+  ([predicate] (partial Iter/iter-filter predicate))
+  ([predicate value]
+   (materialize-vector value (Iter/iter-filter predicate value))))
 
 (defn ^{:schema [:fn [:num :any] :any]}
   take
-  "Returns a lazy seq of the first amount items of value."
-  [amount value] (seq (iter-take amount value)))
+  "Unary form returns an iterator transform; collection form eagerly returns
+   the first amount items."
+  ([amount] (partial Iter/iter-take amount))
+  ([amount value] (materialize-vector value (Iter/iter-take amount value))))
 
 (defn ^{:schema [:fn [:num :any] :any]}
   drop
-  "Returns a lazy seq of all but the first amount items of value."
-  [amount value] (seq (iter-drop amount value)))
+  "Unary form returns an iterator transform; collection form eagerly returns
+   all but the first amount items."
+  ([amount] (partial Iter/iter-drop amount))
+  ([amount value] (materialize-vector value (Iter/iter-drop amount value))))
 
 (defn ^{:schema [:fn [:fn :any] :any]}
   mapcat
-  "Returns a lazy seq of function applied to each item, concatenated."
-  [function value] (seq (iter-mapcat function value)))
+  "Unary form returns an iterator transform; collection form eagerly maps and
+   concatenates."
+  ([function] (partial Iter/iter-mapcat function))
+  ([function value]
+   (materialize-vector value (Iter/iter-mapcat function value))))
 
 (defn ^{:schema [:fn [:fn :any] :any]}
   keep
-  "Returns a lazy seq of the non-nil results of function over value."
-  [function value] (seq (iter-keep function value)))
+  "Unary form returns an iterator transform; collection form eagerly returns
+   non-nil mapped results."
+  ([function] (partial Iter/iter-keep function))
+  ([function value]
+   (materialize-vector value (Iter/iter-keep function value))))
 
 (defn ^{:schema [:fn [:any] :any]}
   cycle
   "Returns a lazy seq repeating the items of value forever."
-  [value] (seq (iter-cycle value)))
+  [value] (seq (Iter/iter-cycle value)))
 
 (defn ^{:schema [:fn [:any & :any] :any]}
   zip
-  "Returns a lazy seq of tuples of the items of each source in parallel,
-   stopping at the shortest."
-  [first & rest] (seq (apply iter-zip first rest)))
+  "Eagerly returns tuples of the items of each source in parallel, stopping at
+   the shortest source."
+  [first & rest]
+  (materialize-vector first
+                    (apply Iter/iter-zip (concat [first] rest))))
 
 (defn ^{:schema [:fn [:any] :any]}
   partition-pair
-  "Returns a lazy seq of value partitioned into pairs."
-  [value] (seq (iter-partition-pair value)))
+  "Eagerly returns value partitioned into pairs."
+  [value] (materialize-vector value (Iter/iter-partition-pair value)))
 
 (defn ^{:schema [:fn [:fn :any] :bool]}
   every?
-  "Returns true if predicate holds for every item of value."
-  [predicate value] (iter-every? predicate value))
+  "Unary form returns a reusable terminal; collection form tests every item."
+  ([predicate] (partial Iter/iter-every? predicate))
+  ([predicate value] (Iter/iter-every? predicate value)))
 
 (defn ^{:schema [:fn [:fn :any] :bool]}
   any?
-  "Returns true if predicate holds for at least one item of value."
-  [predicate value] (iter-any? predicate value))
+  "Unary form returns a reusable terminal; collection form tests any item."
+  ([predicate] (partial Iter/iter-any? predicate))
+  ([predicate value] (Iter/iter-any? predicate value)))
 
 ;; ---------------------------------------------------------------------------
 ;; Truth and fixed-point combinators retained from Foundation
@@ -508,163 +505,163 @@
   long
   "Converts a numeric value to a signed 64-bit integer by truncating toward zero."
   [value]
-  (std.native.Numbers/long value))
+  (Numbers/long value))
 
 (defn ^{:schema [:fn [:num] :float]}
   double
   "Converts a numeric value to an IEEE-754 double."
   [value]
-  (std.native.Numbers/double value))
+  (Numbers/double value))
 
 (defn ^{:schema [:fn [& :any] :any]}
   bit-and
   "Returns the bitwise conjunction of values through the portable Bits boundary."
   [& values]
-  (apply std.native.Bits/and values))
+  (apply Bits/and values))
 
 (defn ^{:schema [:fn [& :any] :any]}
   bit-or
   "Returns the bitwise disjunction of values through the portable Bits boundary."
   [& values]
-  (apply std.native.Bits/or values))
+  (apply Bits/or values))
 
 (defn ^{:schema [:fn [& :any] :any]}
   bit-xor
   "Returns the bitwise exclusive-or of values through the portable Bits boundary."
   [& values]
-  (apply std.native.Bits/xor values))
+  (apply Bits/xor values))
 
 (defn ^{:schema [:fn [:any] :any]}
   bit-not
   "Returns the bitwise complement of value through the portable Bits boundary."
   [value]
-  (std.native.Bits/not value))
+  (Bits/not value))
 
 (defn ^{:schema [:fn [& :any] :any]}
   bit-shift-left
   "Left-shifts the first value by the remaining shift counts."
   [& values]
-  (apply std.native.Bits/shift-left values))
+  (apply Bits/shift-left values))
 
 (defn ^{:schema [:fn [& :any] :any]}
   bit-shift-right
   "Right-shifts the first value by the remaining shift counts."
   [& values]
-  (apply std.native.Bits/shift-right values))
+  (apply Bits/shift-right values))
 
 (defn ^{:schema [:fn [:num] :num]}
   abs
   "Returns the absolute magnitude of value."
   [value]
-  (std.native.Maths/abs value))
+  (Maths/abs value))
 
 (defn ^{:schema [:fn [:num] :num]}
   acos
   "Returns the arc cosine of value in radians."
   [value]
-  (std.native.Maths/acos value))
+  (Maths/acos value))
 
 (defn ^{:schema [:fn [:num] :num]}
   acosh
   "Returns the inverse hyperbolic cosine of value."
   [value]
-  (std.native.Maths/acosh value))
+  (Maths/acosh value))
 
 (defn ^{:schema [:fn [:num] :num]}
   asin
   "Returns the arc sine of value in radians."
   [value]
-  (std.native.Maths/asin value))
+  (Maths/asin value))
 
 (defn ^{:schema [:fn [:num] :num]}
   asinh
   "Returns the inverse hyperbolic sine of value."
   [value]
-  (std.native.Maths/asinh value))
+  (Maths/asinh value))
 
 (defn ^{:schema [:fn [:num] :num]}
   atan
   "Returns the arc tangent of value in radians."
   [value]
-  (std.native.Maths/atan value))
+  (Maths/atan value))
 
 (defn ^{:schema [:fn [:num :num] :num]}
   atan2
   "Returns the angle for y and x in radians."
   [y x]
-  (std.native.Maths/atan2 y x))
+  (Maths/atan2 y x))
 
 (defn ^{:schema [:fn [:num] :num]}
   atanh
   "Returns the inverse hyperbolic tangent of value."
   [value]
-  (std.native.Maths/atanh value))
+  (Maths/atanh value))
 
 (defn ^{:schema [:fn [:num] :num]}
   ceil
   "Rounds value upward to the nearest integral number."
   [value]
-  (std.native.Maths/ceil value))
+  (Maths/ceil value))
 
 (defn ^{:schema [:fn [:num] :num]}
   cos
   "Returns the cosine of value in radians."
   [value]
-  (std.native.Maths/cos value))
+  (Maths/cos value))
 
 (defn ^{:schema [:fn [:num] :num]}
   cosh
   "Returns the hyperbolic cosine of value."
   [value]
-  (std.native.Maths/cosh value))
+  (Maths/cosh value))
 
 (defn ^{:schema [:fn [:num] :num]}
   exp
   "Returns Euler's number raised to value."
   [value]
-  (std.native.Maths/exp value))
+  (Maths/exp value))
 
 (defn ^{:schema [:fn [:num] :num]}
   floor
   "Rounds value downward to the nearest integral number."
   [value]
-  (std.native.Maths/floor value))
+  (Maths/floor value))
 
 (defn ^{:schema [:fn [:num :num] :num]}
   pow
   "Returns value raised to exponent."
   [value exponent]
-  (std.native.Maths/pow value exponent))
+  (Maths/pow value exponent))
 
 (defn ^{:schema [:fn [:num] :num]}
   sin
   "Returns the sine of value in radians."
   [value]
-  (std.native.Maths/sin value))
+  (Maths/sin value))
 
 (defn ^{:schema [:fn [:num] :num]}
   sinh
   "Returns the hyperbolic sine of value."
   [value]
-  (std.native.Maths/sinh value))
+  (Maths/sinh value))
 
 (defn ^{:schema [:fn [:num] :num]}
   sqrt
   "Returns the non-negative square root of value."
   [value]
-  (std.native.Maths/sqrt value))
+  (Maths/sqrt value))
 
 (defn ^{:schema [:fn [:num] :num]}
   tan
   "Returns the tangent of value in radians."
   [value]
-  (std.native.Maths/tan value))
+  (Maths/tan value))
 
 (defn ^{:schema [:fn [:num] :num]}
   tanh
   "Returns the hyperbolic tangent of value."
   [value]
-  (std.native.Maths/tanh value))
+  (Maths/tanh value))
 
 (defn ^{:schema [:fn [& :any] :bool]}
   T
@@ -738,11 +735,10 @@
 (defn ^{:schema [:function [:fn [:any] :any]
                             [:fn [:fn :any] :any]]}
   sort
-  "Returns values sorted by comparison (default compare), preserving the
-   input's origin. Stable."
+  "Returns values sorted by comparison (default compare) as a vector. Stable."
   ([values] (sort compare values))
   ([comparison values]
-   (materialize-like
+   (materialize-vector
      values
      (reduce (fn [result value]
                (insert-sorted comparison value result))
@@ -767,11 +763,10 @@
 (defn ^{:schema [:function [:fn [:any] :any]
                             [:fn [:num :any] :any]]}
   drop-last
-  "Returns values without its last amount items (default 1), preserving
-   origin."
+  "Returns values without its last amount items (default 1) as a vector."
   ([values] (drop-last 1 values))
   ([amount values]
-   (materialize-like values
+   (materialize-vector values
                      (take (max 0 (- (count values) amount)) values))))
 
 (defn ^{:schema [:fn [:any] :any]}
@@ -781,23 +776,21 @@
 
 (defn ^{:schema [:fn [:num :any] :any]}
   take-last
-  "Returns the last amount items of values, preserving origin."
+  "Returns the last amount items of values as a vector."
   [amount values]
-  (materialize-like values
+  (materialize-vector values
                     (drop (max 0 (- (count values) amount)) values)))
 
 (defn ^{:schema [:fn [:num :any] :vector]}
   split-at
-  "Returns a pair of (take amount values) and (drop amount values), each
-   preserving origin."
+  "Returns a pair of vector results from take and drop."
   [amount values]
-  [(materialize-like values (take amount values))
-   (materialize-like values (drop amount values))])
+  [(materialize-vector values (take amount values))
+   (materialize-vector values (drop amount values))])
 
 (defn ^{:schema [:fn [:fn :any] :vector]}
   split-with
-  "Returns a pair of the longest prefix satisfying predicate and the rest,
-   each preserving origin."
+  "Returns vectors containing the longest matching prefix and the remainder."
   [predicate values]
   (let [it (iter values)]
     (loop [prefix []]
@@ -805,10 +798,10 @@
         (let [value (iter-next it)]
           (if (predicate value)
             (recur (conj prefix value))
-            [(materialize-like values prefix)
-             (materialize-like values (concat [value] (seq it)))]))
-        [(materialize-like values prefix)
-         (materialize-like values [])]))))
+            [(materialize-vector values prefix)
+             (materialize-vector values (concat [value] (seq it)))]))
+        [(materialize-vector values prefix)
+         (materialize-vector values [])]))))
 
 (defn ^{:schema [:fn [:fn :any] :vector]}
   partition-by
@@ -830,8 +823,7 @@
 
 (defn ^{:schema [:fn [:num :any] :any]}
   take-nth
-  "Returns every amount-th item of values, preserving origin. Throws on
-   non-positive amount."
+  "Returns every amount-th item as a vector. Throws on non-positive amount."
   [amount values]
   (if (<= amount 0)
     (throw (ex-info "take-nth expects a positive amount" {:amount amount}))
@@ -844,7 +836,7 @@
                    (if (= (mod index amount) 0)
                      (conj result value)
                      result)))
-          (materialize-like values result))))))
+          (materialize-vector values result))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Maps and reductions
@@ -869,7 +861,7 @@
           (if (has? seen value)
             (recur seen result)
             (recur (assoc seen value true) (conj result value))))
-        (materialize-like values result)))))
+        (materialize-vector values result)))))
 
 (defn ^{:schema [:fn [& :any] :bool]}
   distinct?

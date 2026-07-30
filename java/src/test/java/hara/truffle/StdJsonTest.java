@@ -20,7 +20,7 @@ public class StdJsonTest {
           context.eval(HaraLanguage.ID, "(std.foundation.json/write {\"a\" 1 \"b\" [true nil]})").asString());
       assertEquals(
           "{\"a\":1}",
-          context.eval(HaraLanguage.ID, "(std.native.Json/write {\"a\" 1})").asString());
+          context.eval(HaraLanguage.ID, "(Json/write {\"a\" 1})").asString());
       assertEquals(
           "{\n  \"a\": 1\n}",
           context.eval(HaraLanguage.ID, "(std.foundation.json/pretty {\"a\" 1} {})").asString());

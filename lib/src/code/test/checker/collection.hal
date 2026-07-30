@@ -1,0 +1,26 @@
+(ns code.test.checker.collection
+  (:require [code.test :as test]))
+
+(def contains test/contains)
+(def just test/just)
+(def throws-info test/throws-info)
+
+(defn verify-map [checkers data]
+  (:pass (test/check (fn [] data) (test/contains checkers))))
+(defn verify-seq [checkers data modifiers]
+  (:pass (test/check (fn [] data)
+                     (apply test/contains checkers modifiers))))
+
+(defn contains-map [value] (test/contains value))
+(defn contains-vector
+  ([value] (test/contains value))
+  ([value modifiers] (apply test/contains value modifiers)))
+(defn contains-set [value] (test/contains value))
+(defn just-map [value] (test/just value))
+(defn just-vector
+  ([value] (test/just value))
+  ([value modifiers] (apply test/just value modifiers)))
+(defn just-set [value] (test/just value))
+
+(defmacro contains-in [value] `(code.test/contains ~value))
+(defmacro just-in [value] `(code.test/just ~value))

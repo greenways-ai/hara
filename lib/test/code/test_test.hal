@@ -13,7 +13,12 @@
   (throw "expected") => (throws))
 
 (fact "supports predicate matchers"
+  {:tags [:unit :matcher]}
   42 => (satisfies (fn [value] (= 42 value))))
+
+(fact "records skipped facts"
+  {:skip true :tags [:slow]}
+  (throw "must not run") => :never)
 
 (def lifecycle (atom []))
 
@@ -27,6 +32,7 @@
 (def reporter (event-reporter))
 (def summary (run {:namespace "code.test-test"
                    :reporter reporter}))
+(def positional-summary (run '[missing]))
 
 (def timeout-timer
   (function-timer
@@ -45,6 +51,43 @@
   (run {:namespace "code.test-test"
         :control (function-control (fn [fact] true))}))
 
+(def fixture-events (atom []))
+(def fixture-summary
+  (run {:namespace "code.test-test"
+        :name "evaluates ordinary equality"
+        :before-all (fn []
+                      (swap! fixture-events
+                             (fn [events] (conj events :before-all))))
+        :before-each (fn []
+                       (swap! fixture-events
+                              (fn [events] (conj events :before-each))))
+        :after-each (fn []
+                      (swap! fixture-events
+                             (fn [events] (conj events :after-each))))
+        :after-all (fn []
+                     (swap! fixture-events
+                            (fn [events] (conj events :after-all))))}))
+
+(def tagged-summary
+  (run {:namespace "code.test-test"
+        :include-tags :matcher}))
+
+(def fail-fast-runs (atom 0))
+(register! "fail-fast/1"
+           (fn [options]
+             [{:pass false :actual :no :expected :yes}]))
+(register! "fail-fast/2"
+           (fn [options]
+             (do
+               (swap! fail-fast-runs inc)
+               [{:pass true :actual :yes :expected :yes}])))
+(def fail-fast-summary
+  (run {:namespace "code.test-test"
+        :name "fail-fast/"
+        :fail-fast true}))
+(remove-fact "fail-fast/1")
+(remove-fact "fail-fast/2")
+
 (def clock-values (atom [10 18]))
 (def timed-result
   (run-fact
@@ -58,16 +101,23 @@
          value)))}))
 
 (def results
-  [(legacy/check "portable facts pass"
-                 [(:status summary)
-                  (:passed (:counts summary))
-                  (count (:results summary))
-                  (count (:checks (first (:results summary))))
+  [(legacy/check "archived positional namespace selectors are supported"
+                 [(get positional-summary :status)
+                  (get positional-summary :facts)
+                  (get positional-summary :checks)]
+                 [:passed 0 0])
+   (legacy/check "portable facts pass"
+                 [(get summary :status)
+                  (get (get summary :counts) :passed)
+                  (count (get summary :results))
+                  (count (get (first (get summary :results)) :checks))
                   (deref lifecycle)]
-                 [:passed 5 5 2 [:before :after]])
+                 [:passed 5 6 1 [:before :after]])
    (legacy/check "runner emits structured events without printing"
-                 (vec (map :event (reporter-events reporter)))
+                 (vec (map (fn [report] (get report :event))
+                           (reporter-events reporter)))
                  [:run/start
+                  :fact/start :fact/end
                   :fact/start :fact/end
                   :fact/start :fact/end
                   :fact/start :fact/end
@@ -75,17 +125,28 @@
                   :fact/start :fact/end
                   :run/end])
    (legacy/check "host timers classify timeout diagnostics"
-                 [(:status timeout-result)
-                  (:pass timeout-result)
-                  (:timeout timeout-result)]
+                 [(get timeout-result :status)
+                  (get timeout-result :pass)
+                  (get timeout-result :timeout)]
                  [:timeout false 25])
    (legacy/check "host control cancels facts without invoking them"
-                 [(:status cancelled-summary)
-                  (:cancelled (:counts cancelled-summary))
+                 [(get cancelled-summary :status)
+                  (get (get cancelled-summary :counts) :cancelled)
                   (deref lifecycle)]
                  [:passed 5 [:before :after]])
    (legacy/check "host clocks attach deterministic elapsed time"
-                 [(:status timed-result) (:elapsed timed-result)]
-                 [:passed 8])])
+                 [(get timed-result :status) (get timed-result :elapsed)]
+                 [:passed 8])
+   (legacy/check "runner supports suite fixtures, selectors, tags, and skips"
+                 [(deref fixture-events)
+                  (get fixture-summary :facts)
+                  (get tagged-summary :facts)
+                  (get (get summary :counts) :skipped)
+                  (get summary :checks)
+                  (get (get fail-fast-summary :counts) :failed)
+                  (get (get fail-fast-summary :counts) :cancelled)
+                  (deref fail-fast-runs)]
+                 [[:before-all :before-each :after-each :after-all]
+                  1 1 1 6 1 1 0])])
 
 (legacy/print-results results)

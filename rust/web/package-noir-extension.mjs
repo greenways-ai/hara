@@ -17,9 +17,8 @@ await cp(resolve(source, "hara.extension.edn"), resolve(output, "hara.extension.
 await cp(resolve(source, "package.json"), resolve(output, "package.json"));
 await mkdir(resolve(output, "node"), { recursive: true });
 await cp(resolve(web, "dist-node/worker.mjs"), resolve(output, "node/worker.mjs"));
-await cp(resolve(source, "browser"), resolve(output, "browser"), { recursive: true });
-await cp(resolve(source, "assets/noir-provider.mjs"), resolve(assets, "noir-provider.mjs"));
-await cp(resolve(web, "hta.js"), resolve(assets, "hta.js"));
+await mkdir(resolve(output, "browser"), { recursive: true });
+await cp(resolve(web, "dist-provider/worker.mjs"), resolve(output, "browser/worker.mjs"));
 
 const compiler = resolve(web, "node_modules/@noir-lang/noir_wasm/dist/web/main.mjs");
 await cp(compiler, resolve(web, "dist/noir-wasm.mjs"));

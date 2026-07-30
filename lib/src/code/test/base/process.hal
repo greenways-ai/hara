@@ -1,0 +1,21 @@
+(ns code.test.base.process
+  (:require [code.test :as test]))
+
+(defn evaluate
+  [input]
+  (try
+    {:type :code/test
+     :status :success
+     :data (if (map? input)
+             ((or (:function input) (fn [] (:form input))))
+             (input))}
+    (catch Throwable error
+      {:type :code/test :status :exception :data error})))
+
+(defn infer-function [form] (fn [] form))
+(defn attach-meta [result metadata] (assoc result :meta metadata))
+(defn evaluate-on-error [result] result)
+(defn process [input] (evaluate input))
+(defn collect [results] (vec results))
+(defn skip-check [check] (assoc check :status :skipped))
+(defn run-check [thunk expected] (test/check thunk expected))

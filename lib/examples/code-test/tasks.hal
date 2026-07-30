@@ -1,5 +1,5 @@
 (ns example.code-test.tasks
-  (:require [std.task :as task]))
+  (:require [std.lib.task :as task]))
 
 (task/deftask double-task
   {:template :default

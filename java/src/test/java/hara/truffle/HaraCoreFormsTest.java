@@ -60,15 +60,15 @@ public class HaraCoreFormsTest {
               .eval(
                   HaraLanguage.ID,
                   "(def ^:dynamic answer 41) "
-                      + "(protocol-call IReset reset (var answer) 42) "
+                      + "(IReset/reset (var answer) 42) "
                       + "(deref (var answer))")
               .asLong());
       assertTrue(
           context
               .eval(
                   HaraLanguage.ID,
-                  "(protocol-call ILookup lookup "
-                      + "(protocol-call IObjType meta (var answer)) :dynamic)")
+                  "(ILookup/lookup "
+                      + "(IObjType/meta (var answer)) :dynamic)")
               .asBoolean());
     }
   }

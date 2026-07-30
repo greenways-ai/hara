@@ -13,9 +13,7 @@
   "assets/barretenberg.js"
   "assets/barretenberg-threads.js"
   "assets/main.worker.js"
-  "assets/thread.worker.js"
-  "assets/hta.js"
-  "assets/noir-provider.mjs"]
+  "assets/thread.worker.js"]
  :exports
  {"compile" {:args [:value] :returns :value :async true}
   "prove"   {:args [:value :map] :returns :value :async true}

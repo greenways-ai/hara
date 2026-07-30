@@ -1,0 +1,10 @@
+(ns std.lib.block.protocol)
+
+(defprotocol IBlock
+  (block-type [block])
+  (block-tag [block])
+  (block-string [block])
+  (block-value [block])
+  (block-children [block])
+  (block-verify [block])
+  (block-info [block]))

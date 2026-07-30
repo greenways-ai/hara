@@ -74,8 +74,8 @@
                                    state
                                    options
                                    mode
-                                   (+ (std.native.Numbers/long indent)
-                                      (std.native.Numbers/long offset))))
+                                   (+ (Numbers/long indent)
+                                      (Numbers/long offset))))
                     (if (= tag :align)
                       (let [offset (nth document 1)
                             children (rest (rest document))]

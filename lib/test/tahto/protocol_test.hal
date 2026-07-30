@@ -57,16 +57,11 @@
 
 (def results
   [(test/check "compiler phase protocols dispatch independently"
-               [(protocol-call compiler/INormalizer
-                               normalize-form fixture '(+ 1 2) {})
-                (protocol-call compiler/IStager
-                               stage-form fixture '(+ 1 2) fixture {})
-                (protocol-call compiler/IRewriter
-                               rewrite-form fixture '(+ 1 2) fixture {})
-                (protocol-call compiler/IEmitter
-                               emit-form fixture '(+ 1 2) fixture {})
-                (protocol-call compiler/ICompiler
-                               compile-form fixture '(+ 1 2) {})]
+               [(compiler/normalize-form fixture '(+ 1 2) {})
+                (compiler/stage-form fixture '(+ 1 2) fixture {})
+                (compiler/rewrite-form fixture '(+ 1 2) fixture {})
+                (compiler/emit-form fixture '(+ 1 2) fixture {})
+                (compiler/compile-form fixture '(+ 1 2) {})]
                [[:fixture :normalize '(+ 1 2) {}]
                 [:fixture :stage '(+ 1 2) fixture {}]
                 [:fixture :rewrite '(+ 1 2) fixture {}]
@@ -74,23 +69,18 @@
                 [:fixture :compile '(+ 1 2) {}]])
    (test/check "analysis protocols keep inference separate from diagnostics"
                (let [inference
-                     (protocol-call compiler/IInferencer
-                                    infer-form fixture '(+ 1 2) fixture {})]
+                     (compiler/infer-form fixture '(+ 1 2) fixture {})]
                  [inference
-                  (protocol-call compiler/ILinter
-                                 lint-form fixture '(+ 1 2)
+                  (compiler/lint-form fixture '(+ 1 2)
                                  inference fixture {})])
                [{:tag :fixture :form '(+ 1 2)}
                 [{:tag :fixture
                   :form '(+ 1 2)
                   :inference {:tag :fixture :form '(+ 1 2)}}]])
    (test/check "registry protocols separate catalog, mutation, and resolution"
-               [(protocol-call registry/IGrammarCatalog
-                               find-source fixture [:grammar :js 1])
-                (protocol-call registry/IGrammarRegistry
-                               install-source fixture {:grammar/id :js})
-                (protocol-call registry/IGrammarResolver
-                               resolve-grammar fixture
+               [(registry/find-source fixture [:grammar :js 1])
+                (registry/install-source fixture {:grammar/id :js})
+                (registry/resolve-grammar fixture
                                {:grammar/id :js :grammar/version 1})]
                [[:fixture :find [:grammar :js 1]]
                 [:fixture :register {:grammar/id :js}]
