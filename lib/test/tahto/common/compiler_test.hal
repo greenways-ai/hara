@@ -1,0 +1,131 @@
+(ns tahto.common.compiler-test
+  (:require [std.lib.test :as test]
+            [tahto.common.compiler :as compiler]
+            [tahto.common.grammar-api :as grammar]
+            [tahto.common.registry :as registry]
+            [tahto.protocol.compiler :as protocol]))
+
+(defn rewrite-add
+  [form context]
+  (if (= form '(+ 1 2))
+    '(+ 2 3)
+    form))
+
+(defstruct WarningLinter [])
+
+(extend-type WarningLinter protocol/ILinter
+  (lint-form [linter staged inference selected context]
+    [{:level :warning
+      :code :demo/lint
+      :form staged}]))
+
+(def template
+  (grammar/emit-template
+   {:template/id :js-default
+    :template/version 1
+    :template/value
+    {:token {:nil "null"}}}))
+
+(def grammar-v1
+  (grammar/definition
+   {:grammar/id :js
+    :grammar/version 1
+    :grammar/release "v1"
+    :grammar/emit-template
+    {:template/id :js-default
+     :template/version 1}
+    :operators
+    {:define
+     {:add {:op :add
+            :symbol #{'+}
+            :type :operator
+            :emit :infix
+            :raw "+"}}}}))
+
+(def grammar-v2
+  (grammar/definition
+   {:grammar/id :js
+    :grammar/version 2
+    :grammar/release "v2"
+    :grammar/emit-template
+    {:template/id :js-default
+     :template/version 1}
+    :operators
+    {:define
+     {:add {:op :add
+            :symbol #{'+}
+            :type :operator
+            :emit :infix
+            :raw "plus"}}}
+    :grammar/rewrite
+    {:staging
+     {:append ['tahto.common.compiler-test/rewrite-add]}}
+    :grammar/facets
+    {:jsx
+     {:operators
+      {:override {:add {:raw "jsx-plus"}}}}}
+    :grammar/facet-order [:jsx]}))
+
+(def catalog
+  (registry/install
+   (registry/install
+    (registry/install
+     (registry/registry)
+     template)
+    grammar-v1)
+   grammar-v2))
+
+(def instance
+  (compiler/compiler
+   catalog
+   {:linter (WarningLinter)}))
+
+(def compiled-v1
+  (compiler/compile
+   instance
+   '(+ 1 2)
+   {:grammar/id :js
+    :grammar/version 1}))
+
+(def compiled-v2
+  (compiler/compile
+   instance
+   '(+ 1 2)
+   {:grammar/id :js
+    :grammar/version 2}))
+
+(def compiled-jsx
+  (compiler/compile
+   instance
+   '(+ 1 2)
+   {:grammar/id :js
+    :grammar/version 2
+    :grammar/facets [:jsx]}))
+
+(def results
+  [(test/check "compiler selects explicit grammar versions"
+               [(:output compiled-v1)
+                (:output compiled-v2)]
+               ["(1 + 2)"
+                "(2 plus 3)"])
+   (test/check "compiler applies grammar flavours after version selection"
+               (:output compiled-jsx)
+               "(2 jsx-plus 3)")
+   (test/check "compiler retains phase results and diagnostics"
+               [(get-in compiled-v2 [:stages :normalized])
+                (get-in compiled-v2 [:stages :staged])
+                (get-in compiled-v2 [:stages :rewritten])
+                (:inference compiled-v2)
+                (:diagnostics compiled-v2)
+                (map (fn [entry] (:phase entry))
+                     (get-in compiled-v2 [:provenance :phases]))]
+               ['(+ 1 2)
+                '(+ 1 2)
+                '(+ 2 3)
+                {:types {}}
+                [{:level :warning
+                  :code :demo/lint
+                  :form '(+ 1 2)}]
+                [:normalize :stage :infer :lint :rewrite :emit]])])
+
+(test/print-results results)
