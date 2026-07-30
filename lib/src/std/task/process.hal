@@ -1,9 +1,0 @@
-;; Temporary compatibility facade. New code should use std.lib.task.process.
-(ns std.task.process
-  (:require [std.lib.task.process :as process]))
-
-(def task-section process/task-section)
-(def main-function process/main-function)
-(def wrap-execute process/wrap-execute)
-(def task-inputs process/task-inputs)
-(def invoke process/invoke)

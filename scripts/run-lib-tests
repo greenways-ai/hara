@@ -21,6 +21,25 @@ run_file() {
         return 1
     fi
 
+    # code.test/fact suites return a structured summary map.
+    local last_summary
+    last_summary=$(echo "$output" | grep -E '^"?\{' | tail -n 1)
+    if [ -n "$last_summary" ]; then
+        if echo "$last_summary" | grep -q ':status :passed'; then
+            local fact_count
+            local check_count
+            fact_count=$(echo "$last_summary" |
+                sed -n 's/.*:facts \([0-9][0-9]*\).*/\1/p')
+            check_count=$(echo "$last_summary" |
+                sed -n 's/.*:checks \([0-9][0-9]*\).*/\1/p')
+            echo "PASS  $file ($fact_count facts, $check_count checks)"
+            return 0
+        fi
+        echo "FAIL  $file"
+        echo "$last_summary" | sed 's/^/      /'
+        return 1
+    fi
+
     # Accept either a result vector or its pr-str representation. Older tests
     # return the serialized form, while std.lib.test returns the vector itself.
     local last_vector

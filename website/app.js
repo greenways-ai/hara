@@ -2520,17 +2520,17 @@ async function bootRuntime() {
     await state.broker.eval(ROOT, defaultBootstrap(SPACE));
     setKernelProgress(84, "LOADING WORKSPACE", "READING PROJECT MANIFESTS");
     await loadBackgroundWorkspace();
-    setKernelProgress(92, "LOADING SOURCE", "EVALUATING BACKGROUND PROGRAM");
-    await loadBackgroundSource(state.backgroundSource);
     const files = await listFiles();
     if (!files.length) await seedFiles();
-    setRuntimeStatus("WASM // LIVE", "live");
-    elements.backgroundPicker.hidden = false;
     elements.editorStatus.textContent = "READY";
     const preferred = localStorage.getItem(ACTIVE_FILE_KEY);
     const path = state.files.includes(preferred) ? preferred :
       state.files.includes("/sketches/neon-orbit.hal") ? "/sketches/neon-orbit.hal" : state.files[0];
     if (path) await openFile(path, true, false);
+    setKernelProgress(92, "LOADING SOURCE", "EVALUATING BACKGROUND PROGRAM");
+    await loadBackgroundSource(state.backgroundSource);
+    setRuntimeStatus("WASM // LIVE", "live");
+    elements.backgroundPicker.hidden = false;
     syncHighlight();
     await renderSavedWorkspaces();
     setWorkspace(0, { reloadBackground: false });

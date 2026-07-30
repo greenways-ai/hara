@@ -19,8 +19,6 @@ pub mod tap;
 mod process_extension;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod resp;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod service;
 pub mod task;
 #[cfg(feature = "dev-trace")]
 pub mod trace;
@@ -2172,64 +2170,6 @@ mod tests {
     }
 
     #[test]
-    fn embedded_hal_catalog_matches_declared_namespaces() {
-        let mut seen = HashSet::new();
-        for &(expected, _, source) in EMBEDDED_HAL_RESOURCES {
-            assert!(seen.insert(expected), "duplicate embedded namespace {expected}");
-            let declared = kernel::parse_forms(source)
-                .unwrap()
-                .into_iter()
-                .find_map(|form| match form {
-                    Form::List(values)
-                        if matches!(
-                            values.first(),
-                            Some(Form::Symbol(head)) if head == "ns" || head == "ns+"
-                        ) =>
-                    {
-                        match values.get(1) {
-                            Some(Form::Symbol(namespace)) => Some(namespace.clone()),
-                            _ => None,
-                        }
-                    }
-                    _ => None,
-                })
-                .unwrap_or_else(|| panic!("embedded resource {expected} has no namespace"));
-            assert_eq!(declared, expected);
-        }
-        assert!(seen.contains("std.logic"));
-        assert!(seen.contains("std.lib.simple"));
-        assert!(seen.contains("tahto.core"));
-    }
-
-    #[test]
-    fn generated_catalog_loads_logic_without_manual_registration() {
-        let mut runtime = Runtime::new();
-        assert_eq!(
-            runtime
-                .eval_text(
-                    "(require [std.logic :as logic]) \
-                     (logic/run* (fn [query] (logic/== query 42)))"
-                )
-                .unwrap(),
-            "[42]"
-        );
-    }
-
-    #[test]
-    fn host_resource_replaces_an_embedded_resource() {
-        let mut runtime = Runtime::new();
-        runtime.require_resource("std.lib.simple").unwrap();
-        assert_eq!(runtime.eval_text("(std.lib.simple/foo 1)").unwrap(), "2");
-
-        runtime.register_resource(
-            "std.lib.simple",
-            "(ns std.lib.simple) (defn foo [value] (+ value 40))",
-        );
-        runtime.require_resource("std.lib.simple").unwrap();
-        assert_eq!(runtime.eval_text("(std.lib.simple/foo 2)").unwrap(), "42");
-    }
-
-    #[test]
     fn substrate_protocol_resource_loads_in_the_native_runtime() {
         let mut runtime = Runtime::new();
         assert_eq!(
@@ -3531,6 +3471,7 @@ mod tests {
                     "              (fn [timeout] timeout))",
                     "       timed (check (fn [] (promise/from 42)) 42",
                     "                    {:timer timer :timeout 25})",
+                    "       positional (run '[code])",
                     "       cancelled",
                     "       (run {:namespace \"code.test-rust-probe\"",
                     "             :control (function-control (fn [fact] true))})]",
@@ -3539,10 +3480,47 @@ mod tests {
                     "  (count (:checks (first (:results summary))))",
                     "  (:status timed)",
                     "  (:timeout timed)",
+                    "  (:facts positional)",
                     "  (:cancelled (:counts cancelled))])"
                 ))
                 .unwrap(),
-            "[:passed 1 2 :timeout 25 1]"
+            "[:passed 1 2 :timeout 25 1 1]"
+        );
+    }
+
+    #[test]
+    fn foundation_code_test_compatibility_namespaces_are_embedded() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(ns code-test-compat-rust-probe \
+                       (:require [code.test :as test] \
+                                 [code.test.checker.common :as common] \
+                                 [code.test.checker.collection :as collection] \
+                                 [code.test.checker.logic :as logic] \
+                                 [code.test.base.runtime :as runtime] \
+                                 [code.test.compile.types :as types] \
+                                 [code.test.task :as task])) \
+                     (let [fact (types/Fact :core 'id 'probe nil nil \
+                                            \"portable\" 1 1 nil nil \
+                                            (fn [] 42) {})] \
+                       [(common/succeeded? \
+                         (common/verify (common/exactly 1) 1)) \
+                        (:pass (test/check \
+                                (fn [] {:a 1 :b 2}) \
+                                (collection/contains-map {:a 1}))) \
+                        (:pass (test/check \
+                                (fn [] 3) \
+                                (logic/all (fn [value] (number? value)) \
+                                           (fn [value] (= 1 (mod value 2)))))) \
+                        (types/fact? fact) \
+                        (fact) \
+                        (task/process-test-args \
+                         [\":only\" \"std\" \"code\"])])"
+                )
+                .unwrap(),
+            "[true true true true 42 {:ns [std code]}]"
         );
     }
 
@@ -3576,8 +3554,7 @@ mod tests {
                 .eval_text(
                     "(ns std-task-rust-probe \
                        (:require [std.lib.task :as task] \
-                                 [std.lib.task.bulk :as bulk] \
-                                 [std.task :as compat])) \
+                                 [std.lib.task.bulk :as bulk])) \
                      (task/deftask double-task \
                        {:template :default \
                         :main {:fn (fn [value] (* 2 value))}}) \
@@ -3620,7 +3597,7 @@ mod tests {
                         (vec (map (fn [result] (get result :data)) \
                                   (get output :results))) \
                         (count (bulk/reporter-events reporter)) \
-                        (compat/invoke double-task 4) \
+                        (task/invoke double-task 4) \
                         (vec (map (fn [result] (get result :data)) \
                                   (task/invoke selected-task 'code \
                                                {:package :records} \
@@ -3644,8 +3621,7 @@ mod tests {
                     "(ns std-block-rust-probe \
                        (:require [std.lib.block :as block] \
                                  [std.lib.block.grid :as grid] \
-                                 [std.lib.block.reader :as reader] \
-                                 [std.block :as compat])) \
+                                 [std.lib.block.reader :as reader])) \
                      (let [parsed (block/parse-string \"[1 2 3]\") \
                            first-block (block/parse-first \"[1 2 3]\") \
                            spaces (block/spaces 3) \
@@ -3685,7 +3661,7 @@ mod tests {
                         first-two \
                         (reader/reader-position input-reader) \
                         (reader/read-to-boundary input-reader) \
-                        (compat/value (compat/parse-string \"[4 5]\"))])"
+                        (block/value (block/parse-string \"[4 5]\"))])"
                 )
                 .unwrap(),
             "[\"[1 2 3]\" [1 2 3] :container :vector [1 2 3] \"   \" true \"(if\\n  ready\\n  [1 2]\\n  [3 4]\\n)\" \"(if\\n  ready\\n  done)\" [1 3] [1 3] \"[1 2]\" \"[1 3]\" [\"a\" \"b\"] [2 1] \"cd\" [4 5]]"

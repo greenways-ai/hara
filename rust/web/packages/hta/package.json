@@ -1,0 +1,25 @@
+{
+  "name": "@hara-lang/hta",
+  "version": "0.1.0",
+  "description": "HTA codecs, browser hosts, and provider transports for Hara",
+  "license": "EPL-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./provider/browser": "./provider-browser.mjs",
+    "./provider/node": "./provider-node.mjs",
+    "./shared-worker": "./shared-worker.js",
+    "./worker": "./worker.js"
+  },
+  "files": [
+    "index.js",
+    "provider-browser.mjs",
+    "provider-common.mjs",
+    "provider-node.mjs",
+    "shared-worker.js",
+    "worker.js"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

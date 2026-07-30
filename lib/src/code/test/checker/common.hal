@@ -1,0 +1,36 @@
+(ns code.test.checker.common
+  (:require [code.test :as test]))
+
+(def exactly test/exactly)
+(def approx test/approx)
+(def satisfies test/satisfies)
+(def stores test/stores)
+(def anything test/anything)
+(def throws test/throws)
+(def checker test/matcher-for)
+(def ->checker test/matcher-for)
+
+(defn function-string [function] (str function))
+
+(defn checker?
+  [value]
+  (instance? code.test/Matcher value))
+
+(defn verify
+  [checker actual]
+  (let [result (test/check (fn [] actual) checker)]
+    {:type :code/test
+     :status (if (:pass result) :success :failure)
+     :data (:pass result)
+     :checker checker
+     :actual actual
+     :from :verify}))
+
+(defn succeeded?
+  [result]
+  (and (= :success (:status result))
+       (= true (:data result))))
+
+(defmacro capture
+  [& arguments]
+  `(fn [value#] true))

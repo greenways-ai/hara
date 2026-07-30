@@ -3,7 +3,6 @@
             [std.lib.block.check :as check]
             [std.lib.block.grid :as grid]
             [std.lib.block.reader :as reader]
-            [std.block :as compat]
             [std.lib.test :as test]))
 
 (def results
@@ -107,10 +106,6 @@
                  [(block/string form)
                   (block/string formatted)])
                ["(if\nready\ndone)"
-                "(if\n  ready\n  done)"])
-   (test/check "retains the temporary std.block compatibility facade"
-               [(compat/string (compat/parse-string "[1 2]"))
-                (compat/value (compat/parse-string "[1 2]"))]
-               ["[1 2]" [1 2]])])
+                "(if\n  ready\n  done)"])])
 
 (test/print-results results)

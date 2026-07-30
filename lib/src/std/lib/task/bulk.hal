@@ -1,7 +1,9 @@
 ;; Portable bulk task execution. This namespace emits structured reports and
 ;; never prints; hosts own terminal rendering and wall-clock implementations.
 (ns std.lib.task.bulk
-  (:require [std.lib.task.protocol :as protocol]))
+  (:require [std.lib.task.protocol :as protocol]
+            [std.lib.task.print :as print]
+            [std.foundation.string :as string]))
 
 (defstruct NullReporter [])
 (defstruct EventReporter [reports])
@@ -48,42 +50,118 @@
     (merge {:key input} value)
     {:key input :status :return :data value}))
 
+(defn bulk-display
+  [index-length input-length]
+  {:padding 1
+   :spacing 1
+   :columns [{:id :index :length index-length
+              :color [:blue] :align :right}
+             {:id :input :length input-length}
+             {:id :data :length 60 :color [:white]}
+             {:id :time :length 10 :color [:bold]}]})
+
 (defn bulk-process-item
-  [task function input params lookup env args]
+  [task function input params lookup env args index total display]
   (let [reporter (or (:reporter params) +null-reporter+)
         clock (or (:clock params) +zero-clock+)
         start (now-ms clock)]
     (report! reporter {:event :task/item-start :input input})
     (let [result
           (try
-            (merge (normalize-result
-                    input
-                    (apply function input params lookup env args))
-                   {:elapsed (- (now-ms clock) start)})
+            (let [elapsed (- (now-ms clock) start)]
+              (merge (normalize-result
+                      input
+                      (apply function input params lookup env args))
+                     {:elapsed elapsed :time elapsed}))
             (catch Throwable error
               {:key input
                :status :error
                :error (str error)
-               :elapsed (- (now-ms clock) start)}))]
+               :elapsed (- (now-ms clock) start)
+               :time (- (now-ms clock) start)}))]
       (report! reporter (merge {:event :task/item-end} result))
+      (if (get-in params [:print :item])
+        (let [item-config (or (field task :item) {})
+              display-function (or (:display item-config) identity)
+              item (if (= :return (:status result))
+                     (display-function (:data result))
+                     result)]
+          (print/print-row
+           [(str (inc index) "/" total)
+            (:key result)
+            item
+            (print/format-ms (:time result))]
+           display))
+        nil)
       result)))
+
+(defn indexed-inputs
+  [inputs]
+  (loop [index 0
+         output []]
+    (if (= index (count inputs))
+      output
+      (recur (inc index)
+             (conj output [index (nth inputs index)])))))
 
 (defn bulk-items
   [task function inputs params lookup env args]
-  (vec (map (fn [input]
-              (bulk-process-item task function input params lookup env args))
-            inputs)))
+  (let [total (count inputs)
+        index-length (+ 4 (string/length (str total)))
+        input-length
+        (+ 2
+           (reduce (fn [length input]
+                     (max length (string/length (str input))))
+                   0 inputs))
+        display (bulk-display index-length input-length)]
+    (if (get-in params [:print :item])
+      (do
+        (println)
+        (print/print-subtitle (str "ITEMS (" total ")"))
+        (println))
+      nil)
+    (loop [index 0
+           output []]
+      (if (= index total)
+        output
+        (recur
+         (inc index)
+         (conj output
+               (bulk-process-item task function
+                                  (nth inputs index) params lookup env args
+                                  index total display)))))))
 
 (defn bulk-warnings
-  [items]
-  (vec (filter (fn [item] (= :warn (get item :status))) items)))
+  ([items]
+   (vec (filter (fn [item] (= :warn (get item :status))) items)))
+  ([params items]
+   (let [warnings (bulk-warnings items)]
+     (if (and (get-in params [:print :result]) (seq warnings))
+       (do
+         (println)
+         (print/print-subtitle (str "WARNINGS (" (count warnings) ")"))
+         (println)
+         (map (fn [warning] (println (:data warning))) warnings))
+       nil)
+     warnings)))
 
 (defn bulk-errors
-  [items]
-  (vec (filter (fn [item]
-                 (or (= :error (get item :status))
-                     (= :critical (get item :status))))
-               items)))
+  ([items]
+   (vec (filter (fn [item]
+                  (or (= :error (get item :status))
+                      (= :critical (get item :status))))
+                items)))
+  ([params items]
+   (let [errors (bulk-errors items)]
+     (if (and (get-in params [:print :result]) (seq errors))
+       (do
+         (println)
+         (print/print-subtitle (str "ERRORS (" (count errors) ")"))
+         (println)
+         (map (fn [error] (println (or (:data error) (:error error))))
+              errors))
+       nil)
+     errors)))
 
 (defn result-ignored?
   [task item]
@@ -93,11 +171,59 @@
     (or (not (= :return status))
         (if ignore (ignore (get item :data)) false))))
 
+(defn prepare-columns
+  [columns outputs]
+  (map
+   (fn [column]
+     (let [key (:key column)
+           length
+           (if (number? (:length column))
+             (:length column)
+             (+ 2
+                (reduce (fn [size output]
+                          (max size
+                               (string/length (str (get output key)))))
+                        0 outputs)))]
+       (assoc (assoc column :id key) :length length)))
+   columns))
+
 (defn bulk-results
   ([items]
    (bulk-results nil items))
   ([task items]
-   (vec (filter (fn [item] (not (result-ignored? task item))) items))))
+   (vec (filter (fn [item] (not (result-ignored? task item))) items)))
+  ([task params items]
+   (let [results (bulk-results task items)
+         result-config (or (field task :result) {})
+         columns (:columns result-config)
+         key-functions (or (:keys result-config) {})
+         outputs
+         (map
+          (fn [result]
+            (reduce (fn [output entry]
+                      (assoc output
+                             (nth entry 0)
+                             ((nth entry 1) (:data result))))
+                    result
+                    key-functions))
+          results)]
+     (if (get-in params [:print :result])
+       (do
+         (println)
+         (print/print-subtitle (str "RESULTS (" (count outputs) ")"))
+         (if (and (seq outputs) (seq columns))
+           (let [prepared (prepare-columns columns outputs)
+                 display {:padding 1 :spacing 1 :columns prepared}
+                 keys (map :key columns)]
+             (println)
+             (print/print-header keys display)
+             (map (fn [output]
+                    (print/print-row (map (fn [key] (get output key)) keys)
+                                     display))
+                  outputs))
+           nil))
+       nil)
+     (vec outputs))))
 
 (defn bulk-summary
   ([items]
@@ -138,7 +264,20 @@
          finalise (get summary-config :finalise)]
      (if finalise
        (finalise aggregated items results)
-       aggregated))))
+       aggregated)))
+  ([task params items results warnings errors elapsed]
+   (let [summary (bulk-summary task items elapsed)]
+     (if (get-in params [:print :summary])
+       (do
+         (println)
+         (print/print-subtitle
+          (str "SUMMARY "
+               (assoc summary
+                      :cumulative (print/format-ms (:cumulative summary))
+                      :elapsed (print/format-ms (:elapsed summary)))))
+         (println))
+       nil)
+     summary)))
 
 (defn output-value
   [function value]
@@ -208,16 +347,27 @@
   (let [reporter (or (:reporter params) +null-reporter+)
         clock (or (:clock params) +zero-clock+)
         args (vec args)
-        start (now-ms clock)]
+        start (now-ms clock)
+        printing (:print params)
+        title (:title params)]
+    (if (and title
+             (or (:function printing)
+                 (:item printing)
+                 (:result printing)
+                 (:summary printing)))
+      (print/print-title
+       (if (fn? title) (title params env) title))
+      nil)
     (report! reporter {:event :task/bulk-start :count (count inputs)})
     (let [items (bulk-items task function inputs
                             (assoc params :bulk true)
                             lookup env args)
           elapsed (- (now-ms clock) start)
-          results (bulk-results task items)
-          warnings (bulk-warnings items)
-          errors (bulk-errors items)
-          summary (bulk-summary task items elapsed)
+          warnings (bulk-warnings params items)
+          errors (bulk-errors params items)
+          results (bulk-results task params items)
+          summary (bulk-summary task params items results
+                                warnings errors elapsed)
           bundle {:items items
                   :results results
                   :warnings warnings

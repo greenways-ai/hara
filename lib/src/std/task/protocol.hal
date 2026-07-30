@@ -1,8 +1,0 @@
-;; Temporary compatibility facade. New code should use std.lib.task.protocol.
-(ns std.task.protocol
-  (:require [std.lib.task.protocol :as protocol]))
-
-(def ITaskReporter protocol/ITaskReporter)
-(def report-task protocol/report-task)
-(def ITaskClock protocol/ITaskClock)
-(def task-now-ms protocol/task-now-ms)

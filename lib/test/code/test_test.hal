@@ -32,6 +32,7 @@
 (def reporter (event-reporter))
 (def summary (run {:namespace "code.test-test"
                    :reporter reporter}))
+(def positional-summary (run '[missing]))
 
 (def timeout-timer
   (function-timer
@@ -100,7 +101,12 @@
          value)))}))
 
 (def results
-  [(legacy/check "portable facts pass"
+  [(legacy/check "archived positional namespace selectors are supported"
+                 [(get positional-summary :status)
+                  (get positional-summary :facts)
+                  (get positional-summary :checks)]
+                 [:passed 0 0])
+   (legacy/check "portable facts pass"
                  [(get summary :status)
                   (get (get summary :counts) :passed)
                   (count (get summary :results))
@@ -136,7 +142,7 @@
                   (get fixture-summary :facts)
                   (get tagged-summary :facts)
                   (get (get summary :counts) :skipped)
-                  (get (get summary :checks) :total)
+                  (get summary :checks)
                   (get (get fail-fast-summary :counts) :failed)
                   (get (get fail-fast-summary :counts) :cancelled)
                   (deref fail-fast-runs)]

@@ -12,7 +12,7 @@ struct Session {
     instance: Instance,
 }
 
-/// Process-shareable compiled code. Fabric stores one of these per artifact
+/// Process-shareable compiled code. Hosts can store one of these per artifact
 /// digest and creates a fresh provider/store for every session that loads it.
 #[derive(Clone)]
 pub struct CompiledWasmModule {

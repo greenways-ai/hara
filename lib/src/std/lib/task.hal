@@ -1,7 +1,9 @@
-;; Portable task descriptions and invocation. Presentation is deliberately
-;; absent: std.lib.task.bulk reports data through std.lib.task.protocol.
+;; Portable task descriptions and invocation, including Foundation-compatible
+;; invocation and display protocols.
 (ns std.lib.task
-  (:require [std.lib.task.process :as process]))
+  (:require [std.lib.task.process :as process]
+            [std.foundation.string :as string]
+            [std.foundation.edn :as edn]))
 
 (defn task-defaults
   [kind]
@@ -29,7 +31,11 @@
 
 (defn task-info
   [task]
-  {:fn (field task :name)})
+  {:fn (symbol (field task :name))})
+
+(defn task-string
+  [task]
+  (str "#task" (task-status task) " " (task-info task)))
 
 (defn single-function-print
   "Retains the Foundation option normalisation without performing output."
@@ -84,6 +90,83 @@
 (defn invoke
   [task & arguments]
   (apply process/invoke task arguments))
+
+(extend-type Task std.protocol.ifn/IFn
+  (invoke [task & arguments]
+    (apply invoke task arguments)))
+
+(extend-type Task std.protocol.idisplay/IDisplay
+  (display [task]
+    (task-string task)))
+
+(defn read-cli-arg
+  "Reads one command-line token as EDN, falling back to the original string."
+  [value]
+  (try
+    (edn/read value)
+    (catch Throwable error value)))
+
+(defn keyword-cli-arg?
+  [value]
+  (keyword? (read-cli-arg value)))
+
+(defn vector-tail
+  [values start]
+  (loop [index start
+         output []]
+    (if (= index (count values))
+      output
+      (recur (inc index) (conj output (nth values index))))))
+
+(defn cli-selector-values
+  [arguments]
+  (loop [remaining (vec arguments)
+         selected []]
+    (if (or (empty? remaining)
+            (keyword-cli-arg? (first remaining)))
+      selected
+      (recur (vector-tail remaining 1)
+             (conj selected (read-cli-arg (first remaining)))))))
+
+(defn collapse-only
+  "Collapses consecutive selectors following :only into one vector value."
+  [arguments]
+  (loop [remaining (vec arguments)
+         output []]
+    (if (empty? remaining)
+      output
+      (let [key (first remaining)
+            tail (vector-tail remaining 1)]
+        (if (= :only (read-cli-arg key))
+          (let [values (cli-selector-values tail)]
+            (if (empty? values)
+              (recur tail (conj output key))
+              (recur (vector-tail tail (count values))
+                     (conj (conj output key) (pr-str values)))))
+          (recur tail (conj output key)))))))
+
+(defn process-ns-args
+  "Processes Foundation task CLI options, including :only and :with."
+  [arguments]
+  (loop [remaining (vec arguments)
+         output {}]
+    (if (empty? remaining)
+      output
+      (let [raw-key (first remaining)
+            key (read-cli-arg raw-key)
+            tail (vector-tail remaining 1)
+            has-value (not (empty? tail))
+            value (if has-value (read-cli-arg (first tail)) nil)]
+        (if (not (keyword? key))
+          (recur tail output)
+          (if (or (not has-value) (keyword? value))
+            (recur tail (assoc output key true))
+            (recur (vector-tail tail 1)
+                   (if (= key :only)
+                     (assoc output :ns value)
+                     (if (= key :with)
+                       (assoc output :ns [value])
+                       (assoc output key value))))))))))
 
 (def select-filter process/select-filter)
 (def select-inputs process/select-inputs)

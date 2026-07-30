@@ -1,0 +1,13 @@
+(ns code.test.compile.snippet)
+
+(defn fact-setup [fact] (:setup fact))
+(defn fact-teardown [fact] (:teardown fact))
+(defn fact-wrap-ceremony [function setup teardown]
+  (fn []
+    (try
+      (do (if setup (setup) nil) (function))
+      (finally (if teardown (teardown) nil)))))
+(defn fact-wrap-check [function check]
+  (fn [] (check (function))))
+(defn fact-slim [fact]
+  (dissoc fact :source :function :setup :teardown))

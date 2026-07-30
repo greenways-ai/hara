@@ -1,7 +1,0 @@
-;; Temporary compatibility facade. New code should use std.lib.block.parse.
-(ns std.block.parse
-  (:require [std.lib.block.parse :as parse]))
-
-(def parse-string parse/parse-string)
-(def parse-root parse/parse-root)
-(def parse-first parse/parse-first)

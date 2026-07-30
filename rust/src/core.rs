@@ -6179,6 +6179,7 @@ fn collection_count(value: &Value) -> Result<Value, String> {
         Value::ByteBuffer(v) => v.borrow().len(),
         Value::Array(v) => v.borrow().len(),
         Value::Object(v) => v.borrow().len(),
+        Value::Struct(v) => v.values.len(),
         Value::Iterator(_) => {
             if !iterator_is_finite(value) {
                 return Err("count expects a finite collection".into());
@@ -6275,6 +6276,22 @@ fn collection_get(value: &Value, key: &Value, default: Value) -> Result<Value, S
                 .iter()
                 .find(|(candidate, _)| candidate == name)
                 .map(|(_, value)| value.clone())
+                .unwrap_or(default))
+        }
+        Value::Struct(value) => {
+            let name = match key {
+                Value::String(name) => name.as_str(),
+                Value::Keyword(name) => name.as_str(),
+                Value::Symbol(name) if name.get_namespace().is_none() => name.get_name(),
+                _ => return Ok(default),
+            };
+            Ok(value
+                .ty
+                .fields
+                .iter()
+                .position(|candidate| candidate == name)
+                .and_then(|index| value.values.get(index))
+                .cloned()
                 .unwrap_or(default))
         }
         _ => Err("get expects a collection".into()),
@@ -6997,6 +7014,16 @@ pub(crate) fn call_value(callable: Value, arguments: Vec<Value>) -> Result<Value
                 ty,
                 values: arguments,
             })))
+        }
+        value @ Value::Struct(_) => {
+            let mut protocol_arguments = Vec::with_capacity(arguments.len() + 1);
+            protocol_arguments.push(value);
+            protocol_arguments.extend(arguments);
+            protocol_call(
+                "std.protocol.ifn/IFn",
+                "invoke",
+                &protocol_arguments,
+            )
         }
         Value::Keyword(keyword) => match arguments.as_slice() {
             [target] => lookup(target, &Value::Keyword(keyword), Value::Nil),

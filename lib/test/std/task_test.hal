@@ -2,7 +2,7 @@
   (:require [std.lib.test :as test]
             [std.lib.task :as task]
             [std.lib.task.bulk :as bulk]
-            [std.task :as compat]))
+            [std.lib.task.print :as print]))
 
 (task/deftask double-task
   {:template :default
@@ -45,7 +45,7 @@
                 (task/task-status double-task)
                 (task/task-info double-task)
                 (task/invoke double-task 3)]
-               [true :default {:fn "double-task"} 6])
+               [true :default {:fn 'double-task} 6])
    (test/check "bulk execution reports data without printing"
                (let [reporter (bulk/event-reporter)
                      output (task/invoke
@@ -94,8 +94,24 @@
    (test/check "zero-argument invocation constructs input, env, and lookup"
                (task/invoke constructed-task)
                [7 true :ready :ready])
-   (test/check "retains the temporary std.task compatibility facade"
-               (compat/invoke double-task 4)
-               8)])
+   (test/check "tasks retain Foundation callable and display behavior"
+               [(double-task 4)
+                (protocol-call std.protocol.idisplay/IDisplay
+                               display double-task)]
+               [8 "#task:default {:fn double-task}"])
+   (test/check "task report formatting preserves ANSI title and table output"
+               [(print/report-title "TASK")
+                (print/report-header
+                 [:id :value]
+                 {:padding 0
+                  :spacing 1
+                  :columns [{:length 4 :align :right}
+                            {:length 7 :align :left}]})
+                (task/process-ns-args
+                 (task/collapse-only
+                  [":only" "std" "code" ":parallel" "true"]))]
+               [(str "\u001b[1m\n----\nTASK\n----\u001b[0m")
+                (str "\u001b[1m  id value  \u001b[0m")
+                {:ns ['std 'code] :parallel true}])])
 
 (test/print-results results)

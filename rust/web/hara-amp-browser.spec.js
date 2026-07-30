@@ -23,6 +23,14 @@ test("Hara Amp routes WASM FFT frames through ns+ before canvas rendering", asyn
     .toBeGreaterThan(1);
   await expect.poll(async () => Number((await page.locator("[data-story-queue]").textContent()).split(" ")[0]))
     .toBeLessThanOrEqual(1);
+
+  await expect(page.locator(".story-next-copy strong")).toHaveText("Build View ↔ Stage View");
+  await page.locator("[data-workspace-next]").click();
+  await expect(page.getByRole("heading", { name: /A player is/ })).toBeVisible();
+  await expect(page.locator("[data-story-audio]")).toHaveText("PLAYING / WASM");
+  await page.locator("[data-workspace-prev]").click();
+  await expect(page.getByRole("button", { name: /PAUSE HARA AMP/ }))
+    .toHaveAttribute("aria-pressed", "true");
 });
 
 test("Hara Amp exposes synchronized Node/Text views and selectable completion", async ({ page }) => {
@@ -39,4 +47,48 @@ test("Hara Amp exposes synchronized Node/Text views and selectable completion", 
   await expect(page.getByRole("listbox")).toBeVisible();
   await page.getByRole("option", { name: /sonic\/status symbol/ }).click();
   await expect(repl).toHaveValue("sonic/status");
+
+  await repl.fill("(+ 19 23)");
+  await repl.press("Enter");
+  await expect(page.locator("[data-story-repl-history] > div").last().locator("output"))
+    .toHaveText("42");
+
+  await repl.fill("(str \"first\"\n \"second\")");
+  await repl.press("Shift+Enter");
+  await expect(repl).toHaveValue("(str \"first\"\n \"second\")\n");
+});
+
+test("story navigation continues through the animation stage and build screens", async ({ page }) => {
+  await page.goto("/target/www/");
+  const next = page.locator("[data-workspace-next]");
+  await expect(page.getByRole("button", { name: "START" })).toBeEnabled({
+    timeout: 60000
+  });
+  await page.getByRole("button", { name: "START" }).click();
+  await next.click();
+
+  const stage = page.frameLocator('iframe[title="Hara animation stage view"]');
+  await next.click();
+  await expect(stage.locator("body")).toHaveAttribute("data-view", "stage");
+  await expect(stage.getByRole("heading", { name: "DIRECT A CHARACTER" })).toBeVisible();
+
+  const build = page.frameLocator('iframe[title="Hara animation build view"]');
+  await next.click();
+  await expect(build.locator("body")).toHaveAttribute("data-view", "build");
+  await expect(build.getByRole("heading", { name: "HAL SOURCE" })).toBeVisible();
+  await expect(next).toBeDisabled();
+});
+
+test("startup does not route filesystem probes into the background task", async ({ page }) => {
+  await page.goto("/target/www/");
+  await expect(page.getByRole("button", { name: "START" })).toBeEnabled({
+    timeout: 60000
+  });
+  await page.reload();
+  await expect(page.getByRole("button", { name: "START" })).toBeEnabled({
+    timeout: 60000
+  });
+  await page.waitForTimeout(5000);
+  await expect(page.locator("[data-toasts]")).not.toContainText(/file\/(not-found|not-directory)/);
+  await expect(page.locator("[data-background-status]")).not.toContainText("ERROR");
 });
