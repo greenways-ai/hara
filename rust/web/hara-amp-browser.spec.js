@@ -78,3 +78,17 @@ test("story navigation continues through the animation stage and build screens",
   await expect(build.getByRole("heading", { name: "HAL SOURCE" })).toBeVisible();
   await expect(next).toBeDisabled();
 });
+
+test("startup does not route filesystem probes into the background task", async ({ page }) => {
+  await page.goto("/target/www/");
+  await expect(page.getByRole("button", { name: "START" })).toBeEnabled({
+    timeout: 60000
+  });
+  await page.reload();
+  await expect(page.getByRole("button", { name: "START" })).toBeEnabled({
+    timeout: 60000
+  });
+  await page.waitForTimeout(5000);
+  await expect(page.locator("[data-toasts]")).not.toContainText(/file\/(not-found|not-directory)/);
+  await expect(page.locator("[data-background-status]")).not.toContainText("ERROR");
+});
