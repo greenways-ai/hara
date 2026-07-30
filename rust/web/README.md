@@ -6,14 +6,21 @@ assets. The pages deploy copies the runtime-facing pieces under
 
 ## Pieces
 
-- `hta.js` / `hta-worker.js` — the raw HTA loader: `HtaContext` drives one
+- `packages/hta/` — the publishable `@hara-lang/hta` package: HTA1 codecs,
+  browser hosts, and reusable Node/browser provider transports. `hta.js`
+  remains a compatibility re-export for static browser consumers.
+- `packages/noir/` — the publishable `@hara-lang/noir` compile/prove/verify
+  adapter. The Noir extension consumes it through generated worker entries.
+- `hta-worker.js` — the raw HTA worker: `HtaContext` drives one
   raw wasm instance (`rust/raw`) inside a Web Worker over the `HTA1` binary
   wire format, with handles and the promise-provider contract
   (`specs/archive/planning/extensions/contract.md`).
 - `index.html` / `playground.js` — the wasm-bindgen playground page
   (in-browser runtime plus Noir proving).
 - `noir-loader.js` — Noir circuit loader/backends for the playground and the
-  Noir extension. `build:package:noir` builds its deterministic HARP archive.
+  Noir extension. `entries/noir-*.mjs` combine `@hara-lang/hta` and
+  `@hara-lang/noir` into self-contained provider workers;
+  `build:package:noir` builds the deterministic HARP archive.
 - `studio/` — the shared studio environment:
   - `broker.js` — kernel broker; one kernel = one Web Worker running one raw
     HTA wasm instance (mirrors the JVM `HaraSessionBroker`).

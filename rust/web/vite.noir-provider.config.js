@@ -3,11 +3,11 @@ import { resolve } from "node:path";
 
 export default defineConfig({
   build: {
-    target: "node18",
-    outDir: "dist-node",
+    target: "es2022",
+    outDir: "dist-provider",
     emptyOutDir: true,
     lib: {
-      entry: resolve(import.meta.dirname, "entries/noir-node.mjs"),
+      entry: resolve(import.meta.dirname, "entries/noir-browser.mjs"),
       formats: ["es"],
       fileName: () => "worker.mjs"
     }
