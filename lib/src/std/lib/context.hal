@@ -1,5 +1,5 @@
 ;; ==========================================================================
-;; std.foundation.context — named runtimes, spaces, and portable pointers.
+;; std.lib.context — named runtimes, spaces, and portable pointers.
 ;;
 ;;                         global registry
 ;;                               |
@@ -38,8 +38,8 @@
 ;; Spaces own live runtime instances; the registry owns reusable runtime
 ;; specifications. Pointers describe invocation but do not own the runtime.
 ;; ==========================================================================
-(ns std.foundation.context
-  (:require [std.foundation.component :as component]))
+(ns std.lib.context
+  (:require [std.lib.component :as component]))
 
 ;; Runtime and pointer value shapes.
 
@@ -56,7 +56,7 @@
    Calling it returns its arguments as a vector; lifecycle operations are
    successful no-ops."
   []
-  (std.foundation.context/runtime-null-type))
+  (std.lib.context/runtime-null-type))
 
 ;; The null runtime gives pointer invocation a total fallback.
 
@@ -170,7 +170,7 @@
   space
   "Creates an empty context space backed by an atom."
   []
-  (std.foundation.context/space-type (atom {})))
+  (std.lib.context/space-type (atom {})))
 
 (defn ^{:schema [:fn [:any] :bool]}
   space?
@@ -262,7 +262,7 @@
   ([context]
    (pointer context {}))
   ([context fields]
-   (std.foundation.context/pointer-type context fields nil nil)))
+   (std.lib.context/pointer-type context fields nil nil)))
 
 (defn ^{:schema [:fn [:any] :bool]}
   pointer?

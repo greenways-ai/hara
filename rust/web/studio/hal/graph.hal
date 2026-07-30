@@ -1,6 +1,7 @@
 ;; studio.graph — substrate-frame graph operations for Hara coordinators.
 (ns studio.graph
-  (:require [std.substrate.frame :as frame]))
+  (:require [std.lib.substrate.frame :as frame]
+            [std.foundation.host :as host]))
 
 (defn spawn
   ([descriptor]

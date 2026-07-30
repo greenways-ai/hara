@@ -808,9 +808,9 @@ public final class HaraNodes {
     @Override
     public Object execute(VirtualFrame frame) {
       HaraContext context = HaraLanguage.currentContext();
+      if (context.hasNativeSymbol(symbol)) return context.resolveNativeSymbol(symbol);
       HaraVar var = context.resolve(symbol);
       if (var == null) {
-        if (context.hasNativeSymbol(symbol)) return context.resolveNativeSymbol(symbol);
         throw unboundError("symbol");
       }
       return var.deref();

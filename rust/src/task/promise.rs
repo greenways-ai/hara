@@ -5,10 +5,48 @@ use std::time::{Duration, Instant};
 use crate::core::Value;
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum PromiseRejection {
+    Message(String),
+    Value(Value),
+}
+
+impl PromiseRejection {
+    pub fn value(&self) -> Value {
+        match self {
+            Self::Message(message) => Value::String(message.clone()),
+            Self::Value(value) => value.clone(),
+        }
+    }
+
+    pub fn message(&self) -> String {
+        match self {
+            Self::Message(message) => message.clone(),
+            Self::Value(value) => value.display(),
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Message(message) if message == "cancelled")
+    }
+}
+
+impl From<String> for PromiseRejection {
+    fn from(value: String) -> Self {
+        Self::Message(value)
+    }
+}
+
+impl From<&str> for PromiseRejection {
+    fn from(value: &str) -> Self {
+        Self::Message(value.into())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum PromiseState {
     Pending,
     Fulfilled(Value),
-    Rejected(String),
+    Rejected(PromiseRejection),
 }
 
 #[derive(Default)]
@@ -123,7 +161,15 @@ impl Promise {
     }
 
     pub fn reject(&self, error: impl Into<String>) -> bool {
-        self.settle(PromiseState::Rejected(error.into()))
+        self.reject_rejection(PromiseRejection::Message(error.into()))
+    }
+
+    pub fn reject_value(&self, error: Value) -> bool {
+        self.reject_rejection(PromiseRejection::Value(error))
+    }
+
+    pub fn reject_rejection(&self, error: PromiseRejection) -> bool {
+        self.settle(PromiseState::Rejected(error))
     }
 
     fn settle(&self, next: PromiseState) -> bool {
@@ -164,14 +210,14 @@ impl Promise {
                         destination.resolve(value);
                     }
                     PromiseState::Rejected(error) => {
-                        destination.reject(error);
+                        destination.reject_rejection(error);
                     }
                     PromiseState::Pending => {}
                 }));
                 true
             }
             PromiseState::Fulfilled(value) => self.resolve(value),
-            PromiseState::Rejected(error) => self.reject(error),
+            PromiseState::Rejected(error) => self.reject_rejection(error),
         }
     }
 

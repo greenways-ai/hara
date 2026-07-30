@@ -2398,7 +2398,11 @@ async function bootRuntime() {
     state.runtimeModuleBytes = moduleBytes.byteLength;
     const resources = {};
     const studioResources = ["store", "boot", "node", "draw", "program", "graph", "session"];
-    const standardResources = ["substrate/protocol", "substrate/frame", "substrate"];
+    const standardResources = [
+      "lib/substrate/protocol",
+      "lib/substrate/frame",
+      "lib/substrate"
+    ];
     const resourceCount = studioResources.length + standardResources.length;
     let resourceIndex = 0;
     for (const name of studioResources) {

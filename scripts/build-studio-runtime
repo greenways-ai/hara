@@ -17,14 +17,15 @@ if [ -e "$STAGE" ]; then
   echo "refusing to replace existing staging directory: $STAGE" >&2
   exit 1
 fi
-mkdir -p "$STAGE/rust/studio/hal" "$STAGE/rust/studio/capabilities" "$STAGE/rust/ui" \
+mkdir -p "$STAGE/rust/host" "$STAGE/rust/studio/hal" "$STAGE/rust/studio/capabilities" "$STAGE/rust/ui" \
          "$STAGE/examples/starter/src" \
          "$STAGE/examples/game/src" \
          "$STAGE/examples/music/src" \
          "$STAGE/examples/music/runtime" \
+         "$STAGE/examples/music/runtime/host" \
          "$STAGE/examples/music/runtime/studio/hal" \
          "$STAGE/examples/music/runtime/studio/capabilities" \
-         "$STAGE/examples/music/runtime/std/substrate" \
+         "$STAGE/examples/music/runtime/std/lib/substrate" \
          "$STAGE/examples/music/examples/hara-amp/src" \
          "$STAGE/examples/music/assets/wasm" \
          "$STAGE/examples/music/assets/hara-amp" \
@@ -38,12 +39,13 @@ cp "$ROOT/website/vendor/hara-ui/tokens.css" \
    "$ROOT/website/vendor/hara-ui/studio-shell.js" \
    "$STAGE/rust/ui/"
 cp "$ROOT/rust/web/hta.js" "$ROOT/rust/web/hta-worker.js" "$STAGE/rust/"
+cp "$ROOT"/rust/web/host/*.js "$STAGE/rust/host/"
 cp "$ROOT"/rust/web/studio/*.js "$ROOT/rust/web/studio/studio.css" "$STAGE/rust/studio/"
 cp "$ROOT"/rust/web/studio/capabilities/*.js "$STAGE/rust/studio/capabilities/"
 cp "$ROOT"/rust/web/studio/hal/*.hal "$STAGE/rust/studio/hal/"
-cp "$ROOT/lib/src/std/substrate.hal" "$STAGE/rust/studio/hal/substrate.hal"
-cp "$ROOT/lib/src/std/substrate/frame.hal" "$STAGE/rust/studio/hal/substrate-frame.hal"
-cp "$ROOT/lib/src/std/substrate/protocol.hal" "$STAGE/rust/studio/hal/substrate-protocol.hal"
+cp "$ROOT/lib/src/std/lib/substrate.hal" "$STAGE/rust/studio/hal/substrate.hal"
+cp "$ROOT/lib/src/std/lib/substrate/frame.hal" "$STAGE/rust/studio/hal/substrate-frame.hal"
+cp "$ROOT/lib/src/std/lib/substrate/protocol.hal" "$STAGE/rust/studio/hal/substrate-protocol.hal"
 
 cp "$ROOT/website/examples/index.json" "$STAGE/examples/index.json"
 cp "$ROOT/website/examples/starter/project.edn" "$ROOT/website/examples/starter/workspace.edn" \
@@ -62,12 +64,13 @@ cp "$ROOT/website/hara-amp.html" "$ROOT/website/hara-amp.css" "$ROOT/website/har
    "$STAGE/examples/music/"
 cp "$RAW_WASM" "$STAGE/examples/music/runtime/hara.wasm"
 cp "$ROOT/rust/web/hta.js" "$ROOT/rust/web/hta-worker.js" "$STAGE/examples/music/runtime/"
+cp "$ROOT"/rust/web/host/*.js "$STAGE/examples/music/runtime/host/"
 cp "$ROOT"/rust/web/studio/*.js "$STAGE/examples/music/runtime/studio/"
 cp "$ROOT"/rust/web/studio/capabilities/*.js "$STAGE/examples/music/runtime/studio/capabilities/"
 cp "$ROOT"/rust/web/studio/hal/*.hal "$STAGE/examples/music/runtime/studio/hal/"
-cp "$ROOT/lib/src/std/substrate.hal" "$STAGE/examples/music/runtime/std/substrate.hal"
-cp "$ROOT/lib/src/std/substrate/frame.hal" "$ROOT/lib/src/std/substrate/protocol.hal" \
-   "$STAGE/examples/music/runtime/std/substrate/"
+cp "$ROOT/lib/src/std/lib/substrate.hal" "$STAGE/examples/music/runtime/std/lib/substrate.hal"
+cp "$ROOT/lib/src/std/lib/substrate/frame.hal" "$ROOT/lib/src/std/lib/substrate/protocol.hal" \
+   "$STAGE/examples/music/runtime/std/lib/substrate/"
 cp "$ROOT/website/examples/hara-amp/src/visualizer.hal" \
    "$STAGE/examples/music/examples/hara-amp/src/"
 cp "$ROOT/website/assets/wasm/demo-synth.wasm" "$ROOT/website/assets/wasm/demo-fft.wasm" \

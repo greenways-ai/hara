@@ -1,0 +1,7 @@
+(ns std.task.protocol)
+
+(defprotocol ITaskReporter
+  (report-task [reporter report]))
+
+(defprotocol ITaskClock
+  (task-now-ms [clock]))

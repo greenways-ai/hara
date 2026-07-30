@@ -1,6 +1,7 @@
 ;; studio.session — explicit, session-qualified stream ingress.
 (ns studio.session
-  (:require [std.substrate.frame :as frame]))
+  (:require [std.lib.substrate.frame :as frame]
+            [std.foundation.host :as host]))
 
 (def ^:private *next-callback* (atom 0))
 (def ^:private *callbacks* (atom []))

@@ -1,0 +1,30 @@
+;; ============================================================================
+;; code.test.protocol — behaviour contracts for the portable test stack.
+;;
+;; Test definitions and results remain ordinary immutable data. Protocols are
+;; reserved for stateful registries, host reporting/time, and matcher behaviour.
+;; ============================================================================
+(ns code.test.protocol)
+
+(defprotocol ITestRegistry
+  (registry-register [registry fact])
+  (registry-remove [registry namespace name])
+  (registry-clear [registry namespace])
+  (registry-facts [registry])
+  (registry-find [registry namespace name]))
+
+(defprotocol ITestReporter
+  (report-event [reporter event]))
+
+(defprotocol ITestClock
+  (now-ms [clock]))
+
+(defprotocol ITestTimer
+  (timeout-promise [timer promise milliseconds])
+  (cancel-timeout [timer timeout]))
+
+(defprotocol ITestControl
+  (cancelled? [control fact]))
+
+(defprotocol IMatcher
+  (match-value [matcher actual]))

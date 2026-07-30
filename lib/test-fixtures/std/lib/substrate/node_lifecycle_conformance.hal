@@ -1,6 +1,6 @@
-(ns std.substrate.node-lifecycle-conformance
-  (:require [std.substrate :as substrate]
-            [std.substrate.protocol :as protocol]))
+(ns std.lib.substrate.node-lifecycle-conformance
+  (:require [std.lib.substrate :as substrate]
+            [std.lib.substrate.protocol :as protocol]))
 
 (def node (substrate/node-create "node/conformance"))
 

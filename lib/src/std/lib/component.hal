@@ -1,5 +1,5 @@
 ;; ==========================================================================
-;; std.foundation.component — managed component lifecycle and properties.
+;; std.lib.component — managed component lifecycle and properties.
 ;;
 ;;                         component
 ;;                             |
@@ -30,7 +30,7 @@
 ;; `with-component` guarantees stop in a finally clause. Property descriptors
 ;; expose optional `:get` and `:set` functions without host reflection.
 ;; ==========================================================================
-(ns std.foundation.component)
+(ns std.lib.component)
 
 (defn ^{:schema [:fn [:any] :map]}
   props

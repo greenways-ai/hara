@@ -1,5 +1,6 @@
 (ns studio.node
-  (:require [std.substrate.frame :as frame]))
+  (:require [std.lib.substrate.frame :as frame]
+            [std.foundation.host :as host]))
 
 ;; The browser host binds this dynamically for every document generation.
 ;; ns+ source never receives or exposes its generated private module name.

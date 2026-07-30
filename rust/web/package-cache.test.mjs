@@ -4,7 +4,12 @@ import { webcrypto } from "node:crypto";
 
 globalThis.crypto ??= webcrypto;
 
-import { fetchVerifiedPackage, sha256 } from "./package-cache.js";
+import {
+  activateLockedPackages,
+  fetchVerifiedPackage,
+  inspectHarp,
+  sha256
+} from "./package-cache.js";
 
 async function signaturePair(statement) {
   const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
@@ -42,3 +47,91 @@ test("a missing or invalid attestation rejects before cache insertion", async ()
     /signature-invalid/
   );
 });
+
+test("HARP inspection verifies every file and activates namespaces atomically", async () => {
+  const encoder = new TextEncoder();
+  const files = new Map([
+    ["project.edn", encoder.encode("{:hara/type :project}\n")],
+    ["src/example/main.hal", encoder.encode("(ns example.main) 42\n")]
+  ]);
+  const tree = [];
+  let declarations = "";
+  for (const [path, bytes] of files) {
+    tree.push(encoder.encode(path), Uint8Array.of(0), bytes);
+    declarations += `  ${JSON.stringify(path)} {:sha256 ${JSON.stringify(await sha256(bytes))} :size ${bytes.length}}\n`;
+  }
+  const treeBytes = concat(tree);
+  const manifest = encoder.encode(
+    `{:harp/format 1\n :package {:identity "example/app" :version "1.0.0"}\n`
+    + ` :files {\n${declarations}} :resources {"example.main" "src/example/main.hal"}`
+    + ` :extensions []\n :integrity {:tree-sha256 ${JSON.stringify(await sha256(treeBytes))}}}\n`
+  );
+  const archiveBytes = storedZip(new Map([["package.edn", manifest], ...files]));
+  const archive = await inspectHarp(archiveBytes);
+  assert.equal(archive.resources.get("example.main"), "(ns example.main) 42\n");
+
+  const calls = [];
+  await activateLockedPackages({
+    packages: [{ bytes: archiveBytes, digest: await sha256(archiveBytes) }],
+    context: { call: async (...args) => calls.push(args) }
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], "register-resources");
+  assert.deepEqual(calls[0][1][0], [["example.main", "(ns example.main) 42\n"]]);
+
+  const tampered = archiveBytes.slice();
+  tampered[tampered.lastIndexOf("4".charCodeAt(0))] ^= 1;
+  await assert.rejects(inspectHarp(tampered), /package\/file-integrity|package\/manifest/);
+});
+
+function storedZip(entries) {
+  const encoder = new TextEncoder();
+  const local = [], central = [];
+  let offset = 0;
+  for (const [path, data] of entries) {
+    const name = encoder.encode(path);
+    const localHeader = header(30);
+    write32(localHeader, 0, 0x04034b50);
+    write16(localHeader, 4, 20);
+    write32(localHeader, 18, data.length);
+    write32(localHeader, 22, data.length);
+    write16(localHeader, 26, name.length);
+    local.push(localHeader, name, data);
+
+    const centralHeader = header(46);
+    write32(centralHeader, 0, 0x02014b50);
+    write16(centralHeader, 4, 20);
+    write16(centralHeader, 6, 20);
+    write32(centralHeader, 20, data.length);
+    write32(centralHeader, 24, data.length);
+    write16(centralHeader, 28, name.length);
+    write32(centralHeader, 42, offset);
+    central.push(centralHeader, name);
+    offset += localHeader.length + name.length + data.length;
+  }
+  const localBytes = concat(local), centralBytes = concat(central);
+  const end = header(22);
+  write32(end, 0, 0x06054b50);
+  write16(end, 8, entries.size);
+  write16(end, 10, entries.size);
+  write32(end, 12, centralBytes.length);
+  write32(end, 16, localBytes.length);
+  return concat([localBytes, centralBytes, end]);
+}
+
+function header(size) { return new Uint8Array(size); }
+function write16(bytes, offset, value) {
+  new DataView(bytes.buffer).setUint16(offset, value, true);
+}
+function write32(bytes, offset, value) {
+  new DataView(bytes.buffer).setUint32(offset, value, true);
+}
+function concat(parts) {
+  const bytes = new Uint8Array(parts.reduce((size, part) => size + part.length, 0));
+  let offset = 0;
+  for (const part of parts) {
+    bytes.set(part, offset);
+    offset += part.length;
+  }
+  return bytes;
+}

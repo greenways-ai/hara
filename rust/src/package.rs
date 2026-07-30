@@ -5,7 +5,7 @@
 
 use crate::project::{self, Project};
 use crate::tap::{self, Tap};
-use crate::kernel::{parse, Form};
+use crate::kernel::{parse, parse_forms, Form};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{Read, Write};
@@ -283,7 +283,7 @@ fn build_archive(project: &Project, output: &Path) -> Result<(), String> {
             .map_err(|error| format!("cannot read {}: {error}", source.display()))?;
         contents.push((archive.clone(), bytes));
     }
-    let package_edn = package_manifest(project, &contents);
+    let package_edn = package_manifest(project, &contents)?;
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
@@ -322,28 +322,79 @@ fn inspect_archive(path: &Path) -> Result<String, String> {
     Ok(text)
 }
 
-fn package_manifest(project: &Project, contents: &[(PathBuf, Vec<u8>)]) -> String {
+fn package_manifest(project: &Project, contents: &[(PathBuf, Vec<u8>)]) -> Result<String, String> {
     let mut hasher = Sha256::new();
     let mut files = String::new();
+    let mut resources = Vec::new();
+    let mut extensions = Vec::new();
     for (path, bytes) in contents {
         let path = path_to_slash(path).expect("validated project-relative path");
         hasher.update(path.as_bytes());
         hasher.update([0]);
         hasher.update(bytes);
         files.push_str(&format!(
-            "  \"{}\" {{:sha256 \"sha256:{}\" :size {}}}\n",
-            path,
+            "  {} {{:sha256 \"sha256:{}\" :size {}}}\n",
+            edn_string(&path),
             hex(&Sha256::digest(bytes)),
             bytes.len()
         ));
+        if path.ends_with(".hal") {
+            let source = std::str::from_utf8(bytes)
+                .map_err(|_| format!("HAL package resource is not UTF-8: {path}"))?;
+            if let Some(namespace) = hal_namespace(source)
+                .map_err(|error| format!("cannot parse package resource {path}: {error}"))?
+            {
+                resources.push((namespace, path.clone()));
+            }
+        }
+        if path.ends_with("hara.extension.edn") {
+            extensions.push(path.clone());
+        }
     }
-    format!(
-        "{{:harp/format 1\n :package {{:identity \"{}\" :version \"{}\"}}\n :files {{\n{}}} :integrity {{:tree-sha256 \"sha256:{}\"}}}}\n",
-        project.id,
-        project.version,
+    resources.sort();
+    for pair in resources.windows(2) {
+        if pair[0].0 == pair[1].0 {
+            return Err(format!("duplicate package namespace: {}", pair[0].0));
+        }
+    }
+    extensions.sort();
+    let resources = resources
+        .iter()
+        .map(|(namespace, path)| {
+            format!("  {} {}\n", edn_string(namespace), edn_string(path))
+        })
+        .collect::<String>();
+    let extensions = extensions
+        .iter()
+        .map(|path| edn_string(path))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Ok(format!(
+        "{{:harp/format 1\n :package {{:identity {} :version {}}}\n :files {{\n{}}} :resources {{\n{}}} :extensions [{}]\n :integrity {{:tree-sha256 \"sha256:{}\"}}}}\n",
+        edn_string(&project.id),
+        edn_string(&project.version.to_string()),
         files,
+        resources,
+        extensions,
         hex(&hasher.finalize())
-    )
+    ))
+}
+
+fn hal_namespace(source: &str) -> Result<Option<String>, String> {
+    for form in parse_forms(source)? {
+        let Form::List(forms) = form else { continue };
+        let [Form::Symbol(head), Form::Symbol(namespace), ..] = forms.as_slice() else {
+            continue;
+        };
+        if head == "ns" || head == "ns+" {
+            return Ok(Some(namespace.clone()));
+        }
+    }
+    Ok(None)
+}
+
+fn edn_string(value: &str) -> String {
+    Form::String(value.to_owned()).to_string()
 }
 
 fn collect_files(
@@ -458,7 +509,9 @@ mod tests {
         build_archive(&project, &first).unwrap();
         build_archive(&project, &second).unwrap();
         assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap());
-        assert!(inspect_archive(&first).unwrap().contains(":harp/format 1"));
+        let manifest = inspect_archive(&first).unwrap();
+        assert!(manifest.contains(":harp/format 1"));
+        assert!(manifest.contains("\"example.main\" \"src/example/main.hal\""));
         let file = File::open(&first).unwrap();
         let mut zip = ZipArchive::new(file).unwrap();
         assert!(zip.by_name("project.edn").is_ok());

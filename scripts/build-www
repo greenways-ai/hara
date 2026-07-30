@@ -9,7 +9,7 @@ RAW_WASM="$ROOT/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.was
 bash "$ROOT/scripts/build-hara-wasm-raw"
 
 rm -rf "$OUT"
-mkdir -p "$OUT/runtime/studio/hal" "$OUT/runtime/std/substrate"
+mkdir -p "$OUT/runtime/host" "$OUT/runtime/studio/hal" "$OUT/runtime/std/lib/substrate"
 mkdir -p "$OUT/runtime/studio/capabilities"
 mkdir -p "$OUT/assets/wasm" "$OUT/assets/hara-amp" "$OUT/examples/hara-amp/src"
 mkdir -p "$OUT/sources"
@@ -43,6 +43,7 @@ cp "$ROOT/rust/web/hta.js" \
    "$ROOT/rust/web/hta-worker.js" \
    "$ROOT/rust/web/hta-shared-worker.js" \
    "$OUT/runtime/"
+cp "$ROOT/rust/web/host/"*.js "$OUT/runtime/host/"
 cp "$ROOT/rust/web/studio/boot.js" \
    "$ROOT/rust/web/studio/broker.js" \
    "$ROOT/rust/web/studio/document-runtime.js" \
@@ -60,10 +61,10 @@ cp "$ROOT/rust/web/studio/boot.js" \
    "$OUT/runtime/studio/"
 cp "$ROOT/rust/web/studio/hal/"*.hal "$OUT/runtime/studio/hal/"
 cp "$ROOT/rust/web/studio/capabilities/"*.js "$OUT/runtime/studio/capabilities/"
-cp "$ROOT/lib/src/std/substrate.hal" "$OUT/runtime/std/substrate.hal"
-cp "$ROOT/lib/src/std/substrate/protocol.hal" \
-   "$ROOT/lib/src/std/substrate/frame.hal" \
-   "$OUT/runtime/std/substrate/"
+cp "$ROOT/lib/src/std/lib/substrate.hal" "$OUT/runtime/std/lib/substrate.hal"
+cp "$ROOT/lib/src/std/lib/substrate/protocol.hal" \
+   "$ROOT/lib/src/std/lib/substrate/frame.hal" \
+   "$OUT/runtime/std/lib/substrate/"
 cp "$ROOT/website/assets/hara-amp/"* "$OUT/assets/hara-amp/"
 cp "$ROOT/website/assets/favicon-48.svg" \
    "$ROOT/website/assets/favicon-128.svg" \

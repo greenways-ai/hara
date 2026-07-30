@@ -11,7 +11,7 @@ mod lang;
 #[path = "../../src/task.rs"]
 mod task;
 
-use core::{EvalFiber, EvalFiberState, Promise, PromiseState, Value};
+use core::{EvalFiber, EvalFiberState, Promise, PromiseRejection, PromiseState, Value};
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
@@ -55,7 +55,7 @@ struct Runtime {
     /// Guest protocol declarations and extensions must survive across HTA
     /// evaluations just like namespace bindings.  The native runtime owns the
     /// same registry; without this raw WASM kernels could load frame helpers
-    /// but not the concrete `std.substrate` node.
+    /// but not the concrete `std.lib.substrate` node.
     protocols: core::ProtocolRegistry,
     next_call: u64,
     events: Rc<RefCell<VecDeque<Vec<u8>>>>,
@@ -670,7 +670,10 @@ fn emit_settlement(events: &Rc<RefCell<VecDeque<Vec<u8>>>>, task: u64, state: Pr
     let value = match state {
         PromiseState::Pending => return,
         PromiseState::Fulfilled(value) => event(0, task, value),
-        PromiseState::Rejected(error) => event(1, task, error_value("promise/rejected", error)),
+        PromiseState::Rejected(PromiseRejection::Value(value)) => event(1, task, value),
+        PromiseState::Rejected(PromiseRejection::Message(message)) => {
+            event(1, task, error_value("promise/rejected", message))
+        }
     };
     enqueue_event(events, value);
 }
@@ -919,6 +922,31 @@ fn dispatch(
                 Ok(())
             }
             _ => Err("hta register-resource expects name and source strings".into()),
+        },
+        "register-resources" => match args.as_slice() {
+            [Value::Vector(resources)] => {
+                let mut staged = Vec::with_capacity(resources.len());
+                for entry in resources.iter() {
+                    let Value::Vector(entry) = entry else {
+                        return Err(
+                            "hta register-resources expects string pairs".into(),
+                        );
+                    };
+                    let (Some(Value::String(name)), Some(Value::String(source))) =
+                        (entry.get(0), entry.get(1))
+                    else {
+                        return Err("hta register-resources expects string pairs".into());
+                    };
+                    if entry.len() != 2 {
+                        return Err("hta register-resources expects string pairs".into());
+                    }
+                    staged.push((name.clone(), source.clone()));
+                }
+                kernel.resources.borrow_mut().extend(staged);
+                enqueue_event(&kernel.events, event(0, task, Value::Bool(true)));
+                Ok(())
+            }
+            _ => Err("hta register-resources expects one vector of string pairs".into()),
         },
         _ => Err(format!("hta/target-unknown: {target}")),
     }
@@ -1186,10 +1214,13 @@ pub extern "C" fn eval_error_code(source_ptr: *const u8, source_len: usize) -> i
 
 #[cfg(test)]
 mod tests {
-    use super::{dispatch, eval_error_code, evaluate, KernelRuntime, Runtime};
-    use crate::core::Value;
+    use super::{dispatch, emit_settlement, eval_error_code, evaluate, KernelRuntime, Runtime};
+    use crate::core::{PromiseRejection, PromiseState, Value};
     use crate::lang::data::Symbol;
     use crate::lang::protocol::IDeref;
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+    use std::rc::Rc;
 
     fn result(kernel: &mut KernelRuntime) -> Vec<Value> {
         kernel.drain_ready();
@@ -1313,7 +1344,9 @@ mod tests {
             "session/eval",
             vec![
                 Value::String("busy".into()),
-                Value::String("(host/call \"wait\" \"forever\")".into()),
+                Value::String(
+                    "(deref (std.native.Host/call \"wait\" \"forever\" []))".into(),
+                ),
             ],
         )
         .unwrap();
@@ -1519,20 +1552,20 @@ mod tests {
 
     #[test]
     fn raw_kernels_expose_the_foundation_data_namespaces() {
-        assert_eq!(crate::core::NATIVE_TYPES.len(), 18);
+        assert_eq!(crate::core::NATIVE_TYPES.len(), 20);
         assert_eq!(
             crate::core::NATIVE_TYPES
                 .iter()
                 .map(|(_, methods)| methods.len())
                 .sum::<usize>(),
-            110
+            136
         );
         let mut runtime = Runtime::new();
         assert!(runtime.env.contains_key("edn/write"));
         assert!(runtime.env.contains_key("ICount"));
         for native_type in [
             "Maths", "Numbers", "Bits", "String", "Bytes", "File", "Socket", "Promise",
-            "Coroutine", "Array", "Object", "Runtime", "Printer", "Edn", "Json", "Regex",
+            "Coroutine", "Arr", "Obj", "Runtime", "Printer", "Edn", "Json", "Host", "Regex",
             "UUID", "Error",
         ] {
             assert!(runtime.env.contains_key(native_type), "{native_type}");
@@ -1634,13 +1667,13 @@ mod tests {
     fn raw_kernels_run_the_shared_substrate_frame_fixture() {
         let mut runtime = Runtime::new();
         runtime.resources.borrow_mut().insert(
-            "std.substrate.frame".into(),
-            include_str!("../../../lib/src/std/substrate/frame.hal").into(),
+            "std.lib.substrate.frame".into(),
+            include_str!("../../../lib/src/std/lib/substrate/frame.hal").into(),
         );
         runtime
             .start_fiber(
                 1,
-                include_str!("../../../lib/test-fixtures/std/substrate/frame_conformance.hal"),
+                include_str!("../../../lib/test-fixtures/std/lib/substrate/frame_conformance.hal"),
             )
             .unwrap();
         assert_eq!(
@@ -1656,19 +1689,19 @@ mod tests {
         let mut runtime = Runtime::new();
         runtime.resources.borrow_mut().extend([
             (
-                "std.substrate.protocol".into(),
-                include_str!("../../../lib/src/std/substrate/protocol.hal").into(),
+                "std.lib.substrate.protocol".into(),
+                include_str!("../../../lib/src/std/lib/substrate/protocol.hal").into(),
             ),
             (
-                "std.substrate".into(),
-                include_str!("../../../lib/src/std/substrate.hal").into(),
+                "std.lib.substrate".into(),
+                include_str!("../../../lib/src/std/lib/substrate.hal").into(),
             ),
         ]);
         runtime
             .start_fiber(
                 1,
                 include_str!(
-                    "../../../lib/test-fixtures/std/substrate/node_lifecycle_conformance.hal"
+                    "../../../lib/test-fixtures/std/lib/substrate/node_lifecycle_conformance.hal"
                 ),
             )
             .unwrap();
@@ -1700,6 +1733,31 @@ mod tests {
             }
             other => panic!("unexpected event: {other:?}"),
         }
+    }
+
+    #[test]
+    fn structured_promise_rejections_survive_hta_settlement() {
+        let events = Rc::new(RefCell::new(VecDeque::new()));
+        let rejection = Value::Map(
+            vec![(
+                Value::Keyword("error/code".into()),
+                Value::Keyword("host/unavailable".into()),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        emit_settlement(
+            &events,
+            7,
+            PromiseState::Rejected(PromiseRejection::Value(rejection.clone())),
+        );
+        let frame = events.borrow_mut().pop_front().expect("rejection event");
+        let Value::Vector(values) = crate::hta::decode(&frame).expect("valid HTA event") else {
+            panic!("expected rejection vector")
+        };
+        assert_eq!(values[0], Value::Number(1));
+        assert_eq!(values[1], Value::Number(7));
+        assert_eq!(values[2], rejection);
     }
 
     #[test]

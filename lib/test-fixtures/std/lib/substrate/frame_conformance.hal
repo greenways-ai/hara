@@ -1,5 +1,5 @@
-(ns std.substrate.frame-conformance
-  (:require [std.substrate.frame :as frame]))
+(ns std.lib.substrate.frame-conformance
+  (:require [std.lib.substrate.frame :as frame]))
 
 (def wire (frame/frame-create :request "req-1"
                               {:source "client/a"

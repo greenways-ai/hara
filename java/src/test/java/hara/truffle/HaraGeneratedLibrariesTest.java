@@ -68,6 +68,27 @@ public class HaraGeneratedLibrariesTest {
   }
 
   @Test
+  public void namespaceUseLoadsAndRefersVarsAndMacros() {
+    try (Context context = context()) {
+      assertEquals(
+          84,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(ns demo.use-lib) "
+                      + "(def answer 42) "
+                      + "(defmacro twice [form] `(+ ~form ~form)) "
+                      + "(ns demo.use-app (:use demo.use-lib)) "
+                      + "(twice answer)")
+              .asLong());
+      assertErrorContains(
+          context,
+          "(ns demo.bad-use (:use [demo.use-lib]))",
+          ":use expects unqualified namespace symbols");
+    }
+  }
+
+  @Test
   public void foundationNamespaceCombinesJavaAndHalSymbols() {
     try (Context context = context()) {
       assertEquals(

@@ -17,6 +17,7 @@ pub struct GeneratedNamespaceConfig {
     aliases: HashMap<String, String>,
     refers: HashMap<String, String>,
     required_namespaces: Vec<String>,
+    used_namespaces: Vec<String>,
     builtins: Vec<String>,
     blank: bool,
 }
@@ -33,6 +34,7 @@ impl GeneratedNamespaceConfig {
             aliases,
             refers: HashMap::new(),
             required_namespaces: Vec::new(),
+            used_namespaces: Vec::new(),
             builtins: Vec::new(),
             blank: false,
         }
@@ -49,6 +51,7 @@ impl GeneratedNamespaceConfig {
         let mut excluded = HashSet::new();
         let mut overrides = HashMap::new();
         let mut requires = Vec::new();
+        let mut uses = Vec::new();
         let mut builtins = Vec::new();
         let mut blank = false;
         let mut intrinsics_seen = false;
@@ -90,6 +93,7 @@ impl GeneratedNamespaceConfig {
                     }
                 }
                 "require" => requires.extend(values[1..].iter().cloned()),
+                "use" => uses.extend(values[1..].iter().cloned()),
                 "flavor" | "import" => {}
                 other => return Err(format!("Unsupported ns clause: :{other}")),
             }
@@ -118,11 +122,18 @@ impl GeneratedNamespaceConfig {
         for require in requires {
             config.apply_require(&require, &available)?;
         }
+        for use_form in uses {
+            config.apply_use(&use_form, &available)?;
+        }
         Ok(config)
     }
 
     pub fn required_namespaces(&self) -> &[String] {
         &self.required_namespaces
+    }
+
+    pub fn used_namespaces(&self) -> &[String] {
+        &self.used_namespaces
     }
 
     pub fn builtins(&self) -> &[String] {
@@ -144,7 +155,10 @@ impl GeneratedNamespaceConfig {
         match form {
             Form::Symbol(name) => Form::Symbol(self.resolve_symbol(&name)),
             Form::List(values) => {
-                if matches!(values.first(), Some(Form::Symbol(name)) if name == "quote") {
+                if matches!(
+                    values.first(),
+                    Some(Form::Symbol(name)) if name == "quote" || name == "require"
+                ) {
                     Form::List(values)
                 } else {
                     Form::List(
@@ -256,6 +270,16 @@ impl GeneratedNamespaceConfig {
         if options.len() % 2 != 0 {
             return Err(format!("Malformed :require options for {target}"));
         }
+        let lazy = options.chunks(2).any(|option| {
+            matches!(&option[0], Form::Keyword(name) if name == "lazy")
+                && matches!(&option[1], Form::Bool(true))
+        });
+        let has_alias = options
+            .chunks(2)
+            .any(|option| matches!(&option[0], Form::Keyword(name) if name == "as"));
+        if lazy && !has_alias {
+            return Err(":require :lazy requires :as".into());
+        }
         for option in options.chunks(2) {
             let name = keyword(&option[0], "Malformed :require options")?;
             match name {
@@ -267,6 +291,9 @@ impl GeneratedNamespaceConfig {
                     self.put_alias(alias, target)?;
                 }
                 "refer" => {
+                    if lazy {
+                        return Err(":require :lazy cannot be combined with :refer".into());
+                    }
                     let names = vector(&option[1], ":require :refer expects a vector of symbols")?;
                     for value in names {
                         let name = symbol(value, ":require :refer expects unqualified symbols")?;
@@ -281,8 +308,59 @@ impl GeneratedNamespaceConfig {
                         }
                     }
                 }
+                "refer-macros" => {
+                    if lazy {
+                        return Err(":require :lazy cannot be combined with :refer-macros".into());
+                    }
+                    let names = vector(
+                        &option[1],
+                        ":require :refer-macros expects a vector of symbols",
+                    )?;
+                    for value in names {
+                        let name = symbol(
+                            value,
+                            ":require :refer-macros expects unqualified symbols",
+                        )?;
+                        if name.contains('/') {
+                            return Err(
+                                ":require :refer-macros expects unqualified symbols".into(),
+                            );
+                        }
+                    }
+                }
+                "lazy" => {
+                    if !matches!(&option[1], Form::Bool(true)) {
+                        return Err(":require :lazy expects true".into());
+                    }
+                }
+                "reload" => {
+                    if !matches!(&option[1], Form::Bool(true)) {
+                        return Err(":require :reload expects true".into());
+                    }
+                }
                 other => return Err(format!("Unsupported :require option: :{other}")),
             }
+        }
+        Ok(())
+    }
+
+    pub fn apply_use(
+        &mut self,
+        form: &Form,
+        available: &impl Fn(&str) -> bool,
+    ) -> Result<(), String> {
+        let target = match form {
+            Form::Symbol(target) if !target.contains('/') => normalize_namespace(target),
+            _ => return Err(":use expects unqualified namespace symbols".into()),
+        };
+        if !known_namespace(target) && !available(target) {
+            return Err(format!("Cannot use missing generated namespace: {target}"));
+        }
+        if !self.required_namespaces.iter().any(|value| value == target) {
+            self.required_namespaces.push(target.into());
+        }
+        if !self.used_namespaces.iter().any(|value| value == target) {
+            self.used_namespaces.push(target.into());
         }
         Ok(())
     }
@@ -455,10 +533,10 @@ fn canonical(namespace: &str, method: &str) -> String {
         ("std.native.Promise", method) => format!("promise/{method}"),
         ("std.native.Coroutine", "instance?") => "std.foundation.coroutine/coroutine?".into(),
         ("std.native.Coroutine", method) => format!("std.foundation.coroutine/{method}"),
-        ("std.native.Array", "new") => "array".into(),
-        ("std.native.Array", "instance?") => "array?".into(),
-        ("std.native.Object", "new") => "object".into(),
-        ("std.native.Object", "instance?") => "object?".into(),
+        ("std.native.Arr", "new") => "array".into(),
+        ("std.native.Arr", "instance?") => "array?".into(),
+        ("std.native.Obj", "new") => "object".into(),
+        ("std.native.Obj", "instance?") => "object?".into(),
         ("std.native.Runtime", method) => method.into(),
         ("std.native.Printer", method) => method.into(),
         ("std.native.Edn", method) => format!("std.native.Edn/{method}"),
@@ -532,5 +610,21 @@ mod tests {
                 .to_string(),
             "bytes"
         );
+    }
+
+    #[test]
+    fn records_used_namespaces_for_runtime_referral() {
+        let config = GeneratedNamespaceConfig::configure_with(
+            &parse_forms("(:use code.test)").unwrap(),
+            |target| target == "code.test",
+        )
+        .unwrap();
+        assert_eq!(config.required_namespaces(), &["code.test"]);
+        assert_eq!(config.used_namespaces(), &["code.test"]);
+        assert!(GeneratedNamespaceConfig::configure(
+            &parse_forms("(:use [code.test])").unwrap()
+        )
+        .unwrap_err()
+        .contains(":use expects unqualified namespace symbols"));
     }
 }

@@ -84,7 +84,7 @@ impl PromiseHandle {
         match self.promise.state() {
             core::PromiseState::Pending => Err(JsValue::from_str("promise is pending")),
             core::PromiseState::Fulfilled(value) => Ok(value.display()),
-            core::PromiseState::Rejected(error) => Err(JsValue::from_str(&error)),
+            core::PromiseState::Rejected(error) => Err(JsValue::from_str(&error.message())),
         }
     }
 }
@@ -165,11 +165,18 @@ impl SessionKernel {
         names
     }
 
+    pub fn session_namespace(&self, session: &str) -> Result<String, String> {
+        self.sessions
+            .get(session)
+            .map(Runtime::current_namespace)
+            .ok_or_else(|| format!("NO_SESSION {session}"))
+    }
+
     pub fn eval(&mut self, session: &str, source: &str) -> Result<String, String> {
         self.sessions
             .get_mut(session)
             .ok_or_else(|| format!("NO_SESSION {session}"))?
-            .eval_text(source)
+            .eval_transfer_text(source)
     }
 
     pub fn register_resource(&mut self, name: &str, source: &str) {
@@ -332,6 +339,7 @@ impl Runtime {
         for (name, descriptor) in core::native_type_values() {
             let var = native.intern(&name, descriptor);
             foundation.map_var(crate::lang::data::Symbol::parse(&name), var);
+            namespace_registry.find_or_create(format!("std.native.{name}"));
         }
         Runtime {
             env: HashMap::new(),
@@ -469,17 +477,68 @@ impl Runtime {
             ),
             ("std.pretty", include_str!("../../lib/src/std/pretty.hal")),
             (
-                "std.substrate.protocol",
-                include_str!("../../lib/src/std/substrate/protocol.hal"),
+                "std.lib.substrate.protocol",
+                include_str!("../../lib/src/std/lib/substrate/protocol.hal"),
             ),
             (
-                "std.substrate.frame",
-                include_str!("../../lib/src/std/substrate/frame.hal"),
+                "std.lib.substrate.frame",
+                include_str!("../../lib/src/std/lib/substrate/frame.hal"),
             ),
             (
-                "std.substrate",
-                include_str!("../../lib/src/std/substrate.hal"),
+                "std.lib.substrate",
+                include_str!("../../lib/src/std/lib/substrate.hal"),
             ),
+            (
+                "std.lib.test",
+                include_str!("../../lib/src/std/lib/test.hal"),
+            ),
+            (
+                "std.lib.component",
+                include_str!("../../lib/src/std/lib/component.hal"),
+            ),
+            (
+                "std.lib.context",
+                include_str!("../../lib/src/std/lib/context.hal"),
+            ),
+            (
+                "std.task.protocol",
+                include_str!("../../lib/src/std/task/protocol.hal"),
+            ),
+            (
+                "std.task.bulk",
+                include_str!("../../lib/src/std/task/bulk.hal"),
+            ),
+            (
+                "std.task.process",
+                include_str!("../../lib/src/std/task/process.hal"),
+            ),
+            ("std.task", include_str!("../../lib/src/std/task.hal")),
+            (
+                "std.block.protocol",
+                include_str!("../../lib/src/std/block/protocol.hal"),
+            ),
+            (
+                "std.block.type",
+                include_str!("../../lib/src/std/block/type.hal"),
+            ),
+            (
+                "std.block.base",
+                include_str!("../../lib/src/std/block/base.hal"),
+            ),
+            (
+                "std.block.construct",
+                include_str!("../../lib/src/std/block/construct.hal"),
+            ),
+            (
+                "std.block.parse",
+                include_str!("../../lib/src/std/block/parse.hal"),
+            ),
+            ("std.block", include_str!("../../lib/src/std/block.hal")),
+            (
+                "code.test.protocol",
+                include_str!("../../lib/src/code/test/protocol.hal"),
+            ),
+            ("code.test", include_str!("../../lib/src/code/test.hal")),
         ] {
             self.register_resource(name, source);
         }
@@ -538,7 +597,22 @@ impl Runtime {
         let result = self.eval_forms(forms, traced)?;
         self.save_namespace();
         self.refresh_qualified_bindings();
-        Ok(result)
+        Ok(result.display())
+    }
+
+    fn eval_transfer_text(&mut self, source: &str) -> Result<String, String> {
+        self.refresh_qualified_bindings();
+        let forms = kernel::parse_forms(source)?;
+        let result = self.eval_forms(forms, false)?;
+        self.save_namespace();
+        self.refresh_qualified_bindings();
+        if !core::session_transferable(&result) {
+            return Err(format!(
+                "SESSION_TRANSFER_REJECTED {}",
+                core::portable_type_name(&result)
+            ));
+        }
+        Ok(result.display())
     }
 
     pub fn eval_hir(&mut self, bytes: &[u8]) -> Result<String, String> {
@@ -547,10 +621,10 @@ impl Runtime {
         let result = self.eval_forms(module.forms, false)?;
         self.save_namespace();
         self.refresh_qualified_bindings();
-        Ok(result)
+        Ok(result.display())
     }
 
-    fn eval_forms(&mut self, forms: Vec<Form>, traced: bool) -> Result<String, String> {
+    fn eval_forms(&mut self, forms: Vec<Form>, traced: bool) -> Result<core::Value, String> {
         let mut result = core::Value::Nil;
         for form in forms {
             if let Form::List(values) = &form {
@@ -578,19 +652,20 @@ impl Runtime {
                         })?;
                     let required_extensions = config.required_namespaces().to_vec();
                     for target in required_extensions {
+                        if self.loaded_resources.contains(&target) {
+                            continue;
+                        }
+                        if self.resources.contains_key(&target) {
+                            let source =
+                                self.resources.get(&target).cloned().unwrap_or_default();
+                            self.eval_text(&source)?;
+                            self.loaded_resources.insert(target);
+                            continue;
+                        }
                         if target == "std.foundation"
                             || target.starts_with("std.lib.")
                             || target.starts_with("std.foundation.")
                         {
-                            continue;
-                        }
-                        if self.resources.contains_key(&target) {
-                            if !self.loaded_resources.contains(&target) {
-                                let source =
-                                    self.resources.get(&target).cloned().unwrap_or_default();
-                                self.eval_text(&source)?;
-                                self.loaded_resources.insert(target);
-                            }
                             continue;
                         }
                         #[cfg(not(target_arch = "wasm32"))]
@@ -651,7 +726,7 @@ impl Runtime {
         }
         self.save_namespace();
         self.refresh_qualified_bindings();
-        Ok(result.display())
+        Ok(result)
     }
 
     fn eval_text(&mut self, source: &str) -> Result<String, String> {
@@ -759,6 +834,27 @@ impl Runtime {
                 target.alias(alias, source);
             }
         }
+        for namespace in config.used_namespaces() {
+            if let Some(source) = self.namespace_registry.find(namespace) {
+                for (symbol, var) in source.mappings() {
+                    target.map_var(symbol, var);
+                }
+                let source_name = source.name().as_str().to_owned();
+                let target_name = target.name().as_str().to_owned();
+                let referred = self
+                    .macros
+                    .borrow()
+                    .iter()
+                    .filter_map(|((namespace, name), function)| {
+                        (namespace == &source_name).then(|| (name.clone(), function.clone()))
+                    })
+                    .collect::<Vec<_>>();
+                let mut macros = self.macros.borrow_mut();
+                for (name, function) in referred {
+                    macros.insert((target_name.clone(), name), function);
+                }
+            }
+        }
     }
 
     pub fn visible_symbols(&self) -> Vec<String> {
@@ -831,7 +927,7 @@ impl Runtime {
             .install_socket(core::LoopbackSocketProvider::default());
     }
 
-    /// Installs the JS host handler that backs the `host/call` special form.
+    /// Installs the JS host handler that backs `std.native.Host/call`.
     #[cfg(target_arch = "wasm32")]
     pub fn install_host_handler(&mut self, handler: js_sys::Function) {
         self.host_handler = Some(handler);
@@ -949,6 +1045,11 @@ impl Runtime {
         if self.loaded_resources.contains(name) {
             return Ok(":loaded".into());
         }
+        if self.resources.contains_key(name) {
+            let result = self.load_resource(name)?;
+            self.loaded_resources.insert(name.into());
+            return Ok(result);
+        }
         if self.extensions.contains(name) {
             let result = self.require_extension(name)?;
             self.loaded_resources.insert(name.into());
@@ -961,9 +1062,7 @@ impl Runtime {
             self.loaded_resources.insert(name.into());
             return Ok(result);
         }
-        let result = self.load_resource(name)?;
-        self.loaded_resources.insert(name.into());
-        Ok(result)
+        Err(JsValue::from_str("module/not-found"))
     }
 
     pub fn file_supported(&self) -> bool {
@@ -1245,7 +1344,7 @@ fn value_to_js(value: &core::Value) -> Result<JsValue, String> {
             Ok(object.into())
         }
         other => Err(format!(
-            "host/call type-not-transportable: {}",
+            "std.native.Host/call type-not-transportable: {}",
             other.display()
         )),
     }
@@ -1266,7 +1365,7 @@ fn js_to_value(value: &JsValue) -> Result<core::Value, String> {
         let integer: js_sys::BigInt = value.clone().unchecked_into();
         return i64::try_from(integer)
             .map(core::Value::Number)
-            .map_err(|_| "host/call bigint is outside the signed 64-bit range".into());
+            .map_err(|_| "std.native.Host/call bigint is outside the signed 64-bit range".into());
     }
     if let Some(number) = value.as_f64() {
         if number.fract() == 0.0
@@ -1304,7 +1403,7 @@ fn js_to_value(value: &JsValue) -> Result<core::Value, String> {
             items,
         ))));
     }
-    Err("host/call type-not-transportable: unsupported JS result".into())
+    Err("std.native.Host/call type-not-transportable: unsupported JS result".into())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1348,6 +1447,112 @@ pub fn version() -> String {
 mod tests {
     use super::*;
 
+    fn module_case(id: &str) -> Vec<(Form, Form)> {
+        fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> Option<&'a Form> {
+            entries.iter().find_map(|(candidate, value)| match candidate {
+                Form::Keyword(name) if name == key => Some(value),
+                _ => None,
+            })
+        }
+
+        let manifest = kernel::parse_forms(include_str!(
+            "../../specs/language/draft/conformance/modules.edn"
+        ))
+        .expect("module conformance corpus must parse")
+        .remove(0);
+        let Form::Map(manifest) = manifest else {
+            panic!("module conformance corpus must be a map")
+        };
+        let Some(Form::Vector(cases)) = entry(&manifest, "cases") else {
+            panic!("module conformance :cases must be a vector")
+        };
+        cases
+            .iter()
+            .find_map(|case| {
+                let Form::Map(case) = case else {
+                    return None;
+                };
+                matches!(entry(case, "id"), Some(Form::Keyword(candidate)) if candidate == id)
+                    .then(|| case.clone())
+            })
+            .unwrap_or_else(|| panic!("missing module conformance case :{id}"))
+    }
+
+    fn module_expect(id: &str, key: &str) -> Form {
+        let case = module_case(id);
+        let expect = case.iter().find_map(|(candidate, value)| match candidate {
+            Form::Keyword(name) if name == "expect" => Some(value),
+            _ => None,
+        });
+        let Some(Form::Map(expect)) = expect else {
+            panic!("module conformance case :{id} must have an :expect map")
+        };
+        expect
+            .iter()
+            .find_map(|(candidate, value)| {
+                matches!(candidate, Form::Keyword(name) if name == key).then(|| value.clone())
+            })
+            .unwrap_or_else(|| panic!("module conformance case :{id} is missing :expect :{key}"))
+    }
+
+    fn module_runtime_profile(runtime: &str, key: &str) -> Form {
+        fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> Option<&'a Form> {
+            entries.iter().find_map(|(candidate, value)| match candidate {
+                Form::Keyword(name) if name == key => Some(value),
+                _ => None,
+            })
+        }
+
+        let manifest = kernel::parse_forms(include_str!(
+            "../../specs/language/draft/conformance/modules.edn"
+        ))
+        .expect("module conformance corpus must parse")
+        .remove(0);
+        let Form::Map(manifest) = manifest else {
+            panic!("module conformance corpus must be a map")
+        };
+        let Some(Form::Map(profiles)) = entry(&manifest, "runtime/profiles") else {
+            panic!("module conformance corpus must declare :runtime/profiles")
+        };
+        let Some(Form::Map(profile)) = entry(profiles, runtime) else {
+            panic!("module conformance corpus has no :{runtime} profile")
+        };
+        entry(profile, key)
+            .cloned()
+            .unwrap_or_else(|| panic!("module runtime profile :{runtime} has no :{key}"))
+    }
+
+    fn host_conformance_case(id: &str) -> Vec<(Form, Form)> {
+        fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> Option<&'a Form> {
+            entries.iter().find_map(|(candidate, value)| match candidate {
+                Form::Keyword(name) if name == key => Some(value),
+                _ => None,
+            })
+        }
+
+        let document = kernel::parse_forms(include_str!(
+            "../../specs/runtime/draft/hal-host-runtime.edn"
+        ))
+        .expect("Host runtime specification must parse")
+        .remove(0);
+        let Form::Map(document) = document else {
+            panic!("Host runtime specification must be a map")
+        };
+        let Some(Form::Vector(cases)) = entry(&document, "host/conformance") else {
+            panic!("Host runtime specification must declare :host/conformance")
+        };
+        cases
+            .iter()
+            .find_map(|case| {
+                let Form::Map(case) = case else {
+                    return None;
+                };
+                matches!(entry(case, "id"), Some(Form::Keyword(candidate)) if candidate == id)
+                    .then(|| case.clone())
+            })
+            .unwrap_or_else(|| panic!("missing Host conformance case :{id}"))
+    }
+
     #[test]
     fn session_kernel_mounts_preserve_state_and_enforce_lifetime() {
         let mut kernel = SessionKernel::new();
@@ -1382,6 +1587,28 @@ mod tests {
                 )
                 .unwrap(),
             "true"
+        );
+        assert_eq!(
+            kernel
+                .eval(
+                    "alpha",
+                    "(do (require [std.foundation.file :as file]) \
+                     (deref (file/write \"/workspace/source.hal\" \
+                       (str/encode-utf8 \"(+ 19 23)\"))))",
+                )
+                .unwrap(),
+            "nil"
+        );
+        assert_eq!(
+            kernel
+                .eval(
+                    "beta",
+                    "(do (require [std.foundation.file :as file]) \
+                     (str/decode-utf8 \
+                       (deref (file/read \"/workspace/source.hal\"))))",
+                )
+                .unwrap(),
+            "\"(+ 19 23)\""
         );
         assert_eq!(
             kernel.close_filesystem(mount).unwrap_err(),
@@ -1764,41 +1991,33 @@ mod tests {
     }
 
     #[test]
-    fn host_local_macro_bridges_aliased_calls_to_the_special_form() {
+    fn foundation_host_routes_calls_to_the_native_host_type() {
         let mut runtime = Runtime::new();
-        runtime.register_resource(
-            "host.local",
-            "(ns host.local) (defmacro call [service method & args] `(host/call ~service ~method ~@args))",
-        );
         let error = runtime
             .eval_text(
-                "(ns user (:require [host.local :as host])) (host/call \"browser.dom\" \"set-text\" \"#sel\" \"hi\")",
+                "(ns user (:require [std.foundation.host :as host])) (deref (host/call \"browser.dom\" \"set-text\" \"#sel\" \"hi\"))",
             )
             .unwrap_err();
         assert!(
-            error.contains("host/call is unavailable"),
+            error.contains("host/unavailable"),
             "unexpected error: {error}"
         );
     }
 
     #[test]
-    fn host_browser_defns_route_through_host_local_macro() {
+    fn host_modules_route_through_the_foundation_wrapper() {
         let mut runtime = Runtime::new();
         runtime.register_resource(
-            "host.local",
-            "(ns host.local) (defmacro call [service method & args] `(host/call ~service ~method ~@args))",
-        );
-        runtime.register_resource(
             "host.browser.dom",
-            "(ns host.browser.dom (:require [host.local :as host])) (defn set-text [selector text] (host/call \"browser.dom\" \"set-text\" selector text))",
+            "(ns host.browser.dom (:require [std.foundation.host :as host])) (defn set-text [selector text] (host/call \"browser.dom\" \"set-text\" selector text))",
         );
         let error = runtime
             .eval_text(
-                "(ns user (:require [host.browser.dom :as dom])) (dom/set-text \"#sel\" \"hi\")",
+                "(ns user (:require [host.browser.dom :as dom])) (deref (dom/set-text \"#sel\" \"hi\"))",
             )
             .unwrap_err();
         assert!(
-            error.contains("host/call is unavailable"),
+            error.contains("host/unavailable"),
             "unexpected error: {error}"
         );
     }
@@ -2043,7 +2262,7 @@ mod tests {
         let mut runtime = Runtime::new();
         assert_eq!(
             runtime
-                .eval_text("(require 'std.substrate.protocol) :loaded")
+                .eval_text("(require 'std.lib.substrate.protocol) :loaded")
                 .unwrap(),
             ":loaded"
         );
@@ -2349,7 +2568,7 @@ mod tests {
         assert_eq!(
             runtime
                 .eval_text(include_str!(
-                    "../../lib/test-fixtures/std/substrate/protocol_conformance.hal"
+                    "../../lib/test-fixtures/std/lib/substrate/protocol_conformance.hal"
                 ))
                 .unwrap(),
             "[40 42]"
@@ -2361,14 +2580,14 @@ mod tests {
         let mut runtime = Runtime::new();
         assert_eq!(
             runtime
-                .eval_text(include_str!("../../lib/test-fixtures/std/substrate/frame_conformance.hal"))
+                .eval_text(include_str!("../../lib/test-fixtures/std/lib/substrate/frame_conformance.hal"))
                 .unwrap(),
             "\"{\\\"version\\\":\\\"substrate.v1\\\",\\\"kind\\\":\\\"request\\\",\\\"id\\\":\\\"req-1\\\",\\\"source\\\":\\\"client/a\\\",\\\"target\\\":\\\"server/b\\\",\\\"space\\\":\\\"workspace/main\\\",\\\"meta\\\":{\\\"trace\\\":\\\"trace-1\\\"},\\\"action\\\":\\\"math/add\\\",\\\"args\\\":[19,23],\\\"reply_to\\\":null,\\\"status\\\":null,\\\"data\\\":null,\\\"error\\\":null,\\\"signal\\\":null,\\\"cause\\\":null}\""
         );
         assert!(runtime
             .eval_text(
-                "(do (require 'std.substrate.frame) \\
-                     (std.substrate.frame/normalize-frame {:kind :unknown :id \"evt-1\"}))",
+                "(do (require 'std.lib.substrate.frame) \\
+                     (std.lib.substrate.frame/normalize-frame {:kind :unknown :id \"evt-1\"}))",
             )
             .is_err());
     }
@@ -2379,7 +2598,7 @@ mod tests {
         assert_eq!(
             runtime
                 .eval_text(include_str!(
-                    "../../lib/test-fixtures/std/substrate/node_lifecycle_conformance.hal"
+                    "../../lib/test-fixtures/std/lib/substrate/node_lifecycle_conformance.hal"
                 ))
                 .unwrap(),
             "[84 42 :rejected]"
@@ -2392,18 +2611,18 @@ mod tests {
         assert_eq!(
             runtime
                 .eval_text(
-                    "(require 'std.substrate) \
-                     (def node (std.substrate/node-create \"node-1\")) \
-                     [(protocol-call std.substrate.protocol/IService set-service node \"cache\" 42) \
-                      (protocol-call std.substrate.protocol/IService get-service node \"cache\") \
-                      (protocol-call std.substrate.protocol/ISpace set-space-state node \"main\" {:count 1}) \
-                      (protocol-call std.substrate.protocol/ISpace get-space-state node \"main\") \
-                      (def subscription (protocol-call std.substrate.protocol/IStream subscribe node \"main\" \"changed\" \"sub-1\" {})) \
-                      (protocol-call std.substrate.protocol/ITransport receive-frame node subscription {:transport-id \"peer-a\"}) \
-                      (protocol-call std.substrate.protocol/IStream list-subscriptions node \"main\" \"changed\")]",
+                    "(require 'std.lib.substrate) \
+                     (def node (std.lib.substrate/node-create \"node-1\")) \
+                     [(protocol-call std.lib.substrate.protocol/IService set-service node \"cache\" 42) \
+                      (protocol-call std.lib.substrate.protocol/IService get-service node \"cache\") \
+                      (protocol-call std.lib.substrate.protocol/ISpace set-space-state node \"main\" {:count 1}) \
+                      (protocol-call std.lib.substrate.protocol/ISpace get-space-state node \"main\") \
+                      (def subscription (protocol-call std.lib.substrate.protocol/IStream subscribe node \"main\" \"changed\" \"sub-1\" {})) \
+                      (protocol-call std.lib.substrate.protocol/ITransport receive-frame node subscription {:transport-id \"peer-a\"}) \
+                      (protocol-call std.lib.substrate.protocol/IStream list-subscriptions node \"main\" \"changed\")]",
                 )
                 .unwrap(),
-            "[42 42 {:count 1} {:count 1} #std.substrate/SubstrateFrame{:id \"sub-1\" :kind :subscribe :space \"main\" :meta {} :action nil :args [] :reply-to nil :status nil :data nil :error nil :signal \"changed\" :cause nil} {\"peer-a\" {:id \"sub-1\" :meta {}}} [\"peer-a\"]]"
+            "[42 42 {:count 1} {:count 1} #std.lib.substrate/SubstrateFrame{:id \"sub-1\" :kind :subscribe :space \"main\" :meta {} :action nil :args [] :reply-to nil :status nil :data nil :error nil :signal \"changed\" :cause nil} {\"peer-a\" {:id \"sub-1\" :meta {}}} [\"peer-a\"]]"
         );
     }
 
@@ -2413,16 +2632,16 @@ mod tests {
         assert_eq!(
             runtime
                 .eval_text(
-                    "(require 'std.substrate) \
-                     (def node (std.substrate/node-create \"node-1\")) \
-                     (protocol-call std.substrate.protocol/ITransport attach-transport node \"peer-a\" \
+                    "(require 'std.lib.substrate) \
+                     (def node (std.lib.substrate/node-create \"node-1\")) \
+                     (protocol-call std.lib.substrate.protocol/ITransport attach-transport node \"peer-a\" \
                        (fn [frame] \
-                         (protocol-call std.substrate.protocol/IService set-service node \"sent\" \
-                           (protocol-call std.substrate.protocol/IFrame frame-data frame)))) \
-                     (def subscription (protocol-call std.substrate.protocol/IStream subscribe node \"main\" \"changed\" \"sub-1\" {})) \
-                     (protocol-call std.substrate.protocol/ITransport receive-frame node subscription {:transport-id \"peer-a\"}) \
-                     (protocol-call std.substrate.protocol/IStream publish node \"main\" \"changed\" 42 {:id \"evt-1\"}) \
-                     (protocol-call std.substrate.protocol/IService get-service node \"sent\")",
+                         (protocol-call std.lib.substrate.protocol/IService set-service node \"sent\" \
+                           (protocol-call std.lib.substrate.protocol/IFrame frame-data frame)))) \
+                     (def subscription (protocol-call std.lib.substrate.protocol/IStream subscribe node \"main\" \"changed\" \"sub-1\" {})) \
+                     (protocol-call std.lib.substrate.protocol/ITransport receive-frame node subscription {:transport-id \"peer-a\"}) \
+                     (protocol-call std.lib.substrate.protocol/IStream publish node \"main\" \"changed\" 42 {:id \"evt-1\"}) \
+                     (protocol-call std.lib.substrate.protocol/IService get-service node \"sent\")",
                 )
                 .unwrap(),
             "42"
@@ -2431,14 +2650,14 @@ mod tests {
         assert_eq!(
             runtime
                 .eval_text(
-                    "(def requester (std.substrate/node-create \"node-2\")) \
-                     (protocol-call std.substrate.protocol/ITransport attach-transport requester \"peer-b\" \
+                    "(def requester (std.lib.substrate/node-create \"node-2\")) \
+                     (protocol-call std.lib.substrate.protocol/ITransport attach-transport requester \"peer-b\" \
                        (fn [frame] \
-                         (protocol-call std.substrate.protocol/ITransport receive-frame requester \
-                           (std.substrate/node-frame :response \"res-1\" \"main\" {} nil [] \
-                             (protocol-call std.substrate.protocol/IFrame frame-id frame) :ok 84 nil nil nil) \
+                         (protocol-call std.lib.substrate.protocol/ITransport receive-frame requester \
+                           (std.lib.substrate/node-frame :response \"res-1\" \"main\" {} nil [] \
+                             (protocol-call std.lib.substrate.protocol/IFrame frame-id frame) :ok 84 nil nil nil) \
                            {:transport-id \"peer-b\"}))) \
-                     (def reply (protocol-call std.substrate.protocol/IRequest request requester \"main\" \"sum\" [] \
+                     (def reply (protocol-call std.lib.substrate.protocol/IRequest request requester \"main\" \"sum\" [] \
                                   {:id \"req-1\" :transport-id \"peer-b\"})) \
                      (promise/value reply)",
                 )
@@ -2453,12 +2672,12 @@ mod tests {
         assert_eq!(
             runtime
                 .eval_text(
-                    "(require 'std.substrate) \
-                     (def node (std.substrate/node-create \"node-1\")) \
-                     (protocol-call std.substrate.protocol/ITransport attach-transport node \"peer-a\" (fn [frame] nil)) \
-                     (def cancelled (protocol-call std.substrate.protocol/IRequest request node \"main\" \"wait\" [] \
+                    "(require 'std.lib.substrate) \
+                     (def node (std.lib.substrate/node-create \"node-1\")) \
+                     (protocol-call std.lib.substrate.protocol/ITransport attach-transport node \"peer-a\" (fn [frame] nil)) \
+                     (def cancelled (protocol-call std.lib.substrate.protocol/IRequest request node \"main\" \"wait\" [] \
                                       {:id \"req-cancel\" :transport-id \"peer-a\"})) \
-                     (protocol-call std.substrate.protocol/IRequest cancel-request node \"req-cancel\" :cancelled) \
+                     (protocol-call std.lib.substrate.protocol/IRequest cancel-request node \"req-cancel\" :cancelled) \
                      (promise/state cancelled)",
                 )
                 .unwrap(),
@@ -2666,6 +2885,9 @@ mod tests {
                 "lib/src/std/foundation/coroutine.hal" => {
                     include_str!("../../lib/src/std/foundation/coroutine.hal")
                 }
+                "lib/src/std/foundation/kernel.hal" => {
+                    include_str!("../../lib/src/std/foundation/kernel.hal")
+                }
                 "lib/src/std/foundation/edn.hal" => {
                     include_str!("../../lib/src/std/foundation/edn.hal")
                 }
@@ -2688,11 +2910,13 @@ mod tests {
             panic!(":inventory must be a map")
         };
         assert!(matches!(entry(inventory, "closed"), Form::Bool(true)));
-        assert!(matches!(entry(inventory, "type-count"), Form::Number(18)));
-        assert!(matches!(entry(inventory, "method-count"), Form::Number(110)));
         let Form::Vector(types) = entry(&contract, "types") else {
             panic!(":types must be a vector")
         };
+        assert_eq!(
+            entry(inventory, "type-count"),
+            &Form::Number(types.len() as i64)
+        );
 
         let mut specified = Vec::new();
         let mut direct_cases = Vec::new();
@@ -2776,8 +3000,10 @@ mod tests {
             .collect::<Vec<(String, Vec<String>)>>();
         assert_eq!(specified, runtime_inventory);
         assert_eq!(
-            specified.iter().map(|(_, methods)| methods.len()).sum::<usize>(),
-            110
+            entry(inventory, "method-count"),
+            &Form::Number(
+                specified.iter().map(|(_, methods)| methods.len()).sum::<usize>() as i64
+            )
         );
 
         for (type_name, type_cases) in &direct_cases {
@@ -2801,7 +3027,7 @@ mod tests {
                 .iter()
                 .map(|(_, type_cases)| type_cases.len())
                 .sum::<usize>(),
-            110
+            specified.iter().map(|(_, methods)| methods.len()).sum::<usize>()
         );
         let mut runtime = Runtime::new();
         assert_eq!(
@@ -2857,16 +3083,25 @@ mod tests {
                       (= Maths std.native/Maths std.foundation/Maths) \
                       (= Edn std.native/Edn std.foundation/Edn) \
                       (= Json std.native/Json std.foundation/Json) \
+                      (= Host std.native/Host std.foundation/Host) \
+                      (= Arr std.native/Arr std.foundation/Arr) \
+                      (= Obj std.native/Obj std.foundation/Obj) \
+                      (let [arr (std.native.Arr/new 1 2)] \
+                        (std.native.Arr/set-index arr 1 7) \
+                        (std.native.Arr/get-index arr 1)) \
+                      (let [obj (std.native.Obj/new \"a\" 1)] \
+                        (std.native.Obj/set-key obj \"a\" 9) \
+                        (std.native.Obj/get-key obj \"a\")) \
                       (ICount/count [1 2 3])]"
                 )
                 .unwrap(),
-            "[\"{:a 1}\" true true true 3]"
+            "[\"{:a 1}\" true true true true true true 7 9 3]"
         );
         let symbols = runtime.visible_symbols();
         assert!(symbols.iter().any(|symbol| symbol == "edn/pretty"));
         for native_type in [
             "Maths", "Numbers", "Bits", "String", "Bytes", "File", "Socket", "Promise",
-            "Coroutine", "Array", "Object", "Runtime", "Printer", "Edn", "Json", "Regex",
+            "Coroutine", "Arr", "Obj", "Runtime", "Printer", "Edn", "Json", "Host", "Regex",
             "UUID", "Error",
         ] {
             assert!(
@@ -3325,6 +3560,134 @@ mod tests {
             .eval_text("(ns:create (quote bad/name))")
             .unwrap_err()
             .contains("unqualified symbol"));
+    }
+
+    #[test]
+    fn namespace_use_refers_portable_test_vars_and_macros() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(concat!(
+                    "(ns code.test-rust-probe (:use code.test))",
+                    " (def lifecycle (atom []))",
+                    " (fact \"promise assertion\"",
+                    "   {:before (fn []",
+                    "              (swap! lifecycle",
+                    "                     (fn [events] (conj events :before))))",
+                    "    :after (fn []",
+                    "             (swap! lifecycle",
+                    "                    (fn [events] (conj events :after))))}",
+                    "   (promise/from 42) => 42",
+                    "   (+ 1 1) => 2)",
+                    " (let [summary (run {:namespace \"code.test-rust-probe\"})",
+                    "       timer (function-timer",
+                    "              (fn [promise milliseconds]",
+                    "                {:promise (promise/from {:test/status :timeout})",
+                    "                 :timeout milliseconds})",
+                    "              (fn [timeout] timeout))",
+                    "       timed (check (fn [] (promise/from 42)) 42",
+                    "                    {:timer timer :timeout 25})",
+                    "       cancelled",
+                    "       (run {:namespace \"code.test-rust-probe\"",
+                    "             :control (function-control (fn [fact] true))})]",
+                    " [(:status summary)",
+                    "  (:passed (:counts summary))",
+                    "  (count (:checks (first (:results summary))))",
+                    "  (:status timed)",
+                    "  (:timeout timed)",
+                    "  (:cancelled (:counts cancelled))])"
+                ))
+                .unwrap(),
+            "[:passed 1 2 :timeout 25 1]"
+        );
+    }
+
+    #[test]
+    fn canonical_component_and_context_libraries_load_without_old_aliases() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(ns std-lib-context-rust-probe \
+                       (:require [std.lib.component :as component] \
+                                 [std.lib.context :as context])) \
+                     (let [runtime (context/runtime-null)] \
+                       [(component/started? runtime) \
+                        (context/call runtime :a :b)])"
+                )
+                .unwrap(),
+            "[true [:a :b]]"
+        );
+        assert!(runtime
+            .eval_text("(require [std.foundation.component :as old])")
+            .unwrap_err()
+            .contains("missing"));
+    }
+
+    #[test]
+    fn portable_task_bulk_execution_is_data_first() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(ns std-task-rust-probe \
+                       (:require [std.task :as task] [std.task.bulk :as bulk])) \
+                     (task/deftask double-task \
+                       {:template :default \
+                        :main {:fn (fn [value] (* 2 value))}}) \
+                     (let [reporter (bulk/event-reporter) \
+                           output (task/invoke double-task [1 2 3] \
+                                               {:reporter reporter :return :all})] \
+                       [(get output :summary) \
+                        (vec (map (fn [result] (get result :data)) \
+                                  (get output :results))) \
+                        (count (bulk/reporter-events reporter))])"
+                )
+                .unwrap(),
+            "[{:items 3 :results 3 :warnings 0 :errors 0} [2 4 6] 8]"
+        );
+    }
+
+    #[test]
+    fn portable_block_preserves_source_value_and_structure() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(ns std-block-rust-probe \
+                       (:require [std.block :as block])) \
+                     (let [parsed (block/parse-string \"[1 2 3]\") \
+                           first-block (block/parse-first \"[1 2 3]\") \
+                           spaces (block/spaces 3)] \
+                       [(block/string parsed) \
+                        (block/value parsed) \
+                        (block/type first-block) \
+                        (block/tag first-block) \
+                        (vec (map block/value (block/children first-block))) \
+                        (block/string spaces) \
+                        (block/space? spaces)])"
+                )
+                .unwrap(),
+            "[\"[1 2 3]\" [1 2 3] :container :vector [1 2 3] \"   \" true]"
+        );
+    }
+
+    #[test]
+    fn portable_collection_execution_preserves_hal_semantics_and_errors() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "[(reduce (fn [total value] (+ total value)) 0 [1 2 3 4]) \
+                      (let [answer 41] (+ answer 1) (+ answer 2))]"
+                )
+                .unwrap(),
+            "[10 43]"
+        );
+        assert!(runtime
+            .eval_text("(vec (map (fn [value] (/ 1 value)) [1 0]))")
+            .unwrap_err()
+            .contains("division by zero"));
     }
 
     #[test]
@@ -4392,6 +4755,836 @@ mod tests {
             );
             assert!(matches!(entry(case, "expect"), Some(Form::Map(_))), ":{id}");
         }
+    }
+
+    #[test]
+    fn issue_134_lazy_namespace_state_is_non_forcing_and_failure_is_sticky() {
+        assert_eq!(
+            module_expect("lazy/non-forcing", "state"),
+            Form::Keyword("unloaded".into())
+        );
+        assert_eq!(
+            module_expect("lazy/non-forcing", "target-evaluated"),
+            Form::Bool(false)
+        );
+        assert_eq!(
+            module_expect("lazy/qualified-force", "target-evaluations"),
+            Form::Number(1)
+        );
+        assert_eq!(
+            module_expect("lazy/failure-state", "state"),
+            Form::Keyword("failed".into())
+        );
+        assert_eq!(
+            module_expect("lazy/failure-state", "partial-state"),
+            Form::Bool(false)
+        );
+        assert_eq!(
+            module_expect("lazy/explicit-retry", "ordinary-force-retries"),
+            Form::Bool(false)
+        );
+        assert_eq!(
+            module_expect("lazy/explicit-retry", "reload-retries"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("module/reload-revision", "revision-increment"),
+            Form::Number(1)
+        );
+        assert_eq!(
+            module_expect("module/reload-rollback", "previous-revision-preserved"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("namespace/loading-state", "non-forcing"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("namespace/cross-namespace-alias-state", "owner-explicit"),
+            Form::Bool(true)
+        );
+
+        let mut runtime = Runtime::new();
+        runtime.register_resource(
+            "example.lazy",
+            "(ns example.lazy) (def observed-state (ns-state 'example.lazy)) (def answer 42)",
+        );
+
+        assert_eq!(
+            runtime
+                .eval_text("(require [example.lazy :as lazy :lazy true])")
+                .unwrap(),
+            "nil"
+        );
+        assert_eq!(
+            runtime.eval_text("(ns-state 'example.lazy)").unwrap(),
+            ":unloaded"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(get (ns-alias-state 'lazy) :state)")
+                .unwrap(),
+            ":unloaded"
+        );
+        assert_eq!(runtime.eval_text("lazy/answer").unwrap(), "42");
+        assert_eq!(runtime.eval_text("lazy/observed-state").unwrap(), ":loading");
+        assert_eq!(
+            runtime.eval_text("(ns-state 'example.lazy)").unwrap(),
+            ":loaded"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(module-revision 'example.lazy)")
+                .unwrap(),
+            "1"
+        );
+
+        runtime.register_resource(
+            "example.lazy",
+            "(ns example.lazy) (def answer 43)",
+        );
+        runtime
+            .eval_text("(require [example.lazy :as lazy :reload true])")
+            .unwrap();
+        assert_eq!(runtime.eval_text("lazy/answer").unwrap(), "43");
+        assert_eq!(
+            runtime
+                .eval_text("(module-revision 'example.lazy)")
+                .unwrap(),
+            "2"
+        );
+
+        runtime.register_resource(
+            "example.lazy",
+            "(ns example.lazy) (def answer 99) (def reload-leaked-134 1) (throw :reload-failed)",
+        );
+        assert!(runtime
+            .eval_text("(require [example.lazy :as lazy :reload true])")
+            .is_err());
+        assert_eq!(runtime.eval_text("lazy/answer").unwrap(), "43");
+        assert_eq!(
+            runtime
+                .eval_text("(module-revision 'example.lazy)")
+                .unwrap(),
+            "2"
+        );
+        assert_eq!(
+            runtime.eval_text("(ns-state 'example.lazy)").unwrap(),
+            ":loaded"
+        );
+        assert!(runtime
+            .namespace_registry
+            .find("example.lazy")
+            .unwrap()
+            .resolve(&crate::lang::data::Symbol::parse("reload-leaked-134"))
+            .is_none());
+
+        runtime.register_resource(
+            "example.broken",
+            "(ns example.broken) (def leaked 1) (throw :broken)",
+        );
+        runtime
+            .eval_text("(require [example.broken :as broken :lazy true])")
+            .unwrap();
+        assert!(runtime.eval_text("broken/leaked").is_err());
+        assert_eq!(
+            runtime.eval_text("(ns-state 'example.broken)").unwrap(),
+            ":failed"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(get (ns-alias-state 'broken) :state)")
+                .unwrap(),
+            ":failed"
+        );
+        assert!(runtime.namespace_registry.find("example.broken").is_none());
+        assert_eq!(runtime.current_namespace(), "user");
+        assert_eq!(
+            runtime
+                .namespace_registry
+                .current()
+                .lazy_target("broken")
+                .map(|name| name.as_str().to_owned()),
+            Some("example.broken".into())
+        );
+
+        runtime.register_resource(
+            "example.broken",
+            "(ns example.broken) (def answer 42)",
+        );
+        let sticky_error = runtime.eval_text("broken/answer").unwrap_err();
+        assert!(
+            sticky_error.contains("explicit reload"),
+            "unexpected sticky lazy-load error: {sticky_error}"
+        );
+        runtime
+            .eval_text("(require [example.broken :as broken :reload true])")
+            .unwrap();
+        assert_eq!(runtime.eval_text("broken/answer").unwrap(), "42");
+        assert_eq!(
+            runtime.eval_text("(ns-state 'example.broken)").unwrap(),
+            ":loaded"
+        );
+
+        runtime.eval_text("(ns observer)").unwrap();
+        assert_eq!(
+            runtime
+                .eval_text("(get (ns-alias-state 'user 'broken) :state)")
+                .unwrap(),
+            ":loaded"
+        );
+
+        let mut isolated = Runtime::new();
+        assert_eq!(
+            isolated.eval_text("(ns-state 'example.lazy)").unwrap(),
+            ":unknown"
+        );
+    }
+
+    #[test]
+    fn issue_134_dependency_order_cycles_and_canonical_cache_are_transactional() {
+        assert_eq!(
+            module_expect("module/canonical-cache", "duplicate-evaluation"),
+            Form::Bool(false)
+        );
+        assert_eq!(
+            module_expect("module/dependency-order", "order"),
+            Form::Keyword("dependency-first-source-order".into())
+        );
+        assert_eq!(
+            module_expect("module/cycle-rollback", "partial-state"),
+            Form::Bool(false)
+        );
+        assert_eq!(
+            module_expect("module/failure-rollback", "revision-increment"),
+            Form::Bool(false)
+        );
+
+        let mut runtime = Runtime::new();
+        runtime.register_resource(
+            "graph.dependency",
+            "(ns graph.dependency) (def value 41)",
+        );
+        runtime.register_resource(
+            "graph.root",
+            concat!(
+                "(ns graph.root) ",
+                "(require [graph.dependency :as dependency]) ",
+                "(def answer (+ dependency/value 1))"
+            ),
+        );
+
+        runtime
+            .eval_text("(require [graph.root :as graph])")
+            .unwrap();
+        assert_eq!(runtime.eval_text("graph/answer").unwrap(), "42");
+        assert_eq!(
+            runtime
+                .eval_text("(module-revision 'graph.dependency)")
+                .unwrap(),
+            "1"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(module-revision 'graph.root)")
+                .unwrap(),
+            "1"
+        );
+        assert_eq!(
+            runtime
+                .namespace_registry
+                .module_dependencies("graph.root")
+                .iter()
+                .map(|name| name.as_str().to_owned())
+                .collect::<Vec<_>>(),
+            vec!["graph.dependency"]
+        );
+
+        runtime
+            .eval_text("(require [graph.root :as graph])")
+            .unwrap();
+        assert_eq!(
+            runtime
+                .eval_text("(module-revision 'graph.root)")
+                .unwrap(),
+            "1"
+        );
+
+        runtime.register_resource(
+            "cycle.first",
+            concat!(
+                "(ns cycle.first) ",
+                "(def leaked-first 1) ",
+                "(require [cycle.second :as second])"
+            ),
+        );
+        runtime.register_resource(
+            "cycle.second",
+            concat!(
+                "(ns cycle.second) ",
+                "(def leaked-second 2) ",
+                "(require [cycle.first :as first])"
+            ),
+        );
+
+        let cycle = runtime
+            .eval_text("(require [cycle.first :as cycle])")
+            .unwrap_err();
+        assert!(cycle.contains("Cyclic namespace require"), "{cycle}");
+        assert!(runtime.namespace_registry.find("cycle.first").is_none());
+        assert!(runtime.namespace_registry.find("cycle.second").is_none());
+        assert_eq!(
+            runtime.eval_text("(module-revision 'cycle.first)").unwrap(),
+            "0"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(module-revision 'cycle.second)")
+                .unwrap(),
+            "0"
+        );
+        assert!(runtime
+            .namespace_registry
+            .module_dependencies("cycle.first")
+            .is_empty());
+        assert!(runtime
+            .namespace_registry
+            .module_dependencies("cycle.second")
+            .is_empty());
+
+        runtime.register_resource(
+            "failure.root",
+            concat!(
+                "(ns failure.root) ",
+                "(require [graph.dependency :as dependency]) ",
+                "(def leaked dependency/value) ",
+                "(throw :failure)"
+            ),
+        );
+        assert!(runtime
+            .eval_text("(require [failure.root :as failure])")
+            .is_err());
+        assert!(runtime.namespace_registry.find("failure.root").is_none());
+        assert!(runtime
+            .namespace_registry
+            .module_dependencies("failure.root")
+            .is_empty());
+    }
+
+    #[test]
+    fn issue_134_with_ns_uses_target_globals_and_restores_the_caller() {
+        assert_eq!(
+            module_expect("namespace/with-ns-success", "caller-restored"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("namespace/with-ns-failure", "caller-restored"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("namespace/with-ns-lexical-isolation", "caller-locals-visible"),
+            Form::Bool(false)
+        );
+
+        let mut runtime = Runtime::new();
+        runtime
+            .eval_text("(ns target) (def answer 41) (ns user)")
+            .unwrap();
+        assert_eq!(
+            runtime
+                .eval_text("(with-ns 'target (def answer 42) answer)")
+                .unwrap(),
+            "42"
+        );
+        assert_eq!(runtime.current_namespace(), "user");
+        assert_eq!(runtime.eval_text("target/answer").unwrap(), "42");
+
+        assert!(runtime
+            .eval_text("(with-ns 'target (throw :with-ns-failed))")
+            .is_err());
+        assert_eq!(runtime.current_namespace(), "user");
+
+        assert!(runtime
+            .eval_text("(let [caller-local 42] (with-ns 'target caller-local))")
+            .is_err());
+        assert_eq!(runtime.current_namespace(), "user");
+    }
+
+    #[test]
+    fn issue_134_facade_vars_copy_roots_and_metadata_without_sharing_identity() {
+        assert_eq!(
+            module_expect("namespace/facade-var-copy", "same-var"),
+            Form::Bool(false)
+        );
+        assert_eq!(
+            module_expect("namespace/facade-var-copy", "copied-root"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("namespace/facade-var-copy", "copied-metadata"),
+            Form::Bool(true)
+        );
+
+        let mut runtime = Runtime::new();
+        runtime
+            .eval_text("(ns source) (def ^{:doc \"copied\"} answer 41)")
+            .unwrap();
+        runtime.eval_text("(ns target)").unwrap();
+        assert_eq!(runtime.eval_text("(deref (var source/answer))").unwrap(), "41");
+        runtime
+            .eval_text("(intern-var 'target 'answer (var source/answer))")
+            .unwrap();
+        let source = runtime
+            .namespace_registry
+            .find("source")
+            .unwrap()
+            .resolve(&crate::lang::data::Symbol::parse("answer"))
+            .unwrap();
+        let target = runtime
+            .namespace_registry
+            .find("target")
+            .unwrap()
+            .resolve(&crate::lang::data::Symbol::parse("answer"))
+            .unwrap();
+
+        assert!(!source.same_identity(&target));
+        assert_eq!(source.deref_value(), target.deref_value());
+        assert_eq!(source.metadata(), target.metadata());
+    }
+
+    #[test]
+    fn issue_134_aliases_and_refers_share_live_var_identity() {
+        assert_eq!(
+            module_expect("namespace/alias-var-identity", "same-var"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("namespace/alias-var-identity", "live-root"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("namespace/refer-var-identity", "same-var"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("namespace/refer-var-identity", "live-root"),
+            Form::Bool(true)
+        );
+
+        let mut runtime = Runtime::new();
+        runtime.register_resource("identity.source", "(ns identity.source) (def answer 41)");
+        runtime
+            .eval_text(
+                "(require [identity.source :as source :refer [answer]])"
+            )
+            .unwrap();
+        let source = runtime
+            .namespace_registry
+            .find("identity.source")
+            .unwrap()
+            .resolve(&crate::lang::data::Symbol::parse("answer"))
+            .unwrap();
+        let alias = runtime
+            .namespace_registry
+            .resolve(&crate::lang::data::Symbol::parse("source/answer"))
+            .unwrap();
+        let referred = runtime
+            .namespace_registry
+            .find("user")
+            .unwrap()
+            .resolve(&crate::lang::data::Symbol::parse("answer"))
+            .unwrap();
+        assert!(source.same_identity(&alias));
+        assert!(source.same_identity(&referred));
+        source.reset_value(core::Value::Number(42));
+        assert_eq!(runtime.eval_text("source/answer").unwrap(), "42");
+        assert_eq!(runtime.eval_text("answer").unwrap(), "42");
+    }
+
+    #[test]
+    fn issue_134_macro_reload_only_changes_new_compilations() {
+        assert_eq!(
+            module_expect(
+                "macro/reload-new-compilation",
+                "existing-call-target"
+            ),
+            Form::Keyword("unchanged".into())
+        );
+        assert_eq!(
+            module_expect("macro/reload-new-compilation", "new-compilation"),
+            Form::Keyword("new-expansion".into())
+        );
+
+        let mut runtime = Runtime::new();
+        runtime.register_resource(
+            "reload.macros",
+            "(ns reload.macros) (defmacro answer [] 41)",
+        );
+        runtime
+            .eval_text(
+                "(require [reload.macros :refer-macros [answer]]) \
+                 (def compiled-before (macroexpand '(answer)))"
+            )
+            .unwrap();
+        assert_eq!(runtime.eval_text("compiled-before").unwrap(), "41");
+
+        runtime.register_resource(
+            "reload.macros",
+            "(ns reload.macros) (defmacro answer [] 42)",
+        );
+        runtime
+            .eval_text(
+                "(require [reload.macros :reload true :refer-macros [answer]])"
+            )
+            .unwrap();
+        assert_eq!(runtime.eval_text("compiled-before").unwrap(), "41");
+        assert_eq!(runtime.eval_text("(answer)").unwrap(), "42");
+    }
+
+    #[test]
+    fn issue_134_session_namespace_module_and_macro_state_is_isolated() {
+        assert_eq!(
+            module_expect("session/namespace-isolation", "vars-shared"),
+            Form::Bool(false)
+        );
+        assert_eq!(
+            module_expect("session/namespace-isolation", "modules-shared"),
+            Form::Bool(false)
+        );
+        assert_eq!(
+            module_expect("session/namespace-isolation", "macros-shared"),
+            Form::Bool(false)
+        );
+
+        let mut kernel = SessionKernel::new();
+        kernel.register_resource(
+            "session.module",
+            "(ns session.module) (defmacro chosen [] 41) (def answer 41)",
+        );
+        kernel.create_session("alpha").unwrap();
+        kernel.create_session("beta").unwrap();
+        kernel
+            .eval(
+                "alpha",
+                "(do (require [session.module :as module :refer-macros [chosen]]) \
+                     (def local-answer (chosen)) nil)"
+            )
+            .unwrap();
+        assert_eq!(kernel.eval("alpha", "local-answer").unwrap(), "41");
+        assert!(kernel.eval("beta", "local-answer").is_err());
+        assert_eq!(
+            kernel.eval("alpha", "(module-revision 'session.module)").unwrap(),
+            "1"
+        );
+        assert_eq!(
+            kernel.eval("beta", "(module-revision 'session.module)").unwrap(),
+            "0"
+        );
+        assert!(kernel.eval("beta", "(chosen)").is_err());
+    }
+
+    #[test]
+    fn issue_134_source_and_hir_have_value_metadata_and_error_parity() {
+        assert_eq!(
+            module_expect("module/source-hir-parity", "same-value"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("module/source-hir-parity", "same-var-metadata"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("module/source-hir-parity", "same-error-category"),
+            Form::Bool(true)
+        );
+
+        use crate::kernel::hir::encode_hir_module;
+
+        let source =
+            "(ns parity.demo) (defn value \"answer\" [] 42) (value)";
+        let forms = kernel::parse_forms(source).unwrap();
+        let artifact =
+            encode_hir_module("parity.demo", "parity/demo.hal", source, forms);
+
+        let mut source_runtime = Runtime::new();
+        let mut hir_runtime = Runtime::new();
+        assert_eq!(source_runtime.eval_text(source).unwrap(), "42");
+        assert_eq!(hir_runtime.eval_hir(&artifact).unwrap(), "42");
+
+        let source_var = source_runtime
+            .namespace_registry
+            .find("parity.demo")
+            .unwrap()
+            .resolve(&crate::lang::data::Symbol::parse("value"))
+            .unwrap();
+        let hir_var = hir_runtime
+            .namespace_registry
+            .find("parity.demo")
+            .unwrap()
+            .resolve(&crate::lang::data::Symbol::parse("value"))
+            .unwrap();
+        assert_eq!(source_var.metadata(), hir_var.metadata());
+
+        let failing_source = "(throw :parity-failed)";
+        let failing_artifact = encode_hir_module(
+            "parity.failure",
+            "parity/failure.hal",
+            failing_source,
+            kernel::parse_forms(failing_source).unwrap(),
+        );
+        let source_error = source_runtime.eval_text(failing_source).unwrap_err();
+        let hir_error = hir_runtime.eval_hir(&failing_artifact).unwrap_err();
+        assert!(source_error.contains("thrown: :parity-failed"));
+        assert!(hir_error.contains("thrown: :parity-failed"));
+    }
+
+    #[test]
+    fn issue_134_runtime_profile_declares_deterministic_resource_precedence() {
+        assert_eq!(
+            module_expect("module/resource-precedence", "deterministic"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect(
+                "module/resource-precedence",
+                "declared-by-runtime-profile"
+            ),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_runtime_profile("rust", "resource-order"),
+            Form::Vector(vec![
+                Form::Keyword("loaded-native-namespace".into()),
+                Form::Keyword("registered-resource".into()),
+                Form::Keyword("registered-extension".into()),
+            ])
+        );
+
+        let mut runtime = Runtime::new();
+        runtime.extensions.install(RangeExtension);
+        runtime.register_resource(
+            "range",
+            "(def resource-precedence-marker 42) resource-precedence-marker",
+        );
+        assert_eq!(runtime.require_resource("range").unwrap(), "42");
+        assert_eq!(runtime.require_resource("range").unwrap(), ":loaded");
+        assert_eq!(
+            runtime.eval_text("resource-precedence-marker").unwrap(),
+            "42"
+        );
+    }
+
+    #[test]
+    fn issue_134_sessions_unwind_bindings_and_transfer_only_immutable_data() {
+        assert_eq!(
+            module_expect("session/dynamic-unwind", "binding-session-local"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("session/dynamic-unwind", "restored-after-error"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("session/immutable-transfer", "immutable-data"),
+            Form::Bool(true)
+        );
+        for kind in [
+            "functions",
+            "vars",
+            "mutable-references",
+            "streams",
+            "sockets",
+            "host-handles",
+        ] {
+            assert_eq!(
+                module_expect("session/reject-live-transfer", kind),
+                Form::Bool(false)
+            );
+        }
+
+        let mut kernel = SessionKernel::new();
+        kernel.create_session("alpha").unwrap();
+        kernel.create_session("beta").unwrap();
+        assert_eq!(
+            kernel
+                .eval("alpha", "(do (def ^:dynamic *answer* 1) nil)")
+                .unwrap(),
+            "nil"
+        );
+        assert_eq!(
+            kernel
+                .eval("beta", "(do (def ^:dynamic *answer* 10) nil)")
+                .unwrap(),
+            "nil"
+        );
+        assert!(kernel
+            .eval(
+                "alpha",
+                "(binding [*answer* 2] (throw :binding-failed))"
+            )
+            .is_err());
+        assert_eq!(kernel.eval("alpha", "*answer*").unwrap(), "1");
+        assert_eq!(kernel.eval("beta", "*answer*").unwrap(), "10");
+
+        assert_eq!(
+            kernel
+                .eval(
+                    "alpha",
+                    "{:answer [1 2 {:nested #{:immutable}}]}"
+                )
+                .unwrap(),
+            "{:answer [1 2 {:nested #{:immutable}}]}"
+        );
+        for source in [
+            "(fn [value] value)",
+            "(var *answer*)",
+            "(atom 1)",
+            "(iter [1 2 3])",
+        ] {
+            let error = kernel.eval("alpha", source).unwrap_err();
+            assert!(
+                error.contains("SESSION_TRANSFER_REJECTED"),
+                "{source} unexpectedly produced {error}"
+            );
+        }
+        assert!(!core::session_transferable(&core::Value::Extension(
+            core::ExtensionValue {
+                provider: "socket".into(),
+                type_name: "Socket".into(),
+                handle: 1,
+            }
+        )));
+    }
+
+    #[test]
+    fn issue_134_retained_repl_state_survives_errors_and_multiline_forms() {
+        assert_eq!(
+            module_expect("repl/retained-state", "namespace-retained"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("repl/retained-state", "multiline"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("repl/error-recovery", "session-survives"),
+            Form::Bool(true)
+        );
+        assert_eq!(
+            module_expect("repl/error-recovery", "namespace-restored"),
+            Form::Bool(true)
+        );
+
+        let mut kernel = SessionKernel::new();
+        kernel.create_session("repl").unwrap();
+        assert_eq!(
+            kernel
+                .eval(
+                    "repl",
+                    "(ns retained.repl)\n(def answer\n  (+ 40\n     2))\nnil"
+                )
+                .unwrap(),
+            "nil"
+        );
+        assert!(kernel.eval("repl", "missing-symbol").is_err());
+        assert_eq!(
+            kernel.session_namespace("repl").unwrap(),
+            "retained.repl"
+        );
+        assert_eq!(kernel.eval("repl", "answer").unwrap(), "42");
+    }
+
+    #[test]
+    fn issue_134_host_facades_are_loaded_session_local_and_non_transferable() {
+        for id in [
+            "host/type-identity",
+            "host/session-local-facade",
+            "host/namespace-loaded",
+            "host/no-live-transfer",
+            "host/rejected-ex-info",
+        ] {
+            assert!(!host_conformance_case(id).is_empty());
+        }
+
+        let mut first = Runtime::new();
+        let second = Runtime::new();
+        assert_eq!(
+            first
+                .eval_text("(= Host std.native/Host std.foundation/Host)")
+                .unwrap(),
+            "true"
+        );
+        assert_eq!(
+            first.eval_text("(ns-state 'std.native)").unwrap(),
+            ":loaded"
+        );
+        assert_eq!(
+            first.eval_text("(ns-state 'std.native.Host)").unwrap(),
+            ":loaded"
+        );
+
+        let first_host = first
+            .namespace_registry
+            .find("std.native")
+            .unwrap()
+            .resolve(&crate::lang::data::Symbol::parse("Host"))
+            .unwrap()
+            .deref_value();
+        let second_host = second
+            .namespace_registry
+            .find("std.native")
+            .unwrap()
+            .resolve(&crate::lang::data::Symbol::parse("Host"))
+            .unwrap()
+            .deref_value();
+        let (core::Value::NativeType(first_host), core::Value::NativeType(second_host)) =
+            (first_host, second_host)
+        else {
+            panic!("Host must be a native façade descriptor")
+        };
+        assert!(!Rc::ptr_eq(&first_host, &second_host));
+
+        let mut kernel = SessionKernel::new();
+        kernel.create_session("host-transfer").unwrap();
+        let error = kernel.eval("host-transfer", "Host").unwrap_err();
+        assert!(error.contains("SESSION_TRANSFER_REJECTED"), "{error}");
+
+        assert_eq!(
+            first
+                .eval_text(
+                    "(try
+                       (deref (std.native.Host/call \"missing\" \"missing\" []))
+                       (catch error
+                         [(ex-message error)
+                          (get (ex-data error) :error/code)]))"
+                )
+                .unwrap(),
+            "[\"Host capability provider is unavailable\" :host/unavailable]"
+        );
+        assert_eq!(
+            first
+                .eval_text(
+                    "(deref
+                       (promise/catch
+                         (std.native.Host/call \"missing\" \"missing\" [])
+                         (fn [error]
+                           (get (ex-data error) :error/code))))"
+                )
+                .unwrap(),
+            ":host/unavailable"
+        );
+        assert_eq!(
+            kernel
+                .eval(
+                    "host-transfer",
+                    "(try
+                       (deref (std.native.Host/call \"missing\" \"missing\" []))
+                       (catch error
+                         (get (ex-data error) :error/code)))"
+                )
+                .unwrap(),
+            ":host/unavailable"
+        );
     }
 
     #[test]

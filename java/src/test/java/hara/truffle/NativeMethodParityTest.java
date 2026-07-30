@@ -93,7 +93,9 @@ public class NativeMethodParityTest {
     try (Context context = Context.newBuilder(HaraLanguage.ID).allowAllAccess(true).build()) {
       String result = context.eval(HaraLanguage.ID, source.toString()).toString();
       assertTrue(result, !result.contains(":pass false"));
-      assertEquals(110, result.split(":pass true", -1).length - 1);
+      assertEquals(
+          types.values().stream().mapToInt(type -> type.methods.size()).sum(),
+          result.split(":pass true", -1).length - 1);
       assertEquals(
           "[\"native failure\" true]",
           context

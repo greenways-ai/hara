@@ -26,9 +26,9 @@ const resources = wasmBytes === null
       "studio.program": await hal("program"),
       "studio.graph": await hal("graph"),
       "studio.session": await hal("session"),
-      "std.substrate.protocol": await readFile(new URL("../../lib/src/std/substrate/protocol.hal", import.meta.url), "utf8"),
-      "std.substrate.frame": await readFile(new URL("../../lib/src/std/substrate/frame.hal", import.meta.url), "utf8"),
-      "std.substrate": await readFile(new URL("../../lib/src/std/substrate.hal", import.meta.url), "utf8")
+      "std.lib.substrate.protocol": await readFile(new URL("../../lib/src/std/lib/substrate/protocol.hal", import.meta.url), "utf8"),
+      "std.lib.substrate.frame": await readFile(new URL("../../lib/src/std/lib/substrate/frame.hal", import.meta.url), "utf8"),
+      "std.lib.substrate": await readFile(new URL("../../lib/src/std/lib/substrate.hal", import.meta.url), "utf8")
     };
 
 const LISTING_URL = "https://data.jsdelivr.com/v1/packages/gh/octo/lessons@main";
@@ -145,7 +145,7 @@ test("std.foundation.host exposes the generic browser host descriptor", { skip: 
   assert.equal(await evaluate(broker, '(deref (host/capability? "missing"))'), false);
 });
 
-test("studio.node sends std.substrate.frame envelopes through the browser adapter", { skip: wasmBytes === null }, async () => {
+test("studio.node sends std.lib.substrate.frame envelopes through the browser adapter", { skip: wasmBytes === null }, async () => {
   const runtime = new NodeRuntime({ space: "workspace/studio-hal" });
   runtime.registerNode({ id: "node/a" });
   runtime.registerNode({ id: "node/b" });
@@ -275,13 +275,13 @@ test("studio.node registers kernel-owned request handlers", { skip: wasmBytes ==
   assert.equal((await runtime.call("node/a", "node/b", "double", [21])).data, 42);
 });
 
-test("Studio kernels load the atom-backed std.substrate node", { skip: wasmBytes === null }, async () => {
+test("Studio kernels load the atom-backed std.lib.substrate node", { skip: wasmBytes === null }, async () => {
   const broker = makeBroker();
   const value = await broker.eval(
     "ROOT",
     "(do " +
-      "(require [std.substrate :as substrate]) " +
-      "(require [std.substrate.protocol :as protocol]) " +
+      "(require [std.lib.substrate :as substrate]) " +
+      "(require [std.lib.substrate.protocol :as protocol]) " +
       '(def node (substrate/node-create "node/studio")) ' +
       '(protocol-call protocol/IService set-service node "answer" 42) ' +
       '(protocol-call protocol/IService get-service node "answer"))'
@@ -292,7 +292,7 @@ test("Studio kernels load the atom-backed std.substrate node", { skip: wasmBytes
 test("Studio kernels run the atom-backed substrate request stream and cancellation lifecycle", { skip: wasmBytes === null }, async () => {
   const broker = makeBroker();
   const fixture = await readFile(
-    new URL("../../lib/test-fixtures/std/substrate/node_lifecycle_conformance.hal", import.meta.url),
+    new URL("../../lib/test-fixtures/std/lib/substrate/node_lifecycle_conformance.hal", import.meta.url),
     "utf8"
   );
   assert.deepEqual(await broker.eval("ROOT", fixture), [84, 42, new HtaKeyword("rejected")]);
@@ -301,7 +301,7 @@ test("Studio kernels run the atom-backed substrate request stream and cancellati
 test("Studio runs the shared substrate protocol fixture", { skip: wasmBytes === null }, async () => {
   const broker = makeBroker();
   const protocolFixture = await readFile(
-    new URL("../../lib/test-fixtures/std/substrate/protocol_conformance.hal", import.meta.url),
+    new URL("../../lib/test-fixtures/std/lib/substrate/protocol_conformance.hal", import.meta.url),
     "utf8"
   );
   assert.deepEqual(await broker.eval("ROOT", protocolFixture), [40, 42]);
@@ -310,7 +310,7 @@ test("Studio runs the shared substrate protocol fixture", { skip: wasmBytes === 
 test("Studio runs the shared substrate frame fixture", { skip: wasmBytes === null }, async () => {
   const broker = makeBroker();
   const frameFixture = await readFile(
-    new URL("../../lib/test-fixtures/std/substrate/frame_conformance.hal", import.meta.url),
+    new URL("../../lib/test-fixtures/std/lib/substrate/frame_conformance.hal", import.meta.url),
     "utf8"
   );
   assert.equal(

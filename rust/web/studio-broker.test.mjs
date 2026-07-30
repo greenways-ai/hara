@@ -144,8 +144,10 @@ test("resources are registered before the bootstrap eval", async () => {
   });
   const kernel = await broker.create("booted", { bootstrap: "(require 'lib.a)" });
   assert.deepEqual(kernel.context.calls, [
-    ["register-resource", ["lib/a.hal", "(ns lib.a)"]],
-    ["register-resource", ["lib/b.hal", "(ns lib.b)"]],
+    ["register-resources", [[
+      ["lib/a.hal", "(ns lib.a)"],
+      ["lib/b.hal", "(ns lib.b)"]
+    ]]],
     ["eval", ["(require 'lib.a)"]]
   ]);
 });
@@ -167,14 +169,16 @@ test("kernel starting hook establishes host scope before bootstrap", async () =>
     resources: { "lib/a.hal": "(ns lib.a)" }
   });
   await broker.create("scoped", { bootstrap: "(+ 1 2)" });
-  assert.deepEqual(order, ["scope:scoped", "register-resource", "eval"]);
+  assert.deepEqual(order, ["scope:scoped", "register-resources", "eval"]);
 });
 
 test("create without bootstrap only registers resources", async () => {
   const { spawn } = mockSpawn();
   const broker = new KernelBroker({ spawn, resources: { "lib/a.hal": "(ns lib.a)" } });
   const kernel = await broker.create("plain");
-  assert.deepEqual(kernel.context.calls, [["register-resource", ["lib/a.hal", "(ns lib.a)"]]]);
+  assert.deepEqual(kernel.context.calls, [[
+    "register-resources", [[["lib/a.hal", "(ns lib.a)"]]]
+  ]]);
 });
 
 test("duplicate names are rejected, including concurrent creates", async () => {
@@ -245,6 +249,7 @@ test("ns+ documents activate isolated generations and roll back failed reloads",
       const kernel = await spawn(name);
       kernel.context.call = async function (target, args) {
         this.calls.push([target, args]);
+        if (target === "register-resources") return true;
         const source = target === "session/eval" ? args[1] : args[0];
         if (target === "session/eval" && source.includes("BROKEN")) throw new Error("bad reload");
         return source?.includes("(+ value 1)") ? 43 : 42;
@@ -354,7 +359,7 @@ test("a failed create terminates the half-booted kernel", async () => {
       const kernel = await spawn(name);
       kernel.context.call = async function (target, args) {
         this.calls.push([target, args]);
-        if (target === "register-resource") throw new Error("bad resource");
+        if (target === "register-resources") throw new Error("bad resource");
         return true;
       };
       return kernel;

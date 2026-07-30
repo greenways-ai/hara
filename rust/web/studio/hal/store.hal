@@ -2,7 +2,8 @@
 ; resource; use via (require [studio.store :as store]).
 ; All keys and values are plain strings — decodeHta yields keywords as opaque
 ; objects that IndexedDB rejects, so never pass keywords across host/call.
-(ns studio.store)
+(ns studio.store
+  (:require [std.foundation.host :as host]))
 
 (defn call
   ([method] (deref (host/call "store" method)))

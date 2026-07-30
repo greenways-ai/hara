@@ -339,7 +339,7 @@ export class NodeRuntime {
   }
 
   /**
-   * Browser adapter for a request constructed by `std.substrate.frame`.
+   * Browser adapter for a request constructed by `std.lib.substrate.frame`.
    * The portable layer owns the frame shape; Studio supplies only its local
    * source and workspace defaults before dispatching it to a document node.
    */
@@ -440,7 +440,7 @@ export class NodeRuntime {
   }
 
   /**
-   * Browser adapter for a stream frame constructed by `std.substrate.frame`.
+   * Browser adapter for a stream frame constructed by `std.lib.substrate.frame`.
    * Queues and graph edges remain Studio concerns; envelope validation and
    * wire-key normalization stay portable.
    */

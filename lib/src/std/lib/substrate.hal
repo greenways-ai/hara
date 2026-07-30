@@ -1,17 +1,17 @@
 ;; ============================================================================
-;; std.substrate — portable, atom-backed XTalk substrate core.
+;; std.lib.substrate — portable, atom-backed XTalk substrate core.
 ;;
 ;; This is intentionally an in-memory node.  Browser ports, JSON wire shapes,
 ;; and Studio generation ownership are adapters above this namespace.
 ;; ============================================================================
-(ns std.substrate
-  (:require [std.substrate.protocol :as protocol]))
+(ns std.lib.substrate
+  (:require [std.lib.substrate.protocol :as protocol]))
 
 (defstruct SubstrateNode [id state])
 (defstruct SubstrateFrame [id kind space meta action args reply-to status data error signal cause])
 
 (defn node-create [id]
-  (std.substrate/SubstrateNode id
+  (std.lib.substrate/SubstrateNode id
                  (atom {:spaces {}
                         :services {}
                         :handlers {}
@@ -41,7 +41,7 @@
 (defn node-space-id [space-id] (if space-id space-id "__NODE__"))
 
 (defn node-frame [kind id space meta action args reply-to status data error signal cause]
-  (std.substrate/SubstrateFrame id kind (node-space-id space) meta action args reply-to status data error signal cause))
+  (std.lib.substrate/SubstrateFrame id kind (node-space-id space) meta action args reply-to status data error signal cause))
 
 (defn route-stream-loop [node transport-ids frame index]
   (if (= index (count transport-ids))
@@ -68,7 +68,7 @@
     (section-put node :router key
                  (dissoc (get (node-section node :router) key {}) transport-id))))
 
-(extend-type std.substrate/SubstrateFrame protocol/IFrame
+(extend-type std.lib.substrate/SubstrateFrame protocol/IFrame
   (frame-id [frame] (field frame :id))
   (frame-kind [frame] (field frame :kind))
   (frame-space [frame] (field frame :space))
@@ -76,7 +76,7 @@
   (frame-cause [frame] (field frame :cause))
   (frame-data [frame] (field frame :data)))
 
-(extend-type std.substrate/SubstrateNode protocol/ISpace
+(extend-type std.lib.substrate/SubstrateNode protocol/ISpace
   (get-space [node space-id] (get (node-section node :spaces) (node-space-id space-id)))
   (create-space [node space-id opts]
     (let [space-id (node-space-id space-id)]
@@ -97,12 +97,12 @@
     (protocol-call protocol/ISpace set-space-state node space-id
                    (updater (protocol-call protocol/ISpace get-space-state node space-id)))))
 
-(extend-type std.substrate/SubstrateNode protocol/IService
+(extend-type std.lib.substrate/SubstrateNode protocol/IService
   (get-service [node service-id] (get (node-section node :services) service-id))
   (set-service [node service-id service] (section-put node :services service-id service))
   (remove-service [node service-id] (section-remove node :services service-id)))
 
-(extend-type std.substrate/SubstrateNode protocol/IHandler
+(extend-type std.lib.substrate/SubstrateNode protocol/IHandler
   (register-handler [node action handler meta]
     (section-put node :handlers action {:id action :fn handler :meta meta}))
   (unregister-handler [node action] (section-remove node :handlers action))
@@ -114,7 +114,7 @@
   (get-trigger [node signal] (get (node-section node :triggers) signal))
   (list-triggers [node] (vec (keys (node-section node :triggers)))))
 
-(extend-type std.substrate/SubstrateNode protocol/ITransport
+(extend-type std.lib.substrate/SubstrateNode protocol/ITransport
   (attach-transport [node transport-id transport] (section-put node :transports transport-id transport))
   (detach-transport [node transport-id] (section-remove node :transports transport-id))
   (get-transport [node transport-id] (get (node-section node :transports) transport-id))
@@ -138,7 +138,7 @@
                   (if transport-id (router-remove node transport-id frame) frame))
                 nil))))))))
 
-(extend-type std.substrate/SubstrateNode protocol/IRequest
+(extend-type std.lib.substrate/SubstrateNode protocol/IRequest
   (request [node space-id action args meta]
     (let [request-meta (node-meta meta)]
       (let [frame (node-frame :request (get request-meta :id (node-id "req-")) (node-space-id space-id) request-meta action (node-args args) nil nil nil nil nil nil)]
@@ -180,7 +180,7 @@
           (swap! (field node :state) (fn [state] (assoc state :pending {})))
           {:pending pending :reason reason}))))
 
-(extend-type std.substrate/SubstrateNode protocol/IStream
+(extend-type std.lib.substrate/SubstrateNode protocol/IStream
   (publish [node space-id signal data meta]
     (let [stream-meta (node-meta meta)]
       (let [space-id (node-space-id space-id)]

@@ -1,6 +1,6 @@
-(ns std.substrate.protocol-test
+(ns std.lib.substrate.protocol-test
   (:require [std.lib.test :as test]
-            [std.substrate.protocol :as protocol]))
+            [std.lib.substrate.protocol :as protocol]))
 
 (defstruct Fixture [id])
 

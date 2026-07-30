@@ -1,0 +1,126 @@
+;; Portable bulk task execution. This namespace emits structured reports and
+;; never prints; hosts own terminal rendering and wall-clock implementations.
+(ns std.task.bulk
+  (:require [std.task.protocol :as protocol]))
+
+(defstruct NullReporter [])
+(defstruct EventReporter [reports])
+(defstruct FixedClock [value])
+
+(extend-type NullReporter protocol/ITaskReporter
+  (report-task [reporter report]
+    report))
+
+(extend-type EventReporter protocol/ITaskReporter
+  (report-task [reporter report]
+    (do
+      (swap! (field reporter :reports)
+             (fn [reports] (conj reports report)))
+      report)))
+
+(extend-type FixedClock protocol/ITaskClock
+  (task-now-ms [clock]
+    (field clock :value)))
+
+(def +null-reporter+ (std.task.bulk/NullReporter))
+(def +zero-clock+ (std.task.bulk/FixedClock 0))
+
+(defn event-reporter
+  ([] (std.task.bulk/EventReporter (atom [])))
+  ([reports] (std.task.bulk/EventReporter reports)))
+
+(defn reporter-events
+  [reporter]
+  (deref (field reporter :reports)))
+
+(defn report!
+  [reporter report]
+  (protocol-call protocol/ITaskReporter report-task reporter report))
+
+(defn now-ms
+  [clock]
+  (protocol-call protocol/ITaskClock task-now-ms clock))
+
+(defn normalize-result
+  [input value]
+  (if (and (map? value) (:status value))
+    (merge {:key input} value)
+    {:key input :status :return :data value}))
+
+(defn bulk-process-item
+  [task function input params lookup env args]
+  (let [reporter (or (:reporter params) +null-reporter+)
+        clock (or (:clock params) +zero-clock+)
+        start (now-ms clock)]
+    (report! reporter {:event :task/item-start :input input})
+    (let [result
+          (try
+            (merge (normalize-result
+                    input
+                    (apply function input params lookup env args))
+                   {:elapsed (- (now-ms clock) start)})
+            (catch Throwable error
+              {:key input
+               :status :error
+               :error (str error)
+               :elapsed (- (now-ms clock) start)}))]
+      (report! reporter (merge {:event :task/item-end} result))
+      result)))
+
+(defn bulk-items
+  [task function inputs params lookup env args]
+  (vec (map (fn [input]
+              (bulk-process-item task function input params lookup env args))
+            inputs)))
+
+(defn bulk-warnings
+  [items]
+  (vec (filter (fn [item] (= :warn (get item :status))) items)))
+
+(defn bulk-errors
+  [items]
+  (vec (filter (fn [item]
+                 (or (= :error (get item :status))
+                     (= :critical (get item :status))))
+               items)))
+
+(defn bulk-results
+  [items]
+  (vec (filter (fn [item] (= :return (get item :status))) items)))
+
+(defn bulk-summary
+  [items]
+  {:items (count items)
+   :results (count (bulk-results items))
+   :warnings (count (bulk-warnings items))
+   :errors (count (bulk-errors items))})
+
+(defn bulk-package
+  [items return]
+  (let [results (bulk-results items)
+        warnings (bulk-warnings items)
+        errors (bulk-errors items)
+        summary (bulk-summary items)]
+    (if (= return :all)
+      {:items items
+       :results results
+       :warnings warnings
+       :errors errors
+       :summary summary}
+      (if (= return :items)
+        items
+        (if (= return :summary)
+          summary
+          results)))))
+
+(defn bulk
+  [task function inputs params lookup env & args]
+  (let [reporter (or (:reporter params) +null-reporter+)]
+    (report! reporter {:event :task/bulk-start :count (count inputs)})
+    (let [items (bulk-items task function inputs
+                            (assoc params :bulk true)
+                            lookup env args)
+          output (bulk-package items (or (:return params) :results))]
+      (report! reporter {:event :task/bulk-end
+                         :summary (bulk-summary items)})
+      output)))

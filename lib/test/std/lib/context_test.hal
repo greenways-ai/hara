@@ -1,6 +1,6 @@
-(ns std.foundation.context-test
+(ns std.lib.context-test
   (:require [std.lib.test :as test]
-            [std.foundation.context :as context]))
+            [std.lib.context :as context]))
 
 (def results
   [(test/check "space creates, starts, invokes, and stops a registered runtime"

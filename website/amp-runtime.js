@@ -98,9 +98,9 @@ export class HaraAmpRuntime {
         wasm("./assets/wasm/demo-fft.wasm"),
         text("./runtime/studio/hal/node.hal"),
         text("./runtime/studio/hal/draw.hal"),
-        text("./runtime/std/substrate/protocol.hal"),
-        text("./runtime/std/substrate/frame.hal"),
-        text("./runtime/std/substrate.hal"),
+        text("./runtime/std/lib/substrate/protocol.hal"),
+        text("./runtime/std/lib/substrate/frame.hal"),
+        text("./runtime/std/lib/substrate.hal"),
         text("./examples/hara-amp/src/visualizer.hal")
       ]);
     if (this.disposed) throw new Error("Amp runtime was closed");
@@ -127,9 +127,9 @@ export class HaraAmpRuntime {
       resources: {
         "studio.node": nodeSource,
         "studio.draw": drawSource,
-        "std.substrate.protocol": protocolSource,
-        "std.substrate.frame": frameSource,
-        "std.substrate": substrateSource
+        "std.lib.substrate.protocol": protocolSource,
+        "std.lib.substrate.frame": frameSource,
+        "std.lib.substrate": substrateSource
       }
     });
     await this.activateVisualizer(visualizerSource);

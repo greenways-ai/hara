@@ -14,37 +14,24 @@
 
 (defn ^{:schema [:fn [:str :str & :any] :promise]}
   call
-  "Invokes a capability-gated host operation and returns its promise.
-   The fixed arities preserve the raw host/call special form in all runtimes."
-  ([service method]
-   (host/call service method))
-  ([service method a]
-   (host/call service method a))
-  ([service method a b]
-   (host/call service method a b))
-  ([service method a b c]
-   (host/call service method a b c))
-  ([service method a b c d]
-   (host/call service method a b c d))
-  ([service method a b c d e]
-   (host/call service method a b c d e))
-  ([service method a b c d e f]
-   (host/call service method a b c d e f)))
+  "Invokes a capability-gated host operation and returns its promise."
+  [service method & args]
+  (std.native.Host/call service method (vec args)))
 
 (defn ^{:schema [:fn [] :promise]}
   describe
   "Returns a promise of the host descriptor: version, capability names, scopes, and limits."
   []
-  (call "host" "describe"))
+  (std.native.Host/describe))
 
 (defn ^{:schema [:fn [] :promise]}
   capabilities
-  "Returns a promise of the host's available capability names."
+  "Returns a promise of the capability names granted to this session."
   []
-  (call "host" "capabilities"))
+  (std.native.Host/capabilities))
 
 (defn ^{:schema [:fn [:any] :promise]}
   capability?
-  "Returns a promise of whether capability is available to this session."
+  "Returns a promise of whether capability is granted to this session."
   [capability]
-  (call "host" "capability?" capability))
+  (std.native.Host/capability? capability))

@@ -15,7 +15,7 @@ public class StdFoundationTest {
   public void startupDefaultsExposeEdnNativeTypesAndProtocols() {
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
       assertEquals(
-          "[\"{:a 1}\" true true true 3 true true true]",
+          "[\"{:a 1}\" true true true true true 3 true true true]",
           context
               .eval(
                   HaraLanguage.ID,
@@ -24,12 +24,14 @@ public class StdFoundationTest {
                       + "  (= Maths std.native/Maths std.foundation/Maths)"
                       + "  (= Edn std.native/Edn std.foundation/Edn)"
                       + "  (= Json std.native/Json std.foundation/Json)"
+                      + "  (= Arr std.native/Arr std.foundation/Arr)"
+                      + "  (= Obj std.native/Obj std.foundation/Obj)"
                       + "  (ICount/count [1 2 3])"
                       + "  (iter-any? (fn [x] (= x \"edn/pretty\")) (current-symbols))"
                       + "  (iter-any? (fn [x] (= x \"Maths\")) (current-symbols))"
                       + "  (every? (fn [type] (not (nil? (resolve type))))"
                       + "    '[Maths Numbers Bits String Bytes File Socket Promise Coroutine"
-                      + "      Array Object Runtime Printer Edn Json Regex UUID Error])]")
+                      + "      Arr Obj Runtime Printer Edn Json Regex UUID Error])]")
               .toString());
     }
   }

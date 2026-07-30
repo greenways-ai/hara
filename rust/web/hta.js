@@ -66,10 +66,8 @@ export function decodeHta(input) {
 }
 
 export function parseHtaManifest(source) {
-  const reader = new ManifestReader(source);
-  const value = reader.value();
-  reader.space();
-  if (reader.cursor !== source.length || !(value instanceof Map)) throw new Error("hta/manifest-malformed: expected one EDN map");
+  const value = parseEdnData(source, "hta/manifest-malformed");
+  if (!(value instanceof Map)) throw new Error("hta/manifest-malformed: expected one EDN map");
   const namespace = manifestField(value,"namespace"), identity = manifestField(value,"identity"), providerValue = manifestField(value,"provider"), module = manifestField(value,"module"), abiValue = manifestField(value,"abi");
   if (typeof namespace !== "string" || !/^[a-z][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$/.test(namespace)) throw new Error("hta/manifest-malformed: invalid namespace");
   if (identity !== undefined && (typeof identity !== "string" || !/^[a-z][a-z0-9-]*\/[a-z][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)*$/.test(identity))) throw new Error("hta/manifest-malformed: invalid identity");
@@ -104,6 +102,15 @@ export function parseHtaManifest(source) {
   return Object.freeze({namespace,identity,provider,module,abi,browserTarget,assets:Object.freeze(assets),handleTags:Object.freeze(handleTags)});
 }
 
+/** Strict data-only EDN subset shared by extension and package manifests. */
+export function parseEdnData(source, errorCode = "edn/data-malformed") {
+  const reader = new ManifestReader(source, errorCode);
+  const value = reader.value();
+  reader.space();
+  if (reader.cursor !== source.length) throw new Error(`${errorCode}: trailing input`);
+  return value;
+}
+
 function validPackagePath(value,suffix) {
   return typeof value === "string" && value.length>0 && !value.startsWith("/") && !value.split("/").includes("..") && !value.includes(":") && (!suffix || value.endsWith(suffix));
 }
@@ -135,13 +142,14 @@ export async function loadHtaExtension({worker,descriptor,descriptorUrl,packageU
 function manifestField(map,name) { for (const [key,value] of map) if (key instanceof HtaKeyword && key.name===name) return value; }
 
 class ManifestReader {
-  constructor(source){this.source=source;this.cursor=0;}
+  constructor(source,errorCode="hta/manifest-malformed"){this.source=source;this.cursor=0;this.errorCode=errorCode;}
+  error(message){return new Error(`${this.errorCode}: ${message}`);}
   space(){while(this.cursor<this.source.length){const ch=this.source[this.cursor];if(/[\s,]/.test(ch)){this.cursor++;continue;}if(ch===';'){while(this.cursor<this.source.length&&this.source[this.cursor]!=='\n')this.cursor++;continue;}break;}}
-  value(){this.space();const ch=this.source[this.cursor++];if(ch===undefined)throw new Error("hta/manifest-malformed: unexpected EOF");if(ch==='{')return this.map();if(ch==='[')return this.vector();if(ch==='\"')return this.string();if(ch===':')return new HtaKeyword(this.token());this.cursor--;const token=this.token();if(token==='nil')return null;if(token==='true')return true;if(token==='false')return false;if(/^-?[0-9]+$/.test(token))return Number(token);return new HtaSymbol(token);}
-  map(){const result=new Map();for(;;){this.space();if(this.source[this.cursor]==='}'){this.cursor++;return result;}const key=this.value();this.space();if(this.source[this.cursor]==='}')throw new Error("hta/manifest-malformed: map value missing");result.set(key,this.value());}}
+  value(){this.space();const ch=this.source[this.cursor++];if(ch===undefined)throw this.error("unexpected EOF");if(ch==='{')return this.map();if(ch==='[')return this.vector();if(ch==='\"')return this.string();if(ch===':')return new HtaKeyword(this.token());this.cursor--;const token=this.token();if(token==='nil')return null;if(token==='true')return true;if(token==='false')return false;if(/^-?[0-9]+$/.test(token))return Number(token);return new HtaSymbol(token);}
+  map(){const result=new Map(),keys=new Set();for(;;){this.space();if(this.source[this.cursor]==='}'){this.cursor++;return result;}const key=this.value(),identity=displayHta(key);if(keys.has(identity))throw this.error("duplicate map key");keys.add(identity);this.space();if(this.source[this.cursor]==='}')throw this.error("map value missing");result.set(key,this.value());}}
   vector(){const result=[];for(;;){this.space();if(this.source[this.cursor]===']'){this.cursor++;return result;}result.push(this.value());}}
-  string(){let result='';while(this.cursor<this.source.length){const ch=this.source[this.cursor++];if(ch==='\"')return result;if(ch==='\\'){const escaped=this.source[this.cursor++];if(escaped==='u'){const code=this.source.slice(this.cursor,this.cursor+4);if(!/^[0-9a-fA-F]{4}$/.test(code))throw new Error("hta/manifest-malformed: invalid unicode escape");result+=String.fromCharCode(parseInt(code,16));this.cursor+=4;}else{const escapes={n:'\n',r:'\r',t:'\t',b:'\b',f:'\f','\"':'\"','\\':'\\'};if(!(escaped in escapes))throw new Error("hta/manifest-malformed: invalid string escape");result+=escapes[escaped];}}else result+=ch;}throw new Error("hta/manifest-malformed: unterminated string");}
-  token(){this.space();const start=this.cursor;while(this.cursor<this.source.length&&!/[\s,{}\[\]\"]/ .test(this.source[this.cursor]))this.cursor++;if(start===this.cursor)throw new Error("hta/manifest-malformed: invalid token");return this.source.slice(start,this.cursor);}
+  string(){let result='';while(this.cursor<this.source.length){const ch=this.source[this.cursor++];if(ch==='\"')return result;if(ch==='\\'){const escaped=this.source[this.cursor++];if(escaped==='u'){const code=this.source.slice(this.cursor,this.cursor+4);if(!/^[0-9a-fA-F]{4}$/.test(code))throw this.error("invalid unicode escape");result+=String.fromCharCode(parseInt(code,16));this.cursor+=4;}else{const escapes={n:'\n',r:'\r',t:'\t',b:'\b',f:'\f','\"':'\"','\\':'\\'};if(!(escaped in escapes))throw this.error("invalid string escape");result+=escapes[escaped];}}else result+=ch;}throw this.error("unterminated string");}
+  token(){this.space();const start=this.cursor;while(this.cursor<this.source.length&&!/[\s,{}\[\]\"]/ .test(this.source[this.cursor]))this.cursor++;if(start===this.cursor)throw this.error("invalid token");return this.source.slice(start,this.cursor);}
 }
 
 function writeValue(output, value) {

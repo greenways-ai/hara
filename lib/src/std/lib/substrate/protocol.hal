@@ -1,12 +1,12 @@
 ;; ============================================================================
-;; std.substrate.protocol — capability contracts for the portable substrate.
+;; std.lib.substrate.protocol — capability contracts for the portable substrate.
 ;;
 ;; This namespace deliberately contains no concrete node state, transports, or
-;; wire codecs.  `std.substrate` will supply an atom-backed node implementation;
+;; wire codecs. `std.lib.substrate` supplies an atom-backed node implementation;
 ;; Studio and other hosts can then adapt that implementation without owning the
 ;; substrate semantics themselves.
 ;; ============================================================================
-(ns std.substrate.protocol)
+(ns std.lib.substrate.protocol)
 
 (defprotocol IFrame
   (frame-id [frame])

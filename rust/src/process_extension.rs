@@ -462,7 +462,7 @@ mod tests {
     fn result(promise: Promise) -> Result<Value, String> {
         match promise.wait_state() {
             PromiseState::Fulfilled(value) => Ok(value),
-            PromiseState::Rejected(error) => Err(error),
+            PromiseState::Rejected(error) => Err(error.message()),
             PromiseState::Pending => Err("still pending".into()),
         }
     }
