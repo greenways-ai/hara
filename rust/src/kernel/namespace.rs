@@ -125,16 +125,12 @@ impl<V> Namespace<V> {
     pub fn unalias(&self, alias: impl AsRef<str>) -> Option<Namespace<V>> {
         let alias = Symbol::parse(alias.as_ref());
         self.lazy_aliases.borrow_mut().remove(&alias);
-        self.aliases
-            .borrow_mut()
-            .remove(&alias)
+        self.aliases.borrow_mut().remove(&alias)
     }
     pub fn alias(&self, alias: impl AsRef<str>, namespace: Namespace<V>) {
         let alias = Symbol::parse(alias.as_ref());
         self.lazy_aliases.borrow_mut().remove(&alias);
-        self.aliases
-            .borrow_mut()
-            .insert(alias, namespace);
+        self.aliases.borrow_mut().insert(alias, namespace);
     }
     pub fn lazy_alias(&self, alias: impl AsRef<str>, target: impl AsRef<str>) {
         let alias = Symbol::parse(alias.as_ref());
@@ -322,11 +318,7 @@ impl<V: Clone> NamespaceRegistry<V> {
             .borrow_mut()
             .insert(Symbol::parse(name.as_ref()), Vec::new());
     }
-    pub fn record_module_dependency(
-        &self,
-        module: impl AsRef<str>,
-        dependency: impl AsRef<str>,
-    ) {
+    pub fn record_module_dependency(&self, module: impl AsRef<str>, dependency: impl AsRef<str>) {
         let module = Symbol::parse(module.as_ref());
         let dependency = Symbol::parse(dependency.as_ref());
         let mut dependencies = self.module_dependencies.borrow_mut();
@@ -532,10 +524,7 @@ mod tests {
         let first = super::NamespaceRegistry::<i32>::new("user");
         let second = super::NamespaceRegistry::<i32>::new("user");
 
-        assert_eq!(
-            first.load_state("user"),
-            Some(NamespaceLoadState::Loaded)
-        );
+        assert_eq!(first.load_state("user"), Some(NamespaceLoadState::Loaded));
         assert_eq!(first.load_state("example.lazy"), None);
 
         first.set_load_state("example.lazy", NamespaceLoadState::Unloaded);

@@ -167,9 +167,7 @@
        (reduce (fn [passing entry]
                  (and passing
                       (:pass
-                       (protocol-call
-                        protocol/IMatcher match-value
-                        (matcher-for (nth expected (nth entry 0)))
+                       (protocol/match-value (matcher-for (nth expected (nth entry 0)))
                         (nth actual (nth entry 0))))))
                true
                (loop [index 0 output []]
@@ -195,8 +193,7 @@
     (fn [passing entry]
       (and passing
            (:pass
-            (protocol-call protocol/IMatcher match-value
-                           (matcher-for (nth entry 1))
+            (protocol/match-value (matcher-for (nth entry 1))
                            (get actual (nth entry 0))))))
     true
     expected)))
@@ -215,15 +212,12 @@
                            (fn [found candidate]
                              (or found
                                  (:pass
-                                  (protocol-call
-                                   protocol/IMatcher match-value
-                                   (matcher-for value) candidate))))
+                                  (protocol/match-value (matcher-for value) candidate))))
                            false actual)))
                    true expected)
            (sequence-prefix? (vec expected) (vec actual)))
          (:pass
-          (protocol-call protocol/IMatcher match-value
-                         (matcher-for expected) actual)))))
+          (protocol/match-value (matcher-for expected) actual)))))
    expected))
 
 (defn just
@@ -254,7 +248,7 @@
     (code.test/Matcher
      (fn [actual]
        (not (:pass
-             (protocol-call protocol/IMatcher match-value matcher actual))))
+             (protocol/match-value matcher actual))))
      expected)))
 
 (defn any
@@ -272,7 +266,7 @@
         (fn [passing matcher]
           (or passing
               (:pass
-               (protocol-call protocol/IMatcher match-value matcher actual))))
+               (protocol/match-value matcher actual))))
         false matchers))
      expected)))
 
@@ -291,7 +285,7 @@
         (fn [passing matcher]
           (and passing
                (:pass
-                (protocol-call protocol/IMatcher match-value matcher actual))))
+                (protocol/match-value matcher actual))))
         true matchers))
      expected)))
 
@@ -304,16 +298,14 @@
 
 (defn timed-settle
   [timer promise milliseconds]
-  (let [binding (protocol-call protocol/ITestTimer timeout-promise
-                               timer promise milliseconds)
+  (let [binding (protocol/timeout-promise timer promise milliseconds)
         wrapped (if (map? binding) (:promise binding) binding)
         timeout (if (map? binding) (:timeout binding) nil)
         outcome (try
                   (deref wrapped)
                   (finally
                     (if timeout
-                      (protocol-call protocol/ITestTimer
-                                     cancel-timeout timer timeout)
+                      (protocol/cancel-timeout timer timeout)
                       nil)))]
     (if (and (map? outcome) (= :timeout (:test/status outcome)))
       (code.test/TimeoutValue milliseconds)
@@ -347,7 +339,7 @@
           :expected expected
           :timeout (field actual :milliseconds)}
          (if (instance? code.test/Matcher expected)
-           (protocol-call protocol/IMatcher match-value expected actual)
+           (protocol/match-value expected actual)
            (if (fn? expected)
              {:pass (if (expected actual) true false)
               :actual actual
@@ -358,7 +350,7 @@
      (catch Throwable error
        (let [actual (code.test/ThrownValue error)]
          (if (instance? code.test/Matcher expected)
-           (protocol-call protocol/IMatcher match-value expected actual)
+           (protocol/match-value expected actual)
            {:pass false
             :status :error
             :actual nil
@@ -370,10 +362,7 @@
   ([name function]
    (register! name function {}))
   ([name function metadata]
-   (protocol-call
-    protocol/ITestRegistry
-    registry-register
-    +registry+
+   (protocol/registry-register +registry+
     {:namespace (current-namespace)
      :name name
      :function function
@@ -384,10 +373,7 @@
   ([name]
    (remove-fact (current-namespace) name))
   ([namespace name]
-   (protocol-call
-    protocol/ITestRegistry
-    registry-remove
-    +registry+
+   (protocol/registry-remove +registry+
     namespace
     name)))
 
@@ -395,21 +381,18 @@
   "Clears facts from namespace, defaulting to the current namespace."
   ([] (purge-facts (current-namespace)))
   ([namespace]
-   (protocol-call
-    protocol/ITestRegistry
-    registry-clear
-    +registry+
+   (protocol/registry-clear +registry+
     namespace)))
 
 (defn purge-all
   "Clears the complete test registry."
   []
-  (protocol-call protocol/ITestRegistry registry-clear +registry+ nil))
+  (protocol/registry-clear +registry+ nil))
 
 (defn tests
   "Returns all registered fact records."
   []
-  (protocol-call protocol/ITestRegistry registry-facts +registry+))
+  (protocol/registry-facts +registry+))
 
 (defn registry
   "Returns the registry snapshot keyed by [namespace fact-name]."
@@ -420,10 +403,7 @@
   "Returns a fact by namespace and name."
   ([name] (get-fact (current-namespace) name))
   ([namespace name]
-   (protocol-call
-    protocol/ITestRegistry
-    registry-find
-    +registry+
+   (protocol/registry-find +registry+
     namespace
     name)))
 
@@ -511,7 +491,7 @@
 (defn report!
   "Sends event to reporter and returns event."
   [reporter event]
-  (protocol-call protocol/ITestReporter report-event reporter event))
+  (protocol/report-event reporter event))
 
 (defn checks-pass?
   [checks]
@@ -545,7 +525,7 @@
 (defn clock-now
   [options]
   (if (:clock options)
-    (protocol-call protocol/ITestClock now-ms (:clock options))
+    (protocol/now-ms (:clock options))
     nil))
 
 (defn run-hook
@@ -565,7 +545,7 @@
   [fact options]
   (or (:cancelled options)
       (if (:control options)
-        (protocol-call protocol/ITestControl cancelled? (:control options) fact)
+        (protocol/cancelled? (:control options) fact)
         false)))
 
 (defn run-fact

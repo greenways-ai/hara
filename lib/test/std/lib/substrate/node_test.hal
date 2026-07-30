@@ -6,71 +6,70 @@
 (def results
   [(test/check "spaces and services are isolated in a node atom"
                (let [node (substrate/node-create "node-a")]
-                 (protocol-call protocol/ISpace create-space node "main" {:state {:count 1} :meta {:owner "test"}})
-                 (protocol-call protocol/ISpace update-space-state node "main"
+                 (protocol/create-space node "main" {:state {:count 1} :meta {:owner "test"}})
+                 (protocol/update-space-state node "main"
                                 (fn [state] (assoc state :count (+ (get state :count) 1))))
-                 (protocol-call protocol/IService set-service node "cache" 42)
-                 [(protocol-call protocol/ISpace get-space-state node "main")
-                  (protocol-call protocol/IService get-service node "cache")])
+                 (protocol/set-service node "cache" 42)
+                 [(protocol/get-space-state node "main")
+                  (protocol/get-service node "cache")])
                [{:count 2} 42])
    (test/check "nil space ids use the node-wide XTalk space"
                (let [node (substrate/node-create "node-root")]
-                 (protocol-call protocol/ISpace set-space-state node nil 42)
-                 [(protocol-call protocol/ISpace get-space-state node nil)
-                  (protocol-call protocol/IFrame frame-space
-                                 (protocol-call protocol/IStream publish node nil "changed" 1 nil))])
+                 (protocol/set-space-state node nil 42)
+                 [(protocol/get-space-state node nil)
+                  (protocol/frame-space (protocol/publish node nil "changed" 1 nil))])
                [42 "__NODE__"])
    (test/check "local requests invoke handlers with XTalk argument order"
                (let [node (substrate/node-create "node-b")]
-                 (protocol-call protocol/IHandler register-handler node "sum"
+                 (protocol/register-handler node "sum"
                                 (fn [space args frame current-node]
                                   {:space (get space :id)
                                    :sum (+ (nth args 0) (nth args 1))})
                                 {})
-                 (protocol-call protocol/IRequest request node "main" "sum" [19 23] {:id "req-local"}))
+                 (protocol/request node "main" "sum" [19 23] {:id "req-local"}))
                {:space "main" :sum 42})
    (test/check "transports settle remote request promises"
                (let [node (substrate/node-create "node-c")]
-                 (protocol-call protocol/ITransport attach-transport node "peer-a"
+                 (protocol/attach-transport node "peer-a"
                                 (fn [request]
-                                  (protocol-call protocol/ITransport receive-frame node
+                                  (protocol/receive-frame node
                                                  (substrate/node-frame :response "res-1" "main" {} nil []
-                                                                       (protocol-call protocol/IFrame frame-id request)
+                                                                       (protocol/frame-id request)
                                                                        :ok 84 nil nil nil)
                                                  {:transport-id "peer-a"})))
                  (promise/value
-                  (protocol-call protocol/IRequest request node "main" "sum" []
+                  (protocol/request node "main" "sum" []
                                  {:id "req-remote" :transport-id "peer-a"})))
                84)
    (test/check "default request and stream ids do not overwrite pending work"
                (let [node (substrate/node-create "node-ids")]
-                 (protocol-call protocol/ITransport attach-transport node "peer-a" (fn [frame] nil))
-                 (protocol-call protocol/IRequest request node "main" "wait" [] {:transport-id "peer-a"})
-                 (protocol-call protocol/IRequest request node "main" "wait" [] {:transport-id "peer-a"})
-                 (let [first-stream (protocol-call protocol/IStream publish node "main" "changed" 1 nil)]
-                   (let [second-stream (protocol-call protocol/IStream publish node "main" "changed" 2 nil)]
+                 (protocol/attach-transport node "peer-a" (fn [frame] nil))
+                 (protocol/request node "main" "wait" [] {:transport-id "peer-a"})
+                 (protocol/request node "main" "wait" [] {:transport-id "peer-a"})
+                 (let [first-stream (protocol/publish node "main" "changed" 1 nil)]
+                   (let [second-stream (protocol/publish node "main" "changed" 2 nil)]
                      [(count (get (substrate/node-state node) :pending))
-                      (not= (protocol-call protocol/IFrame frame-id first-stream)
-                            (protocol-call protocol/IFrame frame-id second-stream))])))
+                      (not= (protocol/frame-id first-stream)
+                            (protocol/frame-id second-stream))])))
                [2 true])
    (test/check "streams trigger locally and route to subscribers"
                (let [node (substrate/node-create "node-d")]
-                 (protocol-call protocol/IHandler register-trigger node "changed"
+                 (protocol/register-trigger node "changed"
                                 (fn [space frame current-node]
-                                  (protocol-call protocol/IService set-service current-node "local" (protocol-call protocol/IFrame frame-data frame)))
+                                  (protocol/set-service current-node "local" (protocol/frame-data frame)))
                                 {})
-                 (protocol-call protocol/ITransport attach-transport node "peer-a"
+                 (protocol/attach-transport node "peer-a"
                                 (fn [frame]
-                                  (protocol-call protocol/IService set-service node "remote" (protocol-call protocol/IFrame frame-data frame))))
-                 (let [subscription (protocol-call protocol/IStream subscribe node "main" "changed" "sub-1" {})]
-                   (protocol-call protocol/ITransport receive-frame node subscription {:transport-id "peer-a"}))
-                 (protocol-call protocol/IStream publish node "main" "changed" 42 {:id "evt-1"})
-                 (let [unsubscription (protocol-call protocol/IStream unsubscribe node "main" "changed" "sub-1" {})]
-                   (protocol-call protocol/ITransport receive-frame node unsubscription {:transport-id "peer-a"})
-                   [(protocol-call protocol/IService get-service node "local")
-                    (protocol-call protocol/IService get-service node "remote")
-                    (protocol-call protocol/IFrame frame-kind unsubscription)
-                    (protocol-call protocol/IStream list-subscriptions node "main" "changed")]))
+                                  (protocol/set-service node "remote" (protocol/frame-data frame))))
+                 (let [subscription (protocol/subscribe node "main" "changed" "sub-1" {})]
+                   (protocol/receive-frame node subscription {:transport-id "peer-a"}))
+                 (protocol/publish node "main" "changed" 42 {:id "evt-1"})
+                 (let [unsubscription (protocol/unsubscribe node "main" "changed" "sub-1" {})]
+                   (protocol/receive-frame node unsubscription {:transport-id "peer-a"})
+                   [(protocol/get-service node "local")
+                    (protocol/get-service node "remote")
+                    (protocol/frame-kind unsubscription)
+                    (protocol/list-subscriptions node "main" "changed")]))
                [42 42 :unsubscribe []])])
 
 (test/print-results results)

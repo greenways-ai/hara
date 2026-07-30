@@ -16,7 +16,7 @@
      (json/pretty {"a" 1} nil)
      => (throws))
    (fact "native implementation"
-     (std.native.Json/write {"a" 1})
+     (Json/write {"a" 1})
      => "{\"a\":1}")])
 
 (pr-str (run '[std.foundation.json-test]))

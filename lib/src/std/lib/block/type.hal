@@ -18,19 +18,19 @@
 
 (defn void-block?
   [block]
-  (= :void (protocol-call protocol/IBlock block-type block)))
+  (= :void (protocol/block-type block)))
 
 (defn token-block?
   [block]
-  (= :token (protocol-call protocol/IBlock block-type block)))
+  (= :token (protocol/block-type block)))
 
 (defn container-block?
   [block]
-  (= :container (protocol-call protocol/IBlock block-type block)))
+  (= :container (protocol/block-type block)))
 
 (defn modifier-block?
   [block]
-  (= :modifier (protocol-call protocol/IBlock block-type block)))
+  (= :modifier (protocol/block-type block)))
 
 (defn code-block?
   [block]
@@ -39,20 +39,20 @@
 
 (defn space-block?
   [block]
-  (= :space (protocol-call protocol/IBlock block-tag block)))
+  (= :space (protocol/block-tag block)))
 
 (defn linebreak-block?
   [block]
-  (= :linebreak (protocol-call protocol/IBlock block-tag block)))
+  (= :linebreak (protocol/block-tag block)))
 
 (defn linespace-block?
   [block]
-  (= :linespace (protocol-call protocol/IBlock block-tag block)))
+  (= :linespace (protocol/block-tag block)))
 
 (defn eof-block?
   [block]
-  (= :eof (protocol-call protocol/IBlock block-tag block)))
+  (= :eof (protocol/block-tag block)))
 
 (defn comment-block?
   [block]
-  (= :comment (protocol-call protocol/IBlock block-tag block)))
+  (= :comment (protocol/block-tag block)))

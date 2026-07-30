@@ -11,6 +11,29 @@ const LIBRARIES: &[(&str, &str, &str)] = &[
     ("coroutine", "std.foundation.coroutine", "co"),
     ("edn", "std.foundation.edn", "edn"),
 ];
+const NATIVE_TYPES: &[&str] = &[
+    "Maths",
+    "Numbers",
+    "Bits",
+    "String",
+    "Bytes",
+    "File",
+    "Socket",
+    "Promise",
+    "Coroutine",
+    "Arr",
+    "Obj",
+    "Runtime",
+    "Printer",
+    "Edn",
+    "Json",
+    "Host",
+    "Regex",
+    "UUID",
+    "Error",
+    "Iter",
+    "Kernel",
+];
 
 #[derive(Debug, Clone, Default)]
 pub struct GeneratedNamespaceConfig {
@@ -30,6 +53,9 @@ impl GeneratedNamespaceConfig {
             .collect();
         // Allow both the spec alias (coroutine) and the user-facing short alias (co).
         aliases.insert("coroutine".into(), "std.foundation.coroutine".into());
+        for native_type in NATIVE_TYPES {
+            aliases.insert((*native_type).into(), format!("std.native.{native_type}"));
+        }
         Self {
             aliases,
             refers: HashMap::new(),
@@ -110,6 +136,9 @@ impl GeneratedNamespaceConfig {
         let mut config = Self::default();
         config.builtins = builtins;
         config.blank = blank;
+        for native_type in NATIVE_TYPES {
+            config.put_alias(native_type, &format!("std.native.{native_type}"))?;
+        }
         for (library, namespace, default_alias) in LIBRARIES {
             if excluded.contains(*library) {
                 continue;
@@ -317,14 +346,10 @@ impl GeneratedNamespaceConfig {
                         ":require :refer-macros expects a vector of symbols",
                     )?;
                     for value in names {
-                        let name = symbol(
-                            value,
-                            ":require :refer-macros expects unqualified symbols",
-                        )?;
+                        let name =
+                            symbol(value, ":require :refer-macros expects unqualified symbols")?;
                         if name.contains('/') {
-                            return Err(
-                                ":require :refer-macros expects unqualified symbols".into(),
-                            );
+                            return Err(":require :refer-macros expects unqualified symbols".into());
                         }
                     }
                 }
@@ -544,6 +569,7 @@ fn canonical(namespace: &str, method: &str) -> String {
         ("std.native.Regex", "instance?") => "regexp?".into(),
         ("std.native.UUID", "instance?") => "uuid?".into(),
         ("std.native.Error", method) => format!("std.native.Error/{method}"),
+        ("std.native.Iter", method) => method.into(),
         ("std.foundation.coroutine", method) => format!("std.foundation.coroutine/{method}"),
         ("std.foundation.string", method) => format!("std.foundation.string/{method}"),
         ("std.lib.string", "len") => "str/count".into(),
@@ -621,10 +647,28 @@ mod tests {
         .unwrap();
         assert_eq!(config.required_namespaces(), &["code.test"]);
         assert_eq!(config.used_namespaces(), &["code.test"]);
+        assert!(
+            GeneratedNamespaceConfig::configure(&parse_forms("(:use [code.test])").unwrap())
+                .unwrap_err()
+                .contains(":use expects unqualified namespace symbols")
+        );
+    }
+
+    #[test]
+    fn native_aliases_are_universal_and_cannot_be_rebound() {
+        let config =
+            GeneratedNamespaceConfig::configure(&parse_forms("(:config {:blank true})").unwrap())
+                .unwrap();
+        assert_eq!(
+            config
+                .rewrite(parse_forms("Iter/iter-map").unwrap().remove(0))
+                .to_string(),
+            "iter-map"
+        );
         assert!(GeneratedNamespaceConfig::configure(
-            &parse_forms("(:use [code.test])").unwrap()
+            &parse_forms("(:require [std.native.Maths :as Iter])").unwrap()
         )
         .unwrap_err()
-        .contains(":use expects unqualified namespace symbols"));
+        .contains("Namespace alias already refers to std.native.Iter"));
     }
 }

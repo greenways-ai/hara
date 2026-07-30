@@ -83,7 +83,7 @@ public final class ProtocolDispatchBenchmark {
           + "(extend-type Cell Value (value [self] (field self :value))) ";
 
   private static final String MONOMORPHIC_PROGRAM =
-      COMMON_PROGRAM + "(fn [value] (protocol-call Value value value))";
+      COMMON_PROGRAM + "(fn [receiver] (value receiver))";
 
   private static final String POLYMORPHIC_PROGRAM =
       "(defprotocol Value (value [self])) "
@@ -91,7 +91,7 @@ public final class ProtocolDispatchBenchmark {
           + "(defstruct CellB [value]) "
           + "(extend-type CellA Value (value [self] (field self :value))) "
           + "(extend-type CellB Value (value [self] (field self :value))) "
-          + "(fn [value] (protocol-call Value value value))";
+          + "(fn [receiver] (value receiver))";
 
   private static final String MULTIMETHOD_PROGRAM =
       "(defmulti kind (fn [value] value)) "
@@ -99,7 +99,7 @@ public final class ProtocolDispatchBenchmark {
           + "(fn [value] (kind value))";
 
   private static final String LOOKUP_PROGRAM =
-      "(fn [value] (protocol-call ILookup lookup value :key))";
+      "(fn [value] (ILookup/lookup value :key))";
 
   private static final String ITERATOR_PROGRAM =
       "(fn [value] (let [it (iter-map (fn [x] (+ x 1)) value)] (iter-next it)))";

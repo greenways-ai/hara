@@ -1,11 +1,11 @@
 use crate::repl;
+#[cfg(feature = "hir-encoder")]
+use hara_wasm::kernel::{hir::encode_hir_module, parse_forms};
+use hara_wasm::kernel::{parse, Form};
 use hara_wasm::native_cli::RuntimeBroker;
 use hara_wasm::package;
 use hara_wasm::project;
 use hara_wasm::resp::{RespConnection, RespServer, RespValue};
-use hara_wasm::kernel::{parse, Form};
-#[cfg(feature = "hir-encoder")]
-use hara_wasm::kernel::{hir::encode_hir_module, parse_forms};
 use hara_wasm::Runtime;
 use std::env;
 use std::fs;
@@ -94,8 +94,20 @@ pub(crate) fn run(options: Options) -> Result<(), String> {
         Some("test") => test_project(&options, &options.command[1..]),
         Some("eval") => direct_eval(&options, &options.command[1..].join(" ")),
         Some("run") if options.command.len() == 1 => run_project(&options),
-        Some("run") | Some("--file") => run_file(&options, options.command.get(1).ok_or_else(|| "run requires a file path".to_owned())?),
-        Some("stdin") => { let mut source = String::new(); io::stdin().read_to_string(&mut source).map_err(|error| format!("stdin: {error}"))?; direct_eval(&options, &source) }
+        Some("run") | Some("--file") => run_file(
+            &options,
+            options
+                .command
+                .get(1)
+                .ok_or_else(|| "run requires a file path".to_owned())?,
+        ),
+        Some("stdin") => {
+            let mut source = String::new();
+            io::stdin()
+                .read_to_string(&mut source)
+                .map_err(|error| format!("stdin: {error}"))?;
+            direct_eval(&options, &source)
+        }
         Some("headless" | "server") => run_headless(&options),
         Some("remote") => run_remote(
             options
@@ -143,18 +155,25 @@ fn compile_hir(args: &[String]) -> Result<(), String> {
         fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
     }
-    fs::write(output_path, artifact)
-        .map_err(|error| format!("cannot write {output_path}: {error}"))
+    fs::write(output_path, artifact).map_err(|error| format!("cannot write {output_path}: {error}"))
 }
 
 fn project_for(options: &Options, args: &[String]) -> Result<project::Project, String> {
-    let path = args.first().map(PathBuf::from).or_else(|| options.project.clone()).unwrap_or_else(|| PathBuf::from("."));
+    let path = args
+        .first()
+        .map(PathBuf::from)
+        .or_else(|| options.project.clone())
+        .unwrap_or_else(|| PathBuf::from("."));
     project::discover(&path)
 }
 
 fn new_project(args: &[String]) -> Result<(), String> {
-    let name = args.first().ok_or_else(|| "new requires a project name".to_owned())?;
-    if args.len() > 1 { return Err("new accepts exactly one project name".into()); }
+    let name = args
+        .first()
+        .ok_or_else(|| "new requires a project name".to_owned())?;
+    if args.len() > 1 {
+        return Err("new accepts exactly one project name".into());
+    }
     let project = project::new_app(&PathBuf::from(name), name)?;
     println!("created {}", project.root.display());
     Ok(())
@@ -167,11 +186,23 @@ fn check_project(options: &Options, args: &[String]) -> Result<(), String> {
 }
 
 fn edit_dependency(options: &Options, args: &[String], add: bool) -> Result<(), String> {
-    let coordinate = args.first().ok_or_else(|| if add { "add requires COORDINATE@RANGE".to_owned() } else { "remove requires COORDINATE".to_owned() })?;
-    if args.len() > 1 { return Err("dependency commands accept one coordinate".into()); }
+    let coordinate = args.first().ok_or_else(|| {
+        if add {
+            "add requires COORDINATE@RANGE".to_owned()
+        } else {
+            "remove requires COORDINATE".to_owned()
+        }
+    })?;
+    if args.len() > 1 {
+        return Err("dependency commands accept one coordinate".into());
+    }
     let (coordinate, version) = if add {
-        coordinate.rsplit_once('@').ok_or_else(|| "add requires COORDINATE@RANGE".to_owned())?
-    } else { (coordinate.as_str(), "") };
+        coordinate
+            .rsplit_once('@')
+            .ok_or_else(|| "add requires COORDINATE@RANGE".to_owned())?
+    } else {
+        (coordinate.as_str(), "")
+    };
     let project = project_for(options, &[])?;
     project::set_dependency(&project, coordinate, if add { Some(version) } else { None })?;
     println!("{} {}", if add { "added" } else { "removed" }, coordinate);
@@ -197,11 +228,14 @@ fn sync_project(options: &Options, args: &[String]) -> Result<(), String> {
 fn run_project(options: &Options) -> Result<(), String> {
     let project = project_for(options, &[])?;
     let path = project::main_file(&project)?;
-    let source = fs::read_to_string(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let source = fs::read_to_string(&path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
     let mut runtime = Runtime::new();
     runtime.install_native_file_provider(project.root.to_string_lossy().as_ref());
     project::register_sources(&project, &mut runtime)?;
-    if options.native_sockets { runtime.install_native_socket_provider(); }
+    if options.native_sockets {
+        runtime.install_native_socket_provider();
+    }
     println!("{}", runtime.eval_native(&source)?);
     Ok(())
 }
@@ -209,33 +243,65 @@ fn run_project(options: &Options) -> Result<(), String> {
 fn test_project(options: &Options, args: &[String]) -> Result<(), String> {
     let project = project_for(options, args)?;
     let files = project::files_in(&project.root, &project.test_paths)?;
-    if files.is_empty() { return Err("project has no .hal files under :project/test-paths".into()); }
+    if files.is_empty() {
+        return Err("project has no .hal files under :project/test-paths".into());
+    }
     let mut passed = 0usize;
     let mut failed = 0usize;
     for path in files {
-        let source = fs::read_to_string(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        let source = fs::read_to_string(&path)
+            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
         let mut runtime = Runtime::new();
         runtime.install_native_file_provider(project.root.to_string_lossy().as_ref());
         project::register_sources(&project, &mut runtime)?;
         runtime.eval_native(include_str!("../../../../lib/src/std/lib/test.hal"))?;
         match test_results(&runtime.eval_native(&source)?) {
-            Ok((file_passed, file_failed)) => { passed += file_passed; failed += file_failed; println!("test {}: {} passed, {} failed", path.display(), file_passed, file_failed); }
-            Err(error) => { failed += 1; eprintln!("test {}: {error}", path.display()); }
+            Ok((file_passed, file_failed)) => {
+                passed += file_passed;
+                failed += file_failed;
+                println!(
+                    "test {}: {} passed, {} failed",
+                    path.display(),
+                    file_passed,
+                    file_failed
+                );
+            }
+            Err(error) => {
+                failed += 1;
+                eprintln!("test {}: {error}", path.display());
+            }
         }
     }
     println!("test result: {passed} passed, {failed} failed");
-    if failed == 0 { Ok(()) } else { Err("test failures".into()) }
+    if failed == 0 {
+        Ok(())
+    } else {
+        Err("test failures".into())
+    }
 }
 
 fn test_results(value: &str) -> Result<(usize, usize), String> {
-    let Form::String(source) = parse(value)? else { return Err("test file must finish with test/print-results".into()); };
-    let Form::Vector(results) = parse(&source)? else { return Err("test/print-results must return a vector".into()); };
+    let Form::String(source) = parse(value)? else {
+        return Err("test file must finish with test/print-results".into());
+    };
+    let Form::Vector(results) = parse(&source)? else {
+        return Err("test/print-results must return a vector".into());
+    };
     let mut passed = 0;
     let mut failed = 0;
     for result in results {
-        let Form::Map(entries) = result else { return Err("test result must be a map".into()); };
-        let pass = entries.iter().find(|(key, _)| matches!(key, Form::Keyword(name) if name == "pass")).map(|(_, value)| value);
-        match pass { Some(Form::Bool(true)) => passed += 1, Some(Form::Bool(false)) => failed += 1, _ => return Err("test result is missing boolean :pass".into()) }
+        let Form::Map(entries) = result else {
+            return Err("test result must be a map".into());
+        };
+        let pass = entries
+            .iter()
+            .find(|(key, _)| matches!(key, Form::Keyword(name) if name == "pass"))
+            .map(|(_, value)| value);
+        match pass {
+            Some(Form::Bool(true)) => passed += 1,
+            Some(Form::Bool(false)) => failed += 1,
+            _ => return Err("test result is missing boolean :pass".into()),
+        }
     }
     Ok((passed, failed))
 }

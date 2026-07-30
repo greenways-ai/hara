@@ -151,7 +151,18 @@ public final class HaraContext {
           Map.entry("Host", java.util.List.of("call", "describe", "capabilities", "capability?")),
           Map.entry("Regex", java.util.List.of("instance?")),
           Map.entry("UUID", java.util.List.of("instance?")),
-          Map.entry("Error", java.util.List.of("new", "message", "class")));
+          Map.entry("Error", java.util.List.of("new", "message", "class")),
+          Map.entry(
+              "Iter",
+              java.util.List.of(
+                  "iter", "iter?", "iter-finite?", "iter-materialize",
+                  "iter-has?", "iter-next", "iter-close",
+                  "iter-map", "iter-filter", "iter-take-while", "iter-drop-while",
+                  "iter-mapcat", "iter-keep", "iter-interpose", "iter-interleave",
+                  "iter-every?", "iter-any?", "iter-take", "iter-drop", "iter-zip",
+                  "iter-cycle", "iter-partition-pair", "iter-partition-all",
+                  "iter-partition", "iter-range", "iter-constantly",
+                  "iter-repeatedly", "iter-iterate")));
   private static final Map<String, String> NATIVE_LIBRARY_SOURCES =
       Map.of(
           "std.native.String", "std.foundation.string",
@@ -269,12 +280,14 @@ public final class HaraContext {
   }
 
   private void installNativeTypeDescriptors() {
-    HaraNamespace nativeNamespace = namespace("std.native");
+    HaraNamespace intrinsic = namespace(INTRINSIC_NAMESPACE);
     HaraNamespace foundation = namespace(FOUNDATION_NAMESPACE);
     NATIVE_TYPES.forEach(
         (name, methods) -> {
+          String canonicalName = "std.native." + name;
           HaraVar descriptor =
-              nativeNamespace.define(name, new HaraNativeType(name, methods));
+              intrinsic.define(canonicalName, new HaraNativeType(name, methods));
+          intrinsic.refer(name, descriptor);
           foundation.refer(name, descriptor);
         });
   }
@@ -324,6 +337,7 @@ public final class HaraContext {
               "new", "ex-info",
               "message", "ex-message",
               "class", "ex-class"));
+      installNativeExportGroup("Iter", exports, NATIVE_TYPES.get("Iter"), Map.of());
       return;
     }
     String type =
@@ -502,6 +516,7 @@ public final class HaraContext {
   private void applyNamespaceDeclaration(HaraNamespaceDeclaration declaration) {
     currentNamespace = namespace(declaration.name.getName());
     referRuntimeIntrinsics(currentNamespace);
+    configureNativeAliases(currentNamespace);
     if (!declaration.blank) referFoundation(currentNamespace);
     configureProtocolAliases(currentNamespace);
     configureFoundationAliases(declaration);
@@ -536,6 +551,13 @@ public final class HaraContext {
             putAlias(namespaceAliases, name, builtinProtocolNamespace(name));
           }
         });
+  }
+
+  private void configureNativeAliases(HaraNamespace target) {
+    Map<String, String> namespaceAliases =
+        aliases.computeIfAbsent(target.name(), ignored -> new ConcurrentHashMap<>());
+    NATIVE_TYPES.keySet().forEach(
+        name -> putAlias(namespaceAliases, name, "std.native." + name));
   }
 
   private void applyNamespaceRequires(Object[] clauses) {
@@ -648,6 +670,7 @@ public final class HaraContext {
 
   private void initializeUserNamespace(HaraNamespace target) {
     referRuntimeIntrinsics(target);
+    configureNativeAliases(target);
     referFoundation(target);
     configureProtocolAliases(target);
     Map<String, String> namespaceAliases =
@@ -1126,9 +1149,51 @@ public final class HaraContext {
   }
 
   public HaraVar defineLanguageProtocol(Symbol symbol, HaraProtocol protocol) {
+    validateLanguageProtocolMethods(currentNamespace, symbol.getName(), protocol);
     HaraVar variable = define(symbol, protocol);
-    defineLanguageProtocolMethods(currentNamespace.name(), symbol.getName(), protocol);
+    defineLanguageProtocolMethods(currentNamespace.name(), protocol);
     return variable;
+  }
+
+  private void validateLanguageProtocolMethods(
+      HaraNamespace target, String protocolName, HaraProtocol protocol) {
+    HaraProtocol previousProtocol = null;
+    HaraVar previous = target.lookup(protocolName);
+    if (previous != null
+        && target.name().equals(previous.namespaceName())
+        && previous.get() instanceof HaraProtocol) {
+      previousProtocol = (HaraProtocol) previous.get();
+    }
+    for (String methodName : protocol.methods().keySet()) {
+      for (Map.Entry<String, HaraVar> entry : target.vars.entrySet()) {
+        if (entry.getKey().equals(protocolName)
+            || !target.name().equals(entry.getValue().namespaceName())
+            || !(entry.getValue().get() instanceof HaraProtocol otherProtocol)) {
+          continue;
+        }
+        if (otherProtocol.methods().containsKey(methodName)) {
+          throw new HaraException(
+              "Protocol method Var already belongs to "
+                  + entry.getKey()
+                  + ": "
+                  + target.name()
+                  + "/"
+                  + methodName);
+        }
+      }
+      HaraVar existing = target.lookup(methodName);
+      boolean sameProtocolReload =
+          existing != null
+              && target.name().equals(existing.namespaceName())
+              && previousProtocol != null
+              && previousProtocol.methods().containsKey(methodName);
+      if (existing != null
+          && target.name().equals(existing.namespaceName())
+          && !sameProtocolReload) {
+        throw new HaraException(
+            "Protocol method Var already exists: " + target.name() + "/" + methodName);
+      }
+    }
   }
 
   private static String builtinProtocolNamespace(String protocolName) {
@@ -1151,18 +1216,16 @@ public final class HaraContext {
                     origin));
   }
 
-  private void defineLanguageProtocolMethods(
-      String namespaceName, String protocolName, HaraProtocol protocol) {
+  private void defineLanguageProtocolMethods(String namespaceName, HaraProtocol protocol) {
     HaraNamespace target = namespace(namespaceName);
     protocol
         .methods()
         .forEach(
             (methodName, ignored) -> {
-              String localName = protocolName + "/" + methodName;
               target.define(
-                  localName,
+                  methodName,
                   new VariadicBuiltin(
-                      namespaceName + "/" + localName,
+                      namespaceName + "/" + methodName,
                       values -> invokeProtocolMethod(protocol, methodName, values)),
                   null,
                   definitionOrigin);
@@ -1645,6 +1708,8 @@ public final class HaraContext {
     target.define("seq", new VariadicBuiltin("seq", this::seqValue));
     target.define("seq?", new UnaryBuiltin("seq?", this::isSeq));
     target.define("iter?", new UnaryBuiltin("iter?", this::isIterator));
+    target.define("iter-finite?", new UnaryBuiltin("iter-finite?", this::isIteratorFinite));
+    target.define("iter-materialize", new UnaryBuiltin("iter-materialize", this::iterMaterialize));
     target.define("iter-has?", new UnaryBuiltin("iter-has?", this::iterHasNext));
     target.define("iter-next", new UnaryBuiltin("iter-next", this::iterNext));
     target.define("iter-close", new UnaryBuiltin("iter-close", this::iterClose));
@@ -1792,16 +1857,17 @@ public final class HaraContext {
             Object[] arguments = new Object[inputs.length + 1];
             arguments[0] = function;
             System.arraycopy(inputs, 0, arguments, 1, inputs.length);
-            return seqValue(new Object[] {iterMap(arguments)});
+            return iterMap(arguments);
           });
     }
     if (values.length < 2) throw new HaraException("map expects a function and collections");
-    Iterator<?> iterator = (Iterator<?>) iterMap(values);
+    return materializeVector(iterMap(values));
+  }
+
+  Object materializeVector(Object values) {
+    Iterator<?> iterator = (Iterator<?>) iterValue(values);
     ArrayList<Object> output = new ArrayList<>();
     while (iterator.hasNext()) output.add(iterator.next());
-    Object origin = HaraBox.unwrap(values[1]);
-    if (origin instanceof HaraArray) return new HaraArray(output.toArray());
-    if (origin instanceof List<?>) return BuiltinStruct.list(output);
     return hara.lang.data.Vector.Standard.from(null, output.toArray());
   }
 
@@ -1812,16 +1878,39 @@ public final class HaraContext {
           includePartial ? "partition-all" : "partition",
           input -> {
             Object partitioned = iterPartition(new Object[] {amount, input}, includePartial);
-            ArrayList<Object> output = new ArrayList<>();
-            Iterator<?> iterator = (Iterator<?>) partitioned;
-            while (iterator.hasNext()) output.add(iterator.next());
-            return input instanceof HaraArray
-                ? new HaraArray(output.toArray())
-                : hara.lang.data.Vector.Standard.from(null, output.toArray());
+            return partitioned;
           });
     }
     requireMethodArity(includePartial ? "partition-all" : "partition", values, 2);
-    return seqValue(new Object[] {iterPartition(values, includePartial)});
+    return materializeVector(iterPartition(values, includePartial));
+  }
+
+  Object filterValues(Object[] values) {
+    if (values.length == 1) {
+      Object predicate = values[0];
+      return new UnaryBuiltin(
+          "filter", input -> iterFilter(new Object[] {predicate, input}));
+    }
+    requireMethodArity("filter", values, 2);
+    return materializeVector(iterFilter(values));
+  }
+
+  Object takeValues(Object[] values) {
+    if (values.length == 1) {
+      Object amount = values[0];
+      return new UnaryBuiltin("take", input -> iterTake(new Object[] {amount, input}));
+    }
+    requireMethodArity("take", values, 2);
+    return materializeVector(iterTake(values));
+  }
+
+  Object dropValues(Object[] values) {
+    if (values.length == 1) {
+      Object amount = values[0];
+      return new UnaryBuiltin("drop", input -> iterDrop(new Object[] {amount, input}));
+    }
+    requireMethodArity("drop", values, 2);
+    return materializeVector(iterDrop(values));
   }
 
   Object removeValues(Object[] values) {
@@ -4178,6 +4267,23 @@ public final class HaraContext {
     return HaraBox.unwrap(value) instanceof Iterator<?>;
   }
 
+  @TruffleBoundary
+  private Object isIteratorFinite(Object value) {
+    return !(HaraBox.unwrap(value) instanceof Iterator<?>);
+  }
+
+  @TruffleBoundary
+  private Object iterMaterialize(Object value) {
+    Object target = HaraBox.unwrap(value);
+    if (target instanceof Iterator<?> && !((Boolean) isIteratorFinite(target))) {
+      throw new HaraException("cannot materialize an infinite or unknown iterator");
+    }
+    Iterator<?> iterator = (Iterator<?>) iterValue(target);
+    java.util.List<Object> output = new ArrayList<>();
+    iterator.forEachRemaining(output::add);
+    return hara.lang.data.Vector.Standard.from(null, output.toArray());
+  }
+
   private Object snapshotOrIterator(Object value) {
     Object target = HaraBox.unwrap(value);
     if (target instanceof HaraSeq) return target;
@@ -4457,13 +4563,17 @@ public final class HaraContext {
       @Override
       public boolean hasNext() {
         if (closed) return false;
-        for (Iterator source : sources) {
-          if (!source.hasNext()) {
-            close();
-            return false;
+        if (index == 0) {
+          for (Iterator source : sources) {
+            if (!source.hasNext()) {
+              close();
+              return false;
+            }
           }
         }
-        return true;
+        if (sources[index].hasNext()) return true;
+        close();
+        return false;
       }
 
       @Override
