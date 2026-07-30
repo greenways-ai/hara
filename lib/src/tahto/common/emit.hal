@@ -1,0 +1,102 @@
+(ns tahto.common.emit
+  (:require [std.foundation.string :as string]
+            [tahto.protocol.compiler :as compiler]))
+
+(declare emit-node)
+
+(defn- fail
+  [message data]
+  (throw (ex-info message data)))
+
+(defn emit-token
+  "Emits a scalar token without entering operation dispatch."
+  [form grammar context]
+  (cond (nil? form)
+        (or (get-in grammar [:token :nil]) "nil")
+
+        (= true form)
+        (or (get-in grammar [:token :true]) "true")
+
+        (= false form)
+        (or (get-in grammar [:token :false]) "false")
+
+        (symbol? form)
+        (let [entry (get-in grammar [:reserved form])]
+          (if (and entry (:value entry) (:raw entry))
+            (str (:raw entry))
+            (name form)))
+
+        :else
+        (pr-str form)))
+
+(defn emit-infix
+  "Emits a recursively nested infix operation."
+  [form entry grammar context]
+  (let [arguments (vec (rest form))
+        raw (:raw entry)]
+    (if (or (nil? raw)
+            (= 0 (count arguments)))
+      (fail "Invalid infix operation"
+            {:form form
+             :entry entry})
+      (str
+       "("
+       (string/join
+        (str " " raw " ")
+        (map (fn [argument]
+               (tahto.common.emit/emit-node
+                argument grammar context))
+             arguments))
+       ")"))))
+
+(defn- unsupported-operation
+  [form entry grammar context]
+  (fail "Unsupported emit operation"
+        {:form form
+         :entry entry
+         :mode (:emit entry)}))
+
+(defmulti operation-handler identity)
+
+(defmethod operation-handler :infix
+  [mode]
+  emit-infix)
+
+(defmethod operation-handler :default
+  [mode]
+  unsupported-operation)
+
+(defn emit-operation
+  "Dispatches one reserved operation through its modular emit handler."
+  [form grammar context]
+  (let [entry (get-in grammar [:reserved (first form)])
+        handler
+        (tahto.common.emit/operation-handler (:emit entry))]
+    (handler form entry grammar context)))
+
+(defn emit-node
+  "Emits a token or reserved operation from a materialized grammar."
+  [form grammar context]
+  (if (list? form)
+    (emit-operation form grammar context)
+    (emit-token form grammar context)))
+
+(defn emit
+  "Emits directly from a grammar map or resolved grammar selection."
+  ([form selected]
+   (emit form selected {}))
+  ([form selected context]
+   (emit-node form
+              (or (:grammar selected) selected)
+              context)))
+
+(defstruct Emitter [])
+
+(defn emitter
+  []
+  (tahto.common.emit/Emitter))
+
+(extend-type Emitter compiler/IEmitter
+  (emit-form [emitter rewritten selected context]
+    (tahto.common.emit/emit
+     rewritten selected context)))

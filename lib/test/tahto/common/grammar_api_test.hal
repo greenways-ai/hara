@@ -1,0 +1,103 @@
+(ns tahto.common.grammar-api-test
+  (:require [std.lib.test :as test]
+            [tahto.common.grammar-api :as grammar]
+            [tahto.common.registry :as registry]))
+
+(def plus-entry
+  {:op :add
+   :symbol #{'+}
+   :type :operator
+   :raw "+"})
+
+(def cast-entry
+  {:op :cast
+   :symbol #{'cast}
+   :type :operator
+   :raw "cast"})
+
+(def template
+  (grammar/emit-template
+   {:template/id :default
+    :template/version 1
+    :template/value {:token {:nil "nil"}}}))
+
+(def parent
+  (grammar/definition
+   {:grammar/id :base-js
+    :grammar/version 1
+    :grammar/release "base"
+    :grammar/emit-template
+    {:template/id :default
+     :template/version 1}
+    :operators
+    {:define {:add plus-entry}}}))
+
+(def child
+  (grammar/definition
+   {:grammar/id :js
+    :grammar/version 2
+    :grammar/release "child"
+    :grammar/parent
+    {:grammar/id :base-js
+     :grammar/version 1}
+    :operators
+    {:override {:add {:raw "plus"}}}
+    :grammar/rewrite
+    {:staging
+     {:append ['tahto.common.grammar-api/fingerprint]}}
+    :grammar/facets
+    {:typed
+     {:operators
+      {:define {:cast cast-entry}}
+      :grammar/sections
+      [[:lint [:no-eval]]]}
+     :jsx
+     {:requires #{:typed}
+      :operators
+      {:override {:add {:raw "jsx-plus"}}}}}
+    :grammar/facet-order [:typed :jsx]}))
+
+(def catalog
+  (registry/install
+   (registry/install
+    (registry/install
+     (registry/registry)
+     template)
+    parent)
+   child))
+
+(def resolved
+  (registry/resolve
+   catalog
+   {:grammar/id :js
+    :grammar/version 2
+    :grammar/facets [:jsx]}))
+
+(def results
+  [(test/check "declared sections dispatch through methods"
+               (let [out
+                     (grammar/apply-section
+                      {}
+                      :lint
+                      [:no-eval]
+                      {:facet :typed})]
+                 (get-in out [:extensions :lint]))
+               [:no-eval])
+   (test/check
+    "materialization preserves order and shared facet customizations"
+    [(get-in resolved [:grammar :token :nil])
+     (:raw (get-in resolved [:grammar :reserved '+]))
+     (:raw (get-in resolved [:grammar :reserved 'cast]))
+     (get-in resolved [:coordinate :grammar/facets])
+     (get-in resolved [:extensions :lint])
+     (count (get-in resolved [:rewrite :staging]))]
+    ["nil" "jsx-plus" "cast" [:typed :jsx] [:no-eval] 1])
+   (test/check "materialization records versioned provenance"
+               (:provenance resolved)
+               [[:emit-template :default 1]
+                [:grammar :base-js 1]
+                [:grammar :js 2]
+                {:facet :typed}
+                {:facet :jsx}])])
+
+(test/print-results results)

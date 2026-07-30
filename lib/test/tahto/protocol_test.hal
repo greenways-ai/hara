@@ -1,0 +1,100 @@
+(ns tahto.protocol-test
+  (:require [std.lib.test :as test]
+            [tahto.protocol.compiler :as compiler]
+            [tahto.protocol.registry :as registry]))
+
+(defstruct ProtocolFixture [tag])
+
+(extend-type ProtocolFixture compiler/INormalizer
+  (normalize-form [fixture raw context]
+    [(:tag fixture) :normalize raw context]))
+
+(extend-type ProtocolFixture compiler/IStager
+  (stage-form [fixture input selected context]
+    [(:tag fixture) :stage input selected context]))
+
+(extend-type ProtocolFixture compiler/IInferencer
+  (infer-form [fixture staged selected context]
+    {:tag (:tag fixture) :form staged}))
+
+(extend-type ProtocolFixture compiler/ILinter
+  (lint-form [fixture staged inference selected context]
+    [{:tag (:tag fixture) :form staged :inference inference}]))
+
+(extend-type ProtocolFixture compiler/IRewriter
+  (rewrite-form [fixture staged selected context]
+    [(:tag fixture) :rewrite staged selected context]))
+
+(extend-type ProtocolFixture compiler/IEmitter
+  (emit-form [fixture rewritten selected context]
+    [(:tag fixture) :emit rewritten selected context]))
+
+(extend-type ProtocolFixture compiler/ICompiler
+  (compile-form [fixture raw options]
+    [(:tag fixture) :compile raw options]))
+
+(extend-type ProtocolFixture registry/IGrammarCatalog
+  (find-source [fixture coordinate]
+    [(:tag fixture) :find coordinate])
+  (list-sources [fixture query]
+    [(:tag fixture) :list query])
+  (available-versions [fixture grammar-id]
+    [(:tag fixture) :versions grammar-id]))
+
+(extend-type ProtocolFixture registry/IGrammarRegistry
+  (install-source [fixture descriptor]
+    [(:tag fixture) :register descriptor])
+  (replace-source [fixture descriptor]
+    [(:tag fixture) :replace descriptor])
+  (remove-source [fixture coordinate]
+    [(:tag fixture) :remove coordinate]))
+
+(extend-type ProtocolFixture registry/IGrammarResolver
+  (resolve-grammar [fixture request]
+    [(:tag fixture) :resolve request]))
+
+(def fixture (ProtocolFixture :fixture))
+
+(def results
+  [(test/check "compiler phase protocols dispatch independently"
+               [(protocol-call compiler/INormalizer
+                               normalize-form fixture '(+ 1 2) {})
+                (protocol-call compiler/IStager
+                               stage-form fixture '(+ 1 2) fixture {})
+                (protocol-call compiler/IRewriter
+                               rewrite-form fixture '(+ 1 2) fixture {})
+                (protocol-call compiler/IEmitter
+                               emit-form fixture '(+ 1 2) fixture {})
+                (protocol-call compiler/ICompiler
+                               compile-form fixture '(+ 1 2) {})]
+               [[:fixture :normalize '(+ 1 2) {}]
+                [:fixture :stage '(+ 1 2) fixture {}]
+                [:fixture :rewrite '(+ 1 2) fixture {}]
+                [:fixture :emit '(+ 1 2) fixture {}]
+                [:fixture :compile '(+ 1 2) {}]])
+   (test/check "analysis protocols keep inference separate from diagnostics"
+               (let [inference
+                     (protocol-call compiler/IInferencer
+                                    infer-form fixture '(+ 1 2) fixture {})]
+                 [inference
+                  (protocol-call compiler/ILinter
+                                 lint-form fixture '(+ 1 2)
+                                 inference fixture {})])
+               [{:tag :fixture :form '(+ 1 2)}
+                [{:tag :fixture
+                  :form '(+ 1 2)
+                  :inference {:tag :fixture :form '(+ 1 2)}}]])
+   (test/check "registry protocols separate catalog, mutation, and resolution"
+               [(protocol-call registry/IGrammarCatalog
+                               find-source fixture [:grammar :js 1])
+                (protocol-call registry/IGrammarRegistry
+                               install-source fixture {:grammar/id :js})
+                (protocol-call registry/IGrammarResolver
+                               resolve-grammar fixture
+                               {:grammar/id :js :grammar/version 1})]
+               [[:fixture :find [:grammar :js 1]]
+                [:fixture :register {:grammar/id :js}]
+                [:fixture :resolve
+                 {:grammar/id :js :grammar/version 1}]])])
+
+(test/print-results results)

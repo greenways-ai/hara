@@ -1,9 +1,0 @@
-(ns tahto.protocol.grammar)
-
-(defprotocol IGrammar
-  (grammar-reserved [grammar symbol])
-  (grammar-default [grammar])
-  (grammar-define [grammar]))
-
-(defprotocol IEmitter
-  (emit-form [emitter grammar form options]))
