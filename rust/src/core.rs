@@ -7327,6 +7327,9 @@ fn force_lazy_alias(
     let Some((alias, _)) = symbol.split_once('/') else {
         return Ok(());
     };
+    if registry.current().name().as_str() == alias {
+        return Ok(());
+    }
     let target = registry.current().lazy_target(alias).or_else(|| {
         matches!(
             registry.load_state(alias),
