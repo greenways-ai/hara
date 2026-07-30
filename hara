@@ -3,6 +3,16 @@
 # Resolve the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
+if [[ "${1:-}" == "package" ]]; then
+    HARA_NATIVE="${HARA_NATIVE:-$SCRIPT_DIR/rust/target/release/hara}"
+    if [[ ! -x "$HARA_NATIVE" ]]; then
+        echo "Hara native package CLI not found: $HARA_NATIVE" >&2
+        echo "Build it once with: cargo build --manifest-path $SCRIPT_DIR/rust/Cargo.toml --release --bin hara" >&2
+        exit 1
+    fi
+    exec "$HARA_NATIVE" "$@"
+fi
+
 HARA_RUNTIME_JAR="${HARA_RUNTIME_JAR:-$SCRIPT_DIR/java/target/hara-truffle.jar}"
 HARA_JAVA="${HARA_JAVA:-}"
 
