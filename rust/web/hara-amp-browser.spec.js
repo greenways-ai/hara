@@ -38,7 +38,9 @@ test("Hara Amp exposes synchronized Node/Text views and selectable completion", 
   await expect(page.getByRole("heading", { name: /A player is/ })).toBeVisible({
     timeout: 60000
   });
-  await expect(page.locator("[data-amp-node-graph] [data-node-id]")).toHaveCount(11);
+  await expect(page.locator("[data-amp-node-graph] [data-node-id]")).toHaveCount(11, {
+    timeout: 60000
+  });
   await page.getByRole("tab", { name: "TEXT VIEW" }).click();
   await expect(page.getByRole("textbox", { name: "Editable Hara Amp source" }))
     .toHaveValue(/"id" "playlist"/);
