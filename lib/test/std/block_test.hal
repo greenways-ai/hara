@@ -1,0 +1,25 @@
+(ns std.block-test
+  (:require [std.block :as block]
+            [std.lib.test :as test]))
+
+(def results
+  [(test/check "parse preserves source and value"
+               (let [parsed (block/parse-string "[1 2 3]")
+                     first-block (block/parse-first "[1 2 3]")]
+                 [(block/string parsed)
+                  (block/value parsed)
+                  (block/type first-block)
+                  (block/tag first-block)
+                  (vec (map block/value (block/children first-block)))])
+               ["[1 2 3]" [1 2 3] :container :vector [1 2 3]])
+   (test/check "constructs portable whitespace blocks"
+               (let [spaces (block/spaces 3)
+                     newline (block/newline)]
+                 [(block/string spaces)
+                  (block/space? spaces)
+                  (block/string newline)
+                  (block/linebreak? newline)
+                  (block/verify newline)])
+               ["   " true "\n" true true])])
+
+(test/print-results results)

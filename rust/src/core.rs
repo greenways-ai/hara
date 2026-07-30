@@ -9584,13 +9584,13 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             {
                 math_operation(n, &fs[1..], env)
             }
-            Form::Symbol(n) if n == "std.native.Edn/read" => {
+            Form::Symbol(n) if n == "std.native.Edn/read" || n == "read-string" => {
                 if fs.len() != 2 {
-                    return Err("edn/read expects one string".into());
+                    return Err(format!("{n} expects one string"));
                 }
                 match eval(&fs[1], env)? {
                     Value::String(source) => read_edn(&source),
-                    _ => Err("edn/read expects a string".into()),
+                    _ => Err(format!("{n} expects a string")),
                 }
             }
             Form::Symbol(n)

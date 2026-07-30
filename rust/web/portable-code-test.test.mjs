@@ -58,3 +58,26 @@ test("portable tasks emit structured reports through browser wasm", () => {
     "[{:items 3 :results 3 :warnings 0 :errors 0} [2 4 6] 8]",
   );
 });
+
+test("portable blocks preserve source, value, and structure through browser wasm", () => {
+  const runtime = new Runtime();
+  const result = runtime.eval(
+    "(ns std-block-browser-probe" +
+      " (:require [std.block :as block]))" +
+      ' (let [parsed (block/parse-string "[1 2 3]")' +
+      '       first-block (block/parse-first "[1 2 3]")' +
+      "       spaces (block/spaces 3)]" +
+      " [(block/string parsed)" +
+      "  (block/value parsed)" +
+      "  (block/type first-block)" +
+      "  (block/tag first-block)" +
+      "  (vec (map block/value (block/children first-block)))" +
+      "  (block/string spaces)" +
+      "  (block/space? spaces)])",
+  );
+
+  assert.equal(
+    result,
+    '["[1 2 3]" [1 2 3] :container :vector [1 2 3] "   " true]',
+  );
+});

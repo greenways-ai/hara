@@ -1,0 +1,15 @@
+(ns std.block.parse
+  (:require [std.block.construct :as construct]
+            [std.foundation.edn :as edn]))
+
+(defn parse-string
+  [source]
+  (construct/root [(construct/block (edn/read source))] source))
+
+(defn parse-root
+  [source]
+  (parse-string source))
+
+(defn parse-first
+  [source]
+  (first (construct/contents (parse-string source))))

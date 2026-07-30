@@ -511,6 +511,27 @@ impl Runtime {
             ),
             ("std.task", include_str!("../../lib/src/std/task.hal")),
             (
+                "std.block.protocol",
+                include_str!("../../lib/src/std/block/protocol.hal"),
+            ),
+            (
+                "std.block.type",
+                include_str!("../../lib/src/std/block/type.hal"),
+            ),
+            (
+                "std.block.base",
+                include_str!("../../lib/src/std/block/base.hal"),
+            ),
+            (
+                "std.block.construct",
+                include_str!("../../lib/src/std/block/construct.hal"),
+            ),
+            (
+                "std.block.parse",
+                include_str!("../../lib/src/std/block/parse.hal"),
+            ),
+            ("std.block", include_str!("../../lib/src/std/block.hal")),
+            (
                 "code.test.protocol",
                 include_str!("../../lib/src/code/test/protocol.hal"),
             ),
@@ -3514,6 +3535,30 @@ mod tests {
                 )
                 .unwrap(),
             "[{:items 3 :results 3 :warnings 0 :errors 0} [2 4 6] 8]"
+        );
+    }
+
+    #[test]
+    fn portable_block_preserves_source_value_and_structure() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(ns std-block-rust-probe \
+                       (:require [std.block :as block])) \
+                     (let [parsed (block/parse-string \"[1 2 3]\") \
+                           first-block (block/parse-first \"[1 2 3]\") \
+                           spaces (block/spaces 3)] \
+                       [(block/string parsed) \
+                        (block/value parsed) \
+                        (block/type first-block) \
+                        (block/tag first-block) \
+                        (vec (map block/value (block/children first-block))) \
+                        (block/string spaces) \
+                        (block/space? spaces)])"
+                )
+                .unwrap(),
+            "[\"[1 2 3]\" [1 2 3] :container :vector [1 2 3] \"   \" true]"
         );
     }
 

@@ -1,0 +1,19 @@
+(ns std.block.base
+  (:require [std.block.protocol :as protocol]
+            [std.block.type :as type]))
+
+(defn block? [value] (type/block? value))
+(defn expression? [block] (type/code-block? block))
+(defn block-type [block] (protocol-call protocol/IBlock block-type block))
+(defn block-tag [block] (protocol-call protocol/IBlock block-tag block))
+(defn block-string [block] (protocol-call protocol/IBlock block-string block))
+(defn block-length [block] (count (block-string block)))
+(defn block-width [block] (block-length block))
+(defn block-height [block] 0)
+(defn block-prefixed [block] 0)
+(defn block-suffixed [block] 0)
+(defn block-verify [block] (protocol-call protocol/IBlock block-verify block))
+(defn block-value [block] (protocol-call protocol/IBlock block-value block))
+(defn block-value-string [block] (pr-str (block-value block)))
+(defn block-children [block] (protocol-call protocol/IBlock block-children block))
+(defn block-info [block] (protocol-call protocol/IBlock block-info block))
