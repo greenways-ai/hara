@@ -1,0 +1,56 @@
+(ns hara.metaspec.lint-test
+  (:require [hara.metaspec.lint :as lint]
+            [std.lib.test :as test]))
+
+(def minimal
+  {:document/id :demo/metaspec
+   :document/type :demo/metaspec
+   :document/version "0.1.0"
+   :document/status :draft
+   :document/title "Demo"
+   :document/summary "Demo meta-spec"
+   :spec/conforms-to {:spec/id :demo/metaspec :spec/version "0.1.0"}
+   :spec/artifact-kind :demo/artifact
+   :meta/document-schema {:schema/id :demo/document :schema/type :map}
+   :meta/schemas []
+   :meta/cross-references []
+   :meta/requirements
+   [{:requirement/id :demo/required
+     :requirement/level :must
+     :requirement/text "Required"}]
+   :metaspec/generation
+   {:generation/input {}
+    :generation/output {}
+    :generation/process []
+    :generation/acceptance {}}})
+
+(test/print-results
+ [(test/check "complete qualified meta-spec lint passes"
+              (lint/lint minimal)
+              [])
+  (test/check "missing keys produce structured AI repair actions"
+              (let [finding (first (lint/lint {}))]
+                {:rule/id (:rule/id finding)
+                 :requirement/id (:requirement/id finding)
+                 :finding/path (:finding/path finding)
+                 :finding/repair (:finding/repair finding)})
+              {:rule/id :hara.metaspec.rule/required-key
+               :requirement/id :hara.metaspec/required-sections
+               :finding/path []
+               :finding/repair
+               {:action/type :add-key
+                :action/path []
+                :action/key :document/id}})
+  (test/check "unqualified extension keys are rejected"
+              (vec (map (fn [finding] (:rule/id finding))
+                        (lint/lint (assoc minimal :extension true))))
+              [:hara.metaspec.rule/qualified-key])
+  (test/check "duplicate schema IDs are stable findings"
+              (vec (map (fn [finding] (:rule/id finding))
+                        (lint/lint
+                         (assoc minimal :meta/schemas
+                                [{:schema/id :demo/value
+                                  :schema/type :string}
+                                 {:schema/id :demo/value
+                                  :schema/type :keyword}]))))
+              [:hara.metaspec.rule/duplicate-id])])
