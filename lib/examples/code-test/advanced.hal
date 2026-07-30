@@ -1,5 +1,5 @@
 (ns example.code-test.advanced
-  (:require [code.test :refer [anything contains contains-in fact throws use-fixtures]]))
+  (:use code.test))
 
 (use-fixtures :before (fn [] true))
 

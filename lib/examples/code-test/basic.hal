@@ -1,5 +1,5 @@
 (ns example.code-test.basic
-  (:require [code.test :refer :all]))
+  (:use code.test))
 
 (fact "adds numbers"
   (+ 2 3) => 5)

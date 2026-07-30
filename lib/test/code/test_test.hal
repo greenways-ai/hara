@@ -1,0 +1,36 @@
+(ns code.test-test
+  (:use code.test)
+  (:require [std.lib.test :as legacy]))
+
+(fact "evaluates ordinary equality"
+  (+ 20 22) => 42)
+
+(fact "awaits promise-returning assertions"
+  (promise/from 42) => 42)
+
+(fact "matches thrown values"
+  (throw "expected") => (throws))
+
+(fact "supports predicate matchers"
+  42 => (satisfies (fn [value] (= 42 value))))
+
+(def reporter (event-reporter))
+(def summary (run {:namespace "code.test-test"
+                   :reporter reporter}))
+
+(def results
+  [(legacy/check "portable facts pass"
+                 [(:status summary)
+                  (:passed (:counts summary))
+                  (count (:results summary))]
+                 [:passed 4 4])
+   (legacy/check "runner emits structured events without printing"
+                 (vec (map :event (reporter-events reporter)))
+                 [:run/start
+                  :fact/start :fact/end
+                  :fact/start :fact/end
+                  :fact/start :fact/end
+                  :fact/start :fact/end
+                  :run/end])])
+
+(legacy/print-results results)

@@ -5613,7 +5613,8 @@ fn iterator_to_vec(value: Value) -> Result<Vec<Value>, String> {
         loop {
             match iterator_next(&value) {
                 Ok(value) => output.push(value),
-                Err(_) => break,
+                Err(error) if error == "iter-next reached the end of the iterator" => break,
+                Err(error) => return Err(error),
             }
         }
         return Ok(output);
@@ -8552,6 +8553,14 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 ))
             }
             Form::Symbol(n) if n == "ns" || n == "require" => eval_namespace_form(fs, env),
+            Form::Symbol(n) if n == "current-namespace" => {
+                if fs.len() != 1 {
+                    return Err("current-namespace expects no arguments".into());
+                }
+                Ok(Value::String(
+                    namespace_registry()?.current().name().as_str().to_owned(),
+                ))
+            }
             Form::Symbol(n) if n == "std.foundation.coroutine/create" => {
                 if fs.len() != 2 {
                     return Err("coroutine/create expects one function".into());
@@ -9675,6 +9684,25 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 Ok(Value::Bool(n == "every?"))
             }
+            Form::Symbol(n) if n == "reduce" => {
+                if fs.len() != 3 && fs.len() != 4 {
+                    return Err("reduce expects a function, optional initial value, and collection"
+                        .into());
+                }
+                let function = eval(&fs[1], env)?;
+                let mut values = iterator_values(eval(&fs[fs.len() - 1], env)?)?.into_iter();
+                let mut result = if fs.len() == 4 {
+                    eval(&fs[2], env)?
+                } else if let Some(first) = values.next() {
+                    first
+                } else {
+                    return call_value(function, Vec::new());
+                };
+                for value in values {
+                    result = call_value(function.clone(), vec![result, value])?;
+                }
+                Ok(result)
+            }
             Form::Symbol(n) if n == "constantly" => {
                 if fs.len() != 2 {
                     return Err("constantly expects one value".into());
@@ -9992,6 +10020,21 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     .collect::<Result<Vec<_>, _>>()?;
                 collection_dissoc(&value, &keys)
             }
+            Form::Symbol(n) if n == "merge" => {
+                let mut result = Value::Map(PMap::new());
+                for form in &fs[1..] {
+                    let value = eval(form, env)?;
+                    if matches!(value, Value::Nil) {
+                        continue;
+                    }
+                    let entries =
+                        map_entries(&value).ok_or_else(|| "merge expects maps".to_string())?;
+                    for (key, value) in entries {
+                        result = collection_assoc(&result, &key, value)?;
+                    }
+                }
+                Ok(result)
+            }
             Form::Symbol(n) if n == "get-in" => {
                 if fs.len() != 3 {
                     return Err("get-in expects a collection and keys".into());
@@ -10195,6 +10238,25 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     Ok(Value::Nil)
                 }
             }
+            Form::Symbol(n) if n == "and" => {
+                let mut result = Value::Bool(true);
+                for form in &fs[1..] {
+                    result = eval(form, env)?;
+                    if !result.truthy() {
+                        return Ok(result);
+                    }
+                }
+                Ok(result)
+            }
+            Form::Symbol(n) if n == "or" => {
+                for form in &fs[1..] {
+                    let result = eval(form, env)?;
+                    if result.truthy() {
+                        return Ok(result);
+                    }
+                }
+                Ok(Value::Nil)
+            }
             Form::Symbol(n) if n == "cond" => {
                 if fs.len() % 2 == 0 {
                     return Err("cond expects test/expression pairs".into());
@@ -10208,7 +10270,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 Ok(Value::Nil)
             }
             Form::Symbol(n) if n == "let" => {
-                if fs.len() != 3 {
+                if fs.len() < 3 {
                     return Err("let expects bindings and a body".into());
                 }
                 let bindings = match &fs[1] {
@@ -10229,7 +10291,13 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         previous.push((name.clone(), before.get(&name).cloned()));
                     }
                 }
-                let result = eval(&fs[2], env);
+                let mut result = Ok(Value::Nil);
+                for body in &fs[2..] {
+                    result = eval(body, env);
+                    if result.is_err() {
+                        break;
+                    }
+                }
                 for (name, old) in previous.into_iter().rev() {
                     if let Some(old) = old {
                         env.insert(name, old);

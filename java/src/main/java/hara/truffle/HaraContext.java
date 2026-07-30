@@ -503,6 +503,7 @@ public final class HaraContext {
     activateBuiltins(declaration);
     configureNativeFlavor(declaration.structuralClauses);
     applyNamespaceRequires(declaration.structuralClauses);
+    applyNamespaceUses(declaration.structuralClauses);
   }
 
   private void configureFoundationAliases(HaraNamespaceDeclaration declaration) {
@@ -543,6 +544,27 @@ public final class HaraContext {
       }
       for (int index = 1; index < clause.count(); index++) {
         applyGeneratedRequire(clause.nth(index), namespaceAliases);
+      }
+    }
+  }
+
+  private void applyNamespaceUses(Object[] clauses) {
+    for (Object clauseValue : clauses) {
+      List<?> clause = (List<?>) clauseValue;
+      if (!(clause.nth(0) instanceof Keyword keyword)
+          || !"use".equals(keyword.getName())) {
+        continue;
+      }
+      for (int index = 1; index < clause.count(); index++) {
+        Object targetValue = clause.nth(index);
+        if (!(targetValue instanceof Symbol target)
+            || target.getNamespace() != null) {
+          throw new HaraException(":use expects unqualified namespace symbols");
+        }
+        if (requiredNamespace(target.getName()) == null) {
+          throw new HaraException("Cannot use missing namespace: " + target.getName());
+        }
+        referNamespace(target.getName());
       }
     }
   }

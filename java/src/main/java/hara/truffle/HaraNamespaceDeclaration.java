@@ -89,6 +89,7 @@ final class HaraNamespaceDeclaration {
         Object intrinsicValue = options.lookup(Keyword.create("intrinsics"));
         if (intrinsicValue != null) parseIntrinsics(intrinsicValue, excluded, aliases);
       } else if ("require".equals(clauseName)
+          || "use".equals(clauseName)
           || "flavor".equals(clauseName)
           || "import".equals(clauseName)) {
         structural.add(clause);

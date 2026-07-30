@@ -485,6 +485,15 @@ impl Runtime {
                 "std.lib.substrate",
                 include_str!("../../lib/src/std/lib/substrate.hal"),
             ),
+            (
+                "std.lib.test",
+                include_str!("../../lib/src/std/lib/test.hal"),
+            ),
+            (
+                "code.test.protocol",
+                include_str!("../../lib/src/code/test/protocol.hal"),
+            ),
+            ("code.test", include_str!("../../lib/src/code/test.hal")),
         ] {
             self.register_resource(name, source);
         }
@@ -598,13 +607,14 @@ impl Runtime {
                         })?;
                     let required_extensions = config.required_namespaces().to_vec();
                     for target in required_extensions {
+                        if self.loaded_resources.contains(&target) {
+                            continue;
+                        }
                         if self.resources.contains_key(&target) {
-                            if !self.loaded_resources.contains(&target) {
-                                let source =
-                                    self.resources.get(&target).cloned().unwrap_or_default();
-                                self.eval_text(&source)?;
-                                self.loaded_resources.insert(target);
-                            }
+                            let source =
+                                self.resources.get(&target).cloned().unwrap_or_default();
+                            self.eval_text(&source)?;
+                            self.loaded_resources.insert(target);
                             continue;
                         }
                         if target == "std.foundation"
@@ -777,6 +787,27 @@ impl Runtime {
         for (alias, namespace) in config.aliases() {
             if let Some(source) = self.namespace_registry.find(&namespace) {
                 target.alias(alias, source);
+            }
+        }
+        for namespace in config.used_namespaces() {
+            if let Some(source) = self.namespace_registry.find(namespace) {
+                for (symbol, var) in source.mappings() {
+                    target.map_var(symbol, var);
+                }
+                let source_name = source.name().as_str().to_owned();
+                let target_name = target.name().as_str().to_owned();
+                let referred = self
+                    .macros
+                    .borrow()
+                    .iter()
+                    .filter_map(|((namespace, name), function)| {
+                        (namespace == &source_name).then(|| (name.clone(), function.clone()))
+                    })
+                    .collect::<Vec<_>>();
+                let mut macros = self.macros.borrow_mut();
+                for (name, function) in referred {
+                    macros.insert((target_name.clone(), name), function);
+                }
             }
         }
     }
@@ -3401,6 +3432,40 @@ mod tests {
             .eval_text("(ns:create (quote bad/name))")
             .unwrap_err()
             .contains("unqualified symbol"));
+    }
+
+    #[test]
+    fn namespace_use_refers_portable_test_vars_and_macros() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(concat!(
+                    "(ns code.test-rust-probe (:use code.test))",
+                    " (fact \"promise assertion\" (promise/from 42) => 42)",
+                    " (let [summary (run {:namespace \"code.test-rust-probe\"})]",
+                    " [(:status summary) (:passed (:counts summary))])"
+                ))
+                .unwrap(),
+            "[:passed 1]"
+        );
+    }
+
+    #[test]
+    fn portable_collection_execution_preserves_hal_semantics_and_errors() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "[(reduce (fn [total value] (+ total value)) 0 [1 2 3 4]) \
+                      (let [answer 41] (+ answer 1) (+ answer 2))]"
+                )
+                .unwrap(),
+            "[10 43]"
+        );
+        assert!(runtime
+            .eval_text("(vec (map (fn [value] (/ 1 value)) [1 0]))")
+            .unwrap_err()
+            .contains("division by zero"));
     }
 
     #[test]

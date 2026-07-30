@@ -17,6 +17,7 @@ pub struct GeneratedNamespaceConfig {
     aliases: HashMap<String, String>,
     refers: HashMap<String, String>,
     required_namespaces: Vec<String>,
+    used_namespaces: Vec<String>,
     builtins: Vec<String>,
     blank: bool,
 }
@@ -33,6 +34,7 @@ impl GeneratedNamespaceConfig {
             aliases,
             refers: HashMap::new(),
             required_namespaces: Vec::new(),
+            used_namespaces: Vec::new(),
             builtins: Vec::new(),
             blank: false,
         }
@@ -49,6 +51,7 @@ impl GeneratedNamespaceConfig {
         let mut excluded = HashSet::new();
         let mut overrides = HashMap::new();
         let mut requires = Vec::new();
+        let mut uses = Vec::new();
         let mut builtins = Vec::new();
         let mut blank = false;
         let mut intrinsics_seen = false;
@@ -90,6 +93,7 @@ impl GeneratedNamespaceConfig {
                     }
                 }
                 "require" => requires.extend(values[1..].iter().cloned()),
+                "use" => uses.extend(values[1..].iter().cloned()),
                 "flavor" | "import" => {}
                 other => return Err(format!("Unsupported ns clause: :{other}")),
             }
@@ -118,11 +122,18 @@ impl GeneratedNamespaceConfig {
         for require in requires {
             config.apply_require(&require, &available)?;
         }
+        for use_form in uses {
+            config.apply_use(&use_form, &available)?;
+        }
         Ok(config)
     }
 
     pub fn required_namespaces(&self) -> &[String] {
         &self.required_namespaces
+    }
+
+    pub fn used_namespaces(&self) -> &[String] {
+        &self.used_namespaces
     }
 
     pub fn builtins(&self) -> &[String] {
@@ -329,6 +340,27 @@ impl GeneratedNamespaceConfig {
                 }
                 other => return Err(format!("Unsupported :require option: :{other}")),
             }
+        }
+        Ok(())
+    }
+
+    pub fn apply_use(
+        &mut self,
+        form: &Form,
+        available: &impl Fn(&str) -> bool,
+    ) -> Result<(), String> {
+        let target = match form {
+            Form::Symbol(target) if !target.contains('/') => normalize_namespace(target),
+            _ => return Err(":use expects unqualified namespace symbols".into()),
+        };
+        if !known_namespace(target) && !available(target) {
+            return Err(format!("Cannot use missing generated namespace: {target}"));
+        }
+        if !self.required_namespaces.iter().any(|value| value == target) {
+            self.required_namespaces.push(target.into());
+        }
+        if !self.used_namespaces.iter().any(|value| value == target) {
+            self.used_namespaces.push(target.into());
         }
         Ok(())
     }
@@ -578,5 +610,21 @@ mod tests {
                 .to_string(),
             "bytes"
         );
+    }
+
+    #[test]
+    fn records_used_namespaces_for_runtime_referral() {
+        let config = GeneratedNamespaceConfig::configure_with(
+            &parse_forms("(:use code.test)").unwrap(),
+            |target| target == "code.test",
+        )
+        .unwrap();
+        assert_eq!(config.required_namespaces(), &["code.test"]);
+        assert_eq!(config.used_namespaces(), &["code.test"]);
+        assert!(GeneratedNamespaceConfig::configure(
+            &parse_forms("(:use [code.test])").unwrap()
+        )
+        .unwrap_err()
+        .contains(":use expects unqualified namespace symbols"));
     }
 }

@@ -1,0 +1,303 @@
+;; ============================================================================
+;; code.test — portable, data-first test registration and execution.
+;;
+;; The library owns test semantics but no terminal presentation. A reporter
+;; receives structured events; hosts decide whether and how to print them.
+;; ============================================================================
+(ns code.test
+  (:require [code.test.protocol :as protocol]))
+
+(defstruct TestRegistry [state])
+(defstruct NullReporter [value])
+(defstruct EventReporter [events])
+(defstruct Matcher [predicate expected])
+(defstruct ThrownValue [error])
+
+(defn clear-namespace-state
+  [state namespace]
+  (loop [output state
+         remaining (keys state)]
+    (if (seq remaining)
+      (let [key (first remaining)]
+        (recur (if (= namespace (first key))
+                 (dissoc output key)
+                 output)
+               (rest remaining)))
+      output)))
+
+(extend-type TestRegistry protocol/ITestRegistry
+  (registry-register [registry fact]
+    (do
+      (swap! (field registry :state)
+             (fn [state]
+               (assoc state [(:namespace fact) (:name fact)] fact)))
+      fact))
+  (registry-remove [registry namespace name]
+    (let [key [namespace name]
+          found (get (deref (field registry :state)) key)]
+      (swap! (field registry :state)
+             (fn [state] (dissoc state key)))
+      found))
+  (registry-clear [registry namespace]
+    (if namespace
+      (swap! (field registry :state) clear-namespace-state namespace)
+      (reset! (field registry :state) {})))
+  (registry-facts [registry]
+    (vec (vals (deref (field registry :state)))))
+  (registry-find [registry namespace name]
+    (get (deref (field registry :state)) [namespace name])))
+
+(extend-type NullReporter protocol/ITestReporter
+  (report-event [reporter event]
+    event))
+
+(extend-type EventReporter protocol/ITestReporter
+  (report-event [reporter event]
+    (do
+      (swap! (field reporter :events)
+             (fn [events] (conj events event)))
+      event)))
+
+(extend-type Matcher protocol/IMatcher
+  (match-value [matcher actual]
+    {:pass ((field matcher :predicate) actual)
+     :actual actual
+     :expected (field matcher :expected)}))
+
+(def +registry+ (TestRegistry (atom {})))
+(def +null-reporter+ (NullReporter nil))
+(def => '=>)
+
+(def anything
+  (Matcher (fn [value] true) :anything))
+
+(defn event-reporter
+  "Creates a reporter that records structured events in an atom."
+  ([] (EventReporter (atom [])))
+  ([events] (EventReporter events)))
+
+(defn reporter-events
+  "Returns events recorded by an event reporter."
+  [reporter]
+  (deref (field reporter :events)))
+
+(defn exactly
+  "Matches a value using HAL equality."
+  [expected]
+  (Matcher (fn [actual] (= actual expected)) expected))
+
+(defn satisfies
+  "Matches when predicate returns truthy."
+  [predicate]
+  (Matcher predicate :satisfies))
+
+(defn throws
+  "Matches any value thrown while evaluating an assertion."
+  []
+  (Matcher (fn [actual] (instance? ThrownValue actual)) :throws))
+
+(defn settle
+  "Returns an ordinary value, awaiting a promise when necessary."
+  [value]
+  (if (promise? value) (deref value) value))
+
+(defn check
+  "Evaluates thunk and returns a structured check result."
+  [thunk expected]
+  (try
+    (let [actual (settle (thunk))]
+      (if (instance? Matcher expected)
+        (protocol-call protocol/IMatcher match-value expected actual)
+        {:pass (= actual expected)
+         :actual actual
+         :expected expected}))
+    (catch Throwable error
+      (let [actual (ThrownValue error)]
+        (if (instance? Matcher expected)
+          (protocol-call protocol/IMatcher match-value expected actual)
+          {:pass false
+           :status :error
+           :actual nil
+           :expected expected
+           :error (str error)})))))
+
+(defn register!
+  "Registers a fact in the current namespace."
+  ([name function]
+   (register! name function {}))
+  ([name function metadata]
+   (protocol-call
+    protocol/ITestRegistry
+    registry-register
+    +registry+
+    {:namespace (current-namespace)
+     :name name
+     :function function
+     :meta metadata})))
+
+(defn remove-fact
+  "Removes a fact from namespace, defaulting to the current namespace."
+  ([name]
+   (remove-fact (current-namespace) name))
+  ([namespace name]
+   (protocol-call
+    protocol/ITestRegistry
+    registry-remove
+    +registry+
+    namespace
+    name)))
+
+(defn purge-facts
+  "Clears facts from namespace, defaulting to the current namespace."
+  ([] (purge-facts (current-namespace)))
+  ([namespace]
+   (protocol-call
+    protocol/ITestRegistry
+    registry-clear
+    +registry+
+    namespace)))
+
+(defn purge-all
+  "Clears the complete test registry."
+  []
+  (protocol-call protocol/ITestRegistry registry-clear +registry+ nil))
+
+(defn tests
+  "Returns all registered fact records."
+  []
+  (protocol-call protocol/ITestRegistry registry-facts +registry+))
+
+(defn registry
+  "Returns the registry snapshot keyed by [namespace fact-name]."
+  []
+  (deref (field +registry+ :state)))
+
+(defn get-fact
+  "Returns a fact by namespace and name."
+  ([name] (get-fact (current-namespace) name))
+  ([namespace name]
+   (protocol-call
+    protocol/ITestRegistry
+    registry-find
+    +registry+
+    namespace
+    name)))
+
+(defn fact-form
+  "Builds the registration form for one fact assertion."
+  [description body form-meta]
+  (let [forms (vec body)
+        options (if (map? (first forms)) (first forms) {})
+        assertion (if (map? (first forms)) (vec (rest forms)) forms)]
+    (if (not (= 3 (count assertion)))
+      (throw "fact currently expects one actual => expected assertion")
+      (let [actual (nth assertion 0)
+            arrow (nth assertion 1)
+            expected (nth assertion 2)]
+        (if (not (= arrow '=>))
+          (throw "fact expects => between actual and expected")
+          `(code.test/register!
+            ~description
+            (fn [] [(code.test/check (fn [] ~actual) ~expected)])
+            ~(merge form-meta options)))))))
+
+(defmacro fact
+  "Registers one actual => expected assertion."
+  [description & body]
+  (fact-form description body (meta &form)))
+
+(defn selected?
+  "Returns true when fact matches run selection options."
+  [fact options]
+  (and
+   (or (nil? (:namespace options))
+       (= (:namespace options) (:namespace fact)))
+   (or (nil? (:name options))
+       (= (:name options) (:name fact)))
+   (not (:skip (:meta fact)))))
+
+(defn report!
+  "Sends event to reporter and returns event."
+  [reporter event]
+  (protocol-call protocol/ITestReporter report-event reporter event))
+
+(defn checks-pass?
+  [checks]
+  (reduce (fn [passing check-result]
+            (and passing (:pass check-result)))
+          true
+          checks))
+
+(defn checks-error?
+  [checks]
+  (reduce (fn [errored check-result]
+            (or errored (= :error (:status check-result))))
+          false
+          checks))
+
+(defn normalize-checks
+  [value]
+  (if (vector? value)
+    value
+    (if (map? value)
+      [value]
+      [{:pass true :actual value :expected :returned}])))
+
+(defn run-fact
+  "Runs one fact and emits start/end events."
+  [fact reporter]
+  (let [identity {:namespace (:namespace fact)
+                  :name (:name fact)
+                  :meta (:meta fact)}]
+    (report! reporter (merge {:event :fact/start} identity))
+    (let [result
+          (try
+            (let [checks (normalize-checks (settle ((:function fact))))
+                  status (if (checks-error? checks)
+                           :error
+                           (if (checks-pass? checks) :passed :failed))]
+              (merge identity {:status status :checks checks}))
+            (catch Throwable error
+              (merge identity
+                     {:status :error
+                      :checks []
+                      :error (str error)})))]
+      (report! reporter (merge {:event :fact/end} result))
+      result)))
+
+(defn result-counts
+  [results]
+  (reduce (fn [counts result]
+            (update counts (:status result) (fn [count] (inc (or count 0)))))
+          {:passed 0
+           :failed 0
+           :error 0
+           :timeout 0
+           :skipped 0
+           :cancelled 0}
+          results))
+
+(defn run
+  "Runs selected facts sequentially and returns a structured summary."
+  ([] (run {}))
+  ([options]
+   (let [reporter (or (:reporter options) +null-reporter+)
+         selected (vec (filter (fn [fact] (selected? fact options)) (tests)))]
+     (report! reporter {:event :run/start :count (count selected)})
+     (let [results (vec (map (fn [fact] (run-fact fact reporter)) selected))
+           counts (result-counts results)
+           status (if (and (= 0 (:failed counts))
+                           (= 0 (:error counts))
+                           (= 0 (:timeout counts)))
+                    :passed
+                    :failed)
+           summary {:status status
+                    :counts counts
+                    :results results}]
+       (report! reporter (merge {:event :run/end} summary))
+       summary))))
+
+(defn run-tests
+  "Compatibility name for run."
+  ([] (run {}))
+  ([options] (run options)))
