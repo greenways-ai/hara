@@ -87,6 +87,19 @@ reports with optional SQLite retention, and redacted topology/traffic
 analytics over RESP4. See the
 [Fabric service reference](docs/docs/reference/fabric-service.md).
 
+The root Makefile provides the common Fabric workflows:
+
+```shell
+make fabric-build
+make fabric ARGS="--data target/fabric --shards 4"
+make fabric-test
+make fabric-benchmark ARGS="--rooms 8 --tasks 1000 --clients 4"
+```
+
+`ARGS` is passed to the service or benchmark unchanged. The service listens on
+`127.0.0.1:1311` by default; use the normal `--host` and `--port` CLI options
+when a different endpoint is needed.
+
 Per-component builds:
 
 ```shell
