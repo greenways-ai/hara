@@ -1,0 +1,81 @@
+(ns std.task.process
+  (:require [std.task.bulk :as bulk]))
+
+(defn task-section
+  [task key]
+  (if (map? task)
+    (get task key)
+    (cond
+      (= key :main) (field task :main)
+      (= key :construct) (field task :construct)
+      (= key :item) (field task :item)
+      (= key :result) (field task :result)
+      (= key :summary) (field task :summary)
+      (= key :params) (field task :params)
+      :else nil)))
+
+(defn main-function
+  "Adapts a task function to the portable four-slot invocation contract.
+   Arity is explicit because portable HAL does not depend on host reflection."
+  [function argcount]
+  (let [main (cond
+               (= argcount 4)
+               (fn [input params lookup env & args]
+                 (apply function input params lookup env args))
+               (= argcount 3)
+               (fn [input params lookup env & args]
+                 (apply function input params env args))
+               (= argcount 2)
+               (fn [input params lookup env & args]
+                 (apply function input params args))
+               (= argcount 1)
+               (fn [input params lookup env & args]
+                 (apply function input args))
+               :else
+               (throw (ex-info "Task :argcount must be between 1 and 4"
+                               {:argcount argcount})))]
+    [main false]))
+
+(defn wrap-execute
+  [function task]
+  (fn [input params lookup env & args]
+    (let [item (task-section task :item)
+          pre (or (get item :pre) identity)
+          post (or (get item :post) identity)
+          output (or (get item :output) identity)
+          result (apply function (pre input) params lookup env args)
+          result (post result)]
+      (output result))))
+
+(defn task-inputs
+  ([task]
+   (task-inputs task nil))
+  ([task input]
+   (if (map? input)
+     (task-inputs task nil input)
+     (task-inputs task input {})))
+  ([task input params]
+   (let [construct (task-section task :construct)
+         env-function (or (get construct :env)
+                          (fn [options] {}))]
+     (task-inputs task input params
+                  (env-function params))))
+  ([task input params env]
+   (let [construct (task-section task :construct)
+         lookup-function (or (get construct :lookup)
+                             (fn [task options] {}))]
+     (task-inputs task input params
+                  (lookup-function task (merge env params))
+                  env)))
+  ([task input params lookup env]
+   [input params lookup env]))
+
+(defn invoke
+  [task & arguments]
+  (let [input (first arguments)
+        params (or (second arguments) {})
+        [input params lookup env] (task-inputs task input params)
+        function (wrap-execute (get (task-section task :main) :fn) task)]
+    (if (vector? input)
+      (bulk/bulk task function input params lookup env)
+      (function input params lookup env))))

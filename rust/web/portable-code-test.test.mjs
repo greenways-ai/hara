@@ -37,3 +37,24 @@ test("canonical component and context libraries run through browser wasm", () =>
     /missing/,
   );
 });
+
+test("portable tasks emit structured reports through browser wasm", () => {
+  const runtime = new Runtime();
+  const result = runtime.eval(
+    "(ns std-task-browser-probe" +
+      " (:require [std.task :as task] [std.task.bulk :as bulk]))" +
+      " (task/deftask double-task" +
+      "   {:template :default :main {:fn (fn [value] (* 2 value))}})" +
+      " (let [reporter (bulk/event-reporter)" +
+      "       output (task/invoke double-task [1 2 3]" +
+      "                           {:reporter reporter :return :all})]" +
+      " [(get output :summary)" +
+      "  (vec (map (fn [item] (get item :data)) (get output :results)))" +
+      "  (count (bulk/reporter-events reporter))])",
+  );
+
+  assert.equal(
+    result,
+    "[{:items 3 :results 3 :warnings 0 :errors 0} [2 4 6] 8]",
+  );
+});

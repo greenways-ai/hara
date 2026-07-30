@@ -1,7 +1,7 @@
 (ns example.code-test.tasks
-  (:require [std.lib.task :as task]))
+  (:require [std.task :as task]))
 
-(deftask double-task
+(task/deftask double-task
   {:template :default
    :doc "Doubles each input"
    :main {:fn (fn [value] (* 2 value))}})

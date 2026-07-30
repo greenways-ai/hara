@@ -498,6 +498,19 @@ impl Runtime {
                 include_str!("../../lib/src/std/lib/context.hal"),
             ),
             (
+                "std.task.protocol",
+                include_str!("../../lib/src/std/task/protocol.hal"),
+            ),
+            (
+                "std.task.bulk",
+                include_str!("../../lib/src/std/task/bulk.hal"),
+            ),
+            (
+                "std.task.process",
+                include_str!("../../lib/src/std/task/process.hal"),
+            ),
+            ("std.task", include_str!("../../lib/src/std/task.hal")),
+            (
                 "code.test.protocol",
                 include_str!("../../lib/src/code/test/protocol.hal"),
             ),
@@ -3478,6 +3491,30 @@ mod tests {
             .eval_text("(require [std.foundation.component :as old])")
             .unwrap_err()
             .contains("missing"));
+    }
+
+    #[test]
+    fn portable_task_bulk_execution_is_data_first() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(ns std-task-rust-probe \
+                       (:require [std.task :as task] [std.task.bulk :as bulk])) \
+                     (task/deftask double-task \
+                       {:template :default \
+                        :main {:fn (fn [value] (* 2 value))}}) \
+                     (let [reporter (bulk/event-reporter) \
+                           output (task/invoke double-task [1 2 3] \
+                                               {:reporter reporter :return :all})] \
+                       [(get output :summary) \
+                        (vec (map (fn [result] (get result :data)) \
+                                  (get output :results))) \
+                        (count (bulk/reporter-events reporter))])"
+                )
+                .unwrap(),
+            "[{:items 3 :results 3 :warnings 0 :errors 0} [2 4 6] 8]"
+        );
     }
 
     #[test]
