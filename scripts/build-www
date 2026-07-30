@@ -27,7 +27,7 @@ mkdir -p "$HIR_OUT"
 rm -rf "$OUT"
 mkdir -p "$OUT/runtime/host" "$OUT/runtime/studio/hal" "$OUT/runtime/std/lib/substrate"
 mkdir -p "$OUT/runtime/studio/capabilities"
-mkdir -p "$OUT/assets/wasm" "$OUT/assets/hara-amp" "$OUT/examples/hara-amp/src"
+mkdir -p "$OUT/assets/wasm" "$OUT/assets/hara-amp" "$OUT/examples/hara-amp/src" "$OUT/examples/hara-animation/src"
 mkdir -p "$OUT/sources"
 mkdir -p "$OUT/vendor"
 
@@ -49,6 +49,11 @@ cp "$ROOT/website/index.html" \
    "$ROOT/website/amp-node-graph.js" \
    "$ROOT/website/amp-source-model.js" \
    "$ROOT/website/amp-workspace.js" \
+   "$ROOT/website/hara-animation.html" \
+   "$ROOT/website/hara-animation.css" \
+   "$ROOT/website/hara-animation.js" \
+   "$ROOT/website/animation-runtime.js" \
+   "$ROOT/website/animation-source-model.js" \
    "$ROOT/website/og.png" \
    "$ROOT/website/scene.js" \
    "$OUT/"
@@ -113,6 +118,10 @@ cp "$ROOT/website/examples/hara-amp/project.edn" \
    "$ROOT/website/examples/hara-amp/workspace.edn" \
    "$OUT/examples/hara-amp/"
 cp "$ROOT/website/examples/hara-amp/src/amp.hal" "$OUT/examples/hara-amp/src/"
+cp "$ROOT/website/examples/hara-animation/project.edn" \
+   "$ROOT/website/examples/hara-animation/workspace.edn" \
+   "$OUT/examples/hara-animation/"
+cp "$ROOT/website/examples/hara-animation/src/animation.hal" "$OUT/examples/hara-animation/src/"
 mkdir -p "$OUT/examples/studio-backgrounds"
 cp "$ROOT/website/examples/studio-backgrounds/project.edn" \
    "$ROOT/website/examples/studio-backgrounds/workspace.edn" \
