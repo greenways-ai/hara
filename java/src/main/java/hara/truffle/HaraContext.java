@@ -996,12 +996,12 @@ public final class HaraContext {
           aliases.getOrDefault(currentNamespace.name(), Map.of());
       boolean alias = currentAliases.containsKey(namespaceName);
       namespaceName = currentAliases.getOrDefault(namespaceName, namespaceName);
+      String nativeSource = NATIVE_LIBRARY_SOURCES.get(namespaceName);
+      if (nativeSource != null) libraryLoader.ensure(this, nativeSource);
       if (alias && !namespaces.containsKey(namespaceName)) {
         HaraNamespace required = requiredNamespace(namespaceName);
         if (required == null) return null;
       }
-      String nativeSource = NATIVE_LIBRARY_SOURCES.get(namespaceName);
-      if (nativeSource != null) libraryLoader.ensure(this, nativeSource);
       if (!namespaces.containsKey(namespaceName) && libraryLoader.provides(namespaceName)) {
         libraryLoader.ensure(this, namespaceName);
       }
