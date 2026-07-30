@@ -1,0 +1,28 @@
+(ns greenways.build.normalize-test
+  (:require [greenways.build.normalize :as normalize]
+            [std.lib.test :as test]))
+
+(def input
+  {:greenways/type :build
+   :build/id 'example
+   :build/artifact {:artifact/kind :application/service
+                    :artifact/output "dist/example.hal"}
+   :build/stages
+   [{:stage/id 'output
+     :stage/produces :application/service}]})
+
+(def canonical (normalize/normalize-build input))
+
+(test/print-results
+ [(test/check "normalization supplies canonical defaults"
+              [(get canonical :greenways/version)
+               (:build/specs canonical)
+               (get-in canonical [:build/stages 0 :stage/requires])
+               (get-in canonical [:build/stages 0 :stage/checkers])]
+              ["0.1.0" [] [] []])
+  (test/check "normalization is idempotent"
+              (normalize/normalize-build canonical)
+              canonical)
+  (test/check "canonical predicate accepts normalized data"
+              (normalize/canonical-build? canonical)
+              true)])

@@ -1,0 +1,33 @@
+(ns greenways.build.parse-test
+  (:require [greenways.build.parse :as parse]
+            [std.lib.test :as test]))
+
+(def valid
+  (parse/parse-build
+   '(build example
+      (artifact :kind :application/service :output "dist/example.hal")
+      (use-spec :hal/language {:version "1.0.0"})
+      (stage parse :produces :hal/forms
+             :checkers [(check :hal/readable)])
+      (stage output :requires [parse]
+             :produces :application/service))))
+
+(def invalid
+  (parse/parse-build
+   '(build broken
+      (artifact :kind :application/service :kind :other/kind
+                :output "dist/example.hal")
+      (publish :now true))))
+
+(test/print-results
+ [(test/check "surface forms parse without evaluation"
+              [(get-in valid [:build :build/id])
+               (get-in valid [:build :build/stages 0 :stage/requires])
+               (get-in valid [:build :build/stages 0 :stage/checkers])]
+              [:example [] [{:checker/id :hal/readable}]])
+  (test/check "semantic failures are structured findings"
+              (vec (map (fn [finding] (:type finding))
+                        (:findings invalid)))
+              [:greenways/duplicate-key
+               :greenways/unknown-form
+               :greenways/no-stages])])

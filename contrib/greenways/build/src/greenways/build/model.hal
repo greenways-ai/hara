@@ -1,0 +1,126 @@
+(ns greenways.build.model)
+
+(def version "0.1.0")
+
+(defn normalize-id
+  "Normalizes a symbol, string, or keyword identifier to a keyword."
+  [value]
+  (if (keyword? value)
+    value
+    (keyword (name value))))
+
+(defn build
+  "Constructs a portable build value."
+  [id artifact specs stages]
+  {:greenways/type :build
+   :greenways/version version
+   :build/id (normalize-id id)
+   :build/artifact artifact
+   :build/specs (vec specs)
+   :build/stages (vec stages)})
+
+(defn build?
+  [value]
+  (and (map? value)
+       (= :build (:greenways/type value))
+       (keyword? (:build/id value))))
+
+(defn artifact
+  [kind output]
+  {:artifact/kind kind
+   :artifact/output output})
+
+(defn artifact?
+  [value]
+  (and (map? value)
+       (keyword? (:artifact/kind value))
+       (string? (:artifact/output value))))
+
+(defn specification-reference
+  [id version]
+  {:spec/id id
+   :spec/version version})
+
+(defn specification-reference?
+  [value]
+  (and (map? value)
+       (keyword? (:spec/id value))
+       (string? (:spec/version value))))
+
+(defn stage
+  [id requires produces checkers]
+  {:stage/id (normalize-id id)
+   :stage/requires (vec (or requires []))
+   :stage/produces produces
+   :stage/checkers (vec (or checkers []))})
+
+(defn stage?
+  [value]
+  (and (map? value)
+       (keyword? (:stage/id value))
+       (vector? (:stage/requires value))
+       (keyword? (:stage/produces value))
+       (vector? (:stage/checkers value))))
+
+(defn checker-reference
+  ([id] (checker-reference id nil))
+  ([id variation]
+   (if variation
+     {:checker/id id :checker/variation variation}
+     {:checker/id id})))
+
+(defn checker-reference?
+  [value]
+  (and (map? value)
+       (keyword? (:checker/id value))))
+
+(defn checker-variation
+  [id checker config digest]
+  {:variation/id id
+   :variation/checker checker
+   :variation/config config
+   :variation/digest digest})
+
+(defn checker-variation?
+  [value]
+  (and (map? value)
+       (keyword? (:variation/id value))
+       (keyword? (:variation/checker value))
+       (map? (:variation/config value))
+       (string? (:variation/digest value))))
+
+(defn finding
+  ([type level message]
+   (finding type level message nil))
+  ([type level message details]
+   (merge {:type type
+           :level level
+           :message message}
+          (or details {}))))
+
+(defn finding?
+  [value]
+  (and (map? value)
+       (keyword? (:type value))
+       (keyword? (:level value))
+       (string? (:message value))))
+
+(defn obligation-report
+  [build-id status summary stages next-actions checker-identities]
+  {:report/type :greenways/build-check
+   :report/version version
+   :build/id build-id
+   :build/status status
+   :summary summary
+   :stages (vec stages)
+   :next-actions (vec next-actions)
+   :checker/identities (vec checker-identities)})
+
+(defn obligation-report?
+  [value]
+  (and (map? value)
+       (= :greenways/build-check (:report/type value))
+       (keyword? (:build/status value))
+       (map? (:summary value))
+       (vector? (:stages value))
+       (vector? (:next-actions value))))

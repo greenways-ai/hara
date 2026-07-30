@@ -1,0 +1,19 @@
+(build example
+  (artifact
+    :kind :application/service
+    :output "dist/example.hal")
+
+  (use-spec
+    :hal/language
+    {:version "1.0.0"})
+
+  (stage parse
+    :produces :hal/forms
+    :checkers
+    [(check :greenways/build-structure)])
+
+  (stage output
+    :requires [parse]
+    :produces :application/service
+    :checkers
+    [(check :greenways/codec-roundtrip)]))

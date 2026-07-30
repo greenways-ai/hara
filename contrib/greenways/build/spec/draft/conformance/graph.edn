@@ -1,0 +1,11 @@
+{:conformance/id :greenways.build/graph-cases
+ :conformance/version "0.1.0"
+ :conformance/cases
+ [{:case/id :greenways.build.graph/linear :case/type :graph :case/input [[:a []] [:b [:a]]] :case/expected [:a :b]}
+  {:case/id :greenways.build.graph/branching :case/type :graph :case/input [[:a []] [:b [:a]] [:c [:a]]] :case/expected [:a :b :c]}
+  {:case/id :greenways.build.graph/missing-dependency :case/type :finding :case/input [[:a [:missing]]] :case/expected :greenways/missing-dependency}
+  {:case/id :greenways.build.graph/self-dependency :case/type :finding :case/input [[:a [:a]]] :case/expected :greenways/self-dependency}
+  {:case/id :greenways.build.graph/two-node-cycle :case/type :finding :case/input [[:a [:b]] [:b [:a]]] :case/expected :greenways/dependency-cycle}
+  {:case/id :greenways.build.graph/long-cycle :case/type :finding :case/input [[:a [:c]] [:b [:a]] [:c [:b]]] :case/expected :greenways/dependency-cycle}
+  {:case/id :greenways.build.graph/independent-after-failure :case/type :blocking :case/input [[:a []] [:b [:a]] [:c []]] :case/expected {:blocked [:b] :runnable [:c]}}
+  {:case/id :greenways.build.graph/unreachable :case/type :finding :case/input [[:output []] [:orphan []]] :case/expected :greenways/unreachable-stage}]}
