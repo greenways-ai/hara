@@ -1,6 +1,0 @@
-(ns tahto.protocol.preprocess)
-
-(defprotocol IPreprocessor
-  (to-input [preprocessor form options])
-  (to-resolve [preprocessor form grammar modules options])
-  (to-staging [preprocessor form grammar modules options]))
