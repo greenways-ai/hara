@@ -7,8 +7,16 @@
   <title>Hara / Animation Pipeline</title>
   <link rel="stylesheet" href="./hara-animation.css">
 </head>
-<body>
-  <header class="system"><a href="./">HARA</a><span>ANIMATION PIPELINE</span><output data-status>HAL SOURCE · READY</output></header>
+<body data-view="stage">
+  <header class="system">
+    <a href="./">HARA</a><span>ANIMATION PIPELINE</span>
+    <nav aria-label="Animation views">
+      <button type="button" data-view-stage aria-pressed="true">STAGE VIEW</button>
+      <i aria-hidden="true">↔</i>
+      <button type="button" data-view-build aria-pressed="false">BUILD VIEW</button>
+    </nav>
+    <output data-status>HAL SOURCE · READY</output>
+  </header>
   <main>
     <section class="stage panel">
       <header><span>01</span><h1>DIRECT A CHARACTER</h1><i>CANVAS / LIVE PLAN</i></header>
@@ -17,6 +25,7 @@
         <button data-play>▶ PLAY PIPELINE</button><button data-pause>Ⅱ PAUSE</button>
         <output><b data-current-action>WAITING</b><small data-frame>FRAME 0000</small></output>
       </div>
+      <button class="view-next" type="button" data-view-build>OPEN BUILD VIEW <span>›</span></button>
     </section>
     <section class="cast panel">
       <header><span>02</span><h2>CHOOSE CHARACTER</h2><i>CAST</i></header>
@@ -38,6 +47,11 @@
       <footer><output data-source-state>SYNCED</output><button data-reset>RESET</button><button data-apply>APPLY SOURCE</button></footer>
     </section>
   </main>
+  <footer class="view-switcher">
+    <button type="button" data-view-stage><span>‹</span> STAGE VIEW</button>
+    <strong>STAGE VIEW ↔ BUILD VIEW</strong>
+    <button type="button" data-view-build>BUILD VIEW <span>›</span></button>
+  </footer>
   <script type="module" src="./hara-animation.js"></script>
 </body>
 </html>

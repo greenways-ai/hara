@@ -23,6 +23,14 @@ test("Hara Amp routes WASM FFT frames through ns+ before canvas rendering", asyn
     .toBeGreaterThan(1);
   await expect.poll(async () => Number((await page.locator("[data-story-queue]").textContent()).split(" ")[0]))
     .toBeLessThanOrEqual(1);
+
+  await expect(page.locator(".story-next-copy strong")).toHaveText("Build View ↔ Stage View");
+  await page.locator("[data-workspace-next]").click();
+  await expect(page.getByRole("heading", { name: /A player is/ })).toBeVisible();
+  await expect(page.locator("[data-story-audio]")).toHaveText("PLAYING / WASM");
+  await page.locator("[data-workspace-prev]").click();
+  await expect(page.getByRole("button", { name: /PAUSE HARA AMP/ }))
+    .toHaveAttribute("aria-pressed", "true");
 });
 
 test("Hara Amp exposes synchronized Node/Text views and selectable completion", async ({ page }) => {
@@ -39,4 +47,13 @@ test("Hara Amp exposes synchronized Node/Text views and selectable completion", 
   await expect(page.getByRole("listbox")).toBeVisible();
   await page.getByRole("option", { name: /sonic\/status symbol/ }).click();
   await expect(repl).toHaveValue("sonic/status");
+
+  await repl.fill("(+ 19 23)");
+  await repl.press("Enter");
+  await expect(page.locator("[data-story-repl-history] > div").last().locator("output"))
+    .toHaveText("42");
+
+  await repl.fill("(str \"first\"\n \"second\")");
+  await repl.press("Shift+Enter");
+  await expect(repl).toHaveValue("(str \"first\"\n \"second\")\n");
 });

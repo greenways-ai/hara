@@ -49,7 +49,7 @@ story.innerHTML = `
     <div><dt>QUEUE</dt><dd data-story-queue>0 / LATEST</dd></div>
     <div><dt>AUDIO</dt><dd data-story-audio>GESTURE REQUIRED</dd></div></dl>
   </section>
-  <footer class="story-next-copy"><strong>NOW OPEN THE PROGRAM →</strong>The next screen is the same Amp as nodes and an editable HAL file.</footer>
+  <footer class="story-next-copy"><strong>Build View ↔ Stage View</strong>The two screens are continuous views of the same running Amp.</footer>
  </div>
 </section>
 <section class="story-screen" data-story-screen="2" aria-labelledby="editor-title">
@@ -74,7 +74,7 @@ story.innerHTML = `
    </div>
   </section>
   <section class="story-repl">
-   <header><div><strong>AMP REPL · ACTIVE DOCUMENT</strong><span>SELECT A RECIPE OR USE AUTOCOMPLETE</span></div>
+   <header><div><strong>AMP REPL · ACTIVE DOCUMENT</strong><span>ENTER TO EVAL · SHIFT+ENTER FOR A NEW LINE</span></div>
     <button type="button" data-story-repl-clear>CLEAR</button></header>
    <div class="story-repl-recipes" data-repl-recipes></div>
    <label class="story-repl-select"><span>COMMAND</span><select data-repl-recipe-select></select></label>
@@ -95,6 +95,7 @@ document.body.append(story);
 const start = $("[data-start]"), previous = $("[data-workspace-prev]"), next = $("[data-workspace-next]");
 let screen = 0, amp = null, boot = null, graphView = null, sourceModel = null;
 let chosenNote = 0, activeCompletion = 0, longPress = null, preset = "hara", mode = "spectrum";
+let draggedStep = null;
 
 function ready() { return document.body.dataset.kernel === "live"; }
 function navigation() {
@@ -314,11 +315,44 @@ async function evalRepl() {
 }
 function steps() { return amp?.graphSnapshot?.nodes.find((node) => node.id === "sequence")?.params.steps ?? []; }
 function setSteps(value) { if (value.length && value.length <= 64) void updateParameter("sequence", "steps", value); }
+function clearDropPreview() {
+  const slots = $("[data-step-slots]", story);
+  slots.classList.remove("is-drag-active");
+  $$("[data-step-index]", slots).forEach((step) => {
+    step.classList.remove("is-dragging", "is-drop-target", "shift-left", "shift-right");
+    delete step.dataset.dropEdge;
+  });
+}
+function previewSequenceDrop(target, clientX, sourceIndex = draggedStep) {
+  if (!target) return clearDropPreview();
+  const slots = $("[data-step-slots]", story), targetIndex = Number(target.dataset.stepIndex);
+  const box = target.getBoundingClientRect();
+  const edge = clientX < box.left + box.width * .35 ? "before"
+    : clientX > box.right - box.width * .35 ? "after" : "replace";
+  slots.classList.add("is-drag-active");
+  $$("[data-step-index]", slots).forEach((step) => {
+    const index = Number(step.dataset.stepIndex);
+    step.classList.toggle("is-drop-target", index === targetIndex);
+    step.classList.toggle("shift-left", sourceIndex != null && targetIndex < sourceIndex &&
+      index >= targetIndex && index < sourceIndex);
+    step.classList.toggle("shift-right", sourceIndex != null && targetIndex > sourceIndex &&
+      index <= targetIndex && index > sourceIndex);
+    if (index === targetIndex) step.dataset.dropEdge = edge;
+    else delete step.dataset.dropEdge;
+  });
+  return edge;
+}
+function commitSequenceDrop(value, target) {
+  target.classList.add("is-dropping");
+  clearDropPreview();
+  setTimeout(() => {
+    target.classList.remove("is-dropping");
+    setSteps(value);
+  }, 150);
+}
 function show(index) {
-  const was = screen;
   screen = Math.max(0, Math.min(2, index));
   story.hidden = !screen;
-  if (was === 1 && screen !== 1) amp?.pause();
   if (!screen) {
     delete document.body.dataset.storyScreen;
     $$("[data-story-screen]", story).forEach((panel) => panel.classList.remove("is-active"));
@@ -371,9 +405,20 @@ $("[data-story-controls]", story).addEventListener("change", (event) => {
 story.addEventListener("dragstart", (event) => {
   const note = event.target.closest("[data-note-offset]"), step = event.target.closest("[data-step-index]");
   if (note) event.dataTransfer.setData("application/x-hara-note", note.dataset.noteOffset);
-  if (step) event.dataTransfer.setData("application/x-hara-step", step.dataset.stepIndex);
+  if (step) {
+    draggedStep = Number(step.dataset.stepIndex);
+    step.classList.add("is-dragging");
+    event.dataTransfer.setData("application/x-hara-step", step.dataset.stepIndex);
+  }
 });
-$("[data-step-slots]", story).addEventListener("dragover", (event) => event.preventDefault());
+story.addEventListener("dragend", () => { draggedStep = null; clearDropPreview(); });
+$("[data-step-slots]", story).addEventListener("dragleave", (event) => {
+  if (!event.currentTarget.contains(event.relatedTarget)) clearDropPreview();
+});
+$("[data-step-slots]", story).addEventListener("dragover", (event) => {
+  event.preventDefault();
+  previewSequenceDrop(event.target.closest("[data-step-index]"), event.clientX);
+});
 $("[data-step-slots]", story).addEventListener("drop", (event) => {
   event.preventDefault();
   const target = event.target.closest("[data-step-index]");
@@ -387,19 +432,28 @@ $("[data-step-slots]", story).addEventListener("drop", (event) => {
     else if (event.clientX > box.right - box.width / 4) value.splice(targetIndex + 1, 0, offset);
     else value[targetIndex] = offset;
   }
-  setSteps(value);
+  draggedStep = null;
+  commitSequenceDrop(value, target);
 });
 $("[data-step-slots]", story).addEventListener("pointerdown", (event) => {
   const step = event.target.closest("[data-step-index]");
   if (!step || event.pointerType === "mouse") return;
   longPress = setTimeout(() => { step.classList.add("is-dragging"); longPress = { index: Number(step.dataset.stepIndex) }; }, 450);
 });
+$("[data-step-slots]", story).addEventListener("pointermove", (event) => {
+  if (!longPress || typeof longPress !== "object") return;
+  previewSequenceDrop(document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-step-index]"),
+    event.clientX, longPress.index);
+});
 $("[data-step-slots]", story).addEventListener("pointerup", (event) => {
   if (typeof longPress === "number") clearTimeout(longPress);
   if (longPress && typeof longPress === "object") {
     const target = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-step-index]");
-    if (target) { const value = [...steps()], [moved] = value.splice(longPress.index, 1); value.splice(Number(target.dataset.stepIndex), 0, moved); setSteps(value); }
-    $$(".is-dragging", story).forEach((node) => node.classList.remove("is-dragging"));
+    if (target) {
+      const value = [...steps()], [moved] = value.splice(longPress.index, 1);
+      value.splice(Number(target.dataset.stepIndex), 0, moved);
+      commitSequenceDrop(value, target);
+    } else clearDropPreview();
   }
   longPress = null;
 });
@@ -427,7 +481,7 @@ $("[data-story-repl-input]", story).addEventListener("keydown", (event) => {
     renderCompletions(true);
   } else if (!list.hidden && ["Tab", "Enter"].includes(event.key)) { event.preventDefault(); acceptCompletion(); }
   else if (event.key === "Escape") list.hidden = true;
-  else if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); void evalRepl(); }
+  else if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void evalRepl(); }
 });
 document.addEventListener("hara:amp-workspace-error", (event) => showError(event.detail?.message ?? "Workspace failed"));
 new MutationObserver(() => {
