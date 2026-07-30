@@ -59,7 +59,7 @@ export class HaraAmpRuntime {
     this.disposed = false;
 
     for (const node of [
-      { id: "node/synth", type: "wasm/audio-source" },
+      { id: "node/source", type: "wasm/audio-source" },
       { id: "node/fft", type: "wasm/transform" },
       { id: "node/visualizer", type: "hal/transform" }
     ]) this.runtime.registerNode(node);
@@ -336,12 +336,12 @@ export class HaraAmpRuntime {
 
   setVolume(value) {
     this.audio?.setVolume(value);
-    void this.update("pan", "volume", Number(value));
+    void this.update("mixer", "volume", Number(value));
   }
 
   setBalance(value) {
     this.audio?.setBalance(value);
-    void this.update("pan", "balance", Number(value));
+    void this.update("mixer", "balance", Number(value));
   }
 
   async update(nodeId, parameter, value) {
@@ -442,22 +442,22 @@ class AmpAudio {
         this.graph = graph;
         for (const node of graph.nodes) {
           for (const [parameter, value] of Object.entries(node.params)) {
-            if (!TUNE_PARAMETERS.has(parameter)) {
+            if (!isTuneParameter(node.id, parameter)) {
               await this.updateGraphParameter(node.id, parameter, value, node);
             }
           }
-          if (node.id === "synth") await this.updateTune(node.params);
         }
+        await this.updateTune(this.graphTune());
       },
       discard: async () => { this.graph = previous; }
     };
   }
 
   async updateGraphParameter(nodeId, parameter, value, node = null) {
-    if (nodeId === "synth" && TUNE_PARAMETERS.has(parameter)) {
-      return this.updateTune({ ...(node?.params ?? {}), [parameter]: value }, parameter);
+    if (isTuneParameter(nodeId, parameter)) {
+      return this.updateTune(this.graphTune(nodeId, parameter, value), nodeId, parameter);
     }
-    if (nodeId === "synth" && parameter === "waveform") {
+    if (nodeId === "source" && parameter === "waveform") {
       const waveform = { sine: 0, square: 1, saw: 2 }[value];
       if (waveform == null || this.synth.exports.synth_set_waveform(waveform) !== 1) {
         throw new Error(`supersonic/waveform-unsupported:${value}`);
@@ -472,10 +472,13 @@ class AmpAudio {
     } else if (nodeId === "gain" && parameter === "preamp") {
       this.owner.preamp = Number(value);
       this.setPreamp(Number(value));
-    } else if (nodeId === "pan" && parameter === "volume") {
+    } else if (nodeId === "mixer" && parameter === "volume") {
       this.setVolume(value);
-    } else if (nodeId === "pan" && parameter === "balance") {
+    } else if (nodeId === "mixer" && parameter === "balance") {
       this.setBalance(value);
+    } else if (nodeId === "transport" && parameter === "playing") {
+      if (value && this.context && !this.playing) await this.play();
+      else if (!value && this.playing) this.pause();
     } else if (nodeId === "visualizer" && parameter === "mode") {
       this.owner.visualMode = value;
       this.owner.drawFrame();
@@ -501,12 +504,12 @@ class AmpAudio {
     this.timeData = new Float32Array(this.analyser.fftSize);
     for (const node of this.graph?.nodes ?? []) {
       for (const [parameter, value] of Object.entries(node.params)) {
-        if (!TUNE_PARAMETERS.has(parameter)) {
+        if (!isTuneParameter(node.id, parameter)) {
           await this.updateGraphParameter(node.id, parameter, value, node);
         }
       }
-      if (node.id === "synth") await this.updateTune(node.params);
     }
+    await this.updateTune(this.graphTune());
     this.buffer = this.renderSynth();
     this.duration = this.buffer.duration;
     this.visualLoop();
@@ -546,7 +549,20 @@ class AmpAudio {
     exports.synth_tune_commit();
   }
 
-  async updateTune(tune, parameter = "tune") {
+  graphTune(changedNode = null, changedParameter = null, changedValue = null) {
+    const params = (id) => this.graph?.nodes.find((node) => node.id === id)?.params ?? {};
+    const tune = {
+      tempo: params("transport").tempo,
+      "steps-per-beat": params("transport")["steps-per-beat"],
+      steps: params("sequence").steps,
+      root: params("source").root,
+      gate: params("source").gate
+    };
+    if (changedNode && changedParameter) tune[changedParameter] = changedValue;
+    return tune;
+  }
+
+  async updateTune(tune, nodeId = "sequence", parameter = "steps") {
     this.configureTune(tune);
     const nextTune = structuredClone(tune);
     if (!this.context || !this.playing) {
@@ -575,9 +591,9 @@ class AmpAudio {
       this.startedAt = boundary;
       this.offset = 0;
       this.pendingTune = null;
-      this.owner.supersonic?.effective("hara-amp", "synth", null);
+      this.owner.supersonic?.effective("hara-amp", nodeId, parameter);
     }, Math.max(0, (boundary - this.context.currentTime) * 1000));
-    this.pendingTune = { boundary, source, timer };
+    this.pendingTune = { boundary, source, timer, nodeId, parameter };
     return { pending: true, effectiveAt: boundary };
   }
 
@@ -623,13 +639,18 @@ class AmpAudio {
 
   cancelPendingTune({ install = false } = {}) {
     if (!this.pendingTune) return;
-    clearTimeout(this.pendingTune.timer);
-    try { this.pendingTune.source.stop(); } catch {}
+    const pending = this.pendingTune;
+    clearTimeout(pending.timer);
+    try { pending.source.stop(); } catch {}
     this.pendingTune = null;
     if (install && this.context) {
       this.buffer = this.renderSynth();
       this.duration = this.buffer.duration;
-      this.owner.supersonic?.effective("hara-amp", "synth", null);
+      this.owner.supersonic?.effective(
+        "hara-amp",
+        pending.nodeId,
+        pending.parameter
+      );
     }
   }
 
@@ -688,7 +709,15 @@ class AmpAudio {
   }
 }
 
-const TUNE_PARAMETERS = new Set(["tempo", "root", "gate", "steps-per-beat", "steps"]);
+const TUNE_PARAMETERS = Object.freeze({
+  transport: new Set(["tempo", "steps-per-beat"]),
+  sequence: new Set(["steps"]),
+  source: new Set(["root", "gate"])
+});
+
+function isTuneParameter(nodeId, parameter) {
+  return TUNE_PARAMETERS[nodeId]?.has(parameter) ?? false;
+}
 
 function drawSpectrum(context, width, height, bins, palette, peaks, overlay) {
   if (!bins.length) return;

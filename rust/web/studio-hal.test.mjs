@@ -9,6 +9,7 @@ import { defaultBootstrap } from "./studio/boot.js";
 import { createHostServices } from "./studio/host-services.js";
 import { NodeRuntime } from "./studio/node-runtime.js";
 import { SessionRouter } from "./studio/session-router.js";
+import { normalizeCreative } from "../../website/creative.js";
 
 // Real-wasm integration tests for the studio hara libraries
 // (rust/web/studio/hal/*.hal): store/boot and canonical file behaviour is asserted by
@@ -137,6 +138,23 @@ test("defaultBootstrap renders the shared bootstrap template", { skip: wasmBytes
     defaultBootstrap("boot-space"),
     '(do (require [studio.boot :as boot]) (boot/boot! "boot-space"))'
   );
+});
+
+test("rigged-cube creative data survives wasm evaluation and normalization", { skip: wasmBytes === null }, async () => {
+  const broker = makeBroker();
+  const value = await broker.eval("ROOT", `{:creative/version 1
+    :background "#020408"
+    :entities [{:id "mesh/hero"
+                :mesh {:primitive :box}
+                :material {:color "#41f5e4"}
+                :transform {:rotation [0 0 0]}
+                :rig {:bones [{:id "bone/root" :length 1}
+                              {:id "bone/arm" :parent "bone/root" :length 1}]}}]
+    :audio {:tempo 120 :midi true :voices []}}`);
+  const scene = normalizeCreative(value);
+  assert.equal(scene.entities.length, 1);
+  assert.deepEqual(scene.entities[0].rotation, [0, 0, 0]);
+  assert.equal(scene.entities[0].rig.bones.length, 2);
 });
 
 test("std.foundation.host exposes the generic browser host descriptor", { skip: wasmBytes === null }, async () => {

@@ -5,6 +5,8 @@ use hara_wasm::project;
 use hara_wasm::resp::{FabricRespServer, RespConnection, RespServer, RespValue};
 use hara_wasm::service::{FabricService, ServiceConfig};
 use hara_wasm::kernel::{parse, Form};
+#[cfg(feature = "hir-encoder")]
+use hara_wasm::kernel::{hir::encode_hir_module, parse_forms};
 use hara_wasm::Runtime;
 use std::env;
 use std::fs;
@@ -102,6 +104,8 @@ fn required(args: &mut impl Iterator<Item = String>, option: &str) -> Result<Str
 pub(crate) fn run(options: Options) -> Result<(), String> {
     match options.command.first().map(String::as_str) {
         Some("package") => package::run(&options.command[1..]),
+        #[cfg(feature = "hir-encoder")]
+        Some("compile-hir") => compile_hir(&options.command[1..]),
         Some("new") => new_project(&options.command[1..]),
         Some("check") => check_project(&options, &options.command[1..]),
         Some("add") => edit_dependency(&options, &options.command[1..], true),
@@ -125,6 +129,44 @@ pub(crate) fn run(options: Options) -> Result<(), String> {
         Some("repl") | None => repl::run_repl(&options, options.offline),
         Some(command) => Err(format!("unknown command: {command}")),
     }
+}
+
+#[cfg(feature = "hir-encoder")]
+fn compile_hir(args: &[String]) -> Result<(), String> {
+    let source_path = args
+        .first()
+        .ok_or_else(|| "compile-hir requires SOURCE.hal --output OUTPUT.hir".to_owned())?;
+    let output_index = args
+        .iter()
+        .position(|argument| argument == "--output")
+        .ok_or_else(|| "compile-hir requires --output OUTPUT.hir".to_owned())?;
+    let output_path = args
+        .get(output_index + 1)
+        .ok_or_else(|| "compile-hir requires --output OUTPUT.hir".to_owned())?;
+    let source = fs::read_to_string(source_path)
+        .map_err(|error| format!("cannot read {source_path}: {error}"))?;
+    let forms = parse_forms(&source)?;
+    let namespace = forms
+        .iter()
+        .find_map(|form| match form {
+            Form::List(values)
+                if matches!(values.first(), Some(Form::Symbol(head)) if head == "ns" || head == "ns+") =>
+            {
+                match values.get(1) {
+                    Some(Form::Symbol(namespace)) => Some(namespace.clone()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .ok_or_else(|| format!("{source_path} does not declare an ns or ns+ namespace"))?;
+    let artifact = encode_hir_module(&namespace, source_path, &source, forms);
+    if let Some(parent) = std::path::Path::new(output_path).parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    }
+    fs::write(output_path, artifact)
+        .map_err(|error| format!("cannot write {output_path}: {error}"))
 }
 
 fn project_for(options: &Options, args: &[String]) -> Result<project::Project, String> {
