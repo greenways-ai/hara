@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Verify the repository's declared first-party licensing policy.
+# This is intentionally metadata-focused: it never rewrites source headers or
+# third-party notices, which require provenance and copyright review.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+status=0
+
+fail() {
+  printf 'license check: %s\n' "$*" >&2
+  status=1
+}
+
+require_text() {
+  local file=$1 pattern=$2
+  if [[ ! -f "$file" ]]; then
+    fail "missing $file"
+  elif ! grep -Fq -- "$pattern" "$file"; then
+    fail "$file must declare $pattern"
+  fi
+}
+
+require_text LICENSE 'Eclipse Public License - v 2.0'
+require_text LICENSES/README.md 'License inventory'
+require_text extensions/hara-chrome/ui/hara-ui/LICENSE 'MIT License'
+
+while IFS= read -r -d '' manifest; do
+  require_text "$manifest" 'license = "EPL-2.0"'
+done < <(find rust -path '*/target' -prune -o -name Cargo.toml -print0)
+
+while IFS= read -r -d '' manifest; do
+  case "$manifest" in
+    extensions/hara-chrome/ui/hara-ui/package.json) continue ;;
+  esac
+  require_text "$manifest" '"license": "EPL-2.0"'
+done < <(find rust extensions -path '*/node_modules' -prune -o -name package.json -print0)
+
+require_text java/pom.xml '<name>Eclipse Public License 2.0</name>'
+require_text java/pom.xml '<url>https://www.eclipse.org/legal/epl-2.0/</url>'
+
+if (( status != 0 )); then
+  exit "$status"
+fi
+
+printf 'license check: OK (EPL-2.0 policy and documented exceptions)\n'
