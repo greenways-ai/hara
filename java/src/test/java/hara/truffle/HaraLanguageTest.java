@@ -2072,6 +2072,99 @@ public class HaraLanguageTest {
     }
   }
 
+  @Test
+  public void firstRestFastPathVectorsAndNil() {
+    try (Context context = context()) {
+      assertEquals(1, context.eval(HaraLanguage.ID, "(first [1 2 3])").asLong());
+      assertTrue(context.eval(HaraLanguage.ID, "(first [])").isNull());
+      assertTrue(context.eval(HaraLanguage.ID, "(first nil)").isNull());
+      assertEquals(2, context.eval(HaraLanguage.ID, "(first (rest [1 2 3]))").asLong());
+      assertTrue(context.eval(HaraLanguage.ID, "(rest [1])").isNull());
+      assertTrue(context.eval(HaraLanguage.ID, "(rest [])").isNull());
+      assertTrue(context.eval(HaraLanguage.ID, "(rest nil)").isNull());
+      assertEquals(3, context.eval(HaraLanguage.ID, "(first (rest (rest [1 2 3])))").asLong());
+    }
+  }
+
+  @Test
+  public void firstFastPathConsumesIterators() {
+    try (Context context = context()) {
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(= [1 2] (let [it (iter [1 2 3])] [(first it) (first it)]))")
+              .asBoolean());
+    }
+  }
+
+  @Test
+  public void firstRestFastPathStringsAndMaps() {
+    try (Context context = context()) {
+      assertEquals(
+          "a", context.eval(HaraLanguage.ID, "(str (first \"abc\"))").asString());
+      assertEquals(
+          "b", context.eval(HaraLanguage.ID, "(str (first (rest \"abc\")))").asString());
+      assertTrue(
+          context.eval(HaraLanguage.ID, "(= :a (first (first {:a 1})))").asBoolean());
+    }
+  }
+
+  @Test
+  public void firstRestHonorShadowingAndRedefinition() {
+    try (Context context = context()) {
+      assertTrue(
+          context
+              .eval(HaraLanguage.ID, "(= :shadowed (let [first (fn [x] :shadowed)] (first [1 2 3])))")
+              .asBoolean());
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(= :redefined (do (def first (fn [x] :redefined)) (first [1 2 3])))")
+              .asBoolean());
+      assertTrue(
+          context
+              .eval(HaraLanguage.ID, "(= :r (do (def rest (fn [x] :r)) (rest [1 2 3])))")
+              .asBoolean());
+    }
+  }
+
+  @Test
+  public void firstRestFastPathUnsupportedReceivers() {
+    try (Context context = context()) {
+      PolyglotException firstError =
+          assertThrows(
+              PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(first 42)"));
+      assertTrue(firstError.getMessage().contains("iter does not support value: 42"));
+      PolyglotException restError =
+          assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(rest 42)"));
+      assertTrue(restError.getMessage().contains("iter does not support value: 42"));
+    }
+  }
+
+  @Test
+  public void firstRestArityErrors() {
+    try (Context context = context()) {
+      PolyglotException zeroArgs =
+          assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(first)"));
+      assertTrue(zeroArgs.getMessage().contains("Expected 1 arguments, received 0"));
+      PolyglotException twoArgs =
+          assertThrows(
+              PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(first 1 2)"));
+      assertTrue(twoArgs.getMessage().contains("Expected 1 arguments, received 2"));
+    }
+  }
+
+  @Test
+  public void firstRestSurviveFoundationReload() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(require \"std/foundation.hal\" {:reload true})");
+      assertEquals(7, context.eval(HaraLanguage.ID, "(first [7 8 9])").asLong());
+      assertEquals(8, context.eval(HaraLanguage.ID, "(first (rest [7 8 9]))").asLong());
+    }
+  }
+
   private static Context context() {
     return Context.newBuilder(HaraLanguage.ID).allowIO(IOAccess.ALL).build();
   }

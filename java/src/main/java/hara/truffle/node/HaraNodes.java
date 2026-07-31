@@ -17,6 +17,7 @@ import com.oracle.truffle.api.nodes.LoopNode;
 import hara.kernel.builtin.BuiltinStruct;
 import hara.lang.base.Eq;
 import hara.lang.base.Ex;
+import hara.lang.base.Iter;
 import hara.lang.base.primitive.Cast;
 import hara.lang.base.primitive.Num;
 import hara.lang.data.Symbol;
@@ -40,6 +41,7 @@ import hara.truffle.HaraType;
 import hara.truffle.HaraVar;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 
 public final class HaraNodes {
@@ -2079,6 +2081,158 @@ public final class HaraNodes {
         values[i] = arguments[i].execute(frame);
       }
       return values;
+    }
+
+    @TruffleBoundary
+    private HaraException notCallable(Object value) {
+      return new HaraException("Value is not callable: " + value, this);
+    }
+
+    @TruffleBoundary
+    private HaraException arityError(int expected, int actual, boolean variadic) {
+      String expectedText = variadic ? "at least " + expected : Integer.toString(expected);
+      return new HaraException("Expected " + expectedText + " arguments, received " + actual, this);
+    }
+  }
+
+  /**
+   * Specialized node for the hot sequence operations {@code first} and {@code rest}. Emitted only
+   * when the operator is not lexically shadowed and the call arity is one; on every execution the
+   * operator var's current value is compared against the canonical std.foundation function
+   * captured by the context at namespace (re)load, so redefining the var transparently reverts
+   * the call site to a fully generic invocation. The fast path reproduces the foundation
+   * definitions verbatim ({@code first} coerces the receiver through iter and takes or skips the
+   * head; {@code rest} is exactly {@code (seq (iter-drop 1 value))}); receivers Iter cannot coerce
+   * fall back to a plain invocation, which reproduces the exact unsupported-receiver error.
+   */
+  public static final class FirstRest extends HaraExpressionNode {
+    public enum Kind {
+      FIRST("first"),
+      REST("rest");
+
+      private final String functionName;
+
+      Kind(String functionName) {
+        this.functionName = functionName;
+      }
+    }
+
+    private final Kind kind;
+    private final Symbol symbol;
+    @Child private HaraExpressionNode argument;
+    @Child private DirectCallNode directCall;
+    @Child private IndirectCallNode indirectCall = IndirectCallNode.create();
+
+    @CompilerDirectives.CompilationFinal private RootCallTarget cachedCallTarget;
+
+    public FirstRest(Kind kind, Symbol symbol, HaraExpressionNode argument) {
+      this.kind = kind;
+      this.symbol = symbol;
+      this.argument = argument;
+    }
+
+    @Override
+    public Object execute(VirtualFrame frame) {
+      HaraContext context = HaraLanguage.currentContext();
+      Object value = argument.execute(frame);
+      Object target = readOperator(context);
+      Object canonical = context.intrinsicSequenceFunction(kind.functionName);
+      if (canonical == null || target != canonical) {
+        return invokeGeneric(target, new Object[] {value});
+      }
+      Object receiver = HaraBox.unwrap(value);
+      Iterator<?> source;
+      try {
+        source = iteratorFor(receiver);
+      } catch (RuntimeException error) {
+        // Iter declined the receiver; dispatching through a plain invocation reproduces the
+        // exact unsupported-receiver error the generic path would raise.
+        return invokeGeneric(target, new Object[] {value});
+      }
+      if (kind == Kind.FIRST) {
+        return source.hasNext() ? source.next() : null;
+      }
+      return context.restSequence(source);
+    }
+
+    /** Mirrors HaraContext.iterValue for the nil and string receivers it special-cases. */
+    private static Iterator<?> iteratorFor(Object receiver) {
+      if (receiver == null) return Iter.emptyIterator();
+      if (receiver instanceof String) return Iter.chars(((String) receiver).toCharArray());
+      return Iter.iter(receiver);
+    }
+
+    private Object readOperator(HaraContext context) {
+      if (context.hasNativeSymbol(symbol)) {
+        return context.resolveNativeSymbol(symbol);
+      }
+      HaraVar var = context.resolve(symbol);
+      if (var == null) {
+        throw unboundOperator();
+      }
+      return var.deref();
+    }
+
+    @TruffleBoundary
+    private HaraException unboundOperator() {
+      return new HaraException("Unbound symbol: " + symbol.display(), this);
+    }
+
+    /** Mirrors {@link Invoke} for call sites whose operator no longer holds the canonical function. */
+    private Object invokeGeneric(Object target, Object[] values) {
+      if (target instanceof HaraMultiFunction) {
+        return invokeMultiFunction((HaraMultiFunction) target, values);
+      }
+      if (target instanceof HaraStruct) {
+        return invokeViaProtocol(target, values);
+      }
+      if (target instanceof HaraBuiltinFunction) {
+        return ((HaraBuiltinFunction) target).apply(values);
+      }
+      if (target instanceof IFn) {
+        return invokeViaProtocol(target, values);
+      }
+      if (target instanceof HaraType) {
+        HaraType haraType = (HaraType) target;
+        if (values.length != haraType.arity()) {
+          throw arityError(haraType.arity(), values.length, false);
+        }
+        return new HaraStruct(haraType, values);
+      }
+      if (!(target instanceof HaraFunction)) {
+        throw notCallable(target);
+      }
+      HaraFunction haraFunction = (HaraFunction) target;
+      HaraFunction selectedFunction = haraFunction.resolveArity(values.length);
+      if (selectedFunction == null) {
+        throw arityError(haraFunction.arity(), values.length, haraFunction.variadic());
+      }
+      RootCallTarget selectedTarget = selectedFunction.callTarget();
+      if (selectedTarget == cachedCallTarget) {
+        return directCall.call(selectedFunction.callArguments(values));
+      }
+      if (cachedCallTarget == null) {
+        CompilerDirectives.transferToInterpreterAndInvalidate();
+        cachedCallTarget = selectedTarget;
+        directCall = insert(DirectCallNode.create(selectedTarget));
+        return directCall.call(selectedFunction.callArguments(values));
+      }
+      return indirectCall.call(selectedTarget, selectedFunction.callArguments(values));
+    }
+
+    @TruffleBoundary
+    private Object invokeMultiFunction(HaraMultiFunction target, Object[] values) {
+      return HaraBox.export(target.invoke(values));
+    }
+
+    @TruffleBoundary
+    private Object invokeViaProtocol(Object target, Object[] values) {
+      try {
+        return HaraLanguage.currentContext().ifnProtocol().invoke("invoke", target, values);
+      } catch (HaraException error) {
+        if (error.haraLocation() != null) throw error;
+        throw new HaraException(error.getMessage(), this);
+      }
     }
 
     @TruffleBoundary
