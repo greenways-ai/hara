@@ -11,7 +11,7 @@ import org.junit.Test;
 
 public class HaraMetaspecConformsTest {
   private static final Path ROOT =
-      Path.of("specs/01-lang/000-metaspec/draft/hal-metaspec.edn");
+      Path.of("specs/01-lang/000-metaspec/draft/metaspec-metaspec.edn");
   private static final Path LANGUAGE =
       Path.of("specs/01-lang/001-language/metaspec/language-metaspec.edn");
   private static final Path LANGUAGE_SPEC =
