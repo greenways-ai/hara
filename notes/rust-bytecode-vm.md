@@ -152,7 +152,9 @@ Lend:
 
 `loop` compiles like `let` (ordered binding initializers into fresh slots),
 then records a loop context: the header instruction index (first body
-instruction) and the binding slot list. The body compiles in tail position.
+instruction) and the binding slot list. Multiple body forms sequence like
+`do` — matching the current evaluator, which wraps `body+` in `do` — and
+the last form compiles in the loop's tail position.
 
 `recur` with `n` arguments against loop slots `[s0 .. sn-1]`:
 

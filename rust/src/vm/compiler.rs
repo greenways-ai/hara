@@ -340,7 +340,6 @@ impl Compiler {
     fn compile_bindings(
         &mut self,
         children: &[Child<'_>],
-        span: &Span,
         form_name: &str,
     ) -> Result<Vec<u16>, CompileError> {
         let bindings = &children[1];
@@ -403,7 +402,7 @@ impl Compiler {
         }
         self.scopes.push_scope();
         let result = self
-            .compile_bindings(children, span, "let")
+            .compile_bindings(children, "let")
             .and_then(|_| self.compile_sequence(&children[2..], tail));
         self.scopes.pop_scope();
         result
@@ -424,7 +423,7 @@ impl Compiler {
         }
         self.scopes.push_scope();
         let result = self
-            .compile_bindings(children, span, "loop")
+            .compile_bindings(children, "loop")
             .and_then(|slots| {
                 let header = self.code.len();
                 self.loops.push(LoopContext { header, slots });
