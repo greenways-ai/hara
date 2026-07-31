@@ -166,10 +166,10 @@
         [before
          (util/list-handlers node)
          (util/list-triggers node)]))
-    [[["echo" "sum"]
-      ["event/a" "event/b"]
-      "request"
-      "stream"]
+    [[ ["echo" "sum"]
+       ["event/a" "event/b"]
+       "request"
+       "stream"]
      ["sum"]
      ["event/a"]])])
 
