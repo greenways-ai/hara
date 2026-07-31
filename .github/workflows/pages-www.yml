@@ -1,4 +1,4 @@
-name: Deploy www.hara-long.org
+name: Deploy www.hara-lang.org
 
 on:
   push:
@@ -34,13 +34,13 @@ jobs:
         run: |
           node --test website/branding.test.mjs website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
           test -s target/www/og-hara-ribbon.jpg
-      - name: Deploy main to www.testing.hara-long.org
+      - name: Deploy main to www.testing.hara-lang.org
         if: github.ref_name == 'main'
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "main ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
-      - name: Deploy production to www.hara-long.org
+      - name: Deploy production to www.hara-lang.org
         if: github.ref_name == 'production'
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "production ${GITHUB_SHA}"
         env:
