@@ -214,6 +214,13 @@ fn nested_loops() {
 }
 
 #[test]
+fn loop_body_sequences_like_do() {
+    assert_eq!(eval("(loop [i 0] 1 2)"), "2");
+    assert_eq!(eval("(loop [i 0] (+ i 1) i)"), "0");
+    assert_eq!(eval("(loop [] 7)"), "7");
+}
+
+#[test]
 fn recur_through_tail_positions() {
     // Tail `let` and `do` bodies and `if` branches are recur positions.
     assert_eq!(
@@ -282,7 +289,7 @@ fn compile_arity_errors_match_evaluator_messages() {
         ("(let [x 1])", "let expects bindings and a body [line 1, column 1]"),
         ("(let 1 x)", "let expects a binding list or vector [line 1, column 6]"),
         ("(let [x] x)", "let bindings require name/value pairs [line 1, column 6]"),
-        ("(loop [i 0] 1 2)", "loop expects bindings and a body [line 1, column 1]"),
+        ("(loop [i 0])", "loop expects bindings and a body [line 1, column 1]"),
         ("(loop 1 2)", "loop expects a binding list or vector [line 1, column 7]"),
         ("(loop [i] i)", "loop bindings require name/value pairs [line 1, column 7]"),
     ] {

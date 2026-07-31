@@ -35,4 +35,11 @@ semver = "1.0"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 ed25519-dalek = { version = "2.1", default-features = false, features = ["std"] }
 
+# Experimental bytecode VM benchmark driver (issue #195); requires the
+# non-default bytecode-vm feature so default builds are unaffected.
+[[bin]]
+name = "hara-bytecode-benchmark"
+path = "src/bin/hara-bytecode-benchmark.rs"
+required-features = ["bytecode-vm"]
+
 [dev-dependencies]

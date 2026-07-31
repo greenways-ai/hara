@@ -35,6 +35,9 @@ mod tests;
 #[cfg(test)]
 #[path = "vm/execution_tests.rs"]
 mod execution_tests;
+#[cfg(test)]
+#[path = "vm/differential_tests.rs"]
+mod differential_tests;
 
 pub use compiler::compile_source;
 pub use disassemble::disassemble;

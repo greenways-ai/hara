@@ -415,7 +415,7 @@ impl Compiler {
         span: &Span,
         _tail: bool,
     ) -> Result<(), CompileError> {
-        if children.len() != 3 {
+        if children.len() < 3 {
             return Err(CompileError::new(
                 CompileErrorKind::Arity,
                 "loop expects bindings and a body",
@@ -428,10 +428,9 @@ impl Compiler {
             .and_then(|slots| {
                 let header = self.code.len();
                 self.loops.push(LoopContext { header, slots });
-                let body = &children[2];
-                // The loop body is the tail position of the loop.
-                let result =
-                    self.compile_form(body.form, body.span, body.children, true);
+                // Multiple body forms sequence like `do`; the last one is
+                // the loop's tail (recur) position.
+                let result = self.compile_sequence(&children[2..], true);
                 self.loops.pop();
                 result
             });
