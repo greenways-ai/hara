@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { HtaKeyword, HtaSymbol } from "./hta.js";
-import { editorFormAt, editorTopLevelForms, isAnonymousDocument, studioDocumentId } from "./studio/editor-state.js";
+import { editorFormAt, editorSourceComplete, editorTopLevelForms, isAnonymousDocument, studioDocumentId } from "./studio/editor-state.js";
 import {
+  buildTraceTree,
   buildTree,
   defaultFileContent,
   normalizeNewFilePath,
@@ -165,4 +166,33 @@ test("Studio document identity includes project, space, and path", () => {
 test("anonymous documents permit leading comments but require ns+", () => {
   assert.equal(isAnonymousDocument(";; board\n\n(ns+ (:require [studio.draw]))"), true);
   assert.equal(isAnonymousDocument("(ns board)"), false);
+});
+
+test("editorSourceComplete waits for balanced collections and strings", () => {
+  assert.equal(editorSourceComplete('(def answer (+ 19 23))'), true);
+  assert.equal(editorSourceComplete('(def answer (+ 19'), false);
+  assert.equal(editorSourceComplete('(show "unfinished)'), false);
+  assert.equal(editorSourceComplete('(show ")") ; ignored )'), true);
+});
+
+test("buildTraceTree links operation returns and nested calls", () => {
+  const kw = (name) => new HtaKeyword(name);
+  const event = (kind, operation, parent = null) => new Map([
+    [kw("kind"), kw(kind)],
+    [kw("operation"), operation],
+    [kw("parent-operation"), parent],
+    [kw("values"), []]
+  ]);
+  const trace = new Map([[kw("events"), [
+    event("evaluation-start", null),
+    event("operation-enter", 1),
+    event("operation-enter", 2, 1),
+    event("operation-return", 2),
+    event("operation-return", 1)
+  ]]]);
+  const roots = buildTraceTree(trace);
+  assert.equal(roots.length, 2);
+  assert.equal(roots[1].children.length, 1);
+  assert.equal(roots[1].children[0].returnEvent instanceof Map, true);
+  assert.equal(roots[1].returnEvent instanceof Map, true);
 });

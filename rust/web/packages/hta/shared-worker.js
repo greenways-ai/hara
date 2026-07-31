@@ -77,7 +77,7 @@ function next() {
 function requestSession(frame) {
   const [target, args] = decodeHta(frame);
   return typeof target === "string" &&
-    (target === "session/eval" || target === "session/eval-bound") &&
+    (target === "session/eval" || target === "session/eval-bound" || target === "session/trace-eval") &&
     typeof args?.[0] === "string"
     ? args[0]
     : "ROOT";

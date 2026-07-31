@@ -10,6 +10,9 @@ mod kernel;
 mod lang;
 #[path = "../../src/task.rs"]
 mod task;
+#[cfg(feature = "dev-trace")]
+#[path = "../../src/trace.rs"]
+mod trace;
 
 use core::{EvalFiber, EvalFiberState, Promise, PromiseRejection, PromiseState, Value};
 use std::cell::RefCell;
@@ -65,6 +68,8 @@ struct Runtime {
     tasks: HashMap<u64, Promise>,
     resources: Rc<RefCell<HashMap<String, String>>>,
     mount_id: Option<u64>,
+    #[cfg(feature = "dev-trace")]
+    next_trace_id: u64,
 }
 impl Runtime {
     fn new() -> Self {
@@ -172,7 +177,47 @@ impl Runtime {
             tasks: HashMap::new(),
             resources,
             mount_id: None,
+            #[cfg(feature = "dev-trace")]
+            next_trace_id: 1,
         }
+    }
+
+    #[cfg(feature = "dev-trace")]
+    fn trace_eval(&mut self, source: &str) -> trace::Trace {
+        let trace_id = trace::TraceId(self.next_trace_id);
+        self.next_trace_id += 1;
+        let namespaces = self.namespaces.clone();
+        let protocols = self.protocols.clone();
+        let resources = self.resources.clone();
+        let provider = Rc::new(move |name: &str| resources.borrow().get(name).cloned());
+        let mut environment = self.env.clone();
+        let (result, trace) = core::with_development_trace(
+            trace_id,
+            trace::TraceLimits::default(),
+            || {
+                core::with_namespace_registry(&namespaces, || {
+                    core::with_namespace_source(provider, || {
+                        core::with_protocols(&protocols, || {
+                            let forms = kernel::parse_forms(source)?;
+                            let mut value = Value::Nil;
+                            for form in forms {
+                                value = core::eval_traced(&form, &mut environment)?;
+                            }
+                            Ok(value)
+                        })
+                    })
+                })
+            },
+            |value, collector| {
+                collector.preview_value(core::portable_type_name(value), value.display())
+            },
+        );
+        if result.is_ok() {
+            self.env = environment;
+            core::save_namespace_environment(&self.namespaces, &mut self.env);
+            core::refresh_namespace_environment(&self.namespaces, &mut self.env);
+        }
+        trace
     }
 
     fn busy(&self) -> bool {
@@ -802,6 +847,22 @@ fn dispatch(
             }
             _ => Err("hta session/eval expects session and source strings".into()),
         },
+        "session/trace-eval" => match args.as_slice() {
+            [Value::String(session), Value::String(source)] => {
+                #[cfg(feature = "dev-trace")]
+                {
+                    let trace = kernel.session_mut(session)?.trace_eval(source);
+                    enqueue_event(&kernel.events, event(0, task, trace_value(&trace)));
+                    Ok(())
+                }
+                #[cfg(not(feature = "dev-trace"))]
+                {
+                    let _ = (kernel, task, session, source);
+                    Err("TRACE_UNAVAILABLE".into())
+                }
+            }
+            _ => Err("hta session/trace-eval expects session and source strings".into()),
+        },
         "session/eval-bound" => match args.as_slice() {
             [Value::String(session), Value::String(source), Value::Vector(bindings)] => {
                 dispatch_eval_values(
@@ -994,6 +1055,108 @@ fn dispatch(
         },
         _ => Err(format!("hta/target-unknown: {target}")),
     }
+}
+
+#[cfg(feature = "dev-trace")]
+fn trace_value(trace: &trace::Trace) -> Value {
+    fn key(name: &str) -> Value {
+        Value::Keyword(name.into())
+    }
+    fn option_number(value: Option<u64>) -> Value {
+        value
+            .map(|value| Value::Number(value as i64))
+            .unwrap_or(Value::Nil)
+    }
+    fn preview(value: &trace::ValuePreview) -> Value {
+        Value::Map(
+            vec![
+                (key("type"), Value::String(value.type_name.clone())),
+                (key("display"), Value::String(value.display.clone())),
+                (key("truncated"), Value::Bool(value.truncated)),
+            ]
+            .into_iter()
+            .collect(),
+        )
+    }
+    fn kind(value: &trace::TraceEventKind) -> &'static str {
+        match value {
+            trace::TraceEventKind::EvaluationStart => "evaluation-start",
+            trace::TraceEventKind::MacroExpand => "macro-expand",
+            trace::TraceEventKind::OperationEnter => "operation-enter",
+            trace::TraceEventKind::OperationReturn => "operation-return",
+            trace::TraceEventKind::Error => "error",
+            trace::TraceEventKind::TraceTruncated => "trace-truncated",
+        }
+    }
+    fn status(value: &trace::TraceStatus) -> &'static str {
+        match value {
+            trace::TraceStatus::Ok => "ok",
+            trace::TraceStatus::Error => "error",
+            trace::TraceStatus::Truncated => "truncated",
+        }
+    }
+    let events = trace
+        .events
+        .iter()
+        .map(|event| {
+            Value::Map(
+                vec![
+                    (key("id"), Value::Number(event.id.0 as i64)),
+                    (key("sequence"), Value::Number(event.sequence as i64)),
+                    (key("kind"), key(kind(&event.kind))),
+                    (
+                        key("operation"),
+                        option_number(event.operation.map(|id| id.0)),
+                    ),
+                    (
+                        key("parent-operation"),
+                        option_number(event.parent_operation.map(|id| id.0)),
+                    ),
+                    (key("depth"), Value::Number(event.depth as i64)),
+                    (
+                        key("function"),
+                        event
+                            .function
+                            .clone()
+                            .map(Value::String)
+                            .unwrap_or(Value::Nil),
+                    ),
+                    (
+                        key("values"),
+                        Value::Vector(event.values.iter().map(preview).collect::<Vec<_>>().into()),
+                    ),
+                    (
+                        key("message"),
+                        event
+                            .message
+                            .clone()
+                            .map(Value::String)
+                            .unwrap_or(Value::Nil),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            )
+        })
+        .collect::<Vec<_>>();
+    Value::Map(
+        vec![
+            (key("schema"), Value::String(trace.schema.into())),
+            (key("trace-id"), Value::String(trace.trace_id.to_string())),
+            (key("status"), key(status(&trace.status))),
+            (key("events"), Value::Vector(events.into())),
+            (
+                key("result"),
+                trace.result.as_ref().map(preview).unwrap_or(Value::Nil),
+            ),
+            (
+                key("error"),
+                trace.error.clone().map(Value::String).unwrap_or(Value::Nil),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    )
 }
 
 fn dispatch_eval(

@@ -141,3 +141,30 @@ export function studioDocumentId({ projectId = "document", space, path }) {
 export function isAnonymousDocument(source) {
   return /^\s*(?:;[^\n]*\n\s*)*\(ns\+/.test(source);
 }
+
+/** True when strings and collection delimiters are balanced enough to hand
+ * the whole document to the evaluator without flashing an incomplete error. */
+export function editorSourceComplete(source) {
+  const stack = [];
+  let inString = false;
+  let inComment = false;
+  let escaped = false;
+  for (const character of source) {
+    if (inComment) {
+      if (character === "\n") inComment = false;
+      continue;
+    }
+    if (inString) {
+      if (!escaped && character === '"') inString = false;
+      escaped = !escaped && character === "\\";
+      continue;
+    }
+    if (character === ";") { inComment = true; continue; }
+    if (character === '"') { inString = true; escaped = false; continue; }
+    if (Object.hasOwn(PAIRS, character)) stack.push(PAIRS[character]);
+    else if (CLOSERS.has(character)) {
+      if (stack.pop() !== character) return false;
+    }
+  }
+  return !inString && stack.length === 0;
+}

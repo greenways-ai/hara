@@ -1074,10 +1074,14 @@ fn development_trace_exit(
 
 #[cfg(feature = "dev-trace")]
 fn development_trace_macro(name: &str, source: &Form, expansion: &Form) {
+    let parent_operation = DEVELOPMENT_TRACE_STACK.with(|stack| stack.borrow().last().copied());
+    let depth = DEVELOPMENT_TRACE_STACK.with(|stack| stack.borrow().len());
     DEVELOPMENT_TRACE.with(|active| {
         if let Some(collector) = active.borrow_mut().as_mut() {
             let mut event =
                 crate::trace::TraceEvent::new(crate::trace::TraceEventKind::MacroExpand);
+            event.parent_operation = parent_operation;
+            event.depth = depth;
             event.function = Some(name.into());
             event.values = vec![
                 collector.preview_value("form", source.to_string()),

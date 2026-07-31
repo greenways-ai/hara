@@ -21,6 +21,23 @@ test("studio boots live and evals (+ 1 2) in the ROOT kernel", async ({ page }) 
   await expect(page.locator('[data-hara-studio="repl-log"]')).toContainText("=> 3");
 });
 
+test("InstaREPL results open their retained structured trace", async ({ page }) => {
+  await page.goto("/rust/web/studio-browser.html");
+  await expect(page.locator('[data-hara-studio="runtime-status"]')).toHaveAttribute("data-state", "live", { timeout: 60000 });
+  await page.evaluate(async () => {
+    const source = "(defn observed [x] (+ x 1))\n(observed 41)";
+    await window.studio.writeText("/trace-demo.hal", source);
+    await window.studio.refreshFiles();
+    await window.studio.openFile("/trace-demo.hal");
+  });
+  await page.getByRole("button", { name: "Toggle InstaREPL" }).click();
+  await expect(page.locator(".hara-studio-insta-result.is-ok")).toHaveCount(2);
+  await page.locator(".hara-studio-insta-result.is-ok").last().click();
+  await expect(page.locator(".hara-studio-trace-summary")).toContainText("OK");
+  await expect(page.locator(".hara-studio-trace-node.is-operation")).toContainText("observed");
+  await expect(page.locator(".hara-studio-trace-result")).toHaveText("42");
+});
+
 test("compact studio chrome has no horizontal overflow on phone", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/rust/web/studio-browser.html");
