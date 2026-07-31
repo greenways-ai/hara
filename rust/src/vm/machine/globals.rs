@@ -3,7 +3,9 @@
 use crate::lang::data::Symbol;
 use std::rc::Rc;
 
-use super::{constant_string, constant_string_vector, Machine, Program, Value, VmMultiArity, VmSlot};
+use super::{
+    constant_string, constant_string_vector, Machine, Program, Value, VmMultiArity, VmSlot,
+};
 
 impl Machine {
     #[inline(never)]
@@ -170,7 +172,8 @@ impl Machine {
                 _ => unreachable!("checked above"),
             })
             .collect();
-        self.stack.push(VmSlot::MultiArity(Rc::new(VmMultiArity { name, clauses })));
+        self.stack
+            .push(VmSlot::MultiArity(Rc::new(VmMultiArity { name, clauses })));
         Ok(())
     }
 }

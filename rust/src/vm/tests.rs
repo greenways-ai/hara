@@ -145,6 +145,15 @@ fn instruction_display_and_shape() {
         .to_string(),
         "Primitive % 2"
     );
+    assert_eq!(
+        Instruction::PrimitiveLocalConst {
+            op: Primitive::Add,
+            local: 2,
+            constant: 7,
+        }
+        .to_string(),
+        "PrimitiveLocalConst + local 2 constant 7"
+    );
     assert_eq!(Instruction::Jump(12).to_string(), "Jump 0012");
     assert_eq!(
         Instruction::Closure {
@@ -171,6 +180,15 @@ fn instruction_display_and_shape() {
     assert_eq!(
         Instruction::Primitive { op: Primitive::Add, argc: 3 }.stack_effect(),
         Some(-2)
+    );
+    assert_eq!(
+        Instruction::PrimitiveLocalConst {
+            op: Primitive::Add,
+            local: 0,
+            constant: 0,
+        }
+        .stack_effect(),
+        Some(1)
     );
     assert_eq!(
         Instruction::Closure {

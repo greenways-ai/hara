@@ -42,6 +42,12 @@ pub enum Instruction {
     /// Pops `argc` arguments, applies the shared value-level primitive,
     /// and pushes the result.
     Primitive { op: Primitive, argc: u8 },
+    /// Applies a binary primitive to a local and a pooled constant.
+    PrimitiveLocalConst {
+        op: Primitive,
+        local: u16,
+        constant: u32,
+    },
     /// Unconditional jump to an absolute instruction index.
     Jump(u32),
     /// Pops the condition and jumps when it is not truthy
@@ -135,13 +141,16 @@ impl Instruction {
             Instruction::Primitive { argc, .. } | Instruction::CallStatic { argc, .. } => {
                 1 - i32::from(*argc)
             }
+            Instruction::PrimitiveLocalConst { .. } => 1,
             Instruction::Closure { captures, .. } => 1 - i32::from(*captures),
             Instruction::Call { argc } => -i32::from(*argc),
             Instruction::GetGlobal(_)
             | Instruction::VarGlobal(_)
             | Instruction::DefStruct { .. }
             | Instruction::DeclareGlobal(_) => 1,
-            Instruction::DefGlobal { .. } | Instruction::SetGlobal(_) | Instruction::StructField(_) => 0,
+            Instruction::DefGlobal { .. }
+            | Instruction::SetGlobal(_)
+            | Instruction::StructField(_) => 0,
             Instruction::InstanceOf => -1,
             Instruction::MakeMultiArity { count, .. } => 1 - i32::from(*count),
             Instruction::Jump(_) => 0,
@@ -163,9 +172,23 @@ impl std::fmt::Display for Instruction {
             Instruction::Primitive { op, argc } => {
                 write!(formatter, "Primitive {} {argc}", op.operator())
             }
+            Instruction::PrimitiveLocalConst {
+                op,
+                local,
+                constant,
+            } => {
+                write!(
+                    formatter,
+                    "PrimitiveLocalConst {} local {local} constant {constant}",
+                    op.operator()
+                )
+            }
             Instruction::Jump(target) => write!(formatter, "Jump {target:04}"),
             Instruction::JumpIfFalse(target) => write!(formatter, "JumpIfFalse {target:04}"),
-            Instruction::Closure { prototype, captures } => {
+            Instruction::Closure {
+                prototype,
+                captures,
+            } => {
                 write!(formatter, "Closure {prototype:04} captures {captures}")
             }
             Instruction::Call { argc } => write!(formatter, "Call {argc}"),

@@ -4,10 +4,10 @@
 
 use crate::kernel::{Form, Position, Span};
 
+use super::{Child, Compiler};
 use crate::vm::error::{CompileError, CompileErrorKind};
 use crate::vm::opcode::Instruction;
 use crate::vm::program::{CatchEntry, TryEntry};
-use super::{Child, Compiler};
 
 /// A `try` region currently being compiled. Used to reject `recur`
 /// crossing a `finally` boundary: a recur targeting a loop opened before
@@ -231,7 +231,11 @@ impl Compiler {
 
     /// Compiles guest `(throw value)`: raises through the shared
     /// `core::thrown_error` boundary. Terminal, like `recur`.
-    pub(super) fn compile_throw(&mut self, children: &[Child<'_>], span: &Span) -> Result<(), CompileError> {
+    pub(super) fn compile_throw(
+        &mut self,
+        children: &[Child<'_>],
+        span: &Span,
+    ) -> Result<(), CompileError> {
         if children.len() != 2 {
             return Err(CompileError::new(
                 CompileErrorKind::Arity,

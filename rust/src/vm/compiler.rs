@@ -31,17 +31,17 @@ use super::program::{
 use super::source_map::SourceMap;
 use super::validate::{self, stack_heights};
 
-#[path = "compiler/scope.rs"]
-mod scope;
-#[path = "compiler/functions.rs"]
-mod functions;
 #[path = "compiler/exceptions.rs"]
 mod exceptions;
+#[path = "compiler/functions.rs"]
+mod functions;
+#[path = "compiler/scope.rs"]
+mod scope;
 use exceptions::TryContext;
-#[path = "compiler/recur.rs"]
-mod recur;
 #[path = "compiler/globals.rs"]
 mod globals;
+#[path = "compiler/recur.rs"]
+mod recur;
 use recur::LoopContext;
 use scope::ScopeStack;
 
@@ -82,8 +82,6 @@ struct Child<'a> {
     span: &'a Span,
     children: Option<&'a [SpannedForm]>,
 }
-
-
 
 /// One in-progress function body: code, scopes, loops, and captures.
 /// The entry function is context 0 with arity and captures 0.
@@ -210,18 +208,20 @@ impl Compiler {
         elements
             .iter()
             .enumerate()
-            .map(|(index, form)| match usable.and_then(|nodes| nodes.get(index)) {
-                Some(node) => Child {
-                    form: &node.form,
-                    span: &node.span,
-                    children: Some(&node.children),
+            .map(
+                |(index, form)| match usable.and_then(|nodes| nodes.get(index)) {
+                    Some(node) => Child {
+                        form: &node.form,
+                        span: &node.span,
+                        children: Some(&node.children),
+                    },
+                    None => Child {
+                        form,
+                        span,
+                        children: None,
+                    },
                 },
-                None => Child {
-                    form,
-                    span,
-                    children: None,
-                },
-            })
+            )
             .collect()
     }
 
@@ -278,11 +278,7 @@ impl Compiler {
             },
             _ => format!("unsupported form: {form}"),
         };
-        CompileError::new(
-            CompileErrorKind::UnsupportedForm,
-            message,
-            Some(span.start),
-        )
+        CompileError::new(CompileErrorKind::UnsupportedForm, message, Some(span.start))
     }
 
     /// Compiles a sequence of forms as an implicit `do`: every non-final
@@ -300,7 +296,12 @@ impl Compiler {
                 break;
             }
             self.top_level = top;
-            self.compile_form(child.form, child.span, child.children, tail && index == last)?;
+            self.compile_form(
+                child.form,
+                child.span,
+                child.children,
+                tail && index == last,
+            )?;
             if index != last && self.ctx().fallthrough {
                 self.emit(Instruction::Pop, Some(child.span.start));
             }
@@ -371,9 +372,7 @@ impl Compiler {
                         self.top_level = top;
                         self.compile_sequence(&children[1..], tail)
                     }
-                    Form::Symbol(name) if name == "let" => {
-                        self.compile_let(&children, span, tail)
-                    }
+                    Form::Symbol(name) if name == "let" => self.compile_let(&children, span, tail),
                     Form::Symbol(name) if name == "loop" => {
                         self.compile_loop(&children, span, tail)
                     }
@@ -435,6 +434,24 @@ impl Compiler {
                 format!("primitive calls support at most {MAX_PRIMITIVE_ARGUMENTS} arguments"),
                 Some(span.start),
             ));
+        }
+        if argc == 2 {
+            if let (Form::Symbol(name), Form::Number(value)) = (children[1].form, children[2].form)
+            {
+                if let Some(local) = self.ctx().scopes.resolve(name) {
+                    let constant =
+                        self.constant_index_of(Value::Number(*value), children[2].span)?;
+                    self.emit(
+                        Instruction::PrimitiveLocalConst {
+                            op,
+                            local,
+                            constant,
+                        },
+                        Some(span.start),
+                    );
+                    return Ok(());
+                }
+            }
         }
         for argument in &children[1..] {
             self.compile_form(argument.form, argument.span, argument.children, false)?;
@@ -558,9 +575,14 @@ impl Compiler {
                     CompileErrorKind::UnsupportedForm,
                     format!("{form_name} destructuring is not supported"),
                     Some(name.span.start),
-                ))
+                ));
             };
-            self.compile_form(initializer.form, initializer.span, initializer.children, false)?;
+            self.compile_form(
+                initializer.form,
+                initializer.span,
+                initializer.children,
+                false,
+            )?;
             if !self.ctx().fallthrough {
                 return Ok(slots);
             }
@@ -608,21 +630,18 @@ impl Compiler {
             ));
         }
         self.ctx_mut().scopes.push_scope();
-        let result = self
-            .compile_bindings(children, "loop")
-            .and_then(|slots| {
-                let header = self.ctx().code.len();
-                self.ctx_mut().loops.push(LoopContext { header, slots });
-                // Multiple body forms sequence like `do`; the last one is
-                // the loop's tail (recur) position.
-                let result = self.compile_sequence(&children[2..], true);
-                self.ctx_mut().loops.pop();
-                result
-            });
+        let result = self.compile_bindings(children, "loop").and_then(|slots| {
+            let header = self.ctx().code.len();
+            self.ctx_mut().loops.push(LoopContext { header, slots });
+            // Multiple body forms sequence like `do`; the last one is
+            // the loop's tail (recur) position.
+            let result = self.compile_sequence(&children[2..], true);
+            self.ctx_mut().loops.pop();
+            result
+        });
         self.ctx_mut().scopes.pop_scope();
         result
     }
-
 
     fn finish(mut self) -> Result<Program, CompileError> {
         if self.ctx().fallthrough {

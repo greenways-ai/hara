@@ -4,9 +4,9 @@
 
 use crate::kernel::Span;
 
+use super::{Child, Compiler};
 use crate::vm::error::{CompileError, CompileErrorKind};
 use crate::vm::opcode::Instruction;
-use super::{Child, Compiler};
 
 #[derive(Clone)]
 pub(super) struct LoopContext {

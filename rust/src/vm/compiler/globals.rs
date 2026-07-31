@@ -28,9 +28,7 @@ impl Compiler {
                 let current = registry.current();
                 current
                     .resolve(&crate::lang::data::Symbol::parse(name))
-                    .map(|var| {
-                        var.symbol().get_namespace() != Some(current.name().as_str())
-                    })
+                    .map(|var| var.symbol().get_namespace() != Some(current.name().as_str()))
             })
             .unwrap_or(false);
         if referred {
@@ -149,7 +147,7 @@ impl Compiler {
             return Err(unsupported(
                 "set! expects a name symbol",
                 children[1].span.start,
-            ))
+            ));
         };
         if self.ctx().scopes.resolve(name).is_some() {
             return Err(unsupported(
@@ -194,7 +192,7 @@ impl Compiler {
             return Err(unsupported(
                 "var expects a name symbol",
                 children[1].span.start,
-            ))
+            ));
         };
         if !self.visible_global(name) {
             return Err(CompileError::new(
@@ -236,7 +234,7 @@ impl Compiler {
                     CompileErrorKind::Arity,
                     "declare expects name symbols",
                     Some(child.span.start),
-                ))
+                ));
             };
             self.require_owned_global(name, child.span)?;
             self.declare_program_global(name);
@@ -267,7 +265,7 @@ impl Compiler {
             return Err(unsupported(
                 "defstruct name must be an unqualified symbol",
                 children[1].span.start,
-            ))
+            ));
         };
         if name.contains('/') {
             return Err(unsupported(
@@ -291,7 +289,7 @@ impl Compiler {
                 return Err(unsupported(
                     "defstruct field names must be unqualified symbols",
                     children[2].span.start,
-                ))
+                ));
             };
             if field.contains('/') {
                 return Err(unsupported(
@@ -311,8 +309,10 @@ impl Compiler {
             names.push(crate::core::Value::String(field.clone()));
         }
         let name_index = self.name_constant(name, children[1].span)?;
-        let fields_index =
-            self.constant_index_of(crate::core::Value::Vector(names.into_iter().collect()), span)?;
+        let fields_index = self.constant_index_of(
+            crate::core::Value::Vector(names.into_iter().collect()),
+            span,
+        )?;
         self.declare_program_global(name);
         self.declare_program_global(&format!("->{name}"));
         self.declare_program_global(&format!("map->{name}"));

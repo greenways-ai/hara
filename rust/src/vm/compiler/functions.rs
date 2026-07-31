@@ -117,8 +117,12 @@ impl Compiler {
             return Ok(false);
         };
         if params.len() != children.len() - 1
-            || params.iter().any(|param| !matches!(param, Form::Symbol(name) if name != "&"))
-            || fn_children[2..].iter().any(|body| contains_recur(body.form))
+            || params
+                .iter()
+                .any(|param| !matches!(param, Form::Symbol(name) if name != "&"))
+            || fn_children[2..]
+                .iter()
+                .any(|body| contains_recur(body.form))
         {
             return Ok(false);
         }
@@ -138,11 +142,8 @@ impl Compiler {
         if !self.ctx().fallthrough {
             return Ok(true);
         }
-        let param_children = self.list_children(
-            params,
-            fn_children[1].span,
-            fn_children[1].children,
-        );
+        let param_children =
+            self.list_children(params, fn_children[1].span, fn_children[1].children);
         self.ctx_mut().scopes.push_scope();
         let result = (|| {
             let mut slots = Vec::with_capacity(params.len());
@@ -282,9 +283,9 @@ impl Compiler {
             })?;
         }
         for (name, position) in &free {
-            scopes.declare(name).map_err(|error| {
-                CompileError::new(error.kind(), error.message(), *position)
-            })?;
+            scopes
+                .declare(name)
+                .map_err(|error| CompileError::new(error.kind(), error.message(), *position))?;
         }
         self.contexts.push(FnContext {
             proto_id,

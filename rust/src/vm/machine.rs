@@ -48,7 +48,10 @@ pub enum VmOutcome {
 /// cost per guest call level small (issue #223).
 enum Dispatch {
     Next(usize),
-    Call { callee: VmSlot, args: Vec<VmSlot> },
+    Call {
+        callee: VmSlot,
+        args: Vec<VmSlot>,
+    },
     CallStatic {
         prototype: u16,
         args: Vec<VmSlot>,
@@ -163,10 +166,12 @@ impl Machine {
                     .clauses
                     .iter()
                     .cloned()
-                    .map(|closure| match Self::closure_value(program.clone(), closure) {
-                        Value::Function(function) => function,
-                        _ => unreachable!(),
-                    })
+                    .map(
+                        |closure| match Self::closure_value(program.clone(), closure) {
+                            Value::Function(function) => function,
+                            _ => unreachable!(),
+                        },
+                    )
                     .collect();
                 crate::core::arity_dispatcher(&dispatch.name, functions, false)
             }
@@ -475,6 +480,42 @@ impl Machine {
                     },
                 }
             }
+            Instruction::PrimitiveLocalConst {
+                op,
+                local,
+                constant,
+            } => {
+                let Some(left) = self.frame.local(*local) else {
+                    return Dispatch::Failed(
+                        self.error(function, format!("local slot {local} out of range")),
+                    );
+                };
+                let Some(right) = program.constants.get(*constant as usize) else {
+                    return Dispatch::Failed(
+                        self.error(function, format!("constant index {constant} out of range")),
+                    );
+                };
+                let result = match (left, right) {
+                    (VmSlot::Number(left), Value::Number(right)) => {
+                        apply_binary_numbers(*op, *left, *right).map(VmSlot::from)
+                    }
+                    _ => {
+                        let Some(left) = left.runtime_value() else {
+                            return Dispatch::Failed(
+                                self.error(function, format!("{} expects values", op.operator())),
+                            );
+                        };
+                        apply_binary_primitive(*op, &left, right).map(VmSlot::from)
+                    }
+                };
+                match result {
+                    Ok(value) => self.stack.push(value),
+                    Err(message) => match self.raise(function, message) {
+                        Ok(target) => return Dispatch::Next(target),
+                        Err(error) => return Dispatch::Failed(error),
+                    },
+                }
+            }
             Instruction::Jump(target) => next_ip = *target as usize,
             Instruction::JumpIfFalse(target) => {
                 let Some(condition) = self.stack.pop() else {
@@ -487,7 +528,10 @@ impl Machine {
                     next_ip = *target as usize;
                 }
             }
-            Instruction::Closure { prototype, captures } => {
+            Instruction::Closure {
+                prototype,
+                captures,
+            } => {
                 guarded!(self.exec_closure(program, *prototype, *captures));
             }
             Instruction::Call { argc } => match self.collect_call(*argc) {

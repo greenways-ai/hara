@@ -22,7 +22,10 @@ pub fn validate(program: &Program) -> Result<(), ValidationError> {
         return Err(ValidationError::new("program has no functions", None));
     }
     if program.entry as usize >= program.functions.len() {
-        return Err(ValidationError::new("entry function index out of range", None));
+        return Err(ValidationError::new(
+            "entry function index out of range",
+            None,
+        ));
     }
     let multiple = program.functions.len() > 1;
     for (index, function) in program.functions.iter().enumerate() {
@@ -65,10 +68,7 @@ fn validate_function(
 /// declarations, pending-slot presence, and clean nesting. Stack heights
 /// at handler targets are already covered by the analysis, which seeds
 /// them with the height computed at each entry's `start`.
-fn validate_handlers(
-    function: &FunctionPrototype,
-    heights: &[u16],
-) -> Result<(), ValidationError> {
+fn validate_handlers(function: &FunctionPrototype, heights: &[u16]) -> Result<(), ValidationError> {
     let code_len = function.code.len();
     for (index, entry) in function.handlers.iter().enumerate() {
         let (start, end) = (entry.start as usize, entry.end as usize);
@@ -225,6 +225,22 @@ pub(crate) fn stack_heights(
                     at,
                 ));
             }
+            Instruction::PrimitiveLocalConst {
+                local, constant, ..
+            } => {
+                if *local >= function.local_count {
+                    return Err(ValidationError::new(
+                        format!("local slot {local} out of range"),
+                        at,
+                    ));
+                }
+                if *constant as usize >= program.constants.len() {
+                    return Err(ValidationError::new(
+                        format!("constant index {constant} out of range"),
+                        at,
+                    ));
+                }
+            }
             Instruction::Jump(target) | Instruction::JumpIfFalse(target)
                 if *target as usize >= code.len() =>
             {
@@ -233,7 +249,10 @@ pub(crate) fn stack_heights(
                     at,
                 ));
             }
-            Instruction::Closure { prototype, captures } => {
+            Instruction::Closure {
+                prototype,
+                captures,
+            } => {
                 let Some(target) = program.functions.get(usize::from(*prototype)) else {
                     return Err(ValidationError::new(
                         format!("closure prototype {prototype} out of range"),
@@ -298,9 +317,7 @@ pub(crate) fn stack_heights(
                 string_constant(program, *name, at)?;
                 match program.constants.get(*fields as usize) {
                     Some(Value::Vector(fields))
-                        if fields
-                            .iter()
-                            .all(|field| matches!(field, Value::String(_))) => {}
+                        if fields.iter().all(|field| matches!(field, Value::String(_))) => {}
                     Some(_) => {
                         return Err(ValidationError::new(
                             format!("defstruct fields constant {fields} is not a string vector"),
@@ -336,7 +353,9 @@ pub(crate) fn stack_heights(
             }
             continue;
         }
-        let effect = instruction.stack_effect().expect("non-terminal instruction");
+        let effect = instruction
+            .stack_effect()
+            .expect("non-terminal instruction");
         let next = height as i32 + effect;
         if next < 0 {
             return Err(ValidationError::new("stack underflow", at));

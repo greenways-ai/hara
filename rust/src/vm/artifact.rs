@@ -202,6 +202,16 @@ fn write_instruction(out: &mut Writer, instruction: &Instruction) {
             out.byte(primitive_id(*op));
             out.byte(*argc);
         }
+        PrimitiveLocalConst {
+            op,
+            local,
+            constant,
+        } => {
+            out.byte(25);
+            out.byte(primitive_id(*op));
+            out.u16(*local);
+            out.u32(*constant);
+        }
         Jump(value) => {
             out.byte(8);
             out.u32(*value);
@@ -316,6 +326,11 @@ fn read_instruction(reader: &mut Reader<'_>) -> Result<Instruction, String> {
             count: reader.byte()?,
         },
         24 => Instruction::Return,
+        25 => Instruction::PrimitiveLocalConst {
+            op: primitive(reader.byte()?)?,
+            local: reader.u16()?,
+            constant: reader.u32()?,
+        },
         _ => return Err("bytecode artifact contains an unknown opcode".into()),
     })
 }
