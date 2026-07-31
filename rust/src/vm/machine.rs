@@ -25,7 +25,7 @@ use super::error::VmError;
 use super::frame::Frame;
 use super::opcode::Instruction;
 use super::program::{FunctionPrototype, Program};
-use crate::core::{apply_primitive, call_function, native_function, Value};
+use crate::core::{apply_binary_primitive, apply_primitive, call_function, native_function, Value};
 
 /// Terminal state of a machine run. Suspension variants belong to the
 /// later async milestone; adding them does not change instruction
@@ -167,9 +167,17 @@ impl Machine {
                             Err(error) => return VmOutcome::Failed(error),
                         }
                     }
-                    self.scratch.clear();
-                    self.scratch.extend(self.stack.drain(self.stack.len() - argc..));
-                    match apply_primitive(*op, &self.scratch) {
+                    let result = if argc == 2 {
+                        let right = self.stack.pop().expect("primitive arity checked above");
+                        let left = self.stack.pop().expect("primitive arity checked above");
+                        apply_binary_primitive(*op, &left, &right)
+                    } else {
+                        self.scratch.clear();
+                        self.scratch
+                            .extend(self.stack.drain(self.stack.len() - argc..));
+                        apply_primitive(*op, &self.scratch)
+                    };
+                    match result {
                         Ok(value) => self.stack.push(value),
                         Err(message) => match self.raise(function, message) {
                             Ok(target) => {
@@ -195,7 +203,10 @@ impl Machine {
                         next_ip = *target as usize;
                     }
                 }
-                Instruction::Closure { prototype, captures } => {
+                Instruction::Closure {
+                    prototype,
+                    captures,
+                } => {
                     let captures = usize::from(*captures);
                     if self.stack.len() < captures {
                         match self.raise(function, "stack underflow") {
@@ -207,7 +218,10 @@ impl Machine {
                         }
                     }
                     let Some(proto) = program.functions.get(usize::from(*prototype)) else {
-                        match self.raise(function, format!("closure prototype {prototype} out of range")) {
+                        match self.raise(
+                            function,
+                            format!("closure prototype {prototype} out of range"),
+                        ) {
                             Ok(target) => {
                                 self.ip = target;
                                 continue;
@@ -220,10 +234,8 @@ impl Machine {
                     let name = proto.name.clone();
                     let captured = Rc::new(self.stack.split_off(self.stack.len() - captures));
                     let program = program.clone();
-                    let closure = native_function(
-                        name.as_deref().unwrap_or("fn"),
-                        arity,
-                        move |args| {
+                    let closure =
+                        native_function(name.as_deref().unwrap_or("fn"), arity, move |args| {
                             match Machine::call(
                                 program.clone(),
                                 prototype,
@@ -238,8 +250,7 @@ impl Machine {
                                 // thrown-value side channel) depends on it.
                                 VmOutcome::Failed(error) => Err(error.message),
                             }
-                        },
-                    );
+                        });
                     self.stack.push(closure);
                 }
                 Instruction::Call { argc } => {
@@ -254,7 +265,8 @@ impl Machine {
                         }
                     }
                     self.scratch.clear();
-                    self.scratch.extend(self.stack.drain(self.stack.len() - argc..));
+                    self.scratch
+                        .extend(self.stack.drain(self.stack.len() - argc..));
                     let callee = self.stack.pop().expect("callee checked above");
                     match callee {
                         Value::Function(callee) => {
@@ -290,7 +302,10 @@ impl Machine {
                         }
                     }
                     let Some(proto) = program.functions.get(usize::from(*prototype)) else {
-                        match self.raise(function, format!("callstatic target {prototype} out of range")) {
+                        match self.raise(
+                            function,
+                            format!("callstatic target {prototype} out of range"),
+                        ) {
                             Ok(target) => {
                                 self.ip = target;
                                 continue;
@@ -300,7 +315,8 @@ impl Machine {
                     };
                     let capture_count = usize::from(proto.capture_count);
                     self.scratch.clear();
-                    self.scratch.extend(self.stack.drain(self.stack.len() - argc..));
+                    self.scratch
+                        .extend(self.stack.drain(self.stack.len() - argc..));
                     let Some(captures) = self
                         .frame
                         .slot_range(usize::from(function.arity), capture_count)

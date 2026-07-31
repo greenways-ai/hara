@@ -4298,6 +4298,9 @@ impl Primitive {
 /// from the operand stack.
 pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Result<Value, String> {
     let op = primitive.operator();
+    if let [left, right] = arguments {
+        return apply_binary_primitive(primitive, left, right);
+    }
     match primitive {
         Primitive::Add
         | Primitive::Subtract
@@ -4377,6 +4380,55 @@ pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Resu
                 Primitive::GreaterOrEqual => pair[0] >= pair[1],
                 _ => unreachable!(),
             })))
+        }
+    }
+}
+
+/// Applies the common fixed-arity primitive case without constructing an
+/// argument slice. The bytecode VM uses this directly on its operand stack;
+/// the general evaluator reaches the same helper through [`apply_primitive`].
+pub(crate) fn apply_binary_primitive(
+    primitive: Primitive,
+    left: &Value,
+    right: &Value,
+) -> Result<Value, String> {
+    let op = primitive.operator();
+    match primitive {
+        Primitive::Add
+        | Primitive::Subtract
+        | Primitive::Multiply
+        | Primitive::Divide
+        | Primitive::Remainder => {
+            let (Value::Number(left), Value::Number(right)) = (left, right) else {
+                return Err(format!("{op} expects numbers"));
+            };
+            let result = match primitive {
+                Primitive::Add => left.checked_add(*right),
+                Primitive::Subtract => left.checked_sub(*right),
+                Primitive::Multiply => left.checked_mul(*right),
+                Primitive::Divide if *right != 0 => left.checked_div(*right),
+                Primitive::Remainder if *right != 0 => left.checked_rem(*right),
+                Primitive::Divide | Primitive::Remainder => return Err("division by zero".into()),
+                _ => unreachable!(),
+            }
+            .ok_or_else(|| "integer overflow".to_string())?;
+            Ok(Value::Number(result))
+        }
+        Primitive::Equal => Ok(Value::Bool(left == right)),
+        Primitive::Less
+        | Primitive::LessOrEqual
+        | Primitive::Greater
+        | Primitive::GreaterOrEqual => {
+            let (Value::Number(left), Value::Number(right)) = (left, right) else {
+                return Err(format!("{op} expects numbers"));
+            };
+            Ok(Value::Bool(match primitive {
+                Primitive::Less => left < right,
+                Primitive::LessOrEqual => left <= right,
+                Primitive::Greater => left > right,
+                Primitive::GreaterOrEqual => left >= right,
+                _ => unreachable!(),
+            }))
         }
     }
 }

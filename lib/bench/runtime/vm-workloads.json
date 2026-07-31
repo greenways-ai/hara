@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "description": "Workloads that isolate Rust bytecode VM dispatch and call costs.",
+  "workloads": [
+    {
+      "id": "noop",
+      "source": "42",
+      "expected": "42",
+      "operations": 0
+    },
+    {
+      "id": "binary-add-loop",
+      "source": "(loop [i 0] (if (< i 5000) (recur (+ i 1)) i))",
+      "expected": "5000",
+      "iterations": 5000
+    },
+    {
+      "id": "arithmetic",
+      "source": "(loop [i 0 acc 0] (if (< i 5000) (recur (+ i 1) (+ acc (mod i 17))) acc))",
+      "expected": "39985",
+      "iterations": 5000
+    },
+    {
+      "id": "immediate-closure",
+      "source": "(loop [i 0 acc 0] (if (< i 2500) (recur (+ i 1) ((fn [x] (+ x 1)) acc)) acc))",
+      "expected": "2500",
+      "iterations": 2500
+    },
+    {
+      "id": "hoisted-closure",
+      "source": "(let [f (fn [x] (+ x 1))] (loop [i 0 acc 0] (if (< i 2500) (recur (+ i 1) (f acc)) acc)))",
+      "expected": "2500",
+      "iterations": 2500
+    },
+    {
+      "id": "capturing-closure",
+      "source": "(let [delta 1 f (fn [x] (+ x delta))] (loop [i 0 acc 0] (if (< i 2500) (recur (+ i 1) (f acc)) acc)))",
+      "expected": "2500",
+      "iterations": 2500
+    },
+    {
+      "id": "static-recursion",
+      "source": "(do (defn count-up [n acc] (if (< n 1) acc (count-up (- n 1) (+ acc 1)))) (count-up 250 0))",
+      "expected": "250",
+      "iterations": 250
+    }
+  ]
+}

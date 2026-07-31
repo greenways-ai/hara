@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-CORPUS = ROOT / "lib/bench/runtime/workloads.json"
+DEFAULT_CORPUS = ROOT / "lib/bench/runtime/workloads.json"
 RESULTS = ROOT / "lib/bench/results/reference.json"
 REPORT = ROOT / "website/docs/reference/runtime-benchmarks.md"
 PROFILES = {
@@ -69,6 +69,12 @@ def adapters():
         return command + [runtime, workload["id"], payload, workload["expected"],
                           str(windows), str(calls)]
 
+    def bytecode(mode, workload, windows, calls):
+        source = workload["source"].encode().hex()
+        return [str(ROOT / "rust/target/release/hara-bytecode-benchmark"), mode,
+                workload["id"], source, workload["expected"],
+                str(windows), str(calls)]
+
     return {
         "clojure": lambda w, n, c: common(
             ["java", "-cp", clj_cp, "clojure.main", clj_script], "clojure", w, n, c),
@@ -82,6 +88,10 @@ def adapters():
         "hara-rust-native": lambda w, n, c: common(
             [str(ROOT / "rust/target/release/hara-runtime-benchmark")],
             "hara-rust-native", w, n, c, "hex"),
+        "hara-rust-bytecode-compile-execute": lambda w, n, c: bytecode(
+            "compile-execute", w, n, c),
+        "hara-rust-bytecode-execute-only": lambda w, n, c: bytecode(
+            "execute-only", w, n, c),
         "hara-wasm-node": lambda w, n, c: common(
             ["node", node_script], "hara-wasm-node", w, n, c),
     }, glue
@@ -95,6 +105,8 @@ def build(include_native):
         timeout=300)
     run(["cargo", "build", "--manifest-path", "rust/Cargo.toml", "--release",
          "--bin", "hara-runtime-benchmark"], timeout=600)
+    run(["cargo", "build", "--manifest-path", "rust/Cargo.toml", "--release",
+         "--features", "bytecode-vm", "--bin", "hara-bytecode-benchmark"], timeout=600)
     if shutil.which("wasm-bindgen"):
         run(["cargo", "build", "--manifest-path", "rust/Cargo.toml", "--release",
              "--target", "wasm32-unknown-unknown", "--lib"], timeout=600)
@@ -128,7 +140,9 @@ def timed(command, env):
     rss = None
     actual = command
     rss_file = None
-    if Path("/usr/bin/time").exists():
+    # GNU time supports the machine-readable `-f`/`-o` pair. macOS ships BSD
+    # time at the same path with a different command-line interface.
+    if platform.system() == "Linux" and Path("/usr/bin/time").exists():
         handle = tempfile.NamedTemporaryFile(delete=False)
         handle.close()
         rss_file = Path(handle.name)
@@ -160,6 +174,10 @@ def payload_sizes(glue):
         "hara-truffle": truffle_files,
         "hara-native-image": [ROOT / "target/hara-truffle"],
         "hara-rust-native": [ROOT / "rust/target/release/hara-runtime-benchmark"],
+        "hara-rust-bytecode-compile-execute": [
+            ROOT / "rust/target/release/hara-bytecode-benchmark"],
+        "hara-rust-bytecode-execute-only": [
+            ROOT / "rust/target/release/hara-bytecode-benchmark"],
         "hara-wasm-node": [ROOT / "rust/target/wasm32-unknown-unknown/release/hara_wasm.wasm", glue],
     }
     def size(path):
@@ -193,6 +211,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile", choices=PROFILES, default="smoke")
     parser.add_argument("--runtime", action="append")
+    parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS,
+                        help="workload JSON (default: %(default)s)")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--reference", action="store_true")
     args = parser.parse_args()
@@ -205,7 +225,8 @@ def main():
     if "hara-wasm-node" in selected and not glue.is_file():
         missing.append("hara-wasm-node (install version-matched wasm-bindgen-cli and rebuild)")
         selected.remove("hara-wasm-node")
-    corpus = json.loads(CORPUS.read_text())["workloads"]
+    corpus_path = args.corpus if args.corpus.is_absolute() else ROOT / args.corpus
+    corpus = json.loads(corpus_path.read_text())["workloads"]
     env = os.environ.copy()
     env["HARA_WASM_GLUE"] = str(glue)
     measurements = []
@@ -224,9 +245,18 @@ def main():
         for workload in corpus:
             _, _, result = timed(adapter(workload, profile["windows"], profile["calls"]), env)
             result["analysis"] = analyse(result["samples_ns"])
+            if workload.get("iterations"):
+                result["analysis"]["ns_per_iteration"] = (
+                    result["analysis"]["steady_ns"] / workload["iterations"]
+                )
             measurements.append(result)
             print(f"{name:18} {workload['id']:18} {result['analysis']['steady_ns']/1e6:9.3f} ms")
+    try:
+        corpus_label = str(corpus_path.relative_to(ROOT))
+    except ValueError:
+        corpus_label = str(corpus_path)
     data = {"schema_version": 1, "profile": args.profile,
+            "corpus": corpus_label,
             "environment": {"timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
                             "platform": platform.platform(), "machine": platform.machine(),
                             "python": platform.python_version(),
