@@ -1936,6 +1936,8 @@ public final class HaraNodes {
     private final boolean variadic;
     private final boolean captures;
 
+    @CompilerDirectives.CompilationFinal private HaraFunction closureFreeInstance;
+
     public FunctionLiteral(
         RootCallTarget callTarget, int minimumArity, boolean variadic, boolean captures) {
       this.callTarget = callTarget;
@@ -1953,8 +1955,18 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      MaterializedFrame closure = captures ? frame.materialize() : null;
-      return new HaraFunction(callTarget, minimumArity, variadic, closure);
+      if (!captures) {
+        // Closure-free functions are immutable, so one instance serves every execution
+        // and call sites keep a stable wrapper for their direct-call caches.
+        HaraFunction instance = closureFreeInstance;
+        if (instance == null) {
+          CompilerDirectives.transferToInterpreterAndInvalidate();
+          instance = new HaraFunction(callTarget, minimumArity, variadic, null);
+          closureFreeInstance = instance;
+        }
+        return instance;
+      }
+      return new HaraFunction(callTarget, minimumArity, variadic, frame.materialize());
     }
   }
 
@@ -1985,7 +1997,7 @@ public final class HaraNodes {
     @Child private DirectCallNode directCall;
     @Child private IndirectCallNode indirectCall = IndirectCallNode.create();
 
-    @CompilerDirectives.CompilationFinal private HaraFunction cachedFunction;
+    @CompilerDirectives.CompilationFinal private RootCallTarget cachedCallTarget;
 
     public Invoke(HaraExpressionNode function, HaraExpressionNode[] arguments) {
       this.function = function;
@@ -2023,17 +2035,19 @@ public final class HaraNodes {
 
       Object[] values = evaluateArguments(frame);
 
-      if (selectedFunction == cachedFunction) {
+      RootCallTarget selectedTarget = selectedFunction.callTarget();
+      if (selectedTarget == cachedCallTarget) {
+        // The current closure travels with the call arguments, so closures created
+        // from the same literal still hit the direct-call cache.
         return directCall.call(selectedFunction.callArguments(values));
       }
-      if (cachedFunction == null) {
+      if (cachedCallTarget == null) {
         CompilerDirectives.transferToInterpreterAndInvalidate();
-        cachedFunction = selectedFunction;
-        directCall = insert(DirectCallNode.create(selectedFunction.callTarget()));
+        cachedCallTarget = selectedTarget;
+        directCall = insert(DirectCallNode.create(selectedTarget));
         return directCall.call(selectedFunction.callArguments(values));
       }
-      return indirectCall.call(
-          selectedFunction.callTarget(), selectedFunction.callArguments(values));
+      return indirectCall.call(selectedTarget, selectedFunction.callArguments(values));
     }
 
     @TruffleBoundary
