@@ -1,0 +1,98 @@
+;; ==========================================================================
+;; std.db.text.base-check — database argument validation helpers.
+;;
+;; Native Hara port of xt.db.text.base-check. The UUID predicate intentionally
+;; preserves the source contract: it checks grouping and lengths only.
+;; ==========================================================================
+(ns std.db.text.base-check
+  (:require [std.foundation.string :as string]))
+
+(defn ^{:schema [:fn [:any] :bool]}
+  is-uuid?
+  "Returns true when value has the UUID five-group length structure."
+  [value]
+  (if (not (string? value))
+    false
+    (if (not (= 36 (string/length value)))
+      false
+      (let [parts (string/split value "-")]
+        (and (= 5 (count parts))
+             (= 8 (string/length (get parts 0)))
+             (= 4 (string/length (get parts 1)))
+             (= 4 (string/length (get parts 2)))
+             (= 4 (string/length (get parts 3)))
+             (= 12 (string/length (get parts 4))))))))
+
+(defn- ^{:schema [:fn [:map] :any]}
+  descriptor-type
+  "Returns a descriptor type from native keyword or boundary string keys."
+  [descriptor]
+  (let [value (get descriptor :type)]
+    (if (nil? value)
+      (get descriptor "type")
+      value)))
+
+(defn ^{:schema [:fn [:str :any] :bool]}
+  check-arg-type
+  "Returns true when argument satisfies the database argument type name."
+  [arg-type argument]
+  (cond
+    (= arg-type "any")
+    true
+
+    (or (= arg-type "citext")
+        (= arg-type "inet")
+        (= arg-type "text"))
+    (string? argument)
+
+    (= arg-type "uuid")
+    (is-uuid? argument)
+
+    (= arg-type "boolean")
+    (boolean? argument)
+
+    (or (= arg-type "integer")
+        (= arg-type "int")
+        (= arg-type "long")
+        (= arg-type "bigint")
+        (= arg-type "float"))
+    (number? argument)
+
+    (= arg-type "numeric")
+    (or (number? argument)
+        (string? argument))
+
+    (= arg-type "jsonb")
+    (or (map? argument)
+        (vector? argument))
+
+    :else
+    false))
+
+(defn ^{:schema [:fn [:vector :vector] :vector]}
+  check-args-type
+  "Checks arguments against descriptors and returns [success error]."
+  [args descriptors]
+  (loop [index 0]
+    (if (= index (count descriptors))
+      [true nil]
+      (let [descriptor (get descriptors index)
+            argument (get args index)]
+        (if (check-arg-type (descriptor-type descriptor) argument)
+          (recur (+ index 1))
+          [false {:status "error"
+                  :tag "net/arg-typecheck-failed"
+                  :data {:input argument
+                         :spec descriptor}}])))))
+
+(defn ^{:schema [:fn [:vector :vector] :vector]}
+  check-args-length
+  "Checks argument and descriptor lengths and returns [success error]."
+  [args descriptors]
+  (if (not (= (count args) (count descriptors)))
+    [false {:status "error"
+            :tag "net/args-not-same-length"
+            :data {:expected (count descriptors)
+                   :actual (count args)
+                   :input args}}]
+    [true nil]))
