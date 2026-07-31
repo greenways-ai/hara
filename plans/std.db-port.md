@@ -24,9 +24,9 @@ The order below is provisional. Before each port, inspect its `:require` graph a
 
 | Order | Source | Destination | Status |
 |---:|---|---|---|
-| 1 | `xt.db.text.base-check` | `std.db.text.base-check` | In progress |
-| 2 | `xt.db.text.base-util` | `std.db.text.base-util` | Pending |
-| 3 | `xt.db.text.base-scope` | `std.db.text.base-scope` | Pending |
+| 1 | `xt.db.text.base-check` | `std.db.text.base-check` | Implemented; CI queued |
+| 2 | `xt.db.text.base-util` | `std.db.text.base-util` | Implemented; CI queued |
+| 3 | `xt.db.text.base-scope` | `std.db.text.base-scope` | Dependency analysis started |
 | 4 | `xt.db.text.base-schema` | `std.db.text.base-schema` | Pending |
 | 5 | `xt.db.text.base-flatten` | `std.db.text.base-flatten` | Pending |
 | 6 | `xt.db.text.base-tree` | `std.db.text.base-tree` | Pending |
@@ -60,8 +60,16 @@ Port `xt.db.system.*` and the public `std.db` facade last, then run integration 
 - [ ] Run the broader library test suite.
 - [ ] Update this plan and move to the next dependency-ready file.
 
-## Current slice: `base-check`
+## Implemented slice: `base-check`
 
 `xt.db.text.base-check` is first because it depends only on primitive string, collection and type operations. The native port preserves the original deliberately shallow UUID check: it validates the five groups and their lengths but does not validate hexadecimal characters or UUID version bits.
 
 The port also accepts both `:type` and `"type"` in argument descriptors. This preserves native Hara map usage while remaining compatible with object-shaped descriptors arriving from xtalk or JSON boundaries.
+
+## Implemented slice: `base-util`
+
+`xt.db.text.base-util` has been ported using immutable Hara maps and vectors. Route, view and ID helpers accept both keyword-keyed native maps and string-keyed boundary maps. `merge-views` preserves the source collision rule: on an existing table entry it merges the existing `select` and `return` categories rather than replacing the complete table descriptor.
+
+## Next slice: `base-scope`
+
+`base-scope` is not a single low-level helper file: it combines scope constants, nested query merging, schema-column selection, link normalisation and recursive tree construction. It depends on behaviours currently supplied by `xt.lang.common-data`, `xt.lang.common-tree` and `xt.lang.common-string`. Before porting it, split its dependency requirements into native Hara equivalents and verify whether `base-schema` or a smaller tree helper must move ahead of it.
