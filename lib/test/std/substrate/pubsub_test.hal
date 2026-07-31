@@ -1,80 +1,75 @@
 (ns std.substrate.pubsub-test
+  (:use code.test)
   (:require [std.foundation.promise :as promise]
             [std.lib.substrate :as core]
-            [std.lib.test :as test]
             [std.substrate.frame :as frame]
             [std.substrate.pubsub :as pubsub]
             [std.substrate.space :as space]))
 
-(def results
-  [(test/check
-    "constructs subscription control frames"
-    (let [node (core/node-create "node/control")
-          subscribe (pubsub/subscribe
-                     node "room/a" "event/updated" "sub-1" nil)
-          unsubscribe (pubsub/unsubscribe
-                       node "room/a" "event/updated" "sub-1" nil)]
-      [(get subscribe "kind")
-       (get subscribe "space")
-       (get subscribe "signal")
-       (get subscribe "id")
-       (get unsubscribe "kind")
-       (get unsubscribe "id")])
-    ["subscribe" "room/a" "event/updated" "sub-1"
-     "unsubscribe" "sub-1"])
+(fact "constructs subscription control frames"
+  (let [node (core/node-create "node/control")
+        subscribe (pubsub/subscribe
+                   node "room/a" "event/updated" "sub-1" nil)
+        unsubscribe (pubsub/unsubscribe
+                     node "room/a" "event/updated" "sub-1" nil)]
+    [(get subscribe "kind")
+     (get subscribe "space")
+     (get subscribe "signal")
+     (get subscribe "id")
+     (get unsubscribe "kind")
+     (get unsubscribe "id")])
+  => ["subscribe" "room/a" "event/updated" "sub-1"
+      "unsubscribe" "sub-1"])
 
-   (test/check
-    "invokes a shared trigger against the selected space"
-    (let [node (core/node-create "node/trigger")
-          calls (atom [])]
-      (core/section-put
-       node :triggers "event/updated"
-       {"id" "event/updated"
-        "fn" (fn [current-space stream current-node]
-               (reset! calls
-                       (conj @calls
-                             [(get current-space "id")
-                              (get-in stream ["data" "value"])
-                              (field current-node :id)]))
-               {"ok" true})
-        "meta" {}})
-      (promise/value
-       (pubsub/invoke-trigger
-        node
-        (frame/stream-frame
-         "room/a" "event/updated" {"value" 3} nil nil)))
-      @calls)
-    [["room/a" 3 "node/trigger"]])
+(fact "invokes a shared trigger against the selected space"
+  (let [node (core/node-create "node/trigger")
+        calls (atom [])]
+    (core/section-put
+     node :triggers "event/updated"
+     {"id" "event/updated"
+      "fn" (fn [current-space stream current-node]
+             (reset! calls
+                     (conj @calls
+                           [(get current-space "id")
+                            (get-in stream ["data" "value"])
+                            (field current-node :id)]))
+             {"ok" true})
+      "meta" {}})
+    (promise/value
+     (pubsub/invoke-trigger
+      node
+      (frame/stream-frame
+       "room/a" "event/updated" {"value" 3} nil nil)))
+    @calls)
+  => [["room/a" 3 "node/trigger"]])
 
-   (test/check
-    "missing triggers resolve without error"
-    (let [node (core/node-create "node/missing")]
-      (promise/value
-       (pubsub/invoke-trigger
-        node
-        (frame/stream-frame
-         "room/a" "event/missing" {"value" 3} nil nil))))
-    nil)
+(fact "missing triggers resolve without error"
+  (let [node (core/node-create "node/missing")]
+    (promise/value
+     (pubsub/invoke-trigger
+      node
+      (frame/stream-frame
+       "room/a" "event/missing" {"value" 3} nil nil))))
+  => nil)
 
-   (test/check
-    "dispatches stream frames and returns the original frame"
-    (let [node (core/node-create "node/publish")
-          stream (frame/stream-frame
-                  "room/a" "event/updated" {"value" 9}
-                  {"id" "evt-1"} nil)]
-      (core/section-put
-       node :triggers "event/updated"
-       {"id" "event/updated"
-        "fn" (fn [current-space incoming current-node]
-               (space/set-space-state
-                current-node
-                (get current-space "id")
-                (get incoming "data"))
-               true)
-        "meta" {}})
-      (let [output (promise/value (pubsub/receive-publish node stream))]
-        [(get-in (space/get-space-state node "room/a") ["value"])
-         (get output "id")]))
-    [9 "evt-1"])])
+(fact "dispatches stream frames and returns the original frame"
+  (let [node (core/node-create "node/publish")
+        stream (frame/stream-frame
+                "room/a" "event/updated" {"value" 9}
+                {"id" "evt-1"} nil)]
+    (core/section-put
+     node :triggers "event/updated"
+     {"id" "event/updated"
+      "fn" (fn [current-space incoming current-node]
+             (space/set-space-state
+              current-node
+              (get current-space "id")
+              (get incoming "data"))
+             true)
+      "meta" {}})
+    (let [output (promise/value (pubsub/receive-publish node stream))]
+      [(get-in (space/get-space-state node "room/a") ["value"])
+       (get output "id")]))
+  => [9 "evt-1"])
 
-(test/print-results results)
+(pr-str (run '[std.substrate.pubsub-test]))

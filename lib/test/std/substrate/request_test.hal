@@ -1,106 +1,98 @@
 (ns std.substrate.request-test
+  (:use code.test)
   (:require [std.foundation.promise :as promise]
             [std.lib.substrate :as core]
-            [std.lib.test :as test]
             [std.substrate.frame :as frame]
             [std.substrate.request :as request]))
 
-(def results
-  [(test/check
-    "normalises raw values to promises"
-    (promise/value (request/ensure-promise {"ok" true}))
-    {"ok" true})
+(fact "normalises raw values to promises"
+  (promise/value (request/ensure-promise {"ok" true}))
+  => {"ok" true})
 
-   (test/check
-    "tracks and settles successful pending requests"
-    (let [node (core/node-create "node/pending")
-          resolved (atom [])
-          rejected (atom [])
-          outgoing (frame/request-frame "room/a" "echo" [1 2] nil)]
-      (request/add-pending
-       node outgoing
-       (fn [value] (reset! resolved (conj @resolved value)))
-       (fn [value] (reset! rejected (conj @rejected value)))
-       {"transport_id" "peer-a"})
-      (let [before (vec (keys (core/node-section node :pending)))]
-        (request/settle-pending
-         node
-         (frame/response-ok-frame
-          (get outgoing "id") "room/a" {"ok" true} nil))
-        [(count before)
-         @resolved
-         @rejected
-         (core/node-section node :pending)]))
-    [1 [{"ok" true}] [] {}])
+(fact "tracks and settles successful pending requests"
+  (let [node (core/node-create "node/pending")
+        resolved (atom [])
+        rejected (atom [])
+        outgoing (frame/request-frame "room/a" "echo" [1 2] nil)]
+    (request/add-pending
+     node outgoing
+     (fn [value] (reset! resolved (conj @resolved value)))
+     (fn [value] (reset! rejected (conj @rejected value)))
+     {"transport_id" "peer-a"})
+    (let [before (vec (keys (core/node-section node :pending)))]
+      (request/settle-pending
+       node
+       (frame/response-ok-frame
+        (get outgoing "id") "room/a" {"ok" true} nil))
+      [(count before)
+       @resolved
+       @rejected
+       (core/node-section node :pending)]))
+  => [1 [{"ok" true}] [] {}])
 
-   (test/check
-    "removes pending request entries by id"
-    (let [node (core/node-create "node/remove-pending")
-          outgoing (frame/request-frame "room/a" "echo" [] nil)]
-      (request/add-pending node outgoing identity identity nil)
-      (let [removed (request/remove-pending node (get outgoing "id"))]
-        [(string? (get-in removed ["request" "id"]))
-         (core/node-section node :pending)]))
-    [true {}])
+(fact "removes pending request entries by id"
+  (let [node (core/node-create "node/remove-pending")
+        outgoing (frame/request-frame "room/a" "echo" [] nil)]
+    (request/add-pending node outgoing identity identity nil)
+    (let [removed (request/remove-pending node (get outgoing "id"))]
+      [(string? (get-in removed ["request" "id"]))
+       (core/node-section node :pending)]))
+  => [true {}])
 
-   (test/check
-    "settles rejected pending requests with the response frame"
-    (let [node (core/node-create "node/reject")
-          rejected (atom nil)
-          outgoing (frame/request-frame "room/a" "echo" [] nil)
-          response (frame/response-error-frame
-                    (get outgoing "id") "room/a"
-                    {"message" "boom"} nil)]
-      (request/add-pending
-       node outgoing identity (fn [value] (reset! rejected value)) nil)
-      (request/settle-pending node response)
-      [(get-in @rejected ["error" "message"])
-       (core/node-section node :pending)])
-    ["boom" {}])
+(fact "settles rejected pending requests with the response frame"
+  (let [node (core/node-create "node/reject")
+        rejected (atom nil)
+        outgoing (frame/request-frame "room/a" "echo" [] nil)
+        response (frame/response-error-frame
+                  (get outgoing "id") "room/a"
+                  {"message" "boom"} nil)]
+    (request/add-pending
+     node outgoing identity (fn [value] (reset! rejected value)) nil)
+    (request/settle-pending node response)
+    [(get-in @rejected ["error" "message"])
+     (core/node-section node :pending)])
+  => ["boom" {}])
 
-   (test/check
-    "invokes handlers against the selected space"
-    (let [node (core/node-create "node/handler")
-          calls (atom [])]
-      (core/section-put
-       node :handlers "echo"
-       {"id" "echo"
-        "fn" (fn [space args incoming current-node]
-               (reset! calls
-                       (conj @calls
-                             [(get space "id")
-                              args
-                              (get incoming "action")
-                              (field current-node :id)]))
-               {"space" (get space "id")
-                "args" args})
-        "meta" {}})
-      (let [output
-            (promise/value
-             (request/invoke-handler
-              node
-              (frame/request-frame "room/a" "echo" [1 2] nil)))]
-        [output @calls]))
-    [{"space" "room/a" "args" [1 2]}
-     [["room/a" [1 2] "echo" "node/handler"]]])
+(fact "invokes handlers against the selected space"
+  (let [node (core/node-create "node/handler")
+        calls (atom [])]
+    (core/section-put
+     node :handlers "echo"
+     {"id" "echo"
+      "fn" (fn [space args incoming current-node]
+             (reset! calls
+                     (conj @calls
+                           [(get space "id")
+                            args
+                            (get incoming "action")
+                            (field current-node :id)]))
+             {"space" (get space "id")
+              "args" args})
+      "meta" {}})
+    (let [output
+          (promise/value
+           (request/invoke-handler
+            node
+            (frame/request-frame "room/a" "echo" [1 2] nil)))]
+      [output @calls]))
+  => [{"space" "room/a" "args" [1 2]}
+      [["room/a" [1 2] "echo" "node/handler"]]])
 
-   (test/check
-    "normalises successful response bodies"
-    (promise/value
-     (request/response-body
-      (frame/response-ok-frame
-       "req-1" "room/a" {"ok" true} nil)))
-    {"ok" true})
+(fact "normalises successful response bodies"
+  (promise/value
+   (request/response-body
+    (frame/response-ok-frame
+     "req-1" "room/a" {"ok" true} nil)))
+  => {"ok" true})
 
-   (test/check
-    "rejects errored response bodies"
-    (promise/value
-     (promise/catch
-      (request/response-body
-       (frame/response-error-frame
-        "req-1" "room/a" {"message" "boom"} nil))
-      (fn [response]
-        (get-in response ["error" "message"]))))
-    "boom")])
+(fact "rejects errored response bodies"
+  (promise/value
+   (promise/catch
+    (request/response-body
+     (frame/response-error-frame
+      "req-1" "room/a" {"message" "boom"} nil))
+    (fn [response]
+      (get-in response ["error" "message"]))))
+  => "boom")
 
-(test/print-results results)
+(pr-str (run '[std.substrate.request-test]))
