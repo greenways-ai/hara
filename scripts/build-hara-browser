@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+PACKAGE="$ROOT/rust/web/packages/browser"
+WASM="$ROOT/rust/target/wasm32-unknown-unknown/release/hara_wasm.wasm"
+GENERATED="$PACKAGE/src/wasm"
+
+"$ROOT/scripts/cargo-wasm-build" \
+  --manifest-path "$ROOT/rust/Cargo.toml" \
+  --target wasm32-unknown-unknown \
+  --release --lib
+
+rm -rf "$GENERATED"
+mkdir -p "$GENERATED"
+wasm-bindgen --target web --out-dir "$GENERATED" "$WASM"
+
+cd "$ROOT/rust/web"
+npm run build:browser
+
+cp "$PACKAGE/src/hara.d.ts" "$PACKAGE/dist/hara.d.ts"
+echo "Built $PACKAGE/dist"
