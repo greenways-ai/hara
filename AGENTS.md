@@ -49,7 +49,7 @@ Rust runtime:
 
 ```shell
 cargo test --manifest-path rust/Cargo.toml
-cargo test --manifest-path rust/Cargo.toml --features bytecode-vm vm  # experimental VM (issue #195)
+cargo test --manifest-path rust/Cargo.toml --features bytecode-vm vm  # experimental VM (issues #195, #202)
 cargo test --manifest-path rust/raw/Cargo.toml
 bash rust/scripts/check-layout.sh
 bash scripts/build-hara-wasm-raw             # raw wasm extension artifact
