@@ -53,6 +53,25 @@ pub fn disassemble(program: &Program) -> String {
             line.push('\n');
             out.push_str(&line);
         }
+        for entry in &function.handlers {
+            out.push_str(&format!(
+                "  try [{:04}..{:04}) depth={}\n",
+                entry.start, entry.end, entry.depth
+            ));
+            for catch in &entry.catches {
+                out.push_str(&format!(
+                    "    catch {} -> slot {} @ {:04}\n",
+                    catch.class, catch.binding, catch.target
+                ));
+            }
+            if let Some(finally) = entry.finally {
+                out.push_str(&format!(
+                    "    finally @ {finally:04} pending=({}, {})\n",
+                    entry.pending_value.expect("validated"),
+                    entry.pending_error.expect("validated")
+                ));
+            }
+        }
     }
     out
 }

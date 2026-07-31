@@ -247,6 +247,8 @@ impl Compiler {
             source_map: SourceMap::default(),
             scopes,
             loops: Vec::new(),
+            tries: Vec::new(),
+            handlers: Vec::new(),
             fallthrough: true,
         });
         let compiled = self.compile_sequence(body, true);
@@ -291,6 +293,7 @@ impl Compiler {
             max_stack: 0,
             code: context.code.clone(),
             source_map: context.source_map.clone(),
+            handlers: context.handlers.clone(),
         };
         context
     }
@@ -315,10 +318,39 @@ impl Compiler {
                 let children = self.list_children(elements, child.span, child.children);
                 match &elements[0] {
                     Form::Symbol(head) => match head.as_str() {
-                        "if" | "do" | "recur" => {
+                        "if" | "do" | "recur" | "try" | "throw" | "finally" => {
                             for c in &children[1..] {
                                 self.collect_free(c, bound, free);
                             }
+                        }
+                        // Catch clauses bind their name symbol over the
+                        // clause body; the class symbol is not a
+                        // reference. Shapes mirror the compiler:
+                        // (catch name body) or (catch Class name body...).
+                        "catch" => {
+                            let marked = bound.len();
+                            if children.len() == 3 {
+                                if let Form::Symbol(name) = children[1].form {
+                                    bound.push(name.clone());
+                                }
+                                for c in &children[2..] {
+                                    self.collect_free(c, bound, free);
+                                }
+                            } else if children.len() >= 4 {
+                                if let Form::Symbol(name) = children[2].form {
+                                    bound.push(name.clone());
+                                }
+                                for c in &children[3..] {
+                                    self.collect_free(c, bound, free);
+                                }
+                            } else {
+                                // Malformed: rejected by the compiler
+                                // later; walk conservatively.
+                                for c in &children[1..] {
+                                    self.collect_free(c, bound, free);
+                                }
+                            }
+                            bound.truncate(marked);
                         }
                         "let" | "loop" => {
                             if children.len() >= 2 {

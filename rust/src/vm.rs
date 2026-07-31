@@ -69,6 +69,8 @@ pub(crate) fn error_category(message: &str) -> &'static str {
         (&["function expects"], "function arity"),
         (&["value is not callable"], "not callable"),
         (&["function parameters must be a vector"], "fn params shape"),
+        (&["throw expects one value"], "throw arity"),
+        (&["thrown: "], "thrown"),
         (&["unbound symbol"], "unbound symbol"),
         (&["recur"], "recur"),
         (&["Invalid number"], "reader"),

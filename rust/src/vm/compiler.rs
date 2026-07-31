@@ -22,7 +22,9 @@ use std::collections::HashMap;
 
 use super::error::{CompileError, CompileErrorKind};
 use super::opcode::Instruction;
-use super::program::{FunctionPrototype, Program, MAX_CONSTANTS, MAX_PRIMITIVE_ARGUMENTS};
+use super::program::{
+    FunctionPrototype, Program, TryEntry, MAX_CONSTANTS, MAX_PRIMITIVE_ARGUMENTS,
+};
 use super::source_map::SourceMap;
 use super::validate::{self, stack_heights};
 
@@ -30,6 +32,12 @@ use super::validate::{self, stack_heights};
 mod scope;
 #[path = "compiler/functions.rs"]
 mod functions;
+#[path = "compiler/exceptions.rs"]
+mod exceptions;
+use exceptions::TryContext;
+#[path = "compiler/recur.rs"]
+mod recur;
+use recur::LoopContext;
 use scope::ScopeStack;
 
 /// Operators that name language forms the VM does not implement. In
@@ -37,7 +45,7 @@ use scope::ScopeStack;
 /// symbols; everything else unbound reports as an unbound symbol,
 /// matching the evaluator.
 const UNSUPPORTED_OPERATORS: &[&str] = &[
-    "def", "var", "quote", "set!", "ns", "in-ns", "require", "try", "throw", "await",
+    "def", "var", "quote", "set!", "ns", "in-ns", "require", "await",
 ];
 
 /// Compiles source text into a validated program. Multiple top-level
@@ -52,17 +60,14 @@ pub fn compile_source(source: &str) -> Result<Program, CompileError> {
 
 /// A form paired with its span and (when the parser provided matching
 /// children) the spans of its elements.
+#[derive(Clone, Copy)]
 struct Child<'a> {
     form: &'a Form,
     span: &'a Span,
     children: Option<&'a [SpannedForm]>,
 }
 
-#[derive(Clone)]
-struct LoopContext {
-    header: usize,
-    slots: Vec<u16>,
-}
+
 
 /// One in-progress function body: code, scopes, loops, and captures.
 /// The entry function is context 0 with arity and captures 0.
@@ -82,6 +87,10 @@ struct FnContext {
     source_map: SourceMap,
     scopes: ScopeStack,
     loops: Vec<LoopContext>,
+    tries: Vec<TryContext>,
+    /// Finished handler table entries for this function; entry depths are
+    /// patched in after stack analysis in `finish`.
+    handlers: Vec<TryEntry>,
     /// Whether control can reach the next emitted instruction. `recur`
     /// clears it; the compiler emits no dead code.
     fallthrough: bool,
@@ -112,6 +121,7 @@ fn placeholder(name: Option<String>, arity: u16, capture_count: u16) -> Function
         max_stack: 0,
         code: Vec::new(),
         source_map: SourceMap::default(),
+        handlers: Vec::new(),
     }
 }
 
@@ -133,6 +143,8 @@ impl Compiler {
                 source_map: SourceMap::default(),
                 scopes,
                 loops: Vec::new(),
+                tries: Vec::new(),
+                handlers: Vec::new(),
                 fallthrough: true,
             }],
             declared: Vec::new(),
@@ -383,6 +395,8 @@ impl Compiler {
                     Form::Symbol(name) if name == "declare" => {
                         self.compile_declare(&children, span, top)
                     }
+                    Form::Symbol(name) if name == "try" => self.compile_try(&children, span, tail),
+                    Form::Symbol(name) if name == "throw" => self.compile_throw(&children, span),
                     Form::Symbol(name) if UNSUPPORTED_OPERATORS.contains(&name.as_str()) => {
                         Err(self.unsupported(form, span))
                     }
@@ -598,55 +612,6 @@ impl Compiler {
         result
     }
 
-    fn compile_recur(
-        &mut self,
-        children: &[Child<'_>],
-        span: &Span,
-        tail: bool,
-    ) -> Result<(), CompileError> {
-        if children.len() < 2 {
-            return Err(CompileError::new(
-                CompileErrorKind::Recur,
-                "recur expects values",
-                Some(span.start),
-            ));
-        }
-        let Some(context) = self.ctx().loops.last().cloned() else {
-            return Err(CompileError::new(
-                CompileErrorKind::Recur,
-                "recur must be inside loop",
-                Some(span.start),
-            ));
-        };
-        if !tail {
-            return Err(CompileError::new(
-                CompileErrorKind::Recur,
-                "recur must be in tail position",
-                Some(span.start),
-            ));
-        }
-        if children.len() - 1 != context.slots.len() {
-            return Err(CompileError::new(
-                CompileErrorKind::Recur,
-                "loop recur arity mismatch",
-                Some(span.start),
-            ));
-        }
-        // Every argument is evaluated before any store, then stored into
-        // the loop slots in reverse order: simultaneous recurrence.
-        for argument in &children[1..] {
-            self.compile_form(argument.form, argument.span, argument.children, false)?;
-        }
-        if !self.ctx().fallthrough {
-            return Ok(());
-        }
-        for &slot in context.slots.iter().rev() {
-            self.emit(Instruction::StoreLocal(slot), Some(span.start));
-        }
-        self.emit(Instruction::Jump(context.header as u32), Some(span.start));
-        self.ctx_mut().fallthrough = false;
-        Ok(())
-    }
 
     fn finish(mut self) -> Result<Program, CompileError> {
         if self.ctx().fallthrough {
@@ -660,11 +625,15 @@ impl Compiler {
         };
         // The shared analysis computes each operand-stack high-water mark;
         // full validation then runs over the whole program before it is
-        // returned.
+        // returned. Handler entry depths are patched from the same pass.
         for index in 0..program.functions.len() {
             let heights = stack_heights(&program, &program.functions[index])
                 .map_err(|error| internal(error.to_string()))?;
             program.functions[index].max_stack = heights.iter().copied().max().unwrap_or(0);
+            for entry_index in 0..program.functions[index].handlers.len() {
+                let start = program.functions[index].handlers[entry_index].start as usize;
+                program.functions[index].handlers[entry_index].depth = heights[start];
+            }
         }
         validate::validate(&program).map_err(|error| internal(error.to_string()))?;
         Ok(program)
