@@ -2218,6 +2218,13 @@ public final class HaraNodes {
 
     @SuppressWarnings("unchecked")
     private Object intrinsicAssoc(Object receiver, Object[] values) {
+      // Mirror BuiltinCollection.assoc: vector indices are coerced through the
+      // same checked path so a Long index works and non-numeric or out-of-range
+      // keys raise the same diagnostics as the generic invocation.
+      if (receiver instanceof hara.lang.data.types.IVectorType && !(values[1] instanceof Integer)) {
+        return ((hara.lang.protocol.IAssoc<Integer, Object>) receiver)
+            .assoc(hara.kernel.builtin.BuiltinCollection.assocIndex(values[1]), values[2]);
+      }
       return ((hara.lang.protocol.IAssoc<Object, Object>) receiver).assoc(values[1], values[2]);
     }
 
