@@ -1,0 +1,74 @@
+(ns hara.metaspec.logic-test
+  (:use code.test)
+  (:require [hara.metaspec.logic :as metaspec]
+            [hara.metaspec.model :as model]
+            [std.logic :as logic]
+            [std.logic.kanren :as kanren]))
+
+(def document
+  {:document/id :demo/metaspec
+   :document/type :demo/metaspec
+   :document/version "0.1.0"
+   :document/status :draft
+   :document/title "Demo"
+   :document/summary "Relational demo"
+   :spec/conforms-to {:spec/id :demo/metaspec :spec/version "0.1.0"}
+   :spec/artifact-kind :demo/artifact
+   :meta/document-schema
+   {:schema/id :demo/document
+    :schema/type :map
+    :schema/properties
+    {:demo/value {:schema/ref :missing/value}}}
+   :meta/schemas
+   [{:schema/id :demo/value :schema/type :string}
+    {:schema/id :demo/value :schema/type :string}]
+   :meta/cross-references []
+   :meta/requirements
+   [{:requirement/id :demo/evidence
+     :requirement/level :must
+     :requirement/text "Evidence is required"}]
+   :metaspec/generation
+   {:generation/input {}
+    :generation/output {}
+    :generation/process []
+    :generation/acceptance {}}})
+
+^{:refer 'hara.metaspec.logic/analyze
+  :id 'relational-metaspec-findings}
+(fact "derives duplicate IDs, unresolved references, and missing evidence"
+  (let [analysis (metaspec/analyze document)]
+    [(empty? (:missing-required-keys analysis))
+     (count (:duplicate-schemas analysis))
+     (:unresolved-schema-references analysis)
+     (:missing-evidence analysis)])
+  => [true
+      2
+      [[[:meta/document-schema :schema/properties
+         :demo/value :schema/ref]
+        :missing/value]]
+      [[:demo/evidence [:meta/requirements 0]]]])
+
+^{:refer 'hara.metaspec.logic/compare-imperative
+  :id 'imperative-relational-rule-parity}
+(fact "maps relational results back to the imperative stable rule IDs"
+  (:relational (metaspec/compare-imperative document))
+  => {:required-key []
+      :duplicate-id [:hara.metaspec.rule/duplicate-id]
+      :schema-reference [:hara.metaspec.rule/schema-reference]
+      :missing-evidence [:hara.metaspec.rule/missing-evidence]})
+
+^{:refer 'hara.metaspec.logic/schema-refo
+  :id 'bidirectional-schema-reference}
+(fact "queries schema references bidirectionally through the shared projection"
+  (let [projected (model/project document)]
+    (kanren/query*
+     (fn [query]
+       (logic/fresh
+        (fn [path]
+          (logic/all
+           (metaspec/schema-refo projected path :missing/value)
+           (logic/== query path)))))))
+  => [[:meta/document-schema :schema/properties
+       :demo/value :schema/ref]])
+
+(pr-str (run '[hara.metaspec.logic-test]))

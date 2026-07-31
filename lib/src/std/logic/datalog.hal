@@ -1,0 +1,220 @@
+;; Experimental finite Datalog engine over immutable HAL tuples.
+(ns std.logic.datalog
+  (:require [std.foundation.string :as string]))
+
+(defn ^{:schema [:fn [:any] :bool]}
+  variable?
+  "Returns true for query symbols whose printed name starts with ?."
+  [value]
+  (and (symbol? value)
+       (string/starts-with? (str value) "?")))
+
+(defn- member? [value values]
+  (any? (fn [candidate] (= candidate value)) values))
+
+(defn ^{:schema [:fn [:map :vector] :map]}
+  database
+  "Creates an immutable Datalog database from a relation catalog and tuples."
+  [catalog facts]
+  {:datalog/catalog catalog
+   :datalog/facts (vec facts)
+   :datalog/derivations []})
+
+(defn ^{:schema [:fn [:map :vector] :map]}
+  add-facts
+  "Adds distinct input tuples to a database."
+  [database facts]
+  (assoc
+   database
+   :datalog/facts
+   (reduce
+    (fn [output fact]
+      (if (member? fact output) output (conj output fact)))
+    (:datalog/facts database)
+    facts)))
+
+(defn- walk [term bindings]
+  (if (and (variable? term) (has? bindings term))
+    (walk (get bindings term) bindings)
+    term))
+
+(defn- unify-term [pattern value bindings]
+  (let [pattern (walk pattern bindings)
+        value (walk value bindings)]
+    (cond
+      (= pattern value) bindings
+      (variable? pattern) (assoc bindings pattern value)
+      (variable? value) (assoc bindings value pattern)
+      (and (vector? pattern)
+           (vector? value)
+           (= (count pattern) (count value)))
+      (loop [index 0
+             output bindings]
+        (if (= index (count pattern))
+          output
+          (if output
+            (recur (inc index)
+                   (unify-term (nth pattern index)
+                               (nth value index)
+                               output))
+            nil)))
+      :else nil)))
+
+(defn- match-tuple [pattern fact bindings]
+  (if (not (= (count pattern) (count fact)))
+    nil
+    (loop [index 0
+           output bindings]
+      (if (= index (count pattern))
+        output
+        (if output
+          (recur (inc index)
+                 (unify-term (nth pattern index)
+                             (nth fact index)
+                             output))
+          nil)))))
+
+(defn- matching-bindings [facts pattern bindings]
+  (reduce
+   (fn [output fact]
+     (if (= (first pattern) (first fact))
+       (let [matched (match-tuple pattern fact bindings)]
+         (if matched (conj output matched) output))
+       output))
+   []
+   facts))
+
+(defn- solve-positive [facts states pattern]
+  (reduce
+   (fn [output state]
+     (reduce
+      (fn [joined binding] (conj joined binding))
+      output
+      (matching-bindings facts pattern state)))
+   []
+   states))
+
+(defn- solve-negative [facts states pattern]
+  (vec
+   (filter
+    (fn [state]
+      (empty? (matching-bindings facts pattern state)))
+    states)))
+
+(defn- solve-bindings [facts clauses]
+  (loop [remaining (vec clauses)
+         states [{}]]
+    (if (empty? remaining)
+      (vec states)
+      (let [clause (first remaining)
+            negative (= :not (first clause))
+            unequal (= :!= (first clause))
+            pattern (if negative (second clause) clause)
+            next-states
+            (cond
+              negative
+              (solve-negative facts states pattern)
+
+              unequal
+              (reduce
+               (fn [output state]
+                 (if (= (walk (second clause) state)
+                        (walk (nth clause 2) state))
+                   output
+                   (conj output state)))
+               []
+               states)
+
+              :else
+              (solve-positive facts states pattern))]
+        (recur (vec (rest remaining)) (vec next-states))))))
+
+(defn- instantiate [term bindings]
+  (let [term (walk term bindings)]
+    (if (vector? term)
+      (vec (map (fn [item] (instantiate item bindings)) term))
+      term)))
+
+(defn ^{:schema [:fn [:map :map] :vector]}
+  query
+  "Runs {:find [?var ...] :where [tuple ...]} and returns distinct rows."
+  [database query]
+  (let [bindings
+        (solve-bindings (:datalog/facts database) (:where query))
+        variables (vec (:find query))]
+    (reduce
+     (fn [output binding]
+       (let [row
+             (vec
+              (map (fn [variable]
+                     (instantiate variable binding))
+                   variables))]
+         (if (member? row output) output (conj output row))))
+     []
+     bindings)))
+
+(defn- rule-facts [facts rule]
+  (let [bindings (solve-bindings facts (:rule/body rule))]
+    (reduce
+     (fn [output binding]
+       (let [fact (instantiate (:rule/head rule) binding)]
+         (if (member? fact output) output (conj output fact))))
+     []
+     bindings)))
+
+(defn ^{:schema [:fn [:map :vector] :map]}
+  derive
+  "Derives recursive rules to a finite fixpoint and records provenance."
+  [database rules]
+  (loop [facts (:datalog/facts database)
+         derivations (:datalog/derivations database)
+         iteration 0]
+    (if (> iteration 1000)
+      (throw "Datalog derivation exceeded 1000 fixpoint iterations")
+      (let [candidates
+            (reduce
+             (fn [output rule]
+               (reduce
+                (fn [entries fact]
+                  (conj entries
+                        {:fact fact :rule/id (:rule/id rule)}))
+                output
+                (rule-facts facts rule)))
+             []
+             rules)
+            fresh
+            (vec
+             (filter
+              (fn [candidate]
+                (not (member? (:fact candidate) facts)))
+              candidates))]
+        (if (empty? fresh)
+          (assoc database
+                 :datalog/facts facts
+                 :datalog/derivations derivations)
+          (recur
+           (reduce
+            (fn [output candidate]
+              (if (member? (:fact candidate) output)
+                output
+                (conj output (:fact candidate))))
+            facts
+            fresh)
+           (vec (concat derivations fresh))
+           (inc iteration)))))))
+
+(defn ^{:schema [:fn [:map :vector] :map]}
+  explain
+  "Returns whether a tuple was input or the rule IDs that derived it."
+  [database fact]
+  (let [rules
+        (reduce
+         (fn [output entry]
+           (if (= fact (:fact entry))
+             (conj output (:rule/id entry))
+             output))
+         []
+         (:datalog/derivations database))]
+    {:fact fact
+     :source (if (empty? rules) :input :derived)
+     :rules rules}))

@@ -10840,7 +10840,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             Form::Symbol(n)
                 if [
                     "list?", "vector?", "map?", "set?", "keyword?", "symbol?", "string?",
-                    "number?", "fn?",
+                    "number?", "integer?", "decimal?", "boolean?", "fn?",
                 ]
                 .contains(&n.as_str()) =>
             {
@@ -10869,6 +10869,13 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                             | Value::BigInteger(_)
                             | Value::Decimal(_)
                     ),
+                    "integer?" => {
+                        matches!(value, Value::Number(_) | Value::BigInteger(_))
+                    }
+                    "decimal?" => {
+                        matches!(value, Value::Float(_) | Value::Decimal(_))
+                    }
+                    "boolean?" => matches!(value, Value::Bool(_)),
                     "fn?" => matches!(value, Value::Function(_)),
                     _ => unreachable!(),
                 }))

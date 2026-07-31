@@ -234,3 +234,73 @@
       "Metaspec has no :meta/document-schema"
       {:action/type :add-key
        :action/key :meta/document-schema})]))
+
+(defn- member? [value values]
+  (any? (fn [candidate] (= candidate value)) values))
+
+(defn ^{:schema [:fn [:map] :map]}
+  declaration-catalog
+  "Indexes named metaspec schema declarations by :schema/id."
+  [document]
+  (reduce
+   (fn [output declaration]
+     (assoc output (:schema/id declaration) declaration))
+   {}
+   (:meta/schemas document)))
+
+(defn- primitive-schema [type]
+  (cond
+    (= type :boolean) :bool
+    (= type :number) :num
+    (= type :integer) :int
+    (= type :string) :str
+    :else type))
+
+(defn- compile-declaration [catalog declaration seen]
+  (cond
+    (has? declaration :schema/ref)
+    (let [id (:schema/ref declaration)]
+      (if (member? id seen)
+        :any
+        (let [target (get catalog id)]
+          (if target
+            (compile-declaration catalog target (conj seen id))
+            :any))))
+
+    (has? declaration :schema/items)
+    (let [item (:schema/items declaration)
+          target (if (map? item) item (get catalog item))]
+      [:vector
+       (if target
+         (compile-declaration catalog target seen)
+         :any)])
+
+    (= :enum (:schema/type declaration))
+    (vec (concat [:enum] (:schema/values declaration)))
+
+    (= :map (:schema/type declaration))
+    (let [required (or (:schema/required declaration) [])
+          properties (or (:schema/properties declaration) {})
+          fields
+          (reduce
+           (fn [output entry]
+             (if (member? (key entry) required)
+               (conj output
+                     [(key entry)
+                      (compile-declaration catalog (val entry) seen)])
+               output))
+           []
+           properties)]
+      (vec (concat [:map] fields)))
+
+    :else
+    (primitive-schema (:schema/type declaration))))
+
+(defn ^{:schema [:fn [:map :map] :any]}
+  compile-schema
+  "Compiles a metaspec schema declaration into std.typed surface grammar."
+  [document declaration]
+  (compile-declaration
+   (declaration-catalog document)
+   declaration
+   []))

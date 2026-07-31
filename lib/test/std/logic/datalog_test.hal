@@ -1,0 +1,72 @@
+(ns std.logic.datalog-test
+  (:use code.test)
+  (:require [std.logic.datalog :as datalog]))
+
+(def ancestry
+  (datalog/database
+   {}
+   [[:parent :ada :bea]
+    [:parent :bea :cy]]))
+
+(def ancestry-rules
+  '[{:rule/id :demo/direct-ancestor
+     :rule/head [:ancestor ?parent ?child]
+     :rule/body [[:parent ?parent ?child]]}
+    {:rule/id :demo/transitive-ancestor
+     :rule/head [:ancestor ?ancestor ?child]
+     :rule/body [[:ancestor ?ancestor ?parent]
+                 [:parent ?parent ?child]]}])
+
+^{:refer 'std.logic.datalog/derive
+  :id 'recursive-fixpoint}
+(fact "derives recursive relations to a deterministic finite fixpoint"
+  (datalog/query
+   (datalog/derive ancestry ancestry-rules)
+   '{:find [?descendant]
+     :where [[:ancestor :ada ?descendant]]})
+  => [[:bea] [:cy]])
+
+^{:refer 'std.logic.datalog/query
+  :id 'stratified-negation}
+(fact "finds must requirements that have no evidence tuple"
+  (let [database
+        (datalog/database
+         {}
+         [[:requirement :demo/covered :must []]
+          [:requirement :demo/missing :must []]
+          [:evidence :demo/covered :demo/case []]])]
+    (datalog/query
+     database
+     '{:find [?requirement]
+       :where [[:requirement ?requirement :must ?path]
+               [:not [:evidence ?requirement ?case ?evidence-path]]]}))
+  => [[:demo/missing]])
+
+^{:refer 'std.logic.datalog/query
+  :id 'bound-inequality}
+(fact "filters joined bindings using the finite inequality clause"
+  (let [database
+        (datalog/database
+         {}
+         [[:schema :demo/name :string [:schemas 0]]
+          [:schema :demo/name :string [:schemas 1]]])]
+    (datalog/query
+     database
+     '{:find [?left ?right]
+       :where [[:schema ?id ?type ?left]
+               [:schema ?id ?type ?right]
+               [:!= ?left ?right]]}))
+  => [[[:schemas 0] [:schemas 1]]
+      [[:schemas 1] [:schemas 0]]])
+
+^{:refer 'std.logic.datalog/explain
+  :id 'derived-fact-provenance}
+(fact "identifies the rule that produced a derived tuple"
+  (datalog/explain
+   (datalog/derive ancestry ancestry-rules)
+   [:ancestor :ada :cy])
+  => {:fact [:ancestor :ada :cy]
+      :source :derived
+      :rules [:demo/transitive-ancestor]})
+
+(pr-str (run '[std.logic.datalog-test]))
