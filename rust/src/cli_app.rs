@@ -7,7 +7,7 @@
 use crate::kernel::{parse, Form};
 use std::sync::OnceLock;
 
-pub const MANIFEST_SOURCE: &str = include_str!("../../specs/00-unsorted/cli/draft/hara-cli.edn");
+pub const MANIFEST_SOURCE: &str = include_str!("../resources/hara-cli.edn");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Execution {
@@ -275,10 +275,37 @@ fn string_vector_field(form: &Form, key: &str) -> Result<Vec<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{map_get, parse, router, vector, CliOutcome, Form};
+    use super::{map_get, parse, router, vector, CliOutcome, Form, MANIFEST_SOURCE};
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(ToString::to_string).collect()
+    }
+
+    fn repo_text(relative: &str) -> Option<String> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(relative);
+        match std::fs::read_to_string(&path) {
+            Ok(content) => Some(content),
+            Err(_) => {
+                eprintln!(
+                    "skipping: {} is unavailable (specs submodule not initialized)",
+                    path.display()
+                );
+                None
+            }
+        }
+    }
+
+    #[test]
+    fn vendored_manifest_matches_specs_submodule_when_present() {
+        let Some(submodule) = repo_text("specs/00-unsorted/cli/draft/hara-cli.edn") else {
+            return;
+        };
+        assert_eq!(
+            submodule, MANIFEST_SOURCE,
+            "rust/resources/hara-cli.edn is stale; refresh it from specs/00-unsorted/cli/draft/hara-cli.edn"
+        );
     }
 
     #[test]
@@ -345,10 +372,10 @@ mod tests {
 
     #[test]
     fn shared_outcome_conformance_cases_pass() {
-        let document = parse(include_str!(
-            "../../specs/00-unsorted/cli/draft/conformance/outcomes.edn"
-        ))
-        .unwrap();
+        let Some(document_source) = repo_text("specs/00-unsorted/cli/draft/conformance/outcomes.edn") else {
+            return;
+        };
+        let document = parse(&document_source).unwrap();
         for case in vector(map_get(&document, "conformance/cases").unwrap()).unwrap() {
             let Some(Form::Keyword(input)) = map_get(case, "case/input") else {
                 continue;
@@ -372,7 +399,10 @@ mod tests {
 
     #[test]
     fn shared_route_conformance_cases_pass() {
-        let document = parse(include_str!("../../specs/00-unsorted/cli/draft/conformance/routes.edn")).unwrap();
+        let Some(document_source) = repo_text("specs/00-unsorted/cli/draft/conformance/routes.edn") else {
+            return;
+        };
+        let document = parse(&document_source).unwrap();
         for case in vector(map_get(&document, "conformance/cases").unwrap()).unwrap() {
             let id = match map_get(case, "case/id").unwrap() {
                 Form::Keyword(value) => value,

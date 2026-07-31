@@ -348,7 +348,7 @@ Not in this milestone. Minimum bar for a later default-on discussion:
 1. ~~Closures/upvalues~~ (milestone 2), multi-arity calls, and namespace
    interop compiled, so real programs (not just closed arithmetic) run.
 2. Differential parity over the L0 conformance corpus
-   (`specs/language/draft/conformance/l0.edn`), not only the milestone
+   (`specs/00-unsorted/platform-language/draft/conformance/l0.edn`), not only the milestone
    subset.
 3. Exception and suspension stories (§13, §14) implemented or proven
    unnecessary per call site.

@@ -7698,6 +7698,15 @@ fn syntax_quote_value(form: &Form, env: &mut HashMap<String, Value>) -> Result<V
     }
 }
 
+fn previously_failed_error(registry: &NamespaceRegistry<Value>, namespace: &str) -> String {
+    let mut message =
+        format!("Namespace load previously failed; use explicit reload to retry: {namespace}");
+    if let Some(detail) = registry.load_failure(namespace) {
+        message.push_str(&format!(" (initial failure: {detail})"));
+    }
+    message
+}
+
 fn ensure_namespace(
     registry: &NamespaceRegistry<Value>,
     env: &mut HashMap<String, Value>,
@@ -7710,9 +7719,7 @@ fn ensure_namespace(
             return Err(format!("Cyclic namespace require: {name}"));
         }
         Some(NamespaceLoadState::Failed) if !reload => {
-            return Err(format!(
-                "Namespace load previously failed; use explicit reload to retry: {name}"
-            ));
+            return Err(previously_failed_error(registry, name));
         }
         _ => {}
     }
@@ -7751,6 +7758,7 @@ fn ensure_namespace(
         registry.restore(registry_before);
         if previous_state != Some(NamespaceLoadState::Loaded) {
             registry.set_load_state(name, NamespaceLoadState::Failed);
+            registry.set_load_failure(name, error.clone());
         }
         if let Some(saved) = macros_before {
             ACTIVE_MACROS.with(|active| {
@@ -7763,6 +7771,7 @@ fn ensure_namespace(
     }
 
     registry.set_load_state(name, NamespaceLoadState::Loaded);
+    registry.clear_load_failure(name);
     registry.commit_module_revision(name);
     Ok(())
 }
@@ -8260,9 +8269,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 if let Ok(registry) = namespace_registry() {
                     if let Some((namespace, _)) = n.split_once('/') {
                         if registry.load_state(namespace) == Some(NamespaceLoadState::Failed) {
-                            return Err(format!(
-                                "Namespace load previously failed; use explicit reload to retry: {namespace}"
-                            ));
+                            return Err(previously_failed_error(&registry, namespace));
                         }
                     }
                     force_lazy_alias(&registry, env, n)?;
@@ -8495,9 +8502,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     if let Ok(registry) = namespace_registry() {
                         if let Some((namespace, _)) = name.split_once('/') {
                             if registry.load_state(namespace) == Some(NamespaceLoadState::Failed) {
-                                return Err(format!(
-                                    "Namespace load previously failed; use explicit reload to retry: {namespace}"
-                                ));
+                                return Err(previously_failed_error(&registry, namespace));
                             }
                         }
                         force_lazy_alias(&registry, env, name)?;
