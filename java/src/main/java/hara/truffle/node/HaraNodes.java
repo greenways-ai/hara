@@ -27,6 +27,7 @@ import hara.lang.protocol.IFn;
 import hara.lang.protocol.IMetadata;
 import hara.lang.protocol.IObjType;
 import hara.truffle.HaraBox;
+import hara.truffle.HaraBuiltinFunction;
 import hara.truffle.HaraContext;
 import hara.truffle.HaraException;
 import hara.truffle.HaraFunction;
@@ -2014,6 +2015,12 @@ public final class HaraNodes {
       if (target instanceof HaraStruct) {
         return invokeViaProtocol(target, evaluateArguments(frame));
       }
+      if (target instanceof HaraBuiltinFunction) {
+        // Builtins never implement ILookup/ISequentialLookupType/ISetType, so the IFn
+        // protocol invoker always degrades to IFn.applyAsArray; calling it directly is
+        // exactly equivalent and skips the boundary plus the dispatch round trip.
+        return ((HaraBuiltinFunction) target).apply(evaluateArguments(frame));
+      }
       if (target instanceof IFn) {
         return invokeViaProtocol(target, evaluateArguments(frame));
       }
@@ -2268,7 +2275,13 @@ public final class HaraNodes {
       if (target instanceof HaraMultiFunction) {
         return invokeMultiFunction((HaraMultiFunction) target, values);
       }
-      if (target instanceof HaraStruct || target instanceof IFn) {
+      if (target instanceof HaraStruct) {
+        return invokeViaProtocol(target, values);
+      }
+      if (target instanceof HaraBuiltinFunction) {
+        return ((HaraBuiltinFunction) target).apply(values);
+      }
+      if (target instanceof IFn) {
         return invokeViaProtocol(target, values);
       }
       if (target instanceof HaraType) {

@@ -2017,6 +2017,61 @@ public class HaraLanguageTest {
     }
   }
 
+  @Test
+  public void invokesBuiltinsPassedAsValues() {
+    try (Context context = context()) {
+      assertEquals(
+          "12", context.eval(HaraLanguage.ID, "((fn [f] (f 1 2)) str)").asString());
+      assertEquals(2, context.eval(HaraLanguage.ID, "((fn [f] (f [1 2])) count)").asLong());
+      assertEquals(
+          "hara",
+          context
+              .eval(HaraLanguage.ID, "((fn [f g] (g (f \"ha\") (f \"ra\"))) str str)")
+              .asString());
+      assertEquals(
+          "1",
+          context.eval(HaraLanguage.ID, "(first (iter-map str [1 2 3]))").asString());
+    }
+  }
+
+  @Test
+  public void builtinFastPathPreservesArityErrors() {
+    try (Context context = context()) {
+      PolyglotException twoArgs =
+          assertThrows(
+              PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(count 1 2)"));
+      assertTrue(twoArgs.getMessage().contains("Wrong number of args (2)"));
+      PolyglotException zeroArgs =
+          assertThrows(
+              PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(count)"));
+      assertTrue(zeroArgs.getMessage().contains("Wrong number of args (0)"));
+    }
+  }
+
+  @Test
+  public void builtinFastPathPreservesArgumentEvaluationOrder() {
+    try (Context context = context()) {
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(do (def a (atom [])) "
+                      + "((fn [f] (f (swap! a conj 1) (swap! a conj 2))) str) "
+                      + "(= [1 2] @a))")
+              .asBoolean());
+    }
+  }
+
+  @Test
+  public void builtinFastPathAppliesThroughGenericDispatchAfterRedefinition() {
+    try (Context context = context()) {
+      // Redefine get to a builtin: the CollectionOp generic fallback must invoke it
+      // through the same builtin fast path as a plain Invoke node.
+      context.eval(HaraLanguage.ID, "(def get str)");
+      assertEquals("ab", context.eval(HaraLanguage.ID, "(get \"a\" \"b\")").asString());
+    }
+  }
+
   private static Context context() {
     return Context.newBuilder(HaraLanguage.ID).allowIO(IOAccess.ALL).build();
   }

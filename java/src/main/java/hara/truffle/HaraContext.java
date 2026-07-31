@@ -5461,7 +5461,7 @@ public final class HaraContext {
     }
   }
 
-  private static final class UnaryBuiltin implements IFn<Object, Object, Object> {
+  private static final class UnaryBuiltin implements IFn<Object, Object, Object>, HaraBuiltinFunction {
     private final String name;
     private final Function<Object, Object> implementation;
 
@@ -5476,12 +5476,19 @@ public final class HaraContext {
     }
 
     @Override
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public Object apply(Object[] arguments) {
+      return IFn.applyAsArray(this, arguments);
+    }
+
+    @Override
     public String toString() {
       return "#<builtin " + name + ">";
     }
   }
 
-  private static final class VariadicBuiltin implements IFn<Object, Object, Object> {
+  private static final class VariadicBuiltin
+      implements IFn<Object, Object, Object>, HaraBuiltinFunction {
     private final String name;
     private final Function<Object[], Object> implementation;
 
@@ -5508,6 +5515,12 @@ public final class HaraContext {
     @Override
     public Function<Object, Object> getArgN() {
       return values -> implementation.apply((Object[]) values);
+    }
+
+    @Override
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public Object apply(Object[] arguments) {
+      return IFn.applyAsArray(this, arguments);
     }
 
     @Override
