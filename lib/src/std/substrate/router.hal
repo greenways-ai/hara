@@ -1,0 +1,256 @@
+;; ============================================================================
+;; std.substrate.router — portable port of xt.substrate.base-router.
+;;
+;; Foundation mutates target-language objects in its two prune loop helpers.
+;; Hara keeps those helpers pure: they return the pruned map. All node-facing
+;; behavior and public router shapes remain equivalent.
+;; ============================================================================
+(ns std.substrate.router
+  (:require [std.foundation.promise :as promise]
+            [std.lib.substrate :as core]
+            [std.substrate.frame :as frame]))
+
+(def KIND_SUBSCRIBE "subscribe")
+(def KIND_UNSUBSCRIBE "unsubscribe")
+
+(defn subscribe-frame
+  "Constructs a router subscribe control frame."
+  [space signal subscription-id meta]
+  {"kind" KIND_SUBSCRIBE
+   "id" (or subscription-id (frame/rand-id "sub-" 6))
+   "space" (or space frame/SPACE_NODE)
+   "signal" signal
+   "meta" (or meta {})})
+
+(defn unsubscribe-frame
+  "Constructs a router unsubscribe control frame."
+  [space signal subscription-id meta]
+  {"kind" KIND_UNSUBSCRIBE
+   "id" (or subscription-id (frame/rand-id "sub-" 6))
+   "space" (or space frame/SPACE_NODE)
+   "signal" signal
+   "meta" (or meta {})})
+
+(defn valid-router?
+  [value]
+  (and (map? value)
+       (map? (get value "connections"))
+       (map? (get value "subscriptions"))))
+
+(defn set-router
+  [node router]
+  (swap! (field node :state)
+         (fn [state] (assoc state :router router)))
+  router)
+
+(defn ensure-router
+  "Ensures Foundation router state exists on node."
+  [node]
+  (let [router (get (core/node-state node) :router)]
+    (if (valid-router? router)
+      router
+      (set-router node {"connections" {}
+                        "subscriptions" {}}))))
+
+(defn get-connections
+  [node]
+  (get (ensure-router node) "connections"))
+
+(defn get-subscriptions
+  [node]
+  (get (ensure-router node) "subscriptions"))
+
+(defn update-router-section
+  [node section value]
+  (let [router (ensure-router node)]
+    (set-router node (assoc router section value))
+    value))
+
+(defn register-connection
+  "Registers a connection with the router."
+  [node transport-id meta]
+  (let [entry {"id" transport-id
+               "meta" (or meta {})}
+        connections (assoc (get-connections node) transport-id entry)]
+    (update-router-section node "connections" connections)
+    entry))
+
+(defn prune-subscription-signal-loop
+  "Pure Hara equivalent of Foundation's mutating signal prune loop."
+  [space-subscriptions signal-ids transport-id index]
+  (if (>= index (count signal-ids))
+    space-subscriptions
+    (let [signal (nth signal-ids index)
+          signal-subscriptions (get space-subscriptions signal)
+          next-signal-subscriptions
+          (if signal-subscriptions
+            (dissoc signal-subscriptions transport-id)
+            nil)
+          next-space-subscriptions
+          (if (or (nil? next-signal-subscriptions)
+                  (= 0 (count next-signal-subscriptions)))
+            (dissoc space-subscriptions signal)
+            (assoc space-subscriptions signal next-signal-subscriptions))]
+      (prune-subscription-signal-loop
+       next-space-subscriptions signal-ids transport-id (inc index)))))
+
+(defn prune-subscription-space-loop
+  "Pure Hara equivalent of Foundation's mutating space prune loop."
+  [subscriptions space-ids transport-id index]
+  (if (>= index (count space-ids))
+    subscriptions
+    (let [space (nth space-ids index)
+          space-subscriptions (get subscriptions space)
+          next-space-subscriptions
+          (if space-subscriptions
+            (prune-subscription-signal-loop
+             space-subscriptions
+             (vec (keys space-subscriptions))
+             transport-id
+             0)
+            nil)
+          next-subscriptions
+          (if (or (nil? next-space-subscriptions)
+                  (= 0 (count next-space-subscriptions)))
+            (dissoc subscriptions space)
+            (assoc subscriptions space next-space-subscriptions))]
+      (prune-subscription-space-loop
+       next-subscriptions space-ids transport-id (inc index)))))
+
+(defn unregister-connection
+  "Unregisters a connection and all of its subscriptions."
+  [node transport-id]
+  (let [connections (get-connections node)
+        previous (get connections transport-id)
+        next-connections (dissoc connections transport-id)
+        subscriptions (get-subscriptions node)
+        next-subscriptions
+        (prune-subscription-space-loop
+         subscriptions (vec (keys subscriptions)) transport-id 0)
+        router (ensure-router node)]
+    (set-router node
+                (assoc (assoc router "connections" next-connections)
+                       "subscriptions" next-subscriptions))
+    previous))
+
+(defn ensure-space-subscriptions
+  "Ensures a per-space subscription table exists."
+  [node space]
+  (let [space-id (or space frame/SPACE_NODE)
+        subscriptions (get-subscriptions node)
+        space-subscriptions (get subscriptions space-id)]
+    (if space-subscriptions
+      space-subscriptions
+      (let [next-subscriptions (assoc subscriptions space-id {})]
+        (update-router-section node "subscriptions" next-subscriptions)
+        {}))))
+
+(defn ensure-signal-subscriptions
+  "Ensures a per-signal subscription table exists."
+  [node space signal]
+  (let [space-id (or space frame/SPACE_NODE)
+        subscriptions (get-subscriptions node)
+        space-subscriptions (or (get subscriptions space-id) {})
+        signal-subscriptions (get space-subscriptions signal)]
+    (if signal-subscriptions
+      signal-subscriptions
+      (let [next-space-subscriptions (assoc space-subscriptions signal {})
+            next-subscriptions (assoc subscriptions space-id next-space-subscriptions)]
+        (update-router-section node "subscriptions" next-subscriptions)
+        {}))))
+
+(defn add-subscription
+  "Adds a router subscription for a connection."
+  [node transport-id space signal subscription-id meta]
+  (let [space-id (or space frame/SPACE_NODE)
+        subscriptions (get-subscriptions node)
+        space-subscriptions (or (get subscriptions space-id) {})
+        signal-subscriptions (or (get space-subscriptions signal) {})
+        entry {"id" (or subscription-id (frame/rand-id "sub-" 6))
+               "meta" (or meta {})}
+        next-signal-subscriptions
+        (assoc signal-subscriptions transport-id entry)
+        next-space-subscriptions
+        (assoc space-subscriptions signal next-signal-subscriptions)
+        next-subscriptions
+        (assoc subscriptions space-id next-space-subscriptions)]
+    (update-router-section node "subscriptions" next-subscriptions)
+    entry))
+
+(defn remove-subscription
+  "Removes a router subscription for a connection."
+  [node transport-id space signal]
+  (let [space-id (or space frame/SPACE_NODE)
+        subscriptions (get-subscriptions node)
+        space-subscriptions (get subscriptions space-id)
+        signal-subscriptions (if space-subscriptions
+                               (get space-subscriptions signal)
+                               nil)]
+    (if (nil? signal-subscriptions)
+      nil
+      (let [previous (get signal-subscriptions transport-id)
+            next-signal-subscriptions
+            (dissoc signal-subscriptions transport-id)
+            next-space-subscriptions
+            (if (= 0 (count next-signal-subscriptions))
+              (dissoc space-subscriptions signal)
+              (assoc space-subscriptions signal next-signal-subscriptions))
+            next-subscriptions
+            (if (= 0 (count next-space-subscriptions))
+              (dissoc subscriptions space-id)
+              (assoc subscriptions space-id next-space-subscriptions))]
+        (update-router-section node "subscriptions" next-subscriptions)
+        previous))))
+
+(defn list-subscriptions
+  "Lists all subscriptions, one space, or transport ids for a signal."
+  ([node]
+   (get-subscriptions node))
+  ([node space]
+   (or (get (get-subscriptions node)
+            (or space frame/SPACE_NODE))
+       {}))
+  ([node space signal]
+   (let [space-subscriptions
+         (get (get-subscriptions node)
+              (or space frame/SPACE_NODE))]
+     (if space-subscriptions
+       (vec (sort (keys (or (get space-subscriptions signal) {}))))
+       []))))
+
+(defn target-ids
+  [node space signal]
+  (list-subscriptions node space signal))
+
+(defn context-transport-id
+  [context]
+  (or (get (or context {}) "transport_id")
+      (get (or context {}) :transport_id)
+      (get (or context {}) "transport-id")
+      (get (or context {}) :transport-id)))
+
+(defn receive-subscribe
+  "Processes an inbound subscribe control frame."
+  [node event context]
+  (let [transport-id (context-transport-id context)]
+    (if transport-id
+      (add-subscription node
+                        transport-id
+                        (get event "space")
+                        (get event "signal")
+                        (get event "id")
+                        (get event "meta"))
+      nil)
+    (promise/from event)))
+
+(defn receive-unsubscribe
+  "Processes an inbound unsubscribe control frame."
+  [node event context]
+  (let [transport-id (context-transport-id context)]
+    (if transport-id
+      (remove-subscription node
+                           transport-id
+                           (get event "space")
+                           (get event "signal"))
+      nil)
+    (promise/from event)))

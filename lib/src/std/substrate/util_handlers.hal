@@ -1,0 +1,64 @@
+;; ============================================================================
+;; std.substrate.util-handlers — direct port of xt.substrate.base-util-handlers.
+;; ============================================================================
+(ns std.substrate.util-handlers
+  (:require [std.lib.substrate :as core]
+            [std.substrate.space :as space]
+            [std.substrate.util :as util]))
+
+(defn ping
+  "Utility handler: heartbeat."
+  [current-space args incoming node]
+  {"pong" true
+   "node" (field node :id)})
+
+(defn echo
+  "Utility handler: returns supplied arguments."
+  [current-space args incoming node]
+  args)
+
+(defn list-handlers
+  [current-space args incoming node]
+  (util/list-handlers node))
+
+(defn list-triggers
+  [current-space args incoming node]
+  (util/list-triggers node))
+
+(defn list-spaces
+  [current-space args incoming node]
+  (space/list-spaces node))
+
+(defn list-transports
+  [current-space args incoming node]
+  (util/transport-list node))
+
+(defn node-info
+  [current-space args incoming node]
+  {"id" (field node :id)
+   "meta" (core/node-section node :meta)})
+
+(defn handle-get-service
+  [current-space args incoming node]
+  (get (core/node-section node :services) args))
+
+(defn install-util-handlers
+  "Installs the @/* utility handlers on node."
+  [node]
+  (util/register-handler node "@/ping" ping
+                         {"substrate/fn" "@/ping"})
+  (util/register-handler node "@/echo" echo
+                         {"substrate/fn" "@/echo"})
+  (util/register-handler node "@/list-handlers" list-handlers
+                         {"substrate/fn" "@/list-handlers"})
+  (util/register-handler node "@/list-triggers" list-triggers
+                         {"substrate/fn" "@/list-triggers"})
+  (util/register-handler node "@/list-spaces" list-spaces
+                         {"substrate/fn" "@/list-spaces"})
+  (util/register-handler node "@/list-transports" list-transports
+                         {"substrate/fn" "@/list-transports"})
+  (util/register-handler node "@/get-service" handle-get-service
+                         {"substrate/fn" "@/get-service"})
+  (util/register-handler node "@/node-info" node-info
+                         {"substrate/fn" "@/node-info"})
+  node)

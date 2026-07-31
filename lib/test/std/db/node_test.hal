@@ -10,17 +10,18 @@
    :config (nth args 0)
    :schema (nth args 1)
    :lookup (nth args 2)
-   :space (get space :id)})
+   :space (get space "id")})
 
 (def results
   [(test/check
     "database node client prefers a locally installed kernel handler"
     (let [node (substrate/node-create {:id "db/local"})]
       (db/init-server node {db/ACTION_KERNEL_INIT kernel-init-handler})
-      (db/kernel-init node {:primary {:type "memory"}}
-                      {:Task {:id "uuid"}}
-                      {:Task {:table "task"}}
-                      {}))
+      (promise/value
+       (db/kernel-init node {:primary {:type "memory"}}
+                       {:Task {:id "uuid"}}
+                       {:Task {:table "task"}}
+                       {})))
     {:status "setup"
      :config {:primary {:type "memory"}}
      :schema {:Task {:id "uuid"}}
