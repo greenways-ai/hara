@@ -1,6 +1,6 @@
-//! Corpus-driven conformance tests for `specs/runtime/draft/hal-bytecode-vm.edn`.
+//! Corpus-driven conformance tests for `specs/01-lang/010-bytecode/draft/hal-bytecode-vm.edn`.
 //!
-//! Every case in `specs/runtime/draft/conformance/bytecode-vm.edn` is
+//! Every case in `specs/01-lang/010-bytecode/draft/conformance/bytecode-vm.edn` is
 //! executed exactly once:
 //!
 //! - `:display` — both the tree-walking evaluator and the VM must display
@@ -34,7 +34,7 @@ fn required<'a>(entries: &'a [(Form, Form)], key: &str, id: &str) -> &'a Form {
 #[test]
 fn bytecode_vm_conformance_corpus() {
     let manifest = kernel::parse_forms(include_str!(
-        "../../../specs/runtime/draft/conformance/bytecode-vm.edn"
+        "../../../specs/01-lang/010-bytecode/draft/conformance/bytecode-vm.edn"
     ))
     .expect("bytecode VM conformance corpus parses")
     .remove(0);

@@ -4,7 +4,7 @@
 //! the ten shared primitives, `if`, `do`, `let`, `loop`/`recur`, `fn`
 //! closures with capture-by-value upvalues, direct calls, and top-level
 //! `defn` lowered to direct slot bindings (the var-analysis pass; see
-//! `specs/runtime/draft/hal-bytecode-vm.edn` `:vm/defn-lowering`).
+//! `specs/01-lang/010-bytecode/draft/hal-bytecode-vm.edn` `:vm/defn-lowering`).
 //! Anything else is a typed [`CompileError`] with source context; the
 //! compiler never emits fallback calls into the tree-walking evaluator.
 //!

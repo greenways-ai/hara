@@ -48,7 +48,7 @@ mod conformance_tests;
 /// vector"); each bucket covers every phrasing of one failure class.
 /// Shared by the differential tests and the corpus-driven conformance
 /// tests; the bucket names are pinned by
-/// `specs/runtime/draft/conformance/bytecode-vm.edn`.
+/// `specs/01-lang/010-bytecode/draft/conformance/bytecode-vm.edn`.
 #[cfg(test)]
 pub(crate) fn error_category(message: &str) -> &'static str {
     let buckets: &[(&[&str], &str)] = &[

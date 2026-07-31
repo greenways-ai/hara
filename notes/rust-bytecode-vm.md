@@ -4,8 +4,8 @@ Working design note for GitHub issue #195. Non-normative: it does not change
 the portable HAL contract in `specs/`; it describes how the Rust runtime
 implements that contract for a small synchronous subset. For the areas it
 covers, the normative successor is now
-`specs/runtime/draft/hal-bytecode-vm.edn` (with its machine-checked corpus in
-`specs/runtime/draft/conformance/bytecode-vm.edn`); where this note and that
+`specs/01-lang/010-bytecode/draft/hal-bytecode-vm.edn` (with its machine-checked corpus in
+`specs/01-lang/010-bytecode/draft/conformance/bytecode-vm.edn`); where this note and that
 spec disagree, the spec wins.
 
 Status: milestone 2 (experimental, synchronous; closures and defn
@@ -495,7 +495,7 @@ in milestone 2's first cut.
 ### 17.6 Error surface additions
 
 New corpus error categories (pinned in
-`specs/runtime/draft/conformance/bytecode-vm.edn`): "function arity",
+`specs/01-lang/010-bytecode/draft/conformance/bytecode-vm.edn`): "function arity",
 "not callable", "fn params shape". Call arity and callability errors are
 runtime errors carrying instruction index and source position; shape and
 lowering errors are compile errors.

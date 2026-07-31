@@ -26,8 +26,8 @@ component map and `website/docs/development.md` for the developer guide.
   - `metaspec/draft/hal-metaspec.edn` defines the language-spec document model
   - `language/draft/hal-langspec.edn` is the current portable HAL contract
   - `language/draft/conformance/` contains machine-checked conformance/parity corpora
-  - `runtime/draft/hal-bytecode-vm.edn` is the draft bytecode-VM runtime spec,
-    with its machine-checked corpus in `runtime/draft/conformance/bytecode-vm.edn`
+  - `01-lang/010-bytecode/draft/hal-bytecode-vm.edn` is the draft bytecode-VM runtime spec,
+    with its machine-checked corpus in `01-lang/010-bytecode/draft/conformance/bytecode-vm.edn`
   - `archive/planning/` contains non-normative source material grouped by domain
 - `books/`, `registry/` — book series and the planned extension registry
 - `archive/` — legacy material, kept for history only
