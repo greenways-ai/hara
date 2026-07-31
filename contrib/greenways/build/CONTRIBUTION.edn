@@ -1,0 +1,17 @@
+{:contribution/id :greenways/build
+ :contribution/owner :greenways
+ :contribution/version "0.1.0"
+ :contribution/status :draft
+ :contribution/title "Greenways Build DSL"
+ :contribution/summary "A staged artifact-construction DSL with deterministic graph and obligation checking."
+ :contribution/source
+ {:source/provider :github
+  :source/repository "hara-lang/hara"
+  :source/commit "f36a3c6891a0abba53b3517b7aa73dce3e925d96"
+  :source/path "contrib/greenways/build"}
+ :contribution/specs
+ [{:spec/id :greenways/buildspec
+   :spec/version "0.1.0"
+   :spec/path "spec/draft/greenways-buildspec.edn"
+   :spec/metaspec "specs/00-unsorted/artifact/metaspec/artifact-metaspec.edn"
+   :spec/sha256 "sha256:84e2cd1a74f6e37aa262235d29cbc240333d0a6f3eaebf241e0de527ef23a2c0"}]}

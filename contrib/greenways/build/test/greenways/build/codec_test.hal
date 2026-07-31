@@ -1,0 +1,29 @@
+(ns greenways.build.codec-test
+  (:require [greenways.build.codec :as codec]
+            [greenways.build.normalize :as normalize]
+            [std.lib.test :as test]))
+
+(def original
+  {:build/id 'example
+   :build/artifact {:artifact/kind :application/service
+                    :artifact/output "dist/example.hal"}
+   :build/stages
+   [{:stage/id 'source :stage/produces :hal/forms}
+    {:stage/id 'output :stage/requires ['source]
+     :stage/produces :application/service}]})
+
+(def canonical (codec/to-edn original))
+
+(test/print-results
+ [(test/check "canonical EDN exact round-trip"
+              (codec/to-edn (codec/from-edn canonical))
+              canonical)
+  (test/check "canonical string round-trip"
+              (normalize/normalize-build
+               (codec/read-build-string
+                (codec/write-build-string original)))
+              (normalize/normalize-build original))
+  (test/check "stage ordering remains source ordering"
+              (vec (map (fn [stage] (:stage/id stage))
+                        (:build/stages canonical)))
+              [:source :output])])

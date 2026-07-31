@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { SupersonicProvider, normalizeGraph } from "./supersonic.js";
+import { SupersonicProvider, normalizeGraph } from "../src/js/supersonic.js";
 
 const graph = () => ({
   "graph/id": "amp",

@@ -1,0 +1,200 @@
+(ns hara.metaspec.lint
+  (:require [std.foundation.string :as string]))
+
+(def +required-keys+
+  [:document/id
+   :document/type
+   :document/version
+   :document/status
+   :document/title
+   :document/summary
+   :spec/conforms-to
+   :spec/artifact-kind
+   :meta/document-schema
+   :meta/schemas
+   :meta/cross-references
+   :meta/requirements
+   :metaspec/generation])
+
+(def +identifier-keys+
+  [:document/id
+   :schema/id
+   :reference/id
+   :requirement/id
+   :section/id
+   :rule/id
+   :linter/id
+   :form/id
+   :entity/id
+   :relation/id
+   :codec/id
+   :checker/id
+   :law/id
+   :conformance/id])
+
+(defn qualified-keyword?
+  [value]
+  (and (keyword? value)
+       (string/includes? (str value) "/")))
+
+(defn- member?
+  [value values]
+  (not (empty? (filter (fn [candidate] (= value candidate)) values))))
+
+(defn finding
+  [rule requirement path message repair]
+  {:finding/id rule
+   :rule/id rule
+   :requirement/id requirement
+   :finding/level :error
+   :finding/path (vec path)
+   :finding/message message
+   :finding/repair repair})
+
+(defn- child-values
+  [value path]
+  (if (map? value)
+    (vec
+     (reduce (fn [output entry]
+               (conj output
+                     [(val entry) (conj path (key entry))]))
+             []
+             value))
+    (if (vector? value)
+      (vec (map (fn [index]
+                  [(nth value index) (conj path index)])
+                (range (count value))))
+      (if (set? value)
+        (vec (map (fn [entry] [entry (conj path entry)])
+                  value))
+        []))))
+
+(defn lint-required-keys
+  [document]
+  (vec
+   (map
+    (fn [key]
+      (finding
+       :hara.metaspec.rule/required-key
+       :hara.metaspec/required-sections
+       []
+       (str "Missing required meta-spec key: " key)
+       {:action/type :add-key
+        :action/path []
+        :action/key key}))
+    (filter (fn [key] (not (has? document key)))
+            +required-keys+))))
+
+(defn lint-qualified-keys
+  [document]
+  (loop [pending [[document []]]
+         findings []]
+    (if (empty? pending)
+      findings
+      (let [pair (first pending)
+            value (first pair)
+            path (second pair)
+            local
+            (if (map? value)
+              (vec
+               (map
+                (fn [key]
+                  (finding
+                   :hara.metaspec.rule/qualified-key
+                   :hara.metaspec/qualified-keys
+                   (conj path key)
+                   (str "Map key must be a qualified keyword: " key)
+                   {:action/type :qualify-key
+                    :action/path path
+                    :action/key key}))
+                (filter (fn [key]
+                          (not (qualified-keyword? key)))
+                        (keys value))))
+              [])]
+        (recur (vec (concat (rest pending)
+                            (child-values value path)))
+               (vec (concat findings local)))))))
+
+(defn identifier-entries
+  [document]
+  (loop [pending [[document []]]
+         identifiers []]
+    (if (empty? pending)
+      identifiers
+      (let [pair (first pending)
+            value (first pair)
+            path (second pair)
+            local
+            (if (map? value)
+              (reduce
+               (fn [output entry]
+                 (if (and
+                      (member? (key entry) +identifier-keys+)
+                      (not (map? (val entry))))
+                   (conj output
+                         {:identifier/key (key entry)
+                          :identifier/value (val entry)
+                          :identifier/path (conj path (key entry))})
+                   output))
+               []
+               value)
+              [])]
+        (recur (vec (concat (rest pending)
+                            (child-values value path)))
+               (vec (concat identifiers local)))))))
+
+(defn lint-stable-identifiers
+  [document]
+  (vec
+   (map
+    (fn [entry]
+      (finding
+       :hara.metaspec.rule/stable-id
+       :hara.metaspec/stable-identifiers
+       (:identifier/path entry)
+       (str "Declaration ID must be a qualified keyword: "
+            (:identifier/value entry))
+       {:action/type :replace-value
+        :action/path (:identifier/path entry)
+        :action/expected :qualified-keyword}))
+    (filter (fn [entry]
+              (not (qualified-keyword? (:identifier/value entry))))
+            (identifier-entries document)))))
+
+(defn lint-duplicate-identifiers
+  [document]
+  (let [entries (identifier-entries document)
+        by-domain (group-by
+                   (fn [entry]
+                     [(:identifier/key entry)
+                      (:identifier/value entry)])
+                   entries)]
+    (reduce
+     (fn [output group]
+       (let [entries (val group)]
+         (if (> (count entries) 1)
+           (let [duplicate (second entries)]
+             (conj
+              output
+              (finding
+               :hara.metaspec.rule/duplicate-id
+               :hara.metaspec/unique-identifiers
+               (:identifier/path duplicate)
+               (str "Duplicate declaration identifier: "
+                    (:identifier/value duplicate))
+               {:action/type :rename-id
+                :action/path (:identifier/path duplicate)
+                :action/value (:identifier/value duplicate)})))
+           output)))
+     []
+     by-domain)))
+
+(defn lint
+  "Returns deterministic structural findings suitable for agent repair."
+  [document]
+  (vec
+   (concat
+    (lint-required-keys document)
+    (lint-qualified-keys document)
+    (lint-stable-identifiers document)
+    (lint-duplicate-identifiers document))))

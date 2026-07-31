@@ -1,3 +1,5 @@
 test-results/
 playwright-report/
 dist-provider/
+packages/browser/src/wasm/
+packages/browser/dist/

@@ -1,0 +1,79 @@
+{:document/id :greenways/supersonic-spec
+ :document/type :hara/artifact-specification
+ :document/version "0.1.0"
+ :document/status :draft
+ :document/title "Greenways Supersonic Audio Graph Specification"
+ :document/summary "Canonical local data for declarative audio graphs and deterministic provider snapshots."
+
+ :spec/conforms-to {:spec/id :hara/artifact-metaspec
+                    :spec/version "0.1.0"}
+ :spec/artifact-kind :greenways.supersonic/audio-graph
+
+ :spec/forms []
+
+ :spec/entities
+ [{:entity/id :greenways.supersonic/graph
+   :entity/schema
+   {:schema/required [:supersonic/id :supersonic/nodes
+                      :supersonic/connections]}}
+  {:entity/id :greenways.supersonic/node
+   :entity/schema
+   {:schema/required [:node/id :node/type :node/controls]}}
+  {:entity/id :greenways.supersonic/control
+   :entity/schema
+   {:schema/required [:control/id :control/value]}}
+  {:entity/id :greenways.supersonic/connection
+   :entity/schema
+   {:schema/required [:connection/source :connection/target]}}
+  {:entity/id :greenways.supersonic/snapshot
+   :entity/schema
+   {:schema/required [:snapshot/graph :snapshot/version
+                      :snapshot/provider]}}]
+
+ :spec/relations
+ [{:relation/id :greenways.supersonic/connection-source
+   :relation/from :greenways.supersonic/connection
+   :relation/to :greenways.supersonic/node
+   :relation/cardinality :exactly-one}
+  {:relation/id :greenways.supersonic/connection-target
+   :relation/from :greenways.supersonic/connection
+   :relation/to :greenways.supersonic/node
+   :relation/cardinality :exactly-one}
+  {:relation/id :greenways.supersonic/node-control
+   :relation/from :greenways.supersonic/node
+   :relation/to :greenways.supersonic/control
+   :relation/cardinality :zero-or-more}]
+
+ :spec/codecs
+ [{:codec/id :greenways.supersonic/hal-edn
+   :codec/from :greenways.supersonic/graph
+   :codec/to :hara/edn
+   :codec/laws [:greenways.supersonic/normalization-idempotence
+                :greenways.supersonic/stable-snapshot]}]
+
+ :spec/checkers
+ [{:checker/id :greenways.supersonic/graph-structure
+   :checker/input :greenways.supersonic/graph
+   :checker/output :hara.artifact/finding}
+  {:checker/id :greenways.supersonic/control-values
+   :checker/input :greenways.supersonic/graph
+   :checker/output :hara.artifact/finding}
+  {:checker/id :greenways.supersonic/connection-references
+   :checker/input :greenways.supersonic/graph
+   :checker/output :hara.artifact/finding}]
+
+ :spec/laws
+ [{:law/id :greenways.supersonic/normalization-idempotence
+   :law/expression "(= (normalize-graph x) (normalize-graph (normalize-graph x)))"}
+  {:law/id :greenways.supersonic/atomic-replacement
+   :law/expression "(= (replace-graph a b) b)"}
+  {:law/id :greenways.supersonic/stable-snapshot
+   :law/expression "(= (snapshot x) (snapshot (restore (snapshot x))))"}
+  {:law/id :greenways.supersonic/typed-update
+   :law/expression "(valid-control? c v)"}]
+
+ :spec/conformance
+ [{:conformance/id :greenways.supersonic/graph-cases
+   :conformance/path "conformance/graph.edn"}
+  {:conformance/id :greenways.supersonic/provider-cases
+   :conformance/path "conformance/provider.edn"}]}

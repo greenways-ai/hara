@@ -11,7 +11,7 @@
         "pattern": "std/.*\\.hir"
       },
       {
-        "pattern": "specs/language/draft/.*\\.edn"
+        "pattern": "specs/00-unsorted/platform-language/draft/.*\\.edn"
       },
       {
         "pattern": "META-INF/hara/extensions/.*\\.edn"

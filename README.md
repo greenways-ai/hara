@@ -44,6 +44,9 @@ several Git submodules at the root:
 - [`specs/`](specs/) — normative specs: prose (`.md`), machine-checked corpora,
   and spec-shaped data. Lives in the
   [`hara-lang/hara-specs`](https://github.com/hara-lang/hara-specs) submodule.
+- [`contrib/`](contrib/) — independently owned artifact formats developed with
+  Hara's metaspec and verifier. Greenways formats live under
+  `contrib/greenways/`.
 - [`archive/`](archive/) — legacy material kept for history. Lives in the
   [`hara-lang/hara-archive`](https://github.com/hara-lang/hara-archive)
   submodule.
@@ -60,9 +63,9 @@ several Git submodules at the root:
 - [Namespace catalog](docs/docs/reference/namespaces.md) — discover every shipped namespace family.
 - [Developer guide](docs/docs/development.md) — build, test, debug, and contribute.
 - [Java API and Javadocs](docs/docs/javadocs.md) — public entry points and generated API docs.
-- [HAL meta-spec](specs/metaspec/draft/README.md) — the shape and authority rules for language specifications.
-- [HAL language draft](specs/language/draft/README.md) — the portable language contract and executable evidence.
-- [Planning archive](specs/archive/planning/README.md) — earlier runtime, extension, interop, and tooling designs.
+- [HAL meta-spec](specs/01-lang/000-metaspec/draft/README.md) — the self-describing contract for metaspec documents.
+- [HAL language draft](specs/01-lang/001-language/draft/README.md) — the small EDN-oriented data and reader contract.
+- [Planning archive](specs/99-archive/planning/README.md) — earlier runtime, extension, interop, and tooling designs.
 - [Hara for Emacs](extensions/hara-emacs/README.md) — project-aware evaluation, sessions, completion, docs,
   and a RESP-backed REPL.
 

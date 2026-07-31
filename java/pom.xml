@@ -139,8 +139,9 @@
 			<resource>
 				<directory>${project.basedir}/..</directory>
 				<includes>
-					<include>specs/language/draft/conformance/l0.edn</include>
-					<include>specs/language/draft/conformance/modules.edn</include>
+					<include>specs/00-unsorted/platform-language/draft/conformance/l0.edn</include>
+					<include>specs/00-unsorted/platform-language/draft/conformance/modules.edn</include>
+					<include>specs/00-unsorted/cli/draft/**/*.edn</include>
 				</includes>
 			</resource>
 			<resource>

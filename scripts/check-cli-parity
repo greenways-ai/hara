@@ -1,0 +1,60 @@
+#!/bin/bash
+set -u
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RUST="${HARA_NATIVE:-$ROOT/rust/target/debug/hara}"
+CLI="$ROOT/hara"
+
+fail() {
+  echo "CLI parity: $1" >&2
+  exit 1
+}
+
+rust_eval="$(HARA_RUNTIME=rust HARA_NATIVE="$RUST" "$CLI" eval -- "(+ 20 22)")" \
+  || fail "Rust eval failed"
+truffle_eval="$(HARA_RUNTIME=truffle "$CLI" eval -- "(+ 20 22)")" \
+  || fail "Truffle eval failed"
+[[ "$rust_eval" == "$truffle_eval" && "$rust_eval" == "42" ]] \
+  || fail "eval output differs"
+
+rust_project="$(HARA_RUNTIME=rust HARA_NATIVE="$RUST" "$CLI" project check "$ROOT")" \
+  || fail "Rust grouped project route failed"
+truffle_project="$(HARA_RUNTIME=truffle "$CLI" project check "$ROOT")" \
+  || fail "Truffle grouped project route failed"
+[[ "$rust_project" == "$truffle_project" ]] \
+  || fail "project check output differs"
+
+rust_help="$(HARA_RUNTIME=rust HARA_NATIVE="$RUST" "$CLI" --help)" \
+  || fail "Rust help failed"
+truffle_help="$(HARA_RUNTIME=truffle "$CLI" --help)" \
+  || fail "Truffle help failed"
+[[ "$rust_help" != *"compile-hir"* && "$truffle_help" != *"compile-hir"* ]] \
+  || fail "developer routes leaked into public help"
+
+METASPEC="$ROOT/specs/00-unsorted/artifact/metaspec/artifact-metaspec.edn"
+rust_spec="$(
+  HARA_RUNTIME=rust HARA_NATIVE="$RUST" "$CLI" \
+    spec lint "$METASPEC" --format edn
+)" || fail "Rust spec lint failed"
+truffle_spec="$(
+  HARA_RUNTIME=truffle "$CLI" \
+    spec lint "$METASPEC" --format edn
+)" || fail "Truffle spec lint failed"
+[[ "$rust_spec" == "$truffle_spec" ]] \
+  || fail "spec lint EDN output differs"
+
+HARA_RUNTIME=rust HARA_NATIVE="$RUST" "$CLI" no-such-command >/dev/null 2>&1
+rust_unknown=$?
+HARA_RUNTIME=truffle "$CLI" no-such-command >/dev/null 2>&1
+truffle_unknown=$?
+[[ "$rust_unknown" == "2" && "$truffle_unknown" == "2" ]] \
+  || fail "unknown-command exits differ ($rust_unknown, $truffle_unknown)"
+
+HARA_RUNTIME=rust HARA_NATIVE="$RUST" "$CLI" --offline server >/dev/null 2>&1
+rust_offline=$?
+HARA_RUNTIME=truffle "$CLI" --offline server >/dev/null 2>&1
+truffle_offline=$?
+[[ "$rust_offline" == "2" && "$truffle_offline" == "2" ]] \
+  || fail "offline-server exits differ ($rust_offline, $truffle_offline)"
+
+echo "CLI parity: pass"

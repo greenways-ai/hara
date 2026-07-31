@@ -1,0 +1,282 @@
+(ns greenways.build.parse
+  (:require [greenways.build.model :as model]))
+
+(defn- append-values
+  [left right]
+  (reduce (fn [output value] (conj output value))
+          (vec left)
+          right))
+
+(defn- nth-or
+  [values index default]
+  (if (< index (count values))
+    (nth values index)
+    default))
+
+(defn- location
+  [form file]
+  (let [metadata (meta form)]
+    (merge (if file {:file file} {})
+           (if (get metadata :line) {:row (get metadata :line)} {})
+           (if (get metadata :column) {:col (get metadata :column)} {}))))
+
+(defn- semantic-finding
+  [form file type message details]
+  (model/finding type
+                 :error
+                 message
+                 (merge (location form file) details)))
+
+(defn- pair-data
+  [form values file]
+  (let [values (vec values)]
+   (loop [index 0
+         output {}
+         seen #{}
+         findings []]
+    (if (>= index (count values))
+      {:value output :findings findings}
+      (let [key (nth values index)]
+        (if (>= (+ index 1) (count values))
+          {:value output
+           :findings
+           (conj findings
+                 (semantic-finding form file
+                                   :greenways/missing-property-value
+                                   (str "Missing value for property: " key)
+                                   {:property key}))}
+          (let [invalid? (not (keyword? key))
+                duplicate? (if invalid? false (has? seen key))
+                next-output (if (or invalid? duplicate?)
+                              output
+                              (assoc output key (nth values (+ index 1))))
+                next-seen (if invalid? seen (conj seen key))
+                next-findings
+                (cond
+                  invalid?
+                  (conj findings
+                        (semantic-finding form file
+                                          :greenways/invalid-property
+                                          (str "Expected property keyword, got: " key)
+                                          {:property key}))
+                  duplicate?
+                  (conj findings
+                        (semantic-finding form file
+                                          :greenways/duplicate-key
+                                          (str "Duplicate property: " key)
+                                          {:property key}))
+                  :else findings)]
+            (recur (+ index 2)
+                   next-output
+                   next-seen
+                   next-findings))))))))
+
+(defn- parse-check
+  [form file]
+  (if (and (list? form)
+           (= 'check (first form))
+           (keyword? (second form)))
+    (let [options (nth-or form 2 nil)
+          reference
+          (model/checker-reference
+           (second form)
+           (if (map? options) (get options :variation/id)))]
+      {:value
+       (merge reference
+              (if (get options :checker/source)
+                {:checker/source (get options :checker/source)}
+                {})
+              (if (get options :checker/entrypoint)
+                {:checker/entrypoint (get options :checker/entrypoint)}
+                {}))
+     :findings []}
+      )
+    {:value nil
+     :findings
+     [(semantic-finding form file
+                        :greenways/invalid-check
+                        (str "Invalid check form: " form)
+                        {:form form})]}))
+
+(defn- parse-checkers
+  [forms file]
+  (reduce (fn [output form]
+            (let [parsed (parse-check form file)]
+              {:value (if (get parsed :value)
+                        (conj (get output :value) (get parsed :value))
+                        (get output :value))
+               :findings (append-values (get output :findings)
+                                        (get parsed :findings))}))
+          {:value [] :findings []}
+          (or forms [])))
+
+(defn- parse-artifact
+  [form file]
+  (let [parsed (pair-data form (vec (drop 1 form)) file)
+        data (get parsed :value)
+        missing (filter (fn [key] (nil? (get data key)))
+                        [:kind :output])]
+    {:value (model/artifact (get data :kind) (get data :output))
+     :findings
+     (append-values
+      (get parsed :findings)
+      (vec
+       (map (fn [key]
+              (semantic-finding
+               form file
+               :greenways/missing-artifact-property
+               (str "Artifact is missing: " key)
+               {:property key}))
+            missing)))}))
+
+(defn- parse-spec
+  [form file]
+  (let [id (second form)
+        options (nth-or form 2 nil)]
+    {:value (model/specification-reference id (get options :version))
+     :findings
+     (append-values
+      (if (keyword? id)
+        []
+        [(semantic-finding form file
+                           :greenways/invalid-spec-id
+                           "use-spec requires a qualified keyword identifier"
+                           {:spec/id id})])
+      (if (string? (get options :version))
+        []
+        [(semantic-finding form file
+                           :greenways/invalid-spec-version
+                           "use-spec requires a string :version"
+                           {:spec/id id})]))}))
+
+(defn- parse-stage
+  [form file]
+  (let [id (second form)
+        parsed (pair-data form (vec (drop 2 form)) file)
+        data (get parsed :value)
+        checkers (parse-checkers (get data :checkers) file)
+        requires (vec (map model/normalize-id (or (get data :requires) [])))]
+    {:value (model/stage id requires (get data :produces) (get checkers :value))
+     :findings
+     (append-values
+      (append-values (get parsed :findings)
+                     (get checkers :findings))
+      (append-values
+       (if (or (symbol? id) (keyword? id))
+         []
+         [(semantic-finding form file
+                            :greenways/invalid-stage-id
+                            "stage requires a symbol or keyword identifier"
+                            {:stage/id id})])
+       (if (keyword? (get data :produces))
+         []
+         [(semantic-finding form file
+                            :greenways/missing-stage-producer
+                            "stage requires a qualified :produces keyword"
+                            {:stage/id (model/normalize-id id)})])))}))
+
+(defn- append-body
+  [output form file]
+  (let [head (if (list? form) (first form) nil)]
+    (cond
+      (= head 'artifact)
+      (let [parsed (parse-artifact form file)]
+        (assoc output
+               :artifacts (conj (get output :artifacts) (get parsed :value))
+               :findings (append-values (get output :findings)
+                                        (get parsed :findings))))
+
+      (= head 'use-spec)
+      (let [parsed (parse-spec form file)]
+        (assoc output
+               :specs (conj (get output :specs) (get parsed :value))
+               :findings (append-values (get output :findings)
+                                        (get parsed :findings))))
+
+      (= head 'stage)
+      (let [parsed (parse-stage form file)]
+        (assoc output
+               :stages (conj (get output :stages) (get parsed :value))
+               :findings (append-values (get output :findings)
+                                        (get parsed :findings))))
+
+      :else
+      (assoc output
+             :findings
+             (conj
+              (get output :findings)
+              (semantic-finding
+               form file
+               :greenways/unknown-form
+               (str "Unknown build form: " head)
+               {:form/head head}))))))
+
+(defn parse-build
+  "Parses one already-read Build DSL root form into a surface model.
+
+   Semantic failures are returned in :findings. Unreadable text remains the
+   responsibility of the HAL reader."
+  ([form] (parse-build form nil))
+  ([form file]
+   (let [forms (if (and (vector? form)
+                        (not (= 'build (first form))))
+                 form
+                 [form])]
+     (if (not (= 1 (count forms)))
+       {:build nil
+        :findings
+        [(model/finding
+          :greenways/root-count
+          :error
+          "Build source must contain exactly one root form"
+          {:file file :root/count (count forms)})]}
+       (let [root (first forms)]
+         (if (or (not (list? root))
+                 (not (= 'build (first root))))
+           {:build nil
+            :findings
+            [(semantic-finding
+              root file
+              :greenways/root-form
+              "Build source must have one build root"
+              {:form root})]}
+           (let [id (second root)
+                 parsed (reduce (fn [output body]
+                                  (append-body output body file))
+                                {:artifacts []
+                                 :specs []
+                                 :stages []
+                                 :findings []}
+                                (vec (drop 2 root)))
+                 artifacts (get parsed :artifacts)
+                 findings
+                 (append-values
+                  (append-values
+                   (append-values
+                    (get parsed :findings)
+                    (if (or (symbol? id) (keyword? id))
+                      []
+                      [(semantic-finding
+                        root file
+                        :greenways/missing-build-id
+                        "build requires a symbol or keyword identifier"
+                        {:build/id id})]))
+                   (if (= 1 (count artifacts))
+                     []
+                     [(semantic-finding
+                       root file
+                       :greenways/artifact-count
+                       "Build must contain exactly one artifact form"
+                       {:artifact/count (count artifacts)})]))
+                  (if (pos? (count (get parsed :stages)))
+                    []
+                    [(semantic-finding
+                      root file
+                      :greenways/no-stages
+                      "Build must contain one or more stages"
+                      {})]))]
+             {:build (model/build id
+                                  (first artifacts)
+                                  (get parsed :specs)
+                                  (get parsed :stages))
+              :findings findings})))))))

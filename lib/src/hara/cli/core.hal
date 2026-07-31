@@ -1,0 +1,17 @@
+(ns hara.cli.core
+  (:require [hara.cli.model :as model]
+            [hara.cli.report :as report]
+            [hara.cli.route :as route]
+            [hara.cli.verify :as verify]))
+
+(def outcome-exit model/outcome-exit)
+(def request model/request)
+(def result model/result)
+(def resolve-route route/resolve-route)
+(def normalize-request route/normalize-request)
+(def help-model route/help-model)
+(def verify verify/verify)
+
+(defn verify-report
+  [manifest]
+  (report/verification-report manifest (verify/verify manifest)))

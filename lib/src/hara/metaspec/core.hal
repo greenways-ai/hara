@@ -1,0 +1,19 @@
+(ns hara.metaspec.core
+  (:require [hara.metaspec.lint :as lint]
+            [hara.metaspec.report :as report]
+            [hara.metaspec.verify :as verify]))
+
+(def lint lint/lint)
+(def verify verify/verify)
+(def verification-report report/verification-report)
+
+(defn lint-report
+  [document]
+  (report/verification-report document (lint/lint document)))
+
+(defn verify-report
+  ([document]
+   (report/verification-report document (verify/verify document)))
+  ([document registry]
+   (report/verification-report document
+                               (verify/verify document registry))))

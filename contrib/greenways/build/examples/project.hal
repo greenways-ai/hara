@@ -1,0 +1,23 @@
+(build music-project
+  (artifact
+    :kind :music/midi
+    :output "dist/project.mid")
+
+  (use-spec
+    :greenways/buildspec
+    {:version "0.1.0"})
+
+  (stage source
+    :produces :music/source)
+
+  (stage music-model
+    :requires [source]
+    :produces :music/model)
+
+  (stage timeline
+    :requires [music-model]
+    :produces :music/timeline)
+
+  (stage midi-output
+    :requires [timeline]
+    :produces :music/midi))

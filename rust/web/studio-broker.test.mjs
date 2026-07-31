@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 
-import { HtaContext } from "./hta.js";
+import { HtaContext, HtaKeyword } from "./hta.js";
 import { compileAnonymousDocument, createBrowserBroker, KernelBroker } from "./studio/broker.js";
 
 // Mock HtaContext-shaped kernel: records calls, echoes evals with the kernel name.
@@ -134,6 +134,48 @@ test("traceForms evaluates top-level forms in a disposable session and stops on 
     ["(boot)", "(+ 1 2)", "(broken)"]
   );
   assert.equal(calls.at(-1)[0], "session/close");
+});
+
+test("previewDocument retains structured traces until disposal", async () => {
+  const { spawn, spawned } = mockSpawn();
+  const kw = (name) => new HtaKeyword(name);
+  const trace = (id, source) => new Map([
+    [kw("schema"), "hara.trace/v1"],
+    [kw("trace-id"), id],
+    [kw("status"), kw(source === "(broken)" ? "error" : "ok")],
+    [kw("result"), new Map([[kw("type"), "number"], [kw("display"), "42"]])],
+    [kw("error"), source === "(broken)" ? "broken form" : null],
+    [kw("events"), []]
+  ]);
+  const broker = new KernelBroker({
+    spawn: async (name) => {
+      const kernel = await spawn(name);
+      let nextTrace = 1;
+      const original = kernel.context.call.bind(kernel.context);
+      kernel.context.call = async (target, args) => {
+        if (target === "session/trace-eval") return trace(`trace-${nextTrace++}`, args[1]);
+        return original(target, args);
+      };
+      return kernel;
+    }
+  });
+  const forms = [
+    { start: 0, end: 9, source: "(+ 19 23)" },
+    { start: 10, end: 18, source: "(broken)" },
+    { start: 19, end: 28, source: "(+ 20 22)" }
+  ];
+  const preview = await broker.previewDocument("ROOT", "project:home:/demo.hal", forms, {
+    bootstrap: "(boot)"
+  });
+  assert.deepEqual(preview.rows.map(({ status, value, traceId }) => ({ status, value, traceId })), [
+    { status: "ok", value: "42", traceId: "trace-1" },
+    { status: "error", value: "42", traceId: "trace-2" },
+    { status: "skipped", value: undefined, traceId: null }
+  ]);
+  assert.equal(broker.getPreviewTrace(preview.generationId, "trace-1") instanceof Map, true);
+  assert.equal(await broker.disposePreview(preview.generationId), true);
+  assert.throws(() => broker.getPreviewTrace(preview.generationId, "trace-1"), /NO_PREVIEW/);
+  assert.equal(spawned[0].context.calls.at(-1)[0], "session/close");
 });
 
 test("resources are registered before the bootstrap eval", async () => {
@@ -452,6 +494,16 @@ test("real wasm kernel evals hara source through the broker", { skip: wasmBytes 
     trace.map(({ source, status, value }) => ({ source, status, value })),
     [{ source: "(+ 19 23)", status: "ok", value: 42 }]
   );
+  const structured = await broker.traceEval(
+    "ROOT", "ROOT",
+    "(defn observed [x] (+ x 1)) (observed 41)"
+  );
+  const field = (map, name) => [...map].find(([key]) => key?.name === name)?.[1];
+  assert.equal(field(structured, "schema"), "hara.trace/v1");
+  assert.equal(field(field(structured, "result"), "display"), "42");
+  assert.ok(field(structured, "events").some(
+    (event) => field(event, "kind")?.name === "operation-enter"
+  ));
   assert.deepEqual(await broker.listSessions("ROOT"), ["ROOT"]);
   const root = await broker.require("ROOT");
   assert.equal(await root.context.call("register-resource", ["lib/extra.hal", "(ns lib.extra)"]), true);

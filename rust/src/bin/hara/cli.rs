@@ -1,23 +1,40 @@
 use crate::repl;
-#[cfg(feature = "hir-encoder")]
-use hara_wasm::kernel::{hir::encode_hir_module, parse_forms};
-use hara_wasm::kernel::{parse, Form};
-use hara_wasm::native_cli::RuntimeBroker;
+use hara_wasm::cli_app;
+use hara_wasm::extension_tool;
 use hara_wasm::package;
-use hara_wasm::project;
-use hara_wasm::resp::{RespConnection, RespServer, RespValue};
-use hara_wasm::Runtime;
 use std::env;
-use std::fs;
-use std::io::{self, BufRead, Read};
-use std::net::TcpStream;
+use std::io::{self, Read};
 use std::path::PathBuf;
+
+#[path = "cli/build.rs"]
+mod build;
+#[path = "cli/build_check.rs"]
+mod build_check;
+#[path = "cli/form.rs"]
+mod form;
+#[path = "cli/metaspec.rs"]
+mod metaspec;
+#[path = "cli/project.rs"]
+mod project;
+#[path = "cli/spec.rs"]
+mod spec;
+
+#[cfg(feature = "hir-encoder")]
+use self::project::compile_hir;
+use self::project::{
+    check_project, direct_eval, edit_dependency, new_project, run_file, run_headless, run_project,
+    run_remote, sync_project, test_project,
+};
+use self::spec::spec_command;
 
 #[derive(Default)]
 pub(crate) struct Options {
     pub(crate) root: Option<PathBuf>,
     pub(crate) project: Option<PathBuf>,
     pub(crate) native_sockets: bool,
+    pub(crate) allow_file: bool,
+    pub(crate) allow_process: bool,
+    pub(crate) log_requests: bool,
     pub(crate) offline: bool,
     pub(crate) host: String,
     pub(crate) port: u16,
@@ -36,6 +53,10 @@ pub(crate) fn parse_options() -> Result<Options, String> {
     };
     let mut args = env::args().skip(1);
     while let Some(argument) = args.next() {
+        if argument == "--" {
+            options.command.extend(args);
+            break;
+        }
         match argument.as_str() {
             "--help" | "-h" => {
                 usage();
@@ -48,6 +69,9 @@ pub(crate) fn parse_options() -> Result<Options, String> {
             "--root" => options.root = Some(PathBuf::from(required(&mut args, "--root")?)),
             "--project" => options.project = Some(PathBuf::from(required(&mut args, "--project")?)),
             "--native-sockets" | "--allow-net" => options.native_sockets = true,
+            "--allow-file" => options.allow_file = true,
+            "--allow-process" => options.allow_process = true,
+            "--log-requests" => options.log_requests = true,
             "--offline" => options.offline = true,
             "--no-history" => options.no_history = true,
             "--no-splash" => options.no_splash = true,
@@ -63,6 +87,20 @@ pub(crate) fn parse_options() -> Result<Options, String> {
             }
             value if value.starts_with("--history=") => {
                 options.history_file = Some(PathBuf::from(&value[10..]))
+            }
+            value if value.starts_with("--root=") => {
+                options.root = Some(PathBuf::from(option_value(value, "--root")?))
+            }
+            value if value.starts_with("--project=") => {
+                options.project = Some(PathBuf::from(option_value(value, "--project")?))
+            }
+            value if value.starts_with("--host=") => {
+                options.host = option_value(value, "--host")?.to_owned()
+            }
+            value if value.starts_with("--port=") => {
+                options.port = option_value(value, "--port")?
+                    .parse()
+                    .map_err(|_| "--port must be between 0 and 65535".to_owned())?
             }
             value if value.starts_with('-') => return Err(format!("unknown option: {value}")),
             value => {
@@ -80,24 +118,47 @@ fn required(args: &mut impl Iterator<Item = String>, option: &str) -> Result<Str
         .ok_or_else(|| format!("{option} requires a value"))
 }
 
+fn option_value<'a>(argument: &'a str, option: &str) -> Result<&'a str, String> {
+    let value = argument
+        .strip_prefix(option)
+        .and_then(|value| value.strip_prefix('='))
+        .unwrap_or_default();
+    if value.is_empty() {
+        Err(format!("{option} requires a value"))
+    } else {
+        Ok(value)
+    }
+}
+
 pub(crate) fn run(options: Options) -> Result<(), String> {
-    match options.command.first().map(String::as_str) {
-        Some("package") => package::run(&options.command[1..]),
+    let command = routed_command(&options.command);
+    if command.first().is_some_and(|value| value == "help")
+        || command
+            .iter()
+            .skip(1)
+            .any(|value| value == "--help" || value == "-h")
+    {
+        usage();
+        return Ok(());
+    }
+    match command.first().map(String::as_str) {
+        Some("package") => package::run(&command[1..]),
         #[cfg(feature = "hir-encoder")]
-        Some("compile-hir") => compile_hir(&options.command[1..]),
-        Some("new") => new_project(&options.command[1..]),
-        Some("check") => check_project(&options, &options.command[1..]),
-        Some("add") => edit_dependency(&options, &options.command[1..], true),
-        Some("remove") => edit_dependency(&options, &options.command[1..], false),
-        Some("sync") => sync_project(&options, &options.command),
+        Some("compile-hir") => compile_hir(&command[1..]),
+        Some("new") => new_project(&command[1..]),
+        Some("check") => check_project(&options, &command[1..]),
+        Some("add") => edit_dependency(&options, &command[1..], true),
+        Some("remove") => edit_dependency(&options, &command[1..], false),
+        Some("sync") => sync_project(&options, &command),
         Some("update") => Err("project update requires the reviewed registry client".into()),
-        Some("test") => test_project(&options, &options.command[1..]),
-        Some("eval") => direct_eval(&options, &options.command[1..].join(" ")),
-        Some("run") if options.command.len() == 1 => run_project(&options),
+        Some("test") => test_project(&options, &command[1..]),
+        Some("spec") => spec_command(&command[1..]),
+        Some("extension") => extension_tool::run(&command[1..], options.allow_process),
+        Some("eval") => direct_eval(&options, &command[1..].join(" ")),
+        Some("run") if command.len() == 1 => run_project(&options),
         Some("run") | Some("--file") => run_file(
             &options,
-            options
-                .command
+            command
                 .get(1)
                 .ok_or_else(|| "run requires a file path".to_owned())?,
         ),
@@ -110,8 +171,7 @@ pub(crate) fn run(options: Options) -> Result<(), String> {
         }
         Some("headless" | "server") => run_headless(&options),
         Some("remote") => run_remote(
-            options
-                .command
+            command
                 .get(1)
                 .ok_or_else(|| "remote requires HOST:PORT".to_owned())?,
         ),
@@ -121,291 +181,281 @@ pub(crate) fn run(options: Options) -> Result<(), String> {
     }
 }
 
-#[cfg(feature = "hir-encoder")]
-fn compile_hir(args: &[String]) -> Result<(), String> {
-    let source_path = args
+fn routed_command(command: &[String]) -> Vec<String> {
+    if command
         .first()
-        .ok_or_else(|| "compile-hir requires SOURCE.hal --output OUTPUT.hir".to_owned())?;
-    let output_index = args
-        .iter()
-        .position(|argument| argument == "--output")
-        .ok_or_else(|| "compile-hir requires --output OUTPUT.hir".to_owned())?;
-    let output_path = args
-        .get(output_index + 1)
-        .ok_or_else(|| "compile-hir requires --output OUTPUT.hir".to_owned())?;
-    let source = fs::read_to_string(source_path)
-        .map_err(|error| format!("cannot read {source_path}: {error}"))?;
-    let forms = parse_forms(&source)?;
-    let namespace = forms
-        .iter()
-        .find_map(|form| match form {
-            Form::List(values)
-                if matches!(values.first(), Some(Form::Symbol(head)) if head == "ns" || head == "ns+") =>
-            {
-                match values.get(1) {
-                    Some(Form::Symbol(namespace)) => Some(namespace.clone()),
-                    _ => None,
-                }
-            }
-            _ => None,
-        })
-        .ok_or_else(|| format!("{source_path} does not declare an ns or ns+ namespace"))?;
-    let artifact = encode_hir_module(&namespace, source_path, &source, forms);
-    if let Some(parent) = std::path::Path::new(output_path).parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+        .is_some_and(|value| matches!(value.as_str(), "help" | "compile-hir"))
+        || command == ["standalone"]
+    {
+        return command.to_vec();
     }
-    fs::write(output_path, artifact).map_err(|error| format!("cannot write {output_path}: {error}"))
-}
-
-fn project_for(options: &Options, args: &[String]) -> Result<project::Project, String> {
-    let path = args
-        .first()
-        .map(PathBuf::from)
-        .or_else(|| options.project.clone())
-        .unwrap_or_else(|| PathBuf::from("."));
-    project::discover(&path)
-}
-
-fn new_project(args: &[String]) -> Result<(), String> {
-    let name = args
-        .first()
-        .ok_or_else(|| "new requires a project name".to_owned())?;
-    if args.len() > 1 {
-        return Err("new accepts exactly one project name".into());
+    let Some(resolved) = cli_app::router().resolve(command) else {
+        return command.to_vec();
+    };
+    let legacy = match resolved.route.handler.as_str() {
+        "hara.cli.handler/eval" => "eval",
+        "hara.cli.handler/run-file" => "run",
+        "hara.cli.handler/stdin" => "stdin",
+        "hara.cli.handler/repl" => "repl",
+        "hara.cli.handler/server" => "server",
+        "hara.cli.handler/remote" => "remote",
+        "hara.cli.handler/project-new" => "new",
+        "hara.cli.handler/project-check" => "check",
+        "hara.cli.handler/project-run" => "run",
+        "hara.cli.handler/project-test" => "test",
+        "hara.cli.handler/project-add" => "add",
+        "hara.cli.handler/project-remove" => "remove",
+        "hara.cli.handler/project-sync" => "sync",
+        "hara.cli.handler/project-update" => "update",
+        "hara.cli.handler/package" => "package",
+        "hara.cli.handler/spec" => "spec",
+        "hara.cli.handler/extension" => "extension",
+        _ => return command.to_vec(),
+    };
+    let mut routed = vec![legacy.to_owned()];
+    if matches!(
+        resolved.route.handler.as_str(),
+        "hara.cli.handler/package" | "hara.cli.handler/spec" | "hara.cli.handler/extension"
+    ) {
+        routed.extend(resolved.route.path.iter().skip(1).cloned());
     }
-    let project = project::new_app(&PathBuf::from(name), name)?;
-    println!("created {}", project.root.display());
-    Ok(())
+    routed.extend(resolved.arguments);
+    routed
 }
 
-fn check_project(options: &Options, args: &[String]) -> Result<(), String> {
-    let project = project_for(options, args)?;
-    println!("project check: {} {}", project.id, project.version);
-    Ok(())
-}
-
-fn edit_dependency(options: &Options, args: &[String], add: bool) -> Result<(), String> {
-    let coordinate = args.first().ok_or_else(|| {
-        if add {
-            "add requires COORDINATE@RANGE".to_owned()
-        } else {
-            "remove requires COORDINATE".to_owned()
-        }
-    })?;
-    if args.len() > 1 {
-        return Err("dependency commands accept one coordinate".into());
-    }
-    let (coordinate, version) = if add {
-        coordinate
-            .rsplit_once('@')
-            .ok_or_else(|| "add requires COORDINATE@RANGE".to_owned())?
+pub(crate) fn error_exit_code(error: &str) -> i32 {
+    if error.starts_with("unknown ")
+        || error.starts_with("usage:")
+        || error.starts_with("unavailable:")
+        || error.starts_with("--offline cannot")
+        || error.contains(" requires ")
+        || error.contains("cannot read")
+        || error.contains("Cannot read")
+        || error.contains("not found")
+    {
+        cli_app::CliOutcome::UsageError.exit_code()
     } else {
-        (coordinate.as_str(), "")
-    };
-    let project = project_for(options, &[])?;
-    project::set_dependency(&project, coordinate, if add { Some(version) } else { None })?;
-    println!("{} {}", if add { "added" } else { "removed" }, coordinate);
-    Ok(())
-}
-
-fn sync_project(options: &Options, args: &[String]) -> Result<(), String> {
-    let project = project_for(options, &[])?;
-    let flags: Vec<_> = args.iter().skip(1).collect();
-    let mode = match flags.as_slice() {
-        [] if options.offline => project::LockMode::Offline,
-        [] => project::LockMode::Default,
-        [flag] if (*flag).as_str() == "--offline" => project::LockMode::Offline,
-        [flag] if (*flag).as_str() == "--locked" => project::LockMode::Locked,
-        [flag] if (*flag).as_str() == "--frozen" => project::LockMode::Frozen,
-        _ => return Err("sync accepts at most one of --offline, --locked, or --frozen".into()),
-    };
-    let lock = project::sync_lock(&project, mode)?;
-    println!("project sync: {}", lock.display());
-    Ok(())
-}
-
-fn run_project(options: &Options) -> Result<(), String> {
-    let project = project_for(options, &[])?;
-    let path = project::main_file(&project)?;
-    let source = fs::read_to_string(&path)
-        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    let mut runtime = Runtime::new();
-    runtime.install_native_file_provider(project.root.to_string_lossy().as_ref());
-    project::register_sources(&project, &mut runtime)?;
-    if options.native_sockets {
-        runtime.install_native_socket_provider();
-    }
-    println!("{}", runtime.eval_native(&source)?);
-    Ok(())
-}
-
-fn test_project(options: &Options, args: &[String]) -> Result<(), String> {
-    let project = project_for(options, args)?;
-    let files = project::files_in(&project.root, &project.test_paths)?;
-    if files.is_empty() {
-        return Err("project has no .hal files under :project/test-paths".into());
-    }
-    let mut passed = 0usize;
-    let mut failed = 0usize;
-    for path in files {
-        let source = fs::read_to_string(&path)
-            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-        let mut runtime = Runtime::new();
-        runtime.install_native_file_provider(project.root.to_string_lossy().as_ref());
-        project::register_sources(&project, &mut runtime)?;
-        runtime.eval_native(include_str!("../../../../lib/src/std/lib/test.hal"))?;
-        match test_results(&runtime.eval_native(&source)?) {
-            Ok((file_passed, file_failed)) => {
-                passed += file_passed;
-                failed += file_failed;
-                println!(
-                    "test {}: {} passed, {} failed",
-                    path.display(),
-                    file_passed,
-                    file_failed
-                );
-            }
-            Err(error) => {
-                failed += 1;
-                eprintln!("test {}: {error}", path.display());
-            }
-        }
-    }
-    println!("test result: {passed} passed, {failed} failed");
-    if failed == 0 {
-        Ok(())
-    } else {
-        Err("test failures".into())
-    }
-}
-
-fn test_results(value: &str) -> Result<(usize, usize), String> {
-    let Form::String(source) = parse(value)? else {
-        return Err("test file must finish with test/print-results".into());
-    };
-    let Form::Vector(results) = parse(&source)? else {
-        return Err("test/print-results must return a vector".into());
-    };
-    let mut passed = 0;
-    let mut failed = 0;
-    for result in results {
-        let Form::Map(entries) = result else {
-            return Err("test result must be a map".into());
-        };
-        let pass = entries
-            .iter()
-            .find(|(key, _)| matches!(key, Form::Keyword(name) if name == "pass"))
-            .map(|(_, value)| value);
-        match pass {
-            Some(Form::Bool(true)) => passed += 1,
-            Some(Form::Bool(false)) => failed += 1,
-            _ => return Err("test result is missing boolean :pass".into()),
-        }
-    }
-    Ok((passed, failed))
-}
-
-fn direct_eval(options: &Options, source: &str) -> Result<(), String> {
-    if source.is_empty() {
-        return Err("eval requires a Hara expression".into());
-    }
-    let mut runtime = Runtime::new();
-    if let Some(root) = &options.root {
-        runtime.install_native_file_provider(root.to_string_lossy().as_ref());
-    }
-    if options.native_sockets {
-        runtime.install_native_socket_provider();
-    }
-    println!("{}", runtime.eval_native(source)?);
-    Ok(())
-}
-
-fn run_file(options: &Options, path: &str) -> Result<(), String> {
-    let bytes = fs::read(path).map_err(|error| format!("cannot read {path}: {error}"))?;
-    let is_hir = path.ends_with(".hir") || bytes.starts_with(b"HIR\0");
-    let mut runtime = Runtime::new();
-    if let Some(root) = &options.root {
-        runtime.install_native_file_provider(root.to_string_lossy().as_ref());
-    }
-    if options.native_sockets {
-        runtime.install_native_socket_provider();
-    }
-    if is_hir {
-        println!("{}", runtime.eval_hir(&bytes)?);
-    } else {
-        println!(
-            "{}",
-            runtime.eval_native(
-                &String::from_utf8(bytes)
-                    .map_err(|error| format!("{path} is not valid UTF-8: {error}"))?
-            )?
-        );
-    }
-    Ok(())
-}
-
-fn run_headless(options: &Options) -> Result<(), String> {
-    if options.offline {
-        return Err("--offline cannot be used with headless".into());
-    }
-    let broker = RuntimeBroker::start_with(options.root.clone(), options.native_sockets)?;
-    let server = RespServer::start(&options.host, options.port, broker)?;
-    println!("HARA RESP {} · session ROOT", server.endpoint());
-    loop {
-        std::thread::park();
-    }
-}
-
-fn run_remote(endpoint: &str) -> Result<(), String> {
-    let (host, port) = repl::parse_endpoint(endpoint, "127.0.0.1")?;
-    let stream = TcpStream::connect((host.as_str(), port))
-        .map_err(|error| format!("remote connect failed: {error}"))?;
-    let mut connection = RespConnection::new(stream)?;
-    connection.write(&RespValue::array(["HELLO", "4", "CLIENT", "HARA-REMOTE"]))?;
-    println!(
-        "{}",
-        response_text(connection.read()?.ok_or("remote closed")?)
-    );
-    let mut request = 0_u64;
-    for line in io::stdin().lock().lines() {
-        let source = line.map_err(|error| format!("stdin: {error}"))?;
-        if matches!(source.trim(), "/quit" | ":quit") {
-            connection.write(&RespValue::array(["QUIT"]))?;
-            break;
-        }
-        request += 1;
-        let id = format!("REMOTE-{request}");
-        connection.write(&RespValue::array(["EVAL", &id, source.trim()]))?;
-        if let Some(value) = connection.read()? {
-            println!("{}", response_text(value));
-        }
-        let _ = connection.read()?;
-    }
-    Ok(())
-}
-
-fn response_text(value: RespValue) -> String {
-    match value {
-        RespValue::Array(Some(values)) => values
-            .into_iter()
-            .map(response_text)
-            .collect::<Vec<_>>()
-            .join(" "),
-        RespValue::Bulk(Some(bytes)) => String::from_utf8_lossy(&bytes).into_owned(),
-        RespValue::Simple(value) | RespValue::Error(value) => value,
-        RespValue::Integer(value) => value.to_string(),
-        RespValue::Bulk(None) | RespValue::Array(None) => "nil".into(),
+        cli_app::CliOutcome::Failed.exit_code()
     }
 }
 
 fn usage() {
-    println!("hara [OPTIONS] [new NAME|check [PATH]|add COORDINATE@RANGE|remove COORDINATE|sync|test [PATH]|repl|standalone|headless|server|remote HOST:PORT|eval SOURCE|run [FILE]|stdin]");
-    println!("  --offline --host HOST --port PORT --root PATH --project PATH --allow-net");
-    println!("  --history PATH --no-history --no-splash --no-color");
+    println!("Hara CLI · Rust runtime");
+    println!();
+    println!("Usage:");
+    println!("  hara [OPTIONS] repl");
+    println!("  hara eval EXPRESSION | run FILE | stdin");
+    println!("  hara server | remote HOST:PORT");
+    println!("  hara project <new|check|run|test|add|remove|sync|update> ...");
+    println!("  hara package <COMMAND> ...");
+    println!("  hara spec <COMMAND> ...");
+    println!("  hara extension <check|build|install|test> ...");
+    println!();
+    println!("Compatibility aliases:");
+    println!("  new check test add remove sync update headless standalone");
+    println!();
+    println!("Global options:");
+    println!("  --project PATH, --root PATH, --offline");
+    println!("  --allow-file, --allow-net, --allow-process");
+    println!("  --host HOST, --port PORT, --history PATH");
+    println!("  --no-history, --no-splash, --no-color, --log-requests");
 }
 
 pub(crate) fn exit_error(message: &str, status: i32) -> ! {
     eprintln!("hara: {message}");
     std::process::exit(status)
+}
+
+#[cfg(test)]
+mod spec_tests {
+    use super::build::{
+        canonical_build_form, canonical_build_from_edn, read_build_source, write_build_surface,
+    };
+    use super::build_check::{
+        build_obligation_report, build_report_status, check_build, check_build_graph,
+    };
+    use super::form::{keyword, map_form, map_get};
+    use super::metaspec::{
+        lint_metaspec, metaspec_report, metaspec_template, read_spec_document,
+        validate_against_metaspec, verify_metaspec, METASPEC_REQUIRED_KEYS,
+    };
+    use super::spec::check_contribution;
+    use super::{error_exit_code, routed_command};
+    use hara_wasm::cli_app;
+    use hara_wasm::kernel::{parse, Form};
+    use std::fs;
+    use std::path::Path;
+
+    #[test]
+    fn nested_route_operation_is_preserved_for_the_legacy_adapter() {
+        assert_eq!(
+            routed_command(&[
+                "spec".into(),
+                "check-contribution".into(),
+                "candidate".into()
+            ]),
+            ["spec", "check-contribution", "candidate"]
+        );
+    }
+
+    #[test]
+    fn offline_daemon_rejection_is_a_usage_error() {
+        assert_eq!(
+            error_exit_code("--offline cannot be used with headless"),
+            cli_app::CliOutcome::UsageError.exit_code()
+        );
+    }
+
+    #[test]
+    fn generated_metaspec_template_lints_cleanly() {
+        assert!(lint_metaspec(&metaspec_template()).is_empty());
+    }
+
+    #[test]
+    fn missing_keys_have_agent_repair_actions() {
+        let document = parse("{}").unwrap();
+        let findings = lint_metaspec(&document);
+        assert_eq!(findings.len(), METASPEC_REQUIRED_KEYS.len());
+        assert_eq!(findings[0].rule, "hara.metaspec.rule/required-key");
+        assert_eq!(
+            findings[0].repair,
+            map_form(vec![
+                ("action/type", keyword("add-key")),
+                ("action/path", Form::Vector(vec![])),
+                ("action/key", keyword("document/id")),
+            ])
+        );
+    }
+
+    #[test]
+    fn duplicate_ids_and_map_keys_are_not_silently_overwritten() {
+        assert!(
+            read_spec_document("{:document/id :demo/spec :document/id :demo/other}")
+                .unwrap_err()
+                .contains("Duplicate key")
+        );
+        let document = read_spec_document(
+            "{:document/id :demo/spec
+              :meta/schemas [{:schema/id :demo/value}
+                             {:schema/id :demo/value}]}",
+        )
+        .unwrap();
+        let rules = lint_metaspec(&document)
+            .into_iter()
+            .map(|finding| finding.rule)
+            .collect::<Vec<_>>();
+        assert!(rules.contains(&"hara.metaspec.rule/duplicate-id"));
+    }
+
+    #[test]
+    fn unresolved_schema_references_fail_verification() {
+        let mut document = metaspec_template();
+        let Form::Map(entries) = &mut document else {
+            unreachable!()
+        };
+        entries.push((
+            keyword("example/schema-use"),
+            map_form(vec![("schema/ref", keyword("missing/schema"))]),
+        ));
+        let findings = verify_metaspec(&document, Path::new("metaspec.edn"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.rule == "hara.metaspec.rule/schema-reference"));
+        let report = metaspec_report(&document, &findings);
+        assert_eq!(map_get(&report, "report/status"), Some(&keyword("fail")));
+    }
+
+    #[test]
+    fn greenways_buildspec_validates_against_artifact_metaspec() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let document_path =
+            repository.join("contrib/greenways/build/spec/draft/greenways-buildspec.edn");
+        let metaspec_path = repository.join("specs/00-unsorted/artifact/metaspec/artifact-metaspec.edn");
+        let document = read_spec_document(&fs::read_to_string(&document_path).unwrap()).unwrap();
+        let metaspec = read_spec_document(&fs::read_to_string(metaspec_path).unwrap()).unwrap();
+        assert!(validate_against_metaspec(&document, &metaspec, &document_path).is_empty());
+    }
+
+    #[test]
+    fn build_surface_normalizes_to_exact_canonical_edn() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let source_path = repository.join("contrib/greenways/build/examples/minimal-build.hal");
+        let edn_path = repository.join("contrib/greenways/build/examples/minimal-build.edn");
+        let source = fs::read_to_string(&source_path).unwrap();
+        let canonical = read_spec_document(&fs::read_to_string(edn_path).unwrap()).unwrap();
+        let (build, findings) = read_build_source(&source, source_path.to_str().unwrap()).unwrap();
+        assert!(findings.is_empty());
+        assert_eq!(canonical_build_form(&build), canonical);
+    }
+
+    #[test]
+    fn build_edn_surface_round_trip_is_semantically_exact() {
+        let canonical = read_spec_document(
+            "{:greenways/type :build :greenways/version \"0.1.0\"
+              :build/id :demo
+              :build/artifact {:artifact/kind :demo/output
+                               :artifact/output \"dist/demo.hal\"}
+              :build/specs []
+              :build/stages
+              [{:stage/id :source :stage/requires []
+                :stage/produces :demo/source :stage/checkers []}
+               {:stage/id :output :stage/requires [:source]
+                :stage/produces :demo/output :stage/checkers []}]}",
+        )
+        .unwrap();
+        let (build, _) = canonical_build_from_edn(&canonical).unwrap();
+        let surface = write_build_surface(&build);
+        let (round_trip, findings) = read_build_source(&surface, "round-trip.hal").unwrap();
+        assert!(findings.is_empty());
+        assert_eq!(canonical_build_form(&round_trip), canonical);
+    }
+
+    #[test]
+    fn build_cycle_and_blocked_checker_reports_are_structured() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let cycle_path = repository.join("contrib/greenways/build/examples/invalid-cycle.hal");
+        let (cycle, parse_findings) = read_build_source(
+            &fs::read_to_string(&cycle_path).unwrap(),
+            cycle_path.to_str().unwrap(),
+        )
+        .unwrap();
+        assert!(parse_findings.is_empty());
+        let graph_findings = check_build_graph(&cycle);
+        assert!(graph_findings.iter().any(|finding| {
+            finding.kind == "greenways/dependency-cycle"
+                && finding.message.contains("parse → emit → analyze → parse")
+        }));
+
+        let checker_path = repository.join("contrib/greenways/build/examples/invalid-checker.hal");
+        let (checker_build, _) = read_build_source(
+            &fs::read_to_string(&checker_path).unwrap(),
+            checker_path.to_str().unwrap(),
+        )
+        .unwrap();
+        let findings = check_build(&checker_build);
+        assert!(findings
+            .iter()
+            .any(|finding| finding.kind == "greenways/checker-commit"));
+        let report = build_obligation_report(&checker_build, &findings);
+        assert_eq!(build_report_status(&report), "blocked");
+    }
+
+    #[test]
+    fn greenways_contribution_envelopes_verify_offline() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        for path in [
+            "contrib/greenways/build",
+            "contrib/greenways/supersonic",
+            "contrib/greenways/usdskel",
+        ] {
+            let root = repository.join(path);
+            let envelope =
+                read_spec_document(&fs::read_to_string(root.join("CONTRIBUTION.edn")).unwrap())
+                    .unwrap();
+            assert!(
+                check_contribution(&envelope, &root, repository).is_empty(),
+                "{path} did not verify"
+            );
+        }
+    }
 }

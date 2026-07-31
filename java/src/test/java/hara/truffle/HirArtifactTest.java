@@ -131,7 +131,7 @@ public class HirArtifactTest {
   public void goldenBytesLockThePortableFormat() {
     // One form per opcode (0-17). Any change to the byte layout, the opcode
     // numbering, or the canonical collection ordering must update this golden
-    // value and specs/archive/planning/runtime/hir.md together.
+    // value and specs/99-archive/planning/runtime/hir.md together.
     Object[] forms =
         new Object[] {
           null,

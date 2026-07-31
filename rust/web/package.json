@@ -8,11 +8,14 @@
   ],
   "scripts": {
     "build:noir": "vite build --config vite.noir.config.js && vite build --config vite.noir-node.config.js && vite build --config vite.noir-provider.config.js && node package-noir-extension.mjs",
+    "build:browser": "vite build --config packages/browser/vite.config.js",
+    "build:browser:wasm": "bash ../../scripts/build-hara-browser",
+    "test:browser-sdk": "npm run build:browser:wasm && node packages/browser/test.mjs",
     "build:package:noir": "npm run build:noir && cargo run --quiet --manifest-path ../Cargo.toml --bin hara -- package build ../extensions/ledger-noir",
     "test:noir": "npm run build:package:noir && node --test packages/noir/noir.test.mjs noir-loader.test.js",
     "test:hta": "node --test hta.test.js",
     "test:wasm-runtime": "node --test portable-code-test.test.mjs",
-    "test:studio": "node --test package-cache.test.mjs hara-web.test.mjs studio-host-services.test.mjs studio-broker.test.mjs studio-hal.test.mjs studio/supersonic.test.mjs studio-ui.test.mjs studio-document-runtime.test.mjs studio-canvas-runtime.test.mjs studio-node-runtime.test.mjs studio-workspace.test.mjs studio-program-host.test.mjs studio-graph-host.test.mjs studio-session-router.test.mjs studio-capability-registry.test.mjs website-workspaces.test.mjs website-publishing.test.mjs",
+    "test:studio": "node --test package-cache.test.mjs hara-web.test.mjs studio-host-services.test.mjs studio-broker.test.mjs studio-hal.test.mjs ../../contrib/greenways/supersonic/test/supersonic.test.mjs studio-ui.test.mjs studio-document-runtime.test.mjs studio-canvas-runtime.test.mjs studio-node-runtime.test.mjs studio-workspace.test.mjs studio-program-host.test.mjs studio-graph-host.test.mjs studio-session-router.test.mjs studio-capability-registry.test.mjs website-workspaces.test.mjs website-publishing.test.mjs",
     "test:browser": "playwright test"
   },
   "dependencies": {

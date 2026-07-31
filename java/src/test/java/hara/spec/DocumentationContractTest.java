@@ -2,6 +2,7 @@ package hara.spec;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -18,11 +19,24 @@ import org.junit.Test;
 public class DocumentationContractTest {
   private static final List<Path> ACTIVE_SPECIFICATIONS =
       List.of(
-          Path.of("specs/metaspec/draft/hal-metaspec.edn"),
-          Path.of("specs/language/draft/hal-langspec.edn"));
+          Path.of("specs/01-lang/000-metaspec/draft/hal-metaspec.edn"),
+          Path.of("specs/01-lang/001-language/draft/hal-langspec.edn"));
+
+  private static void assumeSpecsSubmodule() {
+    assumeTrue(
+        "specs submodule not initialized: git submodule update --init specs",
+        Files.isRegularFile(ACTIVE_SPECIFICATIONS.get(0)));
+  }
+
+  private static void assumeDocsSubmodule() {
+    assumeTrue(
+        "docs submodule not initialized: git submodule update --init docs",
+        Files.isRegularFile(Path.of("docs/docs/user-guide.md")));
+  }
 
   @Test
   public void activeSpecificationsAreReadableEdnWithRenderedCompanions() throws Exception {
+    assumeSpecsSubmodule();
     for (Path specification : ACTIVE_SPECIFICATIONS) {
       assertTrue("Missing active specification: " + specification, Files.exists(specification));
       Object document =
@@ -47,6 +61,7 @@ public class DocumentationContractTest {
 
   @Test
   public void publishedExamplesUseSupportedMarkerSyntaxAndExistingFiles() throws Exception {
+    assumeDocsSubmodule();
     String userGuide = Files.readString(Path.of("docs/docs/user-guide.md"), StandardCharsets.UTF_8);
     assertTrue(userGuide.contains("(. a (push-last 4))"));
     assertTrue(userGuide.contains("(. a (get 3))"));
@@ -58,6 +73,7 @@ public class DocumentationContractTest {
 
   @Test
   public void namespaceCatalogTracksEveryRegisteredProvider() throws Exception {
+    assumeDocsSubmodule();
     String catalog =
         Files.readString(Path.of("docs/docs/reference/namespaces.md"), StandardCharsets.UTF_8);
     int providers = 0;
@@ -72,6 +88,7 @@ public class DocumentationContractTest {
 
   @Test
   public void currentGuidesUseCurrentNamespaceAndLauncherConventions() throws Exception {
+    assumeDocsSubmodule();
     List<Path> currentGuides =
         List.of(
             Path.of("README.md"),

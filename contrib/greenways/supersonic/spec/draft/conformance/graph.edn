@@ -1,0 +1,21 @@
+{:conformance/id :greenways.supersonic/graph-cases
+ :conformance/version "0.1.0"
+ :conformance/cases
+ [{:case/id :greenways.supersonic.graph/empty
+   :case/type :structure
+   :case/input {:supersonic/id :empty
+                :supersonic/nodes []
+                :supersonic/connections []}
+   :case/expected :pass}
+  {:case/id :greenways.supersonic.graph/missing-source
+   :case/type :reference
+   :case/input {:supersonic/id :missing-source
+                :supersonic/nodes []
+                :supersonic/connections
+                [{:connection/source :osc
+                  :connection/target :output}]}
+   :case/expected :fail}
+  {:case/id :greenways.supersonic.graph/stable-normalization
+   :case/type :normalization
+   :case/input :canonical-graph
+   :case/expected :idempotent}]}

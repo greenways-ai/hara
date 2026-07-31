@@ -1,0 +1,24 @@
+(ns hara.metaspec.report)
+
+(defn- action
+  [finding]
+  (merge
+   {:action/type :repair-finding
+    :action/rule (:rule/id finding)
+    :action/requirement (:requirement/id finding)
+    :action/path (:finding/path finding)}
+   (:finding/repair finding)))
+
+(defn verification-report
+  [document findings]
+  (let [failures (count findings)]
+    {:report/type :hara/metaspec-verification
+     :report/version "0.1.0"
+     :document/id (:document/id document)
+     :report/status (if (zero? failures) :pass :fail)
+     :summary {:pass (if (zero? failures) 1 0)
+               :fail failures
+               :unknown 0
+               :blocked 0}
+     :findings (vec findings)
+     :next-actions (vec (map action findings))}))

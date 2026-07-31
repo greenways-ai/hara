@@ -1,0 +1,20 @@
+(build invalid-checker
+  (artifact
+    :kind :music/midi
+    :output "dist/invalid.mid")
+
+  (stage source
+    :produces :music/source
+    :checkers
+    [(check
+       :music/harmony
+       {:checker/source
+        {:source/provider :github
+         :source/repository "greenways-ai/music-checkers"
+         :source/commit "main"
+         :source/path "src/music/harmony.hal"}
+        :checker/entrypoint music.harmony/check})])
+
+  (stage midi-output
+    :requires [source]
+    :produces :music/midi))

@@ -1,0 +1,17 @@
+{:contribution/id :greenways/supersonic
+ :contribution/owner :greenways
+ :contribution/version "0.1.0"
+ :contribution/status :draft
+ :contribution/title "Greenways Supersonic Audio Graph"
+ :contribution/summary "A canonical declarative graph exchanged with local audio providers."
+ :contribution/source
+ {:source/provider :github
+  :source/repository "hara-lang/hara"
+  :source/commit "34d74feba8c37361da2c3a5196aa2a6adc445561"
+  :source/path "contrib/greenways/supersonic"}
+ :contribution/specs
+ [{:spec/id :greenways/supersonic-spec
+   :spec/version "0.1.0"
+   :spec/path "spec/draft/greenways-supersonic-spec.edn"
+   :spec/metaspec "specs/00-unsorted/artifact/metaspec/artifact-metaspec.edn"
+   :spec/sha256 "sha256:27aa13f72535b756bdcc8c82a3be9dee32f9b5005e6ce550c2a1e56d8356af68"}]}

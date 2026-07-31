@@ -1,0 +1,15 @@
+{:conformance/id :greenways.build/checker-cases
+ :conformance/version "0.1.0"
+ :conformance/cases
+ [{:case/id :greenways.build.checker/valid-github :case/type :checker-identity :case/input :full-commit :case/expected :pass}
+  {:case/id :greenways.build.checker/missing-commit :case/type :checker-identity :case/input :missing-commit :case/expected :greenways/checker-commit}
+  {:case/id :greenways.build.checker/short-commit :case/type :checker-identity :case/input :short-commit :case/expected :greenways/checker-commit}
+  {:case/id :greenways.build.checker/branch-not-identity :case/type :checker-identity :case/input :branch :case/expected :greenways/checker-commit}
+  {:case/id :greenways.build.checker/missing-entrypoint :case/type :checker-identity :case/input :missing-entrypoint :case/expected :greenways/checker-entrypoint}
+  {:case/id :greenways.build.checker/invalid-variation :case/type :variation :case/input :invalid-config :case/expected :greenways/checker-variation}
+  {:case/id :greenways.build.checker/digest-mismatch :case/type :variation :case/input :digest-mismatch :case/expected :greenways/variation-digest}
+  {:case/id :greenways.build.report/complete :case/type :report :case/input :complete :case/expected :pass}
+  {:case/id :greenways.build.report/failed :case/type :report :case/input :failed :case/expected :fail}
+  {:case/id :greenways.build.report/unknown :case/type :report :case/input :unknown :case/expected :unknown}
+  {:case/id :greenways.build.report/blocked-downstream :case/type :report :case/input :blocked :case/expected :blocked}
+  {:case/id :greenways.build.report/independent-actions :case/type :report :case/input :two-failures :case/expected :stable-actions}]}

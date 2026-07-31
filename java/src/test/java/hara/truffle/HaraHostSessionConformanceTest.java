@@ -19,7 +19,7 @@ import org.junit.Test;
 /** Executes the Host/session boundary cases declared by the Host runtime specification. */
 public class HaraHostSessionConformanceTest {
   private static final Path SPEC =
-      Path.of("specs/runtime/draft/hal-host-runtime.edn");
+      Path.of("specs/00-unsorted/runtime/draft/hal-host-runtime.edn");
 
   @Test
   public void hostFacadeIdentityAndNamespaceStateAreSessionLocal() throws Exception {

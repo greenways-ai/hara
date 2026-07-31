@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "specs/language/draft/conformance/parity/wasm-truffle.edn"
+OUT = ROOT / "specs/00-unsorted/platform-language/draft/conformance/parity/wasm-truffle.edn"
 SEED = 20260723
 CASES: list[tuple[str, str, str, int | str, bool]] = []
 

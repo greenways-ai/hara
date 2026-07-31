@@ -344,7 +344,7 @@ public interface BuiltinCollection {
 
   @Module.Fn(name = "to:seq", complete = true)
   public static <ITR> Seq toSeq(ITR source) {
-    return new Seq(Iter.iter(source));
+    return Seq.create(Iter.iter(source));
   }
 
   @Module.Fn(name = "to:set", complete = true)

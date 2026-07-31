@@ -5,7 +5,7 @@
 ;; The namespace is always available, but operations succeed only when the
 ;; host grants network authority.
 ;;
-;; Contract (specs/language/draft/conformance/native.edn, Socket v1):
+;; Contract (specs/00-unsorted/platform-language/draft/conformance/native.edn, Socket v1):
 ;;   * connect accepts host, port, a reserved options value, and an
 ;;     (fn [error connection] ...) callback.
 ;;   * send accepts bytes and returns the byte count.

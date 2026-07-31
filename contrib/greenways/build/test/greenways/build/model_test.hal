@@ -1,0 +1,20 @@
+(ns greenways.build.model-test
+  (:require [greenways.build.model :as model]
+            [std.lib.test :as test]))
+
+(def example
+  (model/build 'example
+               (model/artifact :application/service "dist/example.hal")
+               [(model/specification-reference :hal/language "1.0.0")]
+               [(model/stage 'output [] :application/service [])]))
+
+(test/print-results
+ [(test/check "constructors return portable canonical-shaped data"
+              [(model/build? example)
+               (model/artifact? (:build/artifact example))
+               (model/stage? (first (:build/stages example)))]
+              [true true true])
+  (test/check "identifiers normalize to keywords"
+              [(:build/id example)
+               (get-in example [:build/stages 0 :stage/id])]
+              [:example :output])])

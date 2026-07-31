@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
 import static org.junit.Assert.fail;
 
 import hara.kernel.base.Parser;
@@ -23,7 +24,7 @@ import org.junit.Test;
 /** Executes the shared Rust-WASM/Truffle parity corpus. */
 public class HaraWasmTruffleParityTest {
   private static final Path CORPUS =
-      Path.of("specs/language/draft/conformance/parity/wasm-truffle.edn");
+      Path.of("specs/00-unsorted/platform-language/draft/conformance/parity/wasm-truffle.edn");
   private static final Path ARTIFACT =
       Path.of("rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm");
 
@@ -34,7 +35,7 @@ public class HaraWasmTruffleParityTest {
   @SuppressWarnings({"rawtypes", "unchecked"})
   @Test
   public void sharedCorpusMatchesRustWasmAndTruffle() throws Exception {
-    assertTrue("build rust/raw before parity tests: " + ARTIFACT, Files.isRegularFile(ARTIFACT));
+    assumeTrue("build rust/raw before parity tests: " + ARTIFACT, Files.isRegularFile(ARTIFACT));
     IMapType manifest = readManifest();
     ILinearType<?> cases = requireCases(manifest);
     assertEquals(1024, cases.count());

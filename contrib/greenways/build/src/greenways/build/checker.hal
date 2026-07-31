@@ -1,0 +1,536 @@
+(ns greenways.build.checker
+  (:require [greenways.build.codec :as codec]
+            [greenways.build.graph :as graph]
+            [greenways.build.model :as model]
+            [greenways.build.normalize :as normalize]
+            [std.foundation.string :as string]))
+
+(defn- member?
+  [value values]
+  (not (empty? (filter (fn [candidate] (= value candidate)) values))))
+
+(defn- append-values
+  [left right]
+  (reduce (fn [output value] (conj output value))
+          (vec left)
+          right))
+
+(defn- unique-values
+  [values]
+  (reduce (fn [output value]
+            (if (member? value output)
+              output
+              (conj output value)))
+          []
+          values))
+
+(defn- pow-int
+  [base exponent]
+  (loop [value 1
+         remaining exponent]
+    (if (zero? remaining)
+      value
+      (recur (* value base) (dec remaining)))))
+
+(def +sha256-initial+
+  [1779033703 3144134277 1013904242 2773480762
+   1359893119 2600822924 528734635 1541459225])
+
+(def +sha256-round+
+  [1116352408 1899447441 3049323471 3921009573
+   961987163 1508970993 2453635748 2870763221
+   3624381080 310598401 607225278 1426881987
+   1925078388 2162078206 2614888103 3248222580
+   3835390401 4022224774 264347078 604807628
+   770255983 1249150122 1555081692 1996064986
+   2554220882 2821834349 2952996808 3210313671
+   3336571891 3584528711 113926993 338241895
+   666307205 773529912 1294757372 1396182291
+   1695183700 1986661051 2177026350 2456956037
+   2730485921 2820302411 3259730800 3345764771
+   3516065817 3600352804 4094571909 275423344
+   430227734 506948616 659060556 883997877
+   958139571 1322822218 1537002063 1747873779
+   1955562222 2024104815 2227730452 2361852424
+   2428436474 2756734187 3204031479 3329325298])
+
+(defn- u32
+  [value]
+  (let [remainder (mod value 4294967296)]
+    (if (< remainder 0)
+      (+ remainder 4294967296)
+      remainder)))
+
+(defn- rotr
+  [value amount]
+  (let [divisor (bit-shift-left 1 amount)]
+    (u32
+     (+ (/ value divisor)
+        (* (mod value divisor)
+           (bit-shift-left 1 (- 32 amount)))))))
+
+(defn- ushr
+  [value amount]
+  (/ value (bit-shift-left 1 amount)))
+
+(defn- choose
+  [x y z]
+  (u32
+   (bit-xor (bit-and x y)
+            (bit-and (u32 (bit-not x)) z))))
+
+(defn- xor3
+  [left middle right]
+  (u32 (bit-xor (bit-xor left middle) right)))
+
+(defn- majority
+  [x y z]
+  (xor3 (bit-and x y)
+        (bit-and x z)
+        (bit-and y z)))
+
+(defn- upper-sigma-0
+  [x]
+  (xor3 (rotr x 2) (rotr x 13) (rotr x 22)))
+
+(defn- upper-sigma-1
+  [x]
+  (xor3 (rotr x 6) (rotr x 11) (rotr x 25)))
+
+(defn- lower-sigma-0
+  [x]
+  (xor3 (rotr x 7)
+        (rotr x 18)
+        (ushr x 3)))
+
+(defn- lower-sigma-1
+  [x]
+  (xor3 (rotr x 17)
+        (rotr x 19)
+        (ushr x 10)))
+
+(defn- unsigned-byte
+  [value]
+  (if (< value 0) (+ value 256) value))
+
+(defn- length-byte
+  [bit-length shift]
+  (mod (/ bit-length (pow-int 256 shift)) 256))
+
+(defn- padded-bytes
+  [text]
+  (let [input (vec (map (fn [value] (unsigned-byte value))
+                        (string/encode text)))
+        bit-length (* 8 (count input))
+        with-marker (conj input 128)
+        zero-count (mod (- 56 (mod (count with-marker) 64)) 64)
+        with-zeros (append-values with-marker
+                                  (vec (repeat zero-count 0)))]
+    (append-values
+     with-zeros
+     (vec
+      (map (fn [shift] (length-byte bit-length shift))
+           [7 6 5 4 3 2 1 0])))))
+
+(defn- word-at
+  [bytes offset]
+  (u32 (+ (bit-shift-left (nth bytes offset) 24)
+          (bit-shift-left (nth bytes (+ offset 1)) 16)
+          (bit-shift-left (nth bytes (+ offset 2)) 8)
+          (nth bytes (+ offset 3)))))
+
+(defn- message-schedule
+  [bytes offset]
+  (loop [words (vec (map (fn [index]
+                           (word-at bytes (+ offset (* 4 index))))
+                         (range 16)))
+         index 16]
+    (if (= index 64)
+      words
+      (recur
+       (conj words
+             (u32 (+ (lower-sigma-1 (nth words (- index 2)))
+                     (nth words (- index 7))
+                     (lower-sigma-0 (nth words (- index 15)))
+                     (nth words (- index 16)))))
+       (inc index)))))
+
+(defn- compress-rounds
+  [state words]
+  (loop [round 0
+         a (nth state 0)
+         b (nth state 1)
+         c (nth state 2)
+         d (nth state 3)
+         e (nth state 4)
+         f (nth state 5)
+         g (nth state 6)
+         h (nth state 7)]
+    (if (= round 64)
+      [a b c d e f g h]
+      (let [temp-1 (u32 (+ h
+                           (upper-sigma-1 e)
+                           (choose e f g)
+                           (nth +sha256-round+ round)
+                           (nth words round)))
+            temp-2 (u32 (+ (upper-sigma-0 a)
+                           (majority a b c)))]
+        (recur (inc round)
+               (u32 (+ temp-1 temp-2))
+               a
+               b
+               c
+               (u32 (+ d temp-1))
+               e
+               f
+               g)))))
+
+(defn- compress-block
+  [state bytes offset]
+  (let [working (compress-rounds state (message-schedule bytes offset))]
+    (vec (map (fn [index]
+                (u32 (+ (nth state index)
+                        (nth working index))))
+              (range 8)))))
+
+(defn- hex32
+  [value]
+  (let [digits "0123456789abcdef"]
+    (string/join
+     ""
+     (vec
+      (map (fn [shift]
+             (string/char-at
+              digits
+              (mod (/ value
+                      (pow-int 16 shift))
+                   16)))
+           [7 6 5 4 3 2 1 0])))))
+
+(defn sha256
+  "Returns a deterministic SHA-256 identity for a string."
+  [text]
+  (let [bytes (padded-bytes text)]
+    (loop [offset 0
+           state +sha256-initial+]
+      (if (= offset (count bytes))
+        (str "sha256:"
+             (string/join "" (vec (map (fn [value] (hex32 value))
+                                       state))))
+        (recur (+ offset 64)
+               (compress-block state bytes offset))))))
+
+(defn- canonical-data
+  [value]
+  (if (map? value)
+    (reduce (fn [output entry]
+              (assoc output
+                     (key entry)
+                     (canonical-data (val entry))))
+            {}
+            (sort-by
+             (fn [entry] (pr-str (key entry)))
+             (reduce (fn [output entry] (conj output entry))
+                     []
+                     value)))
+    (if (vector? value)
+      (vec (map (fn [entry] (canonical-data entry))
+                value))
+      (if (set? value)
+        (vec (sort-by
+              (fn [entry] (pr-str entry))
+              (vec (map (fn [entry] (canonical-data entry))
+                        value))))
+        (if (list? value)
+          (vec (map (fn [entry] (canonical-data entry))
+                    value))
+          value)))))
+
+(defn variation-digest
+  [variation]
+  (sha256
+   (pr-str
+    (canonical-data
+     {:variation/id (:variation/id variation)
+      :variation/checker (:variation/checker variation)
+      :variation/config (:variation/config variation)}))))
+
+(defn valid-repository?
+  [value]
+  (and (string? value)
+       (= 2 (count (string/split value "/")))
+       (every? (fn [part] (not (string/blank? part)))
+               (string/split value "/"))))
+
+(defn- hex-character?
+  [value]
+  (string/includes? "0123456789abcdefABCDEF" value))
+
+(defn valid-commit?
+  [value]
+  (and (string? value)
+       (= 40 (string/length value))
+       (every? (fn [index]
+                 (hex-character? (string/char-at value index)))
+               (range 40))))
+
+(defn valid-source-path?
+  [value]
+  (and (string? value)
+       (not (string/blank? value))
+       (not (string/starts-with? value "/"))
+       (not (member? ".." (string/split value "/")))))
+
+(defn valid-entrypoint?
+  [value]
+  (and (symbol? value)
+       (string/includes? (str value) "/")))
+
+(defn validate-checker-identity
+  [checker]
+  (let [source (:checker/source checker)
+        checker-id (:checker/id checker)]
+    (vec
+     (concat
+      (if (keyword? checker-id)
+        []
+        [(model/finding :greenways/checker-id
+                        :error
+                        "Checker ID must be a qualified keyword"
+                        {:checker/id checker-id})])
+      (if (= :github (:source/provider source))
+        []
+        [(model/finding :greenways/checker-provider
+                        :error
+                        "Checker source provider must be :github"
+                        {:checker/id checker-id})])
+      (if (valid-repository? (:source/repository source))
+        []
+        [(model/finding :greenways/checker-repository
+                        :error
+                        "Checker repository must be owner/name"
+                        {:checker/id checker-id})])
+      (if (valid-commit? (:source/commit source))
+        []
+        [(model/finding :greenways/checker-commit
+                        :error
+                        "Checker commit must be a full immutable 40-character Git SHA"
+                        {:checker/id checker-id})])
+      (if (valid-source-path? (:source/path source))
+        []
+        [(model/finding :greenways/checker-path
+                        :error
+                        "Checker path must be repository-relative"
+                        {:checker/id checker-id})])
+      (if (valid-entrypoint? (:checker/entrypoint checker))
+        []
+        [(model/finding :greenways/checker-entrypoint
+                        :error
+                        "Checker entrypoint must be a qualified symbol"
+                        {:checker/id checker-id})])))))
+
+(defn validate-variation
+  [variation]
+  (vec
+   (concat
+    (if (and (keyword? (:variation/id variation))
+             (keyword? (:variation/checker variation))
+             (map? (:variation/config variation)))
+      []
+      [(model/finding :greenways/checker-variation
+                      :error
+                      "Variation requires IDs and a configuration map"
+                      {:variation/id (:variation/id variation)})])
+    (if (= (:variation/digest variation)
+           (variation-digest variation))
+      []
+      [(model/finding :greenways/variation-digest
+                      :error
+                      "Variation digest does not match canonical variation data"
+                      {:variation/id (:variation/id variation)})]))))
+
+(defn effective-checker
+  [checker variation]
+  {:checker/id (:checker/id checker)
+   :source/repository (get-in checker [:checker/source :source/repository])
+   :source/commit (get-in checker [:checker/source :source/commit])
+   :source/path (get-in checker [:checker/source :source/path])
+   :checker/entrypoint (:checker/entrypoint checker)
+   :variation/id (:variation/id variation)
+   :variation/digest (:variation/digest variation)})
+
+(defn check-build-structure
+  [input]
+  (let [build (:build input)]
+    (vec
+     (concat
+      (if (normalize/canonical-build? build)
+        []
+        [(model/finding :greenways/build-structure
+                        :error
+                        "Build is not canonical"
+                        {})])
+      (if (pos? (count (:build/stages build)))
+        []
+        [(model/finding :greenways/no-stages
+                        :error
+                        "Build has no stages"
+                        {})])))))
+
+(defn check-stage-identities
+  [input]
+  (let [ids (vec (map (fn [stage] (:stage/id stage))
+                      (get-in input [:build :build/stages])))
+        counts (frequencies ids)]
+    (vec
+     (map (fn [stage-id]
+            (model/finding :greenways/duplicate-stage
+                           :error
+                           (str "Duplicate stage ID: " (name stage-id))
+                           {:stage/id stage-id}))
+          (filter (fn [stage-id] (> (get counts stage-id) 1))
+                  (unique-values ids))))))
+
+(defn check-dependency-graph
+  [input]
+  (let [build (:build input)
+        stages (:build/stages build)
+        stage-ids (vec (map (fn [stage] (:stage/id stage)) stages))
+        missing (graph/missing-dependencies build)
+        cycles (graph/find-cycles build)
+        self-dependencies
+        (reduce (fn [output stage]
+                  (if (member? (:stage/id stage)
+                               (:stage/requires stage))
+                    (conj output (:stage/id stage))
+                    output))
+                []
+                stages)
+        reachable (graph/reachable-stages build)
+        producers
+        (vec
+         (filter
+          (fn [stage]
+            (= (:stage/produces stage)
+               (get-in build [:build/artifact :artifact/kind])))
+          stages))]
+    (append-values
+     (append-values
+      (append-values
+       (append-values
+        (append-values
+         (vec
+          (map (fn [entry]
+                 (model/finding
+                  :greenways/missing-dependency
+                  :error
+                  (str "Unknown required stage: "
+                       (name (:stage/dependency entry)))
+                  entry))
+               missing))
+         (vec
+          (map (fn [stage-id]
+                 (model/finding
+                  :greenways/self-dependency
+                  :error
+                  (str "Stage depends on itself: " (name stage-id))
+                  {:stage/id stage-id}))
+               self-dependencies)))
+        (vec
+         (map (fn [cycle]
+                (model/finding
+                 :greenways/dependency-cycle
+                 :error
+                 (str "Stage dependency cycle: "
+                      (string/join " → "
+                                   (vec (map (fn [stage-id]
+                                               (name stage-id))
+                                             cycle))))
+                 {:stages cycle}))
+              cycles)))
+      (if (empty? producers)
+        [(model/finding
+          :greenways/no-final-producer
+          :error
+          "No stage produces the declared artifact kind"
+          {:artifact/kind (get-in build [:build/artifact :artifact/kind] )})]
+        []))
+      (if (> (count producers) 1)
+        [(model/finding
+          :greenways/conflicting-final-producers
+          :error
+          "Multiple stages produce the declared artifact kind"
+          {:stages (vec (map (fn [stage] (:stage/id stage))
+                             producers))})]
+        []))
+     (vec
+      (map (fn [stage-id]
+             (model/finding
+              :greenways/unreachable-stage
+              :warning
+              (str "Stage does not contribute to the declared artifact: "
+                   (name stage-id))
+              {:stage/id stage-id}))
+           (filter (fn [stage-id]
+                     (not (member? stage-id reachable)))
+                   stage-ids))))))
+
+(defn check-checker-identities
+  [input]
+  (reduce
+   (fn [output stage]
+     (reduce
+      (fn [stage-output checker]
+        (append-values
+         stage-output
+         (if (:checker/source checker)
+           (validate-checker-identity checker)
+           [])))
+      output
+      (:stage/checkers stage)))
+   []
+   (get-in input [:build :build/stages])))
+
+(defn check-codec-roundtrip
+  [input]
+  (let [build (:build input)
+        canonical (codec/to-edn build)]
+    (if (and (= canonical
+                (codec/to-edn (codec/from-edn canonical)))
+             (= canonical
+                (codec/to-edn
+                 (codec/read-build-string
+                  (codec/write-build-string build)))))
+      []
+      [(model/finding :greenways/codec-roundtrip
+                      :error
+                      "Build codec round-trip failed"
+                      {})])))
+
+(def built-in-registry
+  {:greenways/build-structure check-build-structure
+   :greenways/stage-identities check-stage-identities
+   :greenways/dependency-graph check-dependency-graph
+   :greenways/checker-identities check-checker-identities
+   :greenways/codec-roundtrip check-codec-roundtrip})
+
+(defn check-build
+  "Executes only the closed built-in checker registry."
+  ([build] (check-build build {}))
+  ([build context]
+   (let [input {:artifact (:build/artifact build)
+                :build build
+                :stage nil
+                :variation nil
+                :context context}]
+     (reduce
+      (fn [output checker-id]
+        (append-values
+         output
+         ((get built-in-registry checker-id) input)))
+      []
+      [:greenways/build-structure
+       :greenways/stage-identities
+       :greenways/dependency-graph
+       :greenways/checker-identities
+       :greenways/codec-roundtrip]))))

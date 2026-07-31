@@ -2,6 +2,7 @@ package hara.truffle;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -81,7 +82,7 @@ public class HaraHtaExtensionTest {
   }
 
   private static void withExtension(String hostCalls, CheckedConsumer operation) throws Exception {
-    assertTrue("build rust/raw before HTA tests: " + ARTIFACT, Files.isRegularFile(ARTIFACT));
+    assumeTrue("build rust/raw before HTA tests: " + ARTIFACT, Files.isRegularFile(ARTIFACT));
     Path root = Files.createTempDirectory("hara-hta-extension-");
     Path extension = root.resolve("hara/runtime/wasm");
     Files.createDirectories(extension);

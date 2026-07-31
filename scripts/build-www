@@ -22,7 +22,7 @@ mkdir -p "$HIR_OUT"
 "$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/program.hal" --output "$HIR_OUT/studio-program.hir"
 "$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/graph.hal" --output "$HIR_OUT/studio-graph.hir"
 "$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/session.hal" --output "$HIR_OUT/studio-session.hir"
-"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/supersonic.hal" --output "$HIR_OUT/supersonic.hir"
+"$HARA_COMPILER" compile-hir "$ROOT/contrib/greenways/supersonic/src/hal/gw/audio/supersonic.hal" --output "$HIR_OUT/supersonic.hir"
 
 rm -rf "$OUT"
 mkdir -p "$OUT/runtime/host" "$OUT/runtime/packages/hta" "$OUT/runtime/studio/hal" "$OUT/runtime/std/lib/substrate"
@@ -94,10 +94,12 @@ cp "$ROOT/rust/web/studio/boot.js" \
    "$ROOT/rust/web/studio/program-host.js" \
    "$ROOT/rust/web/studio/program-worker.js" \
    "$ROOT/rust/web/studio/session-router.js" \
-   "$ROOT/rust/web/studio/supersonic.js" \
+   "$ROOT/contrib/greenways/supersonic/src/js/supersonic.js" \
    "$ROOT/rust/web/studio/workspace.js" \
    "$OUT/runtime/studio/"
 cp "$ROOT/rust/web/studio/hal/"*.hal "$OUT/runtime/studio/hal/"
+cp "$ROOT/contrib/greenways/supersonic/src/hal/gw/audio/supersonic.hal" \
+   "$OUT/runtime/studio/hal/supersonic.hal"
 cp "$ROOT/rust/web/studio/capabilities/"*.js "$OUT/runtime/studio/capabilities/"
 cp "$ROOT/lib/src/std/lib/substrate.hal" "$OUT/runtime/std/lib/substrate.hal"
 cp "$ROOT/lib/src/std/lib/substrate/protocol.hal" \

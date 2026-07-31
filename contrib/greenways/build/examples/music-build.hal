@@ -1,0 +1,31 @@
+(build music
+  (artifact
+    :kind :music/midi
+    :output "dist/music.mid")
+
+  (use-spec
+    :hal/language
+    {:version "1.0.0"})
+
+  (stage source
+    :produces :music/source
+    :checkers
+    [(check :greenways/build-structure)])
+
+  (stage music-model
+    :requires [source]
+    :produces :music/model
+    :checkers
+    [(check :greenways/stage-identities)])
+
+  (stage timeline
+    :requires [music-model]
+    :produces :music/timeline
+    :checkers
+    [(check :greenways/dependency-graph)])
+
+  (stage midi-output
+    :requires [timeline]
+    :produces :music/midi
+    :checkers
+    [(check :greenways/codec-roundtrip)]))

@@ -63,6 +63,14 @@ public final class Main {
   }
 
   static int run(String[] args, InputStream input, PrintStream output, PrintStream error) {
+    if (args.length == 1 && ("--version".equals(args[0]) || "-V".equals(args[0]))) {
+      output.println("hara truffle 0.1.0");
+      return 0;
+    }
+    if (args.length == 1 && ("--help".equals(args[0]) || "-h".equals(args[0]))) {
+      printUsage(output);
+      return 0;
+    }
     if (args.length > 0 && "compile-hir".equals(args[0])) {
       return HirCompiler.run(
           java.util.Arrays.copyOfRange(args, 1, args.length), output, error);
@@ -79,6 +87,7 @@ public final class Main {
       return 2;
     }
     args = capabilities.arguments;
+    args = HaraCliRouter.instance().normalize(args);
     if (args.length == 0) {
       return runRepl(
           input,
@@ -89,7 +98,9 @@ public final class Main {
           !capabilities.offline);
     }
 
-    if ("help".equals(args[0]) || "--help".equals(args[0])) {
+    if ("help".equals(args[0])
+        || "--help".equals(args[0])
+        || java.util.Arrays.stream(args).skip(1).anyMatch(value -> "--help".equals(value) || "-h".equals(value))) {
       printUsage(output);
       return 0;
     }
@@ -138,6 +149,14 @@ public final class Main {
           output,
           error);
     }
+    if ("spec".equals(args[0])) {
+      return HaraSpecTool.run(
+          java.util.Arrays.copyOfRange(args, 1, args.length), output, error);
+    }
+    if ("package".equals(args[0])) {
+      return HaraPackageTool.run(
+          java.util.Arrays.copyOfRange(args, 1, args.length), output, error);
+    }
 
     try {
       if ("new".equals(args[0])) return newProject(args, output);
@@ -183,7 +202,7 @@ public final class Main {
       return 1;
     } catch (IOException exception) {
       error.println(exception.getMessage());
-      return 1;
+      return 2;
     } catch (RuntimeException exception) {
       error.println(exception.getMessage());
       return 1;
@@ -333,9 +352,23 @@ public final class Main {
     if (args.length > 2) throw new HaraException("test accepts at most one path");
     HaraProject project = cliProject(args, capabilities);
     ArrayList<Path> files = new ArrayList<>();
-    for (Path root : project.testPaths()) {
-      if (Files.exists(root)) try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
+    Path requested =
+        args.length == 2 ? Path.of(args[1]).toAbsolutePath().normalize() : null;
+    if (requested != null && Files.isRegularFile(requested)) {
+      if (!requested.toString().endsWith(".hal"))
+        throw new HaraException("test file must use the .hal extension");
+      files.add(requested);
+    } else if (requested != null && Files.isDirectory(requested)) {
+      try (java.util.stream.Stream<Path> paths = Files.walk(requested)) {
         paths.filter(path -> path.toString().endsWith(".hal")).forEach(files::add);
+      }
+    } else if (requested != null) {
+      throw new HaraException("test path does not exist: " + requested);
+    } else {
+      for (Path root : project.testPaths()) {
+        if (Files.exists(root)) try (java.util.stream.Stream<Path> paths = Files.walk(root)) {
+          paths.filter(path -> path.toString().endsWith(".hal")).forEach(files::add);
+        }
       }
     }
     files.sort(Comparator.naturalOrder());
@@ -424,7 +457,7 @@ public final class Main {
     String host = endpoint.substring(0, separator);
     try (Socket socket = new Socket(host, Integer.parseInt(endpoint.substring(separator + 1)))) {
       RespConnection conn = new RespConnection(socket);
-      conn.write("HELLO", "3", "CLIENT", "HARA-REMOTE");
+      conn.write("HELLO", "4", "CLIENT", "HARA-REMOTE");
       output.println(remoteText(conn.read()));
       java.io.BufferedReader reader =
           new java.io.BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8));
@@ -489,7 +522,7 @@ public final class Main {
     try (InputStream resource =
         Main.class
             .getClassLoader()
-            .getResourceAsStream("specs/language/draft/conformance/l0.edn")) {
+            .getResourceAsStream("specs/00-unsorted/platform-language/draft/conformance/l0.edn")) {
       if (resource == null) {
         error.println("Missing packaged L0 conformance manifest");
         return 1;
@@ -682,7 +715,8 @@ public final class Main {
       if (options && "--".equals(argument)) {
         options = false;
       } else if (options && "--allow-file".equals(argument)) file = true;
-      else if (options && "--allow-net".equals(argument)) network = true;
+      else if (options && ("--allow-net".equals(argument) || "--native-sockets".equals(argument)))
+        network = true;
       else if (options && "--allow-process".equals(argument)) process = true;
       else if (options && "--offline".equals(argument)) offline = true;
       else if (options && "--log-requests".equals(argument)) logRequests = true;
@@ -693,6 +727,10 @@ public final class Main {
         project = Path.of(requiredOption("--project", argument.substring("--project=".length())));
       else if (options && "--project".equals(argument))
         project = Path.of(nextOption(arguments, ++index, "--project"));
+      else if (options && argument.startsWith("--root="))
+        project = Path.of(requiredOption("--root", argument.substring("--root=".length())));
+      else if (options && "--root".equals(argument))
+        project = Path.of(nextOption(arguments, ++index, "--root"));
       else if (options && argument.startsWith("--host="))
         host = requiredOption("--host", argument.substring("--host=".length()));
       else if (options && "--host".equals(argument))
@@ -1290,6 +1328,7 @@ public final class Main {
 
   static String display(Value result) {
     if (result.isNull()) return "nil";
+    if (result.hasHashEntries()) return result.toString();
     if (result.isHostObject() && result.asHostObject() instanceof Iterator<?>) {
       return "#<lazy-iterator>";
     }
@@ -1335,24 +1374,25 @@ public final class Main {
   }
 
   private static void printUsage(PrintStream output) {
-    output.println("hara [OPTIONS]                         JLine REPL + ROOT RESP listener");
-    output.println("hara --offline                        JLine REPL without a listener");
-    output.println("hara headless [OPTIONS]               ROOT RESP listener only");
-    output.println("hara server [OPTIONS]                 compatibility alias for headless");
-    output.println("hara standalone [OPTIONS]             compatibility alias for --offline");
-    output.println("hara remote HOST:PORT");
-    output.println("hara new NAME | check [PATH] | add COORDINATE@RANGE | remove COORDINATE | sync | test [PATH]");
-    output.println("hara [--allow-file] [--allow-net] eval <expression>");
-    output.println("hara [--allow-file] [--allow-net] run [file]");
-    output.println("hara [--allow-file] [--allow-net] stdin");
-    output.println("hara conformance");
-    output.println("hara extension [check|build|install|test] ...");
+    output.println("Hara CLI · Truffle runtime");
     output.println();
-    output.println("Options:");
-    output.println("  --host HOST, --host=HOST");
-    output.println("  --port PORT, --port=PORT");
-    output.println("  --offline  --log-requests  --allow-file  --allow-net  --allow-process");
-    output.println("  --history PATH  --project PATH  --no-history  --no-splash  --no-color");
+    output.println("Usage:");
+    output.println("  hara [OPTIONS] repl");
+    output.println("  hara eval EXPRESSION | run FILE | stdin");
+    output.println("  hara server | remote HOST:PORT");
+    output.println("  hara project <new|check|run|test|add|remove|sync|update> ...");
+    output.println("  hara package <COMMAND> ...");
+    output.println("  hara spec <COMMAND> ...");
+    output.println("  hara extension <check|build|install|test> ...");
+    output.println();
+    output.println("Compatibility aliases:");
+    output.println("  new check test add remove sync update headless standalone");
+    output.println();
+    output.println("Global options:");
+    output.println("  --project PATH, --root PATH, --offline");
+    output.println("  --allow-file, --allow-net, --allow-process");
+    output.println("  --host HOST, --port PORT, --history PATH");
+    output.println("  --no-history, --no-splash, --no-color, --log-requests");
   }
 
 

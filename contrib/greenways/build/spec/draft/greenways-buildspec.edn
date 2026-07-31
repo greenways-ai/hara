@@ -1,0 +1,116 @@
+{:document/id :greenways/buildspec
+ :document/type :hara/artifact-specification
+ :document/version "0.1.0"
+ :document/status :draft
+ :document/title "Greenways Build DSL Specification"
+ :document/summary "A local HAL DSL for staged artifact construction and deterministic structural verification."
+
+ :spec/conforms-to {:spec/id :hara/artifact-metaspec
+                    :spec/version "0.1.0"}
+ :spec/artifact-kind :greenways/build
+
+ :spec/forms
+ [{:form/id :greenways.build/build
+   :form/head build
+   :form/cardinality :exactly-one
+   :form/grammar "(build ID BODY+)"}
+  {:form/id :greenways.build/artifact
+   :form/head artifact
+   :form/cardinality :exactly-one
+   :form/grammar "(artifact :kind QUALIFIED-KEYWORD :output STRING)"}
+  {:form/id :greenways.build/use-spec
+   :form/head use-spec
+   :form/cardinality :zero-or-more
+   :form/grammar "(use-spec QUALIFIED-KEYWORD {:version STRING})"}
+  {:form/id :greenways.build/stage
+   :form/head stage
+   :form/cardinality :one-or-more
+   :form/grammar "(stage ID :requires [ID*]? :produces QUALIFIED-KEYWORD :checkers [CHECK*]?)"}
+  {:form/id :greenways.build/check
+   :form/head check
+   :form/cardinality :nested
+   :form/grammar "(check QUALIFIED-KEYWORD OPTIONS?)"}]
+
+ :spec/entities
+ [{:entity/id :greenways.build/build
+   :entity/schema
+   {:schema/required [:greenways/type :greenways/version :build/id
+                      :build/artifact :build/specs :build/stages]}}
+  {:entity/id :greenways.build/artifact
+   :entity/schema {:schema/required [:artifact/kind :artifact/output]}}
+  {:entity/id :greenways.build/specification-reference
+   :entity/schema {:schema/required [:spec/id :spec/version]}}
+  {:entity/id :greenways.build/stage
+   :entity/schema {:schema/required [:stage/id :stage/requires
+                                     :stage/produces :stage/checkers]}}
+  {:entity/id :greenways.build/checker-reference
+   :entity/schema {:schema/required [:checker/id]}}]
+
+ :spec/relations
+ [{:relation/id :greenways.build/stage-dependency
+   :relation/from :greenways.build/stage
+   :relation/to :greenways.build/stage
+   :relation/cardinality :many}
+  {:relation/id :greenways.build/final-producer
+   :relation/from :greenways.build/stage
+   :relation/to :greenways.build/artifact
+   :relation/cardinality :one-or-more}]
+
+ :spec/codecs
+ [{:codec/id :greenways.build/hal-edn
+   :codec/from :greenways.build/build
+   :codec/to :hara/edn
+   :codec/laws [:greenways.build/semantic-roundtrip
+                :greenways.build/canonical-edn-roundtrip
+                :greenways.build/string-roundtrip]}]
+
+ :spec/checkers
+ [{:checker/id :greenways/build-structure
+   :checker/input :greenways.build/build
+   :checker/output :hara.artifact/finding}
+  {:checker/id :greenways/stage-identities
+   :checker/input :greenways.build/build
+   :checker/output :hara.artifact/finding}
+  {:checker/id :greenways/dependency-graph
+   :checker/input :greenways.build/build
+   :checker/output :hara.artifact/finding}
+  {:checker/id :greenways/checker-identities
+   :checker/input :greenways.build/build
+   :checker/output :hara.artifact/finding}
+  {:checker/id :greenways/codec-roundtrip
+   :checker/input :greenways.build/build
+   :checker/output :hara.artifact/finding}]
+
+ :spec/laws
+ [{:law/id :greenways.build/normalization-idempotence
+   :law/expression "(= (normalize-build x) (normalize-build (normalize-build x)))"}
+  {:law/id :greenways.build/semantic-roundtrip
+   :law/expression "(= (normalize-build x) (normalize-build (from-edn (to-edn x))))"}
+  {:law/id :greenways.build/canonical-edn-roundtrip
+   :law/expression "(= x (to-edn (from-edn x)))"}
+  {:law/id :greenways.build/string-roundtrip
+   :law/expression "(= (normalize-build x) (normalize-build (read-build-string (write-build-string x))))"}]
+
+ :spec/conformance
+ [{:conformance/id :greenways.build/codec-cases
+   :conformance/path "conformance/codec.edn"}
+  {:conformance/id :greenways.build/graph-cases
+   :conformance/path "conformance/graph.edn"}
+  {:conformance/id :greenways.build/checker-cases
+   :conformance/path "conformance/checker.edn"}]
+
+ :greenways.build/canonical-example
+ {:greenways/type :build
+  :greenways/version "0.1.0"
+  :build/id :example
+  :build/artifact {:artifact/kind :application/service
+                   :artifact/output "dist/example.hal"}
+  :build/specs [{:spec/id :hal/language :spec/version "1.0.0"}]
+  :build/stages
+  [{:stage/id :parse :stage/requires [] :stage/produces :hal/forms
+    :stage/checkers [{:checker/id :hal/readable}]}
+   {:stage/id :analyze :stage/requires [:parse]
+    :stage/produces :greenways/analysis
+    :stage/checkers [{:checker/id :greenways/references}]}
+   {:stage/id :output :stage/requires [:analyze]
+    :stage/produces :application/service :stage/checkers []}]}}

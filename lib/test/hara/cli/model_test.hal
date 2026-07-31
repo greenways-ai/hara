@@ -1,0 +1,33 @@
+(ns hara.cli.model-test
+  (:require [hara.cli.model :as model]
+            [std.lib.test :as test]))
+
+(test/print-results
+ [(test/check "outcome classes have stable exits"
+              (vec
+               (map model/outcome-exit
+                    [:hara.cli.outcome/success
+                     :hara.cli.outcome/failed
+                     :hara.cli.outcome/read-error
+                     :hara.cli.outcome/interrupted]))
+              [0 1 2 130])
+  (test/check "requests contain ordinary canonical data"
+              (model/request
+               :demo/run
+               ["main.hal"]
+               {:option/format :edn}
+               {:runtime/id :hara.runtime/rust
+                :runtime/cwd "."
+                :runtime/project nil
+                :runtime/capabilities []})
+              {:request/route :demo/run
+               :request/arguments ["main.hal"]
+               :request/options {:option/format :edn}
+               :request/runtime :hara.runtime/rust
+               :request/cwd "."
+               :request/project nil
+               :request/capabilities []})
+  (test/check "failed results cannot report a zero exit"
+              (:result/exit
+               (model/result :hara.cli.outcome/failed nil []))
+              1)])
