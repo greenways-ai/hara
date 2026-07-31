@@ -29,13 +29,28 @@ public final class HaraWasmTruffleParityBenchmark {
     int iterations = args.length > 2 ? Integer.parseInt(args[2]) : 1000;
     Path output =
         args.length > 3 ? Path.of(args[3]) : Path.of("target/wasm-truffle-parity-speed.csv");
+    int sliceIndex = args.length > 4 ? Integer.parseInt(args[4]) : 0;
+    int sliceTotal = args.length > 5 ? Integer.parseInt(args[5]) : 1;
     if (coldSamples < 1 || warmup < 0 || iterations < 1) {
       throw new IllegalArgumentException(
           "expected positive cold samples/iterations and non-negative warmup");
     }
+    if (sliceIndex < 0 || sliceIndex >= sliceTotal) {
+      throw new IllegalArgumentException(
+          "expected 0 <= slice index < slice total, got " + sliceIndex + " of " + sliceTotal);
+    }
     if (!Files.isRegularFile(ARTIFACT)) throw new IllegalStateException("missing " + ARTIFACT);
 
     List<IMapType> cases = readCases();
+    if (sliceTotal > 1) {
+      // Round-robin keeps corpus order within a slice and balances the
+      // curated/generated groups across slices.
+      List<IMapType> sliced = new ArrayList<>();
+      for (int i = 0; i < cases.size(); i++) {
+        if (i % sliceTotal == sliceIndex) sliced.add(cases.get(i));
+      }
+      cases = sliced;
+    }
     Path root = Files.createTempDirectory("hara-wasm-truffle-benchmark-");
     Path extension = root.resolve("test/rust/parity");
     Files.createDirectories(extension);
@@ -105,7 +120,9 @@ public final class HaraWasmTruffleParityBenchmark {
       Files.deleteIfExists(extension.getParent().getParent());
       Files.deleteIfExists(root);
     }
-    System.out.printf("wrote %d parity timings to %s%n", cases.size(), output);
+    System.out.printf(
+        "wrote %d parity timings (slice %d of %d) to %s%n",
+        cases.size(), sliceIndex, sliceTotal, output);
   }
 
   @SuppressWarnings({"rawtypes", "unchecked"})
