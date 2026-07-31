@@ -1,176 +1,167 @@
 (ns std.substrate.util-test
+  (:use code.test)
   (:require [std.foundation.promise :as promise]
             [std.lib.substrate :as core]
-            [std.lib.test :as test]
             [std.substrate.frame :as frame]
             [std.substrate.util :as util]))
 
-(def results
-  [(test/check
-    "gets lists and sends through transports"
-    (let [node (core/node-create "node/transports")
-          sent (atom [])]
-      (core/section-put
-       node :transports "peer-b"
-       {"id" "peer-b"
-        "send_fn" (fn [outgoing]
-                    (reset! sent (conj @sent ["peer-b" (get outgoing "id")]))
-                    outgoing)})
-      (core/section-put
-       node :transports "peer-a"
-       {"id" "peer-a"
-        "send_fn" (fn [outgoing]
-                    (reset! sent (conj @sent ["peer-a" (get outgoing "id")]))
-                    outgoing)})
-      (promise/value
-       (util/transport-send
-        node "peer-a"
-        (frame/stream-frame "room/a" "event/a" 1 {"id" "evt-a"} nil)))
-      [(get (util/transport-get node "peer-a") "id")
-       (util/transport-list node)
-       @sent])
-    ["peer-a" ["peer-a" "peer-b"] [["peer-a" "evt-a"]]])
+(fact "gets lists and sends through transports"
+  (let [node (core/node-create "node/transports")
+        sent (atom [])]
+    (core/section-put
+     node :transports "peer-b"
+     {"id" "peer-b"
+      "send_fn" (fn [outgoing]
+                  (reset! sent (conj @sent ["peer-b" (get outgoing "id")]))
+                  outgoing)})
+    (core/section-put
+     node :transports "peer-a"
+     {"id" "peer-a"
+      "send_fn" (fn [outgoing]
+                  (reset! sent (conj @sent ["peer-a" (get outgoing "id")]))
+                  outgoing)})
+    (promise/value
+     (util/transport-send
+      node "peer-a"
+      (frame/stream-frame "room/a" "event/a" 1 {"id" "evt-a"} nil)))
+    [(get (util/transport-get node "peer-a") "id")
+     (util/transport-list node)
+     @sent])
+  => ["peer-a" ["peer-a" "peer-b"] [["peer-a" "evt-a"]]])
 
-   (test/check
-    "selects explicit default and local request targets"
-    (let [node (core/node-create "node/target")]
-      (core/section-put node :transports "peer-a"
-                        {"id" "peer-a" "send_fn" identity})
-      [(util/transport-request-target node {"transport_id" "peer-b"})
-       (util/transport-request-target node {})
-       (util/transport-request-target node {"local" true})
-       (util/transport-request-target
-        (core/node-create "node/empty") {})])
-    ["peer-b" "peer-a" nil nil])
+(fact "selects explicit default and local request targets"
+  (let [node (core/node-create "node/target")]
+    (core/section-put node :transports "peer-a"
+                      {"id" "peer-a" "send_fn" identity})
+    [(util/transport-request-target node {"transport_id" "peer-b"})
+     (util/transport-request-target node {})
+     (util/transport-request-target node {"local" true})
+     (util/transport-request-target
+      (core/node-create "node/empty") {})])
+  => ["peer-b" "peer-a" nil nil])
 
-   (test/check
-    "broadcasts while respecting exclusions"
-    (let [node (core/node-create "node/route")
-          sent (atom [])
-          outgoing (frame/stream-frame
-                    "room/a" "event/a" 1 {"id" "evt-route"} nil)]
-      (core/section-put node :transports "peer-a"
-                        {"id" "peer-a"
-                         "send_fn" (fn [value]
-                                     (reset! sent (conj @sent "peer-a"))
-                                     value)})
-      (core/section-put node :transports "peer-b"
-                        {"id" "peer-b"
-                         "send_fn" (fn [value]
-                                     (reset! sent (conj @sent "peer-b"))
-                                     value)})
-      (promise/value
-       (util/transport-broadcast-loop
-        node ["peer-a" "peer-b"] outgoing "peer-a" 0))
-      (promise/value
-       (util/stream-route-loop
-        node ["peer-a" "peer-b"] outgoing "peer-b" 0))
-      @sent)
-    ["peer-b" "peer-a"])
+(fact "broadcasts while respecting exclusions"
+  (let [node (core/node-create "node/route")
+        sent (atom [])
+        outgoing (frame/stream-frame
+                  "room/a" "event/a" 1 {"id" "evt-route"} nil)]
+    (core/section-put node :transports "peer-a"
+                      {"id" "peer-a"
+                       "send_fn" (fn [value]
+                                   (reset! sent (conj @sent "peer-a"))
+                                   value)})
+    (core/section-put node :transports "peer-b"
+                      {"id" "peer-b"
+                       "send_fn" (fn [value]
+                                   (reset! sent (conj @sent "peer-b"))
+                                   value)})
+    (promise/value
+     (util/transport-broadcast-loop
+      node ["peer-a" "peer-b"] outgoing "peer-a" 0))
+    (promise/value
+     (util/stream-route-loop
+      node ["peer-a" "peer-b"] outgoing "peer-b" 0))
+    @sent)
+  => ["peer-b" "peer-a"])
 
-   (test/check
-    "merges transport context into request metadata"
-    [(util/request-context-merge
-      {"kind" "request" "meta" {"trace" "a"}}
-      {"transport_id" "peer-a"})
-     (util/request-context-merge
-      {"kind" "request"}
-      {"transport_id" "peer-b"})]
-    [{"kind" "request"
-      "meta" {"trace" "a" "transport_id" "peer-a"}}
-     {"kind" "request"
-      "meta" {"transport_id" "peer-b"}}])
+(fact "merges transport context into request metadata"
+  [(util/request-context-merge
+    {"kind" "request" "meta" {"trace" "a"}}
+    {"transport_id" "peer-a"})
+   (util/request-context-merge
+    {"kind" "request"}
+    {"transport_id" "peer-b"})]
+  => [{"kind" "request"
+       "meta" {"trace" "a" "transport_id" "peer-a"}}
+      {"kind" "request"
+       "meta" {"transport_id" "peer-b"}}])
 
-   (test/check
-    "constructs and forwards response frames"
-    (let [node (core/node-create "node/response")
-          captured (atom nil)
-          incoming (frame/request-frame
-                    "room/a" "echo" [] {"id" "req-1"})]
-      (core/section-put
-       node :transports "peer-a"
-       {"id" "peer-a"
-        "send_fn" (fn [outgoing]
-                    (reset! captured outgoing)
-                    outgoing)})
-      (promise/value
-       (util/response-ok
-        node incoming {"ok" true} nil {"transport_id" "peer-a"}))
-      [(get @captured "kind")
-       (get @captured "reply_to")
-       (get @captured "status")
-       (get-in @captured ["data" "ok"])])
-    ["response" "req-1" "ok" true])
+(fact "constructs and forwards response frames"
+  (let [node (core/node-create "node/response")
+        captured (atom nil)
+        incoming (frame/request-frame
+                  "room/a" "echo" [] {"id" "req-1"})]
+    (core/section-put
+     node :transports "peer-a"
+     {"id" "peer-a"
+      "send_fn" (fn [outgoing]
+                  (reset! captured outgoing)
+                  outgoing)})
+    (promise/value
+     (util/response-ok
+      node incoming {"ok" true} nil {"transport_id" "peer-a"}))
+    [(get @captured "kind")
+     (get @captured "reply_to")
+     (get @captured "status")
+     (get-in @captured ["data" "ok"])])
+  => ["response" "req-1" "ok" true])
 
-   (test/check
-    "normalises declarative configuration"
-    (let [handler (fn [space args incoming node] args)
-          trigger (fn [space stream node] stream)
-          mismatched-space
-          (try
-            (do (util/config-normalize-space
-                 "room/a" {"id" "room/b"}) false)
-            (catch Throwable error true))
-          mismatched-handler
-          (try
-            (do (util/config-normalize-handler
-                 "ping" {"id" "pong" "fn" handler}) false)
-            (catch Throwable error true))]
-      [(util/config-normalize-space "room/a" nil)
-       (util/config-normalize-space
-        "room/a"
-        {"id" "room/a"
-         "state" {"count" 1}
-         "meta" {"role" "alpha"}})
-       (fn? (get (util/config-normalize-handler "ping" handler) "fn"))
-       (get (util/config-normalize-trigger
-             "event/ping"
-             {"fn" trigger "meta" {"kind" "stream"}})
-            "meta")
-       mismatched-space
-       mismatched-handler])
-    [nil
-     {"state" {"count" 1} "meta" {"role" "alpha"}}
-     true
-     {"kind" "stream"}
-     true
-     true])
+(fact "normalises declarative configuration"
+  (let [handler (fn [space args incoming node] args)
+        trigger (fn [space stream node] stream)
+        mismatched-space
+        (try
+          (do (util/config-normalize-space
+               "room/a" {"id" "room/b"}) false)
+          (catch Throwable error true))
+        mismatched-handler
+        (try
+          (do (util/config-normalize-handler
+               "ping" {"id" "pong" "fn" handler}) false)
+          (catch Throwable error true))]
+    [(util/config-normalize-space "room/a" nil)
+     (util/config-normalize-space
+      "room/a"
+      {"id" "room/a"
+       "state" {"count" 1}
+       "meta" {"role" "alpha"}})
+     (fn? (get (util/config-normalize-handler "ping" handler) "fn"))
+     (get (util/config-normalize-trigger
+           "event/ping"
+           {"fn" trigger "meta" {"kind" "stream"}})
+          "meta")
+     mismatched-space
+     mismatched-handler])
+  => [nil
+      {"state" {"count" 1} "meta" {"role" "alpha"}}
+      true
+      {"kind" "stream"}
+      true
+      true])
 
-   (test/check
-    "strips declarative node keys"
-    (util/node-base-opts
-     {"id" "node-a"
+(fact "strips declarative node keys"
+  (util/node-base-opts
+   {"id" "node-a"
+    "meta" {"cluster" "local"}
+    "spaces" {"room/a" {}}
+    "handlers" {"ping" true}
+    "triggers" {"event/ping" true}
+    "custom" 42})
+  => {"id" "node-a"
       "meta" {"cluster" "local"}
-      "spaces" {"room/a" {}}
-      "handlers" {"ping" true}
-      "triggers" {"event/ping" true}
       "custom" 42})
-    {"id" "node-a"
-     "meta" {"cluster" "local"}
-     "custom" 42})
 
-   (test/check
-    "registers lists and unregisters handlers and triggers"
-    (let [node (core/node-create "node/registry")]
-      (util/register-handler node "sum" identity {"role" "request"})
-      (util/register-handler node "echo" identity nil)
-      (util/register-trigger node "event/b" identity nil)
-      (util/register-trigger node "event/a" identity {"role" "stream"})
-      (let [before
-            [(util/list-handlers node)
-             (util/list-triggers node)
-             (get-in (util/get-handler node "sum") ["meta" "role"])
-             (get-in (util/get-trigger node "event/a") ["meta" "role"])] ]
-        (util/unregister-handler node "echo")
-        (util/unregister-trigger node "event/b")
-        [before
-         (util/list-handlers node)
-         (util/list-triggers node)]))
-    [[ ["echo" "sum"]
-       ["event/a" "event/b"]
-       "request"
-       "stream"]
-     ["sum"]
-     ["event/a"]])])
+(fact "registers lists and unregisters handlers and triggers"
+  (let [node (core/node-create "node/registry")]
+    (util/register-handler node "sum" identity {"role" "request"})
+    (util/register-handler node "echo" identity nil)
+    (util/register-trigger node "event/b" identity nil)
+    (util/register-trigger node "event/a" identity {"role" "stream"})
+    (let [before
+          [(util/list-handlers node)
+           (util/list-triggers node)
+           (get-in (util/get-handler node "sum") ["meta" "role"])
+           (get-in (util/get-trigger node "event/a") ["meta" "role"])] ]
+      (util/unregister-handler node "echo")
+      (util/unregister-trigger node "event/b")
+      [before
+       (util/list-handlers node)
+       (util/list-triggers node)]))
+  => [[ ["echo" "sum"]
+        ["event/a" "event/b"]
+        "request"
+        "stream"]
+      ["sum"]
+      ["event/a"]])
 
-(test/print-results results)
+(pr-str (run '[std.substrate.util-test]))
