@@ -15,6 +15,9 @@ crate-type = ["cdylib", "rlib"]
 dev-trace = []
 # Existing optional encoder gate (declared here so Cargo can validate it).
 hir-encoder = []
+# Experimental staged bytecode VM (notes/rust-bytecode-vm.md). Non-default:
+# all VM entry points are gated behind this feature.
+bytecode-vm = []
 
 [dependencies]
 wasm-bindgen = "0.2"
