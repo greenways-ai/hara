@@ -368,9 +368,13 @@ mod spec_tests {
     #[test]
     fn greenways_buildspec_validates_against_artifact_metaspec() {
         let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let metaspec_path = repository.join("specs/metaspec/draft/hal-artifact-metaspec.edn");
+        if !metaspec_path.is_file() {
+            eprintln!("skipping: specs submodule not initialized");
+            return;
+        }
         let document_path =
             repository.join("contrib/greenways/build/spec/draft/greenways-buildspec.edn");
-        let metaspec_path = repository.join("specs/metaspec/draft/hal-artifact-metaspec.edn");
         let document = read_spec_document(&fs::read_to_string(&document_path).unwrap()).unwrap();
         let metaspec = read_spec_document(&fs::read_to_string(metaspec_path).unwrap()).unwrap();
         assert!(validate_against_metaspec(&document, &metaspec, &document_path).is_empty());
@@ -443,6 +447,10 @@ mod spec_tests {
     #[test]
     fn greenways_contribution_envelopes_verify_offline() {
         let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        if !repository.join("specs/metaspec/draft").is_dir() {
+            eprintln!("skipping: specs submodule not initialized");
+            return;
+        }
         for path in [
             "contrib/greenways/build",
             "contrib/greenways/supersonic",

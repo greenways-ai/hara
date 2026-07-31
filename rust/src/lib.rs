@@ -1335,6 +1335,22 @@ pub fn version() -> String {
 mod tests {
     use super::*;
 
+    fn repo_text(relative: &str) -> Option<String> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(relative);
+        match std::fs::read_to_string(&path) {
+            Ok(content) => Some(content),
+            Err(_) => {
+                eprintln!(
+                    "skipping: {} is unavailable (specs/docs submodule not initialized)",
+                    path.display()
+                );
+                None
+            }
+        }
+    }
+
     fn module_case(id: &str) -> Vec<(Form, Form)> {
         fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> Option<&'a Form> {
             entries
@@ -1345,11 +1361,11 @@ mod tests {
                 })
         }
 
-        let manifest = kernel::parse_forms(include_str!(
-            "../../specs/language/draft/conformance/modules.edn"
-        ))
-        .expect("module conformance corpus must parse")
-        .remove(0);
+        let corpus = repo_text("specs/language/draft/conformance/modules.edn")
+            .expect("specs submodule must be initialized for module conformance tests");
+        let manifest = kernel::parse_forms(&corpus)
+            .expect("module conformance corpus must parse")
+            .remove(0);
         let Form::Map(manifest) = manifest else {
             panic!("module conformance corpus must be a map")
         };
@@ -1395,11 +1411,11 @@ mod tests {
                 })
         }
 
-        let manifest = kernel::parse_forms(include_str!(
-            "../../specs/language/draft/conformance/modules.edn"
-        ))
-        .expect("module conformance corpus must parse")
-        .remove(0);
+        let corpus = repo_text("specs/language/draft/conformance/modules.edn")
+            .expect("specs submodule must be initialized for module conformance tests");
+        let manifest = kernel::parse_forms(&corpus)
+            .expect("module conformance corpus must parse")
+            .remove(0);
         let Form::Map(manifest) = manifest else {
             panic!("module conformance corpus must be a map")
         };
@@ -1424,11 +1440,11 @@ mod tests {
                 })
         }
 
-        let document = kernel::parse_forms(include_str!(
-            "../../specs/runtime/draft/hal-host-runtime.edn"
-        ))
-        .expect("Host runtime specification must parse")
-        .remove(0);
+        let document_source = repo_text("specs/runtime/draft/hal-host-runtime.edn")
+            .expect("specs submodule must be initialized for host runtime conformance tests");
+        let document = kernel::parse_forms(&document_source)
+            .expect("Host runtime specification must parse")
+            .remove(0);
         let Form::Map(document) = document else {
             panic!("Host runtime specification must be a map")
         };
@@ -2279,7 +2295,9 @@ mod tests {
     #[test]
     fn foundation_protocols_are_canonical_and_method_names_reject_bangs() {
         let mut runtime = Runtime::new();
-        let contract = include_str!("../../specs/language/draft/conformance/protocols.edn");
+        let Some(contract) = repo_text("specs/language/draft/conformance/protocols.edn") else {
+            return;
+        };
         let fixture =
             include_str!("../../lib/test-fixtures/std/foundation/protocol_conformance.hal");
         assert_eq!(core::FOUNDATION_PROTOCOLS.len(), 53);
@@ -2428,8 +2446,10 @@ mod tests {
     fn shared_foundation_protocol_functionality_fixture_runs_in_the_native_runtime() {
         let source =
             include_str!("../../lib/test-fixtures/std/foundation/protocol_functionality.hal");
-        let catalog =
-            include_str!("../../specs/language/draft/conformance/protocol-method-cases.edn");
+        let Some(catalog) = repo_text("specs/language/draft/conformance/protocol-method-cases.edn")
+        else {
+            return;
+        };
         assert_eq!(catalog.matches("{:protocol ").count(), 88);
         let mut runtime = Runtime::new();
         let result = runtime.eval_text(source).unwrap();
@@ -2848,11 +2868,11 @@ mod tests {
                 .unwrap_or_else(|| panic!("unknown wrapper source: {path}"))
         }
 
-        let contract = kernel::parse_forms(include_str!(
-            "../../specs/language/draft/conformance/native.edn"
-        ))
-        .unwrap()
-        .remove(0);
+        let Some(contract_source) = repo_text("specs/language/draft/conformance/native.edn")
+        else {
+            return;
+        };
+        let contract = kernel::parse_forms(&contract_source).unwrap().remove(0);
         let Form::Map(contract) = contract else {
             panic!("native contract must be a map")
         };
@@ -4847,11 +4867,10 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing :{key}"))
         }
 
-        let manifest = kernel::parse_forms(include_str!(
-            "../../specs/language/draft/conformance/l0.edn"
-        ))
-        .unwrap()
-        .remove(0);
+        let Some(corpus) = repo_text("specs/language/draft/conformance/l0.edn") else {
+            return;
+        };
+        let manifest = kernel::parse_forms(&corpus).unwrap().remove(0);
         let Form::Map(manifest) = manifest else {
             panic!("L0 conformance corpus must be a map")
         };
@@ -4944,11 +4963,10 @@ mod tests {
                 })
         }
 
-        let manifest = kernel::parse_forms(include_str!(
-            "../../specs/language/draft/conformance/modules.edn"
-        ))
-        .unwrap()
-        .remove(0);
+        let Some(corpus) = repo_text("specs/language/draft/conformance/modules.edn") else {
+            return;
+        };
+        let manifest = kernel::parse_forms(&corpus).unwrap().remove(0);
         let Form::Map(manifest) = manifest else {
             panic!("module conformance corpus must be a map")
         };
@@ -4979,6 +4997,9 @@ mod tests {
 
     #[test]
     fn issue_134_lazy_namespace_state_is_non_forcing_and_failure_is_sticky() {
+        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+            return;
+        }
         assert_eq!(
             module_expect("lazy/non-forcing", "state"),
             Form::Keyword("unloaded".into())
@@ -5134,6 +5155,10 @@ mod tests {
             sticky_error.contains("explicit reload"),
             "unexpected sticky lazy-load error: {sticky_error}"
         );
+        assert!(
+            sticky_error.contains("initial failure"),
+            "sticky error should retain the initial failure detail: {sticky_error}"
+        );
         runtime
             .eval_text("(require [example.broken :as broken :reload true])")
             .unwrap();
@@ -5160,6 +5185,9 @@ mod tests {
 
     #[test]
     fn issue_134_dependency_order_cycles_and_canonical_cache_are_transactional() {
+        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+            return;
+        }
         assert_eq!(
             module_expect("module/canonical-cache", "duplicate-evaluation"),
             Form::Bool(false)
@@ -5283,6 +5311,9 @@ mod tests {
 
     #[test]
     fn issue_134_with_ns_uses_target_globals_and_restores_the_caller() {
+        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+            return;
+        }
         assert_eq!(
             module_expect("namespace/with-ns-success", "caller-restored"),
             Form::Bool(true)
@@ -5325,6 +5356,9 @@ mod tests {
 
     #[test]
     fn issue_134_facade_vars_copy_roots_and_metadata_without_sharing_identity() {
+        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+            return;
+        }
         assert_eq!(
             module_expect("namespace/facade-var-copy", "same-var"),
             Form::Bool(false)
@@ -5370,6 +5404,9 @@ mod tests {
 
     #[test]
     fn issue_134_aliases_and_refers_share_live_var_identity() {
+        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+            return;
+        }
         assert_eq!(
             module_expect("namespace/alias-var-identity", "same-var"),
             Form::Bool(true)
@@ -5417,6 +5454,9 @@ mod tests {
 
     #[test]
     fn issue_134_macro_reload_only_changes_new_compilations() {
+        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+            return;
+        }
         assert_eq!(
             module_expect("macro/reload-new-compilation", "existing-call-target"),
             Form::Keyword("unchanged".into())
@@ -5452,6 +5492,9 @@ mod tests {
 
     #[test]
     fn issue_134_session_namespace_module_and_macro_state_is_isolated() {
+        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+            return;
+        }
         assert_eq!(
             module_expect("session/namespace-isolation", "vars-shared"),
             Form::Bool(false)
@@ -5498,6 +5541,9 @@ mod tests {
 
     #[test]
     fn issue_134_source_and_hir_have_value_metadata_and_error_parity() {
+        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+            return;
+        }
         assert_eq!(
             module_expect("module/source-hir-parity", "same-value"),
             Form::Bool(true)
@@ -5551,6 +5597,9 @@ mod tests {
 
     #[test]
     fn issue_134_runtime_profile_declares_deterministic_resource_precedence() {
+        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+            return;
+        }
         assert_eq!(
             module_expect("module/resource-precedence", "deterministic"),
             Form::Bool(true)
@@ -5584,6 +5633,9 @@ mod tests {
 
     #[test]
     fn issue_134_sessions_unwind_bindings_and_transfer_only_immutable_data() {
+        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+            return;
+        }
         assert_eq!(
             module_expect("session/dynamic-unwind", "binding-session-local"),
             Form::Bool(true)
@@ -5660,6 +5712,9 @@ mod tests {
 
     #[test]
     fn issue_134_retained_repl_state_survives_errors_and_multiline_forms() {
+        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+            return;
+        }
         assert_eq!(
             module_expect("repl/retained-state", "namespace-retained"),
             Form::Bool(true)
@@ -5695,6 +5750,9 @@ mod tests {
 
     #[test]
     fn issue_134_host_facades_are_loaded_session_local_and_non_transferable() {
+        if repo_text("specs/runtime/draft/hal-host-runtime.edn").is_none() {
+            return;
+        }
         for id in [
             "host/type-identity",
             "host/session-local-facade",
@@ -6399,10 +6457,10 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing :{key}"))
         }
 
-        let manifest =
-            kernel::parse_forms(include_str!("../../docs/docs/reference/l0-conformance.edn"))
-                .unwrap()
-                .remove(0);
+        let Some(corpus) = repo_text("docs/docs/reference/l0-conformance.edn") else {
+            return;
+        };
+        let manifest = kernel::parse_forms(&corpus).unwrap().remove(0);
         let Form::Map(manifest) = manifest else {
             panic!("conformance corpus must be a map")
         };

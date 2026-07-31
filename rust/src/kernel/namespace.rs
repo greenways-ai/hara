@@ -200,6 +200,7 @@ pub struct NamespaceRegistry<V> {
     namespaces: Rc<RefCell<HashMap<Symbol, Namespace<V>>>>,
     current: Rc<RefCell<Symbol>>,
     loading_states: Rc<RefCell<HashMap<Symbol, NamespaceLoadState>>>,
+    load_failures: Rc<RefCell<HashMap<Symbol, String>>>,
     module_revisions: Rc<RefCell<HashMap<Symbol, u64>>>,
     module_dependencies: Rc<RefCell<HashMap<Symbol, Vec<Symbol>>>>,
 }
@@ -237,6 +238,7 @@ impl<V: Clone> NamespaceRegistry<V> {
             namespaces: Rc::new(RefCell::new(namespaces)),
             current: Rc::new(RefCell::new(name)),
             loading_states: Rc::new(RefCell::new(loading_states)),
+            load_failures: Rc::new(RefCell::new(HashMap::new())),
             module_revisions: Rc::new(RefCell::new(HashMap::new())),
             module_dependencies: Rc::new(RefCell::new(HashMap::new())),
         }
@@ -290,6 +292,22 @@ impl<V: Clone> NamespaceRegistry<V> {
     }
     pub fn clear_load_state(&self, name: impl AsRef<str>) {
         self.loading_states
+            .borrow_mut()
+            .remove(&Symbol::parse(name.as_ref()));
+    }
+    pub fn load_failure(&self, name: impl AsRef<str>) -> Option<String> {
+        self.load_failures
+            .borrow()
+            .get(&Symbol::parse(name.as_ref()))
+            .cloned()
+    }
+    pub fn set_load_failure(&self, name: impl AsRef<str>, detail: impl Into<String>) {
+        self.load_failures
+            .borrow_mut()
+            .insert(Symbol::parse(name.as_ref()), detail.into());
+    }
+    pub fn clear_load_failure(&self, name: impl AsRef<str>) {
+        self.load_failures
             .borrow_mut()
             .remove(&Symbol::parse(name.as_ref()));
     }
@@ -400,6 +418,7 @@ impl<V: Clone> NamespaceRegistry<V> {
             return None;
         }
         self.loading_states.borrow_mut().remove(&symbol);
+        self.load_failures.borrow_mut().remove(&symbol);
         self.module_revisions.borrow_mut().remove(&symbol);
         self.module_dependencies.borrow_mut().remove(&symbol);
         self.namespaces.borrow_mut().remove(&symbol)
