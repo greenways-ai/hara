@@ -1,0 +1,111 @@
+;; ============================================================================
+;; std.substrate.frame — direct portable port of xt.substrate.base-frame.
+;;
+;; Frame values deliberately use string keys and string kind/status constants.
+;; This is the Foundation substrate contract. The versioned std.lib.substrate
+;; wire codec remains a separate transport adapter.
+;; ============================================================================
+(ns std.substrate.frame)
+
+(def KIND_REQUEST "request")
+(def KIND_RESPONSE "response")
+(def KIND_STREAM "stream")
+
+(def STATUS_OK "ok")
+(def STATUS_ERROR "error")
+
+(def SPACE_NODE "__NODE__")
+
+(defn string-take
+  "Returns exactly n characters from value, cycling when required."
+  [value n]
+  (let [value (str value)
+        length (count value)]
+    (loop [index 0
+           output ""]
+      (if (= index n)
+        output
+        (recur (inc index)
+               (str output (nth value (mod index length))))))))
+
+(defn rand-id
+  "Creates a unique id with prefix and exactly n generated characters."
+  [prefix n]
+  (str (or prefix "")
+       (string-take (gensym "substrate") n)))
+
+(defn frame
+  "Constructs a base node frame."
+  [kind id space meta extra]
+  (merge {"kind" kind
+          "id" id
+          "space" (or space SPACE_NODE)
+          "meta" (or meta {})}
+         (or extra {})))
+
+(defn request-frame
+  "Constructs a request frame."
+  [space action args meta]
+  (let [meta (or meta {})]
+    (frame KIND_REQUEST
+           (or (get meta "id")
+               (get meta :id)
+               (rand-id "req-" 6))
+           space
+           meta
+           {"action" action
+            "args" (or args [])})))
+
+(defn response-frame
+  "Constructs a response frame."
+  [reply-to space status data error meta]
+  (let [meta (or meta {})]
+    (frame KIND_RESPONSE
+           (or (get meta "id")
+               (get meta :id)
+               (rand-id "res-" 6))
+           space
+           meta
+           {"reply_to" reply-to
+            "status" status
+            "data" data
+            "error" error})))
+
+(defn response-ok-frame
+  "Constructs a successful response frame."
+  [reply-to space data meta]
+  (response-frame reply-to space STATUS_OK data nil meta))
+
+(defn response-error-frame
+  "Constructs an errored response frame."
+  [reply-to space error meta]
+  (response-frame reply-to space STATUS_ERROR nil error meta))
+
+(defn stream-frame
+  "Constructs a stream frame."
+  [space signal data meta cause]
+  (let [meta (or meta {})]
+    (frame KIND_STREAM
+           (or (get meta "id")
+               (get meta :id)
+               (rand-id "evt-" 6))
+           space
+           meta
+           {"signal" signal
+            "data" data
+            "cause" cause})))
+
+(defn request-frame?
+  "Returns true when frame is a request frame."
+  [value]
+  (= KIND_REQUEST (get value "kind")))
+
+(defn response-frame?
+  "Returns true when frame is a response frame."
+  [value]
+  (= KIND_RESPONSE (get value "kind")))
+
+(defn stream-frame?
+  "Returns true when frame is a stream frame."
+  [value]
+  (= KIND_STREAM (get value "kind")))
