@@ -1,0 +1,95 @@
+//! Typed instruction set for the experimental bytecode VM.
+//!
+//! Instructions are a typed enum, not packed bytes: the milestone
+//! prioritises exact validation and disassembly over encoding density.
+//! Jump operands are absolute instruction indexes.
+
+use crate::core::Primitive;
+
+/// One VM instruction.
+///
+/// Stack effects (validated before execution):
+///
+/// - `Constant`, `Nil`, `True`, `False`, `LoadLocal`: push 1.
+/// - `StoreLocal`, `Pop`, `JumpIfFalse`: pop 1.
+/// - `Primitive`: pops `argc`, pushes 1 (net `1 - argc`).
+/// - `Jump`: no change.
+/// - `Return`: terminal; requires stack height exactly 1.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Instruction {
+    /// Pushes `constants[index]` onto the operand stack.
+    Constant(u32),
+    /// Pushes `Value::Nil`.
+    Nil,
+    /// Pushes `Value::Bool(true)`.
+    True,
+    /// Pushes `Value::Bool(false)`.
+    False,
+    /// Pushes the value of local slot `slot`.
+    LoadLocal(u16),
+    /// Pops the top of the stack into local slot `slot`.
+    StoreLocal(u16),
+    /// Discards the top of the stack.
+    Pop,
+    /// Pops `argc` arguments, applies the shared value-level primitive,
+    /// and pushes the result.
+    Primitive { op: Primitive, argc: u8 },
+    /// Unconditional jump to an absolute instruction index.
+    Jump(u32),
+    /// Pops the condition and jumps when it is not truthy
+    /// (`Value::truthy`: only `nil` and `false` are false).
+    JumpIfFalse(u32),
+    /// Returns the top of the stack as the function result.
+    Return,
+}
+
+impl Instruction {
+    /// The jump target, when the instruction transfers control.
+    pub fn jump_target(&self) -> Option<u32> {
+        match self {
+            Instruction::Jump(target) | Instruction::JumpIfFalse(target) => Some(*target),
+            _ => None,
+        }
+    }
+
+    /// Whether control falls through to the next instruction.
+    pub(crate) fn falls_through(&self) -> bool {
+        !matches!(self, Instruction::Jump(_) | Instruction::Return)
+    }
+
+    /// Static stack effect of the instruction; `None` for `Return`, which
+    /// is validated separately (it requires height exactly 1).
+    pub(crate) fn stack_effect(&self) -> Option<i32> {
+        Some(match self {
+            Instruction::Constant(_)
+            | Instruction::Nil
+            | Instruction::True
+            | Instruction::False
+            | Instruction::LoadLocal(_) => 1,
+            Instruction::StoreLocal(_) | Instruction::Pop | Instruction::JumpIfFalse(_) => -1,
+            Instruction::Primitive { argc, .. } => 1 - i32::from(*argc),
+            Instruction::Jump(_) => 0,
+            Instruction::Return => return None,
+        })
+    }
+}
+
+impl std::fmt::Display for Instruction {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Instruction::Constant(index) => write!(formatter, "Constant {index}"),
+            Instruction::Nil => formatter.write_str("Nil"),
+            Instruction::True => formatter.write_str("True"),
+            Instruction::False => formatter.write_str("False"),
+            Instruction::LoadLocal(slot) => write!(formatter, "LoadLocal {slot}"),
+            Instruction::StoreLocal(slot) => write!(formatter, "StoreLocal {slot}"),
+            Instruction::Pop => formatter.write_str("Pop"),
+            Instruction::Primitive { op, argc } => {
+                write!(formatter, "Primitive {} {argc}", op.operator())
+            }
+            Instruction::Jump(target) => write!(formatter, "Jump {target:04}"),
+            Instruction::JumpIfFalse(target) => write!(formatter, "JumpIfFalse {target:04}"),
+            Instruction::Return => formatter.write_str("Return"),
+        }
+    }
+}

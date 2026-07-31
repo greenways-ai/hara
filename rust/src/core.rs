@@ -1871,7 +1871,7 @@ impl Value {
             Self::Nil => "nil".into(),
         }
     }
-    fn truthy(&self) -> bool {
+    pub(crate) fn truthy(&self) -> bool {
         !matches!(self, Self::Nil | Self::Bool(false))
     }
 
@@ -4178,47 +4178,157 @@ pub fn read_edn(source: &str) -> Result<Value, String> {
     form_to_value(&forms[0]).map_err(|error| format!("edn/read: {error}"))
 }
 
-fn arithmetic(op: &str, args: &[Form], env: &mut HashMap<String, Value>) -> Result<Value, String> {
-    if args.is_empty() {
-        return Err(format!("{op} expects arguments"));
-    }
-    let values: Result<Vec<i64>, String> = args
-        .iter()
-        .map(|f| match eval(f, env)? {
-            Value::Number(v) => Ok(v),
-            _ => Err(format!("{op} expects numbers")),
+/// Value-level primitive operations shared by the tree-walking evaluator and
+/// the experimental bytecode VM (issue #195, notes/rust-bytecode-vm.md).
+/// All arithmetic and comparison semantics live here exactly once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Primitive {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+    Equal,
+    Less,
+    LessOrEqual,
+    Greater,
+    GreaterOrEqual,
+}
+
+impl Primitive {
+    pub fn from_symbol(symbol: &str) -> Option<Primitive> {
+        Some(match symbol {
+            "+" => Primitive::Add,
+            "-" => Primitive::Subtract,
+            "*" => Primitive::Multiply,
+            "/" => Primitive::Divide,
+            "%" | "mod" => Primitive::Remainder,
+            "=" => Primitive::Equal,
+            "<" => Primitive::Less,
+            "<=" => Primitive::LessOrEqual,
+            ">" => Primitive::Greater,
+            ">=" => Primitive::GreaterOrEqual,
+            _ => return None,
         })
-        .collect();
-    let values = values?;
-    let result = values.iter().skip(1).try_fold(values[0], |r, v| match op {
-        "+" => r
-            .checked_add(*v)
-            .ok_or_else(|| "integer overflow".to_string()),
-        "-" => r
-            .checked_sub(*v)
-            .ok_or_else(|| "integer overflow".to_string()),
-        "*" => r
-            .checked_mul(*v)
-            .ok_or_else(|| "integer overflow".to_string()),
-        "/" => {
-            if *v == 0 {
-                Err("division by zero".into())
-            } else {
-                r.checked_div(*v)
-                    .ok_or_else(|| "integer overflow".to_string())
-            }
+    }
+
+    /// Operator spelling used in error messages; `mod` reports as `%`,
+    /// matching the existing evaluator.
+    pub fn operator(self) -> &'static str {
+        match self {
+            Primitive::Add => "+",
+            Primitive::Subtract => "-",
+            Primitive::Multiply => "*",
+            Primitive::Divide => "/",
+            Primitive::Remainder => "%",
+            Primitive::Equal => "=",
+            Primitive::Less => "<",
+            Primitive::LessOrEqual => "<=",
+            Primitive::Greater => ">",
+            Primitive::GreaterOrEqual => ">=",
         }
-        "%" => {
-            if *v == 0 {
-                Err("division by zero".into())
-            } else {
-                r.checked_rem(*v)
-                    .ok_or_else(|| "integer overflow".to_string())
+    }
+}
+
+/// Applies a primitive to already-evaluated arguments. The evaluator calls
+/// this after evaluating argument forms; the bytecode VM calls it directly
+/// from the operand stack.
+pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Result<Value, String> {
+    let op = primitive.operator();
+    match primitive {
+        Primitive::Add
+        | Primitive::Subtract
+        | Primitive::Multiply
+        | Primitive::Divide
+        | Primitive::Remainder => {
+            if arguments.is_empty() {
+                return Err(format!("{op} expects arguments"));
             }
+            let mut result = match &arguments[0] {
+                Value::Number(value) => *value,
+                _ => return Err(format!("{op} expects numbers")),
+            };
+            for argument in &arguments[1..] {
+                let value = match argument {
+                    Value::Number(value) => *value,
+                    _ => return Err(format!("{op} expects numbers")),
+                };
+                result = match primitive {
+                    Primitive::Add => result
+                        .checked_add(value)
+                        .ok_or_else(|| "integer overflow".to_string()),
+                    Primitive::Subtract => result
+                        .checked_sub(value)
+                        .ok_or_else(|| "integer overflow".to_string()),
+                    Primitive::Multiply => result
+                        .checked_mul(value)
+                        .ok_or_else(|| "integer overflow".to_string()),
+                    Primitive::Divide => {
+                        if value == 0 {
+                            Err("division by zero".into())
+                        } else {
+                            result
+                                .checked_div(value)
+                                .ok_or_else(|| "integer overflow".to_string())
+                        }
+                    }
+                    Primitive::Remainder => {
+                        if value == 0 {
+                            Err("division by zero".into())
+                        } else {
+                            result
+                                .checked_rem(value)
+                                .ok_or_else(|| "integer overflow".to_string())
+                        }
+                    }
+                    _ => unreachable!(),
+                }?;
+            }
+            Ok(Value::Number(result))
         }
-        _ => unreachable!(),
-    })?;
-    Ok(Value::Number(result))
+        Primitive::Equal => {
+            if arguments.len() < 2 {
+                return Err("= expects at least 2 arguments".into());
+            }
+            let first = &arguments[0];
+            Ok(Value::Bool(arguments[1..].iter().all(|value| value == first)))
+        }
+        Primitive::Less
+        | Primitive::LessOrEqual
+        | Primitive::Greater
+        | Primitive::GreaterOrEqual => {
+            if arguments.len() < 2 {
+                return Err(format!("{op} expects at least two arguments"));
+            }
+            let mut numbers = Vec::with_capacity(arguments.len());
+            for argument in arguments {
+                match argument {
+                    Value::Number(number) => numbers.push(*number),
+                    _ => return Err(format!("{op} expects numbers")),
+                }
+            }
+            Ok(Value::Bool(numbers.windows(2).all(|pair| match primitive {
+                Primitive::Less => pair[0] < pair[1],
+                Primitive::Greater => pair[0] > pair[1],
+                Primitive::LessOrEqual => pair[0] <= pair[1],
+                Primitive::GreaterOrEqual => pair[0] >= pair[1],
+                _ => unreachable!(),
+            })))
+        }
+    }
+}
+
+fn arithmetic(op: &str, args: &[Form], env: &mut HashMap<String, Value>) -> Result<Value, String> {
+    let primitive = Primitive::from_symbol(op).expect("arithmetic operator");
+    let mut values = Vec::with_capacity(args.len());
+    for form in args {
+        let value = eval(form, env)?;
+        if !matches!(value, Value::Number(_)) {
+            return Err(format!("{} expects numbers", primitive.operator()));
+        }
+        values.push(value);
+    }
+    apply_primitive(primitive, &values)
 }
 
 fn bit_operation(
@@ -4444,27 +4554,14 @@ fn native_error_operation(
 }
 
 fn comparison(op: &str, args: &[Form], env: &mut HashMap<String, Value>) -> Result<Value, String> {
-    if args.len() < 2 {
-        return Err(format!("{op} expects at least two arguments"));
-    }
     let values = args
         .iter()
         .map(|form| eval(form, env))
         .collect::<Result<Vec<_>, _>>()?;
-    let numbers = values
-        .iter()
-        .map(|value| match value {
-            Value::Number(number) => Ok(*number),
-            _ => Err(format!("{op} expects numbers")),
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    Ok(Value::Bool(numbers.windows(2).all(|pair| match op {
-        "<" => pair[0] < pair[1],
-        ">" => pair[0] > pair[1],
-        "<=" => pair[0] <= pair[1],
-        ">=" => pair[0] >= pair[1],
-        _ => false,
-    })))
+    apply_primitive(
+        Primitive::from_symbol(op).expect("comparison operator"),
+        &values,
+    )
 }
 
 fn value_index(value: &Value) -> Result<usize, String> {
@@ -9226,14 +9323,14 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("= expects at least 2 arguments".into());
                 }
                 let first = eval(&fs[1], env)?;
-                Ok(Value::Bool(
-                    fs[2..]
-                        .iter()
-                        .map(|form| eval(form, env))
-                        .collect::<Result<Vec<_>, _>>()?
-                        .iter()
-                        .all(|value| *value == first),
-                ))
+                let rest = fs[2..]
+                    .iter()
+                    .map(|form| eval(form, env))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut arguments = Vec::with_capacity(rest.len() + 1);
+                arguments.push(first);
+                arguments.extend(rest);
+                apply_primitive(Primitive::Equal, &arguments)
             }
             Form::Symbol(n) if n == "ns" || n == "require" => eval_namespace_form(fs, env),
             Form::Symbol(n) if n == "current-namespace" => {

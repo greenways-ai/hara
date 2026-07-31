@@ -22,6 +22,10 @@ pub mod tap;
 pub mod task;
 #[cfg(feature = "dev-trace")]
 pub mod trace;
+// Experimental staged bytecode VM (issue #195). Non-default feature; the
+// default evaluator is untouched.
+#[cfg(feature = "bytecode-vm")]
+pub mod vm;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod wasmtime_provider;
 use crate::kernel::Form;
