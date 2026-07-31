@@ -1,0 +1,515 @@
+{:document/id :hara/cli
+ :document/type :hara/cli-application
+ :document/version "0.1.0"
+ :document/status :draft
+ :document/title "Hara command-line application"
+ :document/summary
+ "Normative public route, option, handler and outcome contract shared by the Rust and Truffle Hara runtimes."
+
+ :spec/conforms-to {:spec/id :hara/cli-app-metaspec
+                    :spec/version "0.1.0"}
+
+ :cli/apps
+ [{:app/id :hara.cli/language
+   :app/summary "Evaluate HAL and operate an interactive runtime."
+   :app/routes [:hara.cli.route/eval :hara.cli.route/run-file
+                :hara.cli.route/stdin :hara.cli.route/repl]}
+  {:app/id :hara.cli/session
+   :app/summary "Start or connect to Hara runtime sessions."
+   :app/routes [:hara.cli.route/server :hara.cli.route/remote]}
+  {:app/id :hara.cli/project
+   :app/summary "Create, validate, execute, test and resolve Hara projects."
+   :app/routes [:hara.cli.route/project-new :hara.cli.route/project-check
+                :hara.cli.route/project-run :hara.cli.route/project-test
+                :hara.cli.route/project-add :hara.cli.route/project-remove
+                :hara.cli.route/project-sync :hara.cli.route/project-update]}
+  {:app/id :hara.cli/package
+   :app/summary "Build, inspect, install and publish deterministic Hara packages."
+   :app/routes [:hara.cli.route/package :hara.cli.route/package-check
+                :hara.cli.route/package-build :hara.cli.route/package-inspect
+                :hara.cli.route/package-install :hara.cli.route/package-publish
+                :hara.cli.route/package-tap :hara.cli.route/package-registry]}
+  {:app/id :hara.cli/spec
+   :app/summary "Lint, verify, convert and check machine-readable specifications."
+   :app/routes [:hara.cli.route/spec :hara.cli.route/spec-lint
+                :hara.cli.route/spec-verify :hara.cli.route/spec-validate
+                :hara.cli.route/spec-template :hara.cli.route/spec-check-contribution
+                :hara.cli.route/spec-check :hara.cli.route/spec-to-edn
+                :hara.cli.route/spec-from-edn :hara.cli.route/spec-normalize
+                :hara.cli.route/spec-graph :hara.cli.route/spec-obligations
+                :hara.cli.route/spec-explain]}
+  {:app/id :hara.cli/extension
+   :app/summary "Validate, build, install and test Hara extension packages."
+   :app/routes [:hara.cli.route/extension :hara.cli.route/extension-check
+                :hara.cli.route/extension-build :hara.cli.route/extension-install
+                :hara.cli.route/extension-test]}]
+
+ :cli/routes
+ [{:route/id :hara.cli.route/eval
+   :route/path ["eval"]
+   :route/aliases []
+   :route/handler :hara.cli.handler/eval
+   :route/execution :finite
+   :route/tier :public
+   :route/summary "Evaluate one HAL expression."
+   :route/arguments [{:argument/id :hara.cli.argument/expression
+                      :argument/cardinality :one
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/project :hara.cli.option/offline
+                   :hara.cli.option/allow-file :hara.cli.option/allow-net
+                   :hara.cli.option/allow-process]
+   :route/formats [:text]}
+  {:route/id :hara.cli.route/run-file
+   :route/path ["run"]
+   :route/aliases []
+   :route/handler :hara.cli.handler/run-file
+   :route/execution :finite
+   :route/tier :public
+   :route/summary "Evaluate a HAL source file."
+   :route/arguments [{:argument/id :hara.cli.argument/file
+                      :argument/cardinality :one
+                      :argument/type :path}]
+   :route/options [:hara.cli.option/project :hara.cli.option/offline
+                   :hara.cli.option/allow-file :hara.cli.option/allow-net
+                   :hara.cli.option/allow-process]
+   :route/formats [:text]}
+  {:route/id :hara.cli.route/stdin
+   :route/path ["stdin"]
+   :route/aliases []
+   :route/handler :hara.cli.handler/stdin
+   :route/execution :stream
+   :route/tier :public
+   :route/summary "Evaluate HAL source read from standard input."
+   :route/arguments []
+   :route/options [:hara.cli.option/project :hara.cli.option/offline]
+   :route/formats [:text]}
+  {:route/id :hara.cli.route/repl
+   :route/path ["repl"]
+   :route/aliases [["standalone"]]
+   :route/handler :hara.cli.handler/repl
+   :route/execution :interactive
+   :route/tier :public
+   :route/summary "Start an interactive ROOT session."
+   :route/arguments []
+   :route/options [:hara.cli.option/project :hara.cli.option/offline
+                   :hara.cli.option/host :hara.cli.option/port
+                   :hara.cli.option/history :hara.cli.option/no-history
+                   :hara.cli.option/no-splash :hara.cli.option/no-color]
+   :route/formats [:text]}
+  {:route/id :hara.cli.route/server
+   :route/path ["server"]
+   :route/aliases [["headless"]]
+   :route/handler :hara.cli.handler/server
+   :route/execution :daemon
+   :route/tier :public
+   :route/summary "Start a ROOT RESP listener without a terminal."
+   :route/arguments []
+   :route/options [:hara.cli.option/project :hara.cli.option/host
+                   :hara.cli.option/port :hara.cli.option/log-requests]
+   :route/formats [:text]}
+  {:route/id :hara.cli.route/remote
+   :route/path ["remote"]
+   :route/aliases []
+   :route/handler :hara.cli.handler/remote
+   :route/execution :interactive
+   :route/tier :public
+   :route/summary "Connect a terminal to a remote RESP listener."
+   :route/arguments [{:argument/id :hara.cli.argument/address
+                      :argument/cardinality :one
+                      :argument/type :host-port}]
+   :route/options []
+   :route/formats [:text]}
+  {:route/id :hara.cli.route/project-new
+   :route/path ["project" "new"]
+   :route/aliases [["new"]]
+   :route/handler :hara.cli.handler/project-new
+   :route/execution :finite
+   :route/tier :public
+   :route/summary "Create a Hara project."
+   :route/arguments [{:argument/id :hara.cli.argument/project-name
+                      :argument/cardinality :one
+                      :argument/type :string}]
+   :route/options []
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/project-check
+   :route/path ["project" "check"]
+   :route/aliases [["check"]]
+   :route/handler :hara.cli.handler/project-check
+   :route/execution :finite
+   :route/tier :public
+   :route/summary "Validate a project manifest and source graph."
+   :route/arguments [{:argument/id :hara.cli.argument/path
+                      :argument/cardinality :optional
+                      :argument/type :path}]
+   :route/options [:hara.cli.option/project :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/project-run
+   :route/path ["project" "run"]
+   :route/aliases []
+   :route/handler :hara.cli.handler/project-run
+   :route/execution :finite
+   :route/tier :public
+   :route/summary "Evaluate the active project's main namespace."
+   :route/arguments []
+   :route/options [:hara.cli.option/project :hara.cli.option/offline]
+   :route/formats [:text]}
+  {:route/id :hara.cli.route/project-test
+   :route/path ["project" "test"]
+   :route/aliases [["test"]]
+   :route/handler :hara.cli.handler/project-test
+   :route/execution :finite
+   :route/tier :public
+   :route/summary "Run one test file or discover project tests."
+   :route/arguments [{:argument/id :hara.cli.argument/test-path
+                      :argument/cardinality :optional
+                      :argument/type :path}]
+   :route/options [:hara.cli.option/project :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/project-add
+   :route/path ["project" "add"]
+   :route/aliases [["add"]]
+   :route/handler :hara.cli.handler/project-add
+   :route/execution :finite
+   :route/tier :public
+   :route/summary "Add a project dependency."
+   :route/arguments [{:argument/id :hara.cli.argument/coordinate
+                      :argument/cardinality :one
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/project]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/project-remove
+   :route/path ["project" "remove"]
+   :route/aliases [["remove"]]
+   :route/handler :hara.cli.handler/project-remove
+   :route/execution :finite
+   :route/tier :public
+   :route/summary "Remove a project dependency."
+   :route/arguments [{:argument/id :hara.cli.argument/coordinate
+                      :argument/cardinality :one
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/project]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/project-sync
+   :route/path ["project" "sync"]
+   :route/aliases [["sync"]]
+   :route/handler :hara.cli.handler/project-sync
+   :route/execution :finite
+   :route/tier :public
+   :route/summary "Resolve and lock project dependencies."
+   :route/arguments []
+   :route/options [:hara.cli.option/project :hara.cli.option/offline]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/project-update
+   :route/path ["project" "update"]
+   :route/aliases [["update"]]
+   :route/handler :hara.cli.handler/project-update
+   :route/execution :finite
+   :route/tier :public
+   :route/summary "Update project dependencies through the reviewed registry."
+   :route/arguments []
+   :route/options [:hara.cli.option/project :hara.cli.option/offline]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/package
+   :route/path ["package"]
+   :route/aliases []
+   :route/handler :hara.cli.handler/package
+   :route/execution :finite
+   :route/tier :public
+   :route/summary "Route deterministic package operations."
+   :route/arguments [{:argument/id :hara.cli.argument/package-command
+                      :argument/cardinality :zero-or-more
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/project :hara.cli.option/offline
+                   :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/spec
+   :route/path ["spec"]
+   :route/aliases []
+   :route/handler :hara.cli.handler/spec
+   :route/execution :finite
+   :route/tier :public
+   :route/summary "Route metaspec and artifact specification operations."
+   :route/arguments [{:argument/id :hara.cli.argument/spec-command
+                      :argument/cardinality :zero-or-more
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/extension
+   :route/path ["extension"]
+   :route/aliases []
+   :route/handler :hara.cli.handler/extension
+   :route/execution :finite
+   :route/tier :public
+   :route/summary "Route extension package operations."
+   :route/arguments [{:argument/id :hara.cli.argument/extension-command
+                      :argument/cardinality :zero-or-more
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/project :hara.cli.option/allow-process
+                   :hara.cli.option/format]
+   :route/formats [:text :edn]}
+
+  ;; Package operation routes are explicit so native routers resolve and
+  ;; report the complete operation identity, while the group route remains
+  ;; the help and forward-compatible fallback.
+  {:route/id :hara.cli.route/package-check :route/path ["package" "check"]
+   :route/aliases [] :route/handler :hara.cli.handler/package
+   :route/execution :finite :route/tier :public
+   :route/summary "Validate a package project." :route/arguments []
+   :route/options [:hara.cli.option/project :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/package-build :route/path ["package" "build"]
+   :route/aliases [] :route/handler :hara.cli.handler/package
+   :route/execution :finite :route/tier :public
+   :route/summary "Build a deterministic package archive." :route/arguments []
+   :route/options [:hara.cli.option/project :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/package-inspect :route/path ["package" "inspect"]
+   :route/aliases [] :route/handler :hara.cli.handler/package
+   :route/execution :finite :route/tier :public
+   :route/summary "Inspect a package archive." :route/arguments []
+   :route/options [:hara.cli.option/format] :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/package-install :route/path ["package" "install"]
+   :route/aliases [] :route/handler :hara.cli.handler/package
+   :route/execution :finite :route/tier :public
+   :route/summary "Install a package into local content-addressed storage."
+   :route/arguments [] :route/options [:hara.cli.option/project]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/package-publish :route/path ["package" "publish"]
+   :route/aliases [] :route/handler :hara.cli.handler/package
+   :route/execution :finite :route/tier :public
+   :route/summary "Publish through an explicitly granted registry provider."
+   :route/arguments [] :route/options [:hara.cli.option/offline]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/package-tap :route/path ["package" "tap"]
+   :route/aliases [] :route/handler :hara.cli.handler/package
+   :route/execution :finite :route/tier :public
+   :route/summary "Manage reviewed package tap metadata." :route/arguments []
+   :route/options [:hara.cli.option/offline] :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/package-registry :route/path ["package" "registry"]
+   :route/aliases [] :route/handler :hara.cli.handler/package
+   :route/execution :finite :route/tier :public
+   :route/summary "Manage package registry metadata." :route/arguments []
+   :route/options [:hara.cli.option/offline] :route/formats [:text :edn]}
+
+  {:route/id :hara.cli.route/spec-lint :route/path ["spec" "lint"]
+   :route/aliases [] :route/handler :hara.cli.handler/spec
+   :route/execution :finite :route/tier :public
+   :route/summary "Lint a metaspec document." :route/arguments []
+   :route/options [:hara.cli.option/format] :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/spec-verify :route/path ["spec" "verify"]
+   :route/aliases [] :route/handler :hara.cli.handler/spec
+   :route/execution :finite :route/tier :public
+   :route/summary "Verify metaspec references and laws." :route/arguments []
+   :route/options [:hara.cli.option/format] :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/spec-validate :route/path ["spec" "validate"]
+   :route/aliases [] :route/handler :hara.cli.handler/spec
+   :route/execution :finite :route/tier :public
+   :route/summary "Validate a document against an artifact metaspec."
+   :route/arguments [] :route/options [:hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/spec-template :route/path ["spec" "template"]
+   :route/aliases [] :route/handler :hara.cli.handler/spec
+   :route/execution :finite :route/tier :public
+   :route/summary "Emit an agent-oriented metaspec template." :route/arguments []
+   :route/options [] :route/formats [:edn]}
+  {:route/id :hara.cli.route/spec-check-contribution
+   :route/path ["spec" "check-contribution"]
+   :route/aliases [] :route/handler :hara.cli.handler/spec
+   :route/execution :finite :route/tier :public
+   :route/summary "Check an offline specification contribution."
+   :route/arguments [] :route/options [:hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/spec-check :route/path ["spec" "check"]
+   :route/aliases [] :route/handler :hara.cli.handler/spec
+   :route/execution :finite :route/tier :public
+   :route/summary "Check required artifact obligations." :route/arguments []
+   :route/options [:hara.cli.option/format] :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/spec-to-edn :route/path ["spec" "to-edn"]
+   :route/aliases [] :route/handler :hara.cli.handler/spec
+   :route/execution :finite :route/tier :public
+   :route/summary "Convert authored syntax to canonical EDN." :route/arguments []
+   :route/options [] :route/formats [:edn]}
+  {:route/id :hara.cli.route/spec-from-edn :route/path ["spec" "from-edn"]
+   :route/aliases [] :route/handler :hara.cli.handler/spec
+   :route/execution :finite :route/tier :public
+   :route/summary "Convert canonical EDN to authored syntax." :route/arguments []
+   :route/options [] :route/formats [:text]}
+  {:route/id :hara.cli.route/spec-normalize :route/path ["spec" "normalize"]
+   :route/aliases [] :route/handler :hara.cli.handler/spec
+   :route/execution :finite :route/tier :public
+   :route/summary "Normalize an artifact specification." :route/arguments []
+   :route/options [] :route/formats [:edn]}
+  {:route/id :hara.cli.route/spec-graph :route/path ["spec" "graph"]
+   :route/aliases [] :route/handler :hara.cli.handler/spec
+   :route/execution :finite :route/tier :public
+   :route/summary "Inspect an artifact dependency graph." :route/arguments []
+   :route/options [:hara.cli.option/format] :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/spec-obligations :route/path ["spec" "obligations"]
+   :route/aliases [] :route/handler :hara.cli.handler/spec
+   :route/execution :finite :route/tier :public
+   :route/summary "Emit a machine-readable obligation report." :route/arguments []
+   :route/options [:hara.cli.option/format] :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/spec-explain :route/path ["spec" "explain"]
+   :route/aliases [] :route/handler :hara.cli.handler/spec
+   :route/execution :finite :route/tier :public
+   :route/summary "Explain one stable requirement identifier." :route/arguments []
+   :route/options [:hara.cli.option/format] :route/formats [:text :edn]}
+
+  {:route/id :hara.cli.route/extension-check :route/path ["extension" "check"]
+   :route/aliases [] :route/handler :hara.cli.handler/extension
+   :route/execution :finite :route/tier :public
+   :route/summary "Validate an extension package." :route/arguments []
+   :route/options [:hara.cli.option/format] :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/extension-build :route/path ["extension" "build"]
+   :route/aliases [] :route/handler :hara.cli.handler/extension
+   :route/execution :finite :route/tier :public
+   :route/summary "Build an extension package." :route/arguments []
+   :route/options [:hara.cli.option/allow-process :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/extension-install :route/path ["extension" "install"]
+   :route/aliases [] :route/handler :hara.cli.handler/extension
+   :route/execution :finite :route/tier :public
+   :route/summary "Install an extension package." :route/arguments []
+   :route/options [:hara.cli.option/project :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/extension-test :route/path ["extension" "test"]
+   :route/aliases [] :route/handler :hara.cli.handler/extension
+   :route/execution :finite :route/tier :public
+   :route/summary "Test an extension package." :route/arguments []
+   :route/options [:hara.cli.option/allow-process :hara.cli.option/format]
+   :route/formats [:text :edn]}]
+
+ :cli/options
+ [{:option/id :hara.cli.option/project
+   :option/names ["--project" "--root"]
+   :option/type :path
+   :option/scope :global}
+  {:option/id :hara.cli.option/offline
+   :option/names ["--offline"]
+   :option/type :boolean
+   :option/scope :global}
+  {:option/id :hara.cli.option/allow-file
+   :option/names ["--allow-file"]
+   :option/type :boolean
+   :option/scope :global}
+  {:option/id :hara.cli.option/allow-net
+   :option/names ["--allow-net" "--native-sockets"]
+   :option/type :boolean
+   :option/scope :global}
+  {:option/id :hara.cli.option/allow-process
+   :option/names ["--allow-process"]
+   :option/type :boolean
+   :option/scope :global}
+  {:option/id :hara.cli.option/log-requests
+   :option/names ["--log-requests"]
+   :option/type :boolean
+   :option/scope :global}
+  {:option/id :hara.cli.option/host
+   :option/names ["--host"]
+   :option/type :string
+   :option/scope :global}
+  {:option/id :hara.cli.option/port
+   :option/names ["--port"]
+   :option/type :integer
+   :option/scope :global}
+  {:option/id :hara.cli.option/history
+   :option/names ["--history"]
+   :option/type :path
+   :option/scope :global}
+  {:option/id :hara.cli.option/no-history
+   :option/names ["--no-history"]
+   :option/type :boolean
+   :option/scope :global}
+  {:option/id :hara.cli.option/no-splash
+   :option/names ["--no-splash"]
+   :option/type :boolean
+   :option/scope :global}
+  {:option/id :hara.cli.option/no-color
+   :option/names ["--no-color"]
+   :option/type :boolean
+   :option/scope :global}
+  {:option/id :hara.cli.option/format
+   :option/names ["--format"]
+   :option/type :enum
+   :option/values [:text :edn]
+   :option/scope :route}]
+
+ :cli/outcomes
+ [{:outcome/id :hara.cli.outcome/success :outcome/exit 0}
+  {:outcome/id :hara.cli.outcome/failed :outcome/exit 1}
+  {:outcome/id :hara.cli.outcome/usage-error :outcome/exit 2}
+  {:outcome/id :hara.cli.outcome/read-error :outcome/exit 2}
+  {:outcome/id :hara.cli.outcome/resolution-error :outcome/exit 2}
+  {:outcome/id :hara.cli.outcome/unavailable :outcome/exit 2}
+  {:outcome/id :hara.cli.outcome/internal-error :outcome/exit 2}
+  {:outcome/id :hara.cli.outcome/interrupted :outcome/exit 130}]
+
+ :cli/handlers
+ [{:handler/id :hara.cli.handler/eval
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/run-file
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/stdin
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/repl
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/server
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/remote
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/project-new
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/project-check
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/project-run
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/project-test
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/project-add
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/project-remove
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/project-sync
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/project-update
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/package
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/spec
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/extension
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}]}

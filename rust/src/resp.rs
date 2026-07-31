@@ -1,5 +1,9 @@
 #![cfg(not(target_arch = "wasm32"))]
 
+//! RESP listener and wire codec for the native runtime broker. Wire format,
+//! dialects, and operation semantics are specified in
+//! `specs/01-lang/007-resp/draft/hal-resp-protocol.md`.
+
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BrowserPromiseProvider, decodeHta, encodeHta, HtaContext, HtaHandle, HtaKeyword, loadHtaExtension, parseHtaManifest } from "./hta.js";
+import { BrowserPromiseProvider, decodeHta, encodeHta, HtaContext, HtaHandle, HtaKeyword, loadHtaExtension, parseHtaManifest } from "./packages/hta/index.js";
 
 const tensorDescriptor='{:namespace "math.tensor" :version "1" :provider :wasm :module "tensor.wasm" :abi :hta.v1 :exports {"open" {:args [] :returns :value :async true}} :handles {"tensor" {:tag math}} :capabilities []}';
+
+test("repository compatibility shim re-exports the package API",async()=>{
+  const shim=await import("./hta.js");
+  assert.equal(shim.encodeHta,encodeHta);
+  assert.equal(shim.HtaContext,HtaContext);
+});
 
 test("HTA1 browser codec matches the Java/Rust golden vector",()=>{assert.deepEqual([...encodeHta(["x",42,true])],[72,84,65,49,9,0,0,0,3,4,0,0,0,1,120,3,0,0,0,0,0,0,0,42,2]);assert.deepEqual(decodeHta(encodeHta(["x",42,true])),["x",42,true]);});
 test("HTA1 floats preserve IEEE-754 values",()=>{for(const value of [0.28,-0,Infinity,-Infinity,NaN]){const decoded=decodeHta(encodeHta(value));if(Number.isNaN(value))assert.ok(Number.isNaN(decoded));else assert.ok(Object.is(decoded,value));}});

@@ -27,6 +27,8 @@ component map and `website/docs/development.md` for the developer guide.
   - `01-lang/001-language/metaspec/language-metaspec.edn` defines the language-spec document model
   - `00-unsorted/artifact/metaspec/artifact-metaspec.edn` defines artifact-format specs
   - `01-lang/001-language/draft/hal-langspec.edn` defines the small EDN-oriented data and reader contract
+  - `01-lang/010-bytecode/draft/hal-bytecode-vm.edn` is the draft bytecode-VM runtime spec,
+    with its machine-checked corpus in `01-lang/010-bytecode/draft/conformance/bytecode-vm.edn`
   - `00-unsorted/` holds platform, ecosystem, user-space, and broad execution material awaiting classification
   - `99-archive/planning/` contains non-normative historical source material
 - `contrib/` — separately owned specifications and reference implementations.
@@ -52,6 +54,7 @@ Rust runtime:
 
 ```shell
 cargo test --manifest-path rust/Cargo.toml
+cargo test --manifest-path rust/Cargo.toml --features bytecode-vm vm  # experimental VM (issues #195, #202)
 cargo test --manifest-path rust/raw/Cargo.toml
 bash rust/scripts/check-layout.sh
 bash scripts/build-hara-wasm-raw             # raw wasm extension artifact

@@ -276,10 +276,37 @@ fn string_vector_field(form: &Form, key: &str) -> Result<Vec<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{map_get, parse, router, vector, CliOutcome, Form};
+    use super::{map_get, parse, router, vector, CliOutcome, Form, MANIFEST_SOURCE};
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(ToString::to_string).collect()
+    }
+
+    fn repo_text(relative: &str) -> Option<String> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(relative);
+        match std::fs::read_to_string(&path) {
+            Ok(content) => Some(content),
+            Err(_) => {
+                eprintln!(
+                    "skipping: {} is unavailable (specs submodule not initialized)",
+                    path.display()
+                );
+                None
+            }
+        }
+    }
+
+    #[test]
+    fn vendored_manifest_matches_specs_submodule_when_present() {
+        let Some(submodule) = repo_text("specs/00-unsorted/cli/draft/hara-cli.edn") else {
+            return;
+        };
+        assert_eq!(
+            submodule, MANIFEST_SOURCE,
+            "rust/resources/hara-cli.edn is stale; refresh it from specs/00-unsorted/cli/draft/hara-cli.edn"
+        );
     }
 
     #[test]

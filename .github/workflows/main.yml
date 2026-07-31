@@ -30,7 +30,7 @@ jobs:
     - name: Run Rust native tests
       run: cargo test --manifest-path rust/Cargo.toml
     - name: Verify generated parity corpus
-      run: ./scripts/generate-wasm-truffle-parity && git diff --exit-code -- specs/language/draft/conformance/parity/wasm-truffle.edn
+      run: ./scripts/generate-wasm-truffle-parity && git diff --exit-code -- specs/00-unsorted/platform-language/draft/conformance/parity/wasm-truffle.edn
     - name: Build raw Rust WASM extension artifact
       run: ./scripts/build-hara-wasm-raw
     - name: Build browser and WASI Rust runtime artifacts
