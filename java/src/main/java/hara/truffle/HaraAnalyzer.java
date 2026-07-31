@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -27,7 +28,7 @@ final class HaraAnalyzer {
   private final SourceSection sourceSection;
   private final FrameDescriptor.Builder frames;
   private final Map<Symbol, Integer> locals;
-  private final Map<Symbol, Integer> enclosingLocals;
+  private final HaraAnalyzer parent;
   private final Map<Symbol, Integer> captureSlots;
   private final Map<Symbol, Integer> captureSources;
   private final HaraNodes.RecurTarget recurTarget;
@@ -38,7 +39,7 @@ final class HaraAnalyzer {
       HaraContext context,
       FrameDescriptor.Builder frames,
       Map<Symbol, Integer> locals,
-      Map<Symbol, Integer> enclosingLocals,
+      HaraAnalyzer parent,
       Map<Symbol, Integer> captureSlots,
       Map<Symbol, Integer> captureSources,
       HaraNodes.RecurTarget recurTarget) {
@@ -47,7 +48,7 @@ final class HaraAnalyzer {
     this.sourceSection = sourceSection;
     this.frames = frames;
     this.locals = locals;
-    this.enclosingLocals = enclosingLocals;
+    this.parent = parent;
     this.captureSlots = captureSlots;
     this.captureSources = captureSources;
     this.recurTarget = recurTarget;
@@ -58,7 +59,7 @@ final class HaraAnalyzer {
     FrameDescriptor.Builder frames = FrameDescriptor.newBuilder();
     HaraAnalyzer analyzer =
         new HaraAnalyzer(
-            language, sourceSection, context, frames, Map.of(), Map.of(), Map.of(), Map.of(), null);
+            language, sourceSection, context, frames, Map.of(), null, null, null, null);
     HaraExpressionNode[] expressions = new HaraExpressionNode[forms.length];
     for (int i = 0; i < forms.length; i++) {
       expressions[i] = analyzer.analyze(forms[i]);
@@ -75,6 +76,70 @@ final class HaraAnalyzer {
             true,
             false)
         .getCallTarget();
+  }
+
+  /** Creates a lexical sub-scope sharing the current function frame. */
+  private HaraAnalyzer subScope(
+      Map<Symbol, Integer> subLocals, HaraNodes.RecurTarget subRecurTarget) {
+    return new HaraAnalyzer(
+        language, sourceSection, context, frames, subLocals, this, null, null, subRecurTarget);
+  }
+
+  /** Creates the analyzer for a nested function with its own frame. */
+  private HaraAnalyzer functionScope(
+      FrameDescriptor.Builder functionFrames,
+      Map<Symbol, Integer> functionLocals,
+      Map<Symbol, Integer> functionCaptureSlots,
+      Map<Symbol, Integer> functionCaptureSources) {
+    return new HaraAnalyzer(
+        language,
+        sourceSection,
+        context,
+        functionFrames,
+        functionLocals,
+        this,
+        functionCaptureSlots,
+        functionCaptureSources,
+        null);
+  }
+
+  /**
+   * Resolves a symbol to a frame slot visible from this scope, allocating capture slots on
+   * demand in every function frame crossed on the way out. Capture allocation is therefore
+   * transitive: a nested function that references a grandparent binding forces its immediate
+   * parent to capture that binding as well. Returns null when the symbol is not lexically
+   * bound in any enclosing scope.
+   */
+  private Integer lookupLexical(Symbol symbol) {
+    Integer slot = locals.get(symbol);
+    if (slot != null) {
+      return slot;
+    }
+    if (parent == null) {
+      return null;
+    }
+    Integer source = parent.lookupLexical(symbol);
+    if (source == null) {
+      return null;
+    }
+    if (frames != parent.frames) {
+      slot = frames.addSlot(FrameSlotKind.Object, symbol, null);
+      captureSlots.put(symbol, slot);
+      captureSources.put(symbol, source);
+      locals.put(symbol, slot);
+      return slot;
+    }
+    return source;
+  }
+
+  /** Whether the symbol is bound in any visible lexical scope, without allocating captures. */
+  private boolean isLexicallyBound(Symbol symbol) {
+    for (HaraAnalyzer scope = this; scope != null; scope = scope.parent) {
+      if (scope.locals.containsKey(symbol)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private HaraExpressionNode analyze(Object form) {
@@ -99,18 +164,8 @@ final class HaraAnalyzer {
     }
     if (form instanceof Symbol) {
       Symbol symbol = (Symbol) form;
-      Integer slot = locals.get(symbol);
+      Integer slot = lookupLexical(symbol);
       if (slot == null) {
-        if (enclosingLocals.containsKey(symbol)) {
-          slot = captureSlots.get(symbol);
-          if (slot == null) {
-            slot = frames.addSlot(FrameSlotKind.Object, symbol, null);
-            captureSlots.put(symbol, slot);
-            captureSources.put(symbol, enclosingLocals.get(symbol));
-            locals.put(symbol, slot);
-          }
-          return new HaraNodes.ReadLocal(slot);
-        }
         return new HaraNodes.ReadGlobal(context.canonicalSymbol(symbol));
       }
       return new HaraNodes.ReadLocal(slot);
@@ -229,6 +284,12 @@ final class HaraAnalyzer {
           return analyzeCompare(list, HaraNodes.Compare.Operator.EQUAL, "=");
         case "not=":
           return analyzeCompare(list, HaraNodes.Compare.Operator.NOT_EQUAL, "not=");
+        case "get":
+          return analyzeCollectionOp(list, HaraNodes.CollectionOp.Kind.GET);
+        case "nth":
+          return analyzeCollectionOp(list, HaraNodes.CollectionOp.Kind.NTH);
+        case "assoc":
+          return analyzeCollectionOp(list, HaraNodes.CollectionOp.Kind.ASSOC);
         default:
           return analyzeInvocation(list);
       }
@@ -479,17 +540,7 @@ final class HaraAnalyzer {
     Map<Symbol, Integer> bodyLocals = new HashMap<>(locals);
     for (int i = 0; i < bindingCount; i++) {
       Object pattern = bindings.nth(i * 2L);
-      HaraAnalyzer initializerAnalyzer =
-          new HaraAnalyzer(
-              language,
-              sourceSection,
-              context,
-              frames,
-              bodyLocals,
-              enclosingLocals,
-              Map.of(),
-              Map.of(),
-              recurTarget);
+      HaraAnalyzer initializerAnalyzer = subScope(bodyLocals, recurTarget);
       initializers[i] = initializerAnalyzer.analyze(bindings.nth(i * 2L + 1));
       rawSlots[i] =
           frames.addSlot(FrameSlotKind.Object, Symbol.create(null, "__hara_let_" + i), null);
@@ -503,17 +554,7 @@ final class HaraAnalyzer {
       patternInitializers.add(values.toArray(new HaraExpressionNode[0]));
     }
 
-    HaraAnalyzer bodyAnalyzer =
-        new HaraAnalyzer(
-            language,
-            sourceSection,
-            context,
-            frames,
-            bodyLocals,
-            enclosingLocals,
-            Map.of(),
-            Map.of(),
-            recurTarget);
+    HaraAnalyzer bodyAnalyzer = subScope(bodyLocals, recurTarget);
     HaraExpressionNode body = bodyAnalyzer.analyzeDo(form, 2);
     for (int i = bindingCount - 1; i >= 0; i--) {
       body = new HaraNodes.Let(patternSlots.get(i), patternInitializers.get(i), body);
@@ -554,17 +595,7 @@ final class HaraAnalyzer {
       definitions.add(new Object[] {definitionList.nth(1), body});
     }
 
-    HaraAnalyzer letFnAnalyzer =
-        new HaraAnalyzer(
-            language,
-            sourceSection,
-            context,
-            frames,
-            functionLocals,
-            enclosingLocals,
-            Map.of(),
-            Map.of(),
-            recurTarget);
+    HaraAnalyzer letFnAnalyzer = subScope(functionLocals, recurTarget);
     HaraExpressionNode[] functions = new HaraExpressionNode[functionCount];
     for (int i = 0; i < functionCount; i++) {
       Object[] definition = definitions.get(i);
@@ -689,24 +720,8 @@ final class HaraAnalyzer {
 
     Map<Symbol, Integer> captureSlots = new LinkedHashMap<>();
     Map<Symbol, Integer> captureSources = new LinkedHashMap<>();
-    for (Map.Entry<Symbol, Integer> entry : locals.entrySet()) {
-      if (functionLocals.containsKey(entry.getKey())) continue;
-      int slot = functionFrames.addSlot(FrameSlotKind.Object, entry.getKey(), null);
-      functionLocals.put(entry.getKey(), slot);
-      captureSlots.put(entry.getKey(), slot);
-      captureSources.put(entry.getKey(), entry.getValue());
-    }
     HaraAnalyzer functionAnalyzer =
-        new HaraAnalyzer(
-            language,
-            sourceSection,
-            context,
-            functionFrames,
-            functionLocals,
-            locals,
-            captureSlots,
-            captureSources,
-            null);
+        functionScope(functionFrames, functionLocals, captureSlots, captureSources);
     HaraExpressionNode body = functionAnalyzer.analyzeForms(bodyForms);
     if (!destructureSlots.isEmpty()) {
       body =
@@ -1103,22 +1118,12 @@ final class HaraAnalyzer {
       patternInitializers.add(values.toArray(new HaraExpressionNode[0]));
     }
 
-    HaraNodes.RecurTarget target = new HaraNodes.RecurTarget(bindingCount);
+    HaraNodes.RecurTarget target = new HaraNodes.RecurTarget(rawSlots);
     for (int i = 2; i < form.count() - 1; i++) {
       validateTailRecurs(form.nth(i), false);
     }
     validateTailRecurs(form.nth(form.count() - 1), true);
-    HaraAnalyzer bodyAnalyzer =
-        new HaraAnalyzer(
-            language,
-            sourceSection,
-            context,
-            frames,
-            bodyLocals,
-            enclosingLocals,
-            Map.of(),
-            Map.of(),
-            target);
+    HaraAnalyzer bodyAnalyzer = subScope(bodyLocals, target);
     HaraExpressionNode body = bodyAnalyzer.analyzeDo(form, 2);
     for (int i = bindingCount - 1; i >= 0; i--) {
       body = new HaraNodes.Let(patternSlots.get(i), patternInitializers.get(i), body);
@@ -1186,17 +1191,7 @@ final class HaraAnalyzer {
       int catchSlot = frames.addSlot(FrameSlotKind.Object, catchForm.nth(2), null);
       Map<Symbol, Integer> catchLocals = new HashMap<>(locals);
       catchLocals.put((Symbol) catchForm.nth(2), catchSlot);
-      HaraAnalyzer catchAnalyzer =
-          new HaraAnalyzer(
-              language,
-              sourceSection,
-              context,
-              frames,
-              catchLocals,
-              enclosingLocals,
-              Map.of(),
-              Map.of(),
-              recurTarget);
+      HaraAnalyzer catchAnalyzer = subScope(catchLocals, recurTarget);
       catches[i] =
           new HaraNodes.Try.CatchClause(
               (Symbol) catchForm.nth(1), catchSlot, catchAnalyzer.analyzeDo(catchForm, 3));
@@ -1662,7 +1657,7 @@ final class HaraAnalyzer {
                     Keyword.create("arglists"),
                     hara.lang.data.Vector.Standard.from(null, parameters))
                 .assoc(Keyword.create("macro"), Boolean.TRUE);
-    if (!locals.isEmpty() || !enclosingLocals.isEmpty()) {
+    if (!locals.isEmpty() || parent != null) {
       throw error("defmacro is only valid at namespace scope");
     }
     ArrayList<Object> compiledParameters = new ArrayList<>();
@@ -1737,7 +1732,7 @@ final class HaraAnalyzer {
       return form;
     }
     Symbol operator = (Symbol) list.nth(0);
-    if (locals.containsKey(operator) || enclosingLocals.containsKey(operator)) {
+    if (isLexicallyBound(operator)) {
       return form;
     }
     if ("defmacro".equals(operator.getName())) {
@@ -1751,11 +1746,11 @@ final class HaraAnalyzer {
 
   private Object macroEnvironment(List<?> invocation) {
     ArrayList<Object> localEntries = new ArrayList<>();
-    for (Symbol local : enclosingLocals.keySet()) {
-      localEntries.add(local);
-      localEntries.add(Boolean.TRUE);
+    LinkedHashSet<Symbol> visible = new LinkedHashSet<>();
+    for (HaraAnalyzer scope = this; scope != null; scope = scope.parent) {
+      visible.addAll(scope.locals.keySet());
     }
-    for (Symbol local : locals.keySet()) {
+    for (Symbol local : visible) {
       localEntries.add(local);
       localEntries.add(Boolean.TRUE);
     }
@@ -1815,6 +1810,38 @@ final class HaraAnalyzer {
       arguments[i - 1] = analyze(form.nth(i));
     }
     return new HaraNodes.Invoke(target, arguments);
+  }
+
+  /**
+   * Specializes get/nth/assoc call sites. Falls back to a plain invocation whenever the operator
+   * is lexically shadowed or the arity is outside the specialized shape, so error behavior for
+   * unsupported arities is exactly that of the generic path.
+   */
+  private HaraExpressionNode analyzeCollectionOp(List<?> form, HaraNodes.CollectionOp.Kind kind) {
+    Symbol operator = (Symbol) form.nth(0);
+    long arity = form.count() - 1;
+    boolean supported;
+    switch (kind) {
+      case GET:
+        supported = arity == 2 || arity == 3;
+        break;
+      case NTH:
+        supported = arity == 2;
+        break;
+      case ASSOC:
+        supported = arity == 3;
+        break;
+      default:
+        throw new AssertionError(kind);
+    }
+    if (!supported || isLexicallyBound(operator)) {
+      return analyzeInvocation(form);
+    }
+    HaraExpressionNode[] arguments = new HaraExpressionNode[(int) arity];
+    for (int i = 1; i < form.count(); i++) {
+      arguments[i - 1] = analyze(form.nth(i));
+    }
+    return new HaraNodes.CollectionOp(kind, context.canonicalSymbol(operator), arguments);
   }
 
   private void requireCount(List<?> form, long expected, String name) {

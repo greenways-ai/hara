@@ -10,10 +10,13 @@ import com.oracle.truffle.api.interop.InteropLibrary;
 import com.oracle.truffle.api.interop.UnknownIdentifierException;
 import com.oracle.truffle.api.interop.UnsupportedMessageException;
 import com.oracle.truffle.api.interop.UnsupportedTypeException;
+import com.oracle.truffle.api.nodes.ControlFlowException;
 import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
+import com.oracle.truffle.api.nodes.LoopNode;
 import hara.kernel.builtin.BuiltinStruct;
 import hara.lang.base.Eq;
+import hara.lang.base.Ex;
 import hara.lang.base.primitive.Cast;
 import hara.lang.base.primitive.Num;
 import hara.lang.data.Symbol;
@@ -42,24 +45,32 @@ public final class HaraNodes {
   private HaraNodes() {}
 
   public static final class RecurTarget {
-    private final int arity;
+    private final int[] slots;
 
-    public RecurTarget(int arity) {
-      this.arity = arity;
+    public RecurTarget(int[] slots) {
+      this.slots = slots;
     }
 
     public int arity() {
-      return arity;
+      return slots.length;
+    }
+
+    public int[] slots() {
+      return slots;
     }
   }
 
-  private static final class RecurException extends RuntimeException {
+  /**
+   * Lightweight, stackless recurrence signal. Graal treats {@link ControlFlowException} as a
+   * canonical control-transfer mechanism, so a thrown recur compiles to a plain loop back-edge
+   * once the loop body is inlined; no stack trace is ever captured.
+   */
+  @SuppressWarnings("serial")
+  private static final class RecurException extends ControlFlowException {
     private final RecurTarget target;
-    private final Object[] values;
 
-    private RecurException(RecurTarget target, Object[] values) {
+    private RecurException(RecurTarget target) {
       this.target = target;
-      this.values = values;
     }
   }
 
@@ -1051,21 +1062,19 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      Object[] values = new Object[initializers.length];
       for (int i = 0; i < initializers.length; i++) {
-        values[i] = initializers[i].execute(frame);
+        frame.setObject(slots[i], initializers[i].execute(frame));
       }
+      int recurrences = 0;
       while (true) {
-        for (int i = 0; i < slots.length; i++) {
-          frame.setObject(slots[i], values[i]);
-        }
         try {
           return body.execute(frame);
         } catch (RecurException recur) {
           if (recur.target != target) {
             throw recur;
           }
-          values = recur.values;
+          recurrences++;
+          LoopNode.reportLoopCount(this, recurrences);
         }
       }
     }
@@ -1082,11 +1091,17 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
+      // Evaluate every recurrence value before touching the loop slots so that
+      // expressions such as (recur (+ i 1) (+ acc i)) observe the current bindings.
       Object[] evaluated = new Object[values.length];
       for (int i = 0; i < values.length; i++) {
         evaluated[i] = values[i].execute(frame);
       }
-      throw new RecurException(target, evaluated);
+      int[] slots = target.slots();
+      for (int i = 0; i < slots.length; i++) {
+        frame.setObject(slots[i], evaluated[i]);
+      }
+      throw new RecurException(target);
     }
   }
 
@@ -1922,6 +1937,8 @@ public final class HaraNodes {
     private final boolean variadic;
     private final boolean captures;
 
+    @CompilerDirectives.CompilationFinal private HaraFunction closureFreeInstance;
+
     public FunctionLiteral(
         RootCallTarget callTarget, int minimumArity, boolean variadic, boolean captures) {
       this.callTarget = callTarget;
@@ -1939,8 +1956,18 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      MaterializedFrame closure = captures ? frame.materialize() : null;
-      return new HaraFunction(callTarget, minimumArity, variadic, closure);
+      if (!captures) {
+        // Closure-free functions are immutable, so one instance serves every execution
+        // and call sites keep a stable wrapper for their direct-call caches.
+        HaraFunction instance = closureFreeInstance;
+        if (instance == null) {
+          CompilerDirectives.transferToInterpreterAndInvalidate();
+          instance = new HaraFunction(callTarget, minimumArity, variadic, null);
+          closureFreeInstance = instance;
+        }
+        return instance;
+      }
+      return new HaraFunction(callTarget, minimumArity, variadic, frame.materialize());
     }
   }
 
@@ -1971,7 +1998,7 @@ public final class HaraNodes {
     @Child private DirectCallNode directCall;
     @Child private IndirectCallNode indirectCall = IndirectCallNode.create();
 
-    @CompilerDirectives.CompilationFinal private HaraFunction cachedFunction;
+    @CompilerDirectives.CompilationFinal private RootCallTarget cachedCallTarget;
 
     public Invoke(HaraExpressionNode function, HaraExpressionNode[] arguments) {
       this.function = function;
@@ -2009,17 +2036,274 @@ public final class HaraNodes {
 
       Object[] values = evaluateArguments(frame);
 
-      if (selectedFunction == cachedFunction) {
+      RootCallTarget selectedTarget = selectedFunction.callTarget();
+      if (selectedTarget == cachedCallTarget) {
+        // The current closure travels with the call arguments, so closures created
+        // from the same literal still hit the direct-call cache.
         return directCall.call(selectedFunction.callArguments(values));
       }
-      if (cachedFunction == null) {
+      if (cachedCallTarget == null) {
         CompilerDirectives.transferToInterpreterAndInvalidate();
-        cachedFunction = selectedFunction;
-        directCall = insert(DirectCallNode.create(selectedFunction.callTarget()));
+        cachedCallTarget = selectedTarget;
+        directCall = insert(DirectCallNode.create(selectedTarget));
         return directCall.call(selectedFunction.callArguments(values));
       }
-      return indirectCall.call(
-          selectedFunction.callTarget(), selectedFunction.callArguments(values));
+      return indirectCall.call(selectedTarget, selectedFunction.callArguments(values));
+    }
+
+    @TruffleBoundary
+    private Object invokeMultiFunction(HaraMultiFunction target, Object[] values) {
+      return HaraBox.export(target.invoke(values));
+    }
+
+    @TruffleBoundary
+    private Object invokeViaProtocol(Object target, Object[] values) {
+      try {
+        return HaraLanguage.currentContext().ifnProtocol().invoke("invoke", target, values);
+      } catch (HaraException error) {
+        if (error.haraLocation() != null) throw error;
+        throw new HaraException(error.getMessage(), this);
+      }
+    }
+
+    private Object[] evaluateArguments(VirtualFrame frame) {
+      Object[] values = new Object[arguments.length];
+      for (int i = 0; i < arguments.length; i++) {
+        values[i] = arguments[i].execute(frame);
+      }
+      return values;
+    }
+
+    @TruffleBoundary
+    private HaraException notCallable(Object value) {
+      return new HaraException("Value is not callable: " + value, this);
+    }
+
+    @TruffleBoundary
+    private HaraException arityError(int expected, int actual, boolean variadic) {
+      String expectedText = variadic ? "at least " + expected : Integer.toString(expected);
+      return new HaraException("Expected " + expectedText + " arguments, received " + actual, this);
+    }
+  }
+
+  /**
+   * Specialized node for the hot persistent-collection operations {@code get}, {@code nth}, and
+   * {@code assoc}. Emitted only when the operator is not lexically shadowed and the call arity
+   * matches the protocol method; on every execution the operator var's current value is compared
+   * against the canonical builtin installed by the context, so redefining the var transparently
+   * reverts the call site to a fully generic invocation. The fast path applies only to the
+   * runtime's own intrinsic protocol implementations (built-in persistent collections, byte
+   * arrays, and nil); every other receiver dispatches through the protocol exactly as a plain
+   * invocation would, preserving extend-type semantics and invalidation.
+   */
+  public static final class CollectionOp extends HaraExpressionNode {
+    public enum Kind {
+      GET("ILookup", "lookup"),
+      NTH("INth", "nth"),
+      ASSOC("IAssoc", "assoc");
+
+      private final String protocolName;
+      private final String methodName;
+
+      Kind(String protocolName, String methodName) {
+        this.protocolName = protocolName;
+        this.methodName = methodName;
+      }
+    }
+
+    private final Kind kind;
+    private final Symbol symbol;
+    private final Symbol protocolSymbol;
+    @Children private final HaraExpressionNode[] arguments;
+    @Child private DirectCallNode directCall;
+    @Child private IndirectCallNode indirectCall = IndirectCallNode.create();
+
+    @CompilerDirectives.CompilationFinal private RootCallTarget cachedCallTarget;
+
+    public CollectionOp(Kind kind, Symbol symbol, HaraExpressionNode[] arguments) {
+      this.kind = kind;
+      this.symbol = symbol;
+      this.protocolSymbol = Symbol.create(kind.protocolName);
+      this.arguments = arguments;
+    }
+
+    @Override
+    public Object execute(VirtualFrame frame) {
+      HaraContext context = HaraLanguage.currentContext();
+      Object target = readOperator(context);
+      Object canonical = context.intrinsicCollectionBuiltin(symbol.getName());
+      if (canonical == null || target != canonical) {
+        return invokeGeneric(target, evaluateArguments(frame));
+      }
+      Object[] values = evaluateArguments(frame);
+      Object receiver = HaraBox.unwrap(values[0]);
+      if (context.isHostObject(receiver)) {
+        receiver = context.asHostObject(receiver);
+      }
+      HaraProtocol protocol = resolveProtocol(context);
+      HaraProtocolImplementation implementation = protocol.implementation(receiver, kind.methodName);
+      if (implementation != null && implementation.intrinsic() && intrinsicApplies(receiver)) {
+        try {
+          return invokeIntrinsic(receiver, values);
+        } catch (Ex.Unsupported error) {
+          // The intrinsic receiver declined the operation; dispatching through the protocol
+          // reproduces the exact unsupported-receiver error a plain invocation would raise.
+          return invokeProtocolGeneric(protocol, receiver, values);
+        }
+      }
+      return invokeProtocolGeneric(protocol, receiver, values);
+    }
+
+    private boolean intrinsicApplies(Object receiver) {
+      switch (kind) {
+        case GET:
+          return receiver == null
+              || receiver instanceof hara.lang.protocol.ILookup
+              || receiver instanceof byte[];
+        case NTH:
+          return receiver instanceof hara.lang.protocol.INth || receiver instanceof byte[];
+        case ASSOC:
+          return receiver instanceof hara.lang.protocol.IAssoc;
+        default:
+          throw new AssertionError(kind);
+      }
+    }
+
+    private Object invokeIntrinsic(Object receiver, Object[] values) {
+      switch (kind) {
+        case GET:
+          return intrinsicGet(receiver, values);
+        case NTH:
+          return intrinsicNth(receiver, values);
+        case ASSOC:
+          return intrinsicAssoc(receiver, values);
+        default:
+          throw new AssertionError(kind);
+      }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object intrinsicGet(Object receiver, Object[] values) {
+      if (receiver == null) {
+        return values.length == 3 ? values[2] : null;
+      }
+      if (receiver instanceof hara.lang.protocol.ILookup) {
+        hara.lang.protocol.ILookup<Object, Object> lookup =
+            (hara.lang.protocol.ILookup<Object, Object>) receiver;
+        return values.length == 3 ? lookup.lookup(values[1], values[2]) : lookup.lookup(values[1]);
+      }
+      byte[] bytes = (byte[]) receiver;
+      if (!(values[1] instanceof Number)) {
+        throw new HaraException(
+            "ILookup/lookup on bytes expects an index and optional default", this);
+      }
+      long index = ((Number) values[1]).longValue();
+      if (index < 0 || index >= bytes.length) {
+        return values.length == 3 ? values[2] : null;
+      }
+      return bytes[(int) index];
+    }
+
+    private Object intrinsicNth(Object receiver, Object[] values) {
+      if (receiver instanceof hara.lang.protocol.INth) {
+        return ((hara.lang.protocol.INth<?>) receiver).nth(((Number) values[1]).longValue());
+      }
+      byte[] bytes = (byte[]) receiver;
+      long index = ((Number) values[1]).longValue();
+      if (index < 0 || index >= bytes.length) {
+        throw new HaraException("byte index out of bounds: " + index, this);
+      }
+      return bytes[(int) index];
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object intrinsicAssoc(Object receiver, Object[] values) {
+      // Mirror BuiltinCollection.assoc: vector indices are coerced through the
+      // same checked path so a Long index works and non-numeric or out-of-range
+      // keys raise the same diagnostics as the generic invocation.
+      if (receiver instanceof hara.lang.data.types.IVectorType && !(values[1] instanceof Integer)) {
+        return ((hara.lang.protocol.IAssoc<Integer, Object>) receiver)
+            .assoc(hara.kernel.builtin.BuiltinCollection.assocIndex(values[1]), values[2]);
+      }
+      return ((hara.lang.protocol.IAssoc<Object, Object>) receiver).assoc(values[1], values[2]);
+    }
+
+    private Object readOperator(HaraContext context) {
+      if (context.hasNativeSymbol(symbol)) {
+        return context.resolveNativeSymbol(symbol);
+      }
+      HaraVar var = context.resolve(symbol);
+      if (var == null) {
+        throw unboundOperator();
+      }
+      return var.deref();
+    }
+
+    @TruffleBoundary
+    private HaraException unboundOperator() {
+      return new HaraException("Unbound symbol: " + symbol.display(), this);
+    }
+
+    private HaraProtocol resolveProtocol(HaraContext context) {
+      HaraVar variable = context.resolve(protocolSymbol);
+      Object value = variable == null ? null : variable.get();
+      if (!(value instanceof HaraProtocol)) {
+        throw missingProtocol();
+      }
+      return (HaraProtocol) value;
+    }
+
+    @TruffleBoundary
+    private HaraException missingProtocol() {
+      return new HaraException("Missing protocol: " + kind.protocolName, this);
+    }
+
+    @TruffleBoundary
+    private Object invokeProtocolGeneric(HaraProtocol protocol, Object receiver, Object[] values) {
+      Object[] protocolArguments = new Object[values.length - 1];
+      System.arraycopy(values, 1, protocolArguments, 0, protocolArguments.length);
+      try {
+        return protocol.invoke(kind.methodName, receiver, protocolArguments);
+      } catch (HaraException error) {
+        if (error.haraLocation() != null) throw error;
+        throw new HaraException(error.getMessage(), this);
+      }
+    }
+
+    /** Mirrors {@link Invoke} for call sites whose operator no longer holds the canonical builtin. */
+    private Object invokeGeneric(Object target, Object[] values) {
+      if (target instanceof HaraMultiFunction) {
+        return invokeMultiFunction((HaraMultiFunction) target, values);
+      }
+      if (target instanceof HaraStruct || target instanceof IFn) {
+        return invokeViaProtocol(target, values);
+      }
+      if (target instanceof HaraType) {
+        HaraType haraType = (HaraType) target;
+        if (values.length != haraType.arity()) {
+          throw arityError(haraType.arity(), values.length, false);
+        }
+        return new HaraStruct(haraType, values);
+      }
+      if (!(target instanceof HaraFunction)) {
+        throw notCallable(target);
+      }
+      HaraFunction haraFunction = (HaraFunction) target;
+      HaraFunction selectedFunction = haraFunction.resolveArity(values.length);
+      if (selectedFunction == null) {
+        throw arityError(haraFunction.arity(), values.length, haraFunction.variadic());
+      }
+      RootCallTarget selectedTarget = selectedFunction.callTarget();
+      if (selectedTarget == cachedCallTarget) {
+        return directCall.call(selectedFunction.callArguments(values));
+      }
+      if (cachedCallTarget == null) {
+        CompilerDirectives.transferToInterpreterAndInvalidate();
+        cachedCallTarget = selectedTarget;
+        directCall = insert(DirectCallNode.create(selectedTarget));
+        return directCall.call(selectedFunction.callArguments(values));
+      }
+      return indirectCall.call(selectedTarget, selectedFunction.callArguments(values));
     }
 
     @TruffleBoundary

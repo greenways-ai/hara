@@ -198,6 +198,7 @@ public final class HaraContext {
   private final Map<String, ModuleRecord> modules = new ConcurrentHashMap<>();
   private final Map<String, Set<String>> moduleDependencies = new ConcurrentHashMap<>();
   private final Map<String, Object> libraryStates = new ConcurrentHashMap<>();
+  private final Map<String, Object> intrinsicCollectionBuiltins = new ConcurrentHashMap<>();
   private final Set<String> loadingModules = ConcurrentHashMap.newKeySet();
   private final Deque<String> loadingStack = new ArrayDeque<>();
   private volatile HaraNamespace currentNamespace;
@@ -1759,12 +1760,15 @@ public final class HaraContext {
     target.define(
         "count",
         new UnaryBuiltin("count", value -> protocolCall("ICount", "count", new Object[] {value})));
-    target.define(
-        "get", new VariadicBuiltin("get", values -> protocolCall("ILookup", "lookup", values)));
+    VariadicBuiltin getBuiltin =
+        new VariadicBuiltin("get", values -> protocolCall("ILookup", "lookup", values));
+    target.define("get", getBuiltin);
+    intrinsicCollectionBuiltins.put("get", getBuiltin);
     target.define(
         "find", new VariadicBuiltin("find", values -> protocolCall("IFind", "find", values)));
-    target.define(
-        "assoc", new VariadicBuiltin("assoc", this::associateValues));
+    VariadicBuiltin assocBuiltin = new VariadicBuiltin("assoc", this::associateValues);
+    target.define("assoc", assocBuiltin);
+    intrinsicCollectionBuiltins.put("assoc", assocBuiltin);
     target.define("conj", new VariadicBuiltin("conj", this::conjoin));
     target.define(
         "cons",
@@ -1776,7 +1780,10 @@ public final class HaraContext {
               }
               return protocolCall("ICons", "cons", new Object[] {values[1], values[0]});
             }));
-    target.define("nth", new VariadicBuiltin("nth", values -> protocolCall("INth", "nth", values)));
+    VariadicBuiltin nthBuiltin =
+        new VariadicBuiltin("nth", values -> protocolCall("INth", "nth", values));
+    target.define("nth", nthBuiltin);
+    intrinsicCollectionBuiltins.put("nth", nthBuiltin);
     target.define(
         "empty",
         new UnaryBuiltin("empty", value -> protocolCall("IEmpty", "empty", new Object[] {value})));
@@ -3647,6 +3654,16 @@ public final class HaraContext {
 
   Object invokeProtocol(String protocolName, String methodName, Object... values) {
     return protocolCall(protocolName, methodName, values);
+  }
+
+  /**
+   * The canonical builtin instance currently specializing simple-name collection operations
+   * (get/nth/assoc), or null when the operation has no specialized node support. Specialized
+   * nodes compare the operator var's current value against this instance on every call and fall
+   * back to a generic invocation when it differs (e.g. after redefinition).
+   */
+  public Object intrinsicCollectionBuiltin(String name) {
+    return intrinsicCollectionBuiltins.get(name);
   }
 
   private void requireHalPath(String path, String operation) {

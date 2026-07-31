@@ -544,6 +544,209 @@ public class HaraLanguageTest {
   }
 
   @Test
+  public void evaluatesNestedLoopsWithDistinctRecurTargets() {
+    try (Context context = context()) {
+      assertEquals(
+          18,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(loop [i 0 acc 0] "
+                      + "(if (< i 3) "
+                      + "  (recur (+ i 1) "
+                      + "    (+ acc (loop [j 0 inner 0] "
+                      + "             (if (< j 4) (recur (+ j 1) (+ inner j)) inner)))) "
+                      + "  acc))")
+              .asLong());
+    }
+  }
+
+  @Test
+  public void evaluatesRecurInIfDoAndLetTailPositions() {
+    try (Context context = context()) {
+      assertEquals(
+          2, context.eval(HaraLanguage.ID, "(loop [i 0] (if (< i 2) (recur (+ i 1)) i))").asLong());
+      assertEquals(
+          2,
+          context
+              .eval(HaraLanguage.ID, "(loop [i 0] (do 42 (if (< i 2) (recur (+ i 1)) i)))")
+              .asLong());
+      assertEquals(
+          3,
+          context
+              .eval(HaraLanguage.ID, "(loop [i 0] (let [x (+ i 1)] (if (< x 3) (recur x) x)))")
+              .asLong());
+    }
+  }
+
+  @Test
+  public void rejectsRecurArityMismatch() {
+    try (Context context = context()) {
+      PolyglotException mismatch =
+          assertThrows(
+              PolyglotException.class,
+              () -> context.eval(HaraLanguage.ID, "(loop [left 1 right 2] (recur 3))"));
+      assertTrue(mismatch.getMessage().contains("recur expects 2 arguments"));
+    }
+  }
+
+  @Test
+  public void rejectsRecurInsideTryAsNonTail() {
+    try (Context context = context()) {
+      PolyglotException nonTail =
+          assertThrows(
+              PolyglotException.class,
+              () ->
+                  context.eval(
+                      HaraLanguage.ID, "(loop [i 0] (try (recur (+ i 1)) (finally 42)))"));
+      assertTrue(nonTail.getMessage().contains("tail position"));
+    }
+  }
+
+  @Test
+  public void guestCatchDoesNotInterceptRecurrence() {
+    try (Context context = context()) {
+      assertEquals(
+          5,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(try (loop [i 0] (if (< i 5) (recur (+ i 1)) i)) (catch Throwable t 99))")
+              .asLong());
+    }
+  }
+
+  @Test
+  public void closedLambdasHaveNoCapturesAndAreReused() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(defn mk-closed [] (fn [x] (+ x 1)))");
+      assertEquals(2, context.eval(HaraLanguage.ID, "((mk-closed) 1)").asLong());
+      // A closure-free literal yields one immutable function value on every execution.
+      assertTrue(context.eval(HaraLanguage.ID, "(= (mk-closed) (mk-closed))").asBoolean());
+    }
+  }
+
+  @Test
+  public void closuresCaptureOuterLexicalBindings() {
+    try (Context context = context()) {
+      assertEquals(
+          11, context.eval(HaraLanguage.ID, "(((fn [a b] (fn [x] (+ a x))) 10 20) 1)").asLong());
+      assertEquals(
+          31,
+          context
+              .eval(HaraLanguage.ID, "(((fn [a b] (fn [x] (+ a (+ b x)))) 10 20) 1)")
+              .asLong());
+      assertEquals(
+          6, context.eval(HaraLanguage.ID, "(let [x 1 y 2 f (fn [z] (+ x (+ y z)))] (f 3))").asLong());
+    }
+  }
+
+  @Test
+  public void lexicalShadowingResolvesNearestBinding() {
+    try (Context context = context()) {
+      assertEquals(11, context.eval(HaraLanguage.ID, "(let [x 1] ((fn [x] (+ x 1)) 10))").asLong());
+      assertEquals(5, context.eval(HaraLanguage.ID, "((fn [x] ((fn [x] x) 5)) 1)").asLong());
+      assertEquals(
+          2, context.eval(HaraLanguage.ID, "(let [x 1 f (let [x 2] (fn [] x))] (f))").asLong());
+    }
+  }
+
+  @Test
+  public void nestedClosureCapturesGrandparentLocalTransitively() {
+    try (Context context = context()) {
+      assertEquals(
+          6,
+          context
+              .eval(HaraLanguage.ID, "((((fn [x] (fn [y] (fn [z] (+ x (+ y z))))) 1) 2) 3)")
+              .asLong());
+      // The middle function reads only y; it must capture x solely for its nested child.
+      assertEquals(
+          3,
+          context.eval(HaraLanguage.ID, "(((fn [x] (fn [y] ((fn [z] (+ x z)) y))) 1) 2)").asLong());
+    }
+  }
+
+  @Test
+  public void lexicalBindingInGrandparentScopeBlocksMacroExpansion() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(defmacro shadowed-macro [x] 99)");
+      assertEquals(
+          99, context.eval(HaraLanguage.ID, "(shadowed-macro 1)").asLong());
+      assertEquals(
+          3,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "((fn [shadowed-macro] ((fn [] (shadowed-macro 2)))) (fn [x] (+ x 1)))")
+              .asLong());
+    }
+  }
+
+  @Test
+  public void closuresShareStableCallTargetAcrossWrappers() {
+    try (Context context = context()) {
+      assertEquals(
+          23,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(let [adder (fn [n] (fn [x] (+ x n)))] (+ ((adder 1) 10) ((adder 2) 10)))")
+              .asLong());
+    }
+  }
+
+  @Test
+  public void polymorphicCallSiteFallsBackToIndirectCalls() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(defn apply2 [f x] (f x))");
+      assertEquals(
+          31,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(+ (apply2 (fn [x] (+ x 1)) 10) (apply2 (fn [x] (* x 2)) 10))")
+              .asLong());
+    }
+  }
+
+  @Test
+  public void globalVarLookupSeesRedefinitionThroughFunctions() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(def gv 1)");
+      context.eval(HaraLanguage.ID, "(defn read-gv [] gv)");
+      assertEquals(1, context.eval(HaraLanguage.ID, "(read-gv)").asLong());
+      context.eval(HaraLanguage.ID, "(def gv 9)");
+      assertEquals(9, context.eval(HaraLanguage.ID, "(read-gv)").asLong());
+    }
+  }
+
+  @Test
+  public void dynamicVarsRemainVarLookupsInsideClosures() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(def ^:dynamic *dv* 1)");
+      context.eval(HaraLanguage.ID, "(defn make-reader [] (fn [] *dv*))");
+      assertEquals(1, context.eval(HaraLanguage.ID, "((make-reader))").asLong());
+      assertEquals(
+          42, context.eval(HaraLanguage.ID, "(binding [*dv* 42] ((make-reader)))").asLong());
+    }
+  }
+
+  @Test
+  public void finallyRunsOnceWhenEnclosingLoopCompletes() {
+    try (Context context = context()) {
+      assertEquals(
+          3,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(try (loop [i 0] (if (< i 3) (recur (+ i 1)) i)) "
+                      + "(finally (def loop-finally-runs 1)))")
+              .asLong());
+      assertEquals(1, context.eval(HaraLanguage.ID, "loop-finally-runs").asLong());
+    }
+  }
+
+  @Test
   public void evaluatesThrowCatchAndFinally() {
     try (Context context = context()) {
       assertEquals(
@@ -1689,6 +1892,170 @@ public class HaraLanguageTest {
                       HaraLanguage.ID,
                       "(ns denied (:flavor :jvm) (:import [java.lang String RuntimeException]))"));
       assertTrue(error.getMessage().contains("reflection capability is not granted"));
+    }
+  }
+
+  @Test
+  public void specializesCollectionGetNthAssocOnBuiltins() {
+    try (Context context = context()) {
+      assertEquals(1, context.eval(HaraLanguage.ID, "(get {:a 1} :a)").asLong());
+      assertEquals(10, context.eval(HaraLanguage.ID, "(get [10 20] 0)").asLong());
+      assertEquals(30, context.eval(HaraLanguage.ID, "(nth [10 20 30] 2)").asLong());
+      assertEquals(2, context.eval(HaraLanguage.ID, "(get (assoc {:a 1} :b 2) :b)").asLong());
+      assertEquals(5, context.eval(HaraLanguage.ID, "(get (assoc {:a 1} :a 5) :a)").asLong());
+    }
+  }
+
+  @Test
+  public void collectionGetHandlesMissingKeysNilAndDefaults() {
+    try (Context context = context()) {
+      assertTrue(context.eval(HaraLanguage.ID, "(get {:a 1} :b)").isNull());
+      assertTrue(context.eval(HaraLanguage.ID, "(= :d (get {:a 1} :b :d))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(get nil :k)").isNull());
+      assertTrue(context.eval(HaraLanguage.ID, "(= :d (get nil :k :d))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(= 1 (get {:a 1} :a :d))").asBoolean());
+    }
+  }
+
+  @Test
+  public void collectionNthPreservesBoundsAndArityFailures() {
+    try (Context context = context()) {
+      PolyglotException bounds =
+          assertThrows(
+              PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(nth [1 2] 5)"));
+      assertTrue(bounds.getMessage().contains("IndexOutOfBounds"));
+      PolyglotException arity =
+          assertThrows(
+              PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(nth [1 2] 5 :d)"));
+      assertTrue(arity.getMessage().contains("protocol/arity"));
+      PolyglotException getArity =
+          assertThrows(
+              PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(get {:a 1})"));
+      assertTrue(getArity.getMessage().contains("ILookup/lookup expects one or two arguments"));
+    }
+  }
+
+  @Test
+  public void assocDoesNotMutateTheOriginalCollection() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(def original {:a 1}) (def updated (assoc original :b 2))");
+      assertTrue(
+          context.eval(HaraLanguage.ID, "(= :none (get original :b :none))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(= 2 (get updated :b))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(= 1 (get updated :a))").asBoolean());
+    }
+  }
+
+  @Test
+  public void assocMetadataAgreesWithGenericProtocolDispatch() {
+    try (Context context = context()) {
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(= (meta (assoc (with-meta {:a 1} {:tag :x}) :b 2))"
+                      + " (meta (apply assoc [(with-meta {:a 1} {:tag :x}) :b 2])))")
+              .asBoolean());
+    }
+  }
+
+  @Test
+  public void collectionOpsUseCustomProtocolImplementations() {
+    try (Context context = context()) {
+      context.eval(
+          HaraLanguage.ID,
+          "(defstruct Box [m]) (extend-type Box ILookup (lookup [self k] :custom))");
+      assertTrue(context.eval(HaraLanguage.ID, "(= :custom (get (Box nil) :k))").asBoolean());
+    }
+  }
+
+  @Test
+  public void collectionOpsSeeProtocolExtensionsImmediately() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(defstruct Late [m])");
+      PolyglotException unsupported =
+          assertThrows(
+              PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(nth (Late nil) 0)"));
+      assertTrue(unsupported.getMessage().contains("unsupported-receiver"));
+      context.eval(HaraLanguage.ID, "(extend-type Late INth (nth [self i] :extended))");
+      assertTrue(
+          context.eval(HaraLanguage.ID, "(= :extended (nth (Late nil) 0))").asBoolean());
+      context.eval(HaraLanguage.ID, "(extend-type Late INth (nth [self i] :replaced))");
+      assertTrue(
+          context.eval(HaraLanguage.ID, "(= :replaced (nth (Late nil) 0))").asBoolean());
+    }
+  }
+
+  @Test
+  public void collectionOpsHandleMixedReceiverShapesAtOneCallSite() {
+    try (Context context = context()) {
+      context.eval(
+          HaraLanguage.ID,
+          "(defstruct Box [m]) (extend-type Box ILookup (lookup [self k] (field self :m))) "
+              + "(defn pick [c] (get c :a))");
+      assertEquals(1, context.eval(HaraLanguage.ID, "(pick {:a 1})").asLong());
+      assertTrue(context.eval(HaraLanguage.ID, "(pick nil)").isNull());
+      assertEquals(9, context.eval(HaraLanguage.ID, "(pick (Box 9))").asLong());
+      assertEquals(2, context.eval(HaraLanguage.ID, "(pick {:a 2})").asLong());
+    }
+  }
+
+  @Test
+  public void collectionOpsPreserveArgumentEvaluationOrder() {
+    try (Context context = context()) {
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(do (def a (atom [])) "
+                      + "(get (do (swap! a conj :recv) {:a 1}) (do (swap! a conj :key) :a)) "
+                      + "(= [:recv :key] @a))")
+              .asBoolean());
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(do (def b (atom [])) "
+                      + "(assoc (do (swap! b conj 1) {:x 1}) "
+                      + "       (do (swap! b conj 2) :y) "
+                      + "       (do (swap! b conj 3) 2)) "
+                      + "(= [1 2 3] @b))")
+              .asBoolean());
+    }
+  }
+
+  @Test
+  public void collectionOpsFallBackToGenericInvocationAfterRedefinition() {
+    try (Context context = context()) {
+      context.eval(
+          HaraLanguage.ID,
+          "(alter-var-root (var get) (fn [old] (fn [m k] :redefined)))");
+      assertTrue(context.eval(HaraLanguage.ID, "(= :redefined (get {:a 1} :a))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(= :redefined (get {:a 1} :b))").asBoolean());
+    }
+  }
+
+  @Test
+  public void collectionOpsRespectLexicalShadowing() {
+    try (Context context = context()) {
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(= :shadowed (let [get (fn [m k] :shadowed)] (get {:a 1} :a)))")
+              .asBoolean());
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(= :sh ((fn [assoc] (assoc {:a 1} :b 2)) (fn [m k v] :sh)))")
+              .asBoolean());
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(= :sh ((fn [nth] (nth [1 2] 0)) (fn [v i] :sh)))")
+              .asBoolean());
     }
   }
 

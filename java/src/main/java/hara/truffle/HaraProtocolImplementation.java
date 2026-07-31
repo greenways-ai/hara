@@ -4,14 +4,29 @@ package hara.truffle;
 public final class HaraProtocolImplementation {
   private final HaraProtocolInvoker invoker;
   private final HaraFunction function;
+  private final boolean intrinsic;
 
   HaraProtocolImplementation(HaraProtocolInvoker invoker, HaraFunction function) {
+    this(invoker, function, false);
+  }
+
+  HaraProtocolImplementation(HaraProtocolInvoker invoker, HaraFunction function, boolean intrinsic) {
     this.invoker = invoker;
     this.function = function;
+    this.intrinsic = intrinsic;
   }
 
   public HaraProtocolInvoker invoker() {
     return invoker;
+  }
+
+  /**
+   * Whether this implementation is one of the runtime's own built-in invokers (as opposed to a
+   * user or extension registration). Specialized nodes may inline the receiver operations of an
+   * intrinsic implementation because its behavior is fixed by the runtime.
+   */
+  public boolean intrinsic() {
+    return intrinsic;
   }
 
   public HaraFunction function() {

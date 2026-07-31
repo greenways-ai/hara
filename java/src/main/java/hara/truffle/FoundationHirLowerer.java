@@ -281,7 +281,7 @@ final class FoundationHirLowerer {
       slots[index] = frames.addSlot(FrameSlotKind.Object, symbol, null);
       bodyLocals.put(symbol, slots[index]);
     }
-    HaraNodes.RecurTarget target = new HaraNodes.RecurTarget(count);
+    HaraNodes.RecurTarget target = new HaraNodes.RecurTarget(slots);
     FoundationHirLowerer bodyLowerer =
         new FoundationHirLowerer(language, context, frames, bodyLocals, target);
     return new HaraNodes.Loop(target, slots, initializers, bodyLowerer.lowerBody(form, 2));
