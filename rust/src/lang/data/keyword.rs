@@ -1,9 +1,10 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use crate::lang::protocol::{
-    HashType, IDisplay, IHash, ILookup, IMetadata, INamespaced, IObjType, MetaType, ObjType,
+    HashType, IDisplay, IHash, IHashCached, ILookup, IMetadata, INamespaced, IObjType, MetaType,
+    ObjType,
 };
 
 thread_local! {
@@ -15,6 +16,7 @@ struct Data {
     namespace: Option<String>,
     name: String,
     full: String,
+    hash: Cell<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,9 +49,14 @@ impl Keyword {
                 namespace: namespace.map(str::to_owned),
                 name: name.into(),
                 full: full.into(),
+                hash: Cell::new(0),
             });
             cache.borrow_mut().insert(full.into(), Rc::downgrade(&data));
-            Self(data)
+            let keyword = Self(data);
+            // Java parity: Keyword.create precomputes the hash at intern time
+            // (k.hashGet() inside the RefCache factory), so first use is free.
+            keyword.hash_put(keyword.hash());
+            keyword
         })
     }
 
@@ -122,12 +129,35 @@ impl IObjType for Keyword {
     }
 }
 impl IHash for Keyword {
-    fn hash_calc(&self, _hash_type: HashType) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut state = std::collections::hash_map::DefaultHasher::new();
-        self.hash_seed().hash(&mut state);
-        self.0.full.hash(&mut state);
-        state.finish()
+    fn hash_calc(&self, hash_type: HashType) -> u64 {
+        // DEVIATION from Java: IStringType.hashCalc uses toString(), and
+        // Java's Keyword does not override toString(), so the Java hash is
+        // built on Object identity garbage ("::KEYWORD|hara.lang.data.Keyword@…")
+        // and is non-deterministic across JVM runs. This port standardises on
+        // the display form "::KEYWORD|:ns/name" (see lang::hash module docs).
+        crate::lang::hash::hash_string_type(
+            hash_type,
+            &format!("{}|{}", self.hash_seed(), self.display()),
+        ) as u64
+    }
+    fn hash_get(&self) -> u64 {
+        self.hash_cached()
+    }
+    fn hash_get_as(&self, hash_type: HashType) -> u64 {
+        self.hash_cached_as(hash_type)
+    }
+}
+impl IHashCached for Keyword {
+    fn hash_current(&self) -> u64 {
+        self.0.hash.get()
+    }
+    fn hash_put(&self, hash: u64) {
+        self.0.hash.set(hash);
+    }
+}
+impl crate::lang::hash::JavaHash for Keyword {
+    fn java_hash(&self, hash_type: HashType) -> i64 {
+        self.hash_calc(hash_type) as i64
     }
 }
 impl PartialEq for Keyword {
@@ -210,5 +240,26 @@ mod tests {
         let documented = first.with_meta(Some(crate::lang::data::Metadata::document("ignored")));
         assert!(documented.meta().is_none());
         assert!(documented.same_identity(&first));
+    }
+
+    #[test]
+    fn intern_precomputes_the_hash() {
+        use crate::lang::protocol::IHashCached;
+        // Java Keyword.create calls k.hashGet() inside the cache factory, so
+        // the cached hash is populated at intern time and first use is free.
+        let keyword = Keyword::parse("precomputed/hash").unwrap();
+        let current = keyword.hash_current();
+        assert_ne!(current, 0);
+        assert_eq!(current, keyword.hash_calc(HashType::Rapid));
+        assert_eq!(keyword.hash_get(), current);
+        assert_eq!(keyword.hash_get_as(HashType::Rapid), current);
+        assert_eq!(
+            keyword.hash_get_as(HashType::Murmur3),
+            keyword.hash_calc(HashType::Murmur3)
+        );
+        // re-interning the same name returns the same precomputed data
+        let again = Keyword::create(Some("precomputed"), "hash").unwrap();
+        assert_eq!(again.hash_current(), current);
+        assert!(keyword.same_identity(&again));
     }
 }

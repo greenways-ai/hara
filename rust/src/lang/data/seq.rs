@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::lang::data::Tuple;
+use crate::lang::hash::JavaHash;
 use crate::lang::protocol::{
     HashType, IColl, IConj, ICons, ICount, IDisplay, IEmpty, IEquality, IHash, IMetadata, IObjType,
     IPeekFirst, IPersistent, IPopFirst, IPushFirst, ObjType,
@@ -140,13 +141,13 @@ impl<E: Clone + std::fmt::Debug + 'static> IDisplay for Seq<E> {
         )
     }
 }
-impl<E: Clone + std::hash::Hash + 'static> IHash for Seq<E> {
-    fn hash_calc(&self, _: HashType) -> u64 {
-        let mut s = std::collections::hash_map::DefaultHasher::new();
-        use std::hash::{Hash, Hasher};
-        "::SEQUENTIAL".hash(&mut s);
-        self.clone().into_iter().for_each(|v| v.hash(&mut s));
-        s.finish()
+impl<E: Clone + std::hash::Hash + JavaHash + 'static> IHash for Seq<E> {
+    fn hash_calc(&self, hash_type: HashType) -> u64 {
+        // Java Seq is sequential: ordered composition, "::SEQUENTIAL" seed.
+        crate::lang::hash::compose_ordered(
+            "SEQUENTIAL",
+            self.clone().into_iter().map(|v| v.java_hash(hash_type)),
+        ) as u64
     }
 }
 impl<E: Clone + std::fmt::Debug + 'static> IObjType for Seq<E> {
@@ -156,7 +157,7 @@ impl<E: Clone + std::fmt::Debug + 'static> IObjType for Seq<E> {
 }
 impl<E> IColl<E> for Seq<E>
 where
-    E: Clone + PartialEq + std::fmt::Debug + std::hash::Hash + 'static,
+    E: Clone + PartialEq + std::fmt::Debug + std::hash::Hash + JavaHash + 'static,
 {
     fn start_string(&self) -> &'static str {
         "("

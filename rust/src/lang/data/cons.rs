@@ -1,4 +1,5 @@
 use crate::lang::data::{List, Tuple};
+use crate::lang::hash::JavaHash;
 use crate::lang::protocol::{
     HashType, IColl, IConj, ICons, ICount, IDisplay, IEmpty, IEquality, IHash, IMetadata, INth,
     IObjType, IPeekFirst, IPersistent, IPopFirst, IPushFirst, ObjType,
@@ -131,13 +132,15 @@ impl<E: Clone + std::fmt::Debug, M: Clone + IntoIterator<Item = E>> IDisplay for
         )
     }
 }
-impl<E: Clone + std::hash::Hash, M: Clone + IntoIterator<Item = E>> IHash for Cons<E, M> {
-    fn hash_calc(&self, _: HashType) -> u64 {
-        let mut s = std::collections::hash_map::DefaultHasher::new();
-        use std::hash::{Hash, Hasher};
-        "::SEQUENTIAL".hash(&mut s);
-        self.iter().for_each(|v| v.hash(&mut s));
-        s.finish()
+impl<E: Clone + std::hash::Hash + JavaHash, M: Clone + IntoIterator<Item = E>> IHash
+    for Cons<E, M>
+{
+    fn hash_calc(&self, hash_type: HashType) -> u64 {
+        // Java Cons is sequential: ordered composition, "::SEQUENTIAL" seed.
+        crate::lang::hash::compose_ordered(
+            "SEQUENTIAL",
+            self.iter().map(|value| value.java_hash(hash_type)),
+        ) as u64
     }
 }
 impl<E: Clone + std::fmt::Debug, M: Clone + IntoIterator<Item = E>> IObjType for Cons<E, M> {
@@ -147,7 +150,7 @@ impl<E: Clone + std::fmt::Debug, M: Clone + IntoIterator<Item = E>> IObjType for
 }
 impl<E, M> IColl<E> for Cons<E, M>
 where
-    E: Clone + PartialEq + std::fmt::Debug + std::hash::Hash,
+    E: Clone + PartialEq + std::fmt::Debug + std::hash::Hash + JavaHash,
     M: Clone + IntoIterator<Item = E>,
 {
     fn start_string(&self) -> &'static str {

@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::hash::Hash;
 
 use crate::lang::data::Map;
+use crate::lang::hash::JavaHash;
 use crate::lang::protocol::{
     HashType, IColl, IConj, ICount, IDisplay, IDissoc, IEmpty, IEquality, IFind, IHash, IMetadata,
     IMutable, IObjType, IPersistent, IToMutable, IToPersistent, ObjType,
@@ -130,15 +131,14 @@ impl<E: Clone + Eq + Hash + std::fmt::Debug> IDisplay for Standard<E> {
         )
     }
 }
-impl<E: Clone + Eq + Hash> IHash for Standard<E> {
-    fn hash_calc(&self, _hash_type: HashType) -> u64 {
-        self.iter()
-            .map(|v| {
-                let mut s = std::collections::hash_map::DefaultHasher::new();
-                v.hash(&mut s);
-                std::hash::Hasher::finish(&s)
-            })
-            .fold(0u64, u64::wrapping_add)
+impl<E: Clone + Eq + Hash + JavaHash> IHash for Standard<E> {
+    fn hash_calc(&self, hash_type: HashType) -> u64 {
+        // Java ISetType → IUnOrderedType: order-insensitive sum,
+        // "::SET" seed (see lang::hash).
+        crate::lang::hash::compose_unordered(
+            "SET",
+            self.iter().map(|v| v.java_hash(hash_type)),
+        ) as u64
     }
 }
 impl<E: Clone + Eq + Hash + std::fmt::Debug> IObjType for Standard<E> {
@@ -148,7 +148,7 @@ impl<E: Clone + Eq + Hash + std::fmt::Debug> IObjType for Standard<E> {
 }
 impl<E> IColl<E> for Standard<E>
 where
-    E: Clone + Eq + Hash + std::fmt::Debug,
+    E: Clone + Eq + Hash + JavaHash + std::fmt::Debug,
 {
     fn start_string(&self) -> &'static str {
         "#{"

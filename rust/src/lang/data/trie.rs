@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use crate::lang::hash::JavaHash;
 use crate::lang::protocol::{
     HashType, IAssoc, IColl, IConj, ICount, IDisplay, IDissoc, IEmpty, IEquality, IFind, IHash,
     ILookup, IMetadata, IMutable, IObjType, IPersistent, IToMutable, IToPersistent, MetaType,
@@ -223,17 +224,19 @@ impl<V: Clone + std::fmt::Debug> IDisplay for Standard<V> {
         )
     }
 }
-impl<V: Clone + std::hash::Hash> IHash for Standard<V> {
-    fn hash_calc(&self, _: HashType) -> u64 {
-        self.entries()
-            .iter()
-            .map(|(k, v)| {
-                let mut s = std::collections::hash_map::DefaultHasher::new();
-                std::hash::Hash::hash(k, &mut s);
-                std::hash::Hash::hash(v, &mut s);
-                std::hash::Hasher::finish(&s)
-            })
-            .fold(0u64, u64::wrapping_add)
+impl<V: Clone + std::hash::Hash + JavaHash> IHash for Standard<V> {
+    fn hash_calc(&self, hash_type: HashType) -> u64 {
+        // Java Trie.hashCalc override: acc = "::MAP".hashCode(), then
+        // acc += hash(key) + hash(value) per entry (NOT the entry-tuple
+        // composition used by maps). Keys are plain Strings, so they hash
+        // via Java String.hashCode under every hash type (see lang::hash).
+        let mut acc = crate::lang::hash::hash_seed("MAP") as i64;
+        for (k, v) in self.entries() {
+            acc = acc
+                .wrapping_add(crate::lang::hash::java_string_hash(&k) as i64)
+                .wrapping_add(v.java_hash(hash_type));
+        }
+        acc as u64
     }
 }
 impl<V: Clone + std::fmt::Debug> IObjType for Standard<V> {
@@ -243,7 +246,7 @@ impl<V: Clone + std::fmt::Debug> IObjType for Standard<V> {
 }
 impl<V> IColl<String> for Standard<V>
 where
-    V: Clone + Default + PartialEq + std::hash::Hash + std::fmt::Debug,
+    V: Clone + Default + PartialEq + std::hash::Hash + JavaHash + std::fmt::Debug,
 {
     fn start_string(&self) -> &'static str {
         "#{"
@@ -334,5 +337,67 @@ mod tests {
         assert_eq!(b.get("cat"), None);
         assert_eq!(a.get("cat"), Some(&2));
         assert_eq!(b.get("car"), Some(&1));
+    }
+
+    #[test]
+    fn dissoc_prunes_childless_ancestors_bottom_up() {
+        // Java dissocHelper: a node is removed once it is non-terminal and
+        // childless, and the removal cascades up the spine.
+        let trie = Standard::new()
+            .assoc_value("cat", 1)
+            .assoc_value("cats", 2)
+            .assoc_value("car", 3);
+        // removing the leaf word prunes the 's' node; "cat" stays terminal
+        let trie = trie.dissoc_value("cats");
+        assert_eq!(trie.get("cats"), None);
+        assert_eq!(trie.get("cat"), Some(&1));
+        // removing "car" prunes the 'r' node but keeps the "cat" spine
+        let trie = trie.dissoc_value("car");
+        assert_eq!(trie.get("car"), None);
+        assert_eq!(trie.entries().len(), 1);
+        // removing the last word prunes the whole spine back to an empty root
+        let trie = trie.dissoc_value("cat");
+        assert_eq!(trie.len(), 0);
+        assert!(trie.root.children.is_empty());
+        assert!(trie.root.value.is_none());
+    }
+
+    #[test]
+    fn dissoc_prefix_clears_terminal_but_keeps_children() {
+        // Java: dissoc of a word that is a prefix of another word only
+        // clears the terminal flag/value; the subtree is untouched.
+        let trie = Standard::new()
+            .assoc_value("cat", 1)
+            .assoc_value("cats", 2)
+            .dissoc_value("cat");
+        assert_eq!(trie.get("cat"), None);
+        assert_eq!(trie.get("cats"), Some(&2));
+        assert_eq!(trie.len(), 1);
+        assert_eq!(trie.iter().collect::<Vec<_>>(), vec!["cats"]);
+    }
+
+    #[test]
+    fn empty_string_key_sets_the_root_terminal() {
+        // Java assoc("") walks zero chars and marks the root node terminal;
+        // iteration yields "" first (it is a prefix of every key).
+        let trie = Standard::new().assoc_value("", 7).assoc_value("a", 1);
+        assert_eq!(trie.get(""), Some(&7));
+        assert_eq!(trie.len(), 2);
+        assert_eq!(trie.iter().collect::<Vec<_>>(), vec!["", "a"]);
+        // dissoc("") clears the root terminal but keeps the children
+        let trie = trie.dissoc_value("");
+        assert_eq!(trie.get(""), None);
+        assert_eq!(trie.get("a"), Some(&1));
+        assert_eq!(trie.len(), 1);
+    }
+
+    #[test]
+    fn dissoc_absent_prefix_or_divergent_key_is_a_noop() {
+        let trie = Standard::new().assoc_value("cat", 1);
+        for key in ["cow", "ca", "cats", "dog"] {
+            let next = trie.dissoc_value(key);
+            assert_eq!(next.len(), 1);
+            assert_eq!(next.get("cat"), Some(&1));
+        }
     }
 }

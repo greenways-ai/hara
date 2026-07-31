@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::hash::Hash;
 
 use crate::lang::data::{Map, Vector};
+use crate::lang::hash::JavaHash;
 use crate::lang::protocol::{
     HashType, IAssoc, IColl, IConj, ICount, IDisplay, IDissoc, IEmpty, IEquality, IFind, IHash,
     ILookup, IMetadata, IMutable, INth, IObjType, IPersistent, IToMutable, IToPersistent, MetaType,
@@ -202,16 +203,19 @@ impl<K: Clone + Eq + Hash + std::fmt::Debug, V: Clone + std::fmt::Debug> IDispla
         )
     }
 }
-impl<K: Clone + Eq + Hash, V: Clone + Hash> IHash for Standard<K, V> {
-    fn hash_calc(&self, _: HashType) -> u64 {
-        self.iter()
-            .map(|(k, v)| {
-                let mut s = std::collections::hash_map::DefaultHasher::new();
-                std::hash::Hash::hash(k, &mut s);
-                std::hash::Hash::hash(v, &mut s);
-                std::hash::Hasher::finish(&s)
-            })
-            .fold(0u64, u64::wrapping_add)
+impl<K: Clone + Eq + Hash + JavaHash, V: Clone + Hash + JavaHash> IHash for Standard<K, V> {
+    fn hash_calc(&self, hash_type: HashType) -> u64 {
+        // Same composition as the hash map (Java IMapType → IUnOrderedType):
+        // "::MAP" seed, sum of ordered-entry hashes (see lang::hash).
+        crate::lang::hash::compose_unordered(
+            "MAP",
+            self.iter().map(|(k, v)| {
+                crate::lang::hash::compose_entry(
+                    k.java_hash(hash_type),
+                    v.java_hash(hash_type),
+                )
+            }),
+        ) as u64
     }
 }
 impl<K: Clone + Eq + Hash + std::fmt::Debug, V: Clone + std::fmt::Debug> IObjType
@@ -223,8 +227,8 @@ impl<K: Clone + Eq + Hash + std::fmt::Debug, V: Clone + std::fmt::Debug> IObjTyp
 }
 impl<K, V> IColl<(K, V)> for Standard<K, V>
 where
-    K: Clone + Eq + Hash + std::fmt::Debug,
-    V: Clone + PartialEq + Hash + std::fmt::Debug,
+    K: Clone + Eq + Hash + JavaHash + std::fmt::Debug,
+    V: Clone + PartialEq + Hash + JavaHash + std::fmt::Debug,
 {
     fn start_string(&self) -> &'static str {
         "{"
@@ -308,5 +312,53 @@ mod tests {
             reduced.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
             (60..80).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn compaction_triggers_at_java_threshold_and_renumbers() {
+        // Java: compact on dissoc when order.count() > 32 &&
+        // order.count() > 2 * lookup.count(), rebuilding both structures
+        // and renumbering lookup indices 0..count-1.
+        let mut map = (0..33).map(|n| (n, n)).collect::<Standard<_, _>>();
+        for key in 0..16 {
+            map = map.dissoc_value(&key);
+        }
+        // order 33, lookup 17: 33 > 32 but 33 <= 2 * 17, no compaction
+        assert_eq!(map.order.len(), 33);
+        map = map.dissoc_value(&16);
+        // order 33, lookup 16: 33 > 32 and 33 > 2 * 16, compact + renumber
+        assert_eq!(map.order.len(), 16);
+        assert_eq!(
+            map.iter().map(|(key, _)| *key).collect::<Vec<_>>(),
+            (17..33).collect::<Vec<_>>()
+        );
+        // renumbered: overwriting the first live key writes slot 0
+        let overwritten = map.assoc_value(17, 999);
+        assert_eq!(overwritten.iter().next(), Some(&(17, 999)));
+        // order at exactly 32 never compacts
+        let mut small = (0..32).map(|n| (n, n)).collect::<Standard<_, _>>();
+        for key in 0..31 {
+            small = small.dissoc_value(&key);
+        }
+        assert_eq!(small.order.len(), 32);
+        assert_eq!(small.len(), 1);
+    }
+
+    #[test]
+    fn dissoc_then_reassoc_appends_at_end() {
+        use crate::lang::protocol::{IFind, INth};
+        let map = Standard::new()
+            .assoc_value("a", 1)
+            .assoc_value("b", 2)
+            .assoc_value("c", 3)
+            .dissoc_value(&"b")
+            .assoc_value("b", 9);
+        assert_eq!(
+            map.iter().cloned().collect::<Vec<_>>(),
+            vec![("a", 1), ("c", 3), ("b", 9)]
+        );
+        assert_eq!(map.nth(1), Some(&("c", 3)));
+        assert_eq!(map.find(&"b"), Some(("b", 9)));
+        assert_eq!(map.find(&"zz"), None);
     }
 }

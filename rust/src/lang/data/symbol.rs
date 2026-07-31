@@ -1,9 +1,9 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use crate::lang::protocol::{
-    HashType, IDisplay, IHash, IMetadata, INamespaced, IObjType, MetaType, ObjType,
+    HashType, IDisplay, IHash, IHashCached, IMetadata, INamespaced, IObjType, MetaType, ObjType,
 };
 
 thread_local! {
@@ -15,6 +15,7 @@ struct Data {
     namespace: Option<String>,
     name: String,
     full: String,
+    hash: Cell<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -56,12 +57,17 @@ impl Symbol {
                 namespace: namespace.map(str::to_owned),
                 name: name.into(),
                 full: full.into(),
+                hash: Cell::new(0),
             });
             cache.borrow_mut().insert(full.into(), Rc::downgrade(&data));
-            Self {
+            let symbol = Self {
                 data,
                 metadata: None,
-            }
+            };
+            // Java parity: ObjPersistent.hashGet() is populated at creation,
+            // so the first hash lookup on an interned symbol is free.
+            symbol.hash_put(symbol.hash());
+            symbol
         })
     }
 
@@ -110,12 +116,33 @@ impl IObjType for Symbol {
     }
 }
 impl IHash for Symbol {
-    fn hash_calc(&self, _hash_type: HashType) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut state = std::collections::hash_map::DefaultHasher::new();
-        self.hash_seed().hash(&mut state);
-        self.data.full.hash(&mut state);
-        state.finish()
+    fn hash_calc(&self, hash_type: HashType) -> u64 {
+        // Mirrors Java exactly: Symbol inherits ObjPersistent.toString() =
+        // class-name + "<" + display() + ">" (deterministic, class-qualified),
+        // so Java hashes "::SYMBOL|hara.lang.data.Symbol<ns/name>".
+        crate::lang::hash::hash_string_type(
+            hash_type,
+            &format!("{}|hara.lang.data.Symbol<{}>", self.hash_seed(), self.display()),
+        ) as u64
+    }
+    fn hash_get(&self) -> u64 {
+        self.hash_cached()
+    }
+    fn hash_get_as(&self, hash_type: HashType) -> u64 {
+        self.hash_cached_as(hash_type)
+    }
+}
+impl IHashCached for Symbol {
+    fn hash_current(&self) -> u64 {
+        self.data.hash.get()
+    }
+    fn hash_put(&self, hash: u64) {
+        self.data.hash.set(hash);
+    }
+}
+impl crate::lang::hash::JavaHash for Symbol {
+    fn java_hash(&self, hash_type: HashType) -> i64 {
+        self.hash_calc(hash_type) as i64
     }
 }
 impl PartialEq for Symbol {
@@ -184,5 +211,26 @@ mod tests {
         assert_eq!(documented.meta().and_then(|value| value.doc()), Some("doc"));
         assert_eq!(documented, first);
         assert!(documented.same_identity(&first));
+    }
+
+    #[test]
+    fn intern_precomputes_the_hash() {
+        use crate::lang::protocol::IHashCached;
+        // Java precomputes the hash at creation (ObjPersistent.hashGet), so
+        // the cached hash is populated at intern time and first use is free.
+        let symbol = Symbol::parse("precomputed/hash");
+        let current = symbol.hash_current();
+        assert_ne!(current, 0);
+        assert_eq!(current, symbol.hash_calc(HashType::Rapid));
+        assert_eq!(symbol.hash_get(), current);
+        assert_eq!(symbol.hash_get_as(HashType::Rapid), current);
+        assert_eq!(
+            symbol.hash_get_as(HashType::Murmur3),
+            symbol.hash_calc(HashType::Murmur3)
+        );
+        // metadata variants share the interned precomputed hash
+        let documented = symbol.with_meta(Some(crate::lang::data::Metadata::document("doc")));
+        assert_eq!(documented.hash_current(), current);
+        assert_eq!(documented.hash_get(), current);
     }
 }

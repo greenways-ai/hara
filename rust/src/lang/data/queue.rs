@@ -1,4 +1,5 @@
 use crate::lang::data::{List, Vector};
+use crate::lang::hash::JavaHash;
 use crate::lang::protocol::{
     HashType, IColl, IConj, ICount, IDisplay, IEmpty, IEquality, IHash, IMetadata, IMutable, INth,
     IObjType, IPeekFirst, IPeekLast, IPersistent, IPopFirst, IPopLast, IPushLast, IToMutable,
@@ -159,7 +160,13 @@ impl<E: Clone> Standard<E> {
         }
     }
     pub fn iter(&self) -> impl Iterator<Item = &E> {
-        (0..self.size).map(|i| self.get(i).expect("valid queue index"))
+        // Java Queue.Base.iterator (fixed): drop the first _offset head
+        // elements, then every buffer segment in order, then the tail.
+        self.head
+            .iter()
+            .skip(self.offset)
+            .chain(self.buffer.iter().flat_map(|segment| segment.iter()))
+            .chain(self.tail.iter())
     }
 }
 impl<E: Clone> FromIterator<E> for Standard<E> {
@@ -259,13 +266,14 @@ impl<E: Clone + std::fmt::Debug> IDisplay for Standard<E> {
         )
     }
 }
-impl<E: Clone + std::hash::Hash> IHash for Standard<E> {
-    fn hash_calc(&self, _hash_type: HashType) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut state = std::collections::hash_map::DefaultHasher::new();
-        "::SEQUENTIAL".hash(&mut state);
-        self.iter().for_each(|value| value.hash(&mut state));
-        state.finish()
+impl<E: Clone + std::hash::Hash + JavaHash> IHash for Standard<E> {
+    fn hash_calc(&self, hash_type: HashType) -> u64 {
+        // Java Queue extends ISequentialLookupType → ISequentialType:
+        // ordered composition, "::SEQUENTIAL" seed (see lang::hash).
+        crate::lang::hash::compose_ordered(
+            "SEQUENTIAL",
+            self.iter().map(|value| value.java_hash(hash_type)),
+        ) as u64
     }
 }
 impl<E: Clone + std::fmt::Debug> IObjType for Standard<E> {
@@ -275,7 +283,7 @@ impl<E: Clone + std::fmt::Debug> IObjType for Standard<E> {
 }
 impl<E> IColl<E> for Standard<E>
 where
-    E: Clone + PartialEq + std::fmt::Debug + std::hash::Hash,
+    E: Clone + PartialEq + std::fmt::Debug + std::hash::Hash + JavaHash,
 {
     fn start_string(&self) -> &'static str {
         "["
@@ -401,5 +409,75 @@ mod tests {
         assert_eq!(persistent.peek_first(), Some(&1));
         assert_eq!(persistent.peek_last(), Some(&9999));
         assert_eq!(original.peek_first(), Some(&0));
+    }
+
+    #[test]
+    fn pop_first_promotes_tail_to_head_across_segment() {
+        // 1030 pushes: head fills to 1024, the remaining 6 go to the tail.
+        let queue = (0..1030).collect::<Standard<_>>();
+        assert_eq!(queue.head.len(), MAX_LENGTH);
+        assert_eq!(queue.tail.len(), 6);
+        // 1024 pops push offset to 1024: head is replaced by the former
+        // (short) tail and offset resets (Java popFirst, buffer empty).
+        let queue = (0..MAX_LENGTH).fold(queue, |q, _| q.pop_first_value());
+        assert_eq!(queue.offset, 0);
+        assert_eq!(queue.head.len(), 6);
+        assert!(queue.tail.is_empty());
+        assert_eq!(
+            queue.iter().copied().collect::<Vec<_>>(),
+            (1024..1030).collect::<Vec<_>>()
+        );
+        // iteration and nth respect the offset into the promoted short head
+        let queue = queue.pop_first_value();
+        assert_eq!(queue.offset, 1);
+        assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![1025, 1026, 1027, 1028, 1029]);
+        assert_eq!(queue.get(0), Some(&1025));
+        assert_eq!(queue.get(4), Some(&1029));
+        assert_eq!(queue.get(5), None);
+    }
+
+    #[test]
+    fn nth_probes_across_head_buffer_and_tail() {
+        // 2500 pushes, 100 pops: offset 100 into head, one buffer segment,
+        // 452-element tail (Java nth segment computation).
+        let queue = (0..2500).collect::<Standard<_>>();
+        let queue = (0..100).fold(queue, |q, _| q.pop_first_value());
+        assert_eq!(queue.offset, 100);
+        assert_eq!(queue.buffer.len(), 1);
+        assert_eq!(queue.len(), 2400);
+        for (index, value) in [
+            (0, 100),
+            (923, 1023),
+            (924, 1024),
+            (1947, 2047),
+            (1948, 2048),
+            (2399, 2499),
+        ] {
+            assert_eq!(queue.get(index), Some(&value));
+        }
+        assert_eq!(queue.iter().next(), Some(&100));
+        assert_eq!(queue.iter().last(), Some(&2499));
+        assert_eq!(queue.iter().count(), 2400);
+    }
+
+    #[test]
+    fn pop_last_promotes_last_buffer_segment_to_tail() {
+        // Java popLast quirk, pinned for parity: when the tail is empty and
+        // the buffer is not, the last buffer segment becomes the tail
+        // WITHOUT dropping an element — only _size decrements, so the
+        // segment iterator still yields the retained last element.
+        // Build the quirk state directly: head + 1 buffer segment + empty tail.
+        let queue = (0..(2 * MAX_LENGTH + 1)).collect::<Standard<_>>();
+        let queue = queue.pop_last_value(); // tail 1 -> empty
+        assert!(queue.tail.is_empty());
+        assert_eq!(queue.buffer.len(), 1);
+        let queue = queue.pop_last_value(); // promotes buffer segment, no drop
+        assert!(queue.buffer.is_empty());
+        assert_eq!(queue.tail.len(), MAX_LENGTH);
+        assert_eq!(queue.len(), 2 * MAX_LENGTH - 1);
+        assert_eq!(queue.peek_last(), Some(&(2 * MAX_LENGTH - 1)));
+        // segment iterator (Java parity) still sees the retained element
+        assert_eq!(queue.iter().count(), 2 * MAX_LENGTH);
+        assert_eq!(queue.iter().last(), Some(&(2 * MAX_LENGTH - 1)));
     }
 }

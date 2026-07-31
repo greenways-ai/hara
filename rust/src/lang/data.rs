@@ -59,3 +59,7 @@ pub use trie::{Mutable as MutableTrie, Standard as Trie};
 pub use tuple::Tuple;
 
 pub use vector::{Mutable as MutableVector, Standard as Vector, SubView as VectorSubView};
+
+#[cfg(test)]
+#[path = "data/conformance_tests.rs"]
+mod conformance_tests;

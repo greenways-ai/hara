@@ -59,7 +59,7 @@ public interface Queue<E> extends IColl<E>, ILinearType<E>, ISequentialLookupTyp
         return (Iterator<E>) Iter.emptyIterator();
       }
       ArrayList<Iterator<E>> all = new ArrayList<>();
-      all.add(_head().iterator());
+      all.add(Iter.drop(_head().iterator(), _offset()));
       Iter.reduce(
           _buffer().iterator(),
           all,
@@ -78,13 +78,14 @@ public interface Queue<E> extends IColl<E>, ILinearType<E>, ISequentialLookupTyp
         if (i < space) {
           return _head().nth(_offset() + i);
         } else {
-          int row = (int) ((i - space) % MAX_LENGTH);
-          int col = (int) ((i - space) / MAX_LENGTH);
+          long j = i - space;
+          int seg = (int) (j / MAX_LENGTH);
+          int idx = (int) (j % MAX_LENGTH);
 
-          if (row < _buffer().count()) {
-            return _buffer().nth(row).nth(col);
+          if (seg < _buffer().count()) {
+            return _buffer().nth(seg).nth(idx);
           } else {
-            return _tail().nth(col);
+            return _tail().nth(j - _buffer().count() * (long) MAX_LENGTH);
           }
         }
       } else {

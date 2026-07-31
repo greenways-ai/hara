@@ -12,6 +12,7 @@ use crate::lang::data::{
     Trie as PTrie, Tuple as PTuple, Vector as PVector,
 };
 use crate::lang::data::{Metadata, MetadataValue};
+use crate::lang::hash::JavaHash;
 use crate::lang::protocol::{IDisplay, IMetadata, INamespaced};
 pub use crate::task::{
     LocalPromiseProvider, Promise, PromiseProvider, PromiseRejection, PromiseState,
@@ -1756,6 +1757,99 @@ impl Hash for Value {
     }
 }
 
+impl crate::lang::hash::JavaHash for Value {
+    /// The Java `long` hash of this value under `hash_type`, mirroring
+    /// `G.hashFn(t).apply(o)`. See the `lang::hash` module docs for the
+    /// parity rules and the documented deviations where Java hashes by
+    /// object identity (keywords, pointers, SYSTEM/SIP collection hashes).
+    fn java_hash(&self, hash_type: crate::lang::protocol::HashType) -> i64 {
+        use crate::lang::hash as jh;
+        use crate::lang::protocol::IHash;
+
+        // Opaque (non-parity) identity hash for runtime objects whose Java
+        // counterparts hash by object identity. Follows the previous
+        // `stable_hash` scheme.
+        fn opaque(
+            tag: u64,
+            write: impl FnOnce(&mut std::collections::hash_map::DefaultHasher),
+        ) -> i64 {
+            let mut state = std::collections::hash_map::DefaultHasher::new();
+            tag.hash(&mut state);
+            write(&mut state);
+            state.finish() as i64
+        }
+
+        match self {
+            Self::Nil => 0,
+            Self::Bool(v) => jh::hash_bool(*v) as i64,
+            Self::Character(v) => jh::hash_char(*v) as i64,
+            Self::String(v) => jh::java_string_hash(v) as i64,
+            Self::Number(v) => jh::hash_long(*v) as i64,
+            Self::Float(v) => jh::hash_double(*v) as i64,
+            Self::BigInteger(v) | Self::Decimal(v) => jh::canonical_decimal_str_hash(v) as i64,
+            // Java hashes java.util.regex.Pattern by identity; hash the
+            // pattern string instead (deterministic deviation).
+            Self::Regex(v) => jh::java_string_hash(v) as i64,
+            Self::Keyword(v) => v.java_hash(hash_type),
+            Self::Symbol(v) => v.java_hash(hash_type),
+            Self::Pointer(v) => v.java_hash(hash_type),
+            Self::Bytes(v) => jh::hash_bytes(v) as i64,
+            Self::ByteBuffer(v) => jh::hash_bytes(v.borrow().as_slice()) as i64,
+            // Java arrays hash by identity; composed deterministically here.
+            Self::Array(v) => jh::compose_ordered(
+                "SEQUENTIAL",
+                v.borrow().iter().map(|item| item.java_hash(hash_type)),
+            ),
+            Self::Object(v) => jh::compose_unordered(
+                "MAP",
+                v.borrow().iter().map(|(key, item)| {
+                    jh::compose_entry(
+                        jh::java_string_hash(key) as i64,
+                        item.java_hash(hash_type),
+                    )
+                }),
+            ),
+            Self::Recur(v) => jh::compose_ordered(
+                "SEQUENTIAL",
+                v.iter().map(|item| item.java_hash(hash_type)),
+            ),
+            Self::Tagged(v) => jh::compose_ordered(
+                "SEQUENTIAL",
+                [v.tag().java_hash(hash_type), v.form().java_hash(hash_type)],
+            ),
+            Self::Map(v) => v.hash_calc(hash_type) as i64,
+            Self::OrderedMap(v) => v.hash_calc(hash_type) as i64,
+            Self::SortedMap(v) => v.hash_calc(hash_type) as i64,
+            Self::Trie(v) => v.hash_calc(hash_type) as i64,
+            Self::Set(v) => v.hash_calc(hash_type) as i64,
+            Self::OrderedSet(v) => v.hash_calc(hash_type) as i64,
+            Self::SortedSet(v) => v.hash_calc(hash_type) as i64,
+            Self::List(v) => v.hash_calc(hash_type) as i64,
+            Self::Cons(v) => v.hash_calc(hash_type) as i64,
+            Self::Queue(v) => v.hash_calc(hash_type) as i64,
+            Self::Tuple(v) => v.hash_calc(hash_type) as i64,
+            Self::Vector(v) => v.hash_calc(hash_type) as i64,
+            Self::Promise(v) => opaque(8, |s| v.identity_address().hash(s)),
+            Self::Atom(v) => opaque(28, |s| v.identity_address().hash(s)),
+            Self::Function(v) => opaque(14, |s| Rc::as_ptr(v).hash(s)),
+            Self::Iterator(v) => opaque(16, |s| Rc::as_ptr(v).hash(s)),
+            Self::Var(v) => opaque(17, |s| v.identity_address().hash(s)),
+            Self::Namespace(v) => opaque(27, |s| v.identity_address().hash(s)),
+            Self::Extension(v) => opaque(18, |s| {
+                v.provider.hash(s);
+                v.type_name.hash(s);
+                v.handle.hash(s);
+            }),
+            Self::StructType(v) => opaque(26, |s| v.name.hash(s)),
+            Self::Struct(v) => opaque(27, |s| Rc::as_ptr(v).hash(s)),
+            Self::Protocol(v) => opaque(28, |s| v.name.hash(s)),
+            Self::NativeType(v) => opaque(29, |s| v.name.hash(s)),
+            Self::Coroutine(v) => opaque(30, |s| Rc::as_ptr(v).hash(s)),
+            Self::ExceptionInfo(v) => opaque(31, |s| Rc::as_ptr(v).hash(s)),
+        }
+    }
+}
+
 impl Value {
     pub fn display(&self) -> String {
         match self {
@@ -1939,131 +2033,16 @@ impl Value {
     }
 
     /// Stable structural hash used by protocol and collection conformance tests.
+    ///
+    /// This is the Java-parity RAPID hash: the bit pattern (as `u64`) of the
+    /// Java `long` produced by `G.hashRapid` / `hashCalc(RAPID)` on the
+    /// equivalent Java value. Value-level hashes are Java `int` results
+    /// sign-extended to 64 bits, matching `G.hashValue` returning `long`.
+    /// Opaque runtime objects (functions, atoms, promises, …) keep the
+    /// previous identity-based `DefaultHasher` scheme — their Java
+    /// counterparts hash by object identity, so no parity exists there.
     pub fn stable_hash(&self) -> u64 {
-        fn hash_value(value: &Value, state: &mut std::collections::hash_map::DefaultHasher) {
-            let type_tag: u64 = match value {
-                Value::Number(_) => 0,
-                Value::Bool(_) => 1,
-                Value::String(_) => 2,
-                Value::Keyword(_) => 3,
-                Value::Bytes(_) => 4,
-                Value::ByteBuffer(_) => 5,
-                Value::Array(_) => 6,
-                Value::Object(_) => 7,
-                Value::Promise(_) => 8,
-                Value::Atom(_) => 28,
-                Value::Recur(_) => 9,
-                Value::Map(_) | Value::OrderedMap(_) | Value::SortedMap(_) | Value::Trie(_) => 10,
-                Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_) => 11,
-                Value::List(_)
-                | Value::Cons(_)
-                | Value::Queue(_)
-                | Value::Tuple(_)
-                | Value::Vector(_) => 12,
-                Value::Symbol(_) => 13,
-                Value::Pointer(_) => 13,
-                Value::Function(_) => 14,
-                Value::Iterator(_) => 16,
-                Value::Var(_) => 17,
-                Value::Namespace(_) => 27,
-                Value::Extension(_) => 18,
-                Value::StructType(_) => 26,
-                Value::Struct(_) => 27,
-                Value::Protocol(_) => 28,
-                Value::NativeType(_) => 29,
-                Value::Coroutine(_) => 30,
-                Value::ExceptionInfo(_) => 31,
-                Value::Nil => 19,
-                Value::Float(_) => 20,
-                Value::BigInteger(_) => 21,
-                Value::Decimal(_) => 22,
-                Value::Character(_) => 23,
-                Value::Regex(_) => 24,
-                Value::Tagged(_) => 25,
-            };
-            type_tag.hash(state);
-            match value {
-                Value::Number(v) => v.hash(state),
-                Value::Float(v) => v.to_bits().hash(state),
-                Value::BigInteger(v) | Value::Decimal(v) | Value::Regex(v) => v.hash(state),
-                Value::Character(v) => v.hash(state),
-                Value::Tagged(value) => {
-                    value.tag().hash(state);
-                    hash_value(value.form(), state);
-                }
-                Value::Bool(v) => v.hash(state),
-                Value::String(v) => v.hash(state),
-                Value::Keyword(v) => v.hash(state),
-                Value::Symbol(v) => v.hash(state),
-                Value::Pointer(v) => v.hash(state),
-                Value::Bytes(v) => v.hash(state),
-                Value::ByteBuffer(v) => v.borrow().hash(state),
-                Value::Array(v) => v.borrow().iter().for_each(|item| hash_value(item, state)),
-                Value::Object(v) => v.borrow().iter().for_each(|(key, item)| {
-                    key.hash(state);
-                    hash_value(item, state);
-                }),
-                Value::Promise(v) => v.identity_address().hash(state),
-                Value::Atom(v) => v.identity_address().hash(state),
-                Value::Recur(v) => v.iter().for_each(|item| hash_value(item, state)),
-                value @ (Value::Map(_)
-                | Value::OrderedMap(_)
-                | Value::SortedMap(_)
-                | Value::Trie(_)) => {
-                    let mut entries = map_entries(value)
-                        .unwrap()
-                        .iter()
-                        .map(|(key, item)| {
-                            let mut h = std::collections::hash_map::DefaultHasher::new();
-                            hash_value(key, &mut h);
-                            hash_value(item, &mut h);
-                            h.finish()
-                        })
-                        .collect::<Vec<_>>();
-                    entries.sort_unstable();
-                    entries.hash(state);
-                }
-                value @ (Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_)) => {
-                    let mut entries = set_items(value)
-                        .unwrap()
-                        .iter()
-                        .map(|item| {
-                            let mut h = std::collections::hash_map::DefaultHasher::new();
-                            hash_value(item, &mut h);
-                            h.finish()
-                        })
-                        .collect::<Vec<_>>();
-                    entries.sort_unstable();
-                    entries.hash(state);
-                }
-                Value::List(v) => v.iter().for_each(|item| hash_value(item, state)),
-                Value::Cons(v) => v.iter().for_each(|item| hash_value(&item, state)),
-                Value::Queue(v) => v.iter().for_each(|item| hash_value(item, state)),
-                Value::Tuple(v) => v.iter().for_each(|item| hash_value(item, state)),
-                Value::Vector(v) => v.iter().for_each(|item| hash_value(item, state)),
-                Value::Function(v) => Rc::as_ptr(v).hash(state),
-                Value::Iterator(v) => Rc::as_ptr(v).hash(state),
-                Value::Var(v) => v.identity_address().hash(state),
-                Value::Namespace(v) => v.identity_address().hash(state),
-                Value::Extension(v) => {
-                    v.provider.hash(state);
-                    v.type_name.hash(state);
-                    v.handle.hash(state);
-                }
-                Value::StructType(v) => v.name.hash(state),
-                Value::Struct(v) => Rc::as_ptr(v).hash(state),
-                Value::Protocol(v) => v.name.hash(state),
-                Value::NativeType(v) => v.name.hash(state),
-                Value::Coroutine(v) => {
-                    Rc::as_ptr(v).hash(state);
-                }
-                Value::ExceptionInfo(v) => Rc::as_ptr(v).hash(state),
-                Value::Nil => {}
-            }
-        }
-        let mut state = std::collections::hash_map::DefaultHasher::new();
-        hash_value(self, &mut state);
-        state.finish()
+        self.java_hash(crate::lang::hash::DEFAULT_HASH) as u64
     }
 }
 

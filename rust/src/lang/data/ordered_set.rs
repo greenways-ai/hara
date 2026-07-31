@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::hash::Hash;
 
 use crate::lang::data::{Map, Vector};
+use crate::lang::hash::JavaHash;
 use crate::lang::protocol::{
     HashType, IColl, IConj, ICount, IDisplay, IDissoc, IEmpty, IEquality, IFind, IHash, IMetadata,
     IMutable, INth, IObjType, IPersistent, IToMutable, IToPersistent, ObjType,
@@ -160,15 +161,14 @@ impl<E: Clone + Eq + Hash + std::fmt::Debug> IDisplay for Standard<E> {
         )
     }
 }
-impl<E: Clone + Eq + Hash> IHash for Standard<E> {
-    fn hash_calc(&self, _: HashType) -> u64 {
-        self.iter()
-            .map(|v| {
-                let mut s = std::collections::hash_map::DefaultHasher::new();
-                std::hash::Hash::hash(v, &mut s);
-                std::hash::Hasher::finish(&s)
-            })
-            .fold(0u64, u64::wrapping_add)
+impl<E: Clone + Eq + Hash + JavaHash> IHash for Standard<E> {
+    fn hash_calc(&self, hash_type: HashType) -> u64 {
+        // Java ISetType → IUnOrderedType: order-insensitive sum,
+        // "::SET" seed (see lang::hash).
+        crate::lang::hash::compose_unordered(
+            "SET",
+            self.iter().map(|v| v.java_hash(hash_type)),
+        ) as u64
     }
 }
 impl<E: Clone + Eq + Hash + std::fmt::Debug> IObjType for Standard<E> {
@@ -178,7 +178,7 @@ impl<E: Clone + Eq + Hash + std::fmt::Debug> IObjType for Standard<E> {
 }
 impl<E> IColl<E> for Standard<E>
 where
-    E: Clone + Eq + Hash + std::fmt::Debug,
+    E: Clone + Eq + Hash + JavaHash + std::fmt::Debug,
 {
     fn start_string(&self) -> &'static str {
         "#{"
@@ -260,5 +260,49 @@ mod tests {
         let reduced = original.dissoc_value(&1);
         assert_eq!(original.iter().copied().collect::<Vec<_>>(), vec![3, 1, 2]);
         assert_eq!(reduced.iter().copied().collect::<Vec<_>>(), vec![3, 2]);
+    }
+
+    #[test]
+    fn compaction_triggers_at_java_threshold_and_renumbers() {
+        // Java: compact on dissoc when order.count() > 32 &&
+        // order.count() > 2 * lookup.count(), rebuilding both structures
+        // and renumbering lookup indices 0..count-1.
+        let mut set = (0..33).collect::<Standard<_>>();
+        for value in 0..16 {
+            set = set.dissoc_value(&value);
+        }
+        // order 33, lookup 17: 33 > 32 but 33 <= 2 * 17, no compaction
+        assert_eq!(set.order.len(), 33);
+        set = set.dissoc_value(&16);
+        // order 33, lookup 16: 33 > 32 and 33 > 2 * 16, compact + renumber
+        assert_eq!(set.order.len(), 16);
+        assert_eq!(
+            set.iter().copied().collect::<Vec<_>>(),
+            (17..33).collect::<Vec<_>>()
+        );
+        // order at exactly 32 never compacts
+        let mut small = (0..32).collect::<Standard<_>>();
+        for value in 0..31 {
+            small = small.dissoc_value(&value);
+        }
+        assert_eq!(small.order.len(), 32);
+        assert_eq!(small.len(), 1);
+    }
+
+    #[test]
+    fn dissoc_then_reconj_appends_at_end() {
+        use crate::lang::protocol::{IFind, INth};
+        let set = [1, 2, 3]
+            .into_iter()
+            .collect::<Standard<_>>()
+            .dissoc_value(&2)
+            .conj_value(2);
+        assert_eq!(set.iter().copied().collect::<Vec<_>>(), vec![1, 3, 2]);
+        assert_eq!(set.nth(1), Some(&3));
+        assert_eq!(set.find(&2), Some(2));
+        assert_eq!(set.find(&9), None);
+        // duplicate conj keeps original position
+        let dup = set.conj_value(1);
+        assert_eq!(dup.iter().copied().collect::<Vec<_>>(), vec![1, 3, 2]);
     }
 }

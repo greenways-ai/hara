@@ -1,3 +1,4 @@
+use crate::lang::hash::JavaHash;
 use crate::lang::protocol::{
     HashType, IColl, IConj, ICons, ICount, IDisplay, IEmpty, IEquality, IHash, IMetadata, INth,
     IObjType, IPeekFirst, IPeekLast, IPersistent, IPopFirst, IPopLast, IPushFirst, IPushLast,
@@ -246,13 +247,15 @@ impl<E: Clone + std::fmt::Debug> IDisplay for Tuple<E> {
         )
     }
 }
-impl<E: Clone + std::hash::Hash> IHash for Tuple<E> {
-    fn hash_calc(&self, _hash_type: HashType) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut state = std::collections::hash_map::DefaultHasher::new();
-        "::TUPLE".hash(&mut state);
-        self.iter().for_each(|value| value.hash(&mut state));
-        state.finish()
+impl<E: Clone + std::hash::Hash + JavaHash> IHash for Tuple<E> {
+    fn hash_calc(&self, hash_type: HashType) -> u64 {
+        // Java Tuple.TupN implements ISequentialType: ordered composition,
+        // "::SEQUENTIAL" seed — NOT "::TUPLE" (see lang::hash). Map entries
+        // are Tup2 instances and hash through this same path in Java.
+        crate::lang::hash::compose_ordered(
+            "SEQUENTIAL",
+            self.iter().map(|value| value.java_hash(hash_type)),
+        ) as u64
     }
 }
 impl<E: Clone + std::fmt::Debug> IObjType for Tuple<E> {
@@ -262,7 +265,7 @@ impl<E: Clone + std::fmt::Debug> IObjType for Tuple<E> {
 }
 impl<E> IColl<E> for Tuple<E>
 where
-    E: Clone + PartialEq + std::fmt::Debug + std::hash::Hash,
+    E: Clone + PartialEq + std::fmt::Debug + std::hash::Hash + JavaHash,
 {
     fn start_string(&self) -> &'static str {
         "["

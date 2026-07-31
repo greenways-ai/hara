@@ -44,12 +44,19 @@ impl IObjType for Pointer {
     }
 }
 impl IHash for Pointer {
-    fn hash_calc(&self, _hash_type: HashType) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut state = std::collections::hash_map::DefaultHasher::new();
-        self.hash_seed().hash(&mut state);
-        self.0.as_str().hash(&mut state);
-        state.finish()
+    fn hash_calc(&self, hash_type: HashType) -> u64 {
+        // DEVIATION from Java: Pointer.hashCalc is System.identityHashCode
+        // (non-deterministic). This port uses the deterministic string-type
+        // hash of "::POINTER|" + path (see lang::hash module docs).
+        crate::lang::hash::hash_string_type(
+            hash_type,
+            &format!("{}|{}", self.hash_seed(), self.path()),
+        ) as u64
+    }
+}
+impl crate::lang::hash::JavaHash for Pointer {
+    fn java_hash(&self, hash_type: HashType) -> i64 {
+        self.hash_calc(hash_type) as i64
     }
 }
 impl Hash for Pointer {
