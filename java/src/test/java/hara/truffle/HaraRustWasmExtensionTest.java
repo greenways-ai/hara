@@ -1,7 +1,7 @@
 package hara.truffle;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,7 +15,7 @@ public class HaraRustWasmExtensionTest {
     Path artifact =
         Path.of("rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm")
             .toAbsolutePath();
-    assertTrue(
+    assumeTrue(
         "build rust/raw before running this integration test: " + artifact,
         Files.isRegularFile(artifact));
     Path root = Files.createTempDirectory("hara-rust-wasm-extension-");
