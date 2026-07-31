@@ -11,6 +11,6 @@ fn main() {
         Err(error) => cli::exit_error(&error, 2),
     };
     if let Err(error) = cli::run(options) {
-        cli::exit_error(&error, 1);
+        cli::exit_error(&error, cli::error_exit_code(&error));
     }
 }

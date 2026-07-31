@@ -1,4 +1,6 @@
 use crate::repl;
+use hara_wasm::cli_app;
+use hara_wasm::extension_tool;
 #[cfg(feature = "hir-encoder")]
 use hara_wasm::kernel::{hir::encode_hir_module, parse_forms};
 use hara_wasm::kernel::{parse, read_forms, Form, SpannedForm};
@@ -21,6 +23,9 @@ pub(crate) struct Options {
     pub(crate) root: Option<PathBuf>,
     pub(crate) project: Option<PathBuf>,
     pub(crate) native_sockets: bool,
+    pub(crate) allow_file: bool,
+    pub(crate) allow_process: bool,
+    pub(crate) log_requests: bool,
     pub(crate) offline: bool,
     pub(crate) host: String,
     pub(crate) port: u16,
@@ -46,6 +51,10 @@ pub(crate) fn parse_options() -> Result<Options, String> {
     };
     let mut args = env::args().skip(1);
     while let Some(argument) = args.next() {
+        if argument == "--" {
+            options.command.extend(args);
+            break;
+        }
         match argument.as_str() {
             "--help" | "-h" => {
                 usage();
@@ -58,6 +67,9 @@ pub(crate) fn parse_options() -> Result<Options, String> {
             "--root" => options.root = Some(PathBuf::from(required(&mut args, "--root")?)),
             "--project" => options.project = Some(PathBuf::from(required(&mut args, "--project")?)),
             "--native-sockets" | "--allow-net" => options.native_sockets = true,
+            "--allow-file" => options.allow_file = true,
+            "--allow-process" => options.allow_process = true,
+            "--log-requests" => options.log_requests = true,
             "--offline" => options.offline = true,
             "--no-history" => options.no_history = true,
             "--no-splash" => options.no_splash = true,
@@ -85,6 +97,20 @@ pub(crate) fn parse_options() -> Result<Options, String> {
             value if value.starts_with("--history=") => {
                 options.history_file = Some(PathBuf::from(&value[10..]))
             }
+            value if value.starts_with("--root=") => {
+                options.root = Some(PathBuf::from(option_value(value, "--root")?))
+            }
+            value if value.starts_with("--project=") => {
+                options.project = Some(PathBuf::from(option_value(value, "--project")?))
+            }
+            value if value.starts_with("--host=") => {
+                options.host = option_value(value, "--host")?.to_owned()
+            }
+            value if value.starts_with("--port=") => {
+                options.port = option_value(value, "--port")?
+                    .parse()
+                    .map_err(|_| "--port must be between 0 and 65535".to_owned())?
+            }
             value if value.starts_with('-') => return Err(format!("unknown option: {value}")),
             value => {
                 options.command.push(value.into());
@@ -101,25 +127,47 @@ fn required(args: &mut impl Iterator<Item = String>, option: &str) -> Result<Str
         .ok_or_else(|| format!("{option} requires a value"))
 }
 
+fn option_value<'a>(argument: &'a str, option: &str) -> Result<&'a str, String> {
+    let value = argument
+        .strip_prefix(option)
+        .and_then(|value| value.strip_prefix('='))
+        .unwrap_or_default();
+    if value.is_empty() {
+        Err(format!("{option} requires a value"))
+    } else {
+        Ok(value)
+    }
+}
+
 pub(crate) fn run(options: Options) -> Result<(), String> {
-    match options.command.first().map(String::as_str) {
-        Some("package") => package::run(&options.command[1..]),
+    let command = routed_command(&options.command);
+    if command.first().is_some_and(|value| value == "help")
+        || command
+            .iter()
+            .skip(1)
+            .any(|value| value == "--help" || value == "-h")
+    {
+        usage();
+        return Ok(());
+    }
+    match command.first().map(String::as_str) {
+        Some("package") => package::run(&command[1..]),
         #[cfg(feature = "hir-encoder")]
-        Some("compile-hir") => compile_hir(&options.command[1..]),
-        Some("new") => new_project(&options.command[1..]),
-        Some("check") => check_project(&options, &options.command[1..]),
-        Some("add") => edit_dependency(&options, &options.command[1..], true),
-        Some("remove") => edit_dependency(&options, &options.command[1..], false),
-        Some("sync") => sync_project(&options, &options.command),
+        Some("compile-hir") => compile_hir(&command[1..]),
+        Some("new") => new_project(&command[1..]),
+        Some("check") => check_project(&options, &command[1..]),
+        Some("add") => edit_dependency(&options, &command[1..], true),
+        Some("remove") => edit_dependency(&options, &command[1..], false),
+        Some("sync") => sync_project(&options, &command),
         Some("update") => Err("project update requires the reviewed registry client".into()),
-        Some("test") => test_project(&options, &options.command[1..]),
-        Some("spec") => spec_command(&options.command[1..]),
-        Some("eval") => direct_eval(&options, &options.command[1..].join(" ")),
-        Some("run") if options.command.len() == 1 => run_project(&options),
+        Some("test") => test_project(&options, &command[1..]),
+        Some("spec") => spec_command(&command[1..]),
+        Some("extension") => extension_tool::run(&command[1..], options.allow_process),
+        Some("eval") => direct_eval(&options, &command[1..].join(" ")),
+        Some("run") if command.len() == 1 => run_project(&options),
         Some("run") | Some("--file") => run_file(
             &options,
-            options
-                .command
+            command
                 .get(1)
                 .ok_or_else(|| "run requires a file path".to_owned())?,
         ),
@@ -133,14 +181,75 @@ pub(crate) fn run(options: Options) -> Result<(), String> {
         Some("headless" | "server") => run_headless(&options),
         Some("fabric" | "service") => run_fabric(&options),
         Some("remote") => run_remote(
-            options
-                .command
+            command
                 .get(1)
                 .ok_or_else(|| "remote requires HOST:PORT".to_owned())?,
         ),
         Some("standalone") => repl::run_repl(&options, true),
         Some("repl") | None => repl::run_repl(&options, options.offline),
         Some(command) => Err(format!("unknown command: {command}")),
+    }
+}
+
+fn routed_command(command: &[String]) -> Vec<String> {
+    if command.first().is_some_and(|value| {
+        matches!(
+            value.as_str(),
+            "help" | "compile-hir" | "fabric" | "service"
+        )
+    }) || command == ["standalone"]
+    {
+        return command.to_vec();
+    }
+    let Some(resolved) = cli_app::router().resolve(command) else {
+        return command.to_vec();
+    };
+    let legacy = match resolved.route.handler.as_str() {
+        "hara.cli.handler/eval" => "eval",
+        "hara.cli.handler/run-file" => "run",
+        "hara.cli.handler/stdin" => "stdin",
+        "hara.cli.handler/repl" => "repl",
+        "hara.cli.handler/server" => "server",
+        "hara.cli.handler/remote" => "remote",
+        "hara.cli.handler/project-new" => "new",
+        "hara.cli.handler/project-check" => "check",
+        "hara.cli.handler/project-run" => "run",
+        "hara.cli.handler/project-test" => "test",
+        "hara.cli.handler/project-add" => "add",
+        "hara.cli.handler/project-remove" => "remove",
+        "hara.cli.handler/project-sync" => "sync",
+        "hara.cli.handler/project-update" => "update",
+        "hara.cli.handler/package" => "package",
+        "hara.cli.handler/spec" => "spec",
+        "hara.cli.handler/extension" => "extension",
+        _ => return command.to_vec(),
+    };
+    let mut routed = vec![legacy.to_owned()];
+    if matches!(
+        resolved.route.handler.as_str(),
+        "hara.cli.handler/package"
+            | "hara.cli.handler/spec"
+            | "hara.cli.handler/extension"
+    ) {
+        routed.extend(resolved.route.path.iter().skip(1).cloned());
+    }
+    routed.extend(resolved.arguments);
+    routed
+}
+
+pub(crate) fn error_exit_code(error: &str) -> i32 {
+    if error.starts_with("unknown ")
+        || error.starts_with("usage:")
+        || error.starts_with("unavailable:")
+        || error.starts_with("--offline cannot")
+        || error.contains(" requires ")
+        || error.contains("cannot read")
+        || error.contains("Cannot read")
+        || error.contains("not found")
+    {
+        cli_app::CliOutcome::UsageError.exit_code()
+    } else {
+        cli_app::CliOutcome::Failed.exit_code()
     }
 }
 
@@ -2565,12 +2674,12 @@ fn metaspec_report(document: &Form, findings: &[SpecFinding]) -> Form {
             "summary",
             map_form(vec![
                 (
-                    "summary/pass",
+                    "pass",
                     Form::Number(if findings.is_empty() { 1 } else { 0 }),
                 ),
-                ("summary/fail", Form::Number(failed)),
-                ("summary/unknown", Form::Number(0)),
-                ("summary/blocked", Form::Number(0)),
+                ("fail", Form::Number(failed)),
+                ("unknown", Form::Number(0)),
+                ("blocked", Form::Number(0)),
             ]),
         ),
         (
@@ -2777,6 +2886,9 @@ fn run_project(options: &Options) -> Result<(), String> {
 }
 
 fn test_project(options: &Options, args: &[String]) -> Result<(), String> {
+    if args.len() > 1 {
+        return Err("test accepts at most one path".into());
+    }
     let project = project_for(options, args)?;
     let files = match args.first().map(PathBuf::from) {
         Some(path)
@@ -2785,7 +2897,10 @@ fn test_project(options: &Options, args: &[String]) -> Result<(), String> {
         {
             vec![path]
         }
-        _ => project::files_in(&project.root, &project.test_paths)?,
+        Some(path) if path.is_file() => return Err("test file must use the .hal extension".into()),
+        Some(path) if path.is_dir() => project::files_in(&path, &[PathBuf::new()])?,
+        Some(path) => return Err(format!("test path does not exist: {}", path.display())),
+        None => project::files_in(&project.root, &project.test_paths)?,
     };
     if files.is_empty() {
         return Err("project has no .hal files under :project/test-paths".into());
@@ -2975,11 +3090,25 @@ fn response_text(value: RespValue) -> String {
 }
 
 fn usage() {
-    println!("hara [OPTIONS] [new NAME|check [PATH]|add COORDINATE@RANGE|remove COORDINATE|sync|test [PATH]|spec OPERATION [FILE]|repl|standalone|headless|server|fabric|remote HOST:PORT|eval SOURCE|run [FILE]|stdin]");
-    println!("  spec: lint, verify, validate, template, check-contribution, check, to-edn, from-edn, normalize, graph, obligations");
-    println!("  --offline --host HOST --port PORT --root PATH --project PATH --allow-net");
-    println!("  --data PATH --shards N --node-id NAME --peer NAME --cluster-epoch NAME");
-    println!("  --history PATH --no-history --no-splash --no-color");
+    println!("Hara CLI · Rust runtime");
+    println!();
+    println!("Usage:");
+    println!("  hara [OPTIONS] repl");
+    println!("  hara eval EXPRESSION | run FILE | stdin");
+    println!("  hara server | remote HOST:PORT");
+    println!("  hara project <new|check|run|test|add|remove|sync|update> ...");
+    println!("  hara package <COMMAND> ...");
+    println!("  hara spec <COMMAND> ...");
+    println!("  hara extension <check|build|install|test> ...");
+    println!();
+    println!("Compatibility aliases:");
+    println!("  new check test add remove sync update headless standalone");
+    println!();
+    println!("Global options:");
+    println!("  --project PATH, --root PATH, --offline");
+    println!("  --allow-file, --allow-net, --allow-process");
+    println!("  --host HOST, --port PORT, --history PATH");
+    println!("  --no-history, --no-splash, --no-color, --log-requests");
 }
 
 pub(crate) fn exit_error(message: &str, status: i32) -> ! {
@@ -2990,6 +3119,26 @@ pub(crate) fn exit_error(message: &str, status: i32) -> ! {
 #[cfg(test)]
 mod spec_tests {
     use super::*;
+
+    #[test]
+    fn nested_route_operation_is_preserved_for_the_legacy_adapter() {
+        assert_eq!(
+            routed_command(&[
+                "spec".into(),
+                "check-contribution".into(),
+                "candidate".into()
+            ]),
+            ["spec", "check-contribution", "candidate"]
+        );
+    }
+
+    #[test]
+    fn offline_daemon_rejection_is_a_usage_error() {
+        assert_eq!(
+            error_exit_code("--offline cannot be used with headless"),
+            cli_app::CliOutcome::UsageError.exit_code()
+        );
+    }
 
     #[test]
     fn generated_metaspec_template_lints_cleanly() {

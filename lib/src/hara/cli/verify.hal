@@ -1,0 +1,171 @@
+(ns hara.cli.verify
+  (:require [hara.metaspec.lint :as metaspec]
+            [hara.cli.route :as route]))
+
+(def +required-keys+
+  [:document/id :document/type :document/version :document/status
+   :document/title :document/summary :spec/conforms-to
+   :cli/apps :cli/routes :cli/options :cli/outcomes :cli/handlers])
+
+(defn- member?
+  [value values]
+  (not
+   (empty?
+    (filter (fn [candidate] (= value candidate))
+            values))))
+
+(defn- finding
+  [rule requirement path message repair]
+  {:finding/id rule
+   :rule/id rule
+   :requirement/id requirement
+   :finding/level :error
+   :finding/path (vec path)
+   :finding/message message
+   :finding/repair repair})
+
+(defn- declaration-ids
+  [values key]
+  (reduce (fn [output value]
+            (conj output (get value key)))
+          []
+          values))
+
+(defn- duplicate-values
+  [values key-function]
+  (reduce
+   (fn [output group]
+     (if (> (count (val group)) 1)
+       (conj output (key group))
+       output))
+   []
+   (group-by key-function values)))
+
+(defn verify-required-keys
+  [manifest]
+  (reduce
+   (fn [output key]
+     (if (has? manifest key)
+       output
+       (conj
+        output
+        (finding
+         :hara.cli.rule/required-key
+         :hara.cli/manifest-structure
+         []
+         (str "Missing required CLI manifest key: " key)
+         {:action/type :add-key
+          :action/path []
+          :action/key key}))))
+   []
+   +required-keys+))
+
+(defn verify-identifiers
+  [manifest]
+  (let [declarations
+        (concat
+         [[:document/id (:document/id manifest)]]
+         (map (fn [value] [:app/id (:app/id value)])
+              (:cli/apps manifest))
+         (map (fn [value] [:route/id (:route/id value)])
+              (:cli/routes manifest))
+         (map (fn [value] [:option/id (:option/id value)])
+              (:cli/options manifest))
+         (map (fn [value] [:outcome/id (:outcome/id value)])
+              (:cli/outcomes manifest))
+         (map (fn [value] [:handler/id (:handler/id value)])
+              (:cli/handlers manifest)))]
+    (reduce
+     (fn [output declaration]
+       (let [key (first declaration)
+             value (second declaration)]
+         (if (metaspec/qualified-keyword? value)
+           output
+           (conj
+            output
+            (finding
+             :hara.cli.rule/stable-id
+             :hara.cli/qualified-identifiers
+             [key]
+             (str "CLI declaration ID must be a qualified keyword: " value)
+             {:action/type :replace-value
+              :action/path [key]
+              :action/expected :qualified-keyword})))))
+     []
+     declarations)))
+
+(defn verify-handler-references
+  [manifest]
+  (let [handlers
+        (declaration-ids (:cli/handlers manifest) :handler/id)]
+    (reduce
+     (fn [output route]
+       (if (member? (:route/handler route) handlers)
+         output
+         (conj
+          output
+          (finding
+           :hara.cli.rule/unresolved-handler
+           :hara.cli/closed-handler-registry
+           [:cli/routes (:route/id route) :route/handler]
+           (str "Unknown closed-registry handler: "
+                (:route/handler route))
+           {:action/type :declare-handler
+            :action/handler (:route/handler route)}))))
+     []
+     (:cli/routes manifest))))
+
+(defn verify-option-references
+  [manifest]
+  (let [options
+        (declaration-ids (:cli/options manifest) :option/id)]
+    (reduce
+     (fn [output route]
+       (reduce
+        (fn [local option]
+          (if (member? option options)
+            local
+            (conj
+             local
+             (finding
+              :hara.cli.rule/unresolved-option
+              :hara.cli/route-references
+              [:cli/routes (:route/id route) :route/options]
+              (str "Unknown route option: " option)
+              {:action/type :declare-option
+               :action/option option}))))
+        output
+        (:route/options route)))
+     []
+     (:cli/routes manifest))))
+
+(defn verify-route-paths
+  [manifest]
+  (let [duplicates
+        (duplicate-values
+         (route/route-entries (:cli/routes manifest))
+         (fn [entry] (:match/path entry)))]
+    (reduce
+     (fn [output path]
+       (conj
+        output
+        (finding
+         :hara.cli.rule/ambiguous-path
+         :hara.cli/unambiguous-aliases
+         [:cli/routes]
+         (str "Ambiguous CLI route path: " path)
+         {:action/type :rename-route-path
+          :action/path path})))
+     []
+     duplicates)))
+
+(defn verify
+  "Returns deterministic findings for a CLI application manifest."
+  [manifest]
+  (vec
+   (concat
+    (verify-required-keys manifest)
+    (verify-identifiers manifest)
+    (verify-handler-references manifest)
+    (verify-option-references manifest)
+    (verify-route-paths manifest))))

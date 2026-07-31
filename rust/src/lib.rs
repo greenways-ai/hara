@@ -1,6 +1,10 @@
 #![allow(clippy::too_many_lines)] // Temporary compatibility facade during Java-port split.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cli_app;
 mod core;
 pub mod extension;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod extension_tool;
 pub mod hta;
 mod json;
 pub mod kernel;
@@ -482,6 +486,42 @@ impl Runtime {
             (
                 "std.foundation.pretty",
                 include_str!("../../lib/src/std/foundation/pretty.hal"),
+            ),
+            (
+                "hara.metaspec.lint",
+                include_str!("../../lib/src/hara/metaspec/lint.hal"),
+            ),
+            (
+                "hara.metaspec.verify",
+                include_str!("../../lib/src/hara/metaspec/verify.hal"),
+            ),
+            (
+                "hara.metaspec.report",
+                include_str!("../../lib/src/hara/metaspec/report.hal"),
+            ),
+            (
+                "hara.metaspec.core",
+                include_str!("../../lib/src/hara/metaspec/core.hal"),
+            ),
+            (
+                "hara.cli.model",
+                include_str!("../../lib/src/hara/cli/model.hal"),
+            ),
+            (
+                "hara.cli.route",
+                include_str!("../../lib/src/hara/cli/route.hal"),
+            ),
+            (
+                "hara.cli.verify",
+                include_str!("../../lib/src/hara/cli/verify.hal"),
+            ),
+            (
+                "hara.cli.report",
+                include_str!("../../lib/src/hara/cli/report.hal"),
+            ),
+            (
+                "hara.cli.core",
+                include_str!("../../lib/src/hara/cli/core.hal"),
             ),
             ("std.pretty", include_str!("../../lib/src/std/pretty.hal")),
             (
