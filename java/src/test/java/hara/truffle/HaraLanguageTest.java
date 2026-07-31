@@ -617,6 +617,121 @@ public class HaraLanguageTest {
   }
 
   @Test
+  public void closedLambdasHaveNoCapturesAndAreReused() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(defn mk-closed [] (fn [x] (+ x 1)))");
+      assertEquals(2, context.eval(HaraLanguage.ID, "((mk-closed) 1)").asLong());
+      // A closure-free literal yields one immutable function value on every execution.
+      assertTrue(context.eval(HaraLanguage.ID, "(= (mk-closed) (mk-closed))").asBoolean());
+    }
+  }
+
+  @Test
+  public void closuresCaptureOuterLexicalBindings() {
+    try (Context context = context()) {
+      assertEquals(
+          11, context.eval(HaraLanguage.ID, "(((fn [a b] (fn [x] (+ a x))) 10 20) 1)").asLong());
+      assertEquals(
+          31,
+          context
+              .eval(HaraLanguage.ID, "(((fn [a b] (fn [x] (+ a (+ b x)))) 10 20) 1)")
+              .asLong());
+      assertEquals(
+          6, context.eval(HaraLanguage.ID, "(let [x 1 y 2 f (fn [z] (+ x (+ y z)))] (f 3))").asLong());
+    }
+  }
+
+  @Test
+  public void lexicalShadowingResolvesNearestBinding() {
+    try (Context context = context()) {
+      assertEquals(11, context.eval(HaraLanguage.ID, "(let [x 1] ((fn [x] (+ x 1)) 10))").asLong());
+      assertEquals(5, context.eval(HaraLanguage.ID, "((fn [x] ((fn [x] x) 5)) 1)").asLong());
+      assertEquals(
+          2, context.eval(HaraLanguage.ID, "(let [x 1 f (let [x 2] (fn [] x))] (f))").asLong());
+    }
+  }
+
+  @Test
+  public void nestedClosureCapturesGrandparentLocalTransitively() {
+    try (Context context = context()) {
+      assertEquals(
+          6,
+          context
+              .eval(HaraLanguage.ID, "((((fn [x] (fn [y] (fn [z] (+ x (+ y z))))) 1) 2) 3)")
+              .asLong());
+      // The middle function reads only y; it must capture x solely for its nested child.
+      assertEquals(
+          3,
+          context.eval(HaraLanguage.ID, "(((fn [x] (fn [y] ((fn [z] (+ x z)) y))) 1) 2)").asLong());
+    }
+  }
+
+  @Test
+  public void lexicalBindingInGrandparentScopeBlocksMacroExpansion() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(defmacro shadowed-macro [x] 99)");
+      assertEquals(
+          99, context.eval(HaraLanguage.ID, "(shadowed-macro 1)").asLong());
+      assertEquals(
+          3,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "((fn [shadowed-macro] ((fn [] (shadowed-macro 2)))) (fn [x] (+ x 1)))")
+              .asLong());
+    }
+  }
+
+  @Test
+  public void closuresShareStableCallTargetAcrossWrappers() {
+    try (Context context = context()) {
+      assertEquals(
+          23,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(let [adder (fn [n] (fn [x] (+ x n)))] (+ ((adder 1) 10) ((adder 2) 10)))")
+              .asLong());
+    }
+  }
+
+  @Test
+  public void polymorphicCallSiteFallsBackToIndirectCalls() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(defn apply2 [f x] (f x))");
+      assertEquals(
+          31,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(+ (apply2 (fn [x] (+ x 1)) 10) (apply2 (fn [x] (* x 2)) 10))")
+              .asLong());
+    }
+  }
+
+  @Test
+  public void globalVarLookupSeesRedefinitionThroughFunctions() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(def gv 1)");
+      context.eval(HaraLanguage.ID, "(defn read-gv [] gv)");
+      assertEquals(1, context.eval(HaraLanguage.ID, "(read-gv)").asLong());
+      context.eval(HaraLanguage.ID, "(def gv 9)");
+      assertEquals(9, context.eval(HaraLanguage.ID, "(read-gv)").asLong());
+    }
+  }
+
+  @Test
+  public void dynamicVarsRemainVarLookupsInsideClosures() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(def ^:dynamic *dv* 1)");
+      context.eval(HaraLanguage.ID, "(defn make-reader [] (fn [] *dv*))");
+      assertEquals(1, context.eval(HaraLanguage.ID, "((make-reader))").asLong());
+      assertEquals(
+          42, context.eval(HaraLanguage.ID, "(binding [*dv* 42] ((make-reader)))").asLong());
+    }
+  }
+
+  @Test
   public void finallyRunsOnceWhenEnclosingLoopCompletes() {
     try (Context context = context()) {
       assertEquals(
