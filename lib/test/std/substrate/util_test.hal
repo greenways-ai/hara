@@ -3,7 +3,6 @@
             [std.lib.substrate :as core]
             [std.lib.test :as test]
             [std.substrate.frame :as frame]
-            [std.substrate.router :as router]
             [std.substrate.util :as util]))
 
 (def results
@@ -45,7 +44,7 @@
     ["peer-b" "peer-a" nil nil])
 
    (test/check
-    "broadcasts and routes while respecting exclusions"
+    "broadcasts while respecting exclusions"
     (let [node (core/node-create "node/route")
           sent (atom [])
           outgoing (frame/stream-frame
@@ -167,10 +166,11 @@
         [before
          (util/list-handlers node)
          (util/list-triggers node)]))
-    [["echo" "sum"]
-     ["event/a" "event/b"]
-     "request"
-     "stream"]
-    )])
+    [[ ["echo" "sum"]
+       ["event/a" "event/b"]
+       "request"
+       "stream"]
+     ["sum"]
+     ["event/a"]])])
 
 (test/print-results results)
