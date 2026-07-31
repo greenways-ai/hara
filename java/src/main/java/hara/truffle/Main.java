@@ -157,6 +157,18 @@ public final class Main {
       return HaraPackageTool.run(
           java.util.Arrays.copyOfRange(args, 1, args.length), output, error);
     }
+    if ("asset".equals(args[0])) {
+      return HaraAssetTool.run(
+          java.util.Arrays.copyOfRange(args, 1, args.length), output, error);
+    }
+    if ("id".equals(args[0])) {
+      return HaraIdentityTool.run(
+          java.util.Arrays.copyOfRange(args, 1, args.length), output, error);
+    }
+    if ("tap".equals(args[0])) {
+      return HaraTapTool.run(
+          java.util.Arrays.copyOfRange(args, 1, args.length), output, error);
+    }
 
     try {
       if ("new".equals(args[0])) return newProject(args, output);
@@ -522,7 +534,7 @@ public final class Main {
     try (InputStream resource =
         Main.class
             .getClassLoader()
-            .getResourceAsStream("specs/language/draft/conformance/l0.edn")) {
+            .getResourceAsStream("specs/00-unsorted/platform-language/draft/conformance/l0.edn")) {
       if (resource == null) {
         error.println("Missing packaged L0 conformance manifest");
         return 1;
@@ -1382,6 +1394,9 @@ public final class Main {
     output.println("  hara server | remote HOST:PORT");
     output.println("  hara project <new|check|run|test|add|remove|sync|update> ...");
     output.println("  hara package <COMMAND> ...");
+    output.println("  hara id <login|enroll|status|key|namespace> ...");
+    output.println("  hara asset <check|build|inspect|publish|status|search|info|pull|sync|yank> ...");
+    output.println("  hara tap <bootstrap|init|add|remove|list|verify|mirror> ...");
     output.println("  hara spec <COMMAND> ...");
     output.println("  hara extension <check|build|install|test> ...");
     output.println();

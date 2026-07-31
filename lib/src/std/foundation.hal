@@ -44,9 +44,9 @@
 ;;                 Java / Rust / Wasm runtimes
 ;;
 ;; Authoritative references:
-;;   * specs/language/draft/hal-langspec.edn — portable language contract.
-;;   * specs/language/draft/conformance/native.edn — native wrapper inventory.
-;;   * specs/archive/planning/language/typed.edn — current schema vocabulary.
+;;   * specs/00-unsorted/platform-language/draft/hal-langspec.edn — broad execution contract awaiting classification.
+;;   * specs/00-unsorted/platform-language/draft/conformance/native.edn — native wrapper inventory.
+;;   * specs/99-archive/planning/language/typed.edn — current schema vocabulary.
 ;; ============================================================================
 (ns std.foundation)
 

@@ -465,10 +465,12 @@ fn dependencies(form: &Form) -> Result<BTreeMap<String, String>, String> {
     Ok(output)
 }
 pub fn normalize_coordinate(value: &str) -> Result<String, String> {
-    let qualified = if value.contains(':') {
+    let qualified = if let Some(package) = value.strip_prefix("official:") {
+        format!("hara:{package}")
+    } else if value.contains(':') {
         value.to_owned()
     } else {
-        format!("official:{value}")
+        format!("hara:{value}")
     };
     let (tap, package) = qualified
         .split_once(':')

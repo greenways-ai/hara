@@ -7,7 +7,8 @@
 use crate::kernel::{parse, Form};
 use std::sync::OnceLock;
 
-pub const MANIFEST_SOURCE: &str = include_str!("../resources/hara-cli.edn");
+pub const MANIFEST_SOURCE: &str =
+    include_str!("../../specs/02-platform/000001-cli/draft/hara-cli.edn");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Execution {
@@ -299,12 +300,12 @@ mod tests {
 
     #[test]
     fn vendored_manifest_matches_specs_submodule_when_present() {
-        let Some(submodule) = repo_text("specs/cli/draft/hara-cli.edn") else {
+        let Some(submodule) = repo_text("specs/00-unsorted/cli/draft/hara-cli.edn") else {
             return;
         };
         assert_eq!(
             submodule, MANIFEST_SOURCE,
-            "rust/resources/hara-cli.edn is stale; refresh it from specs/cli/draft/hara-cli.edn"
+            "rust/resources/hara-cli.edn is stale; refresh it from specs/00-unsorted/cli/draft/hara-cli.edn"
         );
     }
 
@@ -372,10 +373,10 @@ mod tests {
 
     #[test]
     fn shared_outcome_conformance_cases_pass() {
-        let Some(document_source) = repo_text("specs/cli/draft/conformance/outcomes.edn") else {
-            return;
-        };
-        let document = parse(&document_source).unwrap();
+        let document = parse(include_str!(
+            "../../specs/02-platform/000001-cli/draft/conformance/outcomes.edn"
+        ))
+        .unwrap();
         for case in vector(map_get(&document, "conformance/cases").unwrap()).unwrap() {
             let Some(Form::Keyword(input)) = map_get(case, "case/input") else {
                 continue;
@@ -399,10 +400,10 @@ mod tests {
 
     #[test]
     fn shared_route_conformance_cases_pass() {
-        let Some(document_source) = repo_text("specs/cli/draft/conformance/routes.edn") else {
-            return;
-        };
-        let document = parse(&document_source).unwrap();
+        let document = parse(include_str!(
+            "../../specs/02-platform/000001-cli/draft/conformance/routes.edn"
+        ))
+        .unwrap();
         for case in vector(map_get(&document, "conformance/cases").unwrap()).unwrap() {
             let id = match map_get(case, "case/id").unwrap() {
                 Form::Keyword(value) => value,

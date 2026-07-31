@@ -1,5 +1,7 @@
 #![allow(clippy::too_many_lines)] // Temporary compatibility facade during Java-port split.
 #[cfg(not(target_arch = "wasm32"))]
+pub mod asset;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod cli_app;
 mod core;
 pub mod extension;
@@ -9,6 +11,8 @@ pub mod hta;
 mod json;
 pub mod kernel;
 pub mod lang;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod identity_tool;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_cli;
 #[cfg(not(target_arch = "wasm32"))]
@@ -26,6 +30,10 @@ pub mod tap;
 pub mod task;
 #[cfg(feature = "dev-trace")]
 pub mod trace;
+// Experimental staged bytecode VM (issue #195). Non-default feature; the
+// default evaluator is untouched.
+#[cfg(feature = "bytecode-vm")]
+pub mod vm;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod wasmtime_provider;
 use crate::kernel::Form;
@@ -1018,6 +1026,36 @@ impl Runtime {
     }
 }
 
+/// Experimental bytecode VM entry points (issue #195), gated behind the
+/// non-default `bytecode-vm` feature. These accept only closed,
+/// namespace-independent forms in the supported synchronous subset;
+/// anything else fails as a typed compile error. There is no fallback to
+/// the default evaluator, and `Runtime::eval_native` is unaffected.
+///
+/// Programs are returned inside `Rc` because compiled closures share the
+/// program with their executing machines; `Rc::clone` is the cheap way to
+/// pass one around.
+#[cfg(feature = "bytecode-vm")]
+pub fn compile_bytecode(source: &str) -> Result<std::rc::Rc<vm::Program>, String> {
+    vm::compile_source(source)
+        .map(std::rc::Rc::new)
+        .map_err(|error| error.to_string())
+}
+
+/// Executes a previously compiled and validated program.
+#[cfg(feature = "bytecode-vm")]
+pub fn execute_bytecode(program: &std::rc::Rc<vm::Program>) -> Result<String, String> {
+    vm::execute_program(program.clone())
+        .map(|value| value.display())
+        .map_err(|error| error.to_string())
+}
+
+/// Compiles and executes a source string through the experimental VM.
+#[cfg(feature = "bytecode-vm")]
+pub fn eval_bytecode_native(source: &str) -> Result<String, String> {
+    execute_bytecode(&compile_bytecode(source)?)
+}
+
 impl Runtime {
     /// Evaluates once through the existing evaluator and returns a
     /// development-only structured trace.
@@ -1361,7 +1399,7 @@ mod tests {
                 })
         }
 
-        let corpus = repo_text("specs/language/draft/conformance/modules.edn")
+        let corpus = repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn")
             .expect("specs submodule must be initialized for module conformance tests");
         let manifest = kernel::parse_forms(&corpus)
             .expect("module conformance corpus must parse")
@@ -1411,7 +1449,7 @@ mod tests {
                 })
         }
 
-        let corpus = repo_text("specs/language/draft/conformance/modules.edn")
+        let corpus = repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn")
             .expect("specs submodule must be initialized for module conformance tests");
         let manifest = kernel::parse_forms(&corpus)
             .expect("module conformance corpus must parse")
@@ -2295,7 +2333,7 @@ mod tests {
     #[test]
     fn foundation_protocols_are_canonical_and_method_names_reject_bangs() {
         let mut runtime = Runtime::new();
-        let Some(contract) = repo_text("specs/language/draft/conformance/protocols.edn") else {
+        let Some(contract) = repo_text("specs/00-unsorted/platform-language/draft/conformance/protocols.edn") else {
             return;
         };
         let fixture =
@@ -2446,7 +2484,7 @@ mod tests {
     fn shared_foundation_protocol_functionality_fixture_runs_in_the_native_runtime() {
         let source =
             include_str!("../../lib/test-fixtures/std/foundation/protocol_functionality.hal");
-        let Some(catalog) = repo_text("specs/language/draft/conformance/protocol-method-cases.edn")
+        let Some(catalog) = repo_text("specs/00-unsorted/platform-language/draft/conformance/protocol-method-cases.edn")
         else {
             return;
         };
@@ -2868,7 +2906,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("unknown wrapper source: {path}"))
         }
 
-        let Some(contract_source) = repo_text("specs/language/draft/conformance/native.edn")
+        let Some(contract_source) = repo_text("specs/00-unsorted/platform-language/draft/conformance/native.edn")
         else {
             return;
         };
@@ -4867,7 +4905,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing :{key}"))
         }
 
-        let Some(corpus) = repo_text("specs/language/draft/conformance/l0.edn") else {
+        let Some(corpus) = repo_text("specs/00-unsorted/platform-language/draft/conformance/l0.edn") else {
             return;
         };
         let manifest = kernel::parse_forms(&corpus).unwrap().remove(0);
@@ -4963,7 +5001,7 @@ mod tests {
                 })
         }
 
-        let Some(corpus) = repo_text("specs/language/draft/conformance/modules.edn") else {
+        let Some(corpus) = repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn") else {
             return;
         };
         let manifest = kernel::parse_forms(&corpus).unwrap().remove(0);
@@ -4997,7 +5035,7 @@ mod tests {
 
     #[test]
     fn issue_134_lazy_namespace_state_is_non_forcing_and_failure_is_sticky() {
-        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
             return;
         }
         assert_eq!(
@@ -5185,7 +5223,7 @@ mod tests {
 
     #[test]
     fn issue_134_dependency_order_cycles_and_canonical_cache_are_transactional() {
-        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
             return;
         }
         assert_eq!(
@@ -5311,7 +5349,7 @@ mod tests {
 
     #[test]
     fn issue_134_with_ns_uses_target_globals_and_restores_the_caller() {
-        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
             return;
         }
         assert_eq!(
@@ -5356,7 +5394,7 @@ mod tests {
 
     #[test]
     fn issue_134_facade_vars_copy_roots_and_metadata_without_sharing_identity() {
-        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
             return;
         }
         assert_eq!(
@@ -5404,7 +5442,7 @@ mod tests {
 
     #[test]
     fn issue_134_aliases_and_refers_share_live_var_identity() {
-        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
             return;
         }
         assert_eq!(
@@ -5454,7 +5492,7 @@ mod tests {
 
     #[test]
     fn issue_134_macro_reload_only_changes_new_compilations() {
-        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
             return;
         }
         assert_eq!(
@@ -5492,7 +5530,7 @@ mod tests {
 
     #[test]
     fn issue_134_session_namespace_module_and_macro_state_is_isolated() {
-        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
             return;
         }
         assert_eq!(
@@ -5541,7 +5579,7 @@ mod tests {
 
     #[test]
     fn issue_134_source_and_hir_have_value_metadata_and_error_parity() {
-        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
             return;
         }
         assert_eq!(
@@ -5597,7 +5635,7 @@ mod tests {
 
     #[test]
     fn issue_134_runtime_profile_declares_deterministic_resource_precedence() {
-        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
             return;
         }
         assert_eq!(
@@ -5633,7 +5671,7 @@ mod tests {
 
     #[test]
     fn issue_134_sessions_unwind_bindings_and_transfer_only_immutable_data() {
-        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
             return;
         }
         assert_eq!(
@@ -5712,7 +5750,7 @@ mod tests {
 
     #[test]
     fn issue_134_retained_repl_state_survives_errors_and_multiline_forms() {
-        if repo_text("specs/language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
             return;
         }
         assert_eq!(
@@ -5921,6 +5959,18 @@ mod tests {
             "7"
         );
         assert_eq!(runtime.eval_text("(do (def answer 1) (defn add [x y] (+ x y)) (alter-var-root (var answer) add 40) answer)").unwrap(), "41");
+        assert_eq!(
+            runtime.eval_text("(assoc [1 2 3] 0 :x)").unwrap(),
+            "[:x 2 3]"
+        );
+        assert_eq!(
+            runtime.eval_text("(assoc [1 2 3] 3 :x)").unwrap(),
+            "[1 2 3 :x]"
+        );
+        assert_eq!(
+            runtime.eval_text("(assoc [1 2 3] 5 :x)").unwrap_err(),
+            "assoc index out of bounds"
+        );
         assert_eq!(
             runtime.eval_text("(set! missing 1)").unwrap_err(),
             "unbound var: missing"

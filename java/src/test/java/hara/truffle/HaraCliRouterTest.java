@@ -65,6 +65,30 @@ public class HaraCliRouterTest {
   }
 
   @Test
+  public void platformManagementRoutesNormalizeToClosedHandlers() {
+    assertTrue(
+        Arrays.equals(
+            new String[] {"id", "enroll", "--owner", "alice"},
+            HaraCliRouter.instance()
+                .normalize(new String[] {"id", "enroll", "--owner", "alice"})));
+    assertTrue(
+        Arrays.equals(
+            new String[] {"asset", "build", "demo"},
+            HaraCliRouter.instance()
+                .normalize(new String[] {"asset", "build", "demo"})));
+    assertTrue(
+        Arrays.equals(
+            new String[] {"tap", "verify", "hara"},
+            HaraCliRouter.instance()
+                .normalize(new String[] {"tap", "verify", "hara"})));
+    assertTrue(
+        Arrays.equals(
+            new String[] {"extension", "check", "demo"},
+            HaraCliRouter.instance()
+                .normalize(new String[] {"package", "extension", "check", "demo"})));
+  }
+
+  @Test
   public void developerCommandsAreNotPublishedAsPublicRoutes() {
     assertTrue(
         HaraCliRouter.instance().publicRoutes().stream()

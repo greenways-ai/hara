@@ -33,7 +33,7 @@ public class HaraCliConformanceTest {
   @Test
   @SuppressWarnings({"rawtypes", "unchecked"})
   public void sharedRouteCasesPass() throws Exception {
-    String resource = "specs/cli/draft/conformance/routes.edn";
+    String resource = "specs/02-platform/000001-cli/draft/conformance/routes.edn";
     try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
       if (input == null) throw new AssertionError("Missing " + resource);
       Object document =
@@ -79,7 +79,7 @@ public class HaraCliConformanceTest {
   @Test
   @SuppressWarnings({"rawtypes", "unchecked"})
   public void sharedOutcomeCasesPass() throws Exception {
-    String resource = "specs/cli/draft/conformance/outcomes.edn";
+    String resource = "specs/02-platform/000001-cli/draft/conformance/outcomes.edn";
     try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
       if (input == null) throw new AssertionError("Missing " + resource);
       Object document =

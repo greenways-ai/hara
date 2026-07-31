@@ -920,6 +920,48 @@ public class HaraLanguageTest {
   }
 
   @Test
+  public void altersVarRootToABuiltinKeepsItCallable() {
+    try (Context context = context()) {
+      assertEquals(
+          "ab",
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(def c count) (alter-var-root (var c) (fn [_] str)) (c \"a\" \"b\")")
+              .asString());
+      assertEquals(
+          2,
+          context.eval(HaraLanguage.ID, "(def y 1) (alter-var-root (var y) inc) y").asLong());
+    }
+  }
+
+  @Test
+  public void assocCoercesLongVectorIndices() {
+    try (Context context = context()) {
+      assertEquals(
+          "[:x 2 3]", context.eval(HaraLanguage.ID, "(str (assoc [1 2 3] 0 :x))").asString());
+      assertEquals(
+          "[1 2 3 :x]", context.eval(HaraLanguage.ID, "(str (assoc [1 2 3] 3 :x))").asString());
+      PolyglotException error =
+          assertThrows(
+              PolyglotException.class,
+              () -> context.eval(HaraLanguage.ID, "(assoc [1 2 3] :k :x)"));
+      assertTrue(error.getMessage().contains("assoc index must be a number"));
+    }
+  }
+
+  @Test
+  public void lazyIteratorsPrintWithAStableDisplayString() {
+    try (Context context = context()) {
+      assertEquals(
+          "#<lazy-iterator>",
+          context
+              .eval(HaraLanguage.ID, "(str (iter-map (fn [x] (+ x 1)) [1 2 3]))")
+              .asString());
+    }
+  }
+
+  @Test
   public void appliesFunctionsWithAFinalSequentialArgument() {
     try (Context context = context()) {
       assertEquals(
@@ -1259,7 +1301,7 @@ public class HaraLanguageTest {
   @Test
   public void exposesTheSharedProtocolInventoryFromFoundation() throws Exception {
     String contract =
-        Files.readString(Path.of("specs/language/draft/conformance/protocols.edn"));
+        Files.readString(Path.of("specs/00-unsorted/platform-language/draft/conformance/protocols.edn"));
     Matcher names = Pattern.compile(":name\\s+(I[A-Za-z]+)").matcher(contract);
     Set<String> protocols = new LinkedHashSet<>();
     while (names.find()) {
@@ -1382,7 +1424,7 @@ public class HaraLanguageTest {
             Path.of("lib/test-fixtures/std/foundation/protocol_functionality.hal"));
     String catalog =
         Files.readString(
-            Path.of("specs/language/draft/conformance/protocol-method-cases.edn"));
+            Path.of("specs/00-unsorted/platform-language/draft/conformance/protocol-method-cases.edn"));
     assertEquals(88, catalog.split("\\{:protocol ", -1).length - 1);
     Matcher methodVars =
         Pattern.compile(

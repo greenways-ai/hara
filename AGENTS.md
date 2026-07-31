@@ -28,14 +28,18 @@ component map and `website/docs/development.md` for the developer guide.
   - `01-lang/001-language/metaspec/language-metaspec.edn` defines the
     language-spec document model
   - `00-unsorted/artifact/metaspec/artifact-metaspec.edn` defines artifact-format specs
-  - `01-lang/001-language/draft/hal-langspec.edn` is the current portable HAL contract
-  - `01-lang/001-language/draft/conformance/` contains machine-checked conformance corpora
-  - `99-archive/planning/` contains non-normative source material grouped by domain
+  - `01-lang/001-language/draft/hal-langspec.edn` defines the small EDN-oriented data and reader contract
+  - `01-lang/001-language/draft/conformance/` contains the current language
+    conformance corpora
+  - `01-lang/010-bytecode/draft/hal-bytecode-vm.edn` is the draft bytecode-VM runtime spec,
+    with its machine-checked corpus in `01-lang/010-bytecode/draft/conformance/bytecode-vm.edn`
+  - `00-unsorted/` holds platform, ecosystem, user-space, and broad execution material awaiting classification
+  - `99-archive/planning/` contains non-normative historical source material
 - `contrib/` — separately owned specifications and reference implementations.
   Greenways formats live under `contrib/greenways/`; Hara may publish verified
   snapshots but does not own their domain vocabulary.
 - `books/`, `registry/` — book series and the planned extension registry
-- `archive/` — legacy material, kept for history only
+- `archive/` — legacy source repository, distinct from `specs/99-archive/`
 
 ## Build and test
 
@@ -54,6 +58,7 @@ Rust runtime:
 
 ```shell
 cargo test --manifest-path rust/Cargo.toml
+cargo test --manifest-path rust/Cargo.toml --features bytecode-vm vm  # experimental VM (issues #195, #202)
 cargo test --manifest-path rust/raw/Cargo.toml
 bash rust/scripts/check-layout.sh
 bash scripts/build-hara-wasm-raw             # raw wasm extension artifact
@@ -109,8 +114,9 @@ To cut a release:
 
 - Maven runs from the repo root via `-f java/pom.xml`; Surefire's working
   directory is the repo root, so tests use repo-relative paths
-  (`specs/01-lang/001-language/draft/conformance/...`, `lib/examples/...`,
-  `website/docs/...`).
+  (`specs/01-lang/001-language/draft/conformance/...`,
+  `specs/00-unsorted/platform-language/draft/conformance/...`,
+  `lib/examples/...`, `website/docs/...`).
 - The JVM runtime embeds `lib/src/**/*.hal` (std foundation) as classpath
   resources via `java/pom.xml`; the Rust runtime embeds
   `lib/src/std/foundation.hal` via `include_str!` in `rust/src/lib.rs`.

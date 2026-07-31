@@ -10,7 +10,7 @@
 ;;   * cancel is best-effort.
 ;;   * delay defers evaluation into the promise scheduler.
 ;;
-;; Native inventory: specs/language/draft/conformance/native.edn
+;; Native inventory: specs/00-unsorted/platform-language/draft/conformance/native.edn
 ;;
 ;;                      function / value
 ;;                            |

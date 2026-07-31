@@ -1,0 +1,236 @@
+(ns hara.metaspec.schema
+  (:require [std.foundation.string :as string]))
+
+(defn qualified-keyword?
+  [value]
+  (and (keyword? value)
+       (string/includes? (str value) "/")))
+
+(defn finding
+  [status rule requirement path message repair]
+  {:finding/id rule
+   :rule/id rule
+   :requirement/id requirement
+   :finding/status status
+   :finding/level (if (= status :blocked) :error :error)
+   :finding/path (vec path)
+   :finding/message message
+   :finding/repair repair})
+
+(defn schema-finding
+  [status path message repair]
+  (finding status
+           :hara.metaspec.rule/schema-validation
+           :hara.metaspec/generated-document-conformance
+           path message repair))
+
+(defn- digits?
+  [value]
+  (and (string? value)
+       (> (string/length value) 0)
+       (every? (fn [index]
+                 (string/includes? "0123456789"
+                                   (string/char-at value index)))
+               (range (string/length value)))))
+
+(defn version-string?
+  [value]
+  (if (string? value)
+    (let [base (first (string/split (first (string/split value "+")) "-"))
+          parts (string/split base ".")]
+      (and (= 3 (count parts))
+           (every? digits? parts)))
+    false))
+
+(defn type-valid?
+  [value schema-type]
+  (cond
+    (= schema-type :any) true
+    (= schema-type :nil) (nil? value)
+    (= schema-type :boolean) (boolean? value)
+    (= schema-type :integer) (integer? value)
+    (= schema-type :number) (number? value)
+    (= schema-type :string) (string? value)
+    (= schema-type :keyword) (keyword? value)
+    (= schema-type :symbol) (symbol? value)
+    (= schema-type :map) (map? value)
+    (= schema-type :vector) (vector? value)
+    (= schema-type :set) (set? value)
+    :else false))
+
+(defn- resolve-schema
+  [schema schemas]
+  (if-let [reference (:schema/ref schema)]
+    (get schemas reference)
+    schema))
+
+(defn- validate-pattern
+  [value pattern path]
+  (if (or (= pattern "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
+          (= pattern "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[a-z0-9.-]+)?$"))
+    (if (version-string? value)
+      []
+      [(schema-finding
+        :fail path
+        (str "Value does not match version pattern: " value)
+        {:action/type :replace-value
+         :action/path path
+         :action/expected :semantic-version})])
+    [(schema-finding
+      :blocked path
+      (str "Unsupported schema pattern: " pattern)
+      {:action/type :install-pattern-checker
+       :action/pattern pattern})]))
+
+(defn- validate-map
+  [validate-fn value schema schemas path]
+  (if (map? value)
+    (let [required-findings
+          (vec
+           (mapcat
+            (fn [key]
+              (if (has? value key)
+                []
+                [(schema-finding
+                  :fail path
+                  (str "Missing required key: " key)
+                  {:action/type :add-key
+                   :action/path path
+                   :action/key key})]))
+            (or (:schema/required schema) [])))
+          properties (or (:schema/properties schema) {})
+          property-findings
+          (vec
+           (mapcat
+            (fn [entry]
+              (let [key (key entry)]
+                (if (has? value key)
+                  (validate-fn (get value key)
+                               (val entry)
+                               schemas
+                               (conj path key))
+                  [])))
+            properties))
+          closed-findings
+          (if (= true (:schema/closed schema))
+            (vec
+             (mapcat
+              (fn [key]
+                (if (has? properties key)
+                  []
+                  [(schema-finding
+                    :fail (conj path key)
+                    (str "Key is not allowed by closed schema: " key)
+                    {:action/type :remove-key
+                     :action/path (conj path key)})]))
+              (keys value)))
+            [])]
+      (vec (concat required-findings
+                   property-findings
+                   closed-findings)))
+    []))
+
+(defn- validate-items
+  [validate-fn value schema schemas path]
+  (if-let [items (:schema/items schema)]
+    (if (or (vector? value) (set? value))
+      (vec
+       (mapcat
+        (fn [index]
+          (validate-fn (nth (vec value) index)
+                       (if (keyword? items)
+                         {:schema/ref items}
+                         items)
+                       schemas
+                       (conj path index)))
+        (range (count value))))
+      [])
+    []))
+
+(defn validate-value
+  [value schema schemas path]
+  (if-let [resolved (resolve-schema schema schemas)]
+    (let [schema-type (:schema/type resolved)
+          type-findings
+          (if (and schema-type
+                   (not (if (= schema-type :enum)
+                          (not
+                           (empty?
+                            (filter (fn [candidate] (= candidate value))
+                                    (:schema/values resolved))))
+                          (type-valid? value schema-type))))
+            [(schema-finding
+              :fail path
+              (str "Expected " schema-type ", got " value)
+              {:action/type :replace-value
+               :action/path path
+               :action/expected schema-type})]
+            [])
+          constraint-findings
+          (if (and (= :qualified (:schema/constraint resolved))
+                   (not (qualified-keyword? value)))
+            [(schema-finding
+              :fail path
+              (str "Expected qualified keyword, got " value)
+              {:action/type :qualify-value
+               :action/path path})]
+            [])
+          length-findings
+          (if (and (string? value)
+                   (:schema/min-length resolved)
+                   (< (string/length value) (:schema/min-length resolved)))
+            [(schema-finding
+              :fail path
+              (str "String is shorter than " (:schema/min-length resolved))
+              {:action/type :replace-value
+               :action/path path
+               :action/min-length (:schema/min-length resolved)})]
+            [])
+          pattern-findings
+          (if (and (string? value) (:schema/pattern resolved))
+            (validate-pattern value (:schema/pattern resolved) path)
+            [])
+          unique-findings
+          (if (and (= true (:schema/unique resolved))
+                   (or (vector? value) (set? value))
+                   (not (apply distinct? (vec value))))
+            [(schema-finding
+              :fail path
+              "Collection members must be unique"
+              {:action/type :remove-duplicates
+               :action/path path})]
+            [])]
+      (if (empty? type-findings)
+        (vec
+         (concat constraint-findings
+                 length-findings
+                 pattern-findings
+                 unique-findings
+                 (validate-map validate-value value resolved schemas path)
+                 (validate-items validate-value value resolved schemas path)))
+        type-findings))
+    [(schema-finding
+      :blocked path
+      (str "Unresolved schema reference: " (:schema/ref schema))
+      {:action/type :declare-schema
+       :action/schema-id (:schema/ref schema)})]))
+
+(defn schema-index
+  [metaspec]
+  (reduce
+   (fn [out schema]
+     (assoc out (:schema/id schema) schema))
+   (if-let [root (:meta/document-schema metaspec)]
+     {(:schema/id root) root}
+     {})
+   (or (:meta/schemas metaspec) [])))
+
+(defn validate-document
+  [metaspec document]
+  (if-let [schema (:meta/document-schema metaspec)]
+    (validate-value document schema (schema-index metaspec) [])
+    [(schema-finding
+      :blocked []
+      "Metaspec has no :meta/document-schema"
+      {:action/type :add-key
+       :action/key :meta/document-schema})]))

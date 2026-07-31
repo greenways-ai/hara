@@ -36,3 +36,33 @@ fn host_resource_replaces_embedded_hal_source() {
     runtime.require_resource("std.lib.simple").unwrap();
     assert_eq!(runtime.eval_native("(std.lib.simple/foo 2)").unwrap(), "42");
 }
+
+#[test]
+fn metaspec_conformance_reports_match_the_hal_contract() {
+    let mut runtime = Runtime::new();
+    let pass = runtime
+        .eval_native(
+            "(require [hara.metaspec.core :as metaspec]) \
+             (def meta-document \
+               {:document/id :demo/meta \
+                :document/version \"1.0.0\" \
+                :spec/conforms-to {:spec/id :demo/meta :spec/version \"1.0.0\"} \
+                :meta/document-schema \
+                {:schema/id :demo/document :schema/type :map \
+                 :schema/required [:document/id :document/version]} \
+                :meta/schemas [] :meta/cross-references [] :meta/checkers []}) \
+             (:report/status (metaspec/conforms meta-document))",
+        )
+        .unwrap();
+    assert_eq!(pass, ":pass");
+
+    let blocked = runtime
+        .eval_native(
+            "(:report/status \
+               (hara.metaspec.core/conforms \
+                 (assoc meta-document :spec/conforms-to \
+                   {:spec/id :missing/meta :spec/version \"1.0.0\"})))",
+        )
+        .unwrap();
+    assert_eq!(blocked, ":blocked");
+}

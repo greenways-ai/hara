@@ -56,4 +56,4 @@ is not the authoritative implementation of the current language surface.
 ```
 
 The earlier extension lifecycle and capability design is retained in the
-[planning archive](specs/archive/planning/extensions/contract.md).
+[HTA contract](specs/01-lang/008-hta/draft/hal-hta-contract.md).

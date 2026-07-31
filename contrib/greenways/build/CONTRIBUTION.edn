@@ -13,5 +13,5 @@
  [{:spec/id :greenways/buildspec
    :spec/version "0.1.0"
    :spec/path "spec/draft/greenways-buildspec.edn"
-   :spec/metaspec "specs/metaspec/draft/hal-artifact-metaspec.edn"
+   :spec/metaspec "specs/00-unsorted/artifact/metaspec/artifact-metaspec.edn"
    :spec/sha256 "sha256:84e2cd1a74f6e37aa262235d29cbc240333d0a6f3eaebf241e0de527ef23a2c0"}]}

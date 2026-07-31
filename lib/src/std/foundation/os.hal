@@ -21,7 +21,7 @@
 ;;   * Outside the boundary: shell strings, inherited I/O, OS signals,
 ;;     incremental stream iterators, clipboard, notifications, URL helpers.
 ;;
-;; Portable contract: specs/language/draft/hal-langspec.edn
+;; Platform contract: specs/00-unsorted/platform-language/draft/hal-langspec.edn
 ;;
 ;;                       std.foundation.os
 ;;                              |

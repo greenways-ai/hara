@@ -10,7 +10,7 @@
 ;;   * close releases a live coroutine; await bridges a coroutine to a
 ;;     promise.
 ;;
-;; Native inventory: specs/language/draft/conformance/native.edn
+;; Native inventory: specs/00-unsorted/platform-language/draft/conformance/native.edn
 ;;
 ;;                       function
 ;;                          |

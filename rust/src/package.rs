@@ -157,7 +157,7 @@ fn verify_registry_request(request: &Path, identity: &Path) -> Result<(), String
     Ok(())
 }
 
-fn tap_command(args: &[String]) -> Result<(), String> {
+pub fn tap_command(args: &[String]) -> Result<(), String> {
     let root = tap::config_root();
     match args.first().map(String::as_str) {
         Some("add") => {
@@ -259,7 +259,9 @@ fn tap_command(args: &[String]) -> Result<(), String> {
 }
 
 fn publish(args: &[String]) -> Result<(), String> {
-    let tap_name = optional_option(args, "--tap").unwrap_or_else(|| "official".into());
+    let tap_name = optional_option(args, "--tap")
+        .map(|name| if name == "official" { "hara".into() } else { name })
+        .unwrap_or_else(|| "hara".into());
     let dry_run = args.iter().any(|arg| arg == "--dry-run");
     let path = args
         .iter()
