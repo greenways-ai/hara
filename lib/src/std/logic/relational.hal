@@ -1,0 +1,45 @@
+;; Relational adapters over the coroutine-backed std.logic.kanren miniKanren core.
+(ns std.logic.relational
+  (:require [std.logic.kanren :as logic]))
+
+(defn ^{:schema [:fn [:vector :any] :fn]}
+  relationo
+  "Returns a goal that unifies pattern with one tuple in facts."
+  [facts pattern]
+  (loop [index 0
+         goals []]
+    (if (= index (count facts))
+      (apply std.logic.kanren/any goals)
+      (recur (inc index)
+             (conj goals
+                   (std.logic.kanren/== pattern (nth facts index)))))))
+
+(defn ^{:schema [:fn [:map :any] :fn]}
+  facto
+  "Returns a goal over every fact in a projected graph."
+  [model pattern]
+  (relationo (:graph/facts model) pattern))
+
+(defn ^{:schema [:fn [:map :any :any] :fn]}
+  patho
+  "Relates source path to the scalar value stored at that path."
+  [model path value]
+  (facto model [:value path value]))
+
+(defn ^{:schema [:fn [:map :keyword :vector] :fn]}
+  projecto
+  "Relates arguments to a named projected relation."
+  [model relation arguments]
+  (facto model (vec (concat [relation] arguments))))
+
+(defn ^{:schema [:fn [:int :fn] :vector]}
+  query
+  "Returns at most amount reified answers from a goal builder."
+  [amount builder]
+  (logic/run amount builder))
+
+(defn ^{:schema [:fn [:fn] :vector]}
+  query*
+  "Returns all reified answers from a goal builder."
+  [builder]
+  (logic/run* builder))

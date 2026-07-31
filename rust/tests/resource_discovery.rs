@@ -6,7 +6,7 @@ fn generated_catalog_loads_portable_hal_namespaces() {
     assert_eq!(
         runtime
             .eval_native(
-                "(require [std.logic :as logic]) \
+                "(require [std.logic.kanren :as logic]) \
                  (logic/run* (fn [query] (logic/== query 42)))"
             )
             .unwrap(),
@@ -46,10 +46,10 @@ fn generated_catalog_loads_portable_hal_namespaces() {
     assert_eq!(
         runtime
             .eval_native(
-                "(require [std.logic.kanren :as kanren]) \
-                 (kanren/query* \
+                "(require [std.logic.relational :as relational]) \
+                 (relational/query* \
                    (fn [query] \
-                     (kanren/relationo \
+                     (relational/relationo \
                        [[:color :sky :blue]] \
                        [:color query :blue])))"
             )

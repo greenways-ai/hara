@@ -2,8 +2,8 @@
   (:use code.test)
   (:require [hara.metaspec.logic :as metaspec]
             [hara.metaspec.model :as model]
-            [std.logic :as logic]
-            [std.logic.kanren :as kanren]))
+            [std.logic.kanren :as logic]
+            [std.logic.relational :as relational]))
 
 (def document
   {:document/id :demo/metaspec
@@ -61,7 +61,7 @@
   :id 'bidirectional-schema-reference}
 (fact "queries schema references bidirectionally through the shared projection"
   (let [projected (model/project document)]
-    (kanren/query*
+    (relational/query*
      (fn [query]
        (logic/fresh
         (fn [path]

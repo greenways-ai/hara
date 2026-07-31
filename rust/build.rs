@@ -12,10 +12,22 @@ fn collect_hal(directory: &Path, output: &mut Vec<PathBuf>) {
     for path in entries {
         if path.is_dir() {
             collect_hal(&path, output);
-        } else if path.extension().and_then(|extension| extension.to_str()) == Some("hal") {
+        } else if path.extension().and_then(|extension| extension.to_str()) == Some("hal")
+            && !is_editor_artifact(&path)
+        {
             output.push(path);
         }
     }
+}
+
+/// Editor lock and autosave files (Emacs `.#name` / `#name#`) are not HAL
+/// sources; lock symlinks are often dangling and must not break the build.
+fn is_editor_artifact(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    name.starts_with(".#") || (name.starts_with('#') && name.ends_with('#'))
 }
 
 fn declared_namespace(source: &str, path: &Path) -> String {

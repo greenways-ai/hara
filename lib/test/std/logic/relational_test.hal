@@ -1,0 +1,50 @@
+(ns std.logic.relational-test
+  (:use code.test)
+  (:require [hara.metaspec.model :as model]
+            [std.logic.kanren :as logic]
+            [std.logic.relational :as relational]))
+
+(def projected
+  (model/project
+   {:document/id :demo/spec
+    :document/type :demo/spec
+    :document/version "0.1.0"
+    :meta/schemas
+    [{:schema/id :demo/name :schema/type :string}
+     {:schema/id :demo/count :schema/type :integer}]}))
+
+^{:refer 'std.logic.relational/projecto
+  :id 'forward-relation-query}
+(fact "queries a projected relation in the forward direction"
+  (relational/query*
+   (fn [query]
+     (logic/fresh
+      (fn [path]
+        (relational/projecto
+         projected
+         :schema
+         [:demo/name query path])))))
+  => [:string])
+
+^{:refer 'std.logic.relational/projecto
+  :id 'reverse-relation-query}
+(fact "uses the same relation to recover identifiers from a known type"
+  (relational/query*
+   (fn [query]
+     (logic/fresh
+      (fn [path]
+        (relational/projecto projected :schema [query :integer path])))))
+  => [:demo/count])
+
+^{:refer 'std.logic.relational/patho
+  :id 'lossless-path-query}
+(fact "relates a source path to its exact scalar value"
+  (relational/query*
+   (fn [query]
+     (relational/patho
+      projected
+      [:meta/schemas 0 :schema/id]
+      query)))
+  => [:demo/name])
+
+(pr-str (run '[std.logic.relational-test]))

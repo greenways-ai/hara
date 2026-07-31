@@ -96,6 +96,7 @@ public final class HaraContext {
   private static final Map<String, String> GENERATED_LIBRARIES =
       Map.of(
           "string", "std.foundation.string",
+          "coroutine", "std.foundation.coroutine",
           "promise", "std.foundation.promise",
           "bytes", "std.foundation.bytes",
           "file", "std.foundation.file",
@@ -104,6 +105,7 @@ public final class HaraContext {
   private static final Map<String, String> DEFAULT_LIBRARY_ALIASES =
       Map.of(
           "string", "str",
+          "coroutine", "co",
           "promise", "promise",
           "bytes", "bytes",
           "file", "file",
@@ -1067,7 +1069,7 @@ public final class HaraContext {
         target = requiredNamespace(alias.getValue());
       }
       if (target == null) continue;
-      for (String name : target.symbolNames()) names.add(alias.getKey() + "/" + name);
+      for (String name : target.sortedSymbolNames()) names.add(alias.getKey() + "/" + name);
     }
     return new ArrayList<>(names);
   }

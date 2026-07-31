@@ -23,7 +23,7 @@ public class StdPortableLibraryProvidersTest {
     assertFalse(namespaces.contains("std.lib.zip"));
     assertFalse(namespaces.contains("std.lib.block"));
     assertFalse(namespaces.contains("std.lib.task"));
-    assertFalse(namespaces.contains("std.logic"));
+    assertFalse(namespaces.contains("std.logic.kanren"));
     assertFalse(namespaces.contains("code.test"));
     assertTrue(namespaces.contains("std.foundation.coroutine"));
   }

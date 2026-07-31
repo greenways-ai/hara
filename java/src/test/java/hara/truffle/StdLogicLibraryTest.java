@@ -15,7 +15,7 @@ public class StdLogicLibraryTest {
               .eval(
                   HaraLanguage.ID,
                   "(ns std-logic-truffle-probe "
-                      + "(:require [std.logic :as logic])) "
+                      + "(:require [std.logic.kanren :as logic])) "
                       + "(pr-str "
                       + " (logic/run* "
                       + "  (fn [query] "
@@ -26,7 +26,7 @@ public class StdLogicLibraryTest {
   }
 
   @Test
-  public void classpathDiscoveryLoadsTypedDatalogAndKanrenAdapters() {
+  public void classpathDiscoveryLoadsTypedDatalogAndRelationalAdapters() {
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
       assertEquals(
           "[true [[:demo/missing]] [:sky]]",
@@ -34,9 +34,9 @@ public class StdLogicLibraryTest {
               .eval(
                   HaraLanguage.ID,
                   "(ns metaspec-logic-truffle-probe "
-                      + "(:require [std.logic :as logic] "
+                      + "(:require [std.logic.kanren :as logic] "
                       + "          [std.logic.datalog :as datalog] "
-                      + "          [std.logic.kanren :as kanren] "
+                      + "          [std.logic.relational :as relational] "
                       + "          [std.typed.schema :as schema])) "
                       + "(def db "
                       + " (datalog/database {} "
@@ -46,9 +46,9 @@ public class StdLogicLibraryTest {
                       + "  (datalog/query db "
                       + "   '{:find [?id] "
                       + "     :where [[:requirement ?id :must ?path]]}) "
-                      + "  (kanren/query* "
+                      + "  (relational/query* "
                       + "   (fn [query] "
-                      + "    (kanren/relationo "
+                      + "    (relational/relationo "
                       + "     [[:color :sky :blue]] "
                       + "     [:color query :blue])))])")
               .asString());

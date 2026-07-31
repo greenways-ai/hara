@@ -141,7 +141,27 @@ public class HaraGeneratedLibrariesTest {
               .asBoolean());
       assertTrue(
           context
+              .eval(HaraLanguage.ID, "(iter-any? (fn [x] (= x \"co/resume\")) (current-symbols))")
+              .asBoolean());
+      assertTrue(
+          context
               .eval(HaraLanguage.ID, "(iter-any? (fn [x] (= x \"push-last\")) (current-symbols))")
+              .asBoolean());
+    }
+  }
+
+  @Test
+  public void completionOnlyQualifiesSymbolsOwnedByRequiredAliases() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(ns sample.walk) (def own-symbol 1)");
+      context.eval(HaraLanguage.ID, "(ns user (:require [sample.walk :as walk]))");
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(and (iter-any? (fn [x] (= x \"walk/own-symbol\")) (current-symbols)) "
+                      + "     (not (iter-any? (fn [x] (= x \"walk/+\")) (current-symbols))) "
+                      + "     (not (iter-any? (fn [x] (= x \"walk/ILookup\")) (current-symbols))))")
               .asBoolean());
     }
   }
