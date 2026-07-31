@@ -1103,6 +1103,7 @@ final class HaraAnalyzer {
 
     int bindingCount = (int) bindings.count() / 2;
     int[] rawSlots = new int[bindingCount];
+    int[] scratchSlots = new int[bindingCount];
     HaraExpressionNode[] initializers = new HaraExpressionNode[bindingCount];
     Map<Symbol, Integer> bodyLocals = new HashMap<>(locals);
     ArrayList<int[]> patternSlots = new ArrayList<>();
@@ -1113,6 +1114,8 @@ final class HaraAnalyzer {
       initializers[i] = analyze(bindings.nth(i * 2L + 1));
       rawSlots[i] =
           frames.addSlot(FrameSlotKind.Object, Symbol.create(null, "__hara_loop_" + i), null);
+      scratchSlots[i] =
+          frames.addSlot(FrameSlotKind.Object, Symbol.create(null, "__hara_recur_" + i), null);
       ArrayList<Integer> slots = new ArrayList<>();
       ArrayList<HaraExpressionNode> values = new ArrayList<>();
       addPatternBindings(
@@ -1122,7 +1125,7 @@ final class HaraAnalyzer {
       patternInitializers.add(values.toArray(new HaraExpressionNode[0]));
     }
 
-    HaraNodes.RecurTarget target = new HaraNodes.RecurTarget(rawSlots);
+    HaraNodes.RecurTarget target = new HaraNodes.RecurTarget(rawSlots, scratchSlots);
     for (int i = 2; i < form.count() - 1; i++) {
       validateTailRecurs(form.nth(i), false);
     }

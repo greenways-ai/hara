@@ -49,9 +49,13 @@ public final class HaraNodes {
 
   public static final class RecurTarget {
     private final int[] slots;
+    private final int[] scratchSlots;
+    private final RecurException signal;
 
-    public RecurTarget(int[] slots) {
+    public RecurTarget(int[] slots, int[] scratchSlots) {
       this.slots = slots;
+      this.scratchSlots = scratchSlots;
+      this.signal = new RecurException(this);
     }
 
     public int arity() {
@@ -61,12 +65,30 @@ public final class HaraNodes {
     public int[] slots() {
       return slots;
     }
+
+    /**
+     * Per-loop staging slots for recurrence values: {@link Recur} evaluates into these before
+     * copying into the binding slots, so no array is allocated per iteration.
+     */
+    public int[] scratchSlots() {
+      return scratchSlots;
+    }
+
+    /**
+     * The single recurrence signal for this target. The exception carries no per-iteration
+     * state (values travel through frame slots), so one stackless instance serves every
+     * recurrence and is safe to throw concurrently from multiple frames.
+     */
+    RecurException signal() {
+      return signal;
+    }
   }
 
   /**
    * Lightweight, stackless recurrence signal. Graal treats {@link ControlFlowException} as a
    * canonical control-transfer mechanism, so a thrown recur compiles to a plain loop back-edge
-   * once the loop body is inlined; no stack trace is ever captured.
+   * once the loop body is inlined; no stack trace is ever captured. Each {@link RecurTarget}
+   * owns exactly one instance, thrown on every recurrence of that loop.
    */
   @SuppressWarnings("serial")
   private static final class RecurException extends ControlFlowException {
@@ -1094,17 +1116,18 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      // Evaluate every recurrence value before touching the loop slots so that
-      // expressions such as (recur (+ i 1) (+ acc i)) observe the current bindings.
-      Object[] evaluated = new Object[values.length];
+      // Evaluate every recurrence value into the loop's scratch slots before touching the
+      // binding slots, so expressions such as (recur (+ i 1) (+ acc i)) observe the current
+      // bindings; no per-iteration array or exception state is allocated.
+      int[] scratchSlots = target.scratchSlots();
       for (int i = 0; i < values.length; i++) {
-        evaluated[i] = values[i].execute(frame);
+        frame.setObject(scratchSlots[i], values[i].execute(frame));
       }
       int[] slots = target.slots();
       for (int i = 0; i < slots.length; i++) {
-        frame.setObject(slots[i], evaluated[i]);
+        frame.copy(scratchSlots[i], slots[i]);
       }
-      throw new RecurException(target);
+      throw target.signal();
     }
   }
 
