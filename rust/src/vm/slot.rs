@@ -8,6 +8,7 @@ pub(crate) enum VmSlot {
     Bool(bool),
     Nil,
     Value(Box<Value>),
+    InlineClosure { prototype: u16, identity: u64 },
     Closure(Rc<VmClosure>),
     MultiArity(Rc<VmMultiArity>),
 }
@@ -31,7 +32,17 @@ impl VmSlot {
             VmSlot::Bool(value) => Some(Value::Bool(*value)),
             VmSlot::Nil => Some(Value::Nil),
             VmSlot::Value(value) => Some((**value).clone()),
-            VmSlot::Closure(_) | VmSlot::MultiArity(_) => None,
+            VmSlot::InlineClosure { .. } | VmSlot::Closure(_) | VmSlot::MultiArity(_) => None,
+        }
+    }
+
+    pub fn into_runtime_value(self) -> Option<Value> {
+        match self {
+            VmSlot::Number(value) => Some(Value::Number(value)),
+            VmSlot::Bool(value) => Some(Value::Bool(value)),
+            VmSlot::Nil => Some(Value::Nil),
+            VmSlot::Value(value) => Some(*value),
+            VmSlot::InlineClosure { .. } | VmSlot::Closure(_) | VmSlot::MultiArity(_) => None,
         }
     }
 

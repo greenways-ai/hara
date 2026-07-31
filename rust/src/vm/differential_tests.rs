@@ -220,7 +220,14 @@ fn shared_benchmark_workloads_match() {
     let Value::Vector(workloads) = workloads else {
         panic!("workloads must be a vector")
     };
-    let supported = ["noop", "arithmetic", "function-call"];
+    let supported = [
+        "noop",
+        "arithmetic",
+        "function-call",
+        "persistent-vector",
+        "persistent-map",
+        "sequence-navigation",
+    ];
     let mut seen = Vec::new();
     let mut runtime = Runtime::new();
     for workload in workloads.iter() {
@@ -237,7 +244,7 @@ fn shared_benchmark_workloads_match() {
         };
         let id = field("id");
         if !supported.contains(&id.as_str()) {
-            continue; // collections are outside this milestone
+            continue;
         }
         seen.push(id.clone());
         let source = field("source");

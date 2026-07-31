@@ -344,6 +344,12 @@ impl Compiler {
             Form::BigInteger(value) => self.constant(Value::BigInteger(value.clone()), span),
             Form::Decimal(value) => self.constant(Value::Decimal(value.clone()), span),
             Form::Regex(value) => self.constant(Value::Regex(value.clone()), span),
+            Form::Vector(_) | Form::Map(_) | Form::Set(_) if constant_form(form) => {
+                let value = crate::core::form_to_value(form).map_err(|message| {
+                    CompileError::new(CompileErrorKind::UnsupportedForm, message, Some(span.start))
+                })?;
+                self.constant(value, span)
+            }
             Form::Metadata(_, value) => self.compile_form(value, span, None, tail),
             Form::Symbol(name) => match self.ctx().scopes.resolve(name) {
                 Some(slot) => {
@@ -434,6 +440,56 @@ impl Compiler {
                 format!("primitive calls support at most {MAX_PRIMITIVE_ARGUMENTS} arguments"),
                 Some(span.start),
             ));
+        }
+        if children[1..]
+            .iter()
+            .all(|argument| constant_form(argument.form))
+        {
+            let arguments = children[1..]
+                .iter()
+                .map(|argument| crate::core::form_to_value(argument.form))
+                .collect::<Result<Vec<_>, _>>();
+            if let Ok(arguments) = arguments {
+                if let Ok(value) = crate::core::apply_primitive(op, &arguments) {
+                    return self.constant(value, span);
+                }
+            }
+        }
+        if op == Primitive::First && argc == 1 {
+            if let Form::List(elements) = children[1].form {
+                if matches!(elements.as_slice(), [Form::Symbol(name), _] if name == "rest") {
+                    let nested = self.list_children(
+                        elements,
+                        children[1].span,
+                        children[1].children,
+                    );
+                    if constant_form(nested[1].form) {
+                        if let Ok(argument) = crate::core::form_to_value(nested[1].form) {
+                            if let Ok(value) =
+                                crate::core::apply_primitive(Primitive::Second, &[argument])
+                            {
+                                return self.constant(value, span);
+                            }
+                        }
+                    }
+                    self.compile_form(
+                        nested[1].form,
+                        nested[1].span,
+                        nested[1].children,
+                        false,
+                    )?;
+                    if self.ctx().fallthrough {
+                        self.emit(
+                            Instruction::Primitive {
+                                op: Primitive::Second,
+                                argc: 1,
+                            },
+                            Some(span.start),
+                        );
+                    }
+                    return Ok(());
+                }
+            }
         }
         if argc == 2 {
             if let (Form::Symbol(name), Form::Number(value)) = (children[1].form, children[2].form)
@@ -668,6 +724,27 @@ impl Compiler {
         }
         validate::validate(&program).map_err(|error| internal(error.to_string()))?;
         Ok(program)
+    }
+}
+
+fn constant_form(form: &Form) -> bool {
+    match form {
+        Form::Nil
+        | Form::Bool(_)
+        | Form::Number(_)
+        | Form::Float(_)
+        | Form::BigInteger(_)
+        | Form::Decimal(_)
+        | Form::Character(_)
+        | Form::Regex(_)
+        | Form::Keyword(_)
+        | Form::String(_) => true,
+        Form::Tagged(_, value) | Form::Metadata(_, value) => constant_form(value),
+        Form::Vector(values) | Form::Set(values) => values.iter().all(constant_form),
+        Form::Map(entries) => entries
+            .iter()
+            .all(|(key, value)| constant_form(key) && constant_form(value)),
+        Form::Symbol(_) | Form::List(_) => false,
     }
 }
 

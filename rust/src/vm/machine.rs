@@ -72,6 +72,7 @@ pub struct Machine {
     free_locals: Vec<Vec<VmSlot>>,
     free_args: Vec<Vec<VmSlot>>,
     vm_globals: HashMap<usize, VmSlot>,
+    next_closure_identity: u64,
     ip: usize,
 }
 
@@ -97,6 +98,7 @@ impl Machine {
             free_locals: Vec::new(),
             free_args: Vec::new(),
             vm_globals: HashMap::new(),
+            next_closure_identity: 0,
             ip: 0,
         }
     }
@@ -150,6 +152,7 @@ impl Machine {
             free_locals: Vec::new(),
             free_args: Vec::new(),
             vm_globals: HashMap::new(),
+            next_closure_identity: 0,
             ip: 0,
         }
     }
@@ -160,6 +163,13 @@ impl Machine {
             VmSlot::Bool(value) => Value::Bool(value),
             VmSlot::Nil => Value::Nil,
             VmSlot::Value(value) => *value,
+            VmSlot::InlineClosure { prototype, .. } => Self::closure_value(
+                program,
+                Rc::new(VmClosure {
+                    prototype,
+                    captures: Vec::new(),
+                }),
+            ),
             VmSlot::Closure(closure) => Self::closure_value(program, closure),
             VmSlot::MultiArity(dispatch) => {
                 let functions = dispatch
@@ -228,6 +238,11 @@ impl Machine {
         mut args: Vec<VmSlot>,
     ) -> Result<(), String> {
         match callee {
+            VmSlot::InlineClosure { prototype, .. } => {
+                self.check_arity(program, prototype, args.len())?;
+                self.enter_prototype(program, prototype, args, Vec::new());
+                Ok(())
+            }
             VmSlot::Closure(closure) => {
                 self.check_arity(program, closure.prototype, args.len())?;
                 self.enter_prototype(program, closure.prototype, args, closure.captures.clone());
@@ -451,6 +466,10 @@ impl Machine {
                                     (VmSlot::Closure(left), VmSlot::Closure(right)) => {
                                         Rc::ptr_eq(left, right)
                                     }
+                                    (
+                                        VmSlot::InlineClosure { identity: left, .. },
+                                        VmSlot::InlineClosure { identity: right, .. },
+                                    ) => left == right,
                                     (VmSlot::MultiArity(left), VmSlot::MultiArity(right)) => {
                                         Rc::ptr_eq(left, right)
                                     }
@@ -463,7 +482,7 @@ impl Machine {
                 } else {
                     self.scratch.clear();
                     for value in self.stack.split_off(self.stack.len() - argc) {
-                        let Some(value) = value.runtime_value() else {
+                        let Some(value) = value.into_runtime_value() else {
                             return Dispatch::Failed(
                                 self.error(function, format!("{} expects values", op.operator())),
                             );
@@ -685,11 +704,20 @@ impl Machine {
         let Some(_proto) = program.functions.get(usize::from(prototype)) else {
             return Err(format!("closure prototype {prototype} out of range"));
         };
-        let captured = self.stack.split_off(self.stack.len() - captures);
-        self.stack.push(VmSlot::Closure(Rc::new(VmClosure {
-            prototype,
-            captures: captured,
-        })));
+        if captures == 0 {
+            let identity = self.next_closure_identity;
+            self.next_closure_identity = self.next_closure_identity.wrapping_add(1);
+            self.stack.push(VmSlot::InlineClosure {
+                prototype,
+                identity,
+            });
+        } else {
+            let captured = self.stack.split_off(self.stack.len() - captures);
+            self.stack.push(VmSlot::Closure(Rc::new(VmClosure {
+                prototype,
+                captures: captured,
+            })));
+        }
         Ok(())
     }
 

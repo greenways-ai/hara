@@ -4,7 +4,8 @@ use crate::lang::data::Symbol;
 use std::rc::Rc;
 
 use super::{
-    constant_string, constant_string_vector, Machine, Program, Value, VmMultiArity, VmSlot,
+    constant_string, constant_string_vector, Machine, Program, Value, VmClosure, VmMultiArity,
+    VmSlot,
 };
 
 impl Machine {
@@ -160,7 +161,7 @@ impl Machine {
         let start = self.stack.len() - count;
         if self.stack[start..]
             .iter()
-            .any(|value| !matches!(value, VmSlot::Closure(_)))
+            .any(|value| !matches!(value, VmSlot::InlineClosure { .. } | VmSlot::Closure(_)))
         {
             return Err("multi-arity clauses must be functions".to_string());
         }
@@ -168,6 +169,10 @@ impl Machine {
             .stack
             .drain(start..)
             .map(|value| match value {
+                VmSlot::InlineClosure { prototype, .. } => Rc::new(VmClosure {
+                    prototype,
+                    captures: Vec::new(),
+                }),
                 VmSlot::Closure(closure) => closure,
                 _ => unreachable!("checked above"),
             })

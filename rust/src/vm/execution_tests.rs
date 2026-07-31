@@ -274,9 +274,6 @@ fn recur_errors() {
 fn unsupported_forms_are_typed_compile_errors() {
     let cases = [
         ("(quote a)", "unsupported operator: quote"),
-        ("[1 2 3]", "unsupported form: [1 2 3]"),
-        ("{:a 1}", "unsupported form: {:a 1}"),
-        ("#{1 2}", "unsupported form: #{1 2}"),
         (
             "(let [[a b] [1 2]] a)",
             "let destructuring is not supported",
@@ -345,11 +342,17 @@ fn unbound_symbols_are_compile_errors_with_positions() {
     let (kind, message) = compile_error("(let [x 1] (+ x y))");
     assert_eq!(kind, CompileErrorKind::UnboundSymbol);
     assert_eq!(message, "unbound symbol: y [line 1, column 17]");
-    // Names outside the curated unsupported-operator list report as
-    // unbound symbols, matching the evaluator.
-    let (kind, message) = compile_error("(first [1 2])");
-    assert_eq!(kind, CompileErrorKind::UnboundSymbol);
-    assert_eq!(message, "unbound symbol: first [line 1, column 1]");
+    assert_eq!(eval("(first [1 2])"), "1");
+}
+
+#[test]
+fn literal_collections_and_collection_primitives() {
+    assert_eq!(eval("[1 2 3]"), "[1 2 3]");
+    assert_eq!(eval("{:a 1}"), "{:a 1}");
+    assert_eq!(eval("#{1 2}"), "#{1 2}");
+    assert_eq!(eval("(nth [10 20 30] 1)"), "20");
+    assert_eq!(eval("(assoc {} :answer 42)"), "{:answer 42}");
+    assert_eq!(eval("(first (rest [1 2]))"), "2");
 }
 
 #[test]
@@ -358,6 +361,8 @@ fn fn_values_and_direct_calls() {
     assert_eq!(eval("((fn [x] x) 1)"), "1");
     assert_eq!(eval("((fn [x y] (+ x y)) 19 23)"), "42");
     assert_eq!(eval("(let [f (fn [x] (+ x 1))] (f 41))"), "42");
+    assert_eq!(eval("(let [f (fn [x] x)] (= f f))"), "true");
+    assert_eq!(eval("(= (fn [x] x) (fn [x] x))"), "false");
     // Zero-argument functions.
     assert_eq!(eval("((fn [] 42))"), "42");
 }

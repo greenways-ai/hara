@@ -948,7 +948,7 @@ fn gensym(prefix: &str) -> String {
     format!("{prefix}{index}")
 }
 
-fn form_to_value(form: &Form) -> Result<Value, String> {
+pub(crate) fn form_to_value(form: &Form) -> Result<Value, String> {
     literal_value(form)
 }
 
@@ -1866,7 +1866,21 @@ impl Ord for Value {
 }
 impl Hash for Value {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u64(self.stable_hash());
+        match self {
+            // Avoid constructing a nested DefaultHasher for the hottest
+            // persistent-map key types. Equal values still hash identically;
+            // stable_hash remains the portable structural hash API.
+            Value::Number(value) => {
+                state.write_u8(0);
+                state.write_i64(*value);
+            }
+            Value::Bool(value) => {
+                state.write_u8(1);
+                state.write_u8(u8::from(*value));
+            }
+            Value::Nil => state.write_u8(19),
+            _ => state.write_u64(self.stable_hash()),
+        }
     }
 }
 
@@ -4539,6 +4553,11 @@ pub enum Primitive {
     Count,
     Get,
     Meta,
+    Nth,
+    Assoc,
+    First,
+    Rest,
+    Second,
 }
 
 impl Primitive {
@@ -4560,6 +4579,11 @@ impl Primitive {
             "count" => Primitive::Count,
             "get" => Primitive::Get,
             "meta" => Primitive::Meta,
+            "nth" => Primitive::Nth,
+            "assoc" => Primitive::Assoc,
+            "first" => Primitive::First,
+            "rest" => Primitive::Rest,
+            "second" => Primitive::Second,
             _ => return None,
         })
     }
@@ -4581,6 +4605,11 @@ impl Primitive {
             Primitive::Count => "count",
             Primitive::Get => "get",
             Primitive::Meta => "meta",
+            Primitive::Nth => "nth",
+            Primitive::Assoc => "assoc",
+            Primitive::First => "first",
+            Primitive::Rest => "rest",
+            Primitive::Second => "second",
         }
     }
 }
@@ -4694,6 +4723,40 @@ pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Resu
             }
             protocol_meta(arguments)
         }
+        Primitive::Nth => {
+            if arguments.len() != 2 {
+                return Err("nth expects two arguments".into());
+            }
+            collection_nth(&arguments[0], &arguments[1])
+        }
+        Primitive::Assoc => {
+            if arguments.len() < 3 || arguments.len() % 2 == 0 {
+                return Err("assoc expects a collection and key/value pairs".into());
+            }
+            let mut value = arguments[0].clone();
+            for pair in arguments[1..].chunks(2) {
+                value = collection_assoc(&value, &pair[0], pair[1].clone())?;
+            }
+            Ok(value)
+        }
+        Primitive::First => {
+            if arguments.len() != 1 {
+                return Err("first expects one argument".into());
+            }
+            collection_first(arguments[0].clone())
+        }
+        Primitive::Rest => {
+            if arguments.len() != 1 {
+                return Err("rest expects one argument".into());
+            }
+            collection_rest(arguments[0].clone())
+        }
+        Primitive::Second => {
+            if arguments.len() != 1 {
+                return Err("second expects one argument".into());
+            }
+            collection_second(arguments[0].clone())
+        }
     }
 }
 
@@ -4727,6 +4790,11 @@ pub(crate) fn apply_binary_primitive(
         Primitive::Get => collection_get(left, right, Value::Nil),
         Primitive::Count => Err("count expects one argument".into()),
         Primitive::Meta => Err("meta expects one value".into()),
+        Primitive::Nth => collection_nth(left, right),
+        Primitive::Assoc => Err("assoc expects a collection and key/value pairs".into()),
+        Primitive::First => Err("first expects one argument".into()),
+        Primitive::Rest => Err("rest expects one argument".into()),
+        Primitive::Second => Err("second expects one argument".into()),
     }
 }
 
@@ -4752,6 +4820,11 @@ pub(crate) fn apply_binary_numbers(
         Primitive::Get => return Err("get expects an associative value".into()),
         Primitive::Count => return Err("count expects one argument".into()),
         Primitive::Meta => return Err("meta expects one value".into()),
+        Primitive::Nth => return Err("nth expects a collection and index".into()),
+        Primitive::Assoc => return Err("assoc expects a collection and key/value pairs".into()),
+        Primitive::First => return Err("first expects one argument".into()),
+        Primitive::Rest => return Err("rest expects one argument".into()),
+        Primitive::Second => return Err("second expects one argument".into()),
     };
     Ok(result)
 }
@@ -6922,16 +6995,23 @@ fn collection_last(value: Value) -> Result<Value, String> {
 }
 
 fn collection_second(value: Value) -> Result<Value, String> {
-    if let Value::Iterator(iterator) = &value {
-        let mut state = iterator.borrow_mut();
-        if state.try_next()?.is_none() {
-            return Ok(Value::Nil);
+    match value {
+        Value::Vector(values) => return Ok(values.get(1).cloned().unwrap_or(Value::Nil)),
+        Value::Tuple(values) => return Ok(values.get(1).cloned().unwrap_or(Value::Nil)),
+        Value::List(values) => return Ok(values.get(1).cloned().unwrap_or(Value::Nil)),
+        Value::Iterator(iterator) => {
+            let mut state = iterator.borrow_mut();
+            if state.try_next()?.is_none() {
+                return Ok(Value::Nil);
+            }
+            return Ok(state.try_next()?.unwrap_or(Value::Nil));
         }
-        return Ok(state.try_next()?.unwrap_or(Value::Nil));
+        value => {
+            let mut values = iterator_values(value)?.into_iter();
+            values.next();
+            return Ok(values.next().unwrap_or(Value::Nil));
+        }
     }
-    let mut values = iterator_values(value)?.into_iter();
-    values.next();
-    Ok(values.next().unwrap_or(Value::Nil))
 }
 
 fn collection_empty(value: Value) -> Result<Value, String> {
