@@ -138,11 +138,133 @@ pub struct Runtime {
 /// facade keeps embedding hosts from treating a `Runtime` as the process
 /// boundary when several independent sessions can share one kernel.
 pub struct SessionKernel {
-    sessions: HashMap<String, Runtime>,
+    sessions: HashMap<String, Session>,
     resources: HashMap<String, String>,
     mounts: HashMap<u64, FilesystemMount>,
     session_mounts: HashMap<String, u64>,
     next_mount_id: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionMetadata {
+    pub name: String,
+    pub namespace: String,
+    pub state: &'static str,
+    pub filesystem: Option<u64>,
+}
+
+/// An isolated, named execution context owned by a [`SessionKernel`].
+pub struct Session {
+    name: String,
+    runtime: Runtime,
+    active: bool,
+    filesystem: Option<u64>,
+}
+
+impl Session {
+    fn new(name: &str, runtime: Runtime) -> Self {
+        Self {
+            name: name.into(),
+            runtime,
+            active: true,
+            filesystem: None,
+        }
+    }
+
+    fn ensure_active(&self) -> Result<(), String> {
+        if self.active {
+            Ok(())
+        } else {
+            Err(format!("SESSION_CLOSED {}", self.name))
+        }
+    }
+
+    pub fn eval(&mut self, source: &str) -> Result<String, String> {
+        self.ensure_active()?;
+        self.runtime.eval_transfer_text(source)
+    }
+
+    pub fn current_namespace(&self) -> String {
+        self.runtime.current_namespace()
+    }
+}
+
+impl crate::lang::protocol::IContext<&str> for Session {
+    type Output = Result<String, String>;
+
+    fn call(&mut self, source: &str) -> Self::Output {
+        self.eval(source)
+    }
+}
+
+impl crate::lang::protocol::IComponent for Session {
+    type Metadata = SessionMetadata;
+
+    fn props(&self) -> Self::Metadata {
+        SessionMetadata {
+            name: self.name.clone(),
+            namespace: self.current_namespace(),
+            state: if self.active { "idle" } else { "closed" },
+            filesystem: self.filesystem,
+        }
+    }
+
+    fn status(&self) -> Self::Metadata {
+        self.props()
+    }
+
+    fn started(&self) -> bool {
+        self.active
+    }
+
+    fn stopped(&self) -> bool {
+        !self.active
+    }
+
+    fn start(&mut self) {
+        assert!(self.active, "cannot restart closed session {}", self.name);
+    }
+
+    fn stop(&mut self) {
+        self.active = false;
+        self.filesystem = None;
+        self.runtime.providers.set_file(None);
+    }
+}
+
+impl<'a> crate::lang::protocol::IApplicable<Session, &'a str> for Session {
+    type Output = Result<String, String>;
+
+    fn apply_in(&self, runtime: &mut Session, source: &'a str) -> Self::Output {
+        self.ensure_active()?;
+        crate::lang::protocol::IContext::call(runtime, source)
+    }
+
+    fn apply_default(&mut self) -> &mut Session {
+        self
+    }
+
+    fn transform_in(&self, _runtime: &Session, source: &'a str) -> &'a str {
+        source
+    }
+
+    fn transform_out(
+        &self,
+        _runtime: &Session,
+        _source: &'a str,
+        value: Self::Output,
+    ) -> Self::Output {
+        value
+    }
+}
+
+impl<'a> crate::lang::protocol::IInvokeIn<Session, &'a str> for Session {
+    type Output = Result<String, String>;
+
+    fn invoke_in(&self, context: &mut Session, source: &'a str) -> Self::Output {
+        self.ensure_active()?;
+        crate::lang::protocol::IContext::call(context, source)
+    }
 }
 
 struct FilesystemMount {
@@ -161,7 +283,7 @@ impl Default for SessionKernel {
 impl SessionKernel {
     pub fn new() -> Self {
         Self {
-            sessions: HashMap::from([("ROOT".into(), Runtime::new())]),
+            sessions: HashMap::from([("ROOT".into(), Session::new("ROOT", Runtime::new()))]),
             resources: HashMap::new(),
             mounts: HashMap::new(),
             session_mounts: HashMap::new(),
@@ -178,7 +300,7 @@ impl SessionKernel {
         for (resource, source) in &self.resources {
             runtime.register_resource(resource, source);
         }
-        self.sessions.insert(name.into(), runtime);
+        self.sessions.insert(name.into(), Session::new(name, runtime));
         Ok(())
     }
 
@@ -188,10 +310,22 @@ impl SessionKernel {
         names
     }
 
+    pub fn session(&self, name: &str) -> Result<&Session, String> {
+        self.sessions
+            .get(name)
+            .ok_or_else(|| format!("NO_SESSION {name}"))
+    }
+
+    pub fn session_mut(&mut self, name: &str) -> Result<&mut Session, String> {
+        self.sessions
+            .get_mut(name)
+            .ok_or_else(|| format!("NO_SESSION {name}"))
+    }
+
     pub fn session_namespace(&self, session: &str) -> Result<String, String> {
         self.sessions
             .get(session)
-            .map(Runtime::current_namespace)
+            .map(Session::current_namespace)
             .ok_or_else(|| format!("NO_SESSION {session}"))
     }
 
@@ -199,13 +333,13 @@ impl SessionKernel {
         self.sessions
             .get_mut(session)
             .ok_or_else(|| format!("NO_SESSION {session}"))?
-            .eval_transfer_text(source)
+            .eval(source)
     }
 
     pub fn register_resource(&mut self, name: &str, source: &str) {
         self.resources.insert(name.into(), source.into());
-        for runtime in self.sessions.values_mut() {
-            runtime.register_resource(name, source);
+        for session in self.sessions.values_mut() {
+            session.runtime.register_resource(name, source);
         }
     }
 
@@ -257,11 +391,9 @@ impl SessionKernel {
         self.detach_filesystem(session)?;
         self.mounts.get_mut(&mount_id).unwrap().attachments += 1;
         self.session_mounts.insert(session.into(), mount_id);
-        self.sessions
-            .get_mut(session)
-            .unwrap()
-            .providers
-            .set_file(Some(provider));
+        let session = self.sessions.get_mut(session).unwrap();
+        session.runtime.providers.set_file(Some(provider));
+        session.filesystem = Some(mount_id);
         Ok(())
     }
 
@@ -270,7 +402,8 @@ impl SessionKernel {
             .sessions
             .get_mut(session)
             .ok_or_else(|| format!("NO_SESSION {session}"))?;
-        runtime.providers.set_file(None);
+        runtime.runtime.providers.set_file(None);
+        runtime.filesystem = None;
         if let Some(mount_id) = self.session_mounts.remove(session) {
             if let Some(mount) = self.mounts.get_mut(&mount_id) {
                 mount.attachments = mount.attachments.saturating_sub(1);
@@ -311,7 +444,9 @@ impl SessionKernel {
             return Err(format!("NO_SESSION {name}"));
         }
         self.detach_filesystem(name)?;
-        self.sessions.remove(name);
+        if let Some(mut session) = self.sessions.remove(name) {
+            crate::lang::protocol::IComponent::stop(&mut session);
+        }
         Ok(())
     }
 }
@@ -1799,6 +1934,33 @@ mod tests {
             kernel.session_names(),
             vec!["ROOT".to_string(), "alpha".to_string(), "beta".to_string()]
         );
+    }
+
+    #[test]
+    fn named_sessions_conform_to_context_component_and_applicative_protocols() {
+        use crate::lang::protocol::{IApplicable, IComponent, IContext, IInvokeIn};
+
+        let mut alpha = Session::new("alpha", Runtime::new());
+        let mut beta = Session::new("beta", Runtime::new());
+
+        assert!(alpha.started());
+        assert_eq!(alpha.props().namespace, "user");
+        assert_eq!(alpha.call("(do (ns alpha.core) (def answer 41) answer)"), Ok("41".into()));
+        assert_eq!(alpha.props().namespace, "alpha.core");
+        assert_eq!(beta.current_namespace(), "user");
+
+        assert_eq!(alpha.apply_in(&mut beta, "(+ 20 22)"), Ok("42".into()));
+        assert_eq!(alpha.invoke_in(&mut beta, "(+ 40 2)"), Ok("42".into()));
+        assert_eq!(alpha.transform_in(&beta, "answer"), "answer");
+        assert_eq!(
+            alpha.transform_out(&beta, "answer", Ok("41".into())),
+            Ok("41".into())
+        );
+        assert_eq!(alpha.apply_default().current_namespace(), "alpha.core");
+
+        alpha.stop();
+        assert!(alpha.stopped());
+        assert_eq!(alpha.call("answer"), Err("SESSION_CLOSED alpha".into()));
     }
 
     fn ignore_socket_event(_event: core::SocketEvent) {}

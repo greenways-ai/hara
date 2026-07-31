@@ -431,12 +431,12 @@ public final class Main {
       error.println("--offline cannot be used with headless");
       return 2;
     }
-    try (HaraSessionBroker broker =
-            new HaraSessionBroker(
+    try (SessionKernel kernel =
+            new SessionKernel(
             capabilities.file, capabilities.network, capabilities.process);
         HaraServer server =
             new HaraServer(
-                broker,
+                kernel,
                 capabilities.host,
                 capabilities.port,
                 capabilities.logRequests,
@@ -630,12 +630,12 @@ public final class Main {
       boolean interactive,
       Capabilities capabilities,
       boolean enableResp) {
-    try (HaraSessionBroker broker =
-        new HaraSessionBroker(
+    try (SessionKernel kernel =
+        new SessionKernel(
             capabilities.file, capabilities.network, capabilities.process)) {
       RespController resp =
           new RespController(
-              broker, capabilities.host, capabilities.port, capabilities.logRequests);
+              kernel, capabilities.host, capabilities.port, capabilities.logRequests);
       if (enableResp) {
         try {
           resp.start();
@@ -646,7 +646,7 @@ public final class Main {
       }
       try {
         if (interactive)
-          return runJLineRepl(broker.root(), resp, output, error, capabilities);
+          return runJLineRepl(kernel.root(), resp, output, error, capabilities);
         try (BufferedReader reader =
             new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
           StringBuilder source = new StringBuilder();
@@ -669,7 +669,7 @@ public final class Main {
             if (!isComplete(source)) continue;
             history.add(source.toString().stripTrailing());
             try {
-              output.println("=> " + display(broker.root().eval(source.toString())));
+              output.println("=> " + display(kernel.root().eval(source.toString())));
             } catch (RuntimeException exception) {
               error.println(exception.getMessage());
             }
@@ -845,7 +845,7 @@ public final class Main {
   }
 
   private static int runJLineRepl(
-      HaraSessionBroker.HaraSession session,
+      SessionKernel.Session session,
       RespController resp,
       PrintStream output,
       PrintStream error,
@@ -1108,14 +1108,14 @@ public final class Main {
   }
 
   private static void showDocumentation(
-      HaraSessionBroker.HaraSession session, LineReader reader, Terminal terminal) {
+      SessionKernel.Session session, LineReader reader, Terminal terminal) {
     String symbol =
         HaraCompleter.extractWord(reader.getBuffer().toString(), reader.getBuffer().cursor());
     showDocumentation(session, symbol, terminal);
   }
 
   private static void showDocumentation(
-      HaraSessionBroker.HaraSession session, String symbol, Terminal terminal) {
+      SessionKernel.Session session, String symbol, Terminal terminal) {
     if (symbol == null || symbol.isEmpty() || symbol.startsWith("/")) return;
     try {
       Value doc = session.eval("(get (meta #'" + symbol + ") :doc)");
@@ -1135,7 +1135,7 @@ public final class Main {
   }
 
   private static void printApropos(
-      HaraSessionBroker.HaraSession session, String query, Terminal terminal) {
+      SessionKernel.Session session, String query, Terminal terminal) {
     try {
       for (String name : session.currentSymbols()) {
         if (fuzzyScore(query, name) == Integer.MAX_VALUE) continue;
@@ -1412,14 +1412,14 @@ public final class Main {
 
 
   static final class RespController implements AutoCloseable {
-    private final HaraSessionBroker broker;
+    private final SessionKernel kernel;
     private final boolean logRequests;
     private String host;
     private int port;
     private HaraServer server;
 
-    RespController(HaraSessionBroker broker, String host, int port, boolean logRequests) {
-      this.broker = broker;
+    RespController(SessionKernel kernel, String host, int port, boolean logRequests) {
+      this.kernel = kernel;
       this.host = host;
       this.port = port;
       this.logRequests = logRequests;
@@ -1427,7 +1427,7 @@ public final class Main {
 
     synchronized void start() throws IOException {
       if (isRunning()) return;
-      HaraServer candidate = new HaraServer(broker, host, port, logRequests);
+      HaraServer candidate = new HaraServer(kernel, host, port, logRequests);
       try {
         candidate.start();
         server = candidate;
@@ -1599,9 +1599,9 @@ public final class Main {
   }
 
   private static final class HaraCompleter implements Completer {
-    private final HaraSessionBroker.HaraSession session;
+    private final SessionKernel.Session session;
 
-    private HaraCompleter(HaraSessionBroker.HaraSession session) {
+    private HaraCompleter(SessionKernel.Session session) {
       this.session = session;
     }
 

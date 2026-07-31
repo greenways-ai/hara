@@ -27,9 +27,9 @@ public class HaraHostSessionConformanceTest {
     requireCase("host/session-local-facade");
     requireCase("host/namespace-loaded");
 
-    try (HaraSessionBroker broker = new HaraSessionBroker(false, false)) {
-      HaraSessionBroker.HaraSession alpha = broker.create("alpha");
-      HaraSessionBroker.HaraSession beta = broker.create("beta");
+    try (SessionKernel kernel = new SessionKernel(false, false)) {
+      SessionKernel.Session alpha = kernel.create("alpha");
+      SessionKernel.Session beta = kernel.create("beta");
       assertTrue(
           alpha
               .eval("(= Host std.native.Host std.foundation/Host)")
@@ -74,8 +74,8 @@ public class HaraHostSessionConformanceTest {
   public void sessionTransferRejectsTheHostFacadeAndItsLiveValues() throws Exception {
     requireCase("host/no-live-transfer");
 
-    try (HaraSessionBroker broker = new HaraSessionBroker(false, false)) {
-      HaraSessionBroker.HaraSession session = broker.create("transfer");
+    try (SessionKernel kernel = new SessionKernel(false, false)) {
+      SessionKernel.Session session = kernel.create("transfer");
       IllegalArgumentException error =
           assertThrows(
               IllegalArgumentException.class,
@@ -117,11 +117,11 @@ public class HaraHostSessionConformanceTest {
               .asString());
     }
 
-    try (HaraSessionBroker broker = new HaraSessionBroker(false, false)) {
+    try (SessionKernel kernel = new SessionKernel(false, false)) {
       assertEquals(
           ":host/method-unavailable",
           hara.lang.base.G.display(
-              broker
+              kernel
                   .create("host-error")
                   .evalTransfer(
                       """

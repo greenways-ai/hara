@@ -1,5 +1,11 @@
 package hara.truffle;
 
+import hara.lang.protocol.Constant;
+import hara.lang.protocol.IApplicable;
+import hara.lang.protocol.IComponent;
+import hara.lang.protocol.IContext;
+import hara.lang.protocol.IInvokeIn;
+import hara.lang.protocol.IMetadata;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -15,37 +21,37 @@ import org.graalvm.polyglot.Value;
 import org.graalvm.polyglot.io.IOAccess;
 
 /** Owns the runtime contexts shared by local and RESP clients. */
-final class HaraSessionBroker implements AutoCloseable {
+final class SessionKernel implements AutoCloseable {
   private final boolean allowFile;
   private final boolean allowNetwork;
   private final boolean allowProcess;
-  private final ConcurrentHashMap<String, HaraSession> sessions = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<String, Session> sessions = new ConcurrentHashMap<>();
 
-  HaraSessionBroker(boolean allowFile, boolean allowNetwork) {
+  SessionKernel(boolean allowFile, boolean allowNetwork) {
     this(allowFile, allowNetwork, false);
   }
 
-  HaraSessionBroker(boolean allowFile, boolean allowNetwork, boolean allowProcess) {
+  SessionKernel(boolean allowFile, boolean allowNetwork, boolean allowProcess) {
     this.allowFile = allowFile;
     this.allowNetwork = allowNetwork;
     this.allowProcess = allowProcess;
-    sessions.put("ROOT", new HaraSession("ROOT", allowFile, allowNetwork, allowProcess));
+    sessions.put("ROOT", new Session("ROOT", allowFile, allowNetwork, allowProcess));
   }
 
-  HaraSession root() {
+  Session root() {
     return require("ROOT");
   }
 
-  HaraSession require(String name) {
-    HaraSession session = sessions.get(name);
+  Session require(String name) {
+    Session session = sessions.get(name);
     if (session == null) throw new IllegalArgumentException("NO_SESSION " + name);
     return session;
   }
 
-  synchronized HaraSession create(String value) {
+  synchronized Session create(String value) {
     String name = normalizeName(value);
     if (sessions.containsKey(name)) throw new IllegalArgumentException("SESSION_EXISTS " + name);
-    HaraSession session = new HaraSession(name, allowFile, allowNetwork, allowProcess);
+    Session session = new Session(name, allowFile, allowNetwork, allowProcess);
     sessions.put(name, session);
     return session;
   }
@@ -58,7 +64,7 @@ final class HaraSessionBroker implements AutoCloseable {
   synchronized void closeSession(String value) {
     String name = normalizeName(value);
     if ("ROOT".equals(name)) throw new IllegalArgumentException("ROOT_CANNOT_CLOSE");
-    HaraSession removed = sessions.remove(name);
+    Session removed = sessions.remove(name);
     if (removed == null) throw new IllegalArgumentException("NO_SESSION " + name);
     removed.close();
   }
@@ -73,7 +79,7 @@ final class HaraSessionBroker implements AutoCloseable {
 
   @Override
   public synchronized void close() {
-    for (HaraSession session : sessions.values()) session.close();
+    for (Session session : sessions.values()) session.close();
     sessions.clear();
   }
 
@@ -83,7 +89,8 @@ final class HaraSessionBroker implements AutoCloseable {
     return value;
   }
 
-  static final class HaraSession implements AutoCloseable {
+  static final class Session
+      implements AutoCloseable, IContext, IComponent, IApplicable, IInvokeIn {
     private final String name;
     private final boolean allowFile;
     private final boolean allowNetwork;
@@ -91,8 +98,29 @@ final class HaraSessionBroker implements AutoCloseable {
     private Context context;
     private Path filesystemRoot;
     private final AtomicInteger activeEvaluations = new AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicBoolean active =
+        new java.util.concurrent.atomic.AtomicBoolean(true);
 
-    private HaraSession(
+    static final class SessionMetadata implements IMetadata {
+      final String name;
+      final String namespace;
+      final String state;
+      final String filesystem;
+
+      SessionMetadata(String name, String namespace, String state, String filesystem) {
+        this.name = name;
+        this.namespace = namespace;
+        this.state = state;
+        this.filesystem = filesystem;
+      }
+
+      @Override
+      public Constant.MetaType getMetatype() {
+        return Constant.MetaType.MAP;
+      }
+    }
+
+    private Session(
         String name, boolean allowFile, boolean allowNetwork, boolean allowProcess) {
       this.name = name;
       this.allowFile = allowFile;
@@ -115,7 +143,12 @@ final class HaraSessionBroker implements AutoCloseable {
           .build();
     }
 
+    private void requireActive() {
+      if (!active.get()) throw new IllegalStateException("SESSION_CLOSED " + name);
+    }
+
     void attachFilesystem(Path root) {
+      requireActive();
       if (activeEvaluations.get() != 0) throw new IllegalArgumentException("SESSION_BUSY " + name);
       Path normalized = root.toAbsolutePath().normalize();
       if (!java.nio.file.Files.isDirectory(normalized)) {
@@ -216,6 +249,7 @@ final class HaraSessionBroker implements AutoCloseable {
     }
 
     Value eval(String source, String file, int line, int column) {
+      requireActive();
       activeEvaluations.incrementAndGet();
       try {
         synchronized (this) {
@@ -261,8 +295,87 @@ final class HaraSessionBroker implements AutoCloseable {
     }
 
     @Override
+    public Object call(Object... args) {
+      requireActive();
+      if (args == null || args.length != 1 || !(args[0] instanceof String)) {
+        throw new IllegalArgumentException("SESSION_CALL_EXPECTS_SOURCE " + name);
+      }
+      return evalTransfer((String) args[0]);
+    }
+
+    @Override
+    public IMetadata getProps() {
+      return metadata();
+    }
+
+    @Override
+    public IMetadata getStatus() {
+      return metadata();
+    }
+
+    private SessionMetadata metadata() {
+      boolean running = active.get();
+      return new SessionMetadata(
+          name,
+          running ? currentNamespace() : null,
+          running ? (activeEvaluations.get() == 0 ? "idle" : "busy") : "closed",
+          filesystemRoot == null ? null : filesystemRoot.toString());
+    }
+
+    @Override
+    public boolean isStarted() {
+      return active.get();
+    }
+
+    @Override
+    public boolean isStopped() {
+      return !active.get();
+    }
+
+    @Override
+    public IComponent start() {
+      if (!active.get()) throw new IllegalStateException("SESSION_CLOSED " + name);
+      return this;
+    }
+
+    @Override
+    public IComponent stop() {
+      close();
+      return this;
+    }
+
+    @Override
+    public Object applyDefault() {
+      return this;
+    }
+
+    @Override
+    public Object applyIn(Object runtime, Object[] args) {
+      requireActive();
+      if (!(runtime instanceof IContext)) {
+        throw new IllegalArgumentException("SESSION_APPLY_EXPECTS_CONTEXT " + name);
+      }
+      return ((IContext) runtime).call(args == null ? new Object[0] : args);
+    }
+
+    @Override
+    public Object transformIn(Object runtime, Object[] args) {
+      return args;
+    }
+
+    @Override
+    public Object transformOut(Object runtime, Object[] args, Object value) {
+      return value;
+    }
+
+    @Override
+    public Object invokeIn(IContext context, Object... args) {
+      return applyIn(context, args);
+    }
+
+    @Override
     public synchronized void close() {
-      context.close(true);
+      if (active.compareAndSet(true, false)) context.close(true);
     }
   }
 }

@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.graalvm.nativeimage.ImageInfo;
 import org.graalvm.polyglot.Value;
 
-/** RESP listener for a shared Hara session broker. */
+/** RESP listener for a shared Hara session kernel. */
 public final class HaraServer implements AutoCloseable {
   public static final String DEFAULT_HOST = "127.0.0.1";
   public static final int DEFAULT_PORT = 1311;
@@ -47,8 +47,8 @@ public final class HaraServer implements AutoCloseable {
   private final String host;
   private final int requestedPort;
   private final boolean logRequests;
-  private final HaraSessionBroker broker;
-  private final boolean ownsBroker;
+  private final SessionKernel kernel;
+  private final boolean ownsKernel;
   private final String instanceId = UUID.randomUUID().toString();
   private final String projectRoot;
   private final Map<String, Handler> handlers = new LinkedHashMap<>();
@@ -67,30 +67,30 @@ public final class HaraServer implements AutoCloseable {
   }
 
   public HaraServer(String host, int port, boolean logRequests, boolean allowNetwork) {
-    this(new HaraSessionBroker(false, allowNetwork), host, port, logRequests, true, null);
+    this(new SessionKernel(false, allowNetwork), host, port, logRequests, true, null);
   }
 
-  HaraServer(HaraSessionBroker broker, String host, int port, boolean logRequests) {
-    this(broker, host, port, logRequests, null);
+  HaraServer(SessionKernel kernel, String host, int port, boolean logRequests) {
+    this(kernel, host, port, logRequests, null);
   }
 
   HaraServer(
-      HaraSessionBroker broker, String host, int port, boolean logRequests, Path projectRoot) {
-    this(broker, host, port, logRequests, false, projectRoot);
+      SessionKernel kernel, String host, int port, boolean logRequests, Path projectRoot) {
+    this(kernel, host, port, logRequests, false, projectRoot);
   }
 
   private HaraServer(
-      HaraSessionBroker broker,
+      SessionKernel kernel,
       String host,
       int port,
       boolean logRequests,
-      boolean ownsBroker,
+      boolean ownsKernel,
       Path projectRoot) {
-    this.broker = broker;
+    this.kernel = kernel;
     this.host = host;
     this.requestedPort = port;
     this.logRequests = logRequests;
-    this.ownsBroker = ownsBroker;
+    this.ownsKernel = ownsKernel;
     this.projectRoot =
         projectRoot == null ? null : projectRoot.toAbsolutePath().normalize().toString();
     registerCoreHandlers();
@@ -152,7 +152,7 @@ public final class HaraServer implements AutoCloseable {
     }
 
     public void attach(String name) {
-      String target = HaraSessionBroker.normalizeName(name);
+      String target = SessionKernel.normalizeName(name);
       server.requireSession(target);
       state.attached = target;
     }
@@ -174,7 +174,7 @@ public final class HaraServer implements AutoCloseable {
     }
 
     public Set<String> sessionNames() {
-      return server.broker.sessionNames();
+      return server.kernel.sessionNames();
     }
   }
 
@@ -311,12 +311,12 @@ public final class HaraServer implements AutoCloseable {
     String sub = request.argument(0).toUpperCase(Locale.ROOT);
     switch (sub) {
       case "NEW":
-        String created = HaraSessionBroker.normalizeName(request.argument(1));
-        broker.create(created);
+        String created = SessionKernel.normalizeName(request.argument(1));
+        kernel.create(created);
         responder.result(created);
         break;
       case "LIST":
-        ArrayList<String> names = new ArrayList<>(broker.sessionNames());
+        ArrayList<String> names = new ArrayList<>(kernel.sessionNames());
         Collections.sort(names);
         responder.result(names);
         break;
@@ -331,19 +331,19 @@ public final class HaraServer implements AutoCloseable {
       case "INFO":
         String target =
             request.arguments().size() > 1
-                ? HaraSessionBroker.normalizeName(request.argument(1))
+                ? SessionKernel.normalizeName(request.argument(1))
                 : request.session();
         responder.result(requireSession(target).info());
         break;
       case "FILESYSTEM":
-        String filesystemSession = HaraSessionBroker.normalizeName(request.argument(1));
-        broker.attachFilesystem(filesystemSession, Path.of(request.argument(2)));
+        String filesystemSession = SessionKernel.normalizeName(request.argument(1));
+        kernel.attachFilesystem(filesystemSession, Path.of(request.argument(2)));
         responder.result(requireSession(filesystemSession).info());
         break;
       case "CLOSE":
       case "KILL":
-        String closed = HaraSessionBroker.normalizeName(request.argument(1));
-        broker.closeSession(closed);
+        String closed = SessionKernel.normalizeName(request.argument(1));
+        kernel.closeSession(closed);
         if (closed.equals(request.state.attached)) request.detach();
         responder.result(true);
         break;
@@ -378,7 +378,7 @@ public final class HaraServer implements AutoCloseable {
   }
 
   public Set<String> sessionNames() {
-    return broker.sessionNames();
+    return kernel.sessionNames();
   }
 
   public synchronized void stop() {
@@ -394,7 +394,7 @@ public final class HaraServer implements AutoCloseable {
   @Override
   public void close() {
     stop();
-    if (ownsBroker) broker.close();
+    if (ownsKernel) kernel.close();
   }
 
   private void acceptLoop() {
@@ -529,7 +529,7 @@ public final class HaraServer implements AutoCloseable {
         "SESSION",
         attached,
         "SESSIONS",
-        (long) broker.size());
+        (long) kernel.size());
   }
 
   private String sessionCommand(
@@ -539,18 +539,18 @@ public final class HaraServer implements AutoCloseable {
     switch (sub) {
       case "NEW":
         require(request, 3);
-        String created = HaraSessionBroker.normalizeName(request.get(2));
-        broker.create(created);
+        String created = SessionKernel.normalizeName(request.get(2));
+        kernel.create(created);
         respond(conn, negotiated, request, created);
         return attached;
       case "LIST":
-        List<String> names = new ArrayList<>(broker.sessionNames());
+        List<String> names = new ArrayList<>(kernel.sessionNames());
         Collections.sort(names);
         respond(conn, negotiated, request, names);
         return attached;
       case "ATTACH":
         require(request, 3);
-        String target = HaraSessionBroker.normalizeName(request.get(2));
+        String target = SessionKernel.normalizeName(request.get(2));
         requireSession(target);
         respond(conn, negotiated, request, target);
         return target;
@@ -558,21 +558,21 @@ public final class HaraServer implements AutoCloseable {
         respond(conn, negotiated, request, "DETACHED");
         return null;
       case "INFO":
-        String targetInfo = request.size() > 2 ? HaraSessionBroker.normalizeName(request.get(2)) : attached;
-        HaraSessionBroker.HaraSession sessionInfo = requireSession(targetInfo);
+        String targetInfo = request.size() > 2 ? SessionKernel.normalizeName(request.get(2)) : attached;
+        SessionKernel.Session sessionInfo = requireSession(targetInfo);
         respond(conn, negotiated, request, sessionInfo.info());
         return attached;
       case "FILESYSTEM":
         require(request, 4);
-        String filesystemSession = HaraSessionBroker.normalizeName(request.get(2));
-        broker.attachFilesystem(filesystemSession, Path.of(request.get(3)));
+        String filesystemSession = SessionKernel.normalizeName(request.get(2));
+        kernel.attachFilesystem(filesystemSession, Path.of(request.get(3)));
         respond(conn, negotiated, request, requireSession(filesystemSession).info());
         return attached;
       case "CLOSE":
       case "KILL":
         require(request, 3);
-        String targetClose = HaraSessionBroker.normalizeName(request.get(2));
-        broker.closeSession(targetClose);
+        String targetClose = SessionKernel.normalizeName(request.get(2));
+        kernel.closeSession(targetClose);
         respond(conn, negotiated, request, true);
         return targetClose.equals(attached) ? null : attached;
       default:
@@ -590,10 +590,10 @@ public final class HaraServer implements AutoCloseable {
       sessionName = requireSessionName(attached);
       source = requireValue(request, 2);
     } else {
-      sessionName = HaraSessionBroker.normalizeName(requireValue(request, 1));
+      sessionName = SessionKernel.normalizeName(requireValue(request, 1));
       source = requireValue(request, 2);
     }
-    HaraSessionBroker.HaraSession session = requireSession(sessionName);
+    SessionKernel.Session session = requireSession(sessionName);
     Object result = session.eval(source);
     if (negotiated) {
       conn.write(Arrays.asList("RESULT", requestId, display(result)));
@@ -757,8 +757,8 @@ public final class HaraServer implements AutoCloseable {
     return String.valueOf(value);
   }
 
-  private HaraSessionBroker.HaraSession requireSession(String name) {
-    return broker.require(name);
+  private SessionKernel.Session requireSession(String name) {
+    return kernel.require(name);
   }
 
   private static String requireSessionName(String name) {
