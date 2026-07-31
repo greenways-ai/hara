@@ -18,6 +18,10 @@ use crate::core::Primitive;
 /// - `CallStatic`: pops `argc`, pushes 1 (net `1 - argc`).
 /// - `Jump`: no change.
 /// - `Throw`, `Rethrow`: pop 1; terminal (unwind).
+/// - `GetGlobal`, `VarGlobal`, `DefStruct`, `DeclareGlobal`: push 1.
+/// - `DefGlobal`, `SetGlobal`, `StructField`: pop 1, push 1 (net 0).
+/// - `InstanceOf`: pops 2, pushes 1 (net -1).
+/// - `MakeMultiArity`: pops `count`, pushes 1 (net `1 - count`).
 /// - `Return`: terminal; requires stack height exactly 1.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
@@ -63,6 +67,39 @@ pub enum Instruction {
     /// unmatched finally boundary. Terminal; only emitted in finally
     /// resume sequences.
     Rethrow,
+    /// Pushes the dereferenced value of the var named by the string
+    /// constant at `constants[index]`, resolved through the namespace
+    /// registry at execution time.
+    GetGlobal(u32),
+    /// Pops a value, interns it as a `Var` in the current namespace
+    /// (optional hara metadata from the program's var-metadata table),
+    /// and pushes the value back (`def` returns the value).
+    DefGlobal { name: u32, metadata: Option<u16> },
+    /// Pops a value, resets the root of the var named by the string
+    /// constant at `constants[index]`, and pushes the value.
+    SetGlobal(u32),
+    /// Pushes the `Value::Var` named by the string constant at
+    /// `constants[index]` (`var` / `#'`).
+    VarGlobal(u32),
+    /// Interns a nil var for the string constant at `constants[index]`
+    /// when the name is not already bound (`declare`), pushing nil.
+    /// Never resets an existing var.
+    DeclareGlobal(u32),
+    /// Creates the struct type named by the constant at `name` (qualified
+    /// to the current namespace), interns the constructor vars, and
+    /// pushes the type value. `fields` indexes a vector constant of
+    /// field-name strings.
+    DefStruct { name: u32, fields: u32 },
+    /// Pops a struct instance and pushes the positional field value
+    /// named by the keyword constant at `constants[index]` (`field`).
+    StructField(u32),
+    /// Pops the value and then the struct type, and pushes whether the
+    /// value is an instance (`instance?`).
+    InstanceOf,
+    /// Pops `count` function values and pushes the arity dispatcher
+    /// named by the string constant at `constants[name]`, built through
+    /// the shared `core::arity_dispatcher` boundary.
+    MakeMultiArity { name: u32, count: u8 },
     /// Returns the top of the stack as the function result.
     Return,
 }
@@ -100,6 +137,13 @@ impl Instruction {
             }
             Instruction::Closure { captures, .. } => 1 - i32::from(*captures),
             Instruction::Call { argc } => -i32::from(*argc),
+            Instruction::GetGlobal(_)
+            | Instruction::VarGlobal(_)
+            | Instruction::DefStruct { .. }
+            | Instruction::DeclareGlobal(_) => 1,
+            Instruction::DefGlobal { .. } | Instruction::SetGlobal(_) | Instruction::StructField(_) => 0,
+            Instruction::InstanceOf => -1,
+            Instruction::MakeMultiArity { count, .. } => 1 - i32::from(*count),
             Instruction::Jump(_) => 0,
             Instruction::Return | Instruction::Throw | Instruction::Rethrow => return None,
         })
@@ -130,6 +174,22 @@ impl std::fmt::Display for Instruction {
             }
             Instruction::Throw => formatter.write_str("Throw"),
             Instruction::Rethrow => formatter.write_str("Rethrow"),
+            Instruction::GetGlobal(index) => write!(formatter, "GetGlobal {index}"),
+            Instruction::DefGlobal { name, metadata } => match metadata {
+                Some(metadata) => write!(formatter, "DefGlobal {name} meta {metadata}"),
+                None => write!(formatter, "DefGlobal {name}"),
+            },
+            Instruction::SetGlobal(index) => write!(formatter, "SetGlobal {index}"),
+            Instruction::VarGlobal(index) => write!(formatter, "VarGlobal {index}"),
+            Instruction::DeclareGlobal(index) => write!(formatter, "DeclareGlobal {index}"),
+            Instruction::DefStruct { name, fields } => {
+                write!(formatter, "DefStruct {name} fields {fields}")
+            }
+            Instruction::StructField(index) => write!(formatter, "StructField {index}"),
+            Instruction::InstanceOf => formatter.write_str("InstanceOf"),
+            Instruction::MakeMultiArity { name, count } => {
+                write!(formatter, "MakeMultiArity {name} count {count}")
+            }
             Instruction::Return => formatter.write_str("Return"),
         }
     }

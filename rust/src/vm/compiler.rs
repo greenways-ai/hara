@@ -1,10 +1,13 @@
 //! Compiler: `Form` trees (with parser spans) to a validated `Program`.
 //!
-//! Supports the milestone-2 synchronous subset: literals, lexical locals,
+//! Supports the milestone-4 synchronous subset: literals, lexical locals,
 //! the ten shared primitives, `if`, `do`, `let`, `loop`/`recur`, `fn`
-//! closures with capture-by-value upvalues, direct calls, and top-level
-//! `defn` lowered to direct slot bindings (the var-analysis pass; see
-//! `specs/01-lang/010-bytecode/draft/hal-bytecode-vm.edn` `:vm/defn-lowering`).
+//! closures with capture-by-value upvalues (including variadic
+//! parameters), direct calls, exceptions, and the registry-direct global
+//! forms — `def`, `defn`/`defn-` (single- and multi-arity, interning real
+//! late-bound vars), `var`, `set!`, `declare`, `defstruct`, `field`, and
+//! `instance?` (issue #223; see
+//! `specs/01-lang/010-bytecode/draft/hal-bytecode-vm.edn` `:vm/namespaces`).
 //! Anything else is a typed [`CompileError`] with source context; the
 //! compiler never emits fallback calls into the tree-walking evaluator.
 //!
@@ -37,6 +40,8 @@ mod exceptions;
 use exceptions::TryContext;
 #[path = "compiler/recur.rs"]
 mod recur;
+#[path = "compiler/globals.rs"]
+mod globals;
 use recur::LoopContext;
 use scope::ScopeStack;
 
@@ -44,18 +49,29 @@ use scope::ScopeStack;
 /// operator position they report as unsupported rather than as unbound
 /// symbols; everything else unbound reports as an unbound symbol,
 /// matching the evaluator.
-const UNSUPPORTED_OPERATORS: &[&str] = &[
-    "def", "var", "quote", "set!", "ns", "in-ns", "require", "await",
-];
+const UNSUPPORTED_OPERATORS: &[&str] = &["quote", "ns", "in-ns", "require", "await"];
 
 /// Compiles source text into a validated program. Multiple top-level
-/// forms compile as an implicit `do`.
+/// forms compile as an implicit `do`. Without a namespace registry the
+/// program must be closed: only the names it declares itself are
+/// visible as globals (issue #223).
 pub fn compile_source(source: &str) -> Result<Program, CompileError> {
     let forms = crate::kernel::read_forms(source)?;
     let mut compiler = Compiler::new();
     let children = compiler.children(&forms);
     compiler.compile_sequence(&children, true)?;
     compiler.finish()
+}
+
+/// Compiles against a caller's namespace registry: registry vars
+/// (std.foundation and anything already interned) are visible to the
+/// two-phase global check, exactly as they will resolve at execution
+/// time through `execute_program_with_globals` (issue #223).
+pub fn compile_source_with(
+    source: &str,
+    registry: &crate::kernel::NamespaceRegistry<crate::core::Value>,
+) -> Result<Program, CompileError> {
+    crate::core::with_namespace_registry(registry, || compile_source(source))
 }
 
 /// A form paired with its span and (when the parser provided matching
@@ -75,11 +91,11 @@ struct FnContext {
     /// Reserved index into `Compiler::functions`.
     proto_id: usize,
     name: Option<String>,
-    /// The `defn` self name: compiles to `CallStatic` in operator
-    /// position, rejected in value position.
-    self_name: Option<String>,
-    /// Parameter count; params occupy slots `0..params-1`.
+    /// Fixed parameter count; params occupy slots `0..params-1`.
     params: u16,
+    /// Whether the function has a `& rest` parameter (occupying the slot
+    /// directly above the fixed params, below the captures).
+    variadic: bool,
     /// Captured free variables in slot order (slots `params..`); each
     /// entry carries the first-occurrence position for diagnostics.
     captures: Vec<(String, Option<Position>)>,
@@ -104,18 +120,30 @@ struct Compiler {
     /// Names introduced by top-level `(declare ...)`: an explicit opt-in
     /// to replacing a std.foundation builtin through `defn`.
     declared: Vec<String>,
+    /// Names this program defines (`def`/`defn`/`declare`/`defstruct`):
+    /// visible to global references compiled after their defining form
+    /// (issue #223 two-phase visibility).
+    globals: Vec<String>,
+    /// Var metadata table indexed by `DefGlobal` operands.
+    var_metadata: Vec<std::rc::Rc<crate::lang::data::Metadata>>,
     /// True while compiling a direct child of the top-level sequence;
-    /// `defn` is only legal there, and never in tail position.
+    /// `defn` and `declare` are only legal there.
     top_level: bool,
 }
 
 /// The reservation placed in `functions` while a body is compiled: the
 /// prototype index, arity, and capture count are known up front, the
 /// code is filled in when the context closes.
-fn placeholder(name: Option<String>, arity: u16, capture_count: u16) -> FunctionPrototype {
+fn placeholder(
+    name: Option<String>,
+    arity: u16,
+    capture_count: u16,
+    variadic: bool,
+) -> FunctionPrototype {
     FunctionPrototype {
         name,
         arity,
+        variadic,
         capture_count,
         local_count: 0,
         max_stack: 0,
@@ -132,12 +160,12 @@ impl Compiler {
         Compiler {
             constants: Vec::new(),
             constant_index: HashMap::new(),
-            functions: vec![placeholder(None, 0, 0)],
+            functions: vec![placeholder(None, 0, 0, false)],
             contexts: vec![FnContext {
                 proto_id: 0,
                 name: None,
-                self_name: None,
                 params: 0,
+                variadic: false,
                 captures: Vec::new(),
                 code: Vec::new(),
                 source_map: SourceMap::default(),
@@ -148,6 +176,8 @@ impl Compiler {
                 fallthrough: true,
             }],
             declared: Vec::new(),
+            globals: Vec::new(),
+            var_metadata: Vec::new(),
             top_level: true,
         }
     }
@@ -217,8 +247,17 @@ impl Compiler {
     }
 
     fn constant(&mut self, value: Value, span: &Span) -> Result<(), CompileError> {
-        let index = match self.constant_index.get(&value) {
-            Some(index) => *index,
+        let index = self.constant_index_of(value, span)?;
+        self.emit(Instruction::Constant(index), Some(span.start));
+        Ok(())
+    }
+
+    /// The pool index for a constant, interning it if new. Used directly
+    /// for instruction operands (global names, struct fields); `constant`
+    /// additionally emits the load.
+    fn constant_index_of(&mut self, value: Value, span: &Span) -> Result<u32, CompileError> {
+        match self.constant_index.get(&value) {
+            Some(index) => Ok(*index),
             None => {
                 if self.constants.len() >= MAX_CONSTANTS {
                     return Err(CompileError::new(
@@ -230,11 +269,9 @@ impl Compiler {
                 let index = self.constants.len() as u32;
                 self.constants.push(value.clone());
                 self.constant_index.insert(value, index);
-                index
+                Ok(index)
             }
-        };
-        self.emit(Instruction::Constant(index), Some(span.start));
-        Ok(())
+        }
     }
 
     fn unsupported(&self, form: &Form, span: &Span) -> CompileError {
@@ -275,39 +312,6 @@ impl Compiler {
         Ok(())
     }
 
-    /// `(declare name ...)` marks names for explicit replacement: a later
-    /// top-level `defn` of a declared std.foundation builtin lowers to a
-    /// slot binding instead of erroring (issue #202 ruling). Top-level
-    /// statements only; evaluates to nil, matching the evaluator.
-    fn compile_declare(
-        &mut self,
-        children: &[Child<'_>],
-        span: &Span,
-        top: bool,
-    ) -> Result<(), CompileError> {
-        if !top {
-            return Err(CompileError::new(
-                CompileErrorKind::UnsupportedForm,
-                "declare is only supported as a top-level statement",
-                Some(span.start),
-            ));
-        }
-        for child in &children[1..] {
-            let Form::Symbol(name) = child.form else {
-                return Err(CompileError::new(
-                    CompileErrorKind::Arity,
-                    "declare expects name symbols",
-                    Some(child.span.start),
-                ))
-            };
-            if !self.declared.iter().any(|n| n == name) {
-                self.declared.push(name.clone());
-            }
-        }
-        self.emit(Instruction::Nil, Some(span.start));
-        Ok(())
-    }
-
     fn compile_form(
         &mut self,
         form: &Form,
@@ -344,26 +348,18 @@ impl Compiler {
             Form::Decimal(value) => self.constant(Value::Decimal(value.clone()), span),
             Form::Regex(value) => self.constant(Value::Regex(value.clone()), span),
             Form::Metadata(_, value) => self.compile_form(value, span, None, tail),
-            Form::Symbol(name) => {
-                if self.ctx().self_name.as_deref() == Some(name.as_str()) {
-                    return Err(CompileError::new(
-                        CompileErrorKind::UnsupportedForm,
-                        "defn self-reference in value position is not supported",
-                        Some(span.start),
-                    ));
+            Form::Symbol(name) => match self.ctx().scopes.resolve(name) {
+                Some(slot) => {
+                    self.emit(Instruction::LoadLocal(slot), Some(span.start));
+                    Ok(())
                 }
-                match self.ctx().scopes.resolve(name) {
-                    Some(slot) => {
-                        self.emit(Instruction::LoadLocal(slot), Some(span.start));
-                        Ok(())
-                    }
-                    None => Err(CompileError::new(
-                        CompileErrorKind::UnboundSymbol,
-                        format!("unbound symbol: {name}"),
-                        Some(span.start),
-                    )),
-                }
-            }
+                None if self.visible_global(name) => self.emit_get_global(name, span),
+                None => Err(CompileError::new(
+                    CompileErrorKind::UnboundSymbol,
+                    format!("unbound symbol: {name}"),
+                    Some(span.start),
+                )),
+            },
             Form::List(elements) if elements.is_empty() => {
                 self.emit(Instruction::Nil, Some(span.start));
                 Ok(())
@@ -389,16 +385,35 @@ impl Compiler {
                         self.compile_recur(&children, span, tail)
                     }
                     Form::Symbol(name) if name == "fn" => self.compile_fn_form(&children, span),
-                    Form::Symbol(name) if name == "defn" => {
-                        self.compile_defn(&children, span, top, tail)
+                    Form::Symbol(name) if name == "def" => self.compile_def(&children, span),
+                    Form::Symbol(name) if name == "defn" || name == "defn-" => {
+                        self.compile_defn(&children, span, top, name == "defn-")
                     }
                     Form::Symbol(name) if name == "declare" => {
                         self.compile_declare(&children, span, top)
+                    }
+                    Form::Symbol(name) if name == "var" => self.compile_var(&children, span),
+                    Form::Symbol(name) if name == "set!" => self.compile_set(&children, span),
+                    Form::Symbol(name) if name == "defstruct" => {
+                        self.compile_defstruct(&children, span)
+                    }
+                    Form::Symbol(name) if name == "field" => self.compile_field(&children, span),
+                    Form::Symbol(name) if name == "instance?" => {
+                        self.compile_instance_of(&children, span)
                     }
                     Form::Symbol(name) if name == "try" => self.compile_try(&children, span, tail),
                     Form::Symbol(name) if name == "throw" => self.compile_throw(&children, span),
                     Form::Symbol(name) if UNSUPPORTED_OPERATORS.contains(&name.as_str()) => {
                         Err(self.unsupported(form, span))
+                    }
+                    // Precedence mirrors the evaluator (core.rs operator
+                    // dispatch): a bound var wins over the structural
+                    // builtin arms, so a program-declared or registry
+                    // global compiles to GetGlobal+Call even when it names
+                    // a primitive; only otherwise-unbound operator names
+                    // lower to Primitive instructions (issue #223).
+                    Form::Symbol(name) if self.visible_global(name) => {
+                        self.compile_named_call(name, &children, span)
                     }
                     Form::Symbol(name) => match Primitive::from_symbol(name) {
                         Some(op) => self.compile_primitive(&children, span, op),
@@ -619,6 +634,7 @@ impl Compiler {
         }
         self.close_context();
         let mut program = Program {
+            var_metadata: self.var_metadata,
             constants: self.constants,
             functions: self.functions,
             entry: 0,

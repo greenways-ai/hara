@@ -33,7 +33,9 @@
 ;;                   |
 ;;                   +--- await(Promise) pauses until settlement
 ;; ============================================================================
-(ns std.foundation.coroutine)
+(ns std.foundation.coroutine
+  (:config {:blank true})
+  (:require [std.foundation :refer [apply]]))
 
 (defn ^{:schema [:fn [:fn] :any]}
   create

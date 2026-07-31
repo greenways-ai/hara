@@ -26,10 +26,12 @@ fn program(
 ) -> Program {
     let source_map = source_map(code.len());
     Program {
+            var_metadata: Vec::new(),
         constants,
         functions: vec![FunctionPrototype {
             name: None,
             arity: 0,
+            variadic: false,
             capture_count: 0,
             local_count,
             max_stack,
@@ -70,6 +72,7 @@ fn prototype(
     FunctionPrototype {
         name: name.map(str::to_string),
         arity,
+        variadic: false,
         capture_count,
         local_count: arity + capture_count,
         max_stack: 1,
@@ -83,6 +86,7 @@ fn prototype(
 /// `Closure 1 / Call 0 / Return` with the target `Nil / Return`.
 fn closure_call_program() -> Program {
     Program {
+            var_metadata: Vec::new(),
         constants: vec![],
         functions: vec![
             prototype(
@@ -250,6 +254,7 @@ fn validator_rejects_callstatic_capture_mismatch() {
     // Entry directly self-calls a prototype with a different capture
     // count; no Closure instruction masks the CallStatic check.
     let program = Program {
+            var_metadata: Vec::new(),
         constants: vec![],
         functions: vec![
             prototype(

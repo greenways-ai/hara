@@ -189,7 +189,7 @@ pub(crate) const NATIVE_TYPES: &[(&str, &[&str])] = &[
             "iter?",
             "iter-finite?",
             "iter-materialize",
-            "iter-has?",
+            "iter-next?",
             "iter-next",
             "iter-close",
             "iter-map",
@@ -703,6 +703,30 @@ pub(crate) fn native_function(
     }))
 }
 
+/// A native function wrapper with an exact fixed parameter list and an
+/// optional rest marker: `params.len()` reflects the fixed arity so the
+/// multi-arity `select_clause` boundary can dispatch on it, unlike
+/// [`native_variadic_function`] whose parameter list is empty. Used by
+/// the bytecode VM for variadic closures (issue #223).
+pub(crate) fn native_fixed_variadic_function(
+    name: &str,
+    fixed_arity: usize,
+    callback: impl Fn(Vec<Value>) -> Result<Value, String> + 'static,
+) -> Value {
+    Value::Function(Rc::new(Function {
+        params: (0..fixed_arity).map(|index| format!("arg{index}")).collect(),
+        variadic: Some("rest".into()),
+        patterns: Vec::new(),
+        variadic_pattern: None,
+        body: Vec::new(),
+        captured: Rc::new(RefCell::new(HashMap::new())),
+        name: Some(name.into()),
+        native: Some(Rc::new(callback)),
+        clauses: Vec::new(),
+        is_macro: false,
+    }))
+}
+
 pub(crate) fn native_variadic_function(
     name: &str,
     callback: impl Fn(Vec<Value>) -> Result<Value, String> + 'static,
@@ -949,7 +973,7 @@ fn macroexpand_call(
     Ok(Some(expansion))
 }
 
-fn form_without_metadata(mut form: &Form) -> &Form {
+pub(crate) fn form_without_metadata(mut form: &Form) -> &Form {
     while let Form::Metadata(_, value) = form {
         form = value.as_ref();
     }
@@ -2444,6 +2468,22 @@ pub(crate) fn binding_is_local(var: &KernelVar<Value>) -> bool {
         .unwrap_or(true)
 }
 
+/// Names a fresh local var cell: qualified to the current namespace when
+/// a registry is active, bare otherwise. Qualifying matters: an
+/// unqualified cell fails `binding_is_local`, so redefining the name in
+/// the same eval used to shadow with a fresh cell instead of resetting
+/// the existing one — the answer then depended on whether the name had
+/// survived a previous eval's namespace save-back (which qualifies
+/// cells). The JVM runtime always resets the same cell; qualifying at
+/// creation makes the tree evaluator agree on both first and later
+/// evals (issue #223).
+pub(crate) fn local_var_name(name: &str) -> String {
+    match namespace_registry() {
+        Ok(registry) => format!("{}/{}", registry.current().name().as_str(), name),
+        Err(_) => name.to_string(),
+    }
+}
+
 pub(crate) fn protected_fallback_binding(
     env: &HashMap<String, Value>,
     name: &str,
@@ -2466,7 +2506,140 @@ pub(crate) fn protected_fallback_binding(
     }
 }
 
-fn namespace_registry() -> Result<NamespaceRegistry<Value>, String> {
+/// Defines or updates a global var in the current namespace, mirroring
+/// the evaluator's `def` arm (`core.rs` special forms) without the flat
+/// env bridge: an existing var local to the current namespace is reused
+/// (identity preserved), a referred or missing name gets a fresh cell.
+/// Used by the bytecode VM's `DefGlobal` (issue #223).
+pub(crate) fn vm_def_global(
+    name: &str,
+    value: Value,
+    metadata: Option<Rc<Metadata>>,
+) -> Result<KernelVar<Value>, String> {
+    let registry = namespace_registry()?;
+    let current = registry.current();
+    let local = Symbol::create(None, name);
+    if let Some(existing) = current.resolve(&local) {
+        if binding_is_local(&existing) {
+            existing.reset_value(value);
+            if metadata.is_some() {
+                existing.set_hara_metadata(metadata);
+            }
+            existing.set_origin(definition_origin());
+            return Ok(existing);
+        }
+    }
+    let var = KernelVar::new(format!("{}/{}", current.name().as_str(), name), value);
+    var.set_hara_metadata(metadata);
+    var.set_origin(definition_origin());
+    current.map_var(local, var.clone());
+    Ok(var)
+}
+
+/// Declares a global var without assigning it, mirroring the evaluator's
+/// `declare` arm: an existing local var is kept (value untouched), a
+/// missing name gets a fresh nil cell. Used by the VM (issue #223).
+pub(crate) fn vm_declare_global(name: &str) -> Result<KernelVar<Value>, String> {
+    let registry = namespace_registry()?;
+    let current = registry.current();
+    let local = Symbol::create(None, name);
+    if let Some(existing) = current.resolve(&local) {
+        if binding_is_local(&existing) {
+            existing.set_origin(definition_origin());
+            return Ok(existing);
+        }
+    }
+    let var = KernelVar::new(format!("{}/{}", current.name().as_str(), name), Value::Nil);
+    var.set_origin(definition_origin());
+    current.map_var(local, var.clone());
+    Ok(var)
+}
+
+/// Resolves a global var by (possibly qualified) name through the
+/// registry: current-namespace mappings, aliases, and qualified names.
+pub(crate) fn vm_resolve_global(name: &str) -> Result<KernelVar<Value>, String> {
+    namespace_registry()?
+        .resolve(&Symbol::parse(name))
+        .ok_or_else(|| format!("unbound symbol: {name}"))
+}
+
+/// `defstruct` against the registry directly, mirroring the evaluator's
+/// defstruct arm minus protocol clauses (rejected by the VM compiler).
+/// Interns `Name`, `->Name`, and `map->Name` into the current namespace
+/// and returns nil, exactly like the special form (issue #223).
+pub(crate) fn vm_defstruct(name: &str, fields: Vec<String>) -> Result<Value, String> {
+    if name.contains('/') {
+        return Err("defstruct name must be an unqualified symbol".into());
+    }
+    if fields.iter().any(|field| field.contains('/')) {
+        return Err("defstruct field names must be unqualified symbols".into());
+    }
+    if fields.iter().collect::<HashSet<_>>().len() != fields.len() {
+        return Err("Duplicate defstruct field".into());
+    }
+    let registry = namespace_registry()?;
+    let namespace = registry.current().name().as_str().to_owned();
+    let ty = Rc::new(StructType {
+        name: format!("{namespace}/{name}"),
+        fields,
+    });
+    let map_type = ty.clone();
+    let map_constructor = native_function(&format!("map->{name}"), 1, move |values| {
+        let source = values.first().expect("native arity is checked");
+        let fields = map_type
+            .fields
+            .iter()
+            .map(|field| {
+                Ok(map_value(source, &Value::Keyword(Keyword::from(field.as_str())))
+                    .cloned()
+                    .unwrap_or(Value::Nil))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(Value::Struct(Rc::new(StructValue {
+            ty: map_type.clone(),
+            values: fields,
+        })))
+    });
+    let current = registry.current();
+    for (binding, value) in [
+        (name.to_owned(), Value::StructType(ty.clone())),
+        (format!("->{name}"), Value::StructType(ty.clone())),
+        (format!("map->{name}"), map_constructor),
+    ] {
+        let var = KernelVar::new(format!("{namespace}/{binding}"), value);
+        var.set_origin(definition_origin());
+        current.map_var(Symbol::create(None, &binding), var);
+    }
+    Ok(Value::Nil)
+}
+
+/// Positional field access on a struct instance, shared with the `field`
+/// special form (issue #223).
+pub(crate) fn struct_field_value(value: &Value, field: &str) -> Result<Value, String> {
+    let Value::Struct(value) = value else {
+        return Err("field expects a struct".into());
+    };
+    value
+        .ty
+        .fields
+        .iter()
+        .position(|candidate| candidate == field)
+        .map(|index| value.values[index].clone())
+        .ok_or_else(|| format!("unknown struct field: {field}"))
+}
+
+/// Struct type identity check, shared with the `instance?` special form
+/// (issue #223).
+pub(crate) fn struct_instance_of(type_value: &Value, value: &Value) -> Result<Value, String> {
+    let Value::StructType(ty) = type_value else {
+        return Err("instance? expects a struct type".into());
+    };
+    Ok(Value::Bool(
+        matches!(value, Value::Struct(value) if Rc::ptr_eq(ty, &value.ty)),
+    ))
+}
+
+pub(crate) fn namespace_registry() -> Result<NamespaceRegistry<Value>, String> {
     ACTIVE_NAMESPACES
         .with(|active| active.borrow().clone())
         .ok_or_else(|| "namespace runtime is unavailable".into())
@@ -4256,6 +4429,9 @@ pub enum Primitive {
     LessOrEqual,
     Greater,
     GreaterOrEqual,
+    Count,
+    Get,
+    Meta,
 }
 
 impl Primitive {
@@ -4271,6 +4447,12 @@ impl Primitive {
             "<=" => Primitive::LessOrEqual,
             ">" => Primitive::Greater,
             ">=" => Primitive::GreaterOrEqual,
+            // Evaluator builtin collection/metadata operators (the
+            // structural arms in `eval`, not vars); the VM reaches them
+            // through the same value-level functions.
+            "count" => Primitive::Count,
+            "get" => Primitive::Get,
+            "meta" => Primitive::Meta,
             _ => return None,
         })
     }
@@ -4289,6 +4471,9 @@ impl Primitive {
             Primitive::LessOrEqual => "<=",
             Primitive::Greater => ">",
             Primitive::GreaterOrEqual => ">=",
+            Primitive::Count => "count",
+            Primitive::Get => "get",
+            Primitive::Meta => "meta",
         }
     }
 }
@@ -4380,6 +4565,27 @@ pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Resu
                 Primitive::GreaterOrEqual => pair[0] >= pair[1],
                 _ => unreachable!(),
             })))
+        }
+        // The evaluator's structural collection/metadata arms, sharing the
+        // same value-level functions and arity messages.
+        Primitive::Count => {
+            if arguments.len() != 1 {
+                return Err("count expects one argument".into());
+            }
+            collection_count(&arguments[0])
+        }
+        Primitive::Get => {
+            if arguments.len() != 2 && arguments.len() != 3 {
+                return Err("get expects 2 or 3 arguments".into());
+            }
+            let default = arguments.get(2).cloned().unwrap_or(Value::Nil);
+            collection_get(&arguments[0], &arguments[1], default)
+        }
+        Primitive::Meta => {
+            if arguments.len() != 1 {
+                return Err("meta expects one value".into());
+            }
+            protocol_meta(arguments)
         }
     }
 }
@@ -6491,7 +6697,7 @@ fn iterator_cycle(value: Value) -> Result<Value, String> {
 fn iterator_has_next(value: &Value) -> Result<Value, String> {
     match value {
         Value::Iterator(iterator) => Ok(Value::Bool(iterator.borrow_mut().has_next()?)),
-        _ => Err("iter-has? expects an iterator".into()),
+        _ => Err("iter-next? expects an iterator".into()),
     }
 }
 
@@ -6952,7 +7158,7 @@ fn assoc_metadata(
     )
 }
 
-fn definition_metadata(
+pub(crate) fn definition_metadata(
     mut metadata: Option<Rc<Metadata>>,
     forms: &[Form],
     private: bool,
@@ -7432,9 +7638,20 @@ fn multi_arity_function(
     if functions.is_empty() {
         return Err("defn expects at least one arity".into());
     }
+    Ok(arity_dispatcher(name, functions, is_macro))
+}
+
+/// Builds the multi-arity dispatcher shared by the evaluator's defn and
+/// the bytecode VM's `MakeMultiArity` (issue #223): exact fixed-arity
+/// match first, then the variadic clause with the most parameters.
+pub(crate) fn arity_dispatcher(
+    name: &str,
+    functions: Vec<Rc<Function>>,
+    is_macro: bool,
+) -> Value {
     let dispatch_name = name.to_owned();
     let clauses = functions.clone();
-    Ok(Value::Function(Rc::new(Function {
+    Value::Function(Rc::new(Function {
         params: Vec::new(),
         variadic: Some("arguments".into()),
         patterns: Vec::new(),
@@ -7453,7 +7670,7 @@ fn multi_arity_function(
             call_function(&function, arguments)
         })),
         is_macro,
-    })))
+    }))
 }
 
 fn deref_value(value: Value) -> Value {
@@ -7680,7 +7897,7 @@ pub(crate) fn with_development_trace<T>(
     (result, trace)
 }
 
-fn binding_symbol(form: &Form, context: &str) -> Result<(String, Option<Rc<Metadata>>), String> {
+pub(crate) fn binding_symbol(form: &Form, context: &str) -> Result<(String, Option<Rc<Metadata>>), String> {
     match form {
         Form::Symbol(name) => Ok((name.clone(), None)),
         Form::Metadata(metadata, value) => match value.as_ref() {
@@ -8777,7 +8994,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 let value = eval(&fs[2], env)?;
                 if let Some(Value::Var(var)) = env.get(&name) {
                     if !binding_is_local(var) {
-                        let var = KernelVar::new(name.clone(), value.clone());
+                        let var = KernelVar::new(local_var_name(&name), value.clone());
                         var.set_origin(definition_origin());
                         var.set_hara_metadata(metadata);
                         env.insert(name, Value::Var(var));
@@ -8789,7 +9006,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         var.set_hara_metadata(metadata);
                     }
                 } else {
-                    let var = KernelVar::new(name.clone(), value.clone());
+                    let var = KernelVar::new(local_var_name(&name), value.clone());
                     var.set_origin(definition_origin());
                     var.set_hara_metadata(metadata);
                     env.insert(name, Value::Var(var));
@@ -8807,7 +9024,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     };
                     let cell = match env.get(&name) {
                         Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
-                        _ => KernelVar::new(name.clone(), Value::Nil),
+                        _ => KernelVar::new(local_var_name(&name), Value::Nil),
                     };
                     cell.set_origin(definition_origin());
                     env.insert(name, Value::Var(cell));
@@ -9210,7 +9427,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 let cell = match env.get(&name) {
                     Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
-                    _ => KernelVar::new(name.clone(), Value::Nil),
+                    _ => KernelVar::new(local_var_name(&name), Value::Nil),
                 };
                 if metadata.is_some() {
                     cell.set_hara_metadata(metadata);
@@ -9271,7 +9488,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 let cell = match env.get(&name) {
                     Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
-                    _ => KernelVar::new(name.clone(), Value::Nil),
+                    _ => KernelVar::new(local_var_name(&name), Value::Nil),
                 };
                 if metadata.is_some() {
                     cell.set_hara_metadata(metadata);
@@ -9929,9 +10146,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 let result = matches!(value, Value::Iterator(iterator) if n == "iter?" || iterator.borrow().seq);
                 Ok(Value::Bool(result))
             }
-            Form::Symbol(n) if n == "iter-has?" => {
+            Form::Symbol(n) if n == "iter-next?" => {
                 if fs.len() != 2 {
-                    return Err("iter-has? expects one argument".into());
+                    return Err("iter-next? expects one argument".into());
                 }
                 iterator_has_next(&eval(&fs[1], env)?)
             }

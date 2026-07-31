@@ -8,11 +8,13 @@ covers, the normative successor is now
 `specs/01-lang/010-bytecode/draft/conformance/bytecode-vm.edn`); where this note and that
 spec disagree, the spec wins.
 
-Status: milestone 3 (experimental, synchronous; closures, defn
-lowering, and exception handling). The VM is disabled by default behind the
-`bytecode-vm` Cargo feature and never replaces `Runtime::eval_native`.
-Milestone 1 covered the closure-free synchronous subset, §17 records the
-milestone 2 delta, and §18 records the milestone 3 delta (exceptions).
+Status: milestone 4 in progress (globals, namespaces, and arity; §19).
+Milestone 3 delivered closures, defn lowering, and exception handling. The
+VM is disabled by default behind the `bytecode-vm` Cargo feature and never
+replaces `Runtime::eval_native`. Milestone 1 covered the closure-free
+synchronous subset, §17 records the milestone 2 delta, §18 records the
+milestone 3 delta (exceptions), and §19 records the milestone 4 design
+(globals, defstruct, variadic and multi-arity functions).
 
 ## 1. Execution model
 
@@ -778,3 +780,245 @@ They are claimed by the namespace-aware milestone, not this one.
   classes as non-matching; VM rejection is canonical.
 - Finally semantics follow the fiber evaluator (§18.3) — the sync
   fallback's last-error-wins behavior is not reproduced.
+
+## 19. Milestone 4 — globals, namespaces, and arity (issue #223)
+
+Milestone 4 lets the VM see the shared namespace environment. Until now
+every program was closed: names were lexical slots, the ten shared
+primitives, or same-program `defn` slots, and an unknown symbol was a
+compile error. Real programs read foundation vars (`count`, `inc`),
+define their own globals (`def`, `defn`), mutate them (`set!`), and
+raise structured errors (`defstruct`). This milestone compiles those
+without changing the closed-program behavior: a program compiled
+against an empty registry behaves exactly as before.
+
+### 19.0 What changed underneath since milestone 1
+
+The namespace machinery this builds on is not the one milestone 1
+described (`Rc<RefCell<HashMap<String, Value>>>` environments). The
+runtime now has `kernel::NamespaceRegistry<core::Value>`
+(`rust/src/kernel/namespace.rs`): namespaces hold `Var<Value>` mappings
+with identity (`requalify`/`same_identity`), origins
+(`VarOrigin::{Source, HalFallback, RustLibrary, RuntimePrimitive}`),
+metadata (`VarMetadata` with hara flags, doc, arglists), aliases and
+lazy aliases, load states, and module revisions. `Var`/`VarMetadata`/
+`VarOrigin` live in `rust/src/kernel/var.rs`. The flat env HashMap and
+the `save_namespace`/`refresh_qualified_bindings` bridge still exist —
+for the tree evaluator. The VM does not join that bridge (§19.3).
+
+### 19.1 Globals model: registry-direct, no env bridge
+
+The evaluator's `def` interns into a flat per-eval env and
+`save_namespace` requalifies and moves entries into the registry
+afterwards; `refresh_qualified_bindings` then rebuilds the env from
+every mapping in every namespace. That save/refresh cycle runs after
+every top-level form and is one of the costs listed in issue #195.
+
+The VM talks to the registry directly:
+
+- `DefGlobal` interns a `Var` into `registry.current()` with the
+  qualified name from the start — nothing to requalify, nothing to
+  save, nothing to refresh.
+- `GetGlobal` resolves through `NamespaceRegistry::resolve` at
+  execution time (current namespace, aliases, qualified names), which
+  is also what gives the VM foundation vars: `refer_foundation_into`
+  has already mapped them into `user`, so `(count ...)` compiles to an
+  ordinary global load plus `Call`.
+- `SetGlobal` resolves the var and `reset_value`s it; `VarGlobal`
+  (`#'x` / `(var x)`) pushes the `Value::Var` itself.
+
+There is no snapshot/restore, no env cloning, and no qualified-name
+materialization on the VM path. A failed execution leaves successfully
+interned vars in place — the same observable state the evaluator
+produces after `save_namespace`.
+
+**Evaluator convergence (var-cell fix).** The registry-direct model
+exposed a pre-existing tree-evaluator defect: fresh `def`/`defn` cells
+were created with bare (unqualified) symbols, so they failed
+`binding_is_local` and redefinition within one eval shadowed with a
+fresh cell (early binding), while cells that survived an eval's
+save-back came back qualified and were reset in place (late binding) —
+the answer depended on the Runtime's history. The JVM runtime always
+resets the same cell (`(= v1 (var f))` → `true`,
+`(do (defn f [x] 1) (defn g [] (f 0)) (defn f [x] 2) (g))` → `2`, and
+displays `#'user/f`). The evaluator now creates local cells qualified
+from the start (`local_var_name` in `core.rs`), converging on the JVM
+semantics on both first and later evals; var display is qualified
+(`#'user/rank`), matching `HaraVar.display`. Two observable effects:
+the conformance `:defn/redefinition-captured` case now pins the
+canonical `2`, and `declare` + `defn` foundation replacement works on
+the evaluator (it previously errored), so
+`:defn/declared-replacement` is an ordinary `:display` case. The VM's
+planned `VarGlobal` unqualified-display requalification is dropped —
+display is qualified on every path.
+
+### 19.2 Compile-time visibility vs runtime resolution
+
+Two-phase name checking, because `def` and use can be in the same
+program:
+
+- The compiler tracks **program-declared globals**: names introduced by
+  top-level `declare`, `def`, `defn`, `defstruct` in the same source.
+- It also queries the registry it was compiled against for
+  **pre-existing globals** (foundation vars, earlier defs).
+- An unqualified symbol that is neither lexical, nor a primitive, nor a
+  visible global stays the milestone-1 compile error
+  `unbound symbol: {name}` — closed-program behavior is unchanged, and
+  typos are still caught at compile time.
+- A visible global compiles to `GetGlobal`, which resolves **at
+  runtime**. Same-program `def`-then-use works (the `DefGlobal` runs
+  first), and a var redefined or removed between compile and execute
+  resolves to the current value or fails at runtime — matching the
+  evaluator, which also detects unbound globals at runtime.
+- Qualified symbols (`a/b`) always compile to `GetGlobal` with runtime
+  resolution: alias loading and namespace lifecycle are runtime
+  concerns (`force_lazy_alias`, load-failure retention) that the
+  compiler must not pre-empt.
+
+Compilation takes a registry reference (`compile_source_with`); the
+milestone-1 `compile_source` compiles against an empty registry, so the
+entire existing corpus and its compile-error expectations stand.
+
+### 19.3 New instructions
+
+```rust
+GetGlobal(u32),                       // constants[i] is the name string
+DefGlobal { name: u32, metadata: Option<u32> },
+SetGlobal(u32),
+VarGlobal(u32),
+DefStruct { name: u32, fields: u32 }, // constants: name, string vector
+StructField(u32),                     // constants[i] is the field keyword
+InstanceOf,                           // (instance? Type value)
+MakeMultiArity(u8),                   // build a dispatcher from N functions
+```
+
+All name operands index the constant pool (names are `Value::String`;
+the validator checks the constant kind). `DefGlobal`'s optional
+metadata constant is a literal map value assembled at compile time
+(`^:private`, doc strings, attr maps, computed `:arglists`) — the VM
+does not need map-literal construction for this because metadata maps
+are closed literals embedded as constants.
+
+`MakeMultiArity` pops N function values and pushes a dispatcher built
+through the same `core::multi_arity_function`/`select_clause` the
+evaluator's `defn` uses: exact fixed-arity match first, then the
+variadic clause with the most parameters, otherwise
+`{name} has no arity accepting {n} arguments`. VM closures are native
+`Value::Function`s (§17), so the existing dispatcher wraps them
+unchanged and arity errors phrase identically on both paths.
+
+### 19.4 defn becomes a real var; defn lowering is superseded
+
+Milestone 2 lowered top-level `defn` to direct slot bindings because
+there were no globals. With `DefGlobal`, top-level `defn` interns a
+var: value, doc/arglists/attr-map/private metadata (the
+`:definition/*` corpus cases read them through `#'` + `meta`), and
+`defn-` as private. References and self-recursive calls compile to
+`GetGlobal` + `Call` — through the var, like the evaluator, so
+redefinition between compile and execute is observed. `CallStatic`
+stays in the instruction set (the validator still knows it) but the
+compiler no longer emits it; the milestone-2 lowering corpus cases keep
+their displayed values, so they pass unchanged.
+
+The issue-#202 ruling is preserved at the global layer: replacing a
+std.foundation var through `defn` requires a prior top-level `declare`.
+`def` over a foundation name stays allowed (it is on the evaluator; the
+ruling was defn-specific).
+
+### 19.5 defstruct, field, instance?
+
+`DefStruct` executes the same construction the evaluator's special form
+performs (`core.rs` defstruct arm), extracted behind a registry-based
+helper: validate name/fields, create the `StructType` qualified to the
+current namespace, intern the three vars (`Name`, `->Name`,
+`map->Name`). Trailing protocol clauses are a compile error
+(`defstruct protocol clauses are not supported`) — protocol extension
+is a later milestone, and the `protocol/*` corpus cases stay there.
+
+`field` and `instance?` compile to `StructField`/`InstanceOf`, which
+call extracted core helpers (`struct_field`, `struct_instance_of`) so
+positional field lookup and `Rc::ptr_eq` type identity live in exactly
+one place. This completes the catch-class story from milestone 3:
+`catch_matches` already matches struct type names with the `/{class}`
+suffix rule, so the four L0 error cases deferred from #203
+(`error/catch-order`, `error/unmatched-catch`, `error/finally-normal`,
+`error/finally-unwind`) now run verbatim.
+
+### 19.6 Variadic and multi-arity functions
+
+- `FunctionPrototype` gains `variadic: bool`. Params `[a b & rest]`
+  compile with arity 2 and the flag; at call time the machine requires
+  at least `arity` arguments and binds the remainder into a
+  `Value::List` in the rest slot, matching `call_function`
+  (`core.rs:7500-7582`). Applies to `fn`, `defn`, and closure calls.
+- Multi-arity `defn` compiles each clause body as its own prototype
+  (each may be variadic) and combines them with `MakeMultiArity`
+  (§19.3) before `DefGlobal`. Bare multi-arity `fn` stays a compile
+  error — the evaluator's `fn` arm does not accept it either
+  (`core.rs:8282-8299`); only `defn`/`defn-` do.
+
+### 19.7 Runtime entry points and the host boundary
+
+New `Runtime` methods (feature-gated):
+
+```rust
+Runtime::compile_bytecode(&self, source)      // compiles against self's registry
+Runtime::eval_bytecode_native(&mut self, src) // compile + execute against self's registry
+```
+
+The free functions (`compile_bytecode`, `execute_bytecode`,
+`eval_bytecode_native`) keep compiling closed programs against an empty
+registry.
+
+`ns`, `require`, `in-ns`, `alias`, `refer`, `use` remain compile errors
+in the VM. Namespace selection and module loading are the host
+boundary: `Runtime::eval_forms` already intercepts top-level `ns`/
+`require` before evaluation, and that interception is where a future
+default-VM world routes them — the VM never grows module-loading
+instructions. `set!` targets globals only; the evaluator's promotion of
+a lexical local into a var (`binding_var`, `core.rs:7443-7453`) is not
+reproduced — `set!` on a lexical name is a compile error
+(`set! targets a global var`). `binding`/`^:dynamic` is deferred (it is
+a frame-adjacent push/pop protocol; the `runtime/dynamic-binding`
+corpus case moves with it).
+
+### 19.8 Validation additions
+
+- Global instruction name operands index a `Value::String` constant
+  (kind-checked); `DefStruct` fields index a vector constant of
+  strings; `DefGlobal` metadata indexes a map constant when present.
+- `MakeMultiArity(n)` pops exactly `n`, pushes 1; every popped value is
+  a function (runtime-checked; the validator checks the height).
+- Stack effects: `GetGlobal`/`VarGlobal` +1; `SetGlobal` pops 1 pushes
+  1; `DefGlobal` pops 1 pushes 1 (def returns the value); `DefStruct`
+  pops 0 pushes 1 (returns the type value); `StructField` pops 1
+  pushes 1; `InstanceOf` pops 2 pushes 1.
+- Variadic prototypes: `arity` counts fixed params; calls to variadic
+  prototypes are valid with `argc >= arity` (fixed prototypes still
+  require `argc == arity`).
+
+### 19.9 Deferred with the milestone
+
+- `binding` / `^:dynamic` (`runtime/dynamic-binding` corpus case).
+- `defstruct` protocol clauses, `extend-type` (`protocol/*` cases).
+- Protocol-based metadata access on structs (`runtime/metadata`).
+- `ns`/`require`/`in-ns`/`alias`/`refer`/`use` compilation
+  (`module/*`, `namespace/config-*` cases) — host boundary, §19.7.
+- Destructuring parameters.
+- Evaluator convergence on the declare ruling for `def` (the ruling was
+  defn-specific; no divergence today).
+
+### 19.10 Open decisions recorded at milestone 4
+
+- Registry-direct globals instead of joining the save/refresh env
+  bridge (§19.1) — the bridge exists to serve the tree evaluator's flat
+  env; the VM never had one, so joining it would import the cost
+  without buying parity.
+- Global references resolve at runtime, visibility checked at compile
+  time (§19.2) — preserves both the closed-program compile errors and
+  def-then-use within one program.
+- defn self-calls through the var, not `CallStatic` (§19.4) — parity
+  with redefinition semantics beats the static-call saving at this
+  stage; benchmarks will say if it matters.
+- Metadata maps as constants (§19.3) — avoids growing map-literal
+  instructions for a compile-time-known value.

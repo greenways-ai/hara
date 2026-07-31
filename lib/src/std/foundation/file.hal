@@ -38,7 +38,8 @@
 ;;                              v
 ;;                   host filesystem provider
 ;; ============================================================================
-(ns std.foundation.file)
+(ns std.foundation.file
+  (:config {:blank true}))
 
 (defn ^{:schema [:fn [:str :str] :str]}
   resolve

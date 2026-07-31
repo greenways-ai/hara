@@ -10,7 +10,9 @@
 ;; ordinary program code. host/* is for capability discovery and explicitly
 ;; declared host operations that have no narrower Foundation abstraction.
 ;; ============================================================================
-(ns std.foundation.host)
+(ns std.foundation.host
+  (:config {:blank true})
+  (:require [std.foundation :refer [vec]]))
 
 (defn ^{:schema [:fn [:str :str & :any] :promise]}
   call

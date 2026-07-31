@@ -10,8 +10,17 @@ use super::eval_source;
 use crate::core::Value;
 use crate::Runtime;
 
-fn differential(source: &str) {
-    let reference = Runtime::new().eval_native(source);
+/// `runtime` is shared across a test's forms to avoid a std.foundation
+/// bootstrap per form (~0.3s each in a debug build, which dominated
+/// this suite's runtime). Safe here only because these forms never
+/// depend on cross-form namespace state: `def`/`defn` side effects
+/// LEAK across `eval_native` calls (a redefined var mutates the shared
+/// cell earlier closures captured), so any form that interns globals —
+/// or could observe one interned earlier — needs a fresh Runtime. The
+/// one interning form below (the defn arity error) is never referenced
+/// by later forms.
+fn differential(runtime: &mut Runtime, source: &str) {
+    let reference = runtime.eval_native(source);
     let vm = eval_source(source).map(|value| value.display());
     match (&reference, &vm) {
         (Ok(expected), Ok(actual)) => {
@@ -124,8 +133,9 @@ fn supported_forms_match_the_existing_evaluator() {
         "(loop [i 0] (try (if (< i 3) (recur (+ i 1)) i) (catch Exception e -1)))",
         "(loop [i 0] (try (throw 1) (catch Exception e (if (< i 3) (recur (+ i 1)) i))))",
     ];
+    let mut runtime = Runtime::new();
     for source in sources {
-        differential(source);
+        differential(&mut runtime, source);
     }
 }
 
@@ -172,8 +182,9 @@ fn supported_form_errors_match_the_existing_evaluator() {
         "(throw)",
         "(try (throw 1) (catch Exception e (throw 2)))",
     ];
+    let mut runtime = Runtime::new();
     for source in sources {
-        differential(source);
+        differential(&mut runtime, source);
     }
 }
 
@@ -202,16 +213,16 @@ fn defn_foundation_replacement_requires_declare() {
         "{error}"
     );
     // With an explicit declare, the replacement lowers and takes effect
-    // in the VM. The evaluator still resolves the builtin even after
-    // declare — canonical behavior is the VM's; the evaluator converges.
+    // on both paths: the evaluator used to keep resolving the builtin
+    // even after declare, but the var-cell fix (qualified local cells,
+    // issue #223) converged it onto the canonical behavior — which the
+    // JVM runtime also exhibits.
     let declared = "(do (declare count) (defn count [n] 42) (count 5))";
-    assert_eq!(
-        eval_source(declared).map(|value| value.display()),
-        Ok("42".into())
-    );
-    assert!(Runtime::new().eval_native(declared).is_err());
+    let mut declared_runtime = Runtime::new();
+    differential(&mut declared_runtime, declared);
     // A bare declare already agrees on both paths.
-    differential("(declare count)");
+    let mut runtime = Runtime::new();
+    differential(&mut runtime, "(declare count)");
 }
 
 /// Reads the shared benchmark corpus and runs every workload whose
@@ -236,6 +247,7 @@ fn shared_benchmark_workloads_match() {
     };
     let supported = ["noop", "arithmetic", "function-call"];
     let mut seen = Vec::new();
+    let mut runtime = Runtime::new();
     for workload in workloads.iter() {
         let fields = crate::core::map_entries(workload).expect("workload object");
         let field = |name: &str| {
@@ -255,7 +267,7 @@ fn shared_benchmark_workloads_match() {
         seen.push(id.clone());
         let source = field("source");
         let expected = field("expected");
-        let reference = Runtime::new().eval_native(&source).expect("reference evaluates");
+        let reference = runtime.eval_native(&source).expect("reference evaluates");
         let vm = eval_source(&source)
             .map(|value| value.display())
             .expect("vm evaluates");
@@ -264,3 +276,68 @@ fn shared_benchmark_workloads_match() {
     }
     assert_eq!(seen, supported, "corpus must contain the supported workloads");
 }
+
+/// Runtime-based differential (issue #223): the VM compiles against the
+/// Runtime's namespace registry, so std.foundation vars are visible and
+/// globals intern into the runtime. Stateful sources get a fresh
+/// Runtime per side — def side effects leak across evals on a shared
+/// Runtime by design (REPL semantics).
+fn runtime_differential(source: &str) {
+    let reference = Runtime::new().eval_native(source);
+    let vm = Runtime::new().eval_bytecode_native(source);
+    match (&reference, &vm) {
+        (Ok(expected), Ok(actual)) => {
+            assert_eq!(expected, actual, "value divergence for {source}")
+        }
+        (Err(expected), Err(actual)) => assert_eq!(
+            error_category(expected),
+            error_category(actual),
+            "error category divergence for {source}: {expected} vs {actual}"
+        ),
+        _ => panic!("divergence for {source}: reference {reference:?} vs vm {vm:?}"),
+    }
+}
+
+/// Namespace- and arity-dependent cases from the normative L0 corpus
+/// (`specs/00-unsorted/platform-language/draft/conformance/l0.edn`),
+/// deferred by milestones 2-3 until globals existed (issue #223).
+#[test]
+fn l0_namespace_corpus_cases_match() {
+    for source in [
+        // :error/catch-order
+        "(do (defstruct Problem [value]) (try (throw (Problem 42)) (catch Other error 0) (catch Problem error (field error :value))))",
+        // :error/unmatched-catch
+        "(do (defstruct Problem [value]) (try (throw (Problem 42)) (catch Other error 0)))",
+        // :error/finally-normal
+        "(do (def cleaned 0) (try 41 (finally (set! cleaned (+ cleaned 1)))) (+ 40 cleaned))",
+        // :error/finally-unwind
+        "(do (def cleaned 0) (try (throw 41) (catch Exception error (+ error cleaned)) (finally (set! cleaned (+ cleaned 1)))) (+ 40 cleaned))",
+        // :runtime/set-var-root
+        "(do (def answer 1) (set! answer 42) answer)",
+        // :compiler/declare-private
+        "(do (declare answer) (def answer 42) (defn- private-answer [] answer) (private-answer))",
+        // :definition/doc-metadata
+        "(do (defn documented \"Adds one.\" [value] (+ value 1)) (get (meta #'documented) :doc))",
+        // :definition/arglists-metadata
+        "(do (defn documented [left right] (+ left right)) (count (first (get (meta #'documented) :arglists))))",
+        // :function/variadic-arity
+        "((fn [left & more] (+ left (count more))) 40 1 2)",
+        // :function/multiple-arities
+        "(do (defn choose ([value] value) ([left right] (+ left right))) (+ (choose 19 22) (choose 1)))",
+    ] {
+        runtime_differential(source);
+    }
+}
+
+/// A Runtime sees its own interned vars across mixed evaluator/VM evals.
+#[test]
+fn runtime_globals_interop_issue_223() {
+    let mut runtime = Runtime::new();
+    assert_eq!(runtime.eval_bytecode_native("(defn f [x] (+ x 1))"), Ok("#'user/f".into()));
+    // The tree evaluator sees the var the VM interned...
+    assert_eq!(runtime.eval_native("(f 41)"), Ok("42".into()));
+    // ...and the VM sees vars the evaluator interned.
+    assert_eq!(runtime.eval_native("(defn g [x] (+ x 2))"), Ok("#'user/g".into()));
+    assert_eq!(runtime.eval_bytecode_native("(g 40)"), Ok("42".into()));
+}
+

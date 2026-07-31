@@ -326,6 +326,49 @@ fn validate_session_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The root Foundation surface deliberately contains only the iterator core.
+/// Native iterator mechanics must enter through the `Iter/*` type alias, so
+/// reject legacy unqualified call heads before namespace rewriting canonicalizes
+/// an alias to its backing method name.
+fn reject_legacy_iterator_calls(form: &Form) -> Result<(), String> {
+    const LEGACY: &[&str] = &[
+        "iter-has?", "iter-finite?", "iter-materialize", "iter-close", "iter-map",
+        "iter-filter", "iter-take-while", "iter-drop-while", "iter-mapcat", "iter-keep",
+        "iter-interpose", "iter-interleave", "iter-every?", "iter-any?", "iter-take",
+        "iter-drop", "iter-zip", "iter-cycle", "iter-partition-pair", "iter-partition-all",
+        "iter-partition", "iter-range", "iter-constantly", "iter-repeatedly", "iter-iterate",
+    ];
+    match form {
+        Form::List(values) => {
+            if let Some(Form::Symbol(name)) = values.first() {
+                if LEGACY.contains(&name.as_str()) {
+                    return Err(format!("unbound symbol: {name}"));
+                }
+                if name == "quote" {
+                    return Ok(());
+                }
+            }
+            for value in values {
+                reject_legacy_iterator_calls(value)?;
+            }
+        }
+        Form::Vector(values) | Form::Set(values) => {
+            for value in values {
+                reject_legacy_iterator_calls(value)?;
+            }
+        }
+        Form::Map(entries) => {
+            for (key, value) in entries {
+                reject_legacy_iterator_calls(key)?;
+                reject_legacy_iterator_calls(value)?;
+            }
+        }
+        Form::Tagged(_, value) | Form::Metadata(_, value) => reject_legacy_iterator_calls(value)?,
+        _ => {}
+    }
+    Ok(())
+}
+
 #[wasm_bindgen]
 impl Runtime {
     fn empty() -> Runtime {
@@ -605,6 +648,7 @@ impl Runtime {
                 .get(&self.current_namespace())
                 .cloned()
                 .unwrap_or_else(kernel::GeneratedNamespaceConfig::defaults);
+            reject_legacy_iterator_calls(&form)?;
             let resolved = config.rewrite(form);
             result = self.eval_form(resolved, traced)?;
             if matches!(result, core::Value::Recur(_)) {
@@ -1054,6 +1098,35 @@ pub fn execute_bytecode(program: &std::rc::Rc<vm::Program>) -> Result<String, St
 #[cfg(feature = "bytecode-vm")]
 pub fn eval_bytecode_native(source: &str) -> Result<String, String> {
     execute_bytecode(&compile_bytecode(source)?)
+}
+
+#[cfg(feature = "bytecode-vm")]
+impl Runtime {
+    /// Compiles source against this runtime's namespace registry:
+    /// std.foundation vars and anything already interned are visible to
+    /// the compiler's two-phase global check (issue #223). The program
+    /// is validated but not executed; globals intern only at execution.
+    pub fn compile_bytecode(&self, source: &str) -> Result<std::rc::Rc<vm::Program>, String> {
+        vm::compile_source_with(source, &self.namespace_registry)
+            .map(std::rc::Rc::new)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Compiles and executes through the experimental VM against this
+    /// runtime's registry, then syncs the flat env so later `eval_native`
+    /// calls see the vars the program interned. No fallback: unsupported
+    /// forms fail as compile errors. `eval_native` is unaffected.
+    pub fn eval_bytecode_native(&mut self, source: &str) -> Result<String, String> {
+        let program = self.compile_bytecode(source)?;
+        let result = vm::execute_program_with_globals(program, &self.namespace_registry)
+            .map(|value| value.display())
+            .map_err(|error| error.to_string());
+        // Rebuild the env from the registry so mixed evaluator/VM usage
+        // on one Runtime observes the same globals.
+        let current = self.namespace_registry.current().name().as_str().to_owned();
+        core::select_namespace_environment(&self.namespace_registry, &mut self.env, &current);
+        result
+    }
 }
 
 impl Runtime {
@@ -4938,6 +5011,8 @@ mod tests {
             "iterator/generated-exhaustion",
             "iterator/shortest-source-finite",
             "iterator/nil-requires-conversion",
+            "iterator/native-combinator-qualified",
+            "iterator/root-combinator-unbound",
             "iterator/empty-cycle-rejected",
             "runtime/recur-outside-target",
             "runtime/recur-arity",
@@ -6472,9 +6547,11 @@ mod tests {
     #[test]
     fn conditional_and_let() {
         let mut runtime = Runtime::new();
+        // Var display is namespace-qualified, matching the JVM runtime
+        // (issue #223).
         assert_eq!(
             runtime.eval_text("(defn rank [score] score)").unwrap(),
-            "#'rank"
+            "#'user/rank"
         );
         assert_eq!(
             runtime

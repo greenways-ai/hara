@@ -70,6 +70,46 @@ public class HaraGeneratedLibrariesTest {
   }
 
   @Test
+  public void referredVarsAreProtectedUnlessTheNamespaceDeclarationOmitsThem() {
+    try (Context context = context()) {
+      assertEquals(
+          "[99 3]",
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(ns app (:config {:blank true}) "
+                      + "(:require [std.foundation :refer :all :exclude [+]])) "
+                      + "(defn + [a b] 99) [(+ 1 2) (std.foundation/+ 1 2)]")
+              .toString());
+
+      assertErrorContains(
+          context,
+          "(ns protected (:config {:blank true}) "
+              + "(:require [std.foundation :refer [+]])) (defn + [a b] 99)",
+          "Cannot replace referred Var without ns omission: +");
+      assertErrorContains(
+          context,
+          "(ns protected-declare (:config {:blank true}) "
+              + "(:require [std.foundation :refer [count]])) (declare count)",
+          "Cannot replace referred Var without ns omission: count");
+    }
+  }
+
+  @Test
+  public void lexicalBindingsShadowCallableFoundationVars() {
+    try (Context context = context()) {
+      assertEquals(
+          "[99 77]",
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "[(let [+ (fn [a b] 99)] (+ 1 2)) "
+                      + " (let [count (fn [value] 77)] (count [1 2 3]))]")
+              .toString());
+    }
+  }
+
+  @Test
   public void namespaceUseLoadsAndRefersVarsAndMacros() {
     try (Context context = context()) {
       assertEquals(

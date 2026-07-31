@@ -7,6 +7,7 @@ use super::opcode::Instruction;
 use super::program::{
     FunctionPrototype, Program, MAX_CONSTANTS, MAX_INSTRUCTIONS, MAX_LOCALS, MAX_OPERAND_STACK,
 };
+use crate::core::Value;
 
 /// Validates a whole program. See `notes/rust-bytecode-vm.md` §9 for the
 /// rule list.
@@ -256,12 +257,15 @@ pub(crate) fn stack_heights(
                         at,
                     ));
                 };
-                if usize::from(*argc) != usize::from(target.arity) {
+                let arity = usize::from(target.arity);
+                let arity_ok = if target.variadic {
+                    usize::from(*argc) >= arity
+                } else {
+                    usize::from(*argc) == arity
+                };
+                if !arity_ok {
                     return Err(ValidationError::new(
-                        format!(
-                            "callstatic argc {argc} but prototype expects {}",
-                            target.arity
-                        ),
+                        format!("callstatic argc {argc} but prototype expects {arity}"),
                         at,
                     ));
                 }
@@ -271,6 +275,48 @@ pub(crate) fn stack_heights(
                         at,
                     ));
                 }
+            }
+            Instruction::GetGlobal(index)
+            | Instruction::SetGlobal(index)
+            | Instruction::VarGlobal(index)
+            | Instruction::StructField(index)
+            | Instruction::DeclareGlobal(index) => {
+                string_constant(program, *index, at)?;
+            }
+            Instruction::DefGlobal { name, metadata } => {
+                string_constant(program, *name, at)?;
+                if let Some(metadata) = metadata {
+                    if usize::from(*metadata) >= program.var_metadata.len() {
+                        return Err(ValidationError::new(
+                            format!("var metadata index {metadata} out of range"),
+                            at,
+                        ));
+                    }
+                }
+            }
+            Instruction::DefStruct { name, fields } => {
+                string_constant(program, *name, at)?;
+                match program.constants.get(*fields as usize) {
+                    Some(Value::Vector(fields))
+                        if fields
+                            .iter()
+                            .all(|field| matches!(field, Value::String(_))) => {}
+                    Some(_) => {
+                        return Err(ValidationError::new(
+                            format!("defstruct fields constant {fields} is not a string vector"),
+                            at,
+                        ))
+                    }
+                    None => {
+                        return Err(ValidationError::new(
+                            format!("constant index {fields} out of range"),
+                            at,
+                        ))
+                    }
+                }
+            }
+            Instruction::MakeMultiArity { name, .. } => {
+                string_constant(program, *name, at)?;
             }
             _ => {}
         }
@@ -341,4 +387,19 @@ fn push_fallthrough(
     debug_assert!(code[ip].falls_through());
     worklist.push((ip + 1, height));
     Ok(())
+}
+
+/// Global-instruction name operands must index a string constant.
+fn string_constant(program: &Program, index: u32, at: Option<u32>) -> Result<(), ValidationError> {
+    match program.constants.get(index as usize) {
+        Some(Value::String(_)) => Ok(()),
+        Some(_) => Err(ValidationError::new(
+            format!("global name constant {index} is not a string"),
+            at,
+        )),
+        None => Err(ValidationError::new(
+            format!("constant index {index} out of range"),
+            at,
+        )),
+    }
 }

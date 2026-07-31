@@ -159,7 +159,7 @@ public final class HaraContext {
               "Iter",
               java.util.List.of(
                   "iter", "iter?", "iter-finite?", "iter-materialize",
-                  "iter-has?", "iter-next", "iter-close",
+                  "iter-next?", "iter-next", "iter-close",
                   "iter-map", "iter-filter", "iter-take-while", "iter-drop-while",
                   "iter-mapcat", "iter-keep", "iter-interpose", "iter-interleave",
                   "iter-every?", "iter-any?", "iter-take", "iter-drop", "iter-zip",
@@ -230,6 +230,7 @@ public final class HaraContext {
     installProjectMacro();
     installNativeLibraries();
     collectBuiltins(FOUNDATION_NAMESPACE, () -> libraryLoader.installEagerJava(this));
+    hideIteratorImplementationBindings();
     currentNamespace = namespace("user");
     initializeUserNamespace(currentNamespace);
   }
@@ -363,6 +364,13 @@ public final class HaraContext {
           "Coroutine".equals(type) ? Map.of("instance?", "coroutine?") : Map.of();
       installNativeExportGroup(type, exports, NATIVE_TYPES.get(type), sourceNames);
     }
+  }
+
+  /** Keeps host iterator combinators available through Iter, not the root surface. */
+  private void hideIteratorImplementationBindings() {
+    HaraNamespace foundation = namespace(FOUNDATION_NAMESPACE);
+    foundation.vars.keySet().removeIf(
+        name -> name.startsWith("iter-") && !name.equals("iter-next?") && !name.equals("iter-next"));
   }
 
   private void installNativeExportGroup(
@@ -821,6 +829,10 @@ public final class HaraContext {
                   currentNamespace.name(), ignored -> new ConcurrentHashMap<>())
               .put(name, macro);
         }
+      } else if ("exclude".equals(option)) {
+        // Applied while processing :refer above. Keeping it as an explicit
+        // option here prevents the validation pass from rejecting the
+        // namespace declaration after it has already collected exclusions.
       } else {
         throw new HaraException("Unsupported :require option: :" + option);
       }
@@ -1040,9 +1052,24 @@ public final class HaraContext {
 
   void declareCurrent(Symbol symbol) {
     HaraVar existing = currentNamespace.lookup(symbol.getName());
-    if (existing == null || !currentNamespace.name().equals(existing.namespaceName())) {
+    if (existing != null && !currentNamespace.name().equals(existing.namespaceName())) {
+      throw protectedReferredVar(symbol);
+    }
+    if (existing == null) {
       currentNamespace.define(
           symbol.getName(), null, symbol.meta(), definitionOrigin);
+    }
+  }
+
+  private HaraException protectedReferredVar(Symbol symbol) {
+    return new HaraException(
+        "Cannot replace referred Var without ns omission: " + symbol.getName());
+  }
+
+  public void requireOwnedCurrent(Symbol symbol) {
+    HaraVar existing = resolve(symbol);
+    if (existing != null && !currentNamespace.name().equals(existing.namespaceName())) {
+      throw protectedReferredVar(symbol);
     }
   }
 
@@ -1144,6 +1171,7 @@ public final class HaraContext {
     if (symbol.getNamespace() != null && !symbol.getNamespace().equals(currentNamespace.name())) {
       throw new HaraException("Cannot define a var in another namespace: " + symbol.display());
     }
+    requireOwnedCurrent(symbol);
     return currentNamespace.define(symbol.getName(), value, symbol.meta(), definitionOrigin);
   }
 
@@ -1387,6 +1415,7 @@ public final class HaraContext {
             || existing.origin() == HaraVar.Origin.RUNTIME_PRIMITIVE)) {
       return;
     }
+    requireOwnedCurrent(symbol);
     macros
         .computeIfAbsent(currentNamespace.name(), ignored -> new ConcurrentHashMap<>())
         .put(symbol.getName(), macro);
@@ -1728,7 +1757,7 @@ public final class HaraContext {
     target.define("iter?", new UnaryBuiltin("iter?", this::isIterator));
     target.define("iter-finite?", new UnaryBuiltin("iter-finite?", this::isIteratorFinite));
     target.define("iter-materialize", new UnaryBuiltin("iter-materialize", this::iterMaterialize));
-    target.define("iter-has?", new UnaryBuiltin("iter-has?", this::iterHasNext));
+    target.define("iter-next?", new UnaryBuiltin("iter-next?", this::iterHasNext));
     target.define("iter-next", new UnaryBuiltin("iter-next", this::iterNext));
     target.define("iter-close", new UnaryBuiltin("iter-close", this::iterClose));
     target.define("concat", new VariadicBuiltin("concat", this::concatIterators));
@@ -4329,7 +4358,7 @@ public final class HaraContext {
 
   @TruffleBoundary
   private Object iterHasNext(Object value) {
-    Iterator<?> iterator = requireIterator(value, "iter-has?");
+    Iterator<?> iterator = requireIterator(value, "iter-next?");
     return iterator.hasNext();
   }
 

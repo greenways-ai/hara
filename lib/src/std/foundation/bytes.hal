@@ -26,7 +26,8 @@
 ;; Byte buffers are opaque across the host boundary. Operations return values
 ;; according to the native Bytes contract and never expose host array classes.
 ;; ==========================================================================
-(ns std.foundation.bytes)
+(ns std.foundation.bytes
+  (:config {:blank true}))
 
 (defn ^{:schema [:fn [:bytes] :int]}
   count

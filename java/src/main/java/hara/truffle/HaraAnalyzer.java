@@ -262,38 +262,6 @@ final class HaraAnalyzer {
           return analyzeField(list);
         case ".":
           return analyzeMarkerCall(list);
-        case "+":
-          return analyzeAdd(list);
-        case "-":
-          return analyzeVariadicNumeric(list, HaraNodes.Numeric.Operator.SUBTRACT, "-", 0L);
-        case "*":
-          return analyzeVariadicNumeric(list, HaraNodes.Numeric.Operator.MULTIPLY, "*", 1L);
-        case "/":
-          return analyzeVariadicNumeric(list, HaraNodes.Numeric.Operator.DIVIDE, "/", 1L);
-        case "mod":
-          return analyzeNumeric(list, HaraNodes.Numeric.Operator.REMAINDER, "mod");
-        case "<":
-          return analyzeCompare(list, HaraNodes.Compare.Operator.LESS, "<");
-        case "<=":
-          return analyzeCompare(list, HaraNodes.Compare.Operator.LESS_OR_EQUAL, "<=");
-        case ">":
-          return analyzeCompare(list, HaraNodes.Compare.Operator.GREATER, ">");
-        case ">=":
-          return analyzeCompare(list, HaraNodes.Compare.Operator.GREATER_OR_EQUAL, ">=");
-        case "=":
-          return analyzeCompare(list, HaraNodes.Compare.Operator.EQUAL, "=");
-        case "not=":
-          return analyzeCompare(list, HaraNodes.Compare.Operator.NOT_EQUAL, "not=");
-        case "get":
-          return analyzeCollectionOp(list, HaraNodes.CollectionOp.Kind.GET);
-        case "nth":
-          return analyzeCollectionOp(list, HaraNodes.CollectionOp.Kind.NTH);
-        case "assoc":
-          return analyzeCollectionOp(list, HaraNodes.CollectionOp.Kind.ASSOC);
-        case "first":
-          return analyzeSequenceAccess(list, HaraNodes.FirstRest.Kind.FIRST);
-        case "rest":
-          return analyzeSequenceAccess(list, HaraNodes.FirstRest.Kind.REST);
         default:
           return analyzeInvocation(list);
       }

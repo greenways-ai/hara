@@ -58,8 +58,12 @@ pub struct TryEntry {
 #[derive(Debug, Clone)]
 pub struct FunctionPrototype {
     pub name: Option<String>,
-    /// Required argument count. Always 0 for the entry function.
+    /// Required argument count. Always 0 for the entry function. When
+    /// `variadic` is set this counts only the fixed parameters.
     pub arity: u16,
+    /// Whether the last parameter binds the remaining arguments as a
+    /// `Value::List` (`[a b & rest]`).
+    pub variadic: bool,
     /// Number of captured values the frame expects in the slots directly
     /// above the parameters. Always 0 for the entry function.
     pub capture_count: u16,
@@ -79,6 +83,10 @@ pub struct FunctionPrototype {
 #[derive(Debug, Clone)]
 pub struct Program {
     pub constants: Vec<Value>,
+    /// Hara metadata tables for `DefGlobal` (docstrings, attr maps,
+    /// computed arglists), assembled at compile time from the source
+    /// forms. Empty for programs without global definitions.
+    pub var_metadata: Vec<std::rc::Rc<crate::lang::data::Metadata>>,
     pub functions: Vec<FunctionPrototype>,
     pub entry: FunctionId,
 }

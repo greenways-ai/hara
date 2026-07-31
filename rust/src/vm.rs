@@ -1,9 +1,12 @@
 //! Experimental staged bytecode VM for the Rust runtime (issue #195).
 //!
-//! Milestone 1 is synchronous and closure-free: it compiles literals,
-//! lexical locals, arithmetic, comparisons, `if`, `do`, `let`, and
-//! `loop`/`recur` into a typed instruction program and executes it on a
-//! stack machine. See `notes/rust-bytecode-vm.md` for the design.
+//! Milestone 4 compiles literals, lexical locals, arithmetic,
+//! comparisons, `if`, `do`, `let`, `loop`/`recur`, `fn` closures
+//! (including variadic), exceptions, and the registry-direct global
+//! forms (`def`, `defn`/`defn-` single- and multi-arity, `var`, `set!`,
+//! `declare`, `defstruct`, `field`, `instance?`) into a typed
+//! instruction program and executes it on a stack machine (issue #223).
+//! See `notes/rust-bytecode-vm.md` for the design.
 //!
 //! Everything in this module is gated behind the non-default `bytecode-vm`
 //! Cargo feature. The VM never replaces `Runtime::eval_native` and never
@@ -71,6 +74,9 @@ pub(crate) fn error_category(message: &str) -> &'static str {
         (&["function parameters must be a vector"], "fn params shape"),
         (&["throw expects one value"], "throw arity"),
         (&["thrown: "], "thrown"),
+        // "unbound var" is checked first: its message contains "unbound
+        // var", not "unbound symbol", so order is safe either way.
+        (&["unbound var"], "unbound var"),
         (&["unbound symbol"], "unbound symbol"),
         (&["recur"], "recur"),
         (&["Invalid number"], "reader"),
@@ -84,10 +90,10 @@ pub(crate) fn error_category(message: &str) -> &'static str {
     panic!("unclassified error message: {message}")
 }
 
-pub use compiler::compile_source;
+pub use compiler::{compile_source, compile_source_with};
 pub use disassemble::disassemble;
 pub use error::{CompileError, CompileErrorKind, ValidationError, VmError};
-pub use machine::{execute_program, Machine, VmOutcome};
+pub use machine::{execute_program, execute_program_with_globals, Machine, VmOutcome};
 pub use opcode::Instruction;
 pub use program::{FunctionId, FunctionPrototype, Program};
 pub use validate::validate;

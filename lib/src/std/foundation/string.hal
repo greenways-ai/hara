@@ -24,7 +24,8 @@
 ;; Indexes and lengths follow the portable native String contract. Canonical
 ;; names appear first; compatibility spellings are thin HAL calls into them.
 ;; ==========================================================================
-(ns std.foundation.string)
+(ns std.foundation.string
+  (:config {:blank true}))
 
 (defn ^{:schema [:fn [:str] :int]}
   length

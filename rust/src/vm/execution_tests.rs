@@ -260,8 +260,6 @@ fn recur_errors() {
 #[test]
 fn unsupported_forms_are_typed_compile_errors() {
     let cases = [
-        ("(def x 1)", "unsupported operator: def"),
-        ("(defn f [x] x)", "defn in result position requires var semantics"),
         ("(quote a)", "unsupported operator: quote"),
         ("[1 2 3]", "unsupported form: [1 2 3]"),
         ("{:a 1}", "unsupported form: {:a 1}"),
@@ -606,4 +604,99 @@ fn uncaught_throw_carries_position() {
     let text = error.to_string();
     assert!(text.starts_with("thrown: :failed [line 1, column 21]"), "{text}");
     assert!(text.contains("(instruction"), "{text}");
+}
+
+
+#[test]
+fn global_forms_issue_223() {
+    assert_eq!(eval("(def answer 42)"), "42");
+    assert_eq!(eval("(do (def answer 42) answer)"), "42");
+    assert_eq!(
+        eval("(do (def answer 19) (def answer (+ answer 23)) answer)"),
+        "42"
+    );
+    // defn interns a real var and evaluates to it; display is qualified.
+    assert_eq!(eval("(defn f [x] x)"), "#'user/f");
+    assert_eq!(eval("(do (defn f [x] (+ x 1)) (f 41))"), "42");
+    // Late binding: redefinition resets the shared cell.
+    assert_eq!(
+        eval("(do (defn f [x] 1) (defn g [] (f 0)) (defn f [x] 2) (g))"),
+        "2"
+    );
+    assert_eq!(
+        eval("(do (defn f [x] 1) (def v (var f)) (defn f [x] 2) (= v (var f)))"),
+        "true"
+    );
+    // var / #' reads the var itself.
+    assert_eq!(eval("(do (defn f [x] x) #'f)"), "#'user/f");
+    assert_eq!(eval("(do (defn f [x] x) (var f))"), "#'user/f");
+    // set! resets a global root and evaluates to the value.
+    assert_eq!(eval("(do (def c 0) (set! c (+ c 42)) c)"), "42");
+    assert_eq!(eval("(do (def c 0) (set! c 42))"), "42");
+    // declare interns a nil var and evaluates to nil.
+    assert_eq!(eval("(declare future)"), "nil");
+    assert_eq!(eval("(declare a b)"), "nil");
+    // defn- compiles like defn (private metadata).
+    assert_eq!(eval("(do (defn- p [] 42) (p))"), "42");
+}
+
+#[test]
+fn defstruct_forms_issue_223() {
+    assert_eq!(eval("(do (defstruct Point [x y]) nil)"), "nil");
+    assert_eq!(
+        eval("(do (defstruct Point [x y]) (field (->Point 19 23) :y))"),
+        "23"
+    );
+    assert_eq!(
+        eval("(do (defstruct Point [x y]) (instance? Point (->Point 1 2)))"),
+        "true"
+    );
+    assert_eq!(
+        eval("(do (defstruct Point [x y]) (instance? Point 42))"),
+        "false"
+    );
+    // Constructor vars are ordinary globals: late-bound and replaceable.
+    assert_eq!(
+        eval("(do (defstruct Point [x y]) (def make ->Point) (field (make 1 2) :x))"),
+        "1"
+    );
+}
+
+#[test]
+fn variadic_and_multi_arity_issue_223() {
+    assert_eq!(eval("((fn [left & more] left) 42 1 2)"), "42");
+    assert_eq!(eval("((fn [left & more] more) 42 1 2)"), "(1 2)");
+    assert_eq!(eval("((fn [left & more] more) 42)"), "()");
+    assert_eval_error("((fn [l r & more] l) 1)", "function expects at least 2 arguments");
+    assert_eq!(
+        eval("(do (defn choose ([v] v) ([l r] (+ l r))) (+ (choose 19) (choose 20 3)))"),
+        "42"
+    );
+    assert_eq!(
+        eval("(do (defn sum3 ([a b] (+ a b)) ([a b c & more] (+ a b c))) (sum3 19 20 3))"),
+        "42"
+    );
+    assert_eq!(eval("(do (defn rest-args [f & r] r) (rest-args 42 1 2))"), "(1 2)");
+}
+
+#[test]
+fn global_form_errors_issue_223() {
+    let (kind, message) = compile_error("(set! missing 1)");
+    assert_eq!(kind, CompileErrorKind::UnboundSymbol);
+    assert!(message.contains("unbound var: missing"), "{message}");
+    let (kind, message) = compile_error("(var missing)");
+    assert_eq!(kind, CompileErrorKind::UnboundSymbol);
+    assert!(message.contains("unbound var: missing"), "{message}");
+    let (_, message) = compile_error("(let [x 1] (set! x 2))");
+    assert!(message.contains("set! targets a global var"), "{message}");
+    // Field errors surface at runtime, not compile time.
+    assert_eval_error("(do (defstruct P [x]) (field (->P 1) :z))", "unknown struct field: z");
+    assert_eval_error("(do (defstruct P [x]) (field 42 :x))", "field expects a struct");
+    assert_eval_error("(do (defstruct P [x]) (instance? 42 1))", "instance? expects a struct type");
+    // Foundation replacement still requires declare (issue #202 ruling).
+    let (_, message) = compile_error("(do (defn count [n] 42) (count 5))");
+    assert!(message.contains("replaces std.foundation var: count"), "{message}");
+    // Uninitialized let-style errors keep their shape.
+    let (_, message) = compile_error("(fn [a &] a)");
+    assert!(message.contains("rest parameter must be the last"), "{message}");
 }

@@ -1,4 +1,5 @@
 (ns std.foundation.pretty
+  (:config {:blank true})
   (:require [std.foundation.pretty.engine :as engine]))
 
 (defn render

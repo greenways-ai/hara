@@ -211,14 +211,14 @@
 (defn ^{:schema [:fn [:any] :bool]}
   empty?
   "Returns true if value yields no items."
-  [value] (not (iter-has? (iter value))))
+  [value] (not (iter-next? (iter value))))
 
 (defn ^{:schema [:fn [:any] :any]}
   first
   "Returns the first item of value, or nil if value is empty."
   [value]
   (let [it (iter value)]
-    (if (iter-has? it) (iter-next it) nil)))
+    (if (iter-next? it) (iter-next it) nil)))
 
 (defn ^{:schema [:fn [:any] :any]}
   second
@@ -229,7 +229,7 @@
   rest
   "Returns all but the first item of value as a seq, or nil if empty."
   [value]
-  (seq (iter-drop 1 value)))
+  (seq (Iter/iter-drop 1 value)))
 
 (defn ^{:schema [:fn [:any] :any]}
   not-empty
@@ -241,9 +241,9 @@
   "Returns the last item of value, or nil if value is empty."
   [value]
   (let [it (iter value)]
-    (if (iter-has? it)
+    (if (iter-next? it)
       (loop [result (iter-next it)]
-        (if (iter-has? it) (recur (iter-next it)) result))
+        (if (iter-next? it) (recur (iter-next it)) result))
       nil)))
 
 (defn ^{:schema [:fn [:any] :any]}
@@ -252,7 +252,7 @@
   [value]
   (let [it (iter value)]
     (loop [result '()]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (recur (cons (iter-next it) result))
         result))))
 
@@ -724,7 +724,7 @@
   [comparison value values]
   (let [it (iter values)]
     (loop [result []]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (let [item (iter-next it)]
           (if (<= (comparison value item) 0)
             (vec (concat result [value item] (seq it)))
@@ -793,7 +793,7 @@
   [predicate values]
   (let [it (iter values)]
     (loop [prefix []]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (let [value (iter-next it)]
           (if (predicate value)
             (recur (conj prefix value))
@@ -812,7 +812,7 @@
            group []
            previous nil
            started false]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (let [value (iter-next it)
               marker (function value)]
           (if (if started (not= marker previous) false)
@@ -829,7 +829,7 @@
     (let [it (iter values)]
       (loop [index 0
              result []]
-        (if (iter-has? it)
+        (if (iter-next? it)
           (let [value (iter-next it)]
             (recur (+ index 1)
                    (if (= (mod index amount) 0)
@@ -855,7 +855,7 @@
   (let [it (iter values)]
     (loop [seen {}
            result []]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (let [value (iter-next it)]
           (if (has? seen value)
             (recur seen result)
@@ -868,7 +868,7 @@
   [& values]
   (let [it (iter values)]
     (loop [seen {}]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (let [value (iter-next it)]
           (if (has? seen value)
             false
@@ -882,7 +882,7 @@
   (let [key-it (iter map-keys)
         value-it (iter map-values)]
     (loop [result {}]
-      (if (if (iter-has? key-it) (iter-has? value-it) false)
+      (if (if (iter-next? key-it) (iter-next? value-it) false)
         (recur (assoc result (iter-next key-it) (iter-next value-it)))
         result))))
 
@@ -893,7 +893,7 @@
   [function value-map]
   (let [it (iter value-map)]
     (loop [result {}]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (let [entry (iter-next it)]
           (recur (assoc result
                         (function (key entry))
@@ -906,7 +906,7 @@
   [function value-map]
   (let [it (iter value-map)]
     (loop [result {}]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (let [entry (iter-next it)]
           (recur (assoc result
                         (key entry)
@@ -1111,7 +1111,7 @@
   [target forms]
   (let [it (iter forms)]
     (loop [calls []]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (recur (conj calls
                      (thread-first-form target (iter-next it))))
         calls))))

@@ -160,7 +160,7 @@ pub(crate) const CORE_SPECIAL_FORMS: &[&str] = &[
     "iter-every?",
     "iter-any?",
     "iter-finite?",
-    "iter-has?",
+    "iter-next?",
     "iter-interleave",
     "iter-interpose",
     "iter-iterate",

@@ -28,7 +28,8 @@
 ;; Sessions isolate evaluator state. Resources are executable `.hal` source.
 ;; Filesystems are opaque host handles and may be closed only after detaching.
 ;; ============================================================================
-(ns std.foundation.kernel)
+(ns std.foundation.kernel
+  (:config {:blank true}))
 
 (defn ^{:schema [:fn [:str] :any]}
   session-create
