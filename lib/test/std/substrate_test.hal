@@ -5,7 +5,7 @@
 
 (def results
   [(test/check
-    "node-create applies declarative spaces, services and handlers"
+    "node-create applies declarative spaces services and handlers"
     (let [node (substrate/node-create
                 {:id "node/config"
                  :spaces {"main" {:state {:count 1}
@@ -22,7 +22,8 @@
                    (substrate/get-service current-node "cache")))))
       [(substrate/node-id node)
        (substrate/get-space-state node "main")
-       (substrate/request node "main" "sum" [19 23] {:local true})])
+       (promise/value
+        (substrate/request node "main" "sum" [19 23] {:local true}))])
     ["node/config" {:count 42} 42])
 
    (test/check
@@ -77,7 +78,7 @@
     42)
 
    (test/check
-    "subscriptions route streams without echoing to the inbound transport"
+    "subscriptions route streams without echoing to inbound transport"
     (let [node (substrate/node-create {:id "node/router"})
           peer-a (atom [])
           peer-b (atom [])]
