@@ -179,6 +179,7 @@ public final class HaraContext {
   private final Map<String, Map<String, HaraMacro>> macros = new ConcurrentHashMap<>();
   private final Map<String, Map<String, String>> aliases = new ConcurrentHashMap<>();
   private final Map<String, NamespaceLoadState> namespaceStates = new ConcurrentHashMap<>();
+  private final Map<String, String> namespaceFailures = new ConcurrentHashMap<>();
   private final Map<String, String> nativeFlavors = new ConcurrentHashMap<>();
   private final Map<String, Map<String, Object>> nativeImports = new ConcurrentHashMap<>();
   private final NativeFlavorRegistry nativeFlavorRegistry =
@@ -830,8 +831,11 @@ public final class HaraContext {
       throw new HaraException("Cyclic namespace require: " + target);
     }
     if (state == NamespaceLoadState.FAILED) {
+      String detail = namespaceFailures.get(target);
       throw new HaraException(
-          "Namespace load previously failed; use explicit reload to retry: " + target);
+          "Namespace load previously failed; use explicit reload to retry: "
+              + target
+              + (detail == null ? "" : " (initial failure: " + detail + ")"));
     }
 
     ContextSnapshot snapshot = snapshot();
@@ -856,13 +860,19 @@ public final class HaraContext {
       if (loaded == null) {
         restore(snapshot);
         namespaceStates.put(target, NamespaceLoadState.FAILED);
+        namespaceFailures.put(
+            target, "no library, source, or extension provided this namespace");
         return null;
       }
       namespaceStates.put(target, NamespaceLoadState.LOADED);
+      namespaceFailures.remove(target);
       return loaded;
     } catch (RuntimeException failure) {
       restore(snapshot);
       namespaceStates.put(target, NamespaceLoadState.FAILED);
+      namespaceFailures.put(
+          target,
+          failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage());
       throw failure;
     }
   }
@@ -3710,8 +3720,8 @@ public final class HaraContext {
       return result;
     } catch (IOException | RuntimeException error) {
       restore(snapshot);
-      throw new HaraException(
-          "Unable to load Hara file: " + value + " (" + error.getMessage() + ")");
+      throw HaraException.withCause(
+          "Unable to load Hara file: " + value + " (" + error.getMessage() + ")", error);
     }
   }
 
@@ -3916,8 +3926,8 @@ public final class HaraContext {
     } catch (IOException | RuntimeException error) {
       restore(snapshot);
       if (error instanceof HaraException) throw (HaraException) error;
-      throw new HaraException(
-          "Unable to load Hara resource: " + value + " (" + error.getMessage() + ")");
+      throw HaraException.withCause(
+          "Unable to load Hara resource: " + value + " (" + error.getMessage() + ")", error);
     }
   }
 
@@ -4003,14 +4013,22 @@ public final class HaraContext {
           restore(snapshot);
           if (previousState != NamespaceLoadState.LOADED) {
             namespaceStates.put(target, NamespaceLoadState.FAILED);
+            namespaceFailures.put(
+                target, "no library, source, or extension provided this namespace");
           }
         } else {
           namespaceStates.put(target, NamespaceLoadState.LOADED);
+          namespaceFailures.remove(target);
         }
       } catch (RuntimeException failure) {
         restore(snapshot);
         if (previousState != NamespaceLoadState.LOADED) {
           namespaceStates.put(target, NamespaceLoadState.FAILED);
+          namespaceFailures.put(
+              target,
+              failure.getMessage() == null
+                  ? failure.getClass().getSimpleName()
+                  : failure.getMessage());
         }
         throw failure;
       }

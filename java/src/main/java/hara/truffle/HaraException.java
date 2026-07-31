@@ -17,6 +17,16 @@ public final class HaraException extends AbstractTruffleException {
     this.haraLocation = location;
   }
 
+  private HaraException(String message, Throwable cause) {
+    super(message, cause, -1, null);
+    this.haraLocation = null;
+  }
+
+  /** Wraps a cause without dropping it, for diagnostics that cross load boundaries. */
+  public static HaraException withCause(String message, Throwable cause) {
+    return new HaraException(message, cause);
+  }
+
   public Node haraLocation() {
     return haraLocation;
   }
