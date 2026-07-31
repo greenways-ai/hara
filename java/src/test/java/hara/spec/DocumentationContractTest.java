@@ -19,8 +19,8 @@ import org.junit.Test;
 public class DocumentationContractTest {
   private static final List<Path> ACTIVE_SPECIFICATIONS =
       List.of(
-          Path.of("specs/01-language-meta/000-metaspec/draft/hal-metaspec.edn"),
-          Path.of("specs/01-language-meta/001-language/draft/hal-langspec.edn"));
+          Path.of("specs/01-lang/000-metaspec/draft/hal-metaspec.edn"),
+          Path.of("specs/01-lang/001-language/draft/hal-langspec.edn"));
 
   private static void assumeSpecsSubmodule() {
     assumeTrue(
