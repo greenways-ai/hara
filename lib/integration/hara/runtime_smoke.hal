@@ -1,0 +1,32 @@
+(ns hara.runtime-smoke
+  (:require [std.foundation.string :as string]
+            [hara.runtime :as runtime]
+            [tahto.common.emit :as emit]
+            [tahto.model.v1.spec-js :as spec-js]
+            [tahto.model.v1.spec-python :as spec-python]))
+
+(def js-source
+  (emit/emit '(console.log (+ 19 23))
+             (spec-js/select)))
+
+(def python-source
+  (emit/emit '(print (+ 19 23))
+             (spec-python/select)))
+
+(def js-result
+  (deref (runtime/run :js js-source)))
+
+(def python-result
+  (deref (runtime/run :python python-source)))
+
+(if (and (= "42" (string/trim (:stdout js-result)))
+         (= "42" (string/trim (:stdout python-result)))
+         (= :js (:runtime/tag js-result))
+         (= :py (:runtime/tag python-result)))
+  {:status :passed
+   :js js-result
+   :python python-result}
+  (throw
+   (ex-info "Tahto target-runtime smoke failed"
+            {:js js-result
+             :python python-result})))

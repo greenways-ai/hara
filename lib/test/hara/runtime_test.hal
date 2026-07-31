@@ -1,0 +1,26 @@
+(ns hara.runtime-test
+  (:require [std.lib.test :as test]
+            [hara.runtime :as runtime]))
+
+(def results
+  [(test/check "JavaScript command construction uses language :js"
+               (runtime/command :js
+                                "console.log(42)"
+                                {:executable "node-test"})
+               ["node-test" "--input-type=module" "--eval" "console.log(42)"])
+   (test/check "Python command construction uses language :python"
+               (runtime/command :python
+                                "print(42)"
+                                {:executable "python-test"})
+               ["python-test" "-c" "print(42)"])
+   (test/check "runtime descriptors preserve Foundation language/tag identity"
+               [(select-keys (runtime/runtime :js)
+                             [:runtime/language :runtime/tag])
+                (select-keys (runtime/runtime :python)
+                             [:runtime/language :runtime/tag])]
+               [{:runtime/language :js
+                 :runtime/tag :js}
+                {:runtime/language :python
+                 :runtime/tag :py}])])
+
+(test/print-results results)

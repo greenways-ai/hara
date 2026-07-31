@@ -1,0 +1,139 @@
+{:migration/id :foundation-base/tahto-to-hara
+ :migration/version 1
+ :reference
+ {:repository "zcaudate-xyz/foundation-base"
+  :commit "f909a44ad504cc6c9f44248d59ec3148261a48d7"
+  :root "src/tahto"}
+ :target
+ {:repository "hara-lang/hara"
+  :base-commit "2da363794c8b56a171aaa5fb7f6e06c58d0693ed"
+  :root "lib/src/tahto"}
+ :rules
+ {:reference-read-only true
+  :language :hal
+  :tests-required true
+  :no-jvm-compatibility-layer true
+  :preserve-modular-boundaries true
+  :preserve-foundation-names true
+  :versioned-namespaces true}
+ :naming
+ {:version 1
+  :common-grammar tahto.base.v1.grammar-spec
+  :common-model tahto.model.v1.spec-xtalk
+  :javascript
+  {:namespace tahto.model.v1.spec-js
+   :language :js
+   :tag :js}
+  :python
+  {:namespace tahto.model.v1.spec-python
+   :language :python
+   :tag :py}}
+ :phases
+ [{:id :common-emit
+   :priority 1
+   :files
+   [{:source "src/tahto/base/emit_common.clj"
+     :target "lib/src/tahto/common/emit.hal"
+     :status :phase-1-ported
+     :coverage [:tokens :reserved-values :comments :free-forms
+                :prefix :postfix :infix :binary :ternary :assign
+                :collections :invoke :index :do :block :function
+                :def :defn :return :macro]
+     :remaining [:decorators :uuid :random-symbols :typed-arguments
+                 :language-specific-hooks :all-foundation-fixtures]}
+    {:source "src/tahto/base/emit_helper.clj"
+     :target "lib/src/tahto/common/emit_helper.hal"
+     :status :ported-existing}
+    {:source "src/tahto/base/emit_assign.clj"
+     :target "lib/src/tahto/common/emit_assign.hal"
+     :status :pending}
+    {:source "src/tahto/base/emit_data.clj"
+     :target "lib/src/tahto/common/emit_data.hal"
+     :status :pending}
+    {:source "src/tahto/base/emit_block.clj"
+     :target "lib/src/tahto/common/emit_block.hal"
+     :status :pending}
+    {:source "src/tahto/base/emit_fn.clj"
+     :target "lib/src/tahto/common/emit_fn.hal"
+     :status :pending}
+    {:source "src/tahto/base/emit_special.clj"
+     :target "lib/src/tahto/common/emit_special.hal"
+     :status :pending}
+    {:source "src/tahto/base/emit_top_level.clj"
+     :target "lib/src/tahto/common/emit_top_level.hal"
+     :status :pending}
+    {:source "src/tahto/base/emit.clj"
+     :target "lib/src/tahto/common/compiler.hal"
+     :status :partial-existing}]}
+  {:id :model-specifications
+   :priority 2
+   :files
+   [{:source "src/tahto/base/grammar_spec.clj"
+     :target "lib/src/tahto/base/v1/grammar_spec.hal"
+     :status :phase-1-versioned
+     :version 1}
+    {:source "src/tahto/model/spec_xtalk.clj"
+     :target "lib/src/tahto/model/v1/spec_xtalk.hal"
+     :status :phase-1-ported
+     :language :xtalk
+     :tag :xtalk
+     :version 1}
+    {:source "src/tahto/model/spec_js.clj"
+     :target "lib/src/tahto/model/v1/spec_js.hal"
+     :status :phase-1-ported
+     :language :js
+     :tag :js
+     :version 1
+     :parent :xtalk}
+    {:source "src/tahto/model/spec_python.clj"
+     :target "lib/src/tahto/model/v1/spec_python.hal"
+     :status :phase-1-ported
+     :language :python
+     :tag :py
+     :version 1
+     :parent :xtalk}
+    {:source "src/tahto/model/spec_js/ts.clj"
+     :target "lib/src/tahto/model/v1/spec_js/ts.hal"
+     :status :pending}
+    {:source "src/tahto/model/spec_js/jsx.clj"
+     :target "lib/src/tahto/model/v1/spec_js/jsx.hal"
+     :status :pending}
+    {:source "src/tahto/model/spec_js/html.clj"
+     :target "lib/src/tahto/model/v1/spec_js/html.hal"
+     :status :pending}
+    {:source "src/tahto/model/spec_js/qml.clj"
+     :target "lib/src/tahto/model/v1/spec_js/qml.hal"
+     :status :pending}
+    {:source "src/tahto/model/spec_c.clj" :status :pending}
+    {:source "src/tahto/model/spec_go.clj" :status :pending}
+    {:source "src/tahto/model/spec_lua.clj" :status :pending}
+    {:source "src/tahto/model/spec_sql.clj" :status :pending}
+    {:source "src/tahto/model/spec_postgres.clj" :status :pending}
+    {:source "src/tahto/model/spec_glsl.clj" :status :pending}
+    {:source "src/tahto/model/spec_dart.clj" :status :pending}
+    {:source "src/tahto/model/spec_bash.clj" :status :pending}
+    {:source "src/tahto/model/spec_llvm.clj" :status :pending}
+    {:source "src/tahto/model/spec_haxe.clj" :status :pending}
+    {:source "src/tahto/model/spec_elisp.clj" :status :pending}
+    {:source "src/tahto/model/spec_scheme.clj" :status :pending}
+    {:source "src/tahto/model/spec_ruby.clj" :status :pending}]}
+  {:id :target-runtimes
+   :priority 3
+   :files
+   [{:source "src/tahto/runtime/basic.clj"
+     :target "lib/src/hara/runtime.hal"
+     :status :phase-1-ported
+     :languages [:js :python]
+     :tags [:js :py]
+     :mode :oneshot-process}
+    {:source "src/tahto/runtime/shell.clj" :status :pending}
+    {:source "src/tahto/runtime/graal.clj" :status :not-required-for-js-python}
+    {:source "src/tahto/runtime/libpython.clj" :status :deferred}
+    {:source "src/tahto/runtime/jep.clj" :status :deferred}]}]
+ :acceptance
+ {:unit-tests ["lib/test/tahto/common/emit_test.hal"
+               "lib/test/tahto/common/emit_compat_test.hal"
+               "lib/test/tahto/model/target_models_test.hal"
+               "lib/test/hara/runtime_test.hal"]
+  :integration-test "lib/integration/hara/runtime_smoke.hal"
+  :required-hosts ["node" "python3"]}}

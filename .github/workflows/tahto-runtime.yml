@@ -1,0 +1,37 @@
+name: Tahto JS and Python runtime
+
+on:
+  pull_request:
+    paths:
+      - 'lib/src/tahto/**'
+      - 'lib/src/hara/runtime.hal'
+      - 'lib/test/tahto/**'
+      - 'lib/test/hara/runtime_test.hal'
+      - 'lib/integration/hara/runtime_smoke.hal'
+      - 'scripts/run-hara-runtime-smoke'
+      - '.github/workflows/tahto-runtime.yml'
+  workflow_dispatch:
+
+jobs:
+  runtime-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+          cache-dependency-path: java/pom.xml
+      - name: Build Hara Truffle runtime
+        run: mvn -B -Ptruffle -DskipTests package --file java/pom.xml
+      - name: Execute emitted JavaScript and Python
+        run: bash scripts/run-hara-runtime-smoke
