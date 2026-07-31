@@ -290,6 +290,10 @@ final class HaraAnalyzer {
           return analyzeCollectionOp(list, HaraNodes.CollectionOp.Kind.NTH);
         case "assoc":
           return analyzeCollectionOp(list, HaraNodes.CollectionOp.Kind.ASSOC);
+        case "first":
+          return analyzeSequenceAccess(list, HaraNodes.FirstRest.Kind.FIRST);
+        case "rest":
+          return analyzeSequenceAccess(list, HaraNodes.FirstRest.Kind.REST);
         default:
           return analyzeInvocation(list);
       }
@@ -1842,6 +1846,19 @@ final class HaraAnalyzer {
       arguments[i - 1] = analyze(form.nth(i));
     }
     return new HaraNodes.CollectionOp(kind, context.canonicalSymbol(operator), arguments);
+  }
+
+  /**
+   * Specializes first/rest call sites. Falls back to a plain invocation whenever the operator is
+   * lexically shadowed or the arity is outside the specialized shape, so error behavior for
+   * unsupported arities is exactly that of the generic path.
+   */
+  private HaraExpressionNode analyzeSequenceAccess(List<?> form, HaraNodes.FirstRest.Kind kind) {
+    Symbol operator = (Symbol) form.nth(0);
+    if (form.count() != 2 || isLexicallyBound(operator)) {
+      return analyzeInvocation(form);
+    }
+    return new HaraNodes.FirstRest(kind, context.canonicalSymbol(operator), analyze(form.nth(1)));
   }
 
   private void requireCount(List<?> form, long expected, String name) {
