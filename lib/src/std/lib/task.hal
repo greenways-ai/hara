@@ -1,7 +1,8 @@
 ;; Portable task descriptions and invocation, including Foundation-compatible
 ;; invocation and display protocols.
 (ns std.lib.task
-  (:require [std.lib.task.process :as process]
+  (:require [std.lib.task.protocol :as protocol]
+            [std.lib.task.process :as process]
             [std.foundation.string :as string]
             [std.foundation.edn :as edn]))
 
@@ -16,22 +17,38 @@
 (defn task-from-map
   [config]
   (std.lib.task/Task (:type config)
-                 (:name config)
-                 (:main config)
-                 (:construct config)
-                 (:arglists config)
-                 (:item config)
-                 (:result config)
-                 (:summary config)
-                 (:params config)))
+                     (:name config)
+                     (:main config)
+                     (:construct config)
+                     (:arglists config)
+                     (:item config)
+                     (:result config)
+                     (:summary config)
+                     (:params config)))
+
+(extend-type Task protocol/ITaskDefinition
+  (task-type [task]
+    (field task :type))
+  (task-name [task]
+    (field task :name))
+  (task-config [task]
+    {:type (field task :type)
+     :name (field task :name)
+     :main (field task :main)
+     :construct (field task :construct)
+     :arglists (field task :arglists)
+     :item (field task :item)
+     :result (field task :result)
+     :summary (field task :summary)
+     :params (field task :params)}))
 
 (defn task-status
   [task]
-  (field task :type))
+  (protocol/task-type task))
 
 (defn task-info
   [task]
-  {:fn (symbol (field task :name))})
+  {:fn (symbol (protocol/task-name task))})
 
 (defn task-string
   [task]
