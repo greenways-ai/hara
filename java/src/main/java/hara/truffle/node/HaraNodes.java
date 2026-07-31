@@ -176,7 +176,7 @@ public final class HaraNodes {
       }
       if (value instanceof AutoGensym auto) {
         return gensyms.computeIfAbsent(
-            auto.index, ignored -> HaraLanguage.currentContext().gensym(auto.prefix));
+            auto.index, ignored -> HaraLanguage.currentContext(this).gensym(auto.prefix));
       }
       if (value instanceof hara.lang.data.List<?> list) {
         ArrayList<Object> output = new ArrayList<>();
@@ -842,7 +842,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      HaraContext context = HaraLanguage.currentContext();
+      HaraContext context = HaraLanguage.currentContext(this);
       if (context.hasNativeSymbol(symbol)) return context.resolveNativeSymbol(symbol);
       HaraVar var = context.resolve(symbol);
       if (var == null) {
@@ -866,7 +866,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      HaraVar var = HaraLanguage.currentContext().resolve(symbol);
+      HaraVar var = HaraLanguage.currentContext(this).resolve(symbol);
       if (var == null) {
         throw unboundError("var");
       }
@@ -889,7 +889,7 @@ public final class HaraNodes {
     @Override
     public Object execute(VirtualFrame frame) {
       Object receiver = value.execute(frame);
-      HaraVar protocolVar = HaraLanguage.currentContext().resolve(Symbol.create("IDeref"));
+      HaraVar protocolVar = HaraLanguage.currentContext(this).resolve(Symbol.create("IDeref"));
       HaraProtocol protocol = (HaraProtocol) protocolVar.get();
       return protocol.invoke("deref", receiver, new Object[0]);
     }
@@ -906,7 +906,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      HaraVar var = HaraLanguage.currentContext().resolve(symbol);
+      HaraVar var = HaraLanguage.currentContext(this).resolve(symbol);
       if (var == null) {
         throw unboundError("var");
       }
@@ -1045,7 +1045,7 @@ public final class HaraNodes {
       int bound = 0;
       try {
         for (int i = 0; i < symbols.length; i++) {
-          HaraVar var = HaraLanguage.currentContext().resolve(symbols[i]);
+          HaraVar var = HaraLanguage.currentContext(this).resolve(symbols[i]);
           if (var == null) {
             throw bindingError("Unbound dynamic var: ", symbols[i]);
           }
@@ -1179,7 +1179,7 @@ public final class HaraNodes {
         if ("BigInteger".equals(typeName)) return value instanceof java.math.BigInteger;
         if ("BigDecimal".equals(typeName)) return value instanceof java.math.BigDecimal;
         if (value instanceof Throwable) {
-          return HaraLanguage.currentContext().matchesNativeThrowable(type, (Throwable) value);
+          return HaraLanguage.currentContext(this).matchesNativeThrowable(type, (Throwable) value);
         }
         return false;
       }
@@ -1254,7 +1254,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      return HaraLanguage.currentContext().define(symbol, initializer.execute(frame));
+      return HaraLanguage.currentContext(this).define(symbol, initializer.execute(frame));
     }
   }
 
@@ -1269,7 +1269,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      return HaraLanguage.currentContext().macroExpand(form.execute(frame), recursive);
+      return HaraLanguage.currentContext(this).macroExpand(form.execute(frame), recursive);
     }
   }
 
@@ -1286,7 +1286,7 @@ public final class HaraNodes {
     public Object execute(VirtualFrame frame) {
       Object pathValue = path.execute(frame);
       Object optionsValue = options.execute(frame);
-      return HaraLanguage.currentContext()
+      return HaraLanguage.currentContext(this)
           .requireModule(
               optionsValue == null
                   ? new Object[] {pathValue}
@@ -1303,7 +1303,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      HaraContext context = HaraLanguage.currentContext();
+      HaraContext context = HaraLanguage.currentContext(this);
       for (Symbol symbol : symbols) context.define(symbol, null);
       return null;
     }
@@ -1324,7 +1324,7 @@ public final class HaraNodes {
       if (!(value instanceof HaraFunction)) {
         throw new HaraException("defmulti dispatch function must be a function", this);
       }
-      return HaraLanguage.currentContext()
+      return HaraLanguage.currentContext(this)
           .define(symbol, new HaraMultiFunction((HaraFunction) value));
     }
   }
@@ -1343,7 +1343,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      HaraContext context = HaraLanguage.currentContext();
+      HaraContext context = HaraLanguage.currentContext(this);
       HaraVar var = context.resolve(symbol);
       if (var == null || !(var.get() instanceof HaraMultiFunction)) {
         throw defmultiError();
@@ -1375,7 +1375,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      HaraLanguage.currentContext().setCurrentNamespace(symbol, clauses);
+      HaraLanguage.currentContext(this).setCurrentNamespace(symbol, clauses);
       return symbol;
     }
   }
@@ -1391,7 +1391,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      HaraLanguage.currentContext().defineAlias(alias, target);
+      HaraLanguage.currentContext(this).defineAlias(alias, target);
       return alias;
     }
   }
@@ -1407,7 +1407,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      return HaraLanguage.currentContext().defineLanguageProtocol(symbol, protocol);
+      return HaraLanguage.currentContext(this).defineLanguageProtocol(symbol, protocol);
     }
   }
 
@@ -1512,7 +1512,7 @@ public final class HaraNodes {
     public Object execute(VirtualFrame frame) {
       requireHostInterop(this);
       try {
-        return HaraLanguage.currentContext().lookupHostSymbol(name);
+        return HaraLanguage.currentContext(this).lookupHostSymbol(name);
       } catch (RuntimeException exception) {
         throw hostSymbolError();
       }
@@ -1538,7 +1538,7 @@ public final class HaraNodes {
       requireHostInterop(this);
       Object targetValue = target.execute(frame);
       try {
-        return HaraLanguage.currentContext()
+        return HaraLanguage.currentContext(this)
             .asGuestValue(InteropLibrary.getUncached().readMember(targetValue, member));
       } catch (UnsupportedMessageException | UnknownIdentifierException exception) {
         throw hostGetError();
@@ -1571,7 +1571,7 @@ public final class HaraNodes {
         values[i] = arguments[i].execute(frame);
       }
       try {
-        return HaraLanguage.currentContext()
+        return HaraLanguage.currentContext(this)
             .asGuestValue(InteropLibrary.getUncached().invokeMember(targetValue, member, values));
       } catch (UnsupportedMessageException
           | UnknownIdentifierException
@@ -1600,7 +1600,7 @@ public final class HaraNodes {
     public Object execute(VirtualFrame frame) {
       Object[] values = new Object[arguments.length];
       for (int i = 0; i < arguments.length; i++) values[i] = arguments[i].execute(frame);
-      return HaraLanguage.currentContext().constructNative(type.execute(frame), values);
+      return HaraLanguage.currentContext(this).constructNative(type.execute(frame), values);
     }
   }
 
@@ -1615,7 +1615,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      return HaraLanguage.currentContext().readNativeMember(receiver.execute(frame), member);
+      return HaraLanguage.currentContext(this).readNativeMember(receiver.execute(frame), member);
     }
   }
 
@@ -1630,7 +1630,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      return HaraLanguage.currentContext()
+      return HaraLanguage.currentContext(this)
           .indexNative(receiver.execute(frame), index.execute(frame));
     }
   }
@@ -1651,12 +1651,12 @@ public final class HaraNodes {
       Object target = receiver.execute(frame);
       Object[] values = new Object[arguments.length];
       for (int i = 0; i < arguments.length; i++) values[i] = arguments[i].execute(frame);
-      return HaraLanguage.currentContext().invokeMarkerMethod(target, method, values);
+      return HaraLanguage.currentContext(this).invokeMarkerMethod(target, method, values);
     }
   }
 
   private static void requireHostInterop(HaraExpressionNode location) {
-    if (!HaraLanguage.currentContext().hostInteropAllowed()) {
+    if (!HaraLanguage.currentContext(location).hostInteropAllowed()) {
       throw new HaraException("Host interop is disabled for this Hara context", location);
     }
   }
@@ -2091,7 +2091,7 @@ public final class HaraNodes {
     @TruffleBoundary
     private Object invokeViaProtocol(Object target, Object[] values) {
       try {
-        return HaraLanguage.currentContext().ifnProtocol().invoke("invoke", target, values);
+        return HaraLanguage.currentContext(this).ifnProtocol().invoke("invoke", target, values);
       } catch (HaraException error) {
         if (error.haraLocation() != null) throw error;
         throw new HaraException(error.getMessage(), this);
@@ -2156,7 +2156,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      HaraContext context = HaraLanguage.currentContext();
+      HaraContext context = HaraLanguage.currentContext(this);
       Object value = argument.execute(frame);
       Object target = readOperator(context);
       Object canonical = context.intrinsicSequenceFunction(kind.functionName);
@@ -2251,7 +2251,7 @@ public final class HaraNodes {
     @TruffleBoundary
     private Object invokeViaProtocol(Object target, Object[] values) {
       try {
-        return HaraLanguage.currentContext().ifnProtocol().invoke("invoke", target, values);
+        return HaraLanguage.currentContext(this).ifnProtocol().invoke("invoke", target, values);
       } catch (HaraException error) {
         if (error.haraLocation() != null) throw error;
         throw new HaraException(error.getMessage(), this);
@@ -2313,7 +2313,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      HaraContext context = HaraLanguage.currentContext();
+      HaraContext context = HaraLanguage.currentContext(this);
       Object target = readOperator(context);
       Object canonical = context.intrinsicCollectionBuiltin(symbol.getName());
       if (canonical == null || target != canonical) {
@@ -2504,7 +2504,7 @@ public final class HaraNodes {
     @TruffleBoundary
     private Object invokeViaProtocol(Object target, Object[] values) {
       try {
-        return HaraLanguage.currentContext().ifnProtocol().invoke("invoke", target, values);
+        return HaraLanguage.currentContext(this).ifnProtocol().invoke("invoke", target, values);
       } catch (HaraException error) {
         if (error.haraLocation() != null) throw error;
         throw new HaraException(error.getMessage(), this);
