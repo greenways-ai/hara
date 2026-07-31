@@ -1993,6 +1993,16 @@ public final class HaraContext {
     return result;
   }
 
+  private static String displayText(Object unwrapped) {
+    if (unwrapped instanceof IDisplay) {
+      return ((IDisplay) unwrapped).display();
+    }
+    if (unwrapped instanceof Iterator) {
+      return "#<lazy-iterator>";
+    }
+    return String.valueOf(unwrapped);
+  }
+
   private static String concatenateStrings(Object[] values) {
     StringBuilder result = new StringBuilder();
     for (Object value : values) {
@@ -2000,11 +2010,7 @@ public final class HaraContext {
       if (unwrapped == null || unwrapped == HaraNull.SINGLETON) {
         continue;
       }
-      if (unwrapped instanceof IDisplay) {
-        result.append(((IDisplay) unwrapped).display());
-      } else {
-        result.append(unwrapped);
-      }
+      result.append(displayText(unwrapped));
     }
     return result.toString();
   }
@@ -2017,9 +2023,7 @@ public final class HaraContext {
         Object unwrapped = HaraBox.unwrap(value);
         parts.add(unwrapped == null || unwrapped == HaraNull.SINGLETON
             ? "nil"
-            : unwrapped instanceof IDisplay
-                ? ((IDisplay) unwrapped).display()
-                : String.valueOf(unwrapped));
+            : displayText(unwrapped));
       }
       text = String.join(" ", parts) + "\n";
     } else {
@@ -4882,7 +4886,7 @@ public final class HaraContext {
     arguments[0] = var.deref();
     System.arraycopy(values, 2, arguments, 1, values.length - 2);
     Object updated = invokeCallable(function, arguments);
-    return var.reset(updated);
+    return var.reset(HaraBox.unwrap(updated));
   }
 
   private Object applyFunction(Object[] values) {

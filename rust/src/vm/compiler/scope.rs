@@ -56,6 +56,23 @@ impl ScopeStack {
         Ok(slot)
     }
 
+    /// Allocates a fresh slot in the innermost scope without registering a
+    /// name: internal compiler state (try pending slots) that no user
+    /// symbol can resolve or shadow.
+    pub fn declare_hidden(&mut self) -> Result<u16, CompileError> {
+        let slot = self.next_slot;
+        if usize::from(slot) >= MAX_LOCALS {
+            return Err(CompileError::new(
+                CompileErrorKind::Limit,
+                format!("local slots exceed limit of {MAX_LOCALS}"),
+                None,
+            ));
+        }
+        self.next_slot += 1;
+        self.high_water = self.high_water.max(self.next_slot);
+        Ok(slot)
+    }
+
     /// Resolves a symbol innermost-first.
     pub fn resolve(&self, name: &str) -> Option<u16> {
         self.scopes

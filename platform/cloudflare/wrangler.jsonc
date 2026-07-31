@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hara-platform",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-31",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "routes": [
+    { "pattern": "id.hara-lang.org", "custom_domain": true },
+    { "pattern": "packages.hara-lang.org", "custom_domain": true },
+    { "pattern": "assets.hara-lang.org", "custom_domain": true }
+  ],
+  "r2_buckets": [
+    { "binding": "OBJECTS", "bucket_name": "hara-objects" },
+    { "binding": "ASSETS", "bucket_name": "hara-assets" }
+  ],
+  "vars": {
+    "IDENTITY_REPOSITORY": "hara-lang/hara-identity",
+    "PACKAGES_REPOSITORY": "hara-lang/hara-packages"
+  }
+}

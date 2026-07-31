@@ -24,6 +24,35 @@ pub const MAX_CAPTURES: usize = u8::MAX as usize;
 /// Index of a function prototype inside [`Program::functions`].
 pub type FunctionId = u16;
 
+/// One `catch` clause of a [`TryEntry`]: the machine stores the caught
+/// value into `binding` and jumps to `target` when `class` matches.
+#[derive(Debug, Clone)]
+pub struct CatchEntry {
+    /// The dispatch class; `Exception` for the implicit 3-element shape.
+    pub class: String,
+    pub binding: u16,
+    pub target: u32,
+}
+
+/// A static handler table entry: the protected range `[start, end)` and
+/// its catch/finally regions. Registered outermost-first, so the machine's
+/// reverse-order search finds the innermost covering entry.
+#[derive(Debug, Clone)]
+pub struct TryEntry {
+    pub start: u32,
+    pub end: u32,
+    /// Operand-stack height at try entry; the machine truncates to this on
+    /// unwind. Patched in after stack analysis and verified by validation.
+    pub depth: u16,
+    pub catches: Vec<CatchEntry>,
+    pub finally: Option<u32>,
+    /// Hidden slots holding the pending result (a value or an error
+    /// message string) and the error flag; present exactly when `finally`
+    /// is present.
+    pub pending_value: Option<u16>,
+    pub pending_error: Option<u16>,
+}
+
 /// A compiled function. The entry function has arity and capture count 0;
 /// `fn`/`defn` forms contribute the remaining prototypes.
 #[derive(Debug, Clone)]
@@ -41,6 +70,9 @@ pub struct FunctionPrototype {
     pub max_stack: u16,
     pub code: Vec<Instruction>,
     pub source_map: SourceMap,
+    /// Static handler table for `try`/`catch`/`finally`; empty for
+    /// functions without protected regions.
+    pub handlers: Vec<TryEntry>,
 }
 
 /// A compiled program: a constant pool plus function prototypes.

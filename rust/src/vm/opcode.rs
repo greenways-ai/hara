@@ -17,6 +17,7 @@ use crate::core::Primitive;
 /// - `Call`: pops `argc` arguments plus the callee, pushes 1 (net `-argc`).
 /// - `CallStatic`: pops `argc`, pushes 1 (net `1 - argc`).
 /// - `Jump`: no change.
+/// - `Throw`, `Rethrow`: pop 1; terminal (unwind).
 /// - `Return`: terminal; requires stack height exactly 1.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
@@ -53,6 +54,15 @@ pub enum Instruction {
     /// current frame's capture slots as the callee's captures (`defn`
     /// self-recursion).
     CallStatic { prototype: u16, argc: u8 },
+    /// Pops one value and raises it as a guest exception through the
+    /// shared `core::thrown_error` boundary. Terminal: unwinds to the
+    /// innermost covering try entry or fails the run.
+    Throw,
+    /// Pops a string and raises that exact message without touching the
+    /// thrown-value side channel, preserving error identity across an
+    /// unmatched finally boundary. Terminal; only emitted in finally
+    /// resume sequences.
+    Rethrow,
     /// Returns the top of the stack as the function result.
     Return,
 }
@@ -68,11 +78,15 @@ impl Instruction {
 
     /// Whether control falls through to the next instruction.
     pub(crate) fn falls_through(&self) -> bool {
-        !matches!(self, Instruction::Jump(_) | Instruction::Return)
+        !matches!(
+            self,
+            Instruction::Jump(_) | Instruction::Return | Instruction::Throw | Instruction::Rethrow
+        )
     }
 
-    /// Static stack effect of the instruction; `None` for `Return`, which
-    /// is validated separately (it requires height exactly 1).
+    /// Static stack effect of the instruction; `None` for the terminals
+    /// (`Return` requires height exactly 1, `Throw`/`Rethrow` pop 1), which
+    /// are validated separately.
     pub(crate) fn stack_effect(&self) -> Option<i32> {
         Some(match self {
             Instruction::Constant(_)
@@ -87,7 +101,7 @@ impl Instruction {
             Instruction::Closure { captures, .. } => 1 - i32::from(*captures),
             Instruction::Call { argc } => -i32::from(*argc),
             Instruction::Jump(_) => 0,
-            Instruction::Return => return None,
+            Instruction::Return | Instruction::Throw | Instruction::Rethrow => return None,
         })
     }
 }
@@ -114,6 +128,8 @@ impl std::fmt::Display for Instruction {
             Instruction::CallStatic { prototype, argc } => {
                 write!(formatter, "CallStatic {prototype:04} {argc}")
             }
+            Instruction::Throw => formatter.write_str("Throw"),
+            Instruction::Rethrow => formatter.write_str("Rethrow"),
             Instruction::Return => formatter.write_str("Return"),
         }
     }

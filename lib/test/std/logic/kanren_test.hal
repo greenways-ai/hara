@@ -1,0 +1,50 @@
+(ns std.logic.kanren-test
+  (:use code.test)
+  (:require [hara.metaspec.model :as model]
+            [std.logic :as logic]
+            [std.logic.kanren :as kanren]))
+
+(def projected
+  (model/project
+   {:document/id :demo/spec
+    :document/type :demo/spec
+    :document/version "0.1.0"
+    :meta/schemas
+    [{:schema/id :demo/name :schema/type :string}
+     {:schema/id :demo/count :schema/type :integer}]}))
+
+^{:refer 'std.logic.kanren/projecto
+  :id 'forward-relation-query}
+(fact "queries a projected relation in the forward direction"
+  (kanren/query*
+   (fn [query]
+     (logic/fresh
+      (fn [path]
+        (kanren/projecto
+         projected
+         :schema
+         [:demo/name query path])))))
+  => [:string])
+
+^{:refer 'std.logic.kanren/projecto
+  :id 'reverse-relation-query}
+(fact "uses the same relation to recover identifiers from a known type"
+  (kanren/query*
+   (fn [query]
+     (logic/fresh
+      (fn [path]
+        (kanren/projecto projected :schema [query :integer path])))))
+  => [:demo/count])
+
+^{:refer 'std.logic.kanren/patho
+  :id 'lossless-path-query}
+(fact "relates a source path to its exact scalar value"
+  (kanren/query*
+   (fn [query]
+     (kanren/patho
+      projected
+      [:meta/schemas 0 :schema/id]
+      query)))
+  => [:demo/name])
+
+(pr-str (run '[std.logic.kanren-test]))

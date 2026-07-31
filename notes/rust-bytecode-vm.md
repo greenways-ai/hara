@@ -8,10 +8,11 @@ covers, the normative successor is now
 `specs/01-lang/010-bytecode/draft/conformance/bytecode-vm.edn`); where this note and that
 spec disagree, the spec wins.
 
-Status: milestone 2 (experimental, synchronous; closures and defn
-lowering). The VM is disabled by default behind the `bytecode-vm` Cargo
-feature and never replaces `Runtime::eval_native`. Milestone 1 covered
-the closure-free synchronous subset; §17 records the milestone 2 delta.
+Status: milestone 3 (experimental, synchronous; closures, defn
+lowering, and exception handling). The VM is disabled by default behind the
+`bytecode-vm` Cargo feature and never replaces `Runtime::eval_native`.
+Milestone 1 covered the closure-free synchronous subset, §17 records the
+milestone 2 delta, and §18 records the milestone 3 delta (exceptions).
 
 ## 1. Execution model
 
@@ -286,7 +287,11 @@ copied into prefixed local slots at closure creation, so the existing
 - `recur` across a function boundary stays rejected; the loop context stack
   is per-prototype.
 
-## 13. Future exception handling
+## 13. Exception handling (delivered in milestone 3)
+
+Milestone 3 (§18) delivered `try`/`catch`/`finally` and guest `throw` using
+the per-prototype handler table sketched below. The original sketch is kept
+for reference.
 
 `try/catch/finally` needs protected ranges on the code vector: a handler
 table (`Vec<(start, end, handler_ip)>`) per prototype, plus stack-unwind
@@ -550,3 +555,226 @@ Interpretation:
   an explicit call stack.
 - defn lowering instead of Var materialization (§17.4) — closed-world
   subset only; namespace-interop programs still need the evaluator.
+
+## 18. Milestone 3 — exception handling (issue #203)
+
+Milestone 3 compiles `try`/`catch`/`finally` and guest `throw`. The design
+reuses the evaluator's error identity semantics exactly: errors in flight
+remain plain message strings, and the guest-thrown value rides the existing
+`ACTIVE_THROWN_VALUE` side channel in `core.rs`. The machine calls
+`core::thrown_error`, `core::catch_matches`, and `core::caught_error`
+verbatim; no identity logic is reimplemented in the VM.
+
+### 18.1 Handler representation: per-prototype try table
+
+Handlers are static exception-table entries on the function prototype, not
+a dynamic handler stack:
+
+```rust
+pub struct TryEntry {
+    pub start: u32,              // protected range [start, end)
+    pub end: u32,
+    pub depth: u16,              // operand height at try entry (patched after analysis)
+    pub catches: Vec<CatchEntry>,// source order, first match wins
+    pub finally: Option<u32>,    // finally region address
+    pub pending_value: Option<u16>, // hidden slot: result or error message
+    pub pending_error: Option<u16>, // hidden slot: Bool(error-pending)
+}
+
+pub struct CatchEntry {
+    pub class: String,           // "Exception" for the implicit 3-form
+    pub binding: u16,            // clause binding slot
+    pub target: u32,             // clause code address
+}
+```
+
+Tables beat a dynamic handler stack (`PushHandler`/`PopHandler`
+instructions) for this machine: control may leave a protected range through
+ordinary jumps (`if` branches out of a body, `recur` through a catch-only
+`try`) without any runtime bookkeeping, and the validator can check every
+handler field statically. The unwind search walks the table in reverse
+registration order, which is innermost-first because the compiler registers
+an outer `try` before any `try` inside its body.
+
+### 18.2 New instructions
+
+- `Throw` — pops one value, raises via `core::thrown_error` (message
+  `thrown: <display>`, side channel set). Terminal.
+- `Rethrow` — pops one value, which must be a string, and raises that exact
+  message *without* touching the side channel. Terminal. Only emitted in
+  finally resume sequences: it preserves error identity across an unmatched
+  `finally` boundary, so an outer `catch` still matches the original class
+  and binds the original value.
+
+### 18.3 Unwind semantics
+
+Every failure site in the machine (primitive errors, call errors, machine
+defenses) and the two new instructions route through `raise(message)`:
+
+1. Find the innermost table entry whose range covers the failing ip.
+2. Try each catch clause in source order with `core::catch_matches`
+   (`Exception`/`Throwable` match everything; any other class matches only
+   a thrown struct by type name or `/`-suffix). On the first match the
+   machine truncates the operand stack to `entry.depth`, stores
+   `core::caught_error(&message)` into the binding slot, and jumps to the
+   clause target. The side channel is consumed only after a match is
+   decided, exactly like the evaluator's `finish_try`.
+3. No match, `finally` present: truncate, store the message string into
+   `pending_value`, store `true` into `pending_error`, jump to the finally
+   region. The side channel is left intact for outer handlers.
+4. No match, no `finally`: propagate `VmError` with the original message
+   and the original failing instruction's source position.
+
+Because catch and finally regions lie outside their entry's protected
+range, a throw inside a catch clause or a finally body unwinds to the next
+outer entry — matching the evaluator. A finally body that throws therefore
+replaces the pending result, matching the fiber evaluator (first finally
+error short-circuits). The older synchronous `core::eval` path runs all
+finally forms and lets the last error win; that path is a deprecated
+fallback and the VM follows the fiber, which is the primary evaluator.
+
+### 18.4 Code layout
+
+Catch-only `try` (entry height H):
+
+```text
+    <body>                    ; protected [start, end), H -> H+1
+    Jump after
+catch_i:                      ; unwind lands here with stack truncated to H
+    <clause body>             ; binding slot pre-stored by the machine
+    Jump after
+after:                        ; height H+1
+```
+
+`try` with `finally` adds two hidden slots (allocated by a new
+`ScopeStack::declare_hidden`, never name-resolvable):
+
+```text
+    False; StoreLocal pe      ; default: no error pending
+start:
+    <body>
+    StoreLocal pv; Jump finally
+end:
+catch_i:
+    <clause body>
+    StoreLocal pv; Jump finally
+finally:                      ; reached from every path at height H
+    <finally forms, all results popped>
+    LoadLocal pe
+    JumpIfFalse normal
+    LoadLocal pv; Rethrow     ; unmatched error resumes its flight
+normal:
+    LoadLocal pv              ; the try's value
+```
+
+`finally` runs on the normal path, the caught path, and the unmatched
+rethrow path; its own value is discarded. Regions that cannot be reached
+because the body or a clause ends in `Throw`/`recur` are simply not
+emitted, following the existing `fallthrough` discipline.
+
+### 18.5 Catch clause shapes and errors
+
+The compiler mirrors the fiber's shapes: `(catch name body)` (exactly 3
+elements, symbol name) is the implicit `Exception` clause;
+`(catch Class name body...)` dispatches on a class symbol. Multiple
+`finally` clauses concatenate, and clause groups may appear in any order
+after the body — both verified against the evaluator.
+
+Malformed clauses are compile errors, with the fiber's message spellings:
+`try clauses must follow body`, `catch expects class, name, and body`,
+`catch class must be symbol`, `catch name must be symbol`. This is the
+recur-misuse precedent applied to `try`: compile-time rejection is
+canonical. Two observable divergences result, recorded here:
+
+- `(try 1 (catch 42 e 0))` evaluates to `1` in the evaluator (the malformed
+  clause is only inspected on the throwing path, and then silently treated
+  as non-matching); the VM rejects it at compile time.
+- `throw` arity errors (`throw` expects one value) are runtime errors in
+  the evaluator, compile errors in the VM; both phrases match.
+
+### 18.6 recur and try
+
+With a table, `recur` through a catch-only `try` needs no runtime support:
+the `Jump` to the loop header simply leaves the protected range. The
+compiler propagates tail position into catch-only `try` bodies and clause
+bodies, so `(loop [i 0] (try (if (< i 3) (recur (+ i 1)) i) (catch
+Exception e -1)))` compiles and evaluates to `3`, matching the evaluator
+(verified).
+
+`recur` crossing a `finally` boundary is rejected at compile time:
+`recur cannot cross a finally boundary`. The evaluator runs the `finally`
+on every recur crossing (verified: `(loop [i 0] (try (if (< i 3) (recur (+
+i 1)) i) (finally (throw 99))))` fails with `thrown: 99`), and correctly
+supporting that requires either scoped code duplication or a resume-action
+protocol that can also chain through nested finally regions and multiple
+enclosing loops. That machinery belongs to the frame-stack milestone,
+where unwinding is first-class; until then the VM is explicit rather than
+wrong. This is a recorded divergence in the same class as the defn-lowering
+restrictions.
+
+### 18.7 Validation additions
+
+- `Throw`/`Rethrow` require stack height at least 1 and have no successors.
+- Every `TryEntry`: `start < end <= code.len()`; catch targets, the finally
+  target, and all slots in range; `depth` must equal the computed height at
+  `start`; pending slots present exactly when a finally target is present.
+- Handler targets are seeded into the worklist analysis with the height
+  computed at their entry's `start`, so the ordinary join-consistency rule
+  covers them.
+- Two try ranges must be disjoint or strictly nested; partial overlap is
+  rejected (`try ranges must not partially overlap`).
+
+### 18.8 Cross-boundary message fix
+
+Milestone 2's `Closure` callback converted a nested machine's `VmError`
+with `error.to_string()`, decorating the message with position and
+instruction suffixes before it crossed the `call_function` boundary. Guest
+values survived (the side channel prefix-match still held), but a runtime
+error caught across a closure boundary bound the decorated string instead
+of the bare message. Milestone 3 passes `error.message` through, matching
+`CallStatic` and the evaluator.
+
+### 18.9 Conformance additions
+
+New corpus cases in `bytecode-vm.edn` (`:display` unless noted):
+
+- `error/catch-guest-value` — the L0 case verbatim: 42.
+- `error/catch-first-match` — first matching clause wins.
+- `error/catch-implicit-form` — `(catch error error)` binds the keyword.
+- `error/catch-binds-runtime-string` — `(/ 1 0)` binds `"division by zero"`.
+- `error/unmatched-class` — `:error-category "thrown"`; the L0
+  `error/unmatched-catch` shape without defstruct.
+- `error/finally-value-discarded` — `(try 42 (finally 0))` → 42.
+- `error/finally-after-catch` — catch result survives finally.
+- `error/finally-unmatched-rethrow` — identity through a finally boundary:
+  inner unmatched class, finally runs, outer catch binds the original 41.
+- `error/finally-error-replaces` — `(try 1 (finally (throw 2)))`:
+  `:error-category "thrown"`.
+- `error/recur-through-try` — catch-only try in a loop tail: 3.
+- `error/throw-arity` — `:error-category "throw arity"`.
+- Compile-error pins (`:compile-error`): clause-after-clause-body ordering,
+  non-symbol class, non-symbol name, `recur cannot cross a finally
+  boundary`.
+
+The L0 corpus cases that use `defstruct`/`def`/`set!`
+(`error/catch-order`, `error/finally-normal`, `error/finally-unwind`) stay
+out of the VM corpus: namespaces and mutation remain outside the supported
+subset, and `ex-info` is a std.foundation function the VM cannot call yet.
+They are claimed by the namespace-aware milestone, not this one.
+
+### 18.10 Open decisions recorded at milestone 3
+
+- Static try table instead of a dynamic handler stack (§18.1) — recur and
+  branch exits through protected ranges need no runtime bookkeeping;
+  revisit only if the frame-stack milestone wants one unwind mechanism for
+  both errors and suspension.
+- Error identity stays in `core.rs` (§18.0) — the machine reuses the side
+  channel; a future value-carrying error representation would change both
+  evaluators together.
+- `recur` across `finally` rejected (§18.6) — accepted divergence; the
+  frame-stack milestone owns the general protocol.
+- Malformed catch clauses rejected at compile time (§18.5) — the evaluator
+  only inspects clauses on the throwing path and then treats non-symbol
+  classes as non-matching; VM rejection is canonical.
+- Finally semantics follow the fiber evaluator (§18.3) — the sync
+  fallback's last-error-wins behavior is not reproduced.

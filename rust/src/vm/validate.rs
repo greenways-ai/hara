@@ -56,6 +56,86 @@ fn validate_function(
             None,
         ));
     }
+    validate_handlers(function, &heights)?;
+    Ok(())
+}
+
+/// Checks the static handler table: ranges, targets, slots, depth
+/// declarations, pending-slot presence, and clean nesting. Stack heights
+/// at handler targets are already covered by the analysis, which seeds
+/// them with the height computed at each entry's `start`.
+fn validate_handlers(
+    function: &FunctionPrototype,
+    heights: &[u16],
+) -> Result<(), ValidationError> {
+    let code_len = function.code.len();
+    for (index, entry) in function.handlers.iter().enumerate() {
+        let (start, end) = (entry.start as usize, entry.end as usize);
+        if start >= end || end > code_len {
+            return Err(ValidationError::new(
+                format!("try range [{start}, {end}) out of bounds or empty"),
+                Some(entry.start),
+            ));
+        }
+        if heights[start] != entry.depth {
+            return Err(ValidationError::new(
+                format!(
+                    "handler depth {} disagrees with computed {}",
+                    entry.depth, heights[start]
+                ),
+                Some(entry.start),
+            ));
+        }
+        for catch in &entry.catches {
+            if catch.target as usize >= code_len {
+                return Err(ValidationError::new(
+                    format!("catch target {} out of range", catch.target),
+                    Some(entry.start),
+                ));
+            }
+            if catch.binding >= function.local_count {
+                return Err(ValidationError::new(
+                    format!("catch binding slot {} out of range", catch.binding),
+                    Some(entry.start),
+                ));
+            }
+        }
+        match (entry.finally, entry.pending_value, entry.pending_error) {
+            (Some(finally), Some(value), Some(flag)) => {
+                if finally as usize >= code_len {
+                    return Err(ValidationError::new(
+                        format!("finally target {finally} out of range"),
+                        Some(entry.start),
+                    ));
+                }
+                if value >= function.local_count || flag >= function.local_count {
+                    return Err(ValidationError::new(
+                        "pending slot out of range",
+                        Some(entry.start),
+                    ));
+                }
+            }
+            (None, None, None) => {}
+            _ => {
+                return Err(ValidationError::new(
+                    "pending slots must be present exactly when finally is present",
+                    Some(entry.start),
+                ))
+            }
+        }
+        for other in &function.handlers[index + 1..] {
+            let (s1, e1) = (entry.start, entry.end);
+            let (s2, e2) = (other.start, other.end);
+            let disjoint = e1 <= s2 || e2 <= s1;
+            let nested = (s1 <= s2 && e2 <= e1) || (s2 <= s1 && e1 <= e2);
+            if !disjoint && !nested {
+                return Err(ValidationError::new(
+                    "try ranges must not partially overlap",
+                    Some(entry.start),
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -82,6 +162,16 @@ pub(crate) fn stack_heights(
     }
     let mut heights: Vec<Option<u16>> = vec![None; code.len()];
     let mut worklist: Vec<(usize, u16)> = vec![(0, 0)];
+    // Handler regions are reached by unwinding, not by ordinary control
+    // flow; each is seeded with the height computed at its entry's start.
+    let mut handler_starts: std::collections::HashMap<usize, Vec<usize>> =
+        std::collections::HashMap::new();
+    for (index, entry) in function.handlers.iter().enumerate() {
+        handler_starts
+            .entry(entry.start as usize)
+            .or_default()
+            .push(index);
+    }
     while let Some((ip, height)) = worklist.pop() {
         if let Some(existing) = heights[ip] {
             if existing != height {
@@ -93,6 +183,29 @@ pub(crate) fn stack_heights(
             continue;
         }
         heights[ip] = Some(height);
+        if let Some(entries) = handler_starts.get(&ip) {
+            for &index in entries {
+                let entry = &function.handlers[index];
+                for catch in &entry.catches {
+                    if catch.target as usize >= code.len() {
+                        return Err(ValidationError::new(
+                            format!("catch target {} out of range", catch.target),
+                            Some(entry.start),
+                        ));
+                    }
+                    worklist.push((catch.target as usize, height));
+                }
+                if let Some(finally) = entry.finally {
+                    if finally as usize >= code.len() {
+                        return Err(ValidationError::new(
+                            format!("finally target {finally} out of range"),
+                            Some(entry.start),
+                        ));
+                    }
+                    worklist.push((finally as usize, height));
+                }
+            }
+        }
         let instruction = &code[ip];
         let at = Some(ip as u32);
         // Operand checks independent of control flow.
@@ -168,6 +281,12 @@ pub(crate) fn stack_heights(
                     format!("return with stack height {height}, expected 1"),
                     at,
                 ));
+            }
+            continue;
+        }
+        if matches!(instruction, Instruction::Throw | Instruction::Rethrow) {
+            if height < 1 {
+                return Err(ValidationError::new("stack underflow", at));
             }
             continue;
         }

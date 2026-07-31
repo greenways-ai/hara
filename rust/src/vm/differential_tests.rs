@@ -105,6 +105,24 @@ fn supported_forms_match_the_existing_evaluator() {
         "(do (defn g [x] (* x 2)) (defn h [x] (+ (g x) 1)) (h 20))",
         "(do (defn countdown [n] (if (< n 1) 0 (+ 1 (countdown (- n 1))))) (countdown 100))",
         "(defn f [x] (+ x 1)) (f 41)",
+        // Exceptions (issue #203).
+        "(try (throw 41) (catch Exception error (+ error 1)))",
+        "(try (throw :failed) (catch error error))",
+        "(try (throw 7) (catch e (+ e 1)))",
+        "(try (throw 41) (catch Exception a 41) (catch Exception b 42))",
+        "(try (throw 41) (catch Problem error 0) (catch Exception error (+ error 1)))",
+        "(try 7 (catch Exception e 0))",
+        "(try (/ 1 0) (catch Exception error error))",
+        "(try 42 (finally 0))",
+        "(try 42 43 (finally 0 1))",
+        "(try (throw 41) (catch Exception error (+ error 1)) (finally 0))",
+        "(try (try (throw :original) (finally 0)) (catch Exception e e))",
+        "(try (try (throw 41) (catch Problem error 0) (finally 0)) (catch Exception error (+ error 1)))",
+        "(try ((fn [] (throw 41))) (catch Exception e (+ e 1)))",
+        "(try ((fn [] (/ 1 0))) (catch Exception e e))",
+        "((fn [] (try (throw 1) (catch Exception e 42))))",
+        "(loop [i 0] (try (if (< i 3) (recur (+ i 1)) i) (catch Exception e -1)))",
+        "(loop [i 0] (try (throw 1) (catch Exception e (if (< i 3) (recur (+ i 1)) i))))",
     ];
     for source in sources {
         differential(source);
@@ -145,6 +163,14 @@ fn supported_form_errors_match_the_existing_evaluator() {
         "((fn [x] x))",
         "(1 2)",
         "(do (defn f [x y] (+ x y)) (f 1))",
+        // Exceptions (issue #203).
+        "(throw :failed)",
+        "(try (throw 41) (catch Problem error 0))",
+        "(try (try (throw 41) (catch Problem error 0)) (catch Problem error 0))",
+        "(try 1 (finally (throw 2)))",
+        "(try (throw 1) (finally (throw 2)))",
+        "(throw)",
+        "(try (throw 1) (catch Exception e (throw 2)))",
     ];
     for source in sources {
         differential(source);

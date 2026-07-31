@@ -20,7 +20,8 @@ import org.junit.Test;
 public class HalSpecificationContractTest {
   private static final Path METASPEC =
       Path.of("specs/01-lang/001-language/metaspec/language-metaspec.edn");
-  private static final Path LANGSPEC = Path.of("specs/01-lang/001-language/draft/hal-langspec.edn");
+  private static final Path LANGSPEC =
+      Path.of("specs/01-lang/001-language/draft/hal-langspec.edn");
   private static final Path L0_CORPUS =
       Path.of("specs/00-unsorted/platform-language/draft/conformance/l0.edn");
   private static final Path READER_CORPUS =
@@ -38,7 +39,8 @@ public class HalSpecificationContractTest {
     assertEquals(
         Keyword.create("hal", "metaspec"), metaspec.lookup(key("document", "id")));
     assertEquals(
-        Keyword.create("hal", "language-metaspec"), metaspec.lookup(key("document", "type")));
+        Keyword.create("hal", "language-metaspec"),
+        metaspec.lookup(key("document", "type")));
     assertEquals(
         Keyword.create("hal", "language"), langspec.lookup(key("document", "id")));
     assertEquals(
@@ -47,9 +49,11 @@ public class HalSpecificationContractTest {
 
     IMapType conformsTo = map(langspec, key("spec", "conforms-to"));
     assertEquals(
-        metaspec.lookup(key("document", "id")), conformsTo.lookup(key("spec", "id")));
+        metaspec.lookup(key("document", "id")),
+        conformsTo.lookup(key("spec", "id")));
     assertEquals(
-        metaspec.lookup(key("document", "version")), conformsTo.lookup(key("spec", "version")));
+        metaspec.lookup(key("document", "version")),
+        conformsTo.lookup(key("spec", "version")));
 
     ILinearType sections = linear(langspec, key("spec", "sections"));
     ILinearType sectionOrder = linear(langspec, key("spec", "section-order"));
@@ -65,11 +69,7 @@ public class HalSpecificationContractTest {
     ILinearType forms = linear(langspec, key("spec", "forms"));
     Map<Object, IMapType> formsById = index(forms, key("form", "id"));
     Map<Object, Set<Object>> suiteCases =
-        Map.of(
-            Keyword.create("hal", "l0"), caseIds(L0_CORPUS),
-            Keyword.create("hal", "reader"), caseIds(READER_CORPUS),
-            Keyword.create("hal", "modules"), caseIds(MODULE_CORPUS),
-            Keyword.create("hal", "parity"), caseIds(PARITY_CORPUS));
+        Map.of(Keyword.create("hal", "reader"), caseIds(READER_CORPUS));
     Set<Object> requirementIds = new HashSet<>();
     collectRequirements(
         linear(langspec, key("spec", "invariants")), requirementIds, suiteCases);

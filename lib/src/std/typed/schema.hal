@@ -1,0 +1,244 @@
+;; Experimental portable schema core for HAL metadata and relation contracts.
+(ns std.typed.schema)
+
+(defn ^{:schema [:fn [:any] :map]}
+  normalize
+  "Normalizes the portable ^{:schema ...} surface grammar into tagged data."
+  [schema]
+  (cond
+    (keyword? schema)
+    {:kind :primitive :name schema}
+
+    (not (vector? schema))
+    {:kind :unknown :surface schema}
+
+    :else
+    (let [head (first schema)
+          args
+          (loop [index 1
+                 output []]
+            (if (= index (count schema))
+              output
+              (recur (inc index)
+                     (conj output (nth schema index)))))]
+      (cond
+        (= head :or)
+        {:kind :union
+         :types
+         (loop [index 0
+                output []]
+           (if (= index (count args))
+             output
+             (recur (inc index)
+                    (conj output (normalize (nth args index))))))}
+
+        (= head :maybe)
+        {:kind :union
+         :types [(normalize (first args)) (normalize :nil)]}
+
+        (= head :vector)
+        {:kind :vector
+         :item (normalize (first args))}
+
+        (= head :tuple)
+        {:kind :tuple
+         :items
+         (loop [index 0
+                output []]
+           (if (= index (count args))
+             output
+             (recur (inc index)
+                    (conj output (normalize (nth args index))))))}
+
+        (= head :map)
+        {:kind :map
+         :fields
+         (vec
+          (map (fn [pair]
+                 {:name (first pair)
+                  :type (normalize (second pair))})
+               args))}
+
+        (= head :fn)
+        {:kind :fn
+         :inputs
+         (loop [index 0
+                inputs (first args)
+                fixed []]
+           (if (= index (count inputs))
+             {:fixed fixed :rest nil}
+             (if (= '& (nth inputs index))
+               {:fixed fixed
+                :rest (normalize (nth inputs (inc index)))}
+               (recur (inc index)
+                      inputs
+                      (conj fixed
+                            (normalize (nth inputs index)))))))
+         :output (normalize (second args))}
+
+        (= head :function)
+        {:kind :function
+         :arities
+         (loop [index 0
+                output []]
+           (if (= index (count args))
+             output
+             (recur (inc index)
+                    (conj output (normalize (nth args index))))))}
+
+        (= head :enum)
+        {:kind :enum :values (vec args)}
+
+        :else
+        {:kind :extension
+         :head head
+         :arguments (vec args)
+         :surface schema}))))
+
+(defn- primitive-valid? [name value]
+  (cond
+    (= name :any) true
+    (= name :nil) (nil? value)
+    (= name :bool) (boolean? value)
+    (= name :boolean) (boolean? value)
+    (= name :num) (number? value)
+    (= name :number) (number? value)
+    (= name :int) (integer? value)
+    (= name :integer) (integer? value)
+    (= name :str) (string? value)
+    (= name :string) (string? value)
+    (= name :keyword) (keyword? value)
+    (= name :symbol) (symbol? value)
+    (= name :list) (list? value)
+    (= name :vector) (vector? value)
+    (= name :map) (map? value)
+    (= name :set) (set? value)
+    (= name :bytes) (bytes? value)
+    :else true))
+
+(defn- finding [path expected value]
+  {:finding/type :std.typed.schema/invalid-value
+   :finding/path (vec path)
+   :finding/expected expected
+   :finding/value value})
+
+(defn- validate-normal [schema value path]
+  (let [kind (:kind schema)]
+    (cond
+      (= kind :primitive)
+      (if (primitive-valid? (:name schema) value)
+        []
+        [(finding path schema value)])
+
+      (= kind :enum)
+      (if (any? (fn [candidate] (= candidate value))
+                (:values schema))
+        []
+        [(finding path schema value)])
+
+      (= kind :union)
+      (if (any? (fn [member]
+                  (empty? (validate-normal member value path)))
+                (:types schema))
+        []
+        [(finding path schema value)])
+
+      (= kind :vector)
+      (if (vector? value)
+        (loop [index 0
+               output []]
+          (if (= index (count value))
+            output
+            (recur
+             (inc index)
+             (vec
+              (concat output
+                      (validate-normal (:item schema)
+                                       (nth value index)
+                                       (conj path index)))))))
+        [(finding path schema value)])
+
+      (= kind :tuple)
+      (if (and (vector? value)
+               (= (count value) (count (:items schema))))
+        (loop [index 0
+               output []]
+          (if (= index (count value))
+            output
+            (recur
+             (inc index)
+             (vec
+              (concat output
+                      (validate-normal (nth (:items schema) index)
+                                       (nth value index)
+                                       (conj path index)))))))
+        [(finding path schema value)])
+
+      (= kind :map)
+      (if (map? value)
+        (loop [remaining (:fields schema)
+               output []]
+          (if (empty? remaining)
+            output
+            (let [field (first remaining)
+                  key (:name field)]
+              (recur
+               (rest remaining)
+               (if (has? value key)
+                 (vec
+                  (concat output
+                          (validate-normal (:type field)
+                                           (get value key)
+                                           (conj path key))))
+                 (conj output
+                       (finding (conj path key)
+                                (:type field)
+                                nil)))))))
+        [(finding path schema value)])
+
+      :else [])))
+
+(defn ^{:schema [:fn [:any :any] :vector]}
+  validate
+  "Returns deterministic, path-aware findings for value against schema."
+  [schema value]
+  (validate-normal (normalize schema) value []))
+
+(defn ^{:schema [:fn [:any :any] :bool]}
+  valid?
+  "Returns true when value conforms to schema."
+  [schema value]
+  (empty? (validate schema value)))
+
+(defn- compatible-normal? [expected actual]
+  (cond
+    (= expected actual) true
+    (and (= :primitive (:kind expected))
+         (= :any (:name expected))) true
+    (and (= :primitive (:kind actual))
+         (= :any (:name actual))) true
+    (= :unknown (:kind expected)) true
+    (= :unknown (:kind actual)) true
+    (= :union (:kind expected))
+    (any? (fn [member] (compatible-normal? member actual))
+          (:types expected))
+    (= :union (:kind actual))
+    (any? (fn [member] (compatible-normal? expected member))
+          (:types actual))
+    :else false))
+
+(defn ^{:schema [:fn [:any :any] :bool]}
+  compatible?
+  "Returns true when two surface schemas have an overlapping value domain."
+  [expected actual]
+  (compatible-normal? (normalize expected) (normalize actual)))
+
+(defn ^{:schema [:fn [:any] :vector]}
+  project-arities
+  "Returns normalized function arities from :fn or :function schema."
+  [schema]
+  (let [normalized (normalize schema)]
+    (cond
+      (= :fn (:kind normalized)) [normalized]
+      (= :function (:kind normalized)) (:arities normalized)
+      :else [])))

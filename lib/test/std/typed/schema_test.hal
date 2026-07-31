@@ -1,0 +1,50 @@
+(ns std.typed.schema-test
+  (:use code.test)
+  (:require [std.typed.schema :as schema]))
+
+^{:refer 'std.typed.schema/project-arities
+  :id 'variadic-and-multi-arity-annotations}
+(fact "normalizes variadic and multi-arity function annotations"
+  [(schema/project-arities '[:fn [:str & :any] :str])
+   (count
+    (schema/project-arities
+     '[:function [:fn [:int] :int]
+                 [:fn [:str & :any] :str]]))]
+  => [[{:kind :fn
+        :inputs {:fixed [{:kind :primitive :name :str}]
+                 :rest {:kind :primitive :name :any}}
+        :output {:kind :primitive :name :str}}]
+      2])
+
+^{:refer 'std.typed.schema/valid?
+  :id 'typed-map-validation}
+(fact "accepts typed map fields and rejects incompatible field values"
+  [(schema/valid? [:map [:name :str] [:count :int]]
+                  {:name "demo" :count 2})
+   (schema/valid? [:map [:name :str] [:count :int]]
+                  {:name "demo" :count "two"})]
+  => [true false])
+
+^{:refer 'std.typed.schema/validate
+  :id 'collection-finding-path}
+(fact "retains the exact collection path for an incompatible value"
+  (:finding/path
+   (first (schema/validate [:vector :int] [1 "two"])))
+  => [1])
+
+^{:refer 'std.typed.schema/compatible?
+  :id 'union-and-enum-validation}
+(fact "recognizes overlapping unions and validates finite enum values"
+  [(schema/compatible? [:maybe :int] :nil)
+   (schema/valid? [:enum :must :may] :must)
+   (schema/valid? [:enum :must :may] :never)]
+  => [true true false])
+
+^{:refer 'std.typed.schema/valid?
+  :id 'typed-relation-tuple}
+(fact "validates heterogeneous tuple contracts used by logic relations"
+  [(schema/valid? [:tuple :keyword :int :str] [:age 42 "years"])
+   (schema/valid? [:tuple :keyword :int :str] [:age "42" "years"])]
+  => [true false])
+
+(pr-str (run '[std.typed.schema-test]))

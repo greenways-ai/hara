@@ -35,6 +35,7 @@ fn program(
             max_stack,
             code,
             source_map,
+            handlers: Vec::new(),
         }],
         entry: 0,
     }
@@ -74,6 +75,7 @@ fn prototype(
         max_stack: 1,
         source_map: source_map(code.len()),
         code,
+        handlers: Vec::new(),
     }
 }
 
@@ -480,4 +482,160 @@ fn disassembler_truncates_long_constant_previews() {
     let text = disassemble(&program);
     let preview = text.lines().nth(2).expect("constant line");
     assert!(preview.contains('…'), "{preview}");
+}
+
+// ---- exceptions: handler table validation and hand-built execution ----
+
+use super::program::{CatchEntry, TryEntry};
+
+fn try_entry(
+    start: u32,
+    end: u32,
+    depth: u16,
+    catches: Vec<CatchEntry>,
+    finally: Option<u32>,
+    pending: Option<(u16, u16)>,
+) -> TryEntry {
+    TryEntry {
+        start,
+        end,
+        depth,
+        catches,
+        finally,
+        pending_value: pending.map(|(value, _)| value),
+        pending_error: pending.map(|(_, flag)| flag),
+    }
+}
+
+/// `(throw 41)` with a catch-all handler, built by hand: the machine
+/// stores the caught value into slot 0 and jumps to the clause.
+fn throw_catch_program() -> Program {
+    let code = vec![
+        Instruction::Constant(0),
+        Instruction::Throw,
+        Instruction::LoadLocal(0),
+        Instruction::Return,
+    ];
+    let mut result = program(code, vec![Value::Number(41)], 1, 1);
+    result.functions[0].handlers = vec![try_entry(
+        0,
+        2,
+        0,
+        vec![CatchEntry {
+            class: "Exception".to_string(),
+            binding: 0,
+            target: 2,
+        }],
+        None,
+        None,
+    )];
+    result
+}
+
+#[test]
+fn machine_catches_hand_built_throw() {
+    let program = throw_catch_program();
+    validate(&program).expect("hand-built handler program validates");
+    let value = super::machine::execute_program(std::rc::Rc::new(program))
+        .expect("catch handles the throw");
+    assert_eq!(value.display(), "41");
+}
+
+#[test]
+fn machine_uncaught_throw_reports_original_message() {
+    let program = program(
+        vec![Instruction::Constant(0), Instruction::Throw],
+        vec![Value::Keyword("failed".into())],
+        0,
+        1,
+    );
+    validate(&program).expect("validates");
+    let error = super::machine::execute_program(std::rc::Rc::new(program))
+        .expect_err("uncaught throw fails");
+    assert_eq!(error.message, "thrown: :failed");
+    assert_eq!(error.instruction, 1);
+}
+
+#[test]
+fn validator_rejects_throw_at_empty_stack() {
+    let program = program(vec![Instruction::Throw], vec![], 0, 0);
+    assert!(invalid(&program).contains("stack underflow"));
+}
+
+#[test]
+fn validator_rejects_try_range_out_of_bounds() {
+    let mut program = add_program();
+    program.functions[0].handlers = vec![try_entry(0, 99, 0, vec![], None, None)];
+    assert!(invalid(&program).contains("try range [0, 99) out of bounds or empty"));
+}
+
+#[test]
+fn validator_rejects_empty_try_range() {
+    let mut program = add_program();
+    program.functions[0].handlers = vec![try_entry(1, 1, 0, vec![], None, None)];
+    assert!(invalid(&program).contains("out of bounds or empty"));
+}
+
+#[test]
+fn validator_rejects_catch_target_out_of_range() {
+    let mut program = add_program();
+    program.functions[0].handlers = vec![try_entry(
+        0,
+        2,
+        0,
+        vec![CatchEntry {
+            class: "Exception".to_string(),
+            binding: 0,
+            target: 99,
+        }],
+        None,
+        None,
+    )];
+    assert!(invalid(&program).contains("catch target 99 out of range"));
+}
+
+#[test]
+fn validator_rejects_catch_binding_out_of_range() {
+    let mut program = throw_catch_program();
+    program.functions[0].handlers[0].catches[0].binding = 9;
+    assert!(invalid(&program).contains("catch binding slot 9 out of range"));
+}
+
+#[test]
+fn validator_rejects_handler_depth_mismatch() {
+    let mut program = throw_catch_program();
+    program.functions[0].handlers[0].depth = 3;
+    assert!(invalid(&program).contains("handler depth 3 disagrees with computed 0"));
+}
+
+#[test]
+fn validator_rejects_missing_pending_slots() {
+    let mut program = throw_catch_program();
+    program.functions[0].handlers[0].finally = Some(2);
+    assert!(invalid(&program).contains("pending slots must be present exactly when finally is present"));
+}
+
+#[test]
+fn validator_rejects_partially_overlapping_try_ranges() {
+    let mut program = add_program();
+    program.functions[0].handlers = vec![
+        try_entry(0, 2, 0, vec![], None, None),
+        try_entry(1, 3, 0, vec![], None, None),
+    ];
+    assert!(invalid(&program).contains("try ranges must not partially overlap"));
+}
+
+#[test]
+fn disassembler_renders_try_table() {
+    let expected = "\
+== program: 1 constants, 1 functions, entry 0 ==
+== fn 0 <anonymous> (arity=0, captures=0, locals=1, max_stack=1) ==
+0000  Constant 0  ; 41
+0001  Throw
+0002  LoadLocal 0
+0003  Return
+  try [0000..0002) depth=0
+    catch Exception -> slot 0 @ 0002
+";
+    assert_eq!(disassemble(&throw_catch_program()), expected);
 }
