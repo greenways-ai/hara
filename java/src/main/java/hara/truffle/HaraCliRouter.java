@@ -126,15 +126,22 @@ final class HaraCliRouter {
           case "hara.cli.handler/package" -> "package";
           case "hara.cli.handler/spec" -> "spec";
           case "hara.cli.handler/extension" -> "extension";
+          case "hara.cli.handler/identity" -> "id";
+          case "hara.cli.handler/asset" -> "asset";
+          case "hara.cli.handler/tap" -> "tap";
           default -> null;
         };
     if (command == null) return arguments;
     ArrayList<String> normalized = new ArrayList<>();
     normalized.add(command);
-    if (java.util.Set.of(
+    if (!"hara.cli.route/package-extension".equals(resolution.route().id())
+        && java.util.Set.of(
             "hara.cli.handler/package",
             "hara.cli.handler/spec",
-            "hara.cli.handler/extension")
+            "hara.cli.handler/extension",
+            "hara.cli.handler/identity",
+            "hara.cli.handler/asset",
+            "hara.cli.handler/tap")
         .contains(resolution.route().handler()))
       normalized.addAll(resolution.route().path().subList(1, resolution.route().path().size()));
     normalized.addAll(resolution.arguments());

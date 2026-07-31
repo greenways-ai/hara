@@ -6627,6 +6627,27 @@ fn collection_nth(value: &Value, key: &Value) -> Result<Value, String> {
 
 fn collection_assoc(value: &Value, key: &Value, replacement: Value) -> Result<Value, String> {
     match value {
+        Value::Tuple(values) => {
+            let index = value_index(key)?;
+            if index == values.len() {
+                return tuple_push_last(values, replacement);
+            }
+            if index > values.len() {
+                return Err("assoc index out of bounds".into());
+            }
+            let mut items: Vec<Value> = values.iter().cloned().collect();
+            items[index] = replacement;
+            Ok(Value::Tuple(Box::new(
+                PTuple::from_values(items)?.with_meta(values.meta().cloned()),
+            )))
+        }
+        Value::Vector(values) => {
+            let index = value_index(key)?;
+            values
+                .assoc_value(index, replacement)
+                .map(Value::Vector)
+                .ok_or_else(|| "assoc index out of bounds".into())
+        }
         value @ (Value::Map(_) | Value::OrderedMap(_) | Value::SortedMap(_) | Value::Trie(_)) => {
             map_assoc_value(value, key.clone(), replacement)
         }
@@ -6658,7 +6679,7 @@ fn collection_assoc(value: &Value, key: &Value, replacement: Value) -> Result<Va
         Value::Nil => Ok(Value::Map(
             PMap::new().assoc_value(key.clone(), replacement),
         )),
-        _ => Err("assoc expects a map, object, or struct".into()),
+        _ => Err("assoc expects a vector, map, object, or struct".into()),
     }
 }
 

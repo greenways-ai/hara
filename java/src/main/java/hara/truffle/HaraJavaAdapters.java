@@ -828,7 +828,34 @@ public final class HaraJavaAdapters {
 
   @SuppressWarnings("unchecked")
   private static Object assocValue(IAssoc<?, ?> assoc, Object[] arguments) {
-    return ((IAssoc<Object, Object>) assoc).assoc(arguments[0], arguments[1]);
+    Object key = arguments[0];
+    if (assoc instanceof IVectorType && !(key instanceof Integer)) {
+      key = assocIndex(key);
+    }
+    try {
+      return ((IAssoc<Object, Object>) assoc).assoc(key, arguments[1]);
+    } catch (IndexOutOfBoundsException error) {
+      throw new HaraException("assoc index out of bounds: " + key);
+    }
+  }
+
+  private static Integer assocIndex(Object key) {
+    if (!(key instanceof Number)) {
+      throw new HaraException(
+          "assoc index must be a number, got: "
+              + (key instanceof IDisplay ? ((IDisplay) key).display() : String.valueOf(key)));
+    }
+    if (key instanceof Double || key instanceof Float) {
+      double value = ((Number) key).doubleValue();
+      if (value != Math.rint(value)) {
+        throw new HaraException("assoc index must be an integer, got: " + key);
+      }
+    }
+    long index = ((Number) key).longValue();
+    if (index < Integer.MIN_VALUE || index > Integer.MAX_VALUE) {
+      throw new HaraException("assoc index out of range: " + index);
+    }
+    return (int) index;
   }
 
   @SuppressWarnings("unchecked")

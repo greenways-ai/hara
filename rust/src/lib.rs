@@ -1,5 +1,7 @@
 #![allow(clippy::too_many_lines)] // Temporary compatibility facade during Java-port split.
 #[cfg(not(target_arch = "wasm32"))]
+pub mod asset;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod cli_app;
 mod core;
 pub mod extension;
@@ -9,6 +11,8 @@ pub mod hta;
 mod json;
 pub mod kernel;
 pub mod lang;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod identity_tool;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_cli;
 #[cfg(not(target_arch = "wasm32"))]
@@ -5863,6 +5867,18 @@ mod tests {
             "7"
         );
         assert_eq!(runtime.eval_text("(do (def answer 1) (defn add [x y] (+ x y)) (alter-var-root (var answer) add 40) answer)").unwrap(), "41");
+        assert_eq!(
+            runtime.eval_text("(assoc [1 2 3] 0 :x)").unwrap(),
+            "[:x 2 3]"
+        );
+        assert_eq!(
+            runtime.eval_text("(assoc [1 2 3] 3 :x)").unwrap(),
+            "[1 2 3 :x]"
+        );
+        assert_eq!(
+            runtime.eval_text("(assoc [1 2 3] 5 :x)").unwrap_err(),
+            "assoc index out of bounds"
+        );
         assert_eq!(
             runtime.eval_text("(set! missing 1)").unwrap_err(),
             "unbound var: missing"
