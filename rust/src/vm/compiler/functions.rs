@@ -2,7 +2,7 @@
 //! direct and static calls, and top-level `defn` lowering. Split from
 //! `compiler.rs` to stay under the repository's per-file line cap.
 
-use crate::core::Primitive;
+use crate::core::{Primitive, CORE_SPECIAL_FORMS};
 use crate::kernel::{Form, Position, Span};
 use crate::vm::error::{CompileError, CompileErrorKind};
 use crate::vm::opcode::Instruction;
@@ -121,6 +121,22 @@ impl Compiler {
                 Some(children[1].span.start),
             ))
         };
+        // Ruling (issue #202): a std.foundation builtin cannot be replaced
+        // unless the name was explicitly `declare`d first. The evaluator's
+        // builtins otherwise take precedence over the redefinition, so a
+        // silent slot binding would diverge.
+        if CORE_SPECIAL_FORMS.contains(&name.as_str())
+            && !self.declared.iter().any(|n| n == name)
+        {
+            return Err(CompileError::new(
+                CompileErrorKind::UnsupportedForm,
+                format!(
+                    "defn replaces std.foundation var: {name} \
+                     (declare the name at the start of the namespace to replace it)"
+                ),
+                Some(children[1].span.start),
+            ));
+        }
         self.compile_function(Some(name), &children[2], &children[3..], span)?;
         if !self.ctx().fallthrough {
             return Ok(());

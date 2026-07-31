@@ -356,7 +356,7 @@ fn defn_lowering_binds_direct_calls() {
     );
     // Self-recursion compiles to a direct static call.
     assert_eq!(
-        eval("(do (defn count [n] (if (< n 1) 0 (+ 1 (count (- n 1))))) (count 100))"),
+        eval("(do (defn countdown [n] (if (< n 1) 0 (+ 1 (countdown (- n 1))))) (countdown 100))"),
         "100"
     );
 }
@@ -424,6 +424,37 @@ fn compiled_programs_are_reusable() {
         let value = execute_program(program.clone()).expect("executes");
         assert!(matches!(value, Value::Number(42)));
     }
+}
+
+#[test]
+fn declare_opts_in_to_foundation_replacement() {
+    assert_eq!(eval("(declare count)"), "nil");
+    assert_eq!(eval("(declare count) (defn count [n] 42) (count 5)"), "42");
+    assert_eq!(
+        eval("(declare count other) (defn count [n] (+ n 1)) (count 41)"),
+        "42"
+    );
+    // Undeclared replacement of a foundation builtin is a compile error.
+    let (kind, message) = compile_error("(defn count [n] 42) (count 5)");
+    assert_eq!(kind, CompileErrorKind::UnsupportedForm);
+    assert!(
+        message.contains("defn replaces std.foundation var: count"),
+        "{message}"
+    );
+    // The VM's own primitives are foundation names too.
+    let (_, message) = compile_error("(defn mod [a b] 100) 1");
+    assert!(
+        message.contains("defn replaces std.foundation var: mod"),
+        "{message}"
+    );
+    // declare is top-level only and takes name symbols.
+    let (_, message) = compile_error("(let [x 1] (declare y) x)");
+    assert!(
+        message.contains("declare is only supported as a top-level statement"),
+        "{message}"
+    );
+    let (_, message) = compile_error("(declare 1)");
+    assert!(message.contains("declare expects name symbols"), "{message}");
 }
 
 #[test]

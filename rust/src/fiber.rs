@@ -56,8 +56,10 @@ const SYNC_SPECIAL_FORMS: &[&str] = &[
 /// All names that `core::eval` handles as special forms. Used in `application`
 /// to ensure runtime builtins take precedence over foundation redefinitions
 /// without forcing the whole call through the synchronous path (which would
-/// break nested `deref`/`yield`/`await`).
-const CORE_SPECIAL_FORMS: &[&str] = &[
+/// break nested `deref`/`yield`/`await`). Also consulted by the bytecode VM
+/// compiler: replacing one of these names through `defn` is an error unless
+/// the name was first `declare`d (issue #202 ruling).
+pub(crate) const CORE_SPECIAL_FORMS: &[&str] = &[
     "=",
     "+",
     "-",

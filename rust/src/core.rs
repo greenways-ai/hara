@@ -22,6 +22,8 @@ use std::rc::Rc;
 #[path = "fiber.rs"]
 mod fiber;
 pub use fiber::{EvalFiber, EvalFiberState, Step};
+#[cfg(feature = "bytecode-vm")]
+pub(crate) use fiber::CORE_SPECIAL_FORMS;
 
 pub fn completion_symbols() -> &'static [&'static str] {
     fiber::completion_symbols()

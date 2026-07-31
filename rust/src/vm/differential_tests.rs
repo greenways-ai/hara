@@ -164,15 +164,28 @@ fn recur_tail_tightening_is_a_documented_divergence() {
 }
 
 #[test]
-fn defn_builtin_collision_is_a_documented_divergence() {
-    // In the evaluator, early binding resolves calls to builtin-named
-    // symbols to the builtin even after a same-named `defn`; the new var
-    // never shadows the primitive. The VM's defn lowering binds a slot,
-    // so the defn shadows the builtin for all subsequent forms.
-    let source = "(do (defn count [n] 42) (count 5))";
-    let reference = Runtime::new().eval_native(source);
-    assert!(reference.is_err(), "{reference:?}");
-    assert_eq!(eval_source(source).map(|value| value.display()), Ok("42".into()));
+fn defn_foundation_replacement_requires_declare() {
+    // Ruling (issue #202): replacing a std.foundation builtin through
+    // `defn` is an error unless the name was `declare`d first. The VM
+    // makes undeclared replacement a compile error; the evaluator still
+    // gives the builtin precedence and converges later.
+    let undeclared = "(do (defn count [n] 42) (count 5))";
+    let error = super::compile_source(undeclared).expect_err("must not compile");
+    assert!(
+        error.to_string().contains("replaces std.foundation var: count"),
+        "{error}"
+    );
+    // With an explicit declare, the replacement lowers and takes effect
+    // in the VM. The evaluator still resolves the builtin even after
+    // declare — canonical behavior is the VM's; the evaluator converges.
+    let declared = "(do (declare count) (defn count [n] 42) (count 5))";
+    assert_eq!(
+        eval_source(declared).map(|value| value.display()),
+        Ok("42".into())
+    );
+    assert!(Runtime::new().eval_native(declared).is_err());
+    // A bare declare already agrees on both paths.
+    differential("(declare count)");
 }
 
 /// Reads the shared benchmark corpus and runs every workload whose

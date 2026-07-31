@@ -92,6 +92,9 @@ struct Compiler {
     constant_index: HashMap<Value, u32>,
     functions: Vec<FunctionPrototype>,
     contexts: Vec<FnContext>,
+    /// Names introduced by top-level `(declare ...)`: an explicit opt-in
+    /// to replacing a std.foundation builtin through `defn`.
+    declared: Vec<String>,
     /// True while compiling a direct child of the top-level sequence;
     /// `defn` is only legal there, and never in tail position.
     top_level: bool,
@@ -132,6 +135,7 @@ impl Compiler {
                 loops: Vec::new(),
                 fallthrough: true,
             }],
+            declared: Vec::new(),
             top_level: true,
         }
     }
@@ -259,6 +263,39 @@ impl Compiler {
         Ok(())
     }
 
+    /// `(declare name ...)` marks names for explicit replacement: a later
+    /// top-level `defn` of a declared std.foundation builtin lowers to a
+    /// slot binding instead of erroring (issue #202 ruling). Top-level
+    /// statements only; evaluates to nil, matching the evaluator.
+    fn compile_declare(
+        &mut self,
+        children: &[Child<'_>],
+        span: &Span,
+        top: bool,
+    ) -> Result<(), CompileError> {
+        if !top {
+            return Err(CompileError::new(
+                CompileErrorKind::UnsupportedForm,
+                "declare is only supported as a top-level statement",
+                Some(span.start),
+            ));
+        }
+        for child in &children[1..] {
+            let Form::Symbol(name) = child.form else {
+                return Err(CompileError::new(
+                    CompileErrorKind::Arity,
+                    "declare expects name symbols",
+                    Some(child.span.start),
+                ))
+            };
+            if !self.declared.iter().any(|n| n == name) {
+                self.declared.push(name.clone());
+            }
+        }
+        self.emit(Instruction::Nil, Some(span.start));
+        Ok(())
+    }
+
     fn compile_form(
         &mut self,
         form: &Form,
@@ -342,6 +379,9 @@ impl Compiler {
                     Form::Symbol(name) if name == "fn" => self.compile_fn_form(&children, span),
                     Form::Symbol(name) if name == "defn" => {
                         self.compile_defn(&children, span, top, tail)
+                    }
+                    Form::Symbol(name) if name == "declare" => {
+                        self.compile_declare(&children, span, top)
                     }
                     Form::Symbol(name) if UNSUPPORTED_OPERATORS.contains(&name.as_str()) => {
                         Err(self.unsupported(form, span))

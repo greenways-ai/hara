@@ -11,6 +11,10 @@
 //!   containing the marker; the tree evaluator is not consulted, because
 //!   the spec makes compile-time rejection the canonical behavior the
 //!   evaluator converges to later.
+//! - `:vm-display` — only the VM is consulted, for behaviors the spec
+//!   defines as canonical where the evaluator has not converged (declared
+//!   foundation replacement: the evaluator still gives builtins
+//!   precedence).
 
 use super::{compile_source, error_category, eval_source};
 use crate::kernel::{self, Form};
@@ -50,6 +54,7 @@ fn bytecode_vm_conformance_corpus() {
     let mut display_cases = 0;
     let mut error_cases = 0;
     let mut compile_cases = 0;
+    let mut vm_display_cases = 0;
     for case in cases {
         let Form::Map(case) = case else {
             panic!("every conformance case must be a map")
@@ -100,12 +105,21 @@ fn bytecode_vm_conformance_corpus() {
                 error.to_string().contains(marker.as_str()),
                 ":{id} compile error `{error}` lacks marker `{marker}`"
             );
+        } else if let Some(expectation) = entry(expect, "vm-display") {
+            vm_display_cases += 1;
+            let Form::String(expected) = expectation else {
+                panic!(":{id} :vm-display must be a string")
+            };
+            let vm = eval_source(source)
+                .map(|value| value.display())
+                .unwrap_or_else(|error| panic!(":{id} vm failed: {error}"));
+            assert_eq!(&vm, expected, ":{id} vm display");
         } else {
             panic!(":{id} has an unknown :expect shape")
         }
     }
     assert_eq!(
-        display_cases + error_cases + compile_cases,
+        display_cases + error_cases + compile_cases + vm_display_cases,
         cases.len(),
         "every case ran exactly one expectation"
     );

@@ -446,22 +446,51 @@ early-binding behavior:
   forms see the new slot; already-compiled bodies keep the old one),
   matching the evaluator.
 - Forward references fail as "unbound symbol", matching the evaluator.
+- Replacing a std.foundation builtin requires an explicit `declare`
+  (§17.5).
 - Referencing the defn'd name as a value inside its own body errors with
   "defn self-reference in value position is not supported"; `#'f` remains
   "unsupported operator: var".
 - Variadic (`&`) and multi-arity `fn`/`defn` and destructuring parameters
   are typed compile errors.
 
-### 17.5 Documented divergence: builtin-named defn
+### 17.5 Ruling: foundation replacement requires declare
 
-Under the evaluator's early binding, a call to a builtin-named symbol
-resolves to the builtin even after a same-named `defn` — the new var
-never shadows the primitive (`(do (defn count [n] 42) (count 5))` fails
-with "count expects a collection"). The VM's lowered slot shadows the
-builtin for all subsequent forms. Both behaviors are internally
-consistent; the VM's matches lexical shadowing intuition, the evaluator's
-is a resolution-order quirk. Recorded in
-`differential_tests.rs::defn_builtin_collision_is_a_documented_divergence`.
+Issue #202 ruling (refined in discussion): replacing a **std.foundation
+builtin** — the evaluator's `CORE_SPECIAL_FORMS` inventory, i.e. the names
+runtime builtins take precedence over — through `defn` is an **error**
+unless the replacement is explicit:
+
+```clojure
+(do (defn count [n] 42) (count 5))             ; compile error:
+;; defn replaces std.foundation var: count
+;; (declare the name at the start of the namespace to replace it)
+
+(do (declare count) (defn count [n] 42) (count 5)) ; => 42
+```
+
+- `(declare name ...)` is a top-level-only statement that marks names for
+  explicit replacement and evaluates to nil (matching the evaluator's
+  existing `declare`). Nested declare and non-symbol arguments are
+  compile errors.
+- A declared builtin's `defn` lowers to a slot binding exactly like any
+  other defn; subsequent calls resolve to the replacement.
+- The collision set is `fiber::CORE_SPECIAL_FORMS`, re-exported through
+  `core` — the same inventory the evaluator's `application` path uses to
+  give builtins precedence, so the VM rejects exactly the names that
+  could never actually be replaced under current evaluator semantics.
+- **The VM behavior is canonical; the evaluator converges later.** The
+  evaluator still resolves the builtin even after `declare` (pinned as
+  `:vm-display` in the corpus, which consults only the VM); undeclared
+  replacement should eventually error there too.
+- Known limitation: declared replacement of one of the ten VM primitives
+  (e.g. `mod`) binds the slot, but operator-position calls still compile
+  to the primitive instruction — the replacement is observable only
+  through the slot value. This mirrors the evaluator, where builtins win
+  in operator position regardless.
+
+This supersedes the earlier "builtin-named defn shadows" behavior merged
+in milestone 2's first cut.
 
 ### 17.6 Error surface additions
 
