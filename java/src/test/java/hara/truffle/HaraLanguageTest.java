@@ -591,6 +591,27 @@ public class HaraLanguageTest {
   }
 
   @Test
+  public void recurValuesObserveCurrentBindingsSimultaneously() {
+    try (Context context = context()) {
+      // Every recurrence value must be evaluated before any binding is updated:
+      // (recur (+ x y) (+ y 1)) reads the old x and y on every iteration.
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(= [3 3] (loop [x 1 y 2] (if (< x 3) (recur (+ x y) (+ y 1)) [x y])))")
+              .asBoolean());
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(= [6 4] (loop [a 1 b 2 n 0] "
+                      + "(if (< n 2) (recur (+ a b) (+ b 1) (+ n 1)) [a b])))")
+              .asBoolean());
+    }
+  }
+
+  @Test
   public void rejectsRecurInsideTryAsNonTail() {
     try (Context context = context()) {
       PolyglotException nonTail =
