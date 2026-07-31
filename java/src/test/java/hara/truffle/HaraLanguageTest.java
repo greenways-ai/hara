@@ -1895,6 +1895,170 @@ public class HaraLanguageTest {
     }
   }
 
+  @Test
+  public void specializesCollectionGetNthAssocOnBuiltins() {
+    try (Context context = context()) {
+      assertEquals(1, context.eval(HaraLanguage.ID, "(get {:a 1} :a)").asLong());
+      assertEquals(10, context.eval(HaraLanguage.ID, "(get [10 20] 0)").asLong());
+      assertEquals(30, context.eval(HaraLanguage.ID, "(nth [10 20 30] 2)").asLong());
+      assertEquals(2, context.eval(HaraLanguage.ID, "(get (assoc {:a 1} :b 2) :b)").asLong());
+      assertEquals(5, context.eval(HaraLanguage.ID, "(get (assoc {:a 1} :a 5) :a)").asLong());
+    }
+  }
+
+  @Test
+  public void collectionGetHandlesMissingKeysNilAndDefaults() {
+    try (Context context = context()) {
+      assertTrue(context.eval(HaraLanguage.ID, "(get {:a 1} :b)").isNull());
+      assertTrue(context.eval(HaraLanguage.ID, "(= :d (get {:a 1} :b :d))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(get nil :k)").isNull());
+      assertTrue(context.eval(HaraLanguage.ID, "(= :d (get nil :k :d))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(= 1 (get {:a 1} :a :d))").asBoolean());
+    }
+  }
+
+  @Test
+  public void collectionNthPreservesBoundsAndArityFailures() {
+    try (Context context = context()) {
+      PolyglotException bounds =
+          assertThrows(
+              PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(nth [1 2] 5)"));
+      assertTrue(bounds.getMessage().contains("IndexOutOfBounds"));
+      PolyglotException arity =
+          assertThrows(
+              PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(nth [1 2] 5 :d)"));
+      assertTrue(arity.getMessage().contains("protocol/arity"));
+      PolyglotException getArity =
+          assertThrows(
+              PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(get {:a 1})"));
+      assertTrue(getArity.getMessage().contains("ILookup/lookup expects one or two arguments"));
+    }
+  }
+
+  @Test
+  public void assocDoesNotMutateTheOriginalCollection() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(def original {:a 1}) (def updated (assoc original :b 2))");
+      assertTrue(
+          context.eval(HaraLanguage.ID, "(= :none (get original :b :none))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(= 2 (get updated :b))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(= 1 (get updated :a))").asBoolean());
+    }
+  }
+
+  @Test
+  public void assocMetadataAgreesWithGenericProtocolDispatch() {
+    try (Context context = context()) {
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(= (meta (assoc (with-meta {:a 1} {:tag :x}) :b 2))"
+                      + " (meta (apply assoc [(with-meta {:a 1} {:tag :x}) :b 2])))")
+              .asBoolean());
+    }
+  }
+
+  @Test
+  public void collectionOpsUseCustomProtocolImplementations() {
+    try (Context context = context()) {
+      context.eval(
+          HaraLanguage.ID,
+          "(defstruct Box [m]) (extend-type Box ILookup (lookup [self k] :custom))");
+      assertTrue(context.eval(HaraLanguage.ID, "(= :custom (get (Box nil) :k))").asBoolean());
+    }
+  }
+
+  @Test
+  public void collectionOpsSeeProtocolExtensionsImmediately() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(defstruct Late [m])");
+      PolyglotException unsupported =
+          assertThrows(
+              PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(nth (Late nil) 0)"));
+      assertTrue(unsupported.getMessage().contains("unsupported-receiver"));
+      context.eval(HaraLanguage.ID, "(extend-type Late INth (nth [self i] :extended))");
+      assertTrue(
+          context.eval(HaraLanguage.ID, "(= :extended (nth (Late nil) 0))").asBoolean());
+      context.eval(HaraLanguage.ID, "(extend-type Late INth (nth [self i] :replaced))");
+      assertTrue(
+          context.eval(HaraLanguage.ID, "(= :replaced (nth (Late nil) 0))").asBoolean());
+    }
+  }
+
+  @Test
+  public void collectionOpsHandleMixedReceiverShapesAtOneCallSite() {
+    try (Context context = context()) {
+      context.eval(
+          HaraLanguage.ID,
+          "(defstruct Box [m]) (extend-type Box ILookup (lookup [self k] (field self :m))) "
+              + "(defn pick [c] (get c :a))");
+      assertEquals(1, context.eval(HaraLanguage.ID, "(pick {:a 1})").asLong());
+      assertTrue(context.eval(HaraLanguage.ID, "(pick nil)").isNull());
+      assertEquals(9, context.eval(HaraLanguage.ID, "(pick (Box 9))").asLong());
+      assertEquals(2, context.eval(HaraLanguage.ID, "(pick {:a 2})").asLong());
+    }
+  }
+
+  @Test
+  public void collectionOpsPreserveArgumentEvaluationOrder() {
+    try (Context context = context()) {
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(do (def a (atom [])) "
+                      + "(get (do (swap! a conj :recv) {:a 1}) (do (swap! a conj :key) :a)) "
+                      + "(= [:recv :key] @a))")
+              .asBoolean());
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(do (def b (atom [])) "
+                      + "(assoc (do (swap! b conj 1) {:x 1}) "
+                      + "       (do (swap! b conj 2) :y) "
+                      + "       (do (swap! b conj 3) 2)) "
+                      + "(= [1 2 3] @b))")
+              .asBoolean());
+    }
+  }
+
+  @Test
+  public void collectionOpsFallBackToGenericInvocationAfterRedefinition() {
+    try (Context context = context()) {
+      context.eval(
+          HaraLanguage.ID,
+          "(alter-var-root (var get) (fn [old] (fn [m k] :redefined)))");
+      assertTrue(context.eval(HaraLanguage.ID, "(= :redefined (get {:a 1} :a))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(= :redefined (get {:a 1} :b))").asBoolean());
+    }
+  }
+
+  @Test
+  public void collectionOpsRespectLexicalShadowing() {
+    try (Context context = context()) {
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(= :shadowed (let [get (fn [m k] :shadowed)] (get {:a 1} :a)))")
+              .asBoolean());
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(= :sh ((fn [assoc] (assoc {:a 1} :b 2)) (fn [m k v] :sh)))")
+              .asBoolean());
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(= :sh ((fn [nth] (nth [1 2] 0)) (fn [v i] :sh)))")
+              .asBoolean());
+    }
+  }
+
   private static Context context() {
     return Context.newBuilder(HaraLanguage.ID).allowIO(IOAccess.ALL).build();
   }
