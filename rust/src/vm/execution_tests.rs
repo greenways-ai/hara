@@ -260,15 +260,12 @@ fn recur_errors() {
 #[test]
 fn unsupported_forms_are_typed_compile_errors() {
     let cases = [
-        ("(fn [x] x)", "unsupported operator: fn"),
         ("(def x 1)", "unsupported operator: def"),
-        ("(defn f [x] x)", "unsupported operator: defn"),
+        ("(defn f [x] x)", "defn in result position requires var semantics"),
         ("(quote a)", "unsupported operator: quote"),
-        ("(first [1 2])", "unsupported operator: first"),
         ("[1 2 3]", "unsupported form: [1 2 3]"),
         ("{:a 1}", "unsupported form: {:a 1}"),
         ("#{1 2}", "unsupported form: #{1 2}"),
-        ("((fn [x] x) 1)", "unsupported form:"),
         ("(let [[a b] [1 2]] a)", "let destructuring is not supported"),
         ("(loop [[a b] [1 2]] a)", "loop destructuring is not supported"),
     ];
@@ -307,6 +304,82 @@ fn unbound_symbols_are_compile_errors_with_positions() {
     let (kind, message) = compile_error("(let [x 1] (+ x y))");
     assert_eq!(kind, CompileErrorKind::UnboundSymbol);
     assert_eq!(message, "unbound symbol: y [line 1, column 17]");
+    // Names outside the curated unsupported-operator list report as
+    // unbound symbols, matching the evaluator.
+    let (kind, message) = compile_error("(first [1 2])");
+    assert_eq!(kind, CompileErrorKind::UnboundSymbol);
+    assert_eq!(message, "unbound symbol: first [line 1, column 1]");
+}
+
+#[test]
+fn fn_values_and_direct_calls() {
+    assert_eq!(eval("(fn [x] x)"), "<fn>");
+    assert_eq!(eval("((fn [x] x) 1)"), "1");
+    assert_eq!(eval("((fn [x y] (+ x y)) 19 23)"), "42");
+    assert_eq!(eval("(let [f (fn [x] (+ x 1))] (f 41))"), "42");
+    // Zero-argument functions.
+    assert_eq!(eval("((fn [] 42))"), "42");
+}
+
+#[test]
+fn closures_capture_lexical_environment() {
+    assert_eq!(eval("(let [x 19] ((fn [y] (+ x y)) 23))"), "42");
+    // Captures are by value at closure-creation time.
+    assert_eq!(
+        eval("(let [x 1 f (fn [] x)] (let [x 2] (+ (f) x)))"),
+        "3"
+    );
+    // Nested closures capture through intermediate scopes.
+    assert_eq!(
+        eval("(((fn [x] (fn [y] (+ x y))) 19) 23)"),
+        "42"
+    );
+    // Loop bindings are capturable.
+    assert_eq!(
+        eval("(loop [i 0 acc 0] (if (< i 5) (recur (+ i 1) ((fn [x] (+ x i)) acc)) acc))"),
+        "10"
+    );
+}
+
+#[test]
+fn defn_lowering_binds_direct_calls() {
+    assert_eq!(eval("(do (defn f [x] (+ x 1)) (f 41))"), "42");
+    // Later defns shadow earlier ones under early binding.
+    assert_eq!(
+        eval("(do (defn f [x] (+ x 1)) (defn f [x] (+ x 2)) (f 40))"),
+        "42"
+    );
+    // A defn body sees earlier defns.
+    assert_eq!(
+        eval("(do (defn g [x] (* x 2)) (defn h [x] (+ (g x) 1)) (h 20))"),
+        "41"
+    );
+    // Self-recursion compiles to a direct static call.
+    assert_eq!(
+        eval("(do (defn count [n] (if (< n 1) 0 (+ 1 (count (- n 1))))) (count 100))"),
+        "100"
+    );
+}
+
+#[test]
+fn call_errors() {
+    // Arity mismatch reports through the shared native-function boundary.
+    assert_eval_error(
+        "((fn [x] x) 1 2)",
+        "function expects 1 arguments [line 1, column 1]",
+    );
+    // Calling a non-function value.
+    assert_eval_error("(1 2)", "value is not callable [line 1, column 1]");
+}
+
+#[test]
+fn fn_shape_errors_are_compile_errors() {
+    let (kind, message) = compile_error("(fn x x)");
+    assert_eq!(kind, CompileErrorKind::Arity);
+    assert!(
+        message.contains("function parameters must be a vector"),
+        "{message}"
+    );
 }
 
 #[test]

@@ -91,6 +91,20 @@ fn supported_forms_match_the_existing_evaluator() {
         "(loop [] 7)",
         "(loop [i 0] 1 2)",
         "(loop [i 0] (+ i 1) i)",
+        // Functions, closures, and defn lowering.
+        "((fn [x] x) 1)",
+        "((fn [x y] (+ x y)) 19 23)",
+        "((fn [] 42))",
+        "(let [f (fn [x] (+ x 1))] (f 41))",
+        "(let [x 19] ((fn [y] (+ x y)) 23))",
+        "(let [x 1 f (fn [] x)] (let [x 2] (+ (f) x)))",
+        "(((fn [x] (fn [y] (+ x y))) 19) 23)",
+        "(loop [i 0 acc 0] (if (< i 5) (recur (+ i 1) ((fn [x] (+ x i)) acc)) acc))",
+        "(do (defn f [x] (+ x 1)) (f 41))",
+        "(do (defn f [x] (+ x 1)) (defn f [x] (+ x 2)) (f 40))",
+        "(do (defn g [x] (* x 2)) (defn h [x] (+ (g x) 1)) (h 20))",
+        "(do (defn countdown [n] (if (< n 1) 0 (+ 1 (countdown (- n 1))))) (countdown 100))",
+        "(defn f [x] (+ x 1)) (f 41)",
     ];
     for source in sources {
         differential(source);
@@ -127,6 +141,10 @@ fn supported_form_errors_match_the_existing_evaluator() {
         "(loop [i 0] (recur 1 2))",
         "(+ 1",
         "42N",
+        "((fn [x] x) 1 2)",
+        "((fn [x] x))",
+        "(1 2)",
+        "(do (defn f [x y] (+ x y)) (f 1))",
     ];
     for source in sources {
         differential(source);
@@ -143,6 +161,18 @@ fn recur_tail_tightening_is_a_documented_divergence() {
     let reference = Runtime::new().eval_native("(loop [i 0] (+ 1 (recur 2)))");
     assert!(reference.is_err(), "{reference:?}");
     assert!(eval_source("(loop [i 0] (+ 1 (recur 2)))").is_err());
+}
+
+#[test]
+fn defn_builtin_collision_is_a_documented_divergence() {
+    // In the evaluator, early binding resolves calls to builtin-named
+    // symbols to the builtin even after a same-named `defn`; the new var
+    // never shadows the primitive. The VM's defn lowering binds a slot,
+    // so the defn shadows the builtin for all subsequent forms.
+    let source = "(do (defn count [n] 42) (count 5))";
+    let reference = Runtime::new().eval_native(source);
+    assert!(reference.is_err(), "{reference:?}");
+    assert_eq!(eval_source(source).map(|value| value.display()), Ok("42".into()));
 }
 
 /// Reads the shared benchmark corpus and runs every workload whose
@@ -165,7 +195,7 @@ fn shared_benchmark_workloads_match() {
     let Value::Vector(workloads) = workloads else {
         panic!("workloads must be a vector")
     };
-    let supported = ["noop", "arithmetic"];
+    let supported = ["noop", "arithmetic", "function-call"];
     let mut seen = Vec::new();
     for workload in workloads.iter() {
         let fields = crate::core::map_entries(workload).expect("workload object");
@@ -181,7 +211,7 @@ fn shared_benchmark_workloads_match() {
         };
         let id = field("id");
         if !supported.contains(&id.as_str()) {
-            continue; // fn calls and collections are outside this milestone
+            continue; // collections are outside this milestone
         }
         seen.push(id.clone());
         let source = field("source");
