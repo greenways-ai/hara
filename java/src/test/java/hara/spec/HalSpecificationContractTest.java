@@ -38,7 +38,7 @@ public class HalSpecificationContractTest {
     assertEquals(
         Keyword.create("hal", "metaspec"), metaspec.lookup(key("document", "id")));
     assertEquals(
-        Keyword.create("language-metaspec"), metaspec.lookup(key("document", "type")));
+        Keyword.create("hal", "language-metaspec"), metaspec.lookup(key("document", "type")));
     assertEquals(
         Keyword.create("hal", "language"), langspec.lookup(key("document", "id")));
     assertEquals(
@@ -46,15 +46,10 @@ public class HalSpecificationContractTest {
     assertEquals(Keyword.create("draft"), langspec.lookup(key("document", "status")));
 
     IMapType conformsTo = map(langspec, key("spec", "conforms-to"));
-    Path declaredMetaspec =
-        LANGSPEC
-            .getParent()
-            .resolve((String) conformsTo.lookup(Keyword.create("document")))
-            .normalize();
-    assertEquals(METASPEC, declaredMetaspec);
     assertEquals(
-        metaspec.lookup(key("document", "version")),
-        conformsTo.lookup(Keyword.create("version")));
+        metaspec.lookup(key("document", "id")), conformsTo.lookup(key("spec", "id")));
+    assertEquals(
+        metaspec.lookup(key("document", "version")), conformsTo.lookup(key("spec", "version")));
 
     ILinearType sections = linear(langspec, key("spec", "sections"));
     ILinearType sectionOrder = linear(langspec, key("spec", "section-order"));
@@ -169,10 +164,10 @@ public class HalSpecificationContractTest {
       if (evidenceValue instanceof ILinearType evidence) {
         for (int j = 0; j < evidence.count(); j++) {
           IMapType link = (IMapType) evidence.nth(j);
-          Object suite = link.lookup(Keyword.create("suite"));
+          Object suite = link.lookup(key("conformance", "suite"));
           Set<Object> knownCases = suiteCases.get(suite);
           assertNotNull("Unknown evidence suite for " + id + ": " + suite, knownCases);
-          ILinearType cases = linear(link, Keyword.create("cases"));
+          ILinearType cases = linear(link, key("conformance", "cases"));
           for (int k = 0; k < cases.count(); k++) {
             assertTrue(
                 "Unknown evidence case for " + id + ": " + suite + " " + cases.nth(k),

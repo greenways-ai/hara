@@ -185,7 +185,7 @@ jobs:
           target/native-extensions/crypto/hash/sha256/sha256.wasm
         cp lib/examples/extensions/crypto/hash/sha256/hara.extension.edn \
           target/native-extensions/crypto/hash/sha256/hara.extension.edn
-        test "$(target/hara-truffle conformance)" = "L0 conformance passed: 104 cases"
+        test "$(target/hara-truffle conformance)" = "L0 conformance passed: 114 cases"
         test "$(HARA_EXTENSION_PATH="$PWD/target/native-extensions" target/hara-truffle eval '(ns app (:require [demo.000-answer-42 :as answer])) (answer/add 20 22)')" = "42"
         test "$(HARA_EXTENSION_PATH="$PWD/rust/extensions/ledger-noir/target/package" target/hara-truffle --allow-process eval '(ns app (:require [ledger.noir :as noir])) (= "hara/ledger.noir/v1" (get (deref (noir/compile {:name "native_smoke" :source "fn main(x: pub Field) { assert(x == 42); }"})) :format))')" = "true"
         test "$(HARA_EXTENSION_PATH="$PWD/target/native-extensions" target/hara-truffle eval '(ns app (:require [hara.runtime.wasm :as runtime])) (deref (runtime/eval "(+ 10 (count (deref (std.native.Host/call \"crypto.hash.sha256\" \"digest\" [(bytes 97 98 99)]))))"))')" = "42"
