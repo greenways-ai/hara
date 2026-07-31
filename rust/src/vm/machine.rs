@@ -313,11 +313,8 @@ impl Machine {
     /// Runs the function to completion or failure.
     pub fn run(&mut self) -> VmOutcome {
         let program = self.program.clone();
-        // This loop stays thin on purpose: every instruction executes in
-        // [`Machine::dispatch`], whose frame has exited before any nested
-        // machine runs. Guest recursion maps onto native stack depth
-        // through the call actions below, so the locals of the fat
-        // dispatch match must not live in this frame (issue #223).
+        // Guest calls use the explicit frame stack below, so instruction
+        // dispatch may be inlined without increasing native recursion depth.
         loop {
             let Some(function) = program.functions.get(self.function) else {
                 return VmOutcome::Failed(VmError::new("function index out of range", 0, None));
@@ -360,9 +357,9 @@ impl Machine {
     /// Executes one instruction, returning where the `run` loop
     /// continues. Call instructions only collect their operands into a
     /// [`Dispatch`] action: the actual call happens in `run` after this
-    /// (fat) frame has exited. `#[inline(never)]` guarantees that split
-    /// in every build profile.
-    #[inline(never)]
+    /// frame has exited. The hot dispatch is inlined into the run loop now
+    /// that guest calls no longer recurse through the native stack.
+    #[inline(always)]
     fn dispatch(
         &mut self,
         program: &Rc<Program>,
