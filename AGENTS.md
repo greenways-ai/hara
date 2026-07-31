@@ -23,10 +23,9 @@ component map and `website/docs/development.md` for the developer guide.
   `notes/superpowers/` (plans/specs written by the superpowers plugin).
   Put nothing here that belongs on the website.
 - `specs/` — normative specifications:
-  - `01-language-meta/000-metaspec/draft/hal-metaspec.edn` defines the language-spec document model
-  - `01-language-meta/000-metaspec/draft/hal-metaspec-metaspec.edn` defines the self-describing
-    metaspec contract and AI generation/repair workflow
-  - `01-language-meta/000-metaspec/draft/hal-artifact-metaspec.edn` defines artifact-format specs
+  - `01-language-meta/000-metaspec/draft/hal-metaspec.edn` defines the self-describing metaspec contract and AI generation/repair workflow
+  - `01-language-meta/001-language/metaspec/language-metaspec.edn` defines the language-spec document model
+  - `00-unsorted/artifact/metaspec/artifact-metaspec.edn` defines artifact-format specs
   - `01-language-meta/001-language/draft/hal-langspec.edn` defines the small EDN-oriented data and reader contract
   - `00-unsorted/` holds platform, ecosystem, user-space, and broad execution material awaiting classification
   - `99-archive/planning/` contains non-normative historical source material

@@ -18,7 +18,8 @@ import org.junit.Test;
 
 /** Structural checks for the draft HAL meta-spec and its first language document. */
 public class HalSpecificationContractTest {
-  private static final Path METASPEC = Path.of("specs/01-language-meta/000-metaspec/draft/hal-metaspec.edn");
+  private static final Path METASPEC =
+      Path.of("specs/01-language-meta/001-language/metaspec/language-metaspec.edn");
   private static final Path LANGSPEC = Path.of("specs/01-language-meta/001-language/draft/hal-langspec.edn");
   private static final Path L0_CORPUS =
       Path.of("specs/00-unsorted/platform-language/draft/conformance/l0.edn");

@@ -13,9 +13,9 @@ import org.junit.Test;
 public class HaraSpecToolTest {
   @Test
   public void portableMetaspecLintReturnsEdnAndStableExitCodes() throws Exception {
-    Path valid = Path.of("../specs/01-language-meta/000-metaspec/draft/hal-metaspec-metaspec.edn");
+    Path valid = Path.of("../specs/01-language-meta/000-metaspec/draft/hal-metaspec.edn");
     if (!Files.isRegularFile(valid))
-      valid = Path.of("specs/01-language-meta/000-metaspec/draft/hal-metaspec-metaspec.edn");
+      valid = Path.of("specs/01-language-meta/000-metaspec/draft/hal-metaspec.edn");
     ByteArrayOutputStream output = new ByteArrayOutputStream();
     ByteArrayOutputStream error = new ByteArrayOutputStream();
     int status =

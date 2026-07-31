@@ -370,7 +370,7 @@ mod spec_tests {
         let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let document_path =
             repository.join("contrib/greenways/build/spec/draft/greenways-buildspec.edn");
-        let metaspec_path = repository.join("specs/01-language-meta/000-metaspec/draft/hal-artifact-metaspec.edn");
+        let metaspec_path = repository.join("specs/00-unsorted/artifact/metaspec/artifact-metaspec.edn");
         let document = read_spec_document(&fs::read_to_string(&document_path).unwrap()).unwrap();
         let metaspec = read_spec_document(&fs::read_to_string(metaspec_path).unwrap()).unwrap();
         assert!(validate_against_metaspec(&document, &metaspec, &document_path).is_empty());
