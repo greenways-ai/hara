@@ -625,6 +625,14 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
                 }),
             )
         }
+        Some("and") => and_cps(Rc::new(v[1..].to_vec()), 0, Value::Bool(true), env, k),
+        Some("or") => or_cps(Rc::new(v[1..].to_vec()), 0, env, k),
+        Some("cond") => {
+            if v.len() % 2 == 0 {
+                return k(Err("cond expects test/expression pairs".into()));
+            }
+            cond_cps(Rc::new(v[1..].to_vec()), 0, env, k)
+        }
         Some("let") => scoped(v, env, k, false),
         Some("loop") => scoped(v, env, k, true),
         Some("recur") => values_cps(
@@ -660,6 +668,72 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
         Some(name) if SYNC_SPECIAL_FORMS.contains(&name) => sync(Form::List(v), env, k),
         _ => application(v, env, k),
     }
+}
+
+fn and_cps(
+    forms: Rc<Vec<Form>>,
+    index: usize,
+    last: Value,
+    env: Rc<RefCell<HashMap<String, Value>>>,
+    k: Cont,
+) -> Step {
+    if index == forms.len() || !last.truthy() {
+        return k(Ok(last));
+    }
+    let next = forms.clone();
+    let e = env.clone();
+    one(
+        forms[index].clone(),
+        env,
+        Box::new(move |result| match result {
+            Ok(value) => and_cps(next, index + 1, value, e, k),
+            Err(error) => k(Err(error)),
+        }),
+    )
+}
+
+fn or_cps(
+    forms: Rc<Vec<Form>>,
+    index: usize,
+    env: Rc<RefCell<HashMap<String, Value>>>,
+    k: Cont,
+) -> Step {
+    if index == forms.len() {
+        return k(Ok(Value::Nil));
+    }
+    let next = forms.clone();
+    let e = env.clone();
+    one(
+        forms[index].clone(),
+        env,
+        Box::new(move |result| match result {
+            Ok(value) if value.truthy() => k(Ok(value)),
+            Ok(_) => or_cps(next, index + 1, e, k),
+            Err(error) => k(Err(error)),
+        }),
+    )
+}
+
+fn cond_cps(
+    clauses: Rc<Vec<Form>>,
+    index: usize,
+    env: Rc<RefCell<HashMap<String, Value>>>,
+    k: Cont,
+) -> Step {
+    if index == clauses.len() {
+        return k(Ok(Value::Nil));
+    }
+    let next = clauses.clone();
+    let e = env.clone();
+    one(
+        clauses[index].clone(),
+        env,
+        Box::new(move |result| match result {
+            Ok(value) if value.truthy() => one(next[index + 1].clone(), e, k),
+            Ok(_) => cond_cps(next, index + 2, e, k),
+            Err(error) => k(Err(error)),
+        }),
+    )
 }
 
 type Previous = Vec<(String, Option<Value>)>;
@@ -1193,5 +1267,34 @@ mod tests {
             fiber.resume(promise.state()),
             EvalFiberState::Completed(Value::Number(42))
         );
+    }
+
+    #[test]
+    fn logical_forms_short_circuit_without_evaluating_later_branches() {
+        let cases = [
+            ("(cond true 42 :else (count :invalid))", Value::Number(42)),
+            ("(and false (count :invalid))", Value::Bool(false)),
+            ("(or 42 (count :invalid))", Value::Number(42)),
+        ];
+        for (source, expected) in cases {
+            let fiber = EvalFiber::start(source, HashMap::new()).unwrap();
+            assert_eq!(fiber.state(), EvalFiberState::Completed(expected));
+        }
+    }
+
+    #[test]
+    fn numeric_and_boolean_predicates_match_foundation_types() {
+        let cases = [
+            ("(integer? 42)", Value::Bool(true)),
+            ("(integer? 42.5)", Value::Bool(false)),
+            ("(decimal? 42.5)", Value::Bool(true)),
+            ("(decimal? 42)", Value::Bool(false)),
+            ("(boolean? false)", Value::Bool(true)),
+            ("(boolean? nil)", Value::Bool(false)),
+        ];
+        for (source, expected) in cases {
+            let fiber = EvalFiber::start(source, HashMap::new()).unwrap();
+            assert_eq!(fiber.state(), EvalFiberState::Completed(expected));
+        }
     }
 }

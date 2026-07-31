@@ -6,9 +6,13 @@
   relationo
   "Returns a goal that unifies pattern with one tuple in facts."
   [facts pattern]
-  (apply
-   logic/any
-   (map (fn [fact] (logic/== pattern fact)) facts)))
+  (loop [index 0
+         goals []]
+    (if (= index (count facts))
+      (apply std.logic/any goals)
+      (recur (inc index)
+             (conj goals
+                   (std.logic/== pattern (nth facts index)))))))
 
 (defn ^{:schema [:fn [:map :any] :fn]}
   facto
