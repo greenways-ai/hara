@@ -1,0 +1,22 @@
+{
+  "name": "@hara-lang/browser",
+  "version": "0.1.0",
+  "description": "Embeddable Hara browser runtime and CDN loader",
+  "license": "EPL-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/hara.d.ts",
+      "import": "./dist/hara.mjs",
+      "default": "./dist/hara.mjs"
+    }
+  },
+  "unpkg": "./dist/hara.js",
+  "jsdelivr": "./dist/hara.js",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
