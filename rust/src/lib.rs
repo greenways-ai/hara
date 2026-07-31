@@ -4045,11 +4045,13 @@ mod tests {
                 .unwrap(),
             "2"
         );
+        assert!(runtime
+            .eval_text("(conj (rest [1 2]) 2)")
+            .unwrap_err()
+            .contains("IConj/conj expects a collection"));
         assert_eq!(
-            runtime
-                .eval_text("(let (source (rest [1 2])) (count (conj source 2)))")
-                .unwrap(),
-            "2"
+            runtime.eval_text("(vec (cons 0 (rest [1 2])))").unwrap(),
+            "[0 2]"
         );
         assert_eq!(
             runtime
@@ -4632,6 +4634,25 @@ mod tests {
             .eval_text("(count (iter-map (fn [x] (throw \"boom\")) [1]))")
             .unwrap_err()
             .contains("boom"));
+        assert!(runtime
+            .eval_text("(count (iter-map (fn [x] (throw \"weekend\")) [1]))")
+            .unwrap_err()
+            .contains("weekend"));
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "[(seq? (seq [1])) \
+                      (iter? (seq [1])) \
+                      (vec (cons 0 (rest [1 2]))) \
+                      (vec (iter-take 4 (cons 0 (repeat 1))))]"
+                )
+                .unwrap(),
+            "[true true [0 2] [0 1 1 1]]"
+        );
+        assert!(runtime
+            .eval_text("(cycle [])")
+            .unwrap_err()
+            .contains("cycle expects a non-empty source"));
     }
 
     #[test]
@@ -4853,9 +4874,14 @@ mod tests {
             "definition/arglists-metadata",
             "sequence/empty-is-nil",
             "sequence/non-empty-rest",
+            "sequence/is-iterator",
+            "sequence/lazy-cons",
+            "sequence/reject-conj",
             "iterator/exact-lookahead",
             "iterator/generated-exhaustion",
             "iterator/shortest-source-finite",
+            "iterator/nil-requires-conversion",
+            "iterator/empty-cycle-rejected",
             "runtime/recur-outside-target",
             "runtime/recur-arity",
             "error/catch-guest-value",
@@ -5983,10 +6009,12 @@ mod tests {
             runtime.eval_text("(first ((drop 3) (repeat :x)))").unwrap(),
             ":x"
         );
-        assert!(runtime
-            .eval_text("(count (repeat :x))")
-            .unwrap_err()
-            .contains("finite collection"));
+        assert_eq!(
+            runtime
+                .eval_text("(Iter/iter-finite? (repeat :x))")
+                .unwrap(),
+            "false"
+        );
         assert_eq!(
             runtime
                 .eval_text("(count ((take 3) (repeatedly (constantly 7))))")

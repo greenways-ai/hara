@@ -181,7 +181,20 @@ public class IterTest {
     assertEquals(Integer.valueOf(1), cycled.next());
     assertEquals(1, requested[0]);
     assertEquals(Integer.valueOf(1), cycled.next());
-    assertEquals(2, requested[0]);
+    assertEquals(1, requested[0]);
+  }
+
+  @Test
+  public void testCycleHasExactLookaheadAndRejectsAnEmptyCache() {
+    Iterator<Integer> empty = Iter.cycle(() -> java.util.Collections.emptyIterator());
+    assertFalse(empty.hasNext());
+
+    Iterator<Integer> cycled = Iter.cycle(() -> Arrays.asList(1, 2).iterator());
+    assertTrue(cycled.hasNext());
+    assertTrue(cycled.hasNext());
+    assertEquals(Integer.valueOf(1), cycled.next());
+    assertEquals(Integer.valueOf(2), cycled.next());
+    assertEquals(Integer.valueOf(1), cycled.next());
   }
 
   @Test

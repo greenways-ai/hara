@@ -26,6 +26,7 @@ import hara.lang.protocol.IDeref;
 import hara.lang.protocol.IDerefTimeout;
 import hara.lang.protocol.IDisplay;
 import hara.lang.protocol.ICount;
+import hara.lang.protocol.ICons;
 import hara.lang.protocol.INth;
 import hara.lang.protocol.IPromise;
 import java.io.IOException;
@@ -4239,17 +4240,17 @@ public final class HaraContext {
     Object lazySource =
         HaraBox.unwrap(source) instanceof HaraSeq
             ? HaraBox.unwrap(source)
-            : new HaraSeq((Iterator<?>) snapshotOrIterator(source));
+            : HaraSeq.create((Iterator<?>) snapshotOrIterator(source));
     if (values.length == 1) {
-      return ((HaraSeq) lazySource).hasNext() ? lazySource : null;
+      return lazySource;
     }
     Object result = invokeCallable(values[0], new Object[] {lazySource});
     Object unwrapped = HaraBox.unwrap(result);
     HaraSeq sequence =
         unwrapped instanceof HaraSeq
             ? (HaraSeq) unwrapped
-            : new HaraSeq((Iterator<?>) iterValue(unwrapped));
-    return sequence.hasNext() ? sequence : null;
+            : HaraSeq.create((Iterator<?>) iterValue(unwrapped));
+    return sequence;
   }
 
   @TruffleBoundary
@@ -4700,7 +4701,12 @@ public final class HaraContext {
 
   @SuppressWarnings({"rawtypes", "unchecked"})
   Object iterCycle(Object value) {
-    return Iter.cycle(() -> (Iterator) iterValue(value));
+    Iterator cycle = Iter.cycle(() -> (Iterator) iterValue(value));
+    if (!cycle.hasNext()) {
+      Iter.close(cycle);
+      throw new HaraException("cycle expects a non-empty source");
+    }
+    return cycle;
   }
 
   @SuppressWarnings({"rawtypes", "unchecked"})
@@ -4910,9 +4916,6 @@ public final class HaraContext {
 
   private Iterator<?> requireIterator(Object value, String operation) {
     Object target = HaraBox.unwrap(value);
-    if (target == null || target == HaraNull.SINGLETON) {
-      return Iter.emptyIterator();
-    }
     if (!(target instanceof Iterator<?>)) {
       throw new HaraException(operation + " expects an iterator");
     }
@@ -5132,12 +5135,16 @@ public final class HaraContext {
     }
   }
 
-  private static final class HaraSeq implements CloseableIterator<Object> {
+  private static final class HaraSeq implements CloseableIterator<Object>, ICons<Object> {
     private final Iterator<?> source;
     private boolean closed;
 
     private HaraSeq(Iterator<?> source) {
       this.source = source;
+    }
+
+    private static HaraSeq create(Iterator<?> source) {
+      return source.hasNext() ? new HaraSeq(source) : null;
     }
 
     @Override
@@ -5149,6 +5156,11 @@ public final class HaraContext {
     public Object next() {
       if (!hasNext()) throw new NoSuchElementException();
       return source.next();
+    }
+
+    @Override
+    public HaraSeq cons(Object value) {
+      return new HaraSeq(Iter.concat(Iter.objects(value), this));
     }
 
     @Override

@@ -1154,6 +1154,7 @@ enum IteratorGenerator {
     Filter(Rc<Function>, Value),
     Mapcat(Rc<Function>, Value, Option<Value>),
     Keep(Rc<Function>, Value),
+    Prepend(Option<Value>, Value),
     Zip(Vec<Value>),
     Interleave(Vec<Value>, usize),
     Partition(Value, usize, bool),
@@ -1348,16 +1349,27 @@ impl IteratorState {
                         break Ok(Some(mapped));
                     }
                 },
+                IteratorGenerator::Prepend(head, source) => {
+                    if let Some(value) = head.take() {
+                        Ok(Some(value))
+                    } else {
+                        iterator_try_next(source)
+                    }
+                }
                 IteratorGenerator::Zip(sources) => {
+                    for source in sources.iter() {
+                        if !matches!(iterator_has_next(source)?, Value::Bool(true)) {
+                            self.closed = true;
+                            return Ok(None);
+                        }
+                    }
                     let mut values = Vec::new();
                     for source in sources.iter() {
-                        match iterator_try_next(source)? {
-                            Some(value) => values.push(value),
-                            None => {
-                                self.closed = true;
-                                return Ok(None);
-                            }
-                        }
+                        let Some(value) = iterator_try_next(source)? else {
+                            self.closed = true;
+                            return Ok(None);
+                        };
+                        values.push(value);
                     }
                     Ok(Some(Value::Vector(values.into())))
                 }
@@ -1365,6 +1377,14 @@ impl IteratorState {
                     if sources.is_empty() {
                         self.closed = true;
                         return Ok(None);
+                    }
+                    if *index == 0 {
+                        for source in sources.iter() {
+                            if !matches!(iterator_has_next(source)?, Value::Bool(true)) {
+                                self.closed = true;
+                                return Ok(None);
+                            }
+                        }
                     }
                     let source = &sources[*index];
                     let Some(value) = iterator_try_next(source)? else {
@@ -4891,17 +4911,11 @@ fn protocol_reduce(arguments: &[Value]) -> Result<Value, String> {
         }
     };
     let iterator = make_iterator(source.clone())?;
-    loop {
-        match iterator_next(&iterator) {
-            Ok(value) => {
-                accumulator = Some(match accumulator {
-                    Some(current) => call_function(function, vec![current, value])?,
-                    None => value,
-                });
-            }
-            Err(error) if error.contains("end") => break,
-            Err(error) => return Err(error),
-        }
+    while let Some(value) = iterator_try_next(&iterator)? {
+        accumulator = Some(match accumulator {
+            Some(current) => call_function(function, vec![current, value])?,
+            None => value,
+        });
     }
     accumulator.ok_or_else(|| "IReduce/reduce cannot reduce an empty value without init".into())
 }
@@ -5111,6 +5125,9 @@ fn protocol_cons(arguments: &[Value]) -> Result<Value, String> {
             item.clone(),
             PList::new(),
         )))),
+        Value::Iterator(iterator) if iterator.borrow().seq => {
+            iterator_prepend(item.clone(), collection.clone())
+        }
         _ => Err("ICons/cons has no implementation for this value".into()),
     }
 }
@@ -5156,13 +5173,6 @@ fn protocol_conj(arguments: &[Value]) -> Result<Value, String> {
                 .chain(values.iter().cloned())
                 .collect();
             Ok(Value::List(output))
-        }
-        Value::Iterator(iterator) if iterator.borrow().seq => {
-            let values = iterator_to_vec(collection.clone())?;
-            Ok(Value::Cons(Box::new(PCons::new(
-                item.clone(),
-                values.into_iter().collect(),
-            ))))
         }
         value @ (Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_)) => {
             set_conj_value(value, item.clone())
@@ -6125,21 +6135,11 @@ fn iterator_values(value: Value) -> Result<Vec<Value>, String> {
         value @ (Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_)) => {
             Ok(set_items(&value).unwrap().into_iter().cloned().collect())
         }
-        Value::Iterator(iterator) => {
-            let mut state = iterator.borrow_mut();
-            if state.closed && state.lookahead.is_none() {
-                return Ok(Vec::new());
-            }
-            if state.generator.is_some() {
-                return Err("cannot materialize an infinite iterator".into());
-            }
+        Value::Iterator(_) => {
             let mut values = Vec::new();
-            if let Some(value) = state.lookahead.take() {
-                values.push(value);
+            while let Some(item) = iterator_try_next(&value)? {
+                values.push(item);
             }
-            values.extend_from_slice(&state.values[state.index..]);
-            state.index = state.values.len();
-            state.closed = true;
             Ok(values)
         }
         _ => Err("iter expects a collection".into()),
@@ -6147,20 +6147,6 @@ fn iterator_values(value: Value) -> Result<Vec<Value>, String> {
 }
 
 fn iterator_to_vec(value: Value) -> Result<Vec<Value>, String> {
-    if let Value::Iterator(_) = &value {
-        if !iterator_is_finite(&value) {
-            return Err("cannot materialize an infinite iterator".into());
-        }
-        let mut output = Vec::new();
-        loop {
-            match iterator_next(&value) {
-                Ok(value) => output.push(value),
-                Err(error) if error == "iter-next reached the end of the iterator" => break,
-                Err(error) => return Err(error),
-            }
-        }
-        return Ok(output);
-    }
     iterator_values(value)
 }
 
@@ -6200,18 +6186,16 @@ pub fn iterator_from_values(values: Vec<Value>) -> Value {
 
 fn iterator_seq(value: Value) -> Result<Value, String> {
     let value = match value {
-        Value::Iterator(iterator) => {
-            iterator.borrow_mut().seq = true;
-            Value::Iterator(iterator)
-        }
+        Value::Iterator(iterator) => Value::Iterator(iterator),
         value => {
             let values = iterator_values(value)?;
-            let mut state = IteratorState::new(values);
-            state.seq = true;
-            Value::Iterator(Rc::new(RefCell::new(state)))
+            Value::Iterator(Rc::new(RefCell::new(IteratorState::new(values))))
         }
     };
     if matches!(iterator_has_next(&value)?, Value::Bool(true)) {
+        if let Value::Iterator(iterator) = &value {
+            iterator.borrow_mut().seq = true;
+        }
         Ok(value)
     } else {
         Ok(Value::Nil)
@@ -6222,6 +6206,15 @@ fn iterator_constant(value: Value) -> Value {
     Value::Iterator(Rc::new(RefCell::new(IteratorState::generated(
         IteratorGenerator::Constant(value),
     ))))
+}
+fn iterator_prepend(head: Value, source: Value) -> Result<Value, String> {
+    let source = match source {
+        Value::Iterator(iterator) => Value::Iterator(iterator),
+        value => make_iterator(value)?,
+    };
+    let mut state = IteratorState::generated(IteratorGenerator::Prepend(Some(head), source));
+    state.seq = true;
+    Ok(Value::Iterator(Rc::new(RefCell::new(state))))
 }
 fn iterator_repeated(function: Rc<Function>) -> Value {
     Value::Iterator(Rc::new(RefCell::new(IteratorState::generated(
@@ -6272,25 +6265,9 @@ fn iterator_interleave(values: Vec<Value>) -> Result<Value, String> {
             value => make_iterator(value),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    if sources.iter().any(
-        |value| matches!(value,Value::Iterator(iterator) if iterator.borrow().generator.is_some()),
-    ) {
-        return Ok(Value::Iterator(Rc::new(RefCell::new(
-            IteratorState::generated(IteratorGenerator::Interleave(sources, 0)),
-        ))));
-    }
-    let collections = sources
-        .iter()
-        .map(|value| iterator_values(value.clone()))
-        .collect::<Result<Vec<_>, _>>()?;
-    let limit = collections.iter().map(Vec::len).min().unwrap_or(0);
-    let mut output = Vec::new();
-    for index in 0..limit {
-        for values in &collections {
-            output.push(values[index].clone());
-        }
-    }
-    Ok(iterator_from_values(output))
+    Ok(Value::Iterator(Rc::new(RefCell::new(
+        IteratorState::generated(IteratorGenerator::Interleave(sources, 0)),
+    ))))
 }
 
 fn iterator_zip(values: Vec<Value>) -> Result<Value, String> {
@@ -6301,30 +6278,9 @@ fn iterator_zip(values: Vec<Value>) -> Result<Value, String> {
             value => make_iterator(value),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    if sources.iter().any(
-        |value| matches!(value,Value::Iterator(iterator) if iterator.borrow().generator.is_some()),
-    ) {
-        return Ok(Value::Iterator(Rc::new(RefCell::new(
-            IteratorState::generated(IteratorGenerator::Zip(sources)),
-        ))));
-    }
-    let collections = sources
-        .iter()
-        .map(|value| iterator_values(value.clone()))
-        .collect::<Result<Vec<_>, _>>()?;
-    let limit = collections.iter().map(Vec::len).min().unwrap_or(0);
-    Ok(iterator_from_values(
-        (0..limit)
-            .map(|index| {
-                Value::Vector(
-                    collections
-                        .iter()
-                        .map(|values| values[index].clone())
-                        .collect(),
-                )
-            })
-            .collect(),
-    ))
+    Ok(Value::Iterator(Rc::new(RefCell::new(
+        IteratorState::generated(IteratorGenerator::Zip(sources)),
+    ))))
 }
 
 fn iterator_mapcat(function: Rc<Function>, value: Value) -> Result<Value, String> {
@@ -6332,16 +6288,6 @@ fn iterator_mapcat(function: Rc<Function>, value: Value) -> Result<Value, String
         Value::Iterator(iterator) => Value::Iterator(iterator),
         value => make_iterator(value)?,
     };
-    if let Value::Iterator(iterator) = &source {
-        if iterator.borrow().generator.is_none() {
-            let values = iterator_values(source)?;
-            let mut output = Vec::new();
-            for value in values {
-                output.extend(iterator_values(call_function(&function, vec![value])?)?);
-            }
-            return Ok(iterator_from_values(output));
-        }
-    }
     Ok(Value::Iterator(Rc::new(RefCell::new(
         IteratorState::generated(IteratorGenerator::Mapcat(function, source, None)),
     ))))
@@ -6351,19 +6297,6 @@ fn iterator_keep(function: Rc<Function>, value: Value) -> Result<Value, String> 
         Value::Iterator(iterator) => Value::Iterator(iterator),
         value => make_iterator(value)?,
     };
-    if let Value::Iterator(iterator) = &source {
-        if iterator.borrow().generator.is_none() {
-            let values = iterator_values(source)?;
-            let mut output = Vec::new();
-            for value in values {
-                let mapped = call_function(&function, vec![value])?;
-                if !matches!(mapped, Value::Nil) {
-                    output.push(mapped);
-                }
-            }
-            return Ok(iterator_from_values(output));
-        }
-    }
     Ok(Value::Iterator(Rc::new(RefCell::new(
         IteratorState::generated(IteratorGenerator::Keep(function, source)),
     ))))
@@ -6374,23 +6307,6 @@ fn iterator_filter(function: Rc<Function>, value: Value) -> Result<Value, String
         Value::Iterator(iterator) => Value::Iterator(iterator),
         value => make_iterator(value)?,
     };
-    if let Value::Iterator(iterator) = &source {
-        if iterator.borrow().generator.is_none() {
-            let values = iterator_values(source)?;
-            return Ok(iterator_from_values(
-                values
-                    .into_iter()
-                    .filter_map(
-                        |value| match call_function(&function, vec![value.clone()]) {
-                            Ok(result) if result.truthy() => Some(Ok(value)),
-                            Ok(_) => None,
-                            Err(error) => Some(Err(error)),
-                        },
-                    )
-                    .collect::<Result<Vec<_>, _>>()?,
-            ));
-        }
-    }
     Ok(Value::Iterator(Rc::new(RefCell::new(
         IteratorState::generated(IteratorGenerator::Filter(function, source)),
     ))))
@@ -6401,21 +6317,6 @@ fn iterator_drop_while(function: Rc<Function>, value: Value) -> Result<Value, St
         Value::Iterator(iterator) => Value::Iterator(iterator),
         value => make_iterator(value)?,
     };
-    if let Value::Iterator(iterator) = &source {
-        if iterator.borrow().generator.is_none() {
-            let values = iterator_values(source)?;
-            let mut output = Vec::new();
-            let mut dropping = true;
-            for value in values {
-                if dropping && call_function(&function, vec![value.clone()])?.truthy() {
-                    continue;
-                }
-                dropping = false;
-                output.push(value);
-            }
-            return Ok(iterator_from_values(output));
-        }
-    }
     Ok(Value::Iterator(Rc::new(RefCell::new(
         IteratorState::generated(IteratorGenerator::DropWhile(function, source, false)),
     ))))
@@ -6444,6 +6345,9 @@ fn iterator_cycle(value: Value) -> Result<Value, String> {
         Value::Iterator(iterator) => Value::Iterator(iterator),
         value => make_iterator(value)?,
     };
+    if !matches!(iterator_has_next(&source)?, Value::Bool(true)) {
+        return Err("cycle expects a non-empty source".into());
+    }
     Ok(Value::Iterator(Rc::new(RefCell::new(
         IteratorState::generated(IteratorGenerator::Cycle(source, Vec::new(), 0, false)),
     ))))
@@ -6609,9 +6513,6 @@ fn collection_count(value: &Value) -> Result<Value, String> {
         Value::Object(v) => v.borrow().len(),
         Value::Struct(v) => v.values.len(),
         Value::Iterator(_) => {
-            if !iterator_is_finite(value) {
-                return Err("count expects a finite collection".into());
-            }
             let mut count = 0;
             while iterator_try_next(value)?.is_some() {
                 count += 1;
@@ -6624,29 +6525,7 @@ fn collection_count(value: &Value) -> Result<Value, String> {
 }
 
 fn iterator_is_finite(value: &Value) -> bool {
-    match value {
-        Value::Iterator(iterator) => match &iterator.borrow().generator {
-            None => true,
-            Some(IteratorGenerator::Constant(_))
-            | Some(IteratorGenerator::Repeated(_))
-            | Some(IteratorGenerator::Iterate(_, _)) => false,
-            Some(IteratorGenerator::Take(_, _)) => true,
-            Some(IteratorGenerator::Cycle(_, _, _, _)) => false,
-            Some(IteratorGenerator::Drop(source, _))
-            | Some(IteratorGenerator::TakeWhile(_, source))
-            | Some(IteratorGenerator::DropWhile(_, source, _))
-            | Some(IteratorGenerator::Map(_, source))
-            | Some(IteratorGenerator::Filter(_, source))
-            | Some(IteratorGenerator::Mapcat(_, source, _))
-            | Some(IteratorGenerator::Keep(_, source))
-            | Some(IteratorGenerator::Partition(source, _, _)) => iterator_is_finite(source),
-            Some(IteratorGenerator::Zip(sources))
-            | Some(IteratorGenerator::Interleave(sources, _)) => {
-                sources.is_empty() || sources.iter().any(iterator_is_finite)
-            }
-        },
-        _ => true,
-    }
+    !matches!(value, Value::Iterator(_))
 }
 
 fn collection_get(value: &Value, key: &Value, default: Value) -> Result<Value, String> {
@@ -9912,7 +9791,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err(format!("{n} expects one value"));
                 }
                 let value = eval(&fs[1], env)?;
-                let result = matches!(value, Value::Iterator(iterator) if n == "seq?" && iterator.borrow().seq || n == "iter?" && !iterator.borrow().seq);
+                let result = matches!(value, Value::Iterator(iterator) if n == "iter?" || iterator.borrow().seq);
                 Ok(Value::Bool(result))
             }
             Form::Symbol(n) if n == "iter-has?" => {
@@ -10528,25 +10407,16 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                             Value::Function(function) => function,
                             _ => return Err(format!("{operation} expects a function")),
                         };
-                        loop {
-                            match iterator_next(&source) {
-                                Ok(value) => {
-                                    let matched = call_function(&function, vec![value])?.truthy();
-                                    if operation == "every?" && !matched {
-                                        return Ok(Value::Bool(false));
-                                    }
-                                    if operation == "any?" && matched {
-                                        return Ok(Value::Bool(true));
-                                    }
-                                }
-                                Err(error)
-                                    if error == "iter-next reached the end of the iterator" =>
-                                {
-                                    return Ok(Value::Bool(operation == "every?"));
-                                }
-                                Err(error) => return Err(error),
+                        while let Some(value) = iterator_try_next(&source)? {
+                            let matched = call_function(&function, vec![value])?.truthy();
+                            if operation == "every?" && !matched {
+                                return Ok(Value::Bool(false));
+                            }
+                            if operation == "any?" && matched {
+                                return Ok(Value::Bool(true));
                             }
                         }
+                        Ok(Value::Bool(operation == "every?"))
                     }
                     _ => Err(format!("unknown iterator transform: {operation}")),
                 }
@@ -11012,22 +10882,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 let item = eval(&fs[1], env)?;
                 let collection = eval(&fs[2], env)?;
-                match collection {
-                    Value::Cons(values) => Ok(Value::Cons(Box::new(
-                        PCons::new(item, values.iter().collect()).with_meta(values.meta().cloned()),
-                    ))),
-                    Value::Tuple(values) => Ok(Value::Cons(Box::new(PCons::new(
-                        item,
-                        values.iter().cloned().collect(),
-                    )))),
-                    Value::Vector(values) => Ok(Value::Cons(Box::new(PCons::new(
-                        item,
-                        values.iter().cloned().collect(),
-                    )))),
-                    Value::List(values) => Ok(Value::Cons(Box::new(PCons::new(item, values)))),
-                    Value::Nil => Ok(Value::Cons(Box::new(PCons::new(item, PList::new())))),
-                    _ => Err("cons expects a sequential collection".into()),
-                }
+                protocol_cons(&[collection, item])
             }
             Form::Symbol(n) if n == "recur" => {
                 if fs.len() < 2 {

@@ -70,7 +70,14 @@ public class BuiltinCollectionTest {
 
   @Test
   public void testToSeq() {
-    assertNotNull(BuiltinCollection.toSeq(Arrays.asList(1)));
+    hara.lang.data.Seq<Integer> singleton = BuiltinCollection.toSeq(Arrays.asList(1));
+    assertNotNull(singleton);
+    assertEquals(Integer.valueOf(1), singleton.peekFirst());
+    assertEquals(1, singleton.count());
+    java.util.ArrayList<Integer> values = new java.util.ArrayList<>();
+    singleton.iterator().forEachRemaining(values::add);
+    assertEquals(Arrays.asList(1), values);
+    assertNull(BuiltinCollection.toSeq(java.util.Collections.emptyList()));
   }
 
   @Test

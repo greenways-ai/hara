@@ -732,6 +732,9 @@ public interface Iter {
   public static <E> Iterator<E> cycle(Supplier<Iterator<E>> f) {
     return new CloseableIterator<E>() {
       Iterator<E> _it;
+      final ArrayList<E> _cache = new ArrayList<>();
+      int _index;
+      boolean _exhausted;
       boolean _closed;
 
       private void initialize() {
@@ -743,7 +746,14 @@ public interface Iter {
 
       public boolean hasNext() {
         initialize();
-        return !_closed;
+        if (_closed) return false;
+        if (!_exhausted && _it.hasNext()) return true;
+        if (!_exhausted) {
+          _exhausted = true;
+          Iter.close(_it);
+          _it = null;
+        }
+        return !_cache.isEmpty();
       }
 
 
@@ -753,20 +763,23 @@ public interface Iter {
         if (_closed) {
           throw new Ex.NoSuchElement();
         }
-        if (_it.hasNext()) {
-          return _it.next();
+        if (!_exhausted && _it.hasNext()) {
+          E value = _it.next();
+          _cache.add(value);
+          return value;
         }
-        Iter.close(_it);
-        _it = f.get();
-        if (!_it.hasNext()) {
+        if (!_exhausted) {
+          _exhausted = true;
           Iter.close(_it);
-          _it = f.get();
-          if (!_it.hasNext()) {
-            close();
-            throw new Ex.NoSuchElement();
-          }
+          _it = null;
         }
-        return _it.next();
+        if (_cache.isEmpty()) {
+          close();
+          throw new Ex.NoSuchElement();
+        }
+        E value = _cache.get(_index);
+        _index = (_index + 1) % _cache.size();
+        return value;
       }
 
 
