@@ -269,6 +269,7 @@ final class FoundationHirLowerer {
     if ((bindings.count() & 1) != 0) fail("loop expects even bindings");
     int count = (int) bindings.count() / 2;
     int[] slots = new int[count];
+    int[] scratchSlots = new int[count];
     HaraExpressionNode[] initializers = new HaraExpressionNode[count];
     Map<Symbol, Integer> bodyLocals = new HashMap<>(locals);
     for (int index = 0; index < count; index++) {
@@ -279,9 +280,11 @@ final class FoundationHirLowerer {
       Symbol symbol = (Symbol) binding;
       initializers[index] = lower(bindings.nth(index * 2L + 1));
       slots[index] = frames.addSlot(FrameSlotKind.Object, symbol, null);
+      scratchSlots[index] =
+          frames.addSlot(FrameSlotKind.Object, Symbol.create(null, "__hara_recur_" + index), null);
       bodyLocals.put(symbol, slots[index]);
     }
-    HaraNodes.RecurTarget target = new HaraNodes.RecurTarget(slots);
+    HaraNodes.RecurTarget target = new HaraNodes.RecurTarget(slots, scratchSlots);
     FoundationHirLowerer bodyLowerer =
         new FoundationHirLowerer(language, context, frames, bodyLocals, target);
     return new HaraNodes.Loop(target, slots, initializers, bodyLowerer.lowerBody(form, 2));

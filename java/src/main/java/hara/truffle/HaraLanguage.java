@@ -2,6 +2,7 @@ package hara.truffle;
 
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.TruffleLanguage;
+import com.oracle.truffle.api.nodes.Node;
 import com.oracle.truffle.api.source.Source;
 import com.oracle.truffle.api.source.SourceSection;
 import hara.kernel.base.Parser;
@@ -24,6 +25,9 @@ public final class HaraLanguage extends TruffleLanguage<HaraContext> {
   public static final String ID = "hara";
   public static final String MIME_TYPE = "application/x-hara";
 
+  private static final ContextReference<HaraContext> CONTEXT_REFERENCE =
+      ContextReference.create(HaraLanguage.class);
+
   @Override
   protected HaraContext createContext(Env environment) {
     return new HaraContext(environment);
@@ -36,6 +40,14 @@ public final class HaraLanguage extends TruffleLanguage<HaraContext> {
 
   public static HaraContext currentContext() {
     return getCurrentContext(HaraLanguage.class);
+  }
+
+  /**
+   * Node-local context lookup for hot execution paths: resolves through the node's root and
+   * engine caches instead of walking the stack the way {@link #currentContext()} does.
+   */
+  public static HaraContext currentContext(Node node) {
+    return CONTEXT_REFERENCE.get(node);
   }
 
   static HaraLanguage currentLanguage() {

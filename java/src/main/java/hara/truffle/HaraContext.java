@@ -199,6 +199,8 @@ public final class HaraContext {
   private final Map<String, Set<String>> moduleDependencies = new ConcurrentHashMap<>();
   private final Map<String, Object> libraryStates = new ConcurrentHashMap<>();
   private final Map<String, Object> intrinsicCollectionBuiltins = new ConcurrentHashMap<>();
+  private volatile Object intrinsicFirstFunction;
+  private volatile Object intrinsicRestFunction;
   private final Set<String> loadingModules = ConcurrentHashMap.newKeySet();
   private final Deque<String> loadingStack = new ArrayDeque<>();
   private volatile HaraNamespace currentNamespace;
@@ -890,7 +892,11 @@ public final class HaraContext {
     currentNamespace = namespace(namespaceName);
     definitionOrigin = HaraVar.Origin.HAL_FALLBACK;
     try {
-      return requireSourceNamespace(namespaceName, reload);
+      HaraNamespace loaded = requireSourceNamespace(namespaceName, reload);
+      if (FOUNDATION_NAMESPACE.equals(namespaceName)) {
+        captureSequenceIntrinsics();
+      }
+      return loaded;
     } catch (RuntimeException error) {
       restore(snapshot);
       throw error;
@@ -3666,6 +3672,32 @@ public final class HaraContext {
     return intrinsicCollectionBuiltins.get(name);
   }
 
+  /**
+   * The canonical std.foundation first/rest function captured when the namespace source was
+   * (re)loaded, or null when unavailable. Specialized nodes compare the operator var's current
+   * value against this instance on every call and fall back to a generic invocation when it
+   * differs (e.g. after redefinition).
+   */
+  public Object intrinsicSequenceFunction(String name) {
+    return "first".equals(name) ? intrinsicFirstFunction : intrinsicRestFunction;
+  }
+
+  /**
+   * The exact (seq (iter-drop 1 source)) expansion for a receiver already coerced to an
+   * iterator: a lazy seq over the tail, or null when the tail is empty.
+   */
+  public Object restSequence(Iterator<?> source) {
+    return HaraSeq.create(closeable(Iter.drop(source, 1), source));
+  }
+
+  private void captureSequenceIntrinsics() {
+    HaraNamespace foundation = namespaces.get(FOUNDATION_NAMESPACE);
+    HaraVar firstVariable = foundation == null ? null : foundation.lookup("first");
+    HaraVar restVariable = foundation == null ? null : foundation.lookup("rest");
+    intrinsicFirstFunction = firstVariable == null ? null : firstVariable.deref();
+    intrinsicRestFunction = restVariable == null ? null : restVariable.deref();
+  }
+
   private void requireHalPath(String path, String operation) {
     String sourcePath = path.startsWith("classpath:") ? path.substring(10) : path;
     if (!sourcePath.endsWith(".hal") && !sourcePath.endsWith(".hrl")) {
@@ -5430,7 +5462,7 @@ public final class HaraContext {
     }
   }
 
-  private static final class UnaryBuiltin implements IFn<Object, Object, Object> {
+  private static final class UnaryBuiltin implements IFn<Object, Object, Object>, HaraBuiltinFunction {
     private final String name;
     private final Function<Object, Object> implementation;
 
@@ -5445,12 +5477,19 @@ public final class HaraContext {
     }
 
     @Override
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public Object apply(Object[] arguments) {
+      return IFn.applyAsArray(this, arguments);
+    }
+
+    @Override
     public String toString() {
       return "#<builtin " + name + ">";
     }
   }
 
-  private static final class VariadicBuiltin implements IFn<Object, Object, Object> {
+  private static final class VariadicBuiltin
+      implements IFn<Object, Object, Object>, HaraBuiltinFunction {
     private final String name;
     private final Function<Object[], Object> implementation;
 
@@ -5477,6 +5516,12 @@ public final class HaraContext {
     @Override
     public Function<Object, Object> getArgN() {
       return values -> implementation.apply((Object[]) values);
+    }
+
+    @Override
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public Object apply(Object[] arguments) {
+      return IFn.applyAsArray(this, arguments);
     }
 
     @Override
