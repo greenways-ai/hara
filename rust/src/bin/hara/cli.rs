@@ -1,6 +1,8 @@
 use crate::repl;
 use hara_wasm::cli_app;
+use hara_wasm::asset;
 use hara_wasm::extension_tool;
+use hara_wasm::identity_tool;
 use hara_wasm::package;
 use std::env;
 use std::io::{self, Read};
@@ -142,6 +144,9 @@ pub(crate) fn run(options: Options) -> Result<(), String> {
         return Ok(());
     }
     match command.first().map(String::as_str) {
+        Some("id") => identity_tool::run(&command[1..]),
+        Some("asset") => asset::run(&command[1..]),
+        Some("tap") => package::tap_command(&command[1..]),
         Some("package") => package::run(&command[1..]),
         #[cfg(feature = "hir-encoder")]
         Some("compile-hir") => compile_hir(&command[1..]),
@@ -210,12 +215,23 @@ fn routed_command(command: &[String]) -> Vec<String> {
         "hara.cli.handler/package" => "package",
         "hara.cli.handler/spec" => "spec",
         "hara.cli.handler/extension" => "extension",
+        "hara.cli.handler/identity" => "id",
+        "hara.cli.handler/asset" => "asset",
+        "hara.cli.handler/tap" => "tap",
         _ => return command.to_vec(),
     };
     let mut routed = vec![legacy.to_owned()];
-    if matches!(
+    if resolved.route.id == "hara.cli.route/package-extension" {
+        // `package extension` is a grouped spelling of the legacy top-level
+        // extension command, not an `extension extension` subcommand.
+    } else if matches!(
         resolved.route.handler.as_str(),
-        "hara.cli.handler/package" | "hara.cli.handler/spec" | "hara.cli.handler/extension"
+        "hara.cli.handler/package"
+            | "hara.cli.handler/spec"
+            | "hara.cli.handler/extension"
+            | "hara.cli.handler/identity"
+            | "hara.cli.handler/asset"
+            | "hara.cli.handler/tap"
     ) {
         routed.extend(resolved.route.path.iter().skip(1).cloned());
     }
@@ -248,6 +264,9 @@ fn usage() {
     println!("  hara server | remote HOST:PORT");
     println!("  hara project <new|check|run|test|add|remove|sync|update> ...");
     println!("  hara package <COMMAND> ...");
+    println!("  hara id <login|enroll|status|key|namespace> ...");
+    println!("  hara asset <check|build|inspect|publish|status|search|info|pull|sync|yank> ...");
+    println!("  hara tap <bootstrap|init|add|remove|list|verify|mirror> ...");
     println!("  hara spec <COMMAND> ...");
     println!("  hara extension <check|build|install|test> ...");
     println!();
@@ -295,6 +314,19 @@ mod spec_tests {
                 "candidate".into()
             ]),
             ["spec", "check-contribution", "candidate"]
+        );
+    }
+
+    #[test]
+    fn grouped_package_extension_does_not_duplicate_the_command() {
+        assert_eq!(
+            routed_command(&[
+                "package".into(),
+                "extension".into(),
+                "check".into(),
+                "demo".into()
+            ]),
+            ["extension", "check", "demo"]
         );
     }
 

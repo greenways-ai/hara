@@ -72,12 +72,23 @@ pub fn add(root: &Path, tap: Tap) -> Result<(), String> {
 /// GitHub-governed official Hara repositories; arbitrary taps remain signed
 /// root-key taps added explicitly by the user.
 pub fn bootstrap(root: &Path, profile: &str) -> Result<Tap, String> {
+    bootstrap_with_official_root(root, profile, &official_root_fingerprint()?)
+}
+
+/// Bootstrap entry point for callers that already obtained the official root
+/// fingerprint from an authenticated distribution channel.
+pub fn bootstrap_with_official_root(
+    root: &Path,
+    profile: &str,
+    identity_key: &str,
+) -> Result<Tap, String> {
+    validate_sha256_fingerprint(identity_key)?;
     let tap = match profile {
-        "official" => Tap {
-            name: "official".into(),
+        "hara" | "official" => Tap {
+            name: "hara".into(),
             registry: vec!["https://packages.hara-lang.org".into()],
-            identity: vec!["https://packages.hara-lang.org/identity.git".into()],
-            identity_key: format!("sha256:{}", "00".repeat(32)),
+            identity: vec!["https://id.hara-lang.org".into()],
+            identity_key: identity_key.into(),
             trust: TrustMode::SignedRoot,
         },
         _ => return Err(format!("unknown built-in tap profile: {profile}")),
@@ -166,12 +177,12 @@ pub fn trusted(root: &Path, name: &str) -> Result<Tap, String> {
 }
 
 pub fn trusted_or_builtin(root: &Path, name: &str) -> Result<Tap, String> {
-    if name == "official" {
+    if matches!(name, "hara" | "official") {
         return Ok(Tap {
-            name: "official".into(),
+            name: "hara".into(),
             registry: vec!["https://packages.hara-lang.org".into()],
-            identity: vec!["https://packages.hara-lang.org/identity.git".into()],
-            identity_key: format!("sha256:{}", "00".repeat(32)),
+            identity: vec!["https://id.hara-lang.org".into()],
+            identity_key: official_root_fingerprint()?,
             trust: TrustMode::SignedRoot,
         });
     }
@@ -545,6 +556,23 @@ fn valid_name(value: &str) -> bool {
         && value
             .chars()
             .all(|value| value.is_ascii_lowercase() || value.is_ascii_digit() || value == '-')
+}
+
+fn official_root_fingerprint() -> Result<String, String> {
+    let value = match option_env!("HARA_OFFICIAL_ROOT_SHA256") {
+        Some(value) => value.to_owned(),
+        None => env::var("HARA_OFFICIAL_ROOT_SHA256").map_err(|_| {
+            "official Hara tap root fingerprint is not configured; set HARA_OFFICIAL_ROOT_SHA256 when building or running the bootstrap client"
+        })?,
+    };
+    validate_sha256_fingerprint(&value)
+}
+fn validate_sha256_fingerprint(value: &str) -> Result<String, String> {
+    let hex = value.trim_start_matches("sha256:");
+    if read_hex(hex, "official tap root fingerprint")?.len() != 32 {
+        return Err("official tap root fingerprint must be SHA-256 hex".into());
+    }
+    Ok(format!("sha256:{hex}"))
 }
 fn verify(public_key: &[u8], message: &[u8], signature: &str) -> Result<(), String> {
     let key = VerifyingKey::from_bytes(

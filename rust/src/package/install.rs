@@ -102,10 +102,11 @@ pub(super) fn install_archive_at(archive: &Path, root: &Path) -> Result<PathBuf,
     }
     let project = read_project(&package_root)?;
     let coordinate = project::normalize_coordinate(&project.id)?;
-    let (_, package) = split_coordinate(&coordinate)?;
+    let (tap, package) = split_coordinate(&coordinate)?;
     let mut parts = package.split('/');
     let registration = root
-        .join("packages/official")
+        .join("packages")
+        .join(tap)
         .join(parts.next().unwrap())
         .join(parts.next().unwrap())
         .join(format!("{}.edn", project.version));

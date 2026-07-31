@@ -1,0 +1,104 @@
+(ns hara.metaspec.conforms-test
+  (:use code.test)
+  (:require [hara.metaspec.core :as metaspec]))
+
+(def base
+  {:document/id :demo/metaspec
+   :document/type :demo/metaspec
+   :document/version "1.0.0"
+   :document/status :draft
+   :document/title "Demo"
+   :document/summary "Demo metaspec"
+   :spec/conforms-to {:spec/id :demo/metaspec
+                      :spec/version "1.0.0"}
+   :spec/artifact-kind :demo/document
+   :meta/document-schema
+   {:schema/id :demo/document
+    :schema/type :map
+    :schema/required [:document/id :document/version]}
+   :meta/schemas []
+   :meta/cross-references []
+   :meta/requirements []
+   :meta/checkers []})
+
+^{:refer hara.metaspec.core/conforms
+  :id "self-conformance"}
+(fact "a metaspec can check itself"
+  (:report/status (metaspec/conforms base))
+  => :pass)
+
+^{:refer hara.metaspec.core/conforms
+  :id "resolution-blocked"}
+(fact "missing metaspec resolution is blocked"
+  (:report/status
+   (metaspec/conforms
+    (assoc base
+           :spec/conforms-to
+           {:spec/id :missing/metaspec
+            :spec/version "1.0.0"})))
+  => :blocked)
+
+^{:refer hara.metaspec.core/register-metaspec!
+  :id "registry-resolution"}
+(fact "registered exact-version metaspecs resolve automatically"
+  (let [subject
+        {:document/id :demo/subject
+         :document/version "1.0.0"
+         :spec/conforms-to {:spec/id :demo/metaspec
+                            :spec/version "1.0.0"}}]
+    (metaspec/register-metaspec! base)
+    (:report/status (metaspec/conforms subject)))
+  => :pass)
+
+^{:refer hara.metaspec.core/conforms
+  :id "schema-findings"}
+(fact "schema failures keep paths and repairs"
+  (let [report
+        (metaspec/conforms
+         (dissoc base :document/version)
+         {:metaspec base})
+        finding (first (:findings report))]
+    [(:report/status report)
+     (:finding/status finding)
+     (:finding/path finding)
+     (:action/type (:finding/repair finding))])
+  => [:fail :fail [] :add-key])
+
+(def external
+  (assoc base
+         :meta/checkers
+         [{:checker/id :demo.checker/value
+           :checker/type :external
+           :checker/package ['greenways/audio.supersonic "0.1.2"]
+           :checker/entrypoints ['gw.audio.supersonic/check-value]
+           :checker/requirement :demo/value}]))
+
+^{:refer hara.metaspec.core/register-checker-package!
+  :id "installed-external-checker"}
+(fact "installed exact-version checker packages participate in conformance"
+  (do
+    (metaspec/register-checker-package!
+     ['greenways/audio.supersonic "0.1.2"]
+     {'gw.audio.supersonic/check-value
+      (fn [document context] [])})
+    (:report/status
+     (metaspec/conforms external {:metaspec external})))
+  => :pass)
+
+^{:refer hara.metaspec.core/conforms
+  :id "missing-external-checker"}
+(fact "missing checker packages are blocked"
+  (let [missing
+        (assoc
+         external
+         :meta/checkers
+         [{:checker/id :demo.checker/value
+           :checker/type :external
+           :checker/package ['greenways/audio.supersonic "9.9.9"]
+           :checker/entrypoints ['gw.audio.supersonic/check-value]
+           :checker/requirement :demo/value}])]
+    (:report/status
+     (metaspec/conforms missing {:metaspec missing})))
+  => :blocked)
+
+(pr-str (run {:namespace "hara.metaspec.conforms-test"}))

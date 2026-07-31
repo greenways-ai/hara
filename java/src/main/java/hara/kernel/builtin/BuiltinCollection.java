@@ -4,6 +4,7 @@ import hara.kernel.base.Module;
 import hara.lang.base.Ex;
 import hara.lang.base.Iter;
 import hara.lang.data.*;
+import hara.lang.data.types.IVectorType;
 import hara.lang.protocol.*;
 
 import java.util.Iterator;
@@ -17,7 +18,29 @@ import static hara.kernel.base.Module.ReduceType.*;
 public interface BuiltinCollection {
   @Module.Fn(name = "assoc", protocol = true)
   public static <K, V> IAssoc assoc(IAssoc coll, K key, V val) {
+    if (coll instanceof IVectorType && !(key instanceof Integer)) {
+      return ((IAssoc<Integer, V>) coll).assoc(assocIndex(key), val);
+    }
     return coll.assoc(key, val);
+  }
+
+  static Integer assocIndex(Object key) {
+    if (!(key instanceof Number)) {
+      throw new Ex.Runtime(
+          "assoc index must be a number, got: "
+              + (key instanceof IDisplay ? ((IDisplay) key).display() : String.valueOf(key)));
+    }
+    if (key instanceof Double || key instanceof Float) {
+      double value = ((Number) key).doubleValue();
+      if (value != Math.rint(value)) {
+        throw new Ex.Runtime("assoc index must be an integer, got: " + key);
+      }
+    }
+    long index = ((Number) key).longValue();
+    if (index < Integer.MIN_VALUE || index > Integer.MAX_VALUE) {
+      throw new Ex.Runtime("assoc index out of range: " + index);
+    }
+    return (int) index;
   }
 
   @Module.Fn(name = "assoc", option = true)

@@ -920,6 +920,48 @@ public class HaraLanguageTest {
   }
 
   @Test
+  public void altersVarRootToABuiltinKeepsItCallable() {
+    try (Context context = context()) {
+      assertEquals(
+          "ab",
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(def c count) (alter-var-root (var c) (fn [_] str)) (c \"a\" \"b\")")
+              .asString());
+      assertEquals(
+          2,
+          context.eval(HaraLanguage.ID, "(def y 1) (alter-var-root (var y) inc) y").asLong());
+    }
+  }
+
+  @Test
+  public void assocCoercesLongVectorIndices() {
+    try (Context context = context()) {
+      assertEquals(
+          "[:x 2 3]", context.eval(HaraLanguage.ID, "(str (assoc [1 2 3] 0 :x))").asString());
+      assertEquals(
+          "[1 2 3 :x]", context.eval(HaraLanguage.ID, "(str (assoc [1 2 3] 3 :x))").asString());
+      PolyglotException error =
+          assertThrows(
+              PolyglotException.class,
+              () -> context.eval(HaraLanguage.ID, "(assoc [1 2 3] :k :x)"));
+      assertTrue(error.getMessage().contains("assoc index must be a number"));
+    }
+  }
+
+  @Test
+  public void lazyIteratorsPrintWithAStableDisplayString() {
+    try (Context context = context()) {
+      assertEquals(
+          "#<lazy-iterator>",
+          context
+              .eval(HaraLanguage.ID, "(str (iter-map (fn [x] (+ x 1)) [1 2 3]))")
+              .asString());
+    }
+  }
+
+  @Test
   public void appliesFunctionsWithAFinalSequentialArgument() {
     try (Context context = context()) {
       assertEquals(

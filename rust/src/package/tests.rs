@@ -151,7 +151,7 @@ fn validates_typed_recipes_and_installs_content_addressed_roots() {
     let installed = install_archive_at(&archive, &dist).unwrap();
     assert!(installed.join("hara.recipe.edn").is_file());
     assert!(dist
-        .join("packages/official/example/app/1.2.3.edn")
+        .join("packages/hara/example/app/1.2.3.edn")
         .is_file());
     fs::remove_dir_all(root).unwrap();
 }
