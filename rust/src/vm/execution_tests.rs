@@ -151,7 +151,10 @@ fn comparisons() {
 
 #[test]
 fn comparison_errors() {
-    assert_eval_error("(< 1)", "< expects at least two arguments [line 1, column 1]");
+    assert_eval_error(
+        "(< 1)",
+        "< expects at least two arguments [line 1, column 1]",
+    );
     assert_eval_error("(< 1 \"a\")", "< expects numbers [line 1, column 1]");
     assert_eval_error("(= 1)", "= expects at least 2 arguments [line 1, column 1]");
 }
@@ -246,28 +249,46 @@ fn recur_errors() {
 
     let (kind, message) = compile_error("(loop [i 0] (+ 1 (recur 2)))");
     assert_eq!(kind, CompileErrorKind::Recur);
-    assert!(message.contains("recur must be in tail position"), "{message}");
+    assert!(
+        message.contains("recur must be in tail position"),
+        "{message}"
+    );
 
     let (kind, message) = compile_error("(loop [i 0] (if (recur 1) 2 3))");
     assert_eq!(kind, CompileErrorKind::Recur);
-    assert!(message.contains("recur must be in tail position"), "{message}");
+    assert!(
+        message.contains("recur must be in tail position"),
+        "{message}"
+    );
 
     let (kind, message) = compile_error("(loop [i 0] (do (recur 1) i))");
     assert_eq!(kind, CompileErrorKind::Recur);
-    assert!(message.contains("recur must be in tail position"), "{message}");
+    assert!(
+        message.contains("recur must be in tail position"),
+        "{message}"
+    );
 }
 
 #[test]
 fn unsupported_forms_are_typed_compile_errors() {
     let cases = [
         ("(def x 1)", "unsupported operator: def"),
-        ("(defn f [x] x)", "defn in result position requires var semantics"),
+        (
+            "(defn f [x] x)",
+            "defn in result position requires var semantics",
+        ),
         ("(quote a)", "unsupported operator: quote"),
         ("[1 2 3]", "unsupported form: [1 2 3]"),
         ("{:a 1}", "unsupported form: {:a 1}"),
         ("#{1 2}", "unsupported form: #{1 2}"),
-        ("(let [[a b] [1 2]] a)", "let destructuring is not supported"),
-        ("(loop [[a b] [1 2]] a)", "loop destructuring is not supported"),
+        (
+            "(let [[a b] [1 2]] a)",
+            "let destructuring is not supported",
+        ),
+        (
+            "(loop [[a b] [1 2]] a)",
+            "loop destructuring is not supported",
+        ),
     ];
     for (source, expected) in cases {
         let (kind, message) = compile_error(source);
@@ -281,14 +302,38 @@ fn unsupported_forms_are_typed_compile_errors() {
 fn compile_arity_errors_match_evaluator_messages() {
     for (source, expected) in [
         ("(if)", "if expects 2 or 3 arguments [line 1, column 1]"),
-        ("(if 1 2 3 4)", "if expects 2 or 3 arguments [line 1, column 1]"),
-        ("(let)", "let expects bindings and a body [line 1, column 1]"),
-        ("(let [x 1])", "let expects bindings and a body [line 1, column 1]"),
-        ("(let 1 x)", "let expects a binding list or vector [line 1, column 6]"),
-        ("(let [x] x)", "let bindings require name/value pairs [line 1, column 6]"),
-        ("(loop [i 0])", "loop expects bindings and a body [line 1, column 1]"),
-        ("(loop 1 2)", "loop expects a binding list or vector [line 1, column 7]"),
-        ("(loop [i] i)", "loop bindings require name/value pairs [line 1, column 7]"),
+        (
+            "(if 1 2 3 4)",
+            "if expects 2 or 3 arguments [line 1, column 1]",
+        ),
+        (
+            "(let)",
+            "let expects bindings and a body [line 1, column 1]",
+        ),
+        (
+            "(let [x 1])",
+            "let expects bindings and a body [line 1, column 1]",
+        ),
+        (
+            "(let 1 x)",
+            "let expects a binding list or vector [line 1, column 6]",
+        ),
+        (
+            "(let [x] x)",
+            "let bindings require name/value pairs [line 1, column 6]",
+        ),
+        (
+            "(loop [i 0])",
+            "loop expects bindings and a body [line 1, column 1]",
+        ),
+        (
+            "(loop 1 2)",
+            "loop expects a binding list or vector [line 1, column 7]",
+        ),
+        (
+            "(loop [i] i)",
+            "loop bindings require name/value pairs [line 1, column 7]",
+        ),
     ] {
         let (kind, message) = compile_error(source);
         assert_eq!(kind, CompileErrorKind::Arity, "{source}");
@@ -325,15 +370,9 @@ fn fn_values_and_direct_calls() {
 fn closures_capture_lexical_environment() {
     assert_eq!(eval("(let [x 19] ((fn [y] (+ x y)) 23))"), "42");
     // Captures are by value at closure-creation time.
-    assert_eq!(
-        eval("(let [x 1 f (fn [] x)] (let [x 2] (+ (f) x)))"),
-        "3"
-    );
+    assert_eq!(eval("(let [x 1 f (fn [] x)] (let [x 2] (+ (f) x)))"), "3");
     // Nested closures capture through intermediate scopes.
-    assert_eq!(
-        eval("(((fn [x] (fn [y] (+ x y))) 19) 23)"),
-        "42"
-    );
+    assert_eq!(eval("(((fn [x] (fn [y] (+ x y))) 19) 23)"), "42");
     // Loop bindings are capturable.
     assert_eq!(
         eval("(loop [i 0 acc 0] (if (< i 5) (recur (+ i 1) ((fn [x] (+ x i)) acc)) acc))"),
@@ -358,6 +397,14 @@ fn defn_lowering_binds_direct_calls() {
     assert_eq!(
         eval("(do (defn countdown [n] (if (< n 1) 0 (+ 1 (countdown (- n 1))))) (countdown 100))"),
         "100"
+    );
+}
+
+#[test]
+fn static_recursion_uses_vm_frames_instead_of_the_host_stack() {
+    assert_eq!(
+        eval("(do (defn countdown [n] (if (< n 1) n (countdown (- n 1)))) (countdown 20000))"),
+        "0"
     );
 }
 
@@ -391,13 +438,16 @@ fn parse_errors_are_compile_errors() {
 
 #[test]
 fn runtime_errors_carry_instruction_and_position() {
-    let program = compile_source("(+ 1 2) (loop [i 0] (if (< i 3) (recur (/ 1 0)) i))")
-        .expect("compiles");
+    let program =
+        compile_source("(+ 1 2) (loop [i 0] (if (< i 3) (recur (/ 1 0)) i))").expect("compiles");
     let error = execute_program(std::rc::Rc::new(program)).expect_err("division by zero");
     let text = error.to_string();
     // The runtime error points at the failing primitive call, not the
     // enclosing `recur`.
-    assert!(text.starts_with("division by zero [line 1, column 40]"), "{text}");
+    assert!(
+        text.starts_with("division by zero [line 1, column 40]"),
+        "{text}"
+    );
     assert!(text.contains("(instruction"), "{text}");
     let position = error.position.expect("source position");
     assert_eq!((position.line, position.column), (1, 40));
@@ -454,7 +504,10 @@ fn declare_opts_in_to_foundation_replacement() {
         "{message}"
     );
     let (_, message) = compile_error("(declare 1)");
-    assert!(message.contains("declare expects name symbols"), "{message}");
+    assert!(
+        message.contains("declare expects name symbols"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -515,7 +568,7 @@ fn uncaught_throws_propagate() {
     assert_eval_error("(try (throw 41) (catch Problem error 0))", "thrown: 41");
     assert_eval_error(
         "(try (try (throw 41) (catch Problem error 0)) (catch Problem error 0))",
-        "thrown: 41"
+        "thrown: 41",
     );
 }
 
@@ -544,7 +597,10 @@ fn finally_semantics() {
 #[test]
 fn exceptions_cross_function_boundaries() {
     // try inside a function body.
-    assert_eq!(eval("((fn [] (try (throw 1) (catch Exception e 42))))"), "42");
+    assert_eq!(
+        eval("((fn [] (try (throw 1) (catch Exception e 42))))"),
+        "42"
+    );
     // A throw inside a called function unwinds to the caller's catch.
     assert_eq!(
         eval("(try ((fn [] (throw 41))) (catch Exception e (+ e 1)))"),
@@ -571,7 +627,10 @@ fn try_compile_errors() {
     // Body forms cannot follow catch/finally clauses.
     let (kind, message) = compile_error("(try 1 (catch Exception e 2) 3)");
     assert_eq!(kind, CompileErrorKind::Arity);
-    assert!(message.contains("try clauses must follow body"), "{message}");
+    assert!(
+        message.contains("try clauses must follow body"),
+        "{message}"
+    );
     // Malformed catch clauses are compile errors. The evaluator silently
     // treats a non-symbol class as non-matching; the VM rejects the
     // source instead (documented divergence).
@@ -596,7 +655,10 @@ fn try_compile_errors() {
     let (kind, message) =
         compile_error("(loop [i 0] (try (if (< i 3) (recur (+ i 1)) i) (finally 0)))");
     assert_eq!(kind, CompileErrorKind::Recur);
-    assert!(message.contains("recur cannot cross a finally boundary"), "{message}");
+    assert!(
+        message.contains("recur cannot cross a finally boundary"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -604,6 +666,9 @@ fn uncaught_throw_carries_position() {
     let program = compile_source("(try 1 (finally 0)) (throw :failed)").expect("compiles");
     let error = execute_program(std::rc::Rc::new(program)).expect_err("uncaught throw");
     let text = error.to_string();
-    assert!(text.starts_with("thrown: :failed [line 1, column 21]"), "{text}");
+    assert!(
+        text.starts_with("thrown: :failed [line 1, column 21]"),
+        "{text}"
+    );
     assert!(text.contains("(instruction"), "{text}");
 }
