@@ -177,19 +177,19 @@ public class HaraGeneratedLibrariesTest {
     try (Context context = context()) {
       assertTrue(
           context
-              .eval(HaraLanguage.ID, "(iter-any? (fn [x] (= x \"str/trim\")) (current-symbols))")
+              .eval(HaraLanguage.ID, "(Iter/iter-any? (fn [x] (= x \"str/trim\")) (current-symbols))")
               .asBoolean());
       assertTrue(
           context
-              .eval(HaraLanguage.ID, "(not (iter-any? (fn [x] (= x \"str/len\")) (current-symbols)))")
+              .eval(HaraLanguage.ID, "(not (Iter/iter-any? (fn [x] (= x \"str/len\")) (current-symbols)))")
               .asBoolean());
       assertTrue(
           context
-              .eval(HaraLanguage.ID, "(iter-any? (fn [x] (= x \"co/resume\")) (current-symbols))")
+              .eval(HaraLanguage.ID, "(Iter/iter-any? (fn [x] (= x \"co/resume\")) (current-symbols))")
               .asBoolean());
       assertTrue(
           context
-              .eval(HaraLanguage.ID, "(iter-any? (fn [x] (= x \"push-last\")) (current-symbols))")
+              .eval(HaraLanguage.ID, "(Iter/iter-any? (fn [x] (= x \"push-last\")) (current-symbols))")
               .asBoolean());
     }
   }
@@ -203,9 +203,9 @@ public class HaraGeneratedLibrariesTest {
           context
               .eval(
                   HaraLanguage.ID,
-                  "(and (iter-any? (fn [x] (= x \"walk/own-symbol\")) (current-symbols)) "
-                      + "     (not (iter-any? (fn [x] (= x \"walk/+\")) (current-symbols))) "
-                      + "     (not (iter-any? (fn [x] (= x \"walk/ILookup\")) (current-symbols))))")
+                  "(and (Iter/iter-any? (fn [x] (= x \"walk/own-symbol\")) (current-symbols)) "
+                      + "     (not (Iter/iter-any? (fn [x] (= x \"walk/+\")) (current-symbols))) "
+                      + "     (not (Iter/iter-any? (fn [x] (= x \"walk/ILookup\")) (current-symbols))))")
               .asBoolean());
     }
   }

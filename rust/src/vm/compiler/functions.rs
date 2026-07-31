@@ -370,7 +370,9 @@ impl Compiler {
                         }
                         // Rejected by the compiler later; nothing to collect.
                         "defn" | "var" => {}
-                        _ if Primitive::from_symbol(head).is_some() => {
+                        _ if Primitive::from_symbol(head).is_some()
+                            && !self.visible_global(head) =>
+                        {
                             for c in &children[1..] {
                                 self.collect_free(c, bound, free);
                             }

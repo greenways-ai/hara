@@ -1,5 +1,6 @@
 (ns std.lib.block.construct
-  (:require [std.lib.block.type :as type]
+  (:require [std.foundation :refer :all :exclude [empty]]
+            [std.lib.block.type :as type]
             [std.foundation.string :as string]
             [std.foundation.edn :as edn]))
 

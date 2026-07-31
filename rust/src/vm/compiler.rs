@@ -117,9 +117,6 @@ struct Compiler {
     constant_index: HashMap<Value, u32>,
     functions: Vec<FunctionPrototype>,
     contexts: Vec<FnContext>,
-    /// Names introduced by top-level `(declare ...)`: an explicit opt-in
-    /// to replacing a std.foundation builtin through `defn`.
-    declared: Vec<String>,
     /// Names this program defines (`def`/`defn`/`declare`/`defstruct`):
     /// visible to global references compiled after their defining form
     /// (issue #223 two-phase visibility).
@@ -175,7 +172,6 @@ impl Compiler {
                 handlers: Vec::new(),
                 fallthrough: true,
             }],
-            declared: Vec::new(),
             globals: Vec::new(),
             var_metadata: Vec::new(),
             top_level: true,

@@ -323,7 +323,13 @@ impl GeneratedNamespaceConfig {
                     if lazy {
                         return Err(":require :lazy cannot be combined with :refer".into());
                     }
-                    let names = vector(&option[1], ":require :refer expects a vector of symbols")?;
+                    if matches!(&option[1], Form::Keyword(name) if name == "all") {
+                        continue;
+                    }
+                    let names = vector(
+                        &option[1],
+                        ":require :refer expects a vector of symbols or :all",
+                    )?;
                     for value in names {
                         let name = symbol(value, ":require :refer expects unqualified symbols")?;
                         if name.contains('/') {
@@ -361,6 +367,23 @@ impl GeneratedNamespaceConfig {
                 "reload" => {
                     if !matches!(&option[1], Form::Bool(true)) {
                         return Err(":require :reload expects true".into());
+                    }
+                }
+                "exclude" => {
+                    let names = vector(
+                        &option[1],
+                        ":require :exclude expects a vector of symbols",
+                    )?;
+                    for value in names {
+                        let name = symbol(
+                            value,
+                            ":require :exclude expects unqualified symbols",
+                        )?;
+                        if name.contains('/') {
+                            return Err(
+                                ":require :exclude expects unqualified symbols".into(),
+                            );
+                        }
                     }
                 }
                 other => return Err(format!("Unsupported :require option: :{other}")),
@@ -517,7 +540,7 @@ fn library(value: &str) -> Result<&str, String> {
         .map(|(library, _, _)| *library)
         .ok_or_else(|| format!("Unknown intrinsic library: {value}"))
 }
-fn normalize_namespace(value: &str) -> &str {
+pub(crate) fn normalize_namespace(value: &str) -> &str {
     match value {
         "core" | "hara.lib.core" => "std.foundation",
         "hara.lib.string" => "std.foundation.string",
@@ -569,7 +592,7 @@ fn canonical(namespace: &str, method: &str) -> String {
         ("std.native.Regex", "instance?") => "regexp?".into(),
         ("std.native.UUID", "instance?") => "uuid?".into(),
         ("std.native.Error", method) => format!("std.native.Error/{method}"),
-        ("std.native.Iter", method) => method.into(),
+        ("std.native.Iter", method) => format!("std.native.Iter/{method}"),
         ("std.foundation.coroutine", method) => format!("std.foundation.coroutine/{method}"),
         ("std.foundation.string", method) => format!("std.foundation.string/{method}"),
         ("std.lib.string", method) => format!("str/{method}"),
@@ -660,7 +683,7 @@ mod tests {
             config
                 .rewrite(parse_forms("Iter/iter-map").unwrap().remove(0))
                 .to_string(),
-            "iter-map"
+            "std.native.Iter/iter-map"
         );
         assert!(GeneratedNamespaceConfig::configure(
             &parse_forms("(:require [std.native.Maths :as Iter])").unwrap()

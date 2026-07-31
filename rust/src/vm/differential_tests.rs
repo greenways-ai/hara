@@ -200,31 +200,6 @@ fn recur_tail_tightening_is_a_documented_divergence() {
     assert!(eval_source("(loop [i 0] (+ 1 (recur 2)))").is_err());
 }
 
-#[test]
-fn defn_foundation_replacement_requires_declare() {
-    // Ruling (issue #202): replacing a std.foundation builtin through
-    // `defn` is an error unless the name was `declare`d first. The VM
-    // makes undeclared replacement a compile error; the evaluator still
-    // gives the builtin precedence and converges later.
-    let undeclared = "(do (defn count [n] 42) (count 5))";
-    let error = super::compile_source(undeclared).expect_err("must not compile");
-    assert!(
-        error.to_string().contains("replaces std.foundation var: count"),
-        "{error}"
-    );
-    // With an explicit declare, the replacement lowers and takes effect
-    // on both paths: the evaluator used to keep resolving the builtin
-    // even after declare, but the var-cell fix (qualified local cells,
-    // issue #223) converged it onto the canonical behavior — which the
-    // JVM runtime also exhibits.
-    let declared = "(do (declare count) (defn count [n] 42) (count 5))";
-    let mut declared_runtime = Runtime::new();
-    differential(&mut declared_runtime, declared);
-    // A bare declare already agrees on both paths.
-    let mut runtime = Runtime::new();
-    differential(&mut runtime, "(declare count)");
-}
-
 /// Reads the shared benchmark corpus and runs every workload whose
 /// source is inside the supported subset, exactly as written in
 /// `lib/bench/runtime/workloads.json`.
@@ -298,33 +273,129 @@ fn runtime_differential(source: &str) {
     }
 }
 
+#[test]
+fn callable_var_namespace_cases_match_shared_spec() {
+    fn entry<'a>(entries: &'a [(crate::kernel::Form, crate::kernel::Form)], key: &str) -> Option<&'a crate::kernel::Form> {
+        entries.iter().find_map(|(candidate, value)| {
+            matches!(candidate, crate::kernel::Form::Keyword(name) if name == key).then_some(value)
+        })
+    }
+
+    let manifest = crate::kernel::parse_forms(include_str!(
+        "../../../specs/00-unsorted/platform-language/draft/conformance/modules.edn"
+    ))
+    .expect("module conformance corpus parses")
+    .remove(0);
+    let crate::kernel::Form::Map(manifest) = manifest else {
+        panic!("module conformance corpus must be a map")
+    };
+    let Some(crate::kernel::Form::Vector(cases)) = entry(&manifest, "cases") else {
+        panic!("module conformance corpus must declare :cases")
+    };
+
+    for id in [
+        "namespace/callable-var-precedence",
+        "namespace/callable-var-lexical-shadow",
+        "namespace/callable-var-late-binding",
+        "namespace/referred-var-protected",
+    ] {
+        let case = cases
+            .iter()
+            .find_map(|case| match case {
+                crate::kernel::Form::Map(entries)
+                    if matches!(entry(entries, "id"), Some(crate::kernel::Form::Keyword(candidate)) if candidate == id) =>
+                {
+                    Some(entries)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing shared module case :{id}"));
+        let Some(crate::kernel::Form::String(setup)) = entry(case, "setup") else {
+            panic!(":{id} must declare string :setup")
+        };
+        let Some(crate::kernel::Form::String(source)) = entry(case, "source") else {
+            panic!(":{id} must declare string :source")
+        };
+        let Some(crate::kernel::Form::Map(expect)) = entry(case, "expect") else {
+            panic!(":{id} must declare :expect")
+        };
+        let mut runtime = Runtime::new();
+        runtime
+            .eval_native(setup)
+            .unwrap_or_else(|error| panic!(":{id} setup failed: {error}"));
+        if let Some(crate::kernel::Form::String(expected)) = entry(expect, "display") {
+            assert_eq!(
+                runtime
+                    .eval_bytecode_native(source)
+                    .unwrap_or_else(|error| panic!(":{id} VM failed: {error}")),
+                *expected,
+                ":{id}"
+            );
+        } else if let Some(crate::kernel::Form::String(marker)) =
+            entry(expect, "error-contains")
+        {
+            let error = runtime
+                .eval_bytecode_native(source)
+                .expect_err(&format!(":{id} VM must fail"));
+            assert!(error.contains(marker), ":{id}: {error}");
+        } else {
+            panic!(":{id} has unsupported expectation")
+        }
+    }
+}
+
 /// Namespace- and arity-dependent cases from the normative L0 corpus
 /// (`specs/00-unsorted/platform-language/draft/conformance/l0.edn`),
 /// deferred by milestones 2-3 until globals existed (issue #223).
 #[test]
 fn l0_namespace_corpus_cases_match() {
-    for source in [
-        // :error/catch-order
-        "(do (defstruct Problem [value]) (try (throw (Problem 42)) (catch Other error 0) (catch Problem error (field error :value))))",
-        // :error/unmatched-catch
-        "(do (defstruct Problem [value]) (try (throw (Problem 42)) (catch Other error 0)))",
-        // :error/finally-normal
-        "(do (def cleaned 0) (try 41 (finally (set! cleaned (+ cleaned 1)))) (+ 40 cleaned))",
-        // :error/finally-unwind
-        "(do (def cleaned 0) (try (throw 41) (catch Exception error (+ error cleaned)) (finally (set! cleaned (+ cleaned 1)))) (+ 40 cleaned))",
-        // :runtime/set-var-root
-        "(do (def answer 1) (set! answer 42) answer)",
-        // :compiler/declare-private
-        "(do (declare answer) (def answer 42) (defn- private-answer [] answer) (private-answer))",
-        // :definition/doc-metadata
-        "(do (defn documented \"Adds one.\" [value] (+ value 1)) (get (meta #'documented) :doc))",
-        // :definition/arglists-metadata
-        "(do (defn documented [left right] (+ left right)) (count (first (get (meta #'documented) :arglists))))",
-        // :function/variadic-arity
-        "((fn [left & more] (+ left (count more))) 40 1 2)",
-        // :function/multiple-arities
-        "(do (defn choose ([value] value) ([left right] (+ left right))) (+ (choose 19 22) (choose 1)))",
-    ] {
+    fn entry<'a>(
+        entries: &'a [(crate::kernel::Form, crate::kernel::Form)],
+        key: &str,
+    ) -> Option<&'a crate::kernel::Form> {
+        entries.iter().find_map(|(candidate, value)| {
+            matches!(candidate, crate::kernel::Form::Keyword(name) if name == key).then_some(value)
+        })
+    }
+
+    let supported = [
+        "error/catch-order",
+        "error/unmatched-catch",
+        "error/finally-normal",
+        "error/finally-unwind",
+        "runtime/set-var-root",
+        "compiler/declare-private",
+        "definition/doc-metadata",
+        "definition/arglists-metadata",
+        "function/variadic-arity",
+        "function/multiple-arities",
+    ];
+    let manifest = crate::kernel::parse_forms(include_str!(
+        "../../../specs/00-unsorted/platform-language/draft/conformance/l0.edn"
+    ))
+    .expect("L0 conformance corpus parses")
+    .remove(0);
+    let crate::kernel::Form::Map(manifest) = manifest else {
+        panic!("L0 conformance corpus must be a map")
+    };
+    let Some(crate::kernel::Form::Vector(cases)) = entry(&manifest, "cases") else {
+        panic!("L0 conformance corpus must declare :cases")
+    };
+    for id in supported {
+        let case = cases
+            .iter()
+            .find_map(|case| match case {
+                crate::kernel::Form::Map(entries)
+                    if matches!(entry(entries, "id"), Some(crate::kernel::Form::Keyword(candidate)) if candidate == id) =>
+                {
+                    Some(entries)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing L0 case :{id}"));
+        let Some(crate::kernel::Form::String(source)) = entry(case, "source") else {
+            panic!(":{id} must declare string :source")
+        };
         runtime_differential(source);
     }
 }
@@ -340,4 +411,3 @@ fn runtime_globals_interop_issue_223() {
     assert_eq!(runtime.eval_native("(defn g [x] (+ x 2))"), Ok("#'user/g".into()));
     assert_eq!(runtime.eval_bytecode_native("(g 40)"), Ok("42".into()));
 }
-

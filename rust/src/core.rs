@@ -22,8 +22,6 @@ use std::rc::Rc;
 #[path = "fiber.rs"]
 mod fiber;
 pub use fiber::{EvalFiber, EvalFiberState, Step};
-#[cfg(feature = "bytecode-vm")]
-pub(crate) use fiber::CORE_SPECIAL_FORMS;
 
 pub fn completion_symbols() -> &'static [&'static str] {
     fiber::completion_symbols()
@@ -785,7 +783,7 @@ pub(crate) fn exception_function_values() -> Vec<(&'static str, Value)> {
 }
 
 pub(crate) fn basic_function_values() -> Vec<(&'static str, Value)> {
-    vec![(
+    let mut functions = vec![(
         "compare",
         native_function("compare", 2, |arguments| {
             Ok(Value::Number(match arguments[0].cmp(&arguments[1]) {
@@ -794,7 +792,98 @@ pub(crate) fn basic_function_values() -> Vec<(&'static str, Value)> {
                 std::cmp::Ordering::Greater => 1,
             }))
         }),
-    )]
+    )];
+    for (name, primitive) in [
+        ("+", Primitive::Add),
+        ("-", Primitive::Subtract),
+        ("*", Primitive::Multiply),
+        ("/", Primitive::Divide),
+        ("%", Primitive::Remainder),
+        ("mod", Primitive::Remainder),
+        ("=", Primitive::Equal),
+        ("<", Primitive::Less),
+        ("<=", Primitive::LessOrEqual),
+        (">", Primitive::Greater),
+        (">=", Primitive::GreaterOrEqual),
+        ("count", Primitive::Count),
+        ("get", Primitive::Get),
+        ("meta", Primitive::Meta),
+    ] {
+        functions.push((
+            name,
+            native_variadic_function(name, move |arguments| {
+                apply_primitive(primitive, &arguments)
+            }),
+        ));
+    }
+    functions
+}
+
+pub(crate) fn structural_function_value(name: impl Into<String>) -> Value {
+    let name = name.into();
+    let display_name = name.clone();
+    let active = Rc::new(Cell::new(false));
+    native_variadic_function(&display_name, move |arguments| {
+        if active.replace(true) {
+            return Err(format!("native method not implemented: {name}"));
+        }
+        let mut env = HashMap::new();
+        let mut call = Vec::with_capacity(arguments.len() + 1);
+        call.push(Form::Symbol(name.clone()));
+        for (index, argument) in arguments.into_iter().enumerate() {
+            let symbol = format!("__native_argument_{index}");
+            env.insert(symbol.clone(), argument);
+            call.push(Form::Symbol(symbol));
+        }
+        let result = eval(&Form::List(call), &mut env);
+        active.set(false);
+        result
+    })
+}
+
+/// Structural evaluator arms that are ordinary callable values.  Rust keeps
+/// the implementations in `eval`, but exposes the names through real
+/// `std.foundation` Vars just as the JVM runtime does.  Syntax and namespace
+/// mutation forms deliberately remain structural and are never interned here.
+pub(crate) fn structural_callable_names() -> impl Iterator<Item = &'static str> {
+    const SYNTAX_FORMS: &[&str] = &[
+        ".",
+        "binding",
+        "declare",
+        "def",
+        "defmacro",
+        "defmethod",
+        "defmulti",
+        "defn",
+        "defn-",
+        "do",
+        "extend-type",
+        "fn",
+        "fn*",
+        "if",
+        "let",
+        "loop",
+        "ns",
+        "recur",
+        "require",
+        "set!",
+        "try",
+        "var",
+    ];
+
+    let maths_methods = NATIVE_TYPES
+        .iter()
+        .find_map(|(name, methods)| (*name == "Maths").then_some(*methods))
+        .expect("Maths native type must be declared");
+
+    fiber::CORE_SPECIAL_FORMS.iter().copied().filter(move |name| {
+        !SYNTAX_FORMS.contains(name)
+            && !name.contains('/')
+            && !name.starts_with("__")
+            && !maths_methods.contains(name)
+            && (!name.starts_with("iter-")
+                || matches!(*name, "iter-next" | "iter-next?"))
+    })
 }
 
 pub fn with_macros<R>(
@@ -1173,7 +1262,7 @@ enum IteratorGenerator {
     Cycle(Value, Vec<Value>, usize, bool),
     TakeWhile(Rc<Function>, Value),
     DropWhile(Rc<Function>, Value, bool),
-    Map(Rc<Function>, Value),
+    Map(Rc<Function>, Value, bool),
     Filter(Rc<Function>, Value),
     Mapcat(Rc<Function>, Value, Option<Value>),
     Keep(Rc<Function>, Value),
@@ -1324,12 +1413,13 @@ impl IteratorState {
                         break Ok(Some(value));
                     }
                 },
-                IteratorGenerator::Map(function, source) => {
+                IteratorGenerator::Map(function, source, spread) => {
                     let Some(value) = iterator_try_next(source)? else {
                         self.closed = true;
                         return Ok(None);
                     };
                     match value {
+                        value if !*spread => call_function(function, vec![value]),
                         Value::Tuple(values) => {
                             call_function(function, values.iter().cloned().collect())
                         }
@@ -2506,6 +2596,17 @@ pub(crate) fn protected_fallback_binding(
     }
 }
 
+fn require_owned_definition(env: &HashMap<String, Value>, name: &str) -> Result<(), String> {
+    if let Some(Value::Var(var)) = env.get(name) {
+        if !binding_is_local(var) {
+            return Err(format!(
+                "Cannot replace referred Var without ns omission: {name}"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Defines or updates a global var in the current namespace, mirroring
 /// the evaluator's `def` arm (`core.rs` special forms) without the flat
 /// env bridge: an existing var local to the current namespace is reused
@@ -2528,6 +2629,9 @@ pub(crate) fn vm_def_global(
             existing.set_origin(definition_origin());
             return Ok(existing);
         }
+        return Err(format!(
+            "Cannot replace referred Var without ns omission: {name}"
+        ));
     }
     let var = KernelVar::new(format!("{}/{}", current.name().as_str(), name), value);
     var.set_hara_metadata(metadata);
@@ -2548,6 +2652,9 @@ pub(crate) fn vm_declare_global(name: &str) -> Result<KernelVar<Value>, String> 
             existing.set_origin(definition_origin());
             return Ok(existing);
         }
+        return Err(format!(
+            "Cannot replace referred Var without ns omission: {name}"
+        ));
     }
     let var = KernelVar::new(format!("{}/{}", current.name().as_str(), name), Value::Nil);
     var.set_origin(definition_origin());
@@ -6577,12 +6684,22 @@ fn iterator_take_while(function: Rc<Function>, value: Value) -> Result<Value, St
     ))))
 }
 fn iterator_map(function: Rc<Function>, value: Value) -> Result<Value, String> {
+    iterator_map_with(function, value, false)
+}
+fn iterator_map_spread(function: Rc<Function>, value: Value) -> Result<Value, String> {
+    iterator_map_with(function, value, true)
+}
+fn iterator_map_with(
+    function: Rc<Function>,
+    value: Value,
+    spread: bool,
+) -> Result<Value, String> {
     let source = match value {
         Value::Iterator(iterator) => Value::Iterator(iterator),
         value => make_iterator(value)?,
     };
     Ok(Value::Iterator(Rc::new(RefCell::new(
-        IteratorState::generated(IteratorGenerator::Map(function, source)),
+        IteratorState::generated(IteratorGenerator::Map(function, source, spread)),
     ))))
 }
 fn iterator_partition(value: Value, amount: usize, all: bool) -> Result<Value, String> {
@@ -7691,26 +7808,11 @@ fn binding_value(env: &HashMap<String, Value>, name: &str) -> Option<Value> {
                 .map(|var| var.deref_value())
         })
         .or_else(|| {
-            name.rsplit_once('/').and_then(|(qualifier, local)| {
-                let qualifier_is_protocol = matches!(
-                    env.get(qualifier).cloned().map(deref_value),
-                    Some(Value::Protocol(_))
-                ) || FOUNDATION_PROTOCOLS
-                    .iter()
-                    .any(|(protocol, _)| *protocol == qualifier)
-                    || namespace_registry().ok().is_some_and(|registry| {
-                        matches!(
-                            registry
-                                .resolve(&crate::lang::data::Symbol::parse(qualifier))
-                                .map(|var| var.deref_value()),
-                            Some(Value::Protocol(_))
-                        )
-                    });
-                if qualifier_is_protocol {
-                    return None;
-                }
-                env.get(local).cloned().map(deref_value)
-            })
+            let (qualifier, local) = name.rsplit_once('/')?;
+            let registry = namespace_registry().ok()?;
+            (registry.current().name().as_str() == qualifier)
+                .then(|| env.get(local).cloned().map(deref_value))
+                .flatten()
         })
 }
 
@@ -8061,7 +8163,10 @@ fn eval_require_spec(
                 Some(Form::Symbol(target)) => target.clone(),
                 _ => return Err("require namespace must be a symbol".into()),
             };
-            (target, &items[1..])
+            (
+                crate::kernel::generated::normalize_namespace(&target).to_owned(),
+                &items[1..],
+            )
         }
         Form::List(items)
             if items.len() == 2
@@ -8072,7 +8177,10 @@ fn eval_require_spec(
                 Form::Symbol(target) => target.clone(),
                 _ => unreachable!(),
             };
-            (target, &[][..])
+            (
+                crate::kernel::generated::normalize_namespace(&target).to_owned(),
+                &[][..],
+            )
         }
         _ => return Err("require expects vectors such as [chrome.api :as api]".into()),
     };
@@ -8087,6 +8195,24 @@ fn eval_require_spec(
         matches!(&option[0], Form::Keyword(keyword) if keyword.as_str() == "reload")
             && matches!(&option[1], Form::Bool(true))
     });
+    let excluded = options
+        .chunks(2)
+        .find_map(|option| {
+            matches!(&option[0], Form::Keyword(keyword) if keyword.as_str() == "exclude")
+                .then_some(&option[1])
+        })
+        .map(|value| match value {
+            Form::Vector(names) => names
+                .iter()
+                .map(|name| match name {
+                    Form::Symbol(name) if !name.contains('/') => Ok(name.clone()),
+                    _ => Err("require :exclude expects unqualified symbols".to_string()),
+                })
+                .collect::<Result<HashSet<_>, _>>(),
+            _ => Err("require :exclude expects a vector of symbols".into()),
+        })
+        .transpose()?
+        .unwrap_or_default();
     if lazy {
         let has_alias = options
             .chunks(2)
@@ -8125,6 +8251,19 @@ fn eval_require_spec(
     if requiring != target && registry.load_state(&requiring) == Some(NamespaceLoadState::Loading) {
         registry.record_module_dependency(&requiring, &target);
     }
+    if !deferred {
+        let destination = registry.current();
+        for name in &excluded {
+            let local = crate::lang::data::Symbol::parse(name);
+            if destination
+                .resolve(&local)
+                .is_some_and(|var| var.symbol().get_namespace() == Some(target.as_str()))
+            {
+                destination.unmap(&local);
+                env.remove(name);
+            }
+        }
+    }
     for option in options.chunks(2) {
         let name = match &option[0] {
             Form::Keyword(keyword) => keyword.as_str(),
@@ -8146,24 +8285,37 @@ fn eval_require_spec(
                 }
             }
             "refer" => {
-                let Form::Vector(names) = &option[1] else {
-                    return Err("require :refer expects a vector of symbols".into());
-                };
                 let source = registry
                     .find(&target)
                     .ok_or_else(|| format!("Cannot require missing namespace: {target}"))?;
                 let destination = registry.current();
+                let names = match &option[1] {
+                    Form::Keyword(name) if name.as_str() == "all" => source
+                        .mappings()
+                        .into_iter()
+                        .map(|(name, _)| name.as_str().to_owned())
+                        .collect::<Vec<_>>(),
+                    Form::Vector(names) => names
+                        .iter()
+                        .map(|name| match name {
+                            Form::Symbol(name) if !name.contains('/') => Ok(name.clone()),
+                            _ => Err("require :refer expects unqualified symbols".to_string()),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    _ => {
+                        return Err(
+                            "require :refer expects a vector of symbols or :all".into(),
+                        )
+                    }
+                };
                 for name in names {
-                    let Form::Symbol(name) = name else {
-                        return Err("require :refer expects unqualified symbols".into());
-                    };
-                    if name.contains('/') {
-                        return Err("require :refer expects unqualified symbols".into());
+                    if excluded.contains(&name) {
+                        continue;
                     }
                     let var = source
-                        .resolve(&crate::lang::data::Symbol::parse(name))
+                        .resolve(&crate::lang::data::Symbol::parse(&name))
                         .ok_or_else(|| format!("Cannot refer missing Var: {target}/{name}"))?;
-                    destination.map_var(crate::lang::data::Symbol::parse(name), var);
+                    destination.map_var(crate::lang::data::Symbol::parse(&name), var);
                 }
             }
             "refer-macros" => {
@@ -8201,6 +8353,7 @@ fn eval_require_spec(
                     return Err("require :reload expects true".into());
                 }
             }
+            "exclude" => {}
             other => return Err(format!("Unsupported require option: :{other}")),
         }
     }
@@ -8823,6 +8976,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 let reference = eval(&fs[1], env)?;
                 let function = eval(&fs[2], env)?;
+                if !matches!(function, Value::Function(_)) {
+                    return Err("swap! expects a function".into());
+                }
                 let arguments = fs[3..]
                     .iter()
                     .map(|form| eval(form, env))
@@ -8874,6 +9030,11 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 };
                 let value = eval(&fs[2], env)?;
                 let cell = binding_var(env, name).ok_or_else(|| format!("unbound var: {name}"))?;
+                if !binding_is_local(&cell) {
+                    return Err(format!(
+                        "Cannot replace referred Var without ns omission: {name}"
+                    ));
+                }
                 cell.reset_value(value.clone());
                 Ok(value)
             }
@@ -8991,6 +9152,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
                     return Ok(value);
                 }
+                require_owned_definition(env, &name)?;
                 let value = eval(&fs[2], env)?;
                 if let Some(Value::Var(var)) = env.get(&name) {
                     if !binding_is_local(var) {
@@ -9022,6 +9184,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         Form::Symbol(name) => name.clone(),
                         _ => return Err("declare expects symbols".into()),
                     };
+                    require_owned_definition(env, &name)?;
                     let cell = match env.get(&name) {
                         Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
                         _ => KernelVar::new(local_var_name(&name), Value::Nil),
@@ -9425,6 +9588,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
                     return Ok(value);
                 }
+                require_owned_definition(env, &name)?;
                 let cell = match env.get(&name) {
                     Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
                     _ => KernelVar::new(local_var_name(&name), Value::Nil),
@@ -9486,6 +9650,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
                     return Ok(value);
                 }
+                require_owned_definition(env, &name)?;
                 let cell = match env.get(&name) {
                     Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
                     _ => KernelVar::new(local_var_name(&name), Value::Nil),
@@ -9614,7 +9779,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             Form::Symbol(n) if n == "std.foundation.coroutine/await" => {
                 Err("coroutine/await requires the fiber evaluator".into())
             }
-            Form::Symbol(n) if matches!(env.get(n), Some(Value::Var(var)) if (binding_is_local(var) || var.origin() == VarOrigin::RustLibrary) && matches!(var.deref_value(), Value::Function(_))) =>
+            Form::Symbol(n)
+                if matches!(env.get(n), Some(Value::Function(_)))
+                    || matches!(env.get(n), Some(Value::Var(var)) if (binding_is_local(var) || var.origin() == VarOrigin::RustLibrary) && matches!(var.deref_value(), Value::Function(_))) =>
             {
                 let function = binding_value(env, n).expect("function binding was checked");
                 let arguments = fs[1..]
@@ -10204,7 +10371,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         .collect::<Result<Vec<_>, _>>()?;
                     let zipped = iterator_zip(sources)?;
                     let result = match function {
-                        Value::Function(function) => iterator_map(function, zipped)?,
+                        Value::Function(function) => iterator_map_spread(function, zipped)?,
                         _ => return Err(format!("{n} expects a function")),
                     };
                     return if n == "map" {

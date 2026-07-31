@@ -1686,7 +1686,7 @@ final class HaraAnalyzer {
     }
     Object[] clauses = new Object[(int) form.count() - 2];
     for (int i = 2; i < form.count(); i++) clauses[i - 2] = form.nth(i);
-    context.setCurrentNamespace((Symbol) name, clauses);
+    context.prepareCurrentNamespace((Symbol) name, clauses);
     return new HaraNodes.SetNamespace((Symbol) name, clauses);
   }
 

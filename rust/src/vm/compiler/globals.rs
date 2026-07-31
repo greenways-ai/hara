@@ -11,15 +11,37 @@
 
 use std::rc::Rc;
 
-use crate::core::{binding_symbol, definition_metadata, CORE_SPECIAL_FORMS};
+use crate::core::{binding_symbol, definition_metadata};
 use crate::kernel::{Form, Span};
 use crate::lang::data::Metadata;
+use crate::lang::protocol::INamespaced;
 use crate::vm::error::{CompileError, CompileErrorKind};
 use crate::vm::opcode::Instruction;
 
 use super::{Child, Compiler};
 
 impl Compiler {
+    fn require_owned_global(&self, name: &str, span: &Span) -> Result<(), CompileError> {
+        let referred = crate::core::namespace_registry()
+            .ok()
+            .and_then(|registry| {
+                let current = registry.current();
+                current
+                    .resolve(&crate::lang::data::Symbol::parse(name))
+                    .map(|var| {
+                        var.symbol().get_namespace() != Some(current.name().as_str())
+                    })
+            })
+            .unwrap_or(false);
+        if referred {
+            return Err(unsupported(
+                format!("Cannot replace referred Var without ns omission: {name}"),
+                span.start,
+            ));
+        }
+        Ok(())
+    }
+
     /// A name constant's pool index (no instruction emitted). Global
     /// operands are string names resolved at execution time.
     pub(super) fn name_constant(&mut self, name: &str, span: &Span) -> Result<u32, CompileError> {
@@ -83,6 +105,7 @@ impl Compiler {
         }
         let (name, metadata) = binding_symbol(children[1].form, "def name")
             .map_err(|message| unsupported(message, children[1].span.start))?;
+        self.require_owned_global(&name, children[1].span)?;
         let metadata = self.var_metadata(metadata);
         let initializer = &children[2];
         self.compile_form(
@@ -141,6 +164,7 @@ impl Compiler {
                 Some(children[1].span.start),
             ));
         }
+        self.require_owned_global(name, children[1].span)?;
         let value = &children[2];
         self.compile_form(value.form, value.span, value.children, false)?;
         if !self.ctx().fallthrough {
@@ -185,8 +209,9 @@ impl Compiler {
     }
 
     /// `(declare name ...)`: interns a nil var per name without resetting
-    /// any existing binding, and marks the name for the issue #202
-    /// foundation-replacement ruling. Top-level statements only
+    /// any existing binding. It supplies forward visibility only; namespace
+    /// omission, not declare, controls whether a referred name may be replaced.
+    /// Top-level statements only
     /// (stricter than the evaluator, documented); evaluates to nil.
     pub(super) fn compile_declare(
         &mut self,
@@ -213,9 +238,7 @@ impl Compiler {
                     Some(child.span.start),
                 ))
             };
-            if !self.declared.iter().any(|n| n == name) {
-                self.declared.push(name.clone());
-            }
+            self.require_owned_global(name, child.span)?;
             self.declare_program_global(name);
             let constant = self.name_constant(name, child.span)?;
             self.emit(Instruction::DeclareGlobal(constant), Some(child.span.start));
@@ -364,8 +387,8 @@ impl Compiler {
     /// clauses) and evaluates to the var, matching the evaluator.
     /// Top-level statements only; the name is visible before the bodies
     /// compile, so self- and mutual-recursion within the form resolve
-    /// through the var (late binding). The issue #202 ruling keeps
-    /// undeclared std.foundation replacement a compile error.
+    /// through the var (late binding). Referred Vars remain owned by their
+    /// defining namespace and must be omitted before a local definition.
     pub(super) fn compile_defn(
         &mut self,
         children: &[Child<'_>],
@@ -388,6 +411,7 @@ impl Compiler {
         }
         let (name, metadata) = binding_symbol(children[1].form, "defn name")
             .map_err(|message| unsupported(format!("{message}"), children[1].span.start))?;
+        self.require_owned_global(&name, children[1].span)?;
         // `definition_metadata` works on the raw forms; the surviving
         // `rest` is a suffix of the elements, so the matching children
         // (with spans) are the same suffix of `children`.
@@ -401,18 +425,6 @@ impl Compiler {
                 CompileErrorKind::Arity,
                 "defn expects a name, parameters, and a body",
                 Some(span.start),
-            ));
-        }
-        // Ruling (issue #202): a std.foundation builtin cannot be
-        // replaced unless the name was explicitly `declare`d first.
-        if CORE_SPECIAL_FORMS.contains(&name.as_str()) && !self.declared.iter().any(|n| n == &name)
-        {
-            return Err(unsupported(
-                format!(
-                    "defn replaces std.foundation var: {name} \
-                     (declare the name at the start of the namespace to replace it)"
-                ),
-                children[1].span.start,
             ));
         }
         let metadata = self.var_metadata(metadata);

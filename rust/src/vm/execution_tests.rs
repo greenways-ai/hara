@@ -6,6 +6,7 @@
 use super::error::CompileErrorKind;
 use super::{compile_source, disassemble, eval_source, execute_program};
 use crate::core::Value;
+use crate::Runtime;
 
 fn eval(source: &str) -> String {
     eval_source(source)
@@ -425,25 +426,11 @@ fn compiled_programs_are_reusable() {
 }
 
 #[test]
-fn declare_opts_in_to_foundation_replacement() {
-    assert_eq!(eval("(declare count)"), "nil");
-    assert_eq!(eval("(declare count) (defn count [n] 42) (count 5)"), "42");
+fn declare_supplies_forward_visibility_only() {
+    assert_eq!(eval("(declare answer)"), "nil");
     assert_eq!(
-        eval("(declare count other) (defn count [n] (+ n 1)) (count 41)"),
+        eval("(declare answer) (defn answer [n] (+ n 1)) (answer 41)"),
         "42"
-    );
-    // Undeclared replacement of a foundation builtin is a compile error.
-    let (kind, message) = compile_error("(defn count [n] 42) (count 5)");
-    assert_eq!(kind, CompileErrorKind::UnsupportedForm);
-    assert!(
-        message.contains("defn replaces std.foundation var: count"),
-        "{message}"
-    );
-    // The VM's own primitives are foundation names too.
-    let (_, message) = compile_error("(defn mod [a b] 100) 1");
-    assert!(
-        message.contains("defn replaces std.foundation var: mod"),
-        "{message}"
     );
     // declare is top-level only and takes name symbols.
     let (_, message) = compile_error("(let [x 1] (declare y) x)");
@@ -693,9 +680,14 @@ fn global_form_errors_issue_223() {
     assert_eval_error("(do (defstruct P [x]) (field (->P 1) :z))", "unknown struct field: z");
     assert_eval_error("(do (defstruct P [x]) (field 42 :x))", "field expects a struct");
     assert_eval_error("(do (defstruct P [x]) (instance? 42 1))", "instance? expects a struct type");
-    // Foundation replacement still requires declare (issue #202 ruling).
-    let (_, message) = compile_error("(do (defn count [n] 42) (count 5))");
-    assert!(message.contains("replaces std.foundation var: count"), "{message}");
+    // Referred foundation Vars are protected; declare is forward visibility only.
+    let message = Runtime::new()
+        .compile_bytecode("(do (defn count [n] 42) (count 5))")
+        .expect_err("referred foundation Var must be protected");
+    assert!(
+        message.contains("Cannot replace referred Var without ns omission: count"),
+        "{message}"
+    );
     // Uninitialized let-style errors keep their shape.
     let (_, message) = compile_error("(fn [a &] a)");
     assert!(message.contains("rest parameter must be the last"), "{message}");

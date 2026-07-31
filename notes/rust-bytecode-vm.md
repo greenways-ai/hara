@@ -453,51 +453,39 @@ early-binding behavior:
   forms see the new slot; already-compiled bodies keep the old one),
   matching the evaluator.
 - Forward references fail as "unbound symbol", matching the evaluator.
-- Replacing a std.foundation builtin requires an explicit `declare`
-  (§17.5).
+- Foundation replacement follows namespace ownership (§17.5).
 - Referencing the defn'd name as a value inside its own body errors with
   "defn self-reference in value position is not supported"; `#'f` remains
   "unsupported operator: var".
 - Variadic (`&`) and multi-arity `fn`/`defn` and destructuring parameters
   are typed compile errors.
 
-### 17.5 Ruling: foundation replacement requires declare
+### 17.5 Superseded ruling: namespace ownership
 
-Issue #202 ruling (refined in discussion): replacing a **std.foundation
-builtin** — the evaluator's `CORE_SPECIAL_FORMS` inventory, i.e. the names
-runtime builtins take precedence over — through `defn` is an **error**
-unless the replacement is explicit:
+Milestone 4 supersedes the issue-#202 declare-or-error experiment. Ordinary
+callables are Vars and a namespace may define only names that it owns:
 
 ```clojure
-(do (defn count [n] 42) (count 5))             ; compile error:
-;; defn replaces std.foundation var: count
-;; (declare the name at the start of the namespace to replace it)
+(ns protected)
+(declare count) ; error: referred std.foundation/count is protected
 
-(do (declare count) (defn count [n] 42) (count 5)) ; => 42
+(ns local-count
+  (:config {:blank true})
+  (:require [std.foundation :refer :all :exclude [count]]))
+(defn count [n] 42)
+(count 5) ; => 42
 ```
 
-- `(declare name ...)` is a top-level-only statement that marks names for
-  explicit replacement and evaluates to nil (matching the evaluator's
-  existing `declare`). Nested declare and non-symbol arguments are
-  compile errors.
-- A declared builtin's `defn` lowers to a slot binding exactly like any
-  other defn; subsequent calls resolve to the replacement.
-- The collision set is `fiber::CORE_SPECIAL_FORMS`, re-exported through
-  `core` — the same inventory the evaluator's `application` path uses to
-  give builtins precedence, so the VM rejects exactly the names that
-  could never actually be replaced under current evaluator semantics.
-- **The VM behavior is canonical; the evaluator converges later.** The
-  evaluator still resolves the builtin even after `declare` (pinned as
-  `:vm-display` in the corpus, which consults only the VM); undeclared
-  replacement should eventually error there too.
-- Known limitation: declared replacement of one of the ten VM primitives
-  (e.g. `mod`) binds the slot, but operator-position calls still compile
-  to the primitive instruction — the replacement is observable only
-  through the slot value. This mirrors the evaluator, where builtins win
-  in operator position regardless.
-
-This supersedes the earlier "builtin-named defn shadows" behavior merged
-in milestone 2's first cut.
+- `(declare name ...)` supplies forward visibility for a namespace-owned
+  name and evaluates to nil. It never grants permission to replace a
+  referred Var.
+- `def`, `defn`, `defmacro`, `declare`, and `set!` enforce the same ownership
+  boundary on Java, the Rust evaluator, and the VM.
+- Callable resolution is lexical binding, visible Var, then an internal
+  primitive fallback. True syntax alone retains structural dispatch.
+- `:config {:blank true}` clears referrals; `:require :exclude` is
+  idempotent and removes a matching existing referral before imports are
+  published.
 
 ### 17.6 Error surface additions
 
@@ -846,9 +834,9 @@ from the start (`local_var_name` in `core.rs`), converging on the JVM
 semantics on both first and later evals; var display is qualified
 (`#'user/rank`), matching `HaraVar.display`. Two observable effects:
 the conformance `:defn/redefinition-captured` case now pins the
-canonical `2`, and `declare` + `defn` foundation replacement works on
-the evaluator (it previously errored), so
-`:defn/declared-replacement` is an ordinary `:display` case. The VM's
+canonical `2`. Foundation names are now protected referrals; local
+replacement is expressed by namespace omission or `:require :exclude`,
+not by `declare`. The VM's
 planned `VarGlobal` unqualified-display requalification is dropped —
 display is qualified on every path.
 
@@ -861,8 +849,8 @@ program:
   top-level `declare`, `def`, `defn`, `defstruct` in the same source.
 - It also queries the registry it was compiled against for
   **pre-existing globals** (foundation vars, earlier defs).
-- An unqualified symbol that is neither lexical, nor a primitive, nor a
-  visible global stays the milestone-1 compile error
+- Resolution order is lexical slot, visible global, then primitive fallback.
+  An unqualified symbol in none of those categories stays the milestone-1 compile error
   `unbound symbol: {name}` — closed-program behavior is unchanged, and
   typos are still caught at compile time.
 - A visible global compiles to `GetGlobal`, which resolves **at
@@ -920,10 +908,10 @@ stays in the instruction set (the validator still knows it) but the
 compiler no longer emits it; the milestone-2 lowering corpus cases keep
 their displayed values, so they pass unchanged.
 
-The issue-#202 ruling is preserved at the global layer: replacing a
-std.foundation var through `defn` requires a prior top-level `declare`.
-`def` over a foundation name stays allowed (it is on the evaluator; the
-ruling was defn-specific).
+The issue-#202 ruling is superseded at the global layer. Referred Vars are
+protected for every definition/mutation form; `declare` is forward visibility
+only. A local definition requires a blank namespace, omission, or explicit
+`:require :exclude`.
 
 ### 19.5 defstruct, field, instance?
 
@@ -1005,8 +993,6 @@ corpus case moves with it).
 - `ns`/`require`/`in-ns`/`alias`/`refer`/`use` compilation
   (`module/*`, `namespace/config-*` cases) — host boundary, §19.7.
 - Destructuring parameters.
-- Evaluator convergence on the declare ruling for `def` (the ruling was
-  defn-specific; no divergence today).
 
 ### 19.10 Open decisions recorded at milestone 4
 

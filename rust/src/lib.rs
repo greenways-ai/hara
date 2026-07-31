@@ -37,6 +37,7 @@ pub mod vm;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod wasmtime_provider;
 use crate::kernel::Form;
+use crate::lang::protocol::INamespaced;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -374,15 +375,16 @@ impl Runtime {
     fn empty() -> Runtime {
         let namespace_registry = kernel::NamespaceRegistry::new("user");
         let foundation = namespace_registry.find_or_create("std.foundation");
-        foundation.intern(
+        foundation.intern_with_origin(
             "list",
             core::native_variadic_function("list", |values| Ok(core::Value::List(values.into()))),
+            kernel::VarOrigin::RustLibrary,
         );
         for (name, value) in core::exception_function_values() {
-            foundation.intern(name, value);
+            foundation.intern_with_origin(name, value, kernel::VarOrigin::RustLibrary);
         }
         for (name, value) in core::basic_function_values() {
-            foundation.intern(name, value);
+            foundation.intern_with_origin(name, value, kernel::VarOrigin::RustLibrary);
         }
         for (name, protocol) in core::foundation_protocol_values() {
             foundation.intern(&name, protocol.clone());
@@ -402,6 +404,22 @@ impl Runtime {
             foundation.map_var(crate::lang::data::Symbol::parse(&name), var.clone());
             native.map_var(crate::lang::data::Symbol::parse(&name), var);
             namespace_registry.find_or_create(canonical_name);
+        }
+        for (native_type, methods) in core::NATIVE_TYPES {
+            let namespace_name = format!("std.native.{native_type}");
+            let namespace = namespace_registry.find_or_create(&namespace_name);
+            for method in *methods {
+                let dispatch_name = if *native_type == "Iter" {
+                    (*method).to_owned()
+                } else {
+                    format!("{namespace_name}/{method}")
+                };
+                namespace.intern_with_origin(
+                    *method,
+                    core::structural_function_value(dispatch_name),
+                    kernel::VarOrigin::RuntimePrimitive,
+                );
+            }
         }
         Runtime {
             env: HashMap::new(),
@@ -442,7 +460,7 @@ impl Runtime {
         Runtime::empty()
     }
 
-    fn refer_foundation_into(&mut self, namespace: &str) {
+    fn refer_native_types_into(&mut self, namespace: &str) {
         let target = self.namespace_registry.find_or_create(namespace);
         for (protocol, _) in core::FOUNDATION_PROTOCOLS {
             let protocol_namespace = core::builtin_protocol_namespace(protocol);
@@ -456,6 +474,25 @@ impl Runtime {
                 target.alias(*native_type, source);
             }
         }
+        if let Some(native) = self.namespace_registry.find("std.native") {
+            for (name, var) in native.mappings() {
+                if target.resolve(&name).is_none() {
+                    target.map_var(name.clone(), var.clone());
+                }
+                let canonical = crate::lang::data::Symbol::parse(&format!(
+                    "std.native.{}",
+                    name.as_str()
+                ));
+                if target.resolve(&canonical).is_none() {
+                    target.map_var(canonical, var);
+                }
+            }
+        }
+    }
+
+    fn refer_foundation_into(&mut self, namespace: &str) {
+        self.refer_native_types_into(namespace);
+        let target = self.namespace_registry.find_or_create(namespace);
         if namespace == "std.foundation" {
             return;
         }
@@ -481,6 +518,17 @@ impl Runtime {
         core::with_definition_origin(kernel::VarOrigin::HalFallback, || {
             self.eval_text(&foundation)
         })?;
+        let foundation_namespace = self.namespace_registry.find_or_create("std.foundation");
+        for name in core::structural_callable_names() {
+            let symbol = crate::lang::data::Symbol::parse(name);
+            if foundation_namespace.resolve(&symbol).is_none() {
+                foundation_namespace.intern_with_origin(
+                    name,
+                    core::structural_function_value(name),
+                    kernel::VarOrigin::RuntimePrimitive,
+                );
+            }
+        }
         self.loaded_resources.insert("std.foundation".into());
         let json = self.namespace_registry.find_or_create("std.native.Json");
         json.intern(
@@ -583,15 +631,10 @@ impl Runtime {
                             #[cfg(target_arch = "wasm32")]
                             false
                         })?;
-                    let required_extensions = config.required_namespaces().to_vec();
-                    for target in required_extensions {
-                        if self.loaded_resources.contains(&target) {
-                            continue;
-                        }
-                        if self.resources.contains_key(&target) {
-                            let source = self.resources.get(&target).cloned().unwrap_or_default();
-                            self.eval_text(&source)?;
-                            self.loaded_resources.insert(target);
+                    for target in config.required_namespaces() {
+                        if self.resources.contains_key(target)
+                            || self.loaded_resources.contains(target)
+                        {
                             continue;
                         }
                         if target == "std.foundation"
@@ -601,11 +644,69 @@ impl Runtime {
                             continue;
                         }
                         #[cfg(not(target_arch = "wasm32"))]
-                        self.install_discovered_extension(&target)?;
-                        self.load_wasm_extension_namespace(&target)?;
+                        self.install_discovered_extension(target)?;
+                        self.load_wasm_extension_namespace(target)?;
                     }
+
+                    let registry_before = self.namespace_registry.snapshot();
+                    let environment_before = self.env.clone();
+                    let macros_before = self.macros.borrow().clone();
+                    let configs_before = self.generated_configs.clone();
+                    let loaded_before = self.loaded_resources.clone();
                     self.generated_configs.insert(name.clone(), config);
                     self.use_namespace(&name);
+                    let foundation_bootstrap_child = name.starts_with("std.foundation.");
+                    let require_specs = values[2..]
+                        .iter()
+                        .flat_map(|clause| match clause {
+                            Form::List(items)
+                                if matches!(items.first(), Some(Form::Keyword(key)) if key == "require") =>
+                            {
+                                items[1..].to_vec()
+                            }
+                            Form::List(items)
+                                if matches!(items.first(), Some(Form::Keyword(key)) if key == "use") =>
+                            {
+                                items[1..]
+                                    .iter()
+                                    .cloned()
+                                    .map(|target| Form::Vector(vec![target]))
+                                    .collect()
+                            }
+                            _ => Vec::new(),
+                        })
+                        // std.foundation is the host bootstrap namespace. Its
+                        // child HAL libraries are rewritten against the
+                        // catalog while it is still being assembled, so they
+                        // must not recursively require the partially-built
+                        // namespace through the ordinary module loader.
+                        .filter(|spec| {
+                            !foundation_bootstrap_child
+                                || !matches!(spec,
+                                Form::Vector(items)
+                                    if matches!(items.first(), Some(Form::Symbol(target)) if target == "std.foundation"))
+                        })
+                        .collect::<Vec<_>>();
+                    if !require_specs.is_empty() {
+                        let require_form = Form::List(
+                            std::iter::once(Form::Symbol("require".into()))
+                                .chain(require_specs)
+                                .collect(),
+                        );
+                        if let Err(error) = self.eval_form(require_form, traced) {
+                            self.namespace_registry.restore(registry_before);
+                            self.env = environment_before;
+                            *self.macros.borrow_mut() = macros_before;
+                            self.generated_configs = configs_before;
+                            self.loaded_resources = loaded_before;
+                            return Err(error);
+                        }
+                        let config = self
+                            .generated_configs
+                            .get(&name)
+                            .expect("ns config was installed");
+                        self.sync_generated_aliases(config);
+                    }
                     result = core::Value::Nil;
                     continue;
                 }
@@ -748,13 +849,23 @@ impl Runtime {
         if name.is_empty() {
             return false;
         }
-        self.refer_foundation_into(name);
-        core::select_namespace_environment(&self.namespace_registry, &mut self.env, name);
         let config = self
             .generated_configs
             .get(name)
             .cloned()
             .unwrap_or_else(kernel::GeneratedNamespaceConfig::defaults);
+        if config.blank() {
+            let target = self.namespace_registry.find_or_create(name);
+            for (local, var) in target.mappings() {
+                if var.symbol().get_namespace() != Some(name) {
+                    target.unmap(&local);
+                }
+            }
+            self.refer_native_types_into(name);
+        } else {
+            self.refer_foundation_into(name);
+        }
+        core::select_namespace_environment(&self.namespace_registry, &mut self.env, name);
         self.sync_generated_aliases(&config);
         self.refresh_qualified_bindings();
         true
@@ -2339,11 +2450,11 @@ mod tests {
         );
         assert!(runtime
             .eval_text(
-                "(do (defstruct Missing []) (defprotocol Needed (get [self])) \
+                "(do (ns protocol-probe (:config {:blank true}) (:require [std.foundation :refer :all :exclude [get]])) (defstruct Missing []) (defprotocol Needed (get [self])) \
                      (get (Missing)))",
             )
             .unwrap_err()
-            .contains("missing protocol implementation: user/Needed/get"));
+            .contains("missing protocol implementation: protocol-probe/Needed/get"));
     }
 
     #[test]
@@ -3034,8 +3145,16 @@ mod tests {
                 &methods,
                 ":foundation-primitive",
             );
+            let native_only = classified(
+                classification.iter().find_map(|(key, value)| {
+                    matches!(key, Form::Keyword(name) if name == "native-only").then_some(value)
+                }),
+                &methods,
+                ":native-only",
+            );
             let mut exposed = hal_wrappers.clone();
             exposed.extend(primitives);
+            exposed.extend(native_only);
             assert_eq!(
                 exposed
                     .iter()
@@ -3541,7 +3660,7 @@ mod tests {
 
         assert_eq!(
             runtime
-                .eval_text("(ns project.app) (def identity (fn [value] 7)) (identity 42)")
+                .eval_text("(ns project.app (:config {:blank true}) (:require [std.foundation :refer :all :exclude [identity]])) (def identity (fn [value] 7)) (identity 42)")
                 .unwrap(),
             "7"
         );
@@ -4730,8 +4849,8 @@ mod tests {
         assert_eq!(
             runtime
                 .eval_text(
-                    "(let [it (iter-drop 1 [1])] \
-                       [(iter-has? it) (iter-has? it) (nil? (seq it))])"
+                    "(let [it (Iter/iter-drop 1 [1])] \
+                       [(iter-next? it) (iter-next? it) (nil? (seq it))])"
                 )
                 .unwrap(),
             "[false false true]"
@@ -4739,8 +4858,8 @@ mod tests {
         assert_eq!(
             runtime
                 .eval_text(
-                    "(let [it (iter-map inc [1])] \
-                       [(iter-has? it) (iter-has? it) (iter-next it) (iter-has? it)])"
+                    "(let [it (Iter/iter-map inc [1])] \
+                       [(iter-next? it) (iter-next? it) (iter-next it) (iter-next? it)])"
                 )
                 .unwrap(),
             "[true true 2 false]"
@@ -4753,20 +4872,20 @@ mod tests {
         assert_eq!(
             runtime
                 .eval_text(
-                    "[(last (iter-take 2 [1 2 3])) \
-                      (vec (reverse (iter-take 2 [1 2 3]))) \
-                      (vec (iter-zip [1] (repeat 0))) \
-                      (vec (iter-interleave [1] (repeat 0)))]"
+                    "[(last (Iter/iter-take 2 [1 2 3])) \
+                      (vec (reverse (Iter/iter-take 2 [1 2 3]))) \
+                      (vec (Iter/iter-zip [1] (repeat 0))) \
+                      (vec (Iter/iter-interleave [1] (repeat 0)))]"
                 )
                 .unwrap(),
             "[2 [2 1] [[1 0]] [1 0]]"
         );
         assert!(runtime
-            .eval_text("(count (iter-map (fn [x] (throw \"boom\")) [1]))")
+            .eval_text("(count (Iter/iter-map (fn [x] (throw \"boom\")) [1]))")
             .unwrap_err()
             .contains("boom"));
         assert!(runtime
-            .eval_text("(count (iter-map (fn [x] (throw \"weekend\")) [1]))")
+            .eval_text("(count (Iter/iter-map (fn [x] (throw \"weekend\")) [1]))")
             .unwrap_err()
             .contains("weekend"));
         assert_eq!(
@@ -4775,7 +4894,7 @@ mod tests {
                     "[(seq? (seq [1])) \
                       (iter? (seq [1])) \
                       (vec (cons 0 (rest [1 2]))) \
-                      (vec (iter-take 4 (cons 0 (repeat 1))))]"
+                      (vec (Iter/iter-take 4 (cons 0 (repeat 1))))]"
                 )
                 .unwrap(),
             "[true true [0 2] [0 1 1 1]]"
@@ -4801,34 +4920,34 @@ mod tests {
                 .unwrap(),
             "2"
         );
-        assert_eq!(runtime.eval_text("(iter-has? (iter [1]))").unwrap(), "true");
+        assert_eq!(runtime.eval_text("(iter-next? (iter [1]))").unwrap(), "true");
         assert_eq!(
             runtime
-                .eval_text("(let (it (iter [1])) (do (iter-close it) (iter-has? it)))")
+                .eval_text("(let (it (iter [1])) (do (Iter/iter-close it) (iter-next? it)))")
                 .unwrap(),
             "false"
         );
         assert_eq!(
             runtime
-                .eval_text("(let (it (iter-cycle [1 2])) (do (iter-next it) (iter-close it) (iter-has? it)))")
+                .eval_text("(let (it (Iter/iter-cycle [1 2])) (do (iter-next it) (Iter/iter-close it) (iter-next? it)))")
                 .unwrap(),
             "false"
         );
         assert_eq!(
             runtime
-                .eval_text("(let (it (iter-zip [1 2] [3 4])) (do (iter-close it) (iter-has? it)))")
+                .eval_text("(let (it (Iter/iter-zip [1 2] [3 4])) (do (Iter/iter-close it) (iter-next? it)))")
                 .unwrap(),
             "false"
         );
         assert_eq!(
             runtime
-                .eval_text("(iter-next (iter-map (fn [x] (* x 2)) [1 2]))")
+                .eval_text("(iter-next (Iter/iter-map (fn [x] (* x 2)) [1 2]))")
                 .unwrap(),
             "2"
         );
         assert_eq!(
             runtime
-                .eval_text("(iter-next (iter-filter (fn [x] (= x 2)) [1 2 3]))")
+                .eval_text("(iter-next (Iter/iter-filter (fn [x] (= x 2)) [1 2 3]))")
                 .unwrap(),
             "2"
         );
@@ -5105,6 +5224,141 @@ mod tests {
                 ":{id}"
             );
             assert!(matches!(entry(case, "expect"), Some(Form::Map(_))), ":{id}");
+        }
+    }
+
+    #[test]
+    fn module_ns_require_reload_executes_shared_spec_fixture() {
+        fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> Option<&'a Form> {
+            entries.iter().find_map(|(candidate, value)| {
+                matches!(candidate, Form::Keyword(name) if name == key).then_some(value)
+            })
+        }
+
+        let case = module_case("module/ns-require-reload");
+        let Some(Form::Map(fixture)) = entry(&case, "fixture") else {
+            panic!(":module/ns-require-reload must declare :fixture")
+        };
+        let Some(Form::Map(resource)) = entry(fixture, "resource") else {
+            panic!("reload fixture must declare :resource")
+        };
+        let Some(Form::String(namespace)) = entry(resource, "namespace") else {
+            panic!("reload resource must declare string :namespace")
+        };
+        let Some(Form::Map(revisions)) = entry(resource, "revisions") else {
+            panic!("reload resource must declare :revisions")
+        };
+        let Some(Form::Vector(steps)) = entry(fixture, "steps") else {
+            panic!("reload fixture must declare :steps")
+        };
+
+        let mut runtime = Runtime::new();
+        for step in steps {
+            let Form::Map(step) = step else {
+                panic!("reload fixture steps must be maps")
+            };
+            let Some(Form::Keyword(operation)) = entry(step, "op") else {
+                panic!("reload fixture step must declare :op")
+            };
+            match operation.as_str() {
+                "resource/use" => {
+                    let Some(Form::Keyword(revision)) = entry(step, "revision") else {
+                        panic!(":resource/use must declare :revision")
+                    };
+                    let Some(Form::String(source)) = entry(revisions, revision) else {
+                        panic!("missing reload resource revision :{revision}")
+                    };
+                    runtime.register_resource(namespace, source);
+                }
+                "eval" => {
+                    let Some(Form::String(source)) = entry(step, "source") else {
+                        panic!(":eval must declare string :source")
+                    };
+                    let Some(Form::Map(expect)) = entry(step, "expect") else {
+                        panic!(":eval must declare :expect")
+                    };
+                    if let Some(Form::String(expected)) = entry(expect, "display") {
+                        assert_eq!(
+                            runtime.eval_text(source).unwrap_or_else(|error| {
+                                panic!("shared reload eval failed for {source}: {error}")
+                            }),
+                            *expected
+                        );
+                    } else if matches!(entry(expect, "error"), Some(Form::Bool(true))) {
+                        runtime
+                            .eval_text(source)
+                            .expect_err("shared reload eval must fail");
+                    } else if let Some(Form::String(marker)) =
+                        entry(expect, "error-contains")
+                    {
+                        let error = runtime
+                            .eval_text(source)
+                            .expect_err("shared reload eval must fail");
+                        assert!(error.contains(marker), "{error}");
+                    } else {
+                        panic!("unsupported shared reload expectation")
+                    }
+                }
+                "assert/revision" => {
+                    let Some(Form::Number(expected)) = entry(step, "expect") else {
+                        panic!(":assert/revision must declare numeric :expect")
+                    };
+                    assert_eq!(
+                        runtime
+                            .eval_text(&format!("(module-revision '{namespace})"))
+                            .unwrap(),
+                        expected.to_string()
+                    );
+                }
+                other => panic!("unsupported shared reload operation :{other}"),
+            }
+        }
+    }
+
+    #[test]
+    fn callable_var_scenarios_execute_from_shared_spec() {
+        fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> Option<&'a Form> {
+            entries.iter().find_map(|(candidate, value)| {
+                matches!(candidate, Form::Keyword(name) if name == key).then_some(value)
+            })
+        }
+
+        for id in [
+            "namespace/callable-var-precedence",
+            "namespace/callable-var-lexical-shadow",
+            "namespace/callable-var-late-binding",
+            "namespace/referred-var-protected",
+        ] {
+            let case = module_case(id);
+            let Some(Form::String(setup)) = entry(&case, "setup") else {
+                panic!(":{id} must declare string :setup")
+            };
+            let Some(Form::String(source)) = entry(&case, "source") else {
+                panic!(":{id} must declare string :source")
+            };
+            let Some(Form::Map(expect)) = entry(&case, "expect") else {
+                panic!(":{id} must declare :expect")
+            };
+            let mut runtime = Runtime::new();
+            runtime
+                .eval_text(setup)
+                .unwrap_or_else(|error| panic!(":{id} setup failed: {error}"));
+            if let Some(Form::String(expected)) = entry(expect, "display") {
+                assert_eq!(
+                    runtime
+                        .eval_text(source)
+                        .unwrap_or_else(|error| panic!(":{id} failed: {error}")),
+                    *expected,
+                    ":{id}"
+                );
+            } else if let Some(Form::String(marker)) = entry(expect, "error-contains") {
+                let error = runtime
+                    .eval_text(source)
+                    .expect_err(&format!(":{id} must fail"));
+                assert!(error.contains(marker), ":{id}: {error}");
+            } else {
+                panic!(":{id} has unsupported expectation")
+            }
         }
     }
 

@@ -202,7 +202,10 @@ public final class HaraContext {
   private volatile Object intrinsicFirstFunction;
   private volatile Object intrinsicRestFunction;
   private final Set<String> loadingModules = ConcurrentHashMap.newKeySet();
+  private final Set<String> preparedNamespaceReloads = ConcurrentHashMap.newKeySet();
+  private final Set<String> blankNamespaces = ConcurrentHashMap.newKeySet();
   private final Deque<String> loadingStack = new ArrayDeque<>();
+  private boolean preparingNamespace;
   private volatile HaraNamespace currentNamespace;
   private final Map<String, Map<String, BuiltinExport>> builtinCatalogs = new ConcurrentHashMap<>();
   private boolean collectingBuiltins;
@@ -532,8 +535,25 @@ public final class HaraContext {
     }
   }
 
+  @TruffleBoundary
+  void prepareCurrentNamespace(Symbol symbol, Object[] clauses) {
+    boolean previous = preparingNamespace;
+    preparingNamespace = true;
+    try {
+      setCurrentNamespace(symbol, clauses);
+    } finally {
+      preparingNamespace = previous;
+    }
+  }
+
   private void applyNamespaceDeclaration(HaraNamespaceDeclaration declaration) {
     currentNamespace = namespace(declaration.name.getName());
+    if (declaration.blank) {
+      blankNamespaces.add(currentNamespace.name());
+      currentNamespace.removeReferredVars();
+    } else {
+      blankNamespaces.remove(currentNamespace.name());
+    }
     referRuntimeIntrinsics(currentNamespace);
     configureNativeAliases(currentNamespace);
     if (!declaration.blank) referFoundation(currentNamespace);
@@ -730,6 +750,7 @@ public final class HaraContext {
     }
     String target = ((Symbol) spec.nth(0)).display();
     boolean lazy = false;
+    boolean reload = false;
     for (int i = 1; i < spec.count(); i += 2) {
       if (i + 1 >= spec.count() || !(spec.nth(i) instanceof Keyword)) {
         throw new HaraException("Malformed :require options for " + target);
@@ -739,6 +760,11 @@ public final class HaraContext {
           throw new HaraException(":require :lazy expects true");
         }
         lazy = true;
+      } else if ("reload".equals(((Keyword) spec.nth(i)).getName())) {
+        if (!Boolean.TRUE.equals(spec.nth(i + 1))) {
+          throw new HaraException(":require :reload expects true");
+        }
+        reload = true;
       }
     }
     if (lazy) {
@@ -755,8 +781,18 @@ public final class HaraContext {
     if (lazy && !namespaces.containsKey(target)) {
       namespaceStates.putIfAbsent(target, NamespaceLoadState.UNLOADED);
     }
-    HaraNamespace required = lazy ? null : requiredNamespace(target);
-    if (!lazy && required == null) throw new HaraException("Cannot require missing namespace: " + target);
+    String reloadKey = currentNamespace.name() + "\u0000" + target;
+    boolean executeReload = reload;
+    if (reload && preparingNamespace) {
+      preparedNamespaceReloads.add(reloadKey);
+    } else if (reload && preparedNamespaceReloads.remove(reloadKey)) {
+      executeReload = false;
+    }
+    HaraNamespace required =
+        lazy && !executeReload ? null : requiredNamespace(target, executeReload);
+    if ((!lazy || reload) && required == null) {
+      throw new HaraException("Cannot require missing namespace: " + target);
+    }
     java.util.Set<String> excludedRefers = new java.util.HashSet<>();
     for (int i = 1; i < spec.count(); i += 2) {
       if (i + 1 >= spec.count() || !(spec.nth(i) instanceof Keyword)) {
@@ -775,6 +811,9 @@ public final class HaraContext {
         }
       }
     }
+    for (String excluded : excludedRefers) {
+      currentNamespace.removeReferredVar(excluded, target);
+    }
     for (int i = 1; i < spec.count(); i += 2) {
       if (i + 1 >= spec.count() || !(spec.nth(i) instanceof Keyword)) {
         throw new HaraException("Malformed :require options for " + target);
@@ -788,6 +827,8 @@ public final class HaraContext {
         putAlias(namespaceAliases, ((Symbol) value).getName(), target);
       } else if ("lazy".equals(option)) {
         // Validated above; aliases retain the target name until first resolution.
+      } else if ("reload".equals(option)) {
+        // Validated and executed before namespace bindings are published.
       } else if ("refer".equals(option)) {
         if (value instanceof Keyword && "all".equals(((Keyword) value).getName())) {
           for (String referred : required.symbolNames()) {
@@ -897,6 +938,44 @@ public final class HaraContext {
     }
   }
 
+  private synchronized HaraNamespace requiredNamespace(String target, boolean reload) {
+    if (!reload) return requiredNamespace(target);
+    NamespaceLoadState previousState = namespaceStates.get(target);
+    ContextSnapshot snapshot = snapshot();
+    namespaceStates.put(target, NamespaceLoadState.LOADING);
+    try {
+      libraryLoader.ensure(this, target);
+      HaraNamespace required =
+          libraryLoader.provides(target)
+              ? loadLibraryResource(target, true)
+              : requireSourceNamespace(target, true);
+      if (required == null) required = namespaces.get(target);
+      if (required == null) {
+        restore(snapshot);
+        if (previousState != NamespaceLoadState.LOADED) {
+          namespaceStates.put(target, NamespaceLoadState.FAILED);
+          namespaceFailures.put(
+              target, "no library, source, or extension provided this namespace");
+        }
+      } else {
+        namespaceStates.put(target, NamespaceLoadState.LOADED);
+        namespaceFailures.remove(target);
+      }
+      return required;
+    } catch (RuntimeException failure) {
+      restore(snapshot);
+      if (previousState != NamespaceLoadState.LOADED) {
+        namespaceStates.put(target, NamespaceLoadState.FAILED);
+        namespaceFailures.put(
+            target,
+            failure.getMessage() == null
+                ? failure.getClass().getSimpleName()
+                : failure.getMessage());
+      }
+      throw failure;
+    }
+  }
+
   HaraNamespace loadLibraryResource(String namespaceName, boolean reload) {
     String previousNamespace = currentNamespace.name();
     HaraVar.Origin previousOrigin = definitionOrigin;
@@ -915,7 +994,7 @@ public final class HaraContext {
     } finally {
       definitionOrigin = previousOrigin;
       currentNamespace = namespace(previousNamespace);
-      initializeUserNamespace(currentNamespace);
+      if (!blankNamespaces.contains(previousNamespace)) initializeUserNamespace(currentNamespace);
     }
   }
 
@@ -1053,7 +1132,7 @@ public final class HaraContext {
   void declareCurrent(Symbol symbol) {
     HaraVar existing = currentNamespace.lookup(symbol.getName());
     if (existing != null && !currentNamespace.name().equals(existing.namespaceName())) {
-      throw protectedReferredVar(symbol);
+      throw protectedReferredVar(symbol, existing);
     }
     if (existing == null) {
       currentNamespace.define(
@@ -1061,7 +1140,7 @@ public final class HaraContext {
     }
   }
 
-  private HaraException protectedReferredVar(Symbol symbol) {
+  private HaraException protectedReferredVar(Symbol symbol, HaraVar existing) {
     return new HaraException(
         "Cannot replace referred Var without ns omission: " + symbol.getName());
   }
@@ -1069,7 +1148,7 @@ public final class HaraContext {
   public void requireOwnedCurrent(Symbol symbol) {
     HaraVar existing = resolve(symbol);
     if (existing != null && !currentNamespace.name().equals(existing.namespaceName())) {
-      throw protectedReferredVar(symbol);
+      throw protectedReferredVar(symbol, existing);
     }
   }
 
@@ -4029,14 +4108,14 @@ public final class HaraContext {
         relocateLoadedMacros(callerNamespace, callerMacrosBefore, loaded);
       }
       currentNamespace = namespace(callerNamespace);
-      initializeUserNamespace(currentNamespace);
+      if (!blankNamespaces.contains(callerNamespace)) initializeUserNamespace(currentNamespace);
       if (arguments.length == 2) {
         applyRequireOptions(arguments[1], modules.get(key));
       }
       return null;
     } finally {
       currentNamespace = namespace(callerNamespace);
-      initializeUserNamespace(currentNamespace);
+      if (!blankNamespaces.contains(callerNamespace)) initializeUserNamespace(currentNamespace);
     }
   }
 
@@ -5060,7 +5139,8 @@ public final class HaraContext {
         aliasValues,
         new LinkedHashMap<>(modules),
         dependencyValues,
-        new LinkedHashMap<>(namespaceStates));
+        new LinkedHashMap<>(namespaceStates),
+        new LinkedHashSet<>(blankNamespaces));
   }
 
   @TruffleBoundary
@@ -5098,6 +5178,8 @@ public final class HaraContext {
     }
     namespaceStates.clear();
     namespaceStates.putAll(snapshot.namespaceStates);
+    blankNamespaces.clear();
+    blankNamespaces.addAll(snapshot.blankNamespaces);
   }
 
   private static final class BuiltinExport {
@@ -5132,6 +5214,7 @@ public final class HaraContext {
     private final Map<String, ModuleRecord> modules;
     private final Map<String, Set<String>> moduleDependencies;
     private final Map<String, NamespaceLoadState> namespaceStates;
+    private final Set<String> blankNamespaces;
 
     private ContextSnapshot(
         String currentNamespace,
@@ -5143,7 +5226,8 @@ public final class HaraContext {
         Map<String, Map<String, String>> aliases,
         Map<String, ModuleRecord> modules,
         Map<String, Set<String>> moduleDependencies,
-        Map<String, NamespaceLoadState> namespaceStates) {
+        Map<String, NamespaceLoadState> namespaceStates,
+        Set<String> blankNamespaces) {
       this.currentNamespace = currentNamespace;
       this.values = values;
       this.bindings = bindings;
@@ -5154,6 +5238,7 @@ public final class HaraContext {
       this.modules = modules;
       this.moduleDependencies = moduleDependencies;
       this.namespaceStates = namespaceStates;
+      this.blankNamespaces = blankNamespaces;
     }
   }
 
@@ -5651,6 +5736,17 @@ public final class HaraContext {
     private HaraVar refer(String symbolName, HaraVar value) {
       vars.put(symbolName, value);
       return value;
+    }
+
+    private void removeReferredVars() {
+      vars.entrySet().removeIf(entry -> !name.equals(entry.getValue().namespaceName()));
+    }
+
+    private void removeReferredVar(String symbolName, String sourceNamespace) {
+      vars.computeIfPresent(
+          symbolName,
+          (ignored, variable) ->
+              sourceNamespace.equals(variable.namespaceName()) ? null : variable);
     }
   }
 
