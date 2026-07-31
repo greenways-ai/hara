@@ -57,12 +57,37 @@ impl Compiler {
         if !self.ctx().fallthrough {
             return Ok(());
         }
+        // A capture-free function literal that is called immediately never
+        // needs to become a heap closure. Its body is already a prototype,
+        // so replace the just-emitted Closure with a direct VM call.
         let argc = (children.len() - 1) as u8;
+        let direct = match self.ctx().code.last() {
+            Some(Instruction::Closure {
+                prototype,
+                captures: 0,
+            }) => {
+                let proto = &self.functions[usize::from(*prototype)];
+                let accepts = (!proto.variadic && proto.arity == u16::from(argc))
+                    || (proto.variadic && u16::from(argc) >= proto.arity);
+                accepts.then_some(*prototype)
+            }
+            _ => None,
+        };
+        if direct.is_some() {
+            self.ctx_mut().code.pop();
+            self.ctx_mut().source_map.pop();
+        }
         self.compile_call_arguments(children, span)?;
         if !self.ctx().fallthrough {
             return Ok(());
         }
-        self.emit(Instruction::Call { argc }, Some(span.start));
+        match direct {
+            Some(prototype) => self.emit(
+                Instruction::CallStatic { prototype, argc },
+                Some(span.start),
+            ),
+            None => self.emit(Instruction::Call { argc }, Some(span.start)),
+        };
         Ok(())
     }
 

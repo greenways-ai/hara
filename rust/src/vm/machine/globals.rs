@@ -1,7 +1,9 @@
 //! Global, struct, and multi-arity instruction helpers.
 
-use super::{constant_string, constant_string_vector, Machine, Program, Value};
 use crate::lang::data::Symbol;
+use std::rc::Rc;
+
+use super::{constant_string, constant_string_vector, Machine, Program, Value, VmMultiArity, VmSlot};
 
 impl Machine {
     #[inline(never)]
@@ -10,7 +12,11 @@ impl Machine {
             return Err(format!("constant index {index} out of range"));
         };
         let var = crate::core::vm_resolve_global(name)?;
-        self.stack.push(var.deref_value());
+        let value = var.deref_value();
+        let slot = Machine::callable_key(&value)
+            .and_then(|key| self.vm_globals.get(&key).cloned())
+            .unwrap_or_else(|| value.into());
+        self.stack.push(slot);
         Ok(())
     }
 
@@ -28,7 +34,9 @@ impl Machine {
             return Err("stack underflow".to_string());
         };
         let metadata = metadata.map(|index| program.var_metadata[usize::from(index)].clone());
-        crate::core::vm_def_global(name, value.clone(), metadata)?;
+        let runtime_value = Machine::into_value(self.program.clone(), value.clone());
+        crate::core::vm_def_global(name, runtime_value.clone(), metadata)?;
+        self.remember_vm_global(&runtime_value, value.clone());
         self.stack.push(value);
         Ok(())
     }
@@ -51,7 +59,9 @@ impl Machine {
                 "Cannot replace referred Var without ns omission: {name}"
             ));
         }
-        var.reset_value(value.clone());
+        let runtime_value = Machine::into_value(self.program.clone(), value.clone());
+        var.reset_value(runtime_value.clone());
+        self.remember_vm_global(&runtime_value, value.clone());
         self.stack.push(value);
         Ok(())
     }
@@ -62,7 +72,7 @@ impl Machine {
             return Err(format!("constant index {index} out of range"));
         };
         let var = crate::core::vm_resolve_global(name)?;
-        self.stack.push(Value::Var(var));
+        self.stack.push(Value::Var(var).into());
         Ok(())
     }
 
@@ -76,7 +86,7 @@ impl Machine {
             return Err(format!("constant index {index} out of range"));
         };
         crate::core::vm_declare_global(name)?;
-        self.stack.push(Value::Nil);
+        self.stack.push(VmSlot::Nil);
         Ok(())
     }
 
@@ -94,7 +104,7 @@ impl Machine {
             return Err(format!("constant index {fields} out of range"));
         };
         let value = crate::core::vm_defstruct(name, field_names)?;
-        self.stack.push(value);
+        self.stack.push(value.into());
         Ok(())
     }
 
@@ -110,8 +120,9 @@ impl Machine {
         let Some(value) = self.stack.pop() else {
             return Err("stack underflow".to_string());
         };
+        let value = Machine::into_value(self.program.clone(), value);
         let value = crate::core::struct_field_value(&value, field)?;
-        self.stack.push(value);
+        self.stack.push(value.into());
         Ok(())
     }
 
@@ -123,8 +134,10 @@ impl Machine {
         let Some(ty) = self.stack.pop() else {
             return Err("stack underflow".to_string());
         };
+        let ty = Machine::into_value(self.program.clone(), ty);
+        let value = Machine::into_value(self.program.clone(), value);
         let value = crate::core::struct_instance_of(&ty, &value)?;
-        self.stack.push(value);
+        self.stack.push(value.into());
         Ok(())
     }
 
@@ -145,20 +158,19 @@ impl Machine {
         let start = self.stack.len() - count;
         if self.stack[start..]
             .iter()
-            .any(|value| !matches!(value, Value::Function(_)))
+            .any(|value| !matches!(value, VmSlot::Closure(_)))
         {
             return Err("multi-arity clauses must be functions".to_string());
         }
-        let functions = self
+        let clauses = self
             .stack
             .drain(start..)
             .map(|value| match value {
-                Value::Function(function) => function,
+                VmSlot::Closure(closure) => closure,
                 _ => unreachable!("checked above"),
             })
             .collect();
-        self.stack
-            .push(crate::core::arity_dispatcher(&name, functions, false));
+        self.stack.push(VmSlot::MultiArity(Rc::new(VmMultiArity { name, clauses })));
         Ok(())
     }
 }

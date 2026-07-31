@@ -1,20 +1,18 @@
-//! One execution frame: the local slot array plus the operand-stack base.
-//! The base is reserved for the multi-frame call stack of the closure
-//! milestone; milestone 1 runs exactly one frame.
+//! One execution frame: the local slot array plus its operand-stack base.
 
-use crate::core::Value;
+use super::slot::VmSlot;
 
 #[derive(Debug)]
 pub struct Frame {
-    locals: Vec<Value>,
+    locals: Vec<VmSlot>,
     base: usize,
 }
 
 impl Frame {
     /// The frame the machine starts with: all slots initialized to `nil`.
-    pub fn entry(local_count: usize) -> Frame {
+    pub(crate) fn entry(local_count: usize) -> Frame {
         Frame {
-            locals: vec![Value::Nil; local_count],
+            locals: vec![VmSlot::Nil; local_count],
             base: 0,
         }
     }
@@ -24,13 +22,26 @@ impl Frame {
     /// the remaining slots start as `nil`. Out-of-range writes are dropped
     /// rather than panicking (the validator guarantees they fit; this
     /// defends hand-built programs).
-    pub fn call(
+    pub(crate) fn call(
         local_count: usize,
         arity: usize,
-        args: Vec<Value>,
-        captures: Vec<Value>,
+        args: Vec<VmSlot>,
+        captures: Vec<VmSlot>,
+        base: usize,
     ) -> Frame {
-        let mut locals = vec![Value::Nil; local_count];
+        Self::call_reusing(Vec::new(), local_count, arity, args, captures, base)
+    }
+
+    pub(crate) fn call_reusing(
+        mut locals: Vec<VmSlot>,
+        local_count: usize,
+        arity: usize,
+        args: Vec<VmSlot>,
+        captures: Vec<VmSlot>,
+        base: usize,
+    ) -> Frame {
+        locals.clear();
+        locals.resize(local_count, VmSlot::Nil);
         for (index, value) in args.into_iter().enumerate() {
             if let Some(cell) = locals.get_mut(index) {
                 *cell = value;
@@ -41,16 +52,20 @@ impl Frame {
                 *cell = value;
             }
         }
-        Frame { locals, base: 0 }
+        Frame { locals, base }
     }
 
-    pub fn local(&self, slot: u16) -> Option<&Value> {
+    pub(crate) fn into_locals(self) -> Vec<VmSlot> {
+        self.locals
+    }
+
+    pub(crate) fn local(&self, slot: u16) -> Option<&VmSlot> {
         self.locals.get(usize::from(slot))
     }
 
     /// Clones the `count` slots starting at `start`; `None` when the range
     /// exceeds the frame (rejected by validation, defended here).
-    pub fn slot_range(&self, start: usize, count: usize) -> Option<Vec<Value>> {
+    pub(crate) fn slot_range(&self, start: usize, count: usize) -> Option<Vec<VmSlot>> {
         let end = start.checked_add(count)?;
         if end > self.locals.len() {
             return None;
@@ -61,7 +76,7 @@ impl Frame {
     /// Stores a value into a slot; false when the slot is out of range
     /// (rejected by validation, defended here so the machine never
     /// panics on malformed programs).
-    pub fn store(&mut self, slot: u16, value: Value) -> bool {
+    pub(crate) fn store(&mut self, slot: u16, value: VmSlot) -> bool {
         match self.locals.get_mut(usize::from(slot)) {
             Some(cell) => {
                 *cell = value;
@@ -71,9 +86,8 @@ impl Frame {
         }
     }
 
-    /// Operand-stack base of this frame; always 0 until function calls
-    /// arrive with the closure milestone.
-    pub fn base(&self) -> usize {
+    /// Operand-stack base at which this frame was entered.
+    pub(crate) fn base(&self) -> usize {
         self.base
     }
 }

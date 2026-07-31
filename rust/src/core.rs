@@ -4706,47 +4706,54 @@ pub(crate) fn apply_binary_primitive(
     right: &Value,
 ) -> Result<Value, String> {
     let op = primitive.operator();
+    if let (Value::Number(left), Value::Number(right)) = (left, right) {
+        return apply_binary_numbers(primitive, *left, *right);
+    }
     match primitive {
         Primitive::Add
         | Primitive::Subtract
         | Primitive::Multiply
         | Primitive::Divide
         | Primitive::Remainder => {
-            let (Value::Number(left), Value::Number(right)) = (left, right) else {
-                return Err(format!("{op} expects numbers"));
-            };
-            let result = match primitive {
-                Primitive::Add => left.checked_add(*right),
-                Primitive::Subtract => left.checked_sub(*right),
-                Primitive::Multiply => left.checked_mul(*right),
-                Primitive::Divide if *right != 0 => left.checked_div(*right),
-                Primitive::Remainder if *right != 0 => left.checked_rem(*right),
-                Primitive::Divide | Primitive::Remainder => return Err("division by zero".into()),
-                _ => unreachable!(),
-            }
-            .ok_or_else(|| "integer overflow".to_string())?;
-            Ok(Value::Number(result))
+            Err(format!("{op} expects numbers"))
         }
         Primitive::Equal => Ok(Value::Bool(left == right)),
         Primitive::Less
         | Primitive::LessOrEqual
         | Primitive::Greater
         | Primitive::GreaterOrEqual => {
-            let (Value::Number(left), Value::Number(right)) = (left, right) else {
-                return Err(format!("{op} expects numbers"));
-            };
-            Ok(Value::Bool(match primitive {
-                Primitive::Less => left < right,
-                Primitive::LessOrEqual => left <= right,
-                Primitive::Greater => left > right,
-                Primitive::GreaterOrEqual => left >= right,
-                _ => unreachable!(),
-            }))
+            Err(format!("{op} expects numbers"))
         }
         Primitive::Get => collection_get(left, right, Value::Nil),
         Primitive::Count => Err("count expects one argument".into()),
         Primitive::Meta => Err("meta expects one value".into()),
     }
+}
+
+pub(crate) fn apply_binary_numbers(
+    primitive: Primitive,
+    left: i64,
+    right: i64,
+) -> Result<Value, String> {
+    let result = match primitive {
+        Primitive::Add => Value::Number(left.checked_add(right).ok_or("integer overflow")?),
+        Primitive::Subtract => Value::Number(left.checked_sub(right).ok_or("integer overflow")?),
+        Primitive::Multiply => Value::Number(left.checked_mul(right).ok_or("integer overflow")?),
+        Primitive::Divide | Primitive::Remainder if right == 0 => {
+            return Err("division by zero".into())
+        }
+        Primitive::Divide => Value::Number(left.checked_div(right).ok_or("integer overflow")?),
+        Primitive::Remainder => Value::Number(left.checked_rem(right).ok_or("integer overflow")?),
+        Primitive::Equal => Value::Bool(left == right),
+        Primitive::Less => Value::Bool(left < right),
+        Primitive::LessOrEqual => Value::Bool(left <= right),
+        Primitive::Greater => Value::Bool(left > right),
+        Primitive::GreaterOrEqual => Value::Bool(left >= right),
+        Primitive::Get => return Err("get expects an associative value".into()),
+        Primitive::Count => return Err("count expects one argument".into()),
+        Primitive::Meta => return Err("meta expects one value".into()),
+    };
+    Ok(result)
 }
 
 fn arithmetic(op: &str, args: &[Form], env: &mut HashMap<String, Value>) -> Result<Value, String> {

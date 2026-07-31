@@ -321,6 +321,15 @@ fn fn_values_and_direct_calls() {
 }
 
 #[test]
+fn immediate_capture_free_closures_compile_to_static_calls() {
+    let program = compile_source("((fn [x] (+ x 1)) 41)").expect("compiles");
+    let listing = disassemble(&program);
+    assert!(listing.contains("CallStatic"), "{listing}");
+    assert!(!listing.contains("Closure"), "{listing}");
+    assert_eq!(eval("((fn [x] (+ x 1)) 41)"), "42");
+}
+
+#[test]
 fn closures_capture_lexical_environment() {
     assert_eq!(eval("(let [x 19] ((fn [y] (+ x y)) 23))"), "42");
     // Captures are by value at closure-creation time.
@@ -357,6 +366,14 @@ fn defn_lowering_binds_direct_calls() {
     assert_eq!(
         eval("(do (defn countdown [n] (if (< n 1) 0 (+ 1 (countdown (- n 1))))) (countdown 100))"),
         "100"
+    );
+}
+
+#[test]
+fn vm_global_recursion_uses_stackless_frames() {
+    assert_eq!(
+        eval("(do (defn countdown [n] (if (< n 1) 0 (countdown (- n 1)))) (countdown 10000))"),
+        "0"
     );
 }
 

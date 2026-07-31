@@ -19,6 +19,8 @@ pub mod opcode;
 pub mod program;
 #[path = "vm/source_map.rs"]
 pub mod source_map;
+#[path = "vm/slot.rs"]
+mod slot;
 #[path = "vm/error.rs"]
 pub mod error;
 #[path = "vm/validate.rs"]
