@@ -139,7 +139,7 @@ public final class HaraContext {
           Map.entry("Numbers", java.util.List.of("long", "double")),
           Map.entry("Bits", java.util.List.of("and", "or", "xor", "not", "shift-left", "shift-right")),
           Map.entry("Kernel", java.util.List.of("session-create", "session-close", "session-list", "session-info", "session-eval", "session-namespace", "session-complete", "resource-register", "resource-remove", "resource-list", "filesystem-create", "filesystem-attach", "filesystem-detach", "filesystem-info", "filesystem-close", "capabilities")),
-          Map.entry("String", java.util.List.of("length", "blank?", "includes?", "starts-with?", "ends-with?", "char-at", "slice", "index-of", "last-index-of", "join", "split", "split-lines", "repeat", "replace", "replace-first", "trim", "trim-left", "trim-right", "upper", "lower", "capitalize", "decapitalize", "pad-left", "pad-right", "reverse", "encode-utf8", "decode-utf8", "comp", "lt?", "gt?", "to-fixed")),
+          Map.entry("String", java.util.List.of("length", "blank?", "includes?", "starts-with?", "ends-with?", "char-at", "slice", "index-of", "last-index-of", "join", "split", "split-lines", "repeat", "replace", "replace-first", "trim", "trim-left", "trim-right", "upper", "lower", "capitalize", "decapitalize", "pad-left", "pad-right", "reverse", "encode-utf8", "decode-utf8", "to-fixed")),
           Map.entry("Bytes", java.util.List.of("new", "instance?", "count", "get", "set", "copy", "slice", "u8", "s8")),
           Map.entry("File", java.util.List.of("resolve", "read", "write", "exists?", "list", "mkdir", "delete")),
           Map.entry("Socket", java.util.List.of("connect", "listen", "endpoint", "events", "next", "send", "close")),
@@ -199,6 +199,8 @@ public final class HaraContext {
   private final Map<String, Set<String>> moduleDependencies = new ConcurrentHashMap<>();
   private final Map<String, Object> libraryStates = new ConcurrentHashMap<>();
   private final Map<String, Object> intrinsicCollectionBuiltins = new ConcurrentHashMap<>();
+  private volatile Object intrinsicFirstFunction;
+  private volatile Object intrinsicRestFunction;
   private final Set<String> loadingModules = ConcurrentHashMap.newKeySet();
   private final Deque<String> loadingStack = new ArrayDeque<>();
   private volatile HaraNamespace currentNamespace;
@@ -890,7 +892,11 @@ public final class HaraContext {
     currentNamespace = namespace(namespaceName);
     definitionOrigin = HaraVar.Origin.HAL_FALLBACK;
     try {
-      return requireSourceNamespace(namespaceName, reload);
+      HaraNamespace loaded = requireSourceNamespace(namespaceName, reload);
+      if (FOUNDATION_NAMESPACE.equals(namespaceName)) {
+        captureSequenceIntrinsics();
+      }
+      return loaded;
     } catch (RuntimeException error) {
       restore(snapshot);
       throw error;
@@ -2505,38 +2511,6 @@ public final class HaraContext {
             "str/decode-utf8",
             value -> new String(bytesValue(value, "str/decode-utf8"), StandardCharsets.UTF_8)));
 
-    // Legacy aliases (not part of the spec surface).
-    string.define(
-        "len", new UnaryBuiltin("str/len", value -> (long) codePointLength(stringValue(value, "str/len"))));
-    string.define("char", new VariadicBuiltin("str/char", this::stringCharAt));
-    string.define("substring", new VariadicBuiltin("str/substring", this::stringSlice));
-    string.define(
-        "to-upper",
-        new UnaryBuiltin(
-            "str/to-upper",
-            value -> stringValue(value, "str/to-upper").toUpperCase(java.util.Locale.ROOT)));
-    string.define(
-        "to-lower",
-        new UnaryBuiltin(
-            "str/to-lower",
-            value -> stringValue(value, "str/to-lower").toLowerCase(java.util.Locale.ROOT)));
-    string.define(
-        "encode",
-        new UnaryBuiltin(
-            "str/encode",
-            value -> stringValue(value, "str/encode").getBytes(StandardCharsets.UTF_8)));
-    string.define(
-        "decode",
-        new UnaryBuiltin(
-            "str/decode",
-            value -> new String(bytesValue(value, "str/decode"), StandardCharsets.UTF_8)));
-
-    // Comparison helpers (not in the spec symbol list).
-    string.define("comp", new VariadicBuiltin("str/comp", this::stringCompare));
-    string.define(
-        "lt?", new VariadicBuiltin("str/lt?", values -> ((Long) stringCompare(values)) < 0));
-    string.define(
-        "gt?", new VariadicBuiltin("str/gt?", values -> ((Long) stringCompare(values)) > 0));
     string.define("to-fixed", new VariadicBuiltin("str/to-fixed", this::stringToFixed));
   }
 
@@ -2761,11 +2735,6 @@ public final class HaraContext {
   private static String[] stringPair(Object[] values, String operation) {
     if (values.length != 2) throw new HaraException(operation + " expects two strings");
     return new String[] {stringValue(values[0], operation), stringValue(values[1], operation)};
-  }
-
-  private Object stringCompare(Object[] values) {
-    String[] pair = stringPair(values, "str/comp");
-    return (long) Integer.signum(pair[0].compareTo(pair[1]));
   }
 
   private static int codePointLength(String input) {
@@ -3701,6 +3670,32 @@ public final class HaraContext {
    */
   public Object intrinsicCollectionBuiltin(String name) {
     return intrinsicCollectionBuiltins.get(name);
+  }
+
+  /**
+   * The canonical std.foundation first/rest function captured when the namespace source was
+   * (re)loaded, or null when unavailable. Specialized nodes compare the operator var's current
+   * value against this instance on every call and fall back to a generic invocation when it
+   * differs (e.g. after redefinition).
+   */
+  public Object intrinsicSequenceFunction(String name) {
+    return "first".equals(name) ? intrinsicFirstFunction : intrinsicRestFunction;
+  }
+
+  /**
+   * The exact (seq (iter-drop 1 source)) expansion for a receiver already coerced to an
+   * iterator: a lazy seq over the tail, or null when the tail is empty.
+   */
+  public Object restSequence(Iterator<?> source) {
+    return HaraSeq.create(closeable(Iter.drop(source, 1), source));
+  }
+
+  private void captureSequenceIntrinsics() {
+    HaraNamespace foundation = namespaces.get(FOUNDATION_NAMESPACE);
+    HaraVar firstVariable = foundation == null ? null : foundation.lookup("first");
+    HaraVar restVariable = foundation == null ? null : foundation.lookup("rest");
+    intrinsicFirstFunction = firstVariable == null ? null : firstVariable.deref();
+    intrinsicRestFunction = restVariable == null ? null : restVariable.deref();
   }
 
   private void requireHalPath(String path, String operation) {
@@ -5467,7 +5462,7 @@ public final class HaraContext {
     }
   }
 
-  private static final class UnaryBuiltin implements IFn<Object, Object, Object> {
+  private static final class UnaryBuiltin implements IFn<Object, Object, Object>, HaraBuiltinFunction {
     private final String name;
     private final Function<Object, Object> implementation;
 
@@ -5482,12 +5477,19 @@ public final class HaraContext {
     }
 
     @Override
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public Object apply(Object[] arguments) {
+      return IFn.applyAsArray(this, arguments);
+    }
+
+    @Override
     public String toString() {
       return "#<builtin " + name + ">";
     }
   }
 
-  private static final class VariadicBuiltin implements IFn<Object, Object, Object> {
+  private static final class VariadicBuiltin
+      implements IFn<Object, Object, Object>, HaraBuiltinFunction {
     private final String name;
     private final Function<Object[], Object> implementation;
 
@@ -5514,6 +5516,12 @@ public final class HaraContext {
     @Override
     public Function<Object, Object> getArgN() {
       return values -> implementation.apply((Object[]) values);
+    }
+
+    @Override
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public Object apply(Object[] arguments) {
+      return IFn.applyAsArray(this, arguments);
     }
 
     @Override

@@ -2079,7 +2079,7 @@ mod tests {
         assert_eq!(
             runtime
                 .eval_text(
-                    "(ns app (:intrinsics {:exclude [bytes] :aliases {string text}})                       (:require [hara.lib.string :as s :refer [trim]]))                       (trim (s/trim (text/to-upper \" x \")))"
+                    "(ns app (:intrinsics {:exclude [bytes] :aliases {string text}})                       (:require [hara.lib.string :as s :refer [trim]]))                       (trim (s/trim (text/upper \" x \")))"
                 )
                 .unwrap(),
             "\"X\""
@@ -4454,7 +4454,7 @@ mod tests {
         );
         assert_eq!(
             runtime
-                .eval_text(r#"(str/decode (str/encode "hé"))"#)
+                .eval_text(r#"(str/decode-utf8 (str/encode-utf8 "hé"))"#)
                 .unwrap(),
             "\"hé\""
         );
@@ -4535,7 +4535,7 @@ mod tests {
             ("(bytes/set (bytes 1) 1 0)", "out of bounds"),
             ("(bytes/slice (bytes 1 2) 2 1)", "out of bounds"),
             ("(bytes/slice (bytes 1 2) 0 3)", "out of bounds"),
-            ("(str/decode (bytes 255))", "invalid UTF-8"),
+            ("(str/decode-utf8 (bytes 255))", "invalid UTF-8"),
             ("(bit-shift-left 1 -1)", "range 0..31"),
             ("(bit-shift-right 1 32)", "range 0..31"),
         ];

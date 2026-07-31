@@ -102,7 +102,7 @@
         index (string/index-of symbol-name "." 0)
         module (:module options)
         local (if (<= 0 index)
-                (symbol (string/substring symbol-name 0 index))
+                (symbol (string/slice symbol-name 0 index))
                 symbol)
         import (get-in module [:native-lu local])]
     (if (and import deps-native)

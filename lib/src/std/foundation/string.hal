@@ -18,8 +18,8 @@
 ;;                  +------------+------------+
 ;;                  |                         |
 ;;                  v                         v
-;;              UTF-8 bytes            compatibility names
-;;             encode/decode          len/char/substring
+;;              UTF-8 bytes              formatting
+;;       encode-utf8/decode-utf8           to-fixed
 ;;
 ;; Indexes and lengths follow the portable native String contract. Canonical
 ;; names appear first; compatibility spellings are thin HAL calls into them.
@@ -196,78 +196,6 @@
   "Decodes UTF-8 bytes into a string."
   [value]
   (String/decode-utf8 value))
-
-;; Compatibility names remain ordinary HAL wrappers so their metadata is
-;; independently discoverable while their behavior stays canonical.
-
-(defn ^{:schema [:fn [:str] :int]}
-  len
-  "Compatibility name for length."
-  [value]
-  (length value))
-
-(defn ^{:schema [:fn [:str] :int]}
-  count
-  "Compatibility name for length."
-  [value]
-  (length value))
-
-(defn ^{:schema [:fn [:str :int] :str]}
-  char
-  "Compatibility name for char-at."
-  [value index]
-  (char-at value index))
-
-(defn ^{:schema [:function [:fn [:str :int] :str]
-                            [:fn [:str :int :int] :str]]}
-  substring
-  "Compatibility name for slice."
-  ([value start]
-   (slice value start))
-  ([value start end]
-   (slice value start end)))
-
-(defn ^{:schema [:fn [:str] :str]}
-  to-upper
-  "Compatibility name for upper."
-  [value]
-  (upper value))
-
-(defn ^{:schema [:fn [:str] :str]}
-  to-lower
-  "Compatibility name for lower."
-  [value]
-  (lower value))
-
-(defn ^{:schema [:fn [:str] :bytes]}
-  encode
-  "Compatibility name for encode-utf8."
-  [value]
-  (encode-utf8 value))
-
-(defn ^{:schema [:fn [:bytes] :str]}
-  decode
-  "Compatibility name for decode-utf8."
-  [value]
-  (decode-utf8 value))
-
-(defn ^{:schema [:fn [:str :str] :int]}
-  comp
-  "Compares left with right and returns a negative, zero, or positive integer."
-  [left right]
-  (String/comp left right))
-
-(defn ^{:schema [:fn [:str :str] :bool]}
-  lt?
-  "Returns true when left sorts before right."
-  [left right]
-  (String/lt? left right))
-
-(defn ^{:schema [:fn [:str :str] :bool]}
-  gt?
-  "Returns true when left sorts after right."
-  [left right]
-  (String/gt? left right))
 
 (defn ^{:schema [:fn [:num :int] :str]}
   to-fixed

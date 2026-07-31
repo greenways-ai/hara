@@ -572,9 +572,6 @@ fn canonical(namespace: &str, method: &str) -> String {
         ("std.native.Iter", method) => method.into(),
         ("std.foundation.coroutine", method) => format!("std.foundation.coroutine/{method}"),
         ("std.foundation.string", method) => format!("std.foundation.string/{method}"),
-        ("std.lib.string", "len") => "str/count".into(),
-        ("std.lib.string", "to-upper") => "str/upper".into(),
-        ("std.lib.string", "to-lower") => "str/lower".into(),
         ("std.lib.string", method) => format!("str/{method}"),
         ("std.foundation.promise", method) => format!("std.foundation.promise/{method}"),
         ("std.foundation.bytes", method) => format!("std.foundation.bytes/{method}"),
@@ -604,13 +601,13 @@ mod tests {
         .unwrap();
         let config = GeneratedNamespaceConfig::configure(&forms).unwrap();
         let rewritten = config.rewrite(
-            parse_forms("(trim (s/trim (text/to-upper \" x \")))")
+            parse_forms("(trim (s/trim (text/upper \" x \")))")
                 .unwrap()
                 .remove(0),
         );
         let display = format!("{rewritten:?}");
         assert!(display.contains("std.foundation.string/trim"));
-        assert!(display.contains("std.foundation.string/to-upper"));
+        assert!(display.contains("std.foundation.string/upper"));
         assert!(display.contains("bytes/count") == false);
         assert!(GeneratedNamespaceConfig::configure(
             &parse_forms("(:require [missing.lib :as x])").unwrap()
