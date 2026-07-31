@@ -250,7 +250,7 @@ public interface BuiltinCollection {
     return Iter.iter(obj);
   }
 
-  @Module.Fn(name = "iter-has?", complete = true)
+  @Module.Fn(name = "iter-next?", complete = true)
   public static boolean iterHas(Iterator iterator) {
     return iterator.hasNext();
   }

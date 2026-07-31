@@ -36,7 +36,7 @@
   [values target]
   (let [it (iter values)]
     (loop []
-      (if (iter-has? it)
+      (if (iter-next? it)
         (if (= target (iter-next it))
           true
           (recur))
@@ -48,7 +48,7 @@
   [result values]
   (let [it (iter values)]
     (loop [output result]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (recur (conj output (iter-next it)))
         output))))
 
@@ -58,7 +58,7 @@
   [result values]
   (let [it (iter values)]
     (loop [output result]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (recur (dissoc output (iter-next it)))
         output))))
 
@@ -68,7 +68,7 @@
   [left right]
   (let [it (iter left)]
     (loop [output #{}]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (let [value (iter-next it)]
           (recur (if (contains-value? right value)
                    (conj output value)
@@ -81,7 +81,7 @@
   [& sets]
   (let [it (iter sets)]
     (loop [result #{}]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (recur (add-all result (iter-next it)))
         result))))
 
@@ -91,7 +91,7 @@
   [first-set & sets]
   (let [it (iter sets)]
     (loop [result first-set]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (recur (intersection-two result (iter-next it)))
         result))))
 
@@ -101,7 +101,7 @@
   [first-set & sets]
   (let [it (iter sets)]
     (loop [result first-set]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (recur (remove-all result (iter-next it)))
         result))))
 
@@ -111,7 +111,7 @@
   [left right]
   (let [it (iter left)]
     (loop []
-      (if (iter-has? it)
+      (if (iter-next? it)
         (if (contains-value? right (iter-next it))
           (recur)
           false)
@@ -129,7 +129,7 @@
   [predicate values]
   (let [it (iter values)]
     (loop [result #{}]
-      (if (iter-has? it)
+      (if (iter-next? it)
         (let [value (iter-next it)]
           (recur (if (predicate value)
                    (conj result value)

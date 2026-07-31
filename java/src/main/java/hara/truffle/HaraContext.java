@@ -159,7 +159,7 @@ public final class HaraContext {
               "Iter",
               java.util.List.of(
                   "iter", "iter?", "iter-finite?", "iter-materialize",
-                  "iter-has?", "iter-next", "iter-close",
+                  "iter-next?", "iter-next", "iter-close",
                   "iter-map", "iter-filter", "iter-take-while", "iter-drop-while",
                   "iter-mapcat", "iter-keep", "iter-interpose", "iter-interleave",
                   "iter-every?", "iter-any?", "iter-take", "iter-drop", "iter-zip",
@@ -1728,7 +1728,7 @@ public final class HaraContext {
     target.define("iter?", new UnaryBuiltin("iter?", this::isIterator));
     target.define("iter-finite?", new UnaryBuiltin("iter-finite?", this::isIteratorFinite));
     target.define("iter-materialize", new UnaryBuiltin("iter-materialize", this::iterMaterialize));
-    target.define("iter-has?", new UnaryBuiltin("iter-has?", this::iterHasNext));
+    target.define("iter-next?", new UnaryBuiltin("iter-next?", this::iterHasNext));
     target.define("iter-next", new UnaryBuiltin("iter-next", this::iterNext));
     target.define("iter-close", new UnaryBuiltin("iter-close", this::iterClose));
     target.define("concat", new VariadicBuiltin("concat", this::concatIterators));
@@ -4329,7 +4329,7 @@ public final class HaraContext {
 
   @TruffleBoundary
   private Object iterHasNext(Object value) {
-    Iterator<?> iterator = requireIterator(value, "iter-has?");
+    Iterator<?> iterator = requireIterator(value, "iter-next?");
     return iterator.hasNext();
   }
 

@@ -4658,7 +4658,7 @@ mod tests {
             runtime
                 .eval_text(
                     "(let [it (iter-drop 1 [1])] \
-                       [(iter-has? it) (iter-has? it) (nil? (seq it))])"
+                       [(iter-next? it) (iter-next? it) (nil? (seq it))])"
                 )
                 .unwrap(),
             "[false false true]"
@@ -4667,7 +4667,7 @@ mod tests {
             runtime
                 .eval_text(
                     "(let [it (iter-map inc [1])] \
-                       [(iter-has? it) (iter-has? it) (iter-next it) (iter-has? it)])"
+                       [(iter-next? it) (iter-next? it) (iter-next it) (iter-next? it)])"
                 )
                 .unwrap(),
             "[true true 2 false]"
@@ -4728,22 +4728,22 @@ mod tests {
                 .unwrap(),
             "2"
         );
-        assert_eq!(runtime.eval_text("(iter-has? (iter [1]))").unwrap(), "true");
+        assert_eq!(runtime.eval_text("(iter-next? (iter [1]))").unwrap(), "true");
         assert_eq!(
             runtime
-                .eval_text("(let (it (iter [1])) (do (iter-close it) (iter-has? it)))")
+                .eval_text("(let (it (iter [1])) (do (iter-close it) (iter-next? it)))")
                 .unwrap(),
             "false"
         );
         assert_eq!(
             runtime
-                .eval_text("(let (it (iter-cycle [1 2])) (do (iter-next it) (iter-close it) (iter-has? it)))")
+                .eval_text("(let (it (iter-cycle [1 2])) (do (iter-next it) (iter-close it) (iter-next? it)))")
                 .unwrap(),
             "false"
         );
         assert_eq!(
             runtime
-                .eval_text("(let (it (iter-zip [1 2] [3 4])) (do (iter-close it) (iter-has? it)))")
+                .eval_text("(let (it (iter-zip [1 2] [3 4])) (do (iter-close it) (iter-next? it)))")
                 .unwrap(),
             "false"
         );

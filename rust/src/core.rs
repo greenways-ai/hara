@@ -190,7 +190,7 @@ pub(crate) const NATIVE_TYPES: &[(&str, &[&str])] = &[
             "iter?",
             "iter-finite?",
             "iter-materialize",
-            "iter-has?",
+            "iter-next?",
             "iter-next",
             "iter-close",
             "iter-map",
@@ -6489,7 +6489,7 @@ fn iterator_cycle(value: Value) -> Result<Value, String> {
 fn iterator_has_next(value: &Value) -> Result<Value, String> {
     match value {
         Value::Iterator(iterator) => Ok(Value::Bool(iterator.borrow_mut().has_next()?)),
-        _ => Err("iter-has? expects an iterator".into()),
+        _ => Err("iter-next? expects an iterator".into()),
     }
 }
 
@@ -9927,9 +9927,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 let result = matches!(value, Value::Iterator(iterator) if n == "iter?" || iterator.borrow().seq);
                 Ok(Value::Bool(result))
             }
-            Form::Symbol(n) if n == "iter-has?" => {
+            Form::Symbol(n) if n == "iter-next?" => {
                 if fs.len() != 2 {
-                    return Err("iter-has? expects one argument".into());
+                    return Err("iter-next? expects one argument".into());
                 }
                 iterator_has_next(&eval(&fs[1], env)?)
             }
