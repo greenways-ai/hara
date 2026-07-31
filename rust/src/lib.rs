@@ -1440,7 +1440,7 @@ mod tests {
                 })
         }
 
-        let document_source = repo_text("specs/runtime/draft/hal-host-runtime.edn")
+        let document_source = repo_text("specs/00-unsorted/runtime/draft/host-runtime.edn")
             .expect("specs submodule must be initialized for host runtime conformance tests");
         let document = kernel::parse_forms(&document_source)
             .expect("Host runtime specification must parse")
@@ -5750,7 +5750,7 @@ mod tests {
 
     #[test]
     fn issue_134_host_facades_are_loaded_session_local_and_non_transferable() {
-        if repo_text("specs/runtime/draft/hal-host-runtime.edn").is_none() {
+        if repo_text("specs/00-unsorted/runtime/draft/host-runtime.edn").is_none() {
             return;
         }
         for id in [

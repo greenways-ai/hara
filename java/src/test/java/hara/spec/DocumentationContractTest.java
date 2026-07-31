@@ -19,8 +19,9 @@ import org.junit.Test;
 public class DocumentationContractTest {
   private static final List<Path> ACTIVE_SPECIFICATIONS =
       List.of(
-          Path.of("specs/metaspec/draft/hal-metaspec.edn"),
-          Path.of("specs/language/draft/hal-langspec.edn"));
+          Path.of("specs/01-lang/000-metaspec/draft/metaspec-metaspec.edn"),
+          Path.of("specs/01-lang/001-language/metaspec/language-metaspec.edn"),
+          Path.of("specs/01-lang/001-language/draft/hal-langspec.edn"));
 
   private static void assumeSpecsSubmodule() {
     assumeTrue(
@@ -54,8 +55,9 @@ public class DocumentationContractTest {
       Path companion = specification.resolveSibling("README.md");
       assertTrue("Missing rendered companion: " + companion, Files.exists(companion));
       assertTrue(
-          "Rendered companion does not identify EDN authority: " + companion,
-          Files.readString(companion, StandardCharsets.UTF_8).contains("authoritative document"));
+          "Rendered companion does not link the authoritative EDN: " + companion,
+          Files.readString(companion, StandardCharsets.UTF_8)
+              .contains(specification.getFileName().toString()));
     }
   }
 

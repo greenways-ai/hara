@@ -23,13 +23,14 @@ component map and `website/docs/development.md` for the developer guide.
   `notes/superpowers/` (plans/specs written by the superpowers plugin).
   Put nothing here that belongs on the website.
 - `specs/` — normative specifications:
-  - `metaspec/draft/hal-metaspec.edn` defines the language-spec document model
-  - `metaspec/draft/hal-metaspec-metaspec.edn` defines the self-describing
-    metaspec contract and AI generation/repair workflow
-  - `metaspec/draft/hal-artifact-metaspec.edn` defines artifact-format specs
-  - `language/draft/hal-langspec.edn` is the current portable HAL contract
-  - `language/draft/conformance/` contains machine-checked conformance/parity corpora
-  - `archive/planning/` contains non-normative source material grouped by domain
+  - `01-lang/000-metaspec/draft/metaspec-metaspec.edn` defines the
+    self-describing metaspec contract and AI generation/repair workflow
+  - `01-lang/001-language/metaspec/language-metaspec.edn` defines the
+    language-spec document model
+  - `00-unsorted/artifact/metaspec/artifact-metaspec.edn` defines artifact-format specs
+  - `01-lang/001-language/draft/hal-langspec.edn` is the current portable HAL contract
+  - `01-lang/001-language/draft/conformance/` contains machine-checked conformance corpora
+  - `99-archive/planning/` contains non-normative source material grouped by domain
 - `contrib/` — separately owned specifications and reference implementations.
   Greenways formats live under `contrib/greenways/`; Hara may publish verified
   snapshots but does not own their domain vocabulary.
@@ -108,7 +109,8 @@ To cut a release:
 
 - Maven runs from the repo root via `-f java/pom.xml`; Surefire's working
   directory is the repo root, so tests use repo-relative paths
-  (`specs/language/draft/conformance/...`, `lib/examples/...`, `website/docs/...`).
+  (`specs/01-lang/001-language/draft/conformance/...`, `lib/examples/...`,
+  `website/docs/...`).
 - The JVM runtime embeds `lib/src/**/*.hal` (std foundation) as classpath
   resources via `java/pom.xml`; the Rust runtime embeds
   `lib/src/std/foundation.hal` via `include_str!` in `rust/src/lib.rs`.
