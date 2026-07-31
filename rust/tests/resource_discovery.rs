@@ -21,6 +21,41 @@ fn generated_catalog_loads_portable_hal_namespaces() {
             .unwrap(),
         "42"
     );
+    assert_eq!(
+        runtime
+            .eval_native(
+                "(require [std.typed.schema :as schema]) \
+                 (schema/valid? [:tuple :keyword :int] [:age 42])"
+            )
+            .unwrap(),
+        "true"
+    );
+    assert_eq!(
+        runtime
+            .eval_native(
+                "(require [std.logic.datalog :as datalog]) \
+                 (def db (datalog/database {} \
+                   [[:requirement :demo/missing :must []]])) \
+                 (datalog/query db \
+                   '{:find [?id] \
+                     :where [[:requirement ?id :must ?path]]})"
+            )
+            .unwrap(),
+        "[[:demo/missing]]"
+    );
+    assert_eq!(
+        runtime
+            .eval_native(
+                "(require [std.logic.kanren :as kanren]) \
+                 (kanren/query* \
+                   (fn [query] \
+                     (kanren/relationo \
+                       [[:color :sky :blue]] \
+                       [:color query :blue])))"
+            )
+            .unwrap(),
+        "[:sky]"
+    );
 }
 
 #[test]

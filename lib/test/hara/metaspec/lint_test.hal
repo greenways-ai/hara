@@ -1,0 +1,68 @@
+(ns hara.metaspec.lint-test
+  (:use code.test)
+  (:require [hara.metaspec.lint :as lint]))
+
+(def minimal
+  {:document/id :demo/metaspec
+   :document/type :demo/metaspec
+   :document/version "0.1.0"
+   :document/status :draft
+   :document/title "Demo"
+   :document/summary "Demo meta-spec"
+   :spec/conforms-to {:spec/id :demo/metaspec :spec/version "0.1.0"}
+   :spec/artifact-kind :demo/artifact
+   :meta/document-schema {:schema/id :demo/document :schema/type :map}
+   :meta/schemas []
+   :meta/cross-references []
+   :meta/requirements
+   [{:requirement/id :demo/required
+     :requirement/level :must
+     :requirement/text "Required"}]
+   :metaspec/generation
+   {:generation/input {}
+    :generation/output {}
+    :generation/process []
+    :generation/acceptance {}}})
+
+^{:refer 'hara.metaspec.lint/lint
+  :id 'complete-qualified-metaspec}
+(fact "accepts a complete metaspec whose keys and identifiers are qualified"
+  (lint/lint minimal)
+  => [])
+
+^{:refer 'hara.metaspec.lint/lint
+  :id 'missing-required-key-repair}
+(fact "returns a structured repair action for a missing required key"
+  (let [finding (first (lint/lint {}))]
+    {:rule/id (:rule/id finding)
+     :requirement/id (:requirement/id finding)
+     :finding/path (:finding/path finding)
+     :finding/repair (:finding/repair finding)})
+  => {:rule/id :hara.metaspec.rule/required-key
+      :requirement/id :hara.metaspec/required-sections
+      :finding/path []
+      :finding/repair
+      {:action/type :add-key
+       :action/path []
+       :action/key :document/id}})
+
+^{:refer 'hara.metaspec.lint/lint
+  :id 'unqualified-extension-key}
+(fact "rejects unqualified extension keys with the qualified-key rule"
+  (vec (map (fn [finding] (:rule/id finding))
+            (lint/lint (assoc minimal :extension true))))
+  => [:hara.metaspec.rule/qualified-key])
+
+^{:refer 'hara.metaspec.lint/lint
+  :id 'duplicate-schema-identifier}
+(fact "reports duplicate schema identifiers with a stable rule ID"
+  (vec (map (fn [finding] (:rule/id finding))
+            (lint/lint
+             (assoc minimal :meta/schemas
+                    [{:schema/id :demo/value
+                      :schema/type :string}
+                     {:schema/id :demo/value
+                      :schema/type :keyword}]))))
+  => [:hara.metaspec.rule/duplicate-id])
+
+(pr-str (run '[hara.metaspec.lint-test]))

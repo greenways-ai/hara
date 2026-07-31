@@ -1,0 +1,195 @@
+;; Lossless, path-preserving relational view of a specification document.
+(ns hara.metaspec.model
+  (:require [std.typed.schema :as typed]))
+
+(defn- value-kind [value]
+  (cond
+    (map? value) :map
+    (vector? value) :vector
+    (set? value) :set
+    (list? value) :list
+    :else :scalar))
+
+(defn- children [value path]
+  (cond
+    (map? value)
+    (vec
+     (reduce
+      (fn [output entry]
+        (let [child-path (conj path (key entry))]
+          (conj output
+                {:segment (key entry)
+                 :path child-path
+                 :value (val entry)})))
+      []
+      value))
+
+    (or (vector? value) (list? value))
+    (loop [index 0
+           output []]
+      (if (= index (count value))
+        output
+        (recur
+         (inc index)
+         (conj output
+               {:segment index
+                :path (conj path index)
+                :value (nth value index)}))))
+
+    (set? value)
+    (vec
+     (map (fn [item]
+            {:segment item
+             :path (conj path item)
+             :value item})
+          value))
+
+    :else []))
+
+(defn ^{:schema [:fn [:any] :map]}
+  graph
+  "Builds a lossless node/edge/value graph whose node IDs are source paths."
+  [document]
+  (loop [pending [{:path [] :value document}]
+         nodes {}
+         facts []]
+    (if (empty? pending)
+      {:graph/document document
+       :graph/nodes nodes
+       :graph/facts facts}
+      (let [entry (first pending)
+            path (:path entry)
+            value (:value entry)
+            kind (value-kind value)
+            child-entries (children value path)
+            edge-facts
+            (vec
+             (map (fn [child]
+                    [:edge path (:segment child) (:path child)])
+                  child-entries))
+            local-facts
+            (if (= kind :scalar)
+              [[:node path kind] [:value path value]]
+              [[:node path kind]])]
+        (recur
+         (vec (concat (rest pending) child-entries))
+         (assoc nodes path {:node/path path
+                            :node/kind kind
+                            :node/value value})
+         (vec (concat facts local-facts edge-facts)))))))
+
+(defn ^{:schema [:fn [] :map]}
+  relation-catalog
+  "Returns the typed tuple contract for every projected relation."
+  []
+  {:node [:tuple [:enum :node] [:vector :any] :keyword]
+   :value [:tuple [:enum :value] [:vector :any] :any]
+   :edge [:tuple [:enum :edge] [:vector :any] :any [:vector :any]]
+   :document [:tuple [:enum :document] :keyword :keyword :str [:vector :any]]
+   :requirement [:tuple [:enum :requirement] :keyword :keyword [:vector :any]]
+   :schema [:tuple [:enum :schema] :keyword :keyword [:vector :any]]
+   :schema-ref [:tuple [:enum :schema-ref] [:vector :any] :keyword]
+   :reference [:tuple [:enum :reference] :keyword :any :any [:vector :any]]
+   :rule [:tuple [:enum :rule] :keyword :keyword [:vector :any]]
+   :evidence [:tuple [:enum :evidence] :keyword :any [:vector :any]]})
+
+(defn- local-relations [value path]
+  (if (map? value)
+    (vec
+     (concat
+      (if (has? value :document/id)
+        [[:document
+          (:document/id value)
+          (:document/type value)
+          (:document/version value)
+          path]]
+        [])
+      (if (has? value :requirement/id)
+        [[:requirement
+          (:requirement/id value)
+          (:requirement/level value)
+          path]]
+        [])
+      (if (has? value :schema/id)
+        [[:schema (:schema/id value) (:schema/type value) path]]
+        [])
+      (if (has? value :schema/ref)
+        [[:schema-ref (conj path :schema/ref) (:schema/ref value)]]
+        [])
+      (if (and (has? value :schema/items)
+               (keyword? (:schema/items value)))
+        [[:schema-ref (conj path :schema/items) (:schema/items value)]]
+        [])
+      (if (has? value :reference/id)
+        [[:reference
+          (:reference/id value)
+          (:reference/from value)
+          (:reference/to value)
+          path]]
+        [])
+      (if (has? value :rule/id)
+        [[:rule (:rule/id value) (:rule/requirement value) path]]
+        [])
+      (if (and (has? value :requirement/id)
+               (has? value :requirement/evidence))
+        (vec
+         (map
+          (fn [evidence]
+            [:evidence
+             (:requirement/id value)
+             evidence
+             (conj path :requirement/evidence)])
+          (:requirement/evidence value)))
+        [])))
+    []))
+
+(defn- domain-facts [document]
+  (loop [pending [{:path [] :value document}]
+         facts []]
+    (if (empty? pending)
+      facts
+      (let [entry (first pending)
+            value (:value entry)
+            path (:path entry)]
+        (recur
+         (vec (concat (rest pending) (children value path)))
+         (vec (concat facts (local-relations value path))))))))
+
+(defn ^{:schema [:fn [:any] :map]}
+  project
+  "Projects typed domain relations over the lossless document graph."
+  [document]
+  (let [base (graph document)
+        facts (vec (concat (:graph/facts base)
+                           (domain-facts document)))]
+    (assoc base
+           :graph/catalog (relation-catalog)
+           :graph/facts facts)))
+
+(defn ^{:schema [:fn [:map :keyword] :vector]}
+  facts
+  "Returns facts for relation from a projected spec graph."
+  [model relation]
+  (vec
+   (filter (fn [fact] (= relation (first fact)))
+           (:graph/facts model))))
+
+(defn ^{:schema [:fn [:map] :vector]}
+  validate-facts
+  "Returns typed findings for relation tuples that violate their catalog."
+  [model]
+  (let [catalog (:graph/catalog model)]
+    (reduce
+     (fn [output fact]
+       (let [schema (get catalog (first fact))
+             findings (if schema (typed/validate schema fact) [])]
+         (reduce
+          (fn [all finding]
+            (conj all
+                  (assoc finding
+                         :finding/relation (first fact)
+                         :finding/fact fact)))
+          output
+          findings)))
+     []
+     (:graph/facts model))))

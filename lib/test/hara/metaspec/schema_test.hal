@@ -1,0 +1,40 @@
+(ns hara.metaspec.schema-test
+  (:use code.test)
+  (:require [hara.metaspec.schema :as schema]))
+
+(def sample
+  {:meta/document-schema
+   {:schema/id :demo/document
+    :schema/type :map
+    :schema/required [:demo/name :demo/status]
+    :schema/properties
+    {:demo/name {:schema/ref :demo/name}
+     :demo/status {:schema/ref :demo/status}
+     :demo/ignored {:schema/type :string}}}
+   :meta/schemas
+   [{:schema/id :demo/name :schema/type :string}
+    {:schema/id :demo/status
+     :schema/type :enum
+     :schema/values [:draft :stable]}]})
+
+^{:refer 'hara.metaspec.schema/compile-schema
+  :id 'compile-named-metaspec-schema}
+(fact "resolves named declarations into the portable typed surface grammar"
+  (schema/compile-schema sample (:meta/document-schema sample))
+  => [:map
+      [:demo/name :str]
+      [:demo/status [:enum :draft :stable]]])
+
+^{:refer 'hara.metaspec.schema/validate-document
+  :id 'validate-metaspec-document}
+(fact "validates required fields through the compiled metaspec schema"
+  [(schema/validate-document
+    sample
+    {:demo/name "Example" :demo/status :draft})
+   (map :finding/path
+        (schema/validate-document
+         sample
+         {:demo/name "Example" :demo/status :unknown}))]
+  => [[] [[:demo/status]]])
+
+(pr-str (run '[hara.metaspec.schema-test]))

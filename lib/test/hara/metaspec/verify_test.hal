@@ -1,0 +1,62 @@
+(ns hara.metaspec.verify-test
+  (:use code.test)
+  (:require [hara.metaspec.report :as report]
+            [hara.metaspec.verify :as verify]))
+
+(def document
+  {:document/id :demo/metaspec
+   :document/type :demo/metaspec
+   :document/version "0.1.0"
+   :document/status :draft
+   :document/title "Demo"
+   :document/summary "Demo meta-spec"
+   :spec/conforms-to {:spec/id :demo/metaspec :spec/version "0.1.0"}
+   :spec/artifact-kind :demo/artifact
+   :meta/document-schema
+   {:schema/id :demo/document
+    :schema/type :map
+    :schema/properties
+    {:demo/value {:schema/ref :demo/value}}}
+   :meta/schemas [{:schema/id :demo/value :schema/type :string}]
+   :meta/cross-references []
+   :meta/requirements []
+   :metaspec/generation
+   {:generation/input {}
+    :generation/output {}
+    :generation/process []
+    :generation/acceptance {}}})
+
+^{:refer 'hara.metaspec.verify/verify
+  :id 'declared-schema-reference}
+(fact "accepts schema references that resolve to declared schema identifiers"
+  (verify/verify document)
+  => [])
+
+^{:refer 'hara.metaspec.verify/verify
+  :id 'unresolved-schema-reference-repair}
+(fact "proposes a schema declaration when a schema reference is unresolved"
+  (:finding/repair
+   (last
+    (verify/verify
+     (assoc-in document
+               [:meta/document-schema :schema/properties
+                :demo/value :schema/ref]
+               :missing/schema))))
+  => {:action/type :declare-schema
+      :action/schema-id :missing/schema
+      :action/path [:meta/schemas]})
+
+^{:refer 'hara.metaspec.report/verification-report
+  :id 'failed-verification-report}
+(fact "prevents a verification report from passing unresolved references"
+  (:report/status
+   (report/verification-report
+    document
+    (verify/verify
+     (assoc-in document
+               [:meta/document-schema :schema/properties
+                :demo/value :schema/ref]
+               :missing/schema))))
+  => :fail)
+
+(pr-str (run '[hara.metaspec.verify-test]))

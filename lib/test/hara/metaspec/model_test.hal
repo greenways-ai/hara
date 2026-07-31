@@ -1,0 +1,54 @@
+(ns hara.metaspec.model-test
+  (:use code.test)
+  (:require [hara.metaspec.model :as model]))
+
+(def document
+  {:document/id :demo/spec
+   :document/type :demo/spec
+   :document/version "0.1.0"
+   :meta/schemas
+   [{:schema/id :demo/name :schema/type :string}
+    {:schema/id :demo/person
+     :schema/type :map
+     :schema/properties
+     {:demo/name {:schema/ref :demo/name}}}]
+   :meta/requirements
+   [{:requirement/id :demo/evidence
+     :requirement/level :must
+     :requirement/evidence [:demo/case]}]})
+
+^{:refer 'hara.metaspec.model/graph
+  :id 'lossless-spec-graph}
+(fact "preserves the original document and exact values at vector source paths"
+  (let [graph (model/graph document)]
+    [(:graph/document graph)
+     (:node/value
+      (get (:graph/nodes graph)
+           [:meta/schemas 0 :schema/id]))])
+  => [document :demo/name])
+
+^{:refer 'hara.metaspec.model/project
+  :id 'typed-domain-projections}
+(fact "projects schemas, references, requirements, and evidence as typed facts"
+  (let [projected (model/project document)]
+    [(model/facts projected :schema)
+     (model/facts projected :schema-ref)
+     (model/facts projected :requirement)
+     (model/facts projected :evidence)
+     (model/validate-facts projected)])
+  => [[[:schema :demo/name :string [:meta/schemas 0]]
+       [:schema :demo/person :map [:meta/schemas 1]]]
+      [[:schema-ref
+        [:meta/schemas 1 :schema/properties :demo/name :schema/ref]
+        :demo/name]]
+      [[:requirement
+        :demo/evidence
+        :must
+        [:meta/requirements 0]]]
+      [[:evidence
+        :demo/evidence
+        :demo/case
+        [:meta/requirements 0 :requirement/evidence]]]
+      []])
+
+(pr-str (run '[hara.metaspec.model-test]))
