@@ -1,0 +1,18 @@
+{:greenways/type :build
+ :greenways/version "0.1.0"
+ :build/id :example
+ :build/artifact
+ {:artifact/kind :application/service
+  :artifact/output "dist/example.hal"}
+ :build/specs
+ [{:spec/id :hal/language
+   :spec/version "1.0.0"}]
+ :build/stages
+ [{:stage/id :parse
+   :stage/requires []
+   :stage/produces :hal/forms
+   :stage/checkers [{:checker/id :greenways/build-structure}]}
+  {:stage/id :output
+   :stage/requires [:parse]
+   :stage/produces :application/service
+   :stage/checkers [{:checker/id :greenways/codec-roundtrip}]}]}

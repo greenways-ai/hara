@@ -1,0 +1,23 @@
+(ns greenways.build.codec
+  (:require [greenways.build.normalize :as normalize]
+            [std.foundation.edn :as edn]))
+
+(defn to-edn
+  "Returns canonical ordinary HAL/EDN data."
+  [build]
+  (normalize/normalize-build build))
+
+(defn from-edn
+  "Converts canonical EDN data to a canonical build value."
+  [data]
+  (normalize/normalize-build data))
+
+(defn read-build-string
+  "Reads canonical readable HAL/EDN build data without evaluation."
+  [source]
+  (from-edn (edn/read source)))
+
+(defn write-build-string
+  "Writes deterministic canonical readable HAL/EDN build data."
+  [build]
+  (edn/write (to-edn build)))

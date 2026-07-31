@@ -1,0 +1,72 @@
+(ns hara.cli.route-test
+  (:require [hara.cli.route :as route]
+            [std.lib.test :as test]))
+
+(def routes
+  [{:route/id :hara.cli.route/repl
+    :route/path ["repl"]
+    :route/aliases [["standalone"]]
+    :route/tier :public
+    :route/summary "REPL"}
+   {:route/id :hara.cli.route/run-file
+    :route/path ["run"]
+    :route/aliases []
+    :route/tier :public
+    :route/summary "Run file"}
+   {:route/id :hara.cli.route/project-run
+    :route/path ["project" "run"]
+    :route/aliases []
+    :route/tier :public
+    :route/summary "Run project"}
+   {:route/id :hara.cli.route/project-check
+    :route/path ["project" "check"]
+    :route/aliases [["check"]]
+    :route/tier :public
+    :route/summary "Check project"}
+   {:route/id :hara.cli.route/internal
+    :route/path ["compile-hir"]
+    :route/aliases []
+    :route/tier :developer
+    :route/summary "Compile HIR"}])
+
+(test/print-results
+ [(test/check "canonical routes use longest-prefix matching"
+              (let [resolved
+                    (route/resolve-route
+                     routes
+                     ["project" "check" "demo"])]
+                [(:route/id (:route resolved))
+                 (:arguments resolved)
+                 (:alias resolved)])
+              [:hara.cli.route/project-check ["demo"] false])
+  (test/check "flat aliases resolve to the canonical route ID"
+              (let [resolved (route/resolve-route routes ["check"])]
+                [(:route/id (:route resolved))
+                 (:alias resolved)])
+              [:hara.cli.route/project-check true])
+  (test/check "run without a file retains project compatibility"
+              (:route/id
+               (:route (route/resolve-route routes ["run"])))
+              :hara.cli.route/project-run)
+  (test/check "empty argv starts the repl"
+              (:route/id
+               (:route (route/resolve-route routes [])))
+              :hara.cli.route/repl)
+  (test/check "option terminator is not a route argument"
+              (:arguments
+               (route/resolve-route
+                routes
+                ["run" "--" "demo.hal"]))
+              ["demo.hal"])
+  (test/check "developer routes are absent from public help"
+              (vec
+               (map
+                (fn [entry] (:route/id entry))
+                (:help/routes
+                 (route/help-model
+                  {:document/version "0.1.0"
+                   :cli/routes routes}))))
+              [:hara.cli.route/repl
+               :hara.cli.route/run-file
+               :hara.cli.route/project-run
+               :hara.cli.route/project-check])])

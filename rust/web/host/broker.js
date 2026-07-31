@@ -35,6 +35,8 @@ export class KernelBroker {
     this.rootStart = null; // in-flight ROOT spawn promise, once triggered
     this.documents = new Map(); // kernel/document -> active private generation
     this.documentGenerations = new Map();
+    this.previews = new Map(); // generation id -> disposable InstaREPL session + traces
+    this.nextPreviewGeneration = 1;
   }
 
   static normalizeName(value) {
@@ -107,8 +109,17 @@ export class KernelBroker {
     return kernel.context.call("session/eval", [sessionName, source]);
   }
 
-  /** Evaluate source forms in a disposable session without changing the active
-   * kernel or document state. Evaluation stops at the first error. */
+  async traceEval(kernelName, sessionName, source) {
+    const kernel = await this.require(KernelBroker.normalizeName(kernelName));
+    sessionName = KernelBroker.normalizeName(sessionName);
+    if (sessionName !== ROOT && !kernel.sessions?.has(sessionName)) {
+      throw new Error(`NO_SESSION ${sessionName}`);
+    }
+    return kernel.context.call("session/trace-eval", [sessionName, source]);
+  }
+
+  /** Legacy form timing projection retained for older hosts. New Studio UI
+   * uses traceEval/previewDocument and the structured evaluator trace. */
   async traceForms(kernelName, forms, {
     now = () => globalThis.performance?.now?.() ?? Date.now(),
     bootstrap
@@ -125,7 +136,11 @@ export class KernelBroker {
           const value = await this.evalSession(kernelName, sessionName, form.source);
           rows.push({ ...form, status: "ok", value, duration: now() - startedAt });
         } catch (error) {
-          rows.push({ ...form, status: "error", error: String(error?.message ?? error), duration: now() - startedAt });
+          rows.push({
+            ...form, status: "error",
+            error: String(error?.message ?? error),
+            duration: now() - startedAt
+          });
           break;
         }
       }
@@ -133,6 +148,69 @@ export class KernelBroker {
     } finally {
       await this.closeSession(kernelName, sessionName).catch(() => {});
     }
+  }
+
+  /** Evaluate complete forms in a clean disposable session and retain each
+   * structured trace for result-gutter click-through. */
+  async previewDocument(kernelName, documentId, forms, { bootstrap } = {}) {
+    if (typeof documentId !== "string" || !documentId) throw new Error("INVALID_DOCUMENT_ID");
+    if (!Array.isArray(forms)) throw new Error("PREVIEW_FORMS_MUST_BE_ARRAY");
+    kernelName = KernelBroker.normalizeName(kernelName);
+    const generationId = `preview-${this.nextPreviewGeneration++}`;
+    const sessionName = `PREVIEW.${generationId.replace("-", ".")}`;
+    await this.createSession(kernelName, sessionName, { bootstrap });
+    const preview = {
+      generationId, kernelName, documentId, sessionName,
+      traces: new Map(), disposed: false
+    };
+    this.previews.set(generationId, preview);
+    const rows = [];
+    try {
+      for (let index = 0; index < forms.length; index += 1) {
+        const form = forms[index];
+        const trace = await this.traceEval(kernelName, sessionName, form.source);
+        const traceId = String(traceField(trace, "trace-id") ?? `${generationId}-${index + 1}`);
+        preview.traces.set(traceId, trace);
+        const status = traceName(traceField(trace, "status"));
+        const result = traceField(trace, "result");
+        rows.push({
+          ...form,
+          status: status === "error" ? "error" : "ok",
+          value: previewDisplay(result),
+          valueType: traceField(result, "type") ?? null,
+          error: traceField(trace, "error") ?? null,
+          traceId
+        });
+        if (status === "error") {
+          for (const skipped of forms.slice(index + 1)) {
+            rows.push({ ...skipped, status: "skipped", traceId: null });
+          }
+          break;
+        }
+      }
+      return { generationId, sessionName, rows };
+    } catch (error) {
+      await this.disposePreview(generationId);
+      throw error;
+    }
+  }
+
+  getPreviewTrace(generationId, traceId) {
+    const preview = this.previews.get(generationId);
+    if (!preview || preview.disposed) throw new Error(`NO_PREVIEW ${generationId}`);
+    const trace = preview.traces.get(traceId);
+    if (!trace) throw new Error(`NO_PREVIEW_TRACE ${traceId}`);
+    return trace;
+  }
+
+  async disposePreview(generationId) {
+    const preview = this.previews.get(generationId);
+    if (!preview) return false;
+    this.previews.delete(generationId);
+    preview.disposed = true;
+    preview.traces.clear();
+    await this.closeSession(preview.kernelName, preview.sessionName).catch(() => {});
+    return true;
   }
 
   async closeSession(kernelName, sessionName) {
@@ -263,6 +341,9 @@ export class KernelBroker {
       if (document.kernel !== name) continue;
       this.releaseDocument(name, document.documentId);
     }
+    for (const preview of [...this.previews.values()]) {
+      if (preview.kernelName === name) await this.disposePreview(preview.generationId);
+    }
     try {
       await this.onKernelClosed(kernel);
     } finally {
@@ -326,6 +407,22 @@ export class KernelBroker {
       throw error;
     }
   }
+}
+
+function traceField(value, name) {
+  if (!(value instanceof Map)) return undefined;
+  for (const [key, item] of value) {
+    if ((key?.name ?? key) === name) return item;
+  }
+  return undefined;
+}
+
+function traceName(value) {
+  return String(value?.name ?? value ?? "");
+}
+
+function previewDisplay(value) {
+  return traceField(value, "display") ?? null;
 }
 
 function documentResult(document) {

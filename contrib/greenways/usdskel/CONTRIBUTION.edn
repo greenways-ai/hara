@@ -1,0 +1,12 @@
+{:contribution/id :greenways/usdskel
+ :contribution/owner :greenways
+ :contribution/version "0.0.0"
+ :contribution/status :scaffold
+ :contribution/title "Greenways USD Skel"
+ :contribution/summary "Reserved ownership boundary; no normative artifact specification has been proposed."
+ :contribution/source
+ {:source/provider :github
+  :source/repository "hara-lang/hara"
+  :source/commit "34d74feba8c37361da2c3a5196aa2a6adc445561"
+  :source/path "contrib/greenways/usdskel"}
+ :contribution/specs []}

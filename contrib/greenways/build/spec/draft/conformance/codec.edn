@@ -1,0 +1,9 @@
+{:conformance/id :greenways.build/codec-cases
+ :conformance/version "0.1.0"
+ :conformance/cases
+ [{:case/id :greenways.build.codec/minimal-roundtrip :case/type :codec :case/input :minimal-build :case/expected :semantic-equality}
+  {:case/id :greenways.build.codec/full-roundtrip :case/type :codec :case/input :full-build :case/expected :semantic-equality}
+  {:case/id :greenways.build.codec/canonical-edn-exact :case/type :codec :case/input :canonical-edn :case/expected :exact-equality}
+  {:case/id :greenways.build.codec/normalization-idempotent :case/type :normalization :case/input :full-build :case/expected :idempotent}
+  {:case/id :greenways.build.codec/stable-stage-order :case/type :normalization :case/input :branching-build :case/expected :source-order}
+  {:case/id :greenways.build.codec/stable-serialization :case/type :codec :case/input :canonical-edn :case/expected :byte-stable}]}

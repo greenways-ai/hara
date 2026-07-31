@@ -35,7 +35,7 @@ public class CloseableIteratorTest {
   }
 
   @Test
-  public void cycleAcquiresLazilyAndClosesEachResourceGeneration() {
+  public void cycleAcquiresOnceCachesAndClosesItsResourceSource() {
     AtomicInteger acquired = new AtomicInteger();
     AtomicInteger closed = new AtomicInteger();
     CloseableIterator<Integer> cycle =
@@ -49,12 +49,12 @@ public class CloseableIteratorTest {
     assertEquals(0, acquired.get());
     assertEquals(Integer.valueOf(1), cycle.next());
     assertEquals(1, acquired.get());
-    assertEquals(Integer.valueOf(2), cycle.next());
-    assertEquals(2, acquired.get());
+    assertEquals(Integer.valueOf(1), cycle.next());
+    assertEquals(1, acquired.get());
     assertEquals(1, closed.get());
     cycle.close();
     cycle.close();
-    assertEquals(2, closed.get());
+    assertEquals(1, closed.get());
     assertFalse(cycle.hasNext());
   }
 

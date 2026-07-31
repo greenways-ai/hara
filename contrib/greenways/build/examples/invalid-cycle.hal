@@ -1,0 +1,16 @@
+(build invalid-cycle
+  (artifact
+    :kind :application/service
+    :output "dist/cycle.hal")
+
+  (stage parse
+    :requires [emit]
+    :produces :hal/forms)
+
+  (stage analyze
+    :requires [parse]
+    :produces :greenways/analysis)
+
+  (stage emit
+    :requires [analyze]
+    :produces :application/service))

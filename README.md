@@ -44,6 +44,9 @@ several Git submodules at the root:
 - [`specs/`](specs/) — normative specs: prose (`.md`), machine-checked corpora,
   and spec-shaped data. Lives in the
   [`hara-lang/hara-specs`](https://github.com/hara-lang/hara-specs) submodule.
+- [`contrib/`](contrib/) — independently owned artifact formats developed with
+  Hara's metaspec and verifier. Greenways formats live under
+  `contrib/greenways/`.
 - [`archive/`](archive/) — legacy material kept for history. Lives in the
   [`hara-lang/hara-archive`](https://github.com/hara-lang/hara-archive)
   submodule.

@@ -1,0 +1,23 @@
+(ns hara.cli.report)
+
+(defn- next-action
+  [finding]
+  {:action/type :repair-finding
+   :action/rule (:rule/id finding)
+   :action/requirement (:requirement/id finding)
+   :action/path (:finding/path finding)
+   :action/repair (:finding/repair finding)})
+
+(defn verification-report
+  [manifest findings]
+  (let [failures (count findings)]
+    {:report/type :hara/cli-verification
+     :report/version "0.1.0"
+     :document/id (:document/id manifest)
+     :report/status (if (zero? failures) :pass :fail)
+     :summary {:pass (if (zero? failures) 1 0)
+               :fail failures
+               :unknown 0
+               :blocked 0}
+     :findings (vec findings)
+     :next-actions (vec (map next-action findings))}))

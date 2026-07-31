@@ -16,6 +16,36 @@ pub struct ExtensionPackage {
 }
 
 impl ExtensionPackage {
+    pub fn load(root: &Path) -> Result<Self, String> {
+        let root = absolute(root)?;
+        let descriptor = root.join("hara.extension.edn");
+        if !descriptor.is_file() {
+            return Err(format!(
+                "extension/malformed: missing {}",
+                descriptor.display()
+            ));
+        }
+        let metadata = descriptor
+            .metadata()
+            .map_err(|error| format!("extension/asset-unavailable: {error}"))?;
+        if metadata.len() > MAX_MANIFEST_BYTES {
+            return Err(format!(
+                "extension/malformed {}: manifest is too large",
+                descriptor.display()
+            ));
+        }
+        let source = fs::read_to_string(&descriptor)
+            .map_err(|error| format!("extension/malformed {}: {error}", descriptor.display()))?;
+        let manifest = ExtensionManifest::parse(&source, &descriptor.display().to_string())?;
+        let package = Self {
+            descriptor,
+            source,
+            manifest,
+        };
+        package.validate_declared_files()?;
+        Ok(package)
+    }
+
     pub fn discover(namespace: &str, roots: &[PathBuf]) -> Result<Option<Self>, String> {
         let relative = PathBuf::from(namespace.replace('.', "/")).join("hara.extension.edn");
         let mut candidates = Vec::new();
@@ -85,8 +115,8 @@ impl ExtensionPackage {
         fs::read(&path).map_err(|error| format!("extension/module-unavailable: {error}"))
     }
 
-    fn validate_declared_files(&self) -> Result<(), String> {
-        let mut paths = self.manifest.assets.clone();
+    pub fn declared_files(&self) -> Vec<String> {
+        let mut paths = vec!["hara.extension.edn".to_owned()];
         if let Some(module) = &self.manifest.module {
             paths.push(module.clone());
         }
@@ -96,6 +126,15 @@ impl ExtensionPackage {
                 .values()
                 .map(|target| target.module.clone()),
         );
+        paths.extend(self.manifest.assets.clone());
+        paths.sort();
+        paths.dedup();
+        paths
+    }
+
+    fn validate_declared_files(&self) -> Result<(), String> {
+        let mut paths = self.declared_files();
+        paths.retain(|path| path != "hara.extension.edn");
         for relative in paths {
             self.resolve(&relative)?;
         }

@@ -26,6 +26,7 @@ import hara.lang.protocol.IDeref;
 import hara.lang.protocol.IDerefTimeout;
 import hara.lang.protocol.IDisplay;
 import hara.lang.protocol.ICount;
+import hara.lang.protocol.ICons;
 import hara.lang.protocol.INth;
 import hara.lang.protocol.IPromise;
 import java.io.IOException;
@@ -178,6 +179,7 @@ public final class HaraContext {
   private final Map<String, Map<String, HaraMacro>> macros = new ConcurrentHashMap<>();
   private final Map<String, Map<String, String>> aliases = new ConcurrentHashMap<>();
   private final Map<String, NamespaceLoadState> namespaceStates = new ConcurrentHashMap<>();
+  private final Map<String, String> namespaceFailures = new ConcurrentHashMap<>();
   private final Map<String, String> nativeFlavors = new ConcurrentHashMap<>();
   private final Map<String, Map<String, Object>> nativeImports = new ConcurrentHashMap<>();
   private final NativeFlavorRegistry nativeFlavorRegistry =
@@ -363,7 +365,8 @@ public final class HaraContext {
       Map<String, BuiltinExport> exports,
       java.util.List<String> methods,
       Map<String, String> sourceNames) {
-    HaraNamespace target = namespace("std.native." + type);
+    String namespaceName = "std.native." + type;
+    HaraNamespace target = namespace(namespaceName);
     for (String method : methods) {
       String sourceName = sourceNames.getOrDefault(method, method);
       BuiltinExport export = exports.get(sourceName);
@@ -371,6 +374,8 @@ public final class HaraContext {
         target.define(method, export.value, export.metadata, HaraVar.Origin.RUNTIME_PRIMITIVE);
       }
     }
+    namespaceStates.put(namespaceName, NamespaceLoadState.LOADED);
+    namespaceFailures.remove(namespaceName);
   }
 
   private void registerBuiltin(
@@ -829,8 +834,11 @@ public final class HaraContext {
       throw new HaraException("Cyclic namespace require: " + target);
     }
     if (state == NamespaceLoadState.FAILED) {
+      String detail = namespaceFailures.get(target);
       throw new HaraException(
-          "Namespace load previously failed; use explicit reload to retry: " + target);
+          "Namespace load previously failed; use explicit reload to retry: "
+              + target
+              + (detail == null ? "" : " (initial failure: " + detail + ")"));
     }
 
     ContextSnapshot snapshot = snapshot();
@@ -855,13 +863,19 @@ public final class HaraContext {
       if (loaded == null) {
         restore(snapshot);
         namespaceStates.put(target, NamespaceLoadState.FAILED);
+        namespaceFailures.put(
+            target, "no library, source, or extension provided this namespace");
         return null;
       }
       namespaceStates.put(target, NamespaceLoadState.LOADED);
+      namespaceFailures.remove(target);
       return loaded;
     } catch (RuntimeException failure) {
       restore(snapshot);
       namespaceStates.put(target, NamespaceLoadState.FAILED);
+      namespaceFailures.put(
+          target,
+          failure.getMessage() == null ? failure.getClass().getSimpleName() : failure.getMessage());
       throw failure;
     }
   }
@@ -990,12 +1004,12 @@ public final class HaraContext {
           aliases.getOrDefault(currentNamespace.name(), Map.of());
       boolean alias = currentAliases.containsKey(namespaceName);
       namespaceName = currentAliases.getOrDefault(namespaceName, namespaceName);
+      String nativeSource = NATIVE_LIBRARY_SOURCES.get(namespaceName);
+      if (nativeSource != null) libraryLoader.ensure(this, nativeSource);
       if (alias) {
         HaraNamespace required = requiredNamespace(namespaceName);
         if (required == null) return null;
       }
-      String nativeSource = NATIVE_LIBRARY_SOURCES.get(namespaceName);
-      if (nativeSource != null) libraryLoader.ensure(this, nativeSource);
       if (libraryLoader.provides(namespaceName)) {
         HaraNamespace required = requiredNamespace(namespaceName);
         if (required == null) return null;
@@ -3709,8 +3723,8 @@ public final class HaraContext {
       return result;
     } catch (IOException | RuntimeException error) {
       restore(snapshot);
-      throw new HaraException(
-          "Unable to load Hara file: " + value + " (" + error.getMessage() + ")");
+      throw HaraException.withCause(
+          "Unable to load Hara file: " + value + " (" + error.getMessage() + ")", error);
     }
   }
 
@@ -3915,8 +3929,8 @@ public final class HaraContext {
     } catch (IOException | RuntimeException error) {
       restore(snapshot);
       if (error instanceof HaraException) throw (HaraException) error;
-      throw new HaraException(
-          "Unable to load Hara resource: " + value + " (" + error.getMessage() + ")");
+      throw HaraException.withCause(
+          "Unable to load Hara resource: " + value + " (" + error.getMessage() + ")", error);
     }
   }
 
@@ -4002,14 +4016,22 @@ public final class HaraContext {
           restore(snapshot);
           if (previousState != NamespaceLoadState.LOADED) {
             namespaceStates.put(target, NamespaceLoadState.FAILED);
+            namespaceFailures.put(
+                target, "no library, source, or extension provided this namespace");
           }
         } else {
           namespaceStates.put(target, NamespaceLoadState.LOADED);
+          namespaceFailures.remove(target);
         }
       } catch (RuntimeException failure) {
         restore(snapshot);
         if (previousState != NamespaceLoadState.LOADED) {
           namespaceStates.put(target, NamespaceLoadState.FAILED);
+          namespaceFailures.put(
+              target,
+              failure.getMessage() == null
+                  ? failure.getClass().getSimpleName()
+                  : failure.getMessage());
         }
         throw failure;
       }
@@ -4239,17 +4261,17 @@ public final class HaraContext {
     Object lazySource =
         HaraBox.unwrap(source) instanceof HaraSeq
             ? HaraBox.unwrap(source)
-            : new HaraSeq((Iterator<?>) snapshotOrIterator(source));
+            : HaraSeq.create((Iterator<?>) snapshotOrIterator(source));
     if (values.length == 1) {
-      return ((HaraSeq) lazySource).hasNext() ? lazySource : null;
+      return lazySource;
     }
     Object result = invokeCallable(values[0], new Object[] {lazySource});
     Object unwrapped = HaraBox.unwrap(result);
     HaraSeq sequence =
         unwrapped instanceof HaraSeq
             ? (HaraSeq) unwrapped
-            : new HaraSeq((Iterator<?>) iterValue(unwrapped));
-    return sequence.hasNext() ? sequence : null;
+            : HaraSeq.create((Iterator<?>) iterValue(unwrapped));
+    return sequence;
   }
 
   @TruffleBoundary
@@ -4700,7 +4722,12 @@ public final class HaraContext {
 
   @SuppressWarnings({"rawtypes", "unchecked"})
   Object iterCycle(Object value) {
-    return Iter.cycle(() -> (Iterator) iterValue(value));
+    Iterator cycle = Iter.cycle(() -> (Iterator) iterValue(value));
+    if (!cycle.hasNext()) {
+      Iter.close(cycle);
+      throw new HaraException("cycle expects a non-empty source");
+    }
+    return cycle;
   }
 
   @SuppressWarnings({"rawtypes", "unchecked"})
@@ -4910,9 +4937,6 @@ public final class HaraContext {
 
   private Iterator<?> requireIterator(Object value, String operation) {
     Object target = HaraBox.unwrap(value);
-    if (target == null || target == HaraNull.SINGLETON) {
-      return Iter.emptyIterator();
-    }
     if (!(target instanceof Iterator<?>)) {
       throw new HaraException(operation + " expects an iterator");
     }
@@ -5132,12 +5156,16 @@ public final class HaraContext {
     }
   }
 
-  private static final class HaraSeq implements CloseableIterator<Object> {
+  private static final class HaraSeq implements CloseableIterator<Object>, ICons<Object> {
     private final Iterator<?> source;
     private boolean closed;
 
     private HaraSeq(Iterator<?> source) {
       this.source = source;
+    }
+
+    private static HaraSeq create(Iterator<?> source) {
+      return source.hasNext() ? new HaraSeq(source) : null;
     }
 
     @Override
@@ -5149,6 +5177,11 @@ public final class HaraContext {
     public Object next() {
       if (!hasNext()) throw new NoSuchElementException();
       return source.next();
+    }
+
+    @Override
+    public HaraSeq cons(Object value) {
+      return new HaraSeq(Iter.concat(Iter.objects(value), this));
     }
 
     @Override

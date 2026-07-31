@@ -1,0 +1,193 @@
+(ns greenways.build.graph)
+
+(defn- member?
+  [value values]
+  (not (empty? (filter (fn [candidate] (= value candidate)) values))))
+
+(defn stage-index
+  "Indexes stages by ID. Duplicate IDs are deliberately checked separately."
+  [build]
+  (reduce (fn [output stage]
+            (assoc output (:stage/id stage) stage))
+          {}
+          (:build/stages build)))
+
+(defn stage-dependencies
+  [build]
+  (reduce (fn [output stage]
+            (assoc output
+                   (:stage/id stage)
+                   (vec (:stage/requires stage))))
+          {}
+          (:build/stages build)))
+
+(defn missing-dependencies
+  [build]
+  (let [index (stage-index build)]
+    (reduce
+     (fn [output stage]
+       (reduce
+        (fn [stage-output dependency]
+          (if (nil? (get index dependency))
+            (conj stage-output
+                  {:stage/id (:stage/id stage)
+                   :stage/dependency dependency})
+            stage-output))
+        output
+        (:stage/requires stage)))
+     []
+     (:build/stages build))))
+
+(defn- index-of
+  [value values]
+  (get
+   (reduce
+    (fn [state candidate]
+      {:index (inc (get state :index))
+       :found (if (number? (get state :found))
+                (get state :found)
+                (if (= value candidate)
+                  (get state :index)
+                  nil))})
+    {:index 0 :found nil}
+    (or values []))
+   :found))
+
+(defn- cycle-from
+  [dependencies current]
+  (loop [pending [[current]]]
+    (if (empty? pending)
+      nil
+      (let [path (first pending)
+            stage-id (last path)
+            required (get dependencies stage-id [])
+            cycle
+            (reduce
+             (fn [found dependency]
+               (if (not (nil? found))
+                 found
+                 (let [at (index-of dependency path)]
+                   (if (number? at)
+                     (conj (vec (drop at path)) dependency)
+                     nil))))
+             nil
+             required)
+            expansions
+            (vec
+             (map (fn [dependency] (conj path dependency))
+                  (filter (fn [dependency]
+                            (nil? (index-of dependency path)))
+                          required)))]
+        (if (not (nil? cycle))
+          cycle
+          (recur (vec (concat (rest pending)
+                              expansions))))))))
+
+(defn find-cycles
+  [build]
+  (let [dependencies (stage-dependencies build)
+        stage-ids (vec (map (fn [stage] (:stage/id stage))
+                            (:build/stages build)))]
+    (get
+     (reduce
+      (fn [state stage-id]
+        (let [covered (get state :covered)
+              cycles (get state :cycles)
+              cycle (if (member? stage-id covered)
+                      nil
+                      (cycle-from dependencies stage-id))]
+          {:covered (if (not (nil? cycle))
+                      (vec (concat covered (butlast cycle)))
+                      covered)
+           :cycles (if (not (nil? cycle))
+                     (conj cycles cycle)
+                     cycles)}))
+      {:covered [] :cycles []}
+      stage-ids)
+     :cycles)))
+
+(defn- topological-step
+  [dependencies ordered remaining]
+  (if (empty? remaining)
+    ordered
+    (let [ready
+          (first
+           (filter
+            (fn [stage-id]
+              (every? (fn [dependency]
+                        (member? dependency ordered))
+                      (get dependencies stage-id [])))
+            remaining))]
+      (if ready
+        (topological-step
+         dependencies
+         (conj ordered ready)
+         (vec (filter (fn [stage-id]
+                        (not (= stage-id ready)))
+                      remaining)))
+        ordered))))
+
+(defn topological-order
+  "Returns the stable source-order Kahn traversal.
+
+   Cyclic stages are omitted; callers use find-cycles for diagnostics."
+  [build]
+  (let [stage-ids (vec (map (fn [stage] (:stage/id stage))
+                            (:build/stages build)))
+        dependencies (stage-dependencies build)]
+    (topological-step dependencies [] stage-ids)))
+
+(defn- reachable-step
+  [dependencies pending reachable]
+  (if (empty? pending)
+    reachable
+    (let [stage-id (first pending)
+          remaining (vec (rest pending))]
+      (if (member? stage-id reachable)
+        (reachable-step dependencies remaining reachable)
+        (reachable-step
+         dependencies
+         (vec (concat remaining
+                      (get dependencies stage-id [])))
+         (conj reachable stage-id))))))
+
+(defn reachable-stages
+  "Returns stages that contribute transitively to a declared final artifact."
+  [build]
+  (let [artifact-kind (get-in build [:build/artifact :artifact/kind])
+        dependencies (stage-dependencies build)
+        roots (vec (map (fn [stage] (:stage/id stage))
+                        (filter (fn [stage]
+                                  (= artifact-kind (:stage/produces stage)))
+                                (:build/stages build))))]
+    (reachable-step dependencies roots [])))
+
+(defn- blocking-status?
+  [status]
+  (or (= :fail status)
+      (= :unknown status)
+      (= :blocked status)))
+
+(defn blocked-stages
+  "Returns a stable map of stage ID to the failed/unknown/blocked ancestors."
+  [build stage-results]
+  (let [dependencies (stage-dependencies build)
+        order (topological-order build)]
+    (reduce
+     (fn [blocked stage-id]
+       (let [blockers
+             (vec
+              (mapcat
+               (fn [dependency]
+                 (let [status (get stage-results dependency)
+                       inherited (get blocked dependency [])]
+                   (if (or (blocking-status? status)
+                           (not (empty? inherited)))
+                     [dependency]
+                     [])))
+               (get dependencies stage-id [])))]
+         (if (empty? blockers)
+           blocked
+           (assoc blocked stage-id blockers))))
+     {}
+     order)))

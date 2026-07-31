@@ -141,6 +141,7 @@
 				<includes>
 					<include>specs/language/draft/conformance/l0.edn</include>
 					<include>specs/language/draft/conformance/modules.edn</include>
+					<include>specs/cli/draft/**/*.edn</include>
 				</includes>
 			</resource>
 			<resource>

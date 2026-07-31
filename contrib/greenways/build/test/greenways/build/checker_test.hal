@@ -1,0 +1,65 @@
+(ns greenways.build.checker-test
+  (:require [greenways.build.checker :as checker]
+            [greenways.build.normalize :as normalize]
+            [std.lib.test :as test]))
+
+(def identity
+  {:checker/id :music/harmony
+   :checker/source
+   {:source/provider :github
+    :source/repository "greenways-ai/music-checkers"
+    :source/commit "0123456789abcdef0123456789abcdef01234567"
+    :source/path "src/music/harmony.hal"}
+   :checker/entrypoint 'music.harmony/check})
+
+(def variation-base
+  {:variation/id :music.harmony/classical-strict
+   :variation/checker :music/harmony
+   :variation/config {:parallel-fifths :error
+                      :parallel-octaves :error
+                      :voice-crossing :warning}})
+
+(def variation
+  (assoc variation-base
+         :variation/digest
+         (checker/variation-digest variation-base)))
+
+(def valid-build
+  (normalize/normalize-build
+   {:build/id :example
+    :build/artifact {:artifact/kind :application/service
+                     :artifact/output "dist/example.hal"}
+    :build/stages
+    [{:stage/id :source :stage/produces :hal/forms}
+     {:stage/id :output :stage/requires [:source]
+      :stage/produces :application/service}]}))
+
+(test/print-results
+ [(test/check "pure HAL SHA-256 matches the standard vector"
+              (checker/sha256 "abc")
+              "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+  (test/check "full GitHub commit identity is accepted"
+              (checker/validate-checker-identity identity)
+              [])
+  (test/check "short commits are rejected"
+              (vec (map (fn [finding] (:type finding))
+                        (checker/validate-checker-identity
+                         (assoc-in identity
+                                   [:checker/source :source/commit]
+                                   "main"))))
+              [:greenways/checker-commit])
+  (test/check "canonical variation digests validate"
+              (checker/validate-variation variation)
+              [])
+  (test/check "closed built-in registry accepts a valid build"
+              (checker/check-build valid-build)
+              [])
+  (test/check "effective identity keeps implementation and policy separate"
+              (checker/effective-checker identity variation)
+              {:checker/id :music/harmony
+               :source/repository "greenways-ai/music-checkers"
+               :source/commit "0123456789abcdef0123456789abcdef01234567"
+               :source/path "src/music/harmony.hal"
+               :checker/entrypoint 'music.harmony/check
+               :variation/id :music.harmony/classical-strict
+               :variation/digest (:variation/digest variation)})])

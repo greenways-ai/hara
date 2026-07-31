@@ -1,0 +1,59 @@
+(ns greenways.build.normalize
+  (:require [greenways.build.model :as model]))
+
+(defn- normalize-artifact
+  [value]
+  {:artifact/kind (:artifact/kind value)
+   :artifact/output (:artifact/output value)})
+
+(defn- normalize-spec
+  [value]
+  {:spec/id (:spec/id value)
+   :spec/version (:spec/version value)})
+
+(defn- normalize-checker
+  [value]
+  (merge {:checker/id (:checker/id value)}
+         (if (:checker/variation value)
+           {:checker/variation (:checker/variation value)}
+           {})
+         (if (:checker/source value)
+           {:checker/source (:checker/source value)}
+           {})
+         (if (:checker/entrypoint value)
+           {:checker/entrypoint (:checker/entrypoint value)}
+           {})))
+
+(defn- normalize-stage
+  [value]
+  {:stage/id (model/normalize-id (:stage/id value))
+   :stage/requires
+   (vec (map model/normalize-id (or (:stage/requires value) [])))
+   :stage/produces (:stage/produces value)
+   :stage/checkers
+   (vec (map normalize-checker (or (:stage/checkers value) [])))})
+
+(defn normalize-build
+  "Returns the authoritative canonical build model."
+  [value]
+  (let [build-value (or (:build value) value)]
+    {:greenways/type :build
+     :greenways/version model/version
+     :build/id (model/normalize-id (:build/id build-value))
+     :build/artifact (normalize-artifact (:build/artifact build-value))
+     :build/specs (vec (map normalize-spec (or (:build/specs build-value) [])))
+     :build/stages (vec (map normalize-stage
+                             (or (:build/stages build-value) [])))}))
+
+(defn canonical-build?
+  [value]
+  (and (map? value)
+       (= :build (:greenways/type value))
+       (= model/version (:greenways/version value))
+       (keyword? (:build/id value))
+       (model/artifact? (:build/artifact value))
+       (vector? (:build/specs value))
+       (every? model/specification-reference? (:build/specs value))
+       (vector? (:build/stages value))
+       (every? model/stage? (:build/stages value))
+       (= value (normalize-build value))))

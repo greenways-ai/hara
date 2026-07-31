@@ -6,6 +6,7 @@ import hara.lang.data.types.ObjPersistent;
 import hara.lang.protocol.IMetadata;
 
 import java.util.Iterator;
+import java.util.NoSuchElementException;
 
 public class Seq<E> extends ObjPersistent implements ISequentialType<E>, ILinkedType<E> {
 
@@ -19,10 +20,15 @@ public class Seq<E> extends ObjPersistent implements ISequentialType<E>, ILinked
 
   @SuppressWarnings("unchecked")
   public Seq(Iterator<E> iter) {
+    if (!iter.hasNext()) throw new NoSuchElementException("Seq requires a head");
     _iter = iter;
     _state = new State<E>();
-    _state._val = (E) _state;
+    _state._val = iter.next();
     _state._rest = (E) _state;
+  }
+
+  public static <E> Seq<E> create(Iterator<E> iter) {
+    return iter.hasNext() ? new Seq<E>(iter) : null;
   }
 
   public Seq(IMetadata meta, Iterator<E> iter, State<E> state) {
@@ -33,10 +39,6 @@ public class Seq<E> extends ObjPersistent implements ISequentialType<E>, ILinked
 
   @Override
   public E peekFirst() {
-    if (_state._val == _state)
-      synchronized (_state) {
-        if (_state._val == _state) _state._val = _iter.next();
-      }
     return _state._val;
   }
 
@@ -46,7 +48,6 @@ public class Seq<E> extends ObjPersistent implements ISequentialType<E>, ILinked
     if (_state._rest == _state) {
       synchronized (_state) {
         if (_state._rest == _state) {
-          peekFirst();
           _state._rest = _iter.hasNext() ? (E) (new Seq<E>(_iter)) : null;
         }
       }
@@ -56,12 +57,33 @@ public class Seq<E> extends ObjPersistent implements ISequentialType<E>, ILinked
 
   @Override
   public Iterator<E> iterator() {
-    return _iter;
+    return new Iterator<E>() {
+      Seq<E> current = Seq.this;
+
+      @Override
+      public boolean hasNext() {
+        return current != null;
+      }
+
+      @Override
+      public E next() {
+        if (current == null) throw new NoSuchElementException();
+        E value = current.peekFirst();
+        current = current.popFirst();
+        return value;
+      }
+    };
   }
 
   @Override
   public long count() {
-    return 1 + popFirst().count();
+    long count = 0;
+    Seq<E> current = this;
+    while (current != null) {
+      count++;
+      current = current.popFirst();
+    }
+    return count;
   }
 
   @Override

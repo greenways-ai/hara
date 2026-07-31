@@ -1,6 +1,10 @@
 #![allow(clippy::too_many_lines)] // Temporary compatibility facade during Java-port split.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cli_app;
 mod core;
 pub mod extension;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod extension_tool;
 pub mod hta;
 mod json;
 pub mod kernel;
@@ -2840,9 +2844,7 @@ mod tests {
         fn wrapper_source(path: &str) -> &'static str {
             EMBEDDED_HAL_RESOURCES
                 .iter()
-                .find_map(|(_, resource_path, source)| {
-                    (*resource_path == path).then_some(*source)
-                })
+                .find_map(|(_, resource_path, source)| (*resource_path == path).then_some(*source))
                 .unwrap_or_else(|| panic!("unknown wrapper source: {path}"))
         }
 
@@ -3276,7 +3278,12 @@ mod tests {
     fn core_collection_navigation_and_predicates_are_host_neutral() {
         let mut runtime = Runtime::new();
         assert_eq!(runtime.eval_text("(first [1 2 3])").unwrap(), "1");
-        assert_eq!(runtime.eval_text("(rest [1 2 3])").unwrap(), "(2 3)");
+        assert_eq!(
+            runtime
+                .eval_text("[(seq? (rest [1 2 3])) (vec (rest [1 2 3]))]")
+                .unwrap(),
+            "[true [2 3]]"
+        );
         assert_eq!(runtime.eval_text("(last [1 2 3])").unwrap(), "3");
         assert_eq!(runtime.eval_text("(empty? [])").unwrap(), "true");
         assert_eq!(runtime.eval_text("(not false)").unwrap(), "true");
@@ -4038,11 +4045,13 @@ mod tests {
                 .unwrap(),
             "2"
         );
+        assert!(runtime
+            .eval_text("(conj (rest [1 2]) 2)")
+            .unwrap_err()
+            .contains("IConj/conj expects a collection"));
         assert_eq!(
-            runtime
-                .eval_text("(let (source (rest [1 2])) (count (conj source 2)))")
-                .unwrap(),
-            "2"
+            runtime.eval_text("(vec (cons 0 (rest [1 2])))").unwrap(),
+            "[0 2]"
         );
         assert_eq!(
             runtime
@@ -4570,6 +4579,83 @@ mod tests {
     }
 
     #[test]
+    fn issue_200_nil_terminates_sequences_and_iterator_lookahead_is_exact() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "[(nil? (seq nil)) \
+                      (nil? (seq [])) \
+                      (nil? (rest nil)) \
+                      (nil? (rest [])) \
+                      (nil? (rest [1])) \
+                      (seq? (rest [1 2])) \
+                      (vec (rest [1])) \
+                      (vec (rest [1 2]))]"
+                )
+                .unwrap(),
+            "[true true true true true true [] [2]]"
+        );
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(let [it (iter-drop 1 [1])] \
+                       [(iter-has? it) (iter-has? it) (nil? (seq it))])"
+                )
+                .unwrap(),
+            "[false false true]"
+        );
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(let [it (iter-map inc [1])] \
+                       [(iter-has? it) (iter-has? it) (iter-next it) (iter-has? it)])"
+                )
+                .unwrap(),
+            "[true true 2 false]"
+        );
+    }
+
+    #[test]
+    fn issue_200_finite_generated_iterators_materialize_and_failures_propagate() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "[(last (iter-take 2 [1 2 3])) \
+                      (vec (reverse (iter-take 2 [1 2 3]))) \
+                      (vec (iter-zip [1] (repeat 0))) \
+                      (vec (iter-interleave [1] (repeat 0)))]"
+                )
+                .unwrap(),
+            "[2 [2 1] [[1 0]] [1 0]]"
+        );
+        assert!(runtime
+            .eval_text("(count (iter-map (fn [x] (throw \"boom\")) [1]))")
+            .unwrap_err()
+            .contains("boom"));
+        assert!(runtime
+            .eval_text("(count (iter-map (fn [x] (throw \"weekend\")) [1]))")
+            .unwrap_err()
+            .contains("weekend"));
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "[(seq? (seq [1])) \
+                      (iter? (seq [1])) \
+                      (vec (cons 0 (rest [1 2]))) \
+                      (vec (iter-take 4 (cons 0 (repeat 1))))]"
+                )
+                .unwrap(),
+            "[true true [0 2] [0 1 1 1]]"
+        );
+        assert!(runtime
+            .eval_text("(cycle [])")
+            .unwrap_err()
+            .contains("cycle expects a non-empty source"));
+    }
+
+    #[test]
     fn iterators_are_closeable_and_support_map_filter() {
         let mut runtime = Runtime::new();
         assert_eq!(
@@ -4786,6 +4872,16 @@ mod tests {
             "definition/doc-metadata",
             "definition/schema-metadata",
             "definition/arglists-metadata",
+            "sequence/empty-is-nil",
+            "sequence/non-empty-rest",
+            "sequence/is-iterator",
+            "sequence/lazy-cons",
+            "sequence/reject-conj",
+            "iterator/exact-lookahead",
+            "iterator/generated-exhaustion",
+            "iterator/shortest-source-finite",
+            "iterator/nil-requires-conversion",
+            "iterator/empty-cycle-rejected",
             "runtime/recur-outside-target",
             "runtime/recur-arity",
             "error/catch-guest-value",
@@ -5913,10 +6009,12 @@ mod tests {
             runtime.eval_text("(first ((drop 3) (repeat :x)))").unwrap(),
             ":x"
         );
-        assert!(runtime
-            .eval_text("(count (repeat :x))")
-            .unwrap_err()
-            .contains("finite collection"));
+        assert_eq!(
+            runtime
+                .eval_text("(Iter/iter-finite? (repeat :x))")
+                .unwrap(),
+            "false"
+        );
         assert_eq!(
             runtime
                 .eval_text("(count ((take 3) (repeatedly (constantly 7))))")
@@ -6040,9 +6138,7 @@ mod tests {
             "42"
         );
         assert_eq!(
-            runtime
-                .eval_text("((comp inc inc inc inc) 38)")
-                .unwrap(),
+            runtime.eval_text("((comp inc inc inc inc) 38)").unwrap(),
             "42"
         );
     }

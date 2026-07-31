@@ -63,18 +63,20 @@ fn main() {
 
     let repository_root = manifest
         .parent()
-        .expect("rust crate must have a repository parent");
+        .expect("rust crate must have a repository parent")
+        .canonicalize()
+        .expect("repository root must resolve");
     let mut generated =
         String::from("pub(crate) static EMBEDDED_HAL_RESOURCES: &[(&str, &str, &str)] = &[\n");
     for (namespace, path) in resources {
-        let relative = path
-            .strip_prefix(repository_root)
-            .expect("HAL resource must be inside the repository")
-            .to_string_lossy()
-            .replace('\\', "/");
         let path = path
             .canonicalize()
             .unwrap_or_else(|error| panic!("cannot resolve {}: {error}", path.display()));
+        let relative = path
+            .strip_prefix(&repository_root)
+            .expect("HAL resource must be inside the repository")
+            .to_string_lossy()
+            .replace('\\', "/");
         generated.push_str(&format!(
             "    ({namespace:?}, {relative:?}, include_str!({path:?})),\n",
             namespace = namespace,

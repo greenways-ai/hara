@@ -169,8 +169,21 @@ final class HaraProject {
               "project/capabilities")) {
         if (lookup(options, key) == null) throw new HaraException("project.edn missing required key :" + key);
       }
-      if (!(lookup(options, "project/version") instanceof String))
-        throw new HaraException("project.edn :project/version must be a string");
+      if (!(lookup(options, "hara/version") instanceof String))
+        throw new HaraException("project.edn :hara/version must be a string");
+      if (!(lookup(options, "project/version") instanceof String version)
+          || !version.matches(
+              "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?$"))
+        throw new HaraException("project.edn :project/version is not SemVer");
+      Object dependencies = lookup(options, "project/dependencies");
+      if (dependencies != null && !(dependencies instanceof IMapType<?, ?>))
+        throw new HaraException("project.edn :project/dependencies must be a map");
+      paths(
+          root,
+          lookup(options, "project/artifact-paths"),
+          "project/artifact-paths",
+          java.util.List.of(),
+          PROJECT_FILE);
     } catch (IOException error) {
       throw new HaraException("Unable to read project descriptor " + descriptor + ": " + error.getMessage());
     }

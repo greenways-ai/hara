@@ -1,0 +1,51 @@
+(ns greenways.build.report-test
+  (:require [greenways.build.normalize :as normalize]
+            [greenways.build.report :as report]
+            [std.lib.test :as test]))
+
+(def build
+  (normalize/normalize-build
+   {:build/id :example
+    :build/artifact {:artifact/kind :application/service
+                     :artifact/output "dist/example.hal"}
+    :build/stages
+    [{:stage/id :parse :stage/produces :hal/forms}
+     {:stage/id :analyze :stage/requires [:parse]
+      :stage/produces :greenways/analysis}
+     {:stage/id :output :stage/requires [:analyze]
+      :stage/produces :application/service}]}))
+
+(def result
+  (report/build-report
+   build
+   [{:requirement/id :greenways/readable
+     :type :greenways/readable
+     :level :error
+     :status :fail
+     :stage/id :parse
+     :file "build.hal"
+     :row 4
+     :col 3
+     :message "Unreadable input"}]))
+
+(test/print-results
+ [(test/check "a failed stage blocks every dependent stage"
+              (vec (map (fn [stage]
+                          [(:stage/id stage)
+                           (:stage/status stage)
+                           (:stage/blocked-by stage)])
+                        (:stages result)))
+              [[:parse :fail nil]
+               [:analyze :blocked [:parse]]
+               [:output :blocked [:analyze]]])
+  (test/check "report never converts failed work to success"
+              [(:build/status result) (:summary result)]
+              [:blocked {:pass 0 :fail 1 :unknown 0 :blocked 2}])
+  (test/check "next actions preserve stable IDs and source locations"
+              (:next-actions result)
+              [{:action/type :repair
+                :action/requirement :greenways/readable
+                :action/stage :parse
+                :file "build.hal"
+                :row 4
+                :col 3}])])
