@@ -321,12 +321,24 @@ fn fn_values_and_direct_calls() {
 }
 
 #[test]
-fn immediate_capture_free_closures_compile_to_static_calls() {
+fn immediate_fixed_arity_closures_inline_into_lexical_slots() {
     let program = compile_source("((fn [x] (+ x 1)) 41)").expect("compiles");
     let listing = disassemble(&program);
-    assert!(listing.contains("CallStatic"), "{listing}");
     assert!(!listing.contains("Closure"), "{listing}");
+    assert!(!listing.contains("Call"), "{listing}");
+    assert!(listing.contains("StoreLocal"), "{listing}");
     assert_eq!(eval("((fn [x] (+ x 1)) 41)"), "42");
+    assert_eq!(eval("(let [x 40] ((fn [x y] (+ x y)) 19 23))"), "42");
+    // Arguments resolve before the inlined parameter scope is introduced.
+    assert_eq!(
+        eval("(let [x 20] ((fn [x y] (+ x y)) 19 (+ x 3)))"),
+        "42"
+    );
+    // A recur nested in the function body retains its own call boundary.
+    assert_eq!(
+        eval("((fn [n] (loop [i n] (if (< i 1) 42 (recur (- i 1))))) 10000)"),
+        "42"
+    );
 }
 
 #[test]

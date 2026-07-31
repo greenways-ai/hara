@@ -52,6 +52,9 @@ impl Compiler {
         children: &[Child<'_>],
         span: &Span,
     ) -> Result<(), CompileError> {
+        if self.compile_immediate_fn_call(children, span)? {
+            return Ok(());
+        }
         let callee = &children[0];
         self.compile_form(callee.form, callee.span, callee.children, false)?;
         if !self.ctx().fallthrough {
@@ -89,6 +92,76 @@ impl Compiler {
             None => self.emit(Instruction::Call { argc }, Some(span.start)),
         };
         Ok(())
+    }
+
+    /// Inlines a fixed-arity function literal that is invoked immediately.
+    /// Arguments are evaluated before the parameter scope exists, then stored
+    /// right-to-left so their normal left-to-right stack order is preserved.
+    fn compile_immediate_fn_call(
+        &mut self,
+        children: &[Child<'_>],
+        span: &Span,
+    ) -> Result<bool, CompileError> {
+        let callee = &children[0];
+        let Form::List(elements) = callee.form else {
+            return Ok(false);
+        };
+        if !matches!(elements.first(), Some(Form::Symbol(name)) if name == "fn") {
+            return Ok(false);
+        }
+        let fn_children = self.list_children(elements, callee.span, callee.children);
+        if fn_children.len() < 3 {
+            return Ok(false);
+        }
+        let Form::Vector(params) = fn_children[1].form else {
+            return Ok(false);
+        };
+        if params.len() != children.len() - 1
+            || params.iter().any(|param| !matches!(param, Form::Symbol(name) if name != "&"))
+            || fn_children[2..].iter().any(|body| contains_recur(body.form))
+        {
+            return Ok(false);
+        }
+        if params.len() > crate::vm::program::MAX_PRIMITIVE_ARGUMENTS {
+            return Err(CompileError::new(
+                CompileErrorKind::Limit,
+                format!(
+                    "calls support at most {} arguments",
+                    crate::vm::program::MAX_PRIMITIVE_ARGUMENTS
+                ),
+                Some(span.start),
+            ));
+        }
+        for argument in &children[1..] {
+            self.compile_form(argument.form, argument.span, argument.children, false)?;
+        }
+        if !self.ctx().fallthrough {
+            return Ok(true);
+        }
+        let param_children = self.list_children(
+            params,
+            fn_children[1].span,
+            fn_children[1].children,
+        );
+        self.ctx_mut().scopes.push_scope();
+        let result = (|| {
+            let mut slots = Vec::with_capacity(params.len());
+            for param in &param_children {
+                let Form::Symbol(name) = param.form else {
+                    unreachable!("parameter shape checked above")
+                };
+                slots.push(self.ctx_mut().scopes.declare(name).map_err(|error| {
+                    CompileError::new(error.kind(), error.message(), Some(param.span.start))
+                })?);
+            }
+            for (slot, param) in slots.iter().zip(&param_children).rev() {
+                self.emit(Instruction::StoreLocal(*slot), Some(param.span.start));
+            }
+            self.compile_sequence(&fn_children[2..], false)
+        })();
+        self.ctx_mut().scopes.pop_scope();
+        result?;
+        Ok(true)
     }
 
     pub(super) fn compile_fn_form(
@@ -433,5 +506,20 @@ impl Compiler {
             }
             _ => {}
         }
+    }
+}
+
+fn contains_recur(form: &Form) -> bool {
+    match form {
+        Form::List(values) => {
+            matches!(values.first(), Some(Form::Symbol(name)) if name == "recur")
+                || values.iter().any(contains_recur)
+        }
+        Form::Vector(values) | Form::Set(values) => values.iter().any(contains_recur),
+        Form::Map(values) => values
+            .iter()
+            .any(|(key, value)| contains_recur(key) || contains_recur(value)),
+        Form::Tagged(_, value) | Form::Metadata(_, value) => contains_recur(value),
+        _ => false,
     }
 }
