@@ -5,42 +5,10 @@
 //! misuse at different stages (compile time vs runtime) and phrase
 //! positions differently.
 
+use super::error_category;
 use super::eval_source;
 use crate::core::Value;
 use crate::Runtime;
-
-/// Normalizes an error message to a coarse category for comparison. The
-/// fiber and the synchronous fallback phrase some shape errors
-/// differently ("let expects bindings" vs "let expects a binding list or
-/// vector"); each bucket covers every phrasing of one failure class.
-fn category(message: &str) -> &'static str {
-    let buckets: &[(&[&str], &str)] = &[
-        (&["division by zero"], "division by zero"),
-        (&["integer overflow"], "integer overflow"),
-        (&["expects numbers"], "expects numbers"),
-        (&["expects at least", "expects arguments"], "primitive arity"),
-        (&["expects 2 or 3 arguments"], "if arity"),
-        (
-            &["expects bindings and a body", "expects bindings and body"],
-            "binding body shape",
-        ),
-        (
-            &["expects a binding list or vector", "expects bindings"],
-            "binding bindings shape",
-        ),
-        (&["require name/value pairs"], "binding pairs"),
-        (&["unbound symbol"], "unbound symbol"),
-        (&["recur"], "recur"),
-        (&["Invalid number"], "reader"),
-        (&["EOF while reading"], "reader"),
-    ];
-    for (markers, bucket) in buckets {
-        if markers.iter().any(|marker| message.contains(marker)) {
-            return bucket;
-        }
-    }
-    panic!("unclassified error message: {message}")
-}
 
 fn differential(source: &str) {
     let reference = Runtime::new().eval_native(source);
@@ -50,8 +18,8 @@ fn differential(source: &str) {
             assert_eq!(expected, actual, "value divergence for {source}")
         }
         (Err(expected), Err(actual)) => assert_eq!(
-            category(expected),
-            category(actual),
+            error_category(expected),
+            error_category(actual),
             "error category divergence for {source}: {expected} vs {actual}"
         ),
         _ => panic!("divergence for {source}: reference {reference:?} vs vm {vm:?}"),

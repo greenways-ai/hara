@@ -38,6 +38,46 @@ mod execution_tests;
 #[cfg(test)]
 #[path = "vm/differential_tests.rs"]
 mod differential_tests;
+#[cfg(test)]
+#[path = "vm/conformance_tests.rs"]
+mod conformance_tests;
+
+/// Normalizes an error message to a coarse category for comparison. The
+/// fiber and the synchronous fallback phrase some shape errors
+/// differently ("let expects bindings" vs "let expects a binding list or
+/// vector"); each bucket covers every phrasing of one failure class.
+/// Shared by the differential tests and the corpus-driven conformance
+/// tests; the bucket names are pinned by
+/// `specs/runtime/draft/conformance/bytecode-vm.edn`.
+#[cfg(test)]
+pub(crate) fn error_category(message: &str) -> &'static str {
+    let buckets: &[(&[&str], &str)] = &[
+        (&["division by zero"], "division by zero"),
+        (&["integer overflow"], "integer overflow"),
+        (&["expects numbers"], "expects numbers"),
+        (&["expects at least", "expects arguments"], "primitive arity"),
+        (&["expects 2 or 3 arguments"], "if arity"),
+        (
+            &["expects bindings and a body", "expects bindings and body"],
+            "binding body shape",
+        ),
+        (
+            &["expects a binding list or vector", "expects bindings"],
+            "binding bindings shape",
+        ),
+        (&["require name/value pairs"], "binding pairs"),
+        (&["unbound symbol"], "unbound symbol"),
+        (&["recur"], "recur"),
+        (&["Invalid number"], "reader"),
+        (&["EOF while reading"], "reader"),
+    ];
+    for (markers, bucket) in buckets {
+        if markers.iter().any(|marker| message.contains(marker)) {
+            return bucket;
+        }
+    }
+    panic!("unclassified error message: {message}")
+}
 
 pub use compiler::compile_source;
 pub use disassemble::disassemble;

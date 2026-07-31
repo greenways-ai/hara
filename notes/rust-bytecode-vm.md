@@ -2,7 +2,11 @@
 
 Working design note for GitHub issue #195. Non-normative: it does not change
 the portable HAL contract in `specs/`; it describes how the Rust runtime
-implements that contract for a small synchronous subset.
+implements that contract for a small synchronous subset. For the areas it
+covers, the normative successor is now
+`specs/runtime/draft/hal-bytecode-vm.edn` (with its machine-checked corpus in
+`specs/runtime/draft/conformance/bytecode-vm.edn`); where this note and that
+spec disagree, the spec wins.
 
 Status: milestone 1 (experimental, synchronous, closure-free). The VM is
 disabled by default behind the `bytecode-vm` Cargo feature and never replaces
