@@ -25,9 +25,9 @@
             (if (string/starts-with? key-name "+op-")
               (conj result
                     [(keyword
-                      (string/substring key-name
+                      (string/slice key-name
                                         4
-                                        (- (string/len key-name) 1)))
+                                        (- (string/length key-name) 1)))
                      (symbol shortcut key-name)])
               result)]
         (recur next-result (vec (drop 1 entries)))))))

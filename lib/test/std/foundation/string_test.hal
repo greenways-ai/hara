@@ -2,21 +2,12 @@
   (:use code.test))
 
 (def results
-  [(fact "len"
-     (str/len "hara")
+  [(fact "length"
+     (str/length "hara")
      => 4)
-   (fact "len-unicode"
-     (str/len "hé")
+   (fact "length-unicode"
+     (str/length "hé")
      => 2)
-   (fact "comp"
-     (str/comp "a" "b")
-     => -1)
-   (fact "lt?"
-     (str/lt? "a" "b")
-     => true)
-   (fact "gt?"
-     (str/gt? "b" "a")
-     => true)
    (fact "pad-left"
      (str/pad-left "x" 3 "0")
      => "00x")
@@ -29,8 +20,8 @@
    (fact "ends-with?"
      (str/ends-with? "hara" "ra")
      => true)
-   (fact "char"
-     (str/char "hara" 1)
+   (fact "char-at"
+     (str/char-at "hara" 1)
      => "a")
    (fact "split"
      (nth (str/split "a,b" ",") 1)
@@ -44,14 +35,14 @@
    (fact "index-of"
      (str/index-of "ababa" "ba" 2)
      => 3)
-   (fact "substring"
-     (str/substring "hara" 1 3)
+   (fact "slice"
+     (str/slice "hara" 1 3)
      => "ar")
-   (fact "to-upper"
-     (str/to-upper "hara")
+   (fact "upper"
+     (str/upper "hara")
      => "HARA")
-   (fact "to-lower"
-     (str/to-lower "HARA")
+   (fact "lower"
+     (str/lower "HARA")
      => "hara")
    (fact "to-fixed"
      (str/to-fixed 1.25 2)
@@ -80,8 +71,8 @@
    (fact "trim-right-multi"
      (str/trim-right "  a  ")
      => "  a")
-   (fact "encode/decode round-trip"
-     (str/decode (str/encode "hé"))
+   (fact "encode-utf8/decode-utf8 round-trip"
+     (str/decode-utf8 (str/encode-utf8 "hé"))
      => "hé")])
 
 (pr-str (run '[std.foundation.string-test]))

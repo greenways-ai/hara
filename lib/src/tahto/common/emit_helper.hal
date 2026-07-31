@@ -14,9 +14,9 @@
   [value]
   (let [printed (pr-str value)
         escaped (string/replace printed "'" "\\'")
-        unquoted (string/substring escaped
+        unquoted (string/slice escaped
                                    1
-                                   (- (string/len escaped) 1))]
+                                   (- (string/length escaped) 1))]
     (str "'"
          (string/replace unquoted "\\\"" "\"")
          "'")))

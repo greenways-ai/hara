@@ -416,7 +416,7 @@
 (defn fingerprint
   "Returns a deterministic fingerprint for normalized grammar source data."
   [value]
-  (let [bytes (string/encode (pr-str value))]
+  (let [bytes (string/encode-utf8 (pr-str value))]
     (loop [index 0
            hash 5381]
       (if (= index (count bytes))

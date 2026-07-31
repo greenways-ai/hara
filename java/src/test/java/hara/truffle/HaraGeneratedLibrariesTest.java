@@ -43,7 +43,7 @@ public class HaraGeneratedLibrariesTest {
               .eval(
                   HaraLanguage.ID,
                   "(ns app (:config {:intrinsics {:exclude [bytes] :alias {string text}}})) "
-                      + "(text/to-upper \"hara\")")
+                      + "(text/upper \"hara\")")
               .asString());
       PolyglotException missing =
           assertThrows(
@@ -138,6 +138,10 @@ public class HaraGeneratedLibrariesTest {
       assertTrue(
           context
               .eval(HaraLanguage.ID, "(iter-any? (fn [x] (= x \"str/trim\")) (current-symbols))")
+              .asBoolean());
+      assertTrue(
+          context
+              .eval(HaraLanguage.ID, "(not (iter-any? (fn [x] (= x \"str/len\")) (current-symbols)))")
               .asBoolean());
       assertTrue(
           context

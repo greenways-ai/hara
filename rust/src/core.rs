@@ -125,9 +125,6 @@ pub(crate) const NATIVE_TYPES: &[(&str, &[&str])] = &[
             "reverse",
             "encode-utf8",
             "decode-utf8",
-            "comp",
-            "lt?",
-            "gt?",
             "to-fixed",
         ],
     ),
@@ -5522,19 +5519,6 @@ fn string_operation(operation: &str, values: Vec<Value>) -> Result<Value, String
         ))
     };
     match operation {
-        "str/comp" | "str/lt?" | "str/gt?" => {
-            let (left, right) = pair(&values)?;
-            let ordering = left.cmp(&right);
-            Ok(match operation {
-                "str/comp" => Value::Number(match ordering {
-                    std::cmp::Ordering::Less => -1,
-                    std::cmp::Ordering::Equal => 0,
-                    std::cmp::Ordering::Greater => 1,
-                }),
-                "str/lt?" => Value::Bool(ordering.is_lt()),
-                _ => Value::Bool(ordering.is_gt()),
-            })
-        }
         "str/starts-with?" | "str/ends-with?" => {
             let (text, part) = pair(&values)?;
             Ok(Value::Bool(if operation == "str/starts-with?" {
@@ -5569,7 +5553,7 @@ fn string_operation(operation: &str, values: Vec<Value>) -> Result<Value, String
                 format!("{text}{fill}")
             }))
         }
-        "str/char-at" | "str/char" => {
+        "str/char-at" => {
             if values.len() != 2 {
                 return Err("str/char-at expects a string and index".into());
             }
@@ -5638,7 +5622,7 @@ fn string_operation(operation: &str, values: Vec<Value>) -> Result<Value, String
             };
             Ok(Value::Number(code_point_last_index_of(text, part, offset)))
         }
-        "str/slice" | "str/substring" => {
+        "str/slice" => {
             if values.len() != 2 && values.len() != 3 {
                 return Err("str/slice expects a string, start, and optional end".into());
             }
@@ -5694,7 +5678,7 @@ fn string_operation(operation: &str, values: Vec<Value>) -> Result<Value, String
                 _ => text.trim_end().into(),
             }))
         }
-        "str/length" | "str/len" | "str/count" => {
+        "str/length" => {
             if values.len() != 1 {
                 return Err(format!("{operation} expects one string"));
             }
@@ -5742,14 +5726,14 @@ fn string_operation(operation: &str, values: Vec<Value>) -> Result<Value, String
                 None => Ok(Value::String(text.into())),
             }
         }
-        "str/upper" | "str/to-upper" => {
+        "str/upper" => {
             if values.len() != 1 {
                 return Err(format!("{operation} expects one string"));
             }
             let text = string_value(&values[0], operation)?;
             Ok(Value::String(text.to_uppercase()))
         }
-        "str/lower" | "str/to-lower" => {
+        "str/lower" => {
             if values.len() != 1 {
                 return Err(format!("{operation} expects one string"));
             }
@@ -5763,7 +5747,7 @@ fn string_operation(operation: &str, values: Vec<Value>) -> Result<Value, String
             let text = string_value(&values[0], operation)?;
             Ok(Value::String(text.chars().rev().collect()))
         }
-        "str/encode-utf8" | "str/encode" => {
+        "str/encode-utf8" => {
             if values.len() != 1 {
                 return Err(format!("{operation} expects one string"));
             }
@@ -5774,7 +5758,7 @@ fn string_operation(operation: &str, values: Vec<Value>) -> Result<Value, String
                 _ => Err(format!("{operation} expects a string")),
             }
         }
-        "str/decode-utf8" | "str/decode" => {
+        "str/decode-utf8" => {
             if values.len() != 1 {
                 return Err(format!("{operation} expects bytes"));
             }
@@ -9726,18 +9710,13 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             }
             Form::Symbol(n)
                 if [
-                    "str/comp",
-                    "str/lt?",
-                    "str/gt?",
                     "str/pad-left",
                     "str/pad-right",
                     "str/starts-with?",
                     "str/ends-with?",
-                    "str/char",
                     "str/split",
                     "str/join",
                     "str/index-of",
-                    "str/substring",
                     "str/to-fixed",
                     "str/replace",
                     "str/trim-left",
@@ -9766,7 +9745,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 string_operation(n, values)
             }
             Form::Symbol(n)
-                if n == "str/count" || n == "str/trim" || n == "str/upper" || n == "str/lower" =>
+                if n == "str/trim" || n == "str/upper" || n == "str/lower" =>
             {
                 if fs.len() != 2 {
                     return Err(format!("{n} expects one string"));
@@ -9776,32 +9755,11 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     _ => return Err(format!("{n} expects a string")),
                 };
                 match n.as_str() {
-                    "str/count" => Ok(Value::Number(text.chars().count() as i64)),
                     "str/trim" => Ok(Value::String(text.trim().into())),
                     "str/upper" => Ok(Value::String(text.to_uppercase())),
                     "str/lower" => Ok(Value::String(text.to_lowercase())),
                     _ => unreachable!(),
                 }
-            }
-            Form::Symbol(n) if n == "str/encode" => {
-                if fs.len() != 2 {
-                    return Err("str/encode expects one string".into());
-                }
-                match eval(&fs[1], env)? {
-                    Value::String(text) => {
-                        Ok(Value::ByteBuffer(Rc::new(RefCell::new(text.into_bytes()))))
-                    }
-                    _ => Err("str/encode expects a string".into()),
-                }
-            }
-            Form::Symbol(n) if n == "str/decode" => {
-                if fs.len() != 2 {
-                    return Err("str/decode expects bytes".into());
-                }
-                let raw = byte_values(&eval(&fs[1], env)?, "str/decode")?;
-                String::from_utf8(raw)
-                    .map(Value::String)
-                    .map_err(|_| "str/decode invalid UTF-8".into())
             }
             Form::Symbol(n) if n == "bytes/copy" => {
                 if fs.len() != 2 {

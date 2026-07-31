@@ -13,7 +13,7 @@
      => true)
    (fact ":config {:intrinsics :all} keeps every default alias"
      (do (ns app (:config {:intrinsics :all}))
-                   (let [result (bytes/count (str/encode "x"))]
+                   (let [result (bytes/count (str/encode-utf8 "x"))]
                      (ns std.foundation.alias-test
                        (:use code.test))
                      result))

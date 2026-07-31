@@ -17,7 +17,7 @@
 (defn- djb2-32
   "Deterministic 32-bit djb2 hash of a string."
   [text]
-  (let [bytes (str/encode text)]
+  (let [bytes (str/encode-utf8 text)]
     (loop [index 0
            hash 5381]
       (if (= index (count bytes))

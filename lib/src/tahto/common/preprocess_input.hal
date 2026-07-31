@@ -26,7 +26,7 @@
             (apply list
                    '!:lang
                    {:lang (keyword
-                           (string/substring (str token) 1))}
+                           (string/slice (str token) 1))}
                    input
                    more)
 
