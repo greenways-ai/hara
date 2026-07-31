@@ -23,13 +23,14 @@ import java.util.Arrays;
 import java.util.Map.Entry;
 
 /** Deterministic, host-neutral binary representation of a Hara source module. */
-final class HirArtifact {
+final class HalcArtifact {
   static final int FORMAT_VERSION = 1;
   static final int EXECUTABLE_FOUNDATION_FLAG = 1;
   static final String FOUNDATION_RESOURCE = "std/foundation.hal";
-  static final String FOUNDATION_HIR_RESOURCE = "std/foundation.hir";
+  static final String FOUNDATION_HALC_RESOURCE = "std/foundation.halc";
 
-  private static final byte[] MAGIC = {'H', 'I', 'R', 0};
+  private static final byte[] MAGIC = {'H', 'A', 'L', 'C'};
+  private static final byte[] LEGACY_MAGIC = {'H', 'I', 'R', 0};
   private static final int HASH_BYTES = 32;
   private static final int MAX_PAYLOAD_BYTES = 64 * 1024 * 1024;
   private static final int MAX_COLLECTION_ITEMS = 1_000_000;
@@ -53,7 +54,7 @@ final class HirArtifact {
   private static final int ORDERED_SET = 16;
   private static final int REGEX = 17;
 
-  private HirArtifact() {}
+  private HalcArtifact() {}
 
   static byte[] encode(String namespace, String resource, byte[] source, Object[] forms) {
     try {
@@ -77,7 +78,7 @@ final class HirArtifact {
       }
       return artifactBytes.toByteArray();
     } catch (IOException error) {
-      throw new HaraException("Unable to encode HIR: " + error.getMessage());
+      throw new HaraException("Unable to encode HALC: " + error.getMessage());
     }
   }
 
@@ -85,7 +86,14 @@ final class HirArtifact {
     try (DataInputStream artifact =
         new DataInputStream(new ByteArrayInputStream(artifactBytes))) {
       byte[] magic = artifact.readNBytes(MAGIC.length);
-      if (!Arrays.equals(MAGIC, magic)) throw invalid("bad magic");
+      Origin origin;
+      if (Arrays.equals(MAGIC, magic)) {
+        origin = Origin.HALC;
+      } else if (Arrays.equals(LEGACY_MAGIC, magic)) {
+        origin = Origin.LEGACY_HIR;
+      } else {
+        throw invalid("bad magic");
+      }
       int version = artifact.readUnsignedShort();
       if (version != FORMAT_VERSION) {
         throw invalid("unsupported format version " + version);
@@ -116,7 +124,7 @@ final class HirArtifact {
         Object[] forms = new Object[count];
         for (int index = 0; index < count; index++) forms[index] = readValue(payload);
         if (payload.read() != -1) throw invalid("trailing payload bytes");
-        return new Module(namespace, resource, sourceHash, forms);
+        return new Module(namespace, resource, sourceHash, forms, origin);
       }
     } catch (EOFException error) {
       throw invalid("truncated artifact");
@@ -133,11 +141,11 @@ final class HirArtifact {
           || !"ns".equals(operator.getName())) continue;
       if (!(list.nth(1) instanceof Symbol namespace)
           || namespace.getNamespace() != null) {
-        throw new HaraException("HIR source has an invalid ns declaration");
+        throw new HaraException("HALC source has an invalid ns declaration");
       }
       return namespace.getName();
     }
-    throw new HaraException("HIR source does not declare a namespace");
+    throw new HaraException("HALC source does not declare a namespace");
   }
 
   private static void writeValue(DataOutputStream output, Object value) throws IOException {
@@ -203,13 +211,13 @@ final class HirArtifact {
     } else if (value instanceof java.util.regex.Pattern pattern) {
       if (pattern.flags() != 0) {
         throw new HaraException(
-            "Unsupported portable HIR regex flags: " + pattern.flags() + " for " + pattern);
+            "Unsupported portable HALC regex flags: " + pattern.flags() + " for " + pattern);
       }
       output.writeByte(REGEX);
       writeString(output, pattern.pattern());
     } else {
       throw new HaraException(
-          "Unsupported portable HIR constant: " + value.getClass().getName());
+          "Unsupported portable HALC constant: " + value.getClass().getName());
     }
   }
 
@@ -361,7 +369,7 @@ final class HirArtifact {
       writeValue(output, metadata);
     } else {
       throw new HaraException(
-          "Unsupported portable HIR metadata: " + metadata.getClass().getName());
+          "Unsupported portable HALC metadata: " + metadata.getClass().getName());
     }
   }
 
@@ -403,7 +411,7 @@ final class HirArtifact {
 
   private static void writeCount(DataOutputStream output, int count) throws IOException {
     if (count < 0 || count > MAX_COLLECTION_ITEMS) {
-      throw new HaraException("HIR collection is too large: " + count);
+      throw new HaraException("HALC collection is too large: " + count);
     }
     output.writeInt(count);
   }
@@ -425,7 +433,7 @@ final class HirArtifact {
   }
 
   private static HaraException invalid(String detail) {
-    return new HaraException("Invalid HIR artifact: " + detail);
+    return new HaraException("Invalid HALC artifact: " + detail);
   }
 
   static final class Module {
@@ -433,12 +441,19 @@ final class HirArtifact {
     final String resource;
     final byte[] sourceHash;
     final Object[] forms;
+    final Origin origin;
 
-    Module(String namespace, String resource, byte[] sourceHash, Object[] forms) {
+    Module(String namespace, String resource, byte[] sourceHash, Object[] forms, Origin origin) {
       this.namespace = namespace;
       this.resource = resource;
       this.sourceHash = sourceHash.clone();
       this.forms = forms.clone();
+      this.origin = origin;
     }
+  }
+
+  enum Origin {
+    HALC,
+    LEGACY_HIR
   }
 }

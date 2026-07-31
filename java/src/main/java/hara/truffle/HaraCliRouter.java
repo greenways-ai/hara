@@ -97,8 +97,8 @@ final class HaraCliRouter {
     if (arguments.length > 0
         && java.util.Set.of(
                 "help",
-                "compile-hir",
-                "foundation-hir-benchmark",
+                "compile-halc",
+                "foundation-halc-benchmark",
                 "conformance",
                 "benchmark",
                 "fabric",

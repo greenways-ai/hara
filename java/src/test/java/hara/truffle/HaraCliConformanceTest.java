@@ -26,7 +26,7 @@ public class HaraCliConformanceTest {
             new PrintStream(error));
     assertEquals(0, status);
     String help = output.toString(StandardCharsets.UTF_8);
-    assertEquals(false, help.contains("compile-hir"));
+    assertEquals(false, help.contains("compile-halc"));
     assertEquals("", error.toString(StandardCharsets.UTF_8));
   }
 

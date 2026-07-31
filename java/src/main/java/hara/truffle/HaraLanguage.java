@@ -86,8 +86,8 @@ public final class HaraLanguage extends TruffleLanguage<HaraContext> {
     return HaraAnalyzer.compile(this, forms, sourceSection, currentContext());
   }
 
-  static CallTarget compileHir(Object[] forms, String sourceName) {
-    return FoundationHirLowerer.compile(currentLanguage(), currentContext(), forms);
+  static CallTarget compileHalc(Object[] forms, String sourceName) {
+    return FoundationHalcLowerer.compile(currentLanguage(), currentContext(), forms);
   }
 
   static Object[] readAll(String source, String sourceName) {

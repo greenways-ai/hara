@@ -7,19 +7,19 @@ import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Engine;
 import org.graalvm.polyglot.Value;
 
-/** Fork-friendly benchmark for source versus HIR foundation loading. */
-final class FoundationHirBenchmark {
+/** Fork-friendly benchmark for source versus HALC foundation loading. */
+final class FoundationHalcBenchmark {
   private static final String PROBE = "(std.foundation/get-in {:a {:b 42}} [:a :b])";
 
-  private FoundationHirBenchmark() {}
+  private FoundationHalcBenchmark() {}
 
   static int run(String[] args, java.io.PrintStream output, java.io.PrintStream error) {
     int samples = args.length == 0 ? 20 : Integer.parseInt(args[0]);
     if (samples < 1 || args.length > 1) {
-      error.println("foundation-hir-benchmark expects an optional positive sample count");
+      error.println("foundation-halc-benchmark expects an optional positive sample count");
       return 2;
     }
-    String previous = System.getProperty("hara.HirMode");
+    String previous = System.getProperty("hara.HalcMode");
     try {
       for (int index = 0; index < 2; index++) {
         sample("off");
@@ -47,16 +47,16 @@ final class FoundationHirBenchmark {
               + "}");
       return 0;
     } catch (RuntimeException failure) {
-      error.println("Foundation HIR benchmark failed: " + failure.getMessage());
+      error.println("Foundation HALC benchmark failed: " + failure.getMessage());
       return 1;
     } finally {
-      if (previous == null) System.clearProperty("hara.HirMode");
-      else System.setProperty("hara.HirMode", previous);
+      if (previous == null) System.clearProperty("hara.HalcMode");
+      else System.setProperty("hara.HalcMode", previous);
     }
   }
 
   private static Result measureSharedEngine(int samples) {
-    System.setProperty("hara.HirMode", "strict");
+    System.setProperty("hara.HalcMode", "strict");
     long[] context = new long[samples];
     long[] load = new long[samples];
     long[] allocation = new long[samples];
@@ -91,7 +91,7 @@ final class FoundationHirBenchmark {
   }
 
   private static Sample sample(String mode, Engine engine) {
-    System.setProperty("hara.HirMode", mode);
+    System.setProperty("hara.HalcMode", mode);
     ThreadMXBean bean =
         ManagementFactory.getThreadMXBean() instanceof ThreadMXBean
             ? (ThreadMXBean) ManagementFactory.getThreadMXBean()

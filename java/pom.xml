@@ -188,16 +188,16 @@
 				<version>3.5.0</version>
 				<executions>
 					<execution>
-						<id>compile-foundation-hir</id>
+						<id>compile-foundation-halc</id>
 						<phase>compile</phase>
 						<goals><goal>java</goal></goals>
 						<configuration>
 							<mainClass>hara.truffle.Main</mainClass>
 							<arguments>
-								<argument>compile-hir</argument>
+								<argument>compile-halc</argument>
 								<argument>${project.basedir}/../lib/src/std/foundation.hal</argument>
 								<argument>--output</argument>
-								<argument>${project.build.outputDirectory}/std/foundation.hir</argument>
+								<argument>${project.build.outputDirectory}/std/foundation.halc</argument>
 							</arguments>
 						</configuration>
 					</execution>

@@ -4039,7 +4039,7 @@ public final class HaraContext {
     requireHalPath((String) value, "load-resource");
     ContextSnapshot snapshot = snapshot();
     try {
-      FoundationHirLoader.Attempt hir = FoundationHirLoader.load((String) value);
+      FoundationHalcLoader.Attempt hir = FoundationHalcLoader.load((String) value);
       if (hir.loaded) return hir.value;
     } catch (RuntimeException error) {
       restore(snapshot);

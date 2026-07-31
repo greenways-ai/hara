@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>This is intentionally not a general Hara analyzer. Unsupported forms fail artifact loading,
  * allowing auto mode to use source and making strict mode expose compiler/runtime skew.
  */
-final class FoundationHirLowerer {
+final class FoundationHalcLowerer {
   private static final AtomicLong COMPILATIONS = new AtomicLong();
   private final HaraLanguage language;
   private final HaraContext context;
@@ -32,7 +32,7 @@ final class FoundationHirLowerer {
   private final Map<Symbol, Integer> locals;
   private final HaraNodes.RecurTarget recurTarget;
 
-  private FoundationHirLowerer(
+  private FoundationHalcLowerer(
       HaraLanguage language,
       HaraContext context,
       FrameDescriptor.Builder frames,
@@ -48,8 +48,8 @@ final class FoundationHirLowerer {
   static RootCallTarget compile(HaraLanguage language, HaraContext context, Object[] forms) {
     COMPILATIONS.incrementAndGet();
     FrameDescriptor.Builder frames = FrameDescriptor.newBuilder();
-    FoundationHirLowerer lowerer =
-        new FoundationHirLowerer(language, context, frames, Map.of(), null);
+    FoundationHalcLowerer lowerer =
+        new FoundationHalcLowerer(language, context, frames, Map.of(), null);
     HaraExpressionNode body = lowerer.lowerForms(forms);
     return new HaraRootNode(
             language,
@@ -238,18 +238,18 @@ final class FoundationHirLowerer {
     for (int index = 0; index < bindings.count(); index += 2) {
       Object binding = bindings.nth(index);
       if (!(binding instanceof Symbol symbol) || symbol.getNamespace() != null) {
-        fail("foundation HIR supports symbol let bindings only");
+        fail("foundation HALC supports symbol let bindings only");
       }
       Symbol symbol = (Symbol) binding;
-      FoundationHirLowerer initializerLowerer =
-          new FoundationHirLowerer(language, context, frames, bodyLocals, recurTarget);
+      FoundationHalcLowerer initializerLowerer =
+          new FoundationHalcLowerer(language, context, frames, bodyLocals, recurTarget);
       initializers.add(initializerLowerer.lower(bindings.nth(index + 1)));
       int slot = frames.addSlot(FrameSlotKind.Object, symbol, null);
       slots.add(slot);
       bodyLocals.put(symbol, slot);
     }
-    FoundationHirLowerer bodyLowerer =
-        new FoundationHirLowerer(language, context, frames, bodyLocals, recurTarget);
+    FoundationHalcLowerer bodyLowerer =
+        new FoundationHalcLowerer(language, context, frames, bodyLocals, recurTarget);
     body = bodyLowerer.lowerBody(form, 2);
     for (int index = slots.size() - 1; index >= 0; index--) {
       body =
@@ -275,7 +275,7 @@ final class FoundationHirLowerer {
     for (int index = 0; index < count; index++) {
       Object binding = bindings.nth(index * 2L);
       if (!(binding instanceof Symbol symbol) || symbol.getNamespace() != null) {
-        fail("foundation HIR supports symbol loop bindings only");
+        fail("foundation HALC supports symbol loop bindings only");
       }
       Symbol symbol = (Symbol) binding;
       initializers[index] = lower(bindings.nth(index * 2L + 1));
@@ -285,8 +285,8 @@ final class FoundationHirLowerer {
       bodyLocals.put(symbol, slots[index]);
     }
     HaraNodes.RecurTarget target = new HaraNodes.RecurTarget(slots, scratchSlots);
-    FoundationHirLowerer bodyLowerer =
-        new FoundationHirLowerer(language, context, frames, bodyLocals, target);
+    FoundationHalcLowerer bodyLowerer =
+        new FoundationHalcLowerer(language, context, frames, bodyLocals, target);
     return new HaraNodes.Loop(target, slots, initializers, bodyLowerer.lowerBody(form, 2));
   }
 
@@ -340,7 +340,7 @@ final class FoundationHirLowerer {
       if (!(parameter instanceof Symbol symbol)
           || symbol.getNamespace() != null
           || "&".equals(symbol.getName())) {
-        fail("foundation HIR supports symbol parameters only");
+        fail("foundation HALC supports symbol parameters only");
       }
       Symbol symbol = (Symbol) parameter;
       parameterSlots[index] = functionFrames.addSlot(FrameSlotKind.Object, symbol, null);
@@ -363,8 +363,8 @@ final class FoundationHirLowerer {
       captureSlots = java.util.Arrays.copyOf(captureSlots, captureIndex);
       captureSources = java.util.Arrays.copyOf(captureSources, captureIndex);
     }
-    FoundationHirLowerer functionLowerer =
-        new FoundationHirLowerer(language, context, functionFrames, functionLocals, null);
+    FoundationHalcLowerer functionLowerer =
+        new FoundationHalcLowerer(language, context, functionFrames, functionLocals, null);
     HaraExpressionNode functionBody = functionLowerer.lowerForms(bodyForms);
     HaraRootNode root =
         new HaraRootNode(
@@ -626,6 +626,6 @@ final class FoundationHirLowerer {
   }
 
   private static void fail(String message) {
-    throw new HaraException("Invalid foundation executable HIR: " + message);
+    throw new HaraException("Invalid foundation executable HALC: " + message);
   }
 }
