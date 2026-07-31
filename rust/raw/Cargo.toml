@@ -8,5 +8,8 @@ rust-version = "1.78"
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+dev-trace = []
+
 [dependencies]
 sha2 = "0.10"

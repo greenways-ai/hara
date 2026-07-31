@@ -84,25 +84,6 @@ session through RESP on `127.0.0.1:1311`. Use `--offline` to start without the l
 `headless` for a listener without terminal UI, and `remote HOST:PORT` for a client connection. The CLI also supports `run <file>`, `stdin`, and `help`. For a native-image build, see the
 [developer guide](docs/docs/development.md); native mode intentionally removes dynamic JVM services.
 
-The experimental Rust coordination service starts with `hara fabric`. It adds
-spaces, sharded isolated sessions, session-owned WASM namespaces, bounded
-reports with optional SQLite retention, and redacted topology/traffic
-analytics over RESP4. See the
-[Fabric service reference](docs/docs/reference/fabric-service.md).
-
-The root Makefile provides the common Fabric workflows:
-
-```shell
-make fabric-build
-make fabric ARGS="--data target/fabric --shards 4"
-make fabric-test
-make fabric-benchmark ARGS="--rooms 8 --tasks 1000 --clients 4"
-```
-
-`ARGS` is passed to the service or benchmark unchanged. The service listens on
-`127.0.0.1:1311` by default; use the normal `--host` and `--port` CLI options
-when a different endpoint is needed.
-
 The Makefile also mirrors the main repository and CI workflows:
 
 ```shell
@@ -123,7 +104,7 @@ Run `make web-install` or `make chrome-install` before the corresponding Node
 workflows on a fresh checkout. `make check-all` runs the core Java, Rust, raw
 WASM, portable library, HTA, and Studio checks. Runtime performance entry
 points are available as `runtime-benchmark`, `truffle-benchmark`,
-`parity-benchmark`, and `fabric-benchmark`; each accepts additional arguments
+and `parity-benchmark`; each accepts additional arguments
 through `ARGS`.
 
 Per-component builds:

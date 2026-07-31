@@ -1,22 +1,22 @@
 (ns std.foundation.coroutine-test
-  (:require [std.lib.test :as test]))
+  (:use code.test))
 
 (require 'std.foundation.coroutine)
 
 (defn results []
-  [(test/check "create makes suspended coroutine"
-               [(std.foundation.coroutine/coroutine? (std.foundation.coroutine/create (fn [x] x)))
+  [(fact "create makes suspended coroutine"
+     [(std.foundation.coroutine/coroutine? (std.foundation.coroutine/create (fn [x] x)))
                 (std.foundation.coroutine/coroutine? 42)
                 (std.foundation.coroutine/status (std.foundation.coroutine/create (fn [x] x)))]
-               [true false :suspended])
+     => [true false :suspended])
 
-   (test/check "resume runs body to completion"
-               (let [c (std.foundation.coroutine/create (fn [x] (* x 2)))]
+   (fact "resume runs body to completion"
+     (let [c (std.foundation.coroutine/create (fn [x] (* x 2)))]
                  [(std.foundation.coroutine/resume c 21) (std.foundation.coroutine/status c)])
-               [42 :dead])
+     => [42 :dead])
 
-   (test/check "yield exchanges values both ways"
-               (let [c (std.foundation.coroutine/create
+   (fact "yield exchanges values both ways"
+     (let [c (std.foundation.coroutine/create
                          (fn [start]
                            (let [a (std.foundation.coroutine/yield (* start start))]
                              (let [b (std.foundation.coroutine/yield :second)]
@@ -25,34 +25,34 @@
                   (std.foundation.coroutine/resume c :got-a)
                   (std.foundation.coroutine/resume c :got-b)
                   (std.foundation.coroutine/status c)])
-               [100 :second [:got-a :got-b] :dead])
+     => [100 :second [:got-a :got-b] :dead])
 
-   (test/check "multi-arg resume delivers vector to yield"
-               (let [c (std.foundation.coroutine/create (fn [] (let [v (std.foundation.coroutine/yield :first)] v)))]
+   (fact "multi-arg resume delivers vector to yield"
+     (let [c (std.foundation.coroutine/create (fn [] (let [v (std.foundation.coroutine/yield :first)] v)))]
                  [(std.foundation.coroutine/resume c)
                   (std.foundation.coroutine/resume c 9 8)
                   (std.foundation.coroutine/status c)])
-               [:first [9 8] :dead])
+     => [:first [9 8] :dead])
 
-   (test/check "multiple values are yielded explicitly as one vector"
-               (let [c (std.foundation.coroutine/create (fn [] (std.foundation.coroutine/yield [1 2 3]) (std.foundation.coroutine/yield nil)))]
+   (fact "multiple values are yielded explicitly as one vector"
+     (let [c (std.foundation.coroutine/create (fn [] (std.foundation.coroutine/yield [1 2 3]) (std.foundation.coroutine/yield nil)))]
                  [(std.foundation.coroutine/resume c)
                   (std.foundation.coroutine/resume c 9 8)
                   (std.foundation.coroutine/status c)
                   (nil? (std.foundation.coroutine/resume c))
                   (std.foundation.coroutine/status c)])
-               [[1 2 3] nil :suspended true :dead])
+     => [[1 2 3] nil :suspended true :dead])
 
-   (test/check "yield works from nested helper"
-               (let [_ (defn helper-n [x] (std.foundation.coroutine/yield (* x 10)))
+   (fact "yield works from nested helper"
+     (let [_ (defn helper-n [x] (std.foundation.coroutine/yield (* x 10)))
                      c (std.foundation.coroutine/create (fn [] (helper-n 3) :end))]
                  [(std.foundation.coroutine/resume c)
                   (std.foundation.coroutine/resume c)
                   (std.foundation.coroutine/status c)])
-               [30 :end :dead])
+     => [30 :end :dead])
 
-   (test/check "nested coroutines resume each other"
-               (let [c-inner (std.foundation.coroutine/create (fn [] (std.foundation.coroutine/yield :inner-yield) :inner-end))
+   (fact "nested coroutines resume each other"
+     (let [c-inner (std.foundation.coroutine/create (fn [] (std.foundation.coroutine/yield :inner-yield) :inner-end))
                      c-outer (std.foundation.coroutine/create (fn []
                                                                 (std.foundation.coroutine/yield (std.foundation.coroutine/resume c-inner))
                                                                 (std.foundation.coroutine/yield (std.foundation.coroutine/resume c-inner :x))
@@ -61,10 +61,10 @@
                   (std.foundation.coroutine/resume c-outer)
                   (std.foundation.coroutine/resume c-outer)
                   (std.foundation.coroutine/status c-outer)])
-               [:inner-yield :inner-end :outer-end :dead])
+     => [:inner-yield :inner-end :outer-end :dead])
 
-   (test/check "generator pipeline produces lazily"
-               (let [c (std.foundation.coroutine/create (fn [n]
+   (fact "generator pipeline produces lazily"
+     (let [c (std.foundation.coroutine/create (fn [n]
                                                           (loop [i 0]
                                                             (if (< i n)
                                                               (do (std.foundation.coroutine/yield (* i i)) (recur (inc i)))
@@ -74,15 +74,15 @@
                   (std.foundation.coroutine/resume c)
                   (std.foundation.coroutine/resume c)
                   (std.foundation.coroutine/status c)])
-               [0 1 4 :done :dead])
+     => [0 1 4 :done :dead])
 
-   (test/check "await returns settled promise value"
-               (let [c (std.foundation.coroutine/create (fn [] (std.foundation.coroutine/await (promise/delay 50 (fn [] :delayed-value)))))
+   (fact "await returns settled promise value"
+     (let [c (std.foundation.coroutine/create (fn [] (std.foundation.coroutine/await (promise/delay 50 (fn [] :delayed-value)))))
                      c-quick (std.foundation.coroutine/create (fn [] (std.foundation.coroutine/await (promise (fn [] 7)))))]
                  [(std.foundation.coroutine/resume c)
                   (std.foundation.coroutine/status c)
                   (std.foundation.coroutine/resume c-quick)
                   (std.foundation.coroutine/status c-quick)])
-               [:delayed-value :dead 7 :dead])])
+     => [:delayed-value :dead 7 :dead])])
 
-(test/print-results (results))
+(do (results) (pr-str (run '[std.foundation.coroutine-test])))

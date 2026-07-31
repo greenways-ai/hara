@@ -3,8 +3,12 @@ import { resolve } from "node:path";
 
 const web = import.meta.dirname;
 const repository = resolve(web, "../..");
-const source = resolve(repository, "rust/extensions/ledger-noir");
-const output = resolve(source, "target/package/ledger/noir");
+const source = process.env.HARA_NOIR_SOURCE
+  ? resolve(process.env.HARA_NOIR_SOURCE)
+  : resolve(repository, "rust/extensions/ledger-noir");
+const output = process.env.HARA_NOIR_OUTPUT
+  ? resolve(process.env.HARA_NOIR_OUTPUT)
+  : resolve(source, "target/package/ledger/noir");
 const assets = resolve(output, "assets");
 
 await rm(output, { recursive: true, force: true });
@@ -13,9 +17,8 @@ await cp(resolve(source, "hara.extension.edn"), resolve(output, "hara.extension.
 await cp(resolve(source, "package.json"), resolve(output, "package.json"));
 await mkdir(resolve(output, "node"), { recursive: true });
 await cp(resolve(web, "dist-node/worker.mjs"), resolve(output, "node/worker.mjs"));
-await cp(resolve(source, "browser"), resolve(output, "browser"), { recursive: true });
-await cp(resolve(source, "assets/noir-provider.mjs"), resolve(assets, "noir-provider.mjs"));
-await cp(resolve(web, "hta.js"), resolve(assets, "hta.js"));
+await mkdir(resolve(output, "browser"), { recursive: true });
+await cp(resolve(web, "dist-provider/worker.mjs"), resolve(output, "browser/worker.mjs"));
 
 const compiler = resolve(web, "node_modules/@noir-lang/noir_wasm/dist/web/main.mjs");
 await cp(compiler, resolve(web, "dist/noir-wasm.mjs"));

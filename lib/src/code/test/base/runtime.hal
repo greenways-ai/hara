@@ -1,0 +1,114 @@
+(ns code.test.base.runtime
+  (:require [code.test :as test]))
+
+(def +globals+ (atom {}))
+(def +links+ (atom {}))
+(def +flags+ (atom {}))
+
+(defn purge-all
+  ([] (test/purge-facts))
+  ([namespace] (test/purge-facts namespace)))
+(defn all-facts
+  ([] (test/registry))
+  ([namespace]
+   (reduce (fn [output fact]
+             (if (= namespace (:namespace fact))
+               (assoc output (:name fact) fact)
+               output))
+           {} (test/tests))))
+(defn list-facts
+  ([] (keys (all-facts (current-namespace))))
+  ([namespace] (keys (all-facts namespace))))
+(def purge-facts purge-all)
+(def get-fact test/get-fact)
+(def remove-fact test/remove-fact)
+
+(defn get-global
+  ([] (get-global (current-namespace)))
+  ([namespace] (get (deref +globals+) namespace))
+  ([namespace key & more]
+   (let [path
+         (loop [remaining (vec more)
+                output [key]]
+           (if (empty? remaining)
+             output
+             (recur (vec (rest remaining))
+                    (conj output (first remaining)))))]
+     (get-in (get-global namespace) path))))
+(defn set-global
+  ([value] (set-global (current-namespace) value))
+  ([namespace value]
+   (swap! +globals+ assoc namespace value)
+   value))
+(defn update-global
+  ([function] (update-global (current-namespace) function))
+  ([namespace function & arguments]
+   (apply swap! +globals+ update namespace function arguments)
+   (get-global namespace)))
+(defn list-links
+  ([] (list-links (current-namespace)))
+  ([namespace] (get (deref +links+) namespace)))
+(defn clear-links
+  ([] (clear-links (current-namespace)))
+  ([namespace]
+   (swap! +links+ assoc namespace nil)
+   nil))
+(defn add-link
+  ([link] (add-link (current-namespace) link))
+  ([namespace link]
+   (swap! +links+ update namespace
+          (fn [links] (conj (or links #{}) link)))
+   (list-links namespace)))
+(defn remove-link
+  ([link] (remove-link (current-namespace) link))
+  ([namespace link]
+   (swap! +links+ update namespace
+          (fn [links] (disj (or links #{}) link)))
+   (list-links namespace)))
+
+(defn parse-args [namespace id argument more]
+  [namespace id (conj (vec more) argument)])
+
+(defn set-fact
+  ([id data] (set-fact (current-namespace) id data))
+  ([namespace id data]
+   (swap! (field test/+registry+ :state) assoc [namespace id] data)
+   [namespace id]))
+
+(defn set-in-fact
+  ([id path data] (set-in-fact (current-namespace) id path data))
+  ([namespace id path data]
+   (let [fact (test/get-fact namespace id)]
+     (set-fact namespace id (assoc-in fact path data)))))
+
+(defn get-flag
+  ([id flag] (get-flag (current-namespace) id flag))
+  ([namespace id flag]
+   (if (get-in (deref +flags+) [namespace id flag]) true false)))
+
+(defn set-flag
+  ([id flag value] (set-flag (current-namespace) id flag value))
+  ([namespace id flag value]
+   (swap! +flags+ assoc-in [namespace id flag] value)
+   value))
+
+(defn update-fact
+  ([id function] (update-fact (current-namespace) id function))
+  ([namespace id function & arguments]
+   (let [value (apply function
+                      (test/get-fact namespace id)
+                      arguments)]
+     (set-fact namespace id value)
+     value)))
+
+(defn eval-in-ns [namespace function] (function))
+(defn teardown-fact [fact] (if (:teardown fact) ((:teardown fact)) nil))
+(defn setup-fact [fact] (if (:setup fact) ((:setup fact)) nil))
+(defn exec-thunk [thunk] (thunk))
+(defn exec-slim [fact] ((:function fact) {}))
+(defn no-dots [value] value)
+(defn fact-id [fact] (or (:id fact) (:name fact)))
+(defn find-fact
+  ([id] (test/get-fact id))
+  ([namespace id] (test/get-fact namespace id)))
+(defn run-op [operation fact] (operation fact))

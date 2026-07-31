@@ -429,8 +429,7 @@
 (defn- require-source
   [catalog coordinate]
   (let [value
-        (protocol-call registry/IGrammarCatalog
-                       find-source catalog coordinate)]
+        (registry/find-source catalog coordinate)]
     (if value
       value
       (fail "Grammar source not found"

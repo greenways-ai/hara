@@ -14,6 +14,10 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: true
+    - name: Verify synchronized Hara UI assets
+      run: |
+        node scripts/sync-hara-ui.mjs
+        node scripts/sync-hara-ui.mjs --check
     - name: Set up Rust WASM toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -64,6 +68,7 @@ jobs:
       run: |
         npm run test:hta
         npm run test:noir
+        ../../scripts/build-www
         npm run test:browser
     - name: Set up JDK 21
       uses: actions/setup-java@v4
@@ -177,17 +182,17 @@ jobs:
           target/native-extensions/crypto/hash/sha256/sha256.wasm
         cp lib/examples/extensions/crypto/hash/sha256/hara.extension.edn \
           target/native-extensions/crypto/hash/sha256/hara.extension.edn
-        test "$(target/hara-truffle conformance)" = "L0 conformance passed: 80 cases"
+        test "$(target/hara-truffle conformance)" = "L0 conformance passed: 104 cases"
         test "$(HARA_EXTENSION_PATH="$PWD/target/native-extensions" target/hara-truffle eval '(ns app (:require [demo.000-answer-42 :as answer])) (answer/add 20 22)')" = "42"
-        test "$(HARA_EXTENSION_PATH="$PWD/rust/extensions/ledger-noir/target/package" target/hara-truffle --allow-process eval '(ns app (:require [ledger.noir :as noir])) (get (deref (noir/compile {:name "native_smoke" :source "fn main(x: pub Field) { assert(x == 42); }"})) :format)')" = "hara/ledger.noir/v1"
-        test "$(HARA_EXTENSION_PATH="$PWD/target/native-extensions" target/hara-truffle eval '(ns app (:require [hara.runtime.wasm :as runtime])) (deref (runtime/eval "(+ 10 (count (deref (host/call \"crypto.hash.sha256\" \"digest\" (bytes 97 98 99)))))"))')" = "42"
+        test "$(HARA_EXTENSION_PATH="$PWD/rust/extensions/ledger-noir/target/package" target/hara-truffle --allow-process eval '(ns app (:require [ledger.noir :as noir])) (= "hara/ledger.noir/v1" (get (deref (noir/compile {:name "native_smoke" :source "fn main(x: pub Field) { assert(x == 42); }"})) :format))')" = "true"
+        test "$(HARA_EXTENSION_PATH="$PWD/target/native-extensions" target/hara-truffle eval '(ns app (:require [hara.runtime.wasm :as runtime])) (deref (runtime/eval "(+ 10 (count (deref (std.native.Host/call \"crypto.hash.sha256\" \"digest\" [(bytes 97 98 99)]))))"))')" = "42"
         test "$(target/hara-truffle eval '(+ 19 23)')" = "42"
         test "$(target/hara-truffle eval '(bytes/u8 -1)')" = "255"
-        test "$(target/hara-truffle eval '(protocol-call ICount count (bytes 1 2 3))')" = "3"
+        test "$(target/hara-truffle eval '(ICount/count (bytes 1 2 3))')" = "3"
         test "$(target/hara-truffle eval '(let [a (array 1 2)] (do (. a (set 1 7)) (. a (get 1))))')" = "7"
-        test "$(target/hara-truffle eval '(defstruct Person [name]) (protocol-call ILookup lookup (protocol-call IObjType meta (protocol-call IObjType with-meta (Person "Ada") {:doc "person"})) :doc)')" = "person"
+        test "$(target/hara-truffle eval '(defstruct Person [name]) (ILookup/lookup (IObjType/meta (IObjType/with-meta (Person "Ada") {:doc :person})) :doc)')" = ":person"
         test "$(target/hara-truffle eval '(= -0.0 0.0)')" = "true"
-        test "$(target/hara-truffle eval '(= 1.0M 1.00M)')" = "true"
+        test "$(target/hara-truffle eval '(= 1.0 1.00)')" = "true"
         test "$(target/hara-truffle eval '(def ^:dynamic *answer* 1) (binding [*answer* 42] *answer*)')" = "42"
         test "$(target/hara-truffle eval '(def answer 1) (set! answer 42) answer')" = "42"
         test "$(target/hara-truffle eval '(let [it (concat [1] [2])] (iter-next it) (iter-next it))')" = "2"
@@ -196,9 +201,9 @@ jobs:
         test "$(target/hara-truffle eval '(defstruct Problem [value]) (try (throw (Problem 7)) (catch Other error 0) (catch Problem error (field error :value)))')" = "7"
         test "$(target/hara-truffle eval '(ns source) (def answer 1) (ns user) (refer "source") (in-ns (quote source)) (set! answer 2) (in-ns (quote user)) answer')" = "2"
         test "$(target/hara-truffle eval '(load-resource "hara/l0-resource.hal")')" = "42"
-        test "$(target/hara-truffle eval '(load-resource "std/foundation.hal") ((comp2 inc inc) 40)')" = "42"
-        test "$(target/hara-truffle eval '(require "std/foundation.hal") ((comp2 inc inc) 40)')" = "42"
-        test "$(target/hara-truffle eval '(defmulti kind (fn [x] (if (= x 1) :one :other))) (defmethod kind :one [x] "one") (defmethod kind :default [x] "other") (kind 2)')" = "other"
+        test "$(target/hara-truffle eval '(load-resource "std/foundation.hal") ((comp inc inc inc inc) 38)')" = "42"
+        test "$(target/hara-truffle eval '(require "std/foundation.hal") ((comp inc inc inc inc) 38)')" = "42"
+        test "$(target/hara-truffle eval '(defmulti kind (fn [x] (if (= x 1) :one :other))) (defmethod kind :one [x] :one) (defmethod kind :default [x] :other) (kind 2)')" = ":other"
         test "$(target/hara-truffle eval '(do (defmacro unless [test body] `(if ~test nil ~body)) (unless false 42))')" = "42"
         test "$(target/hara-truffle eval '(do (declare answer) (def answer 42) (defn- read-answer [] answer) (read-answer))')" = "42"
     - name: Upload Native Image evidence

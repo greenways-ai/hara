@@ -423,13 +423,57 @@ textarea.hara-studio-editor {
   resize: none;
   outline: none;
   width: 100%;
+  height: 100%;
   box-sizing: border-box;
   caret-color: var(--hara-cyan);
 }
 
+.hara-studio-editor-stage {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 28%);
+}
+
+.hara-studio-insta-gutter {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border-left: 1px solid rgba(132, 86, 255, .32);
+  background: rgba(132, 86, 255, .035);
+  font: .62rem/1.45 var(--hara-mono);
+}
+
+.hara-studio-insta-result {
+  position: absolute;
+  left: .55rem;
+  right: .4rem;
+  min-height: 1.45em;
+  padding: 0 .35rem;
+  overflow: hidden;
+  color: var(--hara-green);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-left: 2px solid rgba(73, 255, 171, .55);
+  background: rgba(73, 255, 171, .045);
+}
+
+.hara-studio-insta-result.is-error {
+  color: var(--hara-magenta);
+  border-color: var(--hara-magenta);
+  background: rgba(255, 46, 136, .07);
+}
+
+.hara-studio-insta-result.is-skipped,
+.hara-studio-insta-result.is-pending { color: var(--hara-faint); border-color: var(--hara-faint); }
+.hara-studio-insta-result.is-stale { opacity: .38; }
+.hara-studio-insta-message { padding: .7rem; color: var(--hara-muted); }
+.hara-studio-insta-toggle.is-active { color: var(--hara-violet, #9b7cff); text-shadow: 0 0 9px rgba(132, 86, 255, .65); }
+
 .hara-studio-trace {
   flex: none;
-  max-height: 12rem;
+  max-height: 21rem;
   overflow: auto;
   border-top: 1px solid var(--hara-line);
   background: rgba(3, 5, 10, .72);
@@ -447,6 +491,52 @@ textarea.hara-studio-editor {
 .hara-studio-trace-note {
   padding: .7rem .9rem;
   color: var(--hara-muted);
+}
+
+.hara-studio-trace-summary,
+.hara-studio-trace-filters {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  padding: .45rem .9rem;
+  border-bottom: 1px solid var(--hara-line);
+}
+
+.hara-studio-trace-summary strong { color: var(--hara-green); }
+.hara-studio-trace-summary.is-error strong { color: var(--hara-magenta); }
+.hara-studio-trace-result { margin-left: auto; color: var(--hara-text); }
+.hara-studio-trace-filter { padding: .2rem .4rem; color: var(--hara-faint); border: 1px solid var(--hara-line); }
+.hara-studio-trace-filter.is-active { color: var(--hara-violet, #9b7cff); border-color: rgba(132, 86, 255, .7); }
+.hara-studio-trace-raw { margin-left: auto; color: var(--hara-cyan); }
+
+.hara-studio-trace-layout {
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) minmax(220px, .85fr);
+  min-height: 8rem;
+}
+
+.hara-studio-trace-tree,
+.hara-studio-trace-details { min-width: 0; margin: 0; padding: .5rem; overflow: auto; }
+.hara-studio-trace-details { color: var(--hara-muted); border-left: 1px solid var(--hara-line); white-space: pre-wrap; }
+.hara-studio-trace-node {
+  display: block;
+  width: calc(100% - var(--trace-depth) * .75rem);
+  margin-left: calc(var(--trace-depth) * .75rem);
+  padding: .28rem .4rem;
+  overflow: hidden;
+  color: var(--hara-text);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-left: 1px solid rgba(132, 86, 255, .6);
+}
+.hara-studio-trace-node.is-macro { color: var(--hara-violet, #9b7cff); }
+.hara-studio-trace-node.is-error { color: var(--hara-magenta); }
+
+@media (max-width: 760px) {
+  .hara-studio-editor-stage { grid-template-columns: minmax(0, 1fr) 130px; }
+  .hara-studio-trace-layout { grid-template-columns: 1fr; }
+  .hara-studio-trace-details { border-left: 0; border-top: 1px solid var(--hara-line); }
 }
 
 .hara-studio-trace-table {
@@ -488,41 +578,4 @@ textarea.hara-studio-editor {
 
 .hara-studio-pane-head .hara-studio-action {
   margin-left: .9em;
-}
-
-.hara-fabric-topology svg {
-  width: 100%;
-  min-height: 20rem;
-  background: rgba(3, 12, 20, .72);
-}
-
-.hara-fabric-topology .fabric-session rect {
-  fill: rgba(9, 29, 40, .96);
-  stroke: rgba(65, 245, 228, .42);
-}
-
-.hara-fabric-topology .fabric-space-label,
-.hara-fabric-topology .fabric-session-label {
-  fill: var(--hara-text);
-}
-
-.hara-fabric-topology .fabric-space-label {
-  font-size: .72rem;
-  letter-spacing: .15em;
-  text-transform: uppercase;
-}
-
-.hara-fabric-topology .fabric-session-meta {
-  fill: var(--hara-faint);
-  font-size: .65rem;
-}
-
-.hara-fabric-topology .fabric-flow {
-  stroke: var(--hara-amber);
-  stroke-opacity: .55;
-  marker-end: url("#hara-fabric-arrow");
-}
-
-.hara-fabric-topology #hara-fabric-arrow path {
-  fill: var(--hara-amber);
 }

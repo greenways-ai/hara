@@ -29,6 +29,8 @@ public class HaraGeneratedLibrariesTest {
       assertTrue(context.eval(HaraLanguage.ID, "(map-entry? (first {:a 1}))").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(not (uuid? :a))").asBoolean());
       assertTrue(context.eval(HaraLanguage.ID, "(not (regexp? :a))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(fn? (fn [value] value))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(not (fn? :a))").asBoolean());
     }
   }
 

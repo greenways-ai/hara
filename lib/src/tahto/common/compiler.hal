@@ -112,9 +112,7 @@
 (defn compile
   "Compiles one form through an ICompiler implementation."
   [compiler raw options]
-  (protocol-call protocol/ICompiler
-                 compile-form
-                 compiler
+  (protocol/compile-form compiler
                  raw
                  options))
 
@@ -123,39 +121,29 @@
     (let [selected (registry/resolve (:catalog compiler) options)
           base-context (assoc options :grammar selected)
           normalized
-          (protocol-call protocol/INormalizer
-                         normalize-form
-                         (:normalizer compiler)
+          (protocol/normalize-form (:normalizer compiler)
                          raw
                          (phase-context base-context :normalize))
           staged-result
           (stage-result
-           (protocol-call protocol/IStager
-                          stage-form
-                          (:stager compiler)
+           (protocol/stage-form (:stager compiler)
                           normalized
                           selected
                           (phase-context base-context :stage)))
           staged (:form staged-result)
           inference
-          (protocol-call protocol/IInferencer
-                         infer-form
-                         (:inferencer compiler)
+          (protocol/infer-form (:inferencer compiler)
                          staged
                          selected
                          (phase-context base-context :infer))
           diagnostics
-          (protocol-call protocol/ILinter
-                         lint-form
-                         (:linter compiler)
+          (protocol/lint-form (:linter compiler)
                          staged
                          inference
                          selected
                          (phase-context base-context :lint))
           rewritten
-          (protocol-call protocol/IRewriter
-                         rewrite-form
-                         (:rewriter compiler)
+          (protocol/rewrite-form (:rewriter compiler)
                          staged
                          selected
                          (phase-context
@@ -164,9 +152,7 @@
                                  :diagnostics diagnostics)
                           :rewrite))
           output
-          (protocol-call protocol/IEmitter
-                         emit-form
-                         (:emitter compiler)
+          (protocol/emit-form (:emitter compiler)
                          rewritten
                          selected
                          (phase-context

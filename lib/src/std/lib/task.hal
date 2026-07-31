@@ -1,0 +1,172 @@
+;; Portable task descriptions and invocation, including Foundation-compatible
+;; invocation and display protocols.
+(ns std.lib.task
+  (:require [std.lib.task.process :as process]
+            [std.foundation.string :as string]
+            [std.foundation.edn :as edn]))
+
+(defn task-defaults
+  [kind]
+  {:main {:arglists '([] [entry])
+          :argcount 1}})
+
+(defstruct Task
+  [type name main construct arglists item result summary params])
+
+(defn task-from-map
+  [config]
+  (std.lib.task/Task (:type config)
+                 (:name config)
+                 (:main config)
+                 (:construct config)
+                 (:arglists config)
+                 (:item config)
+                 (:result config)
+                 (:summary config)
+                 (:params config)))
+
+(defn task-status
+  [task]
+  (field task :type))
+
+(defn task-info
+  [task]
+  {:fn (symbol (field task :name))})
+
+(defn task-string
+  [task]
+  (str "#task" (task-status task) " " (task-info task)))
+
+(defn single-function-print
+  "Retains the Foundation option normalisation without performing output."
+  [params]
+  (if (and (not (:bulk params))
+           (nil? (get-in params [:print :function])))
+    (assoc-in params [:print :function] true)
+    params))
+
+(defn task
+  ([config]
+   (task-from-map config))
+  ([type name argument]
+   (let [defaults (task-defaults type)
+         options (if (map? argument) argument {})
+         main-config (if (map? argument)
+                       (:main argument)
+                       {:fn argument})
+         function (:fn main-config)
+         argcount (or (:argcount main-config)
+                      (get-in defaults [:main :argcount])
+                      1)
+         adapted (first (process/main-function function argcount))
+         config (merge defaults
+                       options
+                       {:type type
+                        :name name
+                        :main (merge (:main defaults)
+                                     main-config
+                                     {:fn adapted
+                                      :argcount argcount})})]
+     (task-from-map config))))
+
+(defn task?
+  [value]
+  (instance? std.lib.task/Task value))
+
+(defn invoke-intern-task
+  ([name config]
+   (invoke-intern-task :task name config nil))
+  ([type name config body]
+   `(def ~name
+      (std.lib.task/task
+       ~(or (:template config) :default)
+       ~(str name)
+       ~config))))
+
+(defmacro deftask
+  [name config & body]
+  (invoke-intern-task :task name config body))
+
+(defn invoke
+  [task & arguments]
+  (apply process/invoke task arguments))
+
+(extend-type Task std.protocol.ifn/IFn
+  (invoke [task & arguments]
+    (apply invoke task arguments)))
+
+(extend-type Task std.protocol.idisplay/IDisplay
+  (display [task]
+    (task-string task)))
+
+(defn read-cli-arg
+  "Reads one command-line token as EDN, falling back to the original string."
+  [value]
+  (try
+    (edn/read value)
+    (catch Throwable error value)))
+
+(defn keyword-cli-arg?
+  [value]
+  (keyword? (read-cli-arg value)))
+
+(defn vector-tail
+  [values start]
+  (loop [index start
+         output []]
+    (if (= index (count values))
+      output
+      (recur (inc index) (conj output (nth values index))))))
+
+(defn cli-selector-values
+  [arguments]
+  (loop [remaining (vec arguments)
+         selected []]
+    (if (or (empty? remaining)
+            (keyword-cli-arg? (first remaining)))
+      selected
+      (recur (vector-tail remaining 1)
+             (conj selected (read-cli-arg (first remaining)))))))
+
+(defn collapse-only
+  "Collapses consecutive selectors following :only into one vector value."
+  [arguments]
+  (loop [remaining (vec arguments)
+         output []]
+    (if (empty? remaining)
+      output
+      (let [key (first remaining)
+            tail (vector-tail remaining 1)]
+        (if (= :only (read-cli-arg key))
+          (let [values (cli-selector-values tail)]
+            (if (empty? values)
+              (recur tail (conj output key))
+              (recur (vector-tail tail (count values))
+                     (conj (conj output key) (pr-str values)))))
+          (recur tail (conj output key)))))))
+
+(defn process-ns-args
+  "Processes Foundation task CLI options, including :only and :with."
+  [arguments]
+  (loop [remaining (vec arguments)
+         output {}]
+    (if (empty? remaining)
+      output
+      (let [raw-key (first remaining)
+            key (read-cli-arg raw-key)
+            tail (vector-tail remaining 1)
+            has-value (not (empty? tail))
+            value (if has-value (read-cli-arg (first tail)) nil)]
+        (if (not (keyword? key))
+          (recur tail output)
+          (if (or (not has-value) (keyword? value))
+            (recur tail (assoc output key true))
+            (recur (vector-tail tail 1)
+                   (if (= key :only)
+                     (assoc output :ns value)
+                     (if (= key :with)
+                       (assoc output :ns [value])
+                       (assoc output key value))))))))))
+
+(def select-filter process/select-filter)
+(def select-inputs process/select-inputs)

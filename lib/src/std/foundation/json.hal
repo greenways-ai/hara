@@ -30,16 +30,16 @@
   read
   "Reads one strict JSON value from source."
   [source]
-  (std.native.Json/read source))
+  (Json/read source))
 
 (defn ^{:schema [:fn [:any] :str]}
   write
   "Returns value's compact JSON representation."
   [value]
-  (std.native.Json/write value))
+  (Json/write value))
 
 (defn ^{:schema [:fn [:any :map] :str]}
   pretty
   "Returns value's indented JSON representation using opts."
   [value opts]
-  (std.native.Json/pretty value opts))
+  (Json/pretty value opts))

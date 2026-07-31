@@ -11,5 +11,5 @@
   (read-value [fixture] (field fixture :value))
   (increment [fixture amount] (+ (field fixture :value) amount)))
 
-[(protocol-call FixtureOps read-value (CapabilityFixture 40))
- (protocol-call FixtureOps increment (map->CapabilityFixture {:value 40}) 2)]
+[(read-value (CapabilityFixture 40))
+ (increment (map->CapabilityFixture {:value 40}) 2)]

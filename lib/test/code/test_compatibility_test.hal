@@ -1,0 +1,48 @@
+(ns code.test-compatibility-test
+  (:use code.test)
+  (:require [code.test.base.runtime :as runtime]
+            [code.test.checker.collection :as collection]
+            [code.test.checker.common :as common]
+            [code.test.checker.logic :as logic]
+            [code.test.compile.types :as types]
+            [code.test.task :as test-task]))
+
+(fact "Foundation checker vocabulary composes"
+  (common/succeeded? (common/verify (common/exactly 42) 42))
+  => true
+
+  {:status :ready :count 2}
+  => (collection/contains-map {:status :ready})
+
+  3
+  => (logic/all (fn [value] (number? value))
+                (fn [value] (= 1 (mod value 2)))))
+
+(fact "Foundation runtime globals and links retain namespace scope"
+  (do
+    (runtime/set-global 'code.test-compatibility-test {:timeout 20})
+    (runtime/add-link 'code.test-compatibility-test 'code.shared)
+    [(runtime/get-global 'code.test-compatibility-test :timeout)
+     (runtime/list-links 'code.test-compatibility-test)])
+  => [20 #{'code.shared}])
+
+(fact "Foundation Fact values are callable and identifiable"
+  (let [value
+        (types/Fact :core
+                    'fact-id
+                    'code.test-compatibility-test
+                    nil nil "portable fact" 1 1 nil nil
+                    (fn [] 42)
+                    {})]
+    [(types/fact? value)
+     (value)
+     (std.protocol.idisplay/display value)])
+  => [true 42
+      "#fact {:type :core :id fact-id :ns code.test-compatibility-test :desc \"portable fact\" :line 1}"])
+
+(fact "Foundation code.test CLI selectors retain :only semantics"
+  (test-task/process-test-args
+   [":only" "std" "code" ":parallel" "true"])
+  => {:ns ['std 'code] :parallel true})
+
+(pr-str (run {:namespace "code.test-compatibility-test"}))

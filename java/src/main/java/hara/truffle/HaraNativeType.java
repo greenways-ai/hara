@@ -64,7 +64,7 @@ public final class HaraNativeType
 
   @Override
   public String display() {
-    return "#<native-type std.native/" + name + ">";
+    return "#<native-type std.native." + name + ">";
   }
 
   @ExportMessage

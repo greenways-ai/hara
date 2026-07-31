@@ -209,10 +209,7 @@ pub fn yield_form(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Con
         Vec::new(),
         env,
         Box::new(move |r| match r {
-            Ok(mut values) => Step::Yield(
-                values.remove(0),
-                Box::new(move |value| k(Ok(value))),
-            ),
+            Ok(mut values) => Step::Yield(values.remove(0), Box::new(move |value| k(Ok(value)))),
             Err(e) => k(Err(e)),
         }),
     )

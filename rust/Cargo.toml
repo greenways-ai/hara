@@ -31,6 +31,5 @@ home = "=0.5.9"
 semver = "1.0"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 ed25519-dalek = { version = "2.1", default-features = false, features = ["std"] }
-rusqlite = { version = "0.31", features = ["bundled"] }
 
 [dev-dependencies]

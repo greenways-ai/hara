@@ -28,7 +28,7 @@ public class HaraSubstrateProtocolTest {
                       + "  (frame-meta [frame] {}) "
                       + "  (frame-cause [frame] nil) "
                       + "  (frame-data [frame] 42)) "
-                      + "(protocol-call std.lib.substrate.protocol/IFrame frame-data (Fixture \"frame-1\"))")
+                      + "(std.lib.substrate.protocol/frame-data (Fixture \"frame-1\"))")
               .asLong());
     }
   }
@@ -44,7 +44,7 @@ public class HaraSubstrateProtocolTest {
                       HaraLanguage.ID,
                       "(require 'std.lib.substrate.protocol) "
                           + "(defstruct Incomplete []) "
-                          + "(protocol-call std.lib.substrate.protocol/IService get-service "
+                          + "(std.lib.substrate.protocol/get-service "
                           + "(Incomplete) \"cache\")"));
       assertTrue(error.getMessage().contains("IService/get-service"));
     }
@@ -69,8 +69,8 @@ public class HaraSubstrateProtocolTest {
                   HaraLanguage.ID,
                   "(require 'std.lib.substrate) "
                       + "(def node (std.lib.substrate/node-create \"node-1\")) "
-                      + "(protocol-call std.lib.substrate.protocol/IService set-service node \"cache\" 42) "
-                      + "(protocol-call std.lib.substrate.protocol/IService get-service node \"cache\")")
+                      + "(std.lib.substrate.protocol/set-service node \"cache\" 42) "
+                      + "(std.lib.substrate.protocol/get-service node \"cache\")")
               .asLong());
     }
   }
@@ -138,13 +138,13 @@ public class HaraSubstrateProtocolTest {
                   HaraLanguage.ID,
                   "(require 'std.lib.substrate) "
                       + "(def node (std.lib.substrate/node-create \"node-1\")) "
-                      + "(protocol-call std.lib.substrate.protocol/ITransport attach-transport node \"peer-a\" "
+                      + "(std.lib.substrate.protocol/attach-transport node \"peer-a\" "
                       + "  (fn [frame] "
-                      + "    (protocol-call std.lib.substrate.protocol/ITransport receive-frame node "
+                      + "    (std.lib.substrate.protocol/receive-frame node "
                       + "      (std.lib.substrate/node-frame :response \"res-1\" \"main\" {} nil [] "
-                      + "        (protocol-call std.lib.substrate.protocol/IFrame frame-id frame) :ok 84 nil nil nil) "
+                      + "        (std.lib.substrate.protocol/frame-id frame) :ok 84 nil nil nil) "
                       + "      {:transport-id \"peer-a\"}))) "
-                      + "(def reply (protocol-call std.lib.substrate.protocol/IRequest request node \"main\" \"sum\" [] "
+                      + "(def reply (std.lib.substrate.protocol/request node \"main\" \"sum\" [] "
                       + "  {:id \"req-1\" :transport-id \"peer-a\"})) "
                       + "(promise/value reply)")
               .asLong());
@@ -161,10 +161,10 @@ public class HaraSubstrateProtocolTest {
                   HaraLanguage.ID,
                   "(require 'std.lib.substrate) "
                       + "(def node (std.lib.substrate/node-create \"node-1\")) "
-                      + "(protocol-call std.lib.substrate.protocol/ITransport attach-transport node \"peer-a\" (fn [frame] nil)) "
-                      + "(def pending (protocol-call std.lib.substrate.protocol/IRequest request node \"main\" \"wait\" [] "
+                      + "(std.lib.substrate.protocol/attach-transport node \"peer-a\" (fn [frame] nil)) "
+                      + "(def pending (std.lib.substrate.protocol/request node \"main\" \"wait\" [] "
                       + "  {:id \"req-cancel\" :transport-id \"peer-a\"})) "
-                      + "(protocol-call std.lib.substrate.protocol/IRequest cancel-request node \"req-cancel\" :cancelled) "
+                      + "(std.lib.substrate.protocol/cancel-request node \"req-cancel\" :cancelled) "
                       + "(promise/state pending)")
               .toString());
     }
@@ -180,7 +180,7 @@ public class HaraSubstrateProtocolTest {
                   HaraLanguage.ID,
                   "(require 'std.lib.substrate) "
                       + "(def node (std.lib.substrate/node-create \"node-1\")) "
-                      + "(protocol-call std.lib.substrate.protocol/IRequest request node \"main\" \"missing\" [] {})"));
+                      + "(std.lib.substrate.protocol/request node \"main\" \"missing\" [] {})"));
     }
   }
 }

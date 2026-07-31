@@ -7,8 +7,7 @@ use hara_wasm::kernel::{parse, read_forms, Form, SpannedForm};
 use hara_wasm::native_cli::RuntimeBroker;
 use hara_wasm::package;
 use hara_wasm::project;
-use hara_wasm::resp::{FabricRespServer, RespConnection, RespServer, RespValue};
-use hara_wasm::service::{FabricService, ServiceConfig};
+use hara_wasm::resp::{RespConnection, RespServer, RespValue};
 use hara_wasm::Runtime;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -34,19 +33,12 @@ pub(crate) struct Options {
     pub(crate) no_history: bool,
     pub(crate) no_splash: bool,
     pub(crate) no_color: bool,
-    data_dir: Option<PathBuf>,
-    shards: Option<usize>,
-    node_id: String,
-    peers: Vec<String>,
-    cluster_epoch: String,
 }
 
 pub(crate) fn parse_options() -> Result<Options, String> {
     let mut options = Options {
         host: "127.0.0.1".into(),
         port: 1311,
-        node_id: "local".into(),
-        cluster_epoch: "local.v1".into(),
         ..Options::default()
     };
     let mut args = env::args().skip(1);
@@ -83,17 +75,6 @@ pub(crate) fn parse_options() -> Result<Options, String> {
                     .parse()
                     .map_err(|_| "--port must be between 0 and 65535".to_owned())?
             }
-            "--data" => options.data_dir = Some(PathBuf::from(required(&mut args, "--data")?)),
-            "--shards" => {
-                options.shards = Some(
-                    required(&mut args, "--shards")?
-                        .parse()
-                        .map_err(|_| "--shards must be a positive integer".to_owned())?,
-                )
-            }
-            "--node-id" => options.node_id = required(&mut args, "--node-id")?,
-            "--peer" => options.peers.push(required(&mut args, "--peer")?),
-            "--cluster-epoch" => options.cluster_epoch = required(&mut args, "--cluster-epoch")?,
             value if value.starts_with("--history=") => {
                 options.history_file = Some(PathBuf::from(&value[10..]))
             }
@@ -179,7 +160,6 @@ pub(crate) fn run(options: Options) -> Result<(), String> {
             direct_eval(&options, &source)
         }
         Some("headless" | "server") => run_headless(&options),
-        Some("fabric" | "service") => run_fabric(&options),
         Some("remote") => run_remote(
             command
                 .get(1)
@@ -195,7 +175,7 @@ fn routed_command(command: &[String]) -> Vec<String> {
     if command.first().is_some_and(|value| {
         matches!(
             value.as_str(),
-            "help" | "compile-hir" | "fabric" | "service"
+            "help" | "compile-hir"
         )
     }) || command == ["standalone"]
     {
@@ -3015,33 +2995,6 @@ fn run_headless(options: &Options) -> Result<(), String> {
     let broker = RuntimeBroker::start_with(options.root.clone(), options.native_sockets)?;
     let server = RespServer::start(&options.host, options.port, broker)?;
     println!("HARA RESP {} · session ROOT", server.endpoint());
-    loop {
-        std::thread::park();
-    }
-}
-
-fn run_fabric(options: &Options) -> Result<(), String> {
-    if options.offline {
-        return Err("--offline cannot be used with fabric".into());
-    }
-    let service = FabricService::start(ServiceConfig {
-        shards: options.shards.unwrap_or_else(|| {
-            std::thread::available_parallelism()
-                .map(usize::from)
-                .unwrap_or(1)
-        }),
-        data_dir: options.data_dir.clone(),
-        node_id: options.node_id.clone(),
-        peers: options.peers.clone(),
-        cluster_epoch: options.cluster_epoch.clone(),
-        ..ServiceConfig::default()
-    })?;
-    let server = FabricRespServer::start(&options.host, options.port, service)?;
-    println!(
-        "HARA FABRIC {} · node {} · space default · session ROOT",
-        server.endpoint(),
-        options.node_id
-    );
     loop {
         std::thread::park();
     }

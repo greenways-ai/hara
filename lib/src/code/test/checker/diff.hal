@@ -1,0 +1,29 @@
+(ns code.test.checker.diff)
+
+(defn checker-equal? [left right] (= left right))
+
+(defn diff-map
+  [left right]
+  (let [left-keys (set (keys left))
+        right-keys (set (keys right))]
+    {:left-only (reduce (fn [out key]
+                          (if (contains? right-keys key) out (conj out key)))
+                        #{} left-keys)
+     :right-only (reduce (fn [out key]
+                           (if (contains? left-keys key) out (conj out key)))
+                         #{} right-keys)
+     :same (reduce (fn [out key]
+                     (if (= (get left key) (get right key))
+                       (assoc out key (get left key))
+                       out))
+                   {} left-keys)}))
+
+(defn diff-seq
+  [left right]
+  {:left left :right right :same (= left right)})
+
+(defn diff
+  [left right]
+  (if (and (map? left) (map? right))
+    (diff-map left right)
+    (diff-seq left right)))

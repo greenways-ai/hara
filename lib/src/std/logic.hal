@@ -1,0 +1,311 @@
+;; ============================================================================
+;; std.logic — a small coroutine-backed relational solver.
+;;
+;; A goal is a function from a solver state to a coroutine.  The coroutine
+;; yields every state satisfying that goal.  `any` schedules goal streams in
+;; round-robin order, while `all` fairly schedules the dependent streams
+;; produced by conjunction.
+;;
+;; The public builder API avoids introducing bindings through macros:
+;;
+;;   (run* (fn [q]
+;;           (fresh (fn [x]
+;;             (all (== x 7)
+;;                  (== q [x x]))))))
+;;
+;; ============================================================================
+(ns std.logic)
+
+(defstruct LogicVar [id name])
+(defstruct Binding [value])
+
+(defn logic-var?
+  "Returns true when value is a logic variable."
+  [value]
+  (instance? std.logic/LogicVar value))
+
+(defn walk
+  "Follows logic-variable bindings to the first unbound or non-variable term."
+  [term substitution]
+  (if (logic-var? term)
+    (let [binding (get substitution term)]
+      (if binding
+        (walk (field binding :value) substitution)
+        term))
+    term))
+
+(defn occurs?
+  "Returns true when variable occurs in term after following substitutions."
+  [variable term substitution]
+  (let [term (walk term substitution)]
+    (if (= variable term)
+      true
+      (if (vector? term)
+        (any? (fn [item] (occurs? variable item substitution)) term)
+        (if (list? term)
+          (any? (fn [item] (occurs? variable item substitution)) term)
+          (if (map? term)
+            (or (any? (fn [item] (occurs? variable item substitution))
+                      (keys term))
+                (any? (fn [item] (occurs? variable item substitution))
+                      (vals term)))
+            false))))))
+
+(defn bind-var
+  [variable term substitution]
+  (if (occurs? variable term substitution)
+    nil
+    (assoc substitution variable (std.logic/Binding term))))
+
+(defn map-key?
+  [value key]
+  (any? (fn [candidate] (= candidate key)) (keys value)))
+
+(defn unify
+  "Unifies two terms under substitution, or returns nil on failure.
+   Vectors and lists unify positionally; maps unify recursively by key."
+  [left right substitution]
+  (let [left (walk left substitution)
+        right (walk right substitution)]
+    (if (= left right)
+      substitution
+      (if (logic-var? left)
+        (bind-var left right substitution)
+        (if (logic-var? right)
+          (bind-var right left substitution)
+          (if (and (or (vector? left) (list? left))
+                   (or (vector? right) (list? right))
+                   (= (count left) (count right)))
+            (loop [index 0
+                   result substitution]
+              (if (= index (count left))
+                result
+                (if result
+                  (recur (inc index)
+                         (unify (nth left index) (nth right index) result))
+                  nil)))
+            (if (and (map? left)
+                     (map? right)
+                     (= (count left) (count right)))
+              (loop [remaining (vec (keys left))
+                     result substitution]
+                (if (empty? remaining)
+                  result
+                  (let [key (first remaining)]
+                    (if (and result (map-key? right key))
+                      (recur (vec (drop 1 remaining))
+                             (unify (get left key) (get right key) result))
+                      nil))))
+              nil)))))))
+
+(defn reify-with
+  [term substitution names counter]
+  (let [term (walk term substitution)]
+    (if (logic-var? term)
+      (let [existing (get (deref names) term)]
+        (if existing
+          existing
+          (let [label (symbol (str "_." (deref counter)))]
+            (swap! counter (fn [value] (inc value)))
+            (swap! names
+                   (fn [values]
+                     (assoc values term label)))
+            label)))
+      (if (vector? term)
+        (reduce (fn [result item]
+                  (conj result
+                        (reify-with item substitution names counter)))
+                []
+                term)
+        (if (list? term)
+          (apply list
+                 (map (fn [item]
+                        (reify-with item substitution names counter))
+                      term))
+          (if (map? term)
+            (reduce (fn [result entry]
+                      (assoc result
+                             (reify-with (key entry)
+                                         substitution names counter)
+                             (reify-with (val entry)
+                                         substitution names counter)))
+                    {}
+                    term)
+            term))))))
+
+(defn reify-term
+  "Reifies a term, naming its unbound variables _.0, _.1, and so on."
+  [term substitution]
+  (reify-with term substitution (atom {}) (atom 0)))
+
+(defn stream-next
+  "Resumes a goal stream and returns its next yielded state, or nil."
+  [stream]
+  (if (= :dead (std.foundation.coroutine/status stream))
+    nil
+    (let [value (std.foundation.coroutine/resume stream)]
+      (if (= :dead (std.foundation.coroutine/status stream)) nil value))))
+
+(defn close-stream
+  [stream]
+  (if (= :suspended (std.foundation.coroutine/status stream))
+    (std.foundation.coroutine/close stream)
+    stream))
+
+(defn close-streams
+  [streams]
+  (reduce (fn [result stream]
+            (do (close-stream stream)
+                result))
+          nil
+          streams))
+
+(def succeed
+  (fn [state]
+    (std.foundation.coroutine/create
+     (fn [] (std.foundation.coroutine/yield state)))))
+
+(def fail
+  (fn [state]
+    (std.foundation.coroutine/create (fn [] nil))))
+
+(defn ==
+  "Returns a goal that unifies left and right."
+  [left right]
+  (fn [state]
+    (std.foundation.coroutine/create
+     (fn []
+       (let [substitution
+             (unify left right (get state :substitution))]
+         (if substitution
+           (std.foundation.coroutine/yield
+            (assoc state :substitution substitution))
+           nil))))))
+
+(defn choose
+  "Fair round-robin disjunction over a collection of goals."
+  [goals]
+  (fn [state]
+    (std.foundation.coroutine/create
+     (fn []
+       (let [initial (reduce (fn [result goal]
+                               (conj result (goal state)))
+                             []
+                             goals)
+             active (atom initial)]
+         (try
+           (loop [streams initial]
+             (if (empty? streams)
+               nil
+               (let [stream (first streams)
+                     value (stream-next stream)
+                     remaining (vec (drop 1 streams))]
+                 (if value (std.foundation.coroutine/yield value) nil)
+                 (let [next-streams
+                       (if (= :dead
+                              (std.foundation.coroutine/status stream))
+                         remaining
+                         (conj remaining stream))]
+                   (reset! active next-streams)
+                   (recur next-streams)))))
+           (finally
+             (close-streams (deref active)))))))))
+
+(defn either
+  "Fair binary disjunction."
+  [left-goal right-goal]
+  (choose [left-goal right-goal]))
+
+(defn both
+  "Fair binary conjunction."
+  [left-goal right-goal]
+  (fn [state]
+    (std.foundation.coroutine/create
+     (fn []
+       (let [source (left-goal state)]
+         (let [active (atom [])]
+           (try
+             (loop [source-open true
+                    children []]
+               (let [next-state (if source-open (stream-next source) nil)
+                     source-open
+                     (if source-open
+                       (not (= :dead
+                               (std.foundation.coroutine/status source)))
+                       false)
+                     children (if next-state
+                                (conj children (right-goal next-state))
+                                children)]
+                 (reset! active children)
+                 (if (empty? children)
+                   (if source-open (recur source-open children) nil)
+                   (let [child (first children)
+                         value (stream-next child)
+                         remaining (vec (drop 1 children))]
+                     (if value (std.foundation.coroutine/yield value) nil)
+                     (let [next-children
+                           (if (= :dead
+                                  (std.foundation.coroutine/status child))
+                             remaining
+                             (conj remaining child))]
+                       (reset! active next-children)
+                       (recur source-open next-children))))))
+             (finally
+               (do (close-stream source)
+                   (close-streams (deref active)))))))))))
+
+(defn any
+  "Returns the fair disjunction of goals."
+  [& goals]
+  (choose goals))
+
+(defn all
+  "Returns the fair conjunction of goals."
+  [& goals]
+  (reduce both succeed goals))
+
+(defn conde
+  "Returns a disjunction of clauses, where each clause is a collection of
+   conjunctive goals."
+  [& clauses]
+  (choose
+   (reduce (fn [goals clause]
+             (conj goals (apply all clause)))
+           []
+           clauses)))
+
+(defn fresh
+  "Introduces one fresh logic variable and passes it to builder."
+  ([builder]
+   (fresh nil builder))
+  ([name builder]
+   (fn [state]
+     (let [id (get state :counter)
+           variable (std.logic/LogicVar id name)]
+       ((builder variable) (assoc state :counter (inc id)))))))
+
+(defn solve
+  [amount builder]
+  (let [query (std.logic/LogicVar 0 nil)
+        stream ((builder query) {:substitution {} :counter 1})]
+    (loop [remaining amount
+           results []]
+      (if (and remaining (= remaining 0))
+        (do (close-stream stream)
+            results)
+        (let [state (stream-next stream)]
+          (if state
+            (recur (if remaining (dec remaining) nil)
+                   (conj results
+                         (reify-term query (get state :substitution))))
+            results))))))
+
+(defn run
+  "Returns at most amount reified answers produced by builder."
+  [amount builder]
+  (solve amount builder))
+
+(defn run*
+  "Returns all reified answers produced by builder."
+  [builder]
+  (solve nil builder))

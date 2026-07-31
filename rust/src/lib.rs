@@ -16,15 +16,13 @@ mod native_extension;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod package;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod project;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod tap;
-#[cfg(not(target_arch = "wasm32"))]
 mod process_extension;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod project;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod resp;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod service;
+pub mod tap;
 pub mod task;
 #[cfg(feature = "dev-trace")]
 pub mod trace;
@@ -36,7 +34,19 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 
-const FOUNDATION_FALLBACK: &str = include_str!("../../lib/src/std/foundation.hal");
+include!(concat!(env!("OUT_DIR"), "/embedded_hal.rs"));
+
+const EAGER_HAL_RESOURCES: &[&str] = &[
+    "std.foundation.string",
+    "std.foundation.promise",
+    "std.foundation.bytes",
+    "std.foundation.coroutine",
+    "std.foundation.file",
+    "std.foundation.host",
+    "std.foundation.socket",
+    "std.foundation.edn",
+    "std.foundation.json",
+];
 
 fn ignore_socket_event(_event: core::SocketEvent) {}
 
@@ -191,20 +201,12 @@ impl SessionKernel {
     }
 
     pub fn create_memory_filesystem(&mut self, root: &str) -> u64 {
-        self.create_filesystem(
-            Rc::new(core::MemoryFileProvider::new(root)),
-            "memory",
-            root,
-        )
+        self.create_filesystem(Rc::new(core::MemoryFileProvider::new(root)), "memory", root)
     }
 
     #[cfg(any(not(target_arch = "wasm32"), target_os = "wasi"))]
     pub fn create_native_filesystem(&mut self, root: &str) -> u64 {
-        self.create_filesystem(
-            Rc::new(core::NativeFileProvider::new(root)),
-            "native",
-            root,
-        )
+        self.create_filesystem(Rc::new(core::NativeFileProvider::new(root)), "native", root)
     }
 
     fn create_filesystem(
@@ -328,6 +330,9 @@ impl Runtime {
         for (name, value) in core::exception_function_values() {
             foundation.intern(name, value);
         }
+        for (name, value) in core::basic_function_values() {
+            foundation.intern(name, value);
+        }
         for (name, protocol) in core::foundation_protocol_values() {
             foundation.intern(&name, protocol.clone());
             let namespace =
@@ -341,9 +346,11 @@ impl Runtime {
         }
         let native = namespace_registry.find_or_create("std.native");
         for (name, descriptor) in core::native_type_values() {
-            let var = native.intern(&name, descriptor);
-            foundation.map_var(crate::lang::data::Symbol::parse(&name), var);
-            namespace_registry.find_or_create(format!("std.native.{name}"));
+            let canonical_name = format!("std.native.{name}");
+            let var = foundation.intern(&canonical_name, descriptor);
+            foundation.map_var(crate::lang::data::Symbol::parse(&name), var.clone());
+            native.map_var(crate::lang::data::Symbol::parse(&name), var);
+            namespace_registry.find_or_create(canonical_name);
         }
         Runtime {
             env: HashMap::new(),
@@ -392,6 +399,12 @@ impl Runtime {
                 target.alias(protocol, source);
             }
         }
+        for (native_type, _) in core::NATIVE_TYPES {
+            let native_namespace = format!("std.native.{native_type}");
+            if let Some(source) = self.namespace_registry.find(&native_namespace) {
+                target.alias(*native_type, source);
+            }
+        }
         if namespace == "std.foundation" {
             return;
         }
@@ -406,9 +419,18 @@ impl Runtime {
     }
 
     fn bootstrap_foundation(&mut self) -> Result<(), String> {
+        for &(name, _, source) in EMBEDDED_HAL_RESOURCES {
+            self.register_resource(name, source);
+        }
+        let foundation = self
+            .resources
+            .get("std.foundation")
+            .cloned()
+            .ok_or_else(|| "embedded HAL catalog is missing std.foundation".to_owned())?;
         core::with_definition_origin(kernel::VarOrigin::HalFallback, || {
-            self.eval_text(FOUNDATION_FALLBACK)
+            self.eval_text(&foundation)
         })?;
+        self.loaded_resources.insert("std.foundation".into());
         let json = self.namespace_registry.find_or_create("std.native.Json");
         json.intern(
             "read",
@@ -434,202 +456,14 @@ impl Runtime {
                 json::write_pretty(&arguments[0]).map(core::Value::String)
             }),
         );
-        for (name, source) in [
-            (
-                "std.foundation.string",
-                include_str!("../../lib/src/std/foundation/string.hal"),
-            ),
-            (
-                "std.foundation.promise",
-                include_str!("../../lib/src/std/foundation/promise.hal"),
-            ),
-            (
-                "std.foundation.bytes",
-                include_str!("../../lib/src/std/foundation/bytes.hal"),
-            ),
-            (
-                "std.foundation.coroutine",
-                include_str!("../../lib/src/std/foundation/coroutine.hal"),
-            ),
-            (
-                "std.foundation.file",
-                include_str!("../../lib/src/std/foundation/file.hal"),
-            ),
-            (
-                "std.foundation.host",
-                include_str!("../../lib/src/std/foundation/host.hal"),
-            ),
-            (
-                "std.foundation.os",
-                include_str!("../../lib/src/std/foundation/os.hal"),
-            ),
-            (
-                "std.foundation.socket",
-                include_str!("../../lib/src/std/foundation/socket.hal"),
-            ),
-            (
-                "std.foundation.set",
-                include_str!("../../lib/src/std/foundation/set.hal"),
-            ),
-            (
-                "std.foundation.edn",
-                include_str!("../../lib/src/std/foundation/edn.hal"),
-            ),
-            (
-                "std.foundation.json",
-                include_str!("../../lib/src/std/foundation/json.hal"),
-            ),
-            (
-                "std.foundation.pretty.engine",
-                include_str!("../../lib/src/std/foundation/pretty/engine.hal"),
-            ),
-            (
-                "std.foundation.pretty",
-                include_str!("../../lib/src/std/foundation/pretty.hal"),
-            ),
-            (
-                "hara.metaspec.lint",
-                include_str!("../../lib/src/hara/metaspec/lint.hal"),
-            ),
-            (
-                "hara.metaspec.verify",
-                include_str!("../../lib/src/hara/metaspec/verify.hal"),
-            ),
-            (
-                "hara.metaspec.report",
-                include_str!("../../lib/src/hara/metaspec/report.hal"),
-            ),
-            (
-                "hara.metaspec.core",
-                include_str!("../../lib/src/hara/metaspec/core.hal"),
-            ),
-            (
-                "hara.cli.model",
-                include_str!("../../lib/src/hara/cli/model.hal"),
-            ),
-            (
-                "hara.cli.route",
-                include_str!("../../lib/src/hara/cli/route.hal"),
-            ),
-            (
-                "hara.cli.verify",
-                include_str!("../../lib/src/hara/cli/verify.hal"),
-            ),
-            (
-                "hara.cli.report",
-                include_str!("../../lib/src/hara/cli/report.hal"),
-            ),
-            (
-                "hara.cli.core",
-                include_str!("../../lib/src/hara/cli/core.hal"),
-            ),
-            ("std.pretty", include_str!("../../lib/src/std/pretty.hal")),
-            (
-                "std.lib.substrate.protocol",
-                include_str!("../../lib/src/std/lib/substrate/protocol.hal"),
-            ),
-            (
-                "std.lib.substrate.frame",
-                include_str!("../../lib/src/std/lib/substrate/frame.hal"),
-            ),
-            (
-                "std.lib.substrate",
-                include_str!("../../lib/src/std/lib/substrate.hal"),
-            ),
-            (
-                "std.lib.test",
-                include_str!("../../lib/src/std/lib/test.hal"),
-            ),
-            (
-                "std.lib.component",
-                include_str!("../../lib/src/std/lib/component.hal"),
-            ),
-            (
-                "std.lib.context",
-                include_str!("../../lib/src/std/lib/context.hal"),
-            ),
-            (
-                "std.task.protocol",
-                include_str!("../../lib/src/std/task/protocol.hal"),
-            ),
-            (
-                "std.task.bulk",
-                include_str!("../../lib/src/std/task/bulk.hal"),
-            ),
-            (
-                "std.task.process",
-                include_str!("../../lib/src/std/task/process.hal"),
-            ),
-            ("std.task", include_str!("../../lib/src/std/task.hal")),
-            (
-                "std.block.protocol",
-                include_str!("../../lib/src/std/block/protocol.hal"),
-            ),
-            (
-                "std.block.type",
-                include_str!("../../lib/src/std/block/type.hal"),
-            ),
-            (
-                "std.block.base",
-                include_str!("../../lib/src/std/block/base.hal"),
-            ),
-            (
-                "std.block.construct",
-                include_str!("../../lib/src/std/block/construct.hal"),
-            ),
-            (
-                "std.block.parse",
-                include_str!("../../lib/src/std/block/parse.hal"),
-            ),
-            ("std.block", include_str!("../../lib/src/std/block.hal")),
-            (
-                "code.test.protocol",
-                include_str!("../../lib/src/code/test/protocol.hal"),
-            ),
-            ("code.test", include_str!("../../lib/src/code/test.hal")),
-        ] {
-            self.register_resource(name, source);
-        }
-        for (name, source) in [
-            (
-                "std.foundation.string",
-                include_str!("../../lib/src/std/foundation/string.hal"),
-            ),
-            (
-                "std.foundation.promise",
-                include_str!("../../lib/src/std/foundation/promise.hal"),
-            ),
-            (
-                "std.foundation.bytes",
-                include_str!("../../lib/src/std/foundation/bytes.hal"),
-            ),
-            (
-                "std.foundation.coroutine",
-                include_str!("../../lib/src/std/foundation/coroutine.hal"),
-            ),
-            (
-                "std.foundation.file",
-                include_str!("../../lib/src/std/foundation/file.hal"),
-            ),
-            (
-                "std.foundation.host",
-                include_str!("../../lib/src/std/foundation/host.hal"),
-            ),
-            (
-                "std.foundation.socket",
-                include_str!("../../lib/src/std/foundation/socket.hal"),
-            ),
-            (
-                "std.foundation.edn",
-                include_str!("../../lib/src/std/foundation/edn.hal"),
-            ),
-            (
-                "std.foundation.json",
-                include_str!("../../lib/src/std/foundation/json.hal"),
-            ),
-        ] {
+        for &name in EAGER_HAL_RESOURCES {
+            let source = self
+                .resources
+                .get(name)
+                .cloned()
+                .ok_or_else(|| format!("embedded HAL catalog is missing {name}"))?;
             core::with_definition_origin(kernel::VarOrigin::HalFallback, || {
-                self.eval_text(source)
+                self.eval_text(&source)
             })?;
             self.loaded_resources.insert(name.into());
         }
@@ -704,8 +538,7 @@ impl Runtime {
                             continue;
                         }
                         if self.resources.contains_key(&target) {
-                            let source =
-                                self.resources.get(&target).cloned().unwrap_or_default();
+                            let source = self.resources.get(&target).cloned().unwrap_or_default();
                             self.eval_text(&source)?;
                             self.loaded_resources.insert(target);
                             continue;
@@ -1074,7 +907,14 @@ impl Runtime {
 
     /// Registers a host-supplied Hara resource. Resources are source text, not executable host code.
     pub fn register_resource(&mut self, name: &str, source: &str) {
+        let changed = self
+            .resources
+            .get(name)
+            .is_some_and(|existing| existing != source);
         self.resources.insert(name.into(), source.into());
+        if changed {
+            self.loaded_resources.remove(name);
+        }
     }
 
     /// Evaluates a registered resource in the current lexical namespace.
@@ -1497,10 +1337,12 @@ mod tests {
 
     fn module_case(id: &str) -> Vec<(Form, Form)> {
         fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> Option<&'a Form> {
-            entries.iter().find_map(|(candidate, value)| match candidate {
-                Form::Keyword(name) if name == key => Some(value),
-                _ => None,
-            })
+            entries
+                .iter()
+                .find_map(|(candidate, value)| match candidate {
+                    Form::Keyword(name) if name == key => Some(value),
+                    _ => None,
+                })
         }
 
         let manifest = kernel::parse_forms(include_str!(
@@ -1545,10 +1387,12 @@ mod tests {
 
     fn module_runtime_profile(runtime: &str, key: &str) -> Form {
         fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> Option<&'a Form> {
-            entries.iter().find_map(|(candidate, value)| match candidate {
-                Form::Keyword(name) if name == key => Some(value),
-                _ => None,
-            })
+            entries
+                .iter()
+                .find_map(|(candidate, value)| match candidate {
+                    Form::Keyword(name) if name == key => Some(value),
+                    _ => None,
+                })
         }
 
         let manifest = kernel::parse_forms(include_str!(
@@ -1572,10 +1416,12 @@ mod tests {
 
     fn host_conformance_case(id: &str) -> Vec<(Form, Form)> {
         fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> Option<&'a Form> {
-            entries.iter().find_map(|(candidate, value)| match candidate {
-                Form::Keyword(name) if name == key => Some(value),
-                _ => None,
-            })
+            entries
+                .iter()
+                .find_map(|(candidate, value)| match candidate {
+                    Form::Keyword(name) if name == key => Some(value),
+                    _ => None,
+                })
         }
 
         let document = kernel::parse_forms(include_str!(
@@ -1710,17 +1556,19 @@ mod tests {
         use crate::core::{PromiseState, SocketProvider};
         use std::io::Write;
         let sockets = core::NativeSocketProvider::default();
-        let server = sockets
-            .listen("127.0.0.1", 0, Rc::new(|_| {}))
-            .unwrap();
+        let server = sockets.listen("127.0.0.1", 0, Rc::new(|_| {})).unwrap();
         let (host, port) = sockets.endpoint(server).unwrap();
         let stream = sockets.events(server).unwrap();
         let mut client = std::net::TcpStream::connect((host.as_str(), port)).unwrap();
         let open = sockets.next(stream).unwrap().wait_state();
-        assert!(matches!(open, PromiseState::Fulfilled(value) if value.display().contains(":open")));
+        assert!(
+            matches!(open, PromiseState::Fulfilled(value) if value.display().contains(":open"))
+        );
         client.write_all(b"ping").unwrap();
         let data = sockets.next(stream).unwrap().wait_state();
-        assert!(matches!(data, PromiseState::Fulfilled(value) if value.display().contains(":data") && value.display().contains("112 105 110 103")));
+        assert!(
+            matches!(data, PromiseState::Fulfilled(value) if value.display().contains(":data") && value.display().contains("112 105 110 103"))
+        );
         sockets.close(server).unwrap();
     }
 
@@ -1799,7 +1647,9 @@ mod tests {
         let mut runtime = Runtime::new();
         runtime.require_resource("std.foundation.pretty").unwrap();
         assert_eq!(
-            runtime.eval_text("(std.foundation.pretty/render \"abc\")").unwrap(),
+            runtime
+                .eval_text("(std.foundation.pretty/render \"abc\")")
+                .unwrap(),
             "\"abc\""
         );
         let document = "[:group \"(\" [:nest 2 [:line] \"alpha\" [:line] \"beta\"] \")\"]";
@@ -2226,9 +2076,7 @@ mod tests {
             "\"{\\\"a\\\":1,\\\"b\\\":[true,null]}\""
         );
         assert_eq!(
-            runtime
-                .eval_text("(std.native.Json/write {\"a\" 1})")
-                .unwrap(),
+            runtime.eval_text("(Json/write {\"a\" 1})").unwrap(),
             "\"{\\\"a\\\":1}\""
         );
         assert_eq!(
@@ -2354,9 +2202,9 @@ mod tests {
                      (extend-type Box BoxOps \
                        (read [self] (field self :value)) \
                        (add [self amount] (+ (field self :value) amount))) \
-                     [(protocol-call BoxOps read (Box 40)) \
-                      (protocol-call BoxOps add (map->Box {:value 40}) 2) \
-                      (user/BoxOps/read (Box 41)) \
+                     [(read (Box 40)) \
+                      (add (map->Box {:value 40}) 2) \
+                      (user/read (Box 41)) \
                       (instance? Box (Box 1))])",
                 )
                 .unwrap(),
@@ -2365,10 +2213,67 @@ mod tests {
         assert!(runtime
             .eval_text(
                 "(do (defstruct Missing []) (defprotocol Needed (get [self])) \
-                     (protocol-call Needed get (Missing)))",
+                     (get (Missing)))",
             )
             .unwrap_err()
             .contains("missing protocol implementation: user/Needed/get"));
+    }
+
+    #[test]
+    fn guest_protocol_methods_reload_and_reject_collisions_atomically() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(do (defstruct Box [value]) \
+                     (defprotocol BoxOps (read [self])) \
+                     (extend-type Box BoxOps (read [self] (field self :value))) \
+                     [(read (Box 41)) (user/read (Box 42))])",
+                )
+                .unwrap(),
+            "[41 42]"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(defprotocol BoxOps (read [self]))")
+                .unwrap(),
+            "#protocol[user/BoxOps]"
+        );
+        let collision = runtime
+            .eval_text(
+                "(do (def ordinary 1) \
+                 (defprotocol Broken (fresh [self]) (ordinary [self])))",
+            )
+            .unwrap_err();
+        assert!(collision.contains("Protocol method Var already exists"));
+        assert_eq!(runtime.eval_text("ordinary").unwrap(), "1");
+        assert!(runtime.eval_text("fresh").is_err());
+        assert!(runtime.eval_text("Broken").is_err());
+        assert!(runtime
+            .eval_text("(protocol-call BoxOps read (Box 1))")
+            .is_err());
+        assert!(runtime.eval_text("(BoxOps/read (Box 1))").is_err());
+    }
+
+    #[test]
+    fn required_guest_protocol_methods_are_called_through_namespace_aliases() {
+        let mut runtime = Runtime::new();
+        runtime.register_resource(
+            "acme.box",
+            "(ns acme.box) \
+             (defstruct Box [value]) \
+             (defprotocol BoxOps (read [self])) \
+             (extend-type Box BoxOps (read [self] (field self :value)))",
+        );
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(ns consumer (:require [acme.box :as box])) \
+                     (box/read (acme.box/Box 42))"
+                )
+                .unwrap(),
+            "42"
+        );
     }
 
     #[test]
@@ -2606,12 +2511,12 @@ mod tests {
         assert_eq!(
             runtime
                 .eval_text(
-                    "(let [it (protocol-call std.foundation/IIter iter [1 2])] \
-                       [(protocol-call std.foundation/IIterator iter-next? it) \
-                        (protocol-call std.foundation/IIterator iter-next it) \
-                        (protocol-call std.foundation/IIterator iter-next it) \
-                        (protocol-call std.foundation/IIterator iter-next? it) \
-                        (protocol-call std.foundation/IClose close it)])"
+                    "(let [it (IIter/iter [1 2])] \
+                       [(IIterator/iter-next? it) \
+                        (IIterator/iter-next it) \
+                        (IIterator/iter-next it) \
+                        (IIterator/iter-next? it) \
+                        (IClose/close it)])"
                 )
                 .unwrap(),
             "[true 1 2 false nil]"
@@ -2625,12 +2530,12 @@ mod tests {
             runtime
                 .eval_text(
                     "(let [a (atom 1) seen (atom nil)] \
-                       (protocol-call std.foundation/IWatch watch-add a :log \
+                       (IWatch/watch-add a :log \
                          (fn [key ref old new] \
-                           (protocol-call std.foundation/IReset reset seen [key old new]))) \
-                       (protocol-call std.foundation/IReset reset a 2) \
-                       [(protocol-call std.foundation/IDeref deref a) \
-                        (protocol-call std.foundation/IDeref deref seen)])"
+                           (IReset/reset seen [key old new]))) \
+                       (IReset/reset a 2) \
+                       [(IDeref/deref a) \
+                        (IDeref/deref seen)])"
                 )
                 .unwrap(),
             "[2 [:log 1 2]]"
@@ -2688,13 +2593,13 @@ mod tests {
                 .eval_text(
                     "(require 'std.lib.substrate) \
                      (def node (std.lib.substrate/node-create \"node-1\")) \
-                     [(protocol-call std.lib.substrate.protocol/IService set-service node \"cache\" 42) \
-                      (protocol-call std.lib.substrate.protocol/IService get-service node \"cache\") \
-                      (protocol-call std.lib.substrate.protocol/ISpace set-space-state node \"main\" {:count 1}) \
-                      (protocol-call std.lib.substrate.protocol/ISpace get-space-state node \"main\") \
-                      (def subscription (protocol-call std.lib.substrate.protocol/IStream subscribe node \"main\" \"changed\" \"sub-1\" {})) \
-                      (protocol-call std.lib.substrate.protocol/ITransport receive-frame node subscription {:transport-id \"peer-a\"}) \
-                      (protocol-call std.lib.substrate.protocol/IStream list-subscriptions node \"main\" \"changed\")]",
+                     [(std.lib.substrate.protocol/set-service node \"cache\" 42) \
+                      (std.lib.substrate.protocol/get-service node \"cache\") \
+                      (std.lib.substrate.protocol/set-space-state node \"main\" {:count 1}) \
+                      (std.lib.substrate.protocol/get-space-state node \"main\") \
+                      (def subscription (std.lib.substrate.protocol/subscribe node \"main\" \"changed\" \"sub-1\" {})) \
+                      (std.lib.substrate.protocol/receive-frame node subscription {:transport-id \"peer-a\"}) \
+                      (std.lib.substrate.protocol/list-subscriptions node \"main\" \"changed\")]",
                 )
                 .unwrap(),
             "[42 42 {:count 1} {:count 1} #std.lib.substrate/SubstrateFrame{:id \"sub-1\" :kind :subscribe :space \"main\" :meta {} :action nil :args [] :reply-to nil :status nil :data nil :error nil :signal \"changed\" :cause nil} {\"peer-a\" {:id \"sub-1\" :meta {}}} [\"peer-a\"]]"
@@ -2709,14 +2614,14 @@ mod tests {
                 .eval_text(
                     "(require 'std.lib.substrate) \
                      (def node (std.lib.substrate/node-create \"node-1\")) \
-                     (protocol-call std.lib.substrate.protocol/ITransport attach-transport node \"peer-a\" \
+                     (std.lib.substrate.protocol/attach-transport node \"peer-a\" \
                        (fn [frame] \
-                         (protocol-call std.lib.substrate.protocol/IService set-service node \"sent\" \
-                           (protocol-call std.lib.substrate.protocol/IFrame frame-data frame)))) \
-                     (def subscription (protocol-call std.lib.substrate.protocol/IStream subscribe node \"main\" \"changed\" \"sub-1\" {})) \
-                     (protocol-call std.lib.substrate.protocol/ITransport receive-frame node subscription {:transport-id \"peer-a\"}) \
-                     (protocol-call std.lib.substrate.protocol/IStream publish node \"main\" \"changed\" 42 {:id \"evt-1\"}) \
-                     (protocol-call std.lib.substrate.protocol/IService get-service node \"sent\")",
+                         (std.lib.substrate.protocol/set-service node \"sent\" \
+                           (std.lib.substrate.protocol/frame-data frame)))) \
+                     (def subscription (std.lib.substrate.protocol/subscribe node \"main\" \"changed\" \"sub-1\" {})) \
+                     (std.lib.substrate.protocol/receive-frame node subscription {:transport-id \"peer-a\"}) \
+                     (std.lib.substrate.protocol/publish node \"main\" \"changed\" 42 {:id \"evt-1\"}) \
+                     (std.lib.substrate.protocol/get-service node \"sent\")",
                 )
                 .unwrap(),
             "42"
@@ -2726,13 +2631,13 @@ mod tests {
             runtime
                 .eval_text(
                     "(def requester (std.lib.substrate/node-create \"node-2\")) \
-                     (protocol-call std.lib.substrate.protocol/ITransport attach-transport requester \"peer-b\" \
+                     (std.lib.substrate.protocol/attach-transport requester \"peer-b\" \
                        (fn [frame] \
-                         (protocol-call std.lib.substrate.protocol/ITransport receive-frame requester \
+                         (std.lib.substrate.protocol/receive-frame requester \
                            (std.lib.substrate/node-frame :response \"res-1\" \"main\" {} nil [] \
-                             (protocol-call std.lib.substrate.protocol/IFrame frame-id frame) :ok 84 nil nil nil) \
+                             (std.lib.substrate.protocol/frame-id frame) :ok 84 nil nil nil) \
                            {:transport-id \"peer-b\"}))) \
-                     (def reply (protocol-call std.lib.substrate.protocol/IRequest request requester \"main\" \"sum\" [] \
+                     (def reply (std.lib.substrate.protocol/request requester \"main\" \"sum\" [] \
                                   {:id \"req-1\" :transport-id \"peer-b\"})) \
                      (promise/value reply)",
                 )
@@ -2749,10 +2654,10 @@ mod tests {
                 .eval_text(
                     "(require 'std.lib.substrate) \
                      (def node (std.lib.substrate/node-create \"node-1\")) \
-                     (protocol-call std.lib.substrate.protocol/ITransport attach-transport node \"peer-a\" (fn [frame] nil)) \
-                     (def cancelled (protocol-call std.lib.substrate.protocol/IRequest request node \"main\" \"wait\" [] \
+                     (std.lib.substrate.protocol/attach-transport node \"peer-a\" (fn [frame] nil)) \
+                     (def cancelled (std.lib.substrate.protocol/request node \"main\" \"wait\" [] \
                                       {:id \"req-cancel\" :transport-id \"peer-a\"})) \
-                     (protocol-call std.lib.substrate.protocol/IRequest cancel-request node \"req-cancel\" :cancelled) \
+                     (std.lib.substrate.protocol/cancel-request node \"req-cancel\" :cancelled) \
                      (promise/state cancelled)",
                 )
                 .unwrap(),
@@ -2937,40 +2842,12 @@ mod tests {
             }
         }
         fn wrapper_source(path: &str) -> &'static str {
-            match path {
-                "lib/src/std/foundation.hal" => include_str!("../../lib/src/std/foundation.hal"),
-                "lib/src/std/foundation/string.hal" => {
-                    include_str!("../../lib/src/std/foundation/string.hal")
-                }
-                "lib/src/std/foundation/bytes.hal" => {
-                    include_str!("../../lib/src/std/foundation/bytes.hal")
-                }
-                "lib/src/std/foundation/file.hal" => {
-                    include_str!("../../lib/src/std/foundation/file.hal")
-                }
-                "lib/src/std/foundation/host.hal" => {
-                    include_str!("../../lib/src/std/foundation/host.hal")
-                }
-                "lib/src/std/foundation/socket.hal" => {
-                    include_str!("../../lib/src/std/foundation/socket.hal")
-                }
-                "lib/src/std/foundation/promise.hal" => {
-                    include_str!("../../lib/src/std/foundation/promise.hal")
-                }
-                "lib/src/std/foundation/coroutine.hal" => {
-                    include_str!("../../lib/src/std/foundation/coroutine.hal")
-                }
-                "lib/src/std/foundation/kernel.hal" => {
-                    include_str!("../../lib/src/std/foundation/kernel.hal")
-                }
-                "lib/src/std/foundation/edn.hal" => {
-                    include_str!("../../lib/src/std/foundation/edn.hal")
-                }
-                "lib/src/std/foundation/json.hal" => {
-                    include_str!("../../lib/src/std/foundation/json.hal")
-                }
-                _ => panic!("unknown wrapper source: {path}"),
-            }
+            EMBEDDED_HAL_RESOURCES
+                .iter()
+                .find_map(|(_, resource_path, source)| {
+                    (*resource_path == path).then_some(*source)
+                })
+                .unwrap_or_else(|| panic!("unknown wrapper source: {path}"))
         }
 
         let contract = kernel::parse_forms(include_str!(
@@ -3031,7 +2908,10 @@ mod tests {
             let mut exposed = hal_wrappers.clone();
             exposed.extend(primitives);
             assert_eq!(
-                exposed.iter().collect::<std::collections::HashSet<_>>().len(),
+                exposed
+                    .iter()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len(),
                 methods.len(),
                 "{name} methods must have one Foundation exposure"
             );
@@ -3047,14 +2927,14 @@ mod tests {
                 let source = wrapper_source(path);
                 for method in &hal_wrappers {
                     assert!(
-                        source.contains(&format!("std.native.{name}/{method}")),
-                        "missing HAL wrapper for std.native.{name}/{method}"
+                        source.contains(&format!("{name}/{method}")),
+                        "missing HAL wrapper for {name}/{method}"
                     );
                 }
             }
             let mut type_cases = Vec::new();
             for method in &methods {
-                let symbol = format!("std.native.{name}/{method}");
+                let symbol = format!("{name}/{method}");
                 type_cases.push(format!(
                     "(native-method-result '{symbol} \
                      (fn [] ({symbol} nil nil nil nil nil nil nil nil nil)))"
@@ -3077,7 +2957,10 @@ mod tests {
         assert_eq!(
             entry(inventory, "method-count"),
             &Form::Number(
-                specified.iter().map(|(_, methods)| methods.len()).sum::<usize>() as i64
+                specified
+                    .iter()
+                    .map(|(_, methods)| methods.len())
+                    .sum::<usize>() as i64
             )
         );
 
@@ -3095,24 +2978,30 @@ mod tests {
                     "{direct_case} returned {result}"
                 );
             }
-            assert!(!type_cases.is_empty(), "{type_name} has no conformance cases");
+            assert!(
+                !type_cases.is_empty(),
+                "{type_name} has no conformance cases"
+            );
         }
         assert_eq!(
             direct_cases
                 .iter()
                 .map(|(_, type_cases)| type_cases.len())
                 .sum::<usize>(),
-            specified.iter().map(|(_, methods)| methods.len()).sum::<usize>()
+            specified
+                .iter()
+                .map(|(_, methods)| methods.len())
+                .sum::<usize>()
         );
         let mut runtime = Runtime::new();
         assert_eq!(
             runtime
                 .eval_text(
-                    "[(std.native.Error/message \
-                        (std.native.Error/new \"native failure\" {})) \
-                      (string? (std.native.Error/class \
-                        (std.native.Error/new \"native failure\" {}))) \
-                      (std.native.Runtime/load-string \"(+ 19 23)\")]"
+                    "[(Error/message \
+                        (Error/new \"native failure\" {})) \
+                      (string? (Error/class \
+                        (Error/new \"native failure\" {}))) \
+                      (Runtime/load-string \"(+ 19 23)\")]"
                 )
                 .unwrap(),
             "[\"native failure\" true 42]"
@@ -3125,20 +3014,20 @@ mod tests {
         assert_eq!(
             runtime
                 .eval_text(
-                    "[(str std.native/Maths) \
-                      (INamespaced/name std.native/Maths) \
-                      (INamespaced/namespace std.native/Maths) \
-                      (= std.native/Maths (with-meta std.native/Maths {:doc \"math\"})) \
-                      (std.native.Maths/sin 0) \
-                      (std.native.String/upper \"hara\") \
+                    "[(str std.native.Maths) \
+                      (INamespaced/name std.native.Maths) \
+                      (INamespaced/namespace std.native.Maths) \
+                      (= std.native.Maths (with-meta std.native.Maths {:doc \"math\"})) \
+                      (Maths/sin 0) \
+                      (String/upper \"hara\") \
                       (str/upper \"hara\") \
-                      (std.native.Bytes/u8 -1) \
+                      (Bytes/u8 -1) \
                       (bytes/u8 -1)]"
                 )
                 .unwrap(),
-            "[\"#<native-type std.native/Maths>\" \"Maths\" \"std.native\" true 0 \"HARA\" \"HARA\" 255 255]"
+            "[\"#<native-type std.native.Maths>\" \"Maths\" \"std.native\" true 0 \"HARA\" \"HARA\" 255 255]"
         );
-        assert!(runtime.eval_text("(std.native/Maths 1)").is_err());
+        assert!(runtime.eval_text("(std.native.Maths 1)").is_err());
         assert_eq!(
             runtime
                 .eval_text("(ns legacy.activation (:config {:builtins [inc]}))")
@@ -3155,29 +3044,57 @@ mod tests {
                 .eval_text(
                     "(ns startup.defaults) \
                      [(edn/write {:a 1}) \
-                      (= Maths std.native/Maths std.foundation/Maths) \
-                      (= Edn std.native/Edn std.foundation/Edn) \
-                      (= Json std.native/Json std.foundation/Json) \
-                      (= Host std.native/Host std.foundation/Host) \
-                      (= Arr std.native/Arr std.foundation/Arr) \
-                      (= Obj std.native/Obj std.foundation/Obj) \
-                      (let [arr (std.native.Arr/new 1 2)] \
-                        (std.native.Arr/set-index arr 1 7) \
-                        (std.native.Arr/get-index arr 1)) \
-                      (let [obj (std.native.Obj/new \"a\" 1)] \
-                        (std.native.Obj/set-key obj \"a\" 9) \
-                        (std.native.Obj/get-key obj \"a\")) \
+                      (= Maths std.native.Maths std.foundation/Maths) \
+                      (= Edn std.native.Edn std.foundation/Edn) \
+                      (= Json std.native.Json std.foundation/Json) \
+                      (= Host std.native.Host std.foundation/Host) \
+                      (= Arr std.native.Arr std.foundation/Arr) \
+                      (= Obj std.native.Obj std.foundation/Obj) \
+                      (let [arr (Arr/new 1 2)] \
+                        (Arr/set-index arr 1 7) \
+                        (Arr/get-index arr 1)) \
+                      (let [obj (Obj/new \"a\" 1)] \
+                        (Obj/set-key obj \"a\" 9) \
+                        (Obj/get-key obj \"a\")) \
                       (ICount/count [1 2 3])]"
                 )
                 .unwrap(),
             "[\"{:a 1}\" true true true true true true 7 9 3]"
         );
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(ns blank.native (:config {:blank true})) \
+                     [(= Iter std.native.Iter) \
+                      (Iter/iter-next (Iter/iter-map (fn [value] value) [1]))]"
+                )
+                .unwrap(),
+            "[true 1]"
+        );
         let symbols = runtime.visible_symbols();
         assert!(symbols.iter().any(|symbol| symbol == "edn/pretty"));
         for native_type in [
-            "Maths", "Numbers", "Bits", "String", "Bytes", "File", "Socket", "Promise",
-            "Coroutine", "Arr", "Obj", "Runtime", "Printer", "Edn", "Json", "Host", "Regex",
-            "UUID", "Error",
+            "Maths",
+            "Numbers",
+            "Bits",
+            "String",
+            "Bytes",
+            "File",
+            "Socket",
+            "Promise",
+            "Coroutine",
+            "Arr",
+            "Obj",
+            "Runtime",
+            "Printer",
+            "Edn",
+            "Json",
+            "Host",
+            "Regex",
+            "UUID",
+            "Error",
+            "Iter",
+            "Kernel",
         ] {
             assert!(
                 symbols.iter().any(|symbol| symbol == native_type),
@@ -3542,26 +3459,22 @@ mod tests {
             metadata.get_keyword("arglists"),
             Some(&crate::lang::data::MetadataValue::Vector(vec![
                 crate::lang::data::MetadataValue::Vector(vec![
-                    crate::lang::data::MetadataValue::Symbol(
-                        crate::lang::data::Symbol::from("value")
-                    )
+                    crate::lang::data::MetadataValue::Symbol(crate::lang::data::Symbol::from(
+                        "value"
+                    ))
                 ])
             ]))
         );
         assert_eq!(
             metadata.get_keyword("schema"),
             Some(&crate::lang::data::MetadataValue::Vector(vec![
-                crate::lang::data::MetadataValue::Keyword(
-                    crate::lang::data::Keyword::from("fn")
-                ),
+                crate::lang::data::MetadataValue::Keyword(crate::lang::data::Keyword::from("fn")),
                 crate::lang::data::MetadataValue::Vector(vec![
-                    crate::lang::data::MetadataValue::Keyword(
-                        crate::lang::data::Keyword::from("int")
-                    )
+                    crate::lang::data::MetadataValue::Keyword(crate::lang::data::Keyword::from(
+                        "int"
+                    ))
                 ]),
-                crate::lang::data::MetadataValue::Keyword(
-                    crate::lang::data::Keyword::from("int")
-                )
+                crate::lang::data::MetadataValue::Keyword(crate::lang::data::Keyword::from("int"))
             ]))
         );
     }
@@ -3591,6 +3504,29 @@ mod tests {
                 "[\"Returns the portable character count of value.\"",
                 " [[value]] [:fn [:str] :int]]"
             )
+        );
+    }
+
+    #[test]
+    fn definitions_accept_source_metadata_around_hir_syntax() {
+        let mut runtime = Runtime::new();
+        runtime
+            .eval_text(concat!(
+                "(defn wrapped ^{:line 1} [value] value)",
+                " (defn wrapped-many",
+                " ^{:line 2} ([value] value)",
+                " ^{:line 3} ([left right] (+ left right)))"
+            ))
+            .unwrap();
+        assert_eq!(
+            runtime
+                .eval_text(concat!(
+                    "[(wrapped 42)",
+                    " (wrapped-many 42)",
+                    " (wrapped-many 19 23)]"
+                ))
+                .unwrap(),
+            "[42 42 42]"
         );
     }
 
@@ -3662,6 +3598,7 @@ mod tests {
                     "              (fn [timeout] timeout))",
                     "       timed (check (fn [] (promise/from 42)) 42",
                     "                    {:timer timer :timeout 25})",
+                    "       positional (run '[code])",
                     "       cancelled",
                     "       (run {:namespace \"code.test-rust-probe\"",
                     "             :control (function-control (fn [fact] true))})]",
@@ -3670,10 +3607,47 @@ mod tests {
                     "  (count (:checks (first (:results summary))))",
                     "  (:status timed)",
                     "  (:timeout timed)",
+                    "  (:facts positional)",
                     "  (:cancelled (:counts cancelled))])"
                 ))
                 .unwrap(),
-            "[:passed 1 2 :timeout 25 1]"
+            "[:passed 1 2 :timeout 25 1 1]"
+        );
+    }
+
+    #[test]
+    fn foundation_code_test_compatibility_namespaces_are_embedded() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(ns code-test-compat-rust-probe \
+                       (:require [code.test :as test] \
+                                 [code.test.checker.common :as common] \
+                                 [code.test.checker.collection :as collection] \
+                                 [code.test.checker.logic :as logic] \
+                                 [code.test.base.runtime :as runtime] \
+                                 [code.test.compile.types :as types] \
+                                 [code.test.task :as task])) \
+                     (let [fact (types/Fact :core 'id 'probe nil nil \
+                                            \"portable\" 1 1 nil nil \
+                                            (fn [] 42) {})] \
+                       [(common/succeeded? \
+                         (common/verify (common/exactly 1) 1)) \
+                        (:pass (test/check \
+                                (fn [] {:a 1 :b 2}) \
+                                (collection/contains-map {:a 1}))) \
+                        (:pass (test/check \
+                                (fn [] 3) \
+                                (logic/all (fn [value] (number? value)) \
+                                           (fn [value] (= 1 (mod value 2)))))) \
+                        (types/fact? fact) \
+                        (fact) \
+                        (task/process-test-args \
+                         [\":only\" \"std\" \"code\"])])"
+                )
+                .unwrap(),
+            "[true true true true 42 {:ns [std code]}]"
         );
     }
 
@@ -3706,20 +3680,62 @@ mod tests {
             runtime
                 .eval_text(
                     "(ns std-task-rust-probe \
-                       (:require [std.task :as task] [std.task.bulk :as bulk])) \
+                       (:require [std.lib.task :as task] \
+                                 [std.lib.task.bulk :as bulk])) \
                      (task/deftask double-task \
                        {:template :default \
                         :main {:fn (fn [value] (* 2 value))}}) \
+                     (task/deftask selected-task \
+                       {:template :default \
+                        :main {:fn (fn [value suffix] (str value suffix))} \
+                        :item {:list (fn [lookup env] \
+                                      ['code.alpha 'code.beta 'std.gamma])}}) \
+                     (task/deftask aggregate-task \
+                       {:template :default \
+                        :main {:fn (fn [value] {:score value})} \
+                        :result {:ignore (fn [data] \
+                                           (= 0 (get data :score))) \
+                                 :output (fn [data] (get data :score))} \
+                        :summary {:aggregate \
+                                  {:score-total \
+                                   [(fn [data] (get data :score)) \
+                                    (fn [total score] (+ total score)) 0]}}}) \
+                     (task/deftask constructed-task \
+                       {:template :default \
+                        :main {:argcount 4 \
+                               :fn (fn [input params lookup env] \
+                                     [input (get params :flag) \
+                                      (get lookup :input) \
+                                      (get env :environment)])} \
+                        :construct \
+                        {:input (fn [task] 7) \
+                         :env (fn [options] {:environment :ready}) \
+                         :lookup (fn [task options] \
+                                   {:input (get options :environment)})} \
+                        :params {:flag true}}) \
                      (let [reporter (bulk/event-reporter) \
                            output (task/invoke double-task [1 2 3] \
-                                               {:reporter reporter :return :all})] \
+                                               {:reporter reporter :return :all \
+                                                :package :records}) \
+                           aggregate-output \
+                           (task/invoke aggregate-task [0 2 3] \
+                                        {:return :all})] \
                        [(get output :summary) \
                         (vec (map (fn [result] (get result :data)) \
                                   (get output :results))) \
-                        (count (bulk/reporter-events reporter))])"
+                        (count (bulk/reporter-events reporter)) \
+                        (task/invoke double-task 4) \
+                        (vec (map (fn [result] (get result :data)) \
+                                  (task/invoke selected-task 'code \
+                                               {:package :records} \
+                                               :args \"!\"))) \
+                        (get aggregate-output :results) \
+                        (get (get aggregate-output :summary) \
+                             :score-total) \
+                        (task/invoke constructed-task)])"
                 )
                 .unwrap(),
-            "[{:items 3 :results 3 :warnings 0 :errors 0} [2 4 6] 8]"
+            "[{:items 3 :results 3 :warnings 0 :errors 0 :cumulative 0 :elapsed 0} [2 4 6] 8 8 [\"code.alpha!\" \"code.beta!\"] {2 2 3 3} 5 [7 true :ready :ready]]"
         );
     }
 
@@ -3730,20 +3746,72 @@ mod tests {
             runtime
                 .eval_text(
                     "(ns std-block-rust-probe \
-                       (:require [std.block :as block])) \
+                       (:require [std.lib.block :as block] \
+                                 [std.lib.block.grid :as grid] \
+                                 [std.lib.block.reader :as reader])) \
                      (let [parsed (block/parse-string \"[1 2 3]\") \
                            first-block (block/parse-first \"[1 2 3]\") \
-                           spaces (block/spaces 3)] \
+                           spaces (block/spaces 3) \
+                           wrapped (block/layout '(if ready [1 2] [3 4]) \
+                                                 {:width 10}) \
+                           gridded (grid/grid \
+                                    (block/parse-first \"(if\\nready\\ndone)\") \
+                                    0 {:rules {'if {:indent 1}}}) \
+                           modified (block/parse-first \"[1 #_2 3]\") \
+                           original (block/block [1 2]) \
+                           input-reader (reader/create \"ab\\ncd\") \
+                           first-two (reader/read-times input-reader \
+                                                        reader/read-char 2) \
+                           newline (reader/read-char input-reader) \
+                           edited (std.lib.zip/result \
+                                   (std.lib.zip/replace-right \
+                                    (std.lib.zip/step-right \
+                                     (std.lib.zip/step-right \
+                                     (std.lib.zip/step-inside \
+                                      (block/block-zip original)))) \
+                                    (block/block 3)))] \
                        [(block/string parsed) \
                         (block/value parsed) \
                         (block/type first-block) \
                         (block/tag first-block) \
-                        (vec (map block/value (block/children first-block))) \
+                        (vec (map block/value \
+                                  (filter block/code? \
+                                          (block/children first-block)))) \
                         (block/string spaces) \
-                        (block/space? spaces)])"
+                        (block/space? spaces) \
+                        (block/string wrapped) \
+                        (block/string gridded) \
+                        (block/value modified) \
+                        (block/child-values modified) \
+                        (block/string original) \
+                        (block/string edited) \
+                        first-two \
+                        (reader/reader-position input-reader) \
+                        (reader/read-to-boundary input-reader) \
+                        (block/value (block/parse-string \"[4 5]\"))])"
                 )
                 .unwrap(),
-            "[\"[1 2 3]\" [1 2 3] :container :vector [1 2 3] \"   \" true]"
+            "[\"[1 2 3]\" [1 2 3] :container :vector [1 2 3] \"   \" true \"(if\\n  ready\\n  [1 2]\\n  [3 4]\\n)\" \"(if\\n  ready\\n  done)\" [1 3] [1 3] \"[1 2]\" \"[1 3]\" [\"a\" \"b\"] [2 1] \"cd\" [4 5]]"
+        );
+    }
+
+    #[test]
+    fn portable_zip_is_embedded_and_preserves_original_values() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(ns std-lib-zip-rust-probe \
+                       (:require [std.lib.zip :as zip])) \
+                     (let [root [1 2 3] \
+                           location (zip/step-right \
+                                     (zip/step-inside (zip/vector-zip root))) \
+                           edited (zip/replace-right \
+                                   (zip/insert-left location 9) 8)] \
+                       [(zip/result edited) root])"
+                )
+                .unwrap(),
+            "[[1 9 8 3] [1 2 3]]"
         );
     }
 
@@ -3832,7 +3900,7 @@ mod tests {
             runtime.eval_text("(type #sample [1 2])").unwrap(),
             ":hara.type/tagged-literal"
         );
-        assert_eq!(runtime.eval_text("(protocol-call ILookup lookup (protocol-call IObjType meta (protocol-call IObjType with-meta (cons 0 [1]) {:doc \"cons\"})) :doc)").unwrap(), "\"cons\"");
+        assert_eq!(runtime.eval_text("(ILookup/lookup (IObjType/meta (IObjType/with-meta (cons 0 [1]) {:doc \"cons\"})) :doc)").unwrap(), "\"cons\"");
     }
 
     #[test]
@@ -3853,19 +3921,19 @@ mod tests {
         );
         assert_eq!(
             runtime
-                .eval_text("(protocol-call INamespaced name :core/answer)")
+                .eval_text("(INamespaced/name :core/answer)")
                 .unwrap(),
             "\"answer\""
         );
         assert_eq!(
             runtime
-                .eval_text("(protocol-call INamespaced namespace (symbol \"core\" \"answer\"))")
+                .eval_text("(INamespaced/namespace (symbol \"core\" \"answer\"))")
                 .unwrap(),
             "\"core\""
         );
         assert_eq!(
             runtime
-                .eval_text("(protocol-call INamespaced namespace :answer)")
+                .eval_text("(INamespaced/namespace :answer)")
                 .unwrap(),
             "nil"
         );
@@ -3909,7 +3977,7 @@ mod tests {
         assert!(matches!(promoted, core::Value::Vector(values) if values.len() == 9));
         assert_eq!(
             runtime
-                .eval_text("(protocol-call ILookup lookup (protocol-call IObjType meta (protocol-call IObjType with-meta [1] {:doc \"tuple\"})) :doc)")
+                .eval_text("(ILookup/lookup (IObjType/meta (IObjType/with-meta [1] {:doc \"tuple\"})) :doc)")
                 .unwrap(),
             "\"tuple\""
         );
@@ -4433,26 +4501,24 @@ mod tests {
         let mut runtime = Runtime::new();
         assert_eq!(
             runtime
-                .eval_text("(iter-next (map (fn [x] (* x 2)) [1 2]))")
+                .eval_text("(nth (map (fn [x] (* x 2)) [1 2]) 0)")
                 .unwrap(),
             "2"
         );
         assert_eq!(
             runtime
-                .eval_text("(iter-next (filter (fn [x] (= x 2)) [1 2 3]))")
+                .eval_text("(nth (filter (fn [x] (= x 2)) [1 2 3]) 0)")
                 .unwrap(),
             "2"
         );
         assert_eq!(
             runtime
-                .eval_text("(iter-next (take 1 (drop 1 [1 2 3])))")
+                .eval_text("(nth (take 1 (drop 1 [1 2 3])) 0)")
                 .unwrap(),
             "2"
         );
         assert_eq!(
-            runtime
-                .eval_text("(nth (iter-next (zip [1] [2])) 1)")
-                .unwrap(),
+            runtime.eval_text("(nth (nth (zip [1] [2]) 0) 1)").unwrap(),
             "2"
         );
         assert_eq!(
@@ -4473,7 +4539,7 @@ mod tests {
     fn seq_boundaries_and_source_aware_transforms_match_design() {
         let mut runtime = Runtime::new();
         assert_eq!(
-            runtime.eval_text("(seq? (map inc [1 2 3]))").unwrap(),
+            runtime.eval_text("(vector? (map inc [1 2 3]))").unwrap(),
             "true"
         );
         assert_eq!(runtime.eval_text("(first (map inc [1 2 3]))").unwrap(), "2");
@@ -4564,21 +4630,14 @@ mod tests {
     #[test]
     fn evaluator_protocol_calls_cover_collections_and_bytes() {
         let mut runtime = Runtime::new();
+        assert_eq!(runtime.eval_text("(ICount/count [1 2 3])").unwrap(), "3");
         assert_eq!(
-            runtime
-                .eval_text("(protocol-call ICount count [1 2 3])")
-                .unwrap(),
-            "3"
-        );
-        assert_eq!(
-            runtime
-                .eval_text("(protocol-call INth nth (bytes 1 -3) 1)")
-                .unwrap(),
+            runtime.eval_text("(INth/nth (bytes 1 -3) 1)").unwrap(),
             "-3"
         );
         assert_eq!(
             runtime
-                .eval_text(r#"(protocol-call ILookup lookup {"a" 9} "a")"#)
+                .eval_text(r#"(ILookup/lookup {"a" 9} "a")"#)
                 .unwrap(),
             "9"
         );
@@ -4590,28 +4649,16 @@ mod tests {
         assert_eq!(runtime.eval_text("(has? [10 20] 10)").unwrap(), "false");
         assert_eq!(
             runtime
-                .eval_text(r#"(protocol-call IAssoc assoc {"a" 9} "b" 10)"#)
+                .eval_text(r#"(IAssoc/assoc {"a" 9} "b" 10)"#)
                 .unwrap(),
             r#"{"a" 9 "b" 10}"#
         );
+        assert_eq!(runtime.eval_text(r#"(IConj/conj [1] 2)"#).unwrap(), "[1 2]");
         assert_eq!(
             runtime
-                .eval_text(r#"(protocol-call IConj conj [1] 2)"#)
-                .unwrap(),
-            "[1 2]"
-        );
-        assert_eq!(
-            runtime
-                .eval_text(r#"(protocol-call IDissoc dissoc {"a" 9 "b" 10} "a")"#)
+                .eval_text(r#"(IDissoc/dissoc {"a" 9 "b" 10} "a")"#)
                 .unwrap(),
             r#"{"b" 10}"#
-        );
-        runtime
-            .protocols
-            .register("ITest", "echo", protocol_identity);
-        assert_eq!(
-            runtime.eval_text("(protocol-call ITest echo 7)").unwrap(),
-            "7"
         );
         runtime
             .protocols
@@ -4619,9 +4666,9 @@ mod tests {
         assert_eq!(runtime.eval_text("(iter-next (iter 99))").unwrap(), "7");
         assert!(runtime.has_protocol_method("IAssoc", "assoc"));
         assert!(runtime
-            .eval_text("(protocol-call Missing nope 1)")
+            .eval_text("(ICount/count 1)")
             .unwrap_err()
-            .contains("missing protocol method"));
+            .contains("protocol/unsupported-receiver"));
     }
 
     #[test]
@@ -4718,10 +4765,11 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing :{key}"))
         }
 
-        let manifest =
-            kernel::parse_forms(include_str!("../../specs/language/draft/conformance/l0.edn"))
-                .unwrap()
-                .remove(0);
+        let manifest = kernel::parse_forms(include_str!(
+            "../../specs/language/draft/conformance/l0.edn"
+        ))
+        .unwrap()
+        .remove(0);
         let Form::Map(manifest) = manifest else {
             panic!("L0 conformance corpus must be a map")
         };
@@ -4796,10 +4844,12 @@ mod tests {
     #[test]
     fn issue_134_module_scenarios_have_machine_readable_acceptance_data() {
         fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> Option<&'a Form> {
-            entries.iter().find_map(|(candidate, value)| match candidate {
-                Form::Keyword(name) if name == key => Some(value),
-                _ => None,
-            })
+            entries
+                .iter()
+                .find_map(|(candidate, value)| match candidate {
+                    Form::Keyword(name) if name == key => Some(value),
+                    _ => None,
+                })
         }
 
         let manifest = kernel::parse_forms(include_str!(
@@ -4823,7 +4873,10 @@ mod tests {
                 panic!("module conformance case is missing :id")
             };
             assert!(ids.insert(id.clone()), "duplicate module case :{id}");
-            assert!(matches!(entry(case, "area"), Some(Form::Keyword(_))), ":{id}");
+            assert!(
+                matches!(entry(case, "area"), Some(Form::Keyword(_))),
+                ":{id}"
+            );
             assert!(
                 matches!(entry(case, "scenario"), Some(Form::Keyword(_))),
                 ":{id}"
@@ -4902,7 +4955,10 @@ mod tests {
             ":unloaded"
         );
         assert_eq!(runtime.eval_text("lazy/answer").unwrap(), "42");
-        assert_eq!(runtime.eval_text("lazy/observed-state").unwrap(), ":loading");
+        assert_eq!(
+            runtime.eval_text("lazy/observed-state").unwrap(),
+            ":loading"
+        );
         assert_eq!(
             runtime.eval_text("(ns-state 'example.lazy)").unwrap(),
             ":loaded"
@@ -4914,10 +4970,7 @@ mod tests {
             "1"
         );
 
-        runtime.register_resource(
-            "example.lazy",
-            "(ns example.lazy) (def answer 43)",
-        );
+        runtime.register_resource("example.lazy", "(ns example.lazy) (def answer 43)");
         runtime
             .eval_text("(require [example.lazy :as lazy :reload true])")
             .unwrap();
@@ -4983,10 +5036,7 @@ mod tests {
             Some("example.broken".into())
         );
 
-        runtime.register_resource(
-            "example.broken",
-            "(ns example.broken) (def answer 42)",
-        );
+        runtime.register_resource("example.broken", "(ns example.broken) (def answer 42)");
         let sticky_error = runtime.eval_text("broken/answer").unwrap_err();
         assert!(
             sticky_error.contains("explicit reload"),
@@ -5036,10 +5086,7 @@ mod tests {
         );
 
         let mut runtime = Runtime::new();
-        runtime.register_resource(
-            "graph.dependency",
-            "(ns graph.dependency) (def value 41)",
-        );
+        runtime.register_resource("graph.dependency", "(ns graph.dependency) (def value 41)");
         runtime.register_resource(
             "graph.root",
             concat!(
@@ -5060,9 +5107,7 @@ mod tests {
             "1"
         );
         assert_eq!(
-            runtime
-                .eval_text("(module-revision 'graph.root)")
-                .unwrap(),
+            runtime.eval_text("(module-revision 'graph.root)").unwrap(),
             "1"
         );
         assert_eq!(
@@ -5079,9 +5124,7 @@ mod tests {
             .eval_text("(require [graph.root :as graph])")
             .unwrap();
         assert_eq!(
-            runtime
-                .eval_text("(module-revision 'graph.root)")
-                .unwrap(),
+            runtime.eval_text("(module-revision 'graph.root)").unwrap(),
             "1"
         );
 
@@ -5157,7 +5200,10 @@ mod tests {
             Form::Bool(true)
         );
         assert_eq!(
-            module_expect("namespace/with-ns-lexical-isolation", "caller-locals-visible"),
+            module_expect(
+                "namespace/with-ns-lexical-isolation",
+                "caller-locals-visible"
+            ),
             Form::Bool(false)
         );
 
@@ -5205,7 +5251,10 @@ mod tests {
             .eval_text("(ns source) (def ^{:doc \"copied\"} answer 41)")
             .unwrap();
         runtime.eval_text("(ns target)").unwrap();
-        assert_eq!(runtime.eval_text("(deref (var source/answer))").unwrap(), "41");
+        assert_eq!(
+            runtime.eval_text("(deref (var source/answer))").unwrap(),
+            "41"
+        );
         runtime
             .eval_text("(intern-var 'target 'answer (var source/answer))")
             .unwrap();
@@ -5249,9 +5298,7 @@ mod tests {
         let mut runtime = Runtime::new();
         runtime.register_resource("identity.source", "(ns identity.source) (def answer 41)");
         runtime
-            .eval_text(
-                "(require [identity.source :as source :refer [answer]])"
-            )
+            .eval_text("(require [identity.source :as source :refer [answer]])")
             .unwrap();
         let source = runtime
             .namespace_registry
@@ -5279,10 +5326,7 @@ mod tests {
     #[test]
     fn issue_134_macro_reload_only_changes_new_compilations() {
         assert_eq!(
-            module_expect(
-                "macro/reload-new-compilation",
-                "existing-call-target"
-            ),
+            module_expect("macro/reload-new-compilation", "existing-call-target"),
             Form::Keyword("unchanged".into())
         );
         assert_eq!(
@@ -5298,7 +5342,7 @@ mod tests {
         runtime
             .eval_text(
                 "(require [reload.macros :refer-macros [answer]]) \
-                 (def compiled-before (macroexpand '(answer)))"
+                 (def compiled-before (macroexpand '(answer)))",
             )
             .unwrap();
         assert_eq!(runtime.eval_text("compiled-before").unwrap(), "41");
@@ -5308,9 +5352,7 @@ mod tests {
             "(ns reload.macros) (defmacro answer [] 42)",
         );
         runtime
-            .eval_text(
-                "(require [reload.macros :reload true :refer-macros [answer]])"
-            )
+            .eval_text("(require [reload.macros :reload true :refer-macros [answer]])")
             .unwrap();
         assert_eq!(runtime.eval_text("compiled-before").unwrap(), "41");
         assert_eq!(runtime.eval_text("(answer)").unwrap(), "42");
@@ -5342,17 +5384,21 @@ mod tests {
             .eval(
                 "alpha",
                 "(do (require [session.module :as module :refer-macros [chosen]]) \
-                     (def local-answer (chosen)) nil)"
+                     (def local-answer (chosen)) nil)",
             )
             .unwrap();
         assert_eq!(kernel.eval("alpha", "local-answer").unwrap(), "41");
         assert!(kernel.eval("beta", "local-answer").is_err());
         assert_eq!(
-            kernel.eval("alpha", "(module-revision 'session.module)").unwrap(),
+            kernel
+                .eval("alpha", "(module-revision 'session.module)")
+                .unwrap(),
             "1"
         );
         assert_eq!(
-            kernel.eval("beta", "(module-revision 'session.module)").unwrap(),
+            kernel
+                .eval("beta", "(module-revision 'session.module)")
+                .unwrap(),
             "0"
         );
         assert!(kernel.eval("beta", "(chosen)").is_err());
@@ -5375,11 +5421,9 @@ mod tests {
 
         use crate::kernel::hir::encode_hir_module;
 
-        let source =
-            "(ns parity.demo) (defn value \"answer\" [] 42) (value)";
+        let source = "(ns parity.demo) (defn value \"answer\" [] 42) (value)";
         let forms = kernel::parse_forms(source).unwrap();
-        let artifact =
-            encode_hir_module("parity.demo", "parity/demo.hal", source, forms);
+        let artifact = encode_hir_module("parity.demo", "parity/demo.hal", source, forms);
 
         let mut source_runtime = Runtime::new();
         let mut hir_runtime = Runtime::new();
@@ -5420,10 +5464,7 @@ mod tests {
             Form::Bool(true)
         );
         assert_eq!(
-            module_expect(
-                "module/resource-precedence",
-                "declared-by-runtime-profile"
-            ),
+            module_expect("module/resource-precedence", "declared-by-runtime-profile"),
             Form::Bool(true)
         );
         assert_eq!(
@@ -5493,20 +5534,14 @@ mod tests {
             "nil"
         );
         assert!(kernel
-            .eval(
-                "alpha",
-                "(binding [*answer* 2] (throw :binding-failed))"
-            )
+            .eval("alpha", "(binding [*answer* 2] (throw :binding-failed))")
             .is_err());
         assert_eq!(kernel.eval("alpha", "*answer*").unwrap(), "1");
         assert_eq!(kernel.eval("beta", "*answer*").unwrap(), "10");
 
         assert_eq!(
             kernel
-                .eval(
-                    "alpha",
-                    "{:answer [1 2 {:nested #{:immutable}}]}"
-                )
+                .eval("alpha", "{:answer [1 2 {:nested #{:immutable}}]}")
                 .unwrap(),
             "{:answer [1 2 {:nested #{:immutable}}]}"
         );
@@ -5562,10 +5597,7 @@ mod tests {
             "nil"
         );
         assert!(kernel.eval("repl", "missing-symbol").is_err());
-        assert_eq!(
-            kernel.session_namespace("repl").unwrap(),
-            "retained.repl"
-        );
+        assert_eq!(kernel.session_namespace("repl").unwrap(), "retained.repl");
         assert_eq!(kernel.eval("repl", "answer").unwrap(), "42");
     }
 
@@ -5585,7 +5617,7 @@ mod tests {
         let second = Runtime::new();
         assert_eq!(
             first
-                .eval_text("(= Host std.native/Host std.foundation/Host)")
+                .eval_text("(= Host std.native.Host std.foundation/Host)")
                 .unwrap(),
             "true"
         );
@@ -5628,7 +5660,7 @@ mod tests {
             first
                 .eval_text(
                     "(try
-                       (deref (std.native.Host/call \"missing\" \"missing\" []))
+                       (deref (Host/call \"missing\" \"missing\" []))
                        (catch error
                          [(ex-message error)
                           (get (ex-data error) :error/code)]))"
@@ -5641,7 +5673,7 @@ mod tests {
                 .eval_text(
                     "(deref
                        (promise/catch
-                         (std.native.Host/call \"missing\" \"missing\" [])
+                         (Host/call \"missing\" \"missing\" [])
                          (fn [error]
                            (get (ex-data error) :error/code))))"
                 )
@@ -5653,7 +5685,7 @@ mod tests {
                 .eval(
                     "host-transfer",
                     "(try
-                       (deref (std.native.Host/call \"missing\" \"missing\" []))
+                       (deref (Host/call \"missing\" \"missing\" []))
                        (catch error
                          (get (ex-data error) :error/code)))"
                 )
@@ -5821,7 +5853,7 @@ mod tests {
         assert_eq!(runtime.eval_text("(range 3)").unwrap(), "<seq>");
         assert_eq!(
             runtime
-                .eval_text("(seq? (map (fn [x] (+ x 1)) [1 2 3]))")
+                .eval_text("(vector? (map (fn [x] (+ x 1)) [1 2 3]))")
                 .unwrap(),
             "true"
         );
@@ -5878,11 +5910,11 @@ mod tests {
     fn lazy_iterator_generators_are_bounded_by_consumers() {
         let mut runtime = Runtime::new();
         assert_eq!(
-            runtime.eval_text("(count (take 4 (repeat :x)))").unwrap(),
+            runtime.eval_text("(count ((take 4) (repeat :x)))").unwrap(),
             "4"
         );
         assert_eq!(
-            runtime.eval_text("(first (drop 3 (repeat :x)))").unwrap(),
+            runtime.eval_text("(first ((drop 3) (repeat :x)))").unwrap(),
             ":x"
         );
         assert!(runtime
@@ -5891,20 +5923,20 @@ mod tests {
             .contains("finite collection"));
         assert_eq!(
             runtime
-                .eval_text("(count (take 3 (repeatedly (constantly 7))))")
+                .eval_text("(count ((take 3) (repeatedly (constantly 7))))")
                 .unwrap(),
             "3"
         );
         assert_eq!(
             runtime
-                .eval_text("(count (take 5 (iterate (fn [x] (+ x 2)) 0)))")
+                .eval_text("(count ((take 5) (iterate (fn [x] (+ x 2)) 0)))")
                 .unwrap(),
             "5"
         );
         assert_eq!(
             runtime
                 .eval_text(
-                    "(count (take 3 (take-while (fn [x] (< x 10)) (iterate (fn [x] (+ x 2)) 0))))"
+                    "(count ((take 3) ((take-while (fn [x] (< x 10))) (iterate (fn [x] (+ x 2)) 0))))"
                 )
                 .unwrap(),
             "3"
@@ -5912,59 +5944,65 @@ mod tests {
         assert_eq!(
             runtime
                 .eval_text(
-                    "(first (take 2 (drop-while (fn [x] (< x 4)) (iterate (fn [x] (+ x 2)) 0))))"
+                    "(first ((take 2) ((drop-while (fn [x] (< x 4))) (iterate (fn [x] (+ x 2)) 0))))"
                 )
                 .unwrap(),
             "4"
         );
         assert_eq!(
             runtime
-                .eval_text("(nth (take 4 (map (fn [x] (* x 2)) (iterate (fn [x] (+ x 1)) 0))) 3)")
+                .eval_text(
+                    "(nth ((take 4) ((map (fn [x] (* x 2))) (iterate (fn [x] (+ x 1)) 0))) 3)"
+                )
                 .unwrap(),
             "6"
         );
         assert_eq!(
             runtime
                 .eval_text(
-                    "(first (take 2 (filter (fn [x] (even? x)) (iterate (fn [x] (+ x 1)) 0))))"
+                    "(first ((take 2) ((filter (fn [x] (even? x))) (iterate (fn [x] (+ x 1)) 0))))"
                 )
                 .unwrap(),
             "0"
         );
         assert_eq!(
             runtime
-                .eval_text("(nth (take 4 (mapcat (fn [x] [x x]) (iterate (fn [x] (+ x 1)) 0))) 3)")
+                .eval_text(
+                    "(nth ((take 4) ((mapcat (fn [x] [x x])) (iterate (fn [x] (+ x 1)) 0))) 3)"
+                )
                 .unwrap(),
             "1"
         );
-        assert_eq!(runtime.eval_text("(first (take 2 (keep (fn [x] (if (even? x) (* x 10) nil)) (iterate (fn [x] (+ x 1)) 0))))").unwrap(), "0");
+        assert_eq!(runtime.eval_text("(first ((take 2) ((keep (fn [x] (if (even? x) (* x 10) nil))) (iterate (fn [x] (+ x 1)) 0))))").unwrap(), "0");
         assert_eq!(
             runtime
-                .eval_text("(nth (take 3 (zip (iterate (fn [x] (+ x 1)) 0) (repeat :x))) 2)")
+                .eval_text(
+                    "(nth ((take 3) (Iter/iter-zip (iterate (fn [x] (+ x 1)) 0) (repeat :x))) 2)"
+                )
                 .unwrap(),
             "[2 :x]"
         );
         assert_eq!(
             runtime
-                .eval_text("(nth (take 4 (interleave (iterate (fn [x] (+ x 1)) 0) (repeat :x))) 3)")
+                .eval_text("(nth ((take 4) (Iter/iter-interleave (iterate (fn [x] (+ x 1)) 0) (repeat :x))) 3)")
                 .unwrap(),
             ":x"
         );
         assert_eq!(
             runtime
-                .eval_text("(nth (take 3 (partition-all 2 (iterate (fn [x] (+ x 1)) 0))) 2)")
+                .eval_text("(nth ((take 3) ((partition-all 2) (iterate (fn [x] (+ x 1)) 0))) 2)")
                 .unwrap(),
             "[4 5]"
         );
         assert_eq!(
             runtime
-                .eval_text("(nth (take 2 (partition 2 (iterate (fn [x] (+ x 1)) 0))) 1)")
+                .eval_text("(nth ((take 2) ((partition 2) (iterate (fn [x] (+ x 1)) 0))) 1)")
                 .unwrap(),
             "[2 3]"
         );
         assert_eq!(
             runtime
-                .eval_text("(first (take 4 (iterate (fn [x] (+ x 2)) 0)))")
+                .eval_text("(first ((take 4) (iterate (fn [x] (+ x 2)) 0)))")
                 .unwrap(),
             "0"
         );
@@ -6002,6 +6040,12 @@ mod tests {
         assert_eq!(
             runtime
                 .eval_text("((comp (fn [x] (+ x 1)) (fn [x] (+ x 1)) (fn [x] (+ x 1))) 39)")
+                .unwrap(),
+            "42"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("((comp inc inc inc inc) 38)")
                 .unwrap(),
             "42"
         );
@@ -6340,11 +6384,13 @@ mod tests {
     fn runtime_metadata_round_trips_through_protocols_and_reader_literals() {
         let mut runtime = Runtime::new();
         assert_eq!(
-            runtime.eval_text("(protocol-call ILookup lookup (protocol-call IObjType meta (protocol-call IObjType with-meta [1] {:doc \"vector\"})) :doc)").unwrap(),
+            runtime.eval_text("(ILookup/lookup (IObjType/meta (IObjType/with-meta [1] {:doc \"vector\"})) :doc)").unwrap(),
             "\"vector\""
         );
         assert_eq!(
-            runtime.eval_text("(protocol-call ILookup lookup (protocol-call IObjType meta (quote ^{:doc \"quoted\"} [1])) :doc)").unwrap(),
+            runtime
+                .eval_text("(ILookup/lookup (IObjType/meta (quote ^{:doc \"quoted\"} [1])) :doc)")
+                .unwrap(),
             "\"quoted\""
         );
     }
@@ -6353,8 +6399,13 @@ mod tests {
         let mut runtime = Runtime::new();
         assert_eq!(runtime.eval_text("(do (def ^:dynamic *answer* 1) (binding [*answer* 42] (binding [*answer* 43] *answer*)))").unwrap(), "43");
         assert_eq!(runtime.eval_text("*answer*").unwrap(), "1");
-        assert_eq!(runtime.eval_text("(protocol-call ILookup lookup (protocol-call IObjType meta (var *answer*)) :dynamic)").unwrap(), "true");
-        assert_eq!(runtime.eval_text("(do (def ^{:doc \"answer doc\"} answer 42) (protocol-call ILookup lookup (protocol-call IObjType meta (var answer)) :doc))").unwrap(), "\"answer doc\"");
+        assert_eq!(
+            runtime
+                .eval_text("(ILookup/lookup (IObjType/meta (var *answer*)) :dynamic)")
+                .unwrap(),
+            "true"
+        );
+        assert_eq!(runtime.eval_text("(do (def ^{:doc \"answer doc\"} answer 42) (ILookup/lookup (IObjType/meta (var answer)) :doc))").unwrap(), "\"answer doc\"");
         assert!(runtime
             .eval_text("(do (def plain 1) (binding [plain 2] plain))")
             .unwrap_err()

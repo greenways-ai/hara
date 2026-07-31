@@ -1,0 +1,59 @@
+(ns std.lib.block.value
+  (:require [std.lib.block.base :as base]
+            [std.foundation.edn :as edn]))
+
+(defn child-values
+  "Returns expression values while applying portable block modifiers. The
+   hash-uneval modifier suppresses the following expression."
+  [block]
+  (loop [index 0
+         values []
+         suppress-next false]
+    (if (= index (count (base/block-children block)))
+      values
+      (let [child (nth (base/block-children block) index)]
+        (if (base/modifier? child)
+          (recur (inc index)
+                 values
+                 (= :hash-uneval (base/block-tag child)))
+          (if (base/expression? child)
+            (recur (inc index)
+                   (if suppress-next
+                     values
+                     (conj values (base/block-value child)))
+                   false)
+            (recur (inc index) values suppress-next)))))))
+
+(defn root-value [block]
+  (let [values (child-values block)]
+    (if (= 1 (count values)) (first values) values)))
+
+(defn list-value [block] (apply list (child-values block)))
+(defn vector-value [block] (vec (child-values block)))
+(defn set-value [block] (into #{} (child-values block)))
+
+(defn map-value
+  [block]
+  (let [values (child-values block)]
+    (loop [index 0
+           output {}]
+      (if (= index (count values))
+        output
+        (if (= (inc index) (count values))
+          (throw "Map block requires an even number of values")
+          (recur (+ index 2)
+                 (assoc output
+                        (nth values index)
+                        (nth values (inc index)))))))))
+
+(defn from-value-string
+  [block]
+  (edn/read (base/block-value-string block)))
+
+(defn deref-value [block] (list 'deref (first (child-values block))))
+(defn quote-value [block] (list 'quote (first (child-values block))))
+(defn var-value [block] (list 'var (first (child-values block))))
+(defn unquote-value [block] (list 'unquote (first (child-values block))))
+(defn unquote-splice-value
+  [block]
+  (list 'unquote-splicing (first (child-values block))))

@@ -23,12 +23,12 @@ public class LanguageAgnosticProtocolAcceptanceTest {
               "(do "
                   + "  (defstruct Box [size]) "
                   + "  (extend-type Box ICount (count [self] (field self :size))) "
-                  + "  (fn [value] (protocol-call ICount count value)))");
+                  + "  (fn [value] (ICount/count value)))");
 
       assertEquals(3L, measure.execute(Vector.Standard.from(null, "a", "b", "c")).asLong());
       assertEquals(2L, measure.execute(Map.Standard.from(null, "a", 1, "b", 2)).asLong());
       assertEquals(
-          4L, context.eval(HaraLanguage.ID, "(protocol-call ICount count (Box 4))").asLong());
+          4L, context.eval(HaraLanguage.ID, "(ICount/count (Box 4))").asLong());
     }
   }
 

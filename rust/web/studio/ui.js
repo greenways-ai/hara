@@ -1,6 +1,6 @@
 import { HtaKeyword, HtaSymbol } from "../hta.js";
 import { defaultBootstrap } from "./boot.js";
-import { editorFormAt, editorTopLevelForms, isAnonymousDocument, studioDocumentId } from "./editor-state.js";
+import { editorFormAt, editorSourceComplete, editorTopLevelForms, isAnonymousDocument, studioDocumentId } from "./editor-state.js";
 import { activateStudioDocument } from "./document-runtime.js";
 import { createStudioShell } from "../ui/studio-shell.js";
 
@@ -19,6 +19,48 @@ import { createStudioShell } from "../ui/studio-shell.js";
  */
 
 const PROMPT = "hara ›";
+const INSTA_STORAGE_KEY = "hara-studio.insta-enabled.v1";
+const INSTA_DELAY_MS = 400;
+
+export function traceField(value, name) {
+  if (!(value instanceof Map)) return undefined;
+  for (const [key, item] of value) {
+    if ((key?.name ?? key) === name) return item;
+  }
+  return undefined;
+}
+
+export function traceName(value) {
+  return String(value?.name ?? value ?? "");
+}
+
+/** Project ordered trace events into parent-linked operation nodes while
+ * preserving macro/error diagnostics as standalone rows. */
+export function buildTraceTree(trace) {
+  const roots = [];
+  const operations = new Map();
+  for (const event of traceField(trace, "events") ?? []) {
+    const kind = traceName(traceField(event, "kind"));
+    const operation = traceField(event, "operation");
+    if (kind === "operation-enter" && operation != null) {
+      const node = { event, returnEvent: null, children: [] };
+      operations.set(String(operation), node);
+      const parent = traceField(event, "parent-operation");
+      const parentNode = parent == null ? null : operations.get(String(parent));
+      (parentNode?.children ?? roots).push(node);
+    } else if (kind === "operation-return" && operation != null) {
+      const node = operations.get(String(operation));
+      if (node) node.returnEvent = event;
+      else roots.push({ event, returnEvent: null, children: [] });
+    } else {
+      const node = { event, returnEvent: null, children: [] };
+      const parent = traceField(event, "parent-operation");
+      const parentNode = parent == null ? null : operations.get(String(parent));
+      (parentNode?.children ?? roots).push(node);
+    }
+  }
+  return roots;
+}
 
 /** Render a decoded HTA value as a display string (same approach as
  *  extensions/hara-chrome/src/resp-client.js `renderHta`, plus symbols). */
@@ -151,9 +193,13 @@ class StudioController {
       dirty: false,
       busy: 0,
       runtime: "BOOTING",
-      failed: false
+      failed: false,
+      instaEnabled: safeStorageGet(INSTA_STORAGE_KEY) === "true",
+      previewGeneration: 0,
+      preview: null
     };
     this.buildDom();
+    this.instaAction.classList.toggle("is-active", this.state.instaEnabled);
     this.bindEvents();
     this.init();
   }
@@ -196,12 +242,16 @@ class StudioController {
     this.runAction = action("▶", "Evaluate the whole file");
     this.runAction.classList.add("hara-studio-pane-icon");
     this.runAction.setAttribute("aria-label", "Run file");
-    this.traceAction = action("≡", "Trace top-level forms in an isolated session");
+    this.traceAction = action("≡", "Trace the file in the active evaluator session");
     this.traceAction.classList.add("hara-studio-pane-icon");
     this.traceAction.setAttribute("aria-label", "Trace file");
+    this.instaAction = action("INSTA", "Toggle live isolated evaluation");
+    this.instaAction.classList.add("hara-studio-pane-icon", "hara-studio-insta-toggle");
+    this.instaAction.setAttribute("aria-label", "Toggle InstaREPL");
+    this.instaAction.setAttribute("aria-pressed", String(this.state.instaEnabled));
     const editorHead = el("div", "hara-studio-pane-head");
     const editorHeadRight = el("span");
-    editorHeadRight.append(this.dirtyFlag, this.traceAction, this.runAction, this.saveAction);
+    editorHeadRight.append(this.dirtyFlag, this.instaAction, this.traceAction, this.runAction, this.saveAction);
     editorHead.append(this.editorName, editorHeadRight);
     this.editor = el("textarea", "hara-studio-editor");
     this.editor.setAttribute("data-hara-studio", "editor");
@@ -215,7 +265,12 @@ class StudioController {
     this.tracePanel.append(el("div", "hara-studio-trace-head", "FORM TRACE"));
     this.traceBody = el("div", "hara-studio-trace-body");
     this.tracePanel.append(this.traceBody);
-    editorWrap.append(editorHead, this.editor, this.tracePanel);
+    this.editorStage = el("div", "hara-studio-editor-stage");
+    this.instaGutter = el("aside", "hara-studio-insta-gutter");
+    this.instaGutter.setAttribute("data-hara-studio", "insta-gutter");
+    this.instaGutter.setAttribute("aria-label", "InstaREPL results");
+    this.editorStage.append(this.editor, this.instaGutter);
+    editorWrap.append(editorHead, this.editorStage, this.tracePanel);
 
     // REPL.
     const repl = el("section", "hara-frame hara-studio-repl");
@@ -305,10 +360,16 @@ class StudioController {
     this.saveAction.addEventListener("click", () => this.saveFile());
     this.runAction.addEventListener("click", () => this.runFile());
     this.traceAction.addEventListener("click", () => this.traceFile());
+    this.instaAction.addEventListener("click", () => this.toggleInsta());
     this.editor.addEventListener("input", () => {
       this.state.dirty = true;
       this.clearTrace();
+      this.markInstaStale();
+      this.scheduleInsta();
       this.renderEditorHead();
+    });
+    this.editor.addEventListener("scroll", () => {
+      this.instaGutter.scrollTop = this.editor.scrollTop;
     });
     this.editor.addEventListener("keydown", (event) => {
       if ((event.ctrlKey || event.metaKey) && event.key === "s") {
@@ -616,6 +677,7 @@ class StudioController {
       return;
     }
     await this.attachSpace(name);
+    await this.clearInsta();
     this.state.space = name;
     this.clearEditor();
     this.renderSpaceSelect(await this.task(() => this.listSpaces()) ?? [name]);
@@ -699,6 +761,7 @@ class StudioController {
   // broker, so nothing is lost.
   async switchKernel(name) {
     if (!name || name === this.state.kernel) return;
+    await this.clearInsta();
     this.state.kernel = name;
     if (this.state.space) await this.attachSpace(this.state.space, name);
     this.refreshKernelSelect();
@@ -780,6 +843,7 @@ class StudioController {
     if (!(await this.confirmDiscard())) return;
     const content = await this.task(() => this.readText(path));
     if (content === undefined) return;
+    await this.clearInsta();
     this.state.open = path;
     this.state.dirty = false;
     this.editor.value = content === null ? "" : String(content);
@@ -787,6 +851,7 @@ class StudioController {
     this.clearTrace();
     this.renderEditorHead();
     this.renderTree();
+    this.scheduleInsta({ immediate: true });
   }
 
   async saveFile() {
@@ -803,6 +868,8 @@ class StudioController {
   async runFile() {
     if (!this.state.open) return;
     const source = this.editor.value;
+    this.cancelInstaTimer();
+    this.state.previewGeneration += 1;
     await this.task(async () => {
       if (isAnonymousDocument(source)) {
         const documentId = this.activeDocumentId();
@@ -840,15 +907,14 @@ class StudioController {
       this.showTraceMessage("Live ns+ documents use generated runtime forms and cannot be source-traced yet.");
       return;
     }
-    const forms = editorTopLevelForms(source);
-    if (forms.length === 0) {
-      this.showTraceMessage("No top-level forms to trace.");
-      return;
-    }
-    const rows = await this.task(() => this.broker.traceForms(this.state.kernel, forms, {
-      bootstrap: defaultBootstrap(this.state.space ?? "home")
-    }));
-    if (rows) this.renderTrace(rows);
+    if (!source.trim()) return this.showTraceMessage("No source to trace.");
+    this.cancelInstaTimer();
+    this.state.previewGeneration += 1;
+    const trace = await this.task(() =>
+      this.broker.traceEval(this.state.kernel, "ROOT", source)
+    );
+    if (trace) this.renderTrace(trace);
+    else this.showTraceMessage("Structured tracing is unavailable in this runtime build.");
   }
 
   clearTrace() {
@@ -861,30 +927,195 @@ class StudioController {
     this.traceBody.replaceChildren(el("div", "hara-studio-trace-note", message));
   }
 
-  renderTrace(rows) {
-    const table = el("table", "hara-studio-trace-table");
-    const head = el("thead");
-    const headRow = el("tr");
-    for (const label of ["#", "FORM", "RESULT", "MS"]) headRow.append(el("th", null, label));
-    head.append(headRow);
-    const body = el("tbody");
-    rows.forEach((row, index) => {
-      const entry = el("tr", `is-${row.status}`);
-      entry.append(
-        el("td", "hara-index", String(index + 1)),
-        el("td", "hara-studio-trace-source", compactTraceSource(row.source)),
-        el("td", row.status === "ok" ? "hara-tty-v" : "hara-tty-e", row.status === "ok" ? renderValue(row.value) : row.error),
-        el("td", "hara-index", row.duration.toFixed(1))
-      );
-      entry.addEventListener("click", () => {
+  renderTrace(trace, sourceRange = null) {
+    const status = traceName(traceField(trace, "status")) || "unknown";
+    const events = traceField(trace, "events") ?? [];
+    const result = traceField(trace, "result");
+    const summary = el("div", `hara-studio-trace-summary is-${status}`);
+    summary.append(
+      el("strong", null, status.toUpperCase()),
+      el("span", null, `${events.length} EVENTS`),
+      el("span", "hara-studio-trace-result",
+        traceField(result, "display") ?? traceField(trace, "error") ?? "nil")
+    );
+    const filters = el("div", "hara-studio-trace-filters");
+    const tree = el("div", "hara-studio-trace-tree");
+    const details = el("pre", "hara-studio-trace-details", "Select an event to inspect it.");
+    let activeKinds = new Set(["operation", "macro", "error"]);
+    const showEvent = (event) => {
+      details.textContent = formatTraceEvent(event);
+      const start = traceField(event, "source-start");
+      const end = traceField(event, "source-end");
+      if (Number.isInteger(start) && Number.isInteger(end)) {
         this.editor.focus();
-        this.editor.setSelectionRange(row.start, row.end);
+        this.editor.setSelectionRange(start, end);
+      } else if (sourceRange) {
+        this.editor.focus();
+        this.editor.setSelectionRange(sourceRange.start, sourceRange.end);
+      }
+    };
+    const renderTree = () => {
+      tree.replaceChildren();
+      const renderNode = (node, parent, depth = 0) => {
+        const kind = traceName(traceField(node.event, "kind"));
+        const group = traceKindGroup(kind);
+        if (kind !== "evaluation-start" && activeKinds.has(group)) {
+          const row = action(traceEventLabel(node), "Inspect trace event");
+          row.classList.add("hara-studio-trace-node", `is-${group}`);
+          row.style.setProperty("--trace-depth", String(depth));
+          row.addEventListener("click", () => showEvent(node.event));
+          parent.appendChild(row);
+        }
+        for (const child of node.children) renderNode(child, parent, depth + 1);
+      };
+      for (const node of buildTraceTree(trace)) renderNode(node, tree);
+      if (!tree.childNodes.length) tree.append(el("div", "hara-studio-trace-note", "No events match these filters."));
+    };
+    for (const [name, label] of [["operation", "CALLS"], ["macro", "MACROS"], ["error", "ERRORS"]]) {
+      const button = action(label);
+      button.classList.add("hara-studio-trace-filter", "is-active");
+      button.setAttribute("aria-pressed", "true");
+      button.addEventListener("click", () => {
+        if (activeKinds.has(name)) activeKinds.delete(name); else activeKinds.add(name);
+        button.classList.toggle("is-active", activeKinds.has(name));
+        button.setAttribute("aria-pressed", String(activeKinds.has(name)));
+        renderTree();
       });
-      body.append(entry);
-    });
-    table.append(head, body);
+      filters.appendChild(button);
+    }
+    const raw = action("RAW TRACE");
+    raw.classList.add("hara-studio-trace-raw");
+    raw.addEventListener("click", () => this.exportTrace(trace));
+    filters.appendChild(raw);
+    renderTree();
+    const layout = el("div", "hara-studio-trace-layout");
+    layout.append(tree, details);
     this.tracePanel.hidden = false;
-    this.traceBody.replaceChildren(table);
+    this.traceBody.replaceChildren(summary, filters, layout);
+  }
+
+  async exportTrace(trace) {
+    const json = JSON.stringify(traceToPlain(trace), null, 2);
+    try {
+      await navigator.clipboard.writeText(json);
+      this.logNote(";; trace JSON copied");
+    } catch {
+      const blob = new Blob([json], { type: "application/json" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${traceField(trace, "trace-id") ?? "hara-trace"}.json`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
+  }
+
+  toggleInsta() {
+    this.state.instaEnabled = !this.state.instaEnabled;
+    safeStorageSet(INSTA_STORAGE_KEY, String(this.state.instaEnabled));
+    this.instaAction.setAttribute("aria-pressed", String(this.state.instaEnabled));
+    this.instaAction.classList.toggle("is-active", this.state.instaEnabled);
+    if (this.state.instaEnabled) this.scheduleInsta({ immediate: true });
+    else this.clearInsta();
+  }
+
+  instaAllowed() {
+    if (!this.state.open || isAnonymousDocument(this.editor.value)) return false;
+    return !(this.activeProject?.capabilities ?? []).some(
+      (value) => value === "canvas/2d" || value === "audio/playback"
+    );
+  }
+
+  scheduleInsta({ immediate = false } = {}) {
+    this.cancelInstaTimer();
+    if (!this.state.instaEnabled || !this.instaAllowed()) {
+      if (this.state.instaEnabled && this.state.open) {
+        this.renderInstaMessage("INSTA unavailable for live capability documents");
+      }
+      return;
+    }
+    if (!editorSourceComplete(this.editor.value)) {
+      this.renderInstaMessage("Waiting for a complete form…");
+      return;
+    }
+    this.instaTimer = setTimeout(() => this.runInsta(), immediate ? 0 : INSTA_DELAY_MS);
+  }
+
+  cancelInstaTimer() {
+    if (this.instaTimer) clearTimeout(this.instaTimer);
+    this.instaTimer = null;
+  }
+
+  async runInsta() {
+    if (!this.state.instaEnabled || !this.instaAllowed()) return;
+    const forms = editorTopLevelForms(this.editor.value);
+    const requestGeneration = ++this.state.previewGeneration;
+    const previous = this.state.preview;
+    this.renderInstaPending(forms);
+    try {
+      const preview = await this.broker.previewDocument(
+        this.state.kernel,
+        this.activeDocumentId(),
+        forms,
+        { bootstrap: defaultBootstrap(this.state.space ?? "home") }
+      );
+      if (requestGeneration !== this.state.previewGeneration || !this.state.instaEnabled) {
+        await this.broker.disposePreview(preview.generationId);
+        return;
+      }
+      this.state.preview = preview;
+      if (previous) await this.broker.disposePreview(previous.generationId);
+      this.renderInstaRows(preview);
+    } catch (error) {
+      if (requestGeneration === this.state.previewGeneration) {
+        this.renderInstaMessage(String(error?.message ?? error));
+      }
+    }
+  }
+
+  renderInstaPending(forms) {
+    this.instaGutter.replaceChildren();
+    for (const form of forms) this.instaGutter.appendChild(this.instaRow(form, "pending", "…"));
+  }
+
+  renderInstaRows(preview) {
+    this.instaGutter.replaceChildren();
+    for (const row of preview.rows) {
+      const label = row.status === "ok"
+        ? `${row.valueType ? `${row.valueType} · ` : ""}${row.value ?? "nil"}`
+        : row.status === "error" ? row.error : "not evaluated";
+      const item = this.instaRow(row, row.status, label);
+      if (row.traceId) item.addEventListener("click", () => {
+        const trace = this.broker.getPreviewTrace(preview.generationId, row.traceId);
+        this.renderTrace(trace, row);
+      });
+      this.instaGutter.appendChild(item);
+    }
+  }
+
+  instaRow(form, status, label) {
+    const row = action(label, "Open this form's trace");
+    row.classList.add("hara-studio-insta-result", `is-${status}`);
+    row.style.top = `${sourceLine(this.editor.value, form.start) * editorLineHeight(this.editor)}px`;
+    return row;
+  }
+
+  markInstaStale() {
+    for (const row of this.instaGutter.querySelectorAll(".hara-studio-insta-result")) {
+      row.classList.add("is-stale");
+    }
+  }
+
+  renderInstaMessage(message) {
+    this.instaGutter.replaceChildren(el("div", "hara-studio-insta-message", message));
+  }
+
+  async clearInsta() {
+    this.cancelInstaTimer();
+    this.state.previewGeneration += 1;
+    const preview = this.state.preview;
+    this.state.preview = null;
+    this.instaGutter.replaceChildren();
+    if (preview) await this.broker.disposePreview(preview.generationId);
   }
 
   activeDocumentId() {
@@ -937,6 +1168,7 @@ class StudioController {
   }
 
   clearEditor() {
+    this.clearInsta();
     this.state.open = null;
     this.state.dirty = false;
     this.editor.value = "";
@@ -982,6 +1214,7 @@ class StudioController {
   }
 
   unmount() {
+    this.clearInsta();
     this.chrome.destroy();
   }
 }
@@ -1023,7 +1256,55 @@ function strip(name, valueNode) {
   return span;
 }
 
-function compactTraceSource(source) {
-  const compact = source.replace(/\s+/g, " ").trim();
-  return compact.length > 96 ? `${compact.slice(0, 95)}…` : compact;
+function safeStorageGet(key) {
+  try { return globalThis.localStorage?.getItem(key) ?? null; } catch { return null; }
+}
+
+function safeStorageSet(key, value) {
+  try { globalThis.localStorage?.setItem(key, value); } catch {}
+}
+
+function sourceLine(source, offset) {
+  return source.slice(0, Math.max(0, offset)).split("\n").length - 1;
+}
+
+function editorLineHeight(editor) {
+  const value = Number.parseFloat(globalThis.getComputedStyle?.(editor)?.lineHeight);
+  return Number.isFinite(value) ? value : 18;
+}
+
+function traceKindGroup(kind) {
+  if (kind.startsWith("operation-")) return "operation";
+  if (kind === "macro-expand") return "macro";
+  return "error";
+}
+
+function traceEventLabel(node) {
+  const event = node.event;
+  const kind = traceName(traceField(event, "kind"));
+  const fn = traceField(event, "function");
+  if (kind === "operation-enter") {
+    const returned = node.returnEvent
+      ? traceField((traceField(node.returnEvent, "values") ?? [])[0], "display")
+      : null;
+    return `${fn ?? "<anonymous>"}${returned == null ? "" : ` → ${returned}`}`;
+  }
+  if (kind === "macro-expand") return `MACRO ${fn ?? ""}`;
+  return traceField(event, "message") ?? kind.replaceAll("-", " ").toUpperCase();
+}
+
+function formatTraceEvent(event) {
+  return JSON.stringify(traceToPlain(event), null, 2);
+}
+
+function traceToPlain(value) {
+  if (value instanceof Map) {
+    return Object.fromEntries([...value].map(([key, item]) => [
+      String(key?.name ?? key), traceToPlain(item)
+    ]));
+  }
+  if (Array.isArray(value)) return value.map(traceToPlain);
+  if (value instanceof Set) return [...value].map(traceToPlain);
+  if (value?.name && value.constructor?.name?.startsWith("Hta")) return value.name;
+  return value;
 }

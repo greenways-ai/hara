@@ -46,10 +46,10 @@
             (macroexpand '(chain/tx (assoc state :x 1)))
             '(quote (fn [state ctx] (assoc state :x 1))))
      (check "protocol dispatch computes block hash"
-            (number? (protocol-call protocol/IHashable content-hash (first bs)))
+            (number? (protocol/content-hash (first bs)))
             true)
      (check "protocol dispatch replays block"
-            (protocol-call protocol/IReplayable replay (second bs) {:counter 0})
+            (protocol/replay (second bs) {:counter 0})
             {:counter 1})]))
 
 (pr-str results)

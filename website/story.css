@@ -37,6 +37,18 @@
   pointer-events: auto;
 }
 
+.story-animation-screen {
+  overflow: hidden;
+  background: #02050a;
+}
+
+.story-animation-screen iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
 .story-layout {
   position: relative;
   z-index: 1;
@@ -1043,12 +1055,39 @@ body[data-workspace="1"] .system-bottom-bar .project-tabs {
 .story-sequencer > header button { min-height: 30px; padding: 0 10px; font-size: .45rem; letter-spacing: .1em; }
 .story-step-slots,
 .story-note-bank { display: grid; grid-template-columns: repeat(12, minmax(34px, 1fr)); gap: 4px; margin-top: 10px; }
-.story-step, .story-note { display: grid; min-height: 45px; place-content: center; gap: 2px; }
+.story-step, .story-note {
+  display: grid;
+  min-height: 45px;
+  place-content: center;
+  gap: 2px;
+  transition: transform 150ms cubic-bezier(.2, .8, .2, 1), opacity 120ms ease,
+    border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
 .story-step strong, .story-note strong { font-size: .52rem; }
 .story-step small, .story-note small { color: #63818c; font-size: .4rem; }
 .story-step { border-color: rgba(182, 155, 255, .32) !important; background: rgba(182, 155, 255, .07) !important; }
 .story-note[aria-pressed="true"] { color: #020408; background: var(--cyan); }
-.story-step.is-dragging { opacity: .55; outline: 2px solid var(--cyan); }
+.story-step.is-dragging {
+  z-index: 2;
+  opacity: .48;
+  outline: 2px solid var(--cyan);
+  transform: scale(.94) rotate(-1.5deg);
+}
+.story-step.shift-left { transform: translateX(-7px); }
+.story-step.shift-right { transform: translateX(7px); }
+.story-step.is-drop-target {
+  border-color: var(--cyan) !important;
+  background: rgba(65, 245, 228, .16) !important;
+  box-shadow: 0 0 0 2px rgba(65, 245, 228, .18), 0 8px 22px rgba(0, 0, 0, .35);
+}
+.story-step.is-drop-target[data-drop-edge="before"] { transform: translateX(6px); }
+.story-step.is-drop-target[data-drop-edge="after"] { transform: translateX(-6px); }
+.story-step.is-dropping { animation: story-step-drop 300ms cubic-bezier(.2, .9, .25, 1); }
+@keyframes story-step-drop {
+  0% { transform: translateY(-10px) scale(1.06); box-shadow: 0 12px 28px rgba(65, 245, 228, .35); }
+  58% { transform: translateY(2px) scale(.98); }
+  100% { transform: translateY(0) scale(1); box-shadow: none; }
+}
 .story-sequencer > p { margin: 9px 0 0; color: #5f7782; font: 500 .48rem/1.5 var(--mono); }
 
 .story-editor {

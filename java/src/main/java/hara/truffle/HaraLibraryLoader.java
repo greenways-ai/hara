@@ -10,7 +10,6 @@ import java.util.concurrent.ConcurrentHashMap;
 final class HaraLibraryLoader {
   private final Map<String, HaraLibraryProvider> providers = new ConcurrentHashMap<>();
   private final Map<String, Boolean> installed = new ConcurrentHashMap<>();
-  private final Map<String, Boolean> fallbacksLoaded = new ConcurrentHashMap<>();
 
   HaraLibraryLoader() {
     this(discover());
@@ -31,7 +30,6 @@ final class HaraLibraryLoader {
     HaraLibraryProvider provider = providers.get(namespace);
     if (provider == null) return;
     installProvider(context, provider);
-    installFallback(context, provider, false);
   }
 
   private void installProvider(HaraContext context, HaraLibraryProvider provider) {
@@ -45,28 +43,6 @@ final class HaraLibraryLoader {
     }
   }
 
-  private void installFallback(
-      HaraContext context, HaraLibraryProvider provider, boolean reload) {
-    String resource = provider.fallbackResource();
-    if (resource == null) return;
-    if (!reload
-        && fallbacksLoaded.putIfAbsent(provider.namespace(), Boolean.TRUE) != null) return;
-    try {
-      context.loadLibraryFallback(provider.namespace(), resource, reload);
-      fallbacksLoaded.put(provider.namespace(), Boolean.TRUE);
-    } catch (RuntimeException error) {
-      if (!reload) fallbacksLoaded.remove(provider.namespace());
-      throw error;
-    }
-  }
-
-  void reload(HaraContext context, String namespace) {
-    HaraLibraryProvider provider = providers.get(namespace);
-    if (provider == null) return;
-    installProvider(context, provider);
-    installFallback(context, provider, true);
-  }
-
   void installEagerJava(HaraContext context) {
     providers.values().stream()
         .filter(HaraLibraryProvider::eager)
@@ -74,11 +50,11 @@ final class HaraLibraryLoader {
         .forEach(provider -> installProvider(context, provider));
   }
 
-  void installEagerFallbacks(HaraContext context) {
+  void installEagerResources(HaraContext context) {
     providers.values().stream()
         .filter(HaraLibraryProvider::eager)
         .sorted(java.util.Comparator.comparingInt(HaraLibraryProvider::order))
-        .forEach(provider -> installFallback(context, provider, false));
+        .forEach(provider -> context.loadLibraryResource(provider.namespace(), false));
   }
 
   boolean provides(String namespace) {

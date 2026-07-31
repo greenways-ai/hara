@@ -108,9 +108,7 @@
      [attr
       (as-list
        (concat (cons op
-                     (cons (protocol-call
-                            IObjType
-                            with-meta
+                     (cons (IObjType/with-meta
                             sym
                             (dissoc (merge sym-meta mixed) :!))
                            '()))

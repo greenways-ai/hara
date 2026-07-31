@@ -1,0 +1,27 @@
+(ns code.test.compile.types)
+
+(def +type+ #{:core :template})
+(defstruct Fact [type id ns path refer desc column line source global function meta])
+
+(defn fact?
+  [value]
+  (instance? code.test.compile.types/Fact value))
+
+(defn fact-display-info
+  [fact]
+  {:type (:type fact)
+   :id (:id fact)
+   :ns (:ns fact)
+   :desc (:desc fact)
+   :line (:line fact)})
+
+(defn fact-display [fact] (str (fact-display-info fact)))
+(defn fact-invoke [fact] ((:function fact)))
+
+(extend-type Fact std.protocol.ifn/IFn
+  (invoke [fact & arguments]
+    (apply (:function fact) arguments)))
+
+(extend-type Fact std.protocol.idisplay/IDisplay
+  (display [fact]
+    (str "#fact " (fact-display fact))))
