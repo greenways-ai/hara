@@ -1,6 +1,7 @@
 //! Global, struct, and multi-arity instruction helpers.
 
-use super::{constant_string, constant_string_vector, Machine, Program, Symbol, Value};
+use super::{constant_string, constant_string_vector, Machine, Program, Value};
+use crate::lang::data::Symbol;
 
 impl Machine {
     #[inline(never)]

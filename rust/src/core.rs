@@ -4743,6 +4743,9 @@ pub(crate) fn apply_binary_primitive(
                 _ => unreachable!(),
             }))
         }
+        Primitive::Get => collection_get(left, right, Value::Nil),
+        Primitive::Count => Err("count expects one argument".into()),
+        Primitive::Meta => Err("meta expects one value".into()),
     }
 }
 
