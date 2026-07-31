@@ -1,104 +1,97 @@
 (ns std.substrate.router-test
+  (:use code.test)
   (:require [std.foundation.promise :as promise]
             [std.lib.substrate :as core]
-            [std.lib.test :as test]
             [std.substrate.router :as router]))
 
-(def results
-  [(test/check
-    "constructs router control frames"
-    (let [subscribe (router/subscribe-frame
-                     "room/a" "event/ping" "sub-a" {"via" "tab"})
-          unsubscribe (router/unsubscribe-frame
-                       nil "event/ping" nil {"via" "tab"})]
-      [(get subscribe "kind")
-       (get subscribe "space")
-       (get subscribe "signal")
-       (get-in subscribe ["meta" "via"])
-       (get unsubscribe "kind")
-       (get unsubscribe "space")
-       (string? (get unsubscribe "id"))])
-    ["subscribe" "room/a" "event/ping" "tab"
-     "unsubscribe" "__NODE__" true])
+(fact "constructs router control frames"
+  (let [subscribe (router/subscribe-frame
+                   "room/a" "event/ping" "sub-a" {"via" "tab"})
+        unsubscribe (router/unsubscribe-frame
+                     nil "event/ping" nil {"via" "tab"})]
+    [(get subscribe "kind")
+     (get subscribe "space")
+     (get subscribe "signal")
+     (get-in subscribe ["meta" "via"])
+     (get unsubscribe "kind")
+     (get unsubscribe "space")
+     (string? (get unsubscribe "id"))])
+  => ["subscribe" "room/a" "event/ping" "tab"
+      "unsubscribe" "__NODE__" true])
 
-   (test/check
-    "creates router and nested subscription tables on demand"
-    (let [node (core/node-create "node/router")]
-      (router/ensure-signal-subscriptions node "room/a" "event/ping")
-      [(vec (sort (keys (router/ensure-router node))))
-       (vec (keys (router/ensure-space-subscriptions node "room/a")))
-       (router/ensure-signal-subscriptions node "room/a" "event/ping")])
-    [["connections" "subscriptions"] ["event/ping"] {}])
+(fact "creates router and nested subscription tables on demand"
+  (let [node (core/node-create "node/router")]
+    (router/ensure-signal-subscriptions node "room/a" "event/ping")
+    [(vec (sort (keys (router/ensure-router node))))
+     (vec (keys (router/ensure-space-subscriptions node "room/a")))
+     (router/ensure-signal-subscriptions node "room/a" "event/ping")])
+  => [["connections" "subscriptions"] ["event/ping"] {}])
 
-   (test/check
-    "registers connections and subscriptions"
-    (let [node (core/node-create "node/register")
-          connection (router/register-connection
-                      node "peer-a" {"role" "edge"})
-          subscription (router/add-subscription
-                        node "peer-a" "room/a" "event/ping"
-                        "sub-a" {"scope" "tab"})]
-      [(get connection "id")
-       (get-in (router/get-connections node)
-               ["peer-a" "meta" "role"])
-       (get subscription "id")
-       (get-in (router/get-subscriptions node)
-               ["room/a" "event/ping" "peer-a" "meta" "scope"])
-       (router/list-subscriptions node "room/a" "event/ping")])
-    ["peer-a" "edge" "sub-a" "tab" ["peer-a"]])
+(fact "registers connections and subscriptions"
+  (let [node (core/node-create "node/register")
+        connection (router/register-connection
+                    node "peer-a" {"role" "edge"})
+        subscription (router/add-subscription
+                      node "peer-a" "room/a" "event/ping"
+                      "sub-a" {"scope" "tab"})]
+    [(get connection "id")
+     (get-in (router/get-connections node)
+             ["peer-a" "meta" "role"])
+     (get subscription "id")
+     (get-in (router/get-subscriptions node)
+             ["room/a" "event/ping" "peer-a" "meta" "scope"])
+     (router/list-subscriptions node "room/a" "event/ping")])
+  => ["peer-a" "edge" "sub-a" "tab" ["peer-a"]])
 
-   (test/check
-    "pure prune helpers remove empty signal and space branches"
-    (let [space-subscriptions
-          {"event/a" {"peer-a" {"id" "sub-a"}
-                       "peer-b" {"id" "sub-b"}}
-           "event/b" {"peer-a" {"id" "sub-c"}}}
-          pruned-space
-          (router/prune-subscription-signal-loop
-           space-subscriptions ["event/a" "event/b"] "peer-a" 0)
-          subscriptions
-          {"room/a" space-subscriptions
-           "room/b" {"event/c" {"peer-a" {"id" "sub-d"}}}}
-          pruned-all
-          (router/prune-subscription-space-loop
-           subscriptions ["room/a" "room/b"] "peer-a" 0)]
-      [(get-in pruned-space ["event/a" "peer-b" "id"])
-       (nil? (get-in pruned-space ["event/a" "peer-a"]))
-       (nil? (get pruned-space "event/b"))
-       (vec (keys pruned-all))])
-    ["sub-b" true true ["room/a"]])
+(fact "pure prune helpers remove empty signal and space branches"
+  (let [space-subscriptions
+        {"event/a" {"peer-a" {"id" "sub-a"}
+                     "peer-b" {"id" "sub-b"}}
+         "event/b" {"peer-a" {"id" "sub-c"}}}
+        pruned-space
+        (router/prune-subscription-signal-loop
+         space-subscriptions ["event/a" "event/b"] "peer-a" 0)
+        subscriptions
+        {"room/a" space-subscriptions
+         "room/b" {"event/c" {"peer-a" {"id" "sub-d"}}}}
+        pruned-all
+        (router/prune-subscription-space-loop
+         subscriptions ["room/a" "room/b"] "peer-a" 0)]
+    [(get-in pruned-space ["event/a" "peer-b" "id"])
+     (nil? (get-in pruned-space ["event/a" "peer-a"]))
+     (nil? (get pruned-space "event/b"))
+     (vec (keys pruned-all))])
+  => ["sub-b" true true ["room/a"]])
 
-   (test/check
-    "removes subscriptions and prunes connection state"
-    (let [node (core/node-create "node/remove")]
-      (router/register-connection node "peer-a" nil)
-      (router/register-connection node "peer-b" nil)
-      (router/add-subscription node "peer-a" "room/a" "event/ping" "sub-a" nil)
-      (router/add-subscription node "peer-b" "room/a" "event/ping" "sub-b" nil)
-      (let [removed (router/remove-subscription
-                     node "peer-a" "room/a" "event/ping")
-            previous (router/unregister-connection node "peer-b")]
-        [(get removed "id")
-         (get previous "id")
-         (router/list-subscriptions node "room/a" "event/ping")
-         (vec (keys (router/get-connections node))) ]))
-    ["sub-a" "peer-b" [] ["peer-a"]])
+(fact "removes subscriptions and prunes connection state"
+  (let [node (core/node-create "node/remove")]
+    (router/register-connection node "peer-a" nil)
+    (router/register-connection node "peer-b" nil)
+    (router/add-subscription node "peer-a" "room/a" "event/ping" "sub-a" nil)
+    (router/add-subscription node "peer-b" "room/a" "event/ping" "sub-b" nil)
+    (let [removed (router/remove-subscription
+                   node "peer-a" "room/a" "event/ping")
+          previous (router/unregister-connection node "peer-b")]
+      [(get removed "id")
+       (get previous "id")
+       (router/list-subscriptions node "room/a" "event/ping")
+       (vec (keys (router/get-connections node)))]))
+  => ["sub-a" "peer-b" [] ["peer-a"]])
 
-   (test/check
-    "receives subscribe and unsubscribe controls from transport context"
-    (let [node (core/node-create "node/receive")
-          subscribe (router/subscribe-frame
-                     "room/a" "event/ping" "sub-a" nil)
-          unsubscribe (router/unsubscribe-frame
-                       "room/a" "event/ping" "sub-a" nil)]
+(fact "receives subscribe and unsubscribe controls from transport context"
+  (let [node (core/node-create "node/receive")
+        subscribe (router/subscribe-frame
+                   "room/a" "event/ping" "sub-a" nil)
+        unsubscribe (router/unsubscribe-frame
+                     "room/a" "event/ping" "sub-a" nil)]
+    (promise/value
+     (router/receive-subscribe node subscribe {"transport_id" "peer-a"}))
+    (let [before (router/list-subscriptions node "room/a" "event/ping")]
       (promise/value
-       (router/receive-subscribe node subscribe {"transport_id" "peer-a"}))
-      (let [before (router/list-subscriptions node "room/a" "event/ping")]
-        (promise/value
-         (router/receive-unsubscribe node unsubscribe
-                                     {"transport_id" "peer-a"}))
-        [before
-         (router/list-subscriptions node "room/a" "event/ping")]))
-    [["peer-a"] []])])
+       (router/receive-unsubscribe node unsubscribe
+                                   {"transport_id" "peer-a"}))
+      [before
+       (router/list-subscriptions node "room/a" "event/ping")]))
+  => [["peer-a"] []])
 
-(test/print-results results)
+(pr-str (run '[std.substrate.router-test]))
