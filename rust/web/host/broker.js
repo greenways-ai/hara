@@ -6,8 +6,8 @@ const NAME_PATTERN = /^[A-Za-z0-9_.-]+$/;
 /**
  * Owns studio kernel lifecycle: one kernel = one Web Worker running one raw
  * HTA wasm instance, and each kernel owns many isolated evaluator sessions.
- * Mirrors the JVM `HaraSessionBroker`
- * (java/src/main/java/hara/truffle/HaraSessionBroker.java) — same name
+ * Its per-kernel session lifecycle mirrors the JVM `SessionKernel`
+ * (java/src/main/java/hara/truffle/SessionKernel.java).
  * normalization (reject, never lowercase), same error codes
  * (INVALID_SESSION_NAME, SESSION_EXISTS, NO_SESSION, ROOT_CANNOT_CLOSE), and
  * an always-present ROOT kernel.

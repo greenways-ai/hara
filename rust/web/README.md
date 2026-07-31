@@ -26,7 +26,7 @@ assets. The pages deploy copies the runtime-facing pieces under
   `build:package:noir` builds the deterministic HARP archive.
 - `studio/` — the shared studio environment:
   - `broker.js` — kernel broker; one kernel = one Web Worker running one raw
-    HTA wasm instance (mirrors the JVM `HaraSessionBroker`).
+    HTA wasm instance (mirrors the JVM `SessionKernel`).
   - `host-services.js` — generic host services for kernels (`store/*` over
     IndexedDB, `http/get`).
   - `boot.js` + `hal/` — the bootstrap model: kernels boot from hara
