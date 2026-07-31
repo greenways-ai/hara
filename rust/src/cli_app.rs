@@ -7,7 +7,8 @@
 use crate::kernel::{parse, Form};
 use std::sync::OnceLock;
 
-pub const MANIFEST_SOURCE: &str = include_str!("../../specs/00-unsorted/cli/draft/hara-cli.edn");
+pub const MANIFEST_SOURCE: &str =
+    include_str!("../../specs/02-platform/000001-cli/draft/hara-cli.edn");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Execution {
@@ -346,7 +347,7 @@ mod tests {
     #[test]
     fn shared_outcome_conformance_cases_pass() {
         let document = parse(include_str!(
-            "../../specs/00-unsorted/cli/draft/conformance/outcomes.edn"
+            "../../specs/02-platform/000001-cli/draft/conformance/outcomes.edn"
         ))
         .unwrap();
         for case in vector(map_get(&document, "conformance/cases").unwrap()).unwrap() {
@@ -372,7 +373,10 @@ mod tests {
 
     #[test]
     fn shared_route_conformance_cases_pass() {
-        let document = parse(include_str!("../../specs/00-unsorted/cli/draft/conformance/routes.edn")).unwrap();
+        let document = parse(include_str!(
+            "../../specs/02-platform/000001-cli/draft/conformance/routes.edn"
+        ))
+        .unwrap();
         for case in vector(map_get(&document, "conformance/cases").unwrap()).unwrap() {
             let id = match map_get(case, "case/id").unwrap() {
                 Form::Keyword(value) => value,
