@@ -30,6 +30,7 @@ fn program(
         functions: vec![FunctionPrototype {
             name: None,
             arity: 0,
+            capture_count: 0,
             local_count,
             max_stack,
             code,
@@ -55,6 +56,50 @@ fn add_program() -> Program {
         0,
         2,
     )
+}
+
+/// One prototype of a multi-function program. `max_stack` is 1: enough
+/// for the hand-built shapes below, and the validator recomputes it.
+fn prototype(
+    name: Option<&str>,
+    arity: u16,
+    capture_count: u16,
+    code: Vec<Instruction>,
+) -> FunctionPrototype {
+    FunctionPrototype {
+        name: name.map(str::to_string),
+        arity,
+        capture_count,
+        local_count: arity + capture_count,
+        max_stack: 1,
+        source_map: source_map(code.len()),
+        code,
+    }
+}
+
+/// Entry creates and calls a zero-argument, zero-capture closure:
+/// `Closure 1 / Call 0 / Return` with the target `Nil / Return`.
+fn closure_call_program() -> Program {
+    Program {
+        constants: vec![],
+        functions: vec![
+            prototype(
+                None,
+                0,
+                0,
+                vec![
+                    Instruction::Closure {
+                        prototype: 1,
+                        captures: 0,
+                    },
+                    Instruction::Call { argc: 0 },
+                    Instruction::Return,
+                ],
+            ),
+            prototype(Some("f"), 0, 0, vec![Instruction::Nil, Instruction::Return]),
+        ],
+        entry: 0,
+    }
 }
 
 /// Hand-compiled `if` shape: `True / JumpIfFalse else / then / Jump end /
@@ -95,6 +140,23 @@ fn instruction_display_and_shape() {
         "Primitive % 2"
     );
     assert_eq!(Instruction::Jump(12).to_string(), "Jump 0012");
+    assert_eq!(
+        Instruction::Closure {
+            prototype: 1,
+            captures: 2
+        }
+        .to_string(),
+        "Closure 0001 captures 2"
+    );
+    assert_eq!(Instruction::Call { argc: 3 }.to_string(), "Call 3");
+    assert_eq!(
+        Instruction::CallStatic {
+            prototype: 2,
+            argc: 1
+        }
+        .to_string(),
+        "CallStatic 0002 1"
+    );
     assert_eq!(Instruction::JumpIfFalse(4).jump_target(), Some(4));
     assert_eq!(Instruction::Return.jump_target(), None);
     assert!(!Instruction::Jump(0).falls_through());
@@ -104,6 +166,23 @@ fn instruction_display_and_shape() {
         Instruction::Primitive { op: Primitive::Add, argc: 3 }.stack_effect(),
         Some(-2)
     );
+    assert_eq!(
+        Instruction::Closure {
+            prototype: 0,
+            captures: 2
+        }
+        .stack_effect(),
+        Some(-1)
+    );
+    assert_eq!(Instruction::Call { argc: 3 }.stack_effect(), Some(-3));
+    assert_eq!(
+        Instruction::CallStatic {
+            prototype: 0,
+            argc: 2
+        }
+        .stack_effect(),
+        Some(-1)
+    );
     assert_eq!(Instruction::Return.stack_effect(), None);
 }
 
@@ -111,6 +190,87 @@ fn instruction_display_and_shape() {
 fn valid_programs_pass_validation() {
     validate(&add_program()).expect("add program");
     validate(&if_program()).expect("if program");
+    validate(&closure_call_program()).expect("closure call program");
+}
+
+#[test]
+fn validator_rejects_bad_closure_prototype() {
+    let mut program = closure_call_program();
+    program.functions[0].code[0] = Instruction::Closure {
+        prototype: 9,
+        captures: 0,
+    };
+    assert!(invalid(&program).contains("closure prototype 9 out of range"));
+}
+
+#[test]
+fn validator_rejects_closure_capture_mismatch() {
+    let mut program = closure_call_program();
+    program.functions[0].code[0] = Instruction::Closure {
+        prototype: 1,
+        captures: 1,
+    };
+    let message = invalid(&program);
+    assert!(
+        message.contains("closure captures 1 but prototype expects 0"),
+        "{message}"
+    );
+}
+
+#[test]
+fn validator_rejects_bad_callstatic_target() {
+    let mut program = closure_call_program();
+    program.functions[0].code[1] = Instruction::CallStatic {
+        prototype: 9,
+        argc: 0,
+    };
+    assert!(invalid(&program).contains("callstatic target 9 out of range"));
+}
+
+#[test]
+fn validator_rejects_callstatic_arity_mismatch() {
+    let mut program = closure_call_program();
+    program.functions[1].arity = 1;
+    program.functions[1].local_count = 1;
+    program.functions[0].code[1] = Instruction::CallStatic {
+        prototype: 1,
+        argc: 0,
+    };
+    let message = invalid(&program);
+    assert!(
+        message.contains("callstatic argc 0 but prototype expects 1"),
+        "{message}"
+    );
+}
+
+#[test]
+fn validator_rejects_callstatic_capture_mismatch() {
+    // Entry directly self-calls a prototype with a different capture
+    // count; no Closure instruction masks the CallStatic check.
+    let program = Program {
+        constants: vec![],
+        functions: vec![
+            prototype(
+                None,
+                0,
+                0,
+                vec![
+                    Instruction::CallStatic {
+                        prototype: 1,
+                        argc: 0,
+                    },
+                    Instruction::Return,
+                ],
+            ),
+            prototype(Some("f"), 0, 1, vec![Instruction::Nil, Instruction::Return]),
+        ],
+        entry: 0,
+    };
+    let message = invalid(&program);
+    assert!(
+        message.contains("callstatic capture count differs from current function"),
+        "{message}"
+    );
 }
 
 #[test]
@@ -282,7 +442,7 @@ fn disassembler_renders_offsets_operands_and_positions() {
     program.functions[0].source_map = map;
     let expected = "\
 == program: 2 constants, 1 functions, entry 0 ==
-== fn 0 <anonymous> (arity=0, locals=0, max_stack=1) ==
+== fn 0 <anonymous> (arity=0, captures=0, locals=0, max_stack=1) ==
 0000  True
 0001  JumpIfFalse -> 0004  [line 1, column 6]
 0002  Constant 0  ; 42
@@ -291,6 +451,21 @@ fn disassembler_renders_offsets_operands_and_positions() {
 0005  Return
 ";
     assert_eq!(disassemble(&program), expected);
+}
+
+#[test]
+fn disassembler_resolves_closure_targets() {
+    let expected = "\
+== program: 0 constants, 2 functions, entry 0 ==
+== fn 0 <anonymous> (arity=0, captures=0, locals=0, max_stack=1) ==
+0000  Closure 0001 captures 0  ; fn 0001 f
+0001  Call 0
+0002  Return
+== fn 1 f (arity=0, captures=0, locals=0, max_stack=1) ==
+0000  Nil
+0001  Return
+";
+    assert_eq!(disassemble(&closure_call_program()), expected);
 }
 
 #[test]

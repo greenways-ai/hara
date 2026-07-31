@@ -18,17 +18,22 @@ pub const MAX_LOCALS: usize = u16::MAX as usize;
 pub const MAX_OPERAND_STACK: usize = 4096;
 /// Maximum number of arguments in one primitive call (`u8` operand).
 pub const MAX_PRIMITIVE_ARGUMENTS: usize = u8::MAX as usize;
+/// Maximum number of captured values in one closure (`u8` operand).
+pub const MAX_CAPTURES: usize = u8::MAX as usize;
 
 /// Index of a function prototype inside [`Program::functions`].
 pub type FunctionId = u16;
 
-/// A compiled function. Milestone 1 only ever emits the entry function;
-/// the structure already matches what the closure milestone will need.
+/// A compiled function. The entry function has arity and capture count 0;
+/// `fn`/`defn` forms contribute the remaining prototypes.
 #[derive(Debug, Clone)]
 pub struct FunctionPrototype {
     pub name: Option<String>,
-    /// Required argument count. Always 0 for the entry function today.
+    /// Required argument count. Always 0 for the entry function.
     pub arity: u16,
+    /// Number of captured values the frame expects in the slots directly
+    /// above the parameters. Always 0 for the entry function.
+    pub capture_count: u16,
     /// Number of local slots the frame allocates.
     pub local_count: u16,
     /// Declared operand-stack high-water mark; the validator recomputes

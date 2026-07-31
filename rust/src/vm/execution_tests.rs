@@ -320,7 +320,7 @@ fn parse_errors_are_compile_errors() {
 fn runtime_errors_carry_instruction_and_position() {
     let program = compile_source("(+ 1 2) (loop [i 0] (if (< i 3) (recur (/ 1 0)) i))")
         .expect("compiles");
-    let error = execute_program(&program).expect_err("division by zero");
+    let error = execute_program(std::rc::Rc::new(program)).expect_err("division by zero");
     let text = error.to_string();
     // The runtime error points at the failing primitive call, not the
     // enclosing `recur`.
@@ -346,9 +346,9 @@ fn multiline_source_positions() {
 
 #[test]
 fn compiled_programs_are_reusable() {
-    let program = compile_source("(let [x 19 y 23] (+ x y))").expect("compiles");
+    let program = std::rc::Rc::new(compile_source("(let [x 19 y 23] (+ x y))").expect("compiles"));
     for _ in 0..3 {
-        let value = execute_program(&program).expect("executes");
+        let value = execute_program(program.clone()).expect("executes");
         assert!(matches!(value, Value::Number(42)));
     }
 }

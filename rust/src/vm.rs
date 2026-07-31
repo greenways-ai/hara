@@ -92,5 +92,5 @@ pub use validate::validate;
 /// source positions). No fallback to the tree-walking evaluator.
 pub fn eval_source(source: &str) -> Result<crate::core::Value, String> {
     let program = compile_source(source).map_err(|error| error.to_string())?;
-    execute_program(&program).map_err(|error| error.to_string())
+    execute_program(std::rc::Rc::new(program)).map_err(|error| error.to_string())
 }

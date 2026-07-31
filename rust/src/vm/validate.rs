@@ -119,6 +119,46 @@ pub(crate) fn stack_heights(
                     at,
                 ));
             }
+            Instruction::Closure { prototype, captures } => {
+                let Some(target) = program.functions.get(usize::from(*prototype)) else {
+                    return Err(ValidationError::new(
+                        format!("closure prototype {prototype} out of range"),
+                        at,
+                    ));
+                };
+                if usize::from(*captures) != usize::from(target.capture_count) {
+                    return Err(ValidationError::new(
+                        format!(
+                            "closure captures {captures} but prototype expects {}",
+                            target.capture_count
+                        ),
+                        at,
+                    ));
+                }
+            }
+            Instruction::CallStatic { prototype, argc } => {
+                let Some(target) = program.functions.get(usize::from(*prototype)) else {
+                    return Err(ValidationError::new(
+                        format!("callstatic target {prototype} out of range"),
+                        at,
+                    ));
+                };
+                if usize::from(*argc) != usize::from(target.arity) {
+                    return Err(ValidationError::new(
+                        format!(
+                            "callstatic argc {argc} but prototype expects {}",
+                            target.arity
+                        ),
+                        at,
+                    ));
+                }
+                if target.capture_count != function.capture_count {
+                    return Err(ValidationError::new(
+                        "callstatic capture count differs from current function",
+                        at,
+                    ));
+                }
+            }
             _ => {}
         }
         // Stack effects and successors.

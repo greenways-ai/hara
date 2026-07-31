@@ -13,6 +13,9 @@ use crate::core::Primitive;
 /// - `Constant`, `Nil`, `True`, `False`, `LoadLocal`: push 1.
 /// - `StoreLocal`, `Pop`, `JumpIfFalse`: pop 1.
 /// - `Primitive`: pops `argc`, pushes 1 (net `1 - argc`).
+/// - `Closure`: pops `captures`, pushes 1 (net `1 - captures`).
+/// - `Call`: pops `argc` arguments plus the callee, pushes 1 (net `-argc`).
+/// - `CallStatic`: pops `argc`, pushes 1 (net `1 - argc`).
 /// - `Jump`: no change.
 /// - `Return`: terminal; requires stack height exactly 1.
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +42,17 @@ pub enum Instruction {
     /// Pops the condition and jumps when it is not truthy
     /// (`Value::truthy`: only `nil` and `false` are false).
     JumpIfFalse(u32),
+    /// Pops `captures` captured values and pushes a function value for
+    /// `prototype`.
+    Closure { prototype: u16, captures: u8 },
+    /// Pops `argc` arguments and then the callee, invokes the function
+    /// value through the shared `call_function` boundary, and pushes the
+    /// result.
+    Call { argc: u8 },
+    /// Pops `argc` arguments and calls `prototype` directly, copying the
+    /// current frame's capture slots as the callee's captures (`defn`
+    /// self-recursion).
+    CallStatic { prototype: u16, argc: u8 },
     /// Returns the top of the stack as the function result.
     Return,
 }
@@ -67,7 +81,11 @@ impl Instruction {
             | Instruction::False
             | Instruction::LoadLocal(_) => 1,
             Instruction::StoreLocal(_) | Instruction::Pop | Instruction::JumpIfFalse(_) => -1,
-            Instruction::Primitive { argc, .. } => 1 - i32::from(*argc),
+            Instruction::Primitive { argc, .. } | Instruction::CallStatic { argc, .. } => {
+                1 - i32::from(*argc)
+            }
+            Instruction::Closure { captures, .. } => 1 - i32::from(*captures),
+            Instruction::Call { argc } => -i32::from(*argc),
             Instruction::Jump(_) => 0,
             Instruction::Return => return None,
         })
@@ -89,6 +107,13 @@ impl std::fmt::Display for Instruction {
             }
             Instruction::Jump(target) => write!(formatter, "Jump {target:04}"),
             Instruction::JumpIfFalse(target) => write!(formatter, "JumpIfFalse {target:04}"),
+            Instruction::Closure { prototype, captures } => {
+                write!(formatter, "Closure {prototype:04} captures {captures}")
+            }
+            Instruction::Call { argc } => write!(formatter, "Call {argc}"),
+            Instruction::CallStatic { prototype, argc } => {
+                write!(formatter, "CallStatic {prototype:04} {argc}")
+            }
             Instruction::Return => formatter.write_str("Return"),
         }
     }

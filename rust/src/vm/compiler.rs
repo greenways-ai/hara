@@ -496,6 +496,7 @@ impl Compiler {
             functions: vec![FunctionPrototype {
                 name: None,
                 arity: 0,
+                capture_count: 0,
                 local_count: self.scopes.high_water(),
                 max_stack: 0,
                 code: self.code,

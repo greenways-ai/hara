@@ -17,8 +17,8 @@ pub fn disassemble(program: &Program) -> String {
     for (index, function) in program.functions.iter().enumerate() {
         let name = function.name.as_deref().unwrap_or("<anonymous>");
         out.push_str(&format!(
-            "== fn {index} {name} (arity={}, locals={}, max_stack={}) ==\n",
-            function.arity, function.local_count, function.max_stack
+            "== fn {index} {name} (arity={}, captures={}, locals={}, max_stack={}) ==\n",
+            function.arity, function.capture_count, function.local_count, function.max_stack
         ));
         for (ip, instruction) in function.code.iter().enumerate() {
             let mut line = match instruction {
@@ -30,6 +30,15 @@ pub fn disassemble(program: &Program) -> String {
                     let mut line = format!("{ip:04}  Constant {constant}");
                     if let Some(value) = program.constants.get(*constant as usize) {
                         line.push_str(&format!("  ; {}", preview(&value.display())));
+                    }
+                    line
+                }
+                Instruction::Closure { prototype, .. }
+                | Instruction::CallStatic { prototype, .. } => {
+                    let mut line = format!("{ip:04}  {instruction}");
+                    if let Some(target) = program.functions.get(usize::from(*prototype)) {
+                        let name = target.name.as_deref().unwrap_or("<anonymous>");
+                        line.push_str(&format!("  ; fn {prototype:04} {name}"));
                     }
                     line
                 }

@@ -1023,15 +1023,21 @@ impl Runtime {
 /// namespace-independent forms in the supported synchronous subset;
 /// anything else fails as a typed compile error. There is no fallback to
 /// the default evaluator, and `Runtime::eval_native` is unaffected.
+///
+/// Programs are returned inside `Rc` because compiled closures share the
+/// program with their executing machines; `Rc::clone` is the cheap way to
+/// pass one around.
 #[cfg(feature = "bytecode-vm")]
-pub fn compile_bytecode(source: &str) -> Result<vm::Program, String> {
-    vm::compile_source(source).map_err(|error| error.to_string())
+pub fn compile_bytecode(source: &str) -> Result<std::rc::Rc<vm::Program>, String> {
+    vm::compile_source(source)
+        .map(std::rc::Rc::new)
+        .map_err(|error| error.to_string())
 }
 
 /// Executes a previously compiled and validated program.
 #[cfg(feature = "bytecode-vm")]
-pub fn execute_bytecode(program: &vm::Program) -> Result<String, String> {
-    vm::execute_program(program)
+pub fn execute_bytecode(program: &std::rc::Rc<vm::Program>) -> Result<String, String> {
+    vm::execute_program(program.clone())
         .map(|value| value.display())
         .map_err(|error| error.to_string())
 }
