@@ -1,0 +1,94 @@
+;; ============================================================================
+;; std.substrate.json — direct portable port of xt.substrate.base-json.
+;; ============================================================================
+(ns std.substrate.json
+  (:require [std.foundation.json :as json]
+            [std.substrate.frame :as frame]
+            [std.substrate.router :as router]))
+
+(defn frame-kind?
+  "Returns true when kind is supported by the Foundation JSON wire format."
+  [kind]
+  (or (= kind frame/KIND_REQUEST)
+      (= kind frame/KIND_RESPONSE)
+      (= kind frame/KIND_STREAM)
+      (= kind router/KIND_SUBSCRIBE)
+      (= kind router/KIND_UNSUBSCRIBE)))
+
+(defn valid-frame?
+  "Validates a node or router event frame."
+  [value]
+  (if (not (map? value))
+    false
+    (let [kind (get value "kind")
+          id (get value "id")
+          space (get value "space")
+          meta (get value "meta")]
+      (if (or (not (frame-kind? kind))
+              (not (string? id))
+              (not (string? space))
+              (and (not (nil? meta))
+                   (not (map? meta))))
+        false
+        (cond
+          (= kind frame/KIND_REQUEST)
+          (and (string? (get value "action"))
+               (or (nil? (get value "args"))
+                   (vector? (get value "args"))))
+
+          (= kind frame/KIND_RESPONSE)
+          (and (string? (get value "reply_to"))
+               (string? (get value "status")))
+
+          :else
+          (string? (get value "signal")))))))
+
+(defn normalize-error
+  "Normalises arbitrary errors into plain JSON-safe maps."
+  [error]
+  (cond
+    (nil? error)
+    nil
+
+    (string? error)
+    {"message" error}
+
+    (map? error)
+    (let [message
+          (or (get error "message")
+              (let [value (get error "error")]
+                (if (string? value) value nil))
+              (let [value (get error "status")]
+                (if (string? value) value nil))
+              (str error))]
+      (assoc error "message" message))
+
+    :else
+    {"message" (str error)}))
+
+(defn normalize-frame
+  "Normalises a frame before JSON transport emission."
+  [value]
+  (if (not (map? value))
+    value
+    (if (and (= frame/KIND_RESPONSE (get value "kind"))
+             (= frame/STATUS_ERROR (get value "status"))
+             (not (nil? (get value "error"))))
+      (assoc value "error" (normalize-error (get value "error")))
+      value)))
+
+(defn encode-frame
+  "Encodes a validated frame as JSON."
+  [value]
+  (let [output (normalize-frame value)]
+    (if (not (valid-frame? output))
+      (throw (ex-info "invalid node json frame" {:frame output}))
+      (json/write output))))
+
+(defn decode-frame
+  "Decodes JSON text or validates a direct frame value."
+  [input]
+  (let [output (if (string? input) (json/read input) input)]
+    (if (not (valid-frame? output))
+      (throw (ex-info "invalid node json frame" {:frame output}))
+      output)))
