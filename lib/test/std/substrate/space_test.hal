@@ -1,61 +1,55 @@
 (ns std.substrate.space-test
+  (:use code.test)
   (:require [std.lib.substrate :as core]
-            [std.lib.test :as test]
             [std.substrate.space :as space]))
 
-(def results
-  [(test/check
-    "constructs a space entry with defaults"
-    (let [entry (space/space "room/a" {"state" {"count" 1}})]
-      [(get entry "id")
-       (get-in entry ["state" "count"])
-       (get entry "meta")])
-    ["room/a" 1 {}])
+(fact "constructs a space entry with defaults"
+  (let [entry (space/space "room/a" {"state" {"count" 1}})]
+    [(get entry "id")
+     (get-in entry ["state" "count"])
+     (get entry "meta")])
+  => ["room/a" 1 {}])
 
-   (test/check
-    "gets ensures lists and removes spaces"
-    (let [node (core/node-create "node/spaces")
-          first-entry (space/ensure-space
-                       node "room/a" {"state" {"count" 1}})
-          second-entry (space/ensure-space
-                        node "room/a" {"state" {"count" 9}})]
-      (space/create-space node "room/b" nil)
-      [(get-in first-entry ["state" "count"])
-       (get-in second-entry ["state" "count"])
-       (space/list-spaces node)
-       (get (space/remove-space node "room/a") "id")
-       (nil? (space/get-space node "room/a"))])
-    [1 1 ["room/a" "room/b"] "room/a" true])
+(fact "gets ensures lists and removes spaces"
+  (let [node (core/node-create "node/spaces")
+        first-entry (space/ensure-space
+                     node "room/a" {"state" {"count" 1}})
+        second-entry (space/ensure-space
+                      node "room/a" {"state" {"count" 9}})]
+    (space/create-space node "room/b" nil)
+    [(get-in first-entry ["state" "count"])
+     (get-in second-entry ["state" "count"])
+     (space/list-spaces node)
+     (get (space/remove-space node "room/a") "id")
+     (nil? (space/get-space node "room/a"))])
+  => [1 1 ["room/a" "room/b"] "room/a" true])
 
-   (test/check
-    "gets and creates default state on demand"
-    (let [node (core/node-create "node/state")]
-      (space/create-space node "room/a" {"state" {"count" 2}})
-      [(get-in (space/get-space-state node "room/a") ["count"])
-       (space/get-space-state node "room/b")])
-    [2 {}])
+(fact "gets and creates default state on demand"
+  (let [node (core/node-create "node/state")]
+    (space/create-space node "room/a" {"state" {"count" 2}})
+    [(get-in (space/get-space-state node "room/a") ["count"])
+     (space/get-space-state node "room/b")])
+  => [2 {}])
 
-   (test/check
-    "sets and updates state with entry and node context"
-    (let [node (core/node-create "node/update")]
-      (space/set-space-state node "room/a" {"count" 1})
-      (space/update-space-state
-       node "room/a"
-       (fn [state entry current-node]
-         {"count" (+ (get state "count") 4)
-          "id" (get entry "id")
-          "node" (field current-node :id)}))
-      [(get-in (space/get-space-state node "room/a") ["count"])
-       (get-in (space/get-space-state node "room/a") ["id"])
-       (get-in (space/get-space-state node "room/a") ["node"])])
-    [5 "room/a" "node/update"])
+(fact "sets and updates state with entry and node context"
+  (let [node (core/node-create "node/update")]
+    (space/set-space-state node "room/a" {"count" 1})
+    (space/update-space-state
+     node "room/a"
+     (fn [state entry current-node]
+       {"count" (+ (get state "count") 4)
+        "id" (get entry "id")
+        "node" (field current-node :id)}))
+    [(get-in (space/get-space-state node "room/a") ["count"])
+     (get-in (space/get-space-state node "room/a") ["id"])
+     (get-in (space/get-space-state node "room/a") ["node"])])
+  => [5 "room/a" "node/update"])
 
-   (test/check
-    "nil space ids resolve to the node-wide space"
-    (let [node (core/node-create "node/root")]
-      (space/set-space-state node nil {"value" 42})
-      [(space/list-spaces node)
-       (get-in (space/get-space-state node nil) ["value"])])
-    [["__NODE__"] 42])])
+(fact "nil space ids resolve to the node-wide space"
+  (let [node (core/node-create "node/root")]
+    (space/set-space-state node nil {"value" 42})
+    [(space/list-spaces node)
+     (get-in (space/get-space-state node nil) ["value"])])
+  => [["__NODE__"] 42])
 
-(test/print-results results)
+(pr-str (run '[std.substrate.space-test]))
