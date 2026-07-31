@@ -63,6 +63,16 @@ public final class HaraProtocol implements TruffleObject {
     extend(HaraDispatchKey.nil(), methodName, invoker, null);
   }
 
+  /** Registers a built-in invoker that specialized nodes are allowed to inline. */
+  void extendIntrinsic(Class<?> type, String methodName, HaraProtocolInvoker invoker) {
+    extend(HaraDispatchKey.javaClass(type), methodName, invoker, null, true);
+  }
+
+  /** Registers a built-in nil invoker that specialized nodes are allowed to inline. */
+  void extendNilIntrinsic(String methodName, HaraProtocolInvoker invoker) {
+    extend(HaraDispatchKey.nil(), methodName, invoker, null, true);
+  }
+
   public void extendForeign(String methodName, HaraProtocolInvoker invoker) {
     extend(HaraDispatchKey.foreign(), methodName, invoker, null);
   }
@@ -74,6 +84,16 @@ public final class HaraProtocol implements TruffleObject {
   @TruffleBoundary
   private void extend(
       HaraDispatchKey key, String methodName, HaraProtocolInvoker invoker, HaraFunction function) {
+    extend(key, methodName, invoker, function, false);
+  }
+
+  @TruffleBoundary
+  private void extend(
+      HaraDispatchKey key,
+      String methodName,
+      HaraProtocolInvoker invoker,
+      HaraFunction function,
+      boolean intrinsic) {
     HaraProtocolMethod method = method(methodName);
     if (method == null) {
       throw new HaraException("Unknown method " + name + "/" + methodName);
@@ -88,7 +108,8 @@ public final class HaraProtocol implements TruffleObject {
               + " arguments, received "
               + invoker.arity());
     }
-    implementations.register(methodName, key, new HaraProtocolImplementation(invoker, function));
+    implementations.register(
+        methodName, key, new HaraProtocolImplementation(invoker, function, intrinsic));
   }
 
   public HaraProtocolImplementation implementation(Object receiver, String methodName) {

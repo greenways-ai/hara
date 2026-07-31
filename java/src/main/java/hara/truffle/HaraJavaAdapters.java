@@ -237,7 +237,7 @@ public final class HaraJavaAdapters {
   }
 
   public static void installLookup(HaraProtocol protocol) {
-    protocol.extend(
+    protocol.extendIntrinsic(
         ILookup.class,
         "lookup",
         (receiver, arguments) -> {
@@ -246,8 +246,8 @@ public final class HaraJavaAdapters {
           }
           return lookupValue((ILookup<?, ?>) receiver, arguments);
         });
-    protocol.extend(byte[].class, "lookup", HaraJavaAdapters::lookupBytes);
-    protocol.extendNil(
+    protocol.extendIntrinsic(byte[].class, "lookup", HaraJavaAdapters::lookupBytes);
+    protocol.extendNilIntrinsic(
         "lookup",
         (receiver, arguments) -> {
           if (arguments.length < 1 || arguments.length > 2) {
@@ -258,7 +258,7 @@ public final class HaraJavaAdapters {
   }
 
   public static void installAssoc(HaraProtocol protocol) {
-    protocol.extend(
+    protocol.extendIntrinsic(
         IAssoc.class,
         "assoc",
         (receiver, arguments) -> {
@@ -327,11 +327,11 @@ public final class HaraJavaAdapters {
   }
 
   public static void installNth(HaraProtocol protocol) {
-    protocol.extend(
+    protocol.extendIntrinsic(
         INth.class,
         "nth",
         (receiver, arguments) -> ((INth<?>) receiver).nth(((Number) arguments[0]).longValue()));
-    protocol.extend(
+    protocol.extendIntrinsic(
         byte[].class,
         "nth",
         (receiver, arguments) -> {

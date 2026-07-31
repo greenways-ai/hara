@@ -284,6 +284,12 @@ final class HaraAnalyzer {
           return analyzeCompare(list, HaraNodes.Compare.Operator.EQUAL, "=");
         case "not=":
           return analyzeCompare(list, HaraNodes.Compare.Operator.NOT_EQUAL, "not=");
+        case "get":
+          return analyzeCollectionOp(list, HaraNodes.CollectionOp.Kind.GET);
+        case "nth":
+          return analyzeCollectionOp(list, HaraNodes.CollectionOp.Kind.NTH);
+        case "assoc":
+          return analyzeCollectionOp(list, HaraNodes.CollectionOp.Kind.ASSOC);
         default:
           return analyzeInvocation(list);
       }
@@ -1804,6 +1810,38 @@ final class HaraAnalyzer {
       arguments[i - 1] = analyze(form.nth(i));
     }
     return new HaraNodes.Invoke(target, arguments);
+  }
+
+  /**
+   * Specializes get/nth/assoc call sites. Falls back to a plain invocation whenever the operator
+   * is lexically shadowed or the arity is outside the specialized shape, so error behavior for
+   * unsupported arities is exactly that of the generic path.
+   */
+  private HaraExpressionNode analyzeCollectionOp(List<?> form, HaraNodes.CollectionOp.Kind kind) {
+    Symbol operator = (Symbol) form.nth(0);
+    long arity = form.count() - 1;
+    boolean supported;
+    switch (kind) {
+      case GET:
+        supported = arity == 2 || arity == 3;
+        break;
+      case NTH:
+        supported = arity == 2;
+        break;
+      case ASSOC:
+        supported = arity == 3;
+        break;
+      default:
+        throw new AssertionError(kind);
+    }
+    if (!supported || isLexicallyBound(operator)) {
+      return analyzeInvocation(form);
+    }
+    HaraExpressionNode[] arguments = new HaraExpressionNode[(int) arity];
+    for (int i = 1; i < form.count(); i++) {
+      arguments[i - 1] = analyze(form.nth(i));
+    }
+    return new HaraNodes.CollectionOp(kind, context.canonicalSymbol(operator), arguments);
   }
 
   private void requireCount(List<?> form, long expected, String name) {

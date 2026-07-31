@@ -29,9 +29,14 @@ public final class HaraDispatchRegistry {
   }
 
   private static final class Table {
+    private static final HaraProtocolImplementation NO_IMPLEMENTATION =
+        new HaraProtocolImplementation(null, null);
+
     private final Map<HaraType, HaraProtocolImplementation> haraTypes = new ConcurrentHashMap<>();
     private final Map<Class<?>, HaraProtocolImplementation> javaClasses = new ConcurrentHashMap<>();
     private final Map<HaraDispatchKey.PrimitiveCategory, HaraProtocolImplementation> primitives =
+        new ConcurrentHashMap<>();
+    private final Map<Class<?>, HaraProtocolImplementation> resolvedClasses =
         new ConcurrentHashMap<>();
     private volatile HaraProtocolImplementation nil;
     private volatile HaraProtocolImplementation foreign;
@@ -60,6 +65,7 @@ public final class HaraDispatchRegistry {
         default:
           throw new AssertionError(key.kind());
       }
+      resolvedClasses.clear();
     }
 
     private HaraProtocolImplementation resolve(Object receiver) {
@@ -79,6 +85,17 @@ public final class HaraDispatchRegistry {
       }
 
       Class<?> receiverClass = receiver.getClass();
+      HaraProtocolImplementation cached = resolvedClasses.get(receiverClass);
+      if (cached != null) {
+        return cached == NO_IMPLEMENTATION ? null : cached;
+      }
+      HaraProtocolImplementation implementation = resolveClass(receiverClass, receiver);
+      resolvedClasses.put(
+          receiverClass, implementation == null ? NO_IMPLEMENTATION : implementation);
+      return implementation;
+    }
+
+    private HaraProtocolImplementation resolveClass(Class<?> receiverClass, Object receiver) {
       HaraProtocolImplementation implementation = javaClasses.get(receiverClass);
       if (implementation != null) {
         return implementation;
