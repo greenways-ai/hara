@@ -1018,6 +1018,30 @@ impl Runtime {
     }
 }
 
+/// Experimental bytecode VM entry points (issue #195), gated behind the
+/// non-default `bytecode-vm` feature. These accept only closed,
+/// namespace-independent forms in the supported synchronous subset;
+/// anything else fails as a typed compile error. There is no fallback to
+/// the default evaluator, and `Runtime::eval_native` is unaffected.
+#[cfg(feature = "bytecode-vm")]
+pub fn compile_bytecode(source: &str) -> Result<vm::Program, String> {
+    vm::compile_source(source).map_err(|error| error.to_string())
+}
+
+/// Executes a previously compiled and validated program.
+#[cfg(feature = "bytecode-vm")]
+pub fn execute_bytecode(program: &vm::Program) -> Result<String, String> {
+    vm::execute_program(program)
+        .map(|value| value.display())
+        .map_err(|error| error.to_string())
+}
+
+/// Compiles and executes a source string through the experimental VM.
+#[cfg(feature = "bytecode-vm")]
+pub fn eval_bytecode_native(source: &str) -> Result<String, String> {
+    execute_bytecode(&compile_bytecode(source)?)
+}
+
 impl Runtime {
     /// Evaluates once through the existing evaluator and returns a
     /// development-only structured trace.

@@ -22,13 +22,32 @@ pub mod error;
 pub mod validate;
 #[path = "vm/disassemble.rs"]
 pub mod disassemble;
+#[path = "vm/compiler.rs"]
+pub mod compiler;
+#[path = "vm/frame.rs"]
+pub mod frame;
+#[path = "vm/machine.rs"]
+pub mod machine;
 
 #[cfg(test)]
 #[path = "vm/tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "vm/execution_tests.rs"]
+mod execution_tests;
 
+pub use compiler::compile_source;
 pub use disassemble::disassemble;
 pub use error::{CompileError, CompileErrorKind, ValidationError, VmError};
+pub use machine::{execute_program, Machine, VmOutcome};
 pub use opcode::Instruction;
 pub use program::{FunctionId, FunctionPrototype, Program};
 pub use validate::validate;
+
+/// Compiles, validates, and executes a closed source string in one step.
+/// Errors from either stage flatten to their display form (which carries
+/// source positions). No fallback to the tree-walking evaluator.
+pub fn eval_source(source: &str) -> Result<crate::core::Value, String> {
+    let program = compile_source(source).map_err(|error| error.to_string())?;
+    execute_program(&program).map_err(|error| error.to_string())
+}
