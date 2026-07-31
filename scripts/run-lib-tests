@@ -17,11 +17,12 @@ run_file() {
 
     if [ "$status" -ne 0 ]; then
         echo "FAIL  $file (exit $status)"
-        echo "$output" | tail -n 5 | sed 's/^/      /'
+        echo "$output" | tail -n 8 | sed 's/^/      /'
         return 1
     fi
 
-    # code.test/fact suites return a structured summary map.
+    # code.test/fact suites return a one-line structured summary map, either
+    # directly or wrapped by pr-str in a quoted string.
     local last_summary
     last_summary=$(echo "$output" | grep -E '^"?\{' | tail -n 1)
     if [ -n "$last_summary" ]; then
@@ -32,6 +33,8 @@ run_file() {
                 sed -n 's/.*:facts \([0-9][0-9]*\).*/\1/p')
             check_count=$(echo "$last_summary" |
                 sed -n 's/.*:checks \([0-9][0-9]*\).*/\1/p')
+            fact_count=${fact_count:-0}
+            check_count=${check_count:-0}
             echo "PASS  $file ($fact_count facts, $check_count checks)"
             return 0
         fi
@@ -40,14 +43,13 @@ run_file() {
         return 1
     fi
 
-    # Accept either a result vector or its pr-str representation. Older tests
-    # return the serialized form, while std.lib.test returns the vector itself.
+    # Compatibility path for older std.lib.test result vectors.
     local last_vector
     last_vector=$(echo "$output" | grep -E '^"?\[' | tail -n 1)
 
     if [ -z "$last_vector" ]; then
-        echo "FAIL  $file (no result vector found)"
-        echo "$output" | tail -n 5 | sed 's/^/      /'
+        echo "FAIL  $file (no code.test summary or result vector found)"
+        echo "$output" | tail -n 8 | sed 's/^/      /'
         return 1
     fi
 
@@ -69,7 +71,33 @@ run_file() {
     return 1
 }
 
-for file in $(find lib/test -name '*.hal' | sort); do
+collect_files() {
+    if [ "$#" -eq 0 ]; then
+        find lib/test -name '*.hal' | sort
+        return
+    fi
+
+    local target
+    for target in "$@"; do
+        if [ -d "$target" ]; then
+            find "$target" -name '*.hal'
+        elif [ -f "$target" ]; then
+            printf '%s\n' "$target"
+        else
+            echo "Test target not found: $target" >&2
+            return 2
+        fi
+    done | sort -u
+}
+
+mapfile -t TEST_FILES < <(collect_files "$@")
+
+if [ "${#TEST_FILES[@]}" -eq 0 ]; then
+    echo "No library test files selected" >&2
+    exit 2
+fi
+
+for file in "${TEST_FILES[@]}"; do
     if [ "$file" = "$FRAMEWORK" ]; then
         continue
     fi
