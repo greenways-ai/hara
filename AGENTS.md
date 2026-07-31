@@ -52,6 +52,9 @@ mvn -f java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraL0ConformanceTest test
 ./scripts/run-lib-tests                      # library .hal test harness
 bash scripts/build-truffle-native            # native-image build (target/hara-truffle)
 target/hara-truffle eval '(+ 19 23)'         # native-image smoke test
+./scripts/run-runtime-corpus-benchmark jvm interpreter-temurin target/runtime-corpus.csv
+#   ^ shared benchmark corpus as CSV evidence (jvm mode uses the `java` on PATH;
+#     bin mode appends a binary path, e.g. ... bin native-fallback out.csv 40 10 target/hara-truffle)
 ```
 
 Rust runtime:

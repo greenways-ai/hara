@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+
+# Runs the shared runtime benchmark corpus (lib/bench/runtime/workloads.json)
+# and writes per-workload timing evidence as CSV. Timings are evidence, not
+# CI thresholds — the script fails only when a workload errors or produces an
+# unexpected result.
+#
+# usage:
+#   run-runtime-corpus-benchmark jvm <label> <output.csv> [windows] [calls]
+#       Runs via the `java` on PATH (builds the Truffle runtime classpath with
+#       Maven first). Label should record the JVM/compiler mode, e.g.
+#       interpreter-temurin or jvmci-graalvm.
+#   run-runtime-corpus-benchmark bin <label> <output.csv> [windows] [calls] <binary>
+#       Runs via a prebuilt hara CLI binary (e.g. target/hara-truffle,
+#       the Native Image fallback).
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+MODE="${1:?usage: run-runtime-corpus-benchmark jvm|bin <label> <output.csv> [windows] [calls] [binary]}"
+LABEL="${2:?missing mode label}"
+OUTPUT="${3:?missing output csv path}"
+WINDOWS="${4:-20}"
+CALLS="${5:-5}"
+
+if [[ "$MODE" == "jvm" ]]; then
+  mvn -B -f "$ROOT/java/pom.xml" -Ptruffle -DskipTests test-compile dependency:copy-dependencies \
+    -DincludeScope=runtime \
+    -DoutputDirectory="$ROOT/java/target/truffle-dependencies"
+  RUNNER=(java -cp "$ROOT/java/target/test-classes:$ROOT/java/target/classes:$ROOT/java/target/truffle-dependencies/*" hara.truffle.Main)
+  # The benchmark engine disables engine.WarnInterpreterOnly, so the runtime
+  # never reports its compiler mode. A stock JDK (no JVMCI) can only run the
+  # Truffle fallback runtime; GraalVM runs the optimizing compiler by default.
+  if java -version 2>&1 | grep -qi graalvm; then
+    COMPILER=enabled
+  else
+    COMPILER=fallback
+  fi
+elif [[ "$MODE" == "bin" ]]; then
+  BINARY="${6:?bin mode needs the path to the hara binary}"
+  RUNNER=("$BINARY")
+  # scripts/build-truffle-native builds the Native Image fallback runtime.
+  COMPILER=fallback
+else
+  echo "unknown mode: $MODE (expected jvm or bin)" >&2
+  exit 2
+fi
+export HARA_BENCH_COMPILER="$COMPILER"
+
+mkdir -p "$(dirname "$OUTPUT")"
+
+python3 - "$LABEL" "$OUTPUT" "$WINDOWS" "$CALLS" "${RUNNER[@]}" <<'EOF'
+import csv, json, os, subprocess, base64, sys, statistics
+
+label, output, windows, calls = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+runner = sys.argv[5:]
+
+wl = json.load(open("lib/bench/runtime/workloads.json"))
+items = wl if isinstance(wl, list) else wl.get("workloads")
+
+rows = []
+for w in items:
+    b64 = base64.urlsafe_b64encode(w["source"].encode()).decode()
+    out = subprocess.run(
+        runner + ["benchmark", "hara-truffle", w["id"], b64, str(w["expected"]), windows, calls],
+        capture_output=True, text=True)
+    if out.returncode != 0:
+        print(f"{label} {w['id']} FAILED {out.stderr.strip()[:200]}", file=sys.stderr)
+        sys.exit(1)
+    d = json.loads(out.stdout.strip())
+    s = d["samples_ns"]
+    last10 = s[-10:] if len(s) >= 10 else s
+    compiler = os.environ.get("HARA_BENCH_COMPILER", "unknown")
+    rows.append({
+        "mode": label,
+        "workload": w["id"],
+        "windows": windows,
+        "calls": calls,
+        "runtime_compilation": compiler,
+        "first_ns": d["first_ns"],
+        "median_all_ns": int(statistics.median(s)),
+        "last10_median_ns": int(statistics.median(last10)),
+        "min_ns": min(s),
+    })
+    print(f"{label} {w['id']:22s} compiler={compiler:8s} first={d['first_ns']/1e6:8.3f}ms "
+          f"median_all={statistics.median(s)/1e6:7.3f}ms "
+          f"last10_median={statistics.median(last10)/1e6:7.3f}ms "
+          f"min={min(s)/1e6:7.3f}ms")
+
+with open(output, "w", newline="") as f:
+    writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+    writer.writeheader()
+    writer.writerows(rows)
+EOF
