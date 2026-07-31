@@ -1,4 +1,6 @@
 (ns std.foundation.pretty.engine
+  (:config {:blank true})
+  (:require [std.foundation :refer [+ <= = first get keyword? list? map? nil? nth reduce rest second str string? vector?]])
   (:require [std.foundation.string :as string]))
 
 (defn append-text

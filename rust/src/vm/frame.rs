@@ -1,6 +1,4 @@
-//! One execution frame: the local slot array plus the operand-stack base.
-//! The base is reserved for the multi-frame call stack of the closure
-//! milestone; milestone 1 runs exactly one frame.
+//! One execution frame: the local slot array plus its operand-stack base.
 
 use super::slot::VmSlot;
 
@@ -27,12 +25,31 @@ impl Frame {
     pub(crate) fn call(
         local_count: usize,
         arity: usize,
-        args: Vec<VmSlot>,
+        mut args: Vec<VmSlot>,
         captures: Vec<VmSlot>,
         base: usize,
     ) -> Frame {
-        let mut locals = vec![VmSlot::Nil; local_count];
-        for (index, value) in args.into_iter().enumerate() {
+        Self::call_reusing(
+            Vec::new(),
+            local_count,
+            arity,
+            &mut args,
+            captures,
+            base,
+        )
+    }
+
+    pub(crate) fn call_reusing(
+        mut locals: Vec<VmSlot>,
+        local_count: usize,
+        arity: usize,
+        args: &mut Vec<VmSlot>,
+        captures: Vec<VmSlot>,
+        base: usize,
+    ) -> Frame {
+        locals.clear();
+        locals.resize(local_count, VmSlot::Nil);
+        for (index, value) in args.drain(..).enumerate() {
             if let Some(cell) = locals.get_mut(index) {
                 *cell = value;
             }
@@ -43,6 +60,10 @@ impl Frame {
             }
         }
         Frame { locals, base }
+    }
+
+    pub(crate) fn into_locals(self) -> Vec<VmSlot> {
+        self.locals
     }
 
     pub(crate) fn local(&self, slot: u16) -> Option<&VmSlot> {
@@ -72,8 +93,7 @@ impl Frame {
         }
     }
 
-    /// Operand-stack base of this frame; always 0 until function calls
-    /// arrive with the closure milestone.
+    /// Operand-stack base at which this frame was entered.
     pub(crate) fn base(&self) -> usize {
         self.base
     }

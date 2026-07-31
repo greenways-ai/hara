@@ -28,7 +28,9 @@
 ;; helpers iterate explicitly so no runtime-specific set implementation leaks
 ;; into the portable semantics.
 ;; ============================================================================
-(ns std.foundation.set)
+(ns std.foundation.set
+  (:config {:blank true})
+  (:require [std.foundation :refer [= conj dissoc iter iter-next? iter-next]]))
 
 (defn- ^{:schema [:fn [:set :any] :bool]}
   contains-value?

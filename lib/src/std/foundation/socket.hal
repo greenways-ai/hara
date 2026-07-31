@@ -44,7 +44,8 @@
 ;; HTTP and RESP framing live above this transport layer. Host threads enqueue
 ;; raw events; HAL callbacks and stream consumers run on the evaluator thread.
 ;; ============================================================================
-(ns std.foundation.socket)
+(ns std.foundation.socket
+  (:config {:blank true}))
 
 (defn ^{:schema [:fn [:str :int :map :fn] :any]}
   connect

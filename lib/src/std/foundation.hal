@@ -229,7 +229,7 @@
   rest
   "Returns all but the first item of value as a seq, or nil if empty."
   [value]
-  (seq (iter-drop 1 value)))
+  (seq (Iter/iter-drop 1 value)))
 
 (defn ^{:schema [:fn [:any] :any]}
   not-empty

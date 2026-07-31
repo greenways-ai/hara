@@ -1,4 +1,5 @@
 (ns code.test.base.runtime
+  (:require [std.foundation :refer :all :exclude [eval-in-ns]])
   (:require [code.test :as test]))
 
 (def +globals+ (atom {}))

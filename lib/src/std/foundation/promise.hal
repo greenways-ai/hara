@@ -35,7 +35,8 @@
 ;; `all` joins multiple promises; `delay` schedules later work; cancellation
 ;; is best-effort and never exposes a host executor.
 ;; ============================================================================
-(ns std.foundation.promise)
+(ns std.foundation.promise
+  (:config {:blank true}))
 
 (defn ^{:schema [:fn [:fn] :promise]}
   run

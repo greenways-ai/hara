@@ -25,7 +25,9 @@
 ;; Writing is deterministic and readable by the same profile. Pretty-print
 ;; options are reserved for future formatting controls.
 ;; ==========================================================================
-(ns std.foundation.edn)
+(ns std.foundation.edn
+  (:config {:blank true})
+  (:require [std.foundation :refer [map? pr-str]]))
 
 (defn ^{:schema [:fn [:str] :any]}
   read

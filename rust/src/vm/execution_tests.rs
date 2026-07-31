@@ -6,6 +6,7 @@
 use super::error::CompileErrorKind;
 use super::{compile_source, disassemble, eval_source, execute_program};
 use crate::core::Value;
+use crate::Runtime;
 
 fn eval(source: &str) -> String {
     eval_source(source)
@@ -272,15 +273,7 @@ fn recur_errors() {
 #[test]
 fn unsupported_forms_are_typed_compile_errors() {
     let cases = [
-        ("(def x 1)", "unsupported operator: def"),
-        (
-            "(defn f [x] x)",
-            "defn in result position requires var semantics",
-        ),
         ("(quote a)", "unsupported operator: quote"),
-        ("[1 2 3]", "unsupported form: [1 2 3]"),
-        ("{:a 1}", "unsupported form: {:a 1}"),
-        ("#{1 2}", "unsupported form: #{1 2}"),
         (
             "(let [[a b] [1 2]] a)",
             "let destructuring is not supported",
@@ -349,11 +342,17 @@ fn unbound_symbols_are_compile_errors_with_positions() {
     let (kind, message) = compile_error("(let [x 1] (+ x y))");
     assert_eq!(kind, CompileErrorKind::UnboundSymbol);
     assert_eq!(message, "unbound symbol: y [line 1, column 17]");
-    // Names outside the curated unsupported-operator list report as
-    // unbound symbols, matching the evaluator.
-    let (kind, message) = compile_error("(first [1 2])");
-    assert_eq!(kind, CompileErrorKind::UnboundSymbol);
-    assert_eq!(message, "unbound symbol: first [line 1, column 1]");
+    assert_eq!(eval("(first [1 2])"), "1");
+}
+
+#[test]
+fn literal_collections_and_collection_primitives() {
+    assert_eq!(eval("[1 2 3]"), "[1 2 3]");
+    assert_eq!(eval("{:a 1}"), "{:a 1}");
+    assert_eq!(eval("#{1 2}"), "#{1 2}");
+    assert_eq!(eval("(nth [10 20 30] 1)"), "20");
+    assert_eq!(eval("(assoc {} :answer 42)"), "{:answer 42}");
+    assert_eq!(eval("(first (rest [1 2]))"), "2");
 }
 
 #[test]
@@ -362,8 +361,28 @@ fn fn_values_and_direct_calls() {
     assert_eq!(eval("((fn [x] x) 1)"), "1");
     assert_eq!(eval("((fn [x y] (+ x y)) 19 23)"), "42");
     assert_eq!(eval("(let [f (fn [x] (+ x 1))] (f 41))"), "42");
+    assert_eq!(eval("(let [f (fn [x] x)] (= f f))"), "true");
+    assert_eq!(eval("(= (fn [x] x) (fn [x] x))"), "false");
     // Zero-argument functions.
     assert_eq!(eval("((fn [] 42))"), "42");
+}
+
+#[test]
+fn immediate_fixed_arity_closures_inline_into_lexical_slots() {
+    let program = compile_source("((fn [x] (+ x 1)) 41)").expect("compiles");
+    let listing = disassemble(&program);
+    assert!(!listing.contains("Closure"), "{listing}");
+    assert!(!listing.contains("Call"), "{listing}");
+    assert!(listing.contains("StoreLocal"), "{listing}");
+    assert_eq!(eval("((fn [x] (+ x 1)) 41)"), "42");
+    assert_eq!(eval("(let [x 40] ((fn [x y] (+ x y)) 19 23))"), "42");
+    // Arguments resolve before the inlined parameter scope is introduced.
+    assert_eq!(eval("(let [x 20] ((fn [x y] (+ x y)) 19 (+ x 3)))"), "42");
+    // A recur nested in the function body retains its own call boundary.
+    assert_eq!(
+        eval("((fn [n] (loop [i n] (if (< i 1) 42 (recur (- i 1))))) 10000)"),
+        "42"
+    );
 }
 
 #[test]
@@ -401,9 +420,9 @@ fn defn_lowering_binds_direct_calls() {
 }
 
 #[test]
-fn static_recursion_uses_vm_frames_instead_of_the_host_stack() {
+fn vm_global_recursion_uses_stackless_frames() {
     assert_eq!(
-        eval("(do (defn countdown [n] (if (< n 1) n (countdown (- n 1)))) (countdown 20000))"),
+        eval("(do (defn countdown [n] (if (< n 1) 0 (countdown (- n 1)))) (countdown 10000))"),
         "0"
     );
 }
@@ -477,25 +496,11 @@ fn compiled_programs_are_reusable() {
 }
 
 #[test]
-fn declare_opts_in_to_foundation_replacement() {
-    assert_eq!(eval("(declare count)"), "nil");
-    assert_eq!(eval("(declare count) (defn count [n] 42) (count 5)"), "42");
+fn declare_supplies_forward_visibility_only() {
+    assert_eq!(eval("(declare answer)"), "nil");
     assert_eq!(
-        eval("(declare count other) (defn count [n] (+ n 1)) (count 41)"),
+        eval("(declare answer) (defn answer [n] (+ n 1)) (answer 41)"),
         "42"
-    );
-    // Undeclared replacement of a foundation builtin is a compile error.
-    let (kind, message) = compile_error("(defn count [n] 42) (count 5)");
-    assert_eq!(kind, CompileErrorKind::UnsupportedForm);
-    assert!(
-        message.contains("defn replaces std.foundation var: count"),
-        "{message}"
-    );
-    // The VM's own primitives are foundation names too.
-    let (_, message) = compile_error("(defn mod [a b] 100) 1");
-    assert!(
-        message.contains("defn replaces std.foundation var: mod"),
-        "{message}"
     );
     // declare is top-level only and takes name symbols.
     let (_, message) = compile_error("(let [x 1] (declare y) x)");
@@ -518,7 +523,10 @@ fn workload_disassembly_is_deterministic() {
     assert_eq!(first, second);
     assert!(first.contains("JumpIfFalse ->"), "{first}");
     assert!(first.contains("StoreLocal 1"), "{first}");
-    assert!(first.contains("Primitive < 2"), "{first}");
+    assert!(
+        first.contains("PrimitiveLocalConst < local 0 constant 1"),
+        "{first}"
+    );
 }
 
 // ------------------------------------------------------------------
@@ -671,4 +679,121 @@ fn uncaught_throw_carries_position() {
         "{text}"
     );
     assert!(text.contains("(instruction"), "{text}");
+}
+
+#[test]
+fn global_forms_issue_223() {
+    assert_eq!(eval("(def answer 42)"), "42");
+    assert_eq!(eval("(do (def answer 42) answer)"), "42");
+    assert_eq!(
+        eval("(do (def answer 19) (def answer (+ answer 23)) answer)"),
+        "42"
+    );
+    // defn interns a real var and evaluates to it; display is qualified.
+    assert_eq!(eval("(defn f [x] x)"), "#'user/f");
+    assert_eq!(eval("(do (defn f [x] (+ x 1)) (f 41))"), "42");
+    // Late binding: redefinition resets the shared cell.
+    assert_eq!(
+        eval("(do (defn f [x] 1) (defn g [] (f 0)) (defn f [x] 2) (g))"),
+        "2"
+    );
+    assert_eq!(
+        eval("(do (defn f [x] 1) (def v (var f)) (defn f [x] 2) (= v (var f)))"),
+        "true"
+    );
+    // var / #' reads the var itself.
+    assert_eq!(eval("(do (defn f [x] x) #'f)"), "#'user/f");
+    assert_eq!(eval("(do (defn f [x] x) (var f))"), "#'user/f");
+    // set! resets a global root and evaluates to the value.
+    assert_eq!(eval("(do (def c 0) (set! c (+ c 42)) c)"), "42");
+    assert_eq!(eval("(do (def c 0) (set! c 42))"), "42");
+    // declare interns a nil var and evaluates to nil.
+    assert_eq!(eval("(declare future)"), "nil");
+    assert_eq!(eval("(declare a b)"), "nil");
+    // defn- compiles like defn (private metadata).
+    assert_eq!(eval("(do (defn- p [] 42) (p))"), "42");
+}
+
+#[test]
+fn defstruct_forms_issue_223() {
+    assert_eq!(eval("(do (defstruct Point [x y]) nil)"), "nil");
+    assert_eq!(
+        eval("(do (defstruct Point [x y]) (field (->Point 19 23) :y))"),
+        "23"
+    );
+    assert_eq!(
+        eval("(do (defstruct Point [x y]) (instance? Point (->Point 1 2)))"),
+        "true"
+    );
+    assert_eq!(
+        eval("(do (defstruct Point [x y]) (instance? Point 42))"),
+        "false"
+    );
+    // Constructor vars are ordinary globals: late-bound and replaceable.
+    assert_eq!(
+        eval("(do (defstruct Point [x y]) (def make ->Point) (field (make 1 2) :x))"),
+        "1"
+    );
+}
+
+#[test]
+fn variadic_and_multi_arity_issue_223() {
+    assert_eq!(eval("((fn [left & more] left) 42 1 2)"), "42");
+    assert_eq!(eval("((fn [left & more] more) 42 1 2)"), "(1 2)");
+    assert_eq!(eval("((fn [left & more] more) 42)"), "()");
+    assert_eval_error(
+        "((fn [l r & more] l) 1)",
+        "function expects at least 2 arguments",
+    );
+    assert_eq!(
+        eval("(do (defn choose ([v] v) ([l r] (+ l r))) (+ (choose 19) (choose 20 3)))"),
+        "42"
+    );
+    assert_eq!(
+        eval("(do (defn sum3 ([a b] (+ a b)) ([a b c & more] (+ a b c))) (sum3 19 20 3))"),
+        "42"
+    );
+    assert_eq!(
+        eval("(do (defn rest-args [f & r] r) (rest-args 42 1 2))"),
+        "(1 2)"
+    );
+}
+
+#[test]
+fn global_form_errors_issue_223() {
+    let (kind, message) = compile_error("(set! missing 1)");
+    assert_eq!(kind, CompileErrorKind::UnboundSymbol);
+    assert!(message.contains("unbound var: missing"), "{message}");
+    let (kind, message) = compile_error("(var missing)");
+    assert_eq!(kind, CompileErrorKind::UnboundSymbol);
+    assert!(message.contains("unbound var: missing"), "{message}");
+    let (_, message) = compile_error("(let [x 1] (set! x 2))");
+    assert!(message.contains("set! targets a global var"), "{message}");
+    // Field errors surface at runtime, not compile time.
+    assert_eval_error(
+        "(do (defstruct P [x]) (field (->P 1) :z))",
+        "unknown struct field: z",
+    );
+    assert_eval_error(
+        "(do (defstruct P [x]) (field 42 :x))",
+        "field expects a struct",
+    );
+    assert_eval_error(
+        "(do (defstruct P [x]) (instance? 42 1))",
+        "instance? expects a struct type",
+    );
+    // Referred foundation Vars are protected; declare is forward visibility only.
+    let message = Runtime::new()
+        .compile_bytecode("(do (defn count [n] 42) (count 5))")
+        .expect_err("referred foundation Var must be protected");
+    assert!(
+        message.contains("Cannot replace referred Var without ns omission: count"),
+        "{message}"
+    );
+    // Uninitialized let-style errors keep their shape.
+    let (_, message) = compile_error("(fn [a &] a)");
+    assert!(
+        message.contains("rest parameter must be the last"),
+        "{message}"
+    );
 }

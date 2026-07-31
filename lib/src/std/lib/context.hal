@@ -39,6 +39,7 @@
 ;; specifications. Pointers describe invocation but do not own the runtime.
 ;; ==========================================================================
 (ns std.lib.context
+  (:require [std.foundation :refer :all :exclude [pointer]])
   (:require [std.lib.component :as component]))
 
 ;; Runtime and pointer value shapes.

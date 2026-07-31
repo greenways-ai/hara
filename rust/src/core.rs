@@ -23,8 +23,6 @@ use std::rc::Rc;
 #[path = "fiber.rs"]
 mod fiber;
 pub use fiber::{EvalFiber, EvalFiberState, Step};
-#[cfg(feature = "bytecode-vm")]
-pub(crate) use fiber::CORE_SPECIAL_FORMS;
 
 pub fn completion_symbols() -> &'static [&'static str] {
     fiber::completion_symbols()
@@ -704,6 +702,30 @@ pub(crate) fn native_function(
     }))
 }
 
+/// A native function wrapper with an exact fixed parameter list and an
+/// optional rest marker: `params.len()` reflects the fixed arity so the
+/// multi-arity `select_clause` boundary can dispatch on it, unlike
+/// [`native_variadic_function`] whose parameter list is empty. Used by
+/// the bytecode VM for variadic closures (issue #223).
+pub(crate) fn native_fixed_variadic_function(
+    name: &str,
+    fixed_arity: usize,
+    callback: impl Fn(Vec<Value>) -> Result<Value, String> + 'static,
+) -> Value {
+    Value::Function(Rc::new(Function {
+        params: (0..fixed_arity).map(|index| format!("arg{index}")).collect(),
+        variadic: Some("rest".into()),
+        patterns: Vec::new(),
+        variadic_pattern: None,
+        body: Vec::new(),
+        captured: Rc::new(RefCell::new(HashMap::new())),
+        name: Some(name.into()),
+        native: Some(Rc::new(callback)),
+        clauses: Vec::new(),
+        is_macro: false,
+    }))
+}
+
 pub(crate) fn native_variadic_function(
     name: &str,
     callback: impl Fn(Vec<Value>) -> Result<Value, String> + 'static,
@@ -762,7 +784,7 @@ pub(crate) fn exception_function_values() -> Vec<(&'static str, Value)> {
 }
 
 pub(crate) fn basic_function_values() -> Vec<(&'static str, Value)> {
-    vec![(
+    let mut functions = vec![(
         "compare",
         native_function("compare", 2, |arguments| {
             Ok(Value::Number(match arguments[0].cmp(&arguments[1]) {
@@ -771,7 +793,98 @@ pub(crate) fn basic_function_values() -> Vec<(&'static str, Value)> {
                 std::cmp::Ordering::Greater => 1,
             }))
         }),
-    )]
+    )];
+    for (name, primitive) in [
+        ("+", Primitive::Add),
+        ("-", Primitive::Subtract),
+        ("*", Primitive::Multiply),
+        ("/", Primitive::Divide),
+        ("%", Primitive::Remainder),
+        ("mod", Primitive::Remainder),
+        ("=", Primitive::Equal),
+        ("<", Primitive::Less),
+        ("<=", Primitive::LessOrEqual),
+        (">", Primitive::Greater),
+        (">=", Primitive::GreaterOrEqual),
+        ("count", Primitive::Count),
+        ("get", Primitive::Get),
+        ("meta", Primitive::Meta),
+    ] {
+        functions.push((
+            name,
+            native_variadic_function(name, move |arguments| {
+                apply_primitive(primitive, &arguments)
+            }),
+        ));
+    }
+    functions
+}
+
+pub(crate) fn structural_function_value(name: impl Into<String>) -> Value {
+    let name = name.into();
+    let display_name = name.clone();
+    let active = Rc::new(Cell::new(false));
+    native_variadic_function(&display_name, move |arguments| {
+        if active.replace(true) {
+            return Err(format!("native method not implemented: {name}"));
+        }
+        let mut env = HashMap::new();
+        let mut call = Vec::with_capacity(arguments.len() + 1);
+        call.push(Form::Symbol(name.clone()));
+        for (index, argument) in arguments.into_iter().enumerate() {
+            let symbol = format!("__native_argument_{index}");
+            env.insert(symbol.clone(), argument);
+            call.push(Form::Symbol(symbol));
+        }
+        let result = eval(&Form::List(call), &mut env);
+        active.set(false);
+        result
+    })
+}
+
+/// Structural evaluator arms that are ordinary callable values.  Rust keeps
+/// the implementations in `eval`, but exposes the names through real
+/// `std.foundation` Vars just as the JVM runtime does.  Syntax and namespace
+/// mutation forms deliberately remain structural and are never interned here.
+pub(crate) fn structural_callable_names() -> impl Iterator<Item = &'static str> {
+    const SYNTAX_FORMS: &[&str] = &[
+        ".",
+        "binding",
+        "declare",
+        "def",
+        "defmacro",
+        "defmethod",
+        "defmulti",
+        "defn",
+        "defn-",
+        "do",
+        "extend-type",
+        "fn",
+        "fn*",
+        "if",
+        "let",
+        "loop",
+        "ns",
+        "recur",
+        "require",
+        "set!",
+        "try",
+        "var",
+    ];
+
+    let maths_methods = NATIVE_TYPES
+        .iter()
+        .find_map(|(name, methods)| (*name == "Maths").then_some(*methods))
+        .expect("Maths native type must be declared");
+
+    fiber::CORE_SPECIAL_FORMS.iter().copied().filter(move |name| {
+        !SYNTAX_FORMS.contains(name)
+            && !name.contains('/')
+            && !name.starts_with("__")
+            && !maths_methods.contains(name)
+            && (!name.starts_with("iter-")
+                || matches!(*name, "iter-next" | "iter-next?"))
+    })
 }
 
 pub fn with_macros<R>(
@@ -836,7 +949,7 @@ fn gensym(prefix: &str) -> String {
     format!("{prefix}{index}")
 }
 
-fn form_to_value(form: &Form) -> Result<Value, String> {
+pub(crate) fn form_to_value(form: &Form) -> Result<Value, String> {
     literal_value(form)
 }
 
@@ -950,7 +1063,7 @@ fn macroexpand_call(
     Ok(Some(expansion))
 }
 
-fn form_without_metadata(mut form: &Form) -> &Form {
+pub(crate) fn form_without_metadata(mut form: &Form) -> &Form {
     while let Form::Metadata(_, value) = form {
         form = value.as_ref();
     }
@@ -1150,7 +1263,7 @@ enum IteratorGenerator {
     Cycle(Value, Vec<Value>, usize, bool),
     TakeWhile(Rc<Function>, Value),
     DropWhile(Rc<Function>, Value, bool),
-    Map(Rc<Function>, Value),
+    Map(Rc<Function>, Value, bool),
     Filter(Rc<Function>, Value),
     Mapcat(Rc<Function>, Value, Option<Value>),
     Keep(Rc<Function>, Value),
@@ -1301,12 +1414,13 @@ impl IteratorState {
                         break Ok(Some(value));
                     }
                 },
-                IteratorGenerator::Map(function, source) => {
+                IteratorGenerator::Map(function, source, spread) => {
                     let Some(value) = iterator_try_next(source)? else {
                         self.closed = true;
                         return Ok(None);
                     };
                     match value {
+                        value if !*spread => call_function(function, vec![value]),
                         Value::Tuple(values) => {
                             call_function(function, values.iter().cloned().collect())
                         }
@@ -1753,7 +1867,21 @@ impl Ord for Value {
 }
 impl Hash for Value {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        state.write_u64(self.stable_hash());
+        match self {
+            // Avoid constructing a nested DefaultHasher for the hottest
+            // persistent-map key types. Equal values still hash identically;
+            // stable_hash remains the portable structural hash API.
+            Value::Number(value) => {
+                state.write_u8(0);
+                state.write_i64(*value);
+            }
+            Value::Bool(value) => {
+                state.write_u8(1);
+                state.write_u8(u8::from(*value));
+            }
+            Value::Nil => state.write_u8(19),
+            _ => state.write_u64(self.stable_hash()),
+        }
     }
 }
 
@@ -2423,6 +2551,22 @@ pub(crate) fn binding_is_local(var: &KernelVar<Value>) -> bool {
         .unwrap_or(true)
 }
 
+/// Names a fresh local var cell: qualified to the current namespace when
+/// a registry is active, bare otherwise. Qualifying matters: an
+/// unqualified cell fails `binding_is_local`, so redefining the name in
+/// the same eval used to shadow with a fresh cell instead of resetting
+/// the existing one — the answer then depended on whether the name had
+/// survived a previous eval's namespace save-back (which qualifies
+/// cells). The JVM runtime always resets the same cell; qualifying at
+/// creation makes the tree evaluator agree on both first and later
+/// evals (issue #223).
+pub(crate) fn local_var_name(name: &str) -> String {
+    match namespace_registry() {
+        Ok(registry) => format!("{}/{}", registry.current().name().as_str(), name),
+        Err(_) => name.to_string(),
+    }
+}
+
 pub(crate) fn protected_fallback_binding(
     env: &HashMap<String, Value>,
     name: &str,
@@ -2445,7 +2589,157 @@ pub(crate) fn protected_fallback_binding(
     }
 }
 
-fn namespace_registry() -> Result<NamespaceRegistry<Value>, String> {
+fn require_owned_definition(env: &HashMap<String, Value>, name: &str) -> Result<(), String> {
+    if let Some(Value::Var(var)) = env.get(name) {
+        if !binding_is_local(var) {
+            return Err(format!(
+                "Cannot replace referred Var without ns omission: {name}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Defines or updates a global var in the current namespace, mirroring
+/// the evaluator's `def` arm (`core.rs` special forms) without the flat
+/// env bridge: an existing var local to the current namespace is reused
+/// (identity preserved), a referred or missing name gets a fresh cell.
+/// Used by the bytecode VM's `DefGlobal` (issue #223).
+pub(crate) fn vm_def_global(
+    name: &str,
+    value: Value,
+    metadata: Option<Rc<Metadata>>,
+) -> Result<KernelVar<Value>, String> {
+    let registry = namespace_registry()?;
+    let current = registry.current();
+    let local = Symbol::create(None, name);
+    if let Some(existing) = current.resolve(&local) {
+        if binding_is_local(&existing) {
+            existing.reset_value(value);
+            if metadata.is_some() {
+                existing.set_hara_metadata(metadata);
+            }
+            existing.set_origin(definition_origin());
+            return Ok(existing);
+        }
+        return Err(format!(
+            "Cannot replace referred Var without ns omission: {name}"
+        ));
+    }
+    let var = KernelVar::new(format!("{}/{}", current.name().as_str(), name), value);
+    var.set_hara_metadata(metadata);
+    var.set_origin(definition_origin());
+    current.map_var(local, var.clone());
+    Ok(var)
+}
+
+/// Declares a global var without assigning it, mirroring the evaluator's
+/// `declare` arm: an existing local var is kept (value untouched), a
+/// missing name gets a fresh nil cell. Used by the VM (issue #223).
+pub(crate) fn vm_declare_global(name: &str) -> Result<KernelVar<Value>, String> {
+    let registry = namespace_registry()?;
+    let current = registry.current();
+    let local = Symbol::create(None, name);
+    if let Some(existing) = current.resolve(&local) {
+        if binding_is_local(&existing) {
+            existing.set_origin(definition_origin());
+            return Ok(existing);
+        }
+        return Err(format!(
+            "Cannot replace referred Var without ns omission: {name}"
+        ));
+    }
+    let var = KernelVar::new(format!("{}/{}", current.name().as_str(), name), Value::Nil);
+    var.set_origin(definition_origin());
+    current.map_var(local, var.clone());
+    Ok(var)
+}
+
+/// Resolves a global var by (possibly qualified) name through the
+/// registry: current-namespace mappings, aliases, and qualified names.
+pub(crate) fn vm_resolve_global(name: &str) -> Result<KernelVar<Value>, String> {
+    namespace_registry()?
+        .resolve(&Symbol::parse(name))
+        .ok_or_else(|| format!("unbound symbol: {name}"))
+}
+
+/// `defstruct` against the registry directly, mirroring the evaluator's
+/// defstruct arm minus protocol clauses (rejected by the VM compiler).
+/// Interns `Name`, `->Name`, and `map->Name` into the current namespace
+/// and returns nil, exactly like the special form (issue #223).
+pub(crate) fn vm_defstruct(name: &str, fields: Vec<String>) -> Result<Value, String> {
+    if name.contains('/') {
+        return Err("defstruct name must be an unqualified symbol".into());
+    }
+    if fields.iter().any(|field| field.contains('/')) {
+        return Err("defstruct field names must be unqualified symbols".into());
+    }
+    if fields.iter().collect::<HashSet<_>>().len() != fields.len() {
+        return Err("Duplicate defstruct field".into());
+    }
+    let registry = namespace_registry()?;
+    let namespace = registry.current().name().as_str().to_owned();
+    let ty = Rc::new(StructType {
+        name: format!("{namespace}/{name}"),
+        fields,
+    });
+    let map_type = ty.clone();
+    let map_constructor = native_function(&format!("map->{name}"), 1, move |values| {
+        let source = values.first().expect("native arity is checked");
+        let fields = map_type
+            .fields
+            .iter()
+            .map(|field| {
+                Ok(map_value(source, &Value::Keyword(Keyword::from(field.as_str())))
+                    .cloned()
+                    .unwrap_or(Value::Nil))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(Value::Struct(Rc::new(StructValue {
+            ty: map_type.clone(),
+            values: fields,
+        })))
+    });
+    let current = registry.current();
+    for (binding, value) in [
+        (name.to_owned(), Value::StructType(ty.clone())),
+        (format!("->{name}"), Value::StructType(ty.clone())),
+        (format!("map->{name}"), map_constructor),
+    ] {
+        let var = KernelVar::new(format!("{namespace}/{binding}"), value);
+        var.set_origin(definition_origin());
+        current.map_var(Symbol::create(None, &binding), var);
+    }
+    Ok(Value::Nil)
+}
+
+/// Positional field access on a struct instance, shared with the `field`
+/// special form (issue #223).
+pub(crate) fn struct_field_value(value: &Value, field: &str) -> Result<Value, String> {
+    let Value::Struct(value) = value else {
+        return Err("field expects a struct".into());
+    };
+    value
+        .ty
+        .fields
+        .iter()
+        .position(|candidate| candidate == field)
+        .map(|index| value.values[index].clone())
+        .ok_or_else(|| format!("unknown struct field: {field}"))
+}
+
+/// Struct type identity check, shared with the `instance?` special form
+/// (issue #223).
+pub(crate) fn struct_instance_of(type_value: &Value, value: &Value) -> Result<Value, String> {
+    let Value::StructType(ty) = type_value else {
+        return Err("instance? expects a struct type".into());
+    };
+    Ok(Value::Bool(
+        matches!(value, Value::Struct(value) if Rc::ptr_eq(ty, &value.ty)),
+    ))
+}
+
+pub(crate) fn namespace_registry() -> Result<NamespaceRegistry<Value>, String> {
     ACTIVE_NAMESPACES
         .with(|active| active.borrow().clone())
         .ok_or_else(|| "namespace runtime is unavailable".into())
@@ -4235,6 +4529,14 @@ pub enum Primitive {
     LessOrEqual,
     Greater,
     GreaterOrEqual,
+    Count,
+    Get,
+    Meta,
+    Nth,
+    Assoc,
+    First,
+    Rest,
+    Second,
 }
 
 impl Primitive {
@@ -4250,6 +4552,17 @@ impl Primitive {
             "<=" => Primitive::LessOrEqual,
             ">" => Primitive::Greater,
             ">=" => Primitive::GreaterOrEqual,
+            // Evaluator builtin collection/metadata operators (the
+            // structural arms in `eval`, not vars); the VM reaches them
+            // through the same value-level functions.
+            "count" => Primitive::Count,
+            "get" => Primitive::Get,
+            "meta" => Primitive::Meta,
+            "nth" => Primitive::Nth,
+            "assoc" => Primitive::Assoc,
+            "first" => Primitive::First,
+            "rest" => Primitive::Rest,
+            "second" => Primitive::Second,
             _ => return None,
         })
     }
@@ -4268,6 +4581,14 @@ impl Primitive {
             Primitive::LessOrEqual => "<=",
             Primitive::Greater => ">",
             Primitive::GreaterOrEqual => ">=",
+            Primitive::Count => "count",
+            Primitive::Get => "get",
+            Primitive::Meta => "meta",
+            Primitive::Nth => "nth",
+            Primitive::Assoc => "assoc",
+            Primitive::First => "first",
+            Primitive::Rest => "rest",
+            Primitive::Second => "second",
         }
     }
 }
@@ -4360,6 +4681,61 @@ pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Resu
                 _ => unreachable!(),
             })))
         }
+        // The evaluator's structural collection/metadata arms, sharing the
+        // same value-level functions and arity messages.
+        Primitive::Count => {
+            if arguments.len() != 1 {
+                return Err("count expects one argument".into());
+            }
+            collection_count(&arguments[0])
+        }
+        Primitive::Get => {
+            if arguments.len() != 2 && arguments.len() != 3 {
+                return Err("get expects 2 or 3 arguments".into());
+            }
+            let default = arguments.get(2).cloned().unwrap_or(Value::Nil);
+            collection_get(&arguments[0], &arguments[1], default)
+        }
+        Primitive::Meta => {
+            if arguments.len() != 1 {
+                return Err("meta expects one value".into());
+            }
+            protocol_meta(arguments)
+        }
+        Primitive::Nth => {
+            if arguments.len() != 2 {
+                return Err("nth expects two arguments".into());
+            }
+            collection_nth(&arguments[0], &arguments[1])
+        }
+        Primitive::Assoc => {
+            if arguments.len() < 3 || arguments.len() % 2 == 0 {
+                return Err("assoc expects a collection and key/value pairs".into());
+            }
+            let mut value = arguments[0].clone();
+            for pair in arguments[1..].chunks(2) {
+                value = collection_assoc(&value, &pair[0], pair[1].clone())?;
+            }
+            Ok(value)
+        }
+        Primitive::First => {
+            if arguments.len() != 1 {
+                return Err("first expects one argument".into());
+            }
+            collection_first(arguments[0].clone())
+        }
+        Primitive::Rest => {
+            if arguments.len() != 1 {
+                return Err("rest expects one argument".into());
+            }
+            collection_rest(arguments[0].clone())
+        }
+        Primitive::Second => {
+            if arguments.len() != 1 {
+                return Err("second expects one argument".into());
+            }
+            collection_second(arguments[0].clone())
+        }
     }
 }
 
@@ -4390,6 +4766,14 @@ pub(crate) fn apply_binary_primitive(
         | Primitive::GreaterOrEqual => {
             Err(format!("{op} expects numbers"))
         }
+        Primitive::Get => collection_get(left, right, Value::Nil),
+        Primitive::Count => Err("count expects one argument".into()),
+        Primitive::Meta => Err("meta expects one value".into()),
+        Primitive::Nth => collection_nth(left, right),
+        Primitive::Assoc => Err("assoc expects a collection and key/value pairs".into()),
+        Primitive::First => Err("first expects one argument".into()),
+        Primitive::Rest => Err("rest expects one argument".into()),
+        Primitive::Second => Err("second expects one argument".into()),
     }
 }
 
@@ -4399,34 +4783,27 @@ pub(crate) fn apply_binary_numbers(
     right: i64,
 ) -> Result<Value, String> {
     let result = match primitive {
-        Primitive::Add => Value::Number(
-            left.checked_add(right)
-                .ok_or_else(|| "integer overflow".to_string())?,
-        ),
-        Primitive::Subtract => Value::Number(
-            left.checked_sub(right)
-                .ok_or_else(|| "integer overflow".to_string())?,
-        ),
-        Primitive::Multiply => Value::Number(
-            left.checked_mul(right)
-                .ok_or_else(|| "integer overflow".to_string())?,
-        ),
+        Primitive::Add => Value::Number(left.checked_add(right).ok_or("integer overflow")?),
+        Primitive::Subtract => Value::Number(left.checked_sub(right).ok_or("integer overflow")?),
+        Primitive::Multiply => Value::Number(left.checked_mul(right).ok_or("integer overflow")?),
         Primitive::Divide | Primitive::Remainder if right == 0 => {
             return Err("division by zero".into())
         }
-        Primitive::Divide => Value::Number(
-            left.checked_div(right)
-                .ok_or_else(|| "integer overflow".to_string())?,
-        ),
-        Primitive::Remainder => Value::Number(
-            left.checked_rem(right)
-                .ok_or_else(|| "integer overflow".to_string())?,
-        ),
+        Primitive::Divide => Value::Number(left.checked_div(right).ok_or("integer overflow")?),
+        Primitive::Remainder => Value::Number(left.checked_rem(right).ok_or("integer overflow")?),
         Primitive::Equal => Value::Bool(left == right),
         Primitive::Less => Value::Bool(left < right),
         Primitive::LessOrEqual => Value::Bool(left <= right),
         Primitive::Greater => Value::Bool(left > right),
         Primitive::GreaterOrEqual => Value::Bool(left >= right),
+        Primitive::Get => return Err("get expects an associative value".into()),
+        Primitive::Count => return Err("count expects one argument".into()),
+        Primitive::Meta => return Err("meta expects one value".into()),
+        Primitive::Nth => return Err("nth expects a collection and index".into()),
+        Primitive::Assoc => return Err("assoc expects a collection and key/value pairs".into()),
+        Primitive::First => return Err("first expects one argument".into()),
+        Primitive::Rest => return Err("rest expects one argument".into()),
+        Primitive::Second => return Err("second expects one argument".into()),
     };
     Ok(result)
 }
@@ -6369,12 +6746,22 @@ fn iterator_take_while(function: Rc<Function>, value: Value) -> Result<Value, St
     ))))
 }
 fn iterator_map(function: Rc<Function>, value: Value) -> Result<Value, String> {
+    iterator_map_with(function, value, false)
+}
+fn iterator_map_spread(function: Rc<Function>, value: Value) -> Result<Value, String> {
+    iterator_map_with(function, value, true)
+}
+fn iterator_map_with(
+    function: Rc<Function>,
+    value: Value,
+    spread: bool,
+) -> Result<Value, String> {
     let source = match value {
         Value::Iterator(iterator) => Value::Iterator(iterator),
         value => make_iterator(value)?,
     };
     Ok(Value::Iterator(Rc::new(RefCell::new(
-        IteratorState::generated(IteratorGenerator::Map(function, source)),
+        IteratorState::generated(IteratorGenerator::Map(function, source, spread)),
     ))))
 }
 fn iterator_partition(value: Value, amount: usize, all: bool) -> Result<Value, String> {
@@ -6587,16 +6974,23 @@ fn collection_last(value: Value) -> Result<Value, String> {
 }
 
 fn collection_second(value: Value) -> Result<Value, String> {
-    if let Value::Iterator(iterator) = &value {
-        let mut state = iterator.borrow_mut();
-        if state.try_next()?.is_none() {
-            return Ok(Value::Nil);
+    match value {
+        Value::Vector(values) => return Ok(values.get(1).cloned().unwrap_or(Value::Nil)),
+        Value::Tuple(values) => return Ok(values.get(1).cloned().unwrap_or(Value::Nil)),
+        Value::List(values) => return Ok(values.get(1).cloned().unwrap_or(Value::Nil)),
+        Value::Iterator(iterator) => {
+            let mut state = iterator.borrow_mut();
+            if state.try_next()?.is_none() {
+                return Ok(Value::Nil);
+            }
+            return Ok(state.try_next()?.unwrap_or(Value::Nil));
         }
-        return Ok(state.try_next()?.unwrap_or(Value::Nil));
+        value => {
+            let mut values = iterator_values(value)?.into_iter();
+            values.next();
+            return Ok(values.next().unwrap_or(Value::Nil));
+        }
     }
-    let mut values = iterator_values(value)?.into_iter();
-    values.next();
-    Ok(values.next().unwrap_or(Value::Nil))
 }
 
 fn collection_empty(value: Value) -> Result<Value, String> {
@@ -6950,7 +7344,7 @@ fn assoc_metadata(
     )
 }
 
-fn definition_metadata(
+pub(crate) fn definition_metadata(
     mut metadata: Option<Rc<Metadata>>,
     forms: &[Form],
     private: bool,
@@ -7430,9 +7824,20 @@ fn multi_arity_function(
     if functions.is_empty() {
         return Err("defn expects at least one arity".into());
     }
+    Ok(arity_dispatcher(name, functions, is_macro))
+}
+
+/// Builds the multi-arity dispatcher shared by the evaluator's defn and
+/// the bytecode VM's `MakeMultiArity` (issue #223): exact fixed-arity
+/// match first, then the variadic clause with the most parameters.
+pub(crate) fn arity_dispatcher(
+    name: &str,
+    functions: Vec<Rc<Function>>,
+    is_macro: bool,
+) -> Value {
     let dispatch_name = name.to_owned();
     let clauses = functions.clone();
-    Ok(Value::Function(Rc::new(Function {
+    Value::Function(Rc::new(Function {
         params: Vec::new(),
         variadic: Some("arguments".into()),
         patterns: Vec::new(),
@@ -7451,7 +7856,7 @@ fn multi_arity_function(
             call_function(&function, arguments)
         })),
         is_macro,
-    })))
+    }))
 }
 
 fn deref_value(value: Value) -> Value {
@@ -7472,26 +7877,11 @@ fn binding_value(env: &HashMap<String, Value>, name: &str) -> Option<Value> {
                 .map(|var| var.deref_value())
         })
         .or_else(|| {
-            name.rsplit_once('/').and_then(|(qualifier, local)| {
-                let qualifier_is_protocol = matches!(
-                    env.get(qualifier).cloned().map(deref_value),
-                    Some(Value::Protocol(_))
-                ) || FOUNDATION_PROTOCOLS
-                    .iter()
-                    .any(|(protocol, _)| *protocol == qualifier)
-                    || namespace_registry().ok().is_some_and(|registry| {
-                        matches!(
-                            registry
-                                .resolve(&crate::lang::data::Symbol::parse(qualifier))
-                                .map(|var| var.deref_value()),
-                            Some(Value::Protocol(_))
-                        )
-                    });
-                if qualifier_is_protocol {
-                    return None;
-                }
-                env.get(local).cloned().map(deref_value)
-            })
+            let (qualifier, local) = name.rsplit_once('/')?;
+            let registry = namespace_registry().ok()?;
+            (registry.current().name().as_str() == qualifier)
+                .then(|| env.get(local).cloned().map(deref_value))
+                .flatten()
         })
 }
 
@@ -7678,7 +8068,7 @@ pub(crate) fn with_development_trace<T>(
     (result, trace)
 }
 
-fn binding_symbol(form: &Form, context: &str) -> Result<(String, Option<Rc<Metadata>>), String> {
+pub(crate) fn binding_symbol(form: &Form, context: &str) -> Result<(String, Option<Rc<Metadata>>), String> {
     match form {
         Form::Symbol(name) => Ok((name.clone(), None)),
         Form::Metadata(metadata, value) => match value.as_ref() {
@@ -7842,7 +8232,10 @@ fn eval_require_spec(
                 Some(Form::Symbol(target)) => target.clone(),
                 _ => return Err("require namespace must be a symbol".into()),
             };
-            (target, &items[1..])
+            (
+                crate::kernel::generated::normalize_namespace(&target).to_owned(),
+                &items[1..],
+            )
         }
         Form::List(items)
             if items.len() == 2
@@ -7853,7 +8246,10 @@ fn eval_require_spec(
                 Form::Symbol(target) => target.clone(),
                 _ => unreachable!(),
             };
-            (target, &[][..])
+            (
+                crate::kernel::generated::normalize_namespace(&target).to_owned(),
+                &[][..],
+            )
         }
         _ => return Err("require expects vectors such as [chrome.api :as api]".into()),
     };
@@ -7868,6 +8264,24 @@ fn eval_require_spec(
         matches!(&option[0], Form::Keyword(keyword) if keyword.as_str() == "reload")
             && matches!(&option[1], Form::Bool(true))
     });
+    let excluded = options
+        .chunks(2)
+        .find_map(|option| {
+            matches!(&option[0], Form::Keyword(keyword) if keyword.as_str() == "exclude")
+                .then_some(&option[1])
+        })
+        .map(|value| match value {
+            Form::Vector(names) => names
+                .iter()
+                .map(|name| match name {
+                    Form::Symbol(name) if !name.contains('/') => Ok(name.clone()),
+                    _ => Err("require :exclude expects unqualified symbols".to_string()),
+                })
+                .collect::<Result<HashSet<_>, _>>(),
+            _ => Err("require :exclude expects a vector of symbols".into()),
+        })
+        .transpose()?
+        .unwrap_or_default();
     if lazy {
         let has_alias = options
             .chunks(2)
@@ -7906,6 +8320,19 @@ fn eval_require_spec(
     if requiring != target && registry.load_state(&requiring) == Some(NamespaceLoadState::Loading) {
         registry.record_module_dependency(&requiring, &target);
     }
+    if !deferred {
+        let destination = registry.current();
+        for name in &excluded {
+            let local = crate::lang::data::Symbol::parse(name);
+            if destination
+                .resolve(&local)
+                .is_some_and(|var| var.symbol().get_namespace() == Some(target.as_str()))
+            {
+                destination.unmap(&local);
+                env.remove(name);
+            }
+        }
+    }
     for option in options.chunks(2) {
         let name = match &option[0] {
             Form::Keyword(keyword) => keyword.as_str(),
@@ -7927,24 +8354,37 @@ fn eval_require_spec(
                 }
             }
             "refer" => {
-                let Form::Vector(names) = &option[1] else {
-                    return Err("require :refer expects a vector of symbols".into());
-                };
                 let source = registry
                     .find(&target)
                     .ok_or_else(|| format!("Cannot require missing namespace: {target}"))?;
                 let destination = registry.current();
+                let names = match &option[1] {
+                    Form::Keyword(name) if name.as_str() == "all" => source
+                        .mappings()
+                        .into_iter()
+                        .map(|(name, _)| name.as_str().to_owned())
+                        .collect::<Vec<_>>(),
+                    Form::Vector(names) => names
+                        .iter()
+                        .map(|name| match name {
+                            Form::Symbol(name) if !name.contains('/') => Ok(name.clone()),
+                            _ => Err("require :refer expects unqualified symbols".to_string()),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    _ => {
+                        return Err(
+                            "require :refer expects a vector of symbols or :all".into(),
+                        )
+                    }
+                };
                 for name in names {
-                    let Form::Symbol(name) = name else {
-                        return Err("require :refer expects unqualified symbols".into());
-                    };
-                    if name.contains('/') {
-                        return Err("require :refer expects unqualified symbols".into());
+                    if excluded.contains(&name) {
+                        continue;
                     }
                     let var = source
-                        .resolve(&crate::lang::data::Symbol::parse(name))
+                        .resolve(&crate::lang::data::Symbol::parse(&name))
                         .ok_or_else(|| format!("Cannot refer missing Var: {target}/{name}"))?;
-                    destination.map_var(crate::lang::data::Symbol::parse(name), var);
+                    destination.map_var(crate::lang::data::Symbol::parse(&name), var);
                 }
             }
             "refer-macros" => {
@@ -7982,6 +8422,7 @@ fn eval_require_spec(
                     return Err("require :reload expects true".into());
                 }
             }
+            "exclude" => {}
             other => return Err(format!("Unsupported require option: :{other}")),
         }
     }
@@ -8604,6 +9045,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 let reference = eval(&fs[1], env)?;
                 let function = eval(&fs[2], env)?;
+                if !matches!(function, Value::Function(_)) {
+                    return Err("swap! expects a function".into());
+                }
                 let arguments = fs[3..]
                     .iter()
                     .map(|form| eval(form, env))
@@ -8655,6 +9099,11 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 };
                 let value = eval(&fs[2], env)?;
                 let cell = binding_var(env, name).ok_or_else(|| format!("unbound var: {name}"))?;
+                if !binding_is_local(&cell) {
+                    return Err(format!(
+                        "Cannot replace referred Var without ns omission: {name}"
+                    ));
+                }
                 cell.reset_value(value.clone());
                 Ok(value)
             }
@@ -8772,10 +9221,11 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
                     return Ok(value);
                 }
+                require_owned_definition(env, &name)?;
                 let value = eval(&fs[2], env)?;
                 if let Some(Value::Var(var)) = env.get(&name) {
                     if !binding_is_local(var) {
-                        let var = KernelVar::new(name.clone(), value.clone());
+                        let var = KernelVar::new(local_var_name(&name), value.clone());
                         var.set_origin(definition_origin());
                         var.set_hara_metadata(metadata);
                         env.insert(name, Value::Var(var));
@@ -8787,7 +9237,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         var.set_hara_metadata(metadata);
                     }
                 } else {
-                    let var = KernelVar::new(name.clone(), value.clone());
+                    let var = KernelVar::new(local_var_name(&name), value.clone());
                     var.set_origin(definition_origin());
                     var.set_hara_metadata(metadata);
                     env.insert(name, Value::Var(var));
@@ -8803,9 +9253,10 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         Form::Symbol(name) => name.clone(),
                         _ => return Err("declare expects symbols".into()),
                     };
+                    require_owned_definition(env, &name)?;
                     let cell = match env.get(&name) {
                         Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
-                        _ => KernelVar::new(name.clone(), Value::Nil),
+                        _ => KernelVar::new(local_var_name(&name), Value::Nil),
                     };
                     cell.set_origin(definition_origin());
                     env.insert(name, Value::Var(cell));
@@ -9206,9 +9657,10 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
                     return Ok(value);
                 }
+                require_owned_definition(env, &name)?;
                 let cell = match env.get(&name) {
                     Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
-                    _ => KernelVar::new(name.clone(), Value::Nil),
+                    _ => KernelVar::new(local_var_name(&name), Value::Nil),
                 };
                 if metadata.is_some() {
                     cell.set_hara_metadata(metadata);
@@ -9267,9 +9719,10 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
                     return Ok(value);
                 }
+                require_owned_definition(env, &name)?;
                 let cell = match env.get(&name) {
                     Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
-                    _ => KernelVar::new(name.clone(), Value::Nil),
+                    _ => KernelVar::new(local_var_name(&name), Value::Nil),
                 };
                 if metadata.is_some() {
                     cell.set_hara_metadata(metadata);
@@ -9395,7 +9848,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             Form::Symbol(n) if n == "std.foundation.coroutine/await" => {
                 Err("coroutine/await requires the fiber evaluator".into())
             }
-            Form::Symbol(n) if matches!(env.get(n), Some(Value::Var(var)) if (binding_is_local(var) || var.origin() == VarOrigin::RustLibrary) && matches!(var.deref_value(), Value::Function(_))) =>
+            Form::Symbol(n)
+                if matches!(env.get(n), Some(Value::Function(_)))
+                    || matches!(env.get(n), Some(Value::Var(var)) if (binding_is_local(var) || var.origin() == VarOrigin::RustLibrary) && matches!(var.deref_value(), Value::Function(_))) =>
             {
                 let function = binding_value(env, n).expect("function binding was checked");
                 let arguments = fs[1..]
@@ -9985,7 +10440,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         .collect::<Result<Vec<_>, _>>()?;
                     let zipped = iterator_zip(sources)?;
                     let result = match function {
-                        Value::Function(function) => iterator_map(function, zipped)?,
+                        Value::Function(function) => iterator_map_spread(function, zipped)?,
                         _ => return Err(format!("{n} expects a function")),
                     };
                     return if n == "map" {

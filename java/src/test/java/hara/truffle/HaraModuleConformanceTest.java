@@ -95,6 +95,40 @@ public class HaraModuleConformanceTest {
   }
 
   @Test
+  public void executesCallableVarScenariosFromSharedSpec() throws Exception {
+    Map<Object, IMapType> cases = cases();
+    for (String id :
+        new String[] {
+          "namespace/callable-var-precedence",
+          "namespace/callable-var-lexical-shadow",
+          "namespace/callable-var-late-binding",
+          "namespace/referred-var-protected"
+        }) {
+      IMapType scenario = cases.get(keyword(id));
+      assertTrue("Missing callable Var scenario :" + id, scenario != null);
+      String setup = (String) scenario.lookup(Keyword.create("setup"));
+      String source = (String) scenario.lookup(Keyword.create("source"));
+      IMapType expectation = requireMap(scenario, "expect");
+      try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
+        context.eval(HaraLanguage.ID, setup);
+        Object display = expectation.lookup(Keyword.create("display"));
+        if (display instanceof String) {
+          assertEquals(id, display, context.eval(HaraLanguage.ID, source).toString());
+        } else {
+          String marker =
+              (String) expectation.lookup(Keyword.create("error-contains"));
+          PolyglotException error =
+              assertThrows(
+                  id,
+                  PolyglotException.class,
+                  () -> context.eval(HaraLanguage.ID, source));
+          assertTrue(id + ": " + error.getMessage(), error.getMessage().contains(marker));
+        }
+      }
+    }
+  }
+
+  @Test
   public void executesDependencyFirstSourceOrderScenario() throws Exception {
     Map<Object, IMapType> cases = cases();
     assertExpectation(
@@ -180,15 +214,17 @@ public class HaraModuleConformanceTest {
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
       context.eval(
           HaraLanguage.ID,
-          "(ns source) "
-              + "(def ^{:doc \"copied\"} answer 41) "
-              + "(ns target) "
-              + "(intern-var 'target 'answer (var source/answer))");
+          "(ns source (:config {:blank true})) (def ^{:doc \"copied\"} answer 41)");
+      context.eval(
+          HaraLanguage.ID,
+          "(ns target (:config {:blank true})) "
+              + "(std.foundation/intern-var 'target 'answer (var source/answer))");
+      context.eval(HaraLanguage.ID, "(ns user)");
       assertTrue(
           !context
               .eval(
                   HaraLanguage.ID,
-                  "(= (var source/answer) (var target/answer))")
+                  "(std.foundation/= (var source/answer) (var target/answer))")
               .asBoolean());
       assertEquals(
           41,
@@ -196,7 +232,9 @@ public class HaraModuleConformanceTest {
       assertEquals(
           "copied",
           context
-              .eval(HaraLanguage.ID, "(get (meta (var target/answer)) :doc)")
+              .eval(
+                  HaraLanguage.ID,
+                  "(std.foundation/get (std.foundation/meta (var target/answer)) :doc)")
               .asString());
     }
   }
@@ -413,6 +451,81 @@ public class HaraModuleConformanceTest {
     }
   }
 
+  @Test
+  public void executesNsRequireReloadFromSharedSpecFixture() throws Exception {
+    IMapType scenario = cases().get(keyword("module/ns-require-reload"));
+    assertTrue("Missing shared ns reload scenario", scenario != null);
+    IMapType fixture = requireMap(scenario, "fixture");
+    IMapType resource = requireMap(fixture, "resource");
+    String namespace = (String) resource.lookup(Keyword.create("namespace"));
+    String relativePath = (String) resource.lookup(Keyword.create("path"));
+    IMapType revisions = requireMap(resource, "revisions");
+    Object rawSteps = fixture.lookup(Keyword.create("steps"));
+    assertTrue("Reload fixture :steps must be sequential", rawSteps instanceof ILinearType);
+
+    Path root = Files.createTempDirectory("hara-ns-reload-conformance-");
+    Files.writeString(
+        root.resolve("project.edn"),
+        "{:hara/type :project :project/id conformance :project/source-paths [\"src\"]}");
+    Path sourcePath = root.resolve("src").resolve(relativePath);
+    Files.createDirectories(sourcePath.getParent());
+
+    try (Context context =
+        Context.newBuilder(HaraLanguage.ID)
+            .currentWorkingDirectory(root)
+            .allowIO(IOAccess.ALL)
+            .build()) {
+      ILinearType steps = (ILinearType) rawSteps;
+      for (int index = 0; index < steps.count(); index++) {
+        assertTrue("Reload fixture step must be a map", steps.nth(index) instanceof IMapType);
+        IMapType step = (IMapType) steps.nth(index);
+        Keyword operation = (Keyword) step.lookup(Keyword.create("op"));
+        String operationName =
+            operation.getNamespace() == null
+                ? operation.getName()
+                : operation.getNamespace() + "/" + operation.getName();
+        if ("resource/use".equals(operationName)) {
+          Keyword revision = (Keyword) step.lookup(Keyword.create("revision"));
+          String source = (String) revisions.lookup(revision);
+          assertTrue("Missing source for " + revision, source != null);
+          Files.writeString(sourcePath, source);
+          continue;
+        }
+        if ("assert/revision".equals(operationName)) {
+          Number expected = (Number) step.lookup(Keyword.create("expect"));
+          assertEquals(
+              expected.longValue(),
+              context
+                  .eval(
+                      HaraLanguage.ID,
+                      "(std.foundation/module-revision \"" + escaped(sourcePath) + "\")")
+                  .asLong());
+          continue;
+        }
+        assertEquals("eval", operationName);
+        String source = (String) step.lookup(Keyword.create("source"));
+        IMapType expectation = requireMap(step, "expect");
+        Object display = expectation.lookup(Keyword.create("display"));
+        Object expectsError = expectation.lookup(Keyword.create("error"));
+        Object marker = expectation.lookup(Keyword.create("error-contains"));
+        if (display instanceof String) {
+          assertEquals(display, context.eval(HaraLanguage.ID, source).toString());
+        } else {
+          PolyglotException error =
+              assertThrows(
+                  PolyglotException.class,
+                  () -> context.eval(HaraLanguage.ID, source));
+          if (Boolean.TRUE.equals(expectsError)) continue;
+          assertTrue("Expected :error or :error-contains", marker instanceof String);
+          assertTrue(
+              error.getMessage(),
+              error.getMessage().toLowerCase().contains(((String) marker).toLowerCase()));
+        }
+      }
+    }
+    assertEquals("conformance.reload-target", namespace);
+  }
+
   private static Map<Object, IMapType> cases() throws Exception {
     Object document = Parser.LispReader.readString(Files.readString(CORPUS), null);
     assertTrue("Module corpus must be an EDN map", document instanceof IMapType);
@@ -440,6 +553,12 @@ public class HaraModuleConformanceTest {
         "Unexpected module expectation :" + id + " :" + key,
         expected,
         ((IMapType) expectation).lookup(Keyword.create(key)));
+  }
+
+  private static IMapType requireMap(IMapType source, String key) {
+    Object value = source.lookup(Keyword.create(key));
+    assertTrue("Expected map at :" + key, value instanceof IMapType);
+    return (IMapType) value;
   }
 
   private static Set<Object> ids(String... values) {

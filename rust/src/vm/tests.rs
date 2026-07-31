@@ -26,10 +26,12 @@ fn program(
 ) -> Program {
     let source_map = source_map(code.len());
     Program {
+            var_metadata: Vec::new(),
         constants,
         functions: vec![FunctionPrototype {
             name: None,
             arity: 0,
+            variadic: false,
             capture_count: 0,
             local_count,
             max_stack,
@@ -70,6 +72,7 @@ fn prototype(
     FunctionPrototype {
         name: name.map(str::to_string),
         arity,
+        variadic: false,
         capture_count,
         local_count: arity + capture_count,
         max_stack: 1,
@@ -83,6 +86,7 @@ fn prototype(
 /// `Closure 1 / Call 0 / Return` with the target `Nil / Return`.
 fn closure_call_program() -> Program {
     Program {
+            var_metadata: Vec::new(),
         constants: vec![],
         functions: vec![
             prototype(
@@ -141,6 +145,15 @@ fn instruction_display_and_shape() {
         .to_string(),
         "Primitive % 2"
     );
+    assert_eq!(
+        Instruction::PrimitiveLocalConst {
+            op: Primitive::Add,
+            local: 2,
+            constant: 7,
+        }
+        .to_string(),
+        "PrimitiveLocalConst + local 2 constant 7"
+    );
     assert_eq!(Instruction::Jump(12).to_string(), "Jump 0012");
     assert_eq!(
         Instruction::Closure {
@@ -167,6 +180,15 @@ fn instruction_display_and_shape() {
     assert_eq!(
         Instruction::Primitive { op: Primitive::Add, argc: 3 }.stack_effect(),
         Some(-2)
+    );
+    assert_eq!(
+        Instruction::PrimitiveLocalConst {
+            op: Primitive::Add,
+            local: 0,
+            constant: 0,
+        }
+        .stack_effect(),
+        Some(1)
     );
     assert_eq!(
         Instruction::Closure {
@@ -250,6 +272,7 @@ fn validator_rejects_callstatic_capture_mismatch() {
     // Entry directly self-calls a prototype with a different capture
     // count; no Closure instruction masks the CallStatic check.
     let program = Program {
+            var_metadata: Vec::new(),
         constants: vec![],
         functions: vec![
             prototype(

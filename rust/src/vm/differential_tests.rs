@@ -10,8 +10,17 @@ use super::eval_source;
 use crate::core::Value;
 use crate::Runtime;
 
-fn differential(source: &str) {
-    let reference = Runtime::new().eval_native(source);
+/// `runtime` is shared across a test's forms to avoid a std.foundation
+/// bootstrap per form (~0.3s each in a debug build, which dominated
+/// this suite's runtime). Safe here only because these forms never
+/// depend on cross-form namespace state: `def`/`defn` side effects
+/// LEAK across `eval_native` calls (a redefined var mutates the shared
+/// cell earlier closures captured), so any form that interns globals —
+/// or could observe one interned earlier — needs a fresh Runtime. The
+/// one interning form below (the defn arity error) is never referenced
+/// by later forms.
+fn differential(runtime: &mut Runtime, source: &str) {
+    let reference = runtime.eval_native(source);
     let vm = eval_source(source).map(|value| value.display());
     match (&reference, &vm) {
         (Ok(expected), Ok(actual)) => {
@@ -124,8 +133,9 @@ fn supported_forms_match_the_existing_evaluator() {
         "(loop [i 0] (try (if (< i 3) (recur (+ i 1)) i) (catch Exception e -1)))",
         "(loop [i 0] (try (throw 1) (catch Exception e (if (< i 3) (recur (+ i 1)) i))))",
     ];
+    let mut runtime = Runtime::new();
     for source in sources {
-        differential(source);
+        differential(&mut runtime, source);
     }
 }
 
@@ -172,8 +182,9 @@ fn supported_form_errors_match_the_existing_evaluator() {
         "(throw)",
         "(try (throw 1) (catch Exception e (throw 2)))",
     ];
+    let mut runtime = Runtime::new();
     for source in sources {
-        differential(source);
+        differential(&mut runtime, source);
     }
 }
 
@@ -187,31 +198,6 @@ fn recur_tail_tightening_is_a_documented_divergence() {
     let reference = Runtime::new().eval_native("(loop [i 0] (+ 1 (recur 2)))");
     assert!(reference.is_err(), "{reference:?}");
     assert!(eval_source("(loop [i 0] (+ 1 (recur 2)))").is_err());
-}
-
-#[test]
-fn defn_foundation_replacement_requires_declare() {
-    // Ruling (issue #202): replacing a std.foundation builtin through
-    // `defn` is an error unless the name was `declare`d first. The VM
-    // makes undeclared replacement a compile error; the evaluator still
-    // gives the builtin precedence and converges later.
-    let undeclared = "(do (defn count [n] 42) (count 5))";
-    let error = super::compile_source(undeclared).expect_err("must not compile");
-    assert!(
-        error.to_string().contains("replaces std.foundation var: count"),
-        "{error}"
-    );
-    // With an explicit declare, the replacement lowers and takes effect
-    // in the VM. The evaluator still resolves the builtin even after
-    // declare — canonical behavior is the VM's; the evaluator converges.
-    let declared = "(do (declare count) (defn count [n] 42) (count 5))";
-    assert_eq!(
-        eval_source(declared).map(|value| value.display()),
-        Ok("42".into())
-    );
-    assert!(Runtime::new().eval_native(declared).is_err());
-    // A bare declare already agrees on both paths.
-    differential("(declare count)");
 }
 
 /// Reads the shared benchmark corpus and runs every workload whose
@@ -234,8 +220,16 @@ fn shared_benchmark_workloads_match() {
     let Value::Vector(workloads) = workloads else {
         panic!("workloads must be a vector")
     };
-    let supported = ["noop", "arithmetic", "function-call"];
+    let supported = [
+        "noop",
+        "arithmetic",
+        "function-call",
+        "persistent-vector",
+        "persistent-map",
+        "sequence-navigation",
+    ];
     let mut seen = Vec::new();
+    let mut runtime = Runtime::new();
     for workload in workloads.iter() {
         let fields = crate::core::map_entries(workload).expect("workload object");
         let field = |name: &str| {
@@ -250,12 +244,12 @@ fn shared_benchmark_workloads_match() {
         };
         let id = field("id");
         if !supported.contains(&id.as_str()) {
-            continue; // collections are outside this milestone
+            continue;
         }
         seen.push(id.clone());
         let source = field("source");
         let expected = field("expected");
-        let reference = Runtime::new().eval_native(&source).expect("reference evaluates");
+        let reference = runtime.eval_native(&source).expect("reference evaluates");
         let vm = eval_source(&source)
             .map(|value| value.display())
             .expect("vm evaluates");
@@ -263,4 +257,164 @@ fn shared_benchmark_workloads_match() {
         assert_eq!(vm, expected, "{id} vm mismatch");
     }
     assert_eq!(seen, supported, "corpus must contain the supported workloads");
+}
+
+/// Runtime-based differential (issue #223): the VM compiles against the
+/// Runtime's namespace registry, so std.foundation vars are visible and
+/// globals intern into the runtime. Stateful sources get a fresh
+/// Runtime per side — def side effects leak across evals on a shared
+/// Runtime by design (REPL semantics).
+fn runtime_differential(source: &str) {
+    let reference = Runtime::new().eval_native(source);
+    let vm = Runtime::new().eval_bytecode_native(source);
+    match (&reference, &vm) {
+        (Ok(expected), Ok(actual)) => {
+            assert_eq!(expected, actual, "value divergence for {source}")
+        }
+        (Err(expected), Err(actual)) => assert_eq!(
+            error_category(expected),
+            error_category(actual),
+            "error category divergence for {source}: {expected} vs {actual}"
+        ),
+        _ => panic!("divergence for {source}: reference {reference:?} vs vm {vm:?}"),
+    }
+}
+
+#[test]
+fn callable_var_namespace_cases_match_shared_spec() {
+    fn entry<'a>(entries: &'a [(crate::kernel::Form, crate::kernel::Form)], key: &str) -> Option<&'a crate::kernel::Form> {
+        entries.iter().find_map(|(candidate, value)| {
+            matches!(candidate, crate::kernel::Form::Keyword(name) if name == key).then_some(value)
+        })
+    }
+
+    let manifest = crate::kernel::parse_forms(include_str!(
+        "../../../specs/00-unsorted/platform-language/draft/conformance/modules.edn"
+    ))
+    .expect("module conformance corpus parses")
+    .remove(0);
+    let crate::kernel::Form::Map(manifest) = manifest else {
+        panic!("module conformance corpus must be a map")
+    };
+    let Some(crate::kernel::Form::Vector(cases)) = entry(&manifest, "cases") else {
+        panic!("module conformance corpus must declare :cases")
+    };
+
+    for id in [
+        "namespace/callable-var-precedence",
+        "namespace/callable-var-lexical-shadow",
+        "namespace/callable-var-late-binding",
+        "namespace/referred-var-protected",
+    ] {
+        let case = cases
+            .iter()
+            .find_map(|case| match case {
+                crate::kernel::Form::Map(entries)
+                    if matches!(entry(entries, "id"), Some(crate::kernel::Form::Keyword(candidate)) if candidate == id) =>
+                {
+                    Some(entries)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing shared module case :{id}"));
+        let Some(crate::kernel::Form::String(setup)) = entry(case, "setup") else {
+            panic!(":{id} must declare string :setup")
+        };
+        let Some(crate::kernel::Form::String(source)) = entry(case, "source") else {
+            panic!(":{id} must declare string :source")
+        };
+        let Some(crate::kernel::Form::Map(expect)) = entry(case, "expect") else {
+            panic!(":{id} must declare :expect")
+        };
+        let mut runtime = Runtime::new();
+        runtime
+            .eval_native(setup)
+            .unwrap_or_else(|error| panic!(":{id} setup failed: {error}"));
+        if let Some(crate::kernel::Form::String(expected)) = entry(expect, "display") {
+            assert_eq!(
+                runtime
+                    .eval_bytecode_native(source)
+                    .unwrap_or_else(|error| panic!(":{id} VM failed: {error}")),
+                *expected,
+                ":{id}"
+            );
+        } else if let Some(crate::kernel::Form::String(marker)) =
+            entry(expect, "error-contains")
+        {
+            let error = runtime
+                .eval_bytecode_native(source)
+                .expect_err(&format!(":{id} VM must fail"));
+            assert!(error.contains(marker), ":{id}: {error}");
+        } else {
+            panic!(":{id} has unsupported expectation")
+        }
+    }
+}
+
+/// Namespace- and arity-dependent cases from the normative L0 corpus
+/// (`specs/00-unsorted/platform-language/draft/conformance/l0.edn`),
+/// deferred by milestones 2-3 until globals existed (issue #223).
+#[test]
+fn l0_namespace_corpus_cases_match() {
+    fn entry<'a>(
+        entries: &'a [(crate::kernel::Form, crate::kernel::Form)],
+        key: &str,
+    ) -> Option<&'a crate::kernel::Form> {
+        entries.iter().find_map(|(candidate, value)| {
+            matches!(candidate, crate::kernel::Form::Keyword(name) if name == key).then_some(value)
+        })
+    }
+
+    let supported = [
+        "error/catch-order",
+        "error/unmatched-catch",
+        "error/finally-normal",
+        "error/finally-unwind",
+        "runtime/set-var-root",
+        "compiler/declare-private",
+        "definition/doc-metadata",
+        "definition/arglists-metadata",
+        "function/variadic-arity",
+        "function/multiple-arities",
+    ];
+    let manifest = crate::kernel::parse_forms(include_str!(
+        "../../../specs/00-unsorted/platform-language/draft/conformance/l0.edn"
+    ))
+    .expect("L0 conformance corpus parses")
+    .remove(0);
+    let crate::kernel::Form::Map(manifest) = manifest else {
+        panic!("L0 conformance corpus must be a map")
+    };
+    let Some(crate::kernel::Form::Vector(cases)) = entry(&manifest, "cases") else {
+        panic!("L0 conformance corpus must declare :cases")
+    };
+    for id in supported {
+        let case = cases
+            .iter()
+            .find_map(|case| match case {
+                crate::kernel::Form::Map(entries)
+                    if matches!(entry(entries, "id"), Some(crate::kernel::Form::Keyword(candidate)) if candidate == id) =>
+                {
+                    Some(entries)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing L0 case :{id}"));
+        let Some(crate::kernel::Form::String(source)) = entry(case, "source") else {
+            panic!(":{id} must declare string :source")
+        };
+        runtime_differential(source);
+    }
+}
+
+/// A Runtime sees its own interned vars across mixed evaluator/VM evals.
+#[test]
+fn runtime_globals_interop_issue_223() {
+    let mut runtime = Runtime::new();
+    assert_eq!(runtime.eval_bytecode_native("(defn f [x] (+ x 1))"), Ok("#'user/f".into()));
+    // The tree evaluator sees the var the VM interned...
+    assert_eq!(runtime.eval_native("(f 41)"), Ok("42".into()));
+    // ...and the VM sees vars the evaluator interned.
+    assert_eq!(runtime.eval_native("(defn g [x] (+ x 2))"), Ok("#'user/g".into()));
+    assert_eq!(runtime.eval_bytecode_native("(g 40)"), Ok("42".into()));
 }

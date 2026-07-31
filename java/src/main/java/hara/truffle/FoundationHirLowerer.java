@@ -533,7 +533,7 @@ final class FoundationHirLowerer {
     if (form.count() < 2 || !(form.nth(1) instanceof Symbol name)) fail("invalid ns form");
     Symbol name = (Symbol) form.nth(1);
     Object[] clauses = bodyForms(form, 2);
-    context.setCurrentNamespace(name, clauses);
+    context.prepareCurrentNamespace(name, clauses);
     return new HaraNodes.SetNamespace(name, clauses);
   }
 

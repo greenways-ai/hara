@@ -1,5 +1,6 @@
 (ns std.lib.block
-  (:require [std.lib.block.base :as base]
+  (:require [std.foundation :refer :all :exclude [empty]]
+            [std.lib.block.base :as base]
             [std.lib.block.construct :as construct]
             [std.lib.block.parse :as parse]
             [std.lib.block.type :as type]

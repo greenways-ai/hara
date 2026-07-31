@@ -1,8 +1,9 @@
-//! Function and call compilation: `fn` closures with by-value captures,
-//! direct and static calls, and top-level `defn` lowering. Split from
-//! `compiler.rs` to stay under the repository's per-file line cap.
+//! Function and call compilation: `fn` closures with by-value captures
+//! (including variadic parameters) and direct calls. Global forms live
+//! in `globals.rs` (issue #223). Split from `compiler.rs` to stay under
+//! the repository's per-file line cap.
 
-use crate::core::{Primitive, CORE_SPECIAL_FORMS};
+use crate::core::Primitive;
 use crate::kernel::{Form, Position, Span};
 use crate::vm::error::{CompileError, CompileErrorKind};
 use crate::vm::opcode::Instruction;
@@ -13,9 +14,9 @@ use super::scope::ScopeStack;
 use super::{placeholder, Child, Compiler, FnContext};
 
 impl Compiler {
-    /// A call whose operator is a symbol: the `defn` self name (direct
-    /// `CallStatic`), a lexical slot holding a function value, or an
-    /// unbound symbol.
+    /// A call whose operator is a symbol: a lexical slot holding a
+    /// function value, a visible global (late-bound through the var,
+    /// issue #223), or an unbound symbol.
     pub(super) fn compile_named_call(
         &mut self,
         name: &str,
@@ -23,23 +24,20 @@ impl Compiler {
         span: &Span,
     ) -> Result<(), CompileError> {
         let argc = (children.len() - 1) as u8;
-        if self.ctx().self_name.as_deref() == Some(name) {
-            let prototype = self.ctx().proto_id as u16;
-            self.compile_call_arguments(children, span)?;
-            if !self.ctx().fallthrough {
-                return Ok(());
+        match self.ctx().scopes.resolve(name) {
+            Some(slot) => self.emit(Instruction::LoadLocal(slot), Some(span.start)),
+            None if self.visible_global(name) => {
+                let index = self.name_constant(name, span)?;
+                self.emit(Instruction::GetGlobal(index), Some(span.start))
             }
-            self.emit(Instruction::CallStatic { prototype, argc }, Some(span.start));
-            return Ok(());
-        }
-        let Some(slot) = self.ctx().scopes.resolve(name) else {
-            return Err(CompileError::new(
-                CompileErrorKind::UnboundSymbol,
-                format!("unbound symbol: {name}"),
-                Some(span.start),
-            ));
+            None => {
+                return Err(CompileError::new(
+                    CompileErrorKind::UnboundSymbol,
+                    format!("unbound symbol: {name}"),
+                    Some(span.start),
+                ))
+            }
         };
-        self.emit(Instruction::LoadLocal(slot), Some(span.start));
         self.compile_call_arguments(children, span)?;
         if !self.ctx().fallthrough {
             return Ok(());
@@ -54,18 +52,117 @@ impl Compiler {
         children: &[Child<'_>],
         span: &Span,
     ) -> Result<(), CompileError> {
+        if self.compile_immediate_fn_call(children, span)? {
+            return Ok(());
+        }
         let callee = &children[0];
         self.compile_form(callee.form, callee.span, callee.children, false)?;
         if !self.ctx().fallthrough {
             return Ok(());
         }
+        // A capture-free function literal that is called immediately never
+        // needs to become a heap closure. Its body is already a prototype,
+        // so replace the just-emitted Closure with a direct VM call.
         let argc = (children.len() - 1) as u8;
+        let direct = match self.ctx().code.last() {
+            Some(Instruction::Closure {
+                prototype,
+                captures: 0,
+            }) => {
+                let proto = &self.functions[usize::from(*prototype)];
+                let accepts = (!proto.variadic && proto.arity == u16::from(argc))
+                    || (proto.variadic && u16::from(argc) >= proto.arity);
+                accepts.then_some(*prototype)
+            }
+            _ => None,
+        };
+        if direct.is_some() {
+            self.ctx_mut().code.pop();
+            self.ctx_mut().source_map.pop();
+        }
         self.compile_call_arguments(children, span)?;
         if !self.ctx().fallthrough {
             return Ok(());
         }
-        self.emit(Instruction::Call { argc }, Some(span.start));
+        match direct {
+            Some(prototype) => self.emit(
+                Instruction::CallStatic { prototype, argc },
+                Some(span.start),
+            ),
+            None => self.emit(Instruction::Call { argc }, Some(span.start)),
+        };
         Ok(())
+    }
+
+    /// Inlines a fixed-arity function literal that is invoked immediately.
+    /// Arguments are evaluated before the parameter scope exists, then stored
+    /// right-to-left so their normal left-to-right stack order is preserved.
+    fn compile_immediate_fn_call(
+        &mut self,
+        children: &[Child<'_>],
+        span: &Span,
+    ) -> Result<bool, CompileError> {
+        let callee = &children[0];
+        let Form::List(elements) = callee.form else {
+            return Ok(false);
+        };
+        if !matches!(elements.first(), Some(Form::Symbol(name)) if name == "fn") {
+            return Ok(false);
+        }
+        let fn_children = self.list_children(elements, callee.span, callee.children);
+        if fn_children.len() < 3 {
+            return Ok(false);
+        }
+        let Form::Vector(params) = fn_children[1].form else {
+            return Ok(false);
+        };
+        if params.len() != children.len() - 1
+            || params
+                .iter()
+                .any(|param| !matches!(param, Form::Symbol(name) if name != "&"))
+            || fn_children[2..]
+                .iter()
+                .any(|body| contains_recur(body.form))
+        {
+            return Ok(false);
+        }
+        if params.len() > crate::vm::program::MAX_PRIMITIVE_ARGUMENTS {
+            return Err(CompileError::new(
+                CompileErrorKind::Limit,
+                format!(
+                    "calls support at most {} arguments",
+                    crate::vm::program::MAX_PRIMITIVE_ARGUMENTS
+                ),
+                Some(span.start),
+            ));
+        }
+        for argument in &children[1..] {
+            self.compile_form(argument.form, argument.span, argument.children, false)?;
+        }
+        if !self.ctx().fallthrough {
+            return Ok(true);
+        }
+        let param_children =
+            self.list_children(params, fn_children[1].span, fn_children[1].children);
+        self.ctx_mut().scopes.push_scope();
+        let result = (|| {
+            let mut slots = Vec::with_capacity(params.len());
+            for param in &param_children {
+                let Form::Symbol(name) = param.form else {
+                    unreachable!("parameter shape checked above")
+                };
+                slots.push(self.ctx_mut().scopes.declare(name).map_err(|error| {
+                    CompileError::new(error.kind(), error.message(), Some(param.span.start))
+                })?);
+            }
+            for (slot, param) in slots.iter().zip(&param_children).rev() {
+                self.emit(Instruction::StoreLocal(*slot), Some(param.span.start));
+            }
+            self.compile_sequence(&fn_children[2..], false)
+        })();
+        self.ctx_mut().scopes.pop_scope();
+        result?;
+        Ok(true)
     }
 
     pub(super) fn compile_fn_form(
@@ -83,80 +180,14 @@ impl Compiler {
         self.compile_function(None, &children[1], &children[2..], span)
     }
 
-    /// `defn` lowers to a direct slot binding: the var is never accessed
-    /// directly, so no Var value is ever materialized. Only legal as a
-    /// non-final top-level statement.
-    pub(super) fn compile_defn(
-        &mut self,
-        children: &[Child<'_>],
-        span: &Span,
-        top: bool,
-        tail: bool,
-    ) -> Result<(), CompileError> {
-        if !top {
-            return Err(CompileError::new(
-                CompileErrorKind::UnsupportedForm,
-                "defn is only supported as a top-level statement",
-                Some(span.start),
-            ));
-        }
-        if tail {
-            return Err(CompileError::new(
-                CompileErrorKind::UnsupportedForm,
-                "defn in result position requires var semantics",
-                Some(span.start),
-            ));
-        }
-        if children.len() < 4 {
-            return Err(CompileError::new(
-                CompileErrorKind::Arity,
-                "defn expects a name, parameters, and a body",
-                Some(span.start),
-            ));
-        }
-        let Form::Symbol(name) = children[1].form else {
-            return Err(CompileError::new(
-                CompileErrorKind::UnsupportedForm,
-                "defn expects a name symbol",
-                Some(children[1].span.start),
-            ))
-        };
-        // Ruling (issue #202): a std.foundation builtin cannot be replaced
-        // unless the name was explicitly `declare`d first. The evaluator's
-        // builtins otherwise take precedence over the redefinition, so a
-        // silent slot binding would diverge.
-        if CORE_SPECIAL_FORMS.contains(&name.as_str())
-            && !self.declared.iter().any(|n| n == name)
-        {
-            return Err(CompileError::new(
-                CompileErrorKind::UnsupportedForm,
-                format!(
-                    "defn replaces std.foundation var: {name} \
-                     (declare the name at the start of the namespace to replace it)"
-                ),
-                Some(children[1].span.start),
-            ));
-        }
-        self.compile_function(Some(name), &children[2], &children[3..], span)?;
-        if !self.ctx().fallthrough {
-            return Ok(());
-        }
-        let slot = self.ctx_mut().scopes.declare(name).map_err(|error| {
-            CompileError::new(error.kind(), error.message(), Some(children[1].span.start))
-        })?;
-        self.emit(Instruction::StoreLocal(slot), Some(children[1].span.start));
-        // The statement value is unobservable in statement position; the
-        // sequence machinery pops it.
-        self.emit(Instruction::Nil, Some(span.start));
-        Ok(())
-    }
-
     /// Compiles a `fn`/`defn` body into a new function context and emits
     /// the closure creation (capture loads + `Closure`) into the
-    /// enclosing context.
-    fn compile_function(
+    /// enclosing context. `name` names the function value (display and
+    /// errors); self-references resolve as globals, not captures
+    /// (issue #223).
+    pub(super) fn compile_function(
         &mut self,
-        self_name: Option<&str>,
+        name: Option<&str>,
         params: &Child<'_>,
         body: &[Child<'_>],
         span: &Span,
@@ -180,14 +211,18 @@ impl Compiler {
         };
         let param_children = self.list_children(elements, params.span, params.children);
         let mut names: Vec<String> = Vec::with_capacity(elements.len());
+        let mut rest_at: Option<usize> = None;
         for param in &param_children {
             match param.form {
                 Form::Symbol(name) if name == "&" => {
-                    return Err(CompileError::new(
-                        CompileErrorKind::UnsupportedForm,
-                        "fn variadic parameters are not supported",
-                        Some(param.span.start),
-                    ))
+                    if rest_at.is_some() {
+                        return Err(CompileError::new(
+                            CompileErrorKind::Arity,
+                            "function parameters support a single & rest parameter",
+                            Some(param.span.start),
+                        ));
+                    }
+                    rest_at = Some(names.len());
                 }
                 Form::Symbol(name) => names.push(name.clone()),
                 _ => {
@@ -199,13 +234,26 @@ impl Compiler {
                 }
             }
         }
+        // With `& rest`, the fixed arity is the count before `&` and the
+        // rest parameter occupies the slot directly above the fixed
+        // params (captures sit above it), matching `call_function`.
+        let (arity, variadic) = match rest_at {
+            Some(fixed) => {
+                if names.len() != fixed + 1 {
+                    return Err(CompileError::new(
+                        CompileErrorKind::Arity,
+                        "the & rest parameter must be the last parameter",
+                        Some(params.span.start),
+                    ));
+                }
+                (fixed as u16, true)
+            }
+            None => (names.len() as u16, false),
+        };
         // Free variables become capture slots directly above the params.
         let mut free: Vec<(String, Option<Position>)> = Vec::new();
         {
             let mut bound = names.clone();
-            if let Some(self_name) = self_name {
-                bound.push(self_name.to_string());
-            }
             for child in body {
                 self.collect_free(child, &mut bound, &mut free);
             }
@@ -217,31 +265,33 @@ impl Compiler {
                 Some(span.start),
             ));
         }
-        // Reserve the prototype index before compiling the body so
-        // operator-position self-references can target it (CallStatic).
         let proto_id = self.functions.len();
         self.functions.push(placeholder(
-            self_name.map(str::to_string),
-            names.len() as u16,
+            name.map(str::to_string),
+            arity,
             free.len() as u16,
+            variadic,
         ));
         let mut scopes = ScopeStack::new();
         scopes.push_scope();
+        // `names` includes the rest parameter; the param-child zip only
+        // covers the fixed params plus `&`, so positions come from the
+        // name symbols where possible.
         for (name, param) in names.iter().zip(&param_children) {
             scopes.declare(name).map_err(|error| {
                 CompileError::new(error.kind(), error.message(), Some(param.span.start))
             })?;
         }
         for (name, position) in &free {
-            scopes.declare(name).map_err(|error| {
-                CompileError::new(error.kind(), error.message(), *position)
-            })?;
+            scopes
+                .declare(name)
+                .map_err(|error| CompileError::new(error.kind(), error.message(), *position))?;
         }
         self.contexts.push(FnContext {
             proto_id,
-            name: self_name.map(str::to_string),
-            self_name: self_name.map(str::to_string),
-            params: names.len() as u16,
+            name: name.map(str::to_string),
+            params: arity,
+            variadic,
             captures: free,
             code: Vec::new(),
             source_map: SourceMap::default(),
@@ -288,6 +338,7 @@ impl Compiler {
         self.functions[context.proto_id] = FunctionPrototype {
             name: context.name.clone(),
             arity: context.params,
+            variadic: context.variadic,
             capture_count: context.captures.len() as u16,
             local_count: context.scopes.high_water(),
             max_stack: 0,
@@ -310,7 +361,14 @@ impl Compiler {
     ) {
         match child.form {
             Form::Symbol(name) => {
-                if !bound.iter().any(|b| b == name) && !free.iter().any(|(f, _)| f == name) {
+                if bound.iter().any(|b| b == name)
+                    || free.iter().any(|(f, _)| f == name)
+                    || self.visible_global(name)
+                {
+                    // Bound locally, already collected, or a global:
+                    // globals compile to GetGlobal (late binding through
+                    // the shared var cell, issue #223), never captures.
+                } else {
                     free.push((name.clone(), Some(child.span.start)));
                 }
             }
@@ -411,15 +469,19 @@ impl Compiler {
                         }
                         // Rejected by the compiler later; nothing to collect.
                         "defn" | "var" => {}
-                        _ if Primitive::from_symbol(head).is_some() => {
+                        _ if Primitive::from_symbol(head).is_some()
+                            && !self.visible_global(head) =>
+                        {
                             for c in &children[1..] {
                                 self.collect_free(c, bound, free);
                             }
                         }
                         _ => {
-                            // A function call: the operator is a reference.
+                            // A function call: the operator is a
+                            // reference unless it is a visible global.
                             if !bound.iter().any(|b| b == head)
                                 && !free.iter().any(|(f, _)| f == head)
+                                && !self.visible_global(head)
                             {
                                 free.push((head.clone(), Some(children[0].span.start)));
                             }
@@ -445,5 +507,20 @@ impl Compiler {
             }
             _ => {}
         }
+    }
+}
+
+fn contains_recur(form: &Form) -> bool {
+    match form {
+        Form::List(values) => {
+            matches!(values.first(), Some(Form::Symbol(name)) if name == "recur")
+                || values.iter().any(contains_recur)
+        }
+        Form::Vector(values) | Form::Set(values) => values.iter().any(contains_recur),
+        Form::Map(values) => values
+            .iter()
+            .any(|(key, value)| contains_recur(key) || contains_recur(value)),
+        Form::Tagged(_, value) | Form::Metadata(_, value) => contains_recur(value),
+        _ => false,
     }
 }

@@ -1,5 +1,3 @@
-//! Compact VM-owned values that must not cross the public runtime boundary.
-
 use std::rc::Rc;
 
 use crate::core::Value;
@@ -10,13 +8,21 @@ pub(crate) enum VmSlot {
     Bool(bool),
     Nil,
     Value(Box<Value>),
+    InlineClosure { prototype: u16, identity: u64 },
     Closure(Rc<VmClosure>),
+    MultiArity(Rc<VmMultiArity>),
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct VmClosure {
     pub prototype: u16,
     pub captures: Vec<VmSlot>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct VmMultiArity {
+    pub name: String,
+    pub clauses: Vec<Rc<VmClosure>>,
 }
 
 impl VmSlot {
@@ -26,16 +32,22 @@ impl VmSlot {
             VmSlot::Bool(value) => Some(Value::Bool(*value)),
             VmSlot::Nil => Some(Value::Nil),
             VmSlot::Value(value) => Some((**value).clone()),
-            VmSlot::Closure(_) => None,
+            VmSlot::InlineClosure { .. } | VmSlot::Closure(_) | VmSlot::MultiArity(_) => None,
+        }
+    }
+
+    pub fn into_runtime_value(self) -> Option<Value> {
+        match self {
+            VmSlot::Number(value) => Some(Value::Number(value)),
+            VmSlot::Bool(value) => Some(Value::Bool(value)),
+            VmSlot::Nil => Some(Value::Nil),
+            VmSlot::Value(value) => Some(*value),
+            VmSlot::InlineClosure { .. } | VmSlot::Closure(_) | VmSlot::MultiArity(_) => None,
         }
     }
 
     pub fn truthy(&self) -> bool {
-        match self {
-            VmSlot::Bool(false) | VmSlot::Nil => false,
-            VmSlot::Number(_) | VmSlot::Bool(true) | VmSlot::Value(_) => true,
-            VmSlot::Closure(_) => true,
-        }
+        !matches!(self, VmSlot::Bool(false) | VmSlot::Nil)
     }
 }
 

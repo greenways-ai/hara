@@ -15,6 +15,10 @@ impl SourceMap {
         self.positions.push(position);
     }
 
+    pub(crate) fn pop(&mut self) {
+        self.positions.pop();
+    }
+
     /// The source position recorded for an instruction, when available.
     pub fn position(&self, instruction: usize) -> Option<Position> {
         self.positions.get(instruction).copied().flatten()

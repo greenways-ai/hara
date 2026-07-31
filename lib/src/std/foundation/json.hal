@@ -24,7 +24,8 @@
 ;; Parsing rejects non-JSON extensions. Encoding crosses std.native.Json so
 ;; every runtime shares the same supported-value and error contract.
 ;; ==========================================================================
-(ns std.foundation.json)
+(ns std.foundation.json
+  (:config {:blank true}))
 
 (defn ^{:schema [:fn [:str] :any]}
   read
