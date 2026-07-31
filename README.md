@@ -63,9 +63,9 @@ several Git submodules at the root:
 - [Namespace catalog](docs/docs/reference/namespaces.md) — discover every shipped namespace family.
 - [Developer guide](docs/docs/development.md) — build, test, debug, and contribute.
 - [Java API and Javadocs](docs/docs/javadocs.md) — public entry points and generated API docs.
-- [HAL meta-spec](specs/metaspec/draft/README.md) — the shape and authority rules for language specifications.
-- [HAL language draft](specs/language/draft/README.md) — the portable language contract and executable evidence.
-- [Planning archive](specs/archive/planning/README.md) — earlier runtime, extension, interop, and tooling designs.
+- [HAL meta-spec](specs/01-language-meta/000-metaspec/draft/README.md) — the shape and authority rules for language specifications.
+- [HAL language draft](specs/01-language-meta/001-language/draft/README.md) — the small EDN-oriented data and reader contract.
+- [Planning archive](specs/99-archive/planning/README.md) — earlier runtime, extension, interop, and tooling designs.
 - [Hara for Emacs](extensions/hara-emacs/README.md) — project-aware evaluation, sessions, completion, docs,
   and a RESP-backed REPL.
 

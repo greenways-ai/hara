@@ -56,4 +56,4 @@ is not the authoritative implementation of the current language surface.
 ```
 
 The earlier extension lifecycle and capability design is retained in the
-[planning archive](specs/archive/planning/extensions/contract.md).
+[planning archive](specs/99-archive/planning/extensions/contract.md).

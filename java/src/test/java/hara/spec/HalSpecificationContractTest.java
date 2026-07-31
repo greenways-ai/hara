@@ -18,16 +18,16 @@ import org.junit.Test;
 
 /** Structural checks for the draft HAL meta-spec and its first language document. */
 public class HalSpecificationContractTest {
-  private static final Path METASPEC = Path.of("specs/metaspec/draft/hal-metaspec.edn");
-  private static final Path LANGSPEC = Path.of("specs/language/draft/hal-langspec.edn");
+  private static final Path METASPEC = Path.of("specs/01-language-meta/000-metaspec/draft/hal-metaspec.edn");
+  private static final Path LANGSPEC = Path.of("specs/01-language-meta/001-language/draft/hal-langspec.edn");
   private static final Path L0_CORPUS =
-      Path.of("specs/language/draft/conformance/l0.edn");
+      Path.of("specs/00-unsorted/platform-language/draft/conformance/l0.edn");
   private static final Path READER_CORPUS =
-      Path.of("specs/language/draft/conformance/reader.edn");
+      Path.of("specs/01-language-meta/001-language/draft/conformance/reader.edn");
   private static final Path MODULE_CORPUS =
-      Path.of("specs/language/draft/conformance/modules.edn");
+      Path.of("specs/00-unsorted/platform-language/draft/conformance/modules.edn");
   private static final Path PARITY_CORPUS =
-      Path.of("specs/language/draft/conformance/parity/jvm-truffle.edn");
+      Path.of("specs/00-unsorted/platform-language/draft/conformance/parity/jvm-truffle.edn");
 
   @Test
   public void languageDraftHasResolvableIdentityStructureAndEvidence() throws Exception {
@@ -98,7 +98,7 @@ public class HalSpecificationContractTest {
       String relativePath = (String) reference.lookup(key("reference", "path"));
       Path target = LANGSPEC.getParent().resolve(relativePath).normalize();
       assertTrue("Missing specification reference: " + target, Files.exists(target));
-      if (target.startsWith(Path.of("specs/archive/planning"))) {
+      if (target.startsWith(Path.of("specs/99-archive/planning"))) {
         assertEquals(
             "Planning archive references must be historical",
             Keyword.create("historical"),

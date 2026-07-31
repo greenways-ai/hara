@@ -1346,7 +1346,7 @@ mod tests {
         }
 
         let manifest = kernel::parse_forms(include_str!(
-            "../../specs/language/draft/conformance/modules.edn"
+            "../../specs/00-unsorted/platform-language/draft/conformance/modules.edn"
         ))
         .expect("module conformance corpus must parse")
         .remove(0);
@@ -1396,7 +1396,7 @@ mod tests {
         }
 
         let manifest = kernel::parse_forms(include_str!(
-            "../../specs/language/draft/conformance/modules.edn"
+            "../../specs/00-unsorted/platform-language/draft/conformance/modules.edn"
         ))
         .expect("module conformance corpus must parse")
         .remove(0);
@@ -1425,7 +1425,7 @@ mod tests {
         }
 
         let document = kernel::parse_forms(include_str!(
-            "../../specs/runtime/draft/hal-host-runtime.edn"
+            "../../specs/00-unsorted/runtime/draft/hal-host-runtime.edn"
         ))
         .expect("Host runtime specification must parse")
         .remove(0);
@@ -2279,7 +2279,7 @@ mod tests {
     #[test]
     fn foundation_protocols_are_canonical_and_method_names_reject_bangs() {
         let mut runtime = Runtime::new();
-        let contract = include_str!("../../specs/language/draft/conformance/protocols.edn");
+        let contract = include_str!("../../specs/00-unsorted/platform-language/draft/conformance/protocols.edn");
         let fixture =
             include_str!("../../lib/test-fixtures/std/foundation/protocol_conformance.hal");
         assert_eq!(core::FOUNDATION_PROTOCOLS.len(), 53);
@@ -2429,7 +2429,7 @@ mod tests {
         let source =
             include_str!("../../lib/test-fixtures/std/foundation/protocol_functionality.hal");
         let catalog =
-            include_str!("../../specs/language/draft/conformance/protocol-method-cases.edn");
+            include_str!("../../specs/00-unsorted/platform-language/draft/conformance/protocol-method-cases.edn");
         assert_eq!(catalog.matches("{:protocol ").count(), 88);
         let mut runtime = Runtime::new();
         let result = runtime.eval_text(source).unwrap();
@@ -2849,7 +2849,7 @@ mod tests {
         }
 
         let contract = kernel::parse_forms(include_str!(
-            "../../specs/language/draft/conformance/native.edn"
+            "../../specs/00-unsorted/platform-language/draft/conformance/native.edn"
         ))
         .unwrap()
         .remove(0);
@@ -4848,7 +4848,7 @@ mod tests {
         }
 
         let manifest = kernel::parse_forms(include_str!(
-            "../../specs/language/draft/conformance/l0.edn"
+            "../../specs/00-unsorted/platform-language/draft/conformance/l0.edn"
         ))
         .unwrap()
         .remove(0);
@@ -4945,7 +4945,7 @@ mod tests {
         }
 
         let manifest = kernel::parse_forms(include_str!(
-            "../../specs/language/draft/conformance/modules.edn"
+            "../../specs/00-unsorted/platform-language/draft/conformance/modules.edn"
         ))
         .unwrap()
         .remove(0);

@@ -15,7 +15,7 @@
 ;;   * mkdir creates missing parents and succeeds when the directory exists.
 ;;   * delete removes a file or an empty directory; it is never recursive.
 ;;
-;; Native inventory: specs/language/draft/conformance/native.edn
+;; Native inventory: specs/00-unsorted/platform-language/draft/conformance/native.edn
 ;;
 ;;                         root + path
 ;;                              |

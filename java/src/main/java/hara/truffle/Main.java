@@ -522,7 +522,7 @@ public final class Main {
     try (InputStream resource =
         Main.class
             .getClassLoader()
-            .getResourceAsStream("specs/language/draft/conformance/l0.edn")) {
+            .getResourceAsStream("specs/00-unsorted/platform-language/draft/conformance/l0.edn")) {
       if (resource == null) {
         error.println("Missing packaged L0 conformance manifest");
         return 1;

@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-SPEC = ROOT / "specs/archive/planning/language/compatibility"
+SPEC = ROOT / "specs/99-archive/planning/language/compatibility"
 DOC = ROOT / "docs/docs/reference/clojure-core-compatibility.md"
 CLJ_VERSION = "1.12.5"
 CLJ_SPECIALS = {"def", "if", "do", "let", "quote", "var", "fn", "loop", "recur", "throw", "try", "new", "set!", "monitor-enter", "monitor-exit", "catch", "finally"}

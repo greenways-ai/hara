@@ -18,7 +18,7 @@ import org.junit.Test;
 
 /** Executes the canonical reader corpus shared with the Rust runtime. */
 public class ReaderParityCorpusTest {
-  private static final Path CORPUS = Path.of("specs/language/draft/conformance/reader.edn");
+  private static final Path CORPUS = Path.of("specs/01-language-meta/001-language/draft/conformance/reader.edn");
 
   private static Keyword key(String name) {
     return Keyword.create(null, name);

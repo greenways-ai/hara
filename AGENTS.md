@@ -23,18 +23,18 @@ component map and `website/docs/development.md` for the developer guide.
   `notes/superpowers/` (plans/specs written by the superpowers plugin).
   Put nothing here that belongs on the website.
 - `specs/` — normative specifications:
-  - `metaspec/draft/hal-metaspec.edn` defines the language-spec document model
-  - `metaspec/draft/hal-metaspec-metaspec.edn` defines the self-describing
+  - `01-language-meta/000-metaspec/draft/hal-metaspec.edn` defines the language-spec document model
+  - `01-language-meta/000-metaspec/draft/hal-metaspec-metaspec.edn` defines the self-describing
     metaspec contract and AI generation/repair workflow
-  - `metaspec/draft/hal-artifact-metaspec.edn` defines artifact-format specs
-  - `language/draft/hal-langspec.edn` is the current portable HAL contract
-  - `language/draft/conformance/` contains machine-checked conformance/parity corpora
-  - `archive/planning/` contains non-normative source material grouped by domain
+  - `01-language-meta/000-metaspec/draft/hal-artifact-metaspec.edn` defines artifact-format specs
+  - `01-language-meta/001-language/draft/hal-langspec.edn` defines the small EDN-oriented data and reader contract
+  - `00-unsorted/` holds platform, ecosystem, user-space, and broad execution material awaiting classification
+  - `99-archive/planning/` contains non-normative historical source material
 - `contrib/` — separately owned specifications and reference implementations.
   Greenways formats live under `contrib/greenways/`; Hara may publish verified
   snapshots but does not own their domain vocabulary.
 - `books/`, `registry/` — book series and the planned extension registry
-- `archive/` — legacy material, kept for history only
+- `archive/` — legacy source repository, distinct from `specs/99-archive/`
 
 ## Build and test
 
@@ -108,7 +108,7 @@ To cut a release:
 
 - Maven runs from the repo root via `-f java/pom.xml`; Surefire's working
   directory is the repo root, so tests use repo-relative paths
-  (`specs/language/draft/conformance/...`, `lib/examples/...`, `website/docs/...`).
+  (`specs/00-unsorted/platform-language/draft/conformance/...`, `lib/examples/...`, `website/docs/...`).
 - The JVM runtime embeds `lib/src/**/*.hal` (std foundation) as classpath
   resources via `java/pom.xml`; the Rust runtime embeds
   `lib/src/std/foundation.hal` via `include_str!` in `rust/src/lib.rs`.

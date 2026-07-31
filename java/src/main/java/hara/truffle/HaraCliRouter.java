@@ -20,7 +20,7 @@ import java.util.Map;
  * a closed switch in the Truffle CLI.
  */
 final class HaraCliRouter {
-  private static final String RESOURCE = "specs/cli/draft/hara-cli.edn";
+  private static final String RESOURCE = "specs/00-unsorted/cli/draft/hara-cli.edn";
   private static final HaraCliRouter INSTANCE = load();
 
   record Route(

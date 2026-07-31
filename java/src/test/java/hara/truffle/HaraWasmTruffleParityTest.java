@@ -24,7 +24,7 @@ import org.junit.Test;
 /** Executes the shared Rust-WASM/Truffle parity corpus. */
 public class HaraWasmTruffleParityTest {
   private static final Path CORPUS =
-      Path.of("specs/language/draft/conformance/parity/wasm-truffle.edn");
+      Path.of("specs/00-unsorted/platform-language/draft/conformance/parity/wasm-truffle.edn");
   private static final Path ARTIFACT =
       Path.of("rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm");
 
