@@ -17,6 +17,8 @@
 pub mod opcode;
 #[path = "vm/program.rs"]
 pub mod program;
+#[path = "vm/artifact.rs"]
+pub mod artifact;
 #[path = "vm/source_map.rs"]
 pub mod source_map;
 #[path = "vm/slot.rs"]
@@ -98,6 +100,7 @@ pub use error::{CompileError, CompileErrorKind, ValidationError, VmError};
 pub use machine::{execute_program, execute_program_with_globals, Machine, VmOutcome};
 pub use opcode::Instruction;
 pub use program::{FunctionId, FunctionPrototype, Program};
+pub use artifact::{decode_program, encode_program};
 pub use validate::validate;
 
 /// Compiles, validates, and executes a closed source string in one step.

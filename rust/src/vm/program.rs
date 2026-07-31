@@ -1,8 +1,8 @@
 //! Program representation for the experimental bytecode VM.
 //!
 //! Constants reuse `core::Value` directly: the VM does not duplicate the
-//! Hara value model. Programs are in-memory only; there is no persistent
-//! bytecode artifact in this milestone (HIR remains the form serializer).
+//! Hara value model. The versioned `vm::artifact` codec persists validated
+//! programs for packaging and browser startup without reparsing source.
 
 use super::opcode::Instruction;
 use super::source_map::SourceMap;

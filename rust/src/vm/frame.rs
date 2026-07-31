@@ -25,24 +25,31 @@ impl Frame {
     pub(crate) fn call(
         local_count: usize,
         arity: usize,
-        args: Vec<VmSlot>,
+        mut args: Vec<VmSlot>,
         captures: Vec<VmSlot>,
         base: usize,
     ) -> Frame {
-        Self::call_reusing(Vec::new(), local_count, arity, args, captures, base)
+        Self::call_reusing(
+            Vec::new(),
+            local_count,
+            arity,
+            &mut args,
+            captures,
+            base,
+        )
     }
 
     pub(crate) fn call_reusing(
         mut locals: Vec<VmSlot>,
         local_count: usize,
         arity: usize,
-        args: Vec<VmSlot>,
+        args: &mut Vec<VmSlot>,
         captures: Vec<VmSlot>,
         base: usize,
     ) -> Frame {
         locals.clear();
         locals.resize(local_count, VmSlot::Nil);
-        for (index, value) in args.into_iter().enumerate() {
+        for (index, value) in args.drain(..).enumerate() {
             if let Some(cell) = locals.get_mut(index) {
                 *cell = value;
             }

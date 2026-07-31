@@ -19,6 +19,14 @@ hir-encoder = []
 # all VM entry points are gated behind this feature.
 bytecode-vm = []
 
+[profile.browser-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
 [dependencies]
 wasm-bindgen = "0.2"
 sha2 = "0.10"

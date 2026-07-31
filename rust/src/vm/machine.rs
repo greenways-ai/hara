@@ -67,6 +67,7 @@ pub struct Machine {
     scratch: Vec<Value>,
     calls: Vec<SavedFrame>,
     free_locals: Vec<Vec<VmSlot>>,
+    free_args: Vec<Vec<VmSlot>>,
     vm_globals: HashMap<usize, VmSlot>,
     ip: usize,
 }
@@ -91,6 +92,7 @@ impl Machine {
             scratch: Vec::new(),
             calls: Vec::new(),
             free_locals: Vec::new(),
+            free_args: Vec::new(),
             vm_globals: HashMap::new(),
             ip: 0,
         }
@@ -143,6 +145,7 @@ impl Machine {
             scratch: Vec::new(),
             calls: Vec::new(),
             free_locals: Vec::new(),
+            free_args: Vec::new(),
             vm_globals: HashMap::new(),
             ip: 0,
         }
@@ -217,7 +220,7 @@ impl Machine {
         &mut self,
         program: &Rc<Program>,
         callee: VmSlot,
-        args: Vec<VmSlot>,
+        mut args: Vec<VmSlot>,
     ) -> Result<(), String> {
         match callee {
             VmSlot::Closure(closure) => {
@@ -241,11 +244,12 @@ impl Machine {
             }
             value => {
                 let callee = Self::into_value(program.clone(), value);
-                let args = args
-                    .into_iter()
+                let runtime_args = args
+                    .drain(..)
                     .map(|value| Self::into_value(program.clone(), value))
                     .collect();
-                let value = call_value(callee, args)?;
+                self.free_args.push(args);
+                let value = call_value(callee, runtime_args)?;
                 self.stack.push(value.into());
                 self.ip += 1;
                 Ok(())
@@ -291,10 +295,11 @@ impl Machine {
             locals,
             usize::from(proto.local_count),
             frame_arity,
-            args,
+            &mut args,
             captures,
             self.stack.len(),
         );
+        self.free_args.push(args);
         let caller = std::mem::replace(&mut self.frame, frame);
         self.calls.push(SavedFrame {
             function: self.function,
@@ -587,7 +592,8 @@ impl Machine {
         if self.stack.len() < argc + 1 {
             return Err("stack underflow".to_string());
         }
-        let args = self.stack.split_off(self.stack.len() - argc);
+        let mut args = self.free_args.pop().unwrap_or_default();
+        args.extend(self.stack.drain(self.stack.len() - argc..));
         let callee = self.stack.pop().expect("callee checked above");
         Ok((callee, args))
     }
@@ -609,7 +615,8 @@ impl Machine {
             return Err(format!("callstatic target {prototype} out of range"));
         };
         let capture_count = usize::from(proto.capture_count);
-        let args = self.stack.split_off(self.stack.len() - argc);
+        let mut args = self.free_args.pop().unwrap_or_default();
+        args.extend(self.stack.drain(self.stack.len() - argc..));
         let capture_base = usize::from(function.arity) + usize::from(function.variadic);
         let Some(captures) = self.frame.slot_range(capture_base, capture_count) else {
             return Err("capture slots out of range".to_string());

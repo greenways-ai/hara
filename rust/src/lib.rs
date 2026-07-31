@@ -1170,6 +1170,20 @@ impl Runtime {
             .map_err(|error| JsValue::from_str(&error))
     }
 
+    #[cfg(feature = "bytecode-vm")]
+    #[wasm_bindgen(js_name = compileBytecodeArtifact)]
+    pub fn compile_bytecode_artifact_js(&self, source: &str) -> Result<Vec<u8>, JsValue> {
+        self.compile_bytecode_artifact(source)
+            .map_err(|error| JsValue::from_str(&error))
+    }
+
+    #[cfg(feature = "bytecode-vm")]
+    #[wasm_bindgen(js_name = evalBytecodeArtifact)]
+    pub fn eval_bytecode_artifact_js(&mut self, bytes: &[u8]) -> Result<String, JsValue> {
+        self.eval_bytecode_artifact(bytes)
+            .map_err(|error| JsValue::from_str(&error))
+    }
+
     #[cfg(any(not(target_arch = "wasm32"), target_os = "wasi"))]
     pub fn eval_native(&mut self, source: &str) -> Result<String, String> {
         self.eval_text(source)
@@ -1205,6 +1219,20 @@ pub fn execute_bytecode(program: &std::rc::Rc<vm::Program>) -> Result<String, St
         .map_err(|error| error.to_string())
 }
 
+/// Compiles source into a checksummed, versioned bytecode artifact.
+#[cfg(feature = "bytecode-vm")]
+pub fn compile_bytecode_artifact(source: &str) -> Result<Vec<u8>, String> {
+    let program = compile_bytecode(source)?;
+    vm::encode_program(program.as_ref())
+}
+
+/// Decodes, validates, and executes a bytecode artifact.
+#[cfg(feature = "bytecode-vm")]
+pub fn execute_bytecode_artifact(bytes: &[u8]) -> Result<String, String> {
+    let program = std::rc::Rc::new(vm::decode_program(bytes)?);
+    execute_bytecode(&program)
+}
+
 /// Compiles and executes a source string through the experimental VM.
 #[cfg(feature = "bytecode-vm")]
 pub fn eval_bytecode_native(source: &str) -> Result<String, String> {
@@ -1234,6 +1262,24 @@ impl Runtime {
             .map_err(|error| error.to_string());
         // Rebuild the env from the registry so mixed evaluator/VM usage
         // on one Runtime observes the same globals.
+        let current = self.namespace_registry.current().name().as_str().to_owned();
+        core::select_namespace_environment(&self.namespace_registry, &mut self.env, &current);
+        result
+    }
+
+    /// Compiles against this runtime's namespaces and persists the validated
+    /// program for later native or browser execution.
+    pub fn compile_bytecode_artifact(&self, source: &str) -> Result<Vec<u8>, String> {
+        let program = self.compile_bytecode(source)?;
+        vm::encode_program(program.as_ref())
+    }
+
+    /// Executes a persisted artifact against this runtime's namespaces.
+    pub fn eval_bytecode_artifact(&mut self, bytes: &[u8]) -> Result<String, String> {
+        let program = std::rc::Rc::new(vm::decode_program(bytes)?);
+        let result = vm::execute_program_with_globals(program, &self.namespace_registry)
+            .map(|value| value.display())
+            .map_err(|error| error.to_string());
         let current = self.namespace_registry.current().name().as_str().to_owned();
         core::select_namespace_environment(&self.namespace_registry, &mut self.env, &current);
         result
