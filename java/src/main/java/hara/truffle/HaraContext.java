@@ -365,7 +365,8 @@ public final class HaraContext {
       Map<String, BuiltinExport> exports,
       java.util.List<String> methods,
       Map<String, String> sourceNames) {
-    HaraNamespace target = namespace("std.native." + type);
+    String namespaceName = "std.native." + type;
+    HaraNamespace target = namespace(namespaceName);
     for (String method : methods) {
       String sourceName = sourceNames.getOrDefault(method, method);
       BuiltinExport export = exports.get(sourceName);
@@ -373,6 +374,8 @@ public final class HaraContext {
         target.define(method, export.value, export.metadata, HaraVar.Origin.RUNTIME_PRIMITIVE);
       }
     }
+    namespaceStates.put(namespaceName, NamespaceLoadState.LOADED);
+    namespaceFailures.remove(namespaceName);
   }
 
   private void registerBuiltin(
@@ -1001,12 +1004,12 @@ public final class HaraContext {
           aliases.getOrDefault(currentNamespace.name(), Map.of());
       boolean alias = currentAliases.containsKey(namespaceName);
       namespaceName = currentAliases.getOrDefault(namespaceName, namespaceName);
+      String nativeSource = NATIVE_LIBRARY_SOURCES.get(namespaceName);
+      if (nativeSource != null) libraryLoader.ensure(this, nativeSource);
       if (alias) {
         HaraNamespace required = requiredNamespace(namespaceName);
         if (required == null) return null;
       }
-      String nativeSource = NATIVE_LIBRARY_SOURCES.get(namespaceName);
-      if (nativeSource != null) libraryLoader.ensure(this, nativeSource);
       if (libraryLoader.provides(namespaceName)) {
         HaraNamespace required = requiredNamespace(namespaceName);
         if (required == null) return null;
