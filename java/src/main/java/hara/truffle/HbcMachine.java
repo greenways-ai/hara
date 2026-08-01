@@ -1,5 +1,6 @@
 package hara.truffle;
 
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.interop.TruffleObject;
 import com.oracle.truffle.api.library.ExportLibrary;
 import com.oracle.truffle.api.library.ExportMessage;
@@ -524,6 +525,7 @@ public final class HbcMachine {
       this.namespace = context.currentNamespaceName();
     }
 
+    @TruffleBoundary
     Object invoke(Object[] arguments) {
       Function function = program.functions().get(prototype);
       if (function.asyncFunction()) {
@@ -567,6 +569,7 @@ public final class HbcMachine {
       this.clauses = clauses;
     }
 
+    @TruffleBoundary
     Object invoke(Object[] arguments) {
       for (HbcClosure clause : clauses) {
         Function function = clause.program.functions().get(clause.prototype);
@@ -607,6 +610,7 @@ public final class HbcMachine {
       this.implementation = implementation;
     }
 
+    @TruffleBoundary
     Object invoke(Object[] arguments) {
       return implementation.apply(arguments);
     }

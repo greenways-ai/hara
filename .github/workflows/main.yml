@@ -227,12 +227,14 @@ jobs:
         distribution: 'graalvm'
         github-token: ${{ secrets.GITHUB_TOKEN }}
     - name: Build the Truffle Native Image
+      env:
+        HARA_NATIVE_USE_FALLBACK_RUNTIME: 'true'
       run: ./scripts/build-truffle-native
     - name: Record Native Image build and startup metrics
       run: |
         {
           echo "native_image_version=$(native-image --version)"
-          echo "native_runtime_mode=compiler-enabled"
+          echo "native_runtime_mode=fallback"
           echo "binary_bytes=$(stat -c '%s' target/hara-truffle)"
           /usr/bin/time -f 'startup_seconds=%e' target/hara-truffle eval 'nil' >/dev/null
           echo "reachability_manifest=$(find java/target/classes/META-INF/native-image -type f -print | sort | tr '\n' ',')"
@@ -280,8 +282,8 @@ jobs:
         test "$(target/hara-truffle eval '(do (declare answer) (def answer 42) (defn- read-answer [] answer) (read-answer))')" = "42"
     - name: Run runtime corpus benchmark (GraalVM JVMCI)
       run: ./scripts/run-runtime-corpus-benchmark jvm jvmci-graalvm target/runtime-corpus-jvmci.csv 40 10
-    - name: Run runtime corpus benchmark (Native Image compiler enabled)
-      run: ./scripts/run-runtime-corpus-benchmark bin native-jit target/runtime-corpus-native.csv 40 10 target/hara-truffle enabled
+    - name: Run runtime corpus benchmark (Native Image fallback)
+      run: ./scripts/run-runtime-corpus-benchmark bin native-fallback target/runtime-corpus-native.csv 40 10 target/hara-truffle fallback
     - name: Upload Native Image evidence
       if: always()
       uses: actions/upload-artifact@v4

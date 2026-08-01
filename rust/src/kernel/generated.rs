@@ -250,6 +250,9 @@ impl GeneratedNamespaceConfig {
         if alias.is_empty() {
             return Err("Namespace alias cannot be empty".into());
         }
+        if alias == "-" {
+            return Err("Namespace alias is reserved: -".into());
+        }
         if let Some(previous) = self.aliases.get(alias) {
             if previous != namespace {
                 return Err(format!(

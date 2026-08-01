@@ -103,6 +103,7 @@ public final class HaraVar
   }
 
   @Override
+  @TruffleBoundary
   public Boolean isDynamic() {
     if (!(metadata instanceof ILookup<?, ?>)) return false;
     Object value = ((ILookup<Object, Object>) metadata).lookup(Keyword.create("dynamic"));
@@ -110,6 +111,7 @@ public final class HaraVar
   }
 
   @Override
+  @TruffleBoundary
   public Boolean isMacro() {
     if (!(metadata instanceof ILookup<?, ?>)) return false;
     Object value = ((ILookup<Object, Object>) metadata).lookup(Keyword.create("macro"));
@@ -117,6 +119,7 @@ public final class HaraVar
   }
 
   @Override
+  @TruffleBoundary
   public Boolean isControl() {
     if (!(metadata instanceof ILookup<?, ?>)) return false;
     Object value = ((ILookup<Object, Object>) metadata).lookup(Keyword.create("control"));

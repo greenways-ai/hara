@@ -1,6 +1,7 @@
 package hara.truffle.bytecode;
 
 import com.oracle.truffle.api.RootCallTarget;
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.bytecode.BytecodeConfig;
 import com.oracle.truffle.api.bytecode.BytecodeRootNode;
 import com.oracle.truffle.api.bytecode.BytecodeRootNodes;
@@ -44,6 +45,7 @@ public abstract class HbcBytecodeRootNode extends RootNode implements BytecodeRo
   @ConstantOperand(type = HbcProgram.class)
   public static final class Execute {
     @Specialization
+    @TruffleBoundary
     public static Object execute(HbcProgram program) {
       HaraContext context = HaraLanguage.currentContext();
       return HbcMachine.execute(program, context);

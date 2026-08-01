@@ -165,6 +165,10 @@ pub struct Runtime {
     #[cfg(target_arch = "wasm32")]
     host_handler: Option<js_sys::Function>,
     #[cfg(not(target_arch = "wasm32"))]
+    native_host_handler: Option<
+        Rc<dyn Fn(String, String, Vec<core::Value>) -> Result<core::Value, String>>,
+    >,
+    #[cfg(not(target_arch = "wasm32"))]
     extension_roots: Vec<std::path::PathBuf>,
 }
 
@@ -632,6 +636,8 @@ impl Runtime {
             #[cfg(target_arch = "wasm32")]
             host_handler: None,
             #[cfg(not(target_arch = "wasm32"))]
+            native_host_handler: None,
+            #[cfg(not(target_arch = "wasm32"))]
             extension_roots: native_extension::configured_roots(),
         }
     }
@@ -802,12 +808,17 @@ impl Runtime {
     }
 
     fn eval_text_mode(&mut self, source: &str, traced: bool) -> Result<String, String> {
+        self.eval_value_mode(source, traced)
+            .map(|result| result.display())
+    }
+
+    fn eval_value_mode(&mut self, source: &str, traced: bool) -> Result<core::Value, String> {
         self.refresh_qualified_bindings();
         let forms = kernel::parse_forms(source)?;
         let result = self.eval_forms(forms, traced)?;
         self.save_namespace();
         self.refresh_qualified_bindings();
-        Ok(result.display())
+        Ok(result)
     }
 
     fn eval_transfer_text(&mut self, source: &str) -> Result<String, String> {
@@ -1016,6 +1027,12 @@ impl Runtime {
                                                 || core::eval_traced(&form, &mut self.env),
                                             );
                                         }
+                                        #[cfg(not(target_arch = "wasm32"))]
+                                        if let Some(handler) = &self.native_host_handler {
+                                            return core::with_host_calls(handler.clone(), || {
+                                                core::eval_traced(&form, &mut self.env)
+                                            });
+                                        }
                                         core::eval_traced(&form, &mut self.env)
                                     })
                                 })
@@ -1044,6 +1061,13 @@ impl Runtime {
                                             host_call_bridge(handler),
                                             || fiber.drive_sync(),
                                         );
+                                        return Ok((result, fiber));
+                                    }
+                                    #[cfg(not(target_arch = "wasm32"))]
+                                    if let Some(handler) = &self.native_host_handler {
+                                        let result = core::with_host_calls(handler.clone(), || {
+                                            fiber.drive_sync()
+                                        });
                                         return Ok((result, fiber));
                                     }
                                     Ok((fiber.drive_sync(), fiber))
@@ -1417,6 +1441,10 @@ impl Runtime {
 
     #[cfg(any(not(target_arch = "wasm32"), target_os = "wasi"))]
     pub fn eval_native(&mut self, source: &str) -> Result<String, String> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(handler) = self.native_host_handler.clone() {
+            return core::with_host_calls(handler, || self.eval_text(source));
+        }
         self.eval_text(source)
     }
 
@@ -1479,6 +1507,19 @@ pub fn eval_bytecode_native(source: &str) -> Result<String, String> {
 
 #[cfg(feature = "bytecode-vm")]
 impl Runtime {
+    /// Installs the native host service handler used by `std.native.Host/call`.
+    /// Embedders can expose process-local services without converting values
+    /// through JavaScript or textual serialization.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn install_native_host_handler(
+        &mut self,
+        handler: Rc<
+            dyn Fn(String, String, Vec<core::Value>) -> Result<core::Value, String>,
+        >,
+    ) {
+        self.native_host_handler = Some(handler);
+    }
+
     /// Compiles source against this runtime's namespace registry:
     /// std.foundation vars and anything already interned are visible to
     /// the compiler's two-phase global check (issue #223). The program
@@ -1549,6 +1590,18 @@ impl Runtime {
 }
 
 impl Runtime {
+    /// Evaluates native Hara source and returns its runtime value without a
+    /// display round trip. Embedding hosts use this to inspect declarative
+    /// values containing Vars, functions, bytes, and persistent collections.
+    #[cfg(any(not(target_arch = "wasm32"), target_os = "wasi"))]
+    pub fn eval_native_value(&mut self, source: &str) -> Result<core::Value, String> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(handler) = self.native_host_handler.clone() {
+            return core::with_host_calls(handler, || self.eval_value_mode(source, false));
+        }
+        self.eval_value_mode(source, false)
+    }
+
     /// Evaluates once through the existing evaluator and returns a portable
     /// bounded Evaluation Journal.
     #[cfg(feature = "evaluation-journal")]
@@ -7367,6 +7420,21 @@ mod tests {
             .eval_text("(let [m (to-mutable {}) p (to-persistent m)] (do p (assoc m :late 1)))")
             .unwrap_err()
             .contains("mutable collection used after to-persistent"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_embedding_can_receive_values_without_display_serialization() {
+        let mut runtime = Runtime::new();
+        let value = runtime
+            .eval_native_value("(do (def answer 42) {:answer #'answer})")
+            .unwrap();
+        let entries = core::map_entries(&value).expect("expected map");
+        assert!(entries.iter().any(|(key, value)| matches!(
+            (key, value),
+            (core::Value::Keyword(name), core::Value::Var(var))
+                if name.as_str() == "answer" && var.deref_value() == core::Value::Number(42)
+        )));
     }
 
     #[cfg(not(target_arch = "wasm32"))]

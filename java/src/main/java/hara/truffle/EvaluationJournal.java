@@ -1,5 +1,6 @@
 package hara.truffle;
 
+import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import hara.lang.data.Keyword;
 import hara.lang.data.Symbol;
 import hara.lang.data.types.ILinearType;
@@ -94,18 +95,21 @@ public final class EvaluationJournal {
   }
 
   /** Fast disabled path used from Truffle roots. Zero means no ThreadLocal lookup. */
+  @TruffleBoundary
   public static long enter(String name, Object[] arguments, int offset) {
     if (ENABLED.get() == 0) return 0;
     Collector collector = ACTIVE.get();
     return collector == null ? 0 : collector.enter(name, arguments, offset);
   }
 
+  @TruffleBoundary
   public static void returned(long operation, Object result) {
     if (operation == 0 || ENABLED.get() == 0) return;
     Collector collector = ACTIVE.get();
     if (collector != null) collector.returned(operation, result);
   }
 
+  @TruffleBoundary
   public static void failed(long operation, RuntimeException failure) {
     if (operation == 0 || ENABLED.get() == 0) return;
     Collector collector = ACTIVE.get();

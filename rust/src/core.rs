@@ -1658,7 +1658,10 @@ fn sequential_equality(left: &Value, right: &Value) -> Option<bool> {
     Some(items(left)? == items(right)?)
 }
 
-pub(crate) fn map_entries(value: &Value) -> Option<Vec<(Value, Value)>> {
+/// Returns cloned entries for every map-like runtime representation.
+/// Embedding hosts should use this instead of depending on a concrete
+/// persistent-map implementation.
+pub fn map_entries(value: &Value) -> Option<Vec<(Value, Value)>> {
     match value {
         Value::Map(values) => Some(values.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
         Value::OrderedMap(values) => {

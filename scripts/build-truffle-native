@@ -18,6 +18,14 @@ if native-image --help 2>&1 | grep -q -- '--emit'; then
 fi
 if [[ "${HARA_NATIVE_USE_FALLBACK_RUNTIME:-false}" == "true" ]]; then
   NATIVE_IMAGE_OPTIONS+=(-Dtruffle.UseFallbackRuntime=true)
+else
+  # Oracle Native Image's string-builder outlining can synthesize helpers that
+  # its Truffle runtime-compilation blocklist then rejects as compiler roots.
+  NATIVE_IMAGE_OPTIONS+=(
+    -H:-OutlineIndyStringConcatenations
+    -H:-OutlineStringBuilderAppends
+    -H:-OutlineStringBufferAppends
+    -H:-OutlineSBMaterializations)
 fi
 
 # Keep every runtime dependency on the native-image classpath. In particular,

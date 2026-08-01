@@ -168,10 +168,13 @@ impl Compiler {
         name: &str,
         span: &Span,
     ) -> Result<u32, CompileError> {
+        let current_alias_local = name.strip_prefix("-/");
         let qualified = crate::core::namespace_registry()
             .ok()
             .and_then(|registry| {
-                if !name.contains('/') && self.globals.iter().any(|global| global == name) {
+                if let Some(local) = current_alias_local {
+                    Some(format!("{}/{}", registry.current().name().as_str(), local))
+                } else if !name.contains('/') && self.globals.iter().any(|global| global == name) {
                     Some(format!("{}/{}", registry.current().name().as_str(), name))
                 } else {
                     registry
@@ -204,7 +207,11 @@ impl Compiler {
     /// registry (the Runtime path; the free `compile_source` path has
     /// none and only sees program-declared names).
     pub(super) fn visible_global(&self, name: &str) -> bool {
-        self.globals.iter().any(|global| global == name)
+        let declared = name
+            .strip_prefix("-/")
+            .is_some_and(|local| self.globals.iter().any(|global| global == local))
+            || self.globals.iter().any(|global| global == name);
+        declared
             || crate::core::namespace_registry()
                 .map(|registry| {
                     registry

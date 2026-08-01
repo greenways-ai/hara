@@ -21,7 +21,7 @@ const REQUIRED: &[&str] = &[
     "project/capabilities",
 ];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Project {
     pub root: PathBuf,
     pub manifest_path: PathBuf,
@@ -36,8 +36,57 @@ pub struct Project {
     /// resource.  This never includes a live Studio workspace or cache.
     pub package_workspace: bool,
     pub main: Option<String>,
+    pub default_profile: Option<String>,
+    pub profiles: BTreeMap<String, ProjectProfile>,
     pub dependencies: BTreeMap<String, String>,
     pub recipe: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectProfile {
+    pub language: String,
+    pub main: Option<String>,
+    pub options: Form,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedProfile {
+    pub name: String,
+    pub language: String,
+    pub main: String,
+    pub options: Form,
+}
+
+impl Project {
+    /// Resolves a named runnable target without assigning any meaning to its
+    /// language or options. Language hosts such as Hoplite own that policy.
+    pub fn resolve_profile(&self, requested: Option<&str>) -> Result<Option<ResolvedProfile>, String> {
+        if self.profiles.is_empty() {
+            if requested.is_some() {
+                return Err("project.edn does not declare :project/profiles".into());
+            }
+            return Ok(None);
+        }
+        let name = requested
+            .map(str::to_owned)
+            .or_else(|| self.default_profile.clone())
+            .ok_or("project.edn requires :project/default-profile or an explicit profile")?;
+        let profile = self
+            .profiles
+            .get(&name)
+            .ok_or_else(|| format!("project.edn has no profile {name:?}"))?;
+        let main = profile
+            .main
+            .clone()
+            .or_else(|| self.main.clone())
+            .ok_or_else(|| format!("project profile {name:?} has no main value"))?;
+        Ok(Some(ResolvedProfile {
+            name,
+            language: profile.language.clone(),
+            main,
+            options: profile.options.clone(),
+        }))
+    }
 }
 
 pub fn discover(start: &Path) -> Result<Project, String> {
@@ -131,6 +180,20 @@ pub fn read(input: &Path) -> Result<Project, String> {
     let main = lookup(entries, "project/main")
         .map(|value| scalar(value, "project.edn :project/main"))
         .transpose()?;
+    let default_profile = lookup(entries, "project/default-profile")
+        .map(|value| identifier(value, "project.edn :project/default-profile"))
+        .transpose()?;
+    let profiles = lookup(entries, "project/profiles")
+        .map(project_profiles)
+        .transpose()?
+        .unwrap_or_default();
+    if let Some(default) = &default_profile {
+        if !profiles.contains_key(default) {
+            return Err(format!(
+                "project.edn :project/default-profile {default:?} is not declared in :project/profiles"
+            ));
+        }
+    }
     let dependencies = lookup(entries, "project/dependencies")
         .map(dependencies)
         .transpose()?
@@ -158,6 +221,8 @@ pub fn read(input: &Path) -> Result<Project, String> {
         archive_root,
         package_workspace,
         main,
+        default_profile,
+        profiles,
         dependencies,
         recipe,
     })
@@ -410,6 +475,48 @@ fn scalar(form: &Form, label: &str) -> Result<String, String> {
         _ => Err(format!("{label} must be a string or symbol")),
     }
 }
+fn identifier(form: &Form, label: &str) -> Result<String, String> {
+    match form {
+        Form::Keyword(value) | Form::String(value) | Form::Symbol(value) => Ok(value.clone()),
+        _ => Err(format!("{label} must be a keyword, string, or symbol")),
+    }
+}
+
+fn project_profiles(form: &Form) -> Result<BTreeMap<String, ProjectProfile>, String> {
+    let mut output = BTreeMap::new();
+    for (key, value) in map(form, "project.edn :project/profiles must be an EDN map")? {
+        let name = identifier(key, "project profile name")?;
+        let entries = map(value, "project profile must be an EDN map")?;
+        let language = lookup(entries, "profile/language")
+            .ok_or_else(|| format!("project profile {name:?} is missing :profile/language"))
+            .and_then(|value| identifier(value, "profile :profile/language"))?;
+        let main = lookup(entries, "profile/main")
+            .map(|value| scalar(value, "profile :profile/main"))
+            .transpose()?;
+        let options = lookup(entries, "profile/options")
+            .cloned()
+            .unwrap_or_else(|| Form::Map(Vec::new()));
+        if !matches!(options, Form::Map(_)) {
+            return Err(format!(
+                "project profile {name:?} :profile/options must be an EDN map"
+            ));
+        }
+        if output
+            .insert(
+                name.clone(),
+                ProjectProfile {
+                    language,
+                    main,
+                    options,
+                },
+            )
+            .is_some()
+        {
+            return Err(format!("duplicate project profile {name:?}"));
+        }
+    }
+    Ok(output)
+}
 fn string(form: &Form, label: &str) -> Result<String, String> {
     match form {
         Form::String(value) => Ok(value.clone()),
@@ -570,6 +677,49 @@ mod tests {
                 .unwrap(),
             "42"
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resolves_language_profiles_with_main_and_options_inheritance() {
+        let root = temp("profiles");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("project.edn"),
+            "{:hara/type :project :hara/version \"1.0.0\" :project/id demo/app :project/version \"1.0.0\" :project/source-paths [] :project/test-paths [] :project/extension-paths [] :project/capabilities #{} :project/main demo.core/app :project/default-profile :web :project/profiles {:web {:profile/language :hoplite :profile/options {:port 8080}} :admin {:profile/language :hoplite :profile/main demo.admin/app}}}",
+        )
+        .unwrap();
+        let project = read(&root).unwrap();
+
+        let web = project.resolve_profile(None).unwrap().unwrap();
+        assert_eq!(web.name, "web");
+        assert_eq!(web.language, "hoplite");
+        assert_eq!(web.main, "demo.core/app");
+        assert_eq!(web.options.to_string(), "{:port 8080}");
+
+        let admin = project.resolve_profile(Some("admin")).unwrap().unwrap();
+        assert_eq!(admin.main, "demo.admin/app");
+        assert_eq!(admin.options, Form::Map(Vec::new()));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_missing_profile_language_and_unknown_default() {
+        let root = temp("invalid-profiles");
+        fs::create_dir_all(&root).unwrap();
+        let prefix = "{:hara/type :project :hara/version \"1.0.0\" :project/id demo/app :project/version \"1.0.0\" :project/source-paths [] :project/test-paths [] :project/extension-paths [] :project/capabilities #{} ";
+        fs::write(
+            root.join("project.edn"),
+            format!("{prefix}:project/profiles {{:web {{}}}}}}"),
+        )
+        .unwrap();
+        assert!(read(&root).unwrap_err().contains(":profile/language"));
+        fs::write(
+            root.join("project.edn"),
+            format!("{prefix}:project/default-profile :missing :project/profiles {{:web {{:profile/language :hoplite}}}}}}"),
+        )
+        .unwrap();
+        assert!(read(&root).unwrap_err().contains("is not declared"));
         fs::remove_dir_all(root).unwrap();
     }
 }

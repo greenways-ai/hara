@@ -330,7 +330,7 @@ public interface RT {
     public Entry find(Symbol sym) {
       if (sym.getNamespace() != null) {
         String nsName = sym.getNamespace();
-        Namespace ns = _namespaces.get(Symbol.create(nsName));
+        Namespace ns = "-".equals(nsName) ? _currentNs.get() : _namespaces.get(Symbol.create(nsName));
         if (ns == null) {
           Namespace curr = _currentNs.get();
           Namespace aliased = curr.aliases.get(Symbol.create(nsName));
@@ -354,7 +354,7 @@ public interface RT {
     public Var getObj(Symbol key) {
       if (key.getNamespace() != null) {
         String nsName = key.getNamespace();
-        Namespace ns = _namespaces.get(Symbol.create(nsName));
+        Namespace ns = "-".equals(nsName) ? _currentNs.get() : _namespaces.get(Symbol.create(nsName));
         if (ns == null) {
           Namespace curr = _currentNs.get();
           Namespace aliased = curr.aliases.get(Symbol.create(nsName));

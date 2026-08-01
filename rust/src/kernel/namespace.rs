@@ -112,6 +112,13 @@ impl<V> Namespace<V> {
         V: Clone,
     {
         if let Some(namespace) = symbol.get_namespace() {
+            if namespace == "-" {
+                return self
+                    .mappings
+                    .borrow()
+                    .get(&Symbol::create(None, symbol.get_name()))
+                    .cloned();
+            }
             let alias = Symbol::parse(namespace);
             return self.aliases.borrow().get(&alias).and_then(|ns| {
                 ns.mappings
@@ -429,6 +436,9 @@ impl<V: Clone> NamespaceRegistry<V> {
     {
         if let Some(namespace_name) = symbol.get_namespace() {
             let local = Symbol::create(None, symbol.get_name());
+            if namespace_name == "-" {
+                return self.current().mappings.borrow().get(&local).cloned();
+            }
             if let Some(namespace) = self.find(namespace_name) {
                 return namespace.mappings.borrow().get(&local).cloned();
             }
@@ -500,6 +510,10 @@ mod tests {
             target.resolve(&Symbol::parse("s/answer")).unwrap().deref(),
             43
         );
+        assert_eq!(
+            target.resolve(&Symbol::parse("-/answer")).unwrap().deref(),
+            43
+        );
     }
     #[test]
     fn registry_manages_lifecycle_resolution_and_visibility() {
@@ -522,6 +536,10 @@ mod tests {
                 .unwrap()
                 .deref(),
             42
+        );
+        assert_eq!(
+            registry.resolve(&Symbol::parse("-/local")).unwrap().deref(),
+            1
         );
         assert_eq!(
             registry

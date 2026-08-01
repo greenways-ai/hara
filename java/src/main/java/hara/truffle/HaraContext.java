@@ -1113,6 +1113,7 @@ public final class HaraContext {
   public HaraVar resolve(Symbol symbol) {
     String namespaceName = symbol.getNamespace();
     if (namespaceName != null) {
+      if ("-".equals(namespaceName)) namespaceName = currentNamespace.name();
       Map<String, String> currentAliases =
           aliases.getOrDefault(currentNamespace.name(), Map.of());
       boolean alias = currentAliases.containsKey(namespaceName);
@@ -1497,6 +1498,7 @@ public final class HaraContext {
   HaraMacro resolveMacro(Symbol symbol) {
     String namespace = symbol.getNamespace();
     if (namespace != null) {
+      if ("-".equals(namespace)) namespace = currentNamespace.name();
       namespace = aliases.getOrDefault(currentNamespace.name(), Map.of())
           .getOrDefault(namespace, namespace);
     }
@@ -5668,6 +5670,7 @@ public final class HaraContext {
     }
 
     @Override
+    @TruffleBoundary
     @SuppressWarnings({"rawtypes", "unchecked"})
     public Object apply(Object[] arguments) {
       return IFn.applyAsArray(this, arguments);
@@ -5710,6 +5713,7 @@ public final class HaraContext {
     }
 
     @Override
+    @TruffleBoundary
     @SuppressWarnings({"rawtypes", "unchecked"})
     public Object apply(Object[] arguments) {
       return IFn.applyAsArray(this, arguments);
