@@ -8,6 +8,12 @@
       "iterations": 5000
     },
     {
+      "id": "branchy-loop",
+      "source": "(loop [i 0 flag true acc 0] (if (< i 5000) (if flag (recur (+ i 1) false (+ acc 3)) (recur (+ i 1) true (+ acc 7))) acc))",
+      "expected": "25000",
+      "iterations": 5000
+    },
+    {
       "id": "function-call",
       "source": "(loop [i 0 acc 0] (if (< i 2500) (recur (+ i 1) ((fn [x] (+ x 1)) acc)) acc))",
       "expected": "2500",

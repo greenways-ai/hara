@@ -6,17 +6,32 @@ pub enum TraceValue {
     Bool(bool),
     Nil,
     Indexed(Box<Value>),
+    VectorSlice(Box<NumericVectorSlice>),
     Unsupported,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NumericVectorSlice {
+    pub values: Vec<i64>,
+    pub start: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TraceOp {
     GuardLocalI64 { local: u16 },
+    GuardLocalBool { local: u16 },
+    GuardLocalNil { local: u16 },
     GuardLocalVectorI64 { local: u16 },
     LoadLocal { local: u16 },
     ConstantI64(i64),
+    ConstantBool(bool),
+    ConstantNil,
     ConstantVectorI64 { vector: u16 },
     BinaryI64(Primitive),
+    VectorCountI64,
+    VectorFirstI64,
+    VectorRestI64,
+    VectorSecondI64,
     VectorNthI64,
     StoreLocal { local: u16 },
     GuardTruthy { expected: bool },

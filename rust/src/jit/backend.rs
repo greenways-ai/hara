@@ -1,4 +1,6 @@
-use super::trace_ir::{ExitReason, ExitSnapshot, Trace, TraceOp, TraceOutcome, TraceValue};
+use super::trace_ir::{
+    ExitReason, ExitSnapshot, NumericVectorSlice, Trace, TraceOp, TraceOutcome, TraceValue,
+};
 use crate::core::{Primitive, Value};
 
 pub trait TraceBackend {
@@ -33,6 +35,12 @@ impl TraceBackend for CheckedBackend {
                 TraceOp::GuardLocalI64 { local } => {
                     matches!(locals.get(usize::from(*local)), Some(TraceValue::I64(_)))
                 }
+                TraceOp::GuardLocalBool { local } => {
+                    matches!(locals.get(usize::from(*local)), Some(TraceValue::Bool(_)))
+                }
+                TraceOp::GuardLocalNil { local } => {
+                    matches!(locals.get(usize::from(*local)), Some(TraceValue::Nil))
+                }
                 TraceOp::GuardLocalVectorI64 { local } => {
                     locals.get(usize::from(*local)).is_some_and(numeric_vector)
                 }
@@ -53,29 +61,33 @@ impl TraceBackend for CheckedBackend {
         let mut iterations = 0;
         let mut stack = Vec::with_capacity(8);
         while iterations < max_iterations {
+            let checkpoint = locals.to_vec();
             stack.clear();
             for operation in &trace.operations {
-                let exit = |reason, stack: &Vec<TraceValue>, locals: &[TraceValue]| {
-                    TraceOutcome::SideExit {
-                        reason,
-                        snapshot: ExitSnapshot {
-                            function: trace.function,
-                            instruction: trace.resume_ip,
-                            locals: locals.to_vec(),
-                            stack: stack.clone(),
-                        },
-                    }
+                let exit = |reason| TraceOutcome::SideExit {
+                    reason,
+                    snapshot: ExitSnapshot {
+                        function: trace.function,
+                        instruction: trace.resume_ip,
+                        locals: checkpoint.clone(),
+                        stack: Vec::new(),
+                    },
                 };
                 match *operation {
-                    TraceOp::GuardLocalI64 { .. } | TraceOp::GuardLocalVectorI64 { .. } => {}
+                    TraceOp::GuardLocalI64 { .. }
+                    | TraceOp::GuardLocalBool { .. }
+                    | TraceOp::GuardLocalNil { .. }
+                    | TraceOp::GuardLocalVectorI64 { .. } => {}
                     TraceOp::LoadLocal { local } => match locals.get(local as usize).cloned() {
                         Some(value) => stack.push(value),
-                        None => return exit(ExitReason::WrongTag, &stack, locals),
+                        None => return exit(ExitReason::WrongTag),
                     },
                     TraceOp::ConstantI64(value) => stack.push(TraceValue::I64(value)),
+                    TraceOp::ConstantBool(value) => stack.push(TraceValue::Bool(value)),
+                    TraceOp::ConstantNil => stack.push(TraceValue::Nil),
                     TraceOp::ConstantVectorI64 { vector } => {
                         let Some(values) = trace.vectors.get(usize::from(vector)) else {
-                            return exit(ExitReason::Unsupported, &stack, locals);
+                            return exit(ExitReason::Unsupported);
                         };
                         stack.push(TraceValue::Indexed(Box::new(Value::Vector(
                             values.iter().copied().map(Value::Number).collect(),
@@ -83,10 +95,10 @@ impl TraceBackend for CheckedBackend {
                     }
                     TraceOp::StoreLocal { local } => {
                         let Some(value) = stack.pop() else {
-                            return exit(ExitReason::Unsupported, &stack, locals);
+                            return exit(ExitReason::Unsupported);
                         };
                         let Some(slot) = locals.get_mut(local as usize) else {
-                            return exit(ExitReason::Unsupported, &stack, locals);
+                            return exit(ExitReason::Unsupported);
                         };
                         *slot = value;
                     }
@@ -95,62 +107,88 @@ impl TraceBackend for CheckedBackend {
                     }
                     TraceOp::GuardTruthy { expected } => {
                         let Some(value) = stack.pop() else {
-                            return exit(ExitReason::Unsupported, &stack, locals);
+                            return exit(ExitReason::Unsupported);
                         };
                         let truthy = !matches!(value, TraceValue::Bool(false) | TraceValue::Nil);
                         if truthy != expected {
-                            return exit(ExitReason::BranchChanged, &stack, locals);
+                            return exit(ExitReason::BranchChanged);
                         }
                     }
                     TraceOp::BinaryI64(op) => {
                         let (Some(TraceValue::I64(right)), Some(TraceValue::I64(left))) =
                             (stack.pop(), stack.pop())
                         else {
-                            return exit(ExitReason::WrongTag, &stack, locals);
+                            return exit(ExitReason::WrongTag);
                         };
                         let value = match op {
                             Primitive::Add => left.checked_add(right).map(TraceValue::I64),
                             Primitive::Subtract => left.checked_sub(right).map(TraceValue::I64),
                             Primitive::Multiply => left.checked_mul(right).map(TraceValue::I64),
-                            Primitive::Remainder if right == 0 => {
-                                return exit(ExitReason::DivisionByZero, &stack, locals)
+                            Primitive::Divide | Primitive::Remainder if right == 0 => {
+                                return exit(ExitReason::DivisionByZero)
                             }
+                            Primitive::Divide => left.checked_div(right).map(TraceValue::I64),
                             Primitive::Remainder => left.checked_rem(right).map(TraceValue::I64),
                             Primitive::Less => Some(TraceValue::Bool(left < right)),
                             Primitive::LessOrEqual => Some(TraceValue::Bool(left <= right)),
                             Primitive::Greater => Some(TraceValue::Bool(left > right)),
                             Primitive::GreaterOrEqual => Some(TraceValue::Bool(left >= right)),
                             Primitive::Equal => Some(TraceValue::Bool(left == right)),
-                            _ => return exit(ExitReason::Unsupported, &stack, locals),
+                            _ => return exit(ExitReason::Unsupported),
                         };
                         let Some(value) = value else {
-                            return exit(ExitReason::Overflow, &stack, locals);
+                            return exit(ExitReason::Overflow);
                         };
                         stack.push(value);
                     }
+                    TraceOp::VectorCountI64 => {
+                        let Some(vector) =
+                            stack.pop().and_then(|value| numeric_vector_values(&value))
+                        else {
+                            return exit(ExitReason::WrongTag);
+                        };
+                        stack.push(TraceValue::I64(vector.len() as i64));
+                    }
+                    TraceOp::VectorFirstI64 | TraceOp::VectorSecondI64 => {
+                        let index = usize::from(matches!(*operation, TraceOp::VectorSecondI64));
+                        let Some(vector) =
+                            stack.pop().and_then(|value| numeric_vector_values(&value))
+                        else {
+                            return exit(ExitReason::WrongTag);
+                        };
+                        let Some(value) = vector.get(index).copied() else {
+                            return exit(ExitReason::IndexOutOfBounds);
+                        };
+                        stack.push(TraceValue::I64(value));
+                    }
+                    TraceOp::VectorRestI64 => {
+                        let Some(vector) =
+                            stack.pop().and_then(|value| numeric_vector_values(&value))
+                        else {
+                            return exit(ExitReason::WrongTag);
+                        };
+                        stack.push(TraceValue::VectorSlice(Box::new(NumericVectorSlice {
+                            start: usize::from(!vector.is_empty()),
+                            values: vector,
+                        })));
+                    }
                     TraceOp::VectorNthI64 => {
                         let Some(TraceValue::I64(index)) = stack.pop() else {
-                            return exit(ExitReason::WrongTag, &stack, locals);
+                            return exit(ExitReason::WrongTag);
                         };
                         let Some(vector) = stack.pop() else {
-                            return exit(ExitReason::WrongTag, &stack, locals);
+                            return exit(ExitReason::WrongTag);
                         };
                         let Some(index) = usize::try_from(index).ok() else {
-                            return exit(ExitReason::IndexOutOfBounds, &stack, locals);
+                            return exit(ExitReason::IndexOutOfBounds);
                         };
-                        let TraceValue::Indexed(value) = vector else {
-                            return exit(ExitReason::WrongTag, &stack, locals);
+                        let Some(values) = numeric_vector_values(&vector) else {
+                            return exit(ExitReason::WrongTag);
                         };
-                        let value = match value.as_ref() {
-                            Value::Tuple(values) => values.get(index),
-                            Value::Vector(values) => values.get(index),
-                            _ => None,
+                        let Some(value) = values.get(index).copied() else {
+                            return exit(ExitReason::IndexOutOfBounds);
                         };
-                        match value {
-                            Some(Value::Number(value)) => stack.push(TraceValue::I64(*value)),
-                            Some(_) => return exit(ExitReason::WrongTag, &stack, locals),
-                            None => return exit(ExitReason::IndexOutOfBounds, &stack, locals),
-                        }
+                        stack.push(TraceValue::I64(value));
                     }
                     TraceOp::LoopBackedge => iterations += 1,
                 }
@@ -161,13 +199,30 @@ impl TraceBackend for CheckedBackend {
 }
 
 fn numeric_vector(value: &TraceValue) -> bool {
-    let TraceValue::Indexed(value) = value else {
-        return false;
-    };
-    match value.as_ref() {
-        Value::Tuple(values) => values.iter().all(|value| matches!(value, Value::Number(_))),
-        Value::Vector(values) => values.iter().all(|value| matches!(value, Value::Number(_))),
-        _ => false,
+    numeric_vector_values(value).is_some()
+}
+
+fn numeric_vector_values(value: &TraceValue) -> Option<Vec<i64>> {
+    match value {
+        TraceValue::Indexed(value) => match value.as_ref() {
+            Value::Tuple(values) => values
+                .iter()
+                .map(|value| match value {
+                    Value::Number(value) => Some(*value),
+                    _ => None,
+                })
+                .collect(),
+            Value::Vector(values) => values
+                .iter()
+                .map(|value| match value {
+                    Value::Number(value) => Some(*value),
+                    _ => None,
+                })
+                .collect(),
+            _ => None,
+        },
+        TraceValue::VectorSlice(slice) => Some(slice.values[slice.start..].to_vec()),
+        _ => None,
     }
 }
 
@@ -244,6 +299,36 @@ mod tests {
                 reason: ExitReason::IndexOutOfBounds,
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn checked_backend_restores_the_iteration_checkpoint_on_failure() {
+        let trace = Trace {
+            function: 0,
+            header: 4,
+            resume_ip: 4,
+            operations: vec![
+                TraceOp::LoadLocal { local: 0 },
+                TraceOp::ConstantI64(1),
+                TraceOp::BinaryI64(Primitive::Add),
+                TraceOp::StoreLocal { local: 0 },
+                TraceOp::LoadLocal { local: 0 },
+                TraceOp::ConstantI64(0),
+                TraceOp::BinaryI64(Primitive::Divide),
+                TraceOp::Pop,
+                TraceOp::LoopBackedge,
+            ],
+            vectors: Vec::new(),
+        };
+        let mut compiled = trace.clone();
+        let mut locals = [TraceValue::I64(9)];
+        assert!(matches!(
+            CheckedBackend.enter(&mut compiled, &mut locals, 1),
+            TraceOutcome::SideExit {
+                reason: ExitReason::DivisionByZero,
+                snapshot: ExitSnapshot { locals, .. },
+            } if locals == vec![TraceValue::I64(9)]
         ));
     }
 }

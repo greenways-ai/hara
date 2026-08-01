@@ -9,6 +9,8 @@ pub struct LoopKey {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct JitConfig {
     pub hot_threshold: u32,
+    pub side_trace_threshold: u32,
+    pub max_traces_per_loop: usize,
     pub max_trace_operations: usize,
 }
 
@@ -16,6 +18,8 @@ impl Default for JitConfig {
     fn default() -> Self {
         Self {
             hot_threshold: 64,
+            side_trace_threshold: 16,
+            max_traces_per_loop: 4,
             max_trace_operations: 4096,
         }
     }
@@ -62,6 +66,8 @@ mod tests {
         };
         let mut hotness = Hotness::new(JitConfig {
             hot_threshold: 2,
+            side_trace_threshold: 2,
+            max_traces_per_loop: 4,
             max_trace_operations: 10,
         });
         assert!(!hotness.backedge(key));

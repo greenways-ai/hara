@@ -83,6 +83,8 @@ pub struct Machine {
     ip: usize,
     #[cfg(feature = "tracing-jit")]
     jit: crate::jit::runtime::JitRuntime,
+    #[cfg(feature = "tracing-jit")]
+    jit_path: Vec<(usize, u32)>,
 }
 
 #[cfg(feature = "tracing-jit")]
@@ -184,6 +186,8 @@ impl Machine {
             ip: 0,
             #[cfg(feature = "tracing-jit")]
             jit: crate::jit::runtime::JitRuntime::default(),
+            #[cfg(feature = "tracing-jit")]
+            jit_path: Vec::new(),
         }
     }
 
@@ -261,6 +265,8 @@ impl Machine {
             ip: 0,
             #[cfg(feature = "tracing-jit")]
             jit: crate::jit::runtime::JitRuntime::default(),
+            #[cfg(feature = "tracing-jit")]
+            jit_path: Vec::new(),
         }
     }
 
@@ -593,24 +599,43 @@ impl Machine {
             let Some(instruction) = function.code.get(self.ip) else {
                 return VmOutcome::Failed(self.error(function, "instruction pointer out of range"));
             };
+            #[cfg(feature = "tracing-jit")]
+            self.jit_path.push((self.function, self.ip as u32));
             match self.dispatch(&program, function, instruction) {
                 Dispatch::Next(ip) => {
+                    let mut next_ip = ip;
                     #[cfg(feature = "tracing-jit")]
                     if ip <= self.ip {
                         let (mut locals, writable) = self.frame.trace_locals();
-                        if self.jit.backedge(
+                        let header = ip as u32;
+                        let path_start = self
+                            .jit_path
+                            .iter()
+                            .rposition(|entry| *entry == (self.function, header));
+                        let path = path_start.map_or_else(Vec::new, |start| {
+                            self.jit_path[start..]
+                                .iter()
+                                .map(|(_, instruction)| *instruction)
+                                .collect()
+                        });
+                        if let Some(snapshot) = self.jit.backedge(
                             &program,
                             self.function as u16,
                             self.ip as u32,
-                            ip as u32,
+                            header,
+                            &path,
                             &mut locals,
                         ) {
-                            self.frame.apply_trace_locals(&locals, &writable);
+                            self.frame.apply_trace_locals(&snapshot.locals, &writable);
+                            next_ip = snapshot.instruction as usize;
                         }
+                        self.jit_path.clear();
                     }
-                    self.ip = ip;
+                    self.ip = next_ip;
                 }
                 Dispatch::Call { callee, args } => {
+                    #[cfg(feature = "tracing-jit")]
+                    self.jit_path.clear();
                     if let Err(message) = self.enter_callable(&program, callee, args) {
                         match self.raise(function, message) {
                             Ok(target) => self.ip = target,
@@ -622,8 +647,14 @@ impl Machine {
                     prototype,
                     args,
                     captures,
-                } => self.enter_or_spawn(&program, prototype, args, captures),
+                } => {
+                    #[cfg(feature = "tracing-jit")]
+                    self.jit_path.clear();
+                    self.enter_or_spawn(&program, prototype, args, captures)
+                }
                 Dispatch::Returned(value) => {
+                    #[cfg(feature = "tracing-jit")]
+                    self.jit_path.clear();
                     self.stack.truncate(self.frame.base());
                     if let Some(caller) = self.calls.pop() {
                         self.function = caller.function;

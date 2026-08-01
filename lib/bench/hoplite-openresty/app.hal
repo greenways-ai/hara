@@ -1,0 +1,20 @@
+(ns bench.hoplite.app)
+
+;; NOTE: the embedded compiler in the hoplite nginx artifact only supports
+;; literal defn bodies plus ^:async coroutine/await + std.native.Host/call
+;; forms. Unqualified core calls (str, +, if, loop, even qualified
+;; std.foundation/str) fail bootstrap compilation in this build.
+
+(defn hello
+  [request]
+  {:status 200
+   :headers {"content-type" "text/plain; charset=utf-8"}
+   :body "Hello from Hoplite\n"})
+
+(defn ^:async delay
+  [request]
+  (std.foundation.coroutine/await
+    (std.native.Host/call "nginx" "sleep" [25]))
+  {:status 200
+   :headers {"content-type" "text/plain; charset=utf-8"}
+   :body "delayed 25ms\n"})

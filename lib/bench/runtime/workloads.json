@@ -3,6 +3,7 @@
   "workloads": [
     {"id": "noop", "source": "42", "expected": "42", "iterations": 1},
     {"id": "arithmetic", "source": "(loop [i 0 acc 0] (if (< i 5000) (recur (+ i 1) (+ acc (mod i 17))) acc))", "expected": "39985", "iterations": 5000},
+    {"id": "branchy-loop", "source": "(loop [i 0 flag true acc 0] (if (< i 5000) (if flag (recur (+ i 1) false (+ acc 3)) (recur (+ i 1) true (+ acc 7))) acc))", "expected": "25000", "iterations": 5000},
     {"id": "function-call", "source": "(loop [i 0 acc 0] (if (< i 2500) (recur (+ i 1) ((fn [x] (+ x 1)) acc)) acc))", "expected": "2500", "iterations": 2500},
     {"id": "persistent-vector", "source": "(loop [i 0 acc 0] (if (< i 500) (recur (+ i 1) (+ acc (nth [1 2 3 4 5 6 7 8] (mod i 8)))) acc))", "expected": "2242", "iterations": 500},
     {"id": "persistent-map", "source": "(loop [i 0 value {}] (if (< i 500) (recur (+ i 1) (assoc value i (+ i 1))) (get value 499)))", "expected": "500", "iterations": 500},

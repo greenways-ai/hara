@@ -23,7 +23,9 @@ pub use hotness::{Hotness, JitConfig, LoopKey};
 pub use native::NativeBackend;
 pub use recorder::{RecordError, TraceRecorder};
 pub use runtime::JitTelemetry;
-pub use trace_ir::{ExitReason, ExitSnapshot, Trace, TraceOp, TraceOutcome, TraceValue};
+pub use trace_ir::{
+    ExitReason, ExitSnapshot, NumericVectorSlice, Trace, TraceOp, TraceOutcome, TraceValue,
+};
 
 #[cfg(test)]
 #[path = "jit/differential_tests.rs"]

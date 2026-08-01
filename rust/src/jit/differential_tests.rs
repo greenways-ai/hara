@@ -117,3 +117,84 @@ fn unsupported_vectors_and_late_bounds_errors_fall_back_to_vm_semantics() {
     assert!(evaluator.contains("nth index out of bounds"), "{evaluator}");
     assert!(vm.contains("nth index out of bounds"), "{vm}");
 }
+
+#[test]
+fn dynamic_paths_compile_both_directions_of_an_alternating_branch() {
+    let source = "(loop [i 0 flag true acc 0] (if (< i 5000) (if flag (recur (+ i 1) false (+ acc 3)) (recur (+ i 1) true (+ acc 7))) acc))";
+    agrees(source);
+    let program = crate::compile_bytecode(source).unwrap();
+    for path in [
+        vec![6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+        vec![6, 7, 8, 9, 17, 18, 19, 20, 21, 22, 23],
+    ] {
+        let recorded = crate::jit::TraceRecorder::new(4096).record_path(
+            &program,
+            program.entry,
+            6,
+            &path,
+            &[
+                crate::jit::TraceValue::I64(64),
+                crate::jit::TraceValue::Bool(true),
+                crate::jit::TraceValue::I64(0),
+            ],
+        );
+        assert!(recorded.is_ok(), "{path:?}: {recorded:?}");
+        #[cfg(all(feature = "native-jit", not(target_arch = "wasm32")))]
+        {
+            use crate::jit::TraceBackend;
+            let compiled = crate::jit::NativeBackend::default().compile(&recorded.unwrap());
+            assert!(compiled.is_ok(), "{path:?}: {:?}", compiled.err());
+        }
+    }
+    assert_eq!(crate::execute_bytecode(&program).unwrap(), "25000");
+    let telemetry = crate::bytecode_jit_telemetry(&program);
+    assert!(
+        telemetry.trace_paths >= 2,
+        "{telemetry:?}\n{}",
+        crate::vm::disassemble(&program)
+    );
+    assert!(telemetry.branch_exits > 0, "{telemetry:?}");
+}
+
+#[test]
+fn division_and_numeric_sequence_navigation_trace() {
+    for (source, expected) in [
+        (
+            "(loop [i 1 acc 0] (if (< i 5000) (recur (+ i 1) (+ acc (/ i 3))) acc))",
+            "4164167",
+        ),
+        (
+            "(loop [i 0 acc 0] (if (< i 5000) (recur (+ i 1) (+ acc (count [3 5 7 11]))) acc))",
+            "20000",
+        ),
+        (
+            "(loop [i 0 acc 0] (if (< i 5000) (recur (+ i 1) (+ acc (first (rest [3 5 7 11])))) acc))",
+            "25000",
+        ),
+        (
+            "(loop [i 0 acc 0] (if (< i 5000) (recur (+ i 1) (+ acc (second [3 5 7 11]))) acc))",
+            "25000",
+        ),
+    ] {
+        agrees(source);
+        let program = crate::compile_bytecode(source).unwrap();
+        assert_eq!(crate::execute_bytecode(&program).unwrap(), expected);
+        assert!(
+            crate::bytecode_jit_telemetry(&program).compiled > 0,
+            "loop did not compile: {source}"
+        );
+    }
+}
+
+#[test]
+fn divide_and_remainder_edge_errors_remain_interpreter_errors() {
+    for source in [
+        "(loop [i 0 x -9223372036854775808] (if (< i 100) (recur (+ i 1) (/ x -1)) x))",
+        "(loop [i 0 x -9223372036854775808] (if (< i 100) (recur (+ i 1) (mod x -1)) x))",
+    ] {
+        let evaluator = Runtime::new().eval_native(source).unwrap_err();
+        let vm = eval_bytecode_native(source).unwrap_err();
+        assert!(evaluator.contains("integer overflow"), "{evaluator}");
+        assert!(vm.contains("integer overflow"), "{vm}");
+    }
+}

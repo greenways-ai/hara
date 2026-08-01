@@ -86,7 +86,7 @@ fn main() {
     let telemetry = program.as_ref().map_or_else(String::new, |program| {
         let telemetry = hara_wasm::bytecode_jit_telemetry(program);
         format!(
-            ",\"jit\":{{\"backedges\":{},\"compile_attempts\":{},\"compiled\":{},\"rejected\":{},\"entries\":{},\"completed_iterations\":{},\"side_exits\":{}}}",
+            ",\"jit\":{{\"backedges\":{},\"compile_attempts\":{},\"compiled\":{},\"rejected\":{},\"entries\":{},\"completed_iterations\":{},\"side_exits\":{},\"recording_starts\":{},\"recording_completed\":{},\"recording_aborts\":{},\"trace_paths\":{},\"branch_exits\":{},\"type_exits\":{},\"error_exits\":{}}}",
             telemetry.backedges,
             telemetry.compile_attempts,
             telemetry.compiled,
@@ -94,6 +94,13 @@ fn main() {
             telemetry.entries,
             telemetry.completed_iterations,
             telemetry.side_exits,
+            telemetry.recording_starts,
+            telemetry.recording_completed,
+            telemetry.recording_aborts,
+            telemetry.trace_paths,
+            telemetry.branch_exits,
+            telemetry.type_exits,
+            telemetry.error_exits,
         )
     });
     #[cfg(not(feature = "tracing-jit"))]
