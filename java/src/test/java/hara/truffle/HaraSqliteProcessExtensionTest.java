@@ -14,7 +14,7 @@ public class HaraSqliteProcessExtensionTest {
       Path.of("rust/extensions/std-db-sqlite/target/package").toAbsolutePath().normalize();
 
   @Test
-  public void sqliteWasmRunsGeneratedAndParameterizedSqlThroughTheHaraApi() {
+  public void sqliteWasmRunsGeneratedAndParameterizedSqlThroughTheGenericDbApi() {
     Assume.assumeTrue(
         Files.isRegularFile(ROOT.resolve("std/db/provider/sqlite/hara.extension.edn")));
     String previous = System.getProperty("hara.extensions.path");
@@ -23,18 +23,21 @@ public class HaraSqliteProcessExtensionTest {
         Context.newBuilder(HaraLanguage.ID).allowCreateProcess(true).build()) {
       context.eval(
           HaraLanguage.ID,
-          "(ns app (:require [std.db.sqlite :as sqlite] "
+          "(ns app (:require [std.db :as db] "
+              + "[std.db.sqlite :as sqlite] "
               + "[std.db.text.sql-util :as sql])) "
               + "(def connection (deref (sqlite/open))) "
-              + "(deref (sqlite/exec connection "
+              + "(deref (db/exec connection "
               + "\"create table items (id integer primary key, name text not null)\")) "
-              + "(deref (sqlite/exec connection "
+              + "(deref (db/exec connection "
               + "\"insert into items (name) values (?)\" [\"wombat\"])) "
               + "(def predicate "
               + "(sql/encode-query-string {\"name\" \"wombat\"} \"WHERE\" "
               + "{:column-fn sql/default-quote-fn})) "
-              + "(def result (deref (sqlite/query connection "
+              + "(def result (deref (db/query connection "
               + "(str \"select id, name from items \" predicate))))");
+      assertEquals("sqlite", context.eval(HaraLanguage.ID, "(name (db/engine connection))").asString());
+      assertEquals("sqlite", context.eval(HaraLanguage.ID, "(name (db/provider connection))").asString());
       assertEquals(
           "WHERE \"name\" = 'wombat'",
           context.eval(HaraLanguage.ID, "predicate").asString());
@@ -44,7 +47,7 @@ public class HaraSqliteProcessExtensionTest {
       assertEquals(
           "wombat",
           context.eval(HaraLanguage.ID, "(get (get (get result :rows) 0) 1)").asString());
-      assertTrue(context.eval(HaraLanguage.ID, "(deref (sqlite/close connection))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(deref (db/close connection))").asBoolean());
     } finally {
       if (previous == null) System.clearProperty("hara.extensions.path");
       else System.setProperty("hara.extensions.path", previous);
