@@ -15,6 +15,10 @@ on:
       - ".github/workflows/std-db-sqlite.yml"
   workflow_dispatch:
 
+concurrency:
+  group: std-db-sqlite-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   sqlite-wasm:
     runs-on: ubuntu-latest
