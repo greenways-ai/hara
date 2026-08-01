@@ -7,8 +7,5 @@
   "private": true,
   "exports": {
     ".": "./index.mjs"
-  },
-  "dependencies": {
-    "@sqlite.org/sqlite-wasm": "3.53.0-build1"
   }
 }
