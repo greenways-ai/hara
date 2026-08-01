@@ -9,7 +9,7 @@
  :assets []
  :exports
  {"version" {:args [] :returns :map :async true}
-  "open"    {:args [:int] :returns :map :async true}
+  "open"    {:args [:map] :returns :map :async true}
   "exec"    {:args [:int :string :vector] :returns :map :async true}
   "query"   {:args [:int :string :vector] :returns :map :async true}
   "close"   {:args [:int] :returns :boolean :async true}}
