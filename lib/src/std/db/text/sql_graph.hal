@@ -26,7 +26,10 @@
 
 (defn- arrayify
   [value]
-  (if (vector? value) value [value]))
+  (cond
+    (nil? value) []
+    (vector? value) value
+    :else [value]))
 
 (defn- indent
   [amount]
@@ -191,9 +194,11 @@
         data-parameters (or (compatible-get params :data) [])
         link-parameters (or (compatible-get params :links) [])
         custom-parameters (or (compatible-get params :custom) [])
+        count-parameters (filter (fn [entry]
+                                   (= "sql/count" (compatible-get entry "::")))
+                                 custom-parameters)
         sort-keys (option options :sort-keys true)]
-    (if (and (= 1 (count custom-parameters))
-             (= "sql/count" (compatible-get (first custom-parameters) "::")))
+    (if (not (empty? count-parameters))
       (return-count-function)
       (let [nest-function
             (fn [link]
