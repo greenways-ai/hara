@@ -5,6 +5,8 @@ on:
     paths:
       - "lib/src/std/db.hal"
       - "lib/src/std/db/**"
+      - "lib/test/std/db/**"
+      - "java/src/test/java/hara/truffle/HaraDbRuntimeTest.java"
       - "java/src/test/java/hara/truffle/HaraSqliteProcessExtensionTest.java"
       - "rust/extensions/std-db-sqlite/**"
       - "rust/web/entries/sqlite-*.mjs"
@@ -55,5 +57,5 @@ jobs:
       - name: Assemble extension package
         working-directory: rust/web
         run: node package-sqlite-extension.mjs
-      - name: Execute SQLite through the Hara language
-        run: mvn -f java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraSqliteProcessExtensionTest test
+      - name: Execute SQLite and database runtimes through Hara
+        run: mvn -f java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraDbRuntimeTest,hara.truffle.HaraSqliteProcessExtensionTest test
