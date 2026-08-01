@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "lib/src/std/db/**"
+      - "java/src/test/java/hara/truffle/HaraSqliteProcessExtensionTest.java"
       - "rust/extensions/std-db-sqlite/**"
       - "rust/web/entries/sqlite-*.mjs"
       - "rust/web/packages/db-sqlite/**"
@@ -17,7 +18,7 @@ on:
 jobs:
   sqlite-wasm:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,6 +26,11 @@ jobs:
           node-version: 18
           cache: npm
           cache-dependency-path: rust/web/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
       - name: Install Hara web build dependencies
         working-directory: rust/web
         run: npm ci
@@ -37,9 +43,11 @@ jobs:
       - name: Build browser provider
         working-directory: rust/web
         run: ./node_modules/.bin/vite build --config vite.sqlite-browser.config.js
-      - name: Execute real SQLite WASM test
+      - name: Execute real SQLite WASM provider test
         working-directory: rust/web
         run: node --test sqlite-provider.test.mjs
       - name: Assemble extension package
         working-directory: rust/web
         run: node package-sqlite-extension.mjs
+      - name: Execute SQLite through the Hara language
+        run: mvn -f java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraSqliteProcessExtensionTest test
