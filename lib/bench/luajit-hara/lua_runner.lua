@@ -1,22 +1,23 @@
 #!/usr/bin/env luajit
 -- Benchmark runner for the luajit-hara comparison suite.
 -- Contract mirrors rust/src/bin/hara-runtime-benchmark.rs:
---   luajit lua_runner.lua ID SOURCE_HEX EXPECTED WINDOWS CALLS
+--   luajit lua_runner.lua MODE ID SOURCE_HEX EXPECTED WINDOWS CALLS
 -- Loads the source once per call (load + call = parse + eval, matching
 -- hara's eval_native per-call semantics) and prints one JSON line:
 --   {"runtime":"luajit","workload":"ID","first_ns":N,"samples_ns":[...]}
 
 local args = { ... }
-if #args ~= 5 then
-  io.stderr:write("lua_runner expects ID SOURCE_HEX EXPECTED WINDOWS CALLS\n")
+if #args ~= 6 then
+  io.stderr:write("lua_runner expects MODE ID SOURCE_HEX EXPECTED WINDOWS CALLS\n")
   os.exit(2)
 end
 
-local id = args[1]
-local source_hex = args[2]
-local expected = args[3]
-local windows = tonumber(args[4])
-local calls = tonumber(args[5])
+local mode = args[1]
+local id = args[2]
+local source_hex = args[3]
+local expected = args[4]
+local windows = tonumber(args[5])
+local calls = tonumber(args[6])
 
 if not windows or not calls then
   io.stderr:write(id .. ": invalid windows/calls\n")
@@ -45,9 +46,13 @@ end
 
 local source, err = decode_hex(source_hex)
 if not source then fail(err) end
+local prepared, prepared_err
+if mode == "prepared" then prepared, prepared_err = load(source, "workload") end
+if mode == "prepared" and not prepared then fail(prepared_err) end
 
 local function eval_once()
-  local chunk, load_err = load(source, "workload")
+  local chunk, load_err = prepared, nil
+  if not chunk then chunk, load_err = load(source, "workload") end
   if not chunk then fail(load_err) end
   local ok, value = pcall(chunk)
   if not ok then fail(value) end

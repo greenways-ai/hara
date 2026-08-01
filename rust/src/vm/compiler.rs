@@ -563,7 +563,10 @@ impl Compiler {
                     // global compiles to GetGlobal+Call even when it names
                     // a primitive; only otherwise-unbound operator names
                     // lower to Primitive instructions (issue #223).
-                    Form::Symbol(name) if self.visible_global(name) => {
+                    Form::Symbol(name)
+                        if self.ctx().scopes.resolve(name).is_some()
+                            || self.visible_global(name) =>
+                    {
                         self.compile_named_call(name, &children, span)
                     }
                     Form::Symbol(name) => match Primitive::from_symbol(name) {

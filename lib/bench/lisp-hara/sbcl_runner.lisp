@@ -1,6 +1,6 @@
 ;;;; Benchmark runner for the lisp-hara comparison suite (SBCL).
 ;;;; Contract mirrors lib/bench/luajit-hara/lua_runner.lua:
-;;;;   sbcl --script sbcl_runner.lisp ID SOURCE_HEX EXPECTED WINDOWS CALLS
+;;;;   sbcl --script sbcl_runner.lisp MODE ID SOURCE_HEX EXPECTED WINDOWS CALLS
 ;;;; Reads + evals the source on every call (matching hara's eval_native
 ;;;; per-call semantics; SBCL's default *evaluator-mode* is :compile) and
 ;;;; prints one JSON line:
@@ -8,11 +8,11 @@
 
 (defparameter *args* (cdr sb-ext:*posix-argv*))
 
-(when (/= (length *args*) 5)
-  (format *error-output* "sbcl_runner expects ID SOURCE_HEX EXPECTED WINDOWS CALLS~%")
+(when (/= (length *args*) 6)
+  (format *error-output* "sbcl_runner expects MODE ID SOURCE_HEX EXPECTED WINDOWS CALLS~%")
   (sb-ext:exit :code 2))
 
-(destructuring-bind (id source-hex expected windows-s calls-s) *args*
+(destructuring-bind (mode id source-hex expected windows-s calls-s) *args*
   (let ((windows (parse-integer windows-s :junk-allowed t))
         (calls (parse-integer calls-s :junk-allowed t)))
     (unless (and windows calls)
@@ -33,9 +33,13 @@
              (round (* (/ (get-internal-run-time) internal-time-units-per-second)
                        1d9))))
       (let* ((source (hex-decode source-hex))
+             (form (read-from-string source))
+             (prepared (when (string= mode "prepared")
+                         (compile nil `(lambda () ,form))))
              (eval-once
                (lambda ()
-                 (let ((value (eval (read-from-string source))))
+                 (let ((value (if prepared (funcall prepared)
+                                  (eval (read-from-string source)))))
                    (unless (string= (princ-to-string value) expected)
                      (fail (format nil "expected ~a, got ~a" expected value))))))
              (started (clock-ns)))

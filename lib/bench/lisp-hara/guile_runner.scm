@@ -1,6 +1,6 @@
 ;; Benchmark runner for the lisp-hara comparison suite (GNU Guile).
 ;; Contract mirrors lib/bench/luajit-hara/lua_runner.lua:
-;;   guile -s guile_runner.scm ID SOURCE_HEX EXPECTED WINDOWS CALLS
+;;   guile -s guile_runner.scm MODE ID SOURCE_HEX EXPECTED WINDOWS CALLS
 ;; Reads + evals the source on every call (matching hara's eval_native
 ;; per-call semantics) and prints one JSON line:
 ;;   {"runtime":"guile","workload":"ID","first_ns":N,"samples_ns":[...]}
@@ -15,15 +15,16 @@
 
 (define args (cdr (command-line)))
 
-(when (not (= (length args) 5))
-  (display "guile_runner expects ID SOURCE_HEX EXPECTED WINDOWS CALLS\n" (current-error-port))
+(when (not (= (length args) 6))
+  (display "guile_runner expects MODE ID SOURCE_HEX EXPECTED WINDOWS CALLS\n" (current-error-port))
   (exit 2))
 
-(define id (list-ref args 0))
-(define source-hex (list-ref args 1))
-(define expected (list-ref args 2))
-(define windows (string->number (list-ref args 3)))
-(define calls (string->number (list-ref args 4)))
+(define mode (list-ref args 0))
+(define id (list-ref args 1))
+(define source-hex (list-ref args 2))
+(define expected (list-ref args 3))
+(define windows (string->number (list-ref args 4)))
+(define calls (string->number (list-ref args 5)))
 
 (unless (and windows calls)
   (display (string-append id ": invalid windows/calls\n") (current-error-port))
@@ -42,6 +43,10 @@
                    (integer->char (string->number (substring s i (+ i 2)) 16))))))
 
 (define source (hex-decode source-hex))
+(define form (read (open-input-string source)))
+(define prepared
+  (and (string=? mode "prepared")
+       (eval `(lambda () ,form) (interaction-environment))))
 
 (define (clock-ns)
   (round (* 1000000000 (/ (get-internal-run-time) internal-time-units-per-second))))
@@ -50,7 +55,8 @@
   (call-with-string-output-port (lambda (p) (display v p))))
 
 (define (eval-once)
-  (let ((value (eval (read (open-input-string source)) (interaction-environment))))
+  (let ((value (if prepared (prepared)
+                   (eval (read (open-input-string source)) (interaction-environment)))))
     (unless (string=? (->string value) expected)
       (fail (string-append "expected " expected ", got " (->string value))))))
 

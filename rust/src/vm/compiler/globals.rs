@@ -176,6 +176,14 @@ impl Compiler {
                 } else {
                     registry
                         .resolve(&crate::lang::data::Symbol::parse(name))
+                        .or_else(|| {
+                            (!name.contains('/'))
+                                .then(|| registry.find("std.foundation"))
+                                .flatten()
+                                .and_then(|foundation| {
+                                    foundation.resolve(&crate::lang::data::Symbol::parse(name))
+                                })
+                        })
                         .map(|var| var.symbol().as_str().to_owned())
                 }
             })
@@ -201,10 +209,18 @@ impl Compiler {
                 .map(|registry| {
                     registry
                         .resolve(&crate::lang::data::Symbol::parse(name))
-                        .is_some()
-                        || (registry.current().name().as_str() == "std.foundation"
-                            && crate::core::bytecode_callable_names()
-                                .any(|candidate| candidate == name))
+                        .is_some_and(|var| {
+                            crate::core::Primitive::from_symbol(name).is_none()
+                                || var.symbol().get_namespace() != Some("std.foundation")
+                        })
+                        || (!name.contains('/')
+                            && crate::core::Primitive::from_symbol(name).is_none()
+                            && registry
+                                .find("std.foundation")
+                                .and_then(|foundation| {
+                                    foundation.resolve(&crate::lang::data::Symbol::parse(name))
+                                })
+                                .is_some())
                 })
                 .unwrap_or(false)
     }

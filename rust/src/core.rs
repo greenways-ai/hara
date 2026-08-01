@@ -8400,6 +8400,15 @@ pub(crate) fn call_value(callable: Value, arguments: Vec<Value>) -> Result<Value
     }
 }
 
+/// Invokes a runtime callable with already-decoded values.
+///
+/// Embedding hosts use this prepare-once/call-many boundary to avoid routing
+/// native values back through source text. Namespace, protocol, and host-call
+/// contexts remain controlled by the caller.
+pub fn invoke_callable(callable: Value, arguments: Vec<Value>) -> Result<Value, String> {
+    call_value(callable, arguments)
+}
+
 pub(crate) fn call_function(function: &Function, arguments: Vec<Value>) -> Result<Value, String> {
     #[cfg(feature = "evaluation-journal")]
     let operation = evaluation_journal_enter(function, &arguments);

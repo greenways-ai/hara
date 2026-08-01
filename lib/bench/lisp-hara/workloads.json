@@ -1,45 +1,45 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "workloads": [
     {
-      "id": "noop",
-      "hara_source": "42",
-      "scheme_source": "42",
-      "cl_source": "42",
-      "expected": "42",
-      "iterations": 1
+      "id": "arithmetic-branch-mix", "group": "numeric-control", "operations": 20000,
+      "hara_source": "(loop [i 0 acc 0] (if (< i 20000) (recur (+ i 1) (if (= (mod i 3) 0) (+ acc (* i 3)) (- acc (mod i 11)))) acc))",
+      "scheme_source": "(let loop ((i 0) (acc 0)) (if (< i 20000) (loop (+ i 1) (if (= (modulo i 3) 0) (+ acc (* i 3)) (- acc (modulo i 11)))) acc))",
+      "cl_source": "(do ((i 0 (1+ i)) (acc 0 (if (zerop (mod i 3)) (+ acc (* i 3)) (- acc (mod i 11))))) ((>= i 20000) acc))",
+      "lua_source": "local i,acc=0,0 while i<20000 do if i%3==0 then acc=acc+i*3 else acc=acc-(i%11) end i=i+1 end return acc",
+      "expected": "199923338"
     },
     {
-      "id": "arithmetic",
-      "hara_source": "(loop [i 0 acc 0] (if (< i 5000) (recur (+ i 1) (+ acc (mod i 17))) acc))",
-      "scheme_source": "(let loop ((i 0) (acc 0)) (if (< i 5000) (loop (+ i 1) (+ acc (modulo i 17))) acc))",
-      "cl_source": "(do ((i 0 (1+ i)) (acc 0 (+ acc (mod i 17)))) ((>= i 5000) acc))",
-      "expected": "39985",
-      "iterations": 5000
+      "id": "mutable-array-update", "group": "mutable-data", "operations": 4000,
+      "hara_source": "(let [a (std.native.Arr/new 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16)] (loop [i 0 acc 0] (if (< i 4000) (let [idx (mod i 16) value (+ (std.native.Arr/get-index a idx) (mod i 7))] (std.native.Arr/set-index a idx value) (recur (+ i 1) (+ acc value))) acc)))",
+      "scheme_source": "(let ((a (vector 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16))) (let loop ((i 0) (acc 0)) (if (< i 4000) (let* ((idx (modulo i 16)) (value (+ (vector-ref a idx) (modulo i 7)))) (vector-set! a idx value) (loop (+ i 1) (+ acc value))) acc)))",
+      "cl_source": "(let ((a (vector 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16))) (do ((i 0 (1+ i)) (acc 0)) ((>= i 4000) acc) (let* ((idx (mod i 16)) (value (+ (aref a idx) (mod i 7)))) (setf (aref a idx) value acc (+ acc value)))))",
+      "lua_source": "local a={1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16} local acc=0 for i=0,3999 do local idx=(i%16)+1 local value=a[idx]+(i%7) a[idx]=value acc=acc+value end return acc",
+      "expected": "1538997"
     },
     {
-      "id": "function-call",
-      "hara_source": "(loop [i 0 acc 0] (if (< i 2500) (recur (+ i 1) ((fn [x] (+ x 1)) acc)) acc))",
-      "scheme_source": "(let ((inc (lambda (x) (+ x 1)))) (let loop ((i 0) (acc 0)) (if (< i 2500) (loop (+ i 1) (inc acc)) acc)))",
-      "cl_source": "(flet ((inc (x) (+ x 1))) (do ((i 0 (1+ i)) (acc 0 (inc acc))) ((>= i 2500) acc)))",
-      "expected": "2500",
-      "iterations": 2500
+      "id": "mutable-object-counters", "group": "mutable-data", "operations": 2000,
+      "hara_source": "(let [o (std.native.Obj/new \"a\" 0 \"b\" 0 \"c\" 0 \"d\" 0)] (loop [i 0] (if (< i 2000) (let [key (cond (= (mod i 4) 0) \"a\" (= (mod i 4) 1) \"b\" (= (mod i 4) 2) \"c\" :else \"d\")] (std.native.Obj/set-key o key (+ 1 (std.native.Obj/get-key o key))) (recur (+ i 1))) (+ (std.native.Obj/get-key o \"a\") (* 3 (std.native.Obj/get-key o \"b\")) (* 5 (std.native.Obj/get-key o \"c\")) (* 7 (std.native.Obj/get-key o \"d\"))))))",
+      "scheme_source": "(let ((o (make-hashtable string-hash string=?)) (keys (vector \"a\" \"b\" \"c\" \"d\"))) (for-each (lambda (k) (hashtable-set! o k 0)) '(\"a\" \"b\" \"c\" \"d\")) (let loop ((i 0)) (if (< i 2000) (let ((key (vector-ref keys (modulo i 4)))) (hashtable-set! o key (+ 1 (hashtable-ref o key 0))) (loop (+ i 1))) (+ (hashtable-ref o \"a\" 0) (* 3 (hashtable-ref o \"b\" 0)) (* 5 (hashtable-ref o \"c\" 0)) (* 7 (hashtable-ref o \"d\" 0))))))",
+      "cl_source": "(let ((o (make-hash-table :test #'equal))) (dolist (k '(\"a\" \"b\" \"c\" \"d\")) (setf (gethash k o) 0)) (dotimes (i 2000) (let ((k (aref #(\"a\" \"b\" \"c\" \"d\") (mod i 4)))) (incf (gethash k o)))) (+ (gethash \"a\" o) (* 3 (gethash \"b\" o)) (* 5 (gethash \"c\" o)) (* 7 (gethash \"d\" o))))",
+      "lua_source": "local o={a=0,b=0,c=0,d=0} local keys={'a','b','c','d'} for i=0,1999 do local k=keys[(i%4)+1] o[k]=o[k]+1 end return o.a+3*o.b+5*o.c+7*o.d",
+      "expected": "8000"
     },
     {
-      "id": "table-index",
-      "hara_source": "(loop [i 0 acc 0] (if (< i 500) (recur (+ i 1) (+ acc (nth [1 2 3 4 5 6 7 8] (mod i 8)))) acc))",
-      "scheme_source": "(let ((v (vector 1 2 3 4 5 6 7 8))) (let loop ((i 0) (acc 0)) (if (< i 500) (loop (+ i 1) (+ acc (vector-ref v (modulo i 8)))) acc)))",
-      "cl_source": "(let ((v (vector 1 2 3 4 5 6 7 8))) (do ((i 0 (1+ i)) (acc 0 (+ acc (aref v (mod i 8))))) ((>= i 500) acc)))",
-      "expected": "2242",
-      "iterations": 500
+      "id": "recursive-tree-eval", "group": "functions-recursion", "operations": 400,
+      "hara_source": "(do (defn bench-tree-walk [node] (if (number? node) node (loop [i 0 acc 0] (if (< i (count node)) (recur (+ i 1) (+ acc (bench-tree-walk (nth node i)))) acc)))) (let [tree [1 [2 3 4] [5 [6 7] 8]]] (loop [i 0 acc 0] (if (< i 400) (recur (+ i 1) (+ acc (bench-tree-walk tree))) acc))))",
+      "scheme_source": "(let ((tree (vector 1 (vector 2 3 4) (vector 5 (vector 6 7) 8)))) (letrec ((walk (lambda (node) (if (number? node) node (let loop ((i 0) (acc 0)) (if (< i (vector-length node)) (loop (+ i 1) (+ acc (walk (vector-ref node i)))) acc)))))) (let loop ((i 0) (acc 0)) (if (< i 400) (loop (+ i 1) (+ acc (walk tree))) acc))))",
+      "cl_source": "(let ((tree #(1 #(2 3 4) #(5 #(6 7) 8)))) (labels ((walk (node) (if (numberp node) node (loop for item across node sum (walk item))))) (loop repeat 400 sum (walk tree))))",
+      "lua_source": "local tree={1,{2,3,4},{5,{6,7},8}} local function walk(n) if type(n)=='number' then return n end local a=0 for i=1,#n do a=a+walk(n[i]) end return a end local a=0 for i=1,400 do a=a+walk(tree) end return a",
+      "expected": "14400"
     },
     {
-      "id": "table-assoc",
-      "hara_source": "(loop [i 0 value {}] (if (< i 500) (recur (+ i 1) (assoc value i (+ i 1))) (get value 499)))",
-      "scheme_source": "(let ((h (make-eqv-hashtable))) (let loop ((i 0)) (if (< i 500) (begin (hashtable-set! h i (+ i 1)) (loop (+ i 1))) (hashtable-ref h 499 #f))))",
-      "cl_source": "(let ((h (make-hash-table))) (do ((i 0 (1+ i))) ((>= i 500) (gethash 499 h)) (setf (gethash i h) (+ i 1))))",
-      "expected": "500",
-      "iterations": 500
+      "id": "persistent-nested-transform", "group": "persistent-data", "operations": 2500,
+      "hara_source": "(loop [i 0 state {:left [1 2 3] :right {:count 0}} checksum 0] (if (< i 2500) (let [next (assoc state :right {:count (+ i 1)})] (recur (+ i 1) next (+ checksum (get (get next :right) :count)))) checksum))",
+      "scheme_source": "(let loop ((i 0) (state '((left . #(1 2 3)) (right . ((count . 0))))) (checksum 0)) (if (< i 2500) (let ((next (list (car state) (cons 'right (list (cons 'count (+ i 1))))))) (loop (+ i 1) next (+ checksum (cdr (assq 'count (cdr (assq 'right next))))))) checksum))",
+      "cl_source": "(loop with state = '((:left . #(1 2 3)) (:right . ((:count . 0)))) with checksum = 0 for i below 2500 for next = (list (car state) (cons :right (list (cons :count (1+ i))))) do (setf state next) (incf checksum (cdr (assoc :count (cdr (assoc :right next))))) finally (return checksum))",
+      "lua_source": "local state={left={1,2,3},right={count=0}} local checksum=0 for i=0,2499 do local next={left=state.left,right={count=i+1}} state=next checksum=checksum+next.right.count end return checksum",
+      "expected": "3126250"
     }
   ]
 }

@@ -842,6 +842,7 @@ final class HaraAnalyzer {
         throw error("declare expects unqualified symbols");
       }
       symbols[i - 1] = (Symbol) value;
+      context.declareCurrent(symbols[i - 1]);
     }
     return new HaraNodes.Declare(symbols);
   }

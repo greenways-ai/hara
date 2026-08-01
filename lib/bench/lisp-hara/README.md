@@ -1,10 +1,9 @@
 # lisp-hara benchmark
 
-Comparison of the hara Rust runtime tiers against other Lisp-family
-implementations: **SBCL** (Common Lisp, native compiler), **Chez Scheme**
-(native compiler), and **GNU Guile** (bytecode VM). Modelled on
-`lib/bench/luajit-hara/` — same corpus shape, same runner contract, same
-windowed sampling and steady-state analysis.
+Balanced application-kernel comparison of the Hara Rust runtime tiers against
+**SBCL**, **Chez Scheme**, **GNU Guile**, and **LuaJIT**. The original tiny
+microbenchmarks remain in `lib/bench/runtime/`; this corpus exercises mutable
+arrays, mutable objects, persistent data, recursion, and mixed control flow.
 
 ## Requirements
 
@@ -22,11 +21,12 @@ Plus the hara benchmark binaries (built automatically unless `--no-build`):
 ```shell
 python3 lib/bench/lisp-hara/run.py                      # smoke profile, all runtimes
 python3 lib/bench/lisp-hara/run.py --profile standard   # full sampling
-python3 lib/bench/lisp-hara/run.py --runtime sbcl --runtime hara-rust-trace-native
+python3 lib/bench/lisp-hara/run.py --runtime sbcl-prepared --runtime hara-rust-trace-native-prepared
 ```
 
-Runtimes: `sbcl`, `chez`, `guile`, `hara-rust-native`,
-`hara-rust-bytecode`, `hara-rust-trace-checked`, `hara-rust-trace-native`.
+Runtime names carry an explicit `-eval` or `-prepared` lane. Compare only
+within a lane. Hara's tree evaluator participates in `-eval`; bytecode and
+trace tiers participate in both compile/execute and prepared execution.
 
 Results default to `target/lisp-hara-benchmark.{json,md}` (gitignored
 scratch — comparison evidence, not regression gating).
@@ -37,14 +37,13 @@ Mirrors the luajit-hara suite so numbers are comparable across suites:
 
 - `workloads.json` carries per-language source fields (`hara_source`,
   `scheme_source`, `cl_source`) plus a shared `expected` checksum.
-- Every runner re-parses and re-evaluates the workload source on every
-  call, matching hara's `eval_native` per-call semantics. SBCL evals in
-  `:compile` mode (its default), Chez compiles eval'd forms, Guile
-  compiles eval'd forms to bytecode — so per-call cost includes each
-  implementation's compile step, exactly as the LuaJIT suite includes
-  `load`.
-- The `hara-rust-*` VM tiers compile once and execute only (their
-  `first` value is the first execution, not compilation).
+- `-eval` parses/loads and evaluates source on every measured call.
+- `-prepared` reads and compiles/loads once, then invokes repeatedly.
+- Mutable table rows use Hara `object`/`array` (through their canonical
+  native calls), Scheme/Common Lisp hash tables and vectors, and Lua tables.
+  Persistent transformations are named and reported separately.
+- Unsupported runtime/workload combinations are retained in the feature
+  coverage table with their error; they are never silently substituted.
 - Lisp sources are hand-written **untyped** idiomatic equivalents (no
   SBCL type declarations or `optimize` declarations, portable R6RS-ish
   Scheme) — an implementation snapshot, not a source-normalized shootout.
