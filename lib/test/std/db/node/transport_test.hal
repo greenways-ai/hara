@@ -64,25 +64,47 @@
       :closed right-closed}]))
 
 (def results
-  [(fact "frames round-trip through the structured message representation"
+  [(fact "portable nested values round-trip through tagged wire data"
+     (let [value {:kind :db/runtime
+                  :symbol 'db/value
+                  :flags #{:read :write}
+                  [:composite 1] {:nested :ok}
+                  :rows [[1 "wombat"]]}]
+       (transport/wire->value (transport/value->wire value)))
+     => {:kind :db/runtime
+         :symbol 'db/value
+         :flags #{:read :write}
+         [:composite 1] {:nested :ok}
+         :rows [[1 "wombat"]]})
+
+   (fact "thrown values become clone-safe structured errors"
+     (let [encoded (transport/error->wire
+                    (ex-info "database failed" {:tag :db/failure}))]
+       [(get encoded "$hara")
+        (get encoded "message")])
+     => ["error" "database failed"])
+
+   (fact "frames round-trip through the structured message representation"
      (let [frame (substrate/node-frame :request
                                        "req-1"
                                        "main"
-                                       {:trace "t1"}
+                                       {:trace :trace/one}
                                        "@xt.db/query"
-                                       ["db/primary" "select 1" []]
+                                       ["db/primary" "select 1" [{:mode :fast}]]
                                        nil nil nil nil nil nil)
            decoded (transport/wire->frame (transport/frame->wire frame))]
        [(substrate-protocol/frame-id decoded)
         (substrate-protocol/frame-kind decoded)
         (substrate-protocol/frame-space decoded)
+        (substrate-protocol/frame-meta decoded)
         (field decoded :action)
         (field decoded :args)])
      => ["req-1"
          :request
          "main"
+         {:trace :trace/one}
          "@xt.db/query"
-         ["db/primary" "select 1" []]])
+         ["db/primary" "select 1" [{:mode :fast}]]])
 
    (fact "ready messages are separated from substrate frames"
      [(transport/ready-message?
