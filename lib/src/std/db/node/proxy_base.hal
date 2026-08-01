@@ -15,8 +15,10 @@
    kernel/ACTION-EXEC
    kernel/ACTION-QUERY
    service/ACTION-DRIVER-LIST
+   service/ACTION-SERVICE-LIST
    service/ACTION-SERVICE-OPEN
    service/ACTION-SERVICE-CLOSE
+   service/ACTION-SERVICE-CLOSE-ALL
    service/ACTION-SERVICE-EXISTS])
 
 (defn request-proxy
