@@ -7,6 +7,7 @@
 ;; ============================================================================
 (ns std.db.node.kernel-base
   (:require [std.db :as db]
+            [std.db.node.lifecycle :as lifecycle]
             [std.foundation.promise :as promise]
             [std.lib.substrate.protocol :as substrate]))
 
@@ -61,10 +62,7 @@
     (assoc normalized :id (option normalized :id default-id))))
 
 (defn register-driver
-  "Registers a database driver descriptor on node.
-
-   descriptor requires :open, a function from options to a connection promise.
-   Optional :version is retained for diagnostics."
+  "Registers a database driver descriptor on node."
   [node driver-id descriptor]
   (let [drivers (or (substrate/get-service node DRIVER-SERVICE) {})
         key (normalize-type driver-id)]
@@ -169,7 +167,7 @@
              (substrate/set-service node service-id service)
              service))))))
 
-(declare kernel-teardown-main)
+(declare kernel-teardown-services-main)
 
 (defn- kernel-open-services
   "Opens primary before caching so rollback cannot race an unfinished open."
@@ -221,7 +219,7 @@
          :services (map service-summary services)}))
      (fn [error]
        (promise/then
-        (kernel-teardown-main node normalized)
+        (kernel-teardown-services-main node normalized)
         (fn [_]
           (throw error)))))))
 
@@ -234,8 +232,8 @@
        (fn [] (substrate/remove-service node service-id)))
       (promise/from nil))))
 
-(defn kernel-teardown-main
-  "Closes and removes common, primary and caching services."
+(defn kernel-teardown-services-main
+  "Closes configured database services without running host finalizers."
   [node config]
   (let [normalized (kernel-create-config config)
         common-id (service-id (:common normalized) COMMON-SERVICE)
@@ -252,6 +250,17 @@
        (substrate/remove-service node common-id)
        {:status :teardown
         :data normalized}))))
+
+(defn kernel-teardown-main
+  "Runs runtime finalizers, then closes configured database services."
+  [node config]
+  (promise/then
+   (lifecycle/finalize-all-main node)
+   (fn [finalized]
+     (promise/then
+      (kernel-teardown-services-main node config)
+      (fn [status]
+        (assoc status :finalized finalized))))))
 
 (defn kernel-init-main
   "Ensures configured database services are present."
