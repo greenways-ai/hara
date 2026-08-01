@@ -4,7 +4,12 @@ use crate::core::Primitive;
 pub trait TraceBackend {
     type Compiled;
     fn compile(&mut self, trace: &Trace) -> Result<Self::Compiled, String>;
-    fn enter(&mut self, trace: &Self::Compiled, locals: &mut [TraceValue], max_iterations: u32) -> TraceOutcome;
+    fn enter(
+        &mut self,
+        trace: &mut Self::Compiled,
+        locals: &mut [TraceValue],
+        max_iterations: u32,
+    ) -> TraceOutcome;
 }
 
 #[derive(Default)]
@@ -17,20 +22,27 @@ impl TraceBackend for CheckedBackend {
         Ok(trace.clone())
     }
 
-    fn enter(&mut self, trace: &Trace, locals: &mut [TraceValue], max_iterations: u32) -> TraceOutcome {
+    fn enter(
+        &mut self,
+        trace: &mut Trace,
+        locals: &mut [TraceValue],
+        max_iterations: u32,
+    ) -> TraceOutcome {
         let mut iterations = 0;
         let mut stack = Vec::with_capacity(8);
         while iterations < max_iterations {
             stack.clear();
             for operation in &trace.operations {
-                let exit = |reason, stack: &Vec<TraceValue>, locals: &[TraceValue]| TraceOutcome::SideExit {
-                    reason,
-                    snapshot: ExitSnapshot {
-                        function: trace.function,
-                        instruction: trace.resume_ip,
-                        locals: locals.to_vec(),
-                        stack: stack.clone(),
-                    },
+                let exit = |reason, stack: &Vec<TraceValue>, locals: &[TraceValue]| {
+                    TraceOutcome::SideExit {
+                        reason,
+                        snapshot: ExitSnapshot {
+                            function: trace.function,
+                            instruction: trace.resume_ip,
+                            locals: locals.to_vec(),
+                            stack: stack.clone(),
+                        },
+                    }
                 };
                 match *operation {
                     TraceOp::GuardLocalI64 { local } => {
@@ -44,25 +56,39 @@ impl TraceBackend for CheckedBackend {
                     },
                     TraceOp::ConstantI64(value) => stack.push(TraceValue::I64(value)),
                     TraceOp::StoreLocal { local } => {
-                        let Some(value) = stack.pop() else { return exit(ExitReason::Unsupported, &stack, locals) };
-                        let Some(slot) = locals.get_mut(local as usize) else { return exit(ExitReason::Unsupported, &stack, locals) };
+                        let Some(value) = stack.pop() else {
+                            return exit(ExitReason::Unsupported, &stack, locals);
+                        };
+                        let Some(slot) = locals.get_mut(local as usize) else {
+                            return exit(ExitReason::Unsupported, &stack, locals);
+                        };
                         *slot = value;
                     }
-                    TraceOp::Pop => { stack.pop(); }
+                    TraceOp::Pop => {
+                        stack.pop();
+                    }
                     TraceOp::GuardTruthy { expected } => {
-                        let Some(value) = stack.pop() else { return exit(ExitReason::Unsupported, &stack, locals) };
+                        let Some(value) = stack.pop() else {
+                            return exit(ExitReason::Unsupported, &stack, locals);
+                        };
                         let truthy = !matches!(value, TraceValue::Bool(false) | TraceValue::Nil);
-                        if truthy != expected { return exit(ExitReason::BranchChanged, &stack, locals); }
+                        if truthy != expected {
+                            return exit(ExitReason::BranchChanged, &stack, locals);
+                        }
                     }
                     TraceOp::BinaryI64(op) => {
-                        let (Some(TraceValue::I64(right)), Some(TraceValue::I64(left))) = (stack.pop(), stack.pop()) else {
+                        let (Some(TraceValue::I64(right)), Some(TraceValue::I64(left))) =
+                            (stack.pop(), stack.pop())
+                        else {
                             return exit(ExitReason::WrongTag, &stack, locals);
                         };
                         let value = match op {
                             Primitive::Add => left.checked_add(right).map(TraceValue::I64),
                             Primitive::Subtract => left.checked_sub(right).map(TraceValue::I64),
                             Primitive::Multiply => left.checked_mul(right).map(TraceValue::I64),
-                            Primitive::Remainder if right == 0 => return exit(ExitReason::DivisionByZero, &stack, locals),
+                            Primitive::Remainder if right == 0 => {
+                                return exit(ExitReason::DivisionByZero, &stack, locals)
+                            }
                             Primitive::Remainder => left.checked_rem(right).map(TraceValue::I64),
                             Primitive::Less => Some(TraceValue::Bool(left < right)),
                             Primitive::LessOrEqual => Some(TraceValue::Bool(left <= right)),
@@ -71,7 +97,9 @@ impl TraceBackend for CheckedBackend {
                             Primitive::Equal => Some(TraceValue::Bool(left == right)),
                             _ => return exit(ExitReason::Unsupported, &stack, locals),
                         };
-                        let Some(value) = value else { return exit(ExitReason::Overflow, &stack, locals) };
+                        let Some(value) = value else {
+                            return exit(ExitReason::Overflow, &stack, locals);
+                        };
                         stack.push(value);
                     }
                     TraceOp::LoopBackedge => iterations += 1,
@@ -106,11 +134,20 @@ mod tests {
     fn checked_backend_executes_and_guards() {
         let trace = increment_trace();
         let mut backend = CheckedBackend;
-        let compiled = backend.compile(&trace).unwrap();
+        let mut compiled = backend.compile(&trace).unwrap();
         let mut locals = [TraceValue::I64(0)];
-        assert_eq!(backend.enter(&compiled, &mut locals, 5), TraceOutcome::Completed { iterations: 5 });
+        assert_eq!(
+            backend.enter(&mut compiled, &mut locals, 5),
+            TraceOutcome::Completed { iterations: 5 }
+        );
         assert_eq!(locals[0], TraceValue::I64(5));
         let mut wrong = [TraceValue::Bool(false)];
-        assert!(matches!(backend.enter(&compiled, &mut wrong, 1), TraceOutcome::SideExit { reason: ExitReason::WrongTag, .. }));
+        assert!(matches!(
+            backend.enter(&mut compiled, &mut wrong, 1),
+            TraceOutcome::SideExit {
+                reason: ExitReason::WrongTag,
+                ..
+            }
+        ));
     }
 }
