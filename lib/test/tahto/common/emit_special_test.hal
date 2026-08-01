@@ -1,6 +1,7 @@
 (ns tahto.common.emit-special-test
   (:use code.test)
-  (:require [tahto.common.emit-special :as special]))
+  (:require [tahto.common.emit-helper :as helper]
+            [tahto.common.emit-special :as special]))
 
 (def snapshot
   {:js {:book {:modules {'app.core
@@ -29,5 +30,13 @@
 
   (special/emit-with-deref nil nil '(!:deref (var x)) {} {})
   => (throws))
+
+(fact "the Foundation special test emitter installs recursive dispatch"
+  (special/test-special-emit
+   ''(1 2 3)
+   (assoc helper/+default+
+          :reserved {'quote {:op :quote :emit :quote}})
+   {})
+  => "(1,2,3)")
 
 (run {:namespace "tahto.common.emit-special-test"})

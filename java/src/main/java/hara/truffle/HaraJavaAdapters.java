@@ -273,7 +273,10 @@ public final class HaraJavaAdapters {
     protocol.extend(
         String.class,
         "count",
-        (receiver, arguments) -> (long) ((String) receiver).codePointCount(0, ((String) receiver).length()));
+        (receiver, arguments) -> {
+          String value = (String) receiver;
+          return (long) value.codePointCount(0, value.length());
+        });
     protocol.extend(byte[].class, "count", (receiver, arguments) -> ((byte[]) receiver).length);
     protocol.extendNil("count", (receiver, arguments) -> 0L);
   }

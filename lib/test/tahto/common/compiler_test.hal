@@ -184,11 +184,11 @@
 
 (fact "caller resolves explicit grammar versions before compilation"
   [(:output compiled-v1) (:output compiled-v2)]
-  => ["(1 + 2)" "(3 plus 3)"])
+  => ["1 + 2" "3 plus 3"])
 
 (fact "compiler applies grammar facets after explicit resolution"
   (:output compiled-jsx)
-  => "(3 jsx-plus 3)")
+  => "3 jsx-plus 3")
 
 (fact "the default compiler stager resolves module dependencies"
   (protocol/stage-form

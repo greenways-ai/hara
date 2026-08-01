@@ -461,17 +461,6 @@
         (emit-data form grammar context)
         :else (emit-token form grammar context)))
 
-(defn emit
-  ([form selected] (emit form selected {}))
-  ([form selected context]
-   (let [grammar (default-grammar (or (:grammar selected) selected))]
-     (binding [*emit-fn* emit-node]
-       (emit-node form grammar context))))
-  ([form grammar namespace mopts]
-   (if (:emit grammar)
-     ((:emit grammar) form mopts)
-     (tahto.common.emit/emit-main form (default-grammar grammar) mopts))))
-
 (defn- merge-nested
   [left right]
   (reduce-kv (fn [output key value]
@@ -522,7 +511,24 @@
       (string/slice output 1 (- (string/length output) 1))
       output)))
 
-(defmacro with:emit [& body]
+(defn emit
+  "emits form to output string"
+  {:added "4.0"}
+  ([form selected] (emit form selected {}))
+  ([form selected context]
+   (emit-main form
+              (default-grammar (or (:grammar selected) selected))
+              context))
+  ([form grammar namespace mopts]
+   (let [mopts (select-keys mopts +option-keys+)]
+     (if (:emit grammar)
+       ((:emit grammar) form mopts)
+       (emit-main form (default-grammar grammar) mopts)))))
+
+(defmacro with:emit
+  "binds the top-level emit function to the recursive common emitter"
+  {:added "4.0"}
+  [& body]
   `(binding [*emit-fn* emit-main-loop] ~@body))
 
 (def +steps+ [[:raw] [:input] [:staging]])
@@ -534,11 +540,21 @@
   [metadata]
   (let [lang (:lang metadata)
         snapshot (:snapshot metadata)
-        book (or (:book metadata) (get-in snapshot [lang :book]))
+        book-value (:book metadata)
+        book (or (if (symbol? book-value)
+                   (deref (requiring-resolve book-value))
+                   book-value)
+                 (get-in snapshot [lang :book]))
         step (or (get metadata :-)
                  (if (or book (and lang snapshot)) :staging :input))
-        grammar (or (:grammar metadata) (:grammar book) (default-grammar))]
-    [step grammar book (:namespace metadata)
+        grammar-value (:grammar metadata)
+        grammar (or (if (symbol? grammar-value)
+                      (deref (requiring-resolve grammar-value))
+                      grammar-value)
+                    (:grammar book)
+                    +test-grammar+)
+        namespace (or (:namespace metadata) (current-namespace))]
+    [step grammar book namespace
      (select-keys metadata +option-keys+)]))
 
 (defn prep-form

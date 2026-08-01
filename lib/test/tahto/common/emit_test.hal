@@ -30,12 +30,12 @@
 
 (fact "protocol emission recursively uses selected grammar"
   (compiler/emit-form (emit/emitter) '(+ 1 (+ 2 3)) selected-v1 {})
-  => "(1 + (2 + 3))")
+  => "1 + (2 + 3)")
 
 (fact "grammar versions and templates select emitted behavior"
   [(emit/emit '(+ 1 2) selected-v1)
    (emit/emit '(+ 1 2) selected-v2)
    (emit/emit nil selected-v1)]
-  => ["(1 + 2)" "(1 plus 2)" "null"])
+  => ["1 + 2" "1 plus 2" "null"])
 
 (run {:namespace "tahto.common.emit-test"})

@@ -38,17 +38,33 @@
   [value]
   {"$hara" "map"
    "entries"
-   (map (fn [entry]
-          [(value->wire (key entry))
-           (value->wire (val entry))])
-        value)})
+   (reduce (fn [out entry]
+             (conj out
+                   [(std.db.node.transport/value->wire (key entry))
+                    (std.db.node.transport/value->wire (val entry))]))
+           []
+           value)})
+
+(defn- collection->wire
+  [value]
+  (reduce (fn [out item]
+            (conj out (std.db.node.transport/value->wire item)))
+          []
+          value))
+
+(defn- collection-from-wire
+  [value]
+  (reduce (fn [out item]
+            (conj out (std.db.node.transport/wire->value item)))
+          []
+          value))
 
 (defn- map-from-wire
   [value]
   (reduce (fn [out entry]
             (assoc out
-                   (wire->value (first entry))
-                   (wire->value (second entry))))
+                   (std.db.node.transport/wire->value (first entry))
+                   (std.db.node.transport/wire->value (second entry))))
           {}
           (or (compatible-get value :entries) [])))
 
@@ -70,11 +86,11 @@
     (map->wire value)
 
     (vector? value)
-    (map value->wire value)
+    (collection->wire value)
 
     (set? value)
     {"$hara" "set"
-     "items" (map value->wire value)}
+     "items" (collection->wire value)}
 
     :else
     value))
@@ -84,7 +100,7 @@
   [value]
   (cond
     (vector? value)
-    (map wire->value value)
+    (collection-from-wire value)
 
     (map? value)
     (let [tag (compatible-get value "$hara")]
@@ -93,25 +109,28 @@
         (let [ns-value (compatible-get value :namespace)
               name-value (compatible-get value :name)]
           (if ns-value
-            (keyword ns-value name-value)
+            (keyword (str ns-value "/" name-value))
             (keyword name-value)))
 
         (= tag "symbol")
         (let [ns-value (compatible-get value :namespace)
               name-value (compatible-get value :name)]
           (if ns-value
-            (symbol ns-value name-value)
+            (symbol (str ns-value "/" name-value))
             (symbol name-value)))
 
         (= tag "map")
         (map-from-wire value)
 
         (= tag "set")
-        (into #{} (map wire->value (or (compatible-get value :items) [])))
+        (reduce (fn [out item]
+                  (conj out (std.db.node.transport/wire->value item)))
+                #{}
+                (or (compatible-get value :items) []))
 
         :else
         (reduce (fn [out entry]
-                  (assoc out (key entry) (wire->value (val entry))))
+                  (assoc out (key entry) (std.db.node.transport/wire->value (val entry))))
                 {}
                 value)))
 
@@ -126,7 +145,7 @@
     nil
 
     (map? error)
-    (value->wire error)
+    (std.db.node.transport/value->wire error)
 
     (string? error)
     {"$hara" "error" "message" error}
@@ -145,14 +164,14 @@
   {"id" (protocol/frame-id frame)
    "kind" (wire-name (protocol/frame-kind frame))
    "space" (protocol/frame-space frame)
-   "meta" (value->wire (protocol/frame-meta frame))
+   "meta" (std.db.node.transport/value->wire (protocol/frame-meta frame))
    "action" (field frame :action)
-   "args" (value->wire (field frame :args))
+   "args" (std.db.node.transport/value->wire (field frame :args))
    "reply_to" (field frame :reply-to)
    "status" (wire-name (field frame :status))
-   "data" (value->wire (protocol/frame-data frame))
+   "data" (std.db.node.transport/value->wire (protocol/frame-data frame))
    "error" (error->wire (field frame :error))
-   "signal" (value->wire (field frame :signal))
+   "signal" (std.db.node.transport/value->wire (field frame :signal))
    "cause" (protocol/frame-cause frame)})
 
 (defn wire->frame
@@ -162,15 +181,15 @@
    (wire-keyword (compatible-get message :kind))
    (compatible-get message :id)
    (compatible-get message :space)
-   (or (wire->value (compatible-get message :meta)) {})
+   (or (std.db.node.transport/wire->value (compatible-get message :meta)) {})
    (compatible-get message :action)
-   (or (wire->value (compatible-get message :args)) [])
+   (or (std.db.node.transport/wire->value (compatible-get message :args)) [])
    (or (compatible-get message :reply-to)
        (compatible-get message :reply_to))
    (wire-keyword (compatible-get message :status))
-   (wire->value (compatible-get message :data))
-   (wire->value (compatible-get message :error))
-   (wire->value (compatible-get message :signal))
+   (std.db.node.transport/wire->value (compatible-get message :data))
+   (std.db.node.transport/wire->value (compatible-get message :error))
+   (std.db.node.transport/wire->value (compatible-get message :signal))
    (compatible-get message :cause)))
 
 (defn ready-message?
@@ -184,9 +203,13 @@
                         (str "res-" (protocol/frame-id request))
                         (protocol/frame-space request)
                         {}
-                        nil []
+                        nil
+                        []
                         (protocol/frame-id request)
-                        status data error nil
+                        status
+                        data
+                        error
+                        nil
                         (protocol/frame-id request)))
 
 (defn- receive-endpoint-frame
@@ -227,7 +250,10 @@
     (listen-function
      (fn [message]
        (if (compatible-get message :kind)
-         (receive-endpoint-frame node transport-id send-function (wire->frame message))
+         (receive-endpoint-frame node
+                                 transport-id
+                                 send-function
+                                 (wire->frame message))
          (when control-listener
            (control-listener message)))))
     {:node node

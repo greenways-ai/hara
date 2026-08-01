@@ -65,4 +65,12 @@
    {} helper/+default+ {})
   => (throws))
 
+(fact "the Foundation block test emitter installs recursive dispatch"
+  (block/test-block-emit
+   '(do (print 1) (print 2))
+   (assoc helper/+default+
+          :reserved {'do {:op :do :type :block :emit :do}})
+   {})
+  => "print(1);\nprint(2);")
+
 (run {:namespace "tahto.common.emit-block-test"})

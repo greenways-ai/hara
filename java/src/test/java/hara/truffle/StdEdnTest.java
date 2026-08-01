@@ -71,17 +71,8 @@ public class StdEdnTest {
   }
 
   @Test
-  public void supportsPortableExactNumbersAndRejectsUnsupportedInput() {
+  public void rejectsUnsupportedNumbersAndMultipleValues() {
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
-      assertEquals(
-          "[1N 1M]",
-          context
-              .eval(
-                  HaraLanguage.ID,
-                  "(do (require 'std.foundation.edn)"
-                      + " [(std.foundation.edn/read \"1N\")"
-                      + "  (std.foundation.edn/read \"1M\")])")
-              .toString());
       for (String source : new String[] {"1/2", "1 2"}) {
         assertThrows(
             source,
@@ -94,6 +85,12 @@ public class StdEdnTest {
                         + source
                         + "\"))"));
       }
+      assertThrows(
+          RuntimeException.class,
+          () ->
+              context.eval(
+                  HaraLanguage.ID,
+                  "(do (require 'std.foundation.edn) (std.foundation.edn/read \"1N\"))"));
     }
   }
 }

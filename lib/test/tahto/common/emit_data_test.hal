@@ -41,4 +41,8 @@
     (data/emit-coll :map {:.. 3 :a 2 :# 1} helper/+default+ {}))
   => "{\"#\":1,\"a\":2,\"..\":3}")
 
+(fact "the Foundation data test emitter installs recursive dispatch"
+  (data/test-data-emit [1 '(identity 2)] helper/+default+ {})
+  => "[1,identity(2)]")
+
 (run {:namespace "tahto.common.emit-data-test"})

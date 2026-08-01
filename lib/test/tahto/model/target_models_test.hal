@@ -35,10 +35,10 @@
    (emit/emit '(print (+ 19 23)) py)
    (emit/emit '(defn add [x y] (return (+ x y))) js)
    (emit/emit '(defn add [x y] (return (+ x y))) py)]
-  => ["console.log((19 + 23))"
-      "print((19 + 23))"
-      "function add(x, y) {\n  return (x + y);\n}"
-      "def add(x, y):\n    return (x + y)"])
+  => ["console.log(19 + 23)"
+      "print(19 + 23)"
+      "function add(x,y){\n  return x + y;\n}"
+      "def add(x,y):\n    return x + y\n"])
 
 (fact "target literals differ by language"
   [(emit/emit nil js) (emit/emit true js)

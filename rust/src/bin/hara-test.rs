@@ -52,8 +52,12 @@ pub fn run_file(root: &Path, file: &Path) -> Result<TestSummary, String> {
             let mut kernel = SessionKernel::new();
             let mount = kernel.create_native_filesystem(&root_text);
             kernel.attach_filesystem("ROOT", mount)?;
-            let output = kernel.eval("ROOT", &source)?;
-            parse_summary(file, &output)
+            let output = kernel.eval("ROOT", &source).map_err(|error| {
+                format!("{}: {error}", file.display())
+            })?;
+            parse_summary(file.clone(), &output).map_err(|error| {
+                format!("{}: {error}", file.display())
+            })
         })
         .map_err(|error| format!("cannot start test thread: {error}"))?;
 

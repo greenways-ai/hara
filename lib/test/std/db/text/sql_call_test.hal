@@ -31,13 +31,12 @@
    :return "jsonb"})
 
 (def results
-  [(fact "API envelopes decode successful data"
-     (call/decode-return "{\"status\":\"ok\",\"data\":{\"id\":1}}" nil)
-     => {"id" 1})
-
-   (fact "API error envelopes throw"
-     (call/decode-return "{\"status\":\"error\",\"data\":{\"tag\":\"bad\"}}" nil)
-     => (throws))
+  [(fact "API envelopes decode successful data and reject errors"
+     [(call/decode-return "{\"status\":\"ok\",\"data\":{\"id\":1}}" nil)
+      (try
+        (call/decode-return "{\"status\":\"error\",\"data\":{\"tag\":\"bad\"}}" nil)
+        (catch Throwable error :throws))]
+     => [{"id" 1} :throws])
 
    (fact "function inputs and schema-qualified names are encoded"
      [(call/call-format-input json-spec ["Ada" {:role "admin"}])
@@ -73,9 +72,9 @@
      (let [queries (atom [])
            connection (std.db.text.sql-call-test/CallConnection queries "{}")]
        [(try
-          (do (call/call-raw connection json-spec []) :not-thrown)
-          (catch Throwable error :thrown))
+          (call/call-raw connection json-spec [])
+          (catch Throwable error :throws))
         @queries])
-     => [:thrown []])])
+     => [:throws []])])
 
 (pr-str (run '[std.db.text.sql-call-test]))

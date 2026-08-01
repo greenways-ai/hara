@@ -50,4 +50,13 @@
    helper/+default+ {})
   => "function add(int x);")
 
+(fact "the Foundation function test emitter installs recursive dispatch"
+  (function/test-fn-emit
+   '(function add [:int x] (return x))
+   (assoc helper/+default+
+          :reserved {'function {:op :fn :type :fn :emit :fn :raw "function"}
+                     'return {:op :return :emit :return :raw "return"}})
+   {})
+  => "function add(int x){\n  return x;\n}")
+
 (run {:namespace "tahto.common.emit-fn-test"})

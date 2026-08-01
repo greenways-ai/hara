@@ -7,6 +7,15 @@
   (assoc helper/+default+
          :reserved {'+ {:op :add :emit :infix :raw "+"}}))
 
+(def definition-grammar
+  (assoc helper/+default+
+         :reserved {'def {:op :def :type :def}}))
+
+(def symbolic-book
+  {:grammar grammar :modules {}})
+
+(def symbolic-grammar grammar)
+
 (fact "provides Foundation emitter orchestration"
   (map? (emit/default-grammar)) => true
   (emit/emit-main '(+ 1 2) grammar {}) => "1 + 2"
@@ -21,5 +30,27 @@
 (fact "supports the Foundation four-argument emit arity"
   (emit/emit '(+ 1 2) grammar nil {})
   => "1 + 2")
+
+(fact "filters four-argument emitter options to the Foundation contract"
+  (emit/emit 'value
+             {:emit (fn [form mopts]
+                      (vec (sort-by str (keys mopts))))}
+             nil
+             {:lang :js :layout :flat :ignored true})
+  => [:lang :layout])
+
+(fact "resolves symbolic books and grammars and defaults the namespace"
+  (let [[step selected book namespace mopts]
+        (emit/prep-options
+         {:book 'tahto.common.emit-orchestration-test/symbolic-book
+          :grammar 'tahto.common.emit-orchestration-test/symbolic-grammar})]
+    [(= selected grammar)
+     (= book symbolic-book)
+     (= namespace (current-namespace))])
+  => [true true true])
+
+(fact "routes public emission through the ported top-level emitter"
+  (emit/emit '(def answer 42) definition-grammar nil {})
+  => "def answer = 42;")
 
 (run {:namespace "tahto.common.emit-orchestration-test"})

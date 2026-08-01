@@ -2288,6 +2288,11 @@ mod tests {
         assert_eq!(runtime.eval_text("(+ 19 23)").unwrap(), "42");
         assert_eq!(runtime.eval_text("(let (x 7) (* x 6))").unwrap(), "42");
         assert_eq!(runtime.eval_text("(if true 1 0)").unwrap(), "1");
+    }
+
+    #[test]
+    fn foundation_boolean_and_not_equal_are_portable() {
+        let mut runtime = Runtime::new();
         assert_eq!(runtime.eval_text("(boolean :present)").unwrap(), "true");
         assert_eq!(runtime.eval_text("(boolean nil)").unwrap(), "false");
         assert_eq!(runtime.eval_text("(not= 1 2)").unwrap(), "true");
@@ -2649,6 +2654,18 @@ mod tests {
         );
         runtime.use_namespace("alpha");
         assert_eq!(runtime.eval_text("answer").unwrap(), "42");
+    }
+
+    #[test]
+    fn requiring_resolve_loads_a_qualified_resource_and_returns_its_var() {
+        let mut runtime = Runtime::new();
+        runtime.register_resource("demo.required", "(ns demo.required) (def answer 42)");
+        assert_eq!(
+            runtime
+                .eval_text("(deref (requiring-resolve 'demo.required/answer))")
+                .unwrap(),
+            "42"
+        );
     }
 
     #[test]
@@ -3382,6 +3399,23 @@ mod tests {
     }
 
     #[test]
+    fn deref_of_a_global_atom_targets_the_atom_value_not_its_namespace_var() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text("(do (def state (atom [1])) (deref state))")
+                .unwrap(),
+            "[1]"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(do (swap! state conj 2) (deref state))")
+                .unwrap(),
+            "[1 2]"
+        );
+    }
+
+    #[test]
     fn fn_star_and_eval_forms_execute_while_hash_dispatch_extensions_are_rejected() {
         let mut runtime = Runtime::new();
         assert_eq!(runtime.eval_text("((fn* [x] (+ x 1)) 4)").unwrap(), "5");
@@ -3422,8 +3456,6 @@ mod tests {
         let mut runtime = Runtime::new();
         let cases = [
             ("1.5", "1.5"),
-            ("123N", "123N"),
-            ("1.20M", "1.2M"),
             ("\\newline", "\\newline"),
             ("#\"a+\"", "#\"a+\""),
             ("#demo {:a 1}", "#demo{:a 1}"),
@@ -3433,6 +3465,9 @@ mod tests {
         ];
         for (source, expected) in cases {
             assert_eq!(runtime.eval_text(source).unwrap(), expected, "{source}");
+        }
+        for source in ["123N", "1.20M"] {
+            assert!(runtime.eval_text(source).is_err(), "{source}");
         }
         for unsupported in ["9223372036854775808"] {
             assert!(runtime.eval_text(unsupported).is_err(), "{unsupported}");

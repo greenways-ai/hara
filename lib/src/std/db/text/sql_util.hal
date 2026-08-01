@@ -159,6 +159,9 @@
     (vector? value)
     (into [] (map json-compatible value))
 
+    (set? value)
+    (into [] (map json-compatible value))
+
     (keyword? value)
     (name value)
 

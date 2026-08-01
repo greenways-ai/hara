@@ -422,7 +422,7 @@ impl EvalFiber {
                     let Some(pending) = self.pending() else {
                         return Err("fiber suspended without promise".into());
                     };
-                    match pending.state() {
+                    match pending.wait_state() {
                         PromiseState::Fulfilled(v) => {
                             self.resume(PromiseState::Fulfilled(v));
                         }
@@ -622,7 +622,10 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
                             }),
                         ),
                     },
-                    Ok(_) => k(Err("deref expects a var or promise".into())),
+                    Ok(value) => k(Err(format!(
+                        "deref expects a var, atom, or promise, got {}",
+                        value.display()
+                    ))),
                     Err(e) => k(Err(e)),
                 }),
             )
@@ -1248,6 +1251,16 @@ mod tests {
             f.resume(p.state()),
             EvalFiberState::Completed(Value::Number(42))
         );
+    }
+
+    #[test]
+    fn drive_sync_waits_for_a_deferred_promise() {
+        let mut fiber = EvalFiber::start(
+            "(deref (promise/delay 1 (fn [] 42)))",
+            HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(fiber.drive_sync(), Ok(Value::Number(42)));
     }
 
     #[test]

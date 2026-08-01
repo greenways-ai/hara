@@ -133,7 +133,7 @@
 
 (defn- service-summary
   [service]
-  (when service
+  (if service
     (let [database (db/info (service-connection service))]
       {:id (compatible-get service :id)
        :role (compatible-get service :role)
@@ -143,7 +143,8 @@
        :storage (compatible-get database :storage)
        :filename (compatible-get database :filename)
        :database database
-       :metadata (or (compatible-get service :metadata) {})})))
+       :metadata (or (compatible-get service :metadata) {})})
+    nil))
 
 (defn kernel-check-exists
   "Returns true when all configured runtime services already exist."
@@ -241,10 +242,21 @@
          :data normalized
          :services (map service-summary services)}))
      (fn [error]
-       (promise/then
-        (kernel-teardown-services-main node normalized)
-        (fn [_]
-          (throw error)))))))
+       (let [primary-service (substrate/get-service node primary-id)]
+         ;; Detach first so no failed setup is externally observable. The
+         ;; opened primary connection is captured and closed independently.
+         (substrate/remove-service node caching-id)
+         (substrate/remove-service node primary-id)
+         (substrate/remove-service node common-id)
+         (let [cleanup (if primary-service
+                         (service-submit primary-service
+                                         (fn []
+                                           (db/close
+                                            (service-connection primary-service))))
+                         (promise/from nil))]
+         (promise/then cleanup
+                       (fn [_]
+                         (throw error)))))))))
 
 (defn- close-service
   [node service-id]

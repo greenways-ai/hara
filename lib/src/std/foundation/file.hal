@@ -39,7 +39,8 @@
 ;;                   host filesystem provider
 ;; ============================================================================
 (ns std.foundation.file
-  (:config {:blank true}))
+  (:config {:blank true})
+  (:require [std.foundation :refer :all :exclude [resolve read write exists? list mkdir delete]]))
 
 (defn ^{:schema [:fn [:str :str] :str]}
   resolve

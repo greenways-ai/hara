@@ -12,7 +12,7 @@
   (frame-cause [frame] "evt-1")
   (frame-data [frame] 42))
 
-(extend-type Fixture protocol/ISpace
+(extend-type Fixture protocol/ISubstrateSpace
   (get-space [node space-id] [space-id :get])
   (create-space [node space-id opts] [space-id opts])
   (ensure-space [node space-id opts] [space-id opts :ensure])

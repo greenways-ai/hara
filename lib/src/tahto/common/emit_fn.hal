@@ -1,8 +1,8 @@
 (ns tahto.common.emit-fn
   (:require [std.foundation.string :as string]
-            [tahto.common.emit :as emit]
             [tahto.common.emit-block :as block]
             [tahto.common.emit-common :as common]
+            [tahto.common.emit-data :as data]
             [tahto.common.emit-helper :as helper]))
 
 (defn- merge-nested
@@ -94,11 +94,17 @@
               (if uppercase (string/upper output) output)))
           hints))))
 
-(defn emit-def-type [name suffix grammar mopts]
+(defn emit-def-type
+  "emits a definition type hint"
+  {:added "4.0"}
+  [name suffix grammar mopts]
   (emit-hint-type (:type (helper/get-options grammar [:default :define]))
                   name suffix grammar mopts))
 
-(defn emit-fn-type [name suffix grammar mopts]
+(defn emit-fn-type
+  "emits a function return type hint"
+  {:added "4.0"}
+  [name suffix grammar mopts]
   (emit-hint-type (:type (helper/get-options grammar [:default :invoke]))
                   name suffix grammar mopts))
 
@@ -191,9 +197,25 @@
           :else
           (str preamble " " block-output))))
 
-(defn test-fn-loop [form grammar mopts]
-  (common/emit-common-loop form grammar mopts))
+(defn test-fn-loop
+  "add blocks, fn, var and const to emit"
+  {:added "4.0"}
+  [form grammar mopts]
+  (common/emit-common-loop
+   form grammar mopts
+   (assoc common/+emit-lookup+
+          :data data/emit-data
+          :block block/emit-block)
+   (fn [key form grammar mopts]
+     (if (= key :fn)
+       (emit-fn :function form grammar mopts)
+       (common/emit-op key form grammar mopts
+                       {:quote data/emit-quote
+                        :table data/emit-table})))))
 
-(defn test-fn-emit [form grammar mopts]
+(defn test-fn-emit
+  "add blocks, fn, var and const to emit"
+  {:added "4.0"}
+  [form grammar mopts]
   (binding [common/*emit-fn* test-fn-loop]
     (test-fn-loop form grammar mopts)))

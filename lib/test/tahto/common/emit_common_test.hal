@@ -27,7 +27,7 @@
 
 (fact "common emission installs recursive emission"
   (common/emit-common '(+ 1 (+ 2 3)) operator-grammar {})
-  => "(1 + (2 + 3))")
+  => "1 + (2 + 3)")
 
 (fact "index compatibility keeps Foundation's argument shape"
   (common/emit-index nil '[user ["name"]] operator-grammar {})

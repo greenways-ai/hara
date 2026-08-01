@@ -1136,6 +1136,11 @@
   [test then & alternative]
   `(if ~test ~(if (= 0 (count alternative)) nil (first alternative)) ~then))
 
+(defmacro when
+  "Evaluates body when test is truthy, otherwise returns nil."
+  [test & body]
+  `(if ~test (do ~@body) nil))
+
 (defmacro if-let
   "Binds name to expression; evaluates then when the value is truthy,
    otherwise the optional alternative."

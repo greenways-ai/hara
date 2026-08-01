@@ -1,6 +1,5 @@
 (ns tahto.common.emit-block
   (:require [std.foundation.string :as string]
-            [tahto.common.emit :as emit]
             [tahto.common.emit-common :as common]))
 
 (defn- member? [values target]
@@ -263,9 +262,18 @@
           (fn? mode) (mode form grammar mopts)
           :else (emit-block-standard key (:block entry) form grammar mopts))))
 
-(defn test-block-loop [form grammar mopts]
-  (common/emit-common-loop form grammar mopts))
+(defn test-block-loop
+  "emits with blocks"
+  {:added "4.0"}
+  [form grammar mopts]
+  (common/emit-common-loop
+   form grammar mopts
+   (assoc common/+emit-lookup+ :block emit-block)
+   common/emit-op))
 
-(defn test-block-emit [form grammar mopts]
+(defn test-block-emit
+  "emit with blocks"
+  {:added "4.0"}
+  [form grammar mopts]
   (binding [common/*emit-fn* test-block-loop]
     (test-block-loop form grammar mopts)))

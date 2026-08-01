@@ -216,7 +216,27 @@ impl Promise {
                 }
             }
         }
-        self.state()
+        loop {
+            let state = self.state();
+            if !matches!(state, PromiseState::Pending) {
+                return state;
+            }
+            let delay = {
+                let inner = self.inner.borrow();
+                inner
+                    .deferred
+                    .as_ref()
+                    .map(|(at, _)| at.saturating_duration_since(Instant::now()))
+            };
+            let Some(delay) = delay else {
+                return state;
+            };
+            if !delay.is_zero() {
+                std::thread::sleep(delay);
+            } else {
+                std::thread::yield_now();
+            }
+        }
     }
 
     pub(crate) fn notify_cancel(&self) {
@@ -295,6 +315,14 @@ impl Promise {
                     return false;
                 }
                 self.inner.borrow_mut().adopted_from = Some(Rc::downgrade(&other.inner));
+                let source = other.clone();
+                self.set_poller(Rc::new(move || {
+                    source.state();
+                }));
+                let source = other.clone();
+                self.set_waiter(Rc::new(move || {
+                    source.wait_state();
+                }));
                 let destination = self.clone();
                 other.on_settle(Rc::new(move |state| match state {
                     PromiseState::Fulfilled(value) => {

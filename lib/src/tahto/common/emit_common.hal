@@ -13,16 +13,28 @@
 (def ^:dynamic *emit-internal* false)
 (def ^:dynamic *emit-fn* helper/default-emit-fn)
 
-(defmacro with:explode [& body]
+(defmacro with:explode
+  "form to control `explode` option"
+  {:added "4.0"}
+  [& body]
   `(binding [*explode* true] ~@body))
 
-(defmacro with-trace [& body]
+(defmacro with-trace
+  "form to control `trace` option"
+  {:added "4.0"}
+  [& body]
   `(binding [*trace* true] ~@body))
 
-(defmacro with-compressed [& body]
+(defmacro with-compressed
+  "formats without newlines and indents"
+  {:added "3.0"}
+  [& body]
   `(binding [*compressed* true] ~@body))
 
-(defmacro with-indent [increments & body]
+(defmacro with-indent
+  "adds indentation levels"
+  {:added "3.0"}
+  [increments & body]
   `(binding [*indent* (+ *indent* (or (first ~increments) 2))]
      ~@body))
 
@@ -403,10 +415,14 @@
   "emits a token selected by its Foundation token key"
   {:added "3.0"}
   [token-key form grammar mopts]
-  (let [options (get-in grammar [:token token-key])
+  (let [configured (if (= token-key :boolean)
+                     (or (get-in grammar [:token :boolean])
+                         (get-in grammar [:token (if form :true :false)]))
+                     (get-in grammar [:token token-key]))
+        options (if (map? configured) configured {})
         custom (:custom options)
         emit-fn (:emit options)
-        as (:as options)]
+        as (if (map? configured) (:as options) configured)]
     (cond (and (= token-key :string) *emit-internal*) form
           (and (= token-key :string) (= :single (:quote options)))
           (helper/pr-single form)
@@ -451,7 +467,7 @@
   (let [values (vec args)
         index (first-keyword-index values)]
     (if (< index 0)
-      [args []]
+      [values []]
       [(take index values)
        (partition 2 (drop index values))])))
 
@@ -652,8 +668,7 @@
   "emits one form without installing recursive common emission"
   {:added "4.0"}
   ([form grammar mopts]
-   (with-emitter
-    (fn [] (emit/emit-node form grammar mopts))))
+   (emit-common-loop form grammar mopts +emit-lookup+ emit-op))
   ([form grammar mopts fn-lookup fn-default]
    (let [classification (form-key form grammar)
          key (first classification)
@@ -681,6 +696,5 @@
   "emits one form using common emission recursively"
   {:added "4.0"}
   [form grammar mopts]
-  (binding [*emit-fn* emit/emit-node]
-    (with-emitter
-     (fn [] (emit/emit-node form grammar mopts)))))
+  (binding [*emit-fn* emit-common-loop]
+    (emit-common-loop form grammar mopts)))

@@ -90,7 +90,7 @@
         select-query (or (compatible-get select-view :query) {})
         return-query (or (compatible-get return-view :query) {})
         omit-clause (if (present? return-omit)
-                      [{:id {:not-in [return-omit]}}]
+                      [{"id" {"not-in" [return-omit]}}]
                       [])
         combined-clause (scope/merge-queries clause omit-clause)
         returning (vec (concat (if (vector? return-query) return-query [return-query])

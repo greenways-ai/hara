@@ -99,23 +99,23 @@
 
    (fact "sign-in stores session and starts refresh through the remote kernel"
      (do
-      (reset! CALLS [])
-      (reset! REFRESH-STARTS 0)
-      (let [nodes (connected-nodes "signin")
-           client-node (get nodes :client)
-           session (deref
-                    (client/sign-in client-node
-                                    "auth/supabase"
-                                    {:email "wombat@example.com"
-                                     :password "secret"}
-                                    {:timeout-ms 1000}))
-           current (deref (client/current-session client-node "auth/supabase" {}))
-           signed-in (deref (client/signed-in? client-node "auth/supabase" {}))]
-       [session
-        current
-        signed-in
-        @REFRESH-STARTS
-        (get (first @CALLS) :operation)]))
+       (reset! CALLS [])
+       (reset! REFRESH-STARTS 0)
+       (let [nodes (connected-nodes "signin")
+             client-node (get nodes :client)
+             session (deref
+                      (client/sign-in client-node
+                                      "auth/supabase"
+                                      {:email "wombat@example.com"
+                                       :password "secret"}
+                                      {:timeout-ms 1000}))
+             current (deref (client/current-session client-node "auth/supabase" {}))
+             signed-in (deref (client/signed-in? client-node "auth/supabase" {}))]
+         [session
+          current
+          signed-in
+          @REFRESH-STARTS
+          (get (first @CALLS) :operation)]))
      => [{:access-token "signin-token" :refresh-token "signin-refresh"}
          {:access-token "signin-token" :refresh-token "signin-refresh"}
          true
@@ -137,55 +137,55 @@
 
    (fact "RPC table and health actions preserve their legacy payloads"
      (do
-      (reset! CALLS [])
-      (let [nodes (connected-nodes "requests")
-           client-node (get nodes :client)]
-       [(deref (client/rpc-call client-node
-                                "auth/supabase"
-                                "ping"
-                                {:input 1}
-                                {:headers {:profile "public"}}))
-        (deref (client/query-table client-node
-                                   "auth/supabase"
-                                   "items"
-                                   {:select "*"}
-                                   {}))
-        (deref (client/health client-node "auth/supabase" {}))]))
+       (reset! CALLS [])
+       (let [nodes (connected-nodes "requests")
+             client-node (get nodes :client)]
+         [(deref (client/rpc-call client-node
+                                  "auth/supabase"
+                                  "ping"
+                                  {:input 1}
+                                  {:headers {:profile "public"}}))
+          (deref (client/query-table client-node
+                                     "auth/supabase"
+                                     "items"
+                                     {:select "*"}
+                                     {}))
+          (deref (client/health client-node "auth/supabase" {}))]))
      => [{:rpc "ping"}
          [{:id 1 :table "items"}]
          {:name "GoTrue"}])
 
    (fact "sign-out stops refresh and clears the stored session"
      (do
-      (reset! REFRESH-STOPS 0)
-      (let [nodes (connected-nodes "signout")
-           client-node (get nodes :client)]
-       (deref
-        (client/sign-in client-node
-                        "auth/supabase"
-                        {:email "wombat@example.com" :password "secret"}
-                        {}))
-       [(deref (client/sign-out client-node "auth/supabase" {}))
-        (deref (client/current-session client-node "auth/supabase" {}))
-        (deref (client/signed-in? client-node "auth/supabase" {}))
-        @REFRESH-STOPS]))
+       (reset! REFRESH-STOPS 0)
+       (let [nodes (connected-nodes "signout")
+             client-node (get nodes :client)]
+         (deref
+          (client/sign-in client-node
+                          "auth/supabase"
+                          {:email "wombat@example.com" :password "secret"}
+                          {}))
+         [(deref (client/sign-out client-node "auth/supabase" {}))
+          (deref (client/current-session client-node "auth/supabase" {}))
+          (deref (client/signed-in? client-node "auth/supabase" {}))
+          @REFRESH-STOPS]))
      => [{"status" "ok"} nil false 1])
 
    (fact "runtime finalization stops refresh and removes Supabase services"
      (do
-      (reset! REFRESH-STOPS 0)
-      (let [nodes (connected-nodes "finalize")
-           server (get nodes :server)
-           client-node (get nodes :client)]
-       (deref
-        (client/sign-in client-node
-                        "auth/supabase"
-                        {:email "wombat@example.com" :password "secret"}
-                        {}))
-       (let [result (deref (runtime-client/runtime-finalize client-node {}))]
-         [(get result :status)
-          @REFRESH-STOPS
-          (substrate-protocol/get-service server "auth/supabase")])))
+       (reset! REFRESH-STOPS 0)
+       (let [nodes (connected-nodes "finalize")
+             server (get nodes :server)
+             client-node (get nodes :client)]
+         (deref
+          (client/sign-in client-node
+                          "auth/supabase"
+                          {:email "wombat@example.com" :password "secret"}
+                          {}))
+         (let [result (deref (runtime-client/runtime-finalize client-node {}))]
+           [(get result :status)
+            @REFRESH-STOPS
+            (substrate-protocol/get-service server "auth/supabase")])))
      => [:finalized 1 nil])])
 
 (pr-str (run '[std.db.node.supabase-test]))

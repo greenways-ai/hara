@@ -38,13 +38,14 @@
                 :statement ""
                 :namespace "."
                 :newline "\n"
-                :indent "    "}
+                :indent 4}
        :invoke {:start "(" :end ")" :sep "," :space " "}
        :block {:parameter {:start "" :end ""}
                :body {:start ":" :end ""}
                :space-before-body ""}
        :function {:raw "def"
-                  :args {:start "(" :end ")" :sep "," :space " "}
+                  :space ""
+                  :args {:start "(" :end ")" :sep "," :space ""}
                   :body {:start ":" :end ""}
                   :space-before-body ""}}
       :token

@@ -17,7 +17,7 @@
   (frame-cause [frame])
   (frame-data [frame]))
 
-(defprotocol ISpace
+(defprotocol ISubstrateSpace
   (get-space [node space-id])
   (create-space [node space-id opts])
   (ensure-space [node space-id opts])
