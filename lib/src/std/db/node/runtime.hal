@@ -1,0 +1,186 @@
+;; ============================================================================
+;; std.db.node.runtime — database kernels over portable Substrate transports.
+;;
+;; The core runtime is host-neutral. Local linked nodes provide the reference
+;; implementation; browser, SharedWorker and Node worker hosts plug in through
+;; adapter descriptors that attach a transport to the client node.
+;; ============================================================================
+(ns std.db.node.runtime
+  (:require [std.db.node.client-base :as client]
+            [std.db.node.kernel-base :as kernel]
+            [std.db.node.proxy-base :as proxy]
+            [std.db.node.proxy-util :as proxy-util]
+            [std.foundation.promise :as promise]
+            [std.lib.substrate :as substrate]
+            [std.lib.substrate.protocol :as protocol]))
+
+(def DEFAULT-TRANSPORT "std.db.default.transport")
+(def DEFAULT-WORKER "std.db.default.worker")
+
+(defstruct DatabaseRuntime
+  [kind client server transport-id worker-id adapter])
+
+(defn init-server
+  "Installs database kernel handlers on a server node."
+  [node]
+  (kernel/init-handlers node))
+
+(defn init-server-proxy
+  "Installs database forwarding handlers on a client node."
+  [node]
+  (proxy/init-proxy-handlers node))
+
+(defn- response-frame
+  [request status data error]
+  (substrate/node-frame :response
+                        (str "res-" (protocol/frame-id request))
+                        (protocol/frame-space request)
+                        {}
+                        nil
+                        []
+                        (protocol/frame-id request)
+                        status
+                        data
+                        error
+                        nil
+                        (protocol/frame-id request)))
+
+(defn- deliver-response
+  [source transport-id request status data error]
+  (protocol/receive-frame source
+                          (response-frame request status data error)
+                          {:transport-id transport-id}))
+
+(defn- forward-request
+  [source target transport-id frame]
+  (try
+    (let [result (protocol/receive-frame target frame {:transport-id transport-id})]
+      (if (promise? result)
+        (promise/catch
+         (promise/then result
+                       (fn [value]
+                         (deliver-response source transport-id frame :ok value nil)))
+         (fn [error]
+           (deliver-response source transport-id frame :error nil error)))
+        (deliver-response source transport-id frame :ok result nil)))
+    (catch Throwable error
+      (deliver-response source transport-id frame :error nil error))))
+
+(defn- forward-frame
+  [source target transport-id frame]
+  (if (= :request (protocol/frame-kind frame))
+    (forward-request source target transport-id frame)
+    (protocol/receive-frame target frame {:transport-id transport-id})))
+
+(defn connect-nodes
+  "Attaches a bidirectional in-memory transport between two Substrate nodes."
+  ([client-node server-node]
+   (connect-nodes client-node server-node DEFAULT-TRANSPORT))
+  ([client-node server-node transport-id]
+   (protocol/attach-transport client-node
+                              transport-id
+                              (fn [frame]
+                                (forward-frame client-node server-node transport-id frame)))
+   (protocol/attach-transport server-node
+                              transport-id
+                              (fn [frame]
+                                (forward-frame server-node client-node transport-id frame)))
+   (proxy-util/set-default-transport client-node transport-id)
+   {:transport-id transport-id
+    :client client-node
+    :server server-node}))
+
+(defn disconnect-nodes
+  "Detaches a linked runtime transport from both nodes."
+  [client-node server-node transport-id]
+  (protocol/detach-transport client-node transport-id)
+  (protocol/detach-transport server-node transport-id)
+  {:transport-id transport-id
+   :detached true})
+
+(defn local-connect
+  "Connects client and server nodes, then initializes database services."
+  ([client-node server-node config schema lookup]
+   (local-connect client-node server-node config schema lookup {}))
+  ([client-node server-node config schema lookup options]
+   (let [transport-id (or (get options :transport-id) DEFAULT-TRANSPORT)
+         worker-id (or (get options :worker-id) DEFAULT-WORKER)]
+     (init-server server-node)
+     (init-server-proxy client-node)
+     (connect-nodes client-node server-node transport-id)
+     (promise/then
+      (client/kernel-init client-node config schema lookup {:transport-id transport-id})
+      (fn [status]
+        {:runtime (std.db.node.runtime/DatabaseRuntime
+                   :local client-node server-node transport-id worker-id nil)
+         :init status
+         :transport transport-id
+         :transport-attached true})))))
+
+(defn local-runtime
+  "Creates and connects a complete in-memory database runtime."
+  ([config schema lookup]
+   (local-runtime config schema lookup {}))
+  ([config schema lookup options]
+   (let [client-node (substrate/node-create (or (get options :client-id) "db/client"))
+         server-node (substrate/node-create (or (get options :server-id) "db/server"))]
+     (local-connect client-node server-node config schema lookup options))))
+
+(defn adapter-connect
+  "Connects a client through a host adapter descriptor.
+
+   adapter requires :connect, called with client-node and transport-id. The
+   function must attach a Substrate transport and may return a value or promise."
+  [kind client-node config schema lookup adapter options]
+  (let [transport-id (or (get options :transport-id) DEFAULT-TRANSPORT)
+        worker-id (or (get options :worker-id) DEFAULT-WORKER)
+        connect-function (get adapter :connect)]
+    (if (nil? connect-function)
+      (throw (ex-info "Database runtime adapter requires :connect"
+                      {:kind kind :adapter adapter}))
+      (do
+        (init-server-proxy client-node)
+        (promise/then
+         (promise (fn [] (connect-function client-node transport-id)))
+         (fn [_]
+           (proxy-util/set-default-transport client-node transport-id)
+           (promise/then
+            (client/kernel-init client-node config schema lookup {:transport-id transport-id})
+            (fn [status]
+              {:runtime (std.db.node.runtime/DatabaseRuntime
+                         kind client-node nil transport-id worker-id adapter)
+               :init status
+               :transport transport-id
+               :transport-attached (not (nil? (protocol/get-transport client-node transport-id)))}))))))))
+
+(defn sharedworker-connect
+  [client-node config schema lookup adapter options]
+  (adapter-connect :shared-worker client-node config schema lookup adapter options))
+
+(defn webworker-connect
+  [client-node config schema lookup adapter options]
+  (adapter-connect :web-worker client-node config schema lookup adapter options))
+
+(defn nodeworker-connect
+  [client-node config schema lookup adapter options]
+  (adapter-connect :node-worker client-node config schema lookup adapter options))
+
+(defn close-runtime
+  "Tears down database services and detaches or closes the runtime transport."
+  [runtime config]
+  (let [client-node (field runtime :client)
+        server-node (field runtime :server)
+        transport-id (field runtime :transport-id)
+        adapter (field runtime :adapter)
+        close-function (if adapter (get adapter :close) nil)
+        teardown (if server-node
+                   (kernel/kernel-teardown-main server-node config)
+                   (client/kernel-teardown client-node config {:transport-id transport-id}))]
+    (promise/finally
+     teardown
+     (fn []
+       (if server-node
+         (disconnect-nodes client-node server-node transport-id)
+         (do
+           (protocol/detach-transport client-node transport-id)
+           (when close-function (close-function))))))))
