@@ -10,6 +10,8 @@ crate-type = ["cdylib"]
 
 [features]
 dev-trace = []
+halc-encoder = []
+hir-encoder = ["halc-encoder"]
 
 [dependencies]
 sha2 = "0.10"

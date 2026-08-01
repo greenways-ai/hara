@@ -1,7 +1,8 @@
 use super::Form;
 use sha2::{Digest, Sha256};
 
-const MAGIC: &[u8] = b"HIR\0";
+const MAGIC: &[u8] = b"HALC";
+const LEGACY_MAGIC: &[u8] = b"HIR\0";
 const FORMAT_VERSION: u16 = 1;
 const EXECUTABLE_FOUNDATION_FLAG: u16 = 1;
 const HASH_BYTES: usize = 32;
@@ -28,15 +29,22 @@ const ORDERED_SET: u8 = 16;
 const REGEX: u8 = 17;
 
 #[derive(Debug, Clone)]
-pub struct HirModule {
+pub struct HalcModule {
     pub namespace: String,
     pub resource: String,
     pub source_hash: Vec<u8>,
     pub forms: Vec<Form>,
+    pub origin: HalcOrigin,
 }
 
-pub fn decode_hir(bytes: &[u8]) -> Result<HirModule, String> {
-    let payload = decode_envelope(bytes)?;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HalcOrigin {
+    Halc,
+    LegacyHir,
+}
+
+pub fn decode_halc(bytes: &[u8]) -> Result<HalcModule, String> {
+    let (payload, origin) = decode_envelope(bytes)?;
     let mut reader = ByteReader::new(&payload);
     let namespace = reader.read_string()?;
     let resource = reader.read_string()?;
@@ -49,20 +57,25 @@ pub fn decode_hir(bytes: &[u8]) -> Result<HirModule, String> {
     if !reader.is_empty() {
         return Err("trailing payload bytes".into());
     }
-    Ok(HirModule {
+    Ok(HalcModule {
         namespace,
         resource,
         source_hash,
         forms,
+        origin,
     })
 }
 
-fn decode_envelope(bytes: &[u8]) -> Result<Vec<u8>, String> {
+fn decode_envelope(bytes: &[u8]) -> Result<(Vec<u8>, HalcOrigin), String> {
     let mut reader = ByteReader::new(bytes);
     let magic = reader.read_bytes(MAGIC.len())?;
-    if magic != MAGIC {
+    let origin = if magic == MAGIC {
+        HalcOrigin::Halc
+    } else if magic == LEGACY_MAGIC {
+        HalcOrigin::LegacyHir
+    } else {
         return Err("bad magic".into());
-    }
+    };
     let version = reader.read_u16()?;
     if version != FORMAT_VERSION {
         return Err(format!("unsupported format version {version}"));
@@ -84,7 +97,7 @@ fn decode_envelope(bytes: &[u8]) -> Result<Vec<u8>, String> {
     if actual_hash.as_slice() != expected_hash.as_slice() {
         return Err("payload checksum mismatch".into());
     }
-    Ok(payload)
+    Ok((payload, origin))
 }
 
 struct ByteReader<'a> {
@@ -265,18 +278,18 @@ fn namespaced(namespace: Option<String>, name: String) -> String {
     }
 }
 
-#[cfg(any(test, feature = "hir-encoder"))]
+#[cfg(any(test, feature = "halc-encoder"))]
 fn write_string(output: &mut Vec<u8>, value: &str) {
     output.extend_from_slice(&(value.len() as u32).to_be_bytes());
     output.extend_from_slice(value.as_bytes());
 }
 
-#[cfg(any(test, feature = "hir-encoder"))]
+#[cfg(any(test, feature = "halc-encoder"))]
 fn write_count(output: &mut Vec<u8>, count: i32) {
     output.extend_from_slice(&count.to_be_bytes());
 }
 
-#[cfg(any(test, feature = "hir-encoder"))]
+#[cfg(any(test, feature = "halc-encoder"))]
 fn write_namespaced(output: &mut Vec<u8>, symbol: &str) {
     if let Some((ns, name)) = symbol.rsplit_once('/') {
         output.push(1);
@@ -288,7 +301,7 @@ fn write_namespaced(output: &mut Vec<u8>, symbol: &str) {
     }
 }
 
-#[cfg(any(test, feature = "hir-encoder"))]
+#[cfg(any(test, feature = "halc-encoder"))]
 fn write_values(output: &mut Vec<u8>, values: &[Form]) {
     write_count(output, values.len() as i32);
     for value in values {
@@ -296,7 +309,7 @@ fn write_values(output: &mut Vec<u8>, values: &[Form]) {
     }
 }
 
-#[cfg(any(test, feature = "hir-encoder"))]
+#[cfg(any(test, feature = "halc-encoder"))]
 fn write_value(output: &mut Vec<u8>, form: &Form) {
     match form {
         Form::Metadata(metadata, value) => write_value_with_metadata(output, value, Some(metadata)),
@@ -304,7 +317,7 @@ fn write_value(output: &mut Vec<u8>, form: &Form) {
     }
 }
 
-#[cfg(any(test, feature = "hir-encoder"))]
+#[cfg(any(test, feature = "halc-encoder"))]
 fn write_metadata(output: &mut Vec<u8>, metadata: Option<&Form>) {
     match metadata {
         Some(metadata) => {
@@ -315,7 +328,7 @@ fn write_metadata(output: &mut Vec<u8>, metadata: Option<&Form>) {
     }
 }
 
-#[cfg(any(test, feature = "hir-encoder"))]
+#[cfg(any(test, feature = "halc-encoder"))]
 fn write_value_with_metadata(output: &mut Vec<u8>, form: &Form, metadata: Option<&Form>) {
     match form {
         Form::Nil => output.push(NIL),
@@ -389,12 +402,12 @@ fn write_value_with_metadata(output: &mut Vec<u8>, form: &Form, metadata: Option
     }
 }
 
-/// Test-only helper that encodes a minimal HIR artifact from parsed forms.
+/// Encodes a canonical HALC artifact from parsed forms.
 ///
-/// This mirrors the v1 format used by `decode_hir` so that integration tests
+/// This mirrors the v1 format used by `decode_halc` so that integration tests
 /// can construct artifacts without depending on an external encoder.
-#[cfg(any(test, feature = "hir-encoder"))]
-pub fn encode_hir_module(
+#[cfg(any(test, feature = "halc-encoder"))]
+pub fn encode_halc_module(
     namespace: &str,
     resource: &str,
     source: &str,
@@ -424,7 +437,7 @@ mod tests {
     use crate::kernel::parse;
 
     fn artifact_payload(forms: Vec<Form>) -> Vec<u8> {
-        encode_hir_module("demo.ns", "demo.hal", "", forms)
+        encode_halc_module("demo.ns", "demo.hal", "", forms)
     }
 
     #[test]
@@ -446,7 +459,7 @@ mod tests {
         for source in cases {
             let original = parse(source).unwrap();
             let bytes = artifact_payload(vec![original.clone()]);
-            let decoded = decode_hir(&bytes).unwrap();
+            let decoded = decode_halc(&bytes).unwrap();
             assert_eq!(decoded.forms.len(), 1);
             assert_eq!(decoded.forms[0], original, "{source}");
         }
@@ -456,7 +469,7 @@ mod tests {
     fn round_trips_collections() {
         let original = parse("(do {:a [1 2] :b #{3 4}})").unwrap();
         let bytes = artifact_payload(vec![original.clone()]);
-        let decoded = decode_hir(&bytes).unwrap();
+        let decoded = decode_halc(&bytes).unwrap();
         assert_eq!(decoded.forms.len(), 1);
         assert_eq!(decoded.forms[0], original);
     }
@@ -465,7 +478,7 @@ mod tests {
     fn round_trips_metadata() {
         let original = parse("^:dynamic *value*").unwrap();
         let bytes = artifact_payload(vec![original.clone()]);
-        let decoded = decode_hir(&bytes).unwrap();
+        let decoded = decode_halc(&bytes).unwrap();
         assert_eq!(decoded.forms, vec![original]);
     }
 
@@ -473,7 +486,7 @@ mod tests {
     fn rejects_bad_magic() {
         let mut bytes = artifact_payload(vec![Form::Nil]);
         bytes[0] = 0;
-        assert!(decode_hir(&bytes).unwrap_err().contains("bad magic"));
+        assert!(decode_halc(&bytes).unwrap_err().contains("bad magic"));
     }
 
     #[test]
@@ -481,18 +494,18 @@ mod tests {
         let mut bytes = artifact_payload(vec![Form::Nil]);
         let last = bytes.len() - 1;
         bytes[last] = bytes[last].wrapping_add(1);
-        assert!(decode_hir(&bytes).unwrap_err().contains("checksum"));
+        assert!(decode_halc(&bytes).unwrap_err().contains("checksum"));
     }
 
     #[test]
     fn decodes_the_truffle_portable_format_golden_artifact() {
         // This is the canonical v1 artifact emitted by Truffle's
-        // HirArtifactTest.goldenBytesLockThePortableFormat.  Keep this test
+        // HalcArtifactTest.goldenBytesLockThePortableFormat. Keep this test
         // independent of Rust's test-only encoder: it is the cross-runtime
         // compatibility boundary, rather than a Rust encoder/decoder
         // round-trip.
         let bytes = hex_bytes(concat!(
-            "48495200000100010000014b7640e14591506ea3c5e004467edc15b2ea8bb319",
+            "48414c43000100010000014b7640e14591506ea3c5e004467edc15b2ea8bb319",
             "3b48a4596d99c242ca5531a000000001740000000174e3b0c44298fc1c149afb",
             "f4c8996fb92427ae41e4649b934ca495991b7852b85500000012000102030000",
             "00000000002a044004000000000000050000001e313233343536373839303132",
@@ -506,7 +519,8 @@ mod tests {
             "0000000002030000000000000001001100000003612b62",
         ));
 
-        let module = decode_hir(&bytes).unwrap();
+        let module = decode_halc(&bytes).unwrap();
+        assert_eq!(module.origin, HalcOrigin::Halc);
         assert_eq!(module.namespace, "t");
         assert_eq!(module.resource, "t");
         assert_eq!(module.forms.len(), 18);
@@ -517,6 +531,16 @@ mod tests {
         assert_eq!(module.forms[9], Form::Symbol("my.ns/my-sym".into()));
         assert_eq!(module.forms[10], Form::Keyword("kw".into()));
         assert_eq!(module.forms[17], Form::Regex("a+b".into()));
+    }
+
+    #[test]
+    fn legacy_hir_magic_decodes_but_encoding_always_uses_halc_magic() {
+        let halc = artifact_payload(vec![Form::Number(42)]);
+        let mut legacy = halc.clone();
+        legacy[..4].copy_from_slice(LEGACY_MAGIC);
+
+        assert_eq!(decode_halc(&legacy).unwrap().origin, HalcOrigin::LegacyHir);
+        assert_eq!(&halc[..4], MAGIC);
     }
 
     fn hex_bytes(hex: &str) -> Vec<u8> {

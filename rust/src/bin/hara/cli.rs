@@ -1,6 +1,6 @@
 use crate::repl;
-use hara_wasm::cli_app;
 use hara_wasm::asset;
+use hara_wasm::cli_app;
 use hara_wasm::extension_tool;
 use hara_wasm::identity_tool;
 use hara_wasm::package;
@@ -21,8 +21,8 @@ mod project;
 #[path = "cli/spec.rs"]
 mod spec;
 
-#[cfg(feature = "hir-encoder")]
-use self::project::compile_hir;
+#[cfg(feature = "halc-encoder")]
+use self::project::compile_halc;
 use self::project::{
     check_project, direct_eval, edit_dependency, new_project, run_file, run_headless, run_project,
     run_remote, sync_project, test_project,
@@ -148,8 +148,8 @@ pub(crate) fn run(options: Options) -> Result<(), String> {
         Some("asset") => asset::run(&command[1..]),
         Some("tap") => package::tap_command(&command[1..]),
         Some("package") => package::run(&command[1..]),
-        #[cfg(feature = "hir-encoder")]
-        Some("compile-hir") => compile_hir(&command[1..]),
+        #[cfg(feature = "halc-encoder")]
+        Some("compile-halc") => compile_halc(&command[1..]),
         Some("new") => new_project(&command[1..]),
         Some("check") => check_project(&options, &command[1..]),
         Some("add") => edit_dependency(&options, &command[1..], true),
@@ -189,7 +189,7 @@ pub(crate) fn run(options: Options) -> Result<(), String> {
 fn routed_command(command: &[String]) -> Vec<String> {
     if command
         .first()
-        .is_some_and(|value| matches!(value.as_str(), "help" | "compile-hir"))
+        .is_some_and(|value| matches!(value.as_str(), "help" | "compile-halc"))
         || command == ["standalone"]
     {
         return command.to_vec();
@@ -295,13 +295,13 @@ mod spec_tests {
     };
     use super::form::{keyword, map_form, map_get};
     use super::metaspec::{
-        lint_metaspec, metaspec_report, metaspec_template, read_spec_document,
-        validate_against_metaspec, verify_metaspec, METASPEC_REQUIRED_KEYS,
+        METASPEC_REQUIRED_KEYS, lint_metaspec, metaspec_report, metaspec_template,
+        read_spec_document, validate_against_metaspec, verify_metaspec,
     };
     use super::spec::check_contribution;
     use super::{error_exit_code, routed_command};
     use hara_wasm::cli_app;
-    use hara_wasm::kernel::{parse, Form};
+    use hara_wasm::kernel::{Form, parse};
     use std::fs;
     use std::path::Path;
 
@@ -390,9 +390,11 @@ mod spec_tests {
             map_form(vec![("schema/ref", keyword("missing/schema"))]),
         ));
         let findings = verify_metaspec(&document, Path::new("metaspec.edn"));
-        assert!(findings
-            .iter()
-            .any(|finding| finding.rule == "hara.metaspec.rule/schema-reference"));
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.rule == "hara.metaspec.rule/schema-reference")
+        );
         let report = metaspec_report(&document, &findings);
         assert_eq!(map_get(&report, "report/status"), Some(&keyword("fail")));
     }
@@ -400,7 +402,8 @@ mod spec_tests {
     #[test]
     fn greenways_buildspec_validates_against_artifact_metaspec() {
         let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        let metaspec_path = repository.join("specs/00-unsorted/artifact/metaspec/artifact-metaspec.edn");
+        let metaspec_path =
+            repository.join("specs/00-unsorted/artifact/metaspec/artifact-metaspec.edn");
         if !metaspec_path.is_file() {
             eprintln!("skipping: specs submodule not initialized");
             return;
@@ -469,9 +472,11 @@ mod spec_tests {
         )
         .unwrap();
         let findings = check_build(&checker_build);
-        assert!(findings
-            .iter()
-            .any(|finding| finding.kind == "greenways/checker-commit"));
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.kind == "greenways/checker-commit")
+        );
         let report = build_obligation_report(&checker_build, &findings);
         assert_eq!(build_report_status(&report), "blocked");
     }
@@ -479,7 +484,10 @@ mod spec_tests {
     #[test]
     fn greenways_contribution_envelopes_verify_offline() {
         let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        if !repository.join("specs/00-unsorted/artifact/metaspec").is_dir() {
+        if !repository
+            .join("specs/00-unsorted/artifact/metaspec")
+            .is_dir()
+        {
             eprintln!("skipping: specs submodule not initialized");
             return;
         }

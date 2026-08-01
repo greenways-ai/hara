@@ -14,7 +14,8 @@ crate-type = ["cdylib", "rlib"]
 # embedded and production builds do not carry collectors or trace storage.
 dev-trace = []
 # Existing optional encoder gate (declared here so Cargo can validate it).
-hir-encoder = []
+halc-encoder = []
+hir-encoder = ["halc-encoder"]
 # Experimental staged bytecode VM (notes/rust-bytecode-vm.md). Non-default:
 # all VM entry points are gated behind this feature.
 bytecode-vm = []

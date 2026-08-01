@@ -53,7 +53,7 @@ test("HARP inspection verifies every file and activates namespaces atomically", 
   const files = new Map([
     ["project.edn", encoder.encode("{:hara/type :project}\n")],
     ["src/example/main.hal", encoder.encode("(ns example.main) 42\n")],
-    ["hir/example.fast.hir", Uint8Array.from([72, 73, 82, 0, 1])]
+    ["halc/example.fast.halc", Uint8Array.from([72, 65, 76, 67, 1])]
   ]);
   const tree = [];
   let declarations = "";
@@ -64,7 +64,7 @@ test("HARP inspection verifies every file and activates namespaces atomically", 
   const treeBytes = concat(tree);
   const manifest = encoder.encode(
     `{:harp/format 1\n :package {:identity "example/app" :version "1.0.0"}\n`
-    + ` :files {\n${declarations}} :resources {"example.main" "src/example/main.hal" "example.fast" "hir/example.fast.hir"}`
+    + ` :files {\n${declarations}} :resources {"example.main" "src/example/main.hal" "example.fast" "halc/example.fast.halc"}`
     + ` :extensions []\n :integrity {:tree-sha256 ${JSON.stringify(await sha256(treeBytes))}}}\n`
   );
   const archiveBytes = storedZip(new Map([["package.edn", manifest], ...files]));
@@ -73,7 +73,7 @@ test("HARP inspection verifies every file and activates namespaces atomically", 
     format: "hal", source: "(ns example.main) 42\n"
   });
   assert.deepEqual(archive.resources.get("example.fast"), {
-    format: "hir", bytes: Uint8Array.from([72, 73, 82, 0, 1])
+    format: "halc", bytes: Uint8Array.from([72, 65, 76, 67, 1])
   });
 
   const calls = [];
@@ -84,8 +84,8 @@ test("HARP inspection verifies every file and activates namespaces atomically", 
   assert.equal(calls.length, 2);
   assert.equal(calls[0][0], "register-resources");
   assert.deepEqual(calls[0][1][0], [["example.main", "(ns example.main) 42\n"]]);
-  assert.equal(calls[1][0], "eval-hir");
-  assert.deepEqual(calls[1][1][0], Uint8Array.from([72, 73, 82, 0, 1]));
+  assert.equal(calls[1][0], "eval-halc");
+  assert.deepEqual(calls[1][1][0], Uint8Array.from([72, 65, 76, 67, 1]));
 
   const tampered = archiveBytes.slice();
   tampered[tampered.lastIndexOf("4".charCodeAt(0))] ^= 1;

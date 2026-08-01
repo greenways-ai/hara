@@ -1,29 +1,29 @@
 use super::Options;
 use crate::repl;
-#[cfg(feature = "hir-encoder")]
-use hara_wasm::kernel::{hir::encode_hir_module, parse_forms};
-use hara_wasm::kernel::{parse, Form};
+use hara_wasm::Runtime;
+use hara_wasm::kernel::{Form, parse};
+#[cfg(feature = "halc-encoder")]
+use hara_wasm::kernel::{halc::encode_halc_module, parse_forms};
 use hara_wasm::native_cli::RuntimeBroker;
 use hara_wasm::project;
 use hara_wasm::resp::{RespConnection, RespServer, RespValue};
-use hara_wasm::Runtime;
 use std::fs;
 use std::io::{self, BufRead};
 use std::net::TcpStream;
 use std::path::PathBuf;
 
-#[cfg(feature = "hir-encoder")]
-pub(crate) fn compile_hir(args: &[String]) -> Result<(), String> {
+#[cfg(feature = "halc-encoder")]
+pub(crate) fn compile_halc(args: &[String]) -> Result<(), String> {
     let source_path = args
         .first()
-        .ok_or_else(|| "compile-hir requires SOURCE.hal --output OUTPUT.hir".to_owned())?;
+        .ok_or_else(|| "compile-halc requires SOURCE.hal --output OUTPUT.halc".to_owned())?;
     let output_index = args
         .iter()
         .position(|argument| argument == "--output")
-        .ok_or_else(|| "compile-hir requires --output OUTPUT.hir".to_owned())?;
+        .ok_or_else(|| "compile-halc requires --output OUTPUT.halc".to_owned())?;
     let output_path = args
         .get(output_index + 1)
-        .ok_or_else(|| "compile-hir requires --output OUTPUT.hir".to_owned())?;
+        .ok_or_else(|| "compile-halc requires --output OUTPUT.halc".to_owned())?;
     let source = fs::read_to_string(source_path)
         .map_err(|error| format!("cannot read {source_path}: {error}"))?;
     let forms = parse_forms(&source)?;
@@ -41,7 +41,7 @@ pub(crate) fn compile_hir(args: &[String]) -> Result<(), String> {
             _ => None,
         })
         .ok_or_else(|| format!("{source_path} does not declare an ns or ns+ namespace"))?;
-    let artifact = encode_hir_module(&namespace, source_path, &source, forms);
+    let artifact = encode_halc_module(&namespace, source_path, &source, forms);
     if let Some(parent) = std::path::Path::new(output_path).parent() {
         fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
@@ -232,7 +232,10 @@ pub(crate) fn direct_eval(options: &Options, source: &str) -> Result<(), String>
 
 pub(crate) fn run_file(options: &Options, path: &str) -> Result<(), String> {
     let bytes = fs::read(path).map_err(|error| format!("cannot read {path}: {error}"))?;
-    let is_hir = path.ends_with(".hir") || bytes.starts_with(b"HIR\0");
+    let is_halc = path.ends_with(".halc")
+        || path.ends_with(".hir")
+        || bytes.starts_with(b"HALC")
+        || bytes.starts_with(b"HIR\0");
     let mut runtime = Runtime::new();
     if let Some(root) = &options.root {
         runtime.install_native_file_provider(root.to_string_lossy().as_ref());
@@ -240,8 +243,8 @@ pub(crate) fn run_file(options: &Options, path: &str) -> Result<(), String> {
     if options.native_sockets {
         runtime.install_native_socket_provider();
     }
-    if is_hir {
-        println!("{}", runtime.eval_hir(&bytes)?);
+    if is_halc {
+        println!("{}", runtime.eval_halc(&bytes)?);
     } else {
         println!(
             "{}",
