@@ -22,6 +22,10 @@
   [node options]
   (proxy/request-client node service/ACTION-DRIVER-LIST [] options))
 
+(defn service-list
+  [node options]
+  (proxy/request-client node service/ACTION-SERVICE-LIST [] options))
+
 (defn service-info
   [node service-id options]
   (proxy/request-client node kernel/ACTION-SERVICE-INFO [service-id] options))
@@ -40,6 +44,10 @@
 (defn service-close
   [node service-id options]
   (proxy/request-client node service/ACTION-SERVICE-CLOSE [service-id] options))
+
+(defn service-close-all
+  [node options]
+  (proxy/request-client node service/ACTION-SERVICE-CLOSE-ALL [] options))
 
 (defn exec
   ([node service-id sql options]
