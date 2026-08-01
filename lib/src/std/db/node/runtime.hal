@@ -29,6 +29,15 @@
     (keyword? lookup-key) (get value (name lookup-key))
     :else nil))
 
+(defn- call-promise
+  "Calls function immediately, returning a promise for its eventual result."
+  [function arguments]
+  (try
+    (let [result (apply function arguments)]
+      (if (promise? result) result (promise/from result)))
+    (catch Throwable error
+      (promise/new (fn [resolve reject] (reject error))))))
+
 (defn ready-signal
   "Creates the wire-compatible worker ready signal."
   [transport-id worker-id]
@@ -174,9 +183,7 @@
         (install-drivers node drivers)
         (init-server node)
         (promise/then
-         (promise/run
-          (fn []
-            (boot-function node transport-id worker-id ready)))
+         (call-promise boot-function [node transport-id worker-id ready])
          (fn [status]
            {:runtime (std.db.node.runtime/DatabaseRuntime
                       kind nil node transport-id worker-id adapter)
@@ -219,7 +226,7 @@
       (do
         (init-server-proxy client-node)
         (promise/then
-         (promise/run (fn [] (connect-function client-node transport-id)))
+         (call-promise connect-function [client-node transport-id])
          (fn [_]
            (proxy-util/set-default-transport client-node transport-id)
            (promise/then
