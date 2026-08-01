@@ -171,6 +171,19 @@
 
 (declare kernel-teardown-main)
 
+(defn- kernel-open-services
+  "Opens primary before caching so rollback cannot race an unfinished open."
+  [node primary caching schema lookup primary-metadata caching-metadata]
+  (promise/then
+   (kernel-setup-single node :primary primary schema lookup primary-metadata)
+   (fn [primary-service]
+     (if caching
+       (promise/then
+        (kernel-setup-single node :caching caching schema lookup caching-metadata)
+        (fn [caching-service]
+          [primary-service caching-service]))
+       [primary-service]))))
+
 (defn kernel-setup-main
   "Creates common, primary and optional caching services atomically."
   [node config schema lookup]
@@ -191,15 +204,17 @@
         primary-metadata {:common-id common-id
                           :caching-id caching-id}
         caching-metadata {:common-id common-id
-                          :primary-id primary-id}
-        opens (if caching
-                [(kernel-setup-single node :primary primary schema lookup primary-metadata)
-                 (kernel-setup-single node :caching caching schema lookup caching-metadata)]
-                [(kernel-setup-single node :primary primary schema lookup primary-metadata)])]
+                          :primary-id primary-id}]
     (substrate/set-service node common-id common-service)
     (promise/catch
      (promise/then
-      (promise/all opens)
+      (kernel-open-services node
+                            primary
+                            caching
+                            schema
+                            lookup
+                            primary-metadata
+                            caching-metadata)
       (fn [services]
         {:status :setup
          :data normalized
