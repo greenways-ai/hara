@@ -194,10 +194,11 @@
         data-parameters (or (compatible-get params :data) [])
         link-parameters (or (compatible-get params :links) [])
         custom-parameters (or (compatible-get params :custom) [])
+        count-parameters (filter (fn [entry]
+                                   (= "sql/count" (compatible-get entry "::")))
+                                 custom-parameters)
         sort-keys (option options :sort-keys true)]
-    (if (not (empty? (filter (fn [entry]
-                               (= "sql/count" (compatible-get entry "::")))
-                             custom-parameters)))
+    (if (not (empty? count-parameters))
       (return-count-function)
       (let [nest-function
             (fn [link]
