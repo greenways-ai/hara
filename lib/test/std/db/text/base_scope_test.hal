@@ -1,0 +1,94 @@
+(ns std.db.text.base-scope-test
+  (:use code.test)
+  (:require [std.db.text.base-scope :as scope]))
+
+(def schema
+  {"User"
+   {"id" {"ident" "id" "order" 0 "type" "uuid" "scope" "id"}
+    "name" {"ident" "name" "order" 1 "type" "text" "scope" "data"}
+    "secret" {"ident" "secret" "order" 2 "type" "text" "scope" "hidden"}
+    "team" {"ident" "team" "order" 3 "type" "ref" "scope" "ref"
+            "ref" {"ns" "Team" "type" "forward" "key" "team"}}
+    "profile" {"ident" "profile" "type" "ref" "scope" "ref"
+               "ref" {"ns" "Profile" "type" "reverse" "rkey" "user"}}}
+   "Team"
+   {"id" {"ident" "id" "order" 0 "type" "uuid" "scope" "id"}
+    "title" {"ident" "title" "order" 1 "type" "text" "scope" "data"}}
+   "Profile"
+   {"id" {"ident" "id" "order" 0 "type" "uuid" "scope" "id"}
+    "bio" {"ident" "bio" "order" 1 "type" "text" "scope" "data"}
+    "user" {"ident" "user" "order" 2 "type" "ref" "scope" "ref"
+            "ref" {"ns" "User" "type" "forward" "key" "user"}}}})
+
+(def results
+  [(fact "merge-queries performs a Cartesian deep merge"
+     [(scope/merge-queries [] [])
+      (scope/merge-queries [{:a 1}] [{:a 2}])
+      (scope/merge-queries [{:a 1} {:c 1}] [{:b 2} {:c 3}])]
+     => [[]
+         [{:a 2}]
+         [{:a 1 :b 2}
+          {:a 1 :c 3}
+          {:c 1 :b 2}
+          {:c 3}]])
+
+   (fact "scope selectors expand and plain foreign keys normalize"
+     [(scope/filter-scope ["*/data" "-/key"])
+      (scope/filter-plain-key "team_id")
+      (scope/filter-plain ["-/data" "team_id" "name"])]
+     => [{"-/info" true
+          "-/id" true
+          "-/data" true
+          "-/key" true}
+         "team"
+         {"team" true "name" true}])
+
+   (fact "data columns are selected by scopes and explicit identifiers"
+     (map (fn [entry] (get entry "ident"))
+          (scope/get-data-columns schema "User" ["*/data" "team_id"]))
+     => ["id" "name" "team"])
+
+   (fact "compact links receive default where and returning clauses"
+     [(scope/get-link-standard ["profile"])
+      (scope/get-link-standard ["team" ["id" "title"]])]
+     => [["profile" [{} ["*/data"]]]
+         ["team" [{} ["id" "title"]]]])
+
+   (fact "query and returning graphs identify every reached table"
+     [(scope/get-query-tables schema "User" {"profile" {"user" "u1"}} {})
+      (scope/get-linked-tables schema
+                               "User"
+                               [["profile"] ["team" ["title"]]])]
+     => [{"User" true "Profile" true}
+         {"User" true "Profile" true "Team" true}])
+
+   (fact "canonical trees encode forward and reverse reference joins"
+     (scope/get-tree
+      schema
+      "User"
+      {"name" "Ada"}
+      ["*/data"
+       ["team" {"title" "Core"} ["id" "title"]]
+       ["profile" {"bio" ["neq" ""]} ["id" "bio"]]]
+      {})
+     => ["User"
+         {"where" [{"name" "Ada"}]
+          "data" ["id" "name"]
+          "custom" []
+          "links"
+          [["team"
+            "forward"
+            ["Team"
+             {"where" [{"title" "Core" "id" ["eq" ["User.team_id"]]}]
+              "data" ["id" "title"]
+              "links" []
+              "custom" []}]]
+           ["profile"
+            "reverse"
+            ["Profile"
+             {"where" [{"bio" ["neq" ""] "user" ["eq" ["User.id"]]}]
+              "data" ["id" "bio"]
+              "links" []
+              "custom" []}]]]]}])])
+
+(pr-str (run '[std.db.text.base-scope-test]))

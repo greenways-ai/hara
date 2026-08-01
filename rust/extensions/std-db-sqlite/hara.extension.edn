@@ -1,0 +1,16 @@
+{:namespace "std.db.provider.sqlite"
+ :identity "hara/std.db.sqlite"
+ :version "0.1.0"
+ :provider :hta
+ :abi :hta.v1
+ :targets
+ {:node {:module "node/worker.mjs" :runtime :process}
+  :browser {:module "browser/worker.mjs" :runtime :web-worker}}
+ :assets []
+ :exports
+ {"version" {:args [] :returns :map :async true}
+  "open"    {:args [:map] :returns :map :async true}
+  "exec"    {:args [:int :string :vector] :returns :map :async true}
+  "query"   {:args [:int :string :vector] :returns :map :async true}
+  "close"   {:args [:int] :returns :boolean :async true}}
+ :capabilities []}

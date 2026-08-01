@@ -1,0 +1,71 @@
+(ns std.db.text.base-graph-test
+  (:use code.test)
+  (:require [std.db.text.base-graph :as graph]
+            [std.db.text.sql-util :as sql]))
+
+(def schema
+  {"Currency"
+   {"id" {"ident" "id" "order" 0 "type" "text" "scope" "id"}
+    "name" {"ident" "name" "order" 1 "type" "text" "scope" "data"}
+    "description" {"ident" "description" "order" 2 "type" "text" "scope" "detail"}}})
+
+(def results
+  [(fact "tree parameters are recognized by any canonical bucket"
+     [(graph/tree-params? {"where" []})
+      (graph/tree-params? {:data []})
+      (graph/tree-params? {"links" [] "custom" []})
+      (graph/tree-params? [])
+      (graph/tree-params? nil)]
+     => [true true true false false])
+
+   (fact "canonical trees require a table and parameter map"
+     [(graph/tree? ["Currency" {"where" []}])
+      (graph/tree? ["Currency" {:data ["id"]}])
+      (graph/tree? ["Currency"])
+      (graph/tree? ["Currency" ["id"]])]
+     => [true true false false])
+
+   (fact "canonical parameter maps receive all explicit buckets"
+     [(graph/normalise-tree-params {"where" [{"id" "USD"}]})
+      (graph/normalise-tree-params
+       {:data ["id"] :custom [(sql/ORDER-BY ["id"])]})]
+     => [{"where" [{"id" "USD"}]
+          "data" []
+          "links" []
+          "custom" []}
+         {"where" []
+          "data" ["id"]
+          "links" []
+          "custom" [(sql/ORDER-BY ["id"])]}])
+
+   (fact "compact query inputs split into table where and returning"
+     [(graph/base-query-inputs ["Currency"])
+      (graph/base-query-inputs ["Currency" ["id" "name"]])
+      (graph/base-query-inputs ["Currency" {"id" "USD"}])
+      (graph/base-query-inputs ["Currency" {"id" "USD"} ["id"]])]
+     => [["Currency" {} nil]
+         ["Currency" {} ["id" "name"]]
+         ["Currency" {"id" "USD"} nil]
+         ["Currency" {"id" "USD"} ["id"]]])
+
+   (fact "select-tree preserves canonical input and expands compact input"
+     [(graph/select-tree
+       schema
+       ["Currency" {"where" [] "data" ["id"]}]
+       {})
+      (graph/select-tree schema ["Currency"] {})
+      (graph/select-tree schema ["Currency" {"id" "USD"} ["id" "name"]] {})]
+     => [["Currency"
+          {"where" [] "data" ["id"] "links" [] "custom" []}]
+         ["Currency"
+          {"where" []
+           "data" ["id" "name"]
+           "links" []
+           "custom" []}]
+         ["Currency"
+          {"where" [{"id" "USD"}]
+           "data" ["id" "name"]
+           "links" []
+           "custom" []}]])])
+
+(pr-str (run '[std.db.text.base-graph-test]))

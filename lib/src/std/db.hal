@@ -1,0 +1,69 @@
+;; ============================================================================
+;; std.db — provider-neutral database operations.
+;;
+;; Provider namespaces create typed connections implementing IDatabase. This
+;; facade keeps application code independent from SQLite, PGlite or future
+;; remote PostgreSQL transports after a connection has been opened.
+;; ============================================================================
+(ns std.db
+  (:require [std.db.protocol :as protocol]))
+
+(defn ^{:schema [:fn [:any] :keyword]}
+  engine
+  "Returns the logical database engine for connection."
+  [connection]
+  (protocol/db-engine connection))
+
+(defn ^{:schema [:fn [:any] :keyword]}
+  provider
+  "Returns the concrete provider for connection."
+  [connection]
+  (protocol/db-provider connection))
+
+(defn ^{:schema [:fn [:any] :map]}
+  info
+  "Returns connection metadata without exposing its host engine object."
+  [connection]
+  (protocol/db-info connection))
+
+(defn ^{:schema [:function [:fn [:any :str] :any]
+                            [:fn [:any :str :vector] :any]]}
+  exec
+  "Executes SQL with optional positional parameters."
+  ([connection sql]
+   (exec connection sql []))
+  ([connection sql parameters]
+   (protocol/db-exec connection sql parameters)))
+
+(defn ^{:schema [:function [:fn [:any :str] :any]
+                            [:fn [:any :str :vector] :any]]}
+  query
+  "Executes row-returning SQL with optional positional parameters."
+  ([connection sql]
+   (query connection sql []))
+  ([connection sql parameters]
+   (protocol/db-query connection sql parameters)))
+
+(defn ^{:schema [:fn [:any] :any]}
+  close
+  "Closes connection."
+  [connection]
+  (protocol/db-close connection))
+
+(defn ^{:schema [:fn [:any] :any]}
+  begin
+  "Begins a transaction."
+  [connection]
+  (exec connection "begin"))
+
+(defn ^{:schema [:fn [:any] :any]}
+  commit
+  "Commits the current transaction."
+  [connection]
+  (exec connection "commit"))
+
+(defn ^{:schema [:fn [:any] :any]}
+  rollback
+  "Rolls back the current transaction."
+  [connection]
+  (exec connection "rollback"))

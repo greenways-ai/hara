@@ -1,0 +1,100 @@
+;; ============================================================================
+;; std.db.node.client-base — client API for database kernel actions.
+;; ============================================================================
+(ns std.db.node.client-base
+  (:require [std.db.node.kernel-base :as kernel]
+            [std.db.node.kernel-batch :as batch]
+            [std.db.node.kernel-service :as service]
+            [std.db.node.lifecycle :as lifecycle]
+            [std.db.node.proxy-util :as proxy]))
+
+(defn kernel-init
+  [node config schema lookup options]
+  (proxy/request-client node kernel/ACTION-KERNEL-INIT [config schema lookup] options))
+
+(defn kernel-setup
+  [node config schema lookup options]
+  (proxy/request-client node kernel/ACTION-KERNEL-SETUP [config schema lookup] options))
+
+(defn kernel-teardown
+  [node config options]
+  (proxy/request-client node kernel/ACTION-KERNEL-TEARDOWN [config] options))
+
+(defn runtime-finalize
+  [node options]
+  (proxy/request-client node lifecycle/ACTION-FINALIZE [] options))
+
+(defn runtime-status
+  [node options]
+  (proxy/request-client node service/ACTION-RUNTIME-STATUS [] options))
+
+(defn driver-list
+  [node options]
+  (proxy/request-client node service/ACTION-DRIVER-LIST [] options))
+
+(defn service-list
+  [node options]
+  (proxy/request-client node service/ACTION-SERVICE-LIST [] options))
+
+(defn service-info
+  [node service-id options]
+  (proxy/request-client node kernel/ACTION-SERVICE-INFO [service-id] options))
+
+(defn service-exists?
+  [node service-id options]
+  (proxy/request-client node service/ACTION-SERVICE-EXISTS [service-id] options))
+
+(defn service-open
+  [node service-id entry schema lookup options]
+  (proxy/request-client node
+                        service/ACTION-SERVICE-OPEN
+                        [service-id entry schema lookup]
+                        options))
+
+(defn service-close
+  [node service-id options]
+  (proxy/request-client node service/ACTION-SERVICE-CLOSE [service-id] options))
+
+(defn service-close-all
+  [node options]
+  (proxy/request-client node service/ACTION-SERVICE-CLOSE-ALL [] options))
+
+(defn exec
+  ([node service-id sql options]
+   (exec node service-id sql [] options))
+  ([node service-id sql parameters options]
+   (proxy/request-client node kernel/ACTION-EXEC [service-id sql parameters] options)))
+
+(defn query
+  ([node service-id sql options]
+   (query node service-id sql [] options))
+  ([node service-id sql parameters options]
+   (proxy/request-client node kernel/ACTION-QUERY [service-id sql parameters] options)))
+
+(defn batch
+  "Runs statement descriptors sequentially on one runtime service."
+  [node service-id statements options]
+  (proxy/request-client node
+                        batch/ACTION-BATCH
+                        [service-id statements false]
+                        options))
+
+(defn transaction
+  "Runs statement descriptors within one server-side transaction."
+  [node service-id statements options]
+  (proxy/request-client node
+                        batch/ACTION-BATCH
+                        [service-id statements true]
+                        options))
+
+(defn begin
+  [node service-id options]
+  (exec node service-id "begin" [] options))
+
+(defn commit
+  [node service-id options]
+  (exec node service-id "commit" [] options))
+
+(defn rollback
+  [node service-id options]
+  (exec node service-id "rollback" [] options))
