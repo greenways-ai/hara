@@ -1,0 +1,6 @@
+;; Canonical timeout contract for portable test execution.
+(ns std.protocol.itesttimer)
+
+(defprotocol ITestTimer
+  (timeout-promise [timer promise milliseconds])
+  (cancel-timeout [timer timeout]))
