@@ -67,10 +67,15 @@
       (promise/from {:status :not-found
                      :service service-id})
       (let [connection (compatible-get service :connection)]
-        (promise/finally
-         (db/close connection)
-         (fn []
-           (substrate/remove-service node service-id)))))))
+        (promise/then
+         (promise/finally
+          (db/close connection)
+          (fn []
+            (substrate/remove-service node service-id)))
+         (fn [closed]
+           {:status :closed
+            :service service-id
+            :closed closed}))))))
 
 (defn driver-list-handler
   [space args request node]
