@@ -1,0 +1,45 @@
+name: std.db SQLite WASM
+
+on:
+  pull_request:
+    paths:
+      - "lib/src/std/db/**"
+      - "rust/extensions/std-db-sqlite/**"
+      - "rust/web/entries/sqlite-*.mjs"
+      - "rust/web/packages/db-sqlite/**"
+      - "rust/web/sqlite-provider.test.mjs"
+      - "rust/web/vite.sqlite-*.config.js"
+      - "rust/web/package-sqlite-extension.mjs"
+      - "scripts/build-db-sqlite-extension"
+      - ".github/workflows/std-db-sqlite.yml"
+  workflow_dispatch:
+
+jobs:
+  sqlite-wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+          cache-dependency-path: rust/web/package-lock.json
+      - name: Install Hara web build dependencies
+        working-directory: rust/web
+        run: npm ci
+      - name: Install pinned SQLite WASM provider
+        working-directory: rust/extensions/std-db-sqlite
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Build Node provider
+        working-directory: rust/web
+        run: ./node_modules/.bin/vite build --config vite.sqlite-node.config.js
+      - name: Build browser provider
+        working-directory: rust/web
+        run: ./node_modules/.bin/vite build --config vite.sqlite-browser.config.js
+      - name: Execute real SQLite WASM test
+        working-directory: rust/web
+        run: node --test sqlite-provider.test.mjs
+      - name: Assemble extension package
+        working-directory: rust/web
+        run: node package-sqlite-extension.mjs
