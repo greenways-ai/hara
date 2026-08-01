@@ -37,6 +37,11 @@ public class HaraDbRuntimeTest {
   }
 
   @Test
+  public void databaseSupabaseRuntimeFixturePasses() throws Exception {
+    assertHalFixturePasses("lib/test/std/db/node/supabase_test.hal");
+  }
+
+  @Test
   public void databaseWorkerMessageTransportFixturePasses() throws Exception {
     assertHalFixturePasses("lib/test/std/db/node/transport_test.hal");
   }
