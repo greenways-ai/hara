@@ -2,12 +2,14 @@
 ;; std.db.node.kernel-base — provider-neutral database services on Substrate.
 ;;
 ;; Database drivers are registered on a server node. Kernel setup opens typed
-;; std.db connections and stores them as named services. Handlers expose the
-;; same request shape locally or across any Substrate transport.
+;; std.db connections and stores them as named services. Every service owns a
+;; FIFO queue so direct requests, batches, transactions and close operations do
+;; not interleave on the same connection.
 ;; ============================================================================
 (ns std.db.node.kernel-base
   (:require [std.db :as db]
             [std.db.node.lifecycle :as lifecycle]
+            [std.db.node.serial :as serial]
             [std.foundation.promise :as promise]
             [std.lib.substrate.protocol :as substrate]))
 
@@ -105,9 +107,29 @@
   [entry fallback]
   (option entry :id fallback))
 
-(defn- service-connection
+(defn service-connection
+  "Returns the typed std.db connection held by service."
   [service]
   (compatible-get service :connection))
+
+(defn service-submit
+  "Queues function on service's FIFO execution queue."
+  [service function]
+  (let [queue (compatible-get service :serial)]
+    (if queue
+      (serial/submit queue function)
+      (let [result (function)]
+        (if (promise? result) result (promise/from result))))))
+
+(defn exec-service-main
+  "Executes SQL directly on an already-acquired service queue."
+  [service sql parameters]
+  (db/exec (service-connection service) sql (or parameters [])))
+
+(defn query-service-main
+  "Queries directly on an already-acquired service queue."
+  [service sql parameters]
+  (db/query (service-connection service) sql (or parameters [])))
 
 (defn- service-summary
   [service]
@@ -161,6 +183,7 @@
                           :role role
                           :type driver-id
                           :connection connection
+                          :serial (serial/create)
                           :schema schema
                           :lookup lookup
                           :metadata metadata}]
@@ -228,7 +251,9 @@
   (let [service (substrate/get-service node service-id)]
     (if service
       (promise/finally
-       (db/close (service-connection service))
+       (service-submit service
+                       (fn []
+                         (db/close (service-connection service))))
        (fn [] (substrate/remove-service node service-id)))
       (promise/from nil))))
 
@@ -285,18 +310,20 @@
   (service-summary (get-database-service node service-id)))
 
 (defn exec-main
-  "Executes SQL through a configured database service."
+  "Executes SQL through a configured database service queue."
   [node service-id sql parameters]
-  (db/exec (service-connection (get-database-service node service-id))
-           sql
-           (or parameters [])))
+  (let [service (get-database-service node service-id)]
+    (service-submit service
+                    (fn []
+                      (exec-service-main service sql parameters)))))
 
 (defn query-main
-  "Executes row-returning SQL through a configured database service."
+  "Executes row-returning SQL through a configured database service queue."
   [node service-id sql parameters]
-  (db/query (service-connection (get-database-service node service-id))
-            sql
-            (or parameters [])))
+  (let [service (get-database-service node service-id)]
+    (service-submit service
+                    (fn []
+                      (query-service-main service sql parameters)))))
 
 (defn kernel-init-handler
   [space args request node]
