@@ -2666,7 +2666,7 @@ mod tests {
                 .unwrap(),
             "{:kind :invalid}"
         );
-        for source in ["1/2", "1N", "1M", "1 2"] {
+        for source in ["1/2", "1 2"] {
             let escaped = source.replace('\\', "\\\\").replace('"', "\\\"");
             assert!(
                 runtime
@@ -3296,6 +3296,8 @@ mod tests {
         let mut runtime = Runtime::new();
         let cases = [
             ("1.5", "1.5"),
+            ("123N", "123N"),
+            ("1.20M", "1.2M"),
             ("\\newline", "\\newline"),
             ("#\"a+\"", "#\"a+\""),
             ("#demo {:a 1}", "#demo{:a 1}"),
@@ -3306,7 +3308,7 @@ mod tests {
         for (source, expected) in cases {
             assert_eq!(runtime.eval_text(source).unwrap(), expected, "{source}");
         }
-        for unsupported in ["123N", "1.20M", "9223372036854775808"] {
+        for unsupported in ["9223372036854775808"] {
             assert!(runtime.eval_text(unsupported).is_err(), "{unsupported}");
         }
         assert_eq!(runtime.eval_text("(= ##NaN ##NaN)").unwrap(), "true");
