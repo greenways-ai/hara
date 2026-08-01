@@ -2,6 +2,8 @@ const MAGIC = new Uint8Array([0x48, 0x54, 0x41, 0x31]);
 const TAG = { nil: 0, false: 1, true: 2, i64: 3, string: 4, bytes: 5, keyword: 6, symbol: 7, list: 8, vector: 9, set: 10, map: 11, handle: 12, namespace: 13, var: 14, f64: 15, atom: 16, array: 17, object: 18 };
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
+export const HTA_MAX_FRAME_BYTES = 64 * 1024 * 1024;
+export const HTA_MAX_NESTING_DEPTH = 256;
 
 export class HtaKeyword { constructor(name) { this.name = name; } }
 export class HtaSymbol { constructor(name) { this.name = name; } }
@@ -50,17 +52,19 @@ export class BrowserPromiseProvider {
 
 export function encodeHta(value) {
   const output = [...MAGIC];
-  writeValue(output, value);
+  writeValue(output, value, 0);
+  if(output.length>HTA_MAX_FRAME_BYTES)throw new Error("hta/value-too-large: frame exceeds 64 MiB");
   return Uint8Array.from(output);
 }
 
 export function decodeHta(input) {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+  if(bytes.length>HTA_MAX_FRAME_BYTES)throw new Error("hta/value-too-large: frame exceeds 64 MiB");
   if (bytes.length < 4 || !MAGIC.every((byte, index) => bytes[index] === byte)) {
     throw new Error("hta/value-malformed: invalid HTA1 header");
   }
   const reader = new Reader(bytes, 4);
-  const value = reader.value();
+  const value = reader.value(0);
   if (reader.cursor !== bytes.length) throw new Error("hta/value-malformed: trailing bytes");
   return value;
 }
@@ -152,7 +156,8 @@ class ManifestReader {
   token(){this.space();const start=this.cursor;while(this.cursor<this.source.length&&!/[\s,{}\[\]\"]/ .test(this.source[this.cursor]))this.cursor++;if(start===this.cursor)throw this.error("invalid token");return this.source.slice(start,this.cursor);}
 }
 
-function writeValue(output, value) {
+function writeValue(output, value, depth=0) {
+  if(depth>HTA_MAX_NESTING_DEPTH)throw new Error("hta/value-too-deep: nesting exceeds 256");
   if (value === null || value === undefined) output.push(TAG.nil);
   else if (value === false) output.push(TAG.false);
   else if (value === true) output.push(TAG.true);
@@ -164,25 +169,26 @@ function writeValue(output, value) {
   else if (value instanceof Uint8Array) { output.push(TAG.bytes); writeBytes(output, value); }
   else if (value instanceof HtaKeyword) { output.push(TAG.keyword); writeBytes(output, encoder.encode(value.name)); }
   else if (value instanceof HtaSymbol) { output.push(TAG.symbol); writeBytes(output, encoder.encode(value.name)); }
-  else if (value instanceof HtaVar) { output.push(TAG.var); writeValue(output,value.symbol); writeValue(output,value.value); }
-  else if (value instanceof HtaAtom) { output.push(TAG.atom); writeValue(output,value.value); }
-  else if (value instanceof HtaArray) { output.push(TAG.array); writeSequence(output,value.values); }
-  else if (value instanceof HtaObject) { output.push(TAG.object); writeU32(output,value.entries.length);for(const [key,item] of value.entries){writeValue(output,key);writeValue(output,item);} }
+  else if (value instanceof HtaVar) { output.push(TAG.var); writeValue(output,value.symbol,depth+1); writeValue(output,value.value,depth+1); }
+  else if (value instanceof HtaAtom) { output.push(TAG.atom); writeValue(output,value.value,depth+1); }
+  else if (value instanceof HtaArray) { output.push(TAG.array); writeSequence(output,value.values,depth); }
+  else if (value instanceof HtaObject) { output.push(TAG.object); writeU32(output,value.entries.length);for(const [key,item] of value.entries){writeValue(output,key,depth+1);writeValue(output,item,depth+1);} }
   else if (value instanceof HtaHandle) { if(value.released)throw new Error("hta/handle-released");output.push(TAG.handle);writeBytes(output,encoder.encode(value.owner));writeBytes(output,encoder.encode(value.type));writeI64(output,value.id); }
-  else if (Array.isArray(value)) { output.push(TAG.vector); writeSequence(output, value); }
-  else if (value instanceof Set) { output.push(TAG.set); writeCanonical(output, [...value]); }
+  else if (Array.isArray(value)) { output.push(TAG.vector); writeSequence(output, value, depth); }
+  else if (value instanceof Set) { output.push(TAG.set); writeCanonical(output, [...value], depth); }
   else if (value instanceof Map) {
-    const entries = [...value].map(([key, item]) => [bare(key), bare(item)]).sort((a, b) => compare(a[0], b[0]));
+    const entries = [...value].map(([key, item]) => [bare(key,depth+1), bare(item,depth+1)]).sort((a, b) => compare(a[0], b[0]));
     output.push(TAG.map); writeU32(output, entries.length);
-    for (const [key, item] of entries) output.push(...key, ...item);
+    for (const [key, item] of entries) { appendBytes(output,key); appendBytes(output,item); }
   } else throw new Error(`hta/value-unsupported: ${Object.prototype.toString.call(value)}`);
 }
 
-function bare(value) { const output = []; writeValue(output, value); return output; }
-function writeSequence(output, values) { writeU32(output, values.length); for (const value of values) writeValue(output, value); }
-function writeCanonical(output, values) { const encoded = values.map(bare).sort(compare); writeU32(output, encoded.length); for (const value of encoded) output.push(...value); }
+function bare(value,depth) { const output = []; writeValue(output, value, depth); return output; }
+function writeSequence(output, values, depth) { writeU32(output, values.length); for (const value of values) writeValue(output, value, depth+1); }
+function writeCanonical(output, values, depth) { const encoded = values.map(value=>bare(value,depth+1)).sort(compare); writeU32(output, encoded.length); for (const value of encoded) appendBytes(output,value); }
 function compare(left, right) { for (let i=0;i<Math.min(left.length,right.length);i++) if(left[i]!==right[i]) return left[i]-right[i]; return left.length-right.length; }
-function writeBytes(output, bytes) { writeU32(output, bytes.length); output.push(...bytes); }
+function writeBytes(output, bytes) { writeU32(output, bytes.length); appendBytes(output,bytes); }
+function appendBytes(output,bytes){if(output.length+bytes.length>HTA_MAX_FRAME_BYTES)throw new Error("hta/value-too-large: frame exceeds 64 MiB");for(let offset=0;offset<bytes.length;offset++)output.push(bytes[offset]);}
 function writeU32(output, value) { if(value<0||value>0xffff_ffff)throw new Error("hta/value-too-large"); output.push(value>>>24,(value>>>16)&255,(value>>>8)&255,value&255); }
 function writeI64(output, value) { const normalized=BigInt.asUintN(64,value); for(let shift=56n;shift>=0n;shift-=8n)output.push(Number((normalized>>shift)&255n)); }
 function writeF64(output, value) { const bytes=new Uint8Array(8);new DataView(bytes.buffer).setFloat64(0,value,false);output.push(...bytes); }
@@ -192,20 +198,21 @@ class Reader {
   take(size) { const end=this.cursor+size; if(end>this.bytes.length)throw new Error("hta/value-malformed: truncated value"); const value=this.bytes.subarray(this.cursor,end);this.cursor=end;return value; }
   u32() { const value=this.take(4); return ((value[0]*0x1000000)+(value[1]<<16)+(value[2]<<8)+value[3])>>>0; }
   data() { return this.take(this.u32()); }
-  sequence() { const size=this.u32(), result=[]; for(let i=0;i<size;i++)result.push(this.value()); return result; }
-  value() {
+  sequence(depth) { const size=this.u32();if(size>this.bytes.length-this.cursor)throw new Error("hta/value-malformed: impossible sequence length");const result=[]; for(let i=0;i<size;i++)result.push(this.value(depth+1)); return result; }
+  value(depth=0) {
+    if(depth>HTA_MAX_NESTING_DEPTH)throw new Error("hta/value-too-deep: nesting exceeds 256");
     const tag=this.take(1)[0];
     if(tag===TAG.nil)return null;if(tag===TAG.false)return false;if(tag===TAG.true)return true;
     if(tag===TAG.i64){const bytes=this.take(8);let value=0n;for(const byte of bytes)value=(value<<8n)|BigInt(byte);value=BigInt.asIntN(64,value);return value>=BigInt(Number.MIN_SAFE_INTEGER)&&value<=BigInt(Number.MAX_SAFE_INTEGER)?Number(value):value;}
     if(tag===TAG.f64){const bytes=this.take(8);return new DataView(bytes.buffer,bytes.byteOffset,8).getFloat64(0,false);}
     if(tag===TAG.string)return decoder.decode(this.data());if(tag===TAG.bytes)return this.data().slice();
     if(tag===TAG.keyword)return new HtaKeyword(decoder.decode(this.data()));if(tag===TAG.symbol)return new HtaSymbol(decoder.decode(this.data()));
-    if(tag===TAG.list||tag===TAG.vector)return this.sequence();if(tag===TAG.set)return new Set(this.sequence());
-    if(tag===TAG.map){const size=this.u32(),result=new Map();for(let i=0;i<size;i++)result.set(this.value(),this.value());return result;}
-    if(tag===TAG.var){const symbol=this.value(),value=this.value();if(!(symbol instanceof HtaSymbol))throw new Error("hta/value-malformed: invalid var symbol");return new HtaVar(symbol,value);}
-    if(tag===TAG.atom)return new HtaAtom(this.value());
-    if(tag===TAG.array)return new HtaArray(this.sequence());
-    if(tag===TAG.object){const size=this.u32(),entries=[];for(let i=0;i<size;i++){const key=this.value();if(typeof key!=="string")throw new Error("hta/value-malformed: invalid object key");entries.push([key,this.value()]);}return new HtaObject(entries);}
+    if(tag===TAG.list||tag===TAG.vector)return this.sequence(depth);if(tag===TAG.set)return new Set(this.sequence(depth));
+    if(tag===TAG.map){const size=this.u32();if(size>(this.bytes.length-this.cursor)/2)throw new Error("hta/value-malformed: impossible map length");const result=new Map();for(let i=0;i<size;i++)result.set(this.value(depth+1),this.value(depth+1));return result;}
+    if(tag===TAG.var){const symbol=this.value(depth+1),value=this.value(depth+1);if(!(symbol instanceof HtaSymbol))throw new Error("hta/value-malformed: invalid var symbol");return new HtaVar(symbol,value);}
+    if(tag===TAG.atom)return new HtaAtom(this.value(depth+1));
+    if(tag===TAG.array)return new HtaArray(this.sequence(depth));
+    if(tag===TAG.object){const size=this.u32();if(size>(this.bytes.length-this.cursor)/2)throw new Error("hta/value-malformed: impossible object length");const entries=[];for(let i=0;i<size;i++){const key=this.value(depth+1);if(typeof key!=="string")throw new Error("hta/value-malformed: invalid object key");entries.push([key,this.value(depth+1)]);}return new HtaObject(entries);}
     if(tag===TAG.handle){const owner=decoder.decode(this.data()),type=decoder.decode(this.data()),bytes=this.take(8);let id=0n;for(const byte of bytes)id=(id<<8n)|BigInt(byte);return new HtaHandle(owner,type,id);}
     throw new Error("hta/value-malformed: unknown value tag");
   }
@@ -222,7 +229,7 @@ export class HtaContext {
   call(target, args=[]) { let id=null,cancelled=false;
     return this.promiseProvider.create((resolve,reject,onCancel)=>{
       onCancel(()=>{cancelled=true;if(id!==null)this.worker.postMessage({type:"cancel",id});});
-      this.ready.then(()=>{validateHandles(args,this);id=this.next++;this.pending.set(id,{resolve,reject});this.worker.postMessage({type:"call",id,frame:encodeHta([target,args])});if(cancelled)this.worker.postMessage({type:"cancel",id});}).catch(reject);
+      this.ready.then(()=>{if(cancelled)return;validateHandles(args,this);id=this.next++;this.pending.set(id,{resolve,reject});this.worker.postMessage({type:"call",id,frame:encodeHta([target,args])});}).catch(reject);
     });
   }
   releaseHandle(handle){if(handle.context!==this)throw new Error("hta/handle-owner-mismatch");const wireHandle=new HtaHandle(handle.owner,handle.type,handle.id);this.worker.postMessage({type:"release",frame:encodeHta(wireHandle)});}
@@ -250,8 +257,9 @@ export class HtaContext {
 
 export class HtaSession {
   constructor(context,name){if(typeof name!=="string"||!name.length)throw new Error("INVALID_SESSION_NAME");this.context=context;this.name=name;}
-  call(target,args=[]){if(target==="eval")return this.eval(args[0]);if(target==="eval-bound")return this.evalBound(args[0],args[1]);if(target==="complete")return this.complete(args[0]);return this.context.call(target,args);}
+  call(target,args=[]){if(target==="eval")return this.eval(args[0]);if(target==="eval-vm")return this.evalVm(args[0]);if(target==="eval-bound")return this.evalBound(args[0],args[1]);if(target==="complete")return this.complete(args[0]);return this.context.call(target,args);}
   eval(source){return this.context.call("session/eval",[this.name,source]);}
+  evalVm(source){return this.context.call("session/eval-vm",[this.name,source]);}
   evalBound(source,bindings=[]){return this.context.call("session/eval-bound",[this.name,source,bindings]);}
   complete(prefix){return this.context.call("session/complete",[this.name,prefix]);}
   info(){return this.context.call("session/info",[this.name]);}
@@ -263,4 +271,4 @@ export class HtaSession {
 function bindHandles(value,context){if(value instanceof HtaHandle){value.context=context;const tag=context.handleTags[value.type];if(tag){value.displayTag=tag;value.displayKind=value.type;}return value;}if(Array.isArray(value)){value.forEach(item=>bindHandles(item,context));}else if(value instanceof Set){for(const item of value)bindHandles(item,context);}else if(value instanceof Map){for(const [key,item]of value){bindHandles(key,context);bindHandles(item,context);}}return value;}
 function validateHandles(value,context){if(value instanceof HtaHandle){if(value.released)throw new Error("hta/handle-released");if(value.context!==context)throw new Error("hta/handle-owner-mismatch");return;}if(Array.isArray(value)){value.forEach(item=>validateHandles(item,context));}else if(value instanceof Set){for(const item of value)validateHandles(item,context);}else if(value instanceof Map){for(const [key,item]of value){validateHandles(key,context);validateHandles(item,context);}}}
 function errorValue(error){return new Map([[new HtaKeyword("code"),new HtaKeyword("host/error")],[new HtaKeyword("message"),String(error?.message??error)],[new HtaKeyword("origin"),new HtaKeyword("browser")],[new HtaKeyword("retryable"),false]]);}
-function errorFrom(value){if(value instanceof Error)return value;if(value instanceof Map){for(const[key,item]of value)if(key instanceof HtaKeyword&&key.name==="message")return new Error(String(item));}return new Error(String(value));}
+function errorFrom(value){if(value instanceof Error)return value;if(value instanceof Map){let message="HTA request failed",code;for(const[key,item]of value)if(key instanceof HtaKeyword&&key.name==="message")message=String(item);else if(key instanceof HtaKeyword&&key.name==="code")code=item instanceof HtaKeyword?item.name:String(item);const error=new Error(message);error.code=code;error.data=value;return error;}return new Error(String(value));}

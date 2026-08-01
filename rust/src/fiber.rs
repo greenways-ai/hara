@@ -1,5 +1,5 @@
 use super::*;
-use crate::lang::data::{OrderedMap, OrderedSet};
+use crate::lang::data::{List as PList, OrderedMap, OrderedSet};
 
 #[path = "fiber/coroutine.rs"]
 mod coroutine;
@@ -404,7 +404,9 @@ impl EvalFiber {
         ) {
             return false;
         }
-        self.pending = None;
+        if let Some(pending) = self.pending.take() {
+            pending.notify_cancel();
+        }
         self.resume = None;
         self.state = EvalFiberState::Cancelled;
         true
@@ -697,9 +699,7 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
         Some("std.foundation.coroutine/yield") => coroutine::yield_form(v, env, k),
         Some("std.foundation.coroutine/await") => coroutine::await_form(v, env, k),
         Some("def") | Some("set!") | Some("var/set") => bind_form(v, env, k),
-        Some("resolve")
-            if matches!(env.borrow().get("resolve"), Some(value) if !matches!(value, Value::Var(_))) =>
-        {
+        Some("resolve") if matches!(env.borrow().get("resolve"), Some(value) if !matches!(value, Value::Var(_))) => {
             application(v, env, k)
         }
         Some(name) if SYNC_SPECIAL_FORMS.contains(&name) => sync(Form::List(v), env, k),
@@ -1233,6 +1233,7 @@ fn call(f: Rc<Function>, args: Vec<Value>, k: Cont) -> Step {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
     #[test]
     fn resumes_nested() {
         let p = Promise::new();
@@ -1245,6 +1246,21 @@ mod tests {
             f.resume(p.state()),
             EvalFiberState::Completed(Value::Number(42))
         );
+    }
+
+    #[test]
+    fn cancelling_a_suspended_fiber_notifies_its_pending_promise() {
+        let promise = Promise::new();
+        let cancelled = Rc::new(Cell::new(false));
+        let observed = cancelled.clone();
+        promise.set_cancel_hook(Rc::new(move || observed.set(true)));
+        let mut environment = HashMap::new();
+        environment.insert("p".into(), Value::Promise(promise));
+        let mut fiber = EvalFiber::start("(deref p)", environment).unwrap();
+        assert_eq!(fiber.state(), EvalFiberState::Suspended);
+        assert!(fiber.cancel());
+        assert!(cancelled.get());
+        assert_eq!(fiber.state(), EvalFiberState::Cancelled);
     }
     #[test]
     fn resumes_function_finally() {

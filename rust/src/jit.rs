@@ -22,6 +22,7 @@ pub use hotness::{Hotness, JitConfig, LoopKey};
 #[cfg(all(feature = "native-jit", not(target_arch = "wasm32")))]
 pub use native::NativeBackend;
 pub use recorder::{RecordError, TraceRecorder};
+pub use runtime::JitTelemetry;
 pub use trace_ir::{ExitReason, ExitSnapshot, Trace, TraceOp, TraceOutcome, TraceValue};
 
 #[cfg(test)]

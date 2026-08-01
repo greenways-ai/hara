@@ -18,6 +18,17 @@
       "source": "(loop [i 0 value {}] (if (< i 500) (recur (+ i 1) (assoc value i (+ i 1))) (get value 499)))",
       "expected": "500",
       "iterations": 500
+    },
+    {
+      "id": "mutable-map-build",
+      "sources": {
+        "bb": "(loop [i 0 m (transient {})] (if (< i 500) (recur (+ i 1) (assoc! m i (+ i 1))) (get (persistent! m) 499)))",
+        "hara-rust-bytecode": "(loop [i 0 m (to-mutable {})] (if (< i 500) (recur (+ i 1) (assoc m i (+ i 1))) (get (to-persistent m) 499)))",
+        "hara-rust-trace-checked": "(loop [i 0 m (to-mutable {})] (if (< i 500) (recur (+ i 1) (assoc m i (+ i 1))) (get (to-persistent m) 499)))",
+        "hara-rust-trace-native": "(loop [i 0 m (to-mutable {})] (if (< i 500) (recur (+ i 1) (assoc m i (+ i 1))) (get (to-persistent m) 499)))"
+      },
+      "expected": "500",
+      "iterations": 500
     }
   ]
 }

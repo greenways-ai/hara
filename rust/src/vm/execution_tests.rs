@@ -366,6 +366,42 @@ fn literal_collections_and_collection_primitives() {
 }
 
 #[test]
+fn mutable_collections_build_in_place_and_freeze_once() {
+    assert_eq!(
+        eval(
+            "(let [m (to-mutable {})]
+                (do
+                  (loop [i 0]
+                    (if (< i 500)
+                      (do (assoc m i (+ i 1)) (recur (+ i 1)))
+                      nil))
+                  (let [p (to-persistent m)]
+                    (+ (count p) (get p 499)))))"
+        ),
+        "1000"
+    );
+    assert_eval_error(
+        "(let [m (to-mutable {}) p (to-persistent m)] (do p (assoc m :late 1)))",
+        "mutable collection used after to-persistent",
+    );
+}
+
+#[test]
+fn mutable_conversion_is_not_constant_folded_across_executions() {
+    let program = Rc::new(
+        compile_source(
+            "(loop [i 0 m (to-mutable {})]
+           (if (< i 10)
+             (recur (+ i 1) (assoc m i (+ i 1)))
+             (get (to-persistent m) 9)))",
+        )
+        .unwrap(),
+    );
+    assert_eq!(execute_program(program.clone()).unwrap().display(), "10");
+    assert_eq!(execute_program(program).unwrap().display(), "10");
+}
+
+#[test]
 fn fn_values_and_direct_calls() {
     assert_eq!(eval("(fn [x] x)"), "<fn>");
     assert_eq!(eval("((fn [x] x) 1)"), "1");

@@ -12,8 +12,12 @@ use crate::lang::data::{
     Trie as PTrie, Tuple as PTuple, Vector as PVector,
 };
 use crate::lang::data::{Metadata, MetadataValue};
+use crate::lang::data::{
+    MutableList, MutableMap, MutableOrderedMap, MutableOrderedSet, MutableQueue, MutableSet,
+    MutableSortedMap, MutableSortedSet, MutableTrie, MutableVector,
+};
 use crate::lang::hash::JavaHash;
-use crate::lang::protocol::{IDisplay, IMetadata, INamespaced};
+use crate::lang::protocol::{IDisplay, IMetadata, INamespaced, IToMutable, IToPersistent};
 pub use crate::task::{
     LocalPromiseProvider, Promise, PromiseProvider, PromiseRejection, PromiseState,
 };
@@ -498,6 +502,7 @@ pub enum Value {
     Function(Rc<Function>),
     Tuple(Box<PTuple<Value>>),
     Vector(PVector<Value>),
+    MutableCollection(Rc<RefCell<Option<MutableCollection>>>),
     Iterator(Rc<RefCell<IteratorState>>),
     Var(KernelVar<Value>),
     Namespace(Rc<crate::kernel::Namespace<Value>>),
@@ -509,6 +514,20 @@ pub enum Value {
     Coroutine(Rc<Coroutine>),
     ExceptionInfo(Rc<ExceptionInfo>),
     Nil,
+}
+
+#[derive(Debug, Clone)]
+pub enum MutableCollection {
+    Map(MutableMap<Value, Value>),
+    OrderedMap(MutableOrderedMap<Value, Value>),
+    SortedMap(MutableSortedMap<Value, Value>),
+    Trie(MutableTrie<Value>),
+    Set(MutableSet<Value>),
+    OrderedSet(MutableOrderedSet<Value>),
+    SortedSet(MutableSortedSet<Value>),
+    List(MutableList<Value>),
+    Queue(MutableQueue<Value>),
+    Vector(MutableVector<Value>),
 }
 
 #[derive(Clone)]
@@ -1658,7 +1677,8 @@ pub(crate) fn session_transferable(value: &Value) -> bool {
         | Value::StructType(_)
         | Value::Protocol(_)
         | Value::NativeType(_)
-        | Value::Coroutine(_) => false,
+        | Value::Coroutine(_)
+        | Value::MutableCollection(_) => false,
     }
 }
 
@@ -1755,6 +1775,52 @@ fn set_dissoc_value(collection: &Value, value: &Value) -> Result<Value, String> 
     })
 }
 
+fn collection_to_mutable(value: &Value) -> Result<Value, String> {
+    let mutable = match value {
+        Value::Map(values) => MutableCollection::Map(values.to_mutable()),
+        Value::OrderedMap(values) => MutableCollection::OrderedMap(values.to_mutable()),
+        Value::SortedMap(values) => MutableCollection::SortedMap(values.to_mutable()),
+        Value::Trie(values) => MutableCollection::Trie(values.to_mutable()),
+        Value::Set(values) => MutableCollection::Set(values.to_mutable()),
+        Value::OrderedSet(values) => MutableCollection::OrderedSet(values.to_mutable()),
+        Value::SortedSet(values) => MutableCollection::SortedSet(values.to_mutable()),
+        Value::List(values) => MutableCollection::List(values.to_mutable()),
+        Value::Queue(values) => MutableCollection::Queue(values.to_mutable()),
+        Value::Vector(values) => MutableCollection::Vector(values.to_mutable()),
+        Value::MutableCollection(_) => return Err("value is already mutable".into()),
+        _ => return Err("to-mutable expects a persistent collection".into()),
+    };
+    Ok(Value::MutableCollection(Rc::new(RefCell::new(Some(
+        mutable,
+    )))))
+}
+
+fn collection_to_persistent(value: &Value) -> Result<Value, String> {
+    let Value::MutableCollection(collection) = value else {
+        return Err("to-persistent expects a mutable collection".into());
+    };
+    let mut mutable = collection
+        .borrow_mut()
+        .take()
+        .ok_or_else(|| "mutable collection used after to-persistent".to_string())?;
+    Ok(match &mut mutable {
+        MutableCollection::Map(values) => Value::Map(values.to_persistent()),
+        MutableCollection::OrderedMap(values) => {
+            Value::OrderedMap(Box::new(values.to_persistent()))
+        }
+        MutableCollection::SortedMap(values) => Value::SortedMap(Box::new(values.to_persistent())),
+        MutableCollection::Trie(values) => Value::Trie(Box::new(values.to_persistent())),
+        MutableCollection::Set(values) => Value::Set(values.to_persistent()),
+        MutableCollection::OrderedSet(values) => {
+            Value::OrderedSet(Box::new(values.to_persistent()))
+        }
+        MutableCollection::SortedSet(values) => Value::SortedSet(Box::new(values.to_persistent())),
+        MutableCollection::List(values) => Value::List(values.to_persistent()),
+        MutableCollection::Queue(values) => Value::Queue(Box::new(values.to_persistent())),
+        MutableCollection::Vector(values) => Value::Vector(values.to_persistent()),
+    })
+}
+
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         if let Some(equal) = sequential_equality(self, other) {
@@ -1795,6 +1861,7 @@ impl PartialEq for Value {
             (Value::Function(a), Value::Function(b)) => Rc::ptr_eq(a, b),
             (Value::Tuple(a), Value::Tuple(b)) => a == b,
             (Value::Vector(a), Value::Vector(b)) => a == b,
+            (Value::MutableCollection(a), Value::MutableCollection(b)) => Rc::ptr_eq(a, b),
             (Value::Iterator(a), Value::Iterator(b)) => Rc::ptr_eq(a, b),
             (Value::Var(a), Value::Var(b)) => a.same_identity(b),
             (Value::Namespace(a), Value::Namespace(b)) => a.same_identity(b),
@@ -1873,6 +1940,7 @@ impl Ord for Value {
                 Value::NativeType(_) => 30,
                 Value::Coroutine(_) => 31,
                 Value::ExceptionInfo(_) => 32,
+                Value::MutableCollection(_) => 33,
             }
         }
         rank(self)
@@ -1964,6 +2032,7 @@ impl crate::lang::hash::JavaHash for Value {
             Self::Queue(v) => v.hash_calc(hash_type) as i64,
             Self::Tuple(v) => v.hash_calc(hash_type) as i64,
             Self::Vector(v) => v.hash_calc(hash_type) as i64,
+            Self::MutableCollection(v) => opaque(32, |s| Rc::as_ptr(v).hash(s)),
             Self::Promise(v) => opaque(8, |s| v.identity_address().hash(s)),
             Self::Atom(v) => opaque(28, |s| v.identity_address().hash(s)),
             Self::Function(v) => opaque(14, |s| Rc::as_ptr(v).hash(s)),
@@ -2120,6 +2189,25 @@ impl Value {
                     .collect::<Vec<_>>()
                     .join(" ")
             ),
+            Self::MutableCollection(values) => {
+                let borrowed = values.borrow();
+                let Some(values) = borrowed.as_ref() else {
+                    return "#<mutable-frozen>".into();
+                };
+                let kind = match values {
+                    MutableCollection::Map(_) => "map",
+                    MutableCollection::OrderedMap(_) => "ordered-map",
+                    MutableCollection::SortedMap(_) => "sorted-map",
+                    MutableCollection::Trie(_) => "trie",
+                    MutableCollection::Set(_) => "set",
+                    MutableCollection::OrderedSet(_) => "ordered-set",
+                    MutableCollection::SortedSet(_) => "sorted-set",
+                    MutableCollection::List(_) => "list",
+                    MutableCollection::Queue(_) => "queue",
+                    MutableCollection::Vector(_) => "vector",
+                };
+                format!("#<mutable-{kind}>")
+            }
             Self::Iterator(iterator) => {
                 if iterator.borrow().seq {
                     "<seq>".into()
@@ -2492,7 +2580,7 @@ pub(crate) fn thrown_error(value: Value) -> String {
 pub(crate) fn promise_rejection_error(error: PromiseRejection) -> String {
     match error {
         PromiseRejection::Message(message) => message,
-        PromiseRejection::Value(value) => thrown_error(value),
+        PromiseRejection::Value(value) | PromiseRejection::Cancelled(value) => thrown_error(value),
     }
 }
 
@@ -4458,6 +4546,7 @@ pub(crate) fn portable_type_name(value: &Value) -> &str {
         Value::Queue(_) => "queue",
         Value::Tuple(_) => "tuple",
         Value::Vector(_) => "vector",
+        Value::MutableCollection(_) => "mutable-collection",
         Value::Map(_) => "hash-map",
         Value::OrderedMap(_) => "ordered-map",
         Value::SortedMap(_) => "sorted-map",
@@ -4502,6 +4591,7 @@ pub fn receiver_category(value: &Value) -> &'static str {
         Value::Queue(_) => "queue",
         Value::Tuple(_) => "tuple",
         Value::Vector(_) => "vector",
+        Value::MutableCollection(_) => "mutable",
         Value::Map(_) | Value::OrderedMap(_) | Value::SortedMap(_) | Value::Trie(_) => "map",
         Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_) => "set",
         Value::Iterator(_) => "iterator",
@@ -4576,6 +4666,8 @@ pub enum Primitive {
     First,
     Rest,
     Second,
+    ToMutable,
+    ToPersistent,
 }
 
 impl Primitive {
@@ -4602,6 +4694,8 @@ impl Primitive {
             "first" => Primitive::First,
             "rest" => Primitive::Rest,
             "second" => Primitive::Second,
+            "to-mutable" => Primitive::ToMutable,
+            "to-persistent" => Primitive::ToPersistent,
             _ => return None,
         })
     }
@@ -4628,6 +4722,8 @@ impl Primitive {
             Primitive::First => "first",
             Primitive::Rest => "rest",
             Primitive::Second => "second",
+            Primitive::ToMutable => "to-mutable",
+            Primitive::ToPersistent => "to-persistent",
         }
     }
 }
@@ -4779,6 +4875,18 @@ pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Resu
             }
             collection_second(arguments[0].clone())
         }
+        Primitive::ToMutable => {
+            if arguments.len() != 1 {
+                return Err("to-mutable expects one argument".into());
+            }
+            collection_to_mutable(&arguments[0])
+        }
+        Primitive::ToPersistent => {
+            if arguments.len() != 1 {
+                return Err("to-persistent expects one argument".into());
+            }
+            collection_to_persistent(&arguments[0])
+        }
     }
 }
 
@@ -4813,6 +4921,8 @@ pub(crate) fn apply_binary_primitive(
         Primitive::First => Err("first expects one argument".into()),
         Primitive::Rest => Err("rest expects one argument".into()),
         Primitive::Second => Err("second expects one argument".into()),
+        Primitive::ToMutable => Err("to-mutable expects one argument".into()),
+        Primitive::ToPersistent => Err("to-persistent expects one argument".into()),
     }
 }
 
@@ -4843,6 +4953,8 @@ pub(crate) fn apply_binary_numbers(
         Primitive::First => return Err("first expects one argument".into()),
         Primitive::Rest => return Err("rest expects one argument".into()),
         Primitive::Second => return Err("second expects one argument".into()),
+        Primitive::ToMutable => return Err("to-mutable expects one argument".into()),
+        Primitive::ToPersistent => return Err("to-persistent expects one argument".into()),
     };
     Ok(result)
 }
@@ -5727,6 +5839,53 @@ fn protocol_conj(arguments: &[Value]) -> Result<Value, String> {
     let collection = &arguments[0];
     let item = &arguments[1];
     match collection {
+        Value::MutableCollection(collection) => {
+            let mut borrowed = collection.borrow_mut();
+            let mutable = borrowed
+                .as_mut()
+                .ok_or_else(|| "mutable collection used after to-persistent".to_string())?;
+            match mutable {
+                MutableCollection::Set(values) => {
+                    values.conj(item.clone());
+                }
+                MutableCollection::OrderedSet(values) => {
+                    values.conj(item.clone());
+                }
+                MutableCollection::SortedSet(values) => {
+                    values.conj(item.clone());
+                }
+                MutableCollection::List(values) => {
+                    values.push_first(item.clone());
+                }
+                MutableCollection::Queue(values) => {
+                    values.push_last(item.clone());
+                }
+                MutableCollection::Vector(values) => {
+                    values.push_last(item.clone());
+                }
+                MutableCollection::Map(values) => {
+                    let (key, value) = pair_parts(item)
+                        .ok_or_else(|| "IConj/conj map expects a two-element entry".to_string())?;
+                    values.assoc(key, value);
+                }
+                MutableCollection::OrderedMap(values) => {
+                    let (key, value) = pair_parts(item)
+                        .ok_or_else(|| "IConj/conj map expects a two-element entry".to_string())?;
+                    values.assoc(key, value);
+                }
+                MutableCollection::SortedMap(values) => {
+                    let (key, value) = pair_parts(item)
+                        .ok_or_else(|| "IConj/conj map expects a two-element entry".to_string())?;
+                    values.assoc(key, value);
+                }
+                MutableCollection::Trie(values) => {
+                    let (key, value) = pair_parts(item)
+                        .ok_or_else(|| "IConj/conj trie expects a two-element entry".to_string())?;
+                    values.assoc(marker_key(&key, "trie")?, value);
+                }
+            }
+            Ok(Value::MutableCollection(collection.clone()))
+        }
         Value::Tuple(values) => tuple_push_last(values, item.clone()),
         Value::Vector(values) => {
             let output = values.push_last(item.clone());
@@ -7080,6 +7239,24 @@ fn collection_count(value: &Value) -> Result<Value, String> {
         Value::Array(v) => v.borrow().len(),
         Value::Object(v) => v.borrow().len(),
         Value::Struct(v) => v.values.len(),
+        Value::MutableCollection(collection) => {
+            let borrowed = collection.borrow();
+            let mutable = borrowed
+                .as_ref()
+                .ok_or_else(|| "mutable collection used after to-persistent".to_string())?;
+            match mutable {
+                MutableCollection::Map(values) => values.len(),
+                MutableCollection::OrderedMap(values) => values.len(),
+                MutableCollection::SortedMap(values) => values.len(),
+                MutableCollection::Trie(values) => values.len(),
+                MutableCollection::Set(values) => values.len(),
+                MutableCollection::OrderedSet(values) => values.len(),
+                MutableCollection::SortedSet(values) => values.len(),
+                MutableCollection::List(values) => values.len(),
+                MutableCollection::Queue(values) => values.len(),
+                MutableCollection::Vector(values) => values.len(),
+            }
+        }
         Value::Iterator(_) => {
             let mut count = 0;
             while iterator_try_next(value)?.is_some() {
@@ -7122,6 +7299,25 @@ fn collection_get(value: &Value, key: &Value, default: Value) -> Result<Value, S
         Value::Queue(values) => {
             let index = value_index(key)?;
             Ok(values.get(index).cloned().unwrap_or(default))
+        }
+        Value::MutableCollection(collection) => {
+            let borrowed = collection.borrow();
+            let mutable = borrowed
+                .as_ref()
+                .ok_or_else(|| "mutable collection used after to-persistent".to_string())?;
+            let found = match mutable {
+                MutableCollection::Map(values) => values.get(key).cloned(),
+                MutableCollection::OrderedMap(values) => values.get(key).cloned(),
+                MutableCollection::SortedMap(values) => values.get(key).cloned(),
+                MutableCollection::Trie(values) => values.get(&marker_key(key, "trie")?).cloned(),
+                MutableCollection::Set(values) => values.get(key).cloned(),
+                MutableCollection::OrderedSet(values) => values.get(key).cloned(),
+                MutableCollection::SortedSet(values) => values.get(key).cloned(),
+                MutableCollection::List(values) => values.get(value_index(key)?).cloned(),
+                MutableCollection::Queue(values) => values.get(value_index(key)?).cloned(),
+                MutableCollection::Vector(values) => values.get(value_index(key)?).cloned(),
+            };
+            Ok(found.unwrap_or(default))
         }
         Value::String(text) => {
             let index = value_index(key)?;
@@ -7190,6 +7386,18 @@ fn collection_nth(value: &Value, key: &Value) -> Result<Value, String> {
         Value::Cons(values) => values.iter().nth(index),
         Value::List(values) => values.get(index).cloned(),
         Value::Queue(values) => values.get(index).cloned(),
+        Value::MutableCollection(collection) => {
+            let borrowed = collection.borrow();
+            let mutable = borrowed
+                .as_ref()
+                .ok_or_else(|| "mutable collection used after to-persistent".to_string())?;
+            match mutable {
+                MutableCollection::List(values) => values.get(index).cloned(),
+                MutableCollection::Queue(values) => values.get(index).cloned(),
+                MutableCollection::Vector(values) => values.get(index).cloned(),
+                _ => return Err("nth expects an indexed collection".into()),
+            }
+        }
         Value::String(text) => text
             .chars()
             .nth(index)
@@ -7201,6 +7409,36 @@ fn collection_nth(value: &Value, key: &Value) -> Result<Value, String> {
 
 fn collection_assoc(value: &Value, key: &Value, replacement: Value) -> Result<Value, String> {
     match value {
+        Value::MutableCollection(collection) => {
+            let mut borrowed = collection.borrow_mut();
+            let mutable = borrowed
+                .as_mut()
+                .ok_or_else(|| "mutable collection used after to-persistent".to_string())?;
+            match mutable {
+                MutableCollection::Map(values) => {
+                    values.assoc(key.clone(), replacement);
+                }
+                MutableCollection::OrderedMap(values) => {
+                    values.assoc(key.clone(), replacement);
+                }
+                MutableCollection::SortedMap(values) => {
+                    values.assoc(key.clone(), replacement);
+                }
+                MutableCollection::Trie(values) => {
+                    values.assoc(marker_key(key, "trie")?, replacement);
+                }
+                MutableCollection::Vector(values) => {
+                    values.assoc(value_index(key)?, replacement);
+                }
+                MutableCollection::List(values) => {
+                    values
+                        .assoc(value_index(key)?, replacement)
+                        .ok_or_else(|| "assoc index out of bounds".to_string())?;
+                }
+                _ => return Err("assoc expects a mutable map, vector, or list".into()),
+            }
+            Ok(Value::MutableCollection(collection.clone()))
+        }
         Value::Tuple(values) => {
             let index = value_index(key)?;
             if index == values.len() {
@@ -7280,6 +7518,40 @@ pub(crate) fn apply_ternary_primitive_owned(
 
 fn collection_dissoc(value: &Value, keys: &[Value]) -> Result<Value, String> {
     match value {
+        Value::MutableCollection(collection) => {
+            let mut collection_value = collection.borrow_mut();
+            let mutable = collection_value
+                .as_mut()
+                .ok_or_else(|| "mutable collection used after to-persistent".to_string())?;
+            for key in keys {
+                match &mut *mutable {
+                    MutableCollection::Map(values) => {
+                        values.dissoc(key);
+                    }
+                    MutableCollection::OrderedMap(values) => {
+                        values.dissoc(key);
+                    }
+                    MutableCollection::SortedMap(values) => {
+                        values.dissoc(key);
+                    }
+                    MutableCollection::Trie(values) => {
+                        values.dissoc(&marker_key(key, "trie")?);
+                    }
+                    MutableCollection::Set(values) => {
+                        values.dissoc(key);
+                    }
+                    MutableCollection::OrderedSet(values) => {
+                        values.dissoc(key);
+                    }
+                    MutableCollection::SortedSet(values) => {
+                        values.dissoc(key);
+                    }
+                    _ => return Err("dissoc expects a mutable map or set".into()),
+                }
+            }
+            drop(collection_value);
+            Ok(Value::MutableCollection(collection.clone()))
+        }
         value @ (Value::Map(_) | Value::OrderedMap(_) | Value::SortedMap(_) | Value::Trie(_)) => {
             keys.iter()
                 .try_fold(value.clone(), |map, key| map_dissoc_value(&map, key))
@@ -7460,10 +7732,7 @@ pub(crate) fn definition_metadata(
     Ok((metadata, rest))
 }
 
-fn attach_optional_metadata(
-    value: Value,
-    metadata: Option<Rc<Metadata>>,
-) -> Result<Value, String> {
+fn attach_optional_metadata(value: Value, metadata: Option<Rc<Metadata>>) -> Result<Value, String> {
     Ok(match value {
         Value::Symbol(value) => Value::Symbol(value.with_meta(metadata.clone())),
         Value::Pointer(value) => Value::Pointer(value.with_meta(metadata.clone())),
@@ -7473,18 +7742,12 @@ fn attach_optional_metadata(
         Value::Cons(value) => Value::Cons(Box::new(value.with_meta(metadata.clone()))),
         Value::Queue(value) => Value::Queue(Box::new(value.with_meta(metadata.clone()))),
         Value::Map(value) => Value::Map(value.with_meta(metadata.clone())),
-        Value::OrderedMap(value) => {
-            Value::OrderedMap(Box::new(value.with_meta(metadata.clone())))
-        }
+        Value::OrderedMap(value) => Value::OrderedMap(Box::new(value.with_meta(metadata.clone()))),
         Value::SortedMap(value) => Value::SortedMap(Box::new(value.with_meta(metadata.clone()))),
         Value::Trie(value) => Value::Trie(Box::new(value.with_meta(metadata.clone()))),
         Value::Set(value) => Value::Set(value.with_meta(metadata.clone())),
-        Value::OrderedSet(value) => {
-            Value::OrderedSet(Box::new(value.with_meta(metadata.clone())))
-        }
-        Value::SortedSet(value) => {
-            Value::SortedSet(Box::new(value.with_meta(metadata.clone())))
-        }
+        Value::OrderedSet(value) => Value::OrderedSet(Box::new(value.with_meta(metadata.clone()))),
+        Value::SortedSet(value) => Value::SortedSet(Box::new(value.with_meta(metadata.clone()))),
         Value::Var(value) => {
             value.set_hara_metadata(metadata);
             Value::Var(value)
@@ -10149,8 +10412,8 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("select-keys expects a map and keys".into());
                 }
                 let source = eval(&fs[1], env)?;
-                let entries = map_entries(&source)
-                    .ok_or_else(|| "select-keys expects a map".to_string())?;
+                let entries =
+                    map_entries(&source).ok_or_else(|| "select-keys expects a map".to_string())?;
                 let keys = iterator_values(eval(&fs[2], env)?)?;
                 let selected = keys.into_iter().filter_map(|key| {
                     entries
@@ -10158,7 +10421,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         .find(|(candidate, _)| candidate == &key)
                         .map(|(_, value)| (key, value.clone()))
                 });
-                Ok(Value::OrderedMap(Box::new(POrderedMap::from_iter(selected))))
+                Ok(Value::OrderedMap(Box::new(POrderedMap::from_iter(
+                    selected,
+                ))))
             }
             Form::Symbol(n) if ["list", "vector", "pair", "tup"].contains(&n.as_str()) => {
                 eval_sequential_constructor(n, &fs[1..], env)
@@ -11208,8 +11473,8 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 let function = eval(&fs[1], env)?;
                 let mut result = eval(&fs[2], env)?;
                 let source = eval(&fs[3], env)?;
-                let entries = map_entries(&source)
-                    .ok_or_else(|| "reduce-kv expects a map".to_string())?;
+                let entries =
+                    map_entries(&source).ok_or_else(|| "reduce-kv expects a map".to_string())?;
                 for (key, value) in entries {
                     result = call_value(function.clone(), vec![result, key, value])?;
                 }
@@ -11430,8 +11695,8 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             }
             Form::Symbol(n)
                 if [
-                    "list?", "vector?", "map?", "set?", "keyword?", "symbol?", "string?",
-                    "char?", "number?", "integer?", "decimal?", "boolean?", "fn?",
+                    "list?", "vector?", "map?", "set?", "keyword?", "symbol?", "string?", "char?",
+                    "number?", "integer?", "decimal?", "boolean?", "fn?",
                 ]
                 .contains(&n.as_str()) =>
             {
@@ -11488,6 +11753,18 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("count expects one argument".into());
                 }
                 collection_count(&eval(&fs[1], env)?)
+            }
+            Form::Symbol(n) if n == "to-mutable" => {
+                if fs.len() != 2 {
+                    return Err("to-mutable expects one argument".into());
+                }
+                collection_to_mutable(&eval(&fs[1], env)?)
+            }
+            Form::Symbol(n) if n == "to-persistent" => {
+                if fs.len() != 2 {
+                    return Err("to-persistent expects one argument".into());
+                }
+                collection_to_persistent(&eval(&fs[1], env)?)
             }
             Form::Symbol(n) if n == "get" => {
                 if fs.len() != 3 && fs.len() != 4 {

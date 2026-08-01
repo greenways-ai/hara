@@ -376,6 +376,24 @@ fn binary(body: &mut Vec<u8>, op: Primitive) -> Result<(), String> {
             i32_const(body, -1);
             body.extend([0x21, 0x01, 0x0c, 0x02, 0x0b, 0x20, 0x04]);
         }
+        Primitive::Multiply => {
+            body.extend([0x20, 0x02, 0x20, 0x03, 0x7e, 0x21, 0x04]);
+            // `MIN / -1` traps in wasm, so reject that overflow before using
+            // division to prove that the wrapped product is representable.
+            body.extend([0x20, 0x02]);
+            i64_const(body, i64::MIN);
+            body.extend([0x51, 0x20, 0x03]);
+            i64_const(body, -1);
+            body.extend([0x51, 0x71, 0x04, 0x40]);
+            native_exit(body, -1);
+            body.push(0x0b);
+            body.extend([0x20, 0x03, 0x50, 0x04, 0x40, 0x05]);
+            body.extend([0x20, 0x04, 0x20, 0x03, 0x7f, 0x20, 0x02, 0x52]);
+            body.extend([0x04, 0x40]);
+            i32_const(body, -1);
+            body.extend([0x21, 0x01, 0x0c, 0x03]);
+            body.extend([0x0b, 0x0b, 0x20, 0x04]);
+        }
         Primitive::Remainder => {
             body.extend([0x20, 0x03, 0x50, 0x04, 0x40]);
             i32_const(body, -2);
@@ -499,6 +517,41 @@ mod tests {
             TraceOutcome::Completed { iterations: 10 }
         );
         assert_eq!(locals[0], TraceValue::I64(12));
+    }
+
+    #[test]
+    fn native_backend_multiplies_and_side_exits_on_overflow() {
+        let trace = Trace {
+            function: 0,
+            header: 0,
+            resume_ip: 0,
+            operations: vec![
+                TraceOp::GuardLocalI64 { local: 0 },
+                TraceOp::LoadLocal { local: 0 },
+                TraceOp::ConstantI64(3),
+                TraceOp::BinaryI64(Primitive::Multiply),
+                TraceOp::StoreLocal { local: 0 },
+                TraceOp::LoopBackedge,
+            ],
+            vectors: Vec::new(),
+        };
+        let mut backend = NativeBackend::default();
+        let mut compiled = backend.compile(&trace).unwrap();
+        let mut locals = [TraceValue::I64(2)];
+        assert_eq!(
+            backend.enter(&mut compiled, &mut locals, 3),
+            TraceOutcome::Completed { iterations: 3 }
+        );
+        assert_eq!(locals[0], TraceValue::I64(54));
+
+        locals[0] = TraceValue::I64(i64::MAX);
+        assert!(matches!(
+            backend.enter(&mut compiled, &mut locals, 1),
+            TraceOutcome::SideExit {
+                reason: ExitReason::Overflow,
+                ..
+            }
+        ));
     }
 
     #[test]

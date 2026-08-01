@@ -44,6 +44,17 @@ public class HtaValueCodecTest {
   }
 
   @Test
+  public void rejectsImpossibleContainerLengthsAndExcessiveNesting() {
+    byte[] impossible = {'H', 'T', 'A', '1', 9, 127, -1, -1, -1};
+    assertThrows(HaraException.class, () -> HtaValueCodec.decode(impossible));
+
+    Object nested = "leaf";
+    for (int i = 0; i <= 256; i++) nested = List.of(nested);
+    Object tooDeep = nested;
+    assertThrows(HaraException.class, () -> HtaValueCodec.encode(tooDeep));
+  }
+
+  @Test
   public void opaqueHandlesRoundTripAndCannotBeReencodedAfterRelease() {
     HtaHandle handle = new HtaHandle("runtime", "cursor", 42L);
     HtaHandle decoded = (HtaHandle) HtaValueCodec.decode(HtaValueCodec.encode(handle));

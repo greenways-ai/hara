@@ -530,9 +530,13 @@ impl Compiler {
                 Some(span.start),
             ));
         }
-        if children[1..]
-            .iter()
-            .all(|argument| constant_form(argument.form))
+        // Mutable conversion creates/consumes runtime identity and must run on
+        // every execution. Folding it would place a one-shot transient in the
+        // constant pool, so the second execution would observe a frozen value.
+        if !matches!(op, Primitive::ToMutable | Primitive::ToPersistent)
+            && children[1..]
+                .iter()
+                .all(|argument| constant_form(argument.form))
         {
             let arguments = children[1..]
                 .iter()

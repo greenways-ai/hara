@@ -33,6 +33,22 @@ PROFILES = {
 }
 
 
+def workload_for_runtime(workload, runtime):
+    """Resolve an explicitly equivalent source for a runtime.
+
+    Workloads without overrides remain shared. A workload with ``sources`` is
+    only valid for the named runtimes (or its optional ``default`` entry), so
+    an adapter can never silently benchmark different collection semantics.
+    """
+    sources = workload.get("sources")
+    if not sources:
+        return workload
+    source = sources.get(runtime, sources.get("default"))
+    if source is None:
+        return None
+    return {**workload, "source": source}
+
+
 def run(command, *, env=None, timeout=120, check=True):
     return subprocess.run(command, cwd=ROOT, env=env, text=True,
                           capture_output=True, timeout=timeout, check=check)
@@ -246,7 +262,7 @@ def markdown(data):
         per_iteration = row["analysis"].get("ns_per_iteration")
         per_iteration_text = "—" if per_iteration is None else f"{per_iteration:.2f}"
         lines.append(f"| {row['runtime']} / {row['workload']} | {row['first_ns']/1e6:.3f} | {row['analysis']['steady_ns']/1e6:.3f} | {per_iteration_text} | {row['analysis']['throughput_per_sec']:.1f} | {convergence if convergence is not None else '—'} |")
-    lines += ["", "Warm values above are per-call milliseconds (the raw samples are stored as nanoseconds). Lower is better. Each adapter receives the same source and checks the same displayed result. Execute-only VM tiers compile once before measurement; their first value is the first execution, not compilation. Convergence is the first five-window run within ±5% of the final ten-window median with CV ≤10%.", ""]
+    lines += ["", "Warm values above are per-call milliseconds (the raw samples are stored as nanoseconds). Lower is better. Adapters receive the same source except where the corpus declares runtime-specific, semantically equivalent APIs (for example Hara mutable collections versus Clojure transients); every adapter checks the same displayed result. Execute-only VM tiers compile once before measurement; their first value is the first execution, not compilation. Convergence is the first five-window run within ±5% of the final ten-window median with CV ≤10%.", ""]
     return "\n".join(lines)
 
 
@@ -293,7 +309,10 @@ def main():
                          "p95_ns": percentile(elapsed, 0.95),
                          "peak_rss_kib": max(rss_values) if rss_values else None}
         for workload in corpus:
-            _, _, result = timed(adapter(workload, profile["windows"], profile["calls"]), env)
+            resolved = workload_for_runtime(workload, name)
+            if resolved is None:
+                continue
+            _, _, result = timed(adapter(resolved, profile["windows"], profile["calls"]), env)
             result["analysis"] = analyse(result["samples_ns"])
             if workload.get("iterations"):
                 result["analysis"]["ns_per_iteration"] = (

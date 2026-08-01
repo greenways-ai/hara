@@ -3,6 +3,8 @@ use crate::core::Value;
 use crate::lang::data::{Tuple as PTuple, Vector as PVector};
 
 const MAGIC: &[u8; 4] = b"HTA1";
+pub const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_NESTING_DEPTH: usize = 256;
 const NIL: u8 = 0;
 const FALSE: u8 = 1;
 const TRUE: u8 = 2;
@@ -25,11 +27,17 @@ const OBJECT: u8 = 18;
 
 pub fn encode(value: &Value) -> Result<Vec<u8>, String> {
     let mut output = MAGIC.to_vec();
-    encode_bare(value, &mut output)?;
+    encode_bare(value, &mut output, 0)?;
+    if output.len() > MAX_FRAME_BYTES {
+        return Err("hta/value-too-large: frame exceeds 64 MiB".into());
+    }
     Ok(output)
 }
 
 pub fn decode(bytes: &[u8]) -> Result<Value, String> {
+    if bytes.len() > MAX_FRAME_BYTES {
+        return Err("hta/value-too-large: frame exceeds 64 MiB".into());
+    }
     if !bytes.starts_with(MAGIC) {
         return Err("hta/value-malformed: invalid HTA1 header".into());
     }
@@ -37,14 +45,17 @@ pub fn decode(bytes: &[u8]) -> Result<Value, String> {
         bytes,
         cursor: MAGIC.len(),
     };
-    let value = reader.value()?;
+    let value = reader.value(0)?;
     if reader.cursor != bytes.len() {
         return Err("hta/value-malformed: trailing bytes".into());
     }
     Ok(value)
 }
 
-fn encode_bare(value: &Value, output: &mut Vec<u8>) -> Result<(), String> {
+fn encode_bare(value: &Value, output: &mut Vec<u8>, depth: usize) -> Result<(), String> {
+    if depth > MAX_NESTING_DEPTH {
+        return Err("hta/value-too-deep: nesting exceeds 256".into());
+    }
     match value {
         Value::Nil => output.push(NIL),
         Value::Bool(false) => output.push(FALSE),
@@ -77,11 +88,14 @@ fn encode_bare(value: &Value, output: &mut Vec<u8>) -> Result<(), String> {
             output.push(SYMBOL);
             encode_bytes(value.as_str().as_bytes(), output)?;
         }
-        Value::List(values) => encode_sequence(LIST, values.iter(), output)?,
-        Value::Tuple(values) => encode_sequence(VECTOR, values.iter(), output)?,
-        Value::Vector(values) => encode_sequence(VECTOR, values.iter(), output)?,
+        Value::List(values) => encode_sequence(LIST, values.iter(), output, depth)?,
+        Value::Tuple(values) => encode_sequence(VECTOR, values.iter(), output, depth)?,
+        Value::Vector(values) => encode_sequence(VECTOR, values.iter(), output, depth)?,
         Value::Set(values) => {
-            let mut encoded = values.iter().map(bare).collect::<Result<Vec<_>, _>>()?;
+            let mut encoded = values
+                .iter()
+                .map(|value| bare(value, depth + 1))
+                .collect::<Result<Vec<_>, _>>()?;
             encoded.sort();
             output.push(SET);
             encode_len(encoded.len(), output)?;
@@ -90,7 +104,10 @@ fn encode_bare(value: &Value, output: &mut Vec<u8>) -> Result<(), String> {
             }
         }
         Value::OrderedSet(values) => {
-            let mut encoded = values.iter().map(bare).collect::<Result<Vec<_>, _>>()?;
+            let mut encoded = values
+                .iter()
+                .map(|value| bare(value, depth + 1))
+                .collect::<Result<Vec<_>, _>>()?;
             encoded.sort();
             output.push(SET);
             encode_len(encoded.len(), output)?;
@@ -99,7 +116,10 @@ fn encode_bare(value: &Value, output: &mut Vec<u8>) -> Result<(), String> {
             }
         }
         Value::SortedSet(values) => {
-            let mut encoded = values.iter().map(bare).collect::<Result<Vec<_>, _>>()?;
+            let mut encoded = values
+                .iter()
+                .map(|value| bare(value, depth + 1))
+                .collect::<Result<Vec<_>, _>>()?;
             encoded.sort();
             output.push(SET);
             encode_len(encoded.len(), output)?;
@@ -110,7 +130,7 @@ fn encode_bare(value: &Value, output: &mut Vec<u8>) -> Result<(), String> {
         Value::OrderedMap(values) => {
             let mut encoded = values
                 .iter()
-                .map(|(key, value)| Ok((bare(key)?, bare(value)?)))
+                .map(|(key, value)| Ok((bare(key, depth + 1)?, bare(value, depth + 1)?)))
                 .collect::<Result<Vec<_>, String>>()?;
             encoded.sort_by(|left, right| left.0.cmp(&right.0));
             output.push(MAP);
@@ -123,7 +143,7 @@ fn encode_bare(value: &Value, output: &mut Vec<u8>) -> Result<(), String> {
         Value::Map(values) => {
             let mut encoded = values
                 .iter()
-                .map(|(key, value)| Ok((bare(key)?, bare(value)?)))
+                .map(|(key, value)| Ok((bare(key, depth + 1)?, bare(value, depth + 1)?)))
                 .collect::<Result<Vec<_>, String>>()?;
             encoded.sort_by(|left, right| left.0.cmp(&right.0));
             output.push(MAP);
@@ -139,23 +159,23 @@ fn encode_bare(value: &Value, output: &mut Vec<u8>) -> Result<(), String> {
         }
         Value::Var(value) => {
             output.push(VAR);
-            encode_bare(&Value::Symbol(value.symbol().clone()), output)?;
-            if encode_bare(&value.deref_value(), output).is_err() {
-                encode_bare(&Value::Nil, output)?;
+            encode_bare(&Value::Symbol(value.symbol().clone()), output, depth + 1)?;
+            if encode_bare(&value.deref_value(), output, depth + 1).is_err() {
+                encode_bare(&Value::Nil, output, depth + 1)?;
             }
         }
         Value::Atom(value) => {
             output.push(ATOM);
-            encode_bare(&value.deref_value(), output)?;
+            encode_bare(&value.deref_value(), output, depth + 1)?;
         }
-        Value::Array(values) => encode_sequence(ARRAY, values.borrow().iter(), output)?,
+        Value::Array(values) => encode_sequence(ARRAY, values.borrow().iter(), output, depth)?,
         Value::Object(values) => {
             let values = values.borrow();
             output.push(OBJECT);
             encode_len(values.len(), output)?;
             for (key, value) in values.iter() {
-                encode_bare(&Value::String(key.clone()), output)?;
-                encode_bare(value, output)?;
+                encode_bare(&Value::String(key.clone()), output, depth + 1)?;
+                encode_bare(value, output, depth + 1)?;
             }
         }
         Value::Extension(value) => {
@@ -169,9 +189,9 @@ fn encode_bare(value: &Value, output: &mut Vec<u8>) -> Result<(), String> {
     Ok(())
 }
 
-fn bare(value: &Value) -> Result<Vec<u8>, String> {
+fn bare(value: &Value, depth: usize) -> Result<Vec<u8>, String> {
     let mut output = Vec::new();
-    encode_bare(value, &mut output)?;
+    encode_bare(value, &mut output, depth)?;
     Ok(output)
 }
 
@@ -179,12 +199,13 @@ fn encode_sequence<'a>(
     tag: u8,
     values: impl Iterator<Item = &'a Value>,
     output: &mut Vec<u8>,
+    depth: usize,
 ) -> Result<(), String> {
     let values = values.collect::<Vec<_>>();
     output.push(tag);
     encode_len(values.len(), output)?;
     for value in values {
-        encode_bare(value, output)?;
+        encode_bare(value, output, depth + 1)?;
     }
     Ok(())
 }
@@ -205,7 +226,10 @@ struct Reader<'a> {
     cursor: usize,
 }
 impl Reader<'_> {
-    fn value(&mut self) -> Result<Value, String> {
+    fn value(&mut self, depth: usize) -> Result<Value, String> {
+        if depth > MAX_NESTING_DEPTH {
+            return Err("hta/value-too-deep: nesting exceeds 256".into());
+        }
         let tag = self.byte()?;
         match tag {
             NIL => Ok(Value::Nil),
@@ -236,14 +260,17 @@ impl Reader<'_> {
                     .map_err(|_| "hta/value-malformed: invalid UTF-8")?
                     .into(),
             )),
-            LIST => Ok(Value::List(self.sequence()?.into())),
-            VECTOR => Ok(Value::Vector(self.sequence()?.into())),
-            SET => Ok(Value::Set(self.sequence()?.into())),
+            LIST => Ok(Value::List(self.sequence(depth)?.into())),
+            VECTOR => Ok(Value::Vector(self.sequence(depth)?.into())),
+            SET => Ok(Value::Set(self.sequence(depth)?.into())),
             MAP => {
                 let size = self.len()?;
+                if size > self.bytes.len().saturating_sub(self.cursor) / 2 {
+                    return Err("hta/value-malformed: impossible map length".into());
+                }
                 let mut values = Vec::with_capacity(size);
                 for _ in 0..size {
-                    values.push((self.value()?, self.value()?));
+                    values.push((self.value(depth + 1)?, self.value(depth + 1)?));
                 }
                 Ok(Value::Map(values.into_iter().collect()))
             }
@@ -255,28 +282,31 @@ impl Reader<'_> {
                 )))
             }
             VAR => {
-                let symbol = match self.value()? {
+                let symbol = match self.value(depth + 1)? {
                     Value::Symbol(symbol) => symbol,
                     _ => return Err("hta/value-malformed: invalid var symbol".into()),
                 };
-                let value = self.value()?;
+                let value = self.value(depth + 1)?;
                 Ok(Value::Var(crate::kernel::Var::new(symbol.as_str(), value)))
             }
             ATOM => Ok(Value::Atom(Box::new(crate::core::RuntimeAtom::new(
-                self.value()?,
+                self.value(depth + 1)?,
                 true,
             )))),
             ARRAY => Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
-                self.sequence()?,
+                self.sequence(depth)?,
             )))),
             OBJECT => {
                 let size = self.len()?;
+                if size > self.bytes.len().saturating_sub(self.cursor) / 2 {
+                    return Err("hta/value-malformed: impossible object length".into());
+                }
                 let mut values = Vec::with_capacity(size);
                 for _ in 0..size {
-                    let Value::String(key) = self.value()? else {
+                    let Value::String(key) = self.value(depth + 1)? else {
                         return Err("hta/value-malformed: invalid object key".into());
                     };
-                    values.push((key, self.value()?));
+                    values.push((key, self.value(depth + 1)?));
                 }
                 Ok(Value::Object(std::rc::Rc::new(std::cell::RefCell::new(
                     values,
@@ -297,9 +327,12 @@ impl Reader<'_> {
             _ => Err("hta/value-malformed: unknown value tag".into()),
         }
     }
-    fn sequence(&mut self) -> Result<Vec<Value>, String> {
+    fn sequence(&mut self, depth: usize) -> Result<Vec<Value>, String> {
         let size = self.len()?;
-        (0..size).map(|_| self.value()).collect()
+        if size > self.bytes.len().saturating_sub(self.cursor) {
+            return Err("hta/value-malformed: impossible sequence length".into());
+        }
+        (0..size).map(|_| self.value(depth + 1)).collect()
     }
     fn data(&mut self) -> Result<&[u8], String> {
         let size = self.len()?;
@@ -425,5 +458,30 @@ mod tests {
             handle: 42,
         });
         assert_eq!(decode(&encode(&value).unwrap()).unwrap(), value);
+    }
+
+    #[test]
+    fn nesting_depth_is_bounded_on_encode_and_decode() {
+        let mut value = Value::Nil;
+        for _ in 0..=MAX_NESTING_DEPTH {
+            value = Value::Vector(PVector::from(vec![value]));
+        }
+        assert!(encode(&value).unwrap_err().contains("value-too-deep"));
+
+        let mut bytes = MAGIC.to_vec();
+        for _ in 0..=MAX_NESTING_DEPTH {
+            bytes.extend_from_slice(&[VECTOR, 0, 0, 0, 1]);
+        }
+        bytes.push(NIL);
+        assert!(decode(&bytes).unwrap_err().contains("value-too-deep"));
+    }
+
+    #[test]
+    fn impossible_container_lengths_fail_before_allocating() {
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend_from_slice(&[VECTOR, 0xff, 0xff, 0xff, 0xff]);
+        assert!(decode(&bytes)
+            .unwrap_err()
+            .contains("impossible sequence length"));
     }
 }

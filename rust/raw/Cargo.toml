@@ -1,6 +1,6 @@
 [package]
 name = "hara-wasm-raw"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "EPL-2.0"
 rust-version = "1.78"
@@ -13,6 +13,8 @@ evaluation-journal = []
 dev-trace = ["evaluation-journal"]
 halc-encoder = []
 hir-encoder = ["halc-encoder"]
+bytecode-vm = []
+tracing-jit = ["bytecode-vm"]
 
 [dependencies]
 sha2 = "0.10"
