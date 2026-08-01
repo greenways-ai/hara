@@ -1,9 +1,10 @@
 (ns std.db.node.supabase-test
   (:use code.test)
-  (:require [std.db.node.client-supabase :as client]
-            [std.db.node.kernel-supabase :as supabase]
-            [std.db.node.proxy-supabase :as proxy]
+  (:require [std.db.node.client-base :as runtime-client]
+            [std.db.node.client-supabase :as client]
+            [std.db.node.kernel-supabase :as kernel]
             [std.db.node.runtime :as runtime]
+            [std.db.node.supabase :as supabase]
             [std.foundation.promise :as promise]
             [std.lib.substrate :as substrate]
             [std.lib.substrate.protocol :as substrate-protocol]))
@@ -65,15 +66,15 @@
         client-node (substrate/node-create (str "supabase-client-" suffix))]
     (runtime/init-server server)
     (runtime/init-server-proxy client-node)
-    (supabase/init-handlers server)
-    (proxy/init-proxy-handlers client-node)
+    (supabase/init-server server)
+    (supabase/init-client client-node)
     (runtime/connect-nodes client-node server)
     (supabase/install-service server "auth/supabase" (supabase-service))
     {:server server :client client-node}))
 
 (def results
   [(fact "Supabase gateway RPC details are decoded and normalized"
-     (let [data (supabase/supabase-error-data
+     (let [data (kernel/supabase-error-data
                  {:status 400
                   :body {:message "RPC failed"
                          :details "{\"type\":\"gw.rpc.error\",\"tag\":\"bad-input\"}"}})]
@@ -84,15 +85,15 @@
      => ["gw.rpc.error" "bad-input" 400 400])
 
    (fact "failed HTTP-style responses throw normalized exception data"
-     (supabase/supabase-response-data
+     (kernel/supabase-response-data
       {:status 401
        :body {:message "Unauthorized"}})
      => (throws))
 
    (fact "Supabase proxy installs every legacy action"
      (let [node (substrate/node-create "supabase-proxy")]
-       (proxy/init-proxy-handlers node)
-       [(count supabase/ACTIONS)
+       (supabase/init-client node)
+       [(count kernel/ACTIONS)
         (count (substrate-protocol/list-handlers node))])
      => [28 28])
 
@@ -165,6 +166,22 @@
         (deref (client/current-session client-node "auth/supabase" {}))
         (deref (client/signed-in? client-node "auth/supabase" {}))
         @REFRESH-STOPS])
-     => [{"status" "ok"} nil false 1])])
+     => [{"status" "ok"} nil false 1])
+
+   (fact "runtime finalization stops refresh and removes Supabase services"
+     (reset! REFRESH-STOPS 0)
+     (let [nodes (connected-nodes "finalize")
+           server (get nodes :server)
+           client-node (get nodes :client)]
+       (deref
+        (client/sign-in client-node
+                        "auth/supabase"
+                        {:email "wombat@example.com" :password "secret"}
+                        {}))
+       (let [result (deref (runtime-client/runtime-finalize client-node {}))]
+         [(get result :status)
+          @REFRESH-STOPS
+          (substrate-protocol/get-service server "auth/supabase")]))
+     => [:finalized 1 nil])])
 
 (pr-str (run '[std.db.node.supabase-test]))
