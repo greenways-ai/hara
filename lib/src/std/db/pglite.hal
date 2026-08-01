@@ -1,11 +1,50 @@
 ;; ============================================================================
 ;; std.db.pglite — Hara-facing embedded PostgreSQL API.
 ;;
-;; PGlite runs PostgreSQL in WASM inside an HTA provider. This is an embedded
-;; database, not a connection to a remote PostgreSQL server.
+;; PGlite runs PostgreSQL in WASM inside an HTA provider. Provider descriptors
+;; are wrapped as typed PGliteConnection values implementing IDatabase. This is
+;; an embedded database, not a connection to a remote PostgreSQL server.
 ;; ============================================================================
 (ns std.db.pglite
-  (:require [std.db.provider.pglite :as provider]))
+  (:require [std.db.protocol :as protocol]
+            [std.db.provider.pglite :as provider]
+            [std.foundation.promise :as promise]))
+
+(defstruct PGliteConnection
+  [id engine provider storage])
+
+(defn- descriptor-field
+  "Returns a provider descriptor field from keyword or string keys."
+  [descriptor keyword-key string-key]
+  (if (has? descriptor keyword-key)
+    (get descriptor keyword-key)
+    (get descriptor string-key)))
+
+(defn- connection
+  "Wraps a raw provider descriptor as a typed PGlite connection."
+  [descriptor]
+  (std.db.pglite/PGliteConnection
+   (descriptor-field descriptor :id "id")
+   :postgresql
+   :pglite
+   (descriptor-field descriptor :storage "storage")))
+
+(extend-type PGliteConnection protocol/IDatabase
+  (db-engine [value]
+    :postgresql)
+  (db-provider [value]
+    :pglite)
+  (db-info [value]
+    {:id (field value :id)
+     :engine :postgresql
+     :provider :pglite
+     :storage (field value :storage)})
+  (db-exec [value sql parameters]
+    (provider/exec (field value :id) sql parameters))
+  (db-query [value sql parameters]
+    (provider/query (field value :id) sql parameters))
+  (db-close [value]
+    (provider/close (field value :id))))
 
 (defn ^{:schema [:fn [] :any]}
   version
@@ -16,51 +55,51 @@
 (defn ^{:schema [:function [:fn [] :any]
                             [:fn [:map] :any]]}
   open
-  "Returns a promise resolving to an in-memory PGlite connection descriptor."
+  "Returns a promise resolving to a typed in-memory PGliteConnection."
   ([] (open {}))
-  ([options] (provider/open options)))
+  ([options]
+   (promise/then (provider/open options) connection)))
 
-(defn ^{:schema [:function [:fn [:map :str] :any]
-                            [:fn [:map :str :vector] :any]]}
+(defn ^{:schema [:function [:fn [:any :str] :any]
+                            [:fn [:any :str :vector] :any]]}
   exec
   "Executes one PostgreSQL statement with optional positional parameters."
-  ([connection sql]
-   (exec connection sql []))
-  ([connection sql parameters]
-   (provider/exec (get connection :id) sql parameters)))
+  ([value sql]
+   (exec value sql []))
+  ([value sql parameters]
+   (protocol/db-exec value sql parameters)))
 
-(defn ^{:schema [:function [:fn [:map :str] :any]
-                            [:fn [:map :str :vector] :any]]}
+(defn ^{:schema [:function [:fn [:any :str] :any]
+                            [:fn [:any :str :vector] :any]]}
   query
   "Executes a row-returning PostgreSQL statement with optional parameters.
 
-   PostgreSQL parameters use $1, $2 and so on. The promise resolves to
-   {:columns [...], :rows [[...]], :affected n}."
-  ([connection sql]
-   (query connection sql []))
-  ([connection sql parameters]
-   (provider/query (get connection :id) sql parameters)))
+   PostgreSQL parameters use $1, $2 and so on."
+  ([value sql]
+   (query value sql []))
+  ([value sql parameters]
+   (protocol/db-query value sql parameters)))
 
-(defn ^{:schema [:fn [:map] :any]}
+(defn ^{:schema [:fn [:any] :any]}
   close
-  "Closes connection and returns a promise resolving to whether it was open."
-  [connection]
-  (provider/close (get connection :id)))
+  "Closes connection."
+  [value]
+  (protocol/db-close value))
 
-(defn ^{:schema [:fn [:map] :any]}
+(defn ^{:schema [:fn [:any] :any]}
   begin
   "Begins a transaction on connection."
-  [connection]
-  (exec connection "begin"))
+  [value]
+  (exec value "begin"))
 
-(defn ^{:schema [:fn [:map] :any]}
+(defn ^{:schema [:fn [:any] :any]}
   commit
   "Commits the current transaction on connection."
-  [connection]
-  (exec connection "commit"))
+  [value]
+  (exec value "commit"))
 
-(defn ^{:schema [:fn [:map] :any]}
+(defn ^{:schema [:fn [:any] :any]}
   rollback
   "Rolls back the current transaction on connection."
-  [connection]
-  (exec connection "rollback"))
+  [value]
+  (exec value "rollback"))
