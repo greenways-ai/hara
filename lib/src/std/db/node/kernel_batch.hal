@@ -25,62 +25,65 @@
     :else :exec))
 
 (defn run-statement
-  "Runs one {:sql :parameters :mode} statement descriptor."
-  [node service-id statement]
+  "Runs one statement descriptor on an already-acquired service queue."
+  [service statement]
   (let [sql (compatible-get statement :sql)
         parameters (or (compatible-get statement :parameters) [])
         mode (normalize-mode (compatible-get statement :mode))]
     (if (= mode :query)
-      (kernel/query-main node service-id sql parameters)
-      (kernel/exec-main node service-id sql parameters))))
+      (kernel/query-service-main service sql parameters)
+      (kernel/exec-service-main service sql parameters))))
 
 (defn run-statements
   "Runs statement descriptors sequentially and returns ordered results."
-  ([node service-id statements]
-   (run-statements node service-id statements 0 []))
-  ([node service-id statements index results]
+  ([service statements]
+   (run-statements service statements 0 []))
+  ([service statements index results]
    (if (= index (count statements))
      (promise/from results)
      (promise/then
-      (run-statement node service-id (nth statements index))
+      (run-statement service (nth statements index))
       (fn [result]
-        (run-statements node
-                        service-id
+        (run-statements service
                         statements
                         (+ index 1)
                         (conj results result)))))))
 
-(defn transaction-main
-  "Runs statements within one non-interleaved transaction handler."
-  [node service-id statements]
+(defn transaction-service-main
+  "Runs statements within one already-acquired service queue."
+  [service statements]
   (promise/then
-   (kernel/exec-main node service-id "begin" [])
+   (kernel/exec-service-main service "begin" [])
    (fn [_]
      (promise/catch
       (promise/then
-       (run-statements node service-id statements)
+       (run-statements service statements)
        (fn [results]
          (promise/then
-          (kernel/exec-main node service-id "commit" [])
+          (kernel/exec-service-main service "commit" [])
           (fn [_]
             {:status :committed
              :results results}))))
       (fn [error]
         (promise/then
-         (kernel/exec-main node service-id "rollback" [])
+         (kernel/exec-service-main service "rollback" [])
          (fn [_]
            (throw error))))))))
 
 (defn batch-main
-  "Runs a sequential batch, optionally inside a transaction."
+  "Runs a sequential batch under one service queue acquisition."
   [node service-id statements transactional]
-  (if transactional
-    (transaction-main node service-id statements)
-    (promise/then
-     (run-statements node service-id statements)
-     (fn [results]
-       {:status :complete
-        :results results}))))
+  (let [service (kernel/get-database-service node service-id)]
+    (kernel/service-submit
+     service
+     (fn []
+       (if transactional
+         (transaction-service-main service statements)
+         (promise/then
+          (run-statements service statements)
+          (fn [results]
+            {:status :complete
+             :results results})))))))
 
 (defn batch-handler
   [space args request node]
