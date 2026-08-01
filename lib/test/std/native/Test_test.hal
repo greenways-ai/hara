@@ -1,0 +1,69 @@
+(ns std.native.Test-test
+  (:require [code.test :as test]
+            [std.native.Test :as Test]
+            [std.protocol.imatch :as match]
+            [std.protocol.itestregistry :as registry]
+            [std.protocol.itestsession :as session]
+            [std.lib.test :as legacy]))
+
+(def passing-fact
+  {:namespace "std.native.Test-test"
+   :name "passing fact"
+   :meta {:tags #{:unit}}
+   :function (fn [options]
+               [{:pass true :actual 42 :expected 42}])})
+
+(def failing-fact
+  {:namespace "std.native.Test-test"
+   :name "failing fact"
+   :meta {:tags #{:unit}}
+   :function (fn [options]
+               [{:pass false :actual 41 :expected 42}])})
+
+(def session-a (Test/create {:id :session-a}))
+(def session-b (Test/create {:id :session-b}))
+
+(Test/register session-a passing-fact)
+(Test/register session-b failing-fact)
+
+(def summary-a (Test/run session-a))
+(def summary-b (Test/run session-b))
+(def events-a (Test/events session-a))
+
+(def matcher-result
+  (match/match-value (test/exactly 42) 42))
+
+(def close-result (Test/close session-a))
+
+(def results
+  [(legacy/check "std.native.Test sessions keep isolated registries"
+                 [(count (registry/registry-facts session-a))
+                  (count (registry/registry-facts session-b))
+                  (:name (registry/registry-find
+                          session-b
+                          "std.native.Test-test"
+                          "failing fact"))]
+                 [0 1 "failing fact"])
+   (legacy/check "session runs retain independent summaries"
+                 [(:status summary-a)
+                  (:passed summary-a)
+                  (:failed summary-a)
+                  (:status summary-b)
+                  (:passed summary-b)
+                  (:failed summary-b)]
+                 [:passed 1 0 :failed 0 1])
+   (legacy/check "session lifecycle is available through std.protocol.itestsession"
+                 [close-result
+                  (:status (session/session-status session-a))
+                  (:status (session/session-results session-b))]
+                 [true :closed :failed])
+   (legacy/check "session reporters retain structured run events"
+                 (vec (map (fn [event] (:event event)) events-a))
+                 [:run/start :fact/start :fact/end :run/end])
+   (legacy/check "code.test matchers implement std.protocol.imatch"
+                 [(:pass matcher-result)
+                  (:actual matcher-result)
+                  (:expected matcher-result)]
+                 [true 42 42])])
+
+(legacy/print-results results)
