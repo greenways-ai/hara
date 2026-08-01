@@ -1,0 +1,38 @@
+name: std.db Runtime
+
+on:
+  pull_request:
+    paths:
+      - "lib/src/std/db.hal"
+      - "lib/src/std/db/protocol.hal"
+      - "lib/src/std/db/node/**"
+      - "lib/test/std/db/node/**"
+      - "java/src/test/java/hara/truffle/HaraDbRuntimeTest.java"
+      - "rust/web/db-runtime-endpoint.mjs"
+      - "rust/web/db-runtime-endpoint.test.mjs"
+      - ".github/workflows/std-db-runtime.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: std-db-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - name: Test browser and Node worker endpoint wrappers
+        working-directory: rust/web
+        run: node --test db-runtime-endpoint.test.mjs
+      - name: Test database kernel, proxy, services and message transport through Hara
+        run: mvn -f java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraDbRuntimeTest test
