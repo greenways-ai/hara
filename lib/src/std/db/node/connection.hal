@@ -1,0 +1,73 @@
+;; ============================================================================
+;; std.db.node.connection — provider-neutral handles to runtime database services.
+;;
+;; A RuntimeConnection does not own the remote service. Closing it invalidates
+;; only the local handle; runtime teardown remains an explicit lifecycle action.
+;; ============================================================================
+(ns std.db.node.connection
+  (:require [std.db.node.client-base :as client]
+            [std.db.protocol :as protocol]
+            [std.foundation.promise :as promise]))
+
+(defstruct RuntimeConnection
+  [node service-id engine provider info options closed])
+
+(defn- ensure-open
+  [connection]
+  (if (deref (field connection :closed))
+    (throw (ex-info "Database runtime connection is closed"
+                    {:service (field connection :service-id)}))
+    connection))
+
+(extend-type RuntimeConnection protocol/IDatabase
+  (db-engine [connection]
+    (field connection :engine))
+  (db-provider [connection]
+    (field connection :provider))
+  (db-info [connection]
+    (let [info (field connection :info)]
+      (assoc info
+             :remote true
+             :service-id (field connection :service-id)
+             :closed (deref (field connection :closed)))))
+  (db-exec [connection sql parameters]
+    (ensure-open connection)
+    (client/exec (field connection :node)
+                 (field connection :service-id)
+                 sql
+                 parameters
+                 (field connection :options)))
+  (db-query [connection sql parameters]
+    (ensure-open connection)
+    (client/query (field connection :node)
+                  (field connection :service-id)
+                  sql
+                  parameters
+                  (field connection :options)))
+  (db-close [connection]
+    (reset! (field connection :closed) true)
+    (promise/from true)))
+
+(defn open
+  "Returns a promise resolving to a provider-neutral runtime connection.
+
+   The runtime service remains alive when this local handle is closed."
+  ([node service-id]
+   (open node service-id {}))
+  ([node service-id options]
+   (promise/then
+    (client/service-info node service-id options)
+    (fn [info]
+      (std.db.node.connection/RuntimeConnection
+       node
+       service-id
+       (get info :engine)
+       (get info :provider)
+       info
+       options
+       (atom false))))))
+
+(defn closed?
+  "Returns true when the local runtime connection handle is closed."
+  [connection]
+  (deref (field connection :closed)))
