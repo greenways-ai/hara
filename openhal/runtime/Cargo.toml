@@ -1,0 +1,13 @@
+[package]
+name = "openhal-runtime"
+version = "0.1.0"
+edition = "2021"
+license = "EPL-2.0"
+rust-version = "1.78"
+description = "Native worker-local Hara runtime bridge for OpenHAL/Nginx"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+sha2 = "0.10"
