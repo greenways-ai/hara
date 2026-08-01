@@ -103,28 +103,8 @@ jobs:
         name: release-truffle-${{ matrix.target }}
         path: hara-truffle-*.tar.gz
 
-  build-studio-runtime:
-    needs: guard
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: wasm32-unknown-unknown
-    - uses: actions/setup-node@v4
-      with:
-        node-version: '22'
-    - name: Build and verify browser Studio runtime
-      run: scripts/build-studio-runtime "${{ needs.guard.outputs.version }}"
-    - uses: actions/upload-artifact@v4
-      with:
-        name: release-studio-runtime
-        path: |
-          target/studio-runtime/hara-studio-runtime-*.tar.gz
-          target/studio-runtime/hara-studio-runtime-*.tar.gz.sha256
-
   release:
-    needs: [guard, build, build-truffle, build-studio-runtime]
+    needs: [guard, build, build-truffle]
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -138,16 +118,14 @@ jobs:
     - name: Create checksums
       run: |
         cd dist
-        sha256sum hara-rust-*.tar.gz hara-truffle-*.tar.gz hara-studio-runtime-*.tar.gz > SHA256SUMS
+        sha256sum hara-rust-*.tar.gz hara-truffle-*.tar.gz > SHA256SUMS
     - name: Create GitHub release
       run: |
         TAG="${{ needs.guard.outputs.tag }}"
         VERSION="${{ needs.guard.outputs.version }}"
         FLAGS=""
         case "$VERSION" in 0.*) FLAGS="--prerelease" ;; esac
-        ASSETS=(dist/hara-rust-*.tar.gz dist/hara-truffle-*.tar.gz \
-                dist/hara-studio-runtime-*.tar.gz dist/hara-studio-runtime-*.tar.gz.sha256 \
-                dist/SHA256SUMS)
+        ASSETS=(dist/hara-rust-*.tar.gz dist/hara-truffle-*.tar.gz dist/SHA256SUMS)
         if gh release view "$TAG" >/dev/null 2>&1; then
           gh release upload "$TAG" "${ASSETS[@]}" --clobber
         else

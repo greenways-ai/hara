@@ -9,8 +9,8 @@ component map and `website/docs/development.md` for the developer guide.
 - `rust/` — Rust/embedding runtime (native CLI, wasm builds, web loader,
   `rust/extensions/` in-tree wasm extensions). The old `wasm/` tree was
   removed — never reference it; everything is `rust/`. `rust/web/` holds the
-  browser loaders plus the shared studio environment (`rust/web/studio/`,
-  mounted by the website studio page and the hara-chrome panel).
+  browser loaders. Greenways Studio is an external HARP package set, verified
+  by `scripts/fetch-greenways-studio` for the website build.
 - `lib/` — hara-language sources (`lib/src`, `lib/test`), examples
   (`lib/examples/`), benchmarks (`lib/bench/`). Notable namespaces:
   `std.foundation`, the `talo.*` compiler port, and the `std.ledger.*`
@@ -73,12 +73,7 @@ bash scripts/build-hara-wasm-raw             # raw wasm extension artifact
 bash scripts/build-hara-wasm-web             # browser runtime → website/docs/rust/pkg/
 bash scripts/build-demo-synth-wasm           # demo synth → website/docs/assets/wasm/
 cd rust/web && npm ci && npm run test:hta    # browser loader tests
-cd rust/web && npm run test:studio           # studio node tests (broker, hal, UI)
 ```
-
-The `studio-hal` and `studio-broker` real-wasm integration tests need the
-raw wasm artifact from `bash scripts/build-hara-wasm-raw` and self-skip
-without it.
 
 Apps:
 
@@ -130,9 +125,8 @@ To cut a release:
   `lib/src/std/foundation.hal` via `include_str!` in `rust/src/lib.rs`.
 - `target/` at the repo root is CI scratch/build artifacts; Maven output is
   `java/target/`. Both are gitignored.
-- The pages deploy (`.github/workflows/pages.yml`) also ships the raw HTA
-  studio artifacts under `site-build/rust/`: the raw wasm module, the HTA
-  loader, and `rust/web/studio/` (broker, host services, boot, UI, hal libs)
-  for the website studio page.
+- The pages deploy builds through `scripts/build-www`, which fetches and
+  digest-verifies the external Greenways Studio HARP packages before copying
+  their runtime assets.
 - IDE state (`.idea/`, `.settings/`, `.classpath`, `.project`) is user-local
   and untracked.

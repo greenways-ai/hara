@@ -106,6 +106,8 @@ make wasm-web
 make hta-test
 make studio-test
 
+# Studio is maintained in greenways-ai/studio-tooling; this verifies pinned HARPs.
+
 make chrome-build chrome-test
 make docs-build
 make www-build
@@ -113,7 +115,7 @@ make www-build
 
 Run `make web-install` or `make chrome-install` before the corresponding Node
 workflows on a fresh checkout. `make check-all` runs the core Java, Rust, raw
-WASM, portable library, HTA, and Studio checks. Runtime performance entry
+WASM, portable library, HTA, and Greenways Studio package integrity checks. Runtime performance entry
 points are available as `runtime-benchmark`, `truffle-benchmark`,
 and `parity-benchmark`; each accepts additional arguments
 through `ARGS`.

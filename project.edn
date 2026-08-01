@@ -7,6 +7,5 @@
  :project/extension-paths ["rust/extensions" "extensions"]
  :project/main std.foundation
  :project/capabilities
- #{:studio/node-send
    :files/local-read
    :files/local-write}}

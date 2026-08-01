@@ -144,17 +144,17 @@ wasm-web: wasm-web-build ## Build the browser WASM runtime
 wasm-web-build: ## Build the browser WASM package
 	scripts/build-hara-wasm-web
 
-web-install: ## Install browser-loader and Studio dependencies
+web-install: ## Install browser runtime dependencies
 	$(NPM) --prefix $(WEB_DIR) ci
 
 hta-test: ## Run HTA browser-loader Node tests
 	$(NPM) --prefix $(WEB_DIR) run test:hta
 
-studio-build: ## Build the shared Studio runtime artifacts
-	scripts/build-studio-runtime
+studio-build: ## Fetch and verify Greenways Studio HARP packages
+	scripts/fetch-greenways-studio
 
-studio-test: wasm-build ## Run Studio Node tests against current raw WASM
-	$(NPM) --prefix $(WEB_DIR) run test:studio
+studio-test: ## Verify external Greenways Studio packages
+	scripts/fetch-greenways-studio
 
 chrome-install: ## Install Chrome extension dependencies
 	$(NPM) --prefix $(CHROME_DIR) ci

@@ -7,6 +7,11 @@ OUT="$ROOT/target/www"
 RAW_WASM="$ROOT/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm"
 HIR_OUT="$ROOT/target/www-hir"
 HARA_COMPILER="$ROOT/rust/target/debug/hara"
+GREENWAYS_STUDIO="$ROOT/target/greenways-studio/0.1.0"
+STUDIO_RUNTIME="$GREENWAYS_STUDIO/greenways-studio-runtime/src"
+SUPERSONIC="$GREENWAYS_STUDIO/greenways-audio-supersonic"
+
+bash "$ROOT/scripts/fetch-greenways-studio"
 
 bash "$ROOT/scripts/build-hara-wasm-raw"
 cargo build --manifest-path "$ROOT/rust/Cargo.toml" --features hir-encoder --bin hara
@@ -15,14 +20,14 @@ mkdir -p "$HIR_OUT"
 "$HARA_COMPILER" compile-hir "$ROOT/lib/src/std/lib/substrate/protocol.hal" --output "$HIR_OUT/substrate-protocol.hir"
 "$HARA_COMPILER" compile-hir "$ROOT/lib/src/std/lib/substrate/frame.hal" --output "$HIR_OUT/substrate-frame.hir"
 "$HARA_COMPILER" compile-hir "$ROOT/lib/src/std/lib/substrate.hal" --output "$HIR_OUT/substrate.hir"
-"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/store.hal" --output "$HIR_OUT/studio-store.hir"
-"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/boot.hal" --output "$HIR_OUT/studio-boot.hir"
-"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/node.hal" --output "$HIR_OUT/studio-node.hir"
-"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/draw.hal" --output "$HIR_OUT/studio-draw.hir"
-"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/program.hal" --output "$HIR_OUT/studio-program.hir"
-"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/graph.hal" --output "$HIR_OUT/studio-graph.hir"
-"$HARA_COMPILER" compile-hir "$ROOT/rust/web/studio/hal/session.hal" --output "$HIR_OUT/studio-session.hir"
-"$HARA_COMPILER" compile-hir "$ROOT/contrib/greenways/supersonic/src/hal/gw/audio/supersonic.hal" --output "$HIR_OUT/supersonic.hir"
+"$HARA_COMPILER" compile-hir "$STUDIO_RUNTIME/studio/hal/store.hal" --output "$HIR_OUT/studio-store.hir"
+"$HARA_COMPILER" compile-hir "$STUDIO_RUNTIME/studio/hal/boot.hal" --output "$HIR_OUT/studio-boot.hir"
+"$HARA_COMPILER" compile-hir "$STUDIO_RUNTIME/studio/hal/node.hal" --output "$HIR_OUT/studio-node.hir"
+"$HARA_COMPILER" compile-hir "$STUDIO_RUNTIME/studio/hal/draw.hal" --output "$HIR_OUT/studio-draw.hir"
+"$HARA_COMPILER" compile-hir "$STUDIO_RUNTIME/studio/hal/program.hal" --output "$HIR_OUT/studio-program.hir"
+"$HARA_COMPILER" compile-hir "$STUDIO_RUNTIME/studio/hal/graph.hal" --output "$HIR_OUT/studio-graph.hir"
+"$HARA_COMPILER" compile-hir "$STUDIO_RUNTIME/studio/hal/session.hal" --output "$HIR_OUT/studio-session.hir"
+"$HARA_COMPILER" compile-hir "$SUPERSONIC/src/hal/gw/audio/supersonic.hal" --output "$HIR_OUT/supersonic.hir"
 
 rm -rf "$OUT"
 mkdir -p "$OUT/runtime/host" "$OUT/runtime/packages/hta" "$OUT/runtime/studio/hal" "$OUT/runtime/std/lib/substrate"
@@ -81,26 +86,26 @@ node "$ROOT/scripts/build-www-harp.mjs" "$OUT/runtime/kernel.harp" \
   "studio.session=$HIR_OUT/studio-session.hir" \
   "gw.audio.supersonic=$HIR_OUT/supersonic.hir"
 cp "$ROOT/rust/web/host/"*.js "$OUT/runtime/host/"
-cp "$ROOT/rust/web/studio/boot.js" \
-   "$ROOT/rust/web/studio/broker.js" \
-   "$ROOT/rust/web/studio/document-runtime.js" \
-   "$ROOT/rust/web/studio/editor-state.js" \
-   "$ROOT/rust/web/studio/host-services.js" \
-   "$ROOT/rust/web/studio/canvas-runtime.js" \
-   "$ROOT/rust/web/studio/capability-registry.js" \
-   "$ROOT/rust/web/studio/graph-host.js" \
-   "$ROOT/rust/web/studio/module-codec.js" \
-   "$ROOT/rust/web/studio/node-runtime.js" \
-   "$ROOT/rust/web/studio/program-host.js" \
-   "$ROOT/rust/web/studio/program-worker.js" \
-   "$ROOT/rust/web/studio/session-router.js" \
-   "$ROOT/contrib/greenways/supersonic/src/js/supersonic.js" \
-   "$ROOT/rust/web/studio/workspace.js" \
+cp "$STUDIO_RUNTIME/studio/boot.js" \
+   "$STUDIO_RUNTIME/studio/broker.js" \
+   "$STUDIO_RUNTIME/studio/document-runtime.js" \
+   "$STUDIO_RUNTIME/studio/editor-state.js" \
+   "$STUDIO_RUNTIME/studio/host-services.js" \
+   "$STUDIO_RUNTIME/studio/canvas-runtime.js" \
+   "$STUDIO_RUNTIME/studio/capability-registry.js" \
+   "$STUDIO_RUNTIME/studio/graph-host.js" \
+   "$STUDIO_RUNTIME/studio/module-codec.js" \
+   "$STUDIO_RUNTIME/studio/node-runtime.js" \
+   "$STUDIO_RUNTIME/studio/program-host.js" \
+   "$STUDIO_RUNTIME/studio/program-worker.js" \
+   "$STUDIO_RUNTIME/studio/session-router.js" \
+   "$SUPERSONIC/src/js/supersonic.js" \
+   "$STUDIO_RUNTIME/studio/workspace.js" \
    "$OUT/runtime/studio/"
-cp "$ROOT/rust/web/studio/hal/"*.hal "$OUT/runtime/studio/hal/"
-cp "$ROOT/contrib/greenways/supersonic/src/hal/gw/audio/supersonic.hal" \
+cp "$STUDIO_RUNTIME/studio/hal/"*.hal "$OUT/runtime/studio/hal/"
+cp "$SUPERSONIC/src/hal/gw/audio/supersonic.hal" \
    "$OUT/runtime/studio/hal/supersonic.hal"
-cp "$ROOT/rust/web/studio/capabilities/"*.js "$OUT/runtime/studio/capabilities/"
+cp "$STUDIO_RUNTIME/studio/capabilities/"*.js "$OUT/runtime/studio/capabilities/"
 cp "$ROOT/lib/src/std/lib/substrate.hal" "$OUT/runtime/std/lib/substrate.hal"
 cp "$ROOT/lib/src/std/lib/substrate/protocol.hal" \
    "$ROOT/lib/src/std/lib/substrate/frame.hal" \

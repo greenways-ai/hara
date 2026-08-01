@@ -494,7 +494,6 @@ mod spec_tests {
         }
         for path in [
             "contrib/greenways/build",
-            "contrib/greenways/supersonic",
             "contrib/greenways/usdskel",
         ] {
             let root = repository.join(path);

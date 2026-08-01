@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
+version="0.1.0"
+release="studio-v$version"
+destination="$root/target/greenways-studio/$version"
+marker="$destination/.verified"
+base="https://github.com/greenways-ai/studio-tooling/releases/download/$release"
+
+if [[ -f "$marker" ]]; then
+  exit 0
+fi
+
+temporary="$(mktemp -d)"
+trap 'rm -rf "$temporary"' EXIT
+
+fetch() {
+  local package="$1"
+  local digest="$2"
+  local archive="$temporary/$package.harp"
+  curl --fail --location --silent --show-error "$base/$package-$version.harp" --output "$archive"
+  printf '%s  %s\n' "$digest" "$archive" | sha256sum --check --status
+  mkdir -p "$temporary/unpacked/$package"
+  unzip -q "$archive" -d "$temporary/unpacked/$package"
+}
+
+fetch greenways-studio-runtime 366264a24d1cff01da625bad81f89db7aaefd7bddbad2f2009b6d4e9ddf0fa8c
+fetch greenways-studio-ui 2269d7bd2beaee85447c5c8ce9dc57d08237af856dbaefe34bdb3dfa2f1b487f
+fetch greenways-music-spec 1c9a570597425c62fa2e35c57c3ada4e8f6dfd346546095c1dcbe954c595b2be
+fetch greenways-audio-supersonic c26d1bf2b1fed79f5a8f1b01cfab57c140275cd35db7719b9ac82e4b0fa258a4
+
+mkdir -p "$(dirname "$destination")"
+rm -rf "$destination"
+mv "$temporary/unpacked" "$destination"
+touch "$marker"
+printf 'Verified Greenways Studio packages %s\n' "$version"

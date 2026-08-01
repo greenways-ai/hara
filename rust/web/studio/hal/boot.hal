@@ -1,7 +1,0 @@
-; Default bootstrap entry point for studio kernels. Filesystem selection is a
-; host-owned mount operation completed before this HAL bootstrap runs.
-; (require [studio.boot :as boot]).
-(ns studio.boot)
-
-(defn boot! [name]
-  {:project name})
