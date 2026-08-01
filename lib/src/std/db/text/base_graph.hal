@@ -1,0 +1,82 @@
+;; ============================================================================
+;; std.db.text.base-graph — canonical graph-query normalization.
+;; ============================================================================
+(ns std.db.text.base-graph
+  (:require [std.db.text.base-scope :as scope]))
+
+(defn- compatible-get
+  [value lookup-key]
+  (cond
+    (not (map? value)) nil
+    (has? value lookup-key) (get value lookup-key)
+    (string? lookup-key) (get value (keyword lookup-key))
+    (keyword? lookup-key) (get value (name lookup-key))
+    :else nil))
+
+(defn tree-params?
+  "Returns true when params contains any canonical graph bucket."
+  [params]
+  (and (map? params)
+       (or (has? params "where")
+           (has? params :where)
+           (has? params "data")
+           (has? params :data)
+           (has? params "links")
+           (has? params :links)
+           (has? params "custom")
+           (has? params :custom))))
+
+(defn tree?
+  "Returns true when query is already a canonical graph tree."
+  [query]
+  (and (vector? query)
+       (>= (count query) 2)
+       (tree-params? (second query))))
+
+(defn normalise-tree-params
+  "Fills every canonical graph bucket with a vector default."
+  [params]
+  {"where" (or (compatible-get params :where) [])
+   "data" (or (compatible-get params :data) [])
+   "links" (or (compatible-get params :links) [])
+   "custom" (or (compatible-get params :custom) [])})
+
+(defn normalise-tree
+  "Normalizes an existing canonical tree to its explicit full shape."
+  [query]
+  (if (tree? query)
+    [(first query) (normalise-tree-params (second query))]
+    query))
+
+(defn base-query-inputs
+  "Splits compact query input into [table where returning]."
+  [query]
+  (let [table-name (first query)
+        length (count query)]
+    (cond
+      (= length 1)
+      [table-name {} nil]
+
+      (= length 3)
+      [table-name (second query) (nth query 2)]
+
+      (vector? (second query))
+      [table-name {} (second query)]
+
+      :else
+      [table-name (second query) nil])))
+
+(defn select-tree
+  "Normalizes compact or canonical query input into canonical graph IR."
+  [schema query options]
+  (if (tree? query)
+    (normalise-tree query)
+    (let [standard (scope/get-link-standard query)
+          table-name (first standard)
+          linked (second standard)
+          returning (last linked)
+          where (filter (fn [value]
+                          (and (map? value)
+                               (not (empty? value))))
+                        linked)]
+      (scope/get-tree schema table-name where returning (or options {})))))
