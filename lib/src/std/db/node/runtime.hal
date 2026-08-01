@@ -14,11 +14,20 @@
             [std.lib.substrate :as substrate]
             [std.lib.substrate.protocol :as protocol]))
 
-(def DEFAULT-TRANSPORT "std.db.default.transport")
-(def DEFAULT-WORKER "std.db.default.worker")
+(def DEFAULT-TRANSPORT "xt.db.default.transport")
+(def DEFAULT-WORKER "xt.db.default.worker")
 
 (defstruct DatabaseRuntime
   [kind client server transport-id worker-id adapter])
+
+(defn- compatible-get
+  [value lookup-key]
+  (cond
+    (not (map? value)) nil
+    (has? value lookup-key) (get value lookup-key)
+    (string? lookup-key) (get value (keyword lookup-key))
+    (keyword? lookup-key) (get value (name lookup-key))
+    :else nil))
 
 (defn init-server
   "Installs database kernel handlers on a server node."
@@ -29,6 +38,16 @@
   "Installs database forwarding handlers on a client node."
   [node]
   (proxy/init-proxy-handlers node))
+
+(defn install-drivers
+  "Registers a map of driver-id to descriptor on a server node."
+  [node drivers]
+  (reduce (fn [current pair]
+            (kernel/register-driver current (key pair) (val pair))
+            current)
+          node
+          (or drivers {}))
+  node)
 
 (defn- response-frame
   [request status data error]
@@ -103,8 +122,10 @@
   ([client-node server-node config schema lookup]
    (local-connect client-node server-node config schema lookup {}))
   ([client-node server-node config schema lookup options]
-   (let [transport-id (or (get options :transport-id) DEFAULT-TRANSPORT)
-         worker-id (or (get options :worker-id) DEFAULT-WORKER)]
+   (let [transport-id (or (compatible-get options :transport-id) DEFAULT-TRANSPORT)
+         worker-id (or (compatible-get options :worker-id) DEFAULT-WORKER)
+         drivers (compatible-get options :drivers)]
+     (install-drivers server-node drivers)
      (init-server server-node)
      (init-server-proxy client-node)
      (connect-nodes client-node server-node transport-id)
@@ -122,8 +143,10 @@
   ([config schema lookup]
    (local-runtime config schema lookup {}))
   ([config schema lookup options]
-   (let [client-node (substrate/node-create (or (get options :client-id) "db/client"))
-         server-node (substrate/node-create (or (get options :server-id) "db/server"))]
+   (let [client-node (substrate/node-create
+                      (or (compatible-get options :client-id) "db/client"))
+         server-node (substrate/node-create
+                      (or (compatible-get options :server-id) "db/server"))]
      (local-connect client-node server-node config schema lookup options))))
 
 (defn adapter-connect
@@ -132,16 +155,16 @@
    adapter requires :connect, called with client-node and transport-id. The
    function must attach a Substrate transport and may return a value or promise."
   [kind client-node config schema lookup adapter options]
-  (let [transport-id (or (get options :transport-id) DEFAULT-TRANSPORT)
-        worker-id (or (get options :worker-id) DEFAULT-WORKER)
-        connect-function (get adapter :connect)]
+  (let [transport-id (or (compatible-get options :transport-id) DEFAULT-TRANSPORT)
+        worker-id (or (compatible-get options :worker-id) DEFAULT-WORKER)
+        connect-function (compatible-get adapter :connect)]
     (if (nil? connect-function)
       (throw (ex-info "Database runtime adapter requires :connect"
                       {:kind kind :adapter adapter}))
       (do
         (init-server-proxy client-node)
         (promise/then
-         (promise (fn [] (connect-function client-node transport-id)))
+         (promise/run (fn [] (connect-function client-node transport-id)))
          (fn [_]
            (proxy-util/set-default-transport client-node transport-id)
            (promise/then
@@ -151,7 +174,8 @@
                          kind client-node nil transport-id worker-id adapter)
                :init status
                :transport transport-id
-               :transport-attached (not (nil? (protocol/get-transport client-node transport-id)))}))))))))
+               :transport-attached
+               (not (nil? (protocol/get-transport client-node transport-id)))}))))))))
 
 (defn sharedworker-connect
   [client-node config schema lookup adapter options]
@@ -172,7 +196,7 @@
         server-node (field runtime :server)
         transport-id (field runtime :transport-id)
         adapter (field runtime :adapter)
-        close-function (if adapter (get adapter :close) nil)
+        close-function (if adapter (compatible-get adapter :close) nil)
         teardown (if server-node
                    (kernel/kernel-teardown-main server-node config)
                    (client/kernel-teardown client-node config {:transport-id transport-id}))]
