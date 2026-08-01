@@ -12,6 +12,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /** Discovers project.edn (or legacy project.hal) and resolves namespace paths. */
 final class HaraProject {
@@ -25,6 +27,16 @@ final class HaraProject {
   private final Symbol main;
   private final java.util.List<Path> sourcePaths;
   private final java.util.List<Path> testPaths;
+  private final java.util.List<JvmDependency> jvmDependencies;
+  private final java.util.List<Path> jvmSourcePaths;
+  private final Path jvmTargetPath;
+  private final Set<String> capabilities;
+
+  record JvmDependency(String id, String version) {
+    String coordinate() {
+      return id.replace('/', ':') + ":" + version;
+    }
+  }
 
   private HaraProject(
       Path root,
@@ -33,7 +45,11 @@ final class HaraProject {
       String version,
       Symbol main,
       java.util.List<Path> sourcePaths,
-      java.util.List<Path> testPaths) {
+      java.util.List<Path> testPaths,
+      java.util.List<JvmDependency> jvmDependencies,
+      java.util.List<Path> jvmSourcePaths,
+      Path jvmTargetPath,
+      Set<String> capabilities) {
     this.root = root;
     this.descriptor = descriptor;
     this.name = name;
@@ -41,6 +57,10 @@ final class HaraProject {
     this.main = main;
     this.sourcePaths = java.util.List.copyOf(sourcePaths);
     this.testPaths = java.util.List.copyOf(testPaths);
+    this.jvmDependencies = java.util.List.copyOf(jvmDependencies);
+    this.jvmSourcePaths = java.util.List.copyOf(jvmSourcePaths);
+    this.jvmTargetPath = jvmTargetPath;
+    this.capabilities = Set.copyOf(capabilities);
   }
 
   static HaraProject discover(Path start) {
@@ -83,7 +103,21 @@ final class HaraProject {
                 lookup(options, "project/test-paths"),
                 "project/test-paths",
                 java.util.List.of("test"),
-                PROJECT_FILE));
+                PROJECT_FILE),
+            jvmDependencies(lookup(options, "jvm/dependencies"), PROJECT_FILE),
+            paths(
+                root,
+                lookup(options, "jvm/source-paths"),
+                "jvm/source-paths",
+                java.util.List.of("src-java"),
+                PROJECT_FILE),
+            path(
+                root,
+                lookup(options, "jvm/target-path"),
+                "jvm/target-path",
+                "target/classes",
+                PROJECT_FILE),
+            capabilities(lookup(options, "project/capabilities"), PROJECT_FILE));
       }
       if (!(form instanceof List<?> list)
           || list.count() != 3
@@ -112,7 +146,11 @@ final class HaraProject {
               lookup(options, "test-paths"),
               "test-paths",
               java.util.List.of("test"),
-              LEGACY_PROJECT_FILE));
+              LEGACY_PROJECT_FILE),
+          java.util.List.of(),
+          java.util.List.of(),
+          root.resolve("target/classes"),
+          Set.of());
     } catch (IOException error) {
       throw new HaraException(
           "Unable to read project descriptor " + descriptor + ": " + error.getMessage());
@@ -209,6 +247,22 @@ final class HaraProject {
     return testPaths;
   }
 
+  java.util.List<JvmDependency> jvmDependencies() {
+    return jvmDependencies;
+  }
+
+  java.util.List<Path> jvmSourcePaths() {
+    return jvmSourcePaths;
+  }
+
+  Path jvmTargetPath() {
+    return jvmTargetPath;
+  }
+
+  boolean hasCapability(String capability) {
+    return capabilities.contains(capability);
+  }
+
   Path extensionRoot() {
     return root.resolve("extensions");
   }
@@ -244,5 +298,75 @@ final class HaraProject {
       paths.add(path);
     }
     return Collections.unmodifiableList(paths);
+  }
+
+  private static Path path(
+      Path root, Object value, String option, String defaultValue, String descriptor) {
+    Object selected = value == null ? defaultValue : value;
+    if (!(selected instanceof String entry) || entry.isBlank()) {
+      throw new HaraException(descriptor + " :" + option + " expects a non-empty path string");
+    }
+    Path path = root.resolve(entry).normalize();
+    if (!path.startsWith(root)) {
+      throw new HaraException(descriptor + " :" + option + " cannot escape the project root");
+    }
+    return path;
+  }
+
+  private static java.util.List<JvmDependency> jvmDependencies(Object value, String descriptor) {
+    if (value == null) return java.util.List.of();
+    if (!(value instanceof ILinearType<?> entries)) {
+      throw new HaraException(descriptor + " :jvm/dependencies expects a vector");
+    }
+    ArrayList<JvmDependency> dependencies = new ArrayList<>();
+    LinkedHashSet<String> ids = new LinkedHashSet<>();
+    for (Object valueEntry : entries) {
+      if (!(valueEntry instanceof ILinearType<?> entry) || entry.count() != 2) {
+        throw new HaraException(
+            descriptor + " :jvm/dependencies entries must be [group/artifact \"version\"]");
+      }
+      Object idValue = entry.nth(0);
+      String id;
+      if (idValue instanceof Symbol symbol) {
+        id = symbol.display();
+      } else if (idValue instanceof String text) {
+        id = text.replace(':', '/');
+      } else {
+        throw new HaraException(
+            descriptor + " :jvm/dependencies coordinates must be symbols or strings");
+      }
+      if (!id.matches("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")) {
+        throw new HaraException(descriptor + " invalid JVM dependency coordinate " + id);
+      }
+      if (!(entry.nth(1) instanceof String version)
+          || !version.matches("[A-Za-z0-9][A-Za-z0-9._+-]*")) {
+        throw new HaraException(
+            descriptor + " JVM dependency " + id + " requires an exact Maven version");
+      }
+      if (!ids.add(id)) {
+        throw new HaraException(descriptor + " duplicate JVM dependency " + id);
+      }
+      dependencies.add(new JvmDependency(id, version));
+    }
+    return java.util.List.copyOf(dependencies);
+  }
+
+  private static Set<String> capabilities(Object value, String descriptor) {
+    if (value == null) return Set.of();
+    if (!(value instanceof Iterable<?> entries)) {
+      throw new HaraException(descriptor + " :project/capabilities expects a collection");
+    }
+    LinkedHashSet<String> capabilities = new LinkedHashSet<>();
+    for (Object entry : entries) {
+      if (!(entry instanceof Keyword capability)) {
+        throw new HaraException(descriptor + " :project/capabilities expects keywords");
+      }
+      String name =
+          capability.getNamespace() == null
+              ? capability.getName()
+              : capability.getNamespace() + "/" + capability.getName();
+      capabilities.add(name);
+    }
+    return Set.copyOf(capabilities);
   }
 }

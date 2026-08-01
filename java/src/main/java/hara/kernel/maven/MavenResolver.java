@@ -14,8 +14,11 @@ import org.eclipse.aether.resolution.DependencyRequest;
 import org.eclipse.aether.resolution.DependencyResolutionException;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.stream.Collectors;
 
 public class MavenResolver {
 
@@ -24,12 +27,17 @@ public class MavenResolver {
   private final List<RemoteRepository> repositories;
 
   public MavenResolver() {
+    this(false);
+  }
+
+  public MavenResolver(boolean offline) {
     this.system = RepositorySystemFactory.newRepositorySystem();
     this.session = MavenRepositorySystemUtils.newSession();
     LocalRepository localRepo =
         new LocalRepository(System.getProperty("user.home") + "/.m2/repository");
     this.session.setLocalRepositoryManager(
         this.system.newLocalRepositoryManager(this.session, localRepo));
+    this.session.setOffline(offline);
     this.repositories =
         List.of(
             new RemoteRepository.Builder(
@@ -38,9 +46,17 @@ public class MavenResolver {
   }
 
   public List<File> resolve(String coordinate) throws DependencyResolutionException {
-    Artifact artifact = new DefaultArtifact(coordinate);
+    return resolve(List.of(coordinate));
+  }
+
+  /** Resolves all roots as one graph so Maven can mediate shared transitive dependencies. */
+  public List<File> resolve(Collection<String> coordinates)
+      throws DependencyResolutionException {
     CollectRequest collectRequest = new CollectRequest();
-    collectRequest.setRoot(new Dependency(artifact, ""));
+    for (String coordinate : coordinates) {
+      Artifact artifact = new DefaultArtifact(coordinate);
+      collectRequest.addDependency(new Dependency(artifact, "compile"));
+    }
     collectRequest.setRepositories(this.repositories);
 
     DependencyRequest dependencyRequest = new DependencyRequest();
@@ -49,9 +65,13 @@ public class MavenResolver {
     List<ArtifactResult> artifactResults =
         this.system.resolveDependencies(this.session, dependencyRequest).getArtifactResults();
 
-    return artifactResults.stream()
+    LinkedHashMap<String, File> files = new LinkedHashMap<>();
+    artifactResults.stream()
         .map(ArtifactResult::getArtifact)
         .map(Artifact::getFile)
-        .collect(Collectors.toList());
+        .filter(java.util.Objects::nonNull)
+        .sorted(Comparator.comparing(File::getAbsolutePath))
+        .forEach(file -> files.put(file.getAbsolutePath(), file));
+    return List.copyOf(new ArrayList<>(files.values()));
   }
 }

@@ -39,6 +39,7 @@ import org.jline.utils.InfoCmp;
 import org.jline.utils.AttributedString;
 import org.jline.widget.AutosuggestionWidgets;
 import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.HostAccess;
 import org.graalvm.polyglot.PolyglotException;
 import org.graalvm.polyglot.Value;
 import org.graalvm.polyglot.io.IOAccess;
@@ -241,12 +242,14 @@ public final class Main {
     Files.createDirectories(root.resolve("src").resolve(namespace));
     Files.createDirectories(root.resolve("test").resolve(namespace));
     Files.createDirectories(root.resolve("extensions"));
+    Files.createDirectories(root.resolve("src-java"));
     Files.writeString(
         root.resolve("project.edn"),
         "{:hara/type :project\n :hara/version \"1.0.0\"\n :project/id " + name
             + "\n :project/version \"0.1.0\"\n :project/source-paths [\"src\"]\n"
             + " :project/test-paths [\"test\"]\n :project/extension-paths [\"extensions\"]\n"
-            + " :project/main " + namespace + ".main\n :project/capabilities #{}\n :project/dependencies {}}\n");
+            + " :project/main " + namespace + ".main\n :project/capabilities #{}\n :project/dependencies {}\n"
+            + " :jvm/dependencies []\n :jvm/source-paths [\"src-java\"]\n :jvm/target-path \"target/classes\"}\n");
     Files.writeString(root.resolve("workspace.edn"), "{:hara/type :workspace :hara/version \"1.0.0\"}\n");
     Files.writeString(root.resolve("src").resolve(namespace).resolve("main.hal"),
         "(ns " + namespace + ".main)\n\n(defn main []\n  \"Hello from " + name + "\")\n\n(main)\n");
@@ -346,14 +349,28 @@ public final class Main {
     if (locked && !Files.isRegularFile(lock)) throw new HaraException(args[1] + " requires an existing project.lock.edn");
     if (locked && !"{:lock/format 1 :packages {}}\n".equals(Files.readString(lock)))
       throw new HaraException(lock + " is not a lockfile written by this CLI");
+    boolean offline =
+        capabilities.offline
+            || (args.length == 2
+                && ("--offline".equals(args[1]) || "--frozen".equals(args[1])));
+    java.util.List<Path> artifacts = HaraJvmProject.resolveDependencies(project, offline);
     if (!locked) Files.writeString(lock, "{:lock/format 1 :packages {}}\n");
     output.println("project sync: " + lock);
+    if (!project.jvmDependencies().isEmpty()) {
+      output.println(
+          "jvm dependencies: "
+              + project.jvmDependencies().size()
+              + " direct, "
+              + artifacts.size()
+              + " artifacts");
+    }
     return 0;
   }
 
   private static int runProject(Capabilities capabilities, PrintStream output) throws IOException {
     HaraProject project = cliProject(new String[] {"run"}, capabilities);
-    try (Context context = context(capabilities, project.root())) {
+    try (HaraJvmProject ignored = HaraJvmProject.prepare(project, capabilities.offline);
+        Context context = context(capabilities, project)) {
       output.println(display(context.eval(HaraLanguage.ID, Files.readString(project.mainFile()))));
     }
     return 0;
@@ -387,38 +404,40 @@ public final class Main {
     if (files.isEmpty()) throw new HaraException("project has no .hal files under :project/test-paths");
     int passed = 0;
     int failed = 0;
-    for (Path file : files) {
-      try (Context context = context(capabilities, project.root())) {
-        Value value = context.eval(HaraLanguage.ID, Files.readString(file));
-        Object results = Parser.LispReader.readString(value.asString(), null);
-        int filePassed = 0;
-        int fileFailed = 0;
-        if (results instanceof IMapType summary) {
-          Object status = summary.lookup(Keyword.create("status"));
-          Object countsValue = summary.lookup(Keyword.create("counts"));
-          if (!(status instanceof Keyword)
-              || !(countsValue instanceof IMapType counts)
-              || !(counts.lookup(Keyword.create("passed")) instanceof Long passedCount)
-              || !(counts.lookup(Keyword.create("failed")) instanceof Long failedCount)) {
-            throw new HaraException("code.test/run result is missing :status or :counts");
+    try (HaraJvmProject ignored = HaraJvmProject.prepare(project, capabilities.offline)) {
+      for (Path file : files) {
+        try (Context context = context(capabilities, project)) {
+          Value value = context.eval(HaraLanguage.ID, Files.readString(file));
+          Object results = Parser.LispReader.readString(value.asString(), null);
+          int filePassed = 0;
+          int fileFailed = 0;
+          if (results instanceof IMapType summary) {
+            Object status = summary.lookup(Keyword.create("status"));
+            Object countsValue = summary.lookup(Keyword.create("counts"));
+            if (!(status instanceof Keyword)
+                || !(countsValue instanceof IMapType counts)
+                || !(counts.lookup(Keyword.create("passed")) instanceof Long passedCount)
+                || !(counts.lookup(Keyword.create("failed")) instanceof Long failedCount)) {
+              throw new HaraException("code.test/run result is missing :status or :counts");
+            }
+            filePassed = Math.toIntExact(passedCount);
+            fileFailed = Math.toIntExact(failedCount);
+          } else if (results instanceof ILinearType<?> items) {
+            for (Object item : items) {
+              if (!(item instanceof IMapType map) || !(map.lookup(Keyword.create("pass")) instanceof Boolean result))
+                throw new HaraException("test result is missing boolean :pass");
+              if (result) filePassed++; else fileFailed++;
+            }
+          } else {
+            throw new HaraException("test file must return code.test/run summary or test/print-results vector");
           }
-          filePassed = Math.toIntExact(passedCount);
-          fileFailed = Math.toIntExact(failedCount);
-        } else if (results instanceof ILinearType<?> items) {
-          for (Object item : items) {
-            if (!(item instanceof IMapType map) || !(map.lookup(Keyword.create("pass")) instanceof Boolean result))
-              throw new HaraException("test result is missing boolean :pass");
-            if (result) filePassed++; else fileFailed++;
-          }
-        } else {
-          throw new HaraException("test file must return code.test/run summary or test/print-results vector");
+          passed += filePassed;
+          failed += fileFailed;
+          output.println("test " + file + ": " + filePassed + " passed, " + fileFailed + " failed");
+        } catch (RuntimeException failure) {
+          failed++;
+          output.println("test " + file + ": " + failure.getMessage());
         }
-        passed += filePassed;
-        failed += fileFailed;
-        output.println("test " + file + ": " + filePassed + " passed, " + fileFailed + " failed");
-      } catch (RuntimeException failure) {
-        failed++;
-        output.println("test " + file + ": " + failure.getMessage());
       }
     }
     output.println("test result: " + passed + " passed, " + failed + " failed");
@@ -529,6 +548,15 @@ public final class Main {
     return project == null ? null : project.root();
   }
 
+  private static HaraProject runtimeProject(Capabilities capabilities) {
+    Path start = capabilities.project == null ? Path.of(".") : capabilities.project;
+    HaraProject project = HaraProject.discover(start);
+    if (project != null
+        && !"project.edn".equals(project.descriptor().getFileName().toString())) return null;
+    if (project != null) project.validateCliProject();
+    return project;
+  }
+
   @SuppressWarnings({"rawtypes", "unchecked"})
   private static int runConformance(PrintStream output, PrintStream error) {
     try (InputStream resource =
@@ -630,9 +658,21 @@ public final class Main {
       boolean interactive,
       Capabilities capabilities,
       boolean enableResp) {
-    try (SessionKernel kernel =
-        new SessionKernel(
-            capabilities.file, capabilities.network, capabilities.process)) {
+    HaraProject project;
+    try {
+      project = runtimeProject(capabilities);
+    } catch (RuntimeException errorValue) {
+      error.println(errorValue.getMessage());
+      return 1;
+    }
+    try (HaraJvmProject ignored =
+            project == null ? null : HaraJvmProject.prepare(project, capabilities.offline);
+        SessionKernel kernel =
+            new SessionKernel(
+                capabilities.file,
+                capabilities.network,
+                capabilities.process,
+                project)) {
       RespController resp =
           new RespController(
               kernel, capabilities.host, capabilities.port, capabilities.logRequests);
@@ -687,14 +727,22 @@ public final class Main {
     } catch (IOException exception) {
       error.println(exception.getMessage());
       return 1;
+    } catch (RuntimeException exception) {
+      error.println(exception.getMessage());
+      return 1;
     }
   }
 
   private static Context context(Capabilities capabilities) {
-    return context(capabilities, null);
+    return context(capabilities, null, null);
   }
 
-  private static Context context(Capabilities capabilities, Path projectRoot) {
+  private static Context context(Capabilities capabilities, HaraProject project) {
+    return context(capabilities, project == null ? null : project.root(), project);
+  }
+
+  private static Context context(
+      Capabilities capabilities, Path projectRoot, HaraProject project) {
     IOAccess access =
         IOAccess.newBuilder()
             .allowHostFileAccess(capabilities.file || projectRoot != null)
@@ -703,6 +751,9 @@ public final class Main {
     Context.Builder builder = Context.newBuilder(HaraLanguage.ID)
         .allowCreateProcess(capabilities.process)
         .allowIO(access);
+    if (project != null && project.hasCapability("jvm/reflection")) {
+      builder.allowHostAccess(HostAccess.ALL).allowHostClassLookup(name -> true);
+    }
     if (projectRoot != null) builder.currentWorkingDirectory(projectRoot);
     return builder.build();
   }

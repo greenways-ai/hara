@@ -20,15 +20,30 @@ public class MainTest {
     try {
       Files.createDirectories(root.resolve("src/demo_app"));
       Files.createDirectories(root.resolve("test/demo_app"));
+      Files.createDirectories(root.resolve("src-java/demo_app"));
       Files.writeString(
           root.resolve("project.edn"),
           "{:hara/type :project :hara/version \"1.0.0\" :project/id demo-app "
               + ":project/version \"0.1.0\" :project/source-paths [\"src\"] "
               + ":project/test-paths [\"test\"] :project/extension-paths [\"extensions\"] "
-              + ":project/main demo_app.main :project/capabilities #{} :project/dependencies {}}");
+              + ":project/main demo_app.main :project/capabilities #{:jvm/reflection} "
+              + ":project/dependencies {} "
+              + ":jvm/dependencies [[org.apache.commons/commons-lang3 \"3.12.0\"]] "
+              + ":jvm/source-paths [\"src-java\"] :jvm/target-path \"target/classes\"}");
+      Files.writeString(
+          root.resolve("src-java/demo_app/Bridge.java"),
+          "package demo_app;\n"
+              + "import org.apache.commons.lang3.StringUtils;\n"
+              + "public final class Bridge {\n"
+              + "  private Bridge() {}\n"
+              + "  public static String greeting() {\n"
+              + "    return StringUtils.reverse(\"ppa-omed morf olleH\");\n"
+              + "  }\n"
+              + "}\n");
       Files.writeString(
           root.resolve("src/demo_app/main.hal"),
-          "(ns demo_app.main) (defn main [] \"Hello from demo-app\") (main)");
+          "(ns demo_app.main (:flavor :jvm) (:import [demo_app Bridge])) "
+              + "(defn main [] (Bridge/greeting)) (main)");
       Files.writeString(
           root.resolve("test/demo_app/main_test.hal"),
           "(ns demo_app.main-test (:require [std.lib.test :as test])) "
@@ -41,11 +56,23 @@ public class MainTest {
       assertEquals(0, Main.run(new String[] {"--project", root.toString(), "sync"}, stdout, stderr));
       assertEquals(0, Main.run(new String[] {"--project", root.toString(), "sync", "--frozen"}, stdout, stderr));
       assertEquals(0, Main.run(new String[] {"--project", root.toString(), "run"}, stdout, stderr));
+      assertEquals(
+          0,
+          Main.run(
+              new String[] {"--project", root.toString(), "--offline", "repl"},
+              new ByteArrayInputStream(
+                  ("(ns demo_app.repl (:flavor :jvm) (:import [demo_app Bridge]))\n"
+                          + "(Bridge/greeting)\n:quit\n")
+                      .getBytes(StandardCharsets.UTF_8)),
+              stdout,
+              stderr));
       assertEquals(0, Main.run(new String[] {"--project", root.toString(), "test"}, stdout, stderr));
       assertEquals("", error.toString(StandardCharsets.UTF_8));
       assertTrue(output.toString(StandardCharsets.UTF_8).contains("project check: demo-app 0.1.0"));
+      assertTrue(output.toString(StandardCharsets.UTF_8).contains("jvm dependencies: 1 direct"));
       assertTrue(output.toString(StandardCharsets.UTF_8).contains("Hello from demo-app"));
       assertTrue(output.toString(StandardCharsets.UTF_8).contains("test result: 1 passed, 0 failed"));
+      assertTrue(Files.isRegularFile(root.resolve("target/classes/demo_app/Bridge.class")));
     } finally {
       Files.walk(root).sorted(Comparator.reverseOrder()).forEach(path -> { try { Files.deleteIfExists(path); } catch (Exception ignored) {} });
     }
