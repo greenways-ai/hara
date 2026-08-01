@@ -76,14 +76,14 @@
      => [["Owner" "User"]
          ["Owner" "User"]])
 
-   (fact "table-coerce applies type functions and recurses through references"
+   (fact "table-coerce accepts native keyword coercion keys and recurses"
      (schema/table-coerce
       sample-schema
       "User"
       {"active" 1
        "owner" [{"id" "owner-1"}]
        "unknown" "kept"}
-      {"boolean" (fn [value] (= value 1))})
+      {:boolean (fn [value] (= value 1))})
      => {"active" true
          "owner" [{"id" "owner-1"}]
          "unknown" "kept"})])
