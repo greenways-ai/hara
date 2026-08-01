@@ -27,7 +27,7 @@ impl Compiler {
         match self.ctx().scopes.resolve(name) {
             Some(slot) => self.emit(Instruction::LoadLocal(slot), Some(span.start)),
             None if self.visible_global(name) => {
-                let index = self.name_constant(name, span)?;
+                let index = self.global_name_constant(name, span)?;
                 self.emit(Instruction::GetGlobal(index), Some(span.start))
             }
             None => {
@@ -400,9 +400,16 @@ impl Compiler {
                         }
                     }
                     Form::Symbol(head) => match head.as_str() {
-                        "if" | "do" | "recur" | "try" | "throw" | "finally" => {
+                        "if" | "and" | "or" | "cond" | "do" | "recur" | "try" | "throw"
+                        | "finally" => {
                             for c in &children[1..] {
                                 self.collect_free(c, bound, free);
+                            }
+                        }
+                        "quote" => {}
+                        "syntax-quote" => {
+                            if let Some(template) = children.get(1) {
+                                self.collect_syntax_free(template, bound, free);
                             }
                         }
                         // Catch clauses bind their name symbol over the
@@ -531,6 +538,71 @@ impl Compiler {
                     children: None,
                 };
                 self.collect_free(&wrapped, bound, free);
+            }
+            Form::Vector(values) | Form::Set(values) => {
+                for form in values {
+                    let nested = Child {
+                        form,
+                        span: child.span,
+                        children: None,
+                    };
+                    self.collect_free(&nested, bound, free);
+                }
+            }
+            Form::Map(entries) => {
+                for (key, value) in entries {
+                    for form in [key, value] {
+                        let nested = Child {
+                            form,
+                            span: child.span,
+                            children: None,
+                        };
+                        self.collect_free(&nested, bound, free);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_syntax_free(
+        &self,
+        child: &Child<'_>,
+        bound: &mut Vec<String>,
+        free: &mut Vec<(String, Option<Position>)>,
+    ) {
+        match crate::core::form_without_metadata(child.form) {
+            Form::List(values) if matches!(values.first(), Some(Form::Symbol(name)) if name == "unquote" || name == "unquote-splicing") => {
+                if let Some(value) = values.get(1) {
+                    let nested = Child {
+                        form: value,
+                        span: child.span,
+                        children: None,
+                    };
+                    self.collect_free(&nested, bound, free);
+                }
+            }
+            Form::List(values) | Form::Vector(values) | Form::Set(values) => {
+                for value in values {
+                    let nested = Child {
+                        form: value,
+                        span: child.span,
+                        children: None,
+                    };
+                    self.collect_syntax_free(&nested, bound, free);
+                }
+            }
+            Form::Map(entries) => {
+                for (key, value) in entries {
+                    for form in [key, value] {
+                        let nested = Child {
+                            form,
+                            span: child.span,
+                            children: None,
+                        };
+                        self.collect_syntax_free(&nested, bound, free);
+                    }
+                }
             }
             _ => {}
         }

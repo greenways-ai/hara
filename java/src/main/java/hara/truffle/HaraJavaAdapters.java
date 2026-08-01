@@ -2,6 +2,7 @@ package hara.truffle;
 
 import hara.lang.data.types.ISequentialLookupType;
 import hara.lang.data.types.ISequentialType;
+import hara.lang.data.types.ILinearType;
 import hara.lang.data.types.ISetType;
 import hara.lang.data.types.IMapType;
 import hara.lang.data.types.IVectorType;
@@ -868,6 +869,9 @@ public final class HaraJavaAdapters {
 
   @SuppressWarnings("unchecked")
   private static Object conjValue(IConj<?> conj, Object value) {
+    if (conj instanceof IMapType<?, ?> && value instanceof ILinearType<?> pair && pair.count() == 2) {
+      value = new java.util.AbstractMap.SimpleImmutableEntry<>(pair.nth(0), pair.nth(1));
+    }
     return ((IConj<Object>) conj).conj(value);
   }
 

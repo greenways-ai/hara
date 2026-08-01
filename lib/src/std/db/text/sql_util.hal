@@ -142,27 +142,36 @@
       (not (nil? custom)) custom
       :else operator)))
 
-(defn json-value
-  "Converts keyword-keyed portable maps into strict JSON-compatible data."
+(defn ^{:schema [:fn [:any] :str]}
+  json-compatible
+  "Normalizes Hara keyword maps and values at a strict JSON boundary."
   [value]
   (cond
     (map? value)
-    (reduce (fn [output entry]
-              (let [key (key entry)]
-                (assoc output
-                       (if (string? key) key (name key))
-                       (std.db.text.sql-util/json-value (val entry)))))
-            {}
-            value)
-    (vector? value) (map std.db.text.sql-util/json-value value)
-    (set? value) (vec (map std.db.text.sql-util/json-value value))
+    (into {}
+          (map (fn [entry-key]
+                 [(if (keyword? entry-key)
+                    (name entry-key)
+                    entry-key)
+                  (json-compatible (get value entry-key))])
+               (keys value)))
+
+    (vector? value)
+    (into [] (map json-compatible value))
+
+    (set? value)
+    (into [] (map json-compatible value))
+
+    (keyword? value)
+    (name value)
+
     :else value))
 
 (defn ^{:schema [:fn [:any] :str]}
   encode-json
   "Encodes a JSON value as a single-quoted SQL literal."
   [value]
-  (str "'" (string/replace (json/write (json-value value)) "'" "''") "'"))
+  (str "'" (string/replace (json/write (json-compatible value)) "'" "''") "'"))
 
 (defn ^{:schema [:fn [:any] :str]}
   encode-value

@@ -1,4 +1,5 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashSet, VecDeque};
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
@@ -8,25 +9,52 @@ use crate::core::Value;
 pub enum PromiseRejection {
     Message(String),
     Value(Value),
+    Cancelled(Value),
 }
 
 impl PromiseRejection {
     pub fn value(&self) -> Value {
         match self {
             Self::Message(message) => Value::String(message.clone()),
-            Self::Value(value) => value.clone(),
+            Self::Value(value) | Self::Cancelled(value) => value.clone(),
         }
     }
 
     pub fn message(&self) -> String {
         match self {
             Self::Message(message) => message.clone(),
-            Self::Value(value) => value.display(),
+            Self::Value(value) | Self::Cancelled(value) => value.display(),
         }
     }
 
     pub fn is_cancelled(&self) -> bool {
-        matches!(self, Self::Message(message) if message == "cancelled")
+        match self {
+            Self::Cancelled(_) => true,
+            Self::Message(message) => message == "cancelled",
+            Self::Value(_) => false,
+        }
+    }
+
+    pub fn cancelled() -> Self {
+        Self::Cancelled(Value::Map(
+            [
+                (
+                    Value::Keyword("code".into()),
+                    Value::Keyword("task/cancelled".into()),
+                ),
+                (
+                    Value::Keyword("message".into()),
+                    Value::String("cancelled".into()),
+                ),
+                (
+                    Value::Keyword("origin".into()),
+                    Value::Keyword("runtime".into()),
+                ),
+                (Value::Keyword("retryable".into()), Value::Bool(false)),
+            ]
+            .into_iter()
+            .collect(),
+        ))
     }
 }
 
@@ -61,6 +89,31 @@ struct PromiseInner {
     continuations: Vec<Rc<dyn Fn(PromiseState)>>,
     deferred: Option<(Instant, Rc<dyn Fn() -> Result<Value, String>>)>,
     hooks: PromiseHooks,
+    adopted_from: Option<Weak<RefCell<PromiseInner>>>,
+}
+
+type ContinuationJob = (Rc<dyn Fn(PromiseState)>, PromiseState);
+
+thread_local! {
+    static CONTINUATION_QUEUE: RefCell<VecDeque<ContinuationJob>> = RefCell::new(VecDeque::new());
+    static DRAINING_CONTINUATIONS: Cell<bool> = const { Cell::new(false) };
+}
+
+fn enqueue_continuation(continuation: Rc<dyn Fn(PromiseState)>, state: PromiseState) {
+    CONTINUATION_QUEUE.with(|queue| queue.borrow_mut().push_back((continuation, state)));
+    DRAINING_CONTINUATIONS.with(|draining| {
+        if draining.replace(true) {
+            return;
+        }
+        loop {
+            let job = CONTINUATION_QUEUE.with(|queue| queue.borrow_mut().pop_front());
+            let Some((continuation, state)) = job else {
+                break;
+            };
+            continuation(state);
+        }
+        draining.set(false);
+    });
 }
 
 #[derive(Clone)]
@@ -102,6 +155,7 @@ impl Promise {
                 continuations: Vec::new(),
                 deferred: None,
                 hooks: PromiseHooks::default(),
+                adopted_from: None,
             })),
         }
     }
@@ -148,6 +202,19 @@ impl Promise {
         let waiter = self.inner.borrow().hooks.waiter.clone();
         if let Some(waiter) = waiter {
             waiter();
+        } else {
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(deadline) = self
+                .inner
+                .borrow()
+                .deferred
+                .as_ref()
+                .map(|(deadline, _)| *deadline)
+            {
+                if let Some(delay) = deadline.checked_duration_since(Instant::now()) {
+                    std::thread::sleep(delay);
+                }
+            }
         }
         loop {
             let state = self.state();
@@ -184,7 +251,7 @@ impl Promise {
             return false;
         }
         self.notify_cancel();
-        self.reject("cancelled")
+        self.reject_rejection(PromiseRejection::cancelled())
     }
 
     pub fn schedule(&self, delay: Duration, task: Rc<dyn Fn() -> Result<Value, String>>) {
@@ -220,10 +287,11 @@ impl Promise {
             inner.state = next.clone();
             inner.deferred = None;
             inner.hooks = PromiseHooks::default();
+            inner.adopted_from = None;
             std::mem::take(&mut inner.continuations)
         };
         for continuation in continuations {
-            continuation(next.clone());
+            enqueue_continuation(continuation, next.clone());
         }
         true
     }
@@ -233,16 +301,20 @@ impl Promise {
         if matches!(state, PromiseState::Pending) {
             self.inner.borrow_mut().continuations.push(continuation);
         } else {
-            continuation(state);
+            enqueue_continuation(continuation, state);
         }
     }
 
     pub fn adopt(&self, other: &Promise) -> bool {
+        if self.same_identity(other) || self.adoption_would_cycle(other) {
+            return self.reject("promise adoption cycle");
+        }
         match other.state() {
             PromiseState::Pending => {
                 if !matches!(self.state(), PromiseState::Pending) {
                     return false;
                 }
+                self.inner.borrow_mut().adopted_from = Some(Rc::downgrade(&other.inner));
                 let source = other.clone();
                 self.set_poller(Rc::new(move || {
                     source.state();
@@ -266,6 +338,22 @@ impl Promise {
             PromiseState::Fulfilled(value) => self.resolve(value),
             PromiseState::Rejected(error) => self.reject_rejection(error),
         }
+    }
+
+    fn adoption_would_cycle(&self, source: &Promise) -> bool {
+        let mut current = Some(source.inner.clone());
+        let mut seen = HashSet::new();
+        while let Some(inner) = current {
+            if Rc::ptr_eq(&self.inner, &inner) {
+                return true;
+            }
+            let address = Rc::as_ptr(&inner) as usize;
+            if !seen.insert(address) {
+                return true;
+            }
+            current = inner.borrow().adopted_from.as_ref().and_then(Weak::upgrade);
+        }
+        false
     }
 
     pub fn same_identity(&self, other: &Self) -> bool {
@@ -321,5 +409,67 @@ impl PromiseProvider for LocalPromiseProvider {
         let promise = Promise::new();
         promise.schedule(duration, task);
         promise
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cancellation_is_a_structured_rejection() {
+        let promise = Promise::new();
+        assert!(promise.cancel());
+        let PromiseState::Rejected(rejection) = promise.state() else {
+            panic!("cancelled promise was not rejected");
+        };
+        assert!(rejection.is_cancelled());
+        let Value::Map(fields) = rejection.value() else {
+            panic!("cancellation was not represented by a map");
+        };
+        assert_eq!(
+            fields.get(&Value::Keyword("code".into())),
+            Some(&Value::Keyword("task/cancelled".into()))
+        );
+        assert_eq!(
+            fields.get(&Value::Keyword("retryable".into())),
+            Some(&Value::Bool(false))
+        );
+    }
+
+    #[test]
+    fn adoption_cycles_are_rejected() {
+        let direct = Promise::new();
+        assert!(direct.adopt(&direct));
+        assert!(matches!(direct.state(), PromiseState::Rejected(_)));
+
+        let first = Promise::new();
+        let second = Promise::new();
+        assert!(first.adopt(&second));
+        assert!(second.adopt(&first));
+        assert!(matches!(second.state(), PromiseState::Rejected(_)));
+        assert!(matches!(first.state(), PromiseState::Rejected(_)));
+    }
+
+    #[test]
+    fn continuation_chains_are_trampolined() {
+        let promises: Vec<_> = (0..20_000).map(|_| Promise::new()).collect();
+        for pair in promises.windows(2) {
+            let next = pair[1].clone();
+            pair[0].on_settle(Rc::new(move |state| match state {
+                PromiseState::Fulfilled(value) => {
+                    next.resolve(value);
+                }
+                PromiseState::Rejected(error) => {
+                    next.reject_rejection(error);
+                }
+                PromiseState::Pending => {}
+            }));
+        }
+        promises[0].resolve(Value::Number(42));
+        assert_eq!(
+            promises.last().unwrap().state(),
+            PromiseState::Fulfilled(Value::Number(42))
+        );
     }
 }

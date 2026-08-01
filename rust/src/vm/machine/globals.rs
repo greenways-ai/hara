@@ -10,6 +10,67 @@ use super::{
 
 impl Machine {
     #[inline(never)]
+    pub(super) fn exec_build_collection(
+        &mut self,
+        program: &Program,
+        count: u16,
+        map: bool,
+        set: bool,
+    ) -> Result<(), String> {
+        let count = usize::from(count);
+        if self.stack.len() < count {
+            return Err("stack underflow".into());
+        }
+        let start = self.stack.len() - count;
+        let values = self
+            .stack
+            .drain(start..)
+            .map(|value| Machine::into_value(self.program.clone(), value))
+            .collect::<Vec<_>>();
+        let value = if map {
+            crate::core::vm_build_map(values)?
+        } else if set {
+            crate::core::vm_build_set(values)?
+        } else {
+            crate::core::vm_build_vector(values)?
+        };
+        let _ = program;
+        self.stack.push(value.into());
+        Ok(())
+    }
+
+    #[inline(never)]
+    pub(super) fn exec_build_list(&mut self, count: u16, concatenate: bool) -> Result<(), String> {
+        let count = usize::from(count);
+        if self.stack.len() < count {
+            return Err("stack underflow".into());
+        }
+        let start = self.stack.len() - count;
+        let values = self
+            .stack
+            .drain(start..)
+            .map(|value| Machine::into_value(self.program.clone(), value))
+            .collect::<Vec<_>>();
+        let value = if concatenate {
+            crate::core::vm_concat_list(values)?
+        } else {
+            crate::core::vm_build_list(values)
+        };
+        self.stack.push(value.into());
+        Ok(())
+    }
+
+    #[inline(never)]
+    pub(super) fn exec_to_vector(&mut self) -> Result<(), String> {
+        let Some(value) = self.stack.pop() else {
+            return Err("stack underflow".into());
+        };
+        let value = Machine::into_value(self.program.clone(), value);
+        self.stack.push(crate::core::vm_to_vector(value)?.into());
+        Ok(())
+    }
+
+    #[inline(never)]
     pub(super) fn exec_get_global(&mut self, program: &Program, index: u32) -> Result<(), String> {
         let Some(name) = constant_string(program, index) else {
             return Err(format!("constant index {index} out of range"));
@@ -39,6 +100,27 @@ impl Machine {
         let metadata = metadata.map(|index| program.var_metadata[usize::from(index)].clone());
         let runtime_value = Machine::into_value(self.program.clone(), value.clone());
         crate::core::vm_def_global(name, runtime_value.clone(), metadata)?;
+        self.remember_vm_global(&runtime_value, value.clone());
+        self.stack.push(value);
+        Ok(())
+    }
+
+    #[inline(never)]
+    pub(super) fn exec_def_macro(
+        &mut self,
+        program: &Program,
+        name: u32,
+        metadata: Option<u16>,
+    ) -> Result<(), String> {
+        let Some(name) = constant_string(program, name) else {
+            return Err(format!("constant index {name} out of range"));
+        };
+        let Some(value) = self.stack.pop() else {
+            return Err("stack underflow".to_string());
+        };
+        let metadata = metadata.map(|index| program.var_metadata[usize::from(index)].clone());
+        let runtime_value = Machine::into_value(self.program.clone(), value.clone());
+        crate::core::vm_def_macro(name, runtime_value.clone(), metadata)?;
         self.remember_vm_global(&runtime_value, value.clone());
         self.stack.push(value);
         Ok(())

@@ -603,6 +603,15 @@ fn canonical(namespace: &str, method: &str) -> String {
     }
 }
 
+pub(crate) fn canonical_native_call(name: &str) -> String {
+    match name.rsplit_once('/') {
+        Some((namespace, method)) if namespace.starts_with("std.native.") => {
+            canonical(namespace, method)
+        }
+        _ => name.to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::GeneratedNamespaceConfig;

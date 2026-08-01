@@ -1,0 +1,22 @@
+worker_processes 1;
+pid logs/nginx.pid;
+error_log logs/error.log info;
+
+events {}
+
+http {
+    access_log off;
+    hoplite_bootstrap @@ROOT@@/lib/bench/hoplite-openresty/app.hal;
+
+    server {
+        listen 127.0.0.1:18081;
+
+        location = /hello {
+            hoplite_content bench.hoplite.app/hello;
+        }
+
+        location = /delay {
+            hoplite_content bench.hoplite.app/delay;
+        }
+    }
+}

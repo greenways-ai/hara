@@ -6,7 +6,8 @@
 ;; Studio and other hosts can then adapt that implementation without owning the
 ;; substrate semantics themselves.
 ;; ============================================================================
-(ns std.lib.substrate.protocol)
+(ns std.lib.substrate.protocol
+  (:config {:blank true}))
 
 (defprotocol IFrame
   (frame-id [frame])

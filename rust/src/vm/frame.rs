@@ -144,6 +144,15 @@ impl Frame {
                 crate::jit::TraceValue::Bool(value) => VmSlot::Bool(*value),
                 crate::jit::TraceValue::Nil => VmSlot::Nil,
                 crate::jit::TraceValue::Indexed(value) => VmSlot::Value(value.clone()),
+                crate::jit::TraceValue::VectorSlice(slice) => {
+                    VmSlot::Value(Box::new(crate::core::Value::Vector(
+                        slice.values[slice.start..]
+                            .iter()
+                            .copied()
+                            .map(crate::core::Value::Number)
+                            .collect(),
+                    )))
+                }
                 crate::jit::TraceValue::Unsupported => continue,
             };
         }

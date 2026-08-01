@@ -1,0 +1,28 @@
+worker_processes 1;
+pid logs/nginx.pid;
+error_log logs/error.log info;
+
+events {}
+
+http {
+    access_log off;
+
+    server {
+        listen 127.0.0.1:18082;
+
+        location = /hello {
+            content_by_lua_block {
+                ngx.header["content-type"] = "text/plain; charset=utf-8"
+                ngx.say("Hello from OpenResty")
+            }
+        }
+
+        location = /delay {
+            content_by_lua_block {
+                ngx.sleep(0.025)
+                ngx.header["content-type"] = "text/plain; charset=utf-8"
+                ngx.say("delayed 25ms")
+            }
+        }
+    }
+}

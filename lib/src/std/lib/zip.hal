@@ -51,7 +51,7 @@
 
 (defn context-present?
   [context key]
-  (not (nil? (get context key))))
+  (not (nil? (std.foundation/get context key))))
 
 (defn check-context
   [context]
@@ -111,7 +111,7 @@
 
 (defn context-fn
   [zip key]
-  (get (field zip :context) key))
+  (std.foundation/get (field zip :context) key))
 
 (defn is-container?
   ([zip]

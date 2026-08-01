@@ -7,7 +7,7 @@ license = "EPL-2.0"
 rust-version = "1.78"
 
 [workspace]
-members = ["."]
+members = [".", "raw"]
 default-members = ["."]
 resolver = "2"
 
@@ -57,6 +57,16 @@ ed25519-dalek = { version = "2.1", default-features = false, features = ["std"] 
 [[bin]]
 name = "hara-bytecode-benchmark"
 path = "src/bin/hara-bytecode-benchmark.rs"
+required-features = ["bytecode-vm"]
+
+[[bin]]
+name = "hara-foundation-artifact"
+path = "src/bin/hara-foundation-artifact.rs"
+required-features = ["bytecode-vm"]
+
+[[bin]]
+name = "hara-bytecode-conformance-artifact"
+path = "src/bin/hara-bytecode-conformance-artifact.rs"
 required-features = ["bytecode-vm"]
 
 [dev-dependencies]

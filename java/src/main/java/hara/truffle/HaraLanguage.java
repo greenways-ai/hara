@@ -7,6 +7,8 @@ import com.oracle.truffle.api.source.Source;
 import com.oracle.truffle.api.source.SourceSection;
 import hara.kernel.base.Parser;
 import hara.kernel.base.Reader;
+import hara.truffle.bytecode.HbcBytecodeRootNode;
+import hara.truffle.bytecode.HbcCodec;
 import hara.lang.data.Keyword;
 import hara.lang.data.Map;
 import hara.lang.protocol.IMetadata;
@@ -20,10 +22,12 @@ import java.util.List;
     implementationName = "Hara Truffle",
     version = "0.1",
     defaultMimeType = HaraLanguage.MIME_TYPE,
-    characterMimeTypes = HaraLanguage.MIME_TYPE)
+    characterMimeTypes = HaraLanguage.MIME_TYPE,
+    byteMimeTypes = HaraLanguage.BYTECODE_MIME_TYPE)
 public final class HaraLanguage extends TruffleLanguage<HaraContext> {
   public static final String ID = "hara";
   public static final String MIME_TYPE = "application/x-hara";
+  public static final String BYTECODE_MIME_TYPE = "application/x-hara-bytecode";
 
   private static final ContextReference<HaraContext> CONTEXT_REFERENCE =
       ContextReference.create(HaraLanguage.class);
@@ -63,6 +67,13 @@ public final class HaraLanguage extends TruffleLanguage<HaraContext> {
   protected CallTarget parse(ParsingRequest request) {
     currentContext().ensureEagerFallbacks();
     Source source = request.getSource();
+    if (source.hasBytes() || BYTECODE_MIME_TYPE.equals(source.getMimeType())) {
+      try {
+        return HbcBytecodeRootNode.compile(this, HbcCodec.decode(source.getBytes().toByteArray()));
+      } catch (RuntimeException error) {
+        throw new HaraException("Unable to read Hara bytecode " + source.getName() + ": " + error.getMessage());
+      }
+    }
     SourceSection sourceSection =
         source.getLength() == 0
             ? source.createUnavailableSection()

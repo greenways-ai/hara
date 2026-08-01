@@ -601,10 +601,10 @@ impl Runtime {
             let namespace_name = format!("std.native.{native_type}");
             let namespace = namespace_registry.find_or_create(&namespace_name);
             for method in *methods {
-                let dispatch_name = if *native_type == "Iter" {
-                    (*method).to_owned()
-                } else {
-                    format!("{namespace_name}/{method}")
+                let dispatch_name = match *native_type {
+                    "Iter" => (*method).to_owned(),
+                    "String" => format!("str/{method}"),
+                    _ => format!("{namespace_name}/{method}"),
                 };
                 namespace.intern_with_origin(
                     *method,
@@ -649,7 +649,44 @@ impl Runtime {
     /// foundation. This is useful for small embedded surfaces whose commands
     /// only require core forms and should become interactive immediately.
     pub fn core() -> Runtime {
-        Runtime::empty()
+        let mut runtime = Runtime::empty();
+        runtime.refer_foundation_into("user");
+        runtime.use_namespace("user");
+        runtime
+    }
+
+    #[cfg(feature = "bytecode-vm")]
+    pub(crate) fn prepare_foundation_bytecode(&mut self) {
+        let foundation = self.namespace_registry.find_or_create("std.foundation");
+        for name in core::bytecode_callable_names() {
+            let symbol = crate::lang::data::Symbol::parse(name);
+            if foundation.resolve(&symbol).is_none() {
+                foundation.intern_with_origin(
+                    name,
+                    core::structural_function_value(name),
+                    kernel::VarOrigin::RuntimePrimitive,
+                );
+            }
+        }
+    }
+
+    #[cfg(not(feature = "bytecode-vm"))]
+    fn install_structural_primitives(&mut self) {
+        self.install_structural_primitives_into("std.foundation");
+    }
+
+    fn install_structural_primitives_into(&mut self, namespace: &str) {
+        let target = self.namespace_registry.find_or_create(namespace);
+        for name in core::structural_callable_names() {
+            let symbol = crate::lang::data::Symbol::parse(name);
+            if target.resolve(&symbol).is_none() {
+                target.intern_with_origin(
+                    name,
+                    core::structural_function_value(name),
+                    kernel::VarOrigin::RuntimePrimitive,
+                );
+            }
+        }
     }
 
     fn refer_native_types_into(&mut self, namespace: &str) {
@@ -700,26 +737,27 @@ impl Runtime {
         for &(name, _, source) in EMBEDDED_HAL_RESOURCES {
             self.register_resource(name, source);
         }
-        let foundation = self
-            .resources
-            .get("std.foundation")
-            .cloned()
-            .ok_or_else(|| "embedded HAL catalog is missing std.foundation".to_owned())?;
-        core::with_definition_origin(kernel::VarOrigin::HalFallback, || {
-            self.eval_text(&foundation)
-        })?;
-        let foundation_namespace = self.namespace_registry.find_or_create("std.foundation");
-        for name in core::structural_callable_names() {
-            let symbol = crate::lang::data::Symbol::parse(name);
-            if foundation_namespace.resolve(&symbol).is_none() {
-                foundation_namespace.intern_with_origin(
-                    name,
-                    core::structural_function_value(name),
-                    kernel::VarOrigin::RuntimePrimitive,
-                );
+        #[cfg(feature = "bytecode-vm")]
+        {
+            vm::eval_bytecode_bundle(self, include_bytes!("../assets/std.foundation.hbb"))?;
+            self.loaded_resources.insert("std.foundation".into());
+            for &name in EAGER_HAL_RESOURCES {
+                self.loaded_resources.insert(name.into());
             }
         }
-        self.loaded_resources.insert("std.foundation".into());
+        #[cfg(not(feature = "bytecode-vm"))]
+        {
+            let foundation = self
+                .resources
+                .get("std.foundation")
+                .cloned()
+                .ok_or_else(|| "embedded HAL catalog is missing std.foundation".to_owned())?;
+            core::with_definition_origin(kernel::VarOrigin::HalFallback, || {
+                self.eval_text(&foundation)
+            })?;
+            self.install_structural_primitives();
+            self.loaded_resources.insert("std.foundation".into());
+        }
         let json = self.namespace_registry.find_or_create("std.native.Json");
         json.intern(
             "read",
@@ -745,6 +783,7 @@ impl Runtime {
                 json::write_pretty(&arguments[0]).map(core::Value::String)
             }),
         );
+        #[cfg(not(feature = "bytecode-vm"))]
         for &name in EAGER_HAL_RESOURCES {
             let source = self
                 .resources
@@ -1052,6 +1091,8 @@ impl Runtime {
                 }
             }
             self.refer_native_types_into(name);
+            #[cfg(feature = "bytecode-vm")]
+            self.install_structural_primitives_into(name);
         } else {
             self.refer_foundation_into(name);
         }
@@ -1409,6 +1450,13 @@ pub fn execute_bytecode(program: &std::rc::Rc<vm::Program>) -> Result<String, St
         .map_err(|error| error.to_string())
 }
 
+/// Returns tracing-JIT counters retained for a compiled bytecode program.
+/// `None` means this build has no tracing-JIT feature enabled.
+#[cfg(all(feature = "bytecode-vm", feature = "tracing-jit"))]
+pub fn bytecode_jit_telemetry(program: &std::rc::Rc<vm::Program>) -> jit::JitTelemetry {
+    vm::machine::cached_jit_telemetry(program)
+}
+
 /// Compiles source into a checksummed, versioned bytecode artifact.
 #[cfg(feature = "bytecode-vm")]
 pub fn compile_bytecode_artifact(source: &str) -> Result<Vec<u8>, String> {
@@ -1436,9 +1484,11 @@ impl Runtime {
     /// the compiler's two-phase global check (issue #223). The program
     /// is validated but not executed; globals intern only at execution.
     pub fn compile_bytecode(&self, source: &str) -> Result<std::rc::Rc<vm::Program>, String> {
-        vm::compile_source_with(source, &self.namespace_registry)
-            .map(std::rc::Rc::new)
-            .map_err(|error| error.to_string())
+        core::with_macros(self.macros.clone(), || {
+            vm::compile_source_with(source, &self.namespace_registry)
+                .map(std::rc::Rc::new)
+                .map_err(|error| error.to_string())
+        })
     }
 
     /// Compiles and executes through the experimental VM against this
@@ -1447,9 +1497,11 @@ impl Runtime {
     /// forms fail as compile errors. `eval_native` is unaffected.
     pub fn eval_bytecode_native(&mut self, source: &str) -> Result<String, String> {
         let program = self.compile_bytecode(source)?;
-        let result = vm::execute_program_with_globals(program, &self.namespace_registry)
-            .map(|value| value.display())
-            .map_err(|error| error.to_string());
+        let result = core::with_macros(self.macros.clone(), || {
+            vm::execute_program_with_globals(program, &self.namespace_registry)
+                .map(|value| value.display())
+                .map_err(|error| error.to_string())
+        });
         // Rebuild the env from the registry so mixed evaluator/VM usage
         // on one Runtime observes the same globals.
         let current = self.namespace_registry.current().name().as_str().to_owned();
@@ -1467,9 +1519,11 @@ impl Runtime {
     /// Executes a persisted artifact against this runtime's namespaces.
     pub fn eval_bytecode_artifact(&mut self, bytes: &[u8]) -> Result<String, String> {
         let program = std::rc::Rc::new(vm::decode_program(bytes)?);
-        let result = vm::execute_program_with_globals(program, &self.namespace_registry)
-            .map(|value| value.display())
-            .map_err(|error| error.to_string());
+        let result = core::with_macros(self.macros.clone(), || {
+            vm::execute_program_with_globals(program, &self.namespace_registry)
+                .map(|value| value.display())
+                .map_err(|error| error.to_string())
+        });
         let current = self.namespace_registry.current().name().as_str().to_owned();
         core::select_namespace_environment(&self.namespace_registry, &mut self.env, &current);
         result
@@ -3269,7 +3323,7 @@ mod tests {
         );
         assert_eq!(
             runtime.eval_text("`(a ~@1)").unwrap_err(),
-            "iter expects a collection"
+            "iter expects a collection, got 1"
         );
     }
 
@@ -3885,6 +3939,12 @@ mod tests {
     fn atoms_match_java_identity_and_mutation_semantics() {
         let mut runtime = Runtime::new();
         assert_eq!(runtime.eval_text("(let [a (atom 1)] @a)").unwrap(), "1");
+        assert_eq!(
+            runtime
+                .eval_text("(do (def deref-test-values (atom [10 18])) (deref deref-test-values))")
+                .unwrap(),
+            "[10 18]"
+        );
         assert_eq!(
             runtime
                 .eval_text("(let [a (atom 1)] (do (reset! a 2) @a))")
@@ -7300,6 +7360,30 @@ mod tests {
             runtime.eval_text("unknown").unwrap_err(),
             "unbound symbol: unknown"
         );
+    }
+
+    #[test]
+    fn mutable_collections_build_in_place_and_freeze_once() {
+        let mut runtime = Runtime::new();
+        let source = "(let [m (to-mutable {})]
+                        (do
+                          (loop [i 0]
+                            (if (< i 500)
+                              (do (assoc m i (+ i 1)) (recur (+ i 1)))
+                              nil))
+                          (let [p (to-persistent m)]
+                            (+ (count p) (get p 499)))))";
+        assert_eq!(runtime.eval_text(source).unwrap(), "1000");
+        assert_eq!(
+            runtime
+                .eval_text("(let [m (to-mutable {:a 1})] (do (assoc m :b 2) (get m :b)))")
+                .unwrap(),
+            "2"
+        );
+        assert!(runtime
+            .eval_text("(let [m (to-mutable {}) p (to-persistent m)] (do p (assoc m :late 1)))")
+            .unwrap_err()
+            .contains("mutable collection used after to-persistent"));
     }
 
     #[cfg(not(target_arch = "wasm32"))]

@@ -6,5 +6,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 "$ROOT/scripts/cargo-wasm-build" \
-  --manifest-path rust/raw/Cargo.toml --target wasm32-unknown-unknown --release --features dev-trace
-echo "Built $ROOT/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm"
+  --manifest-path rust/raw/Cargo.toml --target wasm32-unknown-unknown --release --features dev-trace,bytecode-vm
+
+SOURCE="$ROOT/rust/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm"
+OUTPUT="$ROOT/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm"
+mkdir -p "$(dirname "$OUTPUT")"
+cp "$SOURCE" "$OUTPUT"
+echo "Built $OUTPUT"

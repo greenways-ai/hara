@@ -109,15 +109,15 @@
   [connection spec arguments]
   (let [validation (validation-result spec arguments)]
     (if (not (first validation))
-      (json/write (sql/json-value {:status "error" :data (second validation)}))
+      (json/write (sql/json-compatible {:status "error" :data (second validation)}))
       (promise/catch
        (promise/then
         (db/query connection (call-format-query spec arguments))
         (fn [result]
           (let [value (first-query-value result)
                 decoded (decode-function-value spec value)]
-            (json/write (sql/json-value {:status "ok" :data decoded})))))
+            (json/write (sql/json-compatible {:status "ok" :data decoded})))))
        (fn [error]
          (if (and (map? error) (compatible-get error :status))
-           (json/write (sql/json-value error))
-           (json/write (sql/json-value {:status "error" :data (str error)}))))))))
+           (json/write (sql/json-compatible error))
+           (json/write (sql/json-compatible {:status "error" :data (str error)}))))))))

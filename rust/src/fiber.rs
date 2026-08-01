@@ -1,5 +1,5 @@
 use super::*;
-use crate::lang::data::{OrderedMap, OrderedSet};
+use crate::lang::data::{List as PList, OrderedMap, OrderedSet};
 
 #[path = "fiber/coroutine.rs"]
 mod coroutine;
@@ -404,7 +404,9 @@ impl EvalFiber {
         ) {
             return false;
         }
-        self.pending = None;
+        if let Some(pending) = self.pending.take() {
+            pending.notify_cancel();
+        }
         self.resume = None;
         self.state = EvalFiberState::Cancelled;
         true
@@ -427,9 +429,15 @@ impl EvalFiber {
                         PromiseState::Rejected(e) => {
                             self.resume(PromiseState::Rejected(e));
                         }
-                        PromiseState::Pending => return Err(
-                            "fiber suspended on a promise without a synchronous waiter".into(),
-                        ),
+                        PromiseState::Pending => {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            self.resume(pending.wait_state());
+                            #[cfg(target_arch = "wasm32")]
+                            return Err(
+                                "deref cannot block on a pending promise outside an HTA fiber"
+                                    .into(),
+                            );
+                        }
                     }
                 }
             }
@@ -581,15 +589,15 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
                     match env.get(name) {
                         Some(Value::Var(cell))
                             if cell.symbol().get_name()
-                                != Symbol::parse(name).get_name() =>
+                                != crate::lang::data::Symbol::parse(name).get_name() =>
                         {
                             Some(Value::Var(cell.clone()))
                         }
                         _ => None,
                     }
                 };
-                if let Some(Value::Var(target)) = target {
-                    return k(Ok(target.deref_value()));
+                if let Some(Value::Var(cell)) = target {
+                    return k(Ok(cell.deref_value()));
                 }
             }
             one(
@@ -671,14 +679,30 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
                 }),
             )
         }
-        Some("std.foundation.coroutine/create") => coroutine::create_form(v, env, k),
-        Some("std.foundation.coroutine/coroutine?") => coroutine::predicate_form(v, env, k),
+        Some("std.foundation.coroutine/create")
+        | Some("std.native.Coroutine/create")
+        | Some("Coroutine/create") => {
+            coroutine::create_form(v, env, k)
+        }
+        Some("std.foundation.coroutine/coroutine?")
+        | Some("std.native.Coroutine/instance?")
+        | Some("Coroutine/instance?") => {
+            coroutine::predicate_form(v, env, k)
+        }
         Some("std.foundation.coroutine/status") => coroutine::status_form(v, env, k),
         Some("std.foundation.coroutine/close") => coroutine::close_form(v, env, k),
         Some("std.foundation.coroutine/resume") => coroutine::resume_form(v, env, k),
         Some("std.protocol.icoroutine/resume") => coroutine::resume_protocol_form(v, env, k),
-        Some("std.foundation.coroutine/yield") => coroutine::yield_form(v, env, k),
-        Some("std.foundation.coroutine/await") => coroutine::await_form(v, env, k),
+        Some("std.foundation.coroutine/yield")
+        | Some("std.native.Coroutine/yield")
+        | Some("Coroutine/yield") => {
+            coroutine::yield_form(v, env, k)
+        }
+        Some("std.foundation.coroutine/await")
+        | Some("std.native.Coroutine/await")
+        | Some("Coroutine/await") => {
+            coroutine::await_form(v, env, k)
+        }
         Some("def") | Some("set!") | Some("var/set") => bind_form(v, env, k),
         Some("resolve") if matches!(env.borrow().get("resolve"), Some(value) if !matches!(value, Value::Var(_))) => {
             application(v, env, k)
@@ -1214,6 +1238,7 @@ fn call(f: Rc<Function>, args: Vec<Value>, k: Cont) -> Step {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
     #[test]
     fn resumes_nested() {
         let p = Promise::new();
@@ -1236,6 +1261,21 @@ mod tests {
         )
         .unwrap();
         assert_eq!(fiber.drive_sync(), Ok(Value::Number(42)));
+    }
+
+    #[test]
+    fn cancelling_a_suspended_fiber_notifies_its_pending_promise() {
+        let promise = Promise::new();
+        let cancelled = Rc::new(Cell::new(false));
+        let observed = cancelled.clone();
+        promise.set_cancel_hook(Rc::new(move || observed.set(true)));
+        let mut environment = HashMap::new();
+        environment.insert("p".into(), Value::Promise(promise));
+        let mut fiber = EvalFiber::start("(deref p)", environment).unwrap();
+        assert_eq!(fiber.state(), EvalFiberState::Suspended);
+        assert!(fiber.cancel());
+        assert!(cancelled.get());
+        assert_eq!(fiber.state(), EvalFiberState::Cancelled);
     }
     #[test]
     fn resumes_function_finally() {

@@ -506,8 +506,8 @@ public class HaraLanguageTest {
       assertEquals(2.0, context.eval(HaraLanguage.ID, "(double 2)").asDouble(), 0.0);
       assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(long ##NaN)"));
       assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(long \"1\")"));
-      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "1N"));
-      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "1M"));
+      assertEquals("1N", context.eval(HaraLanguage.ID, "(str 1N)").asString());
+      assertEquals("1M", context.eval(HaraLanguage.ID, "(str 1M)").asString());
     }
   }
 

@@ -166,7 +166,7 @@ final class HaraAnalyzer {
       Symbol symbol = (Symbol) form;
       Integer slot = lookupLexical(symbol);
       if (slot == null) {
-        return new HaraNodes.ReadGlobal(context.canonicalSymbol(symbol));
+        return new HaraNodes.ReadGlobal(context.canonicalSymbol(symbol), symbol);
       }
       return new HaraNodes.ReadLocal(slot);
     }
@@ -640,7 +640,6 @@ final class HaraAnalyzer {
   }
 
   private HaraExpressionNode analyzeFunction(ILinearType<?> parameters, Object[] bodyForms) {
-
     FrameDescriptor.Builder functionFrames = FrameDescriptor.newBuilder();
     Map<Symbol, Integer> functionLocals = new HashMap<>();
     int restIndex = -1;

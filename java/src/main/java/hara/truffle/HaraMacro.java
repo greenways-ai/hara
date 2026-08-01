@@ -9,14 +9,14 @@ final class HaraMacro {
   private final HaraContext context;
   private final String namespace;
   private final Symbol name;
-  private final HaraFunction function;
+  private final Object function;
   private final Function<List<?>, Object> nativeExpander;
 
   HaraMacro(
       HaraContext context,
       String namespace,
       Symbol name,
-      HaraFunction function) {
+      Object function) {
     this.context = context;
     this.namespace = namespace;
     this.name = name;

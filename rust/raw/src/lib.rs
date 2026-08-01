@@ -8,8 +8,12 @@ mod json;
 mod kernel;
 #[path = "../../src/lang.rs"]
 mod lang;
+#[path = "../../src/snapshot.rs"]
+mod snapshot;
 #[path = "../../src/task.rs"]
 mod task;
+#[cfg(feature = "bytecode-vm")]
+mod vm;
 #[cfg(feature = "evaluation-journal")]
 #[path = "../../src/journal.rs"]
 mod journal;
@@ -65,13 +69,40 @@ struct Session {
     ready: Rc<RefCell<VecDeque<(u64, PromiseState)>>>,
     calls: HashMap<u64, (u64, Promise)>,
     fibers: HashMap<u64, EvalFiber>,
+    #[cfg(feature = "bytecode-vm")]
+    vm_fibers: HashMap<u64, vm::VmFiber>,
     tasks: HashMap<u64, Promise>,
+    active_evaluation: Option<u64>,
+    evaluation_queue: VecDeque<EvaluationRequest>,
     resources: Rc<RefCell<HashMap<String, String>>>,
     mount_id: Option<u64>,
     #[cfg(feature = "evaluation-journal")]
     next_journal_id: u64,
 }
 
+enum EvaluationRequest {
+    Source {
+        task: u64,
+        source: String,
+        bindings: Vec<Value>,
+    },
+    Halc {
+        task: u64,
+        modules: Vec<Vec<u8>>,
+    },
+    #[cfg(feature = "bytecode-vm")]
+    Vm { task: u64, source: String },
+}
+
+impl EvaluationRequest {
+    fn task(&self) -> u64 {
+        match self {
+            Self::Source { task, .. } | Self::Halc { task, .. } => *task,
+            #[cfg(feature = "bytecode-vm")]
+            Self::Vm { task, .. } => *task,
+        }
+    }
+}
 impl Session {
     fn new() -> Self {
         Self::shared(
@@ -88,6 +119,12 @@ impl Session {
     ) -> Self {
         let namespaces = kernel::NamespaceRegistry::new("user");
         let foundation_namespace = namespaces.find_or_create("std.foundation");
+        for (name, value) in core::basic_function_values() {
+            foundation_namespace.intern(name, value);
+        }
+        for name in core::structural_callable_names() {
+            foundation_namespace.intern(name, core::structural_function_value(name));
+        }
         for (name, value) in core::exception_function_values() {
             foundation_namespace.intern(name, value);
         }
@@ -105,6 +142,21 @@ impl Session {
             let var = foundation_namespace.intern(&canonical_name, descriptor);
             foundation_namespace.map_var(lang::data::Symbol::parse(&name), var);
             namespaces.find_or_create(canonical_name);
+        }
+        for (native_type, methods) in core::NATIVE_TYPES {
+            let namespace_name = format!("std.native.{native_type}");
+            let namespace = namespaces.find_or_create(&namespace_name);
+            for method in *methods {
+                let dispatch_name = match *native_type {
+                    "Iter" => (*method).to_owned(),
+                    "String" => format!("str/{method}"),
+                    _ => format!("{namespace_name}/{method}"),
+                };
+                namespace.intern(
+                    *method,
+                    core::structural_function_value(dispatch_name),
+                );
+            }
         }
         let native_json = namespaces.find_or_create("std.native.Json");
         let json_read = native_json.intern(
@@ -165,6 +217,23 @@ impl Session {
         core::refer_startup_defaults(&namespaces, "user");
         let mut env = HashMap::new();
         core::select_namespace_environment(&namespaces, &mut env, "user");
+        // Keep qualified native calls directly addressable in raw WASM. The
+        // compact core evaluator resolves ordinary aliases through the
+        // namespace registry, while wasm32's exported one-shot evaluator also
+        // needs the qualified bindings in its transient environment.
+        for (native_type, methods) in core::NATIVE_TYPES {
+            let namespace_name = format!("std.native.{native_type}");
+            for method in *methods {
+                let dispatch_name = match *native_type {
+                    "Iter" => (*method).to_owned(),
+                    "String" => format!("str/{method}"),
+                    _ => format!("{namespace_name}/{method}"),
+                };
+                let function = core::structural_function_value(dispatch_name);
+                env.insert(format!("{native_type}/{method}"), function.clone());
+                env.insert(format!("{namespace_name}/{method}"), function);
+            }
+        }
         Self {
             name: name.into(),
             env,
@@ -175,7 +244,11 @@ impl Session {
             ready: Rc::new(RefCell::new(VecDeque::new())),
             calls: HashMap::new(),
             fibers: HashMap::new(),
+            #[cfg(feature = "bytecode-vm")]
+            vm_fibers: HashMap::new(),
             tasks: HashMap::new(),
+            active_evaluation: None,
+            evaluation_queue: VecDeque::new(),
             resources,
             mount_id: None,
             #[cfg(feature = "evaluation-journal")]
@@ -222,7 +295,21 @@ impl Session {
     }
 
     fn busy(&self) -> bool {
-        !self.fibers.is_empty() || !self.tasks.is_empty() || !self.calls.is_empty()
+        self.active_evaluation.is_some()
+            || !self.evaluation_queue.is_empty()
+            || !self.fibers.is_empty()
+            || {
+                #[cfg(feature = "bytecode-vm")]
+                {
+                    !self.vm_fibers.is_empty()
+                }
+                #[cfg(not(feature = "bytecode-vm"))]
+                {
+                    false
+                }
+            }
+            || !self.tasks.is_empty()
+            || !self.calls.is_empty()
     }
 
     fn complete(&self, prefix: &str) -> Value {
@@ -307,6 +394,76 @@ impl Session {
     fn start_fiber(&mut self, task: u64, source: &str) -> Result<(), String> {
         self.start_fiber_with_bindings(task, source, Vec::new())
     }
+
+    fn enqueue_source(&mut self, task: u64, source: &str, bindings: Vec<Value>) {
+        self.evaluation_queue.push_back(EvaluationRequest::Source {
+            task,
+            source: source.into(),
+            bindings,
+        });
+        self.start_next_evaluation();
+    }
+
+    fn enqueue_halc(&mut self, task: u64, modules: Vec<Vec<u8>>) {
+        self.evaluation_queue
+            .push_back(EvaluationRequest::Halc { task, modules });
+        self.start_next_evaluation();
+    }
+
+    fn start_next_evaluation(&mut self) {
+        if self.active_evaluation.is_some() {
+            return;
+        }
+        while let Some(request) = self.evaluation_queue.pop_front() {
+            let task = request.task();
+            self.active_evaluation = Some(task);
+            let result = match request {
+                EvaluationRequest::Source {
+                    source, bindings, ..
+                } => self.start_fiber_with_bindings(task, &source, bindings),
+                EvaluationRequest::Halc { modules, .. } => {
+                    let module_refs = modules.iter().map(Vec::as_slice).collect::<Vec<_>>();
+                    self.start_halc_bundle(task, &module_refs)
+                }
+                #[cfg(feature = "bytecode-vm")]
+                EvaluationRequest::Vm { source, .. } => self.start_vm_fiber(task, &source),
+            };
+            if let Err(error) = result {
+                self.event(event(1, task, error_value("eval/error", error)));
+                self.active_evaluation = None;
+            }
+            if self.active_evaluation.is_some() {
+                break;
+            }
+        }
+    }
+
+    fn finish_evaluation(&mut self, task: u64) {
+        if self.active_evaluation == Some(task) {
+            self.active_evaluation = None;
+            self.start_next_evaluation();
+        }
+    }
+
+    fn commit_environment(&mut self, fiber: &EvalFiber) {
+        self.env = fiber.environment();
+        core::save_namespace_environment(&self.namespaces, &mut self.env);
+        core::refresh_namespace_environment(&self.namespaces, &mut self.env);
+    }
+
+    #[cfg(feature = "bytecode-vm")]
+    fn enqueue_vm(&mut self, task: u64, source: &str) {
+        self.evaluation_queue.push_back(EvaluationRequest::Vm {
+            task,
+            source: source.into(),
+        });
+        self.start_next_evaluation();
+    }
+
+    fn refresh_environment_from_namespaces(&mut self) {
+        let current = self.namespaces.current().name().as_str().to_owned();
+        core::select_namespace_environment(&self.namespaces, &mut self.env, &current);
+    }
     fn start_fiber_with_bindings(
         &mut self,
         task: u64,
@@ -375,6 +532,84 @@ impl Session {
         self.drive(task, fiber);
         Ok(())
     }
+    #[cfg(feature = "bytecode-vm")]
+    fn start_vm_fiber(&mut self, task: u64, source: &str) -> Result<(), String> {
+        let (handler, pending, next) = self.host_handler(task);
+        let namespaces = self.namespaces.clone();
+        let protocols = self.protocols.clone();
+        let program = vm::compile_source_with(source, &namespaces)
+            .map(Rc::new)
+            .map_err(|error| error.to_string())?;
+        let fiber = core::with_namespace_registry(&namespaces, || {
+            core::with_protocols(&protocols, || {
+                core::with_host_calls(handler, || vm::VmFiber::start(program))
+            })
+        });
+        self.collect_calls(task, pending, next);
+        self.drive_vm(task, fiber);
+        Ok(())
+    }
+
+    #[cfg(feature = "bytecode-vm")]
+    fn resume_vm_fiber(&mut self, task: u64, state: PromiseState) {
+        let Some(mut fiber) = self.vm_fibers.remove(&task) else {
+            return;
+        };
+        let (handler, pending, next) = self.host_handler(task);
+        let namespaces = self.namespaces.clone();
+        let protocols = self.protocols.clone();
+        core::with_namespace_registry(&namespaces, || {
+            core::with_protocols(&protocols, || {
+                core::with_host_calls(handler, || {
+                    fiber.resume(state);
+                });
+            });
+        });
+        self.collect_calls(task, pending, next);
+        self.drive_vm(task, fiber);
+    }
+
+    #[cfg(feature = "bytecode-vm")]
+    fn drive_vm(&mut self, task: u64, fiber: vm::VmFiber) {
+        match fiber.state() {
+            vm::VmFiberState::Suspended => {
+                let promise = fiber.pending().expect("suspended VM fiber promise");
+                let ready = self.ready.clone();
+                promise.on_settle(Rc::new(move |state| {
+                    ready.borrow_mut().push_back((task, state))
+                }));
+                self.vm_fibers.insert(task, fiber);
+            }
+            vm::VmFiberState::Completed(Value::Promise(promise)) => {
+                self.refresh_environment_from_namespaces();
+                let events = self.events.clone();
+                promise.on_settle(Rc::new(move |state| emit_settlement(&events, task, state)));
+                self.tasks.insert(task, promise);
+                self.finish_evaluation(task);
+            }
+            vm::VmFiberState::Completed(value) => {
+                self.refresh_environment_from_namespaces();
+                self.event(event(0, task, value));
+                self.finish_evaluation(task);
+            }
+            vm::VmFiberState::Failed(error) => {
+                self.event(event(1, task, error_value("vm/error", error.to_string())));
+                self.finish_evaluation(task);
+            }
+            vm::VmFiberState::Cancelled => {
+                self.event(event(1, task, PromiseRejection::cancelled().value()));
+                self.finish_evaluation(task);
+            }
+            vm::VmFiberState::Running => {
+                self.event(event(
+                    1,
+                    task,
+                    error_value("vm/invalid-state", "running VM fiber escaped".into()),
+                ));
+                self.finish_evaluation(task);
+            }
+        }
+    }
     fn resume_fiber(&mut self, task: u64, state: PromiseState) {
         let Some(mut fiber) = self.fibers.remove(&task) else {
             return;
@@ -414,36 +649,47 @@ impl Session {
                 self.fibers.insert(task, fiber);
             }
             EvalFiberState::Completed(Value::Promise(promise)) => {
+                self.commit_environment(&fiber);
                 let events = self.events.clone();
                 promise.on_settle(Rc::new(move |state| emit_settlement(&events, task, state)));
                 self.tasks.insert(task, promise);
+                self.finish_evaluation(task);
             }
             EvalFiberState::Completed(value) => {
-                self.env = fiber.environment();
-                core::save_namespace_environment(&self.namespaces, &mut self.env);
-                core::refresh_namespace_environment(&self.namespaces, &mut self.env);
+                self.commit_environment(&fiber);
                 self.event(event(0, task, value));
+                self.finish_evaluation(task);
             }
             EvalFiberState::Failed(error) => {
-                self.event(event(1, task, error_value("eval/error", error)))
+                self.event(event(1, task, error_value("eval/error", error)));
+                self.finish_evaluation(task);
             }
-            EvalFiberState::Cancelled => self.event(event(
-                1,
-                task,
-                error_value("task/cancelled", "cancelled".into()),
-            )),
-            EvalFiberState::Running => self.event(event(
-                1,
-                task,
-                error_value("fiber/invalid-state", "running fiber escaped".into()),
-            )),
+            EvalFiberState::Cancelled => {
+                self.event(event(1, task, PromiseRejection::cancelled().value()));
+                self.finish_evaluation(task);
+            }
+            EvalFiberState::Running => {
+                self.event(event(
+                    1,
+                    task,
+                    error_value("fiber/invalid-state", "running fiber escaped".into()),
+                ));
+                self.finish_evaluation(task);
+            }
         }
     }
     fn drain_ready(&mut self) {
         loop {
             let next = { self.ready.borrow_mut().pop_front() };
             match next {
-                Some((task, state)) => self.resume_fiber(task, state),
+                Some((task, state)) => {
+                    #[cfg(feature = "bytecode-vm")]
+                    if self.vm_fibers.contains_key(&task) {
+                        self.resume_vm_fiber(task, state);
+                        continue;
+                    }
+                    self.resume_fiber(task, state)
+                }
                 None => break,
             }
         }
@@ -751,7 +997,8 @@ fn emit_settlement(events: &Rc<RefCell<VecDeque<Vec<u8>>>>, task: u64, state: Pr
     let value = match state {
         PromiseState::Pending => return,
         PromiseState::Fulfilled(value) => event(0, task, value),
-        PromiseState::Rejected(PromiseRejection::Value(value)) => event(1, task, value),
+        PromiseState::Rejected(PromiseRejection::Value(value))
+        | PromiseState::Rejected(PromiseRejection::Cancelled(value)) => event(1, task, value),
         PromiseState::Rejected(PromiseRejection::Message(message)) => {
             event(1, task, error_value("promise/rejected", message))
         }
@@ -825,6 +1072,7 @@ fn dispatch(
 ) -> Result<(), String> {
     match target {
         "eval" => dispatch_eval(kernel, task, "ROOT", &args, false),
+        "eval-vm" => dispatch_eval_vm(kernel, task, "ROOT", &args),
         "eval-halc" | "eval-hir" => dispatch_eval_halc(kernel, task, "ROOT", &args),
         "eval-halc-bundle" | "eval-hir-bundle" => {
             dispatch_eval_halc_bundle(kernel, task, "ROOT", &args)
@@ -849,6 +1097,12 @@ fn dispatch(
                 dispatch_eval_values(kernel, task, session, source, None)
             }
             _ => Err("hta session/eval expects session and source strings".into()),
+        },
+        "session/eval-vm" => match args.as_slice() {
+            [Value::String(session), Value::String(source)] => {
+                dispatch_eval_vm_values(kernel, task, session, source)
+            }
+            _ => Err("hta session/eval-vm expects session and source strings".into()),
         },
         "session/journal-eval" | "session/trace-eval" => match args.as_slice() {
             [Value::String(session), Value::String(source)] => {
@@ -1213,9 +1467,40 @@ fn dispatch_eval_values(
     kernel.session(session)?;
     kernel.task_sessions.insert(task, session.into());
     let runtime = kernel.session_mut(session)?;
-    match bindings {
-        Some(bindings) => runtime.start_fiber_with_bindings(task, source, bindings),
-        None => runtime.start_fiber(task, source),
+    runtime.enqueue_source(task, source, bindings.unwrap_or_default());
+    Ok(())
+}
+
+fn dispatch_eval_vm(
+    kernel: &mut SessionKernel,
+    task: u64,
+    session: &str,
+    args: &[Value],
+) -> Result<(), String> {
+    match args {
+        [Value::String(source)] => dispatch_eval_vm_values(kernel, task, session, source),
+        _ => Err("hta eval-vm expects one source string".into()),
+    }
+}
+
+fn dispatch_eval_vm_values(
+    kernel: &mut SessionKernel,
+    task: u64,
+    session: &str,
+    source: &str,
+) -> Result<(), String> {
+    #[cfg(feature = "bytecode-vm")]
+    {
+        validate_session_name(session)?;
+        kernel.session(session)?;
+        kernel.task_sessions.insert(task, session.into());
+        kernel.session_mut(session)?.enqueue_vm(task, source);
+        Ok(())
+    }
+    #[cfg(not(feature = "bytecode-vm"))]
+    {
+        let _ = (kernel, task, session, source);
+        Err("VM_UNAVAILABLE".into())
     }
 }
 
@@ -1240,7 +1525,10 @@ fn dispatch_eval_halc_bytes(
     validate_session_name(session)?;
     kernel.session(session)?;
     kernel.task_sessions.insert(task, session.into());
-    kernel.session_mut(session)?.start_halc_fiber(task, bytes)
+    kernel
+        .session_mut(session)?
+        .enqueue_halc(task, vec![bytes.to_vec()]);
+    Ok(())
 }
 
 fn dispatch_eval_halc_bundle(
@@ -1265,14 +1553,15 @@ fn dispatch_eval_halc_bundle_values(
     let bytes = modules
         .iter()
         .map(|module| match module {
-            Value::Bytes(bytes) => Ok(bytes.as_slice()),
+            Value::Bytes(bytes) => Ok(bytes.clone()),
             _ => Err("hta eval-halc-bundle expects byte arrays".to_owned()),
         })
         .collect::<Result<Vec<_>, _>>()?;
     validate_session_name(session)?;
     kernel.session(session)?;
     kernel.task_sessions.insert(task, session.into());
-    kernel.session_mut(session)?.start_halc_bundle(task, &bytes)
+    kernel.session_mut(session)?.enqueue_halc(task, bytes);
+    Ok(())
 }
 
 fn dispatch_complete(
@@ -1384,18 +1673,31 @@ pub extern "C" fn hta_cancel(task: i64) -> i32 {
         let Some(runtime) = kernel.sessions.get_mut(&session) else {
             return 1;
         };
+        if let Some(position) = runtime
+            .evaluation_queue
+            .iter()
+            .position(|request| request.task() == task)
+        {
+            runtime.evaluation_queue.remove(position);
+            runtime.event(event(1, task, PromiseRejection::cancelled().value()));
+            return 0;
+        }
         runtime.calls.retain(|_, (owner, _)| *owner != task);
         if let Some(mut fiber) = runtime.fibers.remove(&task) {
             fiber.cancel();
-            runtime.event(event(
-                1,
-                task,
-                error_value("task/cancelled", "cancelled".into()),
-            ));
+            runtime.event(event(1, task, PromiseRejection::cancelled().value()));
+            runtime.finish_evaluation(task);
+            return 0;
+        }
+        #[cfg(feature = "bytecode-vm")]
+        if let Some(mut fiber) = runtime.vm_fibers.remove(&task) {
+            fiber.cancel();
+            runtime.event(event(1, task, PromiseRejection::cancelled().value()));
+            runtime.finish_evaluation(task);
             return 0;
         }
         if let Some(promise) = runtime.tasks.remove(&task) {
-            promise.reject("cancelled");
+            promise.cancel();
             return 0;
         }
         1
@@ -1408,9 +1710,19 @@ pub extern "C" fn hta_drop_task(task: i64) -> i32 {
         let task = task as u64;
         if let Some(session) = kernel.task_sessions.remove(&task) {
             if let Some(runtime) = kernel.sessions.get_mut(&session) {
-                runtime.fibers.remove(&task);
+                if let Some(mut fiber) = runtime.fibers.remove(&task) {
+                    fiber.cancel();
+                }
+                #[cfg(feature = "bytecode-vm")]
+                if let Some(mut fiber) = runtime.vm_fibers.remove(&task) {
+                    fiber.cancel();
+                }
                 runtime.tasks.remove(&task);
                 runtime.calls.retain(|_, (owner, _)| *owner != task);
+                runtime
+                    .evaluation_queue
+                    .retain(|request| request.task() != task);
+                runtime.finish_evaluation(task);
             }
         }
         0
@@ -1450,14 +1762,25 @@ fn error_code(error: &str) -> i32 {
     4
 }
 
-fn evaluation_namespaces() -> kernel::NamespaceRegistry<Value> {
-    kernel::NamespaceRegistry::new("user")
+fn one_shot_environment() -> HashMap<String, Value> {
+    let mut env = HashMap::new();
+    if let Some((_, methods)) = core::NATIVE_TYPES
+        .iter()
+        .find(|(native_type, _)| *native_type == "Iter")
+    {
+        for method in *methods {
+            let function = core::structural_function_value((*method).to_owned());
+            env.insert(format!("Iter/{method}"), function.clone());
+            env.insert(format!("std.native.Iter/{method}"), function);
+        }
+    }
+    env
 }
 
 fn evaluate(source: &str) -> Result<i64, i32> {
     kernel::parse_forms(source).map_err(|_| 1)?;
-    let mut env = HashMap::new();
-    let namespaces = evaluation_namespaces();
+    let mut env = one_shot_environment();
+    let namespaces = kernel::NamespaceRegistry::new("user");
     let protocols = core::ProtocolRegistry::core();
     let value = core::with_namespace_registry(&namespaces, || {
         core::with_protocols(&protocols, || core::eval_text(source, &mut env))
@@ -1482,8 +1805,8 @@ pub extern "C" fn eval_error_code(source_ptr: *const u8, source_len: usize) -> i
             if kernel::parse_forms(source).is_err() {
                 return 1;
             }
-            let mut env = HashMap::new();
-            let namespaces = evaluation_namespaces();
+            let mut env = one_shot_environment();
+            let namespaces = kernel::NamespaceRegistry::new("user");
             let protocols = core::ProtocolRegistry::core();
             match core::with_namespace_registry(&namespaces, || {
                 core::with_protocols(&protocols, || core::eval_text(source, &mut env))
@@ -1571,6 +1894,51 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "bytecode-vm")]
+    #[test]
+    fn explicit_vm_target_matches_the_evaluator_without_fallback() {
+        let cases = [
+            "(+ 19 23)",
+            "(let [x 6 y 7] (* x y))",
+            "(loop [i 0 total 0] (if (< i 7) (recur (+ i 1) (+ total i)) total))",
+        ];
+        for (index, source) in cases.into_iter().enumerate() {
+            let evaluator_task = (index * 2 + 1) as u64;
+            let vm_task = evaluator_task + 1;
+            let mut evaluator = SessionKernel::new();
+            dispatch(
+                &mut evaluator,
+                evaluator_task,
+                "eval",
+                vec![Value::String(source.into())],
+            )
+            .unwrap();
+            let expected = result(&mut evaluator)[2].clone();
+
+            let mut vm = SessionKernel::new();
+            dispatch(
+                &mut vm,
+                vm_task,
+                "eval-vm",
+                vec![Value::String(source.into())],
+            )
+            .unwrap();
+            assert_eq!(result(&mut vm)[2], expected, "{source}");
+        }
+
+        let mut kernel = SessionKernel::new();
+        dispatch(
+            &mut kernel,
+            20,
+            "eval-vm",
+            vec![Value::String("(require [unsupported.vm.module])".into())],
+        )
+        .unwrap();
+        let failure = result(&mut kernel);
+        assert_eq!(failure[0], Value::Number(1));
+        assert_eq!(failure[1], Value::Number(20));
+    }
+
     #[test]
     fn filesystem_reattachment_preserves_idle_session_state() {
         let mut kernel = SessionKernel::new();
@@ -1643,6 +2011,60 @@ mod tests {
             kernel.attach_filesystem("busy", mount_id).unwrap_err(),
             "SESSION_BUSY busy"
         );
+    }
+
+    #[test]
+    fn session_evaluations_are_serialized_in_submission_order() {
+        let mut kernel = SessionKernel::new();
+        kernel.create_session("serial").unwrap();
+        dispatch(
+            &mut kernel,
+            1,
+            "session/eval",
+            vec![
+                Value::String("serial".into()),
+                Value::String(
+                    "(do (def queued-answer 41) \
+                     (deref (std.native.Host/call \"wait\" \"once\" [])))"
+                        .into(),
+                ),
+            ],
+        )
+        .unwrap();
+        dispatch(
+            &mut kernel,
+            2,
+            "session/eval",
+            vec![
+                Value::String("serial".into()),
+                Value::String("(+ queued-answer 1)".into()),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(kernel.session("serial").unwrap().evaluation_queue.len(), 1);
+        let call_event = result(&mut kernel);
+        let call = match call_event.as_slice() {
+            [Value::Number(2), Value::Number(call), ..] => *call as u64,
+            other => panic!("expected host call, got {other:?}"),
+        };
+        let promise = kernel
+            .session_mut("serial")
+            .unwrap()
+            .calls
+            .remove(&call)
+            .unwrap()
+            .1;
+        promise.resolve(Value::Nil);
+
+        assert!(matches!(
+            result(&mut kernel).as_slice(),
+            [Value::Number(0), Value::Number(1), Value::Nil]
+        ));
+        assert!(matches!(
+            result(&mut kernel).as_slice(),
+            [Value::Number(0), Value::Number(2), Value::Number(42)]
+        ));
     }
 
     #[test]
@@ -1724,12 +2146,16 @@ mod tests {
     #[test]
     fn iterator_lifecycle_matches_native_core_in_raw_wasm() {
         for source in [
-            "(let (it (iter-cycle [1 2])) (do (iter-next it) (iter-close it) (if (iter-next? it) 0 42)))",
-            "(let (it (iter-zip [1 2] [3 4])) (do (iter-close it) (if (iter-next? it) 0 42)))",
-            "(let (it (iter-map (fn [x] x) [1 2])) (do (iter-close it) (if (iter-next? it) 0 42)))",
+            "(let (it (Iter/iter-cycle [1 2])) (do (iter-next it) (Iter/iter-close it) (if (iter-next? it) 0 42)))",
+            "(let (it (Iter/iter-zip [1 2] [3 4])) (do (Iter/iter-close it) (if (iter-next? it) 0 42)))",
+            "(let (it (Iter/iter-map (fn [x] x) [1 2])) (do (Iter/iter-close it) (if (iter-next? it) 0 42)))",
         ] {
             assert_eq!(evaluate(source), Ok(42), "{source}");
         }
+        assert_eq!(
+            evaluate("(iter-next (Iter/iter-map (fn [x] (+ x 1)) [0]))"),
+            Ok(1)
+        );
     }
 
     fn completion_value(runtime: &mut Session, task: u64) -> crate::core::Value {

@@ -123,12 +123,13 @@
 (defn filter-plain-key
   "Converts a plain foreign-key column name such as owner_id to owner."
   [value]
-  (when (and (string? value)
-             (nil? (selector-namespace value)))
+  (if (and (string? value)
+           (nil? (selector-namespace value)))
     (if (and (>= (string/length value) 3)
              (string/ends-with? value "_id"))
       (string/slice value 0 (- (string/length value) 3))
-      value)))
+      value)
+    nil))
 
 (defn filter-plain
   "Returns a lookup map of explicit non-scope selectors."
@@ -146,8 +147,9 @@
         scopes (filter-scope string-keys)
         plains (filter-plain string-keys)
         columns (compatible-get schema table-name)]
-    (when (nil? columns)
-      (throw (ex-info "Table not in schema" {:table table-name})))
+    (if (nil? columns)
+      (throw (ex-info "Table not in schema" {:table table-name}))
+      nil)
     (sort-by (fn [entry] (compatible-get entry :order))
              (filter (fn [entry]
                        (let [scope (compatible-get entry :scope)

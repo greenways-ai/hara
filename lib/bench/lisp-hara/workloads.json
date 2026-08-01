@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "workloads": [
+    {
+      "id": "noop",
+      "hara_source": "42",
+      "scheme_source": "42",
+      "cl_source": "42",
+      "expected": "42",
+      "iterations": 1
+    },
+    {
+      "id": "arithmetic",
+      "hara_source": "(loop [i 0 acc 0] (if (< i 5000) (recur (+ i 1) (+ acc (mod i 17))) acc))",
+      "scheme_source": "(let loop ((i 0) (acc 0)) (if (< i 5000) (loop (+ i 1) (+ acc (modulo i 17))) acc))",
+      "cl_source": "(do ((i 0 (1+ i)) (acc 0 (+ acc (mod i 17)))) ((>= i 5000) acc))",
+      "expected": "39985",
+      "iterations": 5000
+    },
+    {
+      "id": "function-call",
+      "hara_source": "(loop [i 0 acc 0] (if (< i 2500) (recur (+ i 1) ((fn [x] (+ x 1)) acc)) acc))",
+      "scheme_source": "(let ((inc (lambda (x) (+ x 1)))) (let loop ((i 0) (acc 0)) (if (< i 2500) (loop (+ i 1) (inc acc)) acc)))",
+      "cl_source": "(flet ((inc (x) (+ x 1))) (do ((i 0 (1+ i)) (acc 0 (inc acc))) ((>= i 2500) acc)))",
+      "expected": "2500",
+      "iterations": 2500
+    },
+    {
+      "id": "table-index",
+      "hara_source": "(loop [i 0 acc 0] (if (< i 500) (recur (+ i 1) (+ acc (nth [1 2 3 4 5 6 7 8] (mod i 8)))) acc))",
+      "scheme_source": "(let ((v (vector 1 2 3 4 5 6 7 8))) (let loop ((i 0) (acc 0)) (if (< i 500) (loop (+ i 1) (+ acc (vector-ref v (modulo i 8)))) acc)))",
+      "cl_source": "(let ((v (vector 1 2 3 4 5 6 7 8))) (do ((i 0 (1+ i)) (acc 0 (+ acc (aref v (mod i 8))))) ((>= i 500) acc)))",
+      "expected": "2242",
+      "iterations": 500
+    },
+    {
+      "id": "table-assoc",
+      "hara_source": "(loop [i 0 value {}] (if (< i 500) (recur (+ i 1) (assoc value i (+ i 1))) (get value 499)))",
+      "scheme_source": "(let ((h (make-eqv-hashtable))) (let loop ((i 0)) (if (< i 500) (begin (hashtable-set! h i (+ i 1)) (loop (+ i 1))) (hashtable-ref h 499 #f))))",
+      "cl_source": "(let ((h (make-hash-table))) (do ((i 0 (1+ i))) ((>= i 500) (gethash 499 h)) (setf (gethash i h) (+ i 1))))",
+      "expected": "500",
+      "iterations": 500
+    }
+  ]
+}

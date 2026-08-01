@@ -324,6 +324,9 @@ public final class HaraBox implements TruffleObject, IEquality {
   @TruffleBoundary
   private static String display(Object value) {
     if (value instanceof byte[]) return hara.lang.base.G.displayBytes((byte[]) value);
+    if (value instanceof Character || value instanceof java.util.regex.Pattern) {
+      return hara.lang.base.G.display(value);
+    }
     if (value instanceof IDisplay) return ((IDisplay) value).display();
     if (value instanceof Iterator) return "#<lazy-iterator>";
     return String.valueOf(value);

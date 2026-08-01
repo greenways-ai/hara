@@ -443,6 +443,7 @@ mod tests {
     use super::{Dispatcher, PendingRequest, ProcessExtensionProvider, ReaderEvent};
     use crate::core::{Promise, PromiseState, Value};
     use crate::extension::{ExtensionManifest, WasmExtensionProvider};
+    use crate::task::PromiseRejection;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::mpsc;
     use std::time::Duration;
@@ -559,10 +560,11 @@ function write(value){{const frame=encodeHta(value),header=new Uint8Array(4);new
                 .unwrap(),
         );
         assert!(cancelled.cancel());
-        assert_eq!(
+        assert!(matches!(
             cancelled.state(),
-            PromiseState::Rejected("cancelled".into())
-        );
+            PromiseState::Rejected(PromiseRejection::Cancelled(value))
+                if matches!(value, Value::Map(_))
+        ));
 
         let crashed = promise(provider.invoke(&manifest, "crash", &[]).unwrap());
         assert!(result(crashed)

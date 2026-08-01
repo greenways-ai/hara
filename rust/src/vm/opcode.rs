@@ -39,9 +39,14 @@ pub enum Instruction {
     StoreLocal(u16),
     /// Discards the top of the stack.
     Pop,
+    /// Duplicates the top stack value.
+    Dup,
     /// Pops `argc` arguments, applies the shared value-level primitive,
     /// and pushes the result.
-    Primitive { op: Primitive, argc: u8 },
+    Primitive {
+        op: Primitive,
+        argc: u8,
+    },
     /// Applies a binary primitive to a local and a pooled constant.
     PrimitiveLocalConst {
         op: Primitive,
@@ -55,15 +60,23 @@ pub enum Instruction {
     JumpIfFalse(u32),
     /// Pops `captures` captured values and pushes a function value for
     /// `prototype`.
-    Closure { prototype: u16, captures: u8 },
+    Closure {
+        prototype: u16,
+        captures: u8,
+    },
     /// Pops `argc` arguments and then the callee, invokes the function
     /// value through the shared `call_function` boundary, and pushes the
     /// result.
-    Call { argc: u8 },
+    Call {
+        argc: u8,
+    },
     /// Pops `argc` arguments and calls `prototype` directly, copying the
     /// current frame's capture slots as the callee's captures (`defn`
     /// self-recursion).
-    CallStatic { prototype: u16, argc: u8 },
+    CallStatic {
+        prototype: u16,
+        argc: u8,
+    },
     /// Pops one value and raises it as a guest exception through the
     /// shared `core::thrown_error` boundary. Terminal: unwinds to the
     /// innermost covering try entry or fails the run.
@@ -80,7 +93,10 @@ pub enum Instruction {
     /// Pops a value, interns it as a `Var` in the current namespace
     /// (optional hara metadata from the program's var-metadata table),
     /// and pushes the value back (`def` returns the value).
-    DefGlobal { name: u32, metadata: Option<u16> },
+    DefGlobal {
+        name: u32,
+        metadata: Option<u16>,
+    },
     /// Pops a value, resets the root of the var named by the string
     /// constant at `constants[index]`, and pushes the value.
     SetGlobal(u32),
@@ -95,7 +111,10 @@ pub enum Instruction {
     /// to the current namespace), interns the constructor vars, and
     /// pushes the type value. `fields` indexes a vector constant of
     /// field-name strings.
-    DefStruct { name: u32, fields: u32 },
+    DefStruct {
+        name: u32,
+        fields: u32,
+    },
     /// Pops a struct instance and pushes the positional field value
     /// named by the keyword constant at `constants[index]` (`field`).
     StructField(u32),
@@ -105,7 +124,26 @@ pub enum Instruction {
     /// Pops `count` function values and pushes the arity dispatcher
     /// named by the string constant at `constants[name]`, built through
     /// the shared `core::arity_dispatcher` boundary.
-    MakeMultiArity { name: u32, count: u8 },
+    MakeMultiArity {
+        name: u32,
+        count: u8,
+    },
+    /// Pops `count` values and constructs a vector in source order.
+    BuildVector(u16),
+    /// Pops `pairs * 2` alternating keys and values and constructs an
+    /// insertion-ordered map.
+    BuildMap(u16),
+    /// Pops `count` values and constructs an insertion-ordered set.
+    BuildSet(u16),
+    BuildList(u16),
+    ConcatList(u16),
+    ToVector,
+    /// Pops a function value, interns it as a macro Var, registers it in the
+    /// active Runtime macro registry, and pushes the function back.
+    DefMacro {
+        name: u32,
+        metadata: Option<u16>,
+    },
     /// Replaces a settled promise with its value, raises a rejection, or
     /// suspends the current VM fiber while preserving the complete machine.
     Await,
@@ -144,6 +182,7 @@ impl Instruction {
             | Instruction::False
             | Instruction::LoadLocal(_) => 1,
             Instruction::StoreLocal(_) | Instruction::Pop | Instruction::JumpIfFalse(_) => -1,
+            Instruction::Dup => 1,
             Instruction::Primitive { argc, .. } | Instruction::CallStatic { argc, .. } => {
                 1 - i32::from(*argc)
             }
@@ -159,6 +198,13 @@ impl Instruction {
             | Instruction::StructField(_) => 0,
             Instruction::InstanceOf => -1,
             Instruction::MakeMultiArity { count, .. } => 1 - i32::from(*count),
+            Instruction::BuildVector(count)
+            | Instruction::BuildSet(count)
+            | Instruction::BuildList(count)
+            | Instruction::ConcatList(count) => 1 - i32::from(*count),
+            Instruction::BuildMap(pairs) => 1 - (2 * i32::from(*pairs)),
+            Instruction::ToVector => 0,
+            Instruction::DefMacro { .. } => 0,
             Instruction::Await => 0,
             Instruction::HostCall => -2,
             Instruction::Jump(_) => 0,
@@ -177,6 +223,7 @@ impl std::fmt::Display for Instruction {
             Instruction::LoadLocal(slot) => write!(formatter, "LoadLocal {slot}"),
             Instruction::StoreLocal(slot) => write!(formatter, "StoreLocal {slot}"),
             Instruction::Pop => formatter.write_str("Pop"),
+            Instruction::Dup => formatter.write_str("Dup"),
             Instruction::Primitive { op, argc } => {
                 write!(formatter, "Primitive {} {argc}", op.operator())
             }
@@ -221,6 +268,16 @@ impl std::fmt::Display for Instruction {
             Instruction::MakeMultiArity { name, count } => {
                 write!(formatter, "MakeMultiArity {name} count {count}")
             }
+            Instruction::BuildVector(count) => write!(formatter, "BuildVector {count}"),
+            Instruction::BuildMap(count) => write!(formatter, "BuildMap {count}"),
+            Instruction::BuildSet(count) => write!(formatter, "BuildSet {count}"),
+            Instruction::BuildList(count) => write!(formatter, "BuildList {count}"),
+            Instruction::ConcatList(count) => write!(formatter, "ConcatList {count}"),
+            Instruction::ToVector => formatter.write_str("ToVector"),
+            Instruction::DefMacro { name, metadata } => match metadata {
+                Some(metadata) => write!(formatter, "DefMacro {name} meta {metadata}"),
+                None => write!(formatter, "DefMacro {name}"),
+            },
             Instruction::Await => formatter.write_str("Await"),
             Instruction::HostCall => formatter.write_str("HostCall"),
             Instruction::Return => formatter.write_str("Return"),

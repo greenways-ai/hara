@@ -15,6 +15,7 @@ use crate::lang::data::{Keyword, Metadata, MetadataValue, Symbol};
 
 const MAGIC_V1: &[u8; 4] = b"HBC1";
 const MAGIC_V2: &[u8; 4] = b"HBC2";
+const MAGIC_V3: &[u8; 4] = b"HBC3";
 
 /// Encodes a program after validating it. Constants use the portable HTA
 /// value codec; unsupported runtime-only values are rejected explicitly.
@@ -35,7 +36,7 @@ pub fn encode_program(program: &Program) -> Result<Vec<u8>, String> {
         write_function(&mut payload, function)?;
     }
     let digest = Sha256::digest(&payload.bytes);
-    let mut output = MAGIC_V2.to_vec();
+    let mut output = MAGIC_V3.to_vec();
     output.extend_from_slice(
         &u32::try_from(payload.bytes.len())
             .map_err(|_| "bytecode artifact is too large")?
@@ -48,7 +49,9 @@ pub fn encode_program(program: &Program) -> Result<Vec<u8>, String> {
 
 /// Decodes, authenticates, and validates a persistent VM program.
 pub fn decode_program(bytes: &[u8]) -> Result<Program, String> {
-    let version = if bytes.starts_with(MAGIC_V2) {
+    let version = if bytes.starts_with(MAGIC_V3) {
+        3
+    } else if bytes.starts_with(MAGIC_V2) {
         2
     } else if bytes.starts_with(MAGIC_V1) {
         1
@@ -205,6 +208,7 @@ fn write_instruction(out: &mut Writer, instruction: &Instruction) {
             out.u16(*value);
         }
         Pop => out.byte(6),
+        Dup => out.byte(28),
         Primitive { op, argc } => {
             out.byte(7);
             out.byte(primitive_id(*op));
@@ -285,6 +289,32 @@ fn write_instruction(out: &mut Writer, instruction: &Instruction) {
         }
         Await => out.byte(26),
         HostCall => out.byte(27),
+        BuildVector(count) => {
+            out.byte(29);
+            out.u16(*count);
+        }
+        BuildMap(count) => {
+            out.byte(30);
+            out.u16(*count);
+        }
+        BuildSet(count) => {
+            out.byte(31);
+            out.u16(*count);
+        }
+        DefMacro { name, metadata } => {
+            out.byte(32);
+            out.u32(*name);
+            out.option_u16(*metadata);
+        }
+        BuildList(count) => {
+            out.byte(33);
+            out.u16(*count);
+        }
+        ConcatList(count) => {
+            out.byte(34);
+            out.u16(*count);
+        }
+        ToVector => out.byte(35),
         Return => out.byte(24),
     }
 }
@@ -343,6 +373,17 @@ fn read_instruction(reader: &mut Reader<'_>) -> Result<Instruction, String> {
         },
         26 => Instruction::Await,
         27 => Instruction::HostCall,
+        28 => Instruction::Dup,
+        29 => Instruction::BuildVector(reader.u16()?),
+        30 => Instruction::BuildMap(reader.u16()?),
+        31 => Instruction::BuildSet(reader.u16()?),
+        32 => Instruction::DefMacro {
+            name: reader.u32()?,
+            metadata: reader.option_u16()?,
+        },
+        33 => Instruction::BuildList(reader.u16()?),
+        34 => Instruction::ConcatList(reader.u16()?),
+        35 => Instruction::ToVector,
         _ => return Err("bytecode artifact contains an unknown opcode".into()),
     })
 }
@@ -367,6 +408,8 @@ fn primitive_id(value: Primitive) -> u8 {
         Primitive::First => 15,
         Primitive::Rest => 16,
         Primitive::Second => 17,
+        Primitive::ToMutable => 18,
+        Primitive::ToPersistent => 19,
     }
 }
 
@@ -390,6 +433,8 @@ fn primitive(value: u8) -> Result<Primitive, String> {
         15 => Primitive::First,
         16 => Primitive::Rest,
         17 => Primitive::Second,
+        18 => Primitive::ToMutable,
+        19 => Primitive::ToPersistent,
         _ => return Err("bytecode artifact contains an unknown primitive".into()),
     })
 }
@@ -682,7 +727,7 @@ mod tests {
         let source = "(do (defn add-one [x] (+ x 1)) (add-one 41))";
         let program = compile_source(source).unwrap();
         let encoded = encode_program(&program).unwrap();
-        assert!(encoded.starts_with(b"HBC2"));
+        assert!(encoded.starts_with(b"HBC3"));
         let decoded = decode_program(&encoded).unwrap();
         assert_eq!(disassemble(&decoded), disassemble(&program));
         assert_eq!(

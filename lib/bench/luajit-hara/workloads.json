@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "workloads": [
+    {
+      "id": "noop",
+      "hara_source": "42",
+      "lua_source": "return 42",
+      "expected": "42",
+      "iterations": 1
+    },
+    {
+      "id": "arithmetic",
+      "hara_source": "(loop [i 0 acc 0] (if (< i 5000) (recur (+ i 1) (+ acc (mod i 17))) acc))",
+      "lua_source": "local i = 0\nlocal acc = 0\nwhile i < 5000 do\n  acc = acc + (i % 17)\n  i = i + 1\nend\nreturn acc",
+      "expected": "39985",
+      "iterations": 5000
+    },
+    {
+      "id": "function-call",
+      "hara_source": "(loop [i 0 acc 0] (if (< i 2500) (recur (+ i 1) ((fn [x] (+ x 1)) acc)) acc))",
+      "lua_source": "local function inc(x) return x + 1 end\nlocal i = 0\nlocal acc = 0\nwhile i < 2500 do\n  i = i + 1\n  acc = inc(acc)\nend\nreturn acc",
+      "expected": "2500",
+      "iterations": 2500
+    },
+    {
+      "id": "table-index",
+      "hara_source": "(loop [i 0 acc 0] (if (< i 500) (recur (+ i 1) (+ acc (nth [1 2 3 4 5 6 7 8] (mod i 8)))) acc))",
+      "lua_source": "local v = {1, 2, 3, 4, 5, 6, 7, 8}\nlocal i = 0\nlocal acc = 0\nwhile i < 500 do\n  acc = acc + v[(i % 8) + 1]\n  i = i + 1\nend\nreturn acc",
+      "expected": "2242",
+      "iterations": 500
+    },
+    {
+      "id": "table-assoc",
+      "hara_source": "(loop [i 0 value {}] (if (< i 500) (recur (+ i 1) (assoc value i (+ i 1))) (get value 499)))",
+      "lua_source": "local t = {}\nfor i = 0, 499 do\n  t[i] = i + 1\nend\nreturn t[499]",
+      "expected": "500",
+      "iterations": 500
+    }
+  ]
+}

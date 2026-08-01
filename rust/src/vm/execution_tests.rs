@@ -63,6 +63,60 @@ fn literals() {
 }
 
 #[test]
+fn dynamic_collections_and_short_circuit_forms() {
+    assert_eq!(eval("(let [x 19 y 23] [x y])"), "[19 23]");
+    assert_eq!(eval("(let [x 42] {:answer x})"), "{:answer 42}");
+    assert_eq!(eval("(let [x 42] #{x 1})"), "#{42 1}");
+    assert_eq!(eval("(and true 42)"), "42");
+    assert_eq!(eval("(and 19 false (/ 1 0))"), "false");
+    assert_eq!(eval("(or nil false 42)"), "42");
+    assert_eq!(eval("(or 42 (/ 1 0))"), "42");
+    assert_eq!(eval("(cond false 1 (= 1 1) 42 :else 0)"), "42");
+    assert_eq!(eval("'(a [1 2])"), "(a [1 2])");
+}
+
+#[test]
+fn runtime_bytecode_defmacro_registers_and_expands() {
+    let mut runtime = Runtime::core();
+    assert_eq!(
+        runtime.eval_bytecode_native("(defmacro unless [test body] `(if ~test nil ~body))"),
+        Ok("<fn>".into())
+    );
+    assert_eq!(
+        runtime.eval_bytecode_native("(unless false 42)"),
+        Ok("42".into())
+    );
+    assert_eq!(runtime.eval_native("(unless false 42)"), Ok("42".into()));
+}
+
+#[test]
+fn foundation_source_compiles_to_bytecode() {
+    let source = include_str!("../../../lib/src/std/foundation.hal");
+    let body = source
+        .split_once("(ns std.foundation)")
+        .expect("foundation namespace declaration")
+        .1;
+    let mut runtime = Runtime::core();
+    assert!(runtime.use_namespace("std.foundation"));
+    runtime.prepare_foundation_bytecode();
+    let artifact = runtime
+        .compile_bytecode_artifact(body)
+        .unwrap_or_else(|error| panic!("foundation compile failed: {error}"));
+
+    let mut loaded = Runtime::core();
+    assert!(loaded.use_namespace("std.foundation"));
+    loaded.prepare_foundation_bytecode();
+    crate::core::with_definition_origin(crate::kernel::VarOrigin::HalFallback, || {
+        loaded
+            .eval_bytecode_artifact(&artifact)
+            .unwrap_or_else(|error| panic!("foundation execute failed: {error}"));
+    });
+    assert!(loaded.use_namespace("std.foundation"));
+    assert_eq!(loaded.eval_native("(map inc [1 2 3])").unwrap(), "[2 3 4]");
+    assert_eq!(loaded.eval_native("(if-not false 42)").unwrap(), "42");
+}
+
+#[test]
 fn multiple_top_level_forms() {
     assert_eq!(eval("1 2 3"), "3");
     assert_eq!(eval("(+ 1 2) (+ 3 4)"), "7");
@@ -248,7 +302,9 @@ fn recur_errors() {
 
     let (kind, message) = compile_error("(recur)");
     assert_eq!(kind, CompileErrorKind::Recur);
-    assert!(message.contains("recur expects values"), "{message}");
+    assert!(message.contains("recur must be inside loop"), "{message}");
+
+    assert_eq!(eval("(loop [] 42)"), "42");
 
     let (kind, message) = compile_error("(loop [i 0] (recur 1 2))");
     assert_eq!(kind, CompileErrorKind::Recur);
@@ -279,7 +335,6 @@ fn recur_errors() {
 #[test]
 fn unsupported_forms_are_typed_compile_errors() {
     let cases = [
-        ("(quote a)", "unsupported operator: quote"),
         (
             "(let [[a b] [1 2]] a)",
             "let destructuring is not supported",
@@ -363,6 +418,42 @@ fn literal_collections_and_collection_primitives() {
         "42"
     );
     assert_eq!(eval("(first (rest [1 2]))"), "2");
+}
+
+#[test]
+fn mutable_collections_build_in_place_and_freeze_once() {
+    assert_eq!(
+        eval(
+            "(let [m (to-mutable {})]
+                (do
+                  (loop [i 0]
+                    (if (< i 500)
+                      (do (assoc m i (+ i 1)) (recur (+ i 1)))
+                      nil))
+                  (let [p (to-persistent m)]
+                    (+ (count p) (get p 499)))))"
+        ),
+        "1000"
+    );
+    assert_eval_error(
+        "(let [m (to-mutable {}) p (to-persistent m)] (do p (assoc m :late 1)))",
+        "mutable collection used after to-persistent",
+    );
+}
+
+#[test]
+fn mutable_conversion_is_not_constant_folded_across_executions() {
+    let program = Rc::new(
+        compile_source(
+            "(loop [i 0 m (to-mutable {})]
+           (if (< i 10)
+             (recur (+ i 1) (assoc m i (+ i 1)))
+             (get (to-persistent m) 9)))",
+        )
+        .unwrap(),
+    );
+    assert_eq!(execute_program(program.clone()).unwrap().display(), "10");
+    assert_eq!(execute_program(program).unwrap().display(), "10");
 }
 
 #[test]
