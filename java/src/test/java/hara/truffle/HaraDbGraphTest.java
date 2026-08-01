@@ -40,4 +40,14 @@ public class HaraDbGraphTest {
   public void plannedSqlFixturePasses() throws Exception {
     assertHalFixturePasses("lib/test/std/db/text/sql_tree_test.hal");
   }
+
+  @Test
+  public void viewCompatibilityFixturePasses() throws Exception {
+    assertHalFixturePasses("lib/test/std/db/text/sql_view_test.hal");
+  }
+
+  @Test
+  public void sqlFunctionCallFixturePasses() throws Exception {
+    assertHalFixturePasses("lib/test/std/db/text/sql_call_test.hal");
+  }
 }
