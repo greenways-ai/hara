@@ -39,6 +39,8 @@ pub enum Instruction {
     StoreLocal(u16),
     /// Discards the top of the stack.
     Pop,
+    /// Duplicates the top stack value.
+    Dup,
     /// Pops `argc` arguments, applies the shared value-level primitive,
     /// and pushes the result.
     Primitive { op: Primitive, argc: u8 },
@@ -106,6 +108,16 @@ pub enum Instruction {
     /// named by the string constant at `constants[name]`, built through
     /// the shared `core::arity_dispatcher` boundary.
     MakeMultiArity { name: u32, count: u8 },
+    /// Pops `count` values and constructs a vector in source order.
+    BuildVector(u16),
+    /// Pops `pairs * 2` alternating keys and values and constructs an
+    /// insertion-ordered map.
+    BuildMap(u16),
+    /// Pops `count` values and constructs an insertion-ordered set.
+    BuildSet(u16),
+    /// Pops a function value, interns it as a macro Var, registers it in the
+    /// active Runtime macro registry, and pushes the function back.
+    DefMacro { name: u32, metadata: Option<u16> },
     /// Replaces a settled promise with its value, raises a rejection, or
     /// suspends the current VM fiber while preserving the complete machine.
     Await,
@@ -144,6 +156,7 @@ impl Instruction {
             | Instruction::False
             | Instruction::LoadLocal(_) => 1,
             Instruction::StoreLocal(_) | Instruction::Pop | Instruction::JumpIfFalse(_) => -1,
+            Instruction::Dup => 1,
             Instruction::Primitive { argc, .. } | Instruction::CallStatic { argc, .. } => {
                 1 - i32::from(*argc)
             }
@@ -159,6 +172,9 @@ impl Instruction {
             | Instruction::StructField(_) => 0,
             Instruction::InstanceOf => -1,
             Instruction::MakeMultiArity { count, .. } => 1 - i32::from(*count),
+            Instruction::BuildVector(count) | Instruction::BuildSet(count) => 1 - i32::from(*count),
+            Instruction::BuildMap(pairs) => 1 - (2 * i32::from(*pairs)),
+            Instruction::DefMacro { .. } => 0,
             Instruction::Await => 0,
             Instruction::HostCall => -2,
             Instruction::Jump(_) => 0,
@@ -177,6 +193,7 @@ impl std::fmt::Display for Instruction {
             Instruction::LoadLocal(slot) => write!(formatter, "LoadLocal {slot}"),
             Instruction::StoreLocal(slot) => write!(formatter, "StoreLocal {slot}"),
             Instruction::Pop => formatter.write_str("Pop"),
+            Instruction::Dup => formatter.write_str("Dup"),
             Instruction::Primitive { op, argc } => {
                 write!(formatter, "Primitive {} {argc}", op.operator())
             }
@@ -221,6 +238,13 @@ impl std::fmt::Display for Instruction {
             Instruction::MakeMultiArity { name, count } => {
                 write!(formatter, "MakeMultiArity {name} count {count}")
             }
+            Instruction::BuildVector(count) => write!(formatter, "BuildVector {count}"),
+            Instruction::BuildMap(count) => write!(formatter, "BuildMap {count}"),
+            Instruction::BuildSet(count) => write!(formatter, "BuildSet {count}"),
+            Instruction::DefMacro { name, metadata } => match metadata {
+                Some(metadata) => write!(formatter, "DefMacro {name} meta {metadata}"),
+                None => write!(formatter, "DefMacro {name}"),
+            },
             Instruction::Await => formatter.write_str("Await"),
             Instruction::HostCall => formatter.write_str("HostCall"),
             Instruction::Return => formatter.write_str("Return"),

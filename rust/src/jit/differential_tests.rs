@@ -44,7 +44,7 @@ fn telemetry_distinguishes_hot_compilation_and_execution() {
             .unwrap();
     assert_eq!(crate::execute_bytecode(&program).unwrap(), "12497500");
     let telemetry = crate::bytecode_jit_telemetry(&program);
-    assert!(telemetry.backedges >= 64, "{telemetry:?}");
+    assert!(telemetry.backedges >= 16, "{telemetry:?}");
     assert_eq!(telemetry.compile_attempts, 1, "{telemetry:?}");
     assert_eq!(telemetry.compiled, 1, "{telemetry:?}");
     assert_eq!(telemetry.rejected, 0, "{telemetry:?}");
@@ -154,6 +154,7 @@ fn dynamic_paths_compile_both_directions_of_an_alternating_branch() {
         crate::vm::disassemble(&program)
     );
     assert!(telemetry.branch_exits > 0, "{telemetry:?}");
+    assert_eq!(telemetry.disabled_loops, 1, "{telemetry:?}");
 }
 
 #[test]

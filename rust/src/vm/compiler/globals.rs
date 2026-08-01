@@ -21,6 +21,117 @@ use crate::vm::opcode::Instruction;
 use super::{Child, Compiler};
 
 impl Compiler {
+    pub(super) fn compile_defmacro(
+        &mut self,
+        children: &[Child<'_>],
+        span: &Span,
+        top: bool,
+    ) -> Result<(), CompileError> {
+        if !top {
+            return Err(unsupported(
+                "defmacro is only supported as a top-level statement",
+                span.start,
+            ));
+        }
+        if children.len() < 4 {
+            return Err(CompileError::new(
+                CompileErrorKind::Arity,
+                "defmacro expects a name, parameters, and a body",
+                Some(span.start),
+            ));
+        }
+        let (name, metadata) = binding_symbol(children[1].form, "defmacro name")
+            .map_err(|message| unsupported(message, children[1].span.start))?;
+        self.require_owned_global(&name, children[1].span)?;
+        let raw = children.iter().map(|child| child.form.clone()).collect::<Vec<_>>();
+        let (metadata, rest) = definition_metadata(metadata, &raw[2..], false, true)
+            .map_err(|message| unsupported(format!("{name}: {message}"), children[1].span.start))?;
+        let offset = children.len() - rest.len();
+        let rest_children = &children[offset..];
+        if rest_children.is_empty() {
+            return Err(CompileError::new(
+                CompileErrorKind::Arity,
+                "defmacro expects a name, parameters, and a body",
+                Some(span.start),
+            ));
+        }
+        let metadata = self.var_metadata(metadata);
+        self.declare_program_global(&name);
+        if matches!(
+            crate::core::form_without_metadata(rest_children[0].form),
+            Form::Vector(_)
+        ) {
+            let params = macro_params(rest_children[0].form).map_err(|message| {
+                unsupported(message, rest_children[0].span.start)
+            })?;
+            let params_child = Child {
+                form: &params,
+                span: rest_children[0].span,
+                children: None,
+            };
+            self.compile_function(
+                Some(&name),
+                &params_child,
+                &rest_children[1..],
+                span,
+                false,
+                false,
+            )?;
+        } else {
+            let mut count = 0usize;
+            for clause in rest_children {
+                let Form::List(parts) = crate::core::form_without_metadata(clause.form) else {
+                    return Err(unsupported(
+                        "defmacro multi-arity clauses must be lists",
+                        clause.span.start,
+                    ));
+                };
+                if parts.len() < 2 {
+                    return Err(CompileError::new(
+                        CompileErrorKind::Arity,
+                        "defmacro clause expects parameters and a body",
+                        Some(clause.span.start),
+                    ));
+                }
+                let params = macro_params(&parts[0])
+                    .map_err(|message| unsupported(message, clause.span.start))?;
+                let params_child = Child {
+                    form: &params,
+                    span: clause.span,
+                    children: None,
+                };
+                let body = parts[1..]
+                    .iter()
+                    .map(|form| Child {
+                        form,
+                        span: clause.span,
+                        children: None,
+                    })
+                    .collect::<Vec<_>>();
+                self.compile_function(None, &params_child, &body, span, false, false)?;
+                count += 1;
+                if count > usize::from(u8::MAX) {
+                    return Err(CompileError::new(
+                        CompileErrorKind::Limit,
+                        "defmacro supports at most 255 arity clauses",
+                        Some(span.start),
+                    ));
+                }
+            }
+            let name_constant = self.name_constant(&name, children[1].span)?;
+            self.emit(
+                Instruction::MakeMultiArity {
+                    name: name_constant,
+                    count: count as u8,
+                },
+                Some(span.start),
+            );
+        }
+        let name = self.name_constant(&name, children[1].span)?;
+        self.emit(Instruction::DefMacro { name, metadata }, Some(span.start));
+        Ok(())
+    }
+
     fn require_owned_global(&self, name: &str, span: &Span) -> Result<(), CompileError> {
         let referred = crate::core::namespace_registry()
             .ok()
@@ -506,6 +617,15 @@ impl Compiler {
         self.emit(Instruction::VarGlobal(name_index), Some(span.start));
         Ok(())
     }
+}
+
+fn macro_params(form: &Form) -> Result<Form, String> {
+    let Form::Vector(params) = crate::core::form_without_metadata(form) else {
+        return Err("macro parameters must be a vector".into());
+    };
+    let mut implicit = vec![Form::Symbol("&form".into()), Form::Symbol("&env".into())];
+    implicit.extend_from_slice(params);
+    Ok(Form::Vector(implicit))
 }
 
 fn unsupported(message: impl Into<String>, position: crate::kernel::Position) -> CompileError {

@@ -63,6 +63,30 @@ fn literals() {
 }
 
 #[test]
+fn dynamic_collections_and_short_circuit_forms() {
+    assert_eq!(eval("(let [x 19 y 23] [x y])"), "[19 23]");
+    assert_eq!(eval("(let [x 42] {:answer x})"), "{:answer 42}");
+    assert_eq!(eval("(let [x 42] #{x 1})"), "#{42 1}");
+    assert_eq!(eval("(and true 42)"), "42");
+    assert_eq!(eval("(and 19 false (/ 1 0))"), "false");
+    assert_eq!(eval("(or nil false 42)"), "42");
+    assert_eq!(eval("(or 42 (/ 1 0))"), "42");
+    assert_eq!(eval("(cond false 1 (= 1 1) 42 :else 0)"), "42");
+    assert_eq!(eval("'(a [1 2])"), "(a [1 2])");
+}
+
+#[test]
+fn runtime_bytecode_defmacro_registers_and_expands() {
+    let mut runtime = Runtime::core();
+    assert_eq!(
+        runtime.eval_bytecode_native("(defmacro unless [test body] `(if ~test nil ~body))"),
+        Ok("<fn>".into())
+    );
+    assert_eq!(runtime.eval_bytecode_native("(unless false 42)"), Ok("42".into()));
+    assert_eq!(runtime.eval_native("(unless false 42)"), Ok("42".into()));
+}
+
+#[test]
 fn multiple_top_level_forms() {
     assert_eq!(eval("1 2 3"), "3");
     assert_eq!(eval("(+ 1 2) (+ 3 4)"), "7");

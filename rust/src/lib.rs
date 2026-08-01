@@ -1443,9 +1443,11 @@ impl Runtime {
     /// the compiler's two-phase global check (issue #223). The program
     /// is validated but not executed; globals intern only at execution.
     pub fn compile_bytecode(&self, source: &str) -> Result<std::rc::Rc<vm::Program>, String> {
-        vm::compile_source_with(source, &self.namespace_registry)
-            .map(std::rc::Rc::new)
-            .map_err(|error| error.to_string())
+        core::with_macros(self.macros.clone(), || {
+            vm::compile_source_with(source, &self.namespace_registry)
+                .map(std::rc::Rc::new)
+                .map_err(|error| error.to_string())
+        })
     }
 
     /// Compiles and executes through the experimental VM against this
@@ -1454,9 +1456,11 @@ impl Runtime {
     /// forms fail as compile errors. `eval_native` is unaffected.
     pub fn eval_bytecode_native(&mut self, source: &str) -> Result<String, String> {
         let program = self.compile_bytecode(source)?;
-        let result = vm::execute_program_with_globals(program, &self.namespace_registry)
-            .map(|value| value.display())
-            .map_err(|error| error.to_string());
+        let result = core::with_macros(self.macros.clone(), || {
+            vm::execute_program_with_globals(program, &self.namespace_registry)
+                .map(|value| value.display())
+                .map_err(|error| error.to_string())
+        });
         // Rebuild the env from the registry so mixed evaluator/VM usage
         // on one Runtime observes the same globals.
         let current = self.namespace_registry.current().name().as_str().to_owned();
@@ -1474,9 +1478,11 @@ impl Runtime {
     /// Executes a persisted artifact against this runtime's namespaces.
     pub fn eval_bytecode_artifact(&mut self, bytes: &[u8]) -> Result<String, String> {
         let program = std::rc::Rc::new(vm::decode_program(bytes)?);
-        let result = vm::execute_program_with_globals(program, &self.namespace_registry)
-            .map(|value| value.display())
-            .map_err(|error| error.to_string());
+        let result = core::with_macros(self.macros.clone(), || {
+            vm::execute_program_with_globals(program, &self.namespace_registry)
+                .map(|value| value.display())
+                .map_err(|error| error.to_string())
+        });
         let current = self.namespace_registry.current().name().as_str().to_owned();
         core::select_namespace_environment(&self.namespace_registry, &mut self.env, &current);
         result

@@ -28,6 +28,7 @@ pub struct JitTelemetry {
     pub branch_exits: u64,
     pub type_exits: u64,
     pub error_exits: u64,
+    pub disabled_loops: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -39,6 +40,12 @@ struct TracePathKey {
 struct CachedTrace<T> {
     path: Vec<u32>,
     compiled: T,
+}
+
+#[derive(Default)]
+struct LoopProfile {
+    iterations: u64,
+    branch_exits: u32,
 }
 
 pub(crate) struct JitRuntime {
@@ -54,6 +61,8 @@ pub(crate) struct JitRuntime {
     traces: HashMap<LoopKey, Vec<CachedTrace<NativeTrace>>>,
     candidates: HashMap<TracePathKey, u32>,
     rejected: HashSet<TracePathKey>,
+    disabled: HashSet<LoopKey>,
+    profiles: HashMap<LoopKey, LoopProfile>,
     config: JitConfig,
     batch_iterations: u32,
     telemetry: JitTelemetry,
@@ -74,6 +83,8 @@ impl JitRuntime {
             traces: HashMap::new(),
             candidates: HashMap::new(),
             rejected: HashSet::new(),
+            disabled: HashSet::new(),
+            profiles: HashMap::new(),
             config,
             batch_iterations: 1024,
             telemetry: JitTelemetry::default(),
@@ -87,6 +98,7 @@ impl JitRuntime {
         _from: u32,
         header: u32,
         path: &[u32],
+        recording_locals: &[TraceValue],
         locals: &mut [TraceValue],
     ) -> Option<ExitSnapshot> {
         let key = LoopKey { function, header };
@@ -95,6 +107,9 @@ impl JitRuntime {
             path: path.to_vec(),
         };
         self.telemetry.backedges += 1;
+        if self.disabled.contains(&key) {
+            return None;
+        }
         if self.rejected.contains(&path_key) {
             return None;
         }
@@ -118,7 +133,7 @@ impl JitRuntime {
             self.telemetry.recording_starts += 1;
             match self
                 .recorder
-                .record_path(program, function, header, path, locals)
+                .record_path(program, function, header, path, recording_locals)
             {
                 Ok(trace) => match self.backend.compile(&trace) {
                     Ok(compiled) => {
@@ -164,6 +179,7 @@ impl JitRuntime {
             {
                 TraceOutcome::Completed { iterations } => {
                     self.telemetry.completed_iterations += u64::from(iterations);
+                    self.profiles.entry(key).or_default().iterations += u64::from(iterations);
                     return Some(ExitSnapshot {
                         function,
                         instruction: header,
@@ -171,12 +187,31 @@ impl JitRuntime {
                         stack: Vec::new(),
                     });
                 }
-                TraceOutcome::SideExit { reason, snapshot } => {
+                TraceOutcome::SideExit {
+                    reason,
+                    iterations,
+                    snapshot,
+                } => {
                     self.telemetry.side_exits += 1;
+                    self.telemetry.completed_iterations += u64::from(iterations);
+                    let profile = self.profiles.entry(key).or_default();
+                    profile.iterations += u64::from(iterations);
                     match reason {
-                        ExitReason::BranchChanged => self.telemetry.branch_exits += 1,
+                        ExitReason::BranchChanged => {
+                            self.telemetry.branch_exits += 1;
+                            profile.branch_exits = profile.branch_exits.saturating_add(1);
+                        }
                         ExitReason::WrongTag => self.telemetry.type_exits += 1,
                         _ => self.telemetry.error_exits += 1,
+                    }
+                    if profile.branch_exits >= self.config.max_branch_exits_before_bailout
+                        && profile.iterations
+                            < u64::from(profile.branch_exits)
+                                * u64::from(self.config.min_iterations_per_branch_exit)
+                    {
+                        self.disabled.insert(key);
+                        self.telemetry.disabled_loops += 1;
+                        return Some(snapshot);
                     }
                     if reason == ExitReason::BranchChanged && snapshot.locals == entry {
                         continue;
@@ -196,5 +231,9 @@ impl JitRuntime {
 
     pub(crate) fn telemetry(&self) -> JitTelemetry {
         self.telemetry
+    }
+
+    pub(crate) fn is_disabled(&self, function: u16, header: u32) -> bool {
+        self.disabled.contains(&LoopKey { function, header })
     }
 }

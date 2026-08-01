@@ -302,7 +302,8 @@ pub(crate) fn stack_heights(
             | Instruction::DeclareGlobal(index) => {
                 string_constant(program, *index, at)?;
             }
-            Instruction::DefGlobal { name, metadata } => {
+            Instruction::DefGlobal { name, metadata }
+            | Instruction::DefMacro { name, metadata } => {
                 string_constant(program, *name, at)?;
                 if let Some(metadata) = metadata {
                     if usize::from(*metadata) >= program.var_metadata.len() {

@@ -85,6 +85,10 @@ pub struct Machine {
     jit: crate::jit::runtime::JitRuntime,
     #[cfg(feature = "tracing-jit")]
     jit_path: Vec<(usize, u32)>,
+    #[cfg(feature = "tracing-jit")]
+    jit_suppressed_range: Option<(usize, u32, u32)>,
+    #[cfg(feature = "tracing-jit")]
+    jit_loop_entries: HashMap<(usize, u32), Vec<crate::jit::TraceValue>>,
 }
 
 #[cfg(feature = "tracing-jit")]
@@ -188,6 +192,10 @@ impl Machine {
             jit: crate::jit::runtime::JitRuntime::default(),
             #[cfg(feature = "tracing-jit")]
             jit_path: Vec::new(),
+            #[cfg(feature = "tracing-jit")]
+            jit_suppressed_range: None,
+            #[cfg(feature = "tracing-jit")]
+            jit_loop_entries: HashMap::new(),
         }
     }
 
@@ -267,6 +275,10 @@ impl Machine {
             jit: crate::jit::runtime::JitRuntime::default(),
             #[cfg(feature = "tracing-jit")]
             jit_path: Vec::new(),
+            #[cfg(feature = "tracing-jit")]
+            jit_suppressed_range: None,
+            #[cfg(feature = "tracing-jit")]
+            jit_loop_entries: HashMap::new(),
         }
     }
 
@@ -600,34 +612,65 @@ impl Machine {
                 return VmOutcome::Failed(self.error(function, "instruction pointer out of range"));
             };
             #[cfg(feature = "tracing-jit")]
-            self.jit_path.push((self.function, self.ip as u32));
+            {
+                let instruction = self.ip as u32;
+                let suppressed =
+                    self.jit_suppressed_range
+                        .is_some_and(|(function, header, backedge)| {
+                            function == self.function
+                                && instruction >= header
+                                && instruction <= backedge
+                        });
+                if !suppressed {
+                    self.jit_suppressed_range = None;
+                    self.jit_path.push((self.function, instruction));
+                }
+            }
             match self.dispatch(&program, function, instruction) {
                 Dispatch::Next(ip) => {
                     let mut next_ip = ip;
                     #[cfg(feature = "tracing-jit")]
                     if ip <= self.ip {
-                        let (mut locals, writable) = self.frame.trace_locals();
                         let header = ip as u32;
-                        let path_start = self
-                            .jit_path
-                            .iter()
-                            .rposition(|entry| *entry == (self.function, header));
-                        let path = path_start.map_or_else(Vec::new, |start| {
-                            self.jit_path[start..]
+                        if self.jit.is_disabled(self.function as u16, header) {
+                            self.jit_suppressed_range =
+                                Some((self.function, header, self.ip as u32));
+                        } else {
+                            let (mut locals, writable) = self.frame.trace_locals();
+                            let recording_locals = self
+                                .jit_loop_entries
+                                .get(&(self.function, header))
+                                .cloned()
+                                .unwrap_or_else(|| locals.clone());
+                            let path_start = self
+                                .jit_path
                                 .iter()
-                                .map(|(_, instruction)| *instruction)
-                                .collect()
-                        });
-                        if let Some(snapshot) = self.jit.backedge(
-                            &program,
-                            self.function as u16,
-                            self.ip as u32,
-                            header,
-                            &path,
-                            &mut locals,
-                        ) {
-                            self.frame.apply_trace_locals(&snapshot.locals, &writable);
-                            next_ip = snapshot.instruction as usize;
+                                .rposition(|entry| *entry == (self.function, header));
+                            let path = path_start.map_or_else(Vec::new, |start| {
+                                self.jit_path[start..]
+                                    .iter()
+                                    .map(|(_, instruction)| *instruction)
+                                    .collect()
+                            });
+                            if let Some(snapshot) = self.jit.backedge(
+                                &program,
+                                self.function as u16,
+                                self.ip as u32,
+                                header,
+                                &path,
+                                &recording_locals,
+                                &mut locals,
+                            ) {
+                                self.frame.apply_trace_locals(&snapshot.locals, &writable);
+                                locals = snapshot.locals;
+                                next_ip = snapshot.instruction as usize;
+                            }
+                            self.jit_loop_entries
+                                .insert((self.function, header), locals);
+                            if self.jit.is_disabled(self.function as u16, header) {
+                                self.jit_suppressed_range =
+                                    Some((self.function, header, self.ip as u32));
+                            }
                         }
                         self.jit_path.clear();
                     }
@@ -635,7 +678,10 @@ impl Machine {
                 }
                 Dispatch::Call { callee, args } => {
                     #[cfg(feature = "tracing-jit")]
-                    self.jit_path.clear();
+                    {
+                        self.jit_path.clear();
+                        self.jit_loop_entries.clear();
+                    }
                     if let Err(message) = self.enter_callable(&program, callee, args) {
                         match self.raise(function, message) {
                             Ok(target) => self.ip = target,
@@ -649,12 +695,18 @@ impl Machine {
                     captures,
                 } => {
                     #[cfg(feature = "tracing-jit")]
-                    self.jit_path.clear();
+                    {
+                        self.jit_path.clear();
+                        self.jit_loop_entries.clear();
+                    }
                     self.enter_or_spawn(&program, prototype, args, captures)
                 }
                 Dispatch::Returned(value) => {
                     #[cfg(feature = "tracing-jit")]
-                    self.jit_path.clear();
+                    {
+                        self.jit_path.clear();
+                        self.jit_loop_entries.clear();
+                    }
                     self.stack.truncate(self.frame.base());
                     if let Some(caller) = self.calls.pop() {
                         self.function = caller.function;
@@ -739,6 +791,12 @@ impl Machine {
                         Err(error) => return Dispatch::Failed(error),
                     }
                 }
+            }
+            Instruction::Dup => {
+                let Some(value) = self.stack.last().cloned() else {
+                    return Dispatch::Failed(self.error(function, "stack underflow"));
+                };
+                self.stack.push(value);
             }
             Instruction::Primitive { op, argc } => {
                 let argc = usize::from(*argc);
@@ -950,6 +1008,18 @@ impl Machine {
             }
             Instruction::MakeMultiArity { name, count } => {
                 guarded!(self.exec_make_multi_arity(program, *name, *count));
+            }
+            Instruction::BuildVector(count) => {
+                guarded!(self.exec_build_collection(program, *count, false, false));
+            }
+            Instruction::BuildMap(pairs) => {
+                guarded!(self.exec_build_collection(program, pairs.saturating_mul(2), true, false));
+            }
+            Instruction::BuildSet(count) => {
+                guarded!(self.exec_build_collection(program, *count, false, true));
+            }
+            Instruction::DefMacro { name, metadata } => {
+                guarded!(self.exec_def_macro(program, *name, *metadata));
             }
             Instruction::Await => {
                 let Some(value) = self.stack.last() else {

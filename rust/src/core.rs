@@ -1151,6 +1151,19 @@ fn macroexpand_once(form: &Form, env: &mut HashMap<String, Value>) -> Result<For
     }
 }
 
+pub(crate) fn vm_macroexpand(form: &Form) -> Result<Form, String> {
+    let mut current = form.clone();
+    let mut env = HashMap::new();
+    for _ in 0..1000 {
+        let expanded = macroexpand_once(&current, &mut env)?;
+        if expanded == current {
+            return Ok(current);
+        }
+        current = expanded;
+    }
+    Err("macro expansion exceeded 1000 steps".into())
+}
+
 thread_local! {
     static TRACE_ENABLED: Cell<bool> = const { Cell::new(false) };
     static TRACE_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
@@ -2742,6 +2755,21 @@ pub(crate) fn vm_def_global(
     var.set_hara_metadata(metadata);
     var.set_origin(definition_origin());
     current.map_var(local, var.clone());
+    Ok(var)
+}
+
+pub(crate) fn vm_def_macro(
+    name: &str,
+    value: Value,
+    metadata: Option<Rc<Metadata>>,
+) -> Result<KernelVar<Value>, String> {
+    let Value::Function(function) = &value else {
+        return Err("defmacro expects a function value".into());
+    };
+    let function = function.clone();
+    let namespace = namespace_registry()?.current().name().as_str().to_owned();
+    let var = vm_def_global(name, value, metadata)?;
+    register_macro(&namespace, name, function)?;
     Ok(var)
 }
 
@@ -7869,6 +7897,25 @@ fn vector_literal(values: Vec<Value>) -> Result<Value, String> {
     } else {
         Ok(Value::Vector(values.into()))
     }
+}
+
+pub(crate) fn vm_build_vector(values: Vec<Value>) -> Result<Value, String> {
+    vector_literal(values)
+}
+
+pub(crate) fn vm_build_map(values: Vec<Value>) -> Result<Value, String> {
+    if values.len() % 2 != 0 {
+        return Err("map construction requires key/value pairs".into());
+    }
+    Ok(Value::OrderedMap(Box::new(POrderedMap::from_iter(
+        values
+            .chunks_exact(2)
+            .map(|pair| (pair[0].clone(), pair[1].clone())),
+    ))))
+}
+
+pub(crate) fn vm_build_set(values: Vec<Value>) -> Result<Value, String> {
+    Ok(Value::OrderedSet(Box::new(POrderedSet::from_iter(values))))
 }
 
 fn literal_value(form: &Form) -> Result<Value, String> {

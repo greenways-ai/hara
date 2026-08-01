@@ -112,45 +112,45 @@ impl TraceBackend for NativeBackend {
                 TraceOp::GuardLocalI64 { local }
                     if !matches!(locals.get(usize::from(*local)), Some(TraceValue::I64(_))) =>
                 {
-                    return side_exit(&compiled.trace, ExitReason::WrongTag, locals)
+                    return side_exit(&compiled.trace, ExitReason::WrongTag, 0, locals)
                 }
                 TraceOp::GuardLocalBool { local }
                     if !matches!(locals.get(usize::from(*local)), Some(TraceValue::Bool(_))) =>
                 {
-                    return side_exit(&compiled.trace, ExitReason::WrongTag, locals)
+                    return side_exit(&compiled.trace, ExitReason::WrongTag, 0, locals)
                 }
                 TraceOp::GuardLocalNil { local }
                     if !matches!(locals.get(usize::from(*local)), Some(TraceValue::Nil)) =>
                 {
-                    return side_exit(&compiled.trace, ExitReason::WrongTag, locals)
+                    return side_exit(&compiled.trace, ExitReason::WrongTag, 0, locals)
                 }
                 TraceOp::GuardLocalVectorI64 { local } if !vector_locals.contains_key(local) => {
                     let Some(values) = locals
                         .get(usize::from(*local))
                         .and_then(numeric_vector_values)
                     else {
-                        return side_exit(&compiled.trace, ExitReason::WrongTag, locals);
+                        return side_exit(&compiled.trace, ExitReason::WrongTag, 0, locals);
                     };
                     let bytes = match vector_bytes(values.len()) {
                         Ok(bytes) => bytes,
                         Err(_) => {
-                            return side_exit(&compiled.trace, ExitReason::Unsupported, locals)
+                            return side_exit(&compiled.trace, ExitReason::Unsupported, 0, locals)
                         }
                     };
                     vector_locals.insert(*local, (heap_cursor, values));
                     heap_cursor = match heap_cursor.checked_add(bytes) {
                         Some(cursor) if cursor <= MAX_TRACE_MEMORY_BYTES => cursor,
-                        _ => return side_exit(&compiled.trace, ExitReason::Unsupported, locals),
+                        _ => return side_exit(&compiled.trace, ExitReason::Unsupported, 0, locals),
                     };
                 }
                 _ => {}
             }
         }
         if locals.len() < compiled.local_count {
-            return side_exit(&compiled.trace, ExitReason::WrongTag, locals);
+            return side_exit(&compiled.trace, ExitReason::WrongTag, 0, locals);
         }
         if ensure_memory(&compiled.memory, &mut compiled.store, heap_cursor).is_err() {
-            return side_exit(&compiled.trace, ExitReason::Unsupported, locals);
+            return side_exit(&compiled.trace, ExitReason::Unsupported, 0, locals);
         }
         {
             let data = compiled.memory.data_mut(&mut compiled.store);
@@ -173,7 +173,7 @@ impl TraceBackend for NativeBackend {
             }
             for (offset, values) in vector_locals.values() {
                 if write_vector(data, *offset, values).is_err() {
-                    return side_exit(&compiled.trace, ExitReason::Unsupported, locals);
+                    return side_exit(&compiled.trace, ExitReason::Unsupported, 0, locals);
                 }
             }
         }
@@ -182,7 +182,7 @@ impl TraceBackend for NativeBackend {
             .call(&mut compiled.store, max_iterations as i32)
         {
             Ok(result) => result,
-            Err(_) => return side_exit(&compiled.trace, ExitReason::Unsupported, locals),
+            Err(_) => return side_exit(&compiled.trace, ExitReason::Unsupported, 0, locals),
         };
         let completed = result >= max_iterations as i32;
         {
@@ -202,12 +202,15 @@ impl TraceBackend for NativeBackend {
             }
         }
         match result {
-            -1 => side_exit(&compiled.trace, ExitReason::Overflow, locals),
-            -2 => side_exit(&compiled.trace, ExitReason::DivisionByZero, locals),
-            -3 => side_exit(&compiled.trace, ExitReason::IndexOutOfBounds, locals),
-            value if value >= 0 && value < max_iterations as i32 => {
-                side_exit(&compiled.trace, ExitReason::BranchChanged, locals)
-            }
+            -1 => side_exit(&compiled.trace, ExitReason::Overflow, 0, locals),
+            -2 => side_exit(&compiled.trace, ExitReason::DivisionByZero, 0, locals),
+            -3 => side_exit(&compiled.trace, ExitReason::IndexOutOfBounds, 0, locals),
+            value if value >= 0 && value < max_iterations as i32 => side_exit(
+                &compiled.trace,
+                ExitReason::BranchChanged,
+                value as u32,
+                locals,
+            ),
             _ => TraceOutcome::Completed {
                 iterations: max_iterations,
             },
@@ -215,9 +218,15 @@ impl TraceBackend for NativeBackend {
     }
 }
 
-fn side_exit(trace: &Trace, reason: ExitReason, locals: &[TraceValue]) -> TraceOutcome {
+fn side_exit(
+    trace: &Trace,
+    reason: ExitReason,
+    iterations: u32,
+    locals: &[TraceValue],
+) -> TraceOutcome {
     TraceOutcome::SideExit {
         reason,
+        iterations,
         snapshot: ExitSnapshot {
             function: trace.function,
             instruction: trace.resume_ip,
@@ -762,6 +771,7 @@ mod tests {
             TraceOutcome::SideExit {
                 reason: ExitReason::DivisionByZero,
                 snapshot: ExitSnapshot { locals, .. },
+                ..
             } if locals == vec![TraceValue::I64(9)]
         ));
     }

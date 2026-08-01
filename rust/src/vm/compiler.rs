@@ -407,6 +407,25 @@ impl Compiler {
             // matching the evaluator, which never reaches it.
             return Ok(());
         }
+        if let Form::List(values) = crate::core::form_without_metadata(form) {
+            let protected = matches!(
+                values.first(),
+                Some(Form::Symbol(name)) if name == "quote" || name == "syntax-quote"
+            );
+            if !protected {
+                let expanded = crate::core::vm_macroexpand(form).map_err(|message| {
+                    CompileError::new(
+                        CompileErrorKind::UnsupportedForm,
+                        message,
+                        Some(span.start),
+                    )
+                })?;
+                if expanded != *form {
+                    self.top_level = top;
+                    return self.compile_form(&expanded, span, None, tail);
+                }
+            }
+        }
         match form {
             Form::Nil => {
                 self.emit(Instruction::Nil, Some(span.start));
@@ -434,6 +453,40 @@ impl Compiler {
                 })?;
                 self.constant(value, span)
             }
+            Form::Vector(values) => {
+                self.compile_collection_values(values.iter(), span)?;
+                self.emit(
+                    Instruction::BuildVector(self.collection_count(values.len(), span)?),
+                    Some(span.start),
+                );
+                Ok(())
+            }
+            Form::Map(entries) => {
+                if entries.len() > usize::from(u16::MAX) {
+                    return Err(CompileError::new(
+                        CompileErrorKind::Limit,
+                        "map literal exceeds 65535 entries",
+                        Some(span.start),
+                    ));
+                }
+                for (key, value) in entries {
+                    self.compile_form(key, span, None, false)?;
+                    self.compile_form(value, span, None, false)?;
+                }
+                self.emit(
+                    Instruction::BuildMap(entries.len() as u16),
+                    Some(span.start),
+                );
+                Ok(())
+            }
+            Form::Set(values) => {
+                self.compile_collection_values(values.iter(), span)?;
+                self.emit(
+                    Instruction::BuildSet(self.collection_count(values.len(), span)?),
+                    Some(span.start),
+                );
+                Ok(())
+            }
             Form::Metadata(_, value) => self.compile_form(value, span, None, tail),
             Form::Symbol(name) => match self.ctx().scopes.resolve(name) {
                 Some(slot) => {
@@ -460,6 +513,15 @@ impl Compiler {
                         self.compile_host_call(&children, span)
                     }
                     Form::Symbol(name) if name == "if" => self.compile_if(&children, span, tail),
+                    Form::Symbol(name) if name == "and" => self.compile_and(&children, span, tail),
+                    Form::Symbol(name) if name == "or" => self.compile_or(&children, span, tail),
+                    Form::Symbol(name) if name == "cond" => {
+                        self.compile_cond(&children, span, tail)
+                    }
+                    Form::Symbol(name) if name == "quote" => self.compile_quote(&children, span),
+                    Form::Symbol(name) if name == "syntax-quote" => {
+                        self.compile_syntax_quote(&children, span)
+                    }
                     Form::Symbol(name) if name == "do" => {
                         // A top-level `do` is transparent: its statements
                         // keep top-level position, so `defn` lowering works
@@ -478,6 +540,9 @@ impl Compiler {
                     Form::Symbol(name) if name == "def" => self.compile_def(&children, span),
                     Form::Symbol(name) if name == "defn" || name == "defn-" => {
                         self.compile_defn(&children, span, top, name == "defn-")
+                    }
+                    Form::Symbol(name) if name == "defmacro" => {
+                        self.compile_defmacro(&children, span, top)
                     }
                     Form::Symbol(name) if name == "declare" => {
                         self.compile_declare(&children, span, top)
@@ -514,6 +579,59 @@ impl Compiler {
             }
             _ => Err(self.unsupported(form, span)),
         }
+    }
+
+    fn collection_count(&self, count: usize, span: &Span) -> Result<u16, CompileError> {
+        u16::try_from(count).map_err(|_| {
+            CompileError::new(
+                CompileErrorKind::Limit,
+                "collection literal exceeds 65535 items",
+                Some(span.start),
+            )
+        })
+    }
+
+    fn compile_collection_values<'a>(
+        &mut self,
+        values: impl Iterator<Item = &'a Form>,
+        span: &Span,
+    ) -> Result<(), CompileError> {
+        for value in values {
+            self.compile_form(value, span, None, false)?;
+        }
+        Ok(())
+    }
+
+    fn compile_quote(&mut self, children: &[Child<'_>], span: &Span) -> Result<(), CompileError> {
+        if children.len() != 2 {
+            return Err(CompileError::new(
+                CompileErrorKind::Arity,
+                "quote expects one argument",
+                Some(span.start),
+            ));
+        }
+        let value = crate::core::form_to_value(children[1].form).map_err(|message| {
+            CompileError::new(CompileErrorKind::UnsupportedForm, message, Some(span.start))
+        })?;
+        self.constant(value, span)
+    }
+
+    fn compile_syntax_quote(
+        &mut self,
+        children: &[Child<'_>],
+        span: &Span,
+    ) -> Result<(), CompileError> {
+        if children.len() != 2 {
+            return Err(CompileError::new(
+                CompileErrorKind::Arity,
+                "syntax-quote expects one argument",
+                Some(span.start),
+            ));
+        }
+        let lowered = lower_syntax_quote(children[1].form, false).map_err(|message| {
+            CompileError::new(CompileErrorKind::UnsupportedForm, message, Some(span.start))
+        })?;
+        self.compile_form(&lowered, span, None, false)
     }
 
     fn compile_primitive(
@@ -679,6 +797,96 @@ impl Compiler {
         Ok(())
     }
 
+    fn compile_and(
+        &mut self,
+        children: &[Child<'_>],
+        span: &Span,
+        tail: bool,
+    ) -> Result<(), CompileError> {
+        if children.len() == 1 {
+            self.emit(Instruction::True, Some(span.start));
+            return Ok(());
+        }
+        let mut false_jumps = Vec::new();
+        for child in &children[1..children.len() - 1] {
+            self.compile_form(child.form, child.span, child.children, false)?;
+            self.emit(Instruction::Dup, Some(child.span.start));
+            false_jumps.push(self.emit(Instruction::JumpIfFalse(0), Some(child.span.start)));
+            self.emit(Instruction::Pop, Some(child.span.start));
+        }
+        let last = children.last().expect("and has an argument");
+        self.compile_form(last.form, last.span, last.children, tail)?;
+        let end = self.ctx().code.len();
+        for jump in false_jumps {
+            self.patch_jump(jump, end);
+        }
+        Ok(())
+    }
+
+    fn compile_or(
+        &mut self,
+        children: &[Child<'_>],
+        span: &Span,
+        tail: bool,
+    ) -> Result<(), CompileError> {
+        if children.len() == 1 {
+            self.emit(Instruction::Nil, Some(span.start));
+            return Ok(());
+        }
+        let mut end_jumps = Vec::new();
+        for child in &children[1..children.len() - 1] {
+            self.compile_form(child.form, child.span, child.children, false)?;
+            self.emit(Instruction::Dup, Some(child.span.start));
+            let false_jump = self.emit(Instruction::JumpIfFalse(0), Some(child.span.start));
+            end_jumps.push(self.emit(Instruction::Jump(0), Some(child.span.start)));
+            let next = self.ctx().code.len();
+            self.patch_jump(false_jump, next);
+            self.emit(Instruction::Pop, Some(child.span.start));
+        }
+        let last = children.last().expect("or has an argument");
+        self.compile_form(last.form, last.span, last.children, tail)?;
+        let end = self.ctx().code.len();
+        for jump in end_jumps {
+            self.patch_jump(jump, end);
+        }
+        Ok(())
+    }
+
+    fn compile_cond(
+        &mut self,
+        children: &[Child<'_>],
+        span: &Span,
+        tail: bool,
+    ) -> Result<(), CompileError> {
+        let clauses = &children[1..];
+        if clauses.len() % 2 != 0 {
+            return Err(CompileError::new(
+                CompileErrorKind::Arity,
+                "cond expects test/expression pairs",
+                Some(span.start),
+            ));
+        }
+        if clauses.is_empty() {
+            self.emit(Instruction::Nil, Some(span.start));
+            return Ok(());
+        }
+        let mut end_jumps = Vec::new();
+        for pair in clauses.chunks(2) {
+            self.compile_form(pair[0].form, pair[0].span, pair[0].children, false)?;
+            let next_jump = self.emit(Instruction::JumpIfFalse(0), Some(pair[0].span.start));
+            self.compile_form(pair[1].form, pair[1].span, pair[1].children, tail)?;
+            end_jumps.push(self.emit(Instruction::Jump(0), Some(pair[1].span.start)));
+            let next = self.ctx().code.len();
+            self.patch_jump(next_jump, next);
+        }
+        self.emit(Instruction::Nil, Some(span.start));
+        let end = self.ctx().code.len();
+        for jump in end_jumps {
+            self.patch_jump(jump, end);
+        }
+        Ok(())
+    }
+
     /// Compiles `let`-style ordered bindings into fresh slots, returns the
     /// bound slots, and leaves the scope open for the body.
     fn compile_bindings(
@@ -831,6 +1039,97 @@ fn constant_form(form: &Form) -> bool {
             .all(|(key, value)| constant_form(key) && constant_form(value)),
         Form::Symbol(_) | Form::List(_) => false,
     }
+}
+
+fn quoted(form: &Form) -> Form {
+    Form::List(vec![Form::Symbol("quote".into()), form.clone()])
+}
+
+fn unquote_argument(form: &Form, operator: &str) -> Option<Result<Form, String>> {
+    let Form::List(parts) = crate::core::form_without_metadata(form) else {
+        return None;
+    };
+    if !matches!(parts.first(), Some(Form::Symbol(name)) if name == operator) {
+        return None;
+    }
+    Some(if parts.len() == 2 {
+        Ok(parts[1].clone())
+    } else {
+        Err(format!("{operator} expects one argument"))
+    })
+}
+
+fn lower_syntax_sequence(values: &[Form], vector: bool) -> Result<Form, String> {
+    let mut expressions = Vec::with_capacity(values.len());
+    let mut segments = Vec::with_capacity(values.len());
+    let mut spliced = false;
+    for value in values {
+        if let Some(argument) = unquote_argument(value, "unquote-splicing") {
+            spliced = true;
+            segments.push(argument?);
+        } else {
+            let expression = lower_syntax_quote(value, true)?;
+            expressions.push(expression.clone());
+            segments.push(Form::Vector(vec![expression]));
+        }
+    }
+    if !spliced {
+        return if vector {
+            Ok(Form::Vector(expressions))
+        } else {
+            Ok(Form::List(
+                std::iter::once(Form::Symbol("list".into()))
+                    .chain(expressions)
+                    .collect(),
+            ))
+        };
+    }
+    let concatenated = Form::List(
+        std::iter::once(Form::Symbol("concat".into()))
+            .chain(segments)
+            .collect(),
+    );
+    Ok(if vector {
+        Form::List(vec![Form::Symbol("vec".into()), concatenated])
+    } else {
+        Form::List(vec![
+            Form::Symbol("apply".into()),
+            Form::Symbol("list".into()),
+            concatenated,
+        ])
+    })
+}
+
+fn lower_syntax_quote(form: &Form, nested: bool) -> Result<Form, String> {
+    if let Some(argument) = unquote_argument(form, "unquote") {
+        return argument;
+    }
+    if unquote_argument(form, "unquote-splicing").is_some() {
+        return Err(if nested {
+            "unquote-splicing is only valid inside a collection".into()
+        } else {
+            "unquote-splicing is not valid at the root of syntax-quote".into()
+        });
+    }
+    Ok(match crate::core::form_without_metadata(form) {
+        Form::List(values) => lower_syntax_sequence(values, false)?,
+        Form::Vector(values) => lower_syntax_sequence(values, true)?,
+        Form::Map(entries) => Form::Map(
+            entries
+                .iter()
+                .map(|(key, value)| {
+                    Ok((lower_syntax_quote(key, true)?, lower_syntax_quote(value, true)?))
+                })
+                .collect::<Result<Vec<_>, String>>()?,
+        ),
+        Form::Set(values) => Form::Set(
+            values
+                .iter()
+                .map(|value| lower_syntax_quote(value, true))
+                .collect::<Result<Vec<_>, String>>()?,
+        ),
+        _ => quoted(form),
+    })
 }
 
 fn internal(message: String) -> CompileError {

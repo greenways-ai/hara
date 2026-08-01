@@ -49,6 +49,7 @@ impl TraceBackend for CheckedBackend {
             if !valid {
                 return TraceOutcome::SideExit {
                     reason: ExitReason::WrongTag,
+                    iterations: 0,
                     snapshot: ExitSnapshot {
                         function: trace.function,
                         instruction: trace.resume_ip,
@@ -66,6 +67,7 @@ impl TraceBackend for CheckedBackend {
             for operation in &trace.operations {
                 let exit = |reason| TraceOutcome::SideExit {
                     reason,
+                    iterations,
                     snapshot: ExitSnapshot {
                         function: trace.function,
                         instruction: trace.resume_ip,
@@ -328,6 +330,7 @@ mod tests {
             TraceOutcome::SideExit {
                 reason: ExitReason::DivisionByZero,
                 snapshot: ExitSnapshot { locals, .. },
+                ..
             } if locals == vec![TraceValue::I64(9)]
         ));
     }

@@ -73,6 +73,7 @@ pub enum TraceOutcome {
     },
     SideExit {
         reason: ExitReason,
+        iterations: u32,
         snapshot: ExitSnapshot,
     },
 }
