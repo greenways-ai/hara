@@ -9,7 +9,8 @@ rust-version = "1.78"
 crate-type = ["cdylib"]
 
 [features]
-dev-trace = []
+evaluation-journal = []
+dev-trace = ["evaluation-journal"]
 halc-encoder = []
 hir-encoder = ["halc-encoder"]
 

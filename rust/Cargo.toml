@@ -10,9 +10,10 @@ rust-version = "1.78"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-# Development-only structured evaluator tracing.  Keep this opt-in so
-# embedded and production builds do not carry collectors or trace storage.
-dev-trace = []
+# Structured Evaluation Journal. Keep this opt-in so embedded and production
+# builds do not carry collectors or journal storage.
+evaluation-journal = []
+dev-trace = ["evaluation-journal"]
 # Existing optional encoder gate (declared here so Cargo can validate it).
 halc-encoder = []
 hir-encoder = ["halc-encoder"]

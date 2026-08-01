@@ -28,8 +28,8 @@ pub mod resp;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tap;
 pub mod task;
-#[cfg(feature = "dev-trace")]
-pub mod trace;
+#[cfg(feature = "evaluation-journal")]
+pub mod journal;
 // Experimental staged bytecode VM (issue #195). Non-default feature; the
 // default evaluator is untouched.
 #[cfg(feature = "bytecode-vm")]
@@ -124,8 +124,8 @@ pub struct Runtime {
     namespace_registry: kernel::NamespaceRegistry<core::Value>,
     macros: Rc<RefCell<HashMap<(String, String), Rc<core::Function>>>>,
     generated_configs: HashMap<String, kernel::GeneratedNamespaceConfig>,
-    #[cfg(feature = "dev-trace")]
-    next_trace_id: u64,
+    #[cfg(feature = "evaluation-journal")]
+    next_journal_id: u64,
     #[cfg(target_arch = "wasm32")]
     host_handler: Option<js_sys::Function>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -591,8 +591,8 @@ impl Runtime {
                 "user".into(),
                 kernel::GeneratedNamespaceConfig::defaults(),
             )]),
-            #[cfg(feature = "dev-trace")]
-            next_trace_id: 1,
+            #[cfg(feature = "evaluation-journal")]
+            next_journal_id: 1,
             #[cfg(target_arch = "wasm32")]
             host_handler: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -1441,19 +1441,38 @@ impl Runtime {
 }
 
 impl Runtime {
-    /// Evaluates once through the existing evaluator and returns a
-    /// development-only structured trace.
-    #[cfg(feature = "dev-trace")]
-    pub fn eval_native_trace(&mut self, source: &str) -> Result<trace::Trace, String> {
-        let trace_id = trace::TraceId(self.next_trace_id);
-        self.next_trace_id += 1;
-        let (result, trace) = core::with_development_trace(
-            trace_id,
-            trace::TraceLimits::default(),
-            || self.eval_text_mode(source, true),
-            |value, collector| collector.preview_value("result", value),
+    /// Evaluates once through the existing evaluator and returns a portable
+    /// bounded Evaluation Journal.
+    #[cfg(feature = "evaluation-journal")]
+    pub fn eval_native_journal(&mut self, source: &str) -> journal::Journal {
+        let journal_id = journal::JournalId(self.next_journal_id);
+        self.next_journal_id += 1;
+        let (_, journal) = core::with_evaluation_journal(
+            journal_id,
+            journal::JournalLimits::default(),
+            || {
+                self.refresh_qualified_bindings();
+                let forms = kernel::parse_forms(source)?;
+                let result = self.eval_forms(forms, true)?;
+                self.save_namespace();
+                self.refresh_qualified_bindings();
+                Ok(result)
+            },
+            |value, collector| {
+                collector.preview_value(core::portable_type_name(value), value.display())
+            },
         );
-        result.map(|_| trace)
+        journal
+    }
+
+    #[cfg(feature = "evaluation-journal")]
+    #[deprecated(note = "use eval_native_journal")]
+    pub fn eval_native_trace(&mut self, source: &str) -> Result<journal::Journal, String> {
+        let journal = self.eval_native_journal(source);
+        match journal.status {
+            journal::JournalStatus::Error => Err(journal.error.clone().unwrap_or_default()),
+            _ => Ok(journal),
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -7479,22 +7498,21 @@ mod tests {
         assert_eq!(runtime.eval_native("((comp inc inc) 40)").unwrap(), "42");
     }
 
-    #[cfg(feature = "dev-trace")]
+    #[cfg(feature = "evaluation-journal")]
     #[test]
-    fn development_trace_uses_the_real_macro_and_invocation_paths() {
+    fn evaluation_journal_uses_the_real_macro_and_invocation_paths() {
         let mut runtime = Runtime::new();
         let trace = runtime
-            .eval_native_trace("(defn observed [x] x) (if-not false (observed 5))")
-            .unwrap();
+            .eval_native_journal("(defn observed [x] x) (if-not false (observed 5))");
 
-        assert_eq!(trace.schema, crate::trace::SCHEMA);
+        assert_eq!(trace.schema, crate::journal::SCHEMA);
         assert_eq!(trace.result.as_ref().unwrap().display, "5");
         assert!(trace.events.iter().any(|event| {
-            event.kind == crate::trace::TraceEventKind::MacroExpand
+            event.kind == crate::journal::JournalEventKind::MacroExpand
                 && event.function.as_deref() == Some("if-not")
         }));
         assert!(trace.events.iter().any(|event| {
-            event.kind == crate::trace::TraceEventKind::OperationEnter
+            event.kind == crate::journal::JournalEventKind::OperationEnter
                 && event.function.as_deref() == Some("observed")
                 && event
                     .values
@@ -7502,7 +7520,7 @@ mod tests {
                     .is_some_and(|value| value.display == "5")
         }));
         assert!(trace.events.iter().any(|event| {
-            event.kind == crate::trace::TraceEventKind::OperationReturn
+            event.kind == crate::journal::JournalEventKind::OperationReturn
                 && event.function.as_deref() == Some("observed")
                 && event
                     .values

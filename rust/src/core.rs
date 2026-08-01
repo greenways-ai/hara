@@ -1058,8 +1058,8 @@ fn macroexpand_call(
     }
     let expansion = call_function(&function, arguments)?;
     let expansion = value_to_form(&expansion)?;
-    #[cfg(feature = "dev-trace")]
-    development_trace_macro(name, &Form::List(invocation.to_vec()), &expansion);
+    #[cfg(feature = "evaluation-journal")]
+    evaluation_journal_macro(name, &Form::List(invocation.to_vec()), &expansion);
     Ok(Some(expansion))
 }
 
@@ -1104,42 +1104,42 @@ fn macroexpand_once(form: &Form, env: &mut HashMap<String, Value>) -> Result<For
 thread_local! {
     static TRACE_ENABLED: Cell<bool> = const { Cell::new(false) };
     static TRACE_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-    #[cfg(feature = "dev-trace")]
-    static DEVELOPMENT_TRACE: RefCell<Option<crate::trace::TraceCollector>> = const { RefCell::new(None) };
-    #[cfg(feature = "dev-trace")]
-    static DEVELOPMENT_TRACE_STACK: RefCell<Vec<crate::trace::OperationId>> = const { RefCell::new(Vec::new()) };
+    #[cfg(feature = "evaluation-journal")]
+    static EVALUATION_JOURNAL: RefCell<Option<crate::journal::JournalCollector>> = const { RefCell::new(None) };
+    #[cfg(feature = "evaluation-journal")]
+    static EVALUATION_JOURNAL_STACK: RefCell<Vec<crate::journal::OperationId>> = const { RefCell::new(Vec::new()) };
     static ACTIVE_MACROS: RefCell<Option<Rc<RefCell<HashMap<(String, String), Rc<Function>>>>>> =
         const { RefCell::new(None) };
     static GENSYM_COUNTER: Cell<u64> = const { Cell::new(0) };
 }
 
-#[cfg(feature = "dev-trace")]
-fn development_preview(value: &Value) -> crate::trace::ValuePreview {
-    DEVELOPMENT_TRACE.with(|active| {
+#[cfg(feature = "evaluation-journal")]
+fn journal_preview(value: &Value) -> crate::journal::ValuePreview {
+    EVALUATION_JOURNAL.with(|active| {
         active
             .borrow()
             .as_ref()
-            .expect("development trace must be active")
+            .expect("evaluation journal must be active")
             .preview_value(portable_type_name(value), value.display())
     })
 }
 
-#[cfg(feature = "dev-trace")]
-fn development_trace_enter(
+#[cfg(feature = "evaluation-journal")]
+fn evaluation_journal_enter(
     function: &Function,
     arguments: &[Value],
-) -> Option<crate::trace::OperationId> {
-    if DEVELOPMENT_TRACE.with(|active| active.borrow().is_none()) {
+) -> Option<crate::journal::OperationId> {
+    if EVALUATION_JOURNAL.with(|active| active.borrow().is_none()) {
         return None;
     }
-    let values = arguments.iter().map(development_preview).collect();
-    let parent_operation = DEVELOPMENT_TRACE_STACK.with(|stack| stack.borrow().last().copied());
-    let depth = DEVELOPMENT_TRACE_STACK.with(|stack| stack.borrow().len());
-    DEVELOPMENT_TRACE.with(|active| {
+    let values = arguments.iter().map(journal_preview).collect();
+    let parent_operation = EVALUATION_JOURNAL_STACK.with(|stack| stack.borrow().last().copied());
+    let depth = EVALUATION_JOURNAL_STACK.with(|stack| stack.borrow().len());
+    EVALUATION_JOURNAL.with(|active| {
         let mut active = active.borrow_mut();
         let collector = active.as_mut()?;
         let operation = collector.next_operation_id();
-        let mut event = crate::trace::TraceEvent::new(crate::trace::TraceEventKind::OperationEnter);
+        let mut event = crate::journal::JournalEvent::new(crate::journal::JournalEventKind::OperationEnter);
         event.operation = Some(operation);
         event.parent_operation = parent_operation;
         event.depth = depth;
@@ -1151,23 +1151,23 @@ fn development_trace_enter(
         );
         event.values = values;
         collector.record(event);
-        DEVELOPMENT_TRACE_STACK.with(|stack| stack.borrow_mut().push(operation));
+        EVALUATION_JOURNAL_STACK.with(|stack| stack.borrow_mut().push(operation));
         Some(operation)
     })
 }
 
-#[cfg(feature = "dev-trace")]
-fn development_trace_exit(
-    operation: Option<crate::trace::OperationId>,
+#[cfg(feature = "evaluation-journal")]
+fn evaluation_journal_exit(
+    operation: Option<crate::journal::OperationId>,
     function: &Function,
     result: Option<&Value>,
 ) {
     let Some(operation) = operation else { return };
-    let value = result.map(development_preview);
-    DEVELOPMENT_TRACE.with(|active| {
+    let value = result.map(journal_preview);
+    EVALUATION_JOURNAL.with(|active| {
         if let Some(collector) = active.borrow_mut().as_mut() {
             let mut event =
-                crate::trace::TraceEvent::new(crate::trace::TraceEventKind::OperationReturn);
+                crate::journal::JournalEvent::new(crate::journal::JournalEventKind::OperationReturn);
             event.operation = Some(operation);
             event.function = Some(
                 function
@@ -1179,20 +1179,20 @@ fn development_trace_exit(
             collector.record(event);
         }
     });
-    DEVELOPMENT_TRACE_STACK.with(|stack| {
+    EVALUATION_JOURNAL_STACK.with(|stack| {
         let popped = stack.borrow_mut().pop();
         debug_assert_eq!(popped, Some(operation));
     });
 }
 
-#[cfg(feature = "dev-trace")]
-fn development_trace_macro(name: &str, source: &Form, expansion: &Form) {
-    let parent_operation = DEVELOPMENT_TRACE_STACK.with(|stack| stack.borrow().last().copied());
-    let depth = DEVELOPMENT_TRACE_STACK.with(|stack| stack.borrow().len());
-    DEVELOPMENT_TRACE.with(|active| {
+#[cfg(feature = "evaluation-journal")]
+fn evaluation_journal_macro(name: &str, source: &Form, expansion: &Form) {
+    let parent_operation = EVALUATION_JOURNAL_STACK.with(|stack| stack.borrow().last().copied());
+    let depth = EVALUATION_JOURNAL_STACK.with(|stack| stack.borrow().len());
+    EVALUATION_JOURNAL.with(|active| {
         if let Some(collector) = active.borrow_mut().as_mut() {
             let mut event =
-                crate::trace::TraceEvent::new(crate::trace::TraceEventKind::MacroExpand);
+                crate::journal::JournalEvent::new(crate::journal::JournalEventKind::MacroExpand);
             event.parent_operation = parent_operation;
             event.depth = depth;
             event.function = Some(name.into());
@@ -1205,11 +1205,11 @@ fn development_trace_macro(name: &str, source: &Form, expansion: &Form) {
     });
 }
 
-struct TraceGuard {
+struct StackTraceGuard {
     previous: bool,
 }
 
-impl TraceGuard {
+impl StackTraceGuard {
     fn enable() -> Self {
         let previous = TRACE_ENABLED.with(|enabled| {
             let previous = enabled.get();
@@ -1221,7 +1221,7 @@ impl TraceGuard {
     }
 }
 
-impl Drop for TraceGuard {
+impl Drop for StackTraceGuard {
     fn drop(&mut self) {
         TRACE_STACK.with(|stack| stack.borrow_mut().clear());
         TRACE_ENABLED.with(|enabled| enabled.set(self.previous));
@@ -7943,20 +7943,20 @@ pub(crate) fn call_value(callable: Value, arguments: Vec<Value>) -> Result<Value
 }
 
 pub(crate) fn call_function(function: &Function, arguments: Vec<Value>) -> Result<Value, String> {
-    #[cfg(feature = "dev-trace")]
-    let operation = development_trace_enter(function, &arguments);
+    #[cfg(feature = "evaluation-journal")]
+    let operation = evaluation_journal_enter(function, &arguments);
     if let Some(native) = &function.native {
         if function.variadic.is_none() && function.params.len() != arguments.len() {
-            #[cfg(feature = "dev-trace")]
-            development_trace_exit(operation, function, None);
+            #[cfg(feature = "evaluation-journal")]
+            evaluation_journal_exit(operation, function, None);
             return Err(format!(
                 "function expects {} arguments",
                 function.params.len()
             ));
         }
         let result = native(arguments);
-        #[cfg(feature = "dev-trace")]
-        development_trace_exit(operation, function, result.as_ref().ok());
+        #[cfg(feature = "evaluation-journal")]
+        evaluation_journal_exit(operation, function, result.as_ref().ok());
         return result;
     }
     let tracing = tracing_enabled();
@@ -8016,8 +8016,8 @@ pub(crate) fn call_function(function: &Function, arguments: Vec<Value>) -> Resul
         Ok(result)
     })();
     let result = result.map_err(append_trace);
-    #[cfg(feature = "dev-trace")]
-    development_trace_exit(operation, function, result.as_ref().ok());
+    #[cfg(feature = "evaluation-journal")]
+    evaluation_journal_exit(operation, function, result.as_ref().ok());
     if tracing {
         TRACE_STACK.with(|stack| {
             stack.borrow_mut().pop();
@@ -8026,38 +8026,38 @@ pub(crate) fn call_function(function: &Function, arguments: Vec<Value>) -> Resul
     result
 }
 
-/// Runs one evaluator operation with a bounded development trace. This is
+/// Runs one evaluator operation with a bounded evaluation journal. This is
 /// intentionally separate from the legacy stack-trace flag above.
-#[cfg(feature = "dev-trace")]
-pub(crate) fn with_development_trace<T>(
-    trace_id: crate::trace::TraceId,
-    limits: crate::trace::TraceLimits,
+#[cfg(feature = "evaluation-journal")]
+pub(crate) fn with_evaluation_journal<T>(
+    journal_id: crate::journal::JournalId,
+    limits: crate::journal::JournalLimits,
     evaluate: impl FnOnce() -> Result<T, String>,
-    preview: impl FnOnce(&T, &crate::trace::TraceCollector) -> crate::trace::ValuePreview,
-) -> (Result<T, String>, crate::trace::Trace) {
-    DEVELOPMENT_TRACE_STACK.with(|stack| stack.borrow_mut().clear());
-    let previous = DEVELOPMENT_TRACE
-        .with(|active| active.replace(Some(crate::trace::TraceCollector::new(trace_id, limits))));
+    preview: impl FnOnce(&T, &crate::journal::JournalCollector) -> crate::journal::ValuePreview,
+) -> (Result<T, String>, crate::journal::Journal) {
+    EVALUATION_JOURNAL_STACK.with(|stack| stack.borrow_mut().clear());
+    let previous = EVALUATION_JOURNAL
+        .with(|active| active.replace(Some(crate::journal::JournalCollector::new(journal_id, limits))));
     assert!(
         previous.is_none(),
-        "nested development traces are not supported yet"
+        "nested evaluation journals are not supported yet"
     );
-    DEVELOPMENT_TRACE.with(|active| {
+    EVALUATION_JOURNAL.with(|active| {
         active
             .borrow_mut()
             .as_mut()
-            .expect("development trace must be active")
-            .record(crate::trace::TraceEvent::new(
-                crate::trace::TraceEventKind::EvaluationStart,
+            .expect("evaluation journal must be active")
+            .record(crate::journal::JournalEvent::new(
+                crate::journal::JournalEventKind::EvaluationStart,
             ));
     });
     let result = evaluate();
-    let collector = DEVELOPMENT_TRACE.with(|active| {
+    let collector = EVALUATION_JOURNAL.with(|active| {
         active
             .replace(previous)
-            .expect("development trace must be active")
+            .expect("evaluation journal must be active")
     });
-    DEVELOPMENT_TRACE_STACK.with(|stack| stack.borrow_mut().clear());
+    EVALUATION_JOURNAL_STACK.with(|stack| stack.borrow_mut().clear());
     let trace = match &result {
         Ok(value) => {
             let result = preview(value, &collector);
@@ -11695,7 +11695,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
 }
 
 pub fn eval_traced(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, String> {
-    let _guard = TraceGuard::enable();
+    let _guard = StackTraceGuard::enable();
     eval(form, env).map_err(append_trace)
 }
 
@@ -11704,7 +11704,7 @@ pub fn eval_text(source: &str, env: &mut HashMap<String, Value>) -> Result<Strin
 }
 
 pub fn eval_text_traced(source: &str, env: &mut HashMap<String, Value>) -> Result<String, String> {
-    let _guard = TraceGuard::enable();
+    let _guard = StackTraceGuard::enable();
     eval_text(source, env).map_err(append_trace)
 }
 
@@ -11712,7 +11712,7 @@ pub fn eval_value_text_traced(
     source: &str,
     env: &mut HashMap<String, Value>,
 ) -> Result<Value, String> {
-    let _guard = TraceGuard::enable();
+    let _guard = StackTraceGuard::enable();
     eval_value_text(source, env).map_err(append_trace)
 }
 
