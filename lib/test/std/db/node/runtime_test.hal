@@ -127,8 +127,9 @@
      (let [server (substrate/node-create "server-connection")
            client-node (substrate/node-create "client-connection")]
        (kernel/register-driver server :mock (mock-driver))
-       (deref (runtime/local-connect client-node server config {} {}))
-       (let [connection (deref (remote/open client-node "db/primary"))
+       (let [connected (deref (runtime/local-connect client-node server config {} {}))
+             connection (deref (runtime/open-service (get connected :runtime)
+                                                     "db/primary"))
              output (deref (db/query connection "select id, name from items" []))]
          [(db/engine connection)
           (db/provider connection)
@@ -171,6 +172,20 @@
           (substrate-protocol/get-service server "db/primary")
           (substrate-protocol/get-service server "db/caching")]))
      => [:failed nil nil nil])
+
+   (fact "failed local initialization detaches the linked transport"
+     (let [server (substrate/node-create "server-init-failed")
+           client-node (substrate/node-create "client-init-failed")
+           failed-config {:primary {:type :failing}}]
+       (kernel/register-driver server :failing (failing-driver))
+       (let [status (deref
+                     (promise/catch
+                      (runtime/local-connect client-node server failed-config {} {})
+                      (fn [error] :failed)))]
+         [status
+          (substrate-protocol/get-transport client-node runtime/DEFAULT-TRANSPORT)
+          (substrate-protocol/get-transport server runtime/DEFAULT-TRANSPORT)]))
+     => [:failed nil nil])
 
    (fact "teardown closes services and removes the runtime transport"
      (let [server (substrate/node-create "server-close")
