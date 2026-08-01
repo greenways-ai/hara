@@ -46,6 +46,20 @@
     (string? value) (keyword value)
     :else value))
 
+(defn- normalize-entry
+  "Converts one boundary service descriptor to an internal keyword-keyed map."
+  [entry default-id]
+  (let [normalized
+        (reduce (fn [out pair]
+                  (let [entry-key (key pair)
+                        normalized-key (if (string? entry-key)
+                                         (keyword entry-key)
+                                         entry-key)]
+                    (assoc out normalized-key (val pair))))
+                {}
+                (if (map? entry) entry {}))]
+    (assoc normalized :id (option normalized :id default-id))))
+
 (defn register-driver
   "Registers a database driver descriptor on node.
 
@@ -82,15 +96,12 @@
   [config]
   (let [common-input (option config :common {})
         primary-input (option config :primary {})
-        caching-input (compatible-get config :caching)
-        common (assoc common-input :id (option common-input :id COMMON-SERVICE))
-        primary (assoc primary-input :id (option primary-input :id PRIMARY-SERVICE))
-        caching (if (map? caching-input)
-                  (assoc caching-input :id (option caching-input :id CACHING-SERVICE))
-                  nil)]
-    {:common common
-     :primary primary
-     :caching caching}))
+        caching-input (compatible-get config :caching)]
+    {:common (normalize-entry common-input COMMON-SERVICE)
+     :primary (normalize-entry primary-input PRIMARY-SERVICE)
+     :caching (if (map? caching-input)
+                (normalize-entry caching-input CACHING-SERVICE)
+                nil)}))
 
 (defn- service-id
   [entry fallback]
