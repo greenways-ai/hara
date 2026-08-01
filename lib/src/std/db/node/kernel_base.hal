@@ -1,0 +1,286 @@
+;; ============================================================================
+;; std.db.node.kernel-base — provider-neutral database services on Substrate.
+;;
+;; Database drivers are registered on a server node. Kernel setup opens typed
+;; std.db connections and stores them as named services. Handlers expose the
+;; same request shape locally or across any Substrate transport.
+;; ============================================================================
+(ns std.db.node.kernel-base
+  (:require [std.db :as db]
+            [std.foundation.promise :as promise]
+            [std.lib.substrate.protocol :as substrate]))
+
+(def DRIVER-SERVICE "std.db.runtime/drivers")
+(def COMMON-SERVICE "db/common")
+(def PRIMARY-SERVICE "db/primary")
+(def CACHING-SERVICE "db/caching")
+
+(def ACTION-KERNEL-INIT "@xt.db/kernel-init")
+(def ACTION-KERNEL-SETUP "@xt.db/kernel-setup")
+(def ACTION-KERNEL-TEARDOWN "@xt.db/kernel-teardown")
+(def ACTION-SERVICE-INFO "@xt.db/service-info")
+(def ACTION-EXEC "@xt.db/exec")
+(def ACTION-QUERY "@xt.db/query")
+
+(defn- compatible-get
+  "Gets key directly, then by its string/keyword counterpart."
+  [value lookup-key]
+  (cond
+    (not (map? value)) nil
+    (has? value lookup-key) (get value lookup-key)
+    (string? lookup-key) (get value (keyword lookup-key))
+    (keyword? lookup-key) (get value (name lookup-key))
+    :else nil))
+
+(defn- option
+  "Returns an option or fallback."
+  [value lookup-key fallback]
+  (let [found (compatible-get value lookup-key)]
+    (if (nil? found) fallback found)))
+
+(defn- normalize-type
+  "Normalizes driver identifiers to keywords."
+  [value]
+  (cond
+    (keyword? value) value
+    (string? value) (keyword value)
+    :else value))
+
+(defn register-driver
+  "Registers a database driver descriptor on node.
+
+   descriptor requires :open, a function from options to a connection promise.
+   Optional :version is retained for diagnostics."
+  [node driver-id descriptor]
+  (let [drivers (or (substrate/get-service node DRIVER-SERVICE) {})
+        key (normalize-type driver-id)]
+    (substrate/set-service node DRIVER-SERVICE (assoc drivers key descriptor))
+    descriptor))
+
+(defn unregister-driver
+  "Removes a registered database driver."
+  [node driver-id]
+  (let [drivers (or (substrate/get-service node DRIVER-SERVICE) {})
+        key (normalize-type driver-id)
+        previous (get drivers key)]
+    (substrate/set-service node DRIVER-SERVICE (dissoc drivers key))
+    previous))
+
+(defn get-driver
+  "Returns a registered database driver descriptor."
+  [node driver-id]
+  (get (or (substrate/get-service node DRIVER-SERVICE) {})
+       (normalize-type driver-id)))
+
+(defn list-drivers
+  "Returns registered driver identifiers."
+  [node]
+  (vec (keys (or (substrate/get-service node DRIVER-SERVICE) {}))))
+
+(defn kernel-create-config
+  "Normalizes runtime configuration and assigns stable service IDs."
+  [config]
+  (let [common-input (option config :common {})
+        primary-input (option config :primary {})
+        caching-input (compatible-get config :caching)
+        common (assoc common-input :id (option common-input :id COMMON-SERVICE))
+        primary (assoc primary-input :id (option primary-input :id PRIMARY-SERVICE))
+        caching (if (map? caching-input)
+                  (assoc caching-input :id (option caching-input :id CACHING-SERVICE))
+                  nil)]
+    {:common common
+     :primary primary
+     :caching caching}))
+
+(defn- service-id
+  [entry fallback]
+  (option entry :id fallback))
+
+(defn- service-connection
+  [service]
+  (compatible-get service :connection))
+
+(defn- service-summary
+  [service]
+  (when service
+    {:id (compatible-get service :id)
+     :role (compatible-get service :role)
+     :type (compatible-get service :type)
+     :database (db/info (service-connection service))
+     :metadata (or (compatible-get service :metadata) {})}))
+
+(defn kernel-check-exists
+  "Returns true when all configured runtime services already exist."
+  [node config]
+  (let [normalized (kernel-create-config config)
+        common-id (service-id (:common normalized) COMMON-SERVICE)
+        primary-id (service-id (:primary normalized) PRIMARY-SERVICE)
+        caching (:caching normalized)
+        caching-id (if caching (service-id caching CACHING-SERVICE) nil)]
+    (and (not (nil? (substrate/get-service node common-id)))
+         (not (nil? (substrate/get-service node primary-id)))
+         (or (nil? caching-id)
+             (not (nil? (substrate/get-service node caching-id)))))))
+
+(defn kernel-setup-single
+  "Opens one configured database service and installs it on node."
+  [node role entry schema lookup metadata]
+  (let [service-id (service-id entry (if (= role :primary)
+                                       PRIMARY-SERVICE
+                                       CACHING-SERVICE))
+        driver-id (normalize-type (compatible-get entry :type))
+        driver (get-driver node driver-id)
+        open-function (compatible-get driver :open)
+        options (option entry :options (option entry :defaults {}))]
+    (if (nil? driver)
+      (throw (ex-info "Database driver is not registered"
+                      {:driver driver-id
+                       :service service-id
+                       :registered (list-drivers node)}))
+      (if (nil? open-function)
+        (throw (ex-info "Database driver has no open function"
+                        {:driver driver-id :descriptor driver}))
+        (promise/then
+         (open-function options)
+         (fn [connection]
+           (let [service {:id service-id
+                          :role role
+                          :type driver-id
+                          :connection connection
+                          :schema schema
+                          :lookup lookup
+                          :metadata metadata}]
+             (substrate/set-service node service-id service)
+             service))))))
+
+(defn kernel-setup-main
+  "Creates common, primary and optional caching services."
+  [node config schema lookup]
+  (let [normalized (kernel-create-config config)
+        common (:common normalized)
+        primary (:primary normalized)
+        caching (:caching normalized)
+        common-id (service-id common COMMON-SERVICE)
+        primary-id (service-id primary PRIMARY-SERVICE)
+        caching-id (if caching (service-id caching CACHING-SERVICE) nil)
+        common-service {:id common-id
+                        :config normalized
+                        :schema schema
+                        :lookup lookup
+                        :metadata {:common-id common-id
+                                   :primary-id primary-id
+                                   :caching-id caching-id}}
+        primary-metadata {:common-id common-id
+                          :caching-id caching-id}
+        caching-metadata {:common-id common-id
+                          :primary-id primary-id}
+        opens (if caching
+                [(kernel-setup-single node :primary primary schema lookup primary-metadata)
+                 (kernel-setup-single node :caching caching schema lookup caching-metadata)]
+                [(kernel-setup-single node :primary primary schema lookup primary-metadata)])]
+    (substrate/set-service node common-id common-service)
+    (promise/then
+     (promise/all opens)
+     (fn [services]
+       {:status :setup
+        :data normalized
+        :services (map service-summary services)}))))
+
+(defn- close-service
+  [node service-id]
+  (let [service (substrate/get-service node service-id)]
+    (if service
+      (promise/finally
+       (db/close (service-connection service))
+       (fn [] (substrate/remove-service node service-id)))
+      (promise/from nil))))
+
+(defn kernel-teardown-main
+  "Closes and removes common, primary and caching services."
+  [node config]
+  (let [normalized (kernel-create-config config)
+        common-id (service-id (:common normalized) COMMON-SERVICE)
+        primary-id (service-id (:primary normalized) PRIMARY-SERVICE)
+        caching (:caching normalized)
+        caching-id (if caching (service-id caching CACHING-SERVICE) nil)
+        closes (if caching-id
+                 [(close-service node primary-id)
+                  (close-service node caching-id)]
+                 [(close-service node primary-id)])]
+    (promise/then
+     (promise/all closes)
+     (fn [_]
+       (substrate/remove-service node common-id)
+       {:status :teardown
+        :data normalized}))))
+
+(defn kernel-init-main
+  "Ensures configured database services are present."
+  [node config schema lookup]
+  (if (kernel-check-exists node config)
+    (promise/from {:status :no-change
+                   :data (kernel-create-config config)})
+    (kernel-setup-main node config schema lookup)))
+
+(defn get-database-service
+  "Returns a configured database service or throws a structured error."
+  [node service-id]
+  (let [service (substrate/get-service node service-id)]
+    (if service
+      service
+      (throw (ex-info "Database service is not configured"
+                      {:service service-id}))))
+
+(defn service-info-main
+  "Returns provider-neutral metadata for a configured database service."
+  [node service-id]
+  (service-summary (get-database-service node service-id)))
+
+(defn exec-main
+  "Executes SQL through a configured database service."
+  [node service-id sql parameters]
+  (db/exec (service-connection (get-database-service node service-id))
+           sql
+           (or parameters [])))
+
+(defn query-main
+  "Executes row-returning SQL through a configured database service."
+  [node service-id sql parameters]
+  (db/query (service-connection (get-database-service node service-id))
+            sql
+            (or parameters [])))
+
+(defn kernel-init-handler
+  [space args request node]
+  (kernel-init-main node (nth args 0) (nth args 1) (nth args 2)))
+
+(defn kernel-setup-handler
+  [space args request node]
+  (kernel-setup-main node (nth args 0) (nth args 1) (nth args 2)))
+
+(defn kernel-teardown-handler
+  [space args request node]
+  (kernel-teardown-main node (nth args 0)))
+
+(defn service-info-handler
+  [space args request node]
+  (service-info-main node (nth args 0)))
+
+(defn exec-handler
+  [space args request node]
+  (exec-main node (nth args 0) (nth args 1) (nth args 2)))
+
+(defn query-handler
+  [space args request node]
+  (query-main node (nth args 0) (nth args 1) (nth args 2)))
+
+(defn init-handlers
+  "Installs provider-neutral database kernel handlers on node."
+  [node]
+  (substrate/register-handler node ACTION-KERNEL-INIT kernel-init-handler {})
+  (substrate/register-handler node ACTION-KERNEL-SETUP kernel-setup-handler {})
+  (substrate/register-handler node ACTION-KERNEL-TEARDOWN kernel-teardown-handler {})
+  (substrate/register-handler node ACTION-SERVICE-INFO service-info-handler {})
+  (substrate/register-handler node ACTION-EXEC exec-handler {})
+  (substrate/register-handler node ACTION-QUERY query-handler {})
+  node)
