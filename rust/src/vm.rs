@@ -13,41 +13,43 @@
 //! falls back to the tree-walking evaluator: unsupported forms are typed
 //! compile errors.
 
-#[path = "vm/opcode.rs"]
-pub mod opcode;
-#[path = "vm/program.rs"]
-pub mod program;
 #[path = "vm/artifact.rs"]
 pub mod artifact;
-#[path = "vm/source_map.rs"]
-pub mod source_map;
-#[path = "vm/slot.rs"]
-mod slot;
-#[path = "vm/error.rs"]
-pub mod error;
-#[path = "vm/validate.rs"]
-pub mod validate;
-#[path = "vm/disassemble.rs"]
-pub mod disassemble;
 #[path = "vm/compiler.rs"]
 pub mod compiler;
+#[path = "vm/disassemble.rs"]
+pub mod disassemble;
+#[path = "vm/error.rs"]
+pub mod error;
+#[path = "vm/fiber.rs"]
+pub mod fiber;
 #[path = "vm/frame.rs"]
 pub mod frame;
 #[path = "vm/machine.rs"]
 pub mod machine;
+#[path = "vm/opcode.rs"]
+pub mod opcode;
+#[path = "vm/program.rs"]
+pub mod program;
+#[path = "vm/slot.rs"]
+mod slot;
+#[path = "vm/source_map.rs"]
+pub mod source_map;
+#[path = "vm/validate.rs"]
+pub mod validate;
 
 #[cfg(test)]
-#[path = "vm/tests.rs"]
-mod tests;
-#[cfg(test)]
-#[path = "vm/execution_tests.rs"]
-mod execution_tests;
+#[path = "vm/conformance_tests.rs"]
+mod conformance_tests;
 #[cfg(test)]
 #[path = "vm/differential_tests.rs"]
 mod differential_tests;
 #[cfg(test)]
-#[path = "vm/conformance_tests.rs"]
-mod conformance_tests;
+#[path = "vm/execution_tests.rs"]
+mod execution_tests;
+#[cfg(test)]
+#[path = "vm/tests.rs"]
+mod tests;
 
 /// Normalizes an error message to a coarse category for comparison. The
 /// fiber and the synchronous fallback phrase some shape errors
@@ -62,7 +64,10 @@ pub(crate) fn error_category(message: &str) -> &'static str {
         (&["division by zero"], "division by zero"),
         (&["integer overflow"], "integer overflow"),
         (&["expects numbers"], "expects numbers"),
-        (&["expects at least", "expects arguments"], "primitive arity"),
+        (
+            &["expects at least", "expects arguments"],
+            "primitive arity",
+        ),
         (&["expects 2 or 3 arguments"], "if arity"),
         (
             &["expects bindings and a body", "expects bindings and body"],
@@ -94,13 +99,14 @@ pub(crate) fn error_category(message: &str) -> &'static str {
     panic!("unclassified error message: {message}")
 }
 
+pub use artifact::{decode_program, encode_program};
 pub use compiler::{compile_source, compile_source_with};
 pub use disassemble::disassemble;
 pub use error::{CompileError, CompileErrorKind, ValidationError, VmError};
+pub use fiber::{VmFiber, VmFiberState};
 pub use machine::{execute_program, execute_program_with_globals, Machine, VmOutcome};
 pub use opcode::Instruction;
 pub use program::{FunctionId, FunctionPrototype, Program};
-pub use artifact::{decode_program, encode_program};
 pub use validate::validate;
 
 /// Compiles, validates, and executes a closed source string in one step.

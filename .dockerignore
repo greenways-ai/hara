@@ -1,0 +1,10 @@
+.git
+**/.git
+.netlify
+.venv*
+.DS_Store
+target
+**/target
+**/node_modules
+**/.hoplite
+**/site-build

@@ -61,7 +61,7 @@ impl<V> Atom<V> {
     fn accepts(&self, value: &V) -> bool {
         self.validator
             .as_ref()
-            .is_none_or(|validator| validator(value))
+            .map_or(true, |validator| validator(value))
     }
 }
 impl<V: Clone> Atom<V> {

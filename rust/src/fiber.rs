@@ -553,7 +553,7 @@ fn one(form: Form, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step {
             env,
             Box::new(move |r| k(r.and_then(vector_literal))),
         ),
-        Form::List(v) if v.is_empty() => k(Ok(Value::Nil)),
+        Form::List(v) if v.is_empty() => k(Ok(Value::List(PList::new()))),
         Form::List(v) if v.len() == 2 && matches!(&v[0],Form::Symbol(n)if n=="quote") => {
             k(literal_value(&v[1]))
         }
@@ -697,6 +697,11 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
         Some("std.foundation.coroutine/yield") => coroutine::yield_form(v, env, k),
         Some("std.foundation.coroutine/await") => coroutine::await_form(v, env, k),
         Some("def") | Some("set!") | Some("var/set") => bind_form(v, env, k),
+        Some("resolve")
+            if matches!(env.borrow().get("resolve"), Some(value) if !matches!(value, Value::Var(_))) =>
+        {
+            application(v, env, k)
+        }
         Some(name) if SYNC_SPECIAL_FORMS.contains(&name) => sync(Form::List(v), env, k),
         _ => application(v, env, k),
     }

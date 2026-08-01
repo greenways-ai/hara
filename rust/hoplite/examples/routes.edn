@@ -1,0 +1,4 @@
+{:hoplite/routes
+ [{:path "/hello" :handler hoplite.app/hello}
+  {:path "/delay" :handler hoplite.app/delayed}
+  {:path "/inspect" :handler hoplite.app/inspect}]}

@@ -1,0 +1,12 @@
+ngx_addon_name=ngx_http_hoplite_module
+
+HOPLITE_RUNTIME_DIR=${HOPLITE_RUNTIME_DIR:-$ngx_addon_dir/../../target/release}
+
+ngx_module_type=HTTP
+ngx_module_name=ngx_http_hoplite_module
+ngx_module_srcs="$ngx_addon_dir/ngx_http_hoplite_module.c \
+                 $ngx_addon_dir/hoplite_hta.c"
+ngx_module_incs="$ngx_addon_dir"
+ngx_module_libs="$HOPLITE_RUNTIME_DIR/libhoplite_runtime.a -ldl -lpthread -lm"
+
+. auto/module

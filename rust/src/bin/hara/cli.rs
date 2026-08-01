@@ -158,6 +158,7 @@ pub(crate) fn run(options: Options) -> Result<(), String> {
         Some("update") => Err("project update requires the reviewed registry client".into()),
         Some("test") => test_project(&options, &command[1..]),
         Some("spec") => spec_command(&command[1..]),
+        Some("snapshot") => hara_wasm::snapshot_tool::run(&command[1..]),
         Some("extension") => extension_tool::run(&command[1..], options.allow_process),
         Some("eval") => direct_eval(&options, &command[1..].join(" ")),
         Some("run") if command.len() == 1 => run_project(&options),
@@ -268,6 +269,7 @@ fn usage() {
     println!("  hara asset <check|build|inspect|publish|status|search|info|pull|sync|yank> ...");
     println!("  hara tap <bootstrap|init|add|remove|list|verify|mirror> ...");
     println!("  hara spec <COMMAND> ...");
+    println!("  hara snapshot <build|verify|inspect|diff> ...");
     println!("  hara extension <check|build|install|test> ...");
     println!();
     println!("Compatibility aliases:");
@@ -295,13 +297,13 @@ mod spec_tests {
     };
     use super::form::{keyword, map_form, map_get};
     use super::metaspec::{
-        METASPEC_REQUIRED_KEYS, lint_metaspec, metaspec_report, metaspec_template,
-        read_spec_document, validate_against_metaspec, verify_metaspec,
+        lint_metaspec, metaspec_report, metaspec_template, read_spec_document,
+        validate_against_metaspec, verify_metaspec, METASPEC_REQUIRED_KEYS,
     };
     use super::spec::check_contribution;
     use super::{error_exit_code, routed_command};
     use hara_wasm::cli_app;
-    use hara_wasm::kernel::{Form, parse};
+    use hara_wasm::kernel::{parse, Form};
     use std::fs;
     use std::path::Path;
 
@@ -390,11 +392,9 @@ mod spec_tests {
             map_form(vec![("schema/ref", keyword("missing/schema"))]),
         ));
         let findings = verify_metaspec(&document, Path::new("metaspec.edn"));
-        assert!(
-            findings
-                .iter()
-                .any(|finding| finding.rule == "hara.metaspec.rule/schema-reference")
-        );
+        assert!(findings
+            .iter()
+            .any(|finding| finding.rule == "hara.metaspec.rule/schema-reference"));
         let report = metaspec_report(&document, &findings);
         assert_eq!(map_get(&report, "report/status"), Some(&keyword("fail")));
     }
@@ -472,11 +472,9 @@ mod spec_tests {
         )
         .unwrap();
         let findings = check_build(&checker_build);
-        assert!(
-            findings
-                .iter()
-                .any(|finding| finding.kind == "greenways/checker-commit")
-        );
+        assert!(findings
+            .iter()
+            .any(|finding| finding.kind == "greenways/checker-commit"));
         let report = build_obligation_report(&checker_build, &findings);
         assert_eq!(build_report_status(&report), "blocked");
     }

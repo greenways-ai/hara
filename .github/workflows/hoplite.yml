@@ -1,0 +1,31 @@
+name: Hoplite
+
+on:
+  pull_request:
+    paths:
+      - 'rust/hoplite/**'
+      - 'rust/src/**'
+      - 'lib/src/std/foundation/**'
+      - '.github/workflows/hoplite.yml'
+  workflow_dispatch:
+
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Test Hoplite runtime bridge
+        run: cargo test --manifest-path rust/hoplite/runtime/Cargo.toml
+      - name: Test packaged Hoplite CLI
+        run: cargo test --manifest-path rust/Cargo.toml --features hoplite --bin hoplite
+      - name: Check the example application
+        run: cargo run --manifest-path rust/Cargo.toml --features hoplite --bin hoplite -- check rust/hoplite/examples
+
+  nginx-module:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Hoplite as a static Nginx module
+        run: docker build -f rust/hoplite/docker/Dockerfile -t hoplite-ci .

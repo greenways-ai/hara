@@ -58,6 +58,9 @@ pub struct TryEntry {
 #[derive(Debug, Clone)]
 pub struct FunctionPrototype {
     pub name: Option<String>,
+    /// Calling this prototype creates a child async execution and returns
+    /// its stable result promise instead of the direct body value.
+    pub async_function: bool,
     /// Required argument count. Always 0 for the entry function. When
     /// `variadic` is set this counts only the fixed parameters.
     pub arity: u16,

@@ -26,10 +26,11 @@ fn program(
 ) -> Program {
     let source_map = source_map(code.len());
     Program {
-            var_metadata: Vec::new(),
+        var_metadata: Vec::new(),
         constants,
         functions: vec![FunctionPrototype {
             name: None,
+            async_function: false,
             arity: 0,
             variadic: false,
             capture_count: 0,
@@ -71,6 +72,7 @@ fn prototype(
 ) -> FunctionPrototype {
     FunctionPrototype {
         name: name.map(str::to_string),
+        async_function: false,
         arity,
         variadic: false,
         capture_count,
@@ -86,7 +88,7 @@ fn prototype(
 /// `Closure 1 / Call 0 / Return` with the target `Nil / Return`.
 fn closure_call_program() -> Program {
     Program {
-            var_metadata: Vec::new(),
+        var_metadata: Vec::new(),
         constants: vec![],
         functions: vec![
             prototype(
@@ -178,7 +180,11 @@ fn instruction_display_and_shape() {
     assert!(!Instruction::Return.falls_through());
     assert!(Instruction::Pop.falls_through());
     assert_eq!(
-        Instruction::Primitive { op: Primitive::Add, argc: 3 }.stack_effect(),
+        Instruction::Primitive {
+            op: Primitive::Add,
+            argc: 3
+        }
+        .stack_effect(),
         Some(-2)
     );
     assert_eq!(
@@ -272,7 +278,7 @@ fn validator_rejects_callstatic_capture_mismatch() {
     // Entry directly self-calls a prototype with a different capture
     // count; no Closure instruction masks the CallStatic check.
     let program = Program {
-            var_metadata: Vec::new(),
+        var_metadata: Vec::new(),
         constants: vec![],
         functions: vec![
             prototype(
@@ -440,16 +446,25 @@ fn validator_rejects_source_map_mismatch() {
 fn validator_rejects_missing_entry_function() {
     let mut program = add_program();
     program.entry = 7;
-    assert_eq!(invalid(&program), "validation failed: entry function index out of range");
+    assert_eq!(
+        invalid(&program),
+        "validation failed: entry function index out of range"
+    );
     program = add_program();
     program.functions.clear();
-    assert_eq!(invalid(&program), "validation failed: program has no functions");
+    assert_eq!(
+        invalid(&program),
+        "validation failed: program has no functions"
+    );
 }
 
 #[test]
 fn validation_error_display_includes_instruction() {
     let error = ValidationError::new("stack underflow", Some(12));
-    assert_eq!(error.to_string(), "validation failed at 0012: stack underflow");
+    assert_eq!(
+        error.to_string(),
+        "validation failed at 0012: stack underflow"
+    );
 }
 
 #[test]
@@ -635,7 +650,9 @@ fn validator_rejects_handler_depth_mismatch() {
 fn validator_rejects_missing_pending_slots() {
     let mut program = throw_catch_program();
     program.functions[0].handlers[0].finally = Some(2);
-    assert!(invalid(&program).contains("pending slots must be present exactly when finally is present"));
+    assert!(
+        invalid(&program).contains("pending slots must be present exactly when finally is present")
+    );
 }
 
 #[test]

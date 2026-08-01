@@ -4,9 +4,15 @@
 //! source-aware diagnostics.
 
 use super::error::CompileErrorKind;
-use super::{compile_source, disassemble, eval_source, execute_program};
-use crate::core::Value;
+use super::{
+    compile_source, compile_source_with, disassemble, eval_source, execute_program,
+    execute_program_with_globals,
+};
+use crate::core::{Promise, PromiseState, Value};
+use crate::kernel::NamespaceRegistry;
 use crate::Runtime;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 fn eval(source: &str) -> String {
     eval_source(source)
@@ -795,5 +801,176 @@ fn global_form_errors_issue_223() {
     assert!(
         message.contains("rest parameter must be the last"),
         "{message}"
+    );
+}
+
+#[test]
+fn async_metadata_and_await_lowering_are_explicit() {
+    let program = compile_source("(defn ^:async delayed [p] (std.foundation.coroutine/await p))")
+        .expect("async function must compile");
+    let async_proto = program
+        .functions
+        .iter()
+        .find(|function| function.name.as_deref() == Some("delayed"))
+        .expect("named async prototype");
+    assert!(async_proto.async_function);
+    assert!(async_proto.code.contains(&super::Instruction::Await));
+}
+
+#[test]
+fn await_requires_a_fresh_suspension_context() {
+    let (kind, message) = compile_error("(defn bad [p] (std.foundation.coroutine/await p))");
+    assert_eq!(kind, CompileErrorKind::InvalidEffect);
+    assert!(
+        message.contains("co/await requires ^:async or co/create"),
+        "{message}"
+    );
+
+    let (kind, message) =
+        compile_error("(defn ^:async outer [p] (fn [] (std.foundation.coroutine/await p)))");
+    assert_eq!(kind, CompileErrorKind::InvalidEffect);
+    assert!(
+        message.contains("co/await requires ^:async or co/create"),
+        "{message}"
+    );
+}
+
+#[test]
+fn async_calls_return_promises_and_adopt_direct_values() {
+    let program = compile_source("(do (defn ^:async answer [] 42) (answer))").unwrap();
+    let Value::Promise(result) = execute_program(Rc::new(program)).unwrap() else {
+        panic!("async call must return a promise")
+    };
+    assert_eq!(result.state(), PromiseState::Fulfilled(Value::Number(42)));
+}
+
+#[test]
+fn pending_async_child_is_resumed_only_when_the_scheduler_is_polled() {
+    let registry = NamespaceRegistry::new("user");
+    let source = Promise::new();
+    registry
+        .find_or_create("user")
+        .intern("source", Value::Promise(source.clone()));
+    let program = compile_source_with(
+        "(do (defn ^:async delayed [] (std.foundation.coroutine/await source)) (delayed))",
+        &registry,
+    )
+    .unwrap();
+    let Value::Promise(result) = execute_program_with_globals(Rc::new(program), &registry).unwrap()
+    else {
+        panic!("async call must return a promise")
+    };
+    assert_eq!(result.state(), PromiseState::Pending);
+    source.resolve(Value::Number(9));
+    assert_eq!(result.state(), PromiseState::Fulfilled(Value::Number(9)));
+}
+
+#[test]
+fn cancelling_async_result_propagates_to_the_pending_host_promise() {
+    let registry = NamespaceRegistry::new("user");
+    let source = Promise::new();
+    let cancelled = Rc::new(Cell::new(false));
+    let observed = cancelled.clone();
+    source.set_cancel_hook(Rc::new(move || observed.set(true)));
+    registry
+        .find_or_create("user")
+        .intern("source", Value::Promise(source));
+    let program = compile_source_with(
+        "(do (defn ^:async delayed [] (std.foundation.coroutine/await source)) (delayed))",
+        &registry,
+    )
+    .unwrap();
+    let Value::Promise(result) = execute_program_with_globals(Rc::new(program), &registry).unwrap()
+    else {
+        panic!("async call must return a promise")
+    };
+    assert!(result.cancel());
+    assert!(cancelled.get());
+    assert!(matches!(
+        result.state(),
+        PromiseState::Rejected(error) if error.is_cancelled()
+    ));
+}
+
+#[test]
+fn async_calls_always_return_settled_promises_on_the_fast_path() {
+    let value = eval_source("(do (defn ^:async answer [] 42) (answer))")
+        .expect("async call must return normally");
+    let Value::Promise(promise) = value else {
+        panic!("async call returned {value:?}");
+    };
+    assert_eq!(
+        promise.state(),
+        crate::core::PromiseState::Fulfilled(Value::Number(42))
+    );
+
+    let value = eval_source("(do (defn ^:async fail [] (throw \"boom\")) (fail))")
+        .expect("async throw rejects rather than escaping");
+    let Value::Promise(promise) = value else {
+        panic!("async call returned {value:?}");
+    };
+    assert!(matches!(
+        promise.state(),
+        crate::core::PromiseState::Rejected(ref error) if error.message().contains("boom")
+    ));
+}
+
+#[test]
+fn async_calls_retain_and_resume_pending_child_fibers() {
+    let registry = crate::kernel::NamespaceRegistry::new("user");
+    let pending = crate::core::Promise::new();
+    registry
+        .current()
+        .intern("pending", Value::Promise(pending.clone()));
+    let program = super::compile_source_with(
+        "(do (defn ^:async delayed [] (std.foundation.coroutine/await pending)) (delayed))",
+        &registry,
+    )
+    .expect("async source must compile");
+    let value = super::execute_program_with_globals(std::rc::Rc::new(program), &registry)
+        .expect("async call returns its result promise");
+    let Value::Promise(result) = value else {
+        panic!("async call returned {value:?}");
+    };
+    assert_eq!(result.state(), crate::core::PromiseState::Pending);
+    pending.resolve(Value::Number(42));
+    assert_eq!(
+        result.state(),
+        crate::core::PromiseState::Fulfilled(Value::Number(42))
+    );
+}
+
+#[test]
+fn vm_host_call_returns_a_native_promise_and_resumes_through_await() {
+    let pending = Promise::new();
+    let provider_promise = pending.clone();
+    let observed = Rc::new(RefCell::new(Vec::new()));
+    let provider_observed = observed.clone();
+    let provider = Rc::new(
+        move |service: String, method: String, arguments: Vec<Value>| {
+            provider_observed
+                .borrow_mut()
+                .push((service, method, arguments));
+            Ok(Value::Promise(provider_promise.clone()))
+        },
+    );
+    let program = compile_source(
+        "(do (defn ^:async delayed [] (std.foundation.coroutine/await (std.native.Host/call \"nginx\" \"sleep\" [25]))) (delayed))",
+    )
+    .unwrap();
+    let value = crate::core::with_host_calls(provider, || execute_program(Rc::new(program)))
+        .expect("host call returns its promise");
+    let Value::Promise(result) = value else {
+        panic!("async host call returned {value:?}");
+    };
+    assert_eq!(result.state(), PromiseState::Pending);
+    assert_eq!(
+        observed.borrow().as_slice(),
+        &[("nginx".into(), "sleep".into(), vec![Value::Number(25)])]
+    );
+    pending.resolve(Value::String("done".into()));
+    assert_eq!(
+        result.state(),
+        PromiseState::Fulfilled(Value::String("done".into()))
     );
 }

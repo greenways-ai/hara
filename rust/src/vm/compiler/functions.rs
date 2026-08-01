@@ -177,7 +177,15 @@ impl Compiler {
                 Some(span.start),
             ));
         }
-        self.compile_function(None, &children[1], &children[2..], span)
+        let async_function = metadata_flag(children[1].form, "async")?;
+        self.compile_function(
+            None,
+            &children[1],
+            &children[2..],
+            span,
+            async_function,
+            async_function,
+        )
     }
 
     /// Compiles a `fn`/`defn` body into a new function context and emits
@@ -191,8 +199,10 @@ impl Compiler {
         params: &Child<'_>,
         body: &[Child<'_>],
         span: &Span,
+        async_function: bool,
+        suspend_allowed: bool,
     ) -> Result<(), CompileError> {
-        let elements: &[Form] = match params.form {
+        let elements: &[Form] = match crate::core::form_without_metadata(params.form) {
             Form::Vector(elements) => elements,
             Form::List(_) => {
                 return Err(CompileError::new(
@@ -271,6 +281,7 @@ impl Compiler {
             arity,
             free.len() as u16,
             variadic,
+            async_function,
         ));
         let mut scopes = ScopeStack::new();
         scopes.push_scope();
@@ -292,6 +303,8 @@ impl Compiler {
             name: name.map(str::to_string),
             params: arity,
             variadic,
+            suspend_allowed,
+            async_function,
             captures: free,
             code: Vec::new(),
             source_map: SourceMap::default(),
@@ -337,6 +350,7 @@ impl Compiler {
         let context = self.contexts.pop().expect("balanced context stack");
         self.functions[context.proto_id] = FunctionPrototype {
             name: context.name.clone(),
+            async_function: context.async_function,
             arity: context.params,
             variadic: context.variadic,
             capture_count: context.captures.len() as u16,
@@ -375,6 +389,16 @@ impl Compiler {
             Form::List(elements) if !elements.is_empty() => {
                 let children = self.list_children(elements, child.span, child.children);
                 match &elements[0] {
+                    Form::Symbol(head) if self.is_coroutine_var(head, "await") => {
+                        for c in &children[1..] {
+                            self.collect_free(c, bound, free);
+                        }
+                    }
+                    Form::Symbol(head) if self.is_host_call_var(head) => {
+                        for c in &children[1..] {
+                            self.collect_free(c, bound, free);
+                        }
+                    }
                     Form::Symbol(head) => match head.as_str() {
                         "if" | "do" | "recur" | "try" | "throw" | "finally" => {
                             for c in &children[1..] {
@@ -448,7 +472,10 @@ impl Compiler {
                         }
                         "fn" => {
                             let marked = bound.len();
-                            match children.get(1).map(|c| c.form) {
+                            match children
+                                .get(1)
+                                .map(|c| crate::core::form_without_metadata(c.form))
+                            {
                                 Some(Form::Vector(params)) => {
                                     for param in params {
                                         if let Form::Symbol(name) = param {
@@ -508,6 +535,15 @@ impl Compiler {
             _ => {}
         }
     }
+}
+
+fn metadata_flag(form: &Form, key: &str) -> Result<bool, CompileError> {
+    let Form::Metadata(metadata, _) = form else {
+        return Ok(false);
+    };
+    crate::core::metadata_from_form(metadata)
+        .map(|metadata| metadata.flag(key))
+        .map_err(|message| CompileError::new(CompileErrorKind::UnsupportedForm, message, None))
 }
 
 fn contains_recur(form: &Form) -> bool {

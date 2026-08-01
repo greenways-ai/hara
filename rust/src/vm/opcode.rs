@@ -106,6 +106,12 @@ pub enum Instruction {
     /// named by the string constant at `constants[name]`, built through
     /// the shared `core::arity_dispatcher` boundary.
     MakeMultiArity { name: u32, count: u8 },
+    /// Replaces a settled promise with its value, raises a rejection, or
+    /// suspends the current VM fiber while preserving the complete machine.
+    Await,
+    /// Pops service, method, and argument-vector values and returns the
+    /// provider's ordinary Promise value.
+    HostCall,
     /// Returns the top of the stack as the function result.
     Return,
 }
@@ -153,6 +159,8 @@ impl Instruction {
             | Instruction::StructField(_) => 0,
             Instruction::InstanceOf => -1,
             Instruction::MakeMultiArity { count, .. } => 1 - i32::from(*count),
+            Instruction::Await => 0,
+            Instruction::HostCall => -2,
             Instruction::Jump(_) => 0,
             Instruction::Return | Instruction::Throw | Instruction::Rethrow => return None,
         })
@@ -213,6 +221,8 @@ impl std::fmt::Display for Instruction {
             Instruction::MakeMultiArity { name, count } => {
                 write!(formatter, "MakeMultiArity {name} count {count}")
             }
+            Instruction::Await => formatter.write_str("Await"),
+            Instruction::HostCall => formatter.write_str("HostCall"),
             Instruction::Return => formatter.write_str("Return"),
         }
     }

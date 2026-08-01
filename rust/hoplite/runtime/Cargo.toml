@@ -1,0 +1,23 @@
+[package]
+name = "hoplite"
+version = "0.1.0"
+edition = "2021"
+license = "EPL-2.0"
+rust-version = "1.78"
+description = "Native worker-local Hara runtime bridge for Hoplite/Nginx"
+
+[lib]
+name = "hoplite_runtime"
+crate-type = ["staticlib", "rlib"]
+
+[features]
+default = ["bytecode-vm"]
+bytecode-vm = []
+evaluation-journal = []
+halc-encoder = []
+hir-encoder = ["halc-encoder"]
+tracing-jit = ["bytecode-vm"]
+native-jit = ["tracing-jit"]
+
+[dependencies]
+sha2 = "0.10"

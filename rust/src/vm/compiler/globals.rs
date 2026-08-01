@@ -427,6 +427,7 @@ impl Compiler {
                 Some(span.start),
             ));
         }
+        let async_function = metadata.as_ref().is_some_and(|value| value.flag("async"));
         let metadata = self.var_metadata(metadata);
         self.declare_program_global(&name);
         let single_arity = matches!(
@@ -434,7 +435,14 @@ impl Compiler {
             Form::Vector(_)
         );
         if single_arity {
-            self.compile_function(Some(&name), &rest_children[0], &rest_children[1..], span)?;
+            self.compile_function(
+                Some(&name),
+                &rest_children[0],
+                &rest_children[1..],
+                span,
+                async_function,
+                async_function,
+            )?;
         } else {
             // Multi-arity: each clause is a list `(params body...)`.
             let mut count = 0usize;
@@ -457,7 +465,14 @@ impl Compiler {
                         Some(clause.span.start),
                     ));
                 }
-                self.compile_function(None, &clause_children[0], &clause_children[1..], span)?;
+                self.compile_function(
+                    None,
+                    &clause_children[0],
+                    &clause_children[1..],
+                    span,
+                    async_function,
+                    async_function,
+                )?;
                 count += 1;
                 if count > u8::MAX as usize {
                     return Err(CompileError::new(

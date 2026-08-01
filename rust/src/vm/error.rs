@@ -20,6 +20,9 @@ pub enum CompileErrorKind {
     /// `recur` outside a loop, in a non-tail position, or with mismatched
     /// arity.
     Recur,
+    /// A suspension form appears outside an async function or direct
+    /// coroutine construction body.
+    InvalidEffect,
     /// A program limit (constants, code size, locals, stack, arguments).
     Limit,
     /// The compiler produced a program the validator rejected; indicates a
@@ -78,11 +81,7 @@ impl std::error::Error for CompileError {}
 
 impl From<ParseError> for CompileError {
     fn from(error: ParseError) -> CompileError {
-        CompileError::new(
-            CompileErrorKind::Parse,
-            error.message,
-            Some(error.position),
-        )
+        CompileError::new(CompileErrorKind::Parse, error.message, Some(error.position))
     }
 }
 
@@ -107,7 +106,11 @@ impl std::fmt::Display for ValidationError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.instruction {
             Some(instruction) => {
-                write!(formatter, "validation failed at {instruction:04}: {}", self.message)
+                write!(
+                    formatter,
+                    "validation failed at {instruction:04}: {}",
+                    self.message
+                )
             }
             None => write!(formatter, "validation failed: {}", self.message),
         }
@@ -146,7 +149,11 @@ impl std::fmt::Display for VmError {
                 "{} [line {}, column {}] (instruction {:04})",
                 self.message, position.line, position.column, self.instruction
             ),
-            None => write!(formatter, "{} (instruction {:04})", self.message, self.instruction),
+            None => write!(
+                formatter,
+                "{} (instruction {:04})",
+                self.message, self.instruction
+            ),
         }
     }
 }
