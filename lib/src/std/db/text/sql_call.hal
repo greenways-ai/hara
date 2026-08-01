@@ -28,23 +28,30 @@
       (throw (ex-info "Database API returned an error" {:output output}))
       data)))
 
+(defn- format-input-loop
+  [inputs arguments index output]
+  (if (= index (count arguments))
+    output
+    (let [argument (nth arguments index)
+          input (nth inputs index)
+          input-type (compatible-get input :type)
+          encoded (if (= "jsonb" input-type)
+                    (if (string? argument)
+                      argument
+                      (sql/encode-json argument))
+                    (sql/encode-value argument))]
+      (format-input-loop inputs
+                         arguments
+                         (+ index 1)
+                         (conj output encoded)))))
+
 (defn call-format-input
   "Formats function arguments according to the declared input types."
   [spec arguments]
-  (let [inputs (or (compatible-get spec :input) [])]
-    (loop [index 0
-           output []]
-      (if (= index (count arguments))
-        output
-        (let [argument (nth arguments index)
-              input (nth inputs index)
-              input-type (compatible-get input :type)
-              encoded (if (= "jsonb" input-type)
-                        (if (string? argument)
-                          argument
-                          (sql/encode-json argument))
-                        (sql/encode-value argument))]
-          (recur (+ index 1) (conj output encoded)))))))
+  (format-input-loop (or (compatible-get spec :input) [])
+                     arguments
+                     0
+                     []))
 
 (defn call-format-query
   "Formats a schema-qualified SQL function invocation."
@@ -113,4 +120,4 @@
        (fn [error]
          (if (and (map? error) (compatible-get error :status))
            (json/write error)
-           (json/write {:status "error" :data error})))))))
+           (json/write {:status "error" :data (str error)})))))))
