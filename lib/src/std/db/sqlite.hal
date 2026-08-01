@@ -1,0 +1,70 @@
+;; ============================================================================
+;; std.db.sqlite — Hara-facing SQLite connection API.
+;;
+;; The implementation is supplied by the std.db.provider.sqlite HTA package.
+;; Every provider call is asynchronous and returns a Hara promise. Connection
+;; values are immutable descriptors containing an opaque provider-local :id.
+;; ============================================================================
+(ns std.db.sqlite
+  (:require [std.db.provider.sqlite :as provider]))
+
+(defn ^{:schema [:fn [] :any]}
+  version
+  "Returns a promise resolving to the SQLite engine and library version."
+  []
+  (provider/version))
+
+(defn ^{:schema [:function [:fn [] :any]
+                            [:fn [:map] :any]]}
+  open
+  "Returns a promise resolving to a SQLite connection descriptor.
+
+   The initial portable storage mode is in-memory. Browser persistence will be
+   added behind an explicit storage capability rather than selected implicitly."
+  ([] (open {}))
+  ([options] (provider/open options)))
+
+(defn ^{:schema [:function [:fn [:map :str] :any]
+                            [:fn [:map :str :vector] :any]]}
+  exec
+  "Executes SQL with optional positional parameters and returns a promise
+   resolving to an affected-row summary."
+  ([connection sql]
+   (exec connection sql []))
+  ([connection sql parameters]
+   (provider/exec (get connection :id) sql parameters)))
+
+(defn ^{:schema [:function [:fn [:map :str] :any]
+                            [:fn [:map :str :vector] :any]]}
+  query
+  "Executes a row-returning SQL statement with optional positional parameters.
+
+   The promise resolves to {:columns [...], :rows [[...]], :affected n}."
+  ([connection sql]
+   (query connection sql []))
+  ([connection sql parameters]
+   (provider/query (get connection :id) sql parameters)))
+
+(defn ^{:schema [:fn [:map] :any]}
+  close
+  "Closes connection and returns a promise resolving to whether it was open."
+  [connection]
+  (provider/close (get connection :id)))
+
+(defn ^{:schema [:fn [:map] :any]}
+  begin
+  "Begins a transaction on connection."
+  [connection]
+  (exec connection "begin"))
+
+(defn ^{:schema [:fn [:map] :any]}
+  commit
+  "Commits the current transaction on connection."
+  [connection]
+  (exec connection "commit"))
+
+(defn ^{:schema [:fn [:map] :any]}
+  rollback
+  "Rolls back the current transaction on connection."
+  [connection]
+  (exec connection "rollback"))
