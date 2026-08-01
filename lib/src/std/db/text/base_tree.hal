@@ -1,0 +1,248 @@
+;; ============================================================================
+;; std.db.text.base-tree — reusable graph-query planning and input binding.
+;; ============================================================================
+(ns std.db.text.base-tree
+  (:require [std.db.text.base-check :as check]
+            [std.db.text.base-scope :as scope]
+            [std.db.text.sql-graph :as graph]
+            [std.db.text.sql-util :as sql]))
+
+(defn- compatible-get
+  [value lookup-key]
+  (cond
+    (not (map? value)) nil
+    (has? value lookup-key) (get value lookup-key)
+    (string? lookup-key) (get value (keyword lookup-key))
+    (keyword? lookup-key) (get value (name lookup-key))
+    :else nil))
+
+(defn- present?
+  [value]
+  (cond
+    (nil? value) false
+    (map? value) (not (empty? value))
+    (vector? value) (not (empty? value))
+    :else true))
+
+(defn tree-control-array
+  "Converts view controls into tagged SQL keyword nodes."
+  [control]
+  (if (not (present? control))
+    []
+    (let [order-by (compatible-get control :order-by)
+          order-sort (compatible-get control :order-sort)
+          limit (compatible-get control :limit)
+          offset (compatible-get control :offset)
+          output (if (vector? order-by) [(sql/ORDER-BY order-by)] [])
+          output (if (nil? order-sort) output (conj output (sql/ORDER-SORT order-sort)))
+          output (if (number? limit) (conj output (sql/LIMIT limit)) output)]
+      (if (number? offset) (conj output (sql/OFFSET offset)) output))))
+
+(defn tree-base
+  "Builds canonical graph IR from a table, clauses and returning query."
+  [schema table-name select-query clause returning options]
+  (let [clauses (scope/merge-queries select-query clause)
+        compact (vec (concat [table-name]
+                             clauses
+                             (if (present? returning) [returning] [])))]
+    (graph/select-tree schema compact options)))
+
+(defn tree-count
+  [schema entry clause options]
+  (let [view (compatible-get entry :view)
+        control (compatible-get entry :control)
+        table-name (compatible-get view :table)
+        query (compatible-get view :query)]
+    (tree-base schema
+               table-name
+               query
+               clause
+               (vec (concat [{"::" "sql/count"}]
+                            (tree-control-array control)))
+               options)))
+
+(defn tree-select
+  [schema entry clause options]
+  (let [view (compatible-get entry :view)
+        control (compatible-get entry :control)
+        table-name (compatible-get view :table)
+        query (compatible-get view :query)]
+    (tree-base schema
+               table-name
+               query
+               clause
+               (vec (concat ["id"] (tree-control-array control)))
+               options)))
+
+(defn tree-return
+  [schema entry select-query clause options]
+  (let [view (compatible-get entry :view)
+        table-name (compatible-get view :table)
+        query (compatible-get view :query)]
+    (tree-base schema table-name select-query clause query options)))
+
+(defn tree-combined
+  [schema select-entry return-entry return-omit clause options]
+  (let [control (compatible-get select-entry :control)
+        select-view (compatible-get select-entry :view)
+        return-view (compatible-get return-entry :view)
+        select-table (compatible-get select-view :table)
+        select-query (or (compatible-get select-view :query) {})
+        return-query (or (compatible-get return-view :query) {})
+        omit-clause (if (present? return-omit)
+                      [{:id {:not-in [return-omit]}}]
+                      [])
+        combined-clause (scope/merge-queries clause omit-clause)
+        returning (vec (concat (if (vector? return-query) return-query [return-query])
+                               (tree-control-array control)))]
+    (tree-base schema
+               select-table
+               select-query
+               combined-clause
+               returning
+               options)))
+
+(defn- replace-inputs
+  [value replacements]
+  (cond
+    (string? value)
+    (if (has? replacements value) (get replacements value) value)
+
+    (map? value)
+    (reduce (fn [out pair]
+              (assoc out (key pair) (replace-inputs (val pair) replacements)))
+            {}
+            value)
+
+    (vector? value)
+    (map (fn [item] (replace-inputs item replacements)) value)
+
+    :else value))
+
+(defn tree-fill-input
+  "Replaces {{symbol}} placeholders using args and an input specification."
+  [tree args input-spec drop-first]
+  (let [specs (if drop-first (vec (drop 1 input-spec)) (vec input-spec))]
+    (if (empty? specs)
+      tree
+      (let [replacements
+            (reduce (fn [out indexed]
+                      (let [index (first indexed)
+                            spec (second indexed)
+                            symbol (compatible-get spec :symbol)]
+                        (assoc out
+                               (str "{{" symbol "}}")
+                               (nth args index))))
+                    {}
+                    (map-indexed (fn [index spec] [index spec]) specs))]
+        (replace-inputs tree replacements)))))
+
+(defn plan-select
+  [schema entry args options]
+  (tree-fill-input
+   (tree-select schema entry {} options)
+   args
+   (or (compatible-get entry :input) [])
+   false))
+
+(defn plan-count
+  [schema entry args options]
+  (tree-fill-input
+   (tree-count schema entry {} options)
+   args
+   (or (compatible-get entry :input) [])
+   false))
+
+(defn plan-return
+  [schema entry id args options]
+  (tree-fill-input
+   (tree-return schema entry {:id id} {} options)
+   args
+   (or (compatible-get entry :input) [])
+   true))
+
+(defn plan-return-bulk
+  [schema entry ids args options]
+  (tree-fill-input
+   (tree-return schema entry {:id ["in" [ids]]} {} options)
+   args
+   (or (compatible-get entry :input) [])
+   true))
+
+(defn plan-combined
+  [schema select-entry select-args return-entry return-args return-omit options as-tree]
+  (let [select-input (or (compatible-get select-entry :input) [])
+        return-input (or (compatible-get return-entry :input) [])
+        initial (tree-combined schema
+                               select-entry
+                               return-entry
+                               return-omit
+                               []
+                               options)]
+    (tree-fill-input initial
+                     (vec (concat return-args select-args))
+                     (vec (concat return-input select-input))
+                     (> (count return-input) 0))))
+
+(defn plan-view-check
+  "Checks supplied arguments against an entry input specification."
+  [entry args drop-first]
+  (let [input (or (compatible-get entry :input) [])
+        specs (if drop-first (vec (drop 1 input)) (vec input))
+        length-result (check/check-args-length args specs)]
+    (if (not (first length-result))
+      length-result
+      (check/check-args-type args specs))))
+
+(defn plan-view
+  "Builds a validated graph plan from select/return query descriptors."
+  [schema query-spec]
+  (let [select-entry (compatible-get query-spec :select-entry)
+        select-args (or (compatible-get query-spec :select-args) [])
+        return-entry (compatible-get query-spec :return-entry)
+        return-args (or (compatible-get query-spec :return-args) [])
+        return-omit (compatible-get query-spec :return-omit)
+        return-count (compatible-get query-spec :return-count)
+        return-id (compatible-get query-spec :return-id)
+        return-bulk (compatible-get query-spec :return-bulk)]
+    (cond
+      (and (not (nil? select-entry)) (not (nil? return-entry)))
+      (let [select-check (plan-view-check select-entry select-args false)]
+        (if (not (first select-check))
+          select-check
+          (let [return-check (plan-view-check return-entry return-args true)]
+            (if (not (first return-check))
+              return-check
+              [true (plan-combined schema
+                                   select-entry
+                                   select-args
+                                   return-entry
+                                   return-args
+                                   return-omit
+                                   {}
+                                   false)]))))
+
+      (not (nil? select-entry))
+      (let [select-check (plan-view-check select-entry select-args false)]
+        (if (not (first select-check))
+          select-check
+          [true (if return-count
+                  (plan-count schema select-entry select-args {})
+                  (plan-select schema select-entry select-args {}))]))
+
+      (not (nil? return-id))
+      (let [return-check (plan-view-check return-entry
+                                          (vec (concat [return-id] return-args))
+                                          false)]
+        (if (not (first return-check))
+          return-check
+          [true (plan-return schema return-entry return-id return-args {})]))
+
+      (not (nil? return-bulk))
+      (let [return-check (plan-view-check return-entry return-args true)]
+        (if (not (first return-check))
+          return-check
+          [true (plan-return-bulk schema return-entry return-bulk return-args {})]))
+
+      :else
+      [true nil])))
