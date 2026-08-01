@@ -1,0 +1,12 @@
+;; ============================================================================
+;; std.db.protocol — provider-neutral database connection operations.
+;; ============================================================================
+(ns std.db.protocol)
+
+(defprotocol IDatabase
+  (db-engine [connection])
+  (db-provider [connection])
+  (db-info [connection])
+  (db-exec [connection sql parameters])
+  (db-query [connection sql parameters])
+  (db-close [connection]))
