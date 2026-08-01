@@ -6,6 +6,42 @@ pub struct Span {
     pub start: Position,
     pub end: Position,
 }
+
+fn canonical_integer(value: &str) -> String {
+    let (negative, digits) = match value.as_bytes().first() {
+        Some(b'-') => (true, &value[1..]),
+        Some(b'+') => (false, &value[1..]),
+        _ => (false, value),
+    };
+    let digits = digits.trim_start_matches('0');
+    if digits.is_empty() {
+        "0".into()
+    } else if negative {
+        format!("-{digits}")
+    } else {
+        digits.into()
+    }
+}
+
+fn canonical_decimal(value: &str) -> String {
+    let Some(dot) = value.find('.') else {
+        return value.trim_start_matches('+').to_owned();
+    };
+    let exponent = value[dot..].find(['e', 'E']).map(|offset| dot + offset);
+    let fraction_end = exponent.unwrap_or(value.len());
+    let mut end = fraction_end;
+    while end > dot + 1 && value.as_bytes()[end - 1] == b'0' {
+        end -= 1;
+    }
+    if end == dot + 1 {
+        end = dot;
+    }
+    let mut canonical = value[..end].trim_start_matches('+').to_owned();
+    if let Some(exponent) = exponent {
+        canonical.push_str(&value[exponent..]);
+    }
+    canonical
+}
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpannedForm {
     pub form: Form,
@@ -369,14 +405,14 @@ impl<'a> Parser<'a> {
                         .unwrap_or(value)
                         .chars()
                         .all(|ch| ch.is_ascii_digit())
-                        .then(|| Form::BigInteger(value.to_owned()))
+                        .then(|| Form::BigInteger(canonical_integer(value)))
                 } else if token.ends_with('M') {
                     let value = &token[..token.len() - 1];
                     value
                         .parse::<f64>()
                         .ok()
                         .filter(|number| number.is_finite())
-                        .map(|_| Form::Decimal(value.to_owned()))
+                        .map(|_| Form::Decimal(canonical_decimal(value)))
                 } else if let Some((radix, digits)) = body.split_once(['r', 'R']) {
                     radix
                         .parse::<u32>()

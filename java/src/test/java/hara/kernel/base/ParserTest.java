@@ -15,14 +15,12 @@ public class ParserTest {
     assertEquals(123L, Parser.LispReader.readString("123", null));
     assertEquals(123.45, Parser.LispReader.readString("123.45", null));
     assertEquals(0xFFL, Parser.LispReader.readString("0xFF", null));
-    for (String unsupported :
-        new String[] {
-          "123N", "0N", "+0N", "-0N", "123.45M", "0M", "9223372036854775808"
-        }) {
-      assertThrows(
-          Parser.LispReader.ReaderException.class,
-          () -> Parser.LispReader.readString(unsupported, null));
-    }
+    assertEquals(new java.math.BigInteger("123"), Parser.LispReader.readString("123N", null));
+    assertEquals(java.math.BigInteger.ZERO, Parser.LispReader.readString("-0N", null));
+    assertEquals(new java.math.BigDecimal("123.45"), Parser.LispReader.readString("123.45M", null));
+    assertThrows(
+        Parser.LispReader.ReaderException.class,
+        () -> Parser.LispReader.readString("9223372036854775808", null));
   }
 
   @Test

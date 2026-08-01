@@ -64,8 +64,8 @@ fn matches_canonical_numbers_characters_and_duplicate_errors() {
         vec![
             Form::BigInteger("123".into()),
             Form::BigInteger("0".into()),
-            Form::BigInteger("+0".into()),
-            Form::BigInteger("-0".into()),
+            Form::BigInteger("0".into()),
+            Form::BigInteger("0".into()),
             Form::Decimal("123.45".into()),
             Form::Decimal("0".into()),
         ]
@@ -131,13 +131,7 @@ fn preserves_metadata_and_rejects_unknown_dispatch_forms() {
 #[test]
 fn matches_extended_canonical_reader_categories() {
     for unsupported in [
-        "1.00M",
-        "0M",
         "9223372036854775808",
-        "123N",
-        "0N",
-        "+0N",
-        "-0N",
     ] {
         assert!(parse_forms(unsupported)
             .unwrap_err()

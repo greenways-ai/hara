@@ -59,9 +59,7 @@ public class HaraNumericInteropTest {
       assertThrows(
           PolyglotException.class,
           () -> context.eval(HaraLanguage.ID, LARGE_INTEGER.toString()));
-      assertThrows(
-          PolyglotException.class,
-          () -> context.eval(HaraLanguage.ID, "1.2300M"));
+      assertEquals("1.23M", context.eval(HaraLanguage.ID, "1.2300M").toString());
     }
   }
 }

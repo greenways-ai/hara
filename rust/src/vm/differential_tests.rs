@@ -168,7 +168,6 @@ fn supported_form_errors_match_the_existing_evaluator() {
         "(recur 1)",
         "(loop [i 0] (recur 1 2))",
         "(+ 1",
-        "42N",
         "((fn [x] x) 1 2)",
         "((fn [x] x))",
         "(1 2)",

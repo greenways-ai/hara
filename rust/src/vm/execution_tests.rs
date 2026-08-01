@@ -49,8 +49,8 @@ fn literals() {
     assert_eq!(eval("\"hello\""), "\"hello\"");
     assert_eq!(eval(":hara/name"), ":hara/name");
     assert_eq!(eval("\\a"), "\\a");
-    // BigInteger/Decimal literals compile as constants but are not
-    // readable by this parser ("Invalid number: 42N").
+    assert_eq!(eval("42N"), "42N");
+    assert_eq!(eval("1.25M"), "1.25M");
     assert_eq!(eval("#\"\\d+\""), "#\"\\d+\"");
     assert_eq!(eval("()"), "nil");
     assert_eq!(eval("^:private (+ 1 2)"), "3");
