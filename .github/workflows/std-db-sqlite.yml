@@ -3,6 +3,7 @@ name: std.db SQLite WASM
 on:
   pull_request:
     paths:
+      - "lib/src/std/db.hal"
       - "lib/src/std/db/**"
       - "java/src/test/java/hara/truffle/HaraSqliteProcessExtensionTest.java"
       - "rust/extensions/std-db-sqlite/**"
