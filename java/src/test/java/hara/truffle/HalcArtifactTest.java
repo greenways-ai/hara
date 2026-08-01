@@ -280,6 +280,18 @@ public class HalcArtifactTest {
   }
 
   @Test
+  public void sharedCrossRuntimeGoldensDecode() throws Exception {
+    Path root = Path.of("specs/01-lang/009-halc/draft/conformance/golden");
+    HalcArtifact.Module current = HalcArtifact.decode(Files.readAllBytes(root.resolve("complete.halc")));
+    assertEquals(HalcArtifact.Origin.HALC, current.origin);
+    assertEquals("halc.conformance.complete", current.namespace);
+    assertEquals("conformance/complete.hal", current.resource);
+    assertEquals(
+        HalcArtifact.Origin.LEGACY_HIR,
+        HalcArtifact.decode(Files.readAllBytes(root.resolve("legacy-v1.hir"))).origin);
+  }
+
+  @Test
   public void strictAndOffModesBothPreserveFoundationSemantics() {
     String previous = System.getProperty("hara.HalcMode");
     try {

@@ -362,6 +362,14 @@ final class HalcArtifact {
 
   private static void writeMetadata(DataOutputStream output, IObjType value) throws IOException {
     IMetadata metadata = value.meta();
+    if (metadata instanceof IMapType<?, ?> map) {
+      Object portable = map;
+      for (String key : new String[] {"line", "column", "end-line", "end-column", "file"}) {
+        portable = ((IMapType) portable).dissoc(Keyword.create(key));
+      }
+      metadata = (IMetadata) portable;
+      if (((IMapType<?, ?>) metadata).count() == 0) metadata = null;
+    }
     if (metadata == null) {
       output.writeBoolean(false);
     } else if (metadata instanceof IMapType<?, ?>) {

@@ -379,7 +379,7 @@ fn write_value_with_metadata(output: &mut Vec<u8>, form: &Form, metadata: Option
             write_metadata(output, metadata);
         }
         Form::Map(entries) => {
-            output.push(MAP);
+            output.push(ORDERED_MAP);
             write_count(output, entries.len() as i32);
             for (key, value) in entries {
                 write_value(output, key);
@@ -388,7 +388,7 @@ fn write_value_with_metadata(output: &mut Vec<u8>, form: &Form, metadata: Option
             write_metadata(output, metadata);
         }
         Form::Set(items) => {
-            output.push(SET);
+            output.push(ORDERED_SET);
             write_values(output, items);
             write_metadata(output, metadata);
         }
@@ -541,6 +541,21 @@ mod tests {
 
         assert_eq!(decode_halc(&legacy).unwrap().origin, HalcOrigin::LegacyHir);
         assert_eq!(&halc[..4], MAGIC);
+    }
+
+    #[test]
+    fn shared_cross_runtime_goldens_decode() {
+        let complete = include_bytes!(
+            "../../../specs/01-lang/009-halc/draft/conformance/golden/complete.halc"
+        );
+        let legacy = include_bytes!(
+            "../../../specs/01-lang/009-halc/draft/conformance/golden/legacy-v1.hir"
+        );
+        let current = decode_halc(complete).unwrap();
+        assert_eq!(current.origin, HalcOrigin::Halc);
+        assert_eq!(current.namespace, "halc.conformance.complete");
+        assert_eq!(current.resource, "conformance/complete.hal");
+        assert_eq!(decode_halc(legacy).unwrap().origin, HalcOrigin::LegacyHir);
     }
 
     fn hex_bytes(hex: &str) -> Vec<u8> {

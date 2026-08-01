@@ -59,15 +59,18 @@ fn matches_canonical_numbers_characters_and_duplicate_errors() {
             Form::Number(10)
         ]
     );
-    for unsupported in [
-        "123N",
-        "0N",
-        "+0N",
-        "-0N",
-        "123.45M",
-        "0M",
-        "9223372036854775808",
-    ] {
+    assert_eq!(
+        parse_forms("123N 0N +0N -0N 123.45M 0M").unwrap(),
+        vec![
+            Form::BigInteger("123".into()),
+            Form::BigInteger("0".into()),
+            Form::BigInteger("+0".into()),
+            Form::BigInteger("-0".into()),
+            Form::Decimal("123.45".into()),
+            Form::Decimal("0".into()),
+        ]
+    );
+    for unsupported in ["9223372036854775808", "1.2.3M", "12xN"] {
         assert!(parse_forms(unsupported)
             .unwrap_err()
             .contains("Invalid number"));

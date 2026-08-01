@@ -362,8 +362,21 @@ impl<'a> Parser<'a> {
                     i64::from_str_radix(hex, 16)
                         .ok()
                         .map(|value| Form::Number(if negative { -value } else { value }))
-                } else if body.ends_with(['N', 'M']) {
-                    None
+                } else if token.ends_with('N') {
+                    let value = &token[..token.len() - 1];
+                    value
+                        .strip_prefix(['+', '-'])
+                        .unwrap_or(value)
+                        .chars()
+                        .all(|ch| ch.is_ascii_digit())
+                        .then(|| Form::BigInteger(value.to_owned()))
+                } else if token.ends_with('M') {
+                    let value = &token[..token.len() - 1];
+                    value
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|number| number.is_finite())
+                        .map(|_| Form::Decimal(value.to_owned()))
                 } else if let Some((radix, digits)) = body.split_once(['r', 'R']) {
                     radix
                         .parse::<u32>()

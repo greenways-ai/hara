@@ -24,6 +24,12 @@ pub(crate) fn compile_halc(args: &[String]) -> Result<(), String> {
     let output_path = args
         .get(output_index + 1)
         .ok_or_else(|| "compile-halc requires --output OUTPUT.halc".to_owned())?;
+    let resource = args
+        .iter()
+        .position(|argument| argument == "--resource")
+        .and_then(|index| args.get(index + 1))
+        .map(String::as_str)
+        .unwrap_or(source_path);
     let source = fs::read_to_string(source_path)
         .map_err(|error| format!("cannot read {source_path}: {error}"))?;
     let forms = parse_forms(&source)?;
@@ -41,7 +47,7 @@ pub(crate) fn compile_halc(args: &[String]) -> Result<(), String> {
             _ => None,
         })
         .ok_or_else(|| format!("{source_path} does not declare an ns or ns+ namespace"))?;
-    let artifact = encode_halc_module(&namespace, source_path, &source, forms);
+    let artifact = encode_halc_module(&namespace, resource, &source, forms);
     if let Some(parent) = std::path::Path::new(output_path).parent() {
         fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
