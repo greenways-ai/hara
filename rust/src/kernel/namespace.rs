@@ -511,7 +511,7 @@ mod tests {
             43
         );
         assert_eq!(
-            target.resolve(&Symbol::parse("-/answer")).unwrap().deref(),
+            source.resolve(&Symbol::parse("-/answer")).unwrap().deref(),
             43
         );
     }
