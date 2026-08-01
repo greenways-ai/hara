@@ -1,0 +1,67 @@
+(ns std.db.text.sql-raw-test
+  (:use code.test)
+  (:require [std.db.text.sql-raw :as raw]
+            [std.db.text.sql-util :as sql]))
+
+(def results
+  [(fact "raw-delete encodes equality and IN predicates"
+     [(raw/raw-delete "Currency" {"id" "XLM"} {})
+      (raw/raw-delete "Currency" {"id" ["in" [["XLM" "USD"]]]} {})]
+     => ["DELETE FROM Currency WHERE id = 'XLM';"
+         "DELETE FROM Currency WHERE id in ('XLM', 'USD');"])
+
+   (fact "raw-insert-array reads string columns from keyword-keyed values"
+     (raw/raw-insert-array
+      "Currency"
+      ["id" "name" "type"]
+      [{:id "XLM" :name "XLM" :type "crypto"}]
+      {})
+     => ["INSERT INTO Currency"
+         " (id, name, type)"
+         " VALUES\n ('XLM','XLM','crypto')"])
+
+   (fact "raw-insert emits a complete statement"
+     (raw/raw-insert
+      "Currency"
+      ["id" "name" "type"]
+      [{:id "XLM" :name "XLM" :type "crypto"}]
+      {})
+     => "INSERT INTO Currency\n (id, name, type)\n VALUES\n ('XLM','XLM','crypto');")
+
+   (fact "raw-upsert preserves source conflict semantics"
+     (raw/raw-upsert
+      "Currency"
+      "id"
+      ["id" "name" "type"]
+      [{:id "XLM" :name "XLM" :type "crypto"}]
+      {:upsert-clause "\"excluded\".time_updated < time_updated"})
+     => (str "INSERT INTO Currency\n"
+             " (id, name, type)\n"
+             " VALUES\n"
+             " ('XLM','XLM','crypto')\n"
+             "ON CONFLICT (id) DO UPDATE SET\n"
+             "name=coalesce(\"excluded\".name,name),\n"
+             "type=coalesce(\"excluded\".type,type)\n"
+             "WHERE \"excluded\".time_updated < time_updated;"))
+
+   (fact "raw-update and raw-select retain source whitespace"
+     [(raw/raw-update "Currency"
+                      {"id" "XLM"}
+                      {"name" "Stellar"}
+                      {})
+      (raw/raw-select "Currency"
+                      {"id" "XLM"}
+                      ["id" "name" "type"]
+                      {})]
+     => ["UPDATE Currency\n SET name = 'Stellar'\n WHERE id = 'XLM';"
+         "SELECT id, name, type\n  FROM Currency\n WHERE id = 'XLM';"])
+
+   (fact "raw statements accept SQLite quoting options"
+     (raw/raw-select
+      "Currency"
+      {"id" "XLM"}
+      ["id" "name"]
+      (sql/sqlite-opts {}))
+     => "SELECT \"id\", \"name\"\n  FROM \"Currency\"\n WHERE \"id\" = 'XLM';")])
+
+(pr-str (run '[std.db.text.sql-raw-test]))
