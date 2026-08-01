@@ -6,6 +6,7 @@
  :targets
  {:node {:module "node/worker.mjs" :runtime :process}
   :browser {:module "browser/worker.mjs" :runtime :web-worker}}
+ :assets []
  :exports
  {"version" {:args [] :returns :map :async true}
   "open"    {:args [:map] :returns :map :async true}
