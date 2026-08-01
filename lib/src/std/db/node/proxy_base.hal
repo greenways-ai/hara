@@ -3,6 +3,7 @@
 ;; ============================================================================
 (ns std.db.node.proxy-base
   (:require [std.db.node.kernel-base :as kernel]
+            [std.db.node.kernel-service :as service]
             [std.db.node.proxy-util :as proxy]
             [std.lib.substrate.protocol :as substrate]))
 
@@ -12,14 +13,18 @@
    kernel/ACTION-KERNEL-TEARDOWN
    kernel/ACTION-SERVICE-INFO
    kernel/ACTION-EXEC
-   kernel/ACTION-QUERY])
+   kernel/ACTION-QUERY
+   service/ACTION-DRIVER-LIST
+   service/ACTION-SERVICE-OPEN
+   service/ACTION-SERVICE-CLOSE
+   service/ACTION-SERVICE-EXISTS])
 
 (defn request-proxy
   [space args request node]
   (proxy/request-proxy space args request node))
 
 (defn init-proxy-handlers
-  "Installs forwarding handlers for all base database runtime actions."
+  "Installs forwarding handlers for all database runtime actions."
   [node]
   (reduce (fn [current action]
             (substrate/register-handler current action request-proxy {})
