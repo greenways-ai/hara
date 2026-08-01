@@ -29,14 +29,7 @@ impl Frame {
         captures: Vec<VmSlot>,
         base: usize,
     ) -> Frame {
-        Self::call_reusing(
-            Vec::new(),
-            local_count,
-            arity,
-            &mut args,
-            captures,
-            base,
-        )
+        Self::call_reusing(Vec::new(), local_count, arity, &mut args, captures, base)
     }
 
     pub(crate) fn call_reusing(
@@ -104,23 +97,54 @@ impl Frame {
         let mut writable = Vec::with_capacity(self.locals.len());
         for value in &self.locals {
             match value {
-                VmSlot::Number(value) => { scalar.push(crate::jit::TraceValue::I64(*value)); writable.push(true); }
-                VmSlot::Bool(value) => { scalar.push(crate::jit::TraceValue::Bool(*value)); writable.push(true); }
-                VmSlot::Nil => { scalar.push(crate::jit::TraceValue::Nil); writable.push(true); }
-                _ => { scalar.push(crate::jit::TraceValue::Nil); writable.push(false); }
+                VmSlot::Number(value) => {
+                    scalar.push(crate::jit::TraceValue::I64(*value));
+                    writable.push(true);
+                }
+                VmSlot::Bool(value) => {
+                    scalar.push(crate::jit::TraceValue::Bool(*value));
+                    writable.push(true);
+                }
+                VmSlot::Nil => {
+                    scalar.push(crate::jit::TraceValue::Nil);
+                    writable.push(true);
+                }
+                VmSlot::Value(value)
+                    if matches!(
+                        value.as_ref(),
+                        crate::core::Value::Tuple(_) | crate::core::Value::Vector(_)
+                    ) =>
+                {
+                    scalar.push(crate::jit::TraceValue::Indexed(Box::new(
+                        value.as_ref().clone(),
+                    )));
+                    writable.push(true);
+                }
+                _ => {
+                    scalar.push(crate::jit::TraceValue::Unsupported);
+                    writable.push(false);
+                }
             }
         }
         (scalar, writable)
     }
 
     #[cfg(feature = "tracing-jit")]
-    pub(crate) fn apply_trace_locals(&mut self, values: &[crate::jit::TraceValue], writable: &[bool]) {
+    pub(crate) fn apply_trace_locals(
+        &mut self,
+        values: &[crate::jit::TraceValue],
+        writable: &[bool],
+    ) {
         for (index, (value, writable)) in values.iter().zip(writable).enumerate() {
-            if !writable { continue; }
+            if !writable {
+                continue;
+            }
             self.locals[index] = match value {
                 crate::jit::TraceValue::I64(value) => VmSlot::Number(*value),
                 crate::jit::TraceValue::Bool(value) => VmSlot::Bool(*value),
                 crate::jit::TraceValue::Nil => VmSlot::Nil,
+                crate::jit::TraceValue::Indexed(value) => VmSlot::Value(value.clone()),
+                crate::jit::TraceValue::Unsupported => continue,
             };
         }
     }

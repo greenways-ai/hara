@@ -53,7 +53,10 @@ impl JitRuntime {
             return false;
         }
         if !self.traces.contains_key(&key) && self.hotness.backedge(key) {
-            match self.recorder.record_loop(program, function, header, from) {
+            match self
+                .recorder
+                .record_loop(program, function, header, from, locals)
+            {
                 Ok(trace) => match self.backend.compile(&trace) {
                     Ok(compiled) => {
                         self.traces.insert(key, compiled);
