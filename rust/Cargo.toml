@@ -1,13 +1,13 @@
 [package]
 name = "hara-wasm"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Portable browser runtime slice for Hara"
 license = "EPL-2.0"
 rust-version = "1.78"
 
 [workspace]
-members = [".", "hoplite/runtime"]
+members = ["."]
 default-members = ["."]
 resolver = "2"
 
@@ -27,8 +27,6 @@ hir-encoder = ["halc-encoder"]
 bytecode-vm = []
 tracing-jit = ["bytecode-vm"]
 native-jit = ["tracing-jit"]
-hoplite = ["bytecode-vm"]
-hoplite-embedded-nginx = ["hoplite"]
 
 [profile.browser-release]
 inherits = "release"
@@ -60,10 +58,5 @@ ed25519-dalek = { version = "2.1", default-features = false, features = ["std"] 
 name = "hara-bytecode-benchmark"
 path = "src/bin/hara-bytecode-benchmark.rs"
 required-features = ["bytecode-vm"]
-
-[[bin]]
-name = "hoplite"
-path = "src/bin/hoplite.rs"
-required-features = ["hoplite"]
 
 [dev-dependencies]

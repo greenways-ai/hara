@@ -28,7 +28,7 @@ DOCS_CONFIG := docs/mkdocs.yml
         web-install hta-test studio-build studio-test \
         chrome-install chrome-build chrome-test \
         docs-build www-build \
-        runtime-benchmark truffle-benchmark parity-benchmark
+        runtime-benchmark vm-bb-benchmark truffle-benchmark parity-benchmark
 
 help: ## Show the available runtime targets
 	@echo 'Hara runtimes'
@@ -61,6 +61,8 @@ help: ## Show the available runtime targets
 	@echo '  make docs-build                 Build documentation strictly'
 	@echo '  make runtime-benchmark [ARGS="..."]'
 	@echo '                                  Run the cross-runtime benchmark'
+	@echo '  make vm-bb-benchmark [ARGS="..."]'
+	@echo '                                  Compare compact VM tiers with bb'
 	@echo '  make clean                      Remove Maven and Cargo build output'
 	@echo
 	@echo 'Examples'
@@ -171,6 +173,9 @@ www-build: ## Build the complete website and runtime payload
 
 runtime-benchmark: ## Run the cross-runtime benchmark suite
 	scripts/run-runtime-benchmarks $(ARGS)
+
+vm-bb-benchmark: ## Compare bytecode/native trace VM tiers with babashka
+	scripts/run-vm-bb-benchmark $(ARGS)
 
 truffle-benchmark: ## Run the JVM Truffle benchmark
 	scripts/run-truffle-benchmark $(ARGS)

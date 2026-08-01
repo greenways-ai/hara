@@ -376,6 +376,21 @@ impl<E: Clone> Standard<E> {
         })
     }
 
+    pub fn assoc_value_owned(mut self, index: usize, value: E) -> Option<Self> {
+        if index == self.size {
+            return Some(self.push_last_owned(value));
+        }
+        if index >= self.size {
+            return None;
+        }
+        if index >= self.tail_offset() {
+            Rc::make_mut(&mut self.tail)[index & NODE_MASK] = value;
+        } else {
+            self.root = assoc_editable(NOEDIT, self.root, self.shift, index, value);
+        }
+        Some(self)
+    }
+
     pub fn push_last(&self, value: E) -> Self {
         if self.size - self.tail_offset() < NODE_WIDTH {
             let mut tail = (*self.tail).clone();
@@ -417,6 +432,34 @@ impl<E: Clone> Standard<E> {
             root,
             tail: Rc::new(vec![value]),
         }
+    }
+
+    pub fn push_last_owned(mut self, value: E) -> Self {
+        if self.size - self.tail_offset() < NODE_WIDTH {
+            Rc::make_mut(&mut self.tail).push(value);
+            self.size += 1;
+            return self;
+        }
+
+        let tail_node = Rc::new(Node::Leaf(Leaf {
+            token: NOEDIT,
+            values: std::mem::take(Rc::make_mut(&mut self.tail)),
+        }));
+        self.tail = Rc::new(vec![value]);
+        if (self.size >> NODE_SHIFT) > (1usize << self.shift) {
+            let mut children = vec![None; NODE_WIDTH];
+            children[0] = Some(self.root);
+            children[1] = Some(new_path(NOEDIT, self.shift, tail_node));
+            self.root = Rc::new(Node::Branch(Branch {
+                token: NOEDIT,
+                children,
+            }));
+            self.shift += NODE_SHIFT;
+        } else {
+            self.root = push_tail_editable(NOEDIT, self.root, self.shift, self.size, tail_node);
+        }
+        self.size += 1;
+        self
     }
 
     pub fn pop_last_value(&self) -> Option<Self> {
