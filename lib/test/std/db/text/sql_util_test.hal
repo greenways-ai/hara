@@ -1,0 +1,152 @@
+(ns std.db.text.sql-util-test
+  (:use code.test)
+  (:require [std.db.text.sql-util :as sql]))
+
+(def identity-column identity)
+(def quoted-column sql/default-quote-fn)
+
+(def results
+  [(fact "SQLite JSON helpers preserve the source subquery syntax"
+     [(sql/sqlite-json-values "'[1,2,3]'")
+      (sql/sqlite-json-keys "'{\"a\":1}'")]
+     => ["(SELECT value from json_each('[1,2,3]'))"
+         "(SELECT key from json_each('{\"a\":1}'))"])
+
+   (fact "SQL literals escape strings, JSON and booleans"
+     [(sql/encode-value nil)
+      (sql/encode-value true)
+      (sql/encode-value false)
+      (sql/encode-value 1.235)
+      (sql/encode-value "hel'lo")
+      (sql/encode-value {"a" "he'llo"})]
+     => ["NULL"
+         "TRUE"
+         "FALSE"
+         "'1.235'"
+         "'hel''lo'"
+         "'{\"a\":\"he''llo\"}'"])
+
+   (fact "encode-bool rejects non-boolean values"
+     (sql/encode-bool nil)
+     => (throws))
+
+   (fact "operators support built-ins and dialect overrides"
+     [(sql/encode-operator "eq" {})
+      (sql/encode-operator "lte" {})
+      (sql/encode-operator "ilike" {:operators {"ilike" "LIKE"}})
+      (sql/encode-operator "in" {})]
+     => ["=" "<=" "LIKE" "in"])
+
+   (fact "tagged SQL columns, tuples, tables and casts encode recursively"
+     [(sql/encode-sql-column
+       {"::" "sql/column" :name "hello"}
+       quoted-column {} nil)
+      (sql/encode-sql-tuple
+       {"::" "sql/tuple" :args [1 2 3]}
+       quoted-column {:strict true} sql/encode-loop-fn)
+      (sql/encode-sql-table
+       {"::" "sql/table" :name "hello" :schema "world"}
+       quoted-column {:strict true} nil)
+      (sql/encode-sql-cast
+       {"::" "sql/cast"
+        :args ["k" {"::" "sql/table"
+                    :name "hello"
+                    :schema "ENUM"}]}
+       quoted-column {:strict true} sql/encode-loop-fn)]
+     => ["\"hello\""
+         "'1', '2', '3'"
+         "\"world\".\"hello\""
+         "k::\"ENUM\".\"hello\""])
+
+   (fact "SQLite aliases and macros rewrite PostgreSQL JSON functions"
+     [(sql/encode-sql-fn
+       {"::" "sql/fn"
+        :name "jsonb_build_object"
+        :args ["a" {"a" 1}]}
+       quoted-column
+       {:values {:replace sql/SQLITE_FN}}
+       sql/encode-loop-fn)
+      (sql/encode-sql-fn
+       {"::" "sql/fn"
+        :name "jsonb_object_keys"
+        :args [{"a" 1}]}
+       quoted-column
+       {:values {:replace sql/SQLITE_FN}}
+       sql/encode-loop-fn)]
+     => ["json_object(a, '{\"a\":1}')"
+         "(SELECT key from json_each('{\"a\":1}'))"])
+
+   (fact "nested infix functions and SELECT nodes retain raw SQL fragments"
+     [(sql/encode-loop-fn
+       {"::" "sql/fn"
+        :name "+"
+        :args ["k" {"::" "sql/fn" :name "+" :args [1 2 3]}]}
+       quoted-column
+       {:strict true :values {:replace {}}}
+       sql/encode-loop-fn)
+      (sql/encode-sql-select
+       {"::" "sql/select"
+        :args ["*" "from"
+               {"::" "sql/fn"
+                :name "jsonb_each"
+                :args ["'[1,2,3]'" true]}]}
+       quoted-column
+       {:strict true :values {:replace {}}}
+       sql/encode-loop-fn)]
+     => ["(k + ('1' + '2' + '3'))"
+         "(SELECT * from jsonb_each('[1,2,3]', TRUE))"])
+
+   (fact "query values support tuples, raw fragments and nested expressions"
+     [(sql/encode-query-value [["hello" "world"]] identity-column {})
+      (sql/encode-query-value ["RAW_SQL_FRAGMENT"] identity-column {})
+      (sql/encode-query-value
+       ["and" {"::" "sql/fn" :name "+" :args [1 2]}]
+       identity-column
+       {})]
+     => ["('hello', 'world')"
+         "RAW_SQL_FRAGMENT"
+         "and ('1' + '2')"])
+
+   (fact "query segments and OR groups match the xt.db string contract"
+     [(sql/encode-query-segment "name" "hello" identity-column {})
+      (sql/encode-query-segment "name" ["neq" "hell'o"] identity-column {})
+      (sql/encode-query-segment
+       "name" ["in" [["hello" "world"]]] identity-column {})
+      (sql/encode-query-string
+       [{"name" "hello"} {"name" "world"}]
+       "WHERE"
+       {:column-fn (fn [column] (str "\"SCHEMA\"." column))})]
+     => ["name = 'hello'"
+         "name != 'hell''o'"
+         "name in ('hello', 'world')"
+         "WHERE (\"SCHEMA\".name = 'hello') OR (\"SCHEMA\".name = 'world')"])
+
+   (fact "LIMIT, OFFSET and ordering constructors form tagged SQL nodes"
+     [(sql/encode-sql-keyword
+       (sql/LIMIT 10) quoted-column {} sql/encode-loop-fn)
+      (sql/encode-sql-keyword
+       (sql/OFFSET 20) quoted-column {} sql/encode-loop-fn)
+      (sql/encode-sql-keyword
+       (sql/ORDER-BY ["name"]) quoted-column {} sql/encode-loop-fn)
+      (sql/encode-sql-keyword
+       (sql/ORDER-SORT "desc") quoted-column {} sql/encode-loop-fn)]
+     => ["LIMIT 10" "OFFSET 20" "ORDER BY \"name\"" "DESC"])
+
+   (fact "default PostgreSQL formatting quotes schemas and wraps JSON results"
+     [(sql/default-table-fn "hello" {:hello {:schema "test.schema"}})
+      (sql/postgres-wrapper-fn "SELECT * FROM table" 2)]
+     => ["\"test.schema\".\"hello\""
+         "WITH j_ret AS (\n  SELECT * FROM table\n) SELECT jsonb_agg(j_ret) FROM j_ret"])
+
+   (fact "SQLite options expose aliases, quoting and result coercion"
+     (let [options (sql/sqlite-opts {})
+           boolean-coercion (get-in options [:coerce :boolean])
+           json-coercion (get-in options [:coerce :jsonb])]
+       [(get-in options [:types :uuid])
+        (get-in options [:operators "ilike"])
+        (boolean-coercion 0)
+        (boolean-coercion 1)
+        (json-coercion "{\"a\":1}")])
+     => ["text" "LIKE" false true {"a" 1}])])
+
+(pr-str (run '[std.db.text.sql-util-test]))
