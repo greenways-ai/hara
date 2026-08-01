@@ -1,0 +1,326 @@
+;; ============================================================================
+;; std.db.text.base-flatten — flatten nested schema-shaped database records.
+;;
+;; Native Hara port of xt.db.text.base-flatten. The source implementation
+;; mutates JavaScript objects; this port threads immutable accumulators while
+;; preserving the public maps and link indexes.
+;; ============================================================================
+(ns std.db.text.base-flatten
+  (:refer-clojure :exclude [flatten])
+  (:require [std.db.text.base-schema :as schema]))
+
+(defn- ^{:schema [:fn [:map :any :any] :any]}
+  field
+  "Returns a field from its keyword key or fallback string key."
+  [value keyword-key string-key]
+  (if (has? value keyword-key)
+    (get value keyword-key)
+    (get value string-key)))
+
+(defn- ^{:schema [:fn [:map] :bool]}
+  string-keyed?
+  "Returns true when a non-empty map uses string keys."
+  [value]
+  (and (map? value)
+       (not (empty? value))
+       (string? (key (first value)))))
+
+(defn- ^{:schema [:fn [:map :any :any] :any]}
+  convention-key
+  "Chooses a keyword or string output key matching value's convention."
+  [value keyword-key string-key]
+  (if (string-keyed? value) string-key keyword-key))
+
+(defn- ^{:schema [:fn [:map :any] :any]}
+  compatible-get
+  "Gets key directly, then by its string/keyword counterpart."
+  [value lookup-key]
+  (cond
+    (has? value lookup-key)
+    (get value lookup-key)
+
+    (string? lookup-key)
+    (get value (keyword lookup-key))
+
+    (keyword? lookup-key)
+    (get value (name lookup-key))
+
+    :else
+    nil))
+
+(defn- ^{:schema [:fn [:map :map] :map]}
+  map-merge
+  "Returns left with entries from right associated over it."
+  [left right]
+  (reduce (fn [out pair]
+            (assoc out (key pair) (val pair)))
+          (if (map? left) left {})
+          (if (map? right) right {})))
+
+(defn- ^{:schema [:fn [:map :map] :map]}
+  nested-map-merge
+  "Merges maps, combining colliding map values one level deeper."
+  [left right]
+  (reduce (fn [out pair]
+            (let [entry-key (key pair)
+                  incoming (val pair)
+                  current (get out entry-key)]
+              (assoc out
+                     entry-key
+                     (if (and (map? current) (map? incoming))
+                       (map-merge current incoming)
+                       incoming))))
+          (if (map? left) left {})
+          (if (map? right) right {})))
+
+(defn- ^{:schema [:fn [:map :vector] :map]}
+  map-pick
+  "Returns entries from value selected by compatible keys."
+  [value selected]
+  (reduce (fn [out selected-key]
+            (cond
+              (has? value selected-key)
+              (assoc out selected-key (get value selected-key))
+
+              (and (string? selected-key)
+                   (has? value (keyword selected-key)))
+              (assoc out
+                     (keyword selected-key)
+                     (get value (keyword selected-key)))
+
+              (and (keyword? selected-key)
+                   (has? value (name selected-key)))
+              (assoc out
+                     (name selected-key)
+                     (get value (name selected-key)))
+
+              :else
+              out))
+          {}
+          selected))
+
+(defn- ^{:schema [:fn [:map] :map]}
+  normalize-link-object
+  "Wraps singular link objects in vectors and drops unusable link values."
+  [value]
+  (reduce (fn [out pair]
+            (let [item (val pair)]
+              (cond
+                (map? item)
+                (assoc out (key pair) [item])
+
+                (vector? item)
+                (assoc out (key pair) item)
+
+                :else
+                out)))
+          {}
+          value))
+
+(defn- ^{:schema [:fn [:any :map] :str]}
+  link-id
+  "Returns the ID represented by a string or record link value."
+  [value source]
+  (cond
+    (string? value)
+    value
+
+    (map? value)
+    (field value :id "id")
+
+    :else
+    (throw (ex-info (str "Invalid link - " (pr-str source))
+                    {:tag :db/invalid-link
+                     :input value
+                     :source source}))))
+
+(defn ^{:schema [:fn [:map] :map]}
+  flatten-get-links
+  "Converts array-valued links into ID lookup maps."
+  [value]
+  (reduce (fn [out pair]
+            (let [items (val pair)]
+              (if (vector? items)
+                (assoc out
+                       (key pair)
+                       (reduce (fn [lookup item]
+                                 (assoc lookup (link-id item value) true))
+                               {}
+                               items))
+                out)))
+          {}
+          value))
+
+(defn ^{:schema [:fn [:map :map :map :map] :map]}
+  flatten-merge
+  "Merges one flattened record into table-map."
+  [table-map data-object reference-links reverse-links]
+  (let [id (field data-object :id "id")
+        existing (get table-map id)
+        sample (if (map? existing) existing data-object)
+        id-key (convention-key sample :id "id")
+        data-key (convention-key sample :data "data")
+        reference-key (convention-key sample :ref-links "ref_links")
+        reverse-key (convention-key sample :rev-links "rev_links")
+        record (if (map? existing)
+                 existing
+                 {id-key id
+                  data-key {}
+                  reference-key {}
+                  reverse-key {}})
+        updated (assoc record
+                       id-key id
+                       data-key
+                       (map-merge (field record :data "data") data-object)
+                       reference-key
+                       (nested-map-merge
+                        (field record :ref-links "ref_links")
+                        reference-links)
+                       reverse-key
+                       (nested-map-merge
+                        (field record :rev-links "rev_links")
+                        reverse-links))]
+    (assoc table-map id updated)))
+
+(defn ^{:schema [:fn [:map :str :map :map :map] :map]}
+  flatten-node
+  "Classifies and flattens one table record without traversing its children."
+  [schema-map table-name data parent acc]
+  (let [combined (map-merge data parent)
+        table-map (let [current (compatible-get acc table-name)]
+                    (if (map? current) current {}))
+        data-object (map-pick combined (schema/data-keys schema-map table-name))
+        reverse-object (normalize-link-object
+                        (map-pick combined
+                                  (schema/rev-keys schema-map table-name)))
+        reference-object (normalize-link-object
+                          (map-pick combined
+                                    (schema/ref-keys schema-map table-name)))
+        reverse-links (flatten-get-links reverse-object)
+        reference-links (flatten-get-links reference-object)
+        reference-id-links
+        (reduce (fn [out pair]
+                  (let [id-key (key pair)
+                        link-key (val pair)
+                        id-value (compatible-get combined id-key)]
+                    (if (string? id-value)
+                      (assoc out link-key {id-value true})
+                      out)))
+                {}
+                (schema/ref-id-keys schema-map table-name))
+        merged-reference-links
+        (nested-map-merge reference-links reference-id-links)
+        updated-table
+        (flatten-merge table-map
+                       data-object
+                       merged-reference-links
+                       reverse-links)
+        output-sample (if (string-keyed? data) data combined)]
+    {(convention-key output-sample :table-map "table_map") updated-table
+     (convention-key output-sample :data-object "data_obj") data-object
+     (convention-key output-sample :ref-object "ref_obj") reference-object
+     (convention-key output-sample :rev-object "rev_obj") reverse-object}))
+
+(defn ^{:schema [:fn [:map :str :map :str :map :fn] :map]}
+  flatten-linked
+  "Traverses nested link records and returns the updated accumulator."
+  [schema-map table-name link-object link-id-value acc flatten-function]
+  (reduce
+   (fn [current pair]
+     (let [link-key (key pair)
+           value (val pair)
+           entry (compatible-get
+                  (compatible-get schema-map table-name)
+                  link-key)
+           reference (field entry :ref "ref")
+           next-table (field reference :ns "ns")
+           reverse-value (field reference :rval "rval")]
+       (if (vector? value)
+         (reduce (fn [nested child]
+                   (if (map? child)
+                     (flatten-function schema-map
+                                       next-table
+                                       child
+                                       {reverse-value [link-id-value]}
+                                       nested)
+                     nested))
+                 current
+                 value)
+         current)))
+   acc
+   link-object))
+
+(defn ^{:schema [:fn [:map :str :map :map :map] :map]}
+  flatten-obj
+  "Flattens one record and all nested linked records."
+  [schema-map table-name value parent acc]
+  (let [node (flatten-node schema-map table-name value parent acc)
+        table-map (field node :table-map "table_map")
+        data-object (field node :data-object "data_obj")
+        reference-object (field node :ref-object "ref_obj")
+        reverse-object (field node :rev-object "rev_obj")
+        link-id-value (field data-object :id "id")
+        with-table (assoc acc table-name table-map)
+        with-reverse (flatten-linked schema-map
+                                     table-name
+                                     reverse-object
+                                     link-id-value
+                                     with-table
+                                     flatten-obj)]
+    (flatten-linked schema-map
+                    table-name
+                    reference-object
+                    link-id-value
+                    with-reverse
+                    flatten-obj)))
+
+(defn ^{:schema [:fn [:map :str :any :any] :map]}
+  flatten
+  "Flattens one record or a vector of records for table-name."
+  [schema-map table-name data parent]
+  (let [parent-value (if (map? parent) parent {})]
+    (cond
+      (vector? data)
+      (reduce (fn [acc item]
+                (if (nil? item)
+                  acc
+                  (flatten-obj schema-map table-name item parent-value acc)))
+              {}
+              data)
+
+      (map? data)
+      (flatten-obj schema-map table-name data parent-value {})
+
+      :else
+      {})))
+
+(defn ^{:schema [:fn [:map :any] :map]}
+  flatten-bulk
+  "Flattens records grouped by table name."
+  [schema-map grouped]
+  (let [entries (if (vector? grouped) grouped (vec grouped))]
+    (reduce (fn [acc pair]
+              (let [table-name (first pair)
+                    value (second pair)
+                    items (if (vector? value) value [value])]
+                (reduce (fn [nested item]
+                          (if (nil? item)
+                            nested
+                            (flatten-obj schema-map table-name item {} nested)))
+                        acc
+                        items)))
+            {}
+            entries)))
+
+(defn ^{:schema [:fn [:map :map :any] :vector]}
+  flatten-bulk-ids
+  "Returns table names and sorted flattened IDs in lookup table order."
+  [schema-map lookup grouped]
+  (let [flat (flatten-bulk schema-map grouped)]
+    (reduce (fn [out table-name]
+              (let [table-map (compatible-get flat table-name)]
+                (if (map? table-map)
+                  (conj out [table-name (sort (keys table-map))])
+                  out)))
+            []
+            (schema/table-order lookup))))
