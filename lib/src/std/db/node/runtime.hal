@@ -52,6 +52,11 @@
   (protocol/detach-transport node transport-id)
   (close-adapter adapter))
 
+(defn- runtime-node
+  [runtime]
+  (or (field runtime :client)
+      (field runtime :server)))
+
 (defn ready-signal
   "Creates the wire-compatible worker ready signal."
   [transport-id worker-id]
@@ -283,28 +288,63 @@
   [client-node config schema lookup adapter options]
   (adapter-connect :node-worker client-node config schema lookup adapter options))
 
+(defn list-services
+  "Returns dynamically managed service IDs for runtime."
+  ([runtime]
+   (list-services runtime {}))
+  ([runtime options]
+   (client/service-list (runtime-node runtime) options)))
+
+(defn create-service
+  "Creates a named dynamic database service in runtime."
+  ([runtime service-id entry schema lookup]
+   (create-service runtime service-id entry schema lookup {}))
+  ([runtime service-id entry schema lookup options]
+   (client/service-open (runtime-node runtime)
+                        service-id
+                        entry
+                        schema
+                        lookup
+                        options)))
+
+(defn remove-service
+  "Closes and removes a named dynamic database service."
+  ([runtime service-id]
+   (remove-service runtime service-id {}))
+  ([runtime service-id options]
+   (client/service-close (runtime-node runtime) service-id options)))
+
 (defn open-service
   "Returns a generic std.db connection to a named runtime service."
   ([runtime service-id]
    (open-service runtime service-id {}))
   ([runtime service-id options]
-   (let [node (or (field runtime :client)
-                  (field runtime :server))]
+   (let [node (runtime-node runtime)]
      (if node
        (connection/open node service-id options)
        (throw (ex-info "Database runtime has no accessible node"
                        {:runtime runtime :service service-id}))))))
 
+(defn- teardown-databases
+  [client-node server-node transport-id config]
+  (if server-node
+    (promise/then
+     (service/service-close-all-main server-node)
+     (fn [_]
+       (kernel/kernel-teardown-main server-node config)))
+    (promise/then
+     (client/service-close-all client-node {:transport-id transport-id})
+     (fn [_]
+       (client/kernel-teardown client-node config {:transport-id transport-id})))))
+
 (defn close-runtime
-  "Tears down database services and detaches or closes the runtime transport."
+  "Closes dynamic and configured services, then detaches the runtime transport."
   [runtime config]
   (let [client-node (field runtime :client)
         server-node (field runtime :server)
         transport-id (field runtime :transport-id)
         adapter (field runtime :adapter)
-        teardown (if server-node
-                   (kernel/kernel-teardown-main server-node config)
-                   (client/kernel-teardown client-node config {:transport-id transport-id}))]
+        teardown (teardown-databases client-node server-node transport-id config)]
     (promise/finally
      teardown
      (fn []
