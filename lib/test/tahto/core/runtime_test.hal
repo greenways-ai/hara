@@ -26,12 +26,18 @@
    (test/check "book registry preserves Foundation language and grammar tags"
                [[(:lang js-book)
                  (:parent js-book)
-                 (get-in js-book [:grammar :grammar/id])]
+                 (:tag (:grammar js-book))]
                 [(:lang python-book)
                  (:parent python-book)
-                 (get-in python-book [:grammar :grammar/id])]]
+                 (:tag (:grammar python-book))]]
                [[:js :xtalk :js]
                 [:python :xtalk :py]])
+   (test/check "books contain materialized selections ready for compilation"
+               [(get-in js-book [:coordinate :grammar/version])
+                (get-in python-book [:coordinate :grammar/version])
+                (boolean (:selection js-book))
+                (boolean (:selection python-book))]
+               [1 1 true true])
    (test/check "oneshot constructors use Foundation program defaults"
                [[(:lang js-oneshot) (:runtime js-oneshot)
                  (:program js-oneshot) (:exec js-oneshot)]

@@ -65,14 +65,6 @@
       {:defglobal {:raw ""}
        :def {:raw ""}}}}}))
 
-(def +book+
-  {:lang +language+
-   :parent :xtalk
-   :version +version+
-   :grammar +grammar+})
-
-(def +init+ +book+)
-
 (defn- install-source
   [catalog source]
   (if (registry/find catalog (grammar/source-coordinate source))
@@ -96,3 +88,15 @@
    (registry/resolve catalog
                      {:grammar/id +tag+
                       :grammar/version +version+})))
+
+(def +selection+ (select))
+
+(def +book+
+  {:lang +language+
+   :parent :xtalk
+   :version +version+
+   :coordinate (:coordinate +selection+)
+   :grammar (:grammar +selection+)
+   :selection +selection+})
+
+(def +init+ +book+)
