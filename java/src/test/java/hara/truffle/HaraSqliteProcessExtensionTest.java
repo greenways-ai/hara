@@ -25,22 +25,22 @@ public class HaraSqliteProcessExtensionTest {
           HaraLanguage.ID,
           "(ns app (:require [std.db :as db] "
               + "[std.db.sqlite :as sqlite] "
+              + "[std.db.text.sql-raw :as raw] "
               + "[std.db.text.sql-util :as sql])) "
               + "(def connection (deref (sqlite/open))) "
               + "(deref (db/exec connection "
               + "\"create table items (id integer primary key, name text not null)\")) "
               + "(deref (db/exec connection "
               + "\"insert into items (name) values (?)\" [\"wombat\"])) "
-              + "(def predicate "
-              + "(sql/encode-query-string {\"name\" \"wombat\"} \"WHERE\" "
-              + "{:column-fn sql/default-quote-fn})) "
-              + "(def result (deref (db/query connection "
-              + "(str \"select id, name from items \" predicate))))");
+              + "(def statement "
+              + "(raw/raw-select \"items\" {\"name\" \"wombat\"} "
+              + "[\"id\" \"name\"] (sql/sqlite-opts {}))) "
+              + "(def result (deref (db/query connection statement)))");
       assertEquals("sqlite", context.eval(HaraLanguage.ID, "(name (db/engine connection))").asString());
       assertEquals("sqlite", context.eval(HaraLanguage.ID, "(name (db/provider connection))").asString());
       assertEquals(
-          "WHERE \"name\" = 'wombat'",
-          context.eval(HaraLanguage.ID, "predicate").asString());
+          "SELECT \"id\", \"name\"\n  FROM \"items\"\n WHERE \"name\" = 'wombat';",
+          context.eval(HaraLanguage.ID, "statement").asString());
       assertEquals(
           "name",
           context.eval(HaraLanguage.ID, "(get (get result :columns) 1)").asString());
