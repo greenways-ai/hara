@@ -7,6 +7,7 @@
 ;; ============================================================================
 (ns std.db.node.runtime
   (:require [std.db.node.client-base :as client]
+            [std.db.node.connection :as connection]
             [std.db.node.kernel-base :as kernel]
             [std.db.node.proxy-base :as proxy]
             [std.db.node.proxy-util :as proxy-util]
@@ -37,6 +38,18 @@
       (if (promise? result) result (promise/from result)))
     (catch Throwable error
       (promise/new (fn [resolve reject] (reject error))))))
+
+(defn- close-adapter
+  [adapter]
+  (let [close-function (if adapter (compatible-get adapter :close) nil)]
+    (if close-function
+      (call-promise close-function [])
+      (promise/from nil))))
+
+(defn- cleanup-adapter
+  [node transport-id adapter]
+  (protocol/detach-transport node transport-id)
+  (close-adapter adapter))
 
 (defn ready-signal
   "Creates the wire-compatible worker ready signal."
@@ -145,14 +158,18 @@
      (init-server server-node)
      (init-server-proxy client-node)
      (connect-nodes client-node server-node transport-id)
-     (promise/then
-      (client/kernel-init client-node config schema lookup {:transport-id transport-id})
-      (fn [status]
-        {:runtime (std.db.node.runtime/DatabaseRuntime
-                   :local client-node server-node transport-id worker-id nil)
-         :init status
-         :transport transport-id
-         :transport-attached true})))))
+     (promise/catch
+      (promise/then
+       (client/kernel-init client-node config schema lookup {:transport-id transport-id})
+       (fn [status]
+         {:runtime (std.db.node.runtime/DatabaseRuntime
+                    :local client-node server-node transport-id worker-id nil)
+          :init status
+          :transport transport-id
+          :transport-attached true}))
+      (fn [error]
+        (disconnect-nodes client-node server-node transport-id)
+        (throw error))))))
 
 (defn local-runtime
   "Creates and connects a complete in-memory database runtime."
@@ -182,16 +199,22 @@
       (do
         (install-drivers node drivers)
         (init-server node)
-        (promise/then
-         (call-promise boot-function [node transport-id worker-id ready])
-         (fn [status]
-           {:runtime (std.db.node.runtime/DatabaseRuntime
-                      kind nil node transport-id worker-id adapter)
-            :ready ready
-            :boot status
-            :transport transport-id
-            :transport-attached
-            (not (nil? (protocol/get-transport node transport-id)))}))))))
+        (promise/catch
+         (promise/then
+          (call-promise boot-function [node transport-id worker-id ready])
+          (fn [status]
+            {:runtime (std.db.node.runtime/DatabaseRuntime
+                       kind nil node transport-id worker-id adapter)
+             :ready ready
+             :boot status
+             :transport transport-id
+             :transport-attached
+             (not (nil? (protocol/get-transport node transport-id)))}))
+         (fn [error]
+           (promise/then
+            (cleanup-adapter node transport-id adapter)
+            (fn [_]
+              (throw error)))))))))
 
 (defn sharedworker-init-kernel
   ([node adapter]
@@ -225,19 +248,25 @@
                       {:kind kind :adapter adapter}))
       (do
         (init-server-proxy client-node)
-        (promise/then
-         (call-promise connect-function [client-node transport-id])
-         (fn [_]
-           (proxy-util/set-default-transport client-node transport-id)
+        (promise/catch
+         (promise/then
+          (call-promise connect-function [client-node transport-id])
+          (fn [_]
+            (proxy-util/set-default-transport client-node transport-id)
+            (promise/then
+             (client/kernel-init client-node config schema lookup {:transport-id transport-id})
+             (fn [status]
+               {:runtime (std.db.node.runtime/DatabaseRuntime
+                          kind client-node nil transport-id worker-id adapter)
+                :init status
+                :transport transport-id
+                :transport-attached
+                (not (nil? (protocol/get-transport client-node transport-id)))}))))
+         (fn [error]
            (promise/then
-            (client/kernel-init client-node config schema lookup {:transport-id transport-id})
-            (fn [status]
-              {:runtime (std.db.node.runtime/DatabaseRuntime
-                         kind client-node nil transport-id worker-id adapter)
-               :init status
-               :transport transport-id
-               :transport-attached
-               (not (nil? (protocol/get-transport client-node transport-id)))}))))))))
+            (cleanup-adapter client-node transport-id adapter)
+            (fn [_]
+              (throw error)))))))))
 
 (defn sharedworker-connect
   [client-node config schema lookup adapter options]
@@ -251,6 +280,18 @@
   [client-node config schema lookup adapter options]
   (adapter-connect :node-worker client-node config schema lookup adapter options))
 
+(defn open-service
+  "Returns a generic std.db connection to a named runtime service."
+  ([runtime service-id]
+   (open-service runtime service-id {}))
+  ([runtime service-id options]
+   (let [node (or (field runtime :client)
+                  (field runtime :server))]
+     (if node
+       (connection/open node service-id options)
+       (throw (ex-info "Database runtime has no accessible node"
+                       {:runtime runtime :service service-id}))))))
+
 (defn close-runtime
   "Tears down database services and detaches or closes the runtime transport."
   [runtime config]
@@ -258,7 +299,6 @@
         server-node (field runtime :server)
         transport-id (field runtime :transport-id)
         adapter (field runtime :adapter)
-        close-function (if adapter (compatible-get adapter :close) nil)
         teardown (if server-node
                    (kernel/kernel-teardown-main server-node config)
                    (client/kernel-teardown client-node config {:transport-id transport-id}))]
@@ -270,11 +310,7 @@
          (disconnect-nodes client-node server-node transport-id)
 
          server-node
-         (do
-           (protocol/detach-transport server-node transport-id)
-           (when close-function (close-function)))
+         (cleanup-adapter server-node transport-id adapter)
 
          :else
-         (do
-           (protocol/detach-transport client-node transport-id)
-           (when close-function (close-function))))))))
+         (cleanup-adapter client-node transport-id adapter))))))
