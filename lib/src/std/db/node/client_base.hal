@@ -3,6 +3,7 @@
 ;; ============================================================================
 (ns std.db.node.client-base
   (:require [std.db.node.kernel-base :as kernel]
+            [std.db.node.kernel-batch :as batch]
             [std.db.node.kernel-service :as service]
             [std.db.node.proxy-util :as proxy]))
 
@@ -64,6 +65,22 @@
    (query node service-id sql [] options))
   ([node service-id sql parameters options]
    (proxy/request-client node kernel/ACTION-QUERY [service-id sql parameters] options)))
+
+(defn batch
+  "Runs statement descriptors sequentially on one runtime service."
+  [node service-id statements options]
+  (proxy/request-client node
+                        batch/ACTION-BATCH
+                        [service-id statements false]
+                        options))
+
+(defn transaction
+  "Runs statement descriptors within one server-side transaction."
+  [node service-id statements options]
+  (proxy/request-client node
+                        batch/ACTION-BATCH
+                        [service-id statements true]
+                        options))
 
 (defn begin
   [node service-id options]
