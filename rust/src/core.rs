@@ -2561,6 +2561,11 @@ impl ProtocolRegistry {
             protocol_with_meta,
         );
         registry.register("std.protocol.ideref/IDeref", "deref", protocol_deref);
+        registry.register(
+            "std.protocol.idereftimeout/IDerefTimeout",
+            "deref-timeout",
+            protocol_deref_timeout,
+        );
         registry.register("std.protocol.ireset/IReset", "reset", protocol_reset);
         registry.register("std.protocol.icas/ICas", "cas", protocol_cas);
         registry.register("std.protocol.ireduce/IReduce", "reduce", protocol_reduce);
@@ -5640,6 +5645,32 @@ fn protocol_deref(arguments: &[Value]) -> Result<Value, String> {
         [Value::Var(var)] => Ok(var.deref_value()),
         [Value::Promise(promise)] => promise_value_result(promise),
         _ => Err("IDeref/deref has no implementation for this value".into()),
+    }
+}
+
+fn protocol_deref_timeout(arguments: &[Value]) -> Result<Value, String> {
+    match arguments {
+        [Value::Promise(promise), Value::Number(milliseconds), timeout] if *milliseconds >= 0 => {
+            match promise.state() {
+                PromiseState::Fulfilled(value) => Ok(value),
+                PromiseState::Rejected(error) => Err(promise_rejection_error(error)),
+                PromiseState::Pending => Ok(timeout.clone()),
+            }
+        }
+        [Value::Atom(atom), Value::Number(milliseconds), _] if *milliseconds >= 0 => {
+            Ok(atom.deref_value())
+        }
+        [Value::Var(var), Value::Number(milliseconds), _] if *milliseconds >= 0 => {
+            Ok(var.deref_value())
+        }
+        [_, Value::Number(milliseconds), _] if *milliseconds < 0 => {
+            Err("IDerefTimeout/deref-timeout expects non-negative milliseconds".into())
+        }
+        [_, _, _] => Err(
+            "IDerefTimeout/deref-timeout expects a dereferenceable value, milliseconds, and timeout value"
+                .into(),
+        ),
+        _ => Err("IDerefTimeout/deref-timeout expects three arguments".into()),
     }
 }
 

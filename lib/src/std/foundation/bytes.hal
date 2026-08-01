@@ -40,10 +40,7 @@
   get
   "Returns a byte at index, or fallback when the indexed form supplies one."
   ([value index]
-   (let [found (get value index :bytes/missing)]
-     (if (= found :bytes/missing)
-       (throw "bytes/get index out of bounds")
-       found)))
+   (std.native.Bytes/get value index))
   ([value index fallback]
    (std.native.Bytes/get value index fallback)))
 
