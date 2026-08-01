@@ -9,6 +9,7 @@
 
 (def SERVICE-REGISTRY "std.db.runtime/dynamic-services")
 
+(def ACTION-RUNTIME-STATUS "@xt.db/runtime-status")
 (def ACTION-DRIVER-LIST "@xt.db/driver-list")
 (def ACTION-SERVICE-LIST "@xt.db/service-list")
 (def ACTION-SERVICE-OPEN "@xt.db/service-open")
@@ -71,6 +72,21 @@
   "Returns true when a named database service exists."
   [node service-id]
   (not (nil? (substrate/get-service node service-id))))
+
+(defn- optional-service-info
+  [node service-id]
+  (when (service-exists-main node service-id)
+    (kernel/service-info-main node service-id)))
+
+(defn runtime-status-main
+  "Returns an inspectable snapshot of the database runtime node."
+  [node]
+  {:node-id (field node :id)
+   :drivers (driver-list-main node)
+   :common (service-exists-main node kernel/COMMON-SERVICE)
+   :primary (optional-service-info node kernel/PRIMARY-SERVICE)
+   :caching (optional-service-info node kernel/CACHING-SERVICE)
+   :dynamic-services (service-list-main node)})
 
 (defn service-open-main
   "Opens or returns a named database service."
@@ -135,6 +151,10 @@
        {:status :closed-all
         :services results}))))
 
+(defn runtime-status-handler
+  [space args request node]
+  (runtime-status-main node))
+
 (defn driver-list-handler
   [space args request node]
   (driver-list-main node))
@@ -164,8 +184,9 @@
   (service-close-all-main node))
 
 (defn init-handlers
-  "Installs dynamic service lifecycle handlers on node."
+  "Installs runtime inspection and dynamic service handlers on node."
   [node]
+  (substrate/register-handler node ACTION-RUNTIME-STATUS runtime-status-handler {})
   (substrate/register-handler node ACTION-DRIVER-LIST driver-list-handler {})
   (substrate/register-handler node ACTION-SERVICE-LIST service-list-handler {})
   (substrate/register-handler node ACTION-SERVICE-OPEN service-open-handler {})
