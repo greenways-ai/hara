@@ -1146,7 +1146,10 @@ public final class HaraContext {
 
   void declareCurrent(Symbol symbol) {
     HaraVar existing = currentNamespace.lookup(symbol.getName());
-    if (existing == null || !currentNamespace.name().equals(existing.namespaceName())) {
+    if (existing != null && !currentNamespace.name().equals(existing.namespaceName())) {
+      throw protectedReferredVar(symbol, existing);
+    }
+    if (existing == null) {
       currentNamespace.define(
           symbol.getName(), null, symbol.meta(), definitionOrigin);
     }
@@ -1293,6 +1296,7 @@ public final class HaraContext {
     return protocol;
   }
 
+  @TruffleBoundary
   public HaraVar defineLanguageProtocol(Symbol symbol, HaraProtocol protocol) {
     validateLanguageProtocolMethods(currentNamespace, symbol.getName(), protocol);
     HaraVar variable = define(symbol, protocol);
@@ -1431,6 +1435,7 @@ public final class HaraContext {
     return (JvmFlavorProvider) provider;
   }
 
+  @TruffleBoundary
   public boolean hasNativeSymbol(Symbol symbol) {
     Map<String, Object> imports = nativeImports.get(currentNamespace.name());
     if (imports == null) return false;
@@ -1438,6 +1443,7 @@ public final class HaraContext {
     return imports.containsKey(importedName);
   }
 
+  @TruffleBoundary
   public Object resolveNativeSymbol(Symbol symbol) {
     Map<String, Object> imports = nativeImports.get(currentNamespace.name());
     if (imports == null) throw new HaraException("No native imports in the current namespace");
@@ -1456,6 +1462,7 @@ public final class HaraContext {
     }
   }
 
+  @TruffleBoundary
   public boolean matchesNativeThrowable(Symbol type, Throwable throwable) {
     if (!hasNativeSymbol(type)) return false;
     NativeFlavorProvider provider = nativeProvider();
@@ -1463,12 +1470,14 @@ public final class HaraContext {
         && provider.matchesThrowable(resolveNativeSymbol(type), throwable, nativeAccess());
   }
 
+  @TruffleBoundary
   public Object constructNative(Object type, Object[] arguments) {
     NativeFlavorProvider provider = nativeProvider();
     if (provider == null) throw new HaraException("new requires an ns :flavor declaration");
     return provider.construct(HaraBox.unwrap(type), arguments, nativeAccess());
   }
 
+  @TruffleBoundary
   public Object readNativeMember(Object receiver, String member) {
     NativeFlavorProvider provider = nativeProvider();
     if (provider == null)
@@ -1476,6 +1485,7 @@ public final class HaraContext {
     return provider.readMember(HaraBox.unwrap(receiver), member, nativeAccess());
   }
 
+  @TruffleBoundary
   public Object indexNative(Object receiver, Object index) {
     NativeFlavorProvider provider = nativeProvider();
     if (provider == null)
@@ -3493,6 +3503,7 @@ public final class HaraContext {
                     })));
   }
 
+  @TruffleBoundary
   public Object invokeMarkerMethod(Object receiverValue, String method, Object[] arguments) {
     Object receiver = HaraBox.unwrap(receiverValue);
     if (receiver instanceof HaraArray) {

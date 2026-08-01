@@ -10,9 +10,10 @@
 #       Runs via the `java` on PATH (builds the Truffle runtime classpath with
 #       Maven first). Label should record the JVM/compiler mode, e.g.
 #       interpreter-temurin or jvmci-graalvm.
-#   run-runtime-corpus-benchmark bin <label> <output.csv> [windows] [calls] <binary>
+#   run-runtime-corpus-benchmark bin <label> <output.csv> [windows] [calls] <binary> [compiler]
 #       Runs via a prebuilt hara CLI binary (e.g. target/hara-truffle,
-#       the Native Image fallback).
+#       a Native Image with runtime compilation enabled). Compiler is
+#       `enabled` or `fallback`; it defaults to `fallback` for compatibility.
 
 set -euo pipefail
 
@@ -41,8 +42,11 @@ if [[ "$MODE" == "jvm" ]]; then
 elif [[ "$MODE" == "bin" ]]; then
   BINARY="${6:?bin mode needs the path to the hara binary}"
   RUNNER=("$BINARY")
-  # scripts/build-truffle-native builds the Native Image fallback runtime.
-  COMPILER=fallback
+  COMPILER="${7:-fallback}"
+  if [[ "$COMPILER" != "enabled" && "$COMPILER" != "fallback" ]]; then
+    echo "unknown compiler mode: $COMPILER (expected enabled or fallback)" >&2
+    exit 2
+  fi
 else
   echo "unknown mode: $MODE (expected jvm or bin)" >&2
   exit 2
@@ -62,7 +66,14 @@ items = wl if isinstance(wl, list) else wl.get("workloads")
 
 rows = []
 for w in items:
-    b64 = base64.urlsafe_b64encode(w["source"].encode()).decode()
+    source = w.get("source")
+    if source is None:
+        sources = w.get("sources", {})
+        source = sources.get("hara-truffle", sources.get("default"))
+    if source is None:
+        print(f"{label} {w['id']:22s} skipped (no hara-truffle source)")
+        continue
+    b64 = base64.urlsafe_b64encode(source.encode()).decode()
     out = subprocess.run(
         runner + ["benchmark", "hara-truffle", w["id"], b64, str(w["expected"]), windows, calls],
         capture_output=True, text=True)

@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import math
 import os
 import platform
 import shutil
@@ -26,6 +27,7 @@ DEFAULT_CORPUS = HERE / "workloads.json"
 CHEZ_RUNNER = HERE / "chez_runner.scm"
 GUILE_RUNNER = HERE / "guile_runner.scm"
 SBCL_RUNNER = HERE / "sbcl_runner.lisp"
+LUA_RUNNER = ROOT / "lib/bench/luajit-hara/lua_runner.lua"
 HARA_BENCH = ROOT / "rust/target/release/hara-runtime-benchmark"
 
 PROFILES = {
@@ -41,6 +43,10 @@ LISP_RUNTIMES = {
     "guile": {"command": ["guile", "-s", str(GUILE_RUNNER)],
               "source_field": "scheme_source", "binary": "guile"},
 }
+
+LANGUAGE_RUNTIMES = {**LISP_RUNTIMES,
+                     "luajit": {"command": ["luajit", str(LUA_RUNNER)],
+                                "source_field": "lua_source", "binary": "luajit"}}
 
 
 def run(command, *, timeout=180, check=True):
@@ -74,7 +80,9 @@ def bytecode_binary(label):
 
 def build_bytecode(selected):
     for runtime, (features, label) in BYTECODE_VARIANTS.items():
-        if runtime not in selected:
+        if (f"{runtime}-prepared" not in selected and
+                not (runtime == "hara-rust-bytecode" and
+                     "hara-rust-bytecode-eval" in selected)):
             continue
         env = os.environ.copy()
         env["CARGO_TARGET_DIR"] = str(ROOT / "target/runtime-benchmark" / label)
@@ -85,34 +93,40 @@ def build_bytecode(selected):
 
 
 def adapters():
-    def bytecode(binary, runtime, workload, windows, calls):
-        return [str(binary), "execute-only", workload["id"],
+    def bytecode(binary, runtime, mode, workload, windows, calls):
+        return [str(binary), mode, workload["id"],
                 hex_payload(workload["hara_source"]), workload["expected"],
                 str(windows), str(calls), runtime]
 
-    def lisp(name, workload, windows, calls):
-        spec = LISP_RUNTIMES[name]
+    def language(name, mode, workload, windows, calls):
+        spec = LANGUAGE_RUNTIMES[name]
         return spec["command"] + [
-            workload["id"], hex_payload(workload[spec["source_field"]]),
+            mode, workload["id"], hex_payload(workload[spec["source_field"]]),
             workload["expected"], str(windows), str(calls)]
 
     result = {
-        "hara-rust-native": lambda w, n, c: [
-            str(HARA_BENCH), "hara-rust-native", w["id"],
+        "hara-rust-native-eval": lambda w, n, c: [
+            str(HARA_BENCH), "hara-rust-native-eval", w["id"],
             hex_payload(w["hara_source"]), w["expected"], str(n), str(c)],
     }
-    for name in LISP_RUNTIMES:
-        result[name] = lambda w, n, c, name=name: lisp(name, w, n, c)
+    for name in LANGUAGE_RUNTIMES:
+        for mode in ("eval", "prepared"):
+            label = f"{name}-{mode}"
+            result[label] = lambda w, n, c, name=name, mode=mode: language(
+                name, mode, w, n, c)
     for runtime, (_, label) in BYTECODE_VARIANTS.items():
-        result[runtime] = (
+        result[f"{runtime}-prepared"] = (
             lambda w, n, c, b=bytecode_binary(label), r=runtime:
-            bytecode(b, r, w, n, c))
+            bytecode(b, f"{r}-prepared", "execute-only", w, n, c))
+    result["hara-rust-bytecode-eval"] = (
+        lambda w, n, c, b=bytecode_binary("vm"):
+        bytecode(b, "hara-rust-bytecode-eval", "compile-execute", w, n, c))
     return result
 
 
 def percentile(values, fraction):
     ordered = sorted(values)
-    return ordered[min(len(ordered) - 1, int((len(ordered) - 1) * fraction))]
+    return ordered[min(len(ordered) - 1, math.ceil((len(ordered) - 1) * fraction))]
 
 
 def analyse(samples):
@@ -142,17 +156,16 @@ def timed(command):
 
 
 def markdown(data):
-    lisps = [name for name in data["runtime_order"] if name in LISP_RUNTIMES]
-    hara_tiers = [name for name in data["runtime_order"]
-                  if name not in LISP_RUNTIMES]
+    lisps = [name for name in data["runtime_order"]
+             if name.split("-")[0] in LANGUAGE_RUNTIMES]
+    hara_tiers = [name for name in data["runtime_order"] if name not in lisps]
     lines = ["# Lisp vs Hara (Rust native) benchmark", "",
              f"Generated: `{data['environment']['timestamp']}` on "
              f"`{data['environment']['platform']}`.", "",
              "Values are machine-specific comparison evidence, not regression "
-             "thresholds. All runtimes parse and evaluate the workload source "
-             "on every call; the Scheme and Common Lisp sources are "
-             "hand-written untyped equivalents checked against the same "
-             "expected value.", "",
+             "thresholds. `-eval` rows include source loading on every call; "
+             "`-prepared` rows compile/load once and invoke repeatedly. Rows "
+             "from different lanes are not apples-to-apples.", "",
              "## Startup", "", "| Runtime | p50 ms | p95 ms |", "|---|---:|---:|"]
     for name, item in data["startup"].items():
         lines.append(f"| {name} | {item['p50_ns']/1e6:.2f} | {item['p95_ns']/1e6:.2f} |")
@@ -160,6 +173,9 @@ def markdown(data):
               "| Runtime / workload | First ms | Steady ms | ns/iteration | calls/s | Converged window |",
               "|---|---:|---:|---:|---:|---:|"]
     for row in data["measurements"]:
+        if row.get("status") == "unsupported":
+            lines.append(f"| {row['runtime']} / {row['workload']} | — | — | — | — | — |")
+            continue
         convergence = row["analysis"]["converged_window"]
         per_iteration = row["analysis"].get("ns_per_iteration")
         per_iteration_text = "—" if per_iteration is None else f"{per_iteration:.2f}"
@@ -170,6 +186,12 @@ def markdown(data):
             f"| {row['analysis']['steady_ns']/1e6:.3f} | {per_iteration_text} "
             f"| {throughput_text} "
             f"| {convergence if convergence is not None else '—'} |")
+    lines += ["", "## Feature coverage", "", "| Runtime / workload | Status | Detail |",
+              "|---|---|---|"]
+    for row in data["measurements"]:
+        status = row.get("status", "ok")
+        detail = row.get("reason", "checksum verified").replace("|", "\\|")
+        lines.append(f"| {row['runtime']} / {row['workload']} | {status} | {detail} |")
     lines += ["", "## Head-to-head (steady state, lisp / hara tier)", "",
               "| Workload | Lisp | Hara tier | Lisp steady ms | Hara steady ms | Ratio |",
               "|---|---|---|---:|---:|---:|"]
@@ -179,17 +201,15 @@ def markdown(data):
             base = index.get((lisp, workload))
             for tier in hara_tiers:
                 hara = index.get((tier, workload))
-                if base and hara:
+                if (base and hara and base.get("status") == "ok"
+                        and hara.get("status") == "ok"):
                     lisp_ns = base["analysis"]["steady_ns"]
                     hara_ns = hara["analysis"]["steady_ns"]
                     lines.append(f"| {workload} | {lisp} | {tier} | {lisp_ns/1e6:.3f} "
                                  f"| {hara_ns/1e6:.3f} | {lisp_ns/hara_ns:.4f} |")
-    lines += ["", "Ratio < 1 means the Lisp runtime is faster. `hara-rust-native` "
-              "and the Lisp runners re-parse and evaluate the source on every "
-              "call (SBCL evals in :compile mode; Chez compiles eval'd forms; "
-              "Guile compiles eval'd forms to bytecode); the `hara-rust-*` VM "
-              "tiers compile once and execute only (their first value is the "
-              "first execution, not compilation). Convergence is the first "
+    lines += ["", "Ratio < 1 means the comparison runtime is faster. Compare "
+              "only rows carrying the same `-eval` or `-prepared` suffix. "
+              "Convergence is the first "
               "five-window run within ±5% of the final ten-window median with "
               "CV ≤10%.", ""]
     return "\n".join(lines)
@@ -212,17 +232,19 @@ def main():
         parser.error("unknown runtime(s): " + ", ".join(unknown))
 
     if not args.no_build:
-        if "hara-rust-native" in selected:
+        if "hara-rust-native-eval" in selected:
             run(["cargo", "build", "--manifest-path", "rust/Cargo.toml", "--release",
                  "--bin", "hara-runtime-benchmark"], timeout=600)
         build_bytecode(selected)
-    if "hara-rust-native" in selected and not HARA_BENCH.is_file():
+    if "hara-rust-native-eval" in selected and not HARA_BENCH.is_file():
         parser.error(f"missing {HARA_BENCH} (build it or drop --no-build)")
     for runtime, (_, label) in BYTECODE_VARIANTS.items():
-        if runtime in selected and not bytecode_binary(label).is_file():
+        if (f"{runtime}-prepared" in selected or
+                (runtime == "hara-rust-bytecode" and
+                 "hara-rust-bytecode-eval" in selected)) and not bytecode_binary(label).is_file():
             parser.error(f"missing {bytecode_binary(label)} (build it or drop --no-build)")
-    for name, spec in LISP_RUNTIMES.items():
-        if name in selected and not shutil.which(spec["binary"]):
+    for name, spec in LANGUAGE_RUNTIMES.items():
+        if any(runtime.startswith(f"{name}-") for runtime in selected) and not shutil.which(spec["binary"]):
             parser.error(f"{spec['binary']} not found on PATH "
                          f"(brew install {'chezscheme' if name == 'chez' else name})")
 
@@ -241,16 +263,28 @@ def main():
                          "p50_ns": int(statistics.median(elapsed)),
                          "p95_ns": percentile(elapsed, 0.95)}
         for workload in corpus:
-            _, result = timed(adapter(workload, profile["windows"], profile["calls"]))
+            try:
+                _, result = timed(adapter(workload, profile["windows"], profile["calls"]))
+            except subprocess.CalledProcessError as error:
+                message = (error.stderr or error.stdout or str(error)).strip().splitlines()
+                result = {"runtime": name, "workload": workload["id"],
+                          "status": "unsupported",
+                          "reason": message[-1] if message else str(error)}
+                measurements.append(result)
+                print(f"{name:30} {workload['id']:30} unsupported: {result['reason']}")
+                continue
+            result["runtime"] = name
             result["analysis"] = analyse(result["samples_ns"])
-            if workload.get("iterations"):
+            result["status"] = "ok"
+            operations = workload.get("operations", workload.get("iterations"))
+            if operations:
                 result["analysis"]["ns_per_iteration"] = (
-                    result["analysis"]["steady_ns"] / workload["iterations"])
+                    result["analysis"]["steady_ns"] / operations)
             measurements.append(result)
             print(f"{name:18} {workload['id']:18} "
                   f"{result['analysis']['steady_ns']/1e6:9.3f} ms")
 
-    data = {"schema_version": 1, "profile": args.profile,
+    data = {"schema_version": 2, "profile": args.profile,
             "corpus": str(corpus_path.relative_to(ROOT)),
             "environment": {"timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
                             "platform": platform.platform(),
@@ -261,6 +295,7 @@ def main():
             "versions": {"sbcl": version(["sbcl", "--version"]),
                          "chez": version(["chez", "--version"]),
                          "guile": version(["guile", "--version"]),
+                         "luajit": version(["luajit", "-v"]),
                          "rust": version(["rustc", "--version"])},
             "workload_ids": [w["id"] for w in corpus],
             "runtime_order": selected,

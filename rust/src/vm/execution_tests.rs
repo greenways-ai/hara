@@ -76,6 +76,23 @@ fn dynamic_collections_and_short_circuit_forms() {
 }
 
 #[test]
+fn compiled_execution_can_return_an_immutable_value_directly() {
+    let mut runtime = Runtime::core();
+    let program = runtime
+        .compile_bytecode("{:answer 42}")
+        .expect("map must compile");
+    let result = runtime
+        .execute_compiled_bytecode_value(program)
+        .expect("map must execute");
+
+    assert!(matches!(
+        result,
+        Value::Map(_) | Value::OrderedMap(_) | Value::SortedMap(_) | Value::Trie(_)
+    ));
+    assert_eq!(result.display(), "{:answer 42}");
+}
+
+#[test]
 fn runtime_bytecode_defmacro_registers_and_expands() {
     let mut runtime = Runtime::core();
     assert_eq!(

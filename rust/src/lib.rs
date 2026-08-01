@@ -1491,22 +1491,40 @@ impl Runtime {
         })
     }
 
+    /// Executes an already compiled program against this runtime's namespace
+    /// registry. Embedding hosts use this for prepare-once/call-many paths
+    /// without decoding an artifact or rebuilding the program on every call.
+    pub fn execute_compiled_bytecode(
+        &mut self,
+        program: std::rc::Rc<vm::Program>,
+    ) -> Result<String, String> {
+        self.execute_compiled_bytecode_value(program)
+            .map(|value| value.display())
+    }
+
+    /// Executes an already compiled program and returns its immutable runtime
+    /// value directly. This avoids display serialization and lets native hosts
+    /// inspect persistent results through their shared representation.
+    pub fn execute_compiled_bytecode_value(
+        &mut self,
+        program: std::rc::Rc<vm::Program>,
+    ) -> Result<core::Value, String> {
+        let result = core::with_macros(self.macros.clone(), || {
+            vm::execute_program_with_globals(program, &self.namespace_registry)
+                .map_err(|error| error.to_string())
+        });
+        let current = self.namespace_registry.current().name().as_str().to_owned();
+        core::select_namespace_environment(&self.namespace_registry, &mut self.env, &current);
+        result
+    }
+
     /// Compiles and executes through the experimental VM against this
     /// runtime's registry, then syncs the flat env so later `eval_native`
     /// calls see the vars the program interned. No fallback: unsupported
     /// forms fail as compile errors. `eval_native` is unaffected.
     pub fn eval_bytecode_native(&mut self, source: &str) -> Result<String, String> {
         let program = self.compile_bytecode(source)?;
-        let result = core::with_macros(self.macros.clone(), || {
-            vm::execute_program_with_globals(program, &self.namespace_registry)
-                .map(|value| value.display())
-                .map_err(|error| error.to_string())
-        });
-        // Rebuild the env from the registry so mixed evaluator/VM usage
-        // on one Runtime observes the same globals.
-        let current = self.namespace_registry.current().name().as_str().to_owned();
-        core::select_namespace_environment(&self.namespace_registry, &mut self.env, &current);
-        result
+        self.execute_compiled_bytecode(program)
     }
 
     /// Compiles against this runtime's namespaces and persists the validated
