@@ -60,9 +60,9 @@ public class HaraPgliteProcessExtensionTest {
         Context.newBuilder(HaraLanguage.ID).allowCreateProcess(true).build()) {
       context.eval(
           HaraLanguage.ID,
-          "(ns runtime-app (:require [std.lib.substrate :as substrate] "
+          "(ns runtime-app (:require [std.db :as db] "
+              + "[std.lib.substrate :as substrate] "
               + "[std.db.node.runtime :as runtime] "
-              + "[std.db.node.client-base :as client] "
               + "[std.db.node.driver.pglite :as pglite-driver])) "
               + "(def runtime-config {:primary {:type :pglite :options {}}}) "
               + "(def server (substrate/node-create \"pglite-runtime-server\")) "
@@ -70,13 +70,15 @@ public class HaraPgliteProcessExtensionTest {
               + "(pglite-driver/install server) "
               + "(def connected (deref (runtime/local-connect "
               + "client-node server runtime-config {} {}))) "
-              + "(deref (client/exec client-node \"db/primary\" "
-              + "\"create table items (id serial primary key, name text not null)\" [] {})) "
-              + "(deref (client/exec client-node \"db/primary\" "
-              + "\"insert into items (name) values ($1)\" [\"runtime-wombat\"] {})) "
-              + "(def runtime-result (deref (client/query client-node \"db/primary\" "
-              + "\"select id, name from items\" [] {}))) "
-              + "(def runtime-info (deref (client/service-info client-node \"db/primary\" {})))");
+              + "(def runtime-connection "
+              + "(deref (runtime/open-service (get connected :runtime) \"db/primary\"))) "
+              + "(deref (db/exec runtime-connection "
+              + "\"create table items (id serial primary key, name text not null)\")) "
+              + "(deref (db/exec runtime-connection "
+              + "\"insert into items (name) values ($1)\" [\"runtime-wombat\"])) "
+              + "(def runtime-result (deref (db/query runtime-connection "
+              + "\"select id, name from items\"))) "
+              + "(def runtime-info (db/info runtime-connection))");
       assertTrue(
           context.eval(HaraLanguage.ID, "(get connected :transport-attached)").asBoolean());
       assertEquals(
@@ -85,11 +87,13 @@ public class HaraPgliteProcessExtensionTest {
       assertEquals(
           "pglite",
           context.eval(HaraLanguage.ID, "(name (get runtime-info :provider))").asString());
+      assertTrue(context.eval(HaraLanguage.ID, "(get runtime-info :remote)").asBoolean());
       assertEquals(
           "runtime-wombat",
           context
               .eval(HaraLanguage.ID, "(get (get (get runtime-result :rows) 0) 1)")
               .asString());
+      assertTrue(context.eval(HaraLanguage.ID, "(deref (db/close runtime-connection))").asBoolean());
       assertTrue(
           context
               .eval(
