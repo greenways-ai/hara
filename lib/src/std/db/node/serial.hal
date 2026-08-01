@@ -1,0 +1,48 @@
+;; ============================================================================
+;; std.db.node.serial — promise-based FIFO execution queues.
+;; ============================================================================
+(ns std.db.node.serial
+  (:require [std.foundation.promise :as promise]))
+
+(defn create
+  "Creates a FIFO queue whose tail is an already-settled promise."
+  []
+  (atom (promise/from nil)))
+
+(defn- call-promise
+  [function]
+  (try
+    (let [result (function)]
+      (if (promise? result) result (promise/from result)))
+    (catch Throwable error
+      (promise/new (fn [resolve reject] (reject error))))))
+
+(defn submit
+  "Queues function after the current tail and returns its result promise.
+
+   A gate prevents functions from failed CAS attempts from ever running."
+  [queue function]
+  (loop []
+    (let [previous (deref queue)
+          resolver (atom nil)
+          gate (promise/new
+                (fn [resolve reject]
+                  (reset! resolver resolve)))
+          previous-settled (promise/catch previous (fn [error] nil))
+          result (promise/then
+                  previous-settled
+                  (fn [_]
+                    (promise/then
+                     gate
+                     (fn [run?]
+                       (if run?
+                         (call-promise function)
+                         nil)))))
+          tail (promise/catch result (fn [error] nil))]
+      (if (cas! queue previous tail)
+        (do
+          ((deref resolver) true)
+          result)
+        (do
+          ((deref resolver) false)
+          (recur))))))

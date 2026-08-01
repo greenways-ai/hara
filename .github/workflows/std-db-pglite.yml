@@ -1,0 +1,61 @@
+name: std.db PGlite WASM
+
+on:
+  pull_request:
+    paths:
+      - "lib/src/std/db.hal"
+      - "lib/src/std/db/**"
+      - "lib/test/std/db/**"
+      - "java/src/test/java/hara/truffle/HaraDbRuntimeTest.java"
+      - "java/src/test/java/hara/truffle/HaraPgliteProcessExtensionTest.java"
+      - "rust/extensions/std-db-pglite/**"
+      - "rust/web/entries/pglite-*.mjs"
+      - "rust/web/packages/db-pglite/**"
+      - "rust/web/pglite-provider.test.mjs"
+      - "rust/web/vite.pglite-*.config.js"
+      - "rust/web/package-db-provider.mjs"
+      - "rust/web/package-pglite-extension.mjs"
+      - "scripts/build-db-pglite-extension"
+      - ".github/workflows/std-db-pglite.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: std-db-pglite-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pglite-wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+          cache-dependency-path: rust/web/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - name: Install Hara web build dependencies
+        working-directory: rust/web
+        run: npm ci
+      - name: Install pinned PGlite provider
+        working-directory: rust/extensions/std-db-pglite
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Build Node provider
+        working-directory: rust/web
+        run: ./node_modules/.bin/vite build --config vite.pglite-node.config.js
+      - name: Build browser provider
+        working-directory: rust/web
+        run: ./node_modules/.bin/vite build --config vite.pglite-browser.config.js
+      - name: Execute real PGlite provider test
+        working-directory: rust/web
+        run: node --test pglite-provider.test.mjs
+      - name: Assemble extension package
+        working-directory: rust/web
+        run: node package-pglite-extension.mjs
+      - name: Execute PGlite and database runtimes through Hara
+        run: mvn -f java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraDbRuntimeTest,hara.truffle.HaraPgliteProcessExtensionTest test

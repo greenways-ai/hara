@@ -1,0 +1,28 @@
+;; ============================================================================
+;; std.db.node.driver.pglite — embedded PostgreSQL runtime driver registration.
+;; ============================================================================
+(ns std.db.node.driver.pglite
+  (:require [std.db.node.kernel-base :as kernel]
+            [std.db.pglite :as pglite]))
+
+(def DRIVER-ID :pglite)
+
+(defn descriptor
+  "Returns the PGlite runtime driver descriptor."
+  []
+  {:id DRIVER-ID
+   :engine :postgresql
+   :open pglite/open
+   :version pglite/version})
+
+(defn install
+  "Registers the PGlite driver on a database runtime node."
+  [node]
+  (kernel/register-driver node DRIVER-ID (descriptor))
+  node)
+
+(defn uninstall
+  "Removes the PGlite driver from a database runtime node."
+  [node]
+  (kernel/unregister-driver node DRIVER-ID)
+  node)

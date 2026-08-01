@@ -1,0 +1,112 @@
+(ns std.db.node.serial-test
+  (:use code.test)
+  (:require [std.db.node.client-base :as client]
+            [std.db.node.runtime :as runtime]
+            [std.db.protocol :as protocol]
+            [std.foundation.promise :as promise]
+            [std.lib.substrate :as substrate]))
+
+(def EVENTS (atom []))
+
+(defstruct SerialConnection
+  [id])
+
+(defn- finish
+  [sql result]
+  (swap! EVENTS conj [:end sql])
+  result)
+
+(extend-type SerialConnection protocol/IDatabase
+  (db-engine [connection] :serial-sql)
+  (db-provider [connection] :serial)
+  (db-info [connection]
+    {:id (field connection :id)
+     :engine :serial-sql
+     :provider :serial})
+  (db-exec [connection sql parameters]
+    (swap! EVENTS conj [:start sql])
+    (cond
+      (= sql "slow")
+      (promise/delay 20
+                     (fn []
+                       (finish sql {:affected 1})))
+
+      (= sql "fail")
+      (do
+        (swap! EVENTS conj [:end sql])
+        (promise/new
+         (fn [resolve reject]
+           (reject (ex-info "serial failure" {:sql sql})))))
+
+      :else
+      (promise/from (finish sql {:affected 1}))))
+  (db-query [connection sql parameters]
+    (swap! EVENTS conj [:start sql])
+    (promise/from
+     (finish sql {:columns [] :rows [] :affected 0})))
+  (db-close [connection]
+    (promise/from true)))
+
+(defn serial-driver
+  []
+  {:id :serial
+   :engine :serial-sql
+   :open (fn [options]
+           (promise/from
+            (std.db.node.serial-test/SerialConnection "serial-1")))})
+
+(def config {:primary {:type :serial}})
+
+(defn client-node
+  [suffix]
+  (let [server (substrate/node-create (str "serial-server-" suffix))
+        client-node (substrate/node-create (str "serial-client-" suffix))]
+    (deref
+     (runtime/local-connect
+      client-node
+      server
+      config
+      {}
+      {}
+      {:drivers {:serial (serial-driver)}}))
+    client-node))
+
+(def results
+  [(fact "outside requests wait until a transaction batch commits"
+     (reset! EVENTS [])
+     (let [node (client-node "transaction")
+           transaction (client/transaction
+                        node
+                        "db/primary"
+                        [{:sql "slow"}]
+                        {})
+           outside (client/exec node "db/primary" "outside" [] {})]
+       (deref (promise/all [transaction outside]))
+       @EVENTS)
+     => [[:start "begin"]
+         [:end "begin"]
+         [:start "slow"]
+         [:end "slow"]
+         [:start "commit"]
+         [:end "commit"]
+         [:start "outside"]
+         [:end "outside"]])
+
+   (fact "a failed queued request does not stall following requests"
+     (reset! EVENTS [])
+     (let [node (client-node "failure")
+           failed (promise/catch
+                   (client/exec node "db/primary" "fail" [] {})
+                   (fn [error] :failed))
+           following (client/exec node "db/primary" "following" [] {})]
+       [(deref failed)
+        (get (deref following) :affected)
+        @EVENTS])
+     => [:failed
+         1
+         [[:start "fail"]
+          [:end "fail"]
+          [:start "following"]
+          [:end "following"]]])])
+
+(pr-str (run '[std.db.node.serial-test]))
