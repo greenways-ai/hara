@@ -21,13 +21,6 @@ impl Compiler {
         span: &Span,
         tail: bool,
     ) -> Result<(), CompileError> {
-        if children.len() < 2 {
-            return Err(CompileError::new(
-                CompileErrorKind::Recur,
-                "recur expects values",
-                Some(span.start),
-            ));
-        }
         let Some(context) = self.ctx().loops.last().cloned() else {
             return Err(CompileError::new(
                 CompileErrorKind::Recur,
@@ -35,6 +28,13 @@ impl Compiler {
                 Some(span.start),
             ));
         };
+        if children.len() == 1 && !context.slots.is_empty() {
+            return Err(CompileError::new(
+                CompileErrorKind::Recur,
+                "recur expects values",
+                Some(span.start),
+            ));
+        }
         // A recur targeting a loop opened before a try-with-finally must
         // leave the region, which would skip the finally. The evaluator
         // runs the finally per crossing; the general resume protocol is

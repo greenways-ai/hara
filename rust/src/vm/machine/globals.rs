@@ -40,6 +40,37 @@ impl Machine {
     }
 
     #[inline(never)]
+    pub(super) fn exec_build_list(&mut self, count: u16, concatenate: bool) -> Result<(), String> {
+        let count = usize::from(count);
+        if self.stack.len() < count {
+            return Err("stack underflow".into());
+        }
+        let start = self.stack.len() - count;
+        let values = self
+            .stack
+            .drain(start..)
+            .map(|value| Machine::into_value(self.program.clone(), value))
+            .collect::<Vec<_>>();
+        let value = if concatenate {
+            crate::core::vm_concat_list(values)?
+        } else {
+            crate::core::vm_build_list(values)
+        };
+        self.stack.push(value.into());
+        Ok(())
+    }
+
+    #[inline(never)]
+    pub(super) fn exec_to_vector(&mut self) -> Result<(), String> {
+        let Some(value) = self.stack.pop() else {
+            return Err("stack underflow".into());
+        };
+        let value = Machine::into_value(self.program.clone(), value);
+        self.stack.push(crate::core::vm_to_vector(value)?.into());
+        Ok(())
+    }
+
+    #[inline(never)]
     pub(super) fn exec_get_global(&mut self, program: &Program, index: u32) -> Result<(), String> {
         let Some(name) = constant_string(program, index) else {
             return Err(format!("constant index {index} out of range"));

@@ -176,7 +176,7 @@ public final class HaraStruct
   public IAssoc<Object, Object> assoc(Object key, Object value) {
     int index = indexOfKey(key);
     if (index < 0) {
-      return asMap().assoc(key, value);
+      throw new HaraException("unknown struct field: " + fieldName(key));
     }
     Object[] newValues = values.clone();
     newValues[index] = value;
@@ -241,6 +241,16 @@ public final class HaraStruct
       return type.fieldIndex((String) key);
     }
     return -1;
+  }
+
+  private static String fieldName(Object key) {
+    if (key instanceof Keyword) {
+      return ((Keyword) key).getName();
+    }
+    if (key instanceof Symbol) {
+      return ((Symbol) key).getName();
+    }
+    return String.valueOf(key);
   }
 
   @ExportLibrary(InteropLibrary.class)

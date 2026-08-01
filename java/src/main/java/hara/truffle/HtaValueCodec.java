@@ -9,6 +9,9 @@ import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.util.regex.Pattern;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
@@ -18,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 /** Canonical, dependency-free value encoding used by HTA v1. */
-final class HtaValueCodec {
+public final class HtaValueCodec {
   private static final byte[] MAGIC = {'H', 'T', 'A', '1'};
   private static final int MAX_FRAME_BYTES = 64 * 1024 * 1024;
   private static final int MAX_NESTING_DEPTH = 256;
@@ -35,23 +38,37 @@ final class HtaValueCodec {
   private static final int SET = 10;
   private static final int MAP = 11;
   private static final int HANDLE = 12;
+  private static final int F64 = 15;
+  private static final int CHARACTER = 19;
+  private static final int BIG_INTEGER = 20;
+  private static final int DECIMAL = 21;
+  private static final int REGEX = 22;
 
   private HtaValueCodec() {}
 
-  static byte[] encode(Object value) {
+  public static byte[] encode(Object value) {
     ByteArrayOutputStream output = new ByteArrayOutputStream();
     output.writeBytes(MAGIC);
     write(output, HaraBox.unwrap(value), 0);
     return output.toByteArray();
   }
 
-  static Object decode(byte[] bytes) {
+  public static Object decode(byte[] bytes) {
+    return decode(bytes, false);
+  }
+
+  /** Decodes list and vector tags to their distinct Hara persistent values for HBC3 constants. */
+  public static Object decodeCanonical(byte[] bytes) {
+    return decode(bytes, true);
+  }
+
+  private static Object decode(byte[] bytes, boolean canonicalCollections) {
     if (bytes.length > MAX_FRAME_BYTES) throw malformed("frame too large");
     if (bytes.length < MAGIC.length) throw malformed("missing HTA1 header");
     for (int i = 0; i < MAGIC.length; i++) {
       if (bytes[i] != MAGIC[i]) throw malformed("invalid HTA1 header");
     }
-    Reader reader = new Reader(bytes, MAGIC.length);
+    Reader reader = new Reader(bytes, MAGIC.length, canonicalCollections);
     Object value = reader.read(0);
     if (reader.remaining() != 0) throw malformed("trailing bytes");
     return value;
@@ -69,6 +86,21 @@ final class HtaValueCodec {
         || value instanceof Long) {
       output.write(I64);
       writeLong(output, ((Number) value).longValue());
+    } else if (value instanceof Float || value instanceof Double) {
+      output.write(F64);
+      writeLong(output, Double.doubleToRawLongBits(((Number) value).doubleValue()));
+    } else if (value instanceof Character) {
+      output.write(CHARACTER);
+      writeInt(output, (Character) value);
+    } else if (value instanceof BigInteger) {
+      output.write(BIG_INTEGER);
+      writeText(output, value.toString());
+    } else if (value instanceof BigDecimal) {
+      output.write(DECIMAL);
+      writeText(output, value.toString());
+    } else if (value instanceof Pattern) {
+      output.write(REGEX);
+      writeText(output, ((Pattern) value).pattern());
     } else if (value instanceof String) {
       output.write(STRING);
       writeBytes(output, ((String) value).getBytes(StandardCharsets.UTF_8));
@@ -98,6 +130,9 @@ final class HtaValueCodec {
       writeSet(output, ((ISetType<?>) value).iterator(), depth);
     } else if (value instanceof java.util.Set<?>) {
       writeSet(output, ((java.util.Set<?>) value).iterator(), depth);
+    } else if (value instanceof hara.lang.data.List<?>) {
+      output.write(LIST);
+      writeCollection(output, (ILinearType<?>) value, depth);
     } else if (value instanceof ILinearType<?>) {
       output.write(VECTOR);
       writeCollection(output, (ILinearType<?>) value, depth);
@@ -194,10 +229,12 @@ final class HtaValueCodec {
 
   private static final class Reader {
     private final ByteBuffer input;
+    private final boolean canonicalCollections;
 
-    private Reader(byte[] bytes, int offset) {
+    private Reader(byte[] bytes, int offset, boolean canonicalCollections) {
       input =
           ByteBuffer.wrap(bytes, offset, bytes.length - offset).slice().order(ByteOrder.BIG_ENDIAN);
+      this.canonicalCollections = canonicalCollections;
     }
 
     private int remaining() {
@@ -218,6 +255,25 @@ final class HtaValueCodec {
         case I64:
           require(8);
           return input.getLong();
+        case F64:
+          require(8);
+          return Double.longBitsToDouble(input.getLong());
+        case CHARACTER:
+          require(4);
+          int codePoint = input.getInt();
+          if (!Character.isValidCodePoint(codePoint)
+              || (codePoint >= Character.MIN_SURROGATE && codePoint <= Character.MAX_SURROGATE)) {
+            throw malformed("invalid character scalar");
+          }
+          return Character.isBmpCodePoint(codePoint)
+              ? Character.valueOf((char) codePoint)
+              : new String(Character.toChars(codePoint));
+        case BIG_INTEGER:
+          return new BigInteger(text());
+        case DECIMAL:
+          return new BigDecimal(text());
+        case REGEX:
+          return Pattern.compile(text());
         case STRING:
           return text();
         case BYTES:
@@ -227,8 +283,9 @@ final class HtaValueCodec {
         case SYMBOL:
           return Symbol.create(text());
         case LIST:
+          return sequence(depth + 1, false);
         case VECTOR:
-          return sequence(depth + 1);
+          return sequence(depth + 1, true);
         case SET:
           return set(depth + 1);
         case MAP:
@@ -243,28 +300,41 @@ final class HtaValueCodec {
       }
     }
 
-    private ArrayList<Object> sequence(int depth) {
+    private Object sequence(int depth, boolean vector) {
       int size = size();
       requireContainerItems(size, 1, "sequence");
       ArrayList<Object> result = new ArrayList<>(size);
       for (int i = 0; i < size; i++) result.add(read(depth));
-      return result;
+      if (!canonicalCollections) return result;
+      Object[] values = result.toArray();
+      return vector
+          ? hara.lang.data.Vector.Standard.from(null, values)
+          : hara.lang.data.List.Standard.from(null, values);
     }
 
-    private LinkedHashSet<Object> set(int depth) {
+    private Object set(int depth) {
       int size = size();
       requireContainerItems(size, 1, "set");
       LinkedHashSet<Object> result = new LinkedHashSet<>();
       for (int i = 0; i < size; i++) result.add(read(depth));
-      return result;
+      return canonicalCollections
+          ? hara.lang.data.Set.Standard.from(null, result.toArray())
+          : result;
     }
 
-    private LinkedHashMap<Object, Object> map(int depth) {
+    private Object map(int depth) {
       int size = size();
       requireContainerItems(size, 2, "map");
       LinkedHashMap<Object, Object> result = new LinkedHashMap<>();
       for (int i = 0; i < size; i++) result.put(read(depth), read(depth));
-      return result;
+      if (!canonicalCollections) return result;
+      Object[] entries = new Object[result.size() * 2];
+      int index = 0;
+      for (java.util.Map.Entry<Object, Object> entry : result.entrySet()) {
+        entries[index++] = entry.getKey();
+        entries[index++] = entry.getValue();
+      }
+      return hara.lang.data.Map.Standard.from(null, entries);
     }
 
     private String text() {

@@ -107,7 +107,7 @@
         (map-from-wire value)
 
         (= tag "set")
-        (set (map wire->value (or (compatible-get value :items) [])))
+        (into #{} (map wire->value (or (compatible-get value :items) [])))
 
         :else
         (reduce (fn [out entry]
@@ -178,6 +178,36 @@
   [message]
   (= "ready" (compatible-get message :signal)))
 
+(defn- response-frame
+  [request status data error]
+  (substrate/node-frame :response
+                        (str "res-" (protocol/frame-id request))
+                        (protocol/frame-space request)
+                        {}
+                        nil []
+                        (protocol/frame-id request)
+                        status data error nil
+                        (protocol/frame-id request)))
+
+(defn- receive-endpoint-frame
+  [node transport-id send-function frame]
+  (if (= :request (protocol/frame-kind frame))
+    (try
+      (let [result (protocol/receive-frame node frame {:transport-id transport-id})]
+        (if (promise? result)
+          (promise/catch
+           (promise/then result
+                         (fn [value]
+                           (send-function
+                            (frame->wire (response-frame frame :ok value nil)))))
+           (fn [error]
+             (send-function
+              (frame->wire (response-frame frame :error nil error)))))
+          (send-function (frame->wire (response-frame frame :ok result nil)))))
+      (catch Throwable error
+        (send-function (frame->wire (response-frame frame :error nil error)))))
+    (protocol/receive-frame node frame {:transport-id transport-id})))
+
 (defn attach-endpoint
   "Attaches an endpoint as a Substrate transport.
 
@@ -197,9 +227,7 @@
     (listen-function
      (fn [message]
        (if (compatible-get message :kind)
-         (protocol/receive-frame node
-                                 (wire->frame message)
-                                 {:transport-id transport-id})
+         (receive-endpoint-frame node transport-id send-function (wire->frame message))
          (when control-listener
            (control-listener message)))))
     {:node node

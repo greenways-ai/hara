@@ -126,16 +126,20 @@
                              :options {:id "runtime-message"}}}
            connected-promise (runtime/nodeworker-connect
                               client-node config {} {} client-adapter {})
-           booted (deref (runtime/nodeworker-init-kernel
-                          server-node
-                          server-adapter
-                          {:drivers {:message (message-driver)}}))
-           connected (deref connected-promise)
-           output (deref (client/query client-node
-                                       "db/primary"
-                                       "select value"
-                                       [42]
-                                       {}))]
+           booted (IDerefTimeout/deref-timeout
+                   (runtime/nodeworker-init-kernel
+                    server-node
+                    server-adapter
+                    {:drivers {:message (message-driver)}})
+                   2000 :timeout)
+           connected (IDerefTimeout/deref-timeout connected-promise 2000 :timeout)
+           output (IDerefTimeout/deref-timeout
+                   (client/query client-node
+                                 "db/primary"
+                                 "select value"
+                                 [42]
+                                 {})
+                   2000 :timeout)]
        [(get booted :transport-attached)
         (get connected :transport-attached)
         (get (get connected :init) :status)

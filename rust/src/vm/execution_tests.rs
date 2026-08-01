@@ -82,8 +82,38 @@ fn runtime_bytecode_defmacro_registers_and_expands() {
         runtime.eval_bytecode_native("(defmacro unless [test body] `(if ~test nil ~body))"),
         Ok("<fn>".into())
     );
-    assert_eq!(runtime.eval_bytecode_native("(unless false 42)"), Ok("42".into()));
+    assert_eq!(
+        runtime.eval_bytecode_native("(unless false 42)"),
+        Ok("42".into())
+    );
     assert_eq!(runtime.eval_native("(unless false 42)"), Ok("42".into()));
+}
+
+#[test]
+fn foundation_source_compiles_to_bytecode() {
+    let source = include_str!("../../../lib/src/std/foundation.hal");
+    let body = source
+        .split_once("(ns std.foundation)")
+        .expect("foundation namespace declaration")
+        .1;
+    let mut runtime = Runtime::core();
+    assert!(runtime.use_namespace("std.foundation"));
+    runtime.prepare_foundation_bytecode();
+    let artifact = runtime
+        .compile_bytecode_artifact(body)
+        .unwrap_or_else(|error| panic!("foundation compile failed: {error}"));
+
+    let mut loaded = Runtime::core();
+    assert!(loaded.use_namespace("std.foundation"));
+    loaded.prepare_foundation_bytecode();
+    crate::core::with_definition_origin(crate::kernel::VarOrigin::HalFallback, || {
+        loaded
+            .eval_bytecode_artifact(&artifact)
+            .unwrap_or_else(|error| panic!("foundation execute failed: {error}"));
+    });
+    assert!(loaded.use_namespace("std.foundation"));
+    assert_eq!(loaded.eval_native("(map inc [1 2 3])").unwrap(), "[2 3 4]");
+    assert_eq!(loaded.eval_native("(if-not false 42)").unwrap(), "42");
 }
 
 #[test]
@@ -272,7 +302,9 @@ fn recur_errors() {
 
     let (kind, message) = compile_error("(recur)");
     assert_eq!(kind, CompileErrorKind::Recur);
-    assert!(message.contains("recur expects values"), "{message}");
+    assert!(message.contains("recur must be inside loop"), "{message}");
+
+    assert_eq!(eval("(loop [] 42)"), "42");
 
     let (kind, message) = compile_error("(loop [i 0] (recur 1 2))");
     assert_eq!(kind, CompileErrorKind::Recur);
@@ -303,7 +335,6 @@ fn recur_errors() {
 #[test]
 fn unsupported_forms_are_typed_compile_errors() {
     let cases = [
-        ("(quote a)", "unsupported operator: quote"),
         (
             "(let [[a b] [1 2]] a)",
             "let destructuring is not supported",

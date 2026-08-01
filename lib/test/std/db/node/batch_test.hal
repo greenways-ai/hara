@@ -75,8 +75,9 @@
 
 (def results
   [(fact "plain batches run mixed exec and query statements sequentially"
-     (reset! EVENTS [])
-     (let [connected (connected-runtime "plain")
+     (do
+      (reset! EVENTS [])
+      (let [connected (connected-runtime "plain")
            client-node (get connected :client)
            output (deref
                    (client/batch
@@ -93,7 +94,7 @@
              (get output :results))
         (map (fn [event]
                [(get event :mode) (get event :sql)])
-             @EVENTS)])
+             @EVENTS)]))
      => [:complete
          ["insert-one" [[42]] "insert-two"]
          [[:exec "insert-one"]
@@ -101,8 +102,9 @@
           [:exec "insert-two"]]])
 
    (fact "transaction batches begin run and commit without interleaving"
-     (reset! EVENTS [])
-     (let [connected (connected-runtime "commit")
+     (do
+      (reset! EVENTS [])
+      (let [connected (connected-runtime "commit")
            client-node (get connected :client)
            output (deref
                    (client/transaction
@@ -113,14 +115,15 @@
                     {}))]
        [(get output :status)
         (get-in output [:results 1 :rows])
-        (map (fn [event] (get event :sql)) @EVENTS)])
+        (map (fn [event] (get event :sql)) @EVENTS)]))
      => [:committed
          [[7]]
          ["begin" "insert" "select" "commit"]])
 
    (fact "failed transaction batches roll back and propagate the error"
-     (reset! EVENTS [])
-     (let [connected (connected-runtime "rollback")
+     (do
+      (reset! EVENTS [])
+      (let [connected (connected-runtime "rollback")
            client-node (get connected :client)
            status (deref
                    (promise/catch
@@ -133,7 +136,7 @@
                      {})
                     (fn [error] :failed)))]
        [status
-        (map (fn [event] (get event :sql)) @EVENTS)])
+        (map (fn [event] (get event :sql)) @EVENTS)]))
      => [:failed
          ["begin" "before-failure" "fail" "rollback"]])])
 

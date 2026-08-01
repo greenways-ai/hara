@@ -80,6 +80,10 @@ public final class Main {
       return FoundationHalcBenchmark.run(
           java.util.Arrays.copyOfRange(args, 1, args.length), output, error);
     }
+    if (args.length > 0 && "bytecode".equals(args[0])) {
+      return HaraBytecodeTool.run(
+          java.util.Arrays.copyOfRange(args, 1, args.length), output, error);
+    }
     Capabilities capabilities;
     try {
       capabilities = parseCapabilities(args);
@@ -1450,6 +1454,7 @@ public final class Main {
     output.println("  hara tap <bootstrap|init|add|remove|list|verify|mirror> ...");
     output.println("  hara spec <COMMAND> ...");
     output.println("  hara extension <check|build|install|test> ...");
+    output.println("  hara bytecode <run|disassemble> FILE.hbc|FILE.hbb");
     output.println();
     output.println("Compatibility aliases:");
     output.println("  new check test add remove sync update headless standalone");

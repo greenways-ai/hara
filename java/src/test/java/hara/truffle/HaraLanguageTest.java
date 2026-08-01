@@ -140,7 +140,7 @@ public class HaraLanguageTest {
       assertEquals(
           3,
           context
-              .eval(HaraLanguage.ID, "(iter-next (iter-drop 1 (interleave [1 2] [3 4])))")
+              .eval(HaraLanguage.ID, "(iter-next (Iter/iter-drop 1 (interleave [1 2] [3 4])))")
               .asLong());
       assertTrue(context.eval(HaraLanguage.ID, "(not-empty [1])").hasArrayElements());
       assertTrue(context.eval(HaraLanguage.ID, "(not-empty [])").isNull());
@@ -506,8 +506,8 @@ public class HaraLanguageTest {
       assertEquals(2.0, context.eval(HaraLanguage.ID, "(double 2)").asDouble(), 0.0);
       assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(long ##NaN)"));
       assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "(long \"1\")"));
-      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "1N"));
-      assertThrows(PolyglotException.class, () -> context.eval(HaraLanguage.ID, "1M"));
+      assertEquals("1N", context.eval(HaraLanguage.ID, "(str 1N)").asString());
+      assertEquals("1M", context.eval(HaraLanguage.ID, "(str 1M)").asString());
     }
   }
 
@@ -1182,7 +1182,7 @@ public class HaraLanguageTest {
       assertEquals(
           "#<lazy-iterator>",
           context
-              .eval(HaraLanguage.ID, "(str (iter-map (fn [x] (+ x 1)) [1 2 3]))")
+              .eval(HaraLanguage.ID, "(str (Iter/iter-map (fn [x] (+ x 1)) [1 2 3]))")
               .asString());
     }
   }
@@ -2095,7 +2095,7 @@ public class HaraLanguageTest {
               .asString());
       assertEquals(
           "1",
-          context.eval(HaraLanguage.ID, "(first (iter-map str [1 2 3]))").asString());
+          context.eval(HaraLanguage.ID, "(first (Iter/iter-map str [1 2 3]))").asString());
     }
   }
 

@@ -369,11 +369,14 @@ public final class HaraContext {
     }
   }
 
-  /** Keeps host iterator combinators available through Iter, not the root surface. */
+  /** Keeps native iterator combinators available through Iter, not the portable root surface. */
   private void hideIteratorImplementationBindings() {
     HaraNamespace foundation = namespace(FOUNDATION_NAMESPACE);
     foundation.vars.keySet().removeIf(
-        name -> name.startsWith("iter-") && !name.equals("iter-next?") && !name.equals("iter-next"));
+        name ->
+            name.startsWith("iter-")
+                && !name.equals("iter-next?")
+                && !name.equals("iter-next"));
   }
 
   private void installNativeExportGroup(
@@ -508,6 +511,16 @@ public final class HaraContext {
     try {
       currentNamespace = namespace(namespaceName);
       operation.run();
+    } finally {
+      currentNamespace = previous;
+    }
+  }
+
+  public <T> T callInNamespace(String namespaceName, java.util.function.Supplier<T> operation) {
+    HaraNamespace previous = currentNamespace;
+    try {
+      currentNamespace = namespace(namespaceName);
+      return operation.get();
     } finally {
       currentNamespace = previous;
     }
@@ -1126,15 +1139,14 @@ public final class HaraContext {
     if (variable != null) {
       return Symbol.create(variable.namespaceName(), variable.symbolName());
     }
-    return symbol;
+    return symbol.getNamespace() == null
+        ? Symbol.create(currentNamespace.name(), symbol.getName())
+        : symbol;
   }
 
   void declareCurrent(Symbol symbol) {
     HaraVar existing = currentNamespace.lookup(symbol.getName());
-    if (existing != null && !currentNamespace.name().equals(existing.namespaceName())) {
-      throw protectedReferredVar(symbol, existing);
-    }
-    if (existing == null) {
+    if (existing == null || !currentNamespace.name().equals(existing.namespaceName())) {
       currentNamespace.define(
           symbol.getName(), null, symbol.meta(), definitionOrigin);
     }
@@ -1142,7 +1154,13 @@ public final class HaraContext {
 
   private HaraException protectedReferredVar(Symbol symbol, HaraVar existing) {
     return new HaraException(
-        "Cannot replace referred Var without ns omission: " + symbol.getName());
+        "Cannot replace referred Var without ns omission: "
+            + symbol.getName()
+            + " (referred from "
+            + existing.namespaceName()
+            + " into "
+            + currentNamespace.name()
+            + ")");
   }
 
   public void requireOwnedCurrent(Symbol symbol) {
@@ -1253,7 +1271,6 @@ public final class HaraContext {
     if (symbol.getNamespace() != null && !symbol.getNamespace().equals(currentNamespace.name())) {
       throw new HaraException("Cannot define a var in another namespace: " + symbol.display());
     }
-    requireOwnedCurrent(symbol);
     return currentNamespace.define(symbol.getName(), value, symbol.meta(), definitionOrigin);
   }
 
@@ -1545,6 +1562,7 @@ public final class HaraContext {
     target.define("*", new VariadicBuiltin("*", values -> arithmetic("*", values)));
     target.define("/", new VariadicBuiltin("/", values -> arithmetic("/", values)));
     target.define("mod", new VariadicBuiltin("mod", values -> arithmetic("mod", values)));
+    target.define("%", new VariadicBuiltin("%", values -> arithmetic("mod", values)));
     target.define("compare", new VariadicBuiltin("compare", this::compareValues));
     target.define("=", new VariadicBuiltin("=", values -> compare("=", values)));
     target.define("not=", new VariadicBuiltin("not=", values -> compare("not=", values)));
@@ -1687,14 +1705,20 @@ public final class HaraContext {
             }));
     target.define(
         "keyword",
-        new UnaryBuiltin(
+        new VariadicBuiltin(
             "keyword",
-            value -> {
-              Object unwrapped = HaraBox.unwrap(value);
-              if (unwrapped instanceof Keyword) return unwrapped;
-              if (unwrapped instanceof Symbol symbol) return Keyword.create(symbol.display());
-              if (unwrapped instanceof String text) return Keyword.create(text);
-              throw new HaraException("keyword expects a name");
+            values -> {
+              if (values.length == 1) {
+                Object unwrapped = HaraBox.unwrap(values[0]);
+                if (unwrapped instanceof Keyword) return unwrapped;
+                if (unwrapped instanceof Symbol symbol) return Keyword.create(symbol.display());
+                if (unwrapped instanceof String text) return Keyword.create(text);
+              } else if (values.length == 2) {
+                return Keyword.create(
+                    String.valueOf(HaraBox.unwrap(values[0])),
+                    String.valueOf(HaraBox.unwrap(values[1])));
+              }
+              throw new HaraException("keyword expects a name or namespace and name");
             }));
     target.define(
         "ex-info",
@@ -2120,6 +2144,12 @@ public final class HaraContext {
   }
 
   private static String displayText(Object unwrapped) {
+    if (unwrapped instanceof java.math.BigInteger) {
+      return unwrapped + "N";
+    }
+    if (unwrapped instanceof java.math.BigDecimal) {
+      return ((java.math.BigDecimal) unwrapped).toPlainString() + "M";
+    }
     if (unwrapped instanceof IDisplay) {
       return ((IDisplay) unwrapped).display();
     }
@@ -3218,6 +3248,11 @@ public final class HaraContext {
   }
 
   <T> T invokeInContext(Supplier<T> operation) {
+    try {
+      if (HaraLanguage.currentContext() == this) return operation.get();
+    } catch (IllegalStateException ignored) {
+      // No Hara context is entered on this thread; enter it below.
+    }
     Object previous = environment.getContext().enter(null);
     try {
       return operation.get();
@@ -3659,6 +3694,11 @@ public final class HaraContext {
     }
     if (operator.equals("mod") && values.length != 2) {
       throw new HaraException("mod expects two numbers");
+    }
+    for (Object value : values) {
+      if (!(HaraBox.unwrap(value) instanceof Number)) {
+        throw new HaraException(operator + " expects two numbers");
+      }
     }
     if (operator.equals("-") && values.length == 1) {
       return requireL0Number(Num.minusP(values[0]));
@@ -5040,6 +5080,15 @@ public final class HaraContext {
       }
       return HaraBox.export(selected.callTarget().call(selected.callArguments(arguments)));
     }
+    if (function instanceof HbcMachine.HbcClosure) {
+      return HaraBox.export(((HbcMachine.HbcClosure) function).invoke(arguments));
+    }
+    if (function instanceof HbcMachine.HbcMultiArity) {
+      return HaraBox.export(((HbcMachine.HbcMultiArity) function).invoke(arguments));
+    }
+    if (function instanceof HbcMachine.HbcNativeCallable) {
+      return HaraBox.export(((HbcMachine.HbcNativeCallable) function).invoke(arguments));
+    }
     if (function instanceof HaraMultiFunction) {
       return HaraBox.export(((HaraMultiFunction) function).invoke(arguments));
     }
@@ -5054,6 +5103,20 @@ public final class HaraContext {
       return new HaraStruct(type, arguments);
     }
     throw new HaraException("value is not callable: " + function);
+  }
+
+  Object hbcAsync(java.util.function.Supplier<Object> operation) {
+    CompletableFuture<Object> future =
+        CompletableFuture.supplyAsync(
+                () -> {
+                  try {
+                    return invokeInContext(operation);
+                  } catch (RuntimeException failure) {
+                    throw new CompletionException(failure);
+                  }
+                })
+            .thenCompose(this::flatten);
+    return new HaraPromise(future);
   }
 
   boolean isFunctionValue(Object value) {

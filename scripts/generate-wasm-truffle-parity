@@ -46,9 +46,9 @@ for i, n in enumerate(range(0, 20)):
 for i, n in enumerate(range(0, 20)):
     add_value(f"collections/assoc-{i:03d}", "collections", f"(get (assoc {{:answer {n}}} :answer 42) :answer)", 42)
 for i, n in enumerate(range(0, 16)):
-    add_value(f"iterators/map-{i:03d}", "iterators", f"(iter-next (iter-map (fn [x] (+ x 1)) [{n}]))", n + 1)
+    add_value(f"iterators/map-{i:03d}", "iterators", f"(iter-next (Iter/iter-map (fn [x] (+ x 1)) [{n}]))", n + 1)
 for i, n in enumerate(range(1, 13)):
-    add_value(f"iterators/filter-{i:03d}", "iterators", f"(iter-next (iter-filter (fn [x] (= x {n})) [0 {n}]))", n)
+    add_value(f"iterators/filter-{i:03d}", "iterators", f"(iter-next (Iter/iter-filter (fn [x] (= x {n})) [0 {n}]))", n)
 for i, n in enumerate(range(1, 5)):
     add_value(f"errors/divide-zero-{i:03d}", "errors", f"(/ {n} 0)", "arithmetic/divide-by-zero")
 for i in range(4):
@@ -84,7 +84,7 @@ for i in range(96):
     add_value(f"generated/collections-{i:03d}", "generated-collections", source, 42, False)
 for i in range(96):
     n = i % 41
-    source = f"(iter-next (iter-map (fn [x] (* x 2)) [{n}]))"
+    source = f"(iter-next (Iter/iter-map (fn [x] (* x 2)) [{n}]))"
     add_value(f"generated/iterators-{i:03d}", "generated-iterators", source, n * 2, False)
 for i in range(96):
     n = (i % 31) + 1

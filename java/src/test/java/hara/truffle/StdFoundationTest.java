@@ -4,8 +4,11 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import hara.lang.data.Symbol;
+import hara.lang.data.types.ILinearType;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashSet;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.PolyglotException;
 import org.junit.Test;
@@ -27,8 +30,8 @@ public class StdFoundationTest {
                       + "  (= Arr std.native.Arr std.foundation/Arr)"
                       + "  (= Obj std.native.Obj std.foundation/Obj)"
                       + "  (ICount/count [1 2 3])"
-                      + "  (iter-any? (fn [x] (= x \"edn/pretty\")) (current-symbols))"
-                      + "  (iter-any? (fn [x] (= x \"Maths\")) (current-symbols))"
+                      + "  (Iter/iter-any? (fn [x] (= x \"edn/pretty\")) (current-symbols))"
+                      + "  (Iter/iter-any? (fn [x] (= x \"Maths\")) (current-symbols))"
                       + "  (every? (fn [type] (not (nil? (resolve type))))"
                       + "    '[Maths Numbers Bits String Bytes File Socket Promise Coroutine"
                       + "      Arr Obj Runtime Printer Edn Json Regex UUID Error])]")
@@ -220,10 +223,31 @@ public class StdFoundationTest {
     try (InputStream input =
         StdFoundationTest.class.getClassLoader().getResourceAsStream("std/foundation.hal")) {
       assertTrue("missing foundation fallback resource", input != null);
+      source = new String(input.readAllBytes(), StandardCharsets.UTF_8);
+      LinkedHashSet<String> definitions = new LinkedHashSet<>();
+      for (Object form : HaraLanguage.readAll(source, "std/foundation.hal")) {
+        if (!(form instanceof ILinearType<?> list) || list.count() < 2) continue;
+        if (!(list.nth(0) instanceof Symbol operator)) continue;
+        if (operator.getName().equals("declare")) {
+          for (int index = 1; index < list.count(); index++) {
+            if (list.nth(index) instanceof Symbol name) definitions.add(name.getName());
+          }
+        } else if ((operator.getName().equals("def")
+                || operator.getName().equals("defn")
+                || operator.getName().equals("defn-")
+                || operator.getName().equals("defmacro"))
+            && list.nth(1) instanceof Symbol name) {
+          definitions.add(name.getName());
+        }
+      }
       source =
-          new String(input.readAllBytes(), StandardCharsets.UTF_8)
-              .replace("ns std.foundation", "ns testing.foundation-fallback")
-              .replaceAll("(?s)\\(:config.*?\\]\\}\\)", "");
+          source.replace(
+              "(ns std.foundation)",
+              "(ns testing.foundation-fallback"
+                  + " (:config {:blank true})"
+                  + " (:require [std.foundation :refer :all :exclude ["
+                  + String.join(" ", definitions)
+                  + "]]))");
     }
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
       context.eval(HaraLanguage.ID, source);

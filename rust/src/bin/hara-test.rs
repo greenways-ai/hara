@@ -75,7 +75,10 @@ pub fn run_paths(root: &Path, paths: &[PathBuf]) -> Result<Vec<TestSummary>, Str
     }
     files
         .iter()
-        .map(|file| run_file(root, file))
+        .map(|file| {
+            run_file(root, file)
+                .map_err(|error| format!("{}: {error}", file.display()))
+        })
         .collect::<Result<Vec<_>, _>>()
 }
 

@@ -73,8 +73,9 @@
 
 (def results
   [(fact "outside requests wait until a transaction batch commits"
-     (reset! EVENTS [])
-     (let [node (client-node "transaction")
+     (do
+      (reset! EVENTS [])
+      (let [node (client-node "transaction")
            transaction (client/transaction
                         node
                         "db/primary"
@@ -82,7 +83,7 @@
                         {})
            outside (client/exec node "db/primary" "outside" [] {})]
        (deref (promise/all [transaction outside]))
-       @EVENTS)
+       @EVENTS))
      => [[:start "begin"]
          [:end "begin"]
          [:start "slow"]
@@ -93,15 +94,16 @@
          [:end "outside"]])
 
    (fact "a failed queued request does not stall following requests"
-     (reset! EVENTS [])
-     (let [node (client-node "failure")
+     (do
+      (reset! EVENTS [])
+      (let [node (client-node "failure")
            failed (promise/catch
                    (client/exec node "db/primary" "fail" [] {})
                    (fn [error] :failed))
            following (client/exec node "db/primary" "following" [] {})]
        [(deref failed)
         (get (deref following) :affected)
-        @EVENTS])
+        @EVENTS]))
      => [:failed
          1
          [[:start "fail"]

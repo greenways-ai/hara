@@ -202,6 +202,19 @@ impl Promise {
         let waiter = self.inner.borrow().hooks.waiter.clone();
         if let Some(waiter) = waiter {
             waiter();
+        } else {
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(deadline) = self
+                .inner
+                .borrow()
+                .deferred
+                .as_ref()
+                .map(|(deadline, _)| *deadline)
+            {
+                if let Some(delay) = deadline.checked_duration_since(Instant::now()) {
+                    std::thread::sleep(delay);
+                }
+            }
         }
         self.state()
     }

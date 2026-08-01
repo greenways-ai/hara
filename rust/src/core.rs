@@ -868,9 +868,18 @@ pub(crate) fn basic_function_values() -> Vec<(&'static str, Value)> {
     functions
 }
 
+thread_local! {
+    static STRUCTURAL_NATIVE_DISPATCH: Cell<bool> = const { Cell::new(false) };
+}
+
+fn structural_native_dispatch_active() -> bool {
+    STRUCTURAL_NATIVE_DISPATCH.with(Cell::get)
+}
+
 pub(crate) fn structural_function_value(name: impl Into<String>) -> Value {
     let name = name.into();
     let display_name = name.clone();
+    let call_name = crate::kernel::generated::canonical_native_call(&name);
     let active = Rc::new(Cell::new(false));
     native_variadic_function(&display_name, move |arguments| {
         if active.replace(true) {
@@ -878,13 +887,18 @@ pub(crate) fn structural_function_value(name: impl Into<String>) -> Value {
         }
         let mut env = HashMap::new();
         let mut call = Vec::with_capacity(arguments.len() + 1);
-        call.push(Form::Symbol(name.clone()));
+        call.push(Form::Symbol(call_name.clone()));
         for (index, argument) in arguments.into_iter().enumerate() {
             let symbol = format!("__native_argument_{index}");
             env.insert(symbol.clone(), argument);
             call.push(Form::Symbol(symbol));
         }
-        let result = eval(&Form::List(call), &mut env);
+        let result = STRUCTURAL_NATIVE_DISPATCH.with(|dispatch| {
+            let previous = dispatch.replace(true);
+            let result = eval(&Form::List(call), &mut env);
+            dispatch.set(previous);
+            result
+        });
         active.set(false);
         result
     })
@@ -935,6 +949,18 @@ pub(crate) fn structural_callable_names() -> impl Iterator<Item = &'static str> 
                 && !maths_methods.contains(name)
                 && (!name.starts_with("iter-") || matches!(*name, "iter-next" | "iter-next?"))
         })
+}
+
+#[cfg(feature = "bytecode-vm")]
+pub(crate) fn bytecode_callable_names() -> impl Iterator<Item = &'static str> {
+    structural_callable_names().chain([
+        "macroexpand-1",
+        "gensym",
+        "type",
+        "meta",
+        "with-meta",
+        "ns-publics",
+    ])
 }
 
 pub fn with_macros<R>(
@@ -2701,11 +2727,7 @@ pub(crate) fn protected_fallback_binding(
         return None;
     }
     match env.get(name) {
-        Some(Value::Var(var))
-            if matches!(
-                var.origin(),
-                VarOrigin::RustLibrary | VarOrigin::RuntimePrimitive
-            ) =>
+        Some(Value::Var(var)) if matches!(var.origin(), VarOrigin::RustLibrary) =>
         {
             var.set_hara_metadata(merge_metadata(var.hara_metadata(), metadata));
             Some(var.deref_value())
@@ -2740,6 +2762,12 @@ pub(crate) fn vm_def_global(
     let local = Symbol::create(None, name);
     if let Some(existing) = current.resolve(&local) {
         if binding_is_local(&existing) {
+            if definition_origin() == VarOrigin::HalFallback
+                && matches!(existing.origin(), VarOrigin::RustLibrary)
+            {
+                existing.set_hara_metadata(merge_metadata(existing.hara_metadata(), metadata));
+                return Ok(existing);
+            }
             existing.reset_value(value);
             if metadata.is_some() {
                 existing.set_hara_metadata(metadata);
@@ -4877,6 +4905,9 @@ pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Resu
             if arguments.len() != 2 && arguments.len() != 3 {
                 return Err("get expects 2 or 3 arguments".into());
             }
+            if matches!(arguments[0], Value::Bytes(_) | Value::ByteBuffer(_)) {
+                return byte_get(&arguments[0], &arguments[1], arguments.get(2).cloned());
+            }
             let default = arguments.get(2).cloned().unwrap_or(Value::Nil);
             collection_get(&arguments[0], &arguments[1], default)
         }
@@ -4958,6 +4989,9 @@ pub(crate) fn apply_binary_primitive(
         | Primitive::LessOrEqual
         | Primitive::Greater
         | Primitive::GreaterOrEqual => Err(format!("{op} expects numbers")),
+        Primitive::Get if matches!(left, Value::Bytes(_) | Value::ByteBuffer(_)) => {
+            byte_get(left, right, None)
+        }
         Primitive::Get => collection_get(left, right, Value::Nil),
         Primitive::Count => Err("count expects one argument".into()),
         Primitive::Meta => Err("meta expects one value".into()),
@@ -6901,7 +6935,10 @@ fn iterator_values(value: Value) -> Result<Vec<Value>, String> {
             }
             Ok(values)
         }
-        _ => Err("iter expects a collection".into()),
+        value => Err(format!(
+            "iter expects a collection, got {}",
+            value.display()
+        )),
     }
 }
 
@@ -7364,6 +7401,7 @@ fn collection_get(value: &Value, key: &Value, default: Value) -> Result<Value, S
             };
             Ok(found.unwrap_or(default))
         }
+        Value::Bytes(_) | Value::ByteBuffer(_) => byte_get(value, key, Some(default)),
         Value::String(text) => {
             let index = value_index(key)?;
             Ok(text
@@ -7916,6 +7954,22 @@ pub(crate) fn vm_build_map(values: Vec<Value>) -> Result<Value, String> {
 
 pub(crate) fn vm_build_set(values: Vec<Value>) -> Result<Value, String> {
     Ok(Value::OrderedSet(Box::new(POrderedSet::from_iter(values))))
+}
+
+pub(crate) fn vm_build_list(values: Vec<Value>) -> Value {
+    Value::List(values.into())
+}
+
+pub(crate) fn vm_concat_list(values: Vec<Value>) -> Result<Value, String> {
+    let mut output = Vec::new();
+    for value in values {
+        output.extend(iterator_values(value)?);
+    }
+    Ok(Value::List(output.into()))
+}
+
+pub(crate) fn vm_to_vector(value: Value) -> Result<Value, String> {
+    vector_literal(iterator_values(value)?)
 }
 
 fn literal_value(form: &Form) -> Result<Value, String> {
@@ -9509,13 +9563,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 if fs.len() != 2 {
                     return Err("deref expects a var".into());
                 }
-                let target = match &fs[1] {
-                    Form::Symbol(name) => match env.get(name) {
-                        Some(Value::Var(cell)) => Value::Var(cell.clone()),
-                        _ => eval(&fs[1], env)?,
-                    },
-                    _ => eval(&fs[1], env)?,
-                };
+                let target = eval(&fs[1], env)?;
                 match target {
                     Value::Var(value) => Ok(value.deref_value()),
                     Value::Atom(value) => Ok(value.deref_value()),
@@ -10236,6 +10284,33 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     namespace_registry()?.current().name().as_str().to_owned(),
                 ))
             }
+            Form::Symbol(n) if n == "ns-publics" => {
+                if fs.len() != 2 {
+                    return Err("ns-publics expects one namespace".into());
+                }
+                let namespace = match eval(&fs[1], env)? {
+                    Value::Symbol(name) if name.get_namespace().is_none() => {
+                        name.get_name().to_owned()
+                    }
+                    Value::String(name) => name,
+                    Value::Namespace(namespace) => namespace.name().as_str().to_owned(),
+                    _ => return Err("ns-publics expects a namespace symbol or string".into()),
+                };
+                let registry = namespace_registry()?;
+                let target = registry
+                    .find(&namespace)
+                    .ok_or_else(|| format!("No such namespace: {namespace}"))?;
+                let mut mappings = target.mappings();
+                mappings.sort_by(|(left, _), (right, _)| left.as_str().cmp(right.as_str()));
+                Ok(Value::OrderedMap(Box::new(POrderedMap::from_iter(
+                    mappings.into_iter().map(|(name, var)| {
+                        (
+                            Value::Symbol(Symbol::create(None, name.as_str())),
+                            Value::Var(var),
+                        )
+                    }),
+                ))))
+            }
             Form::Symbol(n) if n == "std.foundation.coroutine/create" => {
                 if fs.len() != 2 {
                     return Err("coroutine/create expects one function".into());
@@ -10289,8 +10364,10 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 Err("coroutine/await requires the fiber evaluator".into())
             }
             Form::Symbol(n)
-                if matches!(env.get(n), Some(Value::Function(_)))
-                    || matches!(env.get(n), Some(Value::Var(var)) if (binding_is_local(var) || var.origin() == VarOrigin::RustLibrary) && matches!(var.deref_value(), Value::Function(_))) =>
+                if resolve_macro(n).is_none()
+                    && !structural_native_dispatch_active()
+                    && (matches!(env.get(n), Some(Value::Function(_)))
+                        || matches!(env.get(n), Some(Value::Var(var)) if ((binding_is_local(var) && (!cfg!(feature = "bytecode-vm") || var.origin() != VarOrigin::RuntimePrimitive)) || var.origin() == VarOrigin::RustLibrary) && matches!(var.deref_value(), Value::Function(_)))) =>
             {
                 let function = binding_value(env, n).expect("function binding was checked");
                 let arguments = fs[1..]

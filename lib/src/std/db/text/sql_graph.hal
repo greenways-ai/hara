@@ -77,9 +77,10 @@
         key-string (key-name key-value)
         table (compatible-get schema table-name)
         attribute (compatible-get table key-string)]
-    (when (nil? attribute)
+    (if (nil? attribute)
       (throw (ex-info "Attribute not found"
-                      {:table table-name :attribute key-string})))
+                      {:table table-name :attribute key-string}))
+      nil)
     (let [reference (compatible-get attribute :ref)
           reference-type (compatible-get reference :type)
           reference-table (compatible-get reference :ns)

@@ -188,7 +188,7 @@
                           :lookup lookup
                           :metadata metadata}]
              (substrate/set-service node service-id service)
-             service))))))
+             service)))))))
 
 (declare kernel-teardown-services-main)
 
@@ -302,7 +302,7 @@
     (if service
       service
       (throw (ex-info "Database service is not configured"
-                      {:service service-id}))))
+                      {:service service-id})))))
 
 (defn service-info-main
   "Returns provider-neutral metadata for a configured database service."

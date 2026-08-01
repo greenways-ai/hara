@@ -1018,6 +1018,15 @@ impl Machine {
             Instruction::BuildSet(count) => {
                 guarded!(self.exec_build_collection(program, *count, false, true));
             }
+            Instruction::BuildList(count) => {
+                guarded!(self.exec_build_list(*count, false));
+            }
+            Instruction::ConcatList(count) => {
+                guarded!(self.exec_build_list(*count, true));
+            }
+            Instruction::ToVector => {
+                guarded!(self.exec_to_vector());
+            }
             Instruction::DefMacro { name, metadata } => {
                 guarded!(self.exec_def_macro(program, *name, *metadata));
             }

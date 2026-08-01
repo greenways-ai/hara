@@ -57,6 +57,10 @@ public class NativeMethodParityTest {
         assertTrue("Duplicate method classification: " + type.name + "/" + primitive,
             classified.add(primitive));
       }
+      for (String nativeOnly : type.nativeOnly) {
+        assertTrue("Duplicate method classification: " + type.name + "/" + nativeOnly,
+            classified.add(nativeOnly));
+      }
       assertEquals(
           "Every native method must have exactly one Foundation exposure: " + type.name,
           new LinkedHashSet<>(type.methods),
@@ -118,7 +122,7 @@ public class NativeMethodParityTest {
               .eval(
                   HaraLanguage.ID,
                   "(ns blank.native (:config {:blank true})) "
-                      + "[(= Iter std.native.Iter) "
+                      + "[(std.foundation/= Iter std.native.Iter) "
                       + " (Iter/iter-next (Iter/iter-map (fn [value] value) [1]))]")
               .toString());
     }
@@ -136,12 +140,14 @@ public class NativeMethodParityTest {
       List<String> halWrappers = classified(classification.lookup(keyword("hal-wrapper")), methods);
       List<String> primitives =
           classified(classification.lookup(keyword("foundation-primitive")), methods);
+      List<String> nativeOnly =
+          classified(classification.lookup(keyword("native-only")), methods);
       String wrapperSource = (String) entry.lookup(keyword("wrapper-source"));
       assertTrue("Duplicate native type: " + name, !output.containsKey(name));
       output.put(
           name,
           new NativeTypeSpec(
-              name, methods, availability, halWrappers, primitives, wrapperSource));
+              name, methods, availability, halWrappers, primitives, nativeOnly, wrapperSource));
     }
     return output;
   }
@@ -190,5 +196,6 @@ public class NativeMethodParityTest {
       String availability,
       List<String> halWrappers,
       List<String> foundationPrimitives,
+      List<String> nativeOnly,
       String wrapperSource) {}
 }

@@ -98,9 +98,10 @@
      => [28 28])
 
    (fact "sign-in stores session and starts refresh through the remote kernel"
-     (reset! CALLS [])
-     (reset! REFRESH-STARTS 0)
-     (let [nodes (connected-nodes "signin")
+     (do
+      (reset! CALLS [])
+      (reset! REFRESH-STARTS 0)
+      (let [nodes (connected-nodes "signin")
            client-node (get nodes :client)
            session (deref
                     (client/sign-in client-node
@@ -114,7 +115,7 @@
         current
         signed-in
         @REFRESH-STARTS
-        (get (first @CALLS) :operation)])
+        (get (first @CALLS) :operation)]))
      => [{:access-token "signin-token" :refresh-token "signin-refresh"}
          {:access-token "signin-token" :refresh-token "signin-refresh"}
          true
@@ -135,8 +136,9 @@
          {:access-token "refreshed-token"}])
 
    (fact "RPC table and health actions preserve their legacy payloads"
-     (reset! CALLS [])
-     (let [nodes (connected-nodes "requests")
+     (do
+      (reset! CALLS [])
+      (let [nodes (connected-nodes "requests")
            client-node (get nodes :client)]
        [(deref (client/rpc-call client-node
                                 "auth/supabase"
@@ -148,14 +150,15 @@
                                    "items"
                                    {:select "*"}
                                    {}))
-        (deref (client/health client-node "auth/supabase" {}))])
+        (deref (client/health client-node "auth/supabase" {}))]))
      => [{:rpc "ping"}
          [{:id 1 :table "items"}]
          {:name "GoTrue"}])
 
    (fact "sign-out stops refresh and clears the stored session"
-     (reset! REFRESH-STOPS 0)
-     (let [nodes (connected-nodes "signout")
+     (do
+      (reset! REFRESH-STOPS 0)
+      (let [nodes (connected-nodes "signout")
            client-node (get nodes :client)]
        (deref
         (client/sign-in client-node
@@ -165,12 +168,13 @@
        [(deref (client/sign-out client-node "auth/supabase" {}))
         (deref (client/current-session client-node "auth/supabase" {}))
         (deref (client/signed-in? client-node "auth/supabase" {}))
-        @REFRESH-STOPS])
+        @REFRESH-STOPS]))
      => [{"status" "ok"} nil false 1])
 
    (fact "runtime finalization stops refresh and removes Supabase services"
-     (reset! REFRESH-STOPS 0)
-     (let [nodes (connected-nodes "finalize")
+     (do
+      (reset! REFRESH-STOPS 0)
+      (let [nodes (connected-nodes "finalize")
            server (get nodes :server)
            client-node (get nodes :client)]
        (deref
@@ -181,7 +185,7 @@
        (let [result (deref (runtime-client/runtime-finalize client-node {}))]
          [(get result :status)
           @REFRESH-STOPS
-          (substrate-protocol/get-service server "auth/supabase")]))
+          (substrate-protocol/get-service server "auth/supabase")])))
      => [:finalized 1 nil])])
 
 (pr-str (run '[std.db.node.supabase-test]))

@@ -24,6 +24,10 @@ const F64: u8 = 15;
 const ATOM: u8 = 16;
 const ARRAY: u8 = 17;
 const OBJECT: u8 = 18;
+const CHARACTER: u8 = 19;
+const BIG_INTEGER: u8 = 20;
+const DECIMAL: u8 = 21;
+const REGEX: u8 = 22;
 
 pub fn encode(value: &Value) -> Result<Vec<u8>, String> {
     let mut output = MAGIC.to_vec();
@@ -67,6 +71,22 @@ fn encode_bare(value: &Value, output: &mut Vec<u8>, depth: usize) -> Result<(), 
         Value::Float(value) => {
             output.push(F64);
             output.extend_from_slice(&value.to_bits().to_be_bytes());
+        }
+        Value::Character(value) => {
+            output.push(CHARACTER);
+            output.extend_from_slice(&u32::from(*value).to_be_bytes());
+        }
+        Value::BigInteger(value) => {
+            output.push(BIG_INTEGER);
+            encode_bytes(value.as_bytes(), output)?;
+        }
+        Value::Decimal(value) => {
+            output.push(DECIMAL);
+            encode_bytes(value.as_bytes(), output)?;
+        }
+        Value::Regex(value) => {
+            output.push(REGEX);
+            encode_bytes(value.as_bytes(), output)?;
         }
         Value::String(value) => {
             output.push(STRING);
@@ -245,6 +265,24 @@ impl Reader<'_> {
                     bytes.try_into().unwrap(),
                 ))))
             }
+            CHARACTER => {
+                let codepoint = u32::from_be_bytes(self.take(4)?.try_into().unwrap());
+                char::from_u32(codepoint)
+                    .map(Value::Character)
+                    .ok_or_else(|| "hta/value-malformed: invalid character scalar".into())
+            }
+            BIG_INTEGER => Ok(Value::BigInteger(
+                String::from_utf8(self.data()?.to_vec())
+                    .map_err(|_| "hta/value-malformed: invalid big integer")?,
+            )),
+            DECIMAL => Ok(Value::Decimal(
+                String::from_utf8(self.data()?.to_vec())
+                    .map_err(|_| "hta/value-malformed: invalid decimal")?,
+            )),
+            REGEX => Ok(Value::Regex(
+                String::from_utf8(self.data()?.to_vec())
+                    .map_err(|_| "hta/value-malformed: invalid regex")?,
+            )),
             STRING => Ok(Value::String(
                 String::from_utf8(self.data()?.to_vec())
                     .map_err(|_| "hta/value-malformed: invalid UTF-8")?,
@@ -397,6 +435,18 @@ mod tests {
                 panic!("float value")
             };
             assert_eq!(decoded.to_bits(), value.to_bits());
+        }
+    }
+
+    #[test]
+    fn portable_language_scalars_round_trip() {
+        for value in [
+            Value::Character('雪'),
+            Value::BigInteger("123456789012345678901234567890".into()),
+            Value::Decimal("1.2500".into()),
+            Value::Regex("^[a-z]+$".into()),
+        ] {
+            assert_eq!(decode(&encode(&value).unwrap()).unwrap(), value);
         }
     }
     #[test]

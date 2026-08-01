@@ -464,9 +464,9 @@
 (defn emit
   ([form selected] (emit form selected {}))
   ([form selected context]
-   (emit-main form
-              (default-grammar (or (:grammar selected) selected))
-              context))
+   (let [grammar (default-grammar (or (:grammar selected) selected))]
+     (binding [*emit-fn* emit-node]
+       (emit-node form grammar context))))
   ([form grammar namespace mopts]
    (if (:emit grammar)
      ((:emit grammar) form mopts)

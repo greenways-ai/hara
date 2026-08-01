@@ -119,6 +119,12 @@ impl Session {
     ) -> Self {
         let namespaces = kernel::NamespaceRegistry::new("user");
         let foundation_namespace = namespaces.find_or_create("std.foundation");
+        for (name, value) in core::basic_function_values() {
+            foundation_namespace.intern(name, value);
+        }
+        for name in core::structural_callable_names() {
+            foundation_namespace.intern(name, core::structural_function_value(name));
+        }
         for (name, value) in core::exception_function_values() {
             foundation_namespace.intern(name, value);
         }
@@ -136,6 +142,21 @@ impl Session {
             let var = foundation_namespace.intern(&canonical_name, descriptor);
             foundation_namespace.map_var(lang::data::Symbol::parse(&name), var);
             namespaces.find_or_create(canonical_name);
+        }
+        for (native_type, methods) in core::NATIVE_TYPES {
+            let namespace_name = format!("std.native.{native_type}");
+            let namespace = namespaces.find_or_create(&namespace_name);
+            for method in *methods {
+                let dispatch_name = match *native_type {
+                    "Iter" => (*method).to_owned(),
+                    "String" => format!("str/{method}"),
+                    _ => format!("{namespace_name}/{method}"),
+                };
+                namespace.intern(
+                    *method,
+                    core::structural_function_value(dispatch_name),
+                );
+            }
         }
         let native_json = namespaces.find_or_create("std.native.Json");
         let json_read = native_json.intern(
@@ -196,6 +217,23 @@ impl Session {
         core::refer_startup_defaults(&namespaces, "user");
         let mut env = HashMap::new();
         core::select_namespace_environment(&namespaces, &mut env, "user");
+        // Keep qualified native calls directly addressable in raw WASM. The
+        // compact core evaluator resolves ordinary aliases through the
+        // namespace registry, while wasm32's exported one-shot evaluator also
+        // needs the qualified bindings in its transient environment.
+        for (native_type, methods) in core::NATIVE_TYPES {
+            let namespace_name = format!("std.native.{native_type}");
+            for method in *methods {
+                let dispatch_name = match *native_type {
+                    "Iter" => (*method).to_owned(),
+                    "String" => format!("str/{method}"),
+                    _ => format!("{namespace_name}/{method}"),
+                };
+                let function = core::structural_function_value(dispatch_name);
+                env.insert(format!("{native_type}/{method}"), function.clone());
+                env.insert(format!("{namespace_name}/{method}"), function);
+            }
+        }
         Self {
             name: name.into(),
             env,
@@ -1724,9 +1762,24 @@ fn error_code(error: &str) -> i32 {
     4
 }
 
+fn one_shot_environment() -> HashMap<String, Value> {
+    let mut env = HashMap::new();
+    if let Some((_, methods)) = core::NATIVE_TYPES
+        .iter()
+        .find(|(native_type, _)| *native_type == "Iter")
+    {
+        for method in *methods {
+            let function = core::structural_function_value((*method).to_owned());
+            env.insert(format!("Iter/{method}"), function.clone());
+            env.insert(format!("std.native.Iter/{method}"), function);
+        }
+    }
+    env
+}
+
 fn evaluate(source: &str) -> Result<i64, i32> {
     kernel::parse_forms(source).map_err(|_| 1)?;
-    let mut env = HashMap::new();
+    let mut env = one_shot_environment();
     let namespaces = kernel::NamespaceRegistry::new("user");
     let protocols = core::ProtocolRegistry::core();
     let value = core::with_namespace_registry(&namespaces, || {
@@ -1752,7 +1805,7 @@ pub extern "C" fn eval_error_code(source_ptr: *const u8, source_len: usize) -> i
             if kernel::parse_forms(source).is_err() {
                 return 1;
             }
-            let mut env = HashMap::new();
+            let mut env = one_shot_environment();
             let namespaces = kernel::NamespaceRegistry::new("user");
             let protocols = core::ProtocolRegistry::core();
             match core::with_namespace_registry(&namespaces, || {
@@ -2093,12 +2146,16 @@ mod tests {
     #[test]
     fn iterator_lifecycle_matches_native_core_in_raw_wasm() {
         for source in [
-            "(let (it (iter-cycle [1 2])) (do (iter-next it) (iter-close it) (if (iter-next? it) 0 42)))",
-            "(let (it (iter-zip [1 2] [3 4])) (do (iter-close it) (if (iter-next? it) 0 42)))",
-            "(let (it (iter-map (fn [x] x) [1 2])) (do (iter-close it) (if (iter-next? it) 0 42)))",
+            "(let (it (Iter/iter-cycle [1 2])) (do (iter-next it) (Iter/iter-close it) (if (iter-next? it) 0 42)))",
+            "(let (it (Iter/iter-zip [1 2] [3 4])) (do (Iter/iter-close it) (if (iter-next? it) 0 42)))",
+            "(let (it (Iter/iter-map (fn [x] x) [1 2])) (do (Iter/iter-close it) (if (iter-next? it) 0 42)))",
         ] {
             assert_eq!(evaluate(source), Ok(42), "{source}");
         }
+        assert_eq!(
+            evaluate("(iter-next (Iter/iter-map (fn [x] (+ x 1)) [0]))"),
+            Ok(1)
+        );
     }
 
     fn completion_value(runtime: &mut Session, task: u64) -> crate::core::Value {

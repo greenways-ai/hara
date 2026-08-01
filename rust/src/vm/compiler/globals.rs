@@ -43,7 +43,10 @@ impl Compiler {
         let (name, metadata) = binding_symbol(children[1].form, "defmacro name")
             .map_err(|message| unsupported(message, children[1].span.start))?;
         self.require_owned_global(&name, children[1].span)?;
-        let raw = children.iter().map(|child| child.form.clone()).collect::<Vec<_>>();
+        let raw = children
+            .iter()
+            .map(|child| child.form.clone())
+            .collect::<Vec<_>>();
         let (metadata, rest) = definition_metadata(metadata, &raw[2..], false, true)
             .map_err(|message| unsupported(format!("{name}: {message}"), children[1].span.start))?;
         let offset = children.len() - rest.len();
@@ -61,9 +64,8 @@ impl Compiler {
             crate::core::form_without_metadata(rest_children[0].form),
             Form::Vector(_)
         ) {
-            let params = macro_params(rest_children[0].form).map_err(|message| {
-                unsupported(message, rest_children[0].span.start)
-            })?;
+            let params = macro_params(rest_children[0].form)
+                .map_err(|message| unsupported(message, rest_children[0].span.start))?;
             let params_child = Child {
                 form: &params,
                 span: rest_children[0].span,
@@ -157,6 +159,30 @@ impl Compiler {
         self.constant_index_of(crate::core::Value::String(name.to_string()), span)
     }
 
+    /// A global read is bound to the var visible in the compilation
+    /// namespace.  Leaving the operand unqualified would resolve it again in
+    /// the caller's current namespace when a compiled closure runs, allowing
+    /// user refers to redirect Foundation helper calls.
+    pub(super) fn global_name_constant(
+        &mut self,
+        name: &str,
+        span: &Span,
+    ) -> Result<u32, CompileError> {
+        let qualified = crate::core::namespace_registry()
+            .ok()
+            .and_then(|registry| {
+                if !name.contains('/') && self.globals.iter().any(|global| global == name) {
+                    Some(format!("{}/{}", registry.current().name().as_str(), name))
+                } else {
+                    registry
+                        .resolve(&crate::lang::data::Symbol::parse(name))
+                        .map(|var| var.symbol().as_str().to_owned())
+                }
+            })
+            .unwrap_or_else(|| name.to_owned());
+        self.constant_index_of(crate::core::Value::String(qualified), span)
+    }
+
     /// Registers a name as program-declared: visible to global
     /// references compiled from this point on.
     pub(super) fn declare_program_global(&mut self, name: &str) {
@@ -176,13 +202,16 @@ impl Compiler {
                     registry
                         .resolve(&crate::lang::data::Symbol::parse(name))
                         .is_some()
+                        || (registry.current().name().as_str() == "std.foundation"
+                            && crate::core::bytecode_callable_names()
+                                .any(|candidate| candidate == name))
                 })
                 .unwrap_or(false)
     }
 
     /// Emits a `GetGlobal` for a visible name.
     pub(super) fn emit_get_global(&mut self, name: &str, span: &Span) -> Result<(), CompileError> {
-        let index = self.name_constant(name, span)?;
+        let index = self.global_name_constant(name, span)?;
         self.emit(Instruction::GetGlobal(index), Some(span.start));
         Ok(())
     }

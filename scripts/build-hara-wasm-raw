@@ -7,4 +7,9 @@ cd "$ROOT"
 
 "$ROOT/scripts/cargo-wasm-build" \
   --manifest-path rust/raw/Cargo.toml --target wasm32-unknown-unknown --release --features dev-trace,bytecode-vm
-echo "Built $ROOT/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm"
+
+SOURCE="$ROOT/rust/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm"
+OUTPUT="$ROOT/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm"
+mkdir -p "$(dirname "$OUTPUT")"
+cp "$SOURCE" "$OUTPUT"
+echo "Built $OUTPUT"

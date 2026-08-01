@@ -601,10 +601,10 @@ impl Runtime {
             let namespace_name = format!("std.native.{native_type}");
             let namespace = namespace_registry.find_or_create(&namespace_name);
             for method in *methods {
-                let dispatch_name = if *native_type == "Iter" {
-                    (*method).to_owned()
-                } else {
-                    format!("{namespace_name}/{method}")
+                let dispatch_name = match *native_type {
+                    "Iter" => (*method).to_owned(),
+                    "String" => format!("str/{method}"),
+                    _ => format!("{namespace_name}/{method}"),
                 };
                 namespace.intern_with_origin(
                     *method,
@@ -649,7 +649,44 @@ impl Runtime {
     /// foundation. This is useful for small embedded surfaces whose commands
     /// only require core forms and should become interactive immediately.
     pub fn core() -> Runtime {
-        Runtime::empty()
+        let mut runtime = Runtime::empty();
+        runtime.refer_foundation_into("user");
+        runtime.use_namespace("user");
+        runtime
+    }
+
+    #[cfg(feature = "bytecode-vm")]
+    pub(crate) fn prepare_foundation_bytecode(&mut self) {
+        let foundation = self.namespace_registry.find_or_create("std.foundation");
+        for name in core::bytecode_callable_names() {
+            let symbol = crate::lang::data::Symbol::parse(name);
+            if foundation.resolve(&symbol).is_none() {
+                foundation.intern_with_origin(
+                    name,
+                    core::structural_function_value(name),
+                    kernel::VarOrigin::RuntimePrimitive,
+                );
+            }
+        }
+    }
+
+    #[cfg(not(feature = "bytecode-vm"))]
+    fn install_structural_primitives(&mut self) {
+        self.install_structural_primitives_into("std.foundation");
+    }
+
+    fn install_structural_primitives_into(&mut self, namespace: &str) {
+        let target = self.namespace_registry.find_or_create(namespace);
+        for name in core::structural_callable_names() {
+            let symbol = crate::lang::data::Symbol::parse(name);
+            if target.resolve(&symbol).is_none() {
+                target.intern_with_origin(
+                    name,
+                    core::structural_function_value(name),
+                    kernel::VarOrigin::RuntimePrimitive,
+                );
+            }
+        }
     }
 
     fn refer_native_types_into(&mut self, namespace: &str) {
@@ -700,26 +737,27 @@ impl Runtime {
         for &(name, _, source) in EMBEDDED_HAL_RESOURCES {
             self.register_resource(name, source);
         }
-        let foundation = self
-            .resources
-            .get("std.foundation")
-            .cloned()
-            .ok_or_else(|| "embedded HAL catalog is missing std.foundation".to_owned())?;
-        core::with_definition_origin(kernel::VarOrigin::HalFallback, || {
-            self.eval_text(&foundation)
-        })?;
-        let foundation_namespace = self.namespace_registry.find_or_create("std.foundation");
-        for name in core::structural_callable_names() {
-            let symbol = crate::lang::data::Symbol::parse(name);
-            if foundation_namespace.resolve(&symbol).is_none() {
-                foundation_namespace.intern_with_origin(
-                    name,
-                    core::structural_function_value(name),
-                    kernel::VarOrigin::RuntimePrimitive,
-                );
+        #[cfg(feature = "bytecode-vm")]
+        {
+            vm::eval_bytecode_bundle(self, include_bytes!("../assets/std.foundation.hbb"))?;
+            self.loaded_resources.insert("std.foundation".into());
+            for &name in EAGER_HAL_RESOURCES {
+                self.loaded_resources.insert(name.into());
             }
         }
-        self.loaded_resources.insert("std.foundation".into());
+        #[cfg(not(feature = "bytecode-vm"))]
+        {
+            let foundation = self
+                .resources
+                .get("std.foundation")
+                .cloned()
+                .ok_or_else(|| "embedded HAL catalog is missing std.foundation".to_owned())?;
+            core::with_definition_origin(kernel::VarOrigin::HalFallback, || {
+                self.eval_text(&foundation)
+            })?;
+            self.install_structural_primitives();
+            self.loaded_resources.insert("std.foundation".into());
+        }
         let json = self.namespace_registry.find_or_create("std.native.Json");
         json.intern(
             "read",
@@ -745,6 +783,7 @@ impl Runtime {
                 json::write_pretty(&arguments[0]).map(core::Value::String)
             }),
         );
+        #[cfg(not(feature = "bytecode-vm"))]
         for &name in EAGER_HAL_RESOURCES {
             let source = self
                 .resources
@@ -1052,6 +1091,8 @@ impl Runtime {
                 }
             }
             self.refer_native_types_into(name);
+            #[cfg(feature = "bytecode-vm")]
+            self.install_structural_primitives_into(name);
         } else {
             self.refer_foundation_into(name);
         }
@@ -3265,7 +3306,7 @@ mod tests {
         );
         assert_eq!(
             runtime.eval_text("`(a ~@1)").unwrap_err(),
-            "iter expects a collection"
+            "iter expects a collection, got 1"
         );
     }
 
@@ -3863,6 +3904,12 @@ mod tests {
     fn atoms_match_java_identity_and_mutation_semantics() {
         let mut runtime = Runtime::new();
         assert_eq!(runtime.eval_text("(let [a (atom 1)] @a)").unwrap(), "1");
+        assert_eq!(
+            runtime
+                .eval_text("(do (def deref-test-values (atom [10 18])) (deref deref-test-values))")
+                .unwrap(),
+            "[10 18]"
+        );
         assert_eq!(
             runtime
                 .eval_text("(let [a (atom 1)] (do (reset! a 2) @a))")

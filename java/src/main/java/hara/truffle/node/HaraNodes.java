@@ -103,6 +103,7 @@ public final class HaraNodes {
     private final Object value;
 
     private ThrownValue(Object value) {
+      super(hara.lang.base.G.display(value));
       this.value = value;
     }
   }
@@ -835,9 +836,15 @@ public final class HaraNodes {
 
   public static final class ReadGlobal extends HaraExpressionNode {
     private final Symbol symbol;
+    private final Symbol displaySymbol;
 
     public ReadGlobal(Symbol symbol) {
+      this(symbol, symbol);
+    }
+
+    public ReadGlobal(Symbol symbol, Symbol displaySymbol) {
       this.symbol = symbol;
+      this.displaySymbol = displaySymbol;
     }
 
     @Override
@@ -853,7 +860,7 @@ public final class HaraNodes {
 
     @TruffleBoundary
     private HaraException unboundError(String kind) {
-      return new HaraException("Unbound " + kind + ": " + symbol.display(), this);
+      return new HaraException("Unbound " + kind + ": " + displaySymbol.display(), this);
     }
   }
 
@@ -1480,7 +1487,12 @@ public final class HaraNodes {
     public Object execute(VirtualFrame frame) {
       Object value = target.execute(frame);
       if (!(value instanceof HaraStruct)) {
-        throw new HaraException("field expects a struct", this);
+        throw new HaraException(
+            "field expects a struct: "
+                + field
+                + " on "
+                + (value == null ? "nil" : value.getClass().getName()),
+            this);
       }
       try {
         return readStructField((HaraStruct) value);
@@ -2044,7 +2056,12 @@ public final class HaraNodes {
         // Builtins never implement ILookup/ISequentialLookupType/ISetType, so the IFn
         // protocol invoker always degrades to IFn.applyAsArray; calling it directly is
         // exactly equivalent and skips the boundary plus the dispatch round trip.
-        return ((HaraBuiltinFunction) target).apply(evaluateArguments(frame));
+        try {
+          return ((HaraBuiltinFunction) target).apply(evaluateArguments(frame));
+        } catch (HaraException error) {
+          if (error.haraLocation() != null) throw error;
+          throw new HaraException(error.getMessage(), this);
+        }
       }
       if (target instanceof IFn) {
         return invokeViaProtocol(target, evaluateArguments(frame));

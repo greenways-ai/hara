@@ -306,6 +306,15 @@ fn write_instruction(out: &mut Writer, instruction: &Instruction) {
             out.u32(*name);
             out.option_u16(*metadata);
         }
+        BuildList(count) => {
+            out.byte(33);
+            out.u16(*count);
+        }
+        ConcatList(count) => {
+            out.byte(34);
+            out.u16(*count);
+        }
+        ToVector => out.byte(35),
         Return => out.byte(24),
     }
 }
@@ -372,6 +381,9 @@ fn read_instruction(reader: &mut Reader<'_>) -> Result<Instruction, String> {
             name: reader.u32()?,
             metadata: reader.option_u16()?,
         },
+        33 => Instruction::BuildList(reader.u16()?),
+        34 => Instruction::ConcatList(reader.u16()?),
+        35 => Instruction::ToVector,
         _ => return Err("bytecode artifact contains an unknown opcode".into()),
     })
 }
@@ -715,7 +727,7 @@ mod tests {
         let source = "(do (defn add-one [x] (+ x 1)) (add-one 41))";
         let program = compile_source(source).unwrap();
         let encoded = encode_program(&program).unwrap();
-        assert!(encoded.starts_with(b"HBC2"));
+        assert!(encoded.starts_with(b"HBC3"));
         let decoded = decode_program(&encoded).unwrap();
         assert_eq!(disassemble(&decoded), disassemble(&program));
         assert_eq!(

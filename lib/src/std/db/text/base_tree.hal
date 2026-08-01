@@ -159,7 +159,7 @@
 (defn plan-return
   [schema entry id args options]
   (tree-fill-input
-   (tree-return schema entry {:id id} {} options)
+   (tree-return schema entry {"id" id} {} options)
    args
    (or (compatible-get entry :input) [])
    true))
@@ -167,7 +167,7 @@
 (defn plan-return-bulk
   [schema entry ids args options]
   (tree-fill-input
-   (tree-return schema entry {:id ["in" [ids]]} {} options)
+   (tree-return schema entry {"id" ["in" [ids]]} {} options)
    args
    (or (compatible-get entry :input) [])
    true))

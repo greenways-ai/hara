@@ -59,4 +59,14 @@ name = "hara-bytecode-benchmark"
 path = "src/bin/hara-bytecode-benchmark.rs"
 required-features = ["bytecode-vm"]
 
+[[bin]]
+name = "hara-foundation-artifact"
+path = "src/bin/hara-foundation-artifact.rs"
+required-features = ["bytecode-vm"]
+
+[[bin]]
+name = "hara-bytecode-conformance-artifact"
+path = "src/bin/hara-bytecode-conformance-artifact.rs"
+required-features = ["bytecode-vm"]
+
 [dev-dependencies]

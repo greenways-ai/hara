@@ -414,11 +414,7 @@ impl Compiler {
             );
             if !protected {
                 let expanded = crate::core::vm_macroexpand(form).map_err(|message| {
-                    CompileError::new(
-                        CompileErrorKind::UnsupportedForm,
-                        message,
-                        Some(span.start),
-                    )
+                    CompileError::new(CompileErrorKind::UnsupportedForm, message, Some(span.start))
                 })?;
                 if expanded != *form {
                     self.top_level = top;
@@ -447,12 +443,12 @@ impl Compiler {
             Form::BigInteger(value) => self.constant(Value::BigInteger(value.clone()), span),
             Form::Decimal(value) => self.constant(Value::Decimal(value.clone()), span),
             Form::Regex(value) => self.constant(Value::Regex(value.clone()), span),
-            Form::Vector(_) | Form::Map(_) | Form::Set(_) if constant_form(form) => {
-                let value = crate::core::form_to_value(form).map_err(|message| {
-                    CompileError::new(CompileErrorKind::UnsupportedForm, message, Some(span.start))
-                })?;
-                self.constant(value, span)
-            }
+            // Collection identity is observable even when language equality
+            // is structural across concrete sequential/map/set types.  Do
+            // not intern collection literals in the Value-keyed constant
+            // pool: `[]` may otherwise alias an earlier `()`, and the HTA
+            // constant codec canonicalizes ordered maps and sets.  Building
+            // them in bytecode preserves their concrete type and order.
             Form::Vector(values) => {
                 self.compile_collection_values(values.iter(), span)?;
                 self.emit(
@@ -628,10 +624,89 @@ impl Compiler {
                 Some(span.start),
             ));
         }
-        let lowered = lower_syntax_quote(children[1].form, false).map_err(|message| {
-            CompileError::new(CompileErrorKind::UnsupportedForm, message, Some(span.start))
-        })?;
-        self.compile_form(&lowered, span, None, false)
+        self.compile_syntax_value(children[1].form, span, false)
+    }
+
+    fn compile_syntax_value(
+        &mut self,
+        form: &Form,
+        span: &Span,
+        nested: bool,
+    ) -> Result<(), CompileError> {
+        if let Some(argument) = unquote_argument(form, "unquote") {
+            let argument = argument.map_err(|message| {
+                CompileError::new(CompileErrorKind::Arity, message, Some(span.start))
+            })?;
+            return self.compile_form(&argument, span, None, false);
+        }
+        if unquote_argument(form, "unquote-splicing").is_some() {
+            return Err(CompileError::new(
+                CompileErrorKind::UnsupportedForm,
+                if nested {
+                    "unquote-splicing is only valid as a collection element"
+                } else {
+                    "unquote-splicing is not valid at the root of syntax-quote"
+                },
+                Some(span.start),
+            ));
+        }
+        match crate::core::form_without_metadata(form) {
+            Form::List(values) | Form::Vector(values) => {
+                let vector = matches!(crate::core::form_without_metadata(form), Form::Vector(_));
+                let spliced = values
+                    .iter()
+                    .any(|value| unquote_argument(value, "unquote-splicing").is_some());
+                for value in values {
+                    if let Some(argument) = unquote_argument(value, "unquote-splicing") {
+                        let argument = argument.map_err(|message| {
+                            CompileError::new(CompileErrorKind::Arity, message, Some(span.start))
+                        })?;
+                        self.compile_form(&argument, span, None, false)?;
+                    } else {
+                        self.compile_syntax_value(value, span, true)?;
+                        if spliced {
+                            self.emit(Instruction::BuildList(1), Some(span.start));
+                        }
+                    }
+                }
+                let count = self.collection_count(values.len(), span)?;
+                if spliced {
+                    self.emit(Instruction::ConcatList(count), Some(span.start));
+                    if vector {
+                        self.emit(Instruction::ToVector, Some(span.start));
+                    }
+                } else if vector {
+                    self.emit(Instruction::BuildVector(count), Some(span.start));
+                } else {
+                    self.emit(Instruction::BuildList(count), Some(span.start));
+                }
+                Ok(())
+            }
+            Form::Map(entries) => {
+                for (key, value) in entries {
+                    self.compile_syntax_value(key, span, true)?;
+                    self.compile_syntax_value(value, span, true)?;
+                }
+                self.emit(
+                    Instruction::BuildMap(entries.len() as u16),
+                    Some(span.start),
+                );
+                Ok(())
+            }
+            Form::Set(values) => {
+                for value in values {
+                    self.compile_syntax_value(value, span, true)?;
+                }
+                self.emit(Instruction::BuildSet(values.len() as u16), Some(span.start));
+                Ok(())
+            }
+            _ => {
+                let value = crate::core::form_to_value(form).map_err(|message| {
+                    CompileError::new(CompileErrorKind::UnsupportedForm, message, Some(span.start))
+                })?;
+                self.constant(value, span)
+            }
+        }
     }
 
     fn compile_primitive(
@@ -1041,10 +1116,6 @@ fn constant_form(form: &Form) -> bool {
     }
 }
 
-fn quoted(form: &Form) -> Form {
-    Form::List(vec![Form::Symbol("quote".into()), form.clone()])
-}
-
 fn unquote_argument(form: &Form, operator: &str) -> Option<Result<Form, String>> {
     let Form::List(parts) = crate::core::form_without_metadata(form) else {
         return None;
@@ -1056,79 +1127,6 @@ fn unquote_argument(form: &Form, operator: &str) -> Option<Result<Form, String>>
         Ok(parts[1].clone())
     } else {
         Err(format!("{operator} expects one argument"))
-    })
-}
-
-fn lower_syntax_sequence(values: &[Form], vector: bool) -> Result<Form, String> {
-    let mut expressions = Vec::with_capacity(values.len());
-    let mut segments = Vec::with_capacity(values.len());
-    let mut spliced = false;
-    for value in values {
-        if let Some(argument) = unquote_argument(value, "unquote-splicing") {
-            spliced = true;
-            segments.push(argument?);
-        } else {
-            let expression = lower_syntax_quote(value, true)?;
-            expressions.push(expression.clone());
-            segments.push(Form::Vector(vec![expression]));
-        }
-    }
-    if !spliced {
-        return if vector {
-            Ok(Form::Vector(expressions))
-        } else {
-            Ok(Form::List(
-                std::iter::once(Form::Symbol("list".into()))
-                    .chain(expressions)
-                    .collect(),
-            ))
-        };
-    }
-    let concatenated = Form::List(
-        std::iter::once(Form::Symbol("concat".into()))
-            .chain(segments)
-            .collect(),
-    );
-    Ok(if vector {
-        Form::List(vec![Form::Symbol("vec".into()), concatenated])
-    } else {
-        Form::List(vec![
-            Form::Symbol("apply".into()),
-            Form::Symbol("list".into()),
-            concatenated,
-        ])
-    })
-}
-
-fn lower_syntax_quote(form: &Form, nested: bool) -> Result<Form, String> {
-    if let Some(argument) = unquote_argument(form, "unquote") {
-        return argument;
-    }
-    if unquote_argument(form, "unquote-splicing").is_some() {
-        return Err(if nested {
-            "unquote-splicing is only valid inside a collection".into()
-        } else {
-            "unquote-splicing is not valid at the root of syntax-quote".into()
-        });
-    }
-    Ok(match crate::core::form_without_metadata(form) {
-        Form::List(values) => lower_syntax_sequence(values, false)?,
-        Form::Vector(values) => lower_syntax_sequence(values, true)?,
-        Form::Map(entries) => Form::Map(
-            entries
-                .iter()
-                .map(|(key, value)| {
-                    Ok((lower_syntax_quote(key, true)?, lower_syntax_quote(value, true)?))
-                })
-                .collect::<Result<Vec<_>, String>>()?,
-        ),
-        Form::Set(values) => Form::Set(
-            values
-                .iter()
-                .map(|value| lower_syntax_quote(value, true))
-                .collect::<Result<Vec<_>, String>>()?,
-        ),
-        _ => quoted(form),
     })
 }
 

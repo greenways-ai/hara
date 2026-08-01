@@ -430,6 +430,9 @@ impl EvalFiber {
                             self.resume(PromiseState::Rejected(e));
                         }
                         PromiseState::Pending => {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            self.resume(pending.wait_state());
+                            #[cfg(target_arch = "wasm32")]
                             return Err(
                                 "deref cannot block on a pending promise outside an HTA fiber"
                                     .into(),
@@ -584,34 +587,17 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
                 let target = {
                     let env = env.borrow();
                     match env.get(name) {
-                        Some(Value::Var(cell)) => Some(Value::Var(cell.clone())),
-                        Some(Value::Atom(cell)) => Some(Value::Atom(cell.clone())),
-                        Some(Value::Promise(p)) => Some(Value::Promise(p.clone())),
+                        Some(Value::Var(cell))
+                            if cell.symbol().get_name()
+                                != crate::lang::data::Symbol::parse(name).get_name() =>
+                        {
+                            Some(Value::Var(cell.clone()))
+                        }
                         _ => None,
                     }
                 };
-                if let Some(target) = target {
-                    return match target {
-                        Value::Var(x) => k(Ok(x.deref_value())),
-                        Value::Atom(x) => k(Ok(x.deref_value())),
-                        Value::Promise(p) => match p.state() {
-                            PromiseState::Fulfilled(x) => k(Ok(x)),
-                            PromiseState::Rejected(e) => {
-                                k(Err(crate::core::promise_rejection_error(e)))
-                            }
-                            PromiseState::Pending => Step::Wait(
-                                p,
-                                Box::new(move |s| match s {
-                                    PromiseState::Fulfilled(x) => k(Ok(x)),
-                                    PromiseState::Rejected(e) => {
-                                        k(Err(crate::core::promise_rejection_error(e)))
-                                    }
-                                    PromiseState::Pending => k(Err("fiber resumed pending".into())),
-                                }),
-                            ),
-                        },
-                        _ => unreachable!(),
-                    };
+                if let Some(Value::Var(cell)) = target {
+                    return k(Ok(cell.deref_value()));
                 }
             }
             one(
@@ -690,14 +676,30 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
                 }),
             )
         }
-        Some("std.foundation.coroutine/create") => coroutine::create_form(v, env, k),
-        Some("std.foundation.coroutine/coroutine?") => coroutine::predicate_form(v, env, k),
+        Some("std.foundation.coroutine/create")
+        | Some("std.native.Coroutine/create")
+        | Some("Coroutine/create") => {
+            coroutine::create_form(v, env, k)
+        }
+        Some("std.foundation.coroutine/coroutine?")
+        | Some("std.native.Coroutine/instance?")
+        | Some("Coroutine/instance?") => {
+            coroutine::predicate_form(v, env, k)
+        }
         Some("std.foundation.coroutine/status") => coroutine::status_form(v, env, k),
         Some("std.foundation.coroutine/close") => coroutine::close_form(v, env, k),
         Some("std.foundation.coroutine/resume") => coroutine::resume_form(v, env, k),
         Some("std.protocol.icoroutine/resume") => coroutine::resume_protocol_form(v, env, k),
-        Some("std.foundation.coroutine/yield") => coroutine::yield_form(v, env, k),
-        Some("std.foundation.coroutine/await") => coroutine::await_form(v, env, k),
+        Some("std.foundation.coroutine/yield")
+        | Some("std.native.Coroutine/yield")
+        | Some("Coroutine/yield") => {
+            coroutine::yield_form(v, env, k)
+        }
+        Some("std.foundation.coroutine/await")
+        | Some("std.native.Coroutine/await")
+        | Some("Coroutine/await") => {
+            coroutine::await_form(v, env, k)
+        }
         Some("def") | Some("set!") | Some("var/set") => bind_form(v, env, k),
         Some("resolve") if matches!(env.borrow().get("resolve"), Some(value) if !matches!(value, Value::Var(_))) => {
             application(v, env, k)
