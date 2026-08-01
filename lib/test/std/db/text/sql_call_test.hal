@@ -1,0 +1,76 @@
+(ns std.db.text.sql-call-test
+  (:use code.test)
+  (:require [std.db.protocol :as protocol]
+            [std.db.text.sql-call :as call]
+            [std.foundation.json :as json]
+            [std.foundation.promise :as promise]
+            [std.foundation.string :as string]))
+
+(defstruct CallConnection
+  [queries value])
+
+(extend-type CallConnection protocol/IDatabase
+  (db-engine [connection] :mock-sql)
+  (db-provider [connection] :call-mock)
+  (db-info [connection] {:engine :mock-sql :provider :call-mock})
+  (db-exec [connection sql parameters]
+    (promise/from {:affected 0}))
+  (db-query [connection sql parameters]
+    (swap! (field connection :queries) conj sql)
+    (promise/from {:columns ["result"]
+                   :rows [[(field connection :value)]]
+                   :affected 0}))
+  (db-close [connection]
+    (promise/from true)))
+
+(def json-spec
+  {:schema "app"
+   :id "user-create"
+   :input [{:symbol "name" :type "text"}
+           {:symbol "metadata" :type "jsonb"}]
+   :return "jsonb"})
+
+(def results
+  [(fact "API envelopes decode successful data and reject errors"
+     [(call/decode-return "{\"status\":\"ok\",\"data\":{\"id\":1}}" nil)
+      (call/decode-return "{\"status\":\"error\",\"data\":{\"tag\":\"bad\"}}" nil)]
+     => [{"id" 1} (throws)])
+
+   (fact "function inputs and schema-qualified names are encoded"
+     [(call/call-format-input json-spec ["Ada" {:role "admin"}])
+      (call/call-format-query json-spec ["Ada" {:role "admin"}])]
+     => [["'Ada'" "'{\"role\":\"admin\"}'"]
+         "SELECT \"app\".user_create('Ada', '{\"role\":\"admin\"}');"])
+
+   (fact "call-raw validates, executes and decodes JSONB"
+     (let [queries (atom [])
+           connection (std.db.text.sql-call-test/CallConnection
+                       queries
+                       "{\"id\":1,\"name\":\"Ada\"}")
+           output (deref (call/call-raw connection
+                                        json-spec
+                                        ["Ada" {:role "admin"}]))]
+       [output (first @queries)])
+     => [{"id" 1 "name" "Ada"}
+         "SELECT \"app\".user_create('Ada', '{\"role\":\"admin\"}');"])
+
+   (fact "call-api returns success and validation-error envelopes"
+     (let [connection (std.db.text.sql-call-test/CallConnection
+                       (atom [])
+                       "{\"id\":1}")
+           success (deref (call/call-api connection
+                                         json-spec
+                                         ["Ada" {:role "admin"}]))
+           invalid (call/call-api connection json-spec [1 {:role "admin"}])]
+       [(call/decode-return success nil)
+        (get (json/read invalid) "status")])
+     => [{"id" 1} "error"])
+
+   (fact "invalid raw calls fail before querying the connection"
+     (let [queries (atom [])
+           connection (std.db.text.sql-call-test/CallConnection queries "{}")]
+       [(call/call-raw connection json-spec [] )
+        @queries])
+     => [(throws) []])])
+
+(pr-str (run '[std.db.text.sql-call-test]))
