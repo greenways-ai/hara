@@ -44,30 +44,22 @@ export function createSqliteProvider(sqlite3InitModule) {
     return database;
   }
 
-  async function openDatabase(environment, options) {
+  async function openDatabase(options) {
     const sqlite3 = await sqlite();
     const storage = keywordName(option(options, "storage", "memory"));
-    const filename = option(options, "filename", "/hara.sqlite3");
-    let database;
-
-    if (storage === "memory" || storage === "transient") {
-      database = new sqlite3.oo1.DB(":memory:", "ct");
-    } else if (storage === "opfs") {
-      if (environment !== "browser" || typeof sqlite3.oo1.OpfsDb !== "function") {
-        throw new Error("db/sqlite-opfs-unavailable: OPFS requires a supported browser worker");
-      }
-      database = new sqlite3.oo1.OpfsDb(String(filename));
-    } else {
-      throw new Error(`db/sqlite-storage-unsupported: ${storage}`);
+    if (storage !== "memory" && storage !== "transient") {
+      throw new Error(
+        `db/sqlite-storage-unsupported: ${storage}; the portable provider currently supports only memory`
+      );
     }
-
+    const database = new sqlite3.oo1.DB(":memory:", "ct");
     const id = ++nextConnectionId;
     connections.set(id, database);
     return {
       id,
       engine: "sqlite",
-      storage,
-      filename: storage === "opfs" ? String(filename) : ":memory:"
+      storage: "memory",
+      filename: ":memory:"
     };
   }
 
@@ -114,7 +106,7 @@ export function createSqliteProvider(sqlite3InitModule) {
       case "version":
         return { engine: "sqlite", version: (await sqlite()).version.libVersion };
       case "open":
-        return openDatabase(environment, args[0]);
+        return openDatabase(args[0]);
       case "exec":
         return execDatabase(args[0], args[1], args[2]);
       case "query":
