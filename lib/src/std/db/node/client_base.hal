@@ -5,6 +5,7 @@
   (:require [std.db.node.kernel-base :as kernel]
             [std.db.node.kernel-batch :as batch]
             [std.db.node.kernel-service :as service]
+            [std.db.node.lifecycle :as lifecycle]
             [std.db.node.proxy-util :as proxy]))
 
 (defn kernel-init
@@ -18,6 +19,10 @@
 (defn kernel-teardown
   [node config options]
   (proxy/request-client node kernel/ACTION-KERNEL-TEARDOWN [config] options))
+
+(defn runtime-finalize
+  [node options]
+  (proxy/request-client node lifecycle/ACTION-FINALIZE [] options))
 
 (defn runtime-status
   [node options]
