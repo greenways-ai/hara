@@ -1,0 +1,148 @@
+;; ============================================================================
+;; std.db.node.transport — message-endpoint adapters for database runtimes.
+;;
+;; An endpoint descriptor contains:
+;;   :send   (fn [message])
+;;   :listen (fn [listener])
+;;   :close  optional zero-argument cleanup function
+;;
+;; This contract can wrap browser Worker, MessagePort, SharedWorker.port or
+;; Node parentPort without placing host globals in portable HAL code.
+;; ============================================================================
+(ns std.db.node.transport
+  (:require [std.foundation.promise :as promise]
+            [std.lib.substrate :as substrate]
+            [std.lib.substrate.protocol :as protocol]))
+
+(defn- compatible-get
+  [value lookup-key]
+  (cond
+    (not (map? value)) nil
+    (has? value lookup-key) (get value lookup-key)
+    (string? lookup-key) (get value (keyword lookup-key))
+    (keyword? lookup-key) (get value (name lookup-key))
+    :else nil))
+
+(defn- wire-name
+  [value]
+  (if (keyword? value) (name value) value))
+
+(defn- wire-keyword
+  [value]
+  (if (string? value) (keyword value) value))
+
+(defn frame->wire
+  "Converts a Substrate frame to a structured-clone-friendly map."
+  [frame]
+  {"id" (protocol/frame-id frame)
+   "kind" (wire-name (protocol/frame-kind frame))
+   "space" (protocol/frame-space frame)
+   "meta" (protocol/frame-meta frame)
+   "action" (field frame :action)
+   "args" (field frame :args)
+   "reply_to" (field frame :reply-to)
+   "status" (wire-name (field frame :status))
+   "data" (protocol/frame-data frame)
+   "error" (field frame :error)
+   "signal" (field frame :signal)
+   "cause" (protocol/frame-cause frame)})
+
+(defn wire->frame
+  "Reconstructs a Substrate frame from a wire map."
+  [message]
+  (substrate/node-frame
+   (wire-keyword (compatible-get message :kind))
+   (compatible-get message :id)
+   (compatible-get message :space)
+   (or (compatible-get message :meta) {})
+   (compatible-get message :action)
+   (or (compatible-get message :args) [])
+   (or (compatible-get message :reply-to)
+       (compatible-get message :reply_to))
+   (wire-keyword (compatible-get message :status))
+   (compatible-get message :data)
+   (compatible-get message :error)
+   (compatible-get message :signal)
+   (compatible-get message :cause)))
+
+(defn ready-message?
+  "Returns true for a database worker ready signal."
+  [message]
+  (= "ready" (compatible-get message :signal)))
+
+(defn attach-endpoint
+  "Attaches an endpoint as a Substrate transport.
+
+   control-listener receives non-frame messages such as ready signals."
+  [node transport-id endpoint control-listener]
+  (let [send-function (compatible-get endpoint :send)
+        listen-function (compatible-get endpoint :listen)]
+    (when (nil? send-function)
+      (throw (ex-info "Database endpoint requires :send" {:endpoint endpoint})))
+    (when (nil? listen-function)
+      (throw (ex-info "Database endpoint requires :listen" {:endpoint endpoint})))
+    (protocol/attach-transport
+     node
+     transport-id
+     (fn [frame]
+       (send-function (frame->wire frame))))
+    (listen-function
+     (fn [message]
+       (if (compatible-get message :kind)
+         (protocol/receive-frame node
+                                 (wire->frame message)
+                                 {:transport-id transport-id})
+         (when control-listener
+           (control-listener message)))))
+    {:node node
+     :transport-id transport-id
+     :endpoint endpoint}))
+
+(defn message-adapter
+  "Creates matching server :boot and client :connect hooks for an endpoint."
+  [endpoint]
+  (let [send-function (compatible-get endpoint :send)
+        close-function (compatible-get endpoint :close)]
+    {:boot
+     (fn [node transport-id worker-id ready]
+       (attach-endpoint node transport-id endpoint nil)
+       (send-function ready)
+       ready)
+
+     :connect
+     (fn [node transport-id]
+       (promise/new
+        (fn [resolve reject]
+          (attach-endpoint
+           node
+           transport-id
+           endpoint
+           (fn [message]
+             (cond
+               (ready-message? message)
+               (resolve message)
+
+               (= "error" (compatible-get message :signal))
+               (reject message)
+
+               :else nil))))))
+
+     :close
+     (fn []
+       (when close-function
+         (close-function)))}))
+
+(defn sharedworker-adapter
+  "Creates a SharedWorker-compatible adapter from a MessagePort endpoint."
+  [endpoint]
+  (assoc (message-adapter endpoint) :kind :shared-worker))
+
+(defn webworker-adapter
+  "Creates a WebWorker-compatible adapter from a worker endpoint."
+  [endpoint]
+  (assoc (message-adapter endpoint) :kind :web-worker))
+
+(defn nodeworker-adapter
+  "Creates a Node worker_threads-compatible adapter from a parentPort endpoint."
+  [endpoint]
+  (assoc (message-adapter endpoint) :kind :node-worker))
