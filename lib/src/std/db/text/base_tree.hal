@@ -119,23 +119,26 @@
 
     :else value))
 
+(defn- build-replacements
+  [args specs index output]
+  (if (= index (count specs))
+    output
+    (let [spec (nth specs index)
+          symbol (compatible-get spec :symbol)]
+      (build-replacements args
+                          specs
+                          (+ index 1)
+                          (assoc output
+                                 (str "{{" symbol "}}")
+                                 (nth args index))))))
+
 (defn tree-fill-input
   "Replaces {{symbol}} placeholders using args and an input specification."
   [tree args input-spec drop-first]
   (let [specs (if drop-first (vec (drop 1 input-spec)) (vec input-spec))]
     (if (empty? specs)
       tree
-      (let [replacements
-            (reduce (fn [out indexed]
-                      (let [index (first indexed)
-                            spec (second indexed)
-                            symbol (compatible-get spec :symbol)]
-                        (assoc out
-                               (str "{{" symbol "}}")
-                               (nth args index))))
-                    {}
-                    (map-indexed (fn [index spec] [index spec]) specs))]
-        (replace-inputs tree replacements)))))
+      (replace-inputs tree (build-replacements args specs 0 {})))))
 
 (defn plan-select
   [schema entry args options]
