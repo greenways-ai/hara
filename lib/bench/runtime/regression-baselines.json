@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "description": "Machine-independent relative gates. Run with the standard profile; smoke measurements are diagnostic only.",
+  "rules": [
+    {"runtime": "hara-rust-bytecode", "workload": "arithmetic", "relative_to": "bb", "max_ratio": 0.90},
+    {"runtime": "hara-rust-trace-checked", "workload": "arithmetic", "relative_to": "bb", "max_ratio": 0.60},
+    {"runtime": "hara-rust-bytecode", "workload": "function-call", "relative_to": "bb", "max_ratio": 1.10},
+    {"runtime": "hara-rust-bytecode", "workload": "persistent-vector", "relative_to": "bb", "max_ratio": 0.75},
+    {"runtime": "hara-rust-bytecode", "workload": "sequence-navigation", "relative_to": "bb", "max_ratio": 0.75}
+  ]
+}
