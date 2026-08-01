@@ -1,0 +1,102 @@
+;; ============================================================================
+;; std.db.node.kernel-service — dynamic database service lifecycle handlers.
+;; ============================================================================
+(ns std.db.node.kernel-service
+  (:require [std.db :as db]
+            [std.db.node.kernel-base :as kernel]
+            [std.foundation.promise :as promise]
+            [std.lib.substrate.protocol :as substrate]))
+
+(def ACTION-DRIVER-LIST "@xt.db/driver-list")
+(def ACTION-SERVICE-OPEN "@xt.db/service-open")
+(def ACTION-SERVICE-CLOSE "@xt.db/service-close")
+(def ACTION-SERVICE-EXISTS "@xt.db/service-exists")
+
+(defn- compatible-get
+  [value lookup-key]
+  (cond
+    (not (map? value)) nil
+    (has? value lookup-key) (get value lookup-key)
+    (string? lookup-key) (get value (keyword lookup-key))
+    (keyword? lookup-key) (get value (name lookup-key))
+    :else nil))
+
+(defn- normalize-entry
+  [service-id entry]
+  (assoc
+   (reduce (fn [out pair]
+             (let [entry-key (key pair)]
+               (assoc out
+                      (if (string? entry-key) (keyword entry-key) entry-key)
+                      (val pair))))
+           {}
+           (or entry {}))
+   :id service-id))
+
+(defn driver-list-main
+  "Returns driver IDs registered on node."
+  [node]
+  (kernel/list-drivers node))
+
+(defn service-exists-main
+  "Returns true when a named database service exists."
+  [node service-id]
+  (not (nil? (substrate/get-service node service-id))))
+
+(defn service-open-main
+  "Opens or returns a named database service."
+  [node service-id entry schema lookup]
+  (let [existing (substrate/get-service node service-id)]
+    (if existing
+      (promise/from {:status :no-change
+                     :service (kernel/service-info-main node service-id)})
+      (let [normalized (normalize-entry service-id entry)
+            role (or (compatible-get normalized :role) :service)
+            metadata (or (compatible-get normalized :metadata) {})]
+        (promise/then
+         (kernel/kernel-setup-single node role normalized schema lookup metadata)
+         (fn [_]
+           {:status :opened
+            :service (kernel/service-info-main node service-id)}))))))
+
+(defn service-close-main
+  "Closes and removes a named database service."
+  [node service-id]
+  (let [service (substrate/get-service node service-id)]
+    (if (nil? service)
+      (promise/from {:status :not-found
+                     :service service-id})
+      (let [connection (compatible-get service :connection)]
+        (promise/finally
+         (db/close connection)
+         (fn []
+           (substrate/remove-service node service-id)))))))
+
+(defn driver-list-handler
+  [space args request node]
+  (driver-list-main node))
+
+(defn service-exists-handler
+  [space args request node]
+  (service-exists-main node (nth args 0)))
+
+(defn service-open-handler
+  [space args request node]
+  (service-open-main node
+                     (nth args 0)
+                     (nth args 1)
+                     (nth args 2)
+                     (nth args 3)))
+
+(defn service-close-handler
+  [space args request node]
+  (service-close-main node (nth args 0)))
+
+(defn init-handlers
+  "Installs dynamic service lifecycle handlers on node."
+  [node]
+  (substrate/register-handler node ACTION-DRIVER-LIST driver-list-handler {})
+  (substrate/register-handler node ACTION-SERVICE-OPEN service-open-handler {})
+  (substrate/register-handler node ACTION-SERVICE-CLOSE service-close-handler {})
+  (substrate/register-handler node ACTION-SERVICE-EXISTS service-exists-handler {})
+  node)
