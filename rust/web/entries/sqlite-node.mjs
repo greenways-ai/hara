@@ -1,7 +1,9 @@
+import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
 import { serveNodeProvider } from "@hara-lang/hta/provider/node";
-import { callSqlite } from "@hara-lang/db-sqlite";
+import { createSqliteProvider } from "@hara-lang/db-sqlite";
 
+const sqlite = createSqliteProvider(sqlite3InitModule);
 serveNodeProvider(
-  (operation, args) => callSqlite("node", operation, args),
+  (operation, args) => sqlite.call("node", operation, args),
   { errorCode: "db/sqlite-error" }
 );
