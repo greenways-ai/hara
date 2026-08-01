@@ -7,9 +7,13 @@
             [std.foundation.promise :as promise]
             [std.lib.substrate.protocol :as substrate]))
 
+(def SERVICE-REGISTRY "std.db.runtime/dynamic-services")
+
 (def ACTION-DRIVER-LIST "@xt.db/driver-list")
+(def ACTION-SERVICE-LIST "@xt.db/service-list")
 (def ACTION-SERVICE-OPEN "@xt.db/service-open")
 (def ACTION-SERVICE-CLOSE "@xt.db/service-close")
+(def ACTION-SERVICE-CLOSE-ALL "@xt.db/service-close-all")
 (def ACTION-SERVICE-EXISTS "@xt.db/service-exists")
 
 (defn- compatible-get
@@ -33,10 +37,30 @@
            (or entry {}))
    :id service-id))
 
+(defn- register-service
+  [node service-id]
+  (let [registry (or (substrate/get-service node SERVICE-REGISTRY) {})]
+    (substrate/set-service node SERVICE-REGISTRY (assoc registry service-id true))
+    service-id))
+
+(defn- unregister-service
+  [node service-id]
+  (let [registry (dissoc (or (substrate/get-service node SERVICE-REGISTRY) {})
+                         service-id)]
+    (if (empty? registry)
+      (substrate/remove-service node SERVICE-REGISTRY)
+      (substrate/set-service node SERVICE-REGISTRY registry))
+    service-id))
+
 (defn driver-list-main
   "Returns driver IDs registered on node."
   [node]
   (kernel/list-drivers node))
+
+(defn service-list-main
+  "Returns dynamically managed service IDs."
+  [node]
+  (vec (keys (or (substrate/get-service node SERVICE-REGISTRY) {}))))
 
 (defn service-exists-main
   "Returns true when a named database service exists."
@@ -56,6 +80,7 @@
         (promise/then
          (kernel/kernel-setup-single node role normalized schema lookup metadata)
          (fn [_]
+           (register-service node service-id)
            {:status :opened
             :service (kernel/service-info-main node service-id)}))))))
 
@@ -64,22 +89,47 @@
   [node service-id]
   (let [service (substrate/get-service node service-id)]
     (if (nil? service)
-      (promise/from {:status :not-found
-                     :service service-id})
+      (do
+        (unregister-service node service-id)
+        (promise/from {:status :not-found
+                       :service service-id}))
       (let [connection (compatible-get service :connection)]
         (promise/then
          (promise/finally
           (db/close connection)
           (fn []
-            (substrate/remove-service node service-id)))
+            (substrate/remove-service node service-id)
+            (unregister-service node service-id)))
          (fn [closed]
            {:status :closed
             :service service-id
             :closed closed}))))))
 
+(defn service-close-all-main
+  "Closes every dynamically managed database service."
+  [node]
+  (let [service-ids (service-list-main node)
+        closes (map (fn [service-id]
+                      (promise/catch
+                       (service-close-main node service-id)
+                       (fn [error]
+                         {:status :error
+                          :service service-id
+                          :error error})))
+                    service-ids)]
+    (promise/then
+     (promise/all closes)
+     (fn [results]
+       {:status :closed-all
+        :services results}))))
+
 (defn driver-list-handler
   [space args request node]
   (driver-list-main node))
+
+(defn service-list-handler
+  [space args request node]
+  (service-list-main node))
 
 (defn service-exists-handler
   [space args request node]
@@ -97,11 +147,17 @@
   [space args request node]
   (service-close-main node (nth args 0)))
 
+(defn service-close-all-handler
+  [space args request node]
+  (service-close-all-main node))
+
 (defn init-handlers
   "Installs dynamic service lifecycle handlers on node."
   [node]
   (substrate/register-handler node ACTION-DRIVER-LIST driver-list-handler {})
+  (substrate/register-handler node ACTION-SERVICE-LIST service-list-handler {})
   (substrate/register-handler node ACTION-SERVICE-OPEN service-open-handler {})
   (substrate/register-handler node ACTION-SERVICE-CLOSE service-close-handler {})
+  (substrate/register-handler node ACTION-SERVICE-CLOSE-ALL service-close-all-handler {})
   (substrate/register-handler node ACTION-SERVICE-EXISTS service-exists-handler {})
   node)
