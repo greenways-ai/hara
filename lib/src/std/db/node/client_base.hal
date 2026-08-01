@@ -1,0 +1,46 @@
+;; ============================================================================
+;; std.db.node.client-base — client API for database kernel actions.
+;; ============================================================================
+(ns std.db.node.client-base
+  (:require [std.db.node.kernel-base :as kernel]
+            [std.db.node.proxy-util :as proxy]))
+
+(defn kernel-init
+  [node config schema lookup options]
+  (proxy/request-client node kernel/ACTION-KERNEL-INIT [config schema lookup] options))
+
+(defn kernel-setup
+  [node config schema lookup options]
+  (proxy/request-client node kernel/ACTION-KERNEL-SETUP [config schema lookup] options))
+
+(defn kernel-teardown
+  [node config options]
+  (proxy/request-client node kernel/ACTION-KERNEL-TEARDOWN [config] options))
+
+(defn service-info
+  [node service-id options]
+  (proxy/request-client node kernel/ACTION-SERVICE-INFO [service-id] options))
+
+(defn exec
+  ([node service-id sql options]
+   (exec node service-id sql [] options))
+  ([node service-id sql parameters options]
+   (proxy/request-client node kernel/ACTION-EXEC [service-id sql parameters] options)))
+
+(defn query
+  ([node service-id sql options]
+   (query node service-id sql [] options))
+  ([node service-id sql parameters options]
+   (proxy/request-client node kernel/ACTION-QUERY [service-id sql parameters] options)))
+
+(defn begin
+  [node service-id options]
+  (exec node service-id "begin" [] options))
+
+(defn commit
+  [node service-id options]
+  (exec node service-id "commit" [] options))
+
+(defn rollback
+  [node service-id options]
+  (exec node service-id "rollback" [] options))
