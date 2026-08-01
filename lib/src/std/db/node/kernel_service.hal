@@ -124,17 +124,19 @@
                      :service service-id})
 
       :else
-      (let [connection (compatible-get service :connection)]
-        (promise/then
-         (promise/finally
-          (db/close connection)
-          (fn []
-            (substrate/remove-service node service-id)
-            (unregister-service node service-id)))
-         (fn [closed]
-           {:status :closed
-            :service service-id
-            :closed closed}))))))
+      (promise/then
+       (promise/finally
+        (kernel/service-submit
+         service
+         (fn []
+           (db/close (kernel/service-connection service))))
+        (fn []
+          (substrate/remove-service node service-id)
+          (unregister-service node service-id)))
+       (fn [closed]
+         {:status :closed
+          :service service-id
+          :closed closed})))))
 
 (defn service-close-all-main
   "Closes every dynamically managed database service."
