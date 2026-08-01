@@ -1,0 +1,48 @@
+;; ============================================================================
+;; std.db.text.sql-tree — render reusable graph plans as SQL.
+;; ============================================================================
+(ns std.db.text.sql-tree
+  (:require [std.db.text.base-tree :as tree]
+            [std.db.text.sql-graph :as graph]))
+
+(defn sql-query-select
+  [schema entry arguments options]
+  (graph/select-return schema
+                       (tree/plan-select schema entry arguments options)
+                       0
+                       options))
+
+(defn sql-query-count
+  [schema entry arguments options]
+  (graph/select-return schema
+                       (tree/plan-count schema entry arguments options)
+                       0
+                       options))
+
+(defn sql-query-return
+  [schema entry id arguments options]
+  (graph/select-return schema
+                       (tree/plan-return schema entry id arguments options)
+                       0
+                       options))
+
+(defn sql-query-return-bulk
+  [schema entry ids arguments options]
+  (graph/select-return schema
+                       (tree/plan-return-bulk schema entry ids arguments options)
+                       0
+                       options))
+
+(defn sql-query-combined
+  [schema select-entry select-arguments return-entry return-arguments return-omit options]
+  (graph/select-return schema
+                       (tree/plan-combined schema
+                                           select-entry
+                                           select-arguments
+                                           return-entry
+                                           return-arguments
+                                           return-omit
+                                           options
+                                           false)
+                       0
+                       options))
