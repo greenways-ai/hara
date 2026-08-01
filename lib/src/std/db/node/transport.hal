@@ -31,20 +31,128 @@
   [value]
   (if (string? value) (keyword value) value))
 
+(declare value->wire)
+(declare wire->value)
+
+(defn- map->wire
+  [value]
+  {"$hara" "map"
+   "entries"
+   (map (fn [entry]
+          [(value->wire (key entry))
+           (value->wire (val entry))])
+        value)})
+
+(defn- map-from-wire
+  [value]
+  (reduce (fn [out entry]
+            (assoc out
+                   (wire->value (first entry))
+                   (wire->value (second entry))))
+          {}
+          (or (compatible-get value :entries) [])))
+
+(defn value->wire
+  "Recursively converts portable Hara values to clone-safe tagged data."
+  [value]
+  (cond
+    (keyword? value)
+    {"$hara" "keyword"
+     "namespace" (namespace value)
+     "name" (name value)}
+
+    (symbol? value)
+    {"$hara" "symbol"
+     "namespace" (namespace value)
+     "name" (name value)}
+
+    (map? value)
+    (map->wire value)
+
+    (vector? value)
+    (map value->wire value)
+
+    (set? value)
+    {"$hara" "set"
+     "items" (map value->wire value)}
+
+    :else
+    value))
+
+(defn wire->value
+  "Reconstructs portable Hara values from clone-safe tagged data."
+  [value]
+  (cond
+    (vector? value)
+    (map wire->value value)
+
+    (map? value)
+    (let [tag (compatible-get value "$hara")]
+      (cond
+        (= tag "keyword")
+        (let [ns-value (compatible-get value :namespace)
+              name-value (compatible-get value :name)]
+          (if ns-value
+            (keyword ns-value name-value)
+            (keyword name-value)))
+
+        (= tag "symbol")
+        (let [ns-value (compatible-get value :namespace)
+              name-value (compatible-get value :name)]
+          (if ns-value
+            (symbol ns-value name-value)
+            (symbol name-value)))
+
+        (= tag "map")
+        (map-from-wire value)
+
+        (= tag "set")
+        (set (map wire->value (or (compatible-get value :items) [])))
+
+        :else
+        (reduce (fn [out entry]
+                  (assoc out (key entry) (wire->value (val entry))))
+                {}
+                value)))
+
+    :else
+    value))
+
+(defn error->wire
+  "Converts thrown values to clone-safe structured error data."
+  [error]
+  (cond
+    (nil? error)
+    nil
+
+    (map? error)
+    (value->wire error)
+
+    (string? error)
+    {"$hara" "error" "message" error}
+
+    :else
+    (try
+      {"$hara" "error"
+       "message" (or (ex-message error) (str error))
+       "class" (str (ex-class error))}
+      (catch Throwable ignored
+        {"$hara" "error" "message" (str error)}))))
+
 (defn frame->wire
   "Converts a Substrate frame to a structured-clone-friendly map."
   [frame]
   {"id" (protocol/frame-id frame)
    "kind" (wire-name (protocol/frame-kind frame))
    "space" (protocol/frame-space frame)
-   "meta" (protocol/frame-meta frame)
+   "meta" (value->wire (protocol/frame-meta frame))
    "action" (field frame :action)
-   "args" (field frame :args)
+   "args" (value->wire (field frame :args))
    "reply_to" (field frame :reply-to)
    "status" (wire-name (field frame :status))
-   "data" (protocol/frame-data frame)
-   "error" (field frame :error)
-   "signal" (field frame :signal)
+   "data" (value->wire (protocol/frame-data frame))
+   "error" (error->wire (field frame :error))
+   "signal" (value->wire (field frame :signal))
    "cause" (protocol/frame-cause frame)})
 
 (defn wire->frame
@@ -54,15 +162,15 @@
    (wire-keyword (compatible-get message :kind))
    (compatible-get message :id)
    (compatible-get message :space)
-   (or (compatible-get message :meta) {})
+   (or (wire->value (compatible-get message :meta)) {})
    (compatible-get message :action)
-   (or (compatible-get message :args) [])
+   (or (wire->value (compatible-get message :args)) [])
    (or (compatible-get message :reply-to)
        (compatible-get message :reply_to))
    (wire-keyword (compatible-get message :status))
-   (compatible-get message :data)
-   (compatible-get message :error)
-   (compatible-get message :signal)
+   (wire->value (compatible-get message :data))
+   (wire->value (compatible-get message :error))
+   (wire->value (compatible-get message :signal))
    (compatible-get message :cause)))
 
 (defn ready-message?
