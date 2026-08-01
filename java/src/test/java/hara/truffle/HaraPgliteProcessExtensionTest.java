@@ -14,7 +14,7 @@ public class HaraPgliteProcessExtensionTest {
       Path.of("rust/extensions/std-db-pglite/target/package").toAbsolutePath().normalize();
 
   @Test
-  public void pgliteRunsParameterizedPostgresqlThroughTheHaraApi() {
+  public void pgliteRunsParameterizedPostgresqlThroughTheGenericDbApi() {
     Assume.assumeTrue(
         Files.isRegularFile(ROOT.resolve("std/db/provider/pglite/hara.extension.edn")));
     String previous = System.getProperty("hara.extensions.path");
@@ -23,21 +23,27 @@ public class HaraPgliteProcessExtensionTest {
         Context.newBuilder(HaraLanguage.ID).allowCreateProcess(true).build()) {
       context.eval(
           HaraLanguage.ID,
-          "(ns app (:require [std.db.pglite :as pglite])) "
+          "(ns app (:require [std.db :as db] [std.db.pglite :as pglite])) "
               + "(def connection (deref (pglite/open))) "
-              + "(deref (pglite/exec connection "
+              + "(deref (db/exec connection "
               + "\"create table items (id serial primary key, name text not null)\")) "
-              + "(deref (pglite/exec connection "
+              + "(deref (db/exec connection "
               + "\"insert into items (name) values ($1)\" [\"wombat\"])) "
-              + "(def result (deref (pglite/query connection "
+              + "(def result (deref (db/query connection "
               + "\"select id, name from items where name = $1\" [\"wombat\"])))");
+      assertEquals(
+          "postgresql",
+          context.eval(HaraLanguage.ID, "(name (db/engine connection))").asString());
+      assertEquals(
+          "pglite",
+          context.eval(HaraLanguage.ID, "(name (db/provider connection))").asString());
       assertEquals(
           "name",
           context.eval(HaraLanguage.ID, "(get (get result :columns) 1)").asString());
       assertEquals(
           "wombat",
           context.eval(HaraLanguage.ID, "(get (get (get result :rows) 0) 1)").asString());
-      assertTrue(context.eval(HaraLanguage.ID, "(deref (pglite/close connection))").asBoolean());
+      assertTrue(context.eval(HaraLanguage.ID, "(deref (db/close connection))").asBoolean());
     } finally {
       if (previous == null) System.clearProperty("hara.extensions.path");
       else System.setProperty("hara.extensions.path", previous);
