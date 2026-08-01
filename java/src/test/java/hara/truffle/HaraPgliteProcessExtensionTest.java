@@ -51,6 +51,58 @@ public class HaraPgliteProcessExtensionTest {
   }
 
   @Test
+  public void pgliteRunsThroughTheDatabaseKernelRuntime() {
+    Assume.assumeTrue(
+        Files.isRegularFile(ROOT.resolve("std/db/provider/pglite/hara.extension.edn")));
+    String previous = System.getProperty("hara.extensions.path");
+    System.setProperty("hara.extensions.path", ROOT.toString());
+    try (Context context =
+        Context.newBuilder(HaraLanguage.ID).allowCreateProcess(true).build()) {
+      context.eval(
+          HaraLanguage.ID,
+          "(ns runtime-app (:require [std.lib.substrate :as substrate] "
+              + "[std.db.node.runtime :as runtime] "
+              + "[std.db.node.client-base :as client] "
+              + "[std.db.node.driver.pglite :as pglite-driver])) "
+              + "(def runtime-config {:primary {:type :pglite :options {}}}) "
+              + "(def server (substrate/node-create \"pglite-runtime-server\")) "
+              + "(def client-node (substrate/node-create \"pglite-runtime-client\")) "
+              + "(pglite-driver/install server) "
+              + "(def connected (deref (runtime/local-connect "
+              + "client-node server runtime-config {} {}))) "
+              + "(deref (client/exec client-node \"db/primary\" "
+              + "\"create table items (id serial primary key, name text not null)\" [] {})) "
+              + "(deref (client/exec client-node \"db/primary\" "
+              + "\"insert into items (name) values ($1)\" [\"runtime-wombat\"] {})) "
+              + "(def runtime-result (deref (client/query client-node \"db/primary\" "
+              + "\"select id, name from items\" [] {}))) "
+              + "(def runtime-info (deref (client/service-info client-node \"db/primary\" {})))");
+      assertTrue(
+          context.eval(HaraLanguage.ID, "(get connected :transport-attached)").asBoolean());
+      assertEquals(
+          "setup",
+          context.eval(HaraLanguage.ID, "(name (get (get connected :init) :status))").asString());
+      assertEquals(
+          "pglite",
+          context.eval(HaraLanguage.ID, "(name (get runtime-info :provider))").asString());
+      assertEquals(
+          "runtime-wombat",
+          context
+              .eval(HaraLanguage.ID, "(get (get (get runtime-result :rows) 0) 1)")
+              .asString());
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(do (deref (runtime/close-runtime (get connected :runtime) runtime-config)) true)")
+              .asBoolean());
+    } finally {
+      if (previous == null) System.clearProperty("hara.extensions.path");
+      else System.setProperty("hara.extensions.path", previous);
+    }
+  }
+
+  @Test
   public void pgliteProcessProviderRequiresProcessCapability() {
     Assume.assumeTrue(
         Files.isRegularFile(ROOT.resolve("std/db/provider/pglite/hara.extension.edn")));
