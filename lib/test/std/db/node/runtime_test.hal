@@ -1,0 +1,149 @@
+(ns std.db.node.runtime-test
+  (:use code.test)
+  (:require [std.db.node.client-base :as client]
+            [std.db.node.kernel-base :as kernel]
+            [std.db.node.runtime :as runtime]
+            [std.db.protocol :as db-protocol]
+            [std.foundation.promise :as promise]
+            [std.lib.substrate :as substrate]
+            [std.lib.substrate.protocol :as substrate-protocol]))
+
+(defstruct MockConnection
+  [id state])
+
+(extend-type MockConnection db-protocol/IDatabase
+  (db-engine [connection]
+    :mock-sql)
+  (db-provider [connection]
+    :mock)
+  (db-info [connection]
+    {:id (field connection :id)
+     :engine :mock-sql
+     :provider :mock})
+  (db-exec [connection sql parameters]
+    (swap! (field connection :state)
+           (fn [state]
+             (assoc state :last-exec {:sql sql :parameters parameters})))
+    (promise/from {:affected 1 :sql sql :parameters parameters}))
+  (db-query [connection sql parameters]
+    (swap! (field connection :state)
+           (fn [state]
+             (assoc state :last-query {:sql sql :parameters parameters})))
+    (promise/from {:columns ["id" "name"]
+                   :rows [[1 "wombat"]]
+                   :affected 0}))
+  (db-close [connection]
+    (reset! (field connection :state) {:closed true})
+    (promise/from true)))
+
+(defn mock-driver
+  []
+  {:id :mock
+   :engine :mock-sql
+   :open (fn [options]
+           (promise/from
+            (std.db.node.runtime-test/MockConnection
+             (get options :id "mock-1")
+             (atom {:opened true :options options}))))})
+
+(def config
+  {:primary {:type :mock
+             :options {:id "primary-1"}}
+   :caching {:type :mock
+             :options {:id "cache-1"}}})
+
+(def results
+  [(fact "kernel config assigns stable service IDs"
+     (kernel/kernel-create-config
+      {"primary" {"type" "mock"}
+       "caching" {"type" "mock"}})
+     => {:common {"id" "db/common"}
+         :primary {"type" "mock" :id "db/primary"}
+         :caching {"type" "mock" :id "db/caching"}})
+
+   (fact "server initialization installs database handlers"
+     (let [node (substrate/node-create "server")]
+       (runtime/init-server node)
+       (substrate-protocol/list-handlers node))
+     => (contains ["@xt.db/kernel-init"
+                   "@xt.db/kernel-setup"
+                   "@xt.db/kernel-teardown"
+                   "@xt.db/service-info"
+                   "@xt.db/exec"
+                   "@xt.db/query"]))
+
+   (fact "drivers can be registered and enumerated without loading providers"
+     (let [node (substrate/node-create "drivers")]
+       (kernel/register-driver node :mock (mock-driver))
+       [(kernel/list-drivers node)
+        (get (kernel/get-driver node "mock") :engine)])
+     => [[:mock] :mock-sql])
+
+   (fact "local runtime initializes primary and caching services through proxies"
+     (let [server (substrate/node-create "server")
+           client-node (substrate/node-create "client")]
+       (kernel/register-driver server :mock (mock-driver))
+       (let [connected (deref (runtime/local-connect client-node server config {} {}))]
+         [(get connected :transport-attached)
+          (get (get connected :init) :status)
+          (get (deref (client/service-info client-node "db/primary" {})) :provider)
+          (get (deref (client/service-info client-node "db/caching" {})) :provider)]))
+     => [true :setup :mock :mock])
+
+   (fact "exec and query cross the linked runtime transport"
+     (let [server (substrate/node-create "server-exec")
+           client-node (substrate/node-create "client-exec")]
+       (kernel/register-driver server :mock (mock-driver))
+       (deref (runtime/local-connect client-node server config {} {}))
+       [(deref (client/exec client-node
+                            "db/primary"
+                            "insert into items values (?)"
+                            ["wombat"]
+                            {}))
+        (deref (client/query client-node
+                             "db/primary"
+                             "select id, name from items"
+                             []
+                             {}))])
+     => [{:affected 1
+          :sql "insert into items values (?)"
+          :parameters ["wombat"]}
+         {:columns ["id" "name"]
+          :rows [[1 "wombat"]]
+          :affected 0}])
+
+   (fact "reinitialization reports no change and preserves services"
+     (let [server (substrate/node-create "server-repeat")
+           client-node (substrate/node-create "client-repeat")]
+       (kernel/register-driver server :mock (mock-driver))
+       (deref (runtime/local-connect client-node server config {} {}))
+       (get (deref (client/kernel-init client-node config {} {} {})) :status))
+     => :no-change)
+
+   (fact "teardown closes services and removes the runtime transport"
+     (let [server (substrate/node-create "server-close")
+           client-node (substrate/node-create "client-close")]
+       (kernel/register-driver server :mock (mock-driver))
+       (let [connected (deref (runtime/local-connect client-node server config {} {}))
+             runtime-value (get connected :runtime)]
+         (deref (runtime/close-runtime runtime-value config))
+         [(substrate-protocol/get-service server "db/primary")
+          (substrate-protocol/get-service server "db/caching")
+          (substrate-protocol/get-transport client-node runtime/DEFAULT-TRANSPORT)]))
+     => [nil nil nil])
+
+   (fact "worker adapter entry points share the same initialization contract"
+     (let [server (substrate/node-create "worker-server")
+           client-node (substrate/node-create "worker-client")]
+       (runtime/init-server server)
+       (kernel/register-driver server :mock (mock-driver))
+       (let [adapter {:connect (fn [current transport-id]
+                                 (runtime/connect-nodes current server transport-id))}
+             connected (deref (runtime/nodeworker-connect
+                               client-node config {} {} adapter {}))]
+         [(field (get connected :runtime) :kind)
+          (get connected :transport-attached)
+          (get (get connected :init) :status)]))
+     => [:node-worker true :setup])])
+
+(pr-str (run '[std.db.node.runtime-test]))
