@@ -14,7 +14,7 @@ public class HaraSqliteProcessExtensionTest {
       Path.of("rust/extensions/std-db-sqlite/target/package").toAbsolutePath().normalize();
 
   @Test
-  public void sqliteWasmRunsParameterizedSqlThroughTheHaraApi() {
+  public void sqliteWasmRunsGeneratedAndParameterizedSqlThroughTheHaraApi() {
     Assume.assumeTrue(
         Files.isRegularFile(ROOT.resolve("std/db/provider/sqlite/hara.extension.edn")));
     String previous = System.getProperty("hara.extensions.path");
@@ -23,14 +23,21 @@ public class HaraSqliteProcessExtensionTest {
         Context.newBuilder(HaraLanguage.ID).allowCreateProcess(true).build()) {
       context.eval(
           HaraLanguage.ID,
-          "(ns app (:require [std.db.sqlite :as sqlite])) "
+          "(ns app (:require [std.db.sqlite :as sqlite] "
+              + "[std.db.text.sql-util :as sql])) "
               + "(def connection (deref (sqlite/open))) "
               + "(deref (sqlite/exec connection "
               + "\"create table items (id integer primary key, name text not null)\")) "
               + "(deref (sqlite/exec connection "
               + "\"insert into items (name) values (?)\" [\"wombat\"])) "
+              + "(def predicate "
+              + "(sql/encode-query-string {\"name\" \"wombat\"} \"WHERE\" "
+              + "{:column-fn sql/default-quote-fn})) "
               + "(def result (deref (sqlite/query connection "
-              + "\"select id, name from items where name = ?\" [\"wombat\"])))");
+              + "(str \"select id, name from items \" predicate))))");
+      assertEquals(
+          "WHERE \"name\" = 'wombat'",
+          context.eval(HaraLanguage.ID, "predicate").asString());
       assertEquals(
           "name",
           context.eval(HaraLanguage.ID, "(get (get result :columns) 1)").asString());
