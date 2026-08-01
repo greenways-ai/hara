@@ -1409,6 +1409,13 @@ pub fn execute_bytecode(program: &std::rc::Rc<vm::Program>) -> Result<String, St
         .map_err(|error| error.to_string())
 }
 
+/// Returns tracing-JIT counters retained for a compiled bytecode program.
+/// `None` means this build has no tracing-JIT feature enabled.
+#[cfg(all(feature = "bytecode-vm", feature = "tracing-jit"))]
+pub fn bytecode_jit_telemetry(program: &std::rc::Rc<vm::Program>) -> jit::JitTelemetry {
+    vm::machine::cached_jit_telemetry(program)
+}
+
 /// Compiles source into a checksummed, versioned bytecode artifact.
 #[cfg(feature = "bytecode-vm")]
 pub fn compile_bytecode_artifact(source: &str) -> Result<Vec<u8>, String> {
@@ -7265,6 +7272,30 @@ mod tests {
             runtime.eval_text("unknown").unwrap_err(),
             "unbound symbol: unknown"
         );
+    }
+
+    #[test]
+    fn mutable_collections_build_in_place_and_freeze_once() {
+        let mut runtime = Runtime::new();
+        let source = "(let [m (to-mutable {})]
+                        (do
+                          (loop [i 0]
+                            (if (< i 500)
+                              (do (assoc m i (+ i 1)) (recur (+ i 1)))
+                              nil))
+                          (let [p (to-persistent m)]
+                            (+ (count p) (get p 499)))))";
+        assert_eq!(runtime.eval_text(source).unwrap(), "1000");
+        assert_eq!(
+            runtime
+                .eval_text("(let [m (to-mutable {:a 1})] (do (assoc m :b 2) (get m :b)))")
+                .unwrap(),
+            "2"
+        );
+        assert!(runtime
+            .eval_text("(let [m (to-mutable {}) p (to-persistent m)] (do p (assoc m :late 1)))")
+            .unwrap_err()
+            .contains("mutable collection used after to-persistent"));
     }
 
     #[cfg(not(target_arch = "wasm32"))]

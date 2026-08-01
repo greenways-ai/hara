@@ -367,6 +367,8 @@ fn primitive_id(value: Primitive) -> u8 {
         Primitive::First => 15,
         Primitive::Rest => 16,
         Primitive::Second => 17,
+        Primitive::ToMutable => 18,
+        Primitive::ToPersistent => 19,
     }
 }
 
@@ -390,6 +392,8 @@ fn primitive(value: u8) -> Result<Primitive, String> {
         15 => Primitive::First,
         16 => Primitive::Rest,
         17 => Primitive::Second,
+        18 => Primitive::ToMutable,
+        19 => Primitive::ToPersistent,
         _ => return Err("bytecode artifact contains an unknown primitive".into()),
     })
 }

@@ -97,6 +97,9 @@ thread_local! {
 }
 
 #[cfg(feature = "tracing-jit")]
+const MAX_PROGRAM_JITS: usize = 128;
+
+#[cfg(feature = "tracing-jit")]
 fn program_key(program: &Rc<Program>) -> usize {
     Rc::as_ptr(program) as usize
 }
@@ -123,6 +126,12 @@ fn store_program_jit(program: &Rc<Program>, runtime: crate::jit::runtime::JitRun
     PROGRAM_JITS.with(|cache| {
         let mut cache = cache.borrow_mut();
         cache.retain(|_, cached| cached.program.strong_count() > 0);
+        if cache.len() >= MAX_PROGRAM_JITS && !cache.contains_key(&program_key(program)) {
+            // Program keys are pointer identities. Bound this TLS cache so a
+            // long-lived embedder compiling many retained programs cannot grow
+            // it indefinitely; all entries are merely optimization state.
+            cache.clear();
+        }
         cache.insert(
             program_key(program),
             CachedJit {
@@ -1153,7 +1162,7 @@ impl Machine {
             }
             PromiseState::Rejected(error) => {
                 self.stack.pop();
-                match self.raise(&function, error.message()) {
+                match self.raise(&function, crate::core::promise_rejection_error(error)) {
                     Ok(target) => self.ip = target,
                     Err(error) => return VmOutcome::Failed(error),
                 }
@@ -1232,8 +1241,11 @@ fn run_entry(program: Rc<Program>) -> Result<Value, VmError> {
     }
 }
 
-#[cfg(all(test, feature = "tracing-jit"))]
-pub(crate) fn cached_trace_count(program: &Rc<Program>) -> usize {
+#[cfg(feature = "tracing-jit")]
+fn cached_jit_runtime<R>(
+    program: &Rc<Program>,
+    access: impl FnOnce(&crate::jit::runtime::JitRuntime) -> R,
+) -> Option<R> {
     PROGRAM_JITS.with(|cache| {
         cache
             .borrow()
@@ -1245,9 +1257,18 @@ pub(crate) fn cached_trace_count(program: &Rc<Program>) -> usize {
                     .map(|owner| (owner, &cached.runtime))
             })
             .filter(|(owner, _)| Rc::ptr_eq(owner, program))
-            .map(|(_, runtime)| runtime.compiled_count())
-            .unwrap_or(0)
+            .map(|(_, runtime)| access(runtime))
     })
+}
+
+#[cfg(all(test, feature = "tracing-jit"))]
+pub(crate) fn cached_trace_count(program: &Rc<Program>) -> usize {
+    cached_jit_runtime(program, crate::jit::runtime::JitRuntime::compiled_count).unwrap_or(0)
+}
+
+#[cfg(feature = "tracing-jit")]
+pub(crate) fn cached_jit_telemetry(program: &Rc<Program>) -> crate::jit::JitTelemetry {
+    cached_jit_runtime(program, crate::jit::runtime::JitRuntime::telemetry).unwrap_or_default()
 }
 
 /// Executes a validated program's entry function.

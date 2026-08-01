@@ -82,12 +82,29 @@ fn main() {
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(",");
+    #[cfg(feature = "tracing-jit")]
+    let telemetry = program.as_ref().map_or_else(String::new, |program| {
+        let telemetry = hara_wasm::bytecode_jit_telemetry(program);
+        format!(
+            ",\"jit\":{{\"backedges\":{},\"compile_attempts\":{},\"compiled\":{},\"rejected\":{},\"entries\":{},\"completed_iterations\":{},\"side_exits\":{}}}",
+            telemetry.backedges,
+            telemetry.compile_attempts,
+            telemetry.compiled,
+            telemetry.rejected,
+            telemetry.entries,
+            telemetry.completed_iterations,
+            telemetry.side_exits,
+        )
+    });
+    #[cfg(not(feature = "tracing-jit"))]
+    let telemetry = String::new();
     println!(
-        "{{\"runtime\":\"{}\",\"workload\":\"{}\",\"first_ns\":{},\"samples_ns\":[{}]}}",
+        "{{\"runtime\":\"{}\",\"workload\":\"{}\",\"first_ns\":{},\"samples_ns\":[{}]{} }}",
         json(runtime_name),
         json(id),
         first_ns,
-        samples
+        samples,
+        telemetry,
     );
 }
 

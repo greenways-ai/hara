@@ -38,6 +38,20 @@ fn compiled_traces_survive_repeated_execution_of_one_program() {
 }
 
 #[test]
+fn telemetry_distinguishes_hot_compilation_and_execution() {
+    let program =
+        crate::compile_bytecode("(loop [i 0 acc 0] (if (< i 5000) (recur (+ i 1) (+ acc i)) acc))")
+            .unwrap();
+    assert_eq!(crate::execute_bytecode(&program).unwrap(), "12497500");
+    let telemetry = crate::bytecode_jit_telemetry(&program);
+    assert!(telemetry.backedges >= 64, "{telemetry:?}");
+    assert_eq!(telemetry.compile_attempts, 1, "{telemetry:?}");
+    assert_eq!(telemetry.compiled, 1, "{telemetry:?}");
+    assert_eq!(telemetry.rejected, 0, "{telemetry:?}");
+    assert!(telemetry.entries > 0, "{telemetry:?}");
+}
+
+#[test]
 fn indexed_numeric_vectors_trace_from_constants_and_locals() {
     for source in [
         "(loop [i 0 acc 0] (if (< i 5000) (recur (+ i 1) (+ acc (nth [3 5 7 11] (mod i 4)))) acc))",

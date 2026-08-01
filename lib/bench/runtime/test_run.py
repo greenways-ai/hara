@@ -18,6 +18,18 @@ def measurement(runtime, workload, steady_ns):
 
 
 class RegressionRulesTest(unittest.TestCase):
+    def test_runtime_specific_sources_are_explicit_and_never_fall_back_silently(self):
+        workload = {
+            "id": "mutable-map-build",
+            "source": "unused",
+            "sources": {"bb": "(transient {})", "hara-rust-bytecode": "(to-mutable {})"},
+        }
+        self.assertEqual(
+            BENCHMARK.workload_for_runtime(workload, "bb")["source"],
+            "(transient {})",
+        )
+        self.assertIsNone(BENCHMARK.workload_for_runtime(workload, "hara-truffle"))
+
     def test_accepts_ratio_at_threshold(self):
         data = {"measurements": [
             measurement("bb", "arithmetic", 100),
