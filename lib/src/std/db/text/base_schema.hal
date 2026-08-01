@@ -227,6 +227,23 @@
         created)
       cached)))
 
+(defn- ^{:schema [:fn [:map :any] :any]}
+  coercion-for
+  "Finds a coercion by exact type key or its string/keyword counterpart."
+  [coercions entry-type]
+  (cond
+    (has? coercions entry-type)
+    (get coercions entry-type)
+
+    (string? entry-type)
+    (get coercions (keyword entry-type))
+
+    (keyword? entry-type)
+    (get coercions (name entry-type))
+
+    :else
+    nil))
+
 (defn ^{:schema [:fn [:map :str :any :map] :any]}
   table-coerce
   "Recursively coerces physical values using functions keyed by schema type."
@@ -251,7 +268,7 @@
                                       (table-coerce schema next-table item coercions))
                                     value)))
                       (let [entry-type (field entry :type "type")
-                            coercion (get coercions entry-type)]
+                            coercion (coercion-for coercions entry-type)]
                         (assoc out
                                field-key
                                (if (nil? coercion)
