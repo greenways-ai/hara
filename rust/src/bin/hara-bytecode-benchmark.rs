@@ -43,7 +43,10 @@ fn main() {
         "execute-only" => "hara-rust-bytecode-execute-only",
         other => fail(id, &format!("unknown mode: {other}")),
     };
-    let runtime_name = args.get(6).map(String::as_str).unwrap_or(default_runtime_name);
+    let runtime_name = args
+        .get(6)
+        .map(String::as_str)
+        .unwrap_or(default_runtime_name);
 
     let mut runtime = Runtime::new();
     // For execute-only the program is compiled once, outside the samples.

@@ -31,7 +31,10 @@ pub fn run_file(root: &Path, file: &Path) -> Result<TestSummary, String> {
         .canonicalize()
         .map_err(|error| format!("cannot resolve {}: {error}", file.display()))?;
     if file.extension().and_then(|value| value.to_str()) != Some("hal") {
-        return Err(format!("test file must use the .hal extension: {}", file.display()));
+        return Err(format!(
+            "test file must use the .hal extension: {}",
+            file.display()
+        ));
     }
     let source = fs::read_to_string(&file)
         .map_err(|error| format!("cannot read {}: {error}", file.display()))?;
@@ -74,7 +77,11 @@ fn collect(path: &Path, output: &mut Vec<PathBuf>) -> Result<(), String> {
     }
     let mut entries = fs::read_dir(path)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?
-        .map(|entry| entry.map(|value| value.path()).map_err(|error| error.to_string()))
+        .map(|entry| {
+            entry
+                .map(|value| value.path())
+                .map_err(|error| error.to_string())
+        })
         .collect::<Result<Vec<_>, _>>()?;
     entries.sort();
     for entry in entries {
@@ -139,11 +146,7 @@ fn parse_code_test_summary(
     })
 }
 
-fn parse_legacy_results(
-    path: PathBuf,
-    items: Vec<Form>,
-    raw: &str,
-) -> Result<TestSummary, String> {
+fn parse_legacy_results(path: PathBuf, items: Vec<Form>, raw: &str) -> Result<TestSummary, String> {
     let mut passed = 0usize;
     let mut failed = 0usize;
     for item in items {
@@ -170,10 +173,12 @@ fn parse_legacy_results(
 }
 
 fn map_get<'a>(entries: &'a [(Form, Form)], key: &str) -> Option<&'a Form> {
-    entries.iter().find_map(|(candidate, value)| match candidate {
-        Form::Keyword(name) if name == key => Some(value),
-        _ => None,
-    })
+    entries
+        .iter()
+        .find_map(|(candidate, value)| match candidate {
+            Form::Keyword(name) if name == key => Some(value),
+            _ => None,
+        })
 }
 
 fn map_number(entries: &[(Form, Form)], key: &str, fallback: usize) -> usize {
@@ -214,7 +219,13 @@ fn parse_arguments() -> Result<(PathBuf, Vec<PathBuf>), String> {
     }
     let paths = paths
         .into_iter()
-        .map(|path| if path.is_absolute() { path } else { root.join(path) })
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                root.join(path)
+            }
+        })
         .collect();
     Ok((root, paths))
 }

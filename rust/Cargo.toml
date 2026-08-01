@@ -28,6 +28,7 @@ bytecode-vm = []
 tracing-jit = ["bytecode-vm"]
 native-jit = ["tracing-jit"]
 hoplite = ["bytecode-vm"]
+hoplite-embedded-nginx = ["hoplite"]
 
 [profile.browser-release]
 inherits = "release"

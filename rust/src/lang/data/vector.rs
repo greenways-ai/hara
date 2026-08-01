@@ -226,7 +226,13 @@ fn assoc_editable<E: Clone>(
     }
     let slot = &mut children_mut(inner)[(index >> level) & NODE_MASK];
     let child = slot.take().expect("existing vector path");
-    *slot = Some(assoc_editable(token, child, level - NODE_SHIFT, index, value));
+    *slot = Some(assoc_editable(
+        token,
+        child,
+        level - NODE_SHIFT,
+        index,
+        value,
+    ));
     node
 }
 
@@ -243,7 +249,9 @@ fn pop_tail<E: Clone>(node: &Rc<Node<E>>, level: usize, size: usize) -> Option<R
     let index = ((size - 2) >> level) & NODE_MASK;
     if level > NODE_SHIFT {
         let child = pop_tail(
-            branch.children[index].as_ref().expect("existing vector path"),
+            branch.children[index]
+                .as_ref()
+                .expect("existing vector path"),
             level - NODE_SHIFT,
             size,
         );
@@ -283,7 +291,12 @@ fn pop_tail_editable<E: Clone>(
     let mut node = ensure_editable(node, token);
     let slot = &mut children_mut(Rc::get_mut(&mut node).expect("editable vector node"))[index];
     if level > NODE_SHIFT {
-        let child = pop_tail_editable(token, slot.take().expect("existing vector path"), level - NODE_SHIFT, size);
+        let child = pop_tail_editable(
+            token,
+            slot.take().expect("existing vector path"),
+            level - NODE_SHIFT,
+            size,
+        );
         if child.is_none() && index == 0 {
             return None;
         }
@@ -430,10 +443,12 @@ impl<E: Clone> Standard<E> {
             .array_for(self.size - 2)
             .expect("previous vector leaf")
             .clone();
-        let mut root = pop_tail(&self.root, self.shift, self.size).unwrap_or_else(Node::empty_branch);
+        let mut root =
+            pop_tail(&self.root, self.shift, self.size).unwrap_or_else(Node::empty_branch);
         let mut shift = self.shift;
         if shift > NODE_SHIFT {
-            let collapse = matches!(root.as_ref(), Node::Branch(branch) if branch.children[1].is_none());
+            let collapse =
+                matches!(root.as_ref(), Node::Branch(branch) if branch.children[1].is_none());
             if collapse {
                 let Node::Branch(branch) = root.as_ref() else {
                     unreachable!("collapsed vector root must be a branch")
@@ -1127,7 +1142,11 @@ mod tests {
         for index in [0usize, 1, 31, 32, 33, 1000, 1024, 1056, 32767, 32768, 39999] {
             let updated = vector.assoc_value(index, -(index as i64)).unwrap();
             assert_eq!(updated.get(index), Some(&(-(index as i64))));
-            assert_eq!(vector.get(index), Some(&(index as i64)), "persistent source mutated");
+            assert_eq!(
+                vector.get(index),
+                Some(&(index as i64)),
+                "persistent source mutated"
+            );
             assert_eq!(updated.len(), vector.len());
         }
         // assoc at len appends; past len is out of bounds.
@@ -1145,7 +1164,10 @@ mod tests {
         assert_eq!(view.get(0), Some(&10));
         assert_eq!(view.get(39), Some(&49));
         assert_eq!(view.get(40), None);
-        assert_eq!(view.iter().copied().collect::<Vec<_>>(), (10..50).collect::<Vec<_>>());
+        assert_eq!(
+            view.iter().copied().collect::<Vec<_>>(),
+            (10..50).collect::<Vec<_>>()
+        );
 
         // push through the view writes through to index `end` of the backing
         // vector and extends the view; the original vector is untouched.
@@ -1174,7 +1196,10 @@ mod tests {
         let nested = view.subview(5, 10).unwrap();
         assert_eq!(nested.len(), 5);
         assert_eq!(nested.get(0), Some(&15));
-        assert_eq!(nested.iter().copied().collect::<Vec<_>>(), (15..20).collect::<Vec<_>>());
+        assert_eq!(
+            nested.iter().copied().collect::<Vec<_>>(),
+            (15..20).collect::<Vec<_>>()
+        );
 
         // empty view: pop yields None.
         let empty = vector.subview(5, 5).unwrap();
@@ -1224,7 +1249,10 @@ mod tests {
         assert_eq!(frozen.len(), 60);
         assert_eq!(contents(&frozen), (0..60).collect::<Vec<_>>());
         let appended = frozen.push_last(100);
-        assert_eq!(contents(&appended), (0..60).chain(std::iter::once(100)).collect::<Vec<_>>());
+        assert_eq!(
+            contents(&appended),
+            (0..60).chain(std::iter::once(100)).collect::<Vec<_>>()
+        );
         // Freeze on exact tail boundaries too.
         let mut boundary = Mutable::from_iter(0..64i64);
         let frozen = boundary.to_persistent();

@@ -1,4 +1,9 @@
-NGINX_SRC ?=
+NGINX_VERSION := 1.30.4
+NGINX_SHA256 := 4261dc90e9e47c1c4041276e9aaa3d48ebe2e664f728e14fa95ae6c67d57a08b
+SOURCE_ROOT := $(abspath $(CURDIR)/../../target/hoplite/sources)
+NGINX_ARCHIVE := $(SOURCE_ROOT)/nginx-$(NGINX_VERSION).tar.gz
+DEFAULT_NGINX_SRC := $(SOURCE_ROOT)/nginx-$(NGINX_VERSION)
+NGINX_SRC ?= $(DEFAULT_NGINX_SRC)
 RUNTIME_DIR := $(CURDIR)/../target/release
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
@@ -13,18 +18,16 @@ MACOS_TARGET := $(UNAME_M)-apple-darwin
 endif
 
 PACKAGE_ROOT := $(abspath $(CURDIR)/../../target/dist)
-PACKAGE_NAME := hara-rust-v$(HARA_VERSION)-$(MACOS_TARGET)
-PACKAGE_DIR := $(PACKAGE_ROOT)/$(PACKAGE_NAME)
-PACKAGE_ARCHIVE := $(PACKAGE_ROOT)/$(PACKAGE_NAME)-with-hoplite-nginx.tar.gz
+HOPLITE_ARTIFACT := $(PACKAGE_ROOT)/hoplite-v$(HARA_VERSION)-$(MACOS_TARGET)
 
 ifeq ($(UNAME_S),Darwin)
 OPENSSL_PREFIX ?= $(shell brew --prefix openssl@3)
 PCRE2_PREFIX ?= $(shell brew --prefix pcre2)
 NGINX_CC_OPT ?= -I$(OPENSSL_PREFIX)/include -I$(PCRE2_PREFIX)/include
-NGINX_LD_OPT ?= -L$(OPENSSL_PREFIX)/lib -L$(PCRE2_PREFIX)/lib -Wl,-rpath,$(OPENSSL_PREFIX)/lib -Wl,-rpath,$(PCRE2_PREFIX)/lib
+NGINX_LD_OPT ?= $(PCRE2_PREFIX)/lib/libpcre2-8.a $(OPENSSL_PREFIX)/lib/libssl.a $(OPENSSL_PREFIX)/lib/libcrypto.a -Wl,-dead_strip_dylibs
 endif
 
-.PHONY: runtime cli test nginx docker check-macos macos macos-package osx
+.PHONY: runtime cli embedded-cli test nginx nginx-source docker check-macos macos macos-package osx
 
 runtime:
 	cargo build --manifest-path runtime/Cargo.toml --release
@@ -33,11 +36,27 @@ cli:
 	cargo build --manifest-path ../Cargo.toml --release --features hoplite \
 		--bin hara --bin hoplite
 
+embedded-cli: nginx
+	cargo build --manifest-path ../Cargo.toml --release \
+		--features hoplite-embedded-nginx --bin hoplite
+
 test:
 	cargo test --manifest-path runtime/Cargo.toml
 
-nginx: runtime
-	@test -n "$(NGINX_SRC)" || (echo "Set NGINX_SRC to an unpacked Nginx source tree" && exit 1)
+$(NGINX_ARCHIVE):
+	mkdir -p $(SOURCE_ROOT)
+	curl --fail --location --retry 3 \
+		https://nginx.org/download/nginx-$(NGINX_VERSION).tar.gz \
+		--output $@.tmp
+	echo "$(NGINX_SHA256)  $@.tmp" | shasum -a 256 --check
+	mv $@.tmp $@
+
+$(DEFAULT_NGINX_SRC)/configure: $(NGINX_ARCHIVE)
+	tar -xzf $(NGINX_ARCHIVE) -C $(SOURCE_ROOT)
+
+nginx-source: $(NGINX_SRC)/configure
+
+nginx: runtime nginx-source
 	cd $(NGINX_SRC) && \
 		HOPLITE_RUNTIME_DIR=$(RUNTIME_DIR) \
 		./configure --prefix=$(CURDIR)/../../target/hoplite/nginx \
@@ -54,27 +73,22 @@ check-macos:
 	@test "$(UNAME_S)" = "Darwin" || \
 		(echo "The macos target must run on macOS" && exit 1)
 
-macos-package: check-macos nginx cli
-	mkdir -p $(PACKAGE_DIR)
-	install -m 755 ../target/release/hara $(PACKAGE_DIR)/hara
-	install -m 755 ../target/release/hoplite $(PACKAGE_DIR)/hoplite
-	install -m 755 ../../target/hoplite/nginx/sbin/nginx $(PACKAGE_DIR)/nginx
-	tar -czf $(PACKAGE_ARCHIVE) -C $(PACKAGE_DIR) hara hoplite nginx
-	shasum -a 256 $(PACKAGE_ARCHIVE)
+macos-package: check-macos embedded-cli
+	mkdir -p $(PACKAGE_ROOT)
+	install -m 755 ../target/release/hoplite $(HOPLITE_ARTIFACT)
+	shasum -a 256 $(HOPLITE_ARTIFACT)
 	@echo
-	@echo "macOS package ready:"
-	@echo "  $(PACKAGE_ARCHIVE)"
+	@echo "Standalone macOS executable ready:"
+	@echo "  $(HOPLITE_ARTIFACT)"
 	@echo
-	@echo "Runtime dependencies:"
-	@echo "  brew install openssl@3 pcre2"
+	@echo "Install it:"
+	@echo "  install -m 755 $(HOPLITE_ARTIFACT) /usr/local/bin/hoplite"
+	@echo "  hoplite version"
 	@echo
-	@echo "Extract the package and keep hara, hoplite, and nginx together:"
-	@echo "  tar -xzf $(PACKAGE_ARCHIVE) -C /your/install/directory"
-	@echo
-	@echo "Try it:"
-	@echo "  $(PACKAGE_DIR)/hara eval '(+ 19 23)'"
-	@echo "  cd /path/to/hoplite/project"
-	@echo "  $(PACKAGE_DIR)/hoplite serve"
+	@echo "Install a project as a per-user launchd service:"
+	@echo "  hoplite serve install /path/to/hoplite/project"
+	@echo "  hoplite serve status /path/to/hoplite/project"
+	@echo "  hoplite serve uninstall /path/to/hoplite/project"
 
 macos: macos-package
 

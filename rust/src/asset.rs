@@ -55,12 +55,10 @@ pub fn run(args: &[String]) -> Result<(), String> {
             print!("{}", fs::read_to_string(input).map_err(io)?);
             Ok(())
         }
-        Some("publish" | "status" | "search" | "info" | "pull" | "sync" | "yank") => Err(
-            format!(
-                "unavailable: hara asset {} requires the packages.hara-lang.org registry client",
-                args[0]
-            ),
-        ),
+        Some("publish" | "status" | "search" | "info" | "pull" | "sync" | "yank") => Err(format!(
+            "unavailable: hara asset {} requires the packages.hara-lang.org registry client",
+            args[0]
+        )),
         Some(command) => Err(format!("unknown asset command: {command}")),
     }
 }
@@ -96,10 +94,7 @@ pub fn read_collection(input: &Path) -> Result<AssetCollection, String> {
             let entry = as_map(entry, "asset entry must be a map")?;
             Ok(AssetEntry {
                 path: safe_path(&string(required(entry, "entry/path")?, ":entry/path")?)?,
-                media_type: string(
-                    required(entry, "entry/media-type")?,
-                    ":entry/media-type",
-                )?,
+                media_type: string(required(entry, "entry/media-type")?, ":entry/media-type")?,
             })
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -220,10 +215,7 @@ fn option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
 }
 
 fn edn_string(value: &str) -> String {
-    format!(
-        "\"{}\"",
-        value.replace('\\', "\\\\").replace('"', "\\\"")
-    )
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 fn io(error: std::io::Error) -> String {
@@ -269,7 +261,9 @@ mod tests {
             "{:asset/format 1 :asset/coordinate \"alice/gallery\" :asset/version \"1.0.0\" :asset/entries [{:entry/path \"../escape\" :entry/media-type \"application/octet-stream\"}]}\n",
         )
         .unwrap();
-        assert!(read_collection(&root).unwrap_err().contains("unsafe asset path"));
+        assert!(read_collection(&root)
+            .unwrap_err()
+            .contains("unsafe asset path"));
         fs::remove_dir_all(root).unwrap();
     }
 }

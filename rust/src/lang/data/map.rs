@@ -123,8 +123,7 @@ fn index(bitmap: u32, bit: u32) -> usize {
 /// so the slot for `bit` sits at `data_arity + (node_arity - 1 - p)` where
 /// `p` counts node bits below `bit`.
 fn node_slot<K, V>(d: &DataNode<K, V>, bit: u32) -> usize {
-    d.datamap.count_ones() as usize
-        + (d.nodemap.count_ones() as usize - 1 - index(d.nodemap, bit))
+    d.datamap.count_ones() as usize + (d.nodemap.count_ones() as usize - 1 - index(d.nodemap, bit))
 }
 
 /// Clone-on-write unifier. Every node-level operation prepares its level
@@ -378,8 +377,8 @@ fn assoc_node<K: Clone + Eq, V: Clone>(
                 d.datamap ^= b;
                 d.nodemap |= b;
                 let p = index(d.nodemap, b);
-                let pos = d.datamap.count_ones() as usize
-                    + (d.nodemap.count_ones() as usize - 1 - p);
+                let pos =
+                    d.datamap.count_ones() as usize + (d.nodemap.count_ones() as usize - 1 - p);
                 d.slots.insert(pos, Slot::Node(merged));
             }
             true
@@ -411,9 +410,11 @@ fn find_node<'a, K: Eq, V>(
     key: &K,
 ) -> Option<(&'a K, &'a V)> {
     match node {
-        Node::Collision(c) if c.hash == hash => {
-            c.entries.iter().find(|(k, _)| k == key).map(|(k, v)| (k, v))
-        }
+        Node::Collision(c) if c.hash == hash => c
+            .entries
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(k, v)| (k, v)),
         Node::Collision(_) => None,
         Node::Data(d) => {
             let b = bit(hash, shift);
@@ -482,7 +483,11 @@ fn without_present<K: Clone + Eq, V: Clone>(
                     // correct, not a bug: every key routed into a sub-node at
                     // shift s shares the removed key's masks at shifts
                     // 0..s-5, so both keys have the same root bitpos.
-                    let new_datamap = if shift == 0 { d.datamap ^ b } else { bit(hash, 0) };
+                    let new_datamap = if shift == 0 {
+                        d.datamap ^ b
+                    } else {
+                        bit(hash, 0)
+                    };
                     Act::DataCollapse { keep, new_datamap }
                 } else {
                     Act::DataRemove { i, b }
@@ -819,10 +824,7 @@ impl<K: Clone + Eq + Hash + JavaHash, V: Clone + Hash + JavaHash> IHash for Stan
         crate::lang::hash::compose_unordered(
             "MAP",
             self.entries().iter().map(|(k, v)| {
-                crate::lang::hash::compose_entry(
-                    k.java_hash(hash_type),
-                    v.java_hash(hash_type),
-                )
+                crate::lang::hash::compose_entry(k.java_hash(hash_type), v.java_hash(hash_type))
             }),
         ) as u64
     }

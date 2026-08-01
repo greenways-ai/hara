@@ -89,7 +89,12 @@ fn redden<K: Clone, V: Clone>(link: &Link<K, V>) -> Link<K, V> {
         Link::Full(n)
             if n.color == Black && n.left.color() == Black && n.right.color() == Black =>
         {
-            red(n.left.clone(), n.key.clone(), n.value.clone(), n.right.clone())
+            red(
+                n.left.clone(),
+                n.key.clone(),
+                n.value.clone(),
+                n.right.clone(),
+            )
         }
         _ => link.clone(),
     }
@@ -97,9 +102,12 @@ fn redden<K: Clone, V: Clone>(link: &Link<K, V>) -> Link<K, V> {
 /// Java `Node.blacken`: RED becomes BLACK.
 fn blacken<K: Clone, V: Clone>(link: &Link<K, V>) -> Link<K, V> {
     match link {
-        Link::Full(n) if n.color == Red => {
-            black(n.left.clone(), n.key.clone(), n.value.clone(), n.right.clone())
-        }
+        Link::Full(n) if n.color == Red => black(
+            n.left.clone(),
+            n.key.clone(),
+            n.value.clone(),
+            n.right.clone(),
+        ),
         _ => link.clone(),
     }
 }
@@ -108,9 +116,12 @@ fn blacken<K: Clone, V: Clone>(link: &Link<K, V>) -> Link<K, V> {
 fn unblacken<K: Clone, V: Clone>(link: &Link<K, V>) -> Link<K, V> {
     match link {
         Link::DoubleEmpty => Link::Empty,
-        Link::Full(n) if n.color == DoubleBlack => {
-            black(n.left.clone(), n.key.clone(), n.value.clone(), n.right.clone())
-        }
+        Link::Full(n) if n.color == DoubleBlack => black(
+            n.left.clone(),
+            n.key.clone(),
+            n.value.clone(),
+            n.right.clone(),
+        ),
         _ => link.clone(),
     }
 }
@@ -552,9 +563,7 @@ fn ceil_index<K: Ord, V>(link: &Link<K, V>, key: &K, offset: usize) -> Option<us
     };
     match key.cmp(&n.key) {
         Ordering::Greater => ceil_index(&n.right, key, offset + n.left.size() + 1),
-        Ordering::Less => {
-            ceil_index(&n.left, key, offset).or(Some(offset + n.left.size()))
-        }
+        Ordering::Less => ceil_index(&n.left, key, offset).or(Some(offset + n.left.size())),
         Ordering::Equal => Some(offset + n.left.size()),
     }
 }
@@ -844,10 +853,7 @@ impl<K: Clone + Ord + std::hash::Hash + JavaHash, V: Clone + std::hash::Hash + J
         crate::lang::hash::compose_unordered(
             "MAP",
             self.iter().map(|(k, v)| {
-                crate::lang::hash::compose_entry(
-                    k.java_hash(hash_type),
-                    v.java_hash(hash_type),
-                )
+                crate::lang::hash::compose_entry(k.java_hash(hash_type), v.java_hash(hash_type))
             }),
         ) as u64
     }
@@ -1104,7 +1110,11 @@ mod tests {
             let b = rng.below(550) as i64 - 25;
             let (min, max) = if a <= b { (a, b) } else { (b, a) };
             let sliced = map.slice(&min, &max);
-            assert_eq!(sliced.len(), model.range(min..=max).count(), "slice [{min},{max}]");
+            assert_eq!(
+                sliced.len(),
+                model.range(min..=max).count(),
+                "slice [{min},{max}]"
+            );
             assert!(
                 sliced.iter().eq(model.range(min..=max)),
                 "slice [{min},{max}] contents"
@@ -1119,7 +1129,10 @@ mod tests {
                 grown = grown.assoc_value(key, key);
                 grown_model.insert(key, key);
             }
-            assert!(grown.iter().eq(grown_model.iter()), "slice [{min},{max}] grown");
+            assert!(
+                grown.iter().eq(grown_model.iter()),
+                "slice [{min},{max}] grown"
+            );
         }
         assert!(map.slice(&1000, &2000).is_empty());
     }

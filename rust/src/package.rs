@@ -3,7 +3,7 @@
 //! Network reconciliation deliberately does not live here yet: package roots
 //! are only activated after a registry and identity client has verified them.
 
-use crate::kernel::{Form, parse, parse_forms};
+use crate::kernel::{parse, parse_forms, Form};
 use crate::project::{self, Project};
 use crate::tap::{self, Tap};
 use sha2::{Digest, Sha256};

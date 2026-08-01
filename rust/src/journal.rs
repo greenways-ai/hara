@@ -150,7 +150,8 @@ impl JournalCollector {
         if self.truncated {
             return;
         }
-        if event.depth > self.limits.max_depth || self.journal.events.len() >= self.limits.max_events
+        if event.depth > self.limits.max_depth
+            || self.journal.events.len() >= self.limits.max_events
         {
             self.truncated = true;
             self.journal.status = JournalStatus::Truncated;

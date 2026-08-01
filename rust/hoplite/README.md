@@ -129,42 +129,51 @@ Build the pinned Nginx distribution with Hoplite statically built in:
 make -C rust/hoplite nginx NGINX_SRC=/path/to/nginx-1.30.4
 ```
 
-Build and package Hara, Hoplite, and the native Nginx executable together:
+Build the standalone Hoplite executable:
 
 ```bash
-make -C rust/hoplite macos NGINX_SRC=/path/to/nginx-1.30.4
+make -C rust/hoplite macos
 ```
 
-`osx` is an alias for `macos`. After packaging, the Makefile prints the
-archive checksum, dependency and extraction instructions, and the commands to
-evaluate Hara code or serve a Hoplite project.
+`osx` is an alias for `macos`. The resulting
+`target/dist/hoplite-v<version>-<target>` is the complete distribution: the
+Hara runtime and statically linked Hoplite Nginx host are embedded in that one
+executable. The Makefile downloads and verifies the pinned Nginx source, then
+prints the executable checksum and installation instructions. Set
+`NGINX_SRC=/path/to/nginx-1.30.4` only to override the downloaded source tree.
 
-The build links `libhoplite_runtime.a` into the Nginx executable. There is no
-loadable Hoplite module or separate runtime shared library to deploy. On an
-Apple Silicon Mac the output is `target/hoplite/nginx/sbin/nginx`, a native
-arm64 executable; the Makefile discovers the Homebrew OpenSSL and PCRE2
-prefixes automatically.
+The build uses Homebrew OpenSSL and PCRE2 static archives while compiling, but
+the resulting executable has no Homebrew runtime-library dependency. There is
+no loadable Hoplite module, separate Nginx executable, or runtime shared
+library to deploy.
 
 ## CLI
 
-Hoplite is a sibling binary in the Hara Rust package and therefore has exactly
-the same version as `hara`:
+Hoplite is the Greenways-packaged Hara runtime with the Nginx host embedded.
+It preserves the full Hara CLI and has exactly the same Hara runtime version:
 
 ```bash
 cargo build --manifest-path rust/Cargo.toml --release --features hoplite \
   --bin hara --bin hoplite
-hoplite check
-hoplite build
+hoplite eval '(+ 19 23)'
+hoplite run app.hal
+hoplite project check
+hoplite package --help
 hoplite serve
-hoplite status
-hoplite reload
-hoplite stop
+hoplite serve install /path/to/project
+hoplite serve status /path/to/project
+hoplite serve uninstall /path/to/project
 ```
 
-`build` emits `.hoplite/app.hal`, the HBC2 bytecode artifact
+`hoplite serve build` emits `.hoplite/app.hal`, the HBC2 bytecode artifact
 `.hoplite/app.hbc`, and a generated Nginx configuration. `server.edn` controls
 `:hoplite/listen` and `:hoplite/workers`; `routes.edn` maps route `:path` values
-to Hara `:handler` vars. Set `HOPLITE_NGINX` to use a non-bundled Nginx binary.
+to Hara `:handler` vars. `hoplite serve foreground` keeps the embedded host in
+the foreground for service managers. On macOS,
+`hoplite serve install /path/to/project` creates and loads a per-user
+LaunchAgent; `hoplite serve uninstall /path/to/project` unloads and removes it.
+Set `HOPLITE_NGINX` only when deliberately overriding the embedded host for
+development.
 
 ## Runtime ABI
 

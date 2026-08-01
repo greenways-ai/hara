@@ -256,21 +256,31 @@ pub(crate) fn error_exit_code(error: &str) -> i32 {
     }
 }
 
-fn usage() {
-    println!("Hara CLI · Rust runtime");
+pub(crate) fn usage() {
+    let program = program_name();
+    if program == "hoplite" {
+        println!("Hoplite · Hara CLI with embedded Nginx");
+    } else {
+        println!("Hara CLI · Rust runtime");
+    }
     println!();
     println!("Usage:");
-    println!("  hara [OPTIONS] repl");
-    println!("  hara eval EXPRESSION | run FILE | stdin");
-    println!("  hara server | remote HOST:PORT");
-    println!("  hara project <new|check|run|test|add|remove|sync|update> ...");
-    println!("  hara package <COMMAND> ...");
-    println!("  hara id <login|enroll|status|key|namespace> ...");
-    println!("  hara asset <check|build|inspect|publish|status|search|info|pull|sync|yank> ...");
-    println!("  hara tap <bootstrap|init|add|remove|list|verify|mirror> ...");
-    println!("  hara spec <COMMAND> ...");
-    println!("  hara snapshot <build|verify|inspect|diff> ...");
-    println!("  hara extension <check|build|install|test> ...");
+    println!("  {program} [OPTIONS] repl");
+    println!("  {program} eval EXPRESSION | run FILE | stdin");
+    println!("  {program} server | remote HOST:PORT");
+    println!("  {program} project <new|check|run|test|add|remove|sync|update> ...");
+    println!("  {program} package <COMMAND> ...");
+    println!("  {program} id <login|enroll|status|key|namespace> ...");
+    println!(
+        "  {program} asset <check|build|inspect|publish|status|search|info|pull|sync|yank> ..."
+    );
+    println!("  {program} tap <bootstrap|init|add|remove|list|verify|mirror> ...");
+    println!("  {program} spec <COMMAND> ...");
+    println!("  {program} snapshot <build|verify|inspect|diff> ...");
+    println!("  {program} extension <check|build|install|test> ...");
+    if program == "hoplite" {
+        println!("  hoplite serve [PROJECT]");
+    }
     println!();
     println!("Compatibility aliases:");
     println!("  new check test add remove sync update headless standalone");
@@ -283,8 +293,20 @@ fn usage() {
 }
 
 pub(crate) fn exit_error(message: &str, status: i32) -> ! {
-    eprintln!("hara: {message}");
+    eprintln!("{}: {message}", program_name());
     std::process::exit(status)
+}
+
+fn program_name() -> &'static str {
+    let is_hoplite = env::args_os()
+        .next()
+        .and_then(|path| PathBuf::from(path).file_stem().map(|name| name.to_owned()))
+        .is_some_and(|name| name.to_string_lossy().starts_with("hoplite"));
+    if is_hoplite {
+        "hoplite"
+    } else {
+        "hara"
+    }
 }
 
 #[cfg(test)]

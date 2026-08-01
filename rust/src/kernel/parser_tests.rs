@@ -130,9 +130,7 @@ fn preserves_metadata_and_rejects_unknown_dispatch_forms() {
 }
 #[test]
 fn matches_extended_canonical_reader_categories() {
-    for unsupported in [
-        "9223372036854775808",
-    ] {
+    for unsupported in ["9223372036854775808"] {
         assert!(parse_forms(unsupported)
             .unwrap_err()
             .contains("Invalid number"));

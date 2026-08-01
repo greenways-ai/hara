@@ -2,10 +2,27 @@ use hara_wasm::kernel::{parse, parse_forms, Form};
 use hara_wasm::project::{self, Project};
 use std::env;
 use std::fs;
+#[cfg(all(unix, feature = "hoplite-embedded-nginx"))]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
+use std::thread;
+use std::time::Duration;
+
+#[path = "hara/cli.rs"]
+mod cli;
+#[path = "hara/repl.rs"]
+mod repl;
+#[path = "hara/terminal.rs"]
+mod terminal;
 
 const NGINX_VERSION: &str = "1.30.4";
+
+#[cfg(feature = "hoplite-embedded-nginx")]
+const EMBEDDED_NGINX: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../target/hoplite/nginx/sbin/nginx"
+));
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Route {
@@ -20,52 +37,77 @@ struct Server {
 }
 
 fn main() {
-    if let Err(error) = run(env::args().skip(1).collect()) {
-        eprintln!("hoplite: {error}");
-        process::exit(1);
+    let arguments = env::args().skip(1).collect::<Vec<_>>();
+    if matches!(
+        arguments.first().map(String::as_str),
+        Some("serve" | "version" | "--version" | "-V")
+    ) {
+        if let Err(error) = run_hoplite(arguments) {
+            eprintln!("hoplite: {error}");
+            process::exit(1);
+        }
+        return;
+    }
+    let options = match cli::parse_options() {
+        Ok(options) => options,
+        Err(error) => cli::exit_error(&error, 2),
+    };
+    if let Err(error) = cli::run(options) {
+        cli::exit_error(&error, cli::error_exit_code(&error));
     }
 }
 
-fn run(arguments: Vec<String>) -> Result<(), String> {
-    let command = arguments.first().map(String::as_str).unwrap_or("help");
-    let root = arguments
-        .get(1)
-        .map(PathBuf::from)
-        .unwrap_or(env::current_dir().map_err(io)?);
-    match command {
-        "check" => {
-            let project = check(&root)?;
-            println!("{} is ready for Hoplite", project.id);
+fn run_hoplite(arguments: Vec<String>) -> Result<(), String> {
+    match arguments.first().map(String::as_str) {
+        Some("version" | "--version" | "-V") => {
+            println!("Hoplite {}", env!("CARGO_PKG_VERSION"));
+            println!("Hara {}", env!("CARGO_PKG_VERSION"));
+            println!("Nginx {} ({})", NGINX_VERSION, nginx_distribution());
         }
-        "build" => {
-            let output = build(&root)?;
-            println!("built {}", output.display());
-        }
-        "serve" => serve(&root)?,
-        "status" => status(&root)?,
-        "reload" => signal(&root, "reload")?,
-        "stop" => signal(&root, "quit")?,
-        "version" | "--version" | "-V" => {
-            println!(
-                "hoplite {} (Hara {}, Nginx {})",
-                env!("CARGO_PKG_VERSION"),
-                env!("CARGO_PKG_VERSION"),
-                NGINX_VERSION
-            );
-        }
-        "help" | "--help" | "-h" => usage(),
-        unknown => return Err(format!("unknown command {unknown:?}; run `hoplite help`")),
+        Some("serve") => run_serve_command(&arguments[1..])?,
+        _ => return Err("unknown Hoplite command".into()),
     }
     Ok(())
 }
 
-fn usage() {
+fn run_serve_command(arguments: &[String]) -> Result<(), String> {
+    let (action, project) = match arguments.first().map(String::as_str) {
+        None => ("start", None),
+        Some("--help" | "-h" | "help") => {
+            serve_usage();
+            return Ok(());
+        }
+        Some(
+            action @ ("start" | "foreground" | "install" | "uninstall" | "status" | "reload"
+            | "stop" | "build" | "check"),
+        ) => (action, arguments.get(1)),
+        Some(_) => ("start", arguments.first()),
+    };
+    let root = project
+        .map(PathBuf::from)
+        .unwrap_or(env::current_dir().map_err(io)?);
+    match action {
+        "start" => serve(&root),
+        "foreground" => run_foreground(&root),
+        "install" => launchd_install(&root),
+        "uninstall" => launchd_uninstall(&root),
+        "status" => status(&root),
+        "reload" => signal(&root, "reload"),
+        "stop" => signal(&root, "quit"),
+        "build" => build(&root).map(|output| println!("built {}", output.display())),
+        "check" => check(&root).map(|project| println!("{} is ready for Hoplite", project.id)),
+        _ => unreachable!(),
+    }
+}
+
+fn serve_usage() {
     println!(
         "Hoplite {} — Hara on Nginx {}",
         env!("CARGO_PKG_VERSION"),
         NGINX_VERSION
     );
-    println!("usage: hoplite <check|build|serve|status|reload|stop|version> [PROJECT]");
+    println!("usage: hoplite serve [PROJECT]");
+    println!("       hoplite serve <foreground|install|uninstall|status|reload|stop|build|check> [PROJECT]");
 }
 
 fn check(root: &Path) -> Result<Project, String> {
@@ -104,7 +146,7 @@ fn build(root: &Path) -> Result<PathBuf, String> {
 fn serve(root: &Path) -> Result<(), String> {
     let output = build(root)?;
     let project_root = output.parent().ok_or("invalid Hoplite output path")?;
-    let exit = Command::new(nginx_binary())
+    let exit = Command::new(nginx_binary()?)
         .arg("-p")
         .arg(project_root)
         .arg("-c")
@@ -116,7 +158,193 @@ fn serve(root: &Path) -> Result<(), String> {
     if !exit.success() {
         return Err(format!("Nginx exited with {exit}"));
     }
-    status(project_root)
+    wait_for_status(project_root)
+}
+
+fn run_foreground(root: &Path) -> Result<(), String> {
+    let output = build(root)?;
+    let project_root = output.parent().ok_or("invalid Hoplite output path")?;
+    let mut command = Command::new(nginx_binary()?);
+    command
+        .arg("-p")
+        .arg(project_root)
+        .arg("-c")
+        .arg(".hoplite/conf/nginx.conf")
+        .arg("-e")
+        .arg(".hoplite/error.log")
+        .args(["-g", "daemon off;"]);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let error = command.exec();
+        Err(format!("cannot exec Hoplite Nginx: {error}"))
+    }
+    #[cfg(not(unix))]
+    {
+        let exit = command
+            .status()
+            .map_err(|error| format!("cannot run Hoplite Nginx: {error}"))?;
+        if exit.success() {
+            Ok(())
+        } else {
+            Err(format!("Nginx exited with {exit}"))
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn launchd_install(root: &Path) -> Result<(), String> {
+    let output = build(root)?;
+    let project_root = output.parent().ok_or("invalid Hoplite output path")?;
+    let project = project::discover(project_root)?;
+    let executable = env::current_exe().map_err(io)?.canonicalize().map_err(io)?;
+    let label = launchd_label(&project.id);
+    let home = env::var_os("HOME").ok_or("HOME is not set")?;
+    let agents = PathBuf::from(home).join("Library/LaunchAgents");
+    fs::create_dir_all(&agents).map_err(io)?;
+    let plist = agents.join(format!("{label}.plist"));
+    fs::write(&plist, launchd_plist(&label, &executable, project_root)).map_err(io)?;
+
+    let uid = command_output("id", &["-u"])?;
+    let domain = format!("gui/{uid}");
+    let service = format!("{domain}/{label}");
+    if Command::new("launchctl")
+        .args(["print", &service])
+        .output()
+        .map_err(io)?
+        .status
+        .success()
+    {
+        let _ = Command::new("launchctl")
+            .args(["bootout", &service])
+            .status();
+    }
+    let status = Command::new("launchctl")
+        .arg("bootstrap")
+        .arg(&domain)
+        .arg(&plist)
+        .status()
+        .map_err(io)?;
+    if !status.success() {
+        return Err(format!("launchctl bootstrap failed with {status}"));
+    }
+    println!("installed {label}");
+    println!("launchd plist: {}", plist.display());
+    wait_for_status(project_root)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn launchd_install(_root: &Path) -> Result<(), String> {
+    Err("hoplite install requires macOS launchd".into())
+}
+
+#[cfg(target_os = "macos")]
+fn launchd_uninstall(root: &Path) -> Result<(), String> {
+    let project = project::discover(root)?;
+    let label = launchd_label(&project.id);
+    let uid = command_output("id", &["-u"])?;
+    let service = format!("gui/{uid}/{label}");
+    let status = Command::new("launchctl")
+        .args(["bootout", &service])
+        .status()
+        .map_err(io)?;
+    if !status.success() {
+        return Err(format!("launchctl bootout failed with {status}"));
+    }
+    if let Some(home) = env::var_os("HOME") {
+        let plist = PathBuf::from(home)
+            .join("Library/LaunchAgents")
+            .join(format!("{label}.plist"));
+        if plist.exists() {
+            fs::remove_file(&plist).map_err(io)?;
+        }
+    }
+    println!("uninstalled {label}");
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn launchd_uninstall(_root: &Path) -> Result<(), String> {
+    Err("hoplite uninstall requires macOS launchd".into())
+}
+
+fn launchd_label(project_id: &str) -> String {
+    let suffix = project_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '-') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    format!("org.hara.hoplite.{suffix}")
+}
+
+fn launchd_plist(label: &str, executable: &Path, project_root: &Path) -> String {
+    let output = project_root.join(".hoplite/launchd.stdout.log");
+    let error = project_root.join(".hoplite/launchd.stderr.log");
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n\
+<plist version=\"1.0\">\n\
+<dict>\n\
+  <key>Label</key><string>{}</string>\n\
+  <key>ProgramArguments</key>\n\
+  <array>\n\
+    <string>{}</string>\n\
+    <string>serve</string>\n\
+    <string>foreground</string>\n\
+    <string>{}</string>\n\
+  </array>\n\
+  <key>WorkingDirectory</key><string>{}</string>\n\
+  <key>RunAtLoad</key><true/>\n\
+  <key>KeepAlive</key><true/>\n\
+  <key>ProcessType</key><string>Background</string>\n\
+  <key>StandardOutPath</key><string>{}</string>\n\
+  <key>StandardErrorPath</key><string>{}</string>\n\
+</dict>\n\
+</plist>\n",
+        xml_escape(label),
+        xml_escape(&executable.display().to_string()),
+        xml_escape(&project_root.display().to_string()),
+        xml_escape(&project_root.display().to_string()),
+        xml_escape(&output.display().to_string()),
+        xml_escape(&error.display().to_string())
+    )
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+#[cfg(target_os = "macos")]
+fn command_output(command: &str, arguments: &[&str]) -> Result<String, String> {
+    let output = Command::new(command).args(arguments).output().map_err(io)?;
+    if !output.status.success() {
+        return Err(format!("{command} exited with {}", output.status));
+    }
+    String::from_utf8(output.stdout)
+        .map(|value| value.trim().to_owned())
+        .map_err(|error| error.to_string())
+}
+
+fn wait_for_status(root: &Path) -> Result<(), String> {
+    let mut last_error = None;
+    for _ in 0..200 {
+        match status(root) {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    Err(last_error.unwrap_or_else(|| "Hoplite failed to start".into()))
 }
 
 fn status(root: &Path) -> Result<(), String> {
@@ -139,7 +367,7 @@ fn status(root: &Path) -> Result<(), String> {
 
 fn signal(root: &Path, signal: &str) -> Result<(), String> {
     let project = project::discover(root)?;
-    let status = Command::new(nginx_binary())
+    let status = Command::new(nginx_binary()?)
         .arg("-p")
         .arg(&project.root)
         .arg("-c")
@@ -157,19 +385,57 @@ fn signal(root: &Path, signal: &str) -> Result<(), String> {
     }
 }
 
-fn nginx_binary() -> PathBuf {
-    if let Some(path) = env::var_os("HOPLITE_NGINX") {
-        return path.into();
+fn nginx_distribution() -> &'static str {
+    if cfg!(feature = "hoplite-embedded-nginx") {
+        "embedded"
+    } else {
+        "external"
     }
-    if let Ok(executable) = env::current_exe() {
-        if let Some(directory) = executable.parent() {
-            let sibling = directory.join("nginx");
-            if sibling.is_file() {
-                return sibling;
+}
+
+fn nginx_binary() -> Result<PathBuf, String> {
+    if let Some(path) = env::var_os("HOPLITE_NGINX") {
+        return Ok(path.into());
+    }
+    #[cfg(feature = "hoplite-embedded-nginx")]
+    return materialize_embedded_nginx();
+
+    #[cfg(not(feature = "hoplite-embedded-nginx"))]
+    {
+        if let Ok(executable) = env::current_exe() {
+            if let Some(directory) = executable.parent() {
+                let sibling = directory.join("nginx");
+                if sibling.is_file() {
+                    return Ok(sibling);
+                }
             }
         }
+        Ok(Path::new(env!("CARGO_MANIFEST_DIR")).join("target/hoplite/nginx/sbin/nginx"))
     }
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("target/hoplite/nginx/sbin/nginx")
+}
+
+#[cfg(feature = "hoplite-embedded-nginx")]
+fn materialize_embedded_nginx() -> Result<PathBuf, String> {
+    let cache = env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Caches")))
+        .unwrap_or_else(env::temp_dir)
+        .join("hoplite")
+        .join(env!("CARGO_PKG_VERSION"));
+    let path = cache.join(format!("nginx-{NGINX_VERSION}"));
+    if fs::read(&path)
+        .map(|contents| contents == EMBEDDED_NGINX)
+        .unwrap_or(false)
+    {
+        return Ok(path);
+    }
+    fs::create_dir_all(&cache).map_err(io)?;
+    let temporary = cache.join(format!(".nginx-{}.tmp", process::id()));
+    fs::write(&temporary, EMBEDDED_NGINX).map_err(io)?;
+    #[cfg(unix)]
+    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o700)).map_err(io)?;
+    fs::rename(&temporary, &path).map_err(io)?;
+    Ok(path)
 }
 
 fn source_files(project: &Project) -> Result<Vec<PathBuf>, String> {
@@ -414,5 +680,21 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("invalid route path"));
+    }
+
+    #[test]
+    fn creates_safe_launchd_definition() {
+        let label = launchd_label("example/web api");
+        assert_eq!(label, "org.hara.hoplite.example-web-api");
+        let plist = launchd_plist(
+            &label,
+            Path::new("/Applications/Hara & Hoplite/hoplite"),
+            Path::new("/tmp/example <web>"),
+        );
+        assert!(plist.contains("<string>serve</string>"));
+        assert!(plist.contains("<string>foreground</string>"));
+        assert!(plist.contains("Hara &amp; Hoplite"));
+        assert!(plist.contains("example &lt;web&gt;"));
+        assert!(plist.contains("<key>KeepAlive</key><true/>"));
     }
 }

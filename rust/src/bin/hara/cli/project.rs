@@ -1,12 +1,12 @@
 use super::Options;
 use crate::repl;
-use hara_wasm::Runtime;
-use hara_wasm::kernel::{Form, parse};
 #[cfg(feature = "halc-encoder")]
 use hara_wasm::kernel::{halc::encode_halc_module, parse_forms};
+use hara_wasm::kernel::{parse, Form};
 use hara_wasm::native_cli::RuntimeBroker;
 use hara_wasm::project;
 use hara_wasm::resp::{RespConnection, RespServer, RespValue};
+use hara_wasm::Runtime;
 use std::fs;
 use std::io::{self, BufRead};
 use std::net::TcpStream;

@@ -370,19 +370,12 @@ impl GeneratedNamespaceConfig {
                     }
                 }
                 "exclude" => {
-                    let names = vector(
-                        &option[1],
-                        ":require :exclude expects a vector of symbols",
-                    )?;
+                    let names =
+                        vector(&option[1], ":require :exclude expects a vector of symbols")?;
                     for value in names {
-                        let name = symbol(
-                            value,
-                            ":require :exclude expects unqualified symbols",
-                        )?;
+                        let name = symbol(value, ":require :exclude expects unqualified symbols")?;
                         if name.contains('/') {
-                            return Err(
-                                ":require :exclude expects unqualified symbols".into(),
-                            );
+                            return Err(":require :exclude expects unqualified symbols".into());
                         }
                     }
                 }

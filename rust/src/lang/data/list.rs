@@ -386,9 +386,7 @@ impl<E> Mutable<E> {
         E: Clone,
     {
         let capacity = ring_capacity(list.size + 1);
-        let mut elements: Vec<Option<E>> = std::iter::repeat_with(|| None)
-            .take(capacity)
-            .collect();
+        let mut elements: Vec<Option<E>> = std::iter::repeat_with(|| None).take(capacity).collect();
         // Flatten chunks into the ring buffer, in order, at offset 0.
         let mut i = 0;
         let mut chunk = list.head.as_deref();
@@ -410,17 +408,13 @@ impl<E> Mutable<E> {
     }
 
     fn check_editable(&self) {
-        assert!(
-            self.editable.get(),
-            "mutable list used after to_persistent"
-        );
+        assert!(self.editable.get(), "mutable list used after to_persistent");
     }
 
     // Doubling grow with linearize-on-resize.
     fn resize(&mut self, new_capacity: usize) {
-        let mut elements: Vec<Option<E>> = std::iter::repeat_with(|| None)
-            .take(new_capacity)
-            .collect();
+        let mut elements: Vec<Option<E>> =
+            std::iter::repeat_with(|| None).take(new_capacity).collect();
         for i in 0..self.size {
             elements[i] = self.elements[(self.offset + i) & self.mask].take();
         }
@@ -529,9 +523,10 @@ impl<E: PartialEq> PartialEq for Mutable<E> {
 impl<E: std::fmt::Debug> std::fmt::Debug for Mutable<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list()
-            .entries((0..self.size).filter_map(|i| {
-                self.elements[(self.offset + i) & self.mask].as_ref()
-            }))
+            .entries(
+                (0..self.size)
+                    .filter_map(|i| self.elements[(self.offset + i) & self.mask].as_ref()),
+            )
             .finish()
     }
 }

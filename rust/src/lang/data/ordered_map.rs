@@ -210,10 +210,7 @@ impl<K: Clone + Eq + Hash + JavaHash, V: Clone + Hash + JavaHash> IHash for Stan
         crate::lang::hash::compose_unordered(
             "MAP",
             self.iter().map(|(k, v)| {
-                crate::lang::hash::compose_entry(
-                    k.java_hash(hash_type),
-                    v.java_hash(hash_type),
-                )
+                crate::lang::hash::compose_entry(k.java_hash(hash_type), v.java_hash(hash_type))
             }),
         ) as u64
     }

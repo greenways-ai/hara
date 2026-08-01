@@ -122,7 +122,11 @@ impl IHash for Symbol {
         // so Java hashes "::SYMBOL|hara.lang.data.Symbol<ns/name>".
         crate::lang::hash::hash_string_type(
             hash_type,
-            &format!("{}|hara.lang.data.Symbol<{}>", self.hash_seed(), self.display()),
+            &format!(
+                "{}|hara.lang.data.Symbol<{}>",
+                self.hash_seed(),
+                self.display()
+            ),
         ) as u64
     }
     fn hash_get(&self) -> u64 {

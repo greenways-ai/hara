@@ -713,7 +713,9 @@ pub(crate) fn native_fixed_variadic_function(
     callback: impl Fn(Vec<Value>) -> Result<Value, String> + 'static,
 ) -> Value {
     Value::Function(Rc::new(Function {
-        params: (0..fixed_arity).map(|index| format!("arg{index}")).collect(),
+        params: (0..fixed_arity)
+            .map(|index| format!("arg{index}"))
+            .collect(),
         variadic: Some("rest".into()),
         patterns: Vec::new(),
         variadic_pattern: None,
@@ -877,14 +879,16 @@ pub(crate) fn structural_callable_names() -> impl Iterator<Item = &'static str> 
         .find_map(|(name, methods)| (*name == "Maths").then_some(*methods))
         .expect("Maths native type must be declared");
 
-    fiber::CORE_SPECIAL_FORMS.iter().copied().filter(move |name| {
-        !SYNTAX_FORMS.contains(name)
-            && !name.contains('/')
-            && !name.starts_with("__")
-            && !maths_methods.contains(name)
-            && (!name.starts_with("iter-")
-                || matches!(*name, "iter-next" | "iter-next?"))
-    })
+    fiber::CORE_SPECIAL_FORMS
+        .iter()
+        .copied()
+        .filter(move |name| {
+            !SYNTAX_FORMS.contains(name)
+                && !name.contains('/')
+                && !name.starts_with("__")
+                && !maths_methods.contains(name)
+                && (!name.starts_with("iter-") || matches!(*name, "iter-next" | "iter-next?"))
+        })
 }
 
 pub fn with_macros<R>(
@@ -1139,7 +1143,8 @@ fn evaluation_journal_enter(
         let mut active = active.borrow_mut();
         let collector = active.as_mut()?;
         let operation = collector.next_operation_id();
-        let mut event = crate::journal::JournalEvent::new(crate::journal::JournalEventKind::OperationEnter);
+        let mut event =
+            crate::journal::JournalEvent::new(crate::journal::JournalEventKind::OperationEnter);
         event.operation = Some(operation);
         event.parent_operation = parent_operation;
         event.depth = depth;
@@ -1166,8 +1171,9 @@ fn evaluation_journal_exit(
     let value = result.map(journal_preview);
     EVALUATION_JOURNAL.with(|active| {
         if let Some(collector) = active.borrow_mut().as_mut() {
-            let mut event =
-                crate::journal::JournalEvent::new(crate::journal::JournalEventKind::OperationReturn);
+            let mut event = crate::journal::JournalEvent::new(
+                crate::journal::JournalEventKind::OperationReturn,
+            );
             event.operation = Some(operation);
             event.function = Some(
                 function
@@ -1926,16 +1932,12 @@ impl crate::lang::hash::JavaHash for Value {
             Self::Object(v) => jh::compose_unordered(
                 "MAP",
                 v.borrow().iter().map(|(key, item)| {
-                    jh::compose_entry(
-                        jh::java_string_hash(key) as i64,
-                        item.java_hash(hash_type),
-                    )
+                    jh::compose_entry(jh::java_string_hash(key) as i64, item.java_hash(hash_type))
                 }),
             ),
-            Self::Recur(v) => jh::compose_ordered(
-                "SEQUENTIAL",
-                v.iter().map(|item| item.java_hash(hash_type)),
-            ),
+            Self::Recur(v) => {
+                jh::compose_ordered("SEQUENTIAL", v.iter().map(|item| item.java_hash(hash_type)))
+            }
             Self::Tagged(v) => jh::compose_ordered(
                 "SEQUENTIAL",
                 [v.tag().java_hash(hash_type), v.form().java_hash(hash_type)],
@@ -2685,9 +2687,11 @@ pub(crate) fn vm_defstruct(name: &str, fields: Vec<String>) -> Result<Value, Str
             .fields
             .iter()
             .map(|field| {
-                Ok(map_value(source, &Value::Keyword(Keyword::from(field.as_str())))
-                    .cloned()
-                    .unwrap_or(Value::Nil))
+                Ok(
+                    map_value(source, &Value::Keyword(Keyword::from(field.as_str())))
+                        .cloned()
+                        .unwrap_or(Value::Nil),
+                )
             })
             .collect::<Result<Vec<_>, String>>()?;
         Ok(Value::Struct(Rc::new(StructValue {
@@ -4682,7 +4686,9 @@ pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Resu
                 return Err("= expects at least 2 arguments".into());
             }
             let first = &arguments[0];
-            Ok(Value::Bool(arguments[1..].iter().all(|value| value == first)))
+            Ok(Value::Bool(
+                arguments[1..].iter().all(|value| value == first),
+            ))
         }
         Primitive::Less
         | Primitive::LessOrEqual
@@ -4698,13 +4704,15 @@ pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Resu
                     _ => return Err(format!("{op} expects numbers")),
                 }
             }
-            Ok(Value::Bool(numbers.windows(2).all(|pair| match primitive {
-                Primitive::Less => pair[0] < pair[1],
-                Primitive::Greater => pair[0] > pair[1],
-                Primitive::LessOrEqual => pair[0] <= pair[1],
-                Primitive::GreaterOrEqual => pair[0] >= pair[1],
-                _ => unreachable!(),
-            })))
+            Ok(Value::Bool(numbers.windows(2).all(
+                |pair| match primitive {
+                    Primitive::Less => pair[0] < pair[1],
+                    Primitive::Greater => pair[0] > pair[1],
+                    Primitive::LessOrEqual => pair[0] <= pair[1],
+                    Primitive::GreaterOrEqual => pair[0] >= pair[1],
+                    _ => unreachable!(),
+                },
+            )))
         }
         // The evaluator's structural collection/metadata arms, sharing the
         // same value-level functions and arity messages.
@@ -4781,16 +4789,12 @@ pub(crate) fn apply_binary_primitive(
         | Primitive::Subtract
         | Primitive::Multiply
         | Primitive::Divide
-        | Primitive::Remainder => {
-            Err(format!("{op} expects numbers"))
-        }
+        | Primitive::Remainder => Err(format!("{op} expects numbers")),
         Primitive::Equal => Ok(Value::Bool(left == right)),
         Primitive::Less
         | Primitive::LessOrEqual
         | Primitive::Greater
-        | Primitive::GreaterOrEqual => {
-            Err(format!("{op} expects numbers"))
-        }
+        | Primitive::GreaterOrEqual => Err(format!("{op} expects numbers")),
         Primitive::Get => collection_get(left, right, Value::Nil),
         Primitive::Count => Err("count expects one argument".into()),
         Primitive::Meta => Err("meta expects one value".into()),
@@ -6776,11 +6780,7 @@ fn iterator_map(function: Rc<Function>, value: Value) -> Result<Value, String> {
 fn iterator_map_spread(function: Rc<Function>, value: Value) -> Result<Value, String> {
     iterator_map_with(function, value, true)
 }
-fn iterator_map_with(
-    function: Rc<Function>,
-    value: Value,
-    spread: bool,
-) -> Result<Value, String> {
+fn iterator_map_with(function: Rc<Function>, value: Value, spread: bool) -> Result<Value, String> {
     let source = match value {
         Value::Iterator(iterator) => Value::Iterator(iterator),
         value => make_iterator(value)?,
@@ -7855,11 +7855,7 @@ fn multi_arity_function(
 /// Builds the multi-arity dispatcher shared by the evaluator's defn and
 /// the bytecode VM's `MakeMultiArity` (issue #223): exact fixed-arity
 /// match first, then the variadic clause with the most parameters.
-pub(crate) fn arity_dispatcher(
-    name: &str,
-    functions: Vec<Rc<Function>>,
-    is_macro: bool,
-) -> Value {
+pub(crate) fn arity_dispatcher(name: &str, functions: Vec<Rc<Function>>, is_macro: bool) -> Value {
     let dispatch_name = name.to_owned();
     let clauses = functions.clone();
     Value::Function(Rc::new(Function {
@@ -8061,8 +8057,11 @@ pub(crate) fn with_evaluation_journal<T>(
     preview: impl FnOnce(&T, &crate::journal::JournalCollector) -> crate::journal::ValuePreview,
 ) -> (Result<T, String>, crate::journal::Journal) {
     EVALUATION_JOURNAL_STACK.with(|stack| stack.borrow_mut().clear());
-    let previous = EVALUATION_JOURNAL
-        .with(|active| active.replace(Some(crate::journal::JournalCollector::new(journal_id, limits))));
+    let previous = EVALUATION_JOURNAL.with(|active| {
+        active.replace(Some(crate::journal::JournalCollector::new(
+            journal_id, limits,
+        )))
+    });
     assert!(
         previous.is_none(),
         "nested evaluation journals are not supported yet"
@@ -8093,7 +8092,10 @@ pub(crate) fn with_evaluation_journal<T>(
     (result, trace)
 }
 
-pub(crate) fn binding_symbol(form: &Form, context: &str) -> Result<(String, Option<Rc<Metadata>>), String> {
+pub(crate) fn binding_symbol(
+    form: &Form,
+    context: &str,
+) -> Result<(String, Option<Rc<Metadata>>), String> {
     match form {
         Form::Symbol(name) => Ok((name.clone(), None)),
         Form::Metadata(metadata, value) => match value.as_ref() {
@@ -8396,11 +8398,7 @@ fn eval_require_spec(
                             _ => Err("require :refer expects unqualified symbols".to_string()),
                         })
                         .collect::<Result<Vec<_>, _>>()?,
-                    _ => {
-                        return Err(
-                            "require :refer expects a vector of symbols or :all".into(),
-                        )
-                    }
+                    _ => return Err("require :refer expects a vector of symbols or :all".into()),
                 };
                 for name in names {
                     if excluded.contains(&name) {
@@ -10274,9 +10272,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     .collect::<Result<Vec<_>, _>>()?;
                 string_operation(n, values)
             }
-            Form::Symbol(n)
-                if n == "str/trim" || n == "str/upper" || n == "str/lower" =>
-            {
+            Form::Symbol(n) if n == "str/trim" || n == "str/upper" || n == "str/lower" => {
                 if fs.len() != 2 {
                     return Err(format!("{n} expects one string"));
                 }

@@ -77,8 +77,14 @@ pub fn hash_with_seed(data: &[u8], seed: u64) -> u64 {
             let mut see2 = seed;
             loop {
                 seed = rapid_mix(read64(data, p) ^ RAPID_SECRET_0, read64(data, p + 8) ^ seed);
-                see1 = rapid_mix(read64(data, p + 16) ^ RAPID_SECRET_1, read64(data, p + 24) ^ see1);
-                see2 = rapid_mix(read64(data, p + 32) ^ RAPID_SECRET_2, read64(data, p + 40) ^ see2);
+                see1 = rapid_mix(
+                    read64(data, p + 16) ^ RAPID_SECRET_1,
+                    read64(data, p + 24) ^ see1,
+                );
+                see2 = rapid_mix(
+                    read64(data, p + 32) ^ RAPID_SECRET_2,
+                    read64(data, p + 40) ^ see2,
+                );
                 p += 48;
                 i -= 48;
                 if i < 48 {
@@ -93,7 +99,10 @@ pub fn hash_with_seed(data: &[u8], seed: u64) -> u64 {
                 read64(data, p + 8) ^ seed ^ RAPID_SECRET_1,
             );
             if i > 32 {
-                seed = rapid_mix(read64(data, p + 16) ^ RAPID_SECRET_2, read64(data, p + 24) ^ seed);
+                seed = rapid_mix(
+                    read64(data, p + 16) ^ RAPID_SECRET_2,
+                    read64(data, p + 24) ^ seed,
+                );
             }
         }
         a = read64(data, p + i - 16);

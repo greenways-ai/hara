@@ -267,9 +267,7 @@ fn run_case(case: &Form) -> Vec<String> {
                     let (name, args) = op_parts(op);
                     match name {
                         "push-last" => v = v.push_last(arg_value(&args[0])),
-                        "pop-last" => {
-                            v = v.pop_last_value().expect("pop-last on empty vector")
-                        }
+                        "pop-last" => v = v.pop_last_value().expect("pop-last on empty vector"),
                         "assoc" => {
                             v = v
                                 .assoc_value(num_of(&args[0]) as usize, arg_value(&args[1]))
@@ -489,9 +487,7 @@ fn run_case(case: &Form) -> Vec<String> {
                 actual.iter = Some(
                     t.entries()
                         .iter()
-                        .map(|(k, v)| {
-                            Form::Vector(vec![Form::String(k.clone()), value_form(v)])
-                        })
+                        .map(|(k, v)| Form::Vector(vec![Form::String(k.clone()), value_form(v)]))
                         .collect(),
                 );
                 hashes(actual, t);
@@ -572,7 +568,10 @@ impl Gettable for SortedMap<Value, Value> {
 fn fill_find<M: Gettable>(m: &M, expect: &Form, out: &mut Vec<(Form, Form)>) {
     if let Some(find) = opt_field(expect, "find") {
         for (probe, _) in map_of(find) {
-            out.push((probe.clone(), opt_value_form(m.get_value(&arg_value(probe)))));
+            out.push((
+                probe.clone(),
+                opt_value_form(m.get_value(&arg_value(probe))),
+            ));
         }
     }
 }
@@ -596,10 +595,7 @@ impl Containable for OrderedSet<Value> {
 fn fill_contains<S: Containable>(s: &S, expect: &Form, out: &mut Vec<(Form, Form)>) {
     if let Some(contains) = opt_field(expect, "contains") {
         for (probe, _) in map_of(contains) {
-            out.push((
-                probe.clone(),
-                Form::Bool(s.has(&arg_value(probe))),
-            ));
+            out.push((probe.clone(), Form::Bool(s.has(&arg_value(probe)))));
         }
     }
 }
@@ -641,10 +637,7 @@ fn fill_nth<N: Nthable>(n: &N, expect: &Form, out: &mut Vec<(Form, Form)>) {
     if let Some(nth) = opt_field(expect, "nth") {
         for (idx, _) in map_of(nth) {
             let i = num_of(idx) as usize;
-            out.push((
-                idx.clone(),
-                opt_value_form(n.nth_value(i)),
-            ));
+            out.push((idx.clone(), opt_value_form(n.nth_value(i))));
         }
     }
 }
@@ -656,7 +649,10 @@ fn fill_index_of_sorted_map(
 ) {
     if let Some(index) = opt_field(expect, "index-of") {
         for (probe, _) in map_of(index) {
-            let rank = m.index_of_key(&arg_value(probe)).map(|i| i as i64).unwrap_or(-1);
+            let rank = m
+                .index_of_key(&arg_value(probe))
+                .map(|i| i as i64)
+                .unwrap_or(-1);
             out.push((probe.clone(), Form::Number(rank)));
         }
     }
@@ -665,7 +661,10 @@ fn fill_index_of_sorted_map(
 fn fill_index_of_sorted_set(s: &SortedSet<Value>, expect: &Form, out: &mut Vec<(Form, Form)>) {
     if let Some(index) = opt_field(expect, "index-of") {
         for (probe, _) in map_of(index) {
-            let rank = s.index_of(&arg_value(probe)).map(|i| i as i64).unwrap_or(-1);
+            let rank = s
+                .index_of(&arg_value(probe))
+                .map(|i| i as i64)
+                .unwrap_or(-1);
             out.push((probe.clone(), Form::Number(rank)));
         }
     }
@@ -753,10 +752,7 @@ fn fill_floor_ceil_sorted_set(
 fn fill_trie_find(t: &Trie<Value>, expect: &Form, out: &mut Vec<(Form, Form)>) {
     if let Some(find) = opt_field(expect, "find") {
         for (probe, _) in map_of(find) {
-            out.push((
-                probe.clone(),
-                opt_value_form(t.get(&str_arg(probe))),
-            ));
+            out.push((probe.clone(), opt_value_form(t.get(&str_arg(probe)))));
         }
     }
 }
@@ -766,7 +762,8 @@ fn fill_trie_find(t: &Trie<Value>, expect: &Form, out: &mut Vec<(Form, Form)>) {
 // ---------------------------------------------------------------------------
 
 fn skipped(id: &str, key: &str) -> bool {
-    SKIP.iter().any(|(skip_id, skip_key, _)| *skip_id == id && *skip_key == key)
+    SKIP.iter()
+        .any(|(skip_id, skip_key, _)| *skip_id == id && *skip_key == key)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -815,7 +812,8 @@ fn compare(
                             ":{id} :iter (unordered): expected {value}, got {}",
                             Form::Vector(actual_items.clone())
                         ));
-                    } else if !skipped(id, "iter-order") && expected_items != actual_items.as_slice()
+                    } else if !skipped(id, "iter-order")
+                        && expected_items != actual_items.as_slice()
                     {
                         failures.push(format!(
                             ":{id} :iter-order: expected {value}, got {}",
@@ -823,17 +821,17 @@ fn compare(
                         ));
                     }
                 } else {
-                    check!(
-                        key,
-                        value,
-                        Form::Vector(actual_items.clone()).to_string()
-                    );
+                    check!(key, value, Form::Vector(actual_items.clone()).to_string());
                 }
             }
             "first" => check!(
                 key,
                 value,
-                actual.first.clone().expect("first not recorded").to_string()
+                actual
+                    .first
+                    .clone()
+                    .expect("first not recorded")
+                    .to_string()
             ),
             "last" => check!(
                 key,
@@ -889,7 +887,11 @@ fn collections_conformance_corpus() {
     for case in cases {
         failures.extend(run_case(case));
     }
-    assert!(cases.len() >= 40, "only {} collections cases found", cases.len());
+    assert!(
+        cases.len() >= 40,
+        "only {} collections cases found",
+        cases.len()
+    );
     if !failures.is_empty() {
         panic!(
             "{} collections corpus assertions failed (of {} cases):\n{}",

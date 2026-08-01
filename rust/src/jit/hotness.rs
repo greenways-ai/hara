@@ -56,8 +56,14 @@ mod tests {
 
     #[test]
     fn counters_are_per_loop_and_saturating() {
-        let key = LoopKey { function: 2, header: 7 };
-        let mut hotness = Hotness::new(JitConfig { hot_threshold: 2, max_trace_operations: 10 });
+        let key = LoopKey {
+            function: 2,
+            header: 7,
+        };
+        let mut hotness = Hotness::new(JitConfig {
+            hot_threshold: 2,
+            max_trace_operations: 10,
+        });
         assert!(!hotness.backedge(key));
         assert!(hotness.backedge(key));
         assert!(!hotness.backedge(key));

@@ -430,7 +430,10 @@ mod tests {
         // iteration and nth respect the offset into the promoted short head
         let queue = queue.pop_first_value();
         assert_eq!(queue.offset, 1);
-        assert_eq!(queue.iter().copied().collect::<Vec<_>>(), vec![1025, 1026, 1027, 1028, 1029]);
+        assert_eq!(
+            queue.iter().copied().collect::<Vec<_>>(),
+            vec![1025, 1026, 1027, 1028, 1029]
+        );
         assert_eq!(queue.get(0), Some(&1025));
         assert_eq!(queue.get(4), Some(&1029));
         assert_eq!(queue.get(5), None);
