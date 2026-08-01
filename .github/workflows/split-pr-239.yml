@@ -1,0 +1,182 @@
+name: Split PR 239 history
+
+on:
+  push:
+    branches:
+      - agent/split-pr-239
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: split-pr-239-history
+  cancel-in-progress: true
+
+jobs:
+  split-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/split-pr-239
+
+      - name: Rebuild PR branch as feature commits
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE=947d416239b30459e224ff7e2c38cec8f7cd7315
+          FINAL=9e276ef277da1e9d67df01920160c8daa30e00b5
+          TARGET=agent/port-std-db-foundation
+
+          git fetch origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            +refs/heads/backup/port-std-db-foundation-single-squash-20260801:refs/remotes/origin/pr239-final
+
+          test "$(git rev-parse refs/remotes/origin/pr239-final)" = "$FINAL"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B pr239-staged "$BASE"
+
+          commit_group() {
+            local message="$1"
+            shift
+            git checkout "$FINAL" -- "$@"
+            git add -- "$@"
+            git commit -m "$message"
+          }
+
+          core=(
+            lib/src/std/db.hal
+            lib/src/std/db/protocol.hal
+            lib/test/std/db_test.hal
+          )
+
+          text=(
+            lib/src/std/db/text/base_check.hal
+            lib/src/std/db/text/base_flatten.hal
+            lib/src/std/db/text/base_schema.hal
+            lib/src/std/db/text/base_util.hal
+            lib/src/std/db/text/sql_raw.hal
+            lib/src/std/db/text/sql_util.hal
+            lib/test/std/db/text/base_check_test.hal
+            lib/test/std/db/text/base_flatten_test.hal
+            lib/test/std/db/text/base_schema_test.hal
+            lib/test/std/db/text/base_util_test.hal
+            lib/test/std/db/text/sql_raw_test.hal
+            lib/test/std/db/text/sql_util_test.hal
+          )
+
+          graph=(
+            .github/workflows/std-db-graph.yml
+            java/src/test/java/hara/truffle/HaraDbGraphTest.java
+            lib/src/std/db/text/base_graph.hal
+            lib/src/std/db/text/base_scope.hal
+            lib/src/std/db/text/base_tree.hal
+            lib/src/std/db/text/sql_call.hal
+            lib/src/std/db/text/sql_graph.hal
+            lib/src/std/db/text/sql_tree.hal
+            lib/src/std/db/text/sql_view.hal
+            lib/test/std/db/text/base_graph_test.hal
+            lib/test/std/db/text/base_scope_test.hal
+            lib/test/std/db/text/base_tree_test.hal
+            lib/test/std/db/text/sql_call_test.hal
+            lib/test/std/db/text/sql_graph_test.hal
+            lib/test/std/db/text/sql_tree_test.hal
+            lib/test/std/db/text/sql_view_test.hal
+            plans/std.db-port.md
+          )
+
+          runtime=(
+            .github/workflows/std-db-runtime.yml
+            java/src/test/java/hara/truffle/HaraDbRuntimeTest.java
+            lib/src/std/db/node/client_base.hal
+            lib/src/std/db/node/client_supabase.hal
+            lib/src/std/db/node/connection.hal
+            lib/src/std/db/node/kernel_base.hal
+            lib/src/std/db/node/kernel_batch.hal
+            lib/src/std/db/node/kernel_service.hal
+            lib/src/std/db/node/kernel_supabase.hal
+            lib/src/std/db/node/lifecycle.hal
+            lib/src/std/db/node/proxy_base.hal
+            lib/src/std/db/node/proxy_supabase.hal
+            lib/src/std/db/node/proxy_util.hal
+            lib/src/std/db/node/runtime.hal
+            lib/src/std/db/node/serial.hal
+            lib/src/std/db/node/supabase.hal
+            lib/src/std/db/node/transport.hal
+            lib/test/std/db/node/batch_test.hal
+            lib/test/std/db/node/runtime_test.hal
+            lib/test/std/db/node/serial_test.hal
+            lib/test/std/db/node/service_test.hal
+            lib/test/std/db/node/status_test.hal
+            lib/test/std/db/node/supabase_test.hal
+            lib/test/std/db/node/transport_test.hal
+            plans/std.db-runtime.md
+            rust/web/db-runtime-endpoint.mjs
+            rust/web/db-runtime-endpoint.test.mjs
+          )
+
+          sqlite=(
+            .github/workflows/std-db-sqlite.yml
+            java/src/test/java/hara/truffle/HaraSqliteProcessExtensionTest.java
+            lib/src/std/db/node/driver/sqlite.hal
+            lib/src/std/db/sqlite.hal
+            rust/extensions/std-db-sqlite/hara.build.edn
+            rust/extensions/std-db-sqlite/hara.extension.edn
+            rust/extensions/std-db-sqlite/package.json
+            rust/web/entries/sqlite-browser.mjs
+            rust/web/entries/sqlite-node.mjs
+            rust/web/package-db-provider.mjs
+            rust/web/package-sqlite-extension.mjs
+            rust/web/packages/db-sqlite/index.mjs
+            rust/web/packages/db-sqlite/package.json
+            rust/web/sqlite-provider.test.mjs
+            rust/web/vite.sqlite-browser.config.js
+            rust/web/vite.sqlite-node.config.js
+            scripts/build-db-sqlite-extension
+          )
+
+          pglite=(
+            .github/workflows/std-db-pglite.yml
+            java/src/test/java/hara/truffle/HaraPgliteProcessExtensionTest.java
+            lib/src/std/db/node/driver/pglite.hal
+            lib/src/std/db/pglite.hal
+            rust/extensions/std-db-pglite/hara.build.edn
+            rust/extensions/std-db-pglite/hara.extension.edn
+            rust/extensions/std-db-pglite/package.json
+            rust/web/entries/pglite-browser.mjs
+            rust/web/entries/pglite-node.mjs
+            rust/web/package-pglite-extension.mjs
+            rust/web/packages/db-pglite/index.mjs
+            rust/web/packages/db-pglite/package.json
+            rust/web/pglite-provider.test.mjs
+            rust/web/vite.pglite-browser.config.js
+            rust/web/vite.pglite-node.config.js
+            scripts/build-db-pglite-extension
+          )
+
+          commit_group "feat(std.db): add provider-neutral database API" "${core[@]}"
+          commit_group "feat(std.db.text): port SQL foundations" "${text[@]}"
+          commit_group "feat(std.db.graph): add graph query compiler" "${graph[@]}"
+          commit_group "feat(std.db.runtime): port runtime, transport and Supabase" "${runtime[@]}"
+          commit_group "feat(std.db.sqlite): add SQLite WASM provider" "${sqlite[@]}"
+          commit_group "feat(std.db.pglite): add PGlite WASM provider" "${pglite[@]}"
+
+          all=("${core[@]}" "${text[@]}" "${graph[@]}" "${runtime[@]}" "${sqlite[@]}" "${pglite[@]}")
+
+          test "${#all[@]}" -eq 92
+          test "$(git rev-list --count "$BASE"..HEAD)" -eq 6
+          git diff --exit-code "$FINAL" HEAD -- "${all[@]}"
+
+          printf '%s\n' "${all[@]}" | sort > /tmp/expected-files
+          git diff --name-only "$BASE"..HEAD | sort > /tmp/actual-files
+          diff -u /tmp/expected-files /tmp/actual-files
+
+          git push \
+            --force-with-lease=refs/heads/$TARGET:$FINAL \
+            origin HEAD:refs/heads/$TARGET
