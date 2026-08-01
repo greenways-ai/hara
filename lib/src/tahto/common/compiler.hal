@@ -1,8 +1,15 @@
 (ns tahto.common.compiler
   (:require [tahto.common.emit :as emit]
             [tahto.common.preprocess-input :as input]
-            [tahto.common.registry :as registry]
+            [tahto.common.provenance :as provenance]
             [tahto.protocol.compiler :as protocol]))
+
+(def +rewrite-phases+ [:canonical :target :staging])
+
+(def +empty-dependencies+
+  {:code #{}
+   :fragment #{}
+   :native {}})
 
 (defstruct InputNormalizer [])
 
@@ -10,99 +17,309 @@
   (normalize-form [normalizer raw context]
     (input/to-input raw)))
 
+(defn- built-grammar
+  [selected]
+  (or (:grammar selected) selected))
+
+(defn- entry-form
+  [entry]
+  (or (:form-raw entry)
+      (:form-input entry)
+      (:form entry)))
+
+(defn- reserved-entry
+  [entry selected]
+  (get-in (built-grammar selected)
+          [:reserved (:op entry)]))
+
+(defstruct IdentityEntryFormatter [])
+
+(extend-type IdentityEntryFormatter protocol/IEntryFormatter
+  (format-entry [formatter entry selected context]
+    (if (:form-input entry)
+      entry
+      (assoc entry :form-input (entry-form entry)))))
+
+(defn- format-result
+  [entry value]
+  (if (and (vector? value) (= 2 (count value)))
+    (merge entry
+           (or (first value) {})
+           {:form-input (second value)})
+    (assoc entry :form-input value)))
+
+(defstruct GrammarEntryFormatter [])
+
+(extend-type GrammarEntryFormatter protocol/IEntryFormatter
+  (format-entry [formatter entry selected context]
+    (let [form (entry-form entry)
+          hook (:format (reserved-entry entry selected))]
+      (if (nil? form)
+        (throw (ex-info "Entry has no input form" {:entry entry}))
+        (if hook
+          (format-result entry (hook form))
+          (assoc entry :form-input form))))))
+
+(defstruct IdentityEntryHydrator [])
+
+(extend-type IdentityEntryHydrator protocol/IEntryHydrator
+  (hydrate-entry [hydrator entry normalized selected context]
+    {:entry entry
+     :form normalized
+     :contributions []}))
+
+(defn- hydration-result
+  [entry normalized value]
+  (cond (and (map? value) (:form value))
+        {:entry (merge entry
+                       (or (:metadata value) {})
+                       (or (:entry value) {}))
+         :form (:form value)
+         :contributions (vec (or (:contributions value) []))}
+
+        (and (vector? value) (= 2 (count value)))
+        (let [metadata (or (first value) {})]
+          {:entry (merge entry metadata)
+           :form (second value)
+           :contributions (vec (or (:tahto/contributions metadata) []))})
+
+        :else
+        {:entry entry
+         :form (or value normalized)
+         :contributions []}))
+
+(defstruct GrammarEntryHydrator [])
+
+(extend-type GrammarEntryHydrator protocol/IEntryHydrator
+  (hydrate-entry [hydrator entry normalized selected context]
+    (let [hook (:hydrate (reserved-entry entry selected))]
+      (if hook
+        (hydration-result
+         entry
+         normalized
+         (hook normalized
+               (built-grammar selected)
+               (assoc context :entry entry)))
+        {:entry entry
+         :form normalized
+         :contributions []}))))
+
 (defstruct StructuralStager [])
 
 (extend-type StructuralStager protocol/IStager
-  (stage-form [stager input selected context]
-    {:form input
-     :dependencies #{}}
-    ))
+  (stage-form [stager normalized selected context]
+    {:form normalized
+     :dependencies +empty-dependencies+}))
 
 (defstruct EmptyInferencer [])
 
 (extend-type EmptyInferencer protocol/IInferencer
-  (infer-form [inferencer staged selected context]
+  (infer-form [inferencer canonical selected context]
     {:types {}}))
 
 (defstruct EmptyLinter [])
 
 (extend-type EmptyLinter protocol/ILinter
-  (lint-form [linter staged inference selected context]
+  (lint-form [linter canonical inference selected context]
     []))
 
-(defn- rewrite-phases
-  [context]
-  (or (:rewrite/phases context)
-      [:canonical :target :staging]))
-
-(defn apply-rewrite-plan
-  "Runs the selected grammar's ordered rewrite hooks.
-
-  A hook receives the current form and compiler context, then returns a form."
-  [form selected context]
+(defn apply-rewrite-phase
+  "Runs one selected grammar rewrite phase in declared order."
+  [phase form selected context]
   (reduce
-   (fn [current phase]
-     (reduce
-      (fn [rewritten hook]
-        (hook rewritten context))
-      current
-      (or (get-in selected [:rewrite phase]) [])))
+   (fn [rewritten hook]
+     (hook rewritten
+           (assoc context
+                  :rewrite/phase phase
+                  :tahto/hook hook)))
    form
-   (rewrite-phases context)))
+   (or (get-in selected [:rewrite phase]) [])))
 
 (defstruct GrammarRewriter [])
 
 (extend-type GrammarRewriter protocol/IRewriter
-  (rewrite-form [rewriter staged selected context]
-    (apply-rewrite-plan staged selected context)))
+  (rewrite-form [rewriter phase form selected context]
+    (apply-rewrite-phase phase form selected context)))
 
-(defn input-normalizer
-  []
+(defn input-normalizer []
   (tahto.common.compiler/InputNormalizer))
 
-(defn structural-stager
-  []
+(defn identity-entry-formatter []
+  (tahto.common.compiler/IdentityEntryFormatter))
+
+(defn grammar-entry-formatter []
+  (tahto.common.compiler/GrammarEntryFormatter))
+
+(defn identity-entry-hydrator []
+  (tahto.common.compiler/IdentityEntryHydrator))
+
+(defn grammar-entry-hydrator []
+  (tahto.common.compiler/GrammarEntryHydrator))
+
+(defn structural-stager []
   (tahto.common.compiler/StructuralStager))
 
-(defn empty-inferencer
-  []
+(defn empty-inferencer []
   (tahto.common.compiler/EmptyInferencer))
 
-(defn empty-linter
-  []
+(defn empty-linter []
   (tahto.common.compiler/EmptyLinter))
 
-(defn grammar-rewriter
-  []
+(defn grammar-rewriter []
   (tahto.common.compiler/GrammarRewriter))
 
+(defn- phase-error-code
+  [phase]
+  (cond (= phase :format) :tahto/error-format
+        (= phase :normalize) :tahto/error-normalize
+        (= phase :hydrate) :tahto/error-hydrate
+        (= phase :stage) :tahto/error-stage
+        (= phase :rewrite/canonical) :tahto/error-rewrite-canonical
+        (= phase :infer) :tahto/error-infer
+        (= phase :lint) :tahto/error-lint
+        (= phase :rewrite/target) :tahto/error-rewrite-target
+        (= phase :rewrite/staging) :tahto/error-rewrite-staging
+        (= phase :emit) :tahto/error-emit
+        (= phase :publish) :tahto/error-publish
+        :else :tahto/error-compiler))
+
 (defn- phase-context
-  [context phase]
-  (assoc context :compiler/phase phase))
+  [context selected phase]
+  (provenance/with-provenance
+   (assoc context
+          :compiler/phase phase
+          :tahto/phase phase
+          :tahto/grammar-coordinate (:coordinate selected)
+          :tahto/grammar-fingerprint (:fingerprint selected))
+   context))
+
+(defn- run-phase
+  [phase selected context function]
+  (let [current (phase-context context selected phase)]
+    (try
+      (function current)
+      (catch Throwable error
+        (provenance/throw-with-provenance
+         (str "Tahto compiler phase failed: " (name phase))
+         (assoc current :tahto/error-code (phase-error-code phase))
+         error)))))
+
+(defn- normalize-dependencies
+  [dependencies]
+  (cond (nil? dependencies) +empty-dependencies+
+        (set? dependencies) (assoc +empty-dependencies+ :code dependencies)
+        (map? dependencies) (merge +empty-dependencies+ dependencies)
+        :else (throw (ex-info "Invalid staged dependencies"
+                              {:dependencies dependencies}))))
 
 (defn- stage-result
   [value]
-  (if (and (map? value)
-           (get value :form))
-    value
+  (if (and (map? value) (:form value))
+    (assoc value :dependencies
+           (normalize-dependencies (:dependencies value)))
     {:form value
-     :dependencies #{}}))
+     :dependencies +empty-dependencies+}))
 
-(defn- phase-record
-  [phase value]
-  {:phase phase
-   :value value})
+(defn- worklog-fields
+  [context]
+  (select-keys context [:tahto/actor :tahto/source :tahto/work]))
 
-(defstruct Compiler [catalog normalizer stager inferencer linter rewriter emitter])
+(defn- worklog-event
+  [index phase value context]
+  (merge {:index index
+          :phase phase
+          :value value}
+         (worklog-fields context)))
+
+(defn- append-event
+  [events phase value context]
+  (conj events (worklog-event (count events) phase value context)))
+
+(defn- compile-staged
+  [compiler selected context initial-stages initial-events normalized]
+  (let [staged-result
+        (stage-result
+         (run-phase
+          :stage selected context
+          (fn [current]
+            (protocol/stage-form (:stager compiler)
+                                 normalized selected current))))
+        staged (:form staged-result)
+        stages (assoc initial-stages :staged staged)
+        events (append-event initial-events :stage staged-result context)
+        canonical
+        (run-phase
+         :rewrite/canonical selected context
+         (fn [current]
+           (protocol/rewrite-form (:rewriter compiler)
+                                  :canonical staged selected current)))
+        stages (assoc stages :canonical canonical)
+        events (append-event events :rewrite/canonical canonical context)
+        inference
+        (run-phase
+         :infer selected context
+         (fn [current]
+           (protocol/infer-form (:inferencer compiler)
+                                canonical selected current)))
+        events (append-event events :infer inference context)
+        diagnostics
+        (vec
+         (run-phase
+          :lint selected (assoc context :inference inference)
+          (fn [current]
+            (protocol/lint-form (:linter compiler)
+                                canonical inference selected current))))
+        events (append-event events :lint diagnostics context)
+        analysis-context (assoc context
+                                :inference inference
+                                :diagnostics diagnostics)
+        targeted
+        (run-phase
+         :rewrite/target selected analysis-context
+         (fn [current]
+           (protocol/rewrite-form (:rewriter compiler)
+                                  :target canonical selected current)))
+        stages (assoc stages :target targeted)
+        events (append-event events :rewrite/target targeted context)
+        rewritten
+        (run-phase
+         :rewrite/staging selected analysis-context
+         (fn [current]
+           (protocol/rewrite-form (:rewriter compiler)
+                                  :staging targeted selected current)))
+        stages (assoc stages :staging rewritten :rewritten rewritten)
+        events (append-event events :rewrite/staging rewritten context)
+        output
+        (run-phase
+         :emit selected analysis-context
+         (fn [current]
+           (protocol/emit-form (:emitter compiler)
+                               rewritten selected current)))
+        events (append-event events :emit output context)]
+    {:output output
+     :grammar selected
+     :dependencies (:dependencies staged-result)
+     :inference inference
+     :diagnostics diagnostics
+     :stages stages
+     :provenance
+     (merge
+      {:grammar (:provenance selected)
+       :events events
+       :phases events}
+      (worklog-fields context))}))
+
+(defstruct Compiler
+  [formatter normalizer hydrator stager inferencer linter rewriter emitter])
 
 (defn compiler
-  "Creates a protocol-composed compiler over a grammar catalog."
-  ([catalog]
-   (compiler catalog {}))
-  ([catalog components]
+  "Creates a compiler over an already materialized grammar selection."
+  ([] (compiler {}))
+  ([components]
    (tahto.common.compiler/Compiler
-    catalog
+    (or (:formatter components) (grammar-entry-formatter))
     (or (:normalizer components) (input-normalizer))
+    (or (:hydrator components) (grammar-entry-hydrator))
     (or (:stager components) (structural-stager))
     (or (:inferencer components) (empty-inferencer))
     (or (:linter components) (empty-linter))
@@ -110,71 +327,109 @@
     (or (:emitter components) (emit/emitter)))))
 
 (defn compile
-  "Compiles one form through an ICompiler implementation."
-  [compiler raw options]
-  (protocol/compile-form compiler
-                 raw
-                 options))
+  "Compiles one raw form using an already materialized grammar selection."
+  ([compiler raw selected]
+   (compile compiler raw selected {}))
+  ([compiler raw selected context]
+   (protocol/compile-form compiler raw selected context)))
+
+(defn compile-entry
+  "Compiles one entry without publishing its returned contributions."
+  ([compiler entry selected]
+   (compile-entry compiler entry selected {}))
+  ([compiler entry selected context]
+   (protocol/compile-entry compiler entry selected context)))
 
 (extend-type Compiler protocol/ICompiler
-  (compile-form [compiler raw options]
-    (let [selected (registry/resolve (:catalog compiler) options)
-          base-context (assoc options :grammar selected)
+  (compile-form [compiler raw selected context]
+    (let [normalized
+          (run-phase
+           :normalize selected context
+           (fn [current]
+             (protocol/normalize-form (:normalizer compiler) raw current)))
+          stages {:raw raw :normalized normalized}
+          events [(worklog-event 0 :normalize normalized context)]]
+      (compile-staged compiler selected context stages events normalized))))
+
+(extend-type Compiler protocol/IEntryCompiler
+  (compile-entry [compiler entry selected context]
+    (let [formatted
+          (run-phase
+           :format selected (assoc context :tahto/entry entry)
+           (fn [current]
+             (protocol/format-entry (:formatter compiler)
+                                    entry selected current)))
+          events [(worklog-event 0 :format formatted context)]
           normalized
-          (protocol/normalize-form (:normalizer compiler)
-                         raw
-                         (phase-context base-context :normalize))
-          staged-result
-          (stage-result
-           (protocol/stage-form (:stager compiler)
-                          normalized
-                          selected
-                          (phase-context base-context :stage)))
-          staged (:form staged-result)
-          inference
-          (protocol/infer-form (:inferencer compiler)
-                         staged
-                         selected
-                         (phase-context base-context :infer))
-          diagnostics
-          (protocol/lint-form (:linter compiler)
-                         staged
-                         inference
-                         selected
-                         (phase-context base-context :lint))
-          rewritten
-          (protocol/rewrite-form (:rewriter compiler)
-                         staged
-                         selected
-                         (phase-context
-                          (assoc base-context
-                                 :inference inference
-                                 :diagnostics diagnostics)
-                          :rewrite))
-          output
-          (protocol/emit-form (:emitter compiler)
-                         rewritten
-                         selected
-                         (phase-context
-                          (assoc base-context
-                                 :inference inference
-                                 :diagnostics diagnostics)
-                          :emit))]
-      {:output output
-       :grammar selected
-       :dependencies (:dependencies staged-result)
-       :inference inference
-       :diagnostics (vec diagnostics)
-       :stages {:raw raw
-                :normalized normalized
-                :staged staged
-                :rewritten rewritten}
-       :provenance
-       {:grammar (:provenance selected)
-        :phases
-        [(phase-record :normalize normalized)
-         (phase-record :stage staged)
-         (phase-record :infer inference)
-         (phase-record :lint diagnostics)
-         (phase-record :rewrite rewritten)
-         (phase-record :emit output)]}})))
+          (run-phase
+           :normalize selected (assoc context :tahto/entry formatted)
+           (fn [current]
+             (protocol/normalize-form (:normalizer compiler)
+                                      (:form-input formatted)
+                                      current)))
+          events (append-event events :normalize normalized context)
+          hydrated
+          (run-phase
+           :hydrate selected (assoc context :tahto/entry formatted)
+           (fn [current]
+             (protocol/hydrate-entry (:hydrator compiler)
+                                     formatted normalized selected current)))
+          hydrated-entry (:entry hydrated)
+          hydrated-form (:form hydrated)
+          contributions (vec (or (:contributions hydrated) []))
+          events (append-event events :hydrate hydrated context)
+          result
+          (compile-staged
+           compiler selected
+           (assoc context :tahto/entry hydrated-entry)
+           {:raw entry
+            :formatted formatted
+            :normalized normalized
+            :hydrated hydrated-form}
+           events
+           hydrated-form)]
+      (assoc result
+             :entry hydrated-entry
+             :contributions contributions))))
+
+(defstruct IdentityEntryPublisher [])
+
+(extend-type IdentityEntryPublisher protocol/IEntryPublisher
+  (publish-entry [publisher entry contributions context]
+    {:published false
+     :entry entry
+     :contributions (vec contributions)}))
+
+(defstruct GrammarEntryPublisher [selected])
+
+(extend-type GrammarEntryPublisher protocol/IEntryPublisher
+  (publish-entry [publisher entry contributions context]
+    (let [hook (:hydrate-hook (reserved-entry entry (:selected publisher)))]
+      (if hook
+        {:published true
+         :value (hook entry)
+         :entry entry
+         :contributions (vec contributions)}
+        {:published false
+         :entry entry
+         :contributions (vec contributions)}))))
+
+(defn identity-entry-publisher []
+  (tahto.common.compiler/IdentityEntryPublisher))
+
+(defn grammar-entry-publisher
+  [selected]
+  (tahto.common.compiler/GrammarEntryPublisher selected))
+
+(defn publish
+  "Explicitly publishes the contributions from a successful entry result."
+  ([publisher compiled]
+   (publish publisher compiled {}))
+  ([publisher compiled context]
+   (let [selected (:grammar compiled)
+         entry (:entry compiled)
+         contributions (:contributions compiled)]
+     (run-phase
+      :publish selected (assoc context :tahto/entry entry)
+      (fn [current]
+        (protocol/publish-entry publisher entry contributions current))))))

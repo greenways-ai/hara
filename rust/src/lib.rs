@@ -3313,6 +3313,12 @@ mod tests {
         }
         assert_eq!(runtime.eval_text("(= ##NaN ##NaN)").unwrap(), "true");
         assert_eq!(runtime.eval_text("'#demo [1 2]").unwrap(), "#demo[1 2]");
+        assert_eq!(runtime.eval_text("()").unwrap(), "()");
+        assert_eq!(runtime.eval_text("(list? ())").unwrap(), "true");
+        assert_eq!(runtime.eval_text("(char? \\x)").unwrap(), "true");
+        assert_eq!(runtime.eval_text("(char? \"x\")").unwrap(), "false");
+        assert_eq!(runtime.eval_text("(nth [1 nil 3] 1)").unwrap(), "nil");
+        assert_eq!(runtime.eval_text("(nth '(1 nil 3) 1)").unwrap(), "nil");
     }
 
     #[test]
@@ -4439,6 +4445,12 @@ mod tests {
             "\"vector\""
         );
         assert_eq!(
+            runtime
+                .eval_text("(meta (with-meta (with-meta [1] {:doc \"vector\"}) nil))")
+                .unwrap(),
+            "nil"
+        );
+        assert_eq!(
             runtime.eval_text("(hash)").unwrap_err(),
             "hash expects one value"
         );
@@ -4507,6 +4519,7 @@ mod tests {
                 .unwrap(),
             "nil"
         );
+        assert_eq!(runtime.eval_text("(namespace :core/answer)").unwrap(), "\"core\"");
         assert!(
             runtime
                 .eval_text("(keyword \"a/b/c\")")
@@ -4518,6 +4531,34 @@ mod tests {
                 .eval_text("(symbol 1)")
                 .unwrap_err()
                 .contains("string arguments")
+        );
+    }
+
+    #[test]
+    fn foundation_compiler_support_functions_are_available_at_root() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text("(reduce-kv (fn [out key value] (assoc out key (+ value 1))) {} {:a 1 :b 2})")
+                .unwrap(),
+            "{:a 2 :b 3}"
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(select-keys {:a 1 :b 2} [:b :missing])")
+                .unwrap(),
+            "{:b 2}"
+        );
+        assert_eq!(
+            runtime.eval_text("(fn? (deref (resolve 'inc)))").unwrap(),
+            "true"
+        );
+        assert_eq!(runtime.eval_text("(nil? (resolve 'missing))").unwrap(), "true");
+        assert_eq!(
+            runtime
+                .eval_text("(ex-class (ex-info \"broken\" {:phase :test}))")
+                .unwrap(),
+            "\"ExceptionInfo\""
         );
     }
 

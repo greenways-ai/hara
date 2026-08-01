@@ -101,6 +101,7 @@ pub(crate) const CORE_SPECIAL_FORMS: &[&str] = &[
     "bytes/u8",
     "cas!",
     "ceil",
+    "char?",
     "comp",
     "comp2",
     "comp3",
@@ -206,6 +207,7 @@ pub(crate) const CORE_SPECIAL_FORMS: &[&str] = &[
     "mod",
     "neg?",
     "name",
+    "namespace",
     "nil?",
     "number?",
     "ns",
@@ -240,13 +242,16 @@ pub(crate) const CORE_SPECIAL_FORMS: &[&str] = &[
     "read-string",
     "recur",
     "reduce",
+    "reduce-kv",
     "repeat",
     "repeatedly",
     "require",
+    "resolve",
     "reset!",
     "rest",
     "reverse",
     "second",
+    "select-keys",
     "seq",
     "seq?",
     "set",
@@ -1318,6 +1323,18 @@ mod tests {
             ("(decimal? 42)", Value::Bool(false)),
             ("(boolean? false)", Value::Bool(true)),
             ("(boolean? nil)", Value::Bool(false)),
+        ];
+        for (source, expected) in cases {
+            let fiber = EvalFiber::start(source, HashMap::new()).unwrap();
+            assert_eq!(fiber.state(), EvalFiberState::Completed(expected));
+        }
+    }
+
+    #[test]
+    fn character_predicate_matches_foundation_types() {
+        let cases = [
+            ("(char? \\x)", Value::Bool(true)),
+            ("(char? \"x\")", Value::Bool(false)),
         ];
         for (source, expected) in cases {
             let fiber = EvalFiber::start(source, HashMap::new()).unwrap();

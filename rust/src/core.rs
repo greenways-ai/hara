@@ -780,6 +780,16 @@ pub(crate) fn exception_function_values() -> Vec<(&'static str, Value)> {
                 value => Ok(Value::String(value.display())),
             }),
         ),
+        (
+            "ex-class",
+            native_function("ex-class", 1, |arguments| {
+                Ok(Value::String(match &arguments[0] {
+                    Value::ExceptionInfo(_) => "ExceptionInfo".into(),
+                    Value::String(_) => "String".into(),
+                    value => receiver_category(value).into(),
+                }))
+            }),
+        ),
     ]
 }
 
@@ -5185,10 +5195,16 @@ fn protocol_with_meta(arguments: &[Value]) -> Result<Value, String> {
     if arguments.len() != 2 {
         return Err("IObjType/with-meta expects a value and metadata map".into());
     }
-    let MetadataValue::Map(entries) = value_to_metadata(&arguments[1])? else {
-        return Err("IObjType/with-meta expects a metadata map".into());
+    let metadata = match &arguments[1] {
+        Value::Nil => None,
+        value => {
+            let MetadataValue::Map(entries) = value_to_metadata(value)? else {
+                return Err("IObjType/with-meta expects a metadata map or nil".into());
+            };
+            Some(Metadata::new(entries))
+        }
     };
-    attach_metadata(arguments[0].clone(), Metadata::new(entries))
+    attach_optional_metadata(arguments[0].clone(), metadata)
 }
 
 fn protocol_count(arguments: &[Value]) -> Result<Value, String> {
@@ -7137,14 +7153,20 @@ fn collection_nth(value: &Value, key: &Value) -> Result<Value, String> {
             .try_next()?
             .ok_or_else(|| "nth index out of bounds".into());
     }
-    let missing = Value::Nil;
-    collection_get(value, key, missing).and_then(|result| {
-        if result == Value::Nil {
-            Err("nth index out of bounds".into())
-        } else {
-            Ok(result)
-        }
-    })
+    let result = match value {
+        Value::Tuple(values) => values.get(index).cloned(),
+        Value::Vector(values) => values.get(index).cloned(),
+        Value::Array(values) => values.borrow().get(index).cloned(),
+        Value::Cons(values) => values.iter().nth(index),
+        Value::List(values) => values.get(index).cloned(),
+        Value::Queue(values) => values.get(index).cloned(),
+        Value::String(text) => text
+            .chars()
+            .nth(index)
+            .map(|character| Value::String(character.to_string())),
+        _ => return Err("nth expects an indexed collection".into()),
+    };
+    result.ok_or_else(|| "nth index out of bounds".into())
 }
 
 fn collection_assoc(value: &Value, key: &Value, replacement: Value) -> Result<Value, String> {
@@ -7387,34 +7409,47 @@ pub(crate) fn definition_metadata(
     Ok((metadata, rest))
 }
 
-fn attach_metadata(value: Value, metadata: Rc<Metadata>) -> Result<Value, String> {
+fn attach_optional_metadata(
+    value: Value,
+    metadata: Option<Rc<Metadata>>,
+) -> Result<Value, String> {
     Ok(match value {
-        Value::Symbol(value) => Value::Symbol(value.with_meta(Some(metadata.clone()))),
-        Value::Pointer(value) => Value::Pointer(value.with_meta(Some(metadata))),
-        Value::Tuple(value) => Value::Tuple(Box::new(value.with_meta(Some(metadata)))),
-        Value::Vector(value) => Value::Vector(value.with_meta(Some(metadata))),
-        Value::List(value) => Value::List(value.with_meta(Some(metadata.clone()))),
-        Value::Cons(value) => Value::Cons(Box::new(value.with_meta(Some(metadata)))),
-        Value::Queue(value) => Value::Queue(Box::new(value.with_meta(Some(metadata)))),
-        Value::Map(value) => Value::Map(value.with_meta(Some(metadata))),
-        Value::OrderedMap(value) => Value::OrderedMap(Box::new(value.with_meta(Some(metadata)))),
-        Value::SortedMap(value) => Value::SortedMap(Box::new(value.with_meta(Some(metadata)))),
-        Value::Trie(value) => Value::Trie(Box::new(value.with_meta(Some(metadata)))),
-        Value::Set(value) => Value::Set(value.with_meta(Some(metadata))),
-        Value::OrderedSet(value) => Value::OrderedSet(Box::new(value.with_meta(Some(metadata)))),
-        Value::SortedSet(value) => Value::SortedSet(Box::new(value.with_meta(Some(metadata)))),
+        Value::Symbol(value) => Value::Symbol(value.with_meta(metadata.clone())),
+        Value::Pointer(value) => Value::Pointer(value.with_meta(metadata.clone())),
+        Value::Tuple(value) => Value::Tuple(Box::new(value.with_meta(metadata.clone()))),
+        Value::Vector(value) => Value::Vector(value.with_meta(metadata.clone())),
+        Value::List(value) => Value::List(value.with_meta(metadata.clone())),
+        Value::Cons(value) => Value::Cons(Box::new(value.with_meta(metadata.clone()))),
+        Value::Queue(value) => Value::Queue(Box::new(value.with_meta(metadata.clone()))),
+        Value::Map(value) => Value::Map(value.with_meta(metadata.clone())),
+        Value::OrderedMap(value) => {
+            Value::OrderedMap(Box::new(value.with_meta(metadata.clone())))
+        }
+        Value::SortedMap(value) => Value::SortedMap(Box::new(value.with_meta(metadata.clone()))),
+        Value::Trie(value) => Value::Trie(Box::new(value.with_meta(metadata.clone()))),
+        Value::Set(value) => Value::Set(value.with_meta(metadata.clone())),
+        Value::OrderedSet(value) => {
+            Value::OrderedSet(Box::new(value.with_meta(metadata.clone())))
+        }
+        Value::SortedSet(value) => {
+            Value::SortedSet(Box::new(value.with_meta(metadata.clone())))
+        }
         Value::Var(value) => {
-            value.set_hara_metadata(Some(metadata));
+            value.set_hara_metadata(metadata);
             Value::Var(value)
         }
         Value::NativeType(value) => Value::NativeType(Rc::new(NativeType {
             name: value.name.clone(),
             methods: value.methods.clone(),
-            metadata: Some(metadata),
+            metadata,
         })),
         Value::Keyword(value) => Value::Keyword(value),
         _ => return Err("metadata can only be applied to object values".into()),
     })
+}
+
+fn attach_metadata(value: Value, metadata: Rc<Metadata>) -> Result<Value, String> {
+    attach_optional_metadata(value, Some(metadata))
 }
 
 fn eval_sequential_constructor(
@@ -8768,7 +8803,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             }
             binding_value(env, n).ok_or_else(|| format!("unbound symbol: {n}"))
         }
-        Form::List(fs) if fs.is_empty() => Ok(Value::Nil),
+        Form::List(fs) if fs.is_empty() => Ok(Value::List(PList::new())),
         Form::List(fs) => match &fs[0] {
             Form::Symbol(n) if n == "fn" || n == "fn*" => {
                 if fs.len() < 3 {
@@ -8811,6 +8846,21 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     Value::Var(var) => Ok(Value::Symbol(var.symbol().clone())),
                     _ => Err("var-sym expects a var".into()),
                 }
+            }
+            Form::Symbol(n) if n == "resolve" => {
+                if fs.len() != 2 {
+                    return Err("resolve expects one symbol".into());
+                }
+                let symbol = match eval(&fs[1], env)? {
+                    Value::Symbol(value) => value,
+                    _ => return Err("resolve expects a symbol".into()),
+                };
+                let registry = namespace_registry()?;
+                force_lazy_alias(&registry, env, symbol.path_string().as_str())?;
+                Ok(registry
+                    .resolve(&symbol)
+                    .map(Value::Var)
+                    .unwrap_or(Value::Nil))
             }
             Form::Symbol(n) if n == "module-revision" => {
                 if fs.len() != 2 {
@@ -10039,6 +10089,28 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     _ => Err("name expects a keyword or symbol".into()),
                 }
             }
+            Form::Symbol(n) if n == "namespace" => {
+                if fs.len() != 2 {
+                    return Err("namespace expects one value".into());
+                }
+                protocol_namespaced_namespace(&[eval(&fs[1], env)?])
+            }
+            Form::Symbol(n) if n == "select-keys" => {
+                if fs.len() != 3 {
+                    return Err("select-keys expects a map and keys".into());
+                }
+                let source = eval(&fs[1], env)?;
+                let entries = map_entries(&source)
+                    .ok_or_else(|| "select-keys expects a map".to_string())?;
+                let keys = iterator_values(eval(&fs[2], env)?)?;
+                let selected = keys.into_iter().filter_map(|key| {
+                    entries
+                        .iter()
+                        .find(|(candidate, _)| candidate == &key)
+                        .map(|(_, value)| (key, value.clone()))
+                });
+                Ok(Value::OrderedMap(Box::new(POrderedMap::from_iter(selected))))
+            }
             Form::Symbol(n) if ["list", "vector", "pair", "tup"].contains(&n.as_str()) => {
                 eval_sequential_constructor(n, &fs[1..], env)
             }
@@ -11082,6 +11154,20 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 Ok(result)
             }
+            Form::Symbol(n) if n == "reduce-kv" => {
+                if fs.len() != 4 {
+                    return Err("reduce-kv expects a function, initial value, and map".into());
+                }
+                let function = eval(&fs[1], env)?;
+                let mut result = eval(&fs[2], env)?;
+                let source = eval(&fs[3], env)?;
+                let entries = map_entries(&source)
+                    .ok_or_else(|| "reduce-kv expects a map".to_string())?;
+                for (key, value) in entries {
+                    result = call_value(function.clone(), vec![result, key, value])?;
+                }
+                Ok(result)
+            }
             Form::Symbol(n) if n == "constantly" => {
                 if fs.len() != 2 {
                     return Err("constantly expects one value".into());
@@ -11298,7 +11384,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             Form::Symbol(n)
                 if [
                     "list?", "vector?", "map?", "set?", "keyword?", "symbol?", "string?",
-                    "number?", "integer?", "decimal?", "boolean?", "fn?",
+                    "char?", "number?", "integer?", "decimal?", "boolean?", "fn?",
                 ]
                 .contains(&n.as_str()) =>
             {
@@ -11320,6 +11406,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     "keyword?" => matches!(value, Value::Keyword(_)),
                     "symbol?" => matches!(value, Value::Symbol(_)),
                     "string?" => matches!(value, Value::String(_)),
+                    "char?" => matches!(value, Value::Character(_)),
                     "number?" => matches!(
                         value,
                         Value::Number(_)

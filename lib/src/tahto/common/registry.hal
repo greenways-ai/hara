@@ -1,5 +1,6 @@
 (ns tahto.common.registry
-  (:require [tahto.common.grammar-api :as grammar]
+  (:require [std.foundation :exclude [find list remove resolve]]
+            [tahto.common.grammar-api :as grammar]
             [tahto.protocol.registry :as protocol]))
 
 (defstruct GrammarRegistry [sources])

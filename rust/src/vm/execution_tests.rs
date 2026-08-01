@@ -52,7 +52,7 @@ fn literals() {
     assert_eq!(eval("42N"), "42N");
     assert_eq!(eval("1.25M"), "1.25M");
     assert_eq!(eval("#\"\\d+\""), "#\"\\d+\"");
-    assert_eq!(eval("()"), "nil");
+    assert_eq!(eval("()"), "()");
     assert_eq!(eval("^:private (+ 1 2)"), "3");
 }
 

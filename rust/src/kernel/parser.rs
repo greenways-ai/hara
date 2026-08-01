@@ -499,9 +499,19 @@ impl<'a> Parser<'a> {
                 Some((form, vec![meta, value]))
             }
             '\\' => {
-                let token = self
+                let token = if self
                     .reader
-                    .read_while(|c| !c.is_whitespace() && !"()[]{}".contains(c));
+                    .peek_char()
+                    .is_some_and(|c| "()[]{}".contains(c))
+                {
+                    self.reader
+                        .read_char()
+                        .map(|value| value.to_string())
+                        .unwrap_or_default()
+                } else {
+                    self.reader
+                        .read_while(|c| !c.is_whitespace() && !"()[]{}".contains(c))
+                };
                 if let Some(digit) = token
                     .strip_prefix('u')
                     .filter(|digits| digits.len() == 4)

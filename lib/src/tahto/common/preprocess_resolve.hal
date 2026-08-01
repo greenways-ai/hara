@@ -50,11 +50,11 @@
 
 (defn- process-code-entry [entry symbol-full symbol-module module deps]
   (if (and (get (:suppress module) symbol-module)
-           (not= 'defglobal (:op entry)))
+           (not (= 'defglobal (:op entry))))
     (fail "Suppressed module - macros only"
           {:symbol [symbol-module (:id entry)]
            :module (dissoc module :code :fragment)}))
-  (if (and deps (not= 'defrun (:op entry)))
+  (if (and deps (not (= 'defrun (:op entry))))
     (swap! deps conj symbol-full))
   symbol-full)
 
