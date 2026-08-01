@@ -20,7 +20,27 @@
   <main>
     <section class="stage panel">
       <header><span>01</span><h1>DIRECT A CHARACTER</h1><i>CANVAS / LIVE PLAN</i></header>
-      <canvas data-stage aria-label="Animated character preview"></canvas>
+      <div class="humanoid-gallery" data-humanoid-gallery aria-label="Free rigged humanoid glTF models">
+        <article>
+          <model-viewer src="https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb"
+            alt="CC0 rigged and animated humanoid robot" camera-controls auto-rotate autoplay
+            shadow-intensity="1" exposure="1.1" interaction-prompt="none" loading="eager"></model-viewer>
+          <a href="https://quaternius.com/">ROBOT EXPRESSIVE · CC0 · RIGGED</a>
+        </article>
+        <article>
+          <model-viewer src="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/RiggedSimple/glTF-Binary/RiggedSimple.glb"
+            alt="CC BY rigged and animated humanoid" camera-controls auto-rotate autoplay
+            shadow-intensity="1" interaction-prompt="none" loading="eager"></model-viewer>
+          <a href="https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/RiggedSimple">RIGGED SIMPLE · CC BY 4.0 · RIGGED</a>
+        </article>
+        <article>
+          <model-viewer src="https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/RiggedFigure/glTF-Binary/RiggedFigure.glb"
+            alt="CC BY rigged and animated humanoid figure" camera-controls auto-rotate autoplay
+            shadow-intensity="1" interaction-prompt="none" loading="eager"></model-viewer>
+          <a href="https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/RiggedFigure">RIGGED FIGURE · CC BY 4.0 · RIGGED</a>
+        </article>
+      </div>
+      <canvas data-stage aria-label="Animated character preview" hidden></canvas>
       <div class="transport">
         <button data-play>▶ PLAY PIPELINE</button><button data-pause>Ⅱ PAUSE</button>
         <output><b data-current-action>WAITING</b><small data-frame>FRAME 0000</small></output>
@@ -52,6 +72,7 @@
     <strong>STAGE VIEW ↔ BUILD VIEW</strong>
     <button type="button" data-view-build>BUILD VIEW <span>›</span></button>
   </footer>
+  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js"></script>
   <script type="module" src="./hara-animation.js"></script>
 </body>
 </html>
