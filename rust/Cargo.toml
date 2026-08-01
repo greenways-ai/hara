@@ -6,6 +6,11 @@ description = "Portable browser runtime slice for Hara"
 license = "EPL-2.0"
 rust-version = "1.78"
 
+[workspace]
+members = [".", "hoplite/runtime"]
+default-members = ["."]
+resolver = "2"
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
@@ -22,6 +27,7 @@ hir-encoder = ["halc-encoder"]
 bytecode-vm = []
 tracing-jit = ["bytecode-vm"]
 native-jit = ["tracing-jit"]
+hoplite = ["bytecode-vm"]
 
 [profile.browser-release]
 inherits = "release"
@@ -53,5 +59,10 @@ ed25519-dalek = { version = "2.1", default-features = false, features = ["std"] 
 name = "hara-bytecode-benchmark"
 path = "src/bin/hara-bytecode-benchmark.rs"
 required-features = ["bytecode-vm"]
+
+[[bin]]
+name = "hoplite"
+path = "src/bin/hoplite.rs"
+required-features = ["hoplite"]
 
 [dev-dependencies]

@@ -1625,7 +1625,7 @@ pub(crate) fn session_transferable(value: &Value) -> bool {
         Value::Struct(value) => value.values.iter().all(session_transferable),
         Value::ExceptionInfo(value) => {
             session_transferable(&value.data)
-                && value.cause.as_deref().is_none_or(session_transferable)
+                && value.cause.as_deref().map_or(true, session_transferable)
         }
         Value::ByteBuffer(_)
         | Value::Array(_)
@@ -3210,6 +3210,36 @@ fn native_host_operation(
             )
         }
         _ => return Err(format!("unknown std.native.Host method: {method}")),
+    };
+    HOST_CALL_HANDLER.with(|active| {
+        let Some(handler) = active.borrow().as_ref().cloned() else {
+            let promise = Promise::new();
+            promise.reject_value(host_error(
+                "host/unavailable",
+                "Host capability provider is unavailable",
+            ));
+            return Ok(Value::Promise(promise));
+        };
+        handler(service, target, arguments)
+    })
+}
+
+/// Invokes the active host capability provider with already-evaluated VM
+/// values. This is the bytecode boundary for `std.native.Host/call`; the VM
+/// remains unaware of timers, sockets, or any other concrete host operation.
+pub fn call_host_value(service: Value, target: Value, arguments: Value) -> Result<Value, String> {
+    let service = match service {
+        Value::String(value) => value,
+        _ => return Err("std.native.Host/call service must be a string".into()),
+    };
+    let target = match target {
+        Value::String(value) => value,
+        _ => return Err("std.native.Host/call method must be a string".into()),
+    };
+    let arguments = match arguments {
+        Value::Vector(values) => values.iter().cloned().collect(),
+        Value::Tuple(values) => values.iter().cloned().collect(),
+        _ => return Err("std.native.Host/call arguments must be a vector".into()),
     };
     HOST_CALL_HANDLER.with(|active| {
         let Some(handler) = active.borrow().as_ref().cloned() else {

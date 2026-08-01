@@ -1,23 +1,23 @@
-(ns openhal.app)
+(ns hoplite.app)
 
 (defn hello
   [request]
   {:status 200
    :headers {"content-type" "text/plain; charset=utf-8"
-             "x-openhal" "true"}
-   :body "Hello from OpenHAL\n"})
+             "x-hoplite" "true"}
+   :body "Hello from Hoplite\n"})
 
-(defn delayed
+(defn ^:async delayed
   [request]
   (std.foundation.coroutine/await
     (std.native.Host/call "nginx" "sleep" [25]))
   {:status 200
    :headers {"content-type" "text/plain; charset=utf-8"
-             "x-openhal" "promise-resumed"}
+             "x-hoplite" "promise-resumed"}
    :body "Hara coroutine resumed from the Nginx event loop\n"})
 
 (defn inspect
   [request]
   {:status 200
    :headers {"content-type" "text/plain; charset=utf-8"}
-   :body (get request :uri)})
+   :body "inspect"})

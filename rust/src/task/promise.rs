@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
 use crate::core::Value;
@@ -56,12 +56,27 @@ struct PromiseHooks {
     cancel: Option<Rc<dyn Fn()>>,
 }
 
+struct PromiseInner {
+    state: PromiseState,
+    continuations: Vec<Rc<dyn Fn(PromiseState)>>,
+    deferred: Option<(Instant, Rc<dyn Fn() -> Result<Value, String>>)>,
+    hooks: PromiseHooks,
+}
+
 #[derive(Clone)]
 pub struct Promise {
-    pub(crate) state: Rc<RefCell<PromiseState>>,
-    continuations: Rc<RefCell<Vec<Rc<dyn Fn(PromiseState)>>>>,
-    deferred: Rc<RefCell<Option<(Instant, Rc<dyn Fn() -> Result<Value, String>>)>>>,
-    hooks: Rc<RefCell<PromiseHooks>>,
+    inner: Rc<RefCell<PromiseInner>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct WeakPromise {
+    inner: Weak<RefCell<PromiseInner>>,
+}
+
+impl WeakPromise {
+    pub(crate) fn upgrade(&self) -> Option<Promise> {
+        self.inner.upgrade().map(|inner| Promise { inner })
+    }
 }
 
 impl std::fmt::Debug for Promise {
@@ -82,51 +97,55 @@ impl Default for Promise {
 impl Promise {
     pub fn new() -> Self {
         Self {
-            state: Rc::new(RefCell::new(PromiseState::Pending)),
-            continuations: Rc::new(RefCell::new(Vec::new())),
-            deferred: Rc::new(RefCell::new(None)),
-            hooks: Rc::new(RefCell::new(PromiseHooks::default())),
+            inner: Rc::new(RefCell::new(PromiseInner {
+                state: PromiseState::Pending,
+                continuations: Vec::new(),
+                deferred: None,
+                hooks: PromiseHooks::default(),
+            })),
         }
     }
 
     pub fn state(&self) -> PromiseState {
         self.run_deferred_if_ready();
-        let poller = self.hooks.borrow().poller.clone();
+        let poller = self.inner.borrow().hooks.poller.clone();
         if let Some(poller) = poller {
             poller();
         }
-        self.state.borrow().clone()
+        self.inner.borrow().state.clone()
     }
 
     fn run_deferred_if_ready(&self) {
-        let ready = self
-            .deferred
-            .borrow()
-            .as_ref()
-            .is_some_and(|(at, _)| Instant::now() >= *at);
-        if !ready {
-            return;
-        }
-        let task = self.deferred.borrow_mut().take().map(|(_, task)| task);
+        let task = {
+            let mut inner = self.inner.borrow_mut();
+            if !inner
+                .deferred
+                .as_ref()
+                .is_some_and(|(at, _)| Instant::now() >= *at)
+            {
+                return;
+            }
+            inner.deferred.take().map(|(_, task)| task)
+        };
         if let Some(task) = task {
             settle_result(self, task());
         }
     }
 
     pub fn set_poller(&self, poller: Rc<dyn Fn()>) {
-        self.hooks.borrow_mut().poller = Some(poller);
+        self.inner.borrow_mut().hooks.poller = Some(poller);
     }
 
     pub fn set_waiter(&self, waiter: Rc<dyn Fn()>) {
-        self.hooks.borrow_mut().waiter = Some(waiter);
+        self.inner.borrow_mut().hooks.waiter = Some(waiter);
     }
 
     pub fn set_cancel_hook(&self, cancel: Rc<dyn Fn()>) {
-        self.hooks.borrow_mut().cancel = Some(cancel);
+        self.inner.borrow_mut().hooks.cancel = Some(cancel);
     }
 
     pub fn wait_state(&self) -> PromiseState {
-        let waiter = self.hooks.borrow().waiter.clone();
+        let waiter = self.inner.borrow().hooks.waiter.clone();
         if let Some(waiter) = waiter {
             waiter();
         }
@@ -134,14 +153,14 @@ impl Promise {
     }
 
     pub(crate) fn notify_cancel(&self) {
-        let cancel = self.hooks.borrow().cancel.clone();
+        let cancel = self.inner.borrow().hooks.cancel.clone();
         if let Some(cancel) = cancel {
             cancel();
         }
     }
 
     pub fn cancel(&self) -> bool {
-        if !matches!(*self.state.borrow(), PromiseState::Pending) {
+        if !matches!(self.inner.borrow().state, PromiseState::Pending) {
             return false;
         }
         self.notify_cancel();
@@ -152,7 +171,7 @@ impl Promise {
         if delay.is_zero() {
             settle_result(self, task());
         } else {
-            *self.deferred.borrow_mut() = Some((Instant::now() + delay, task));
+            self.inner.borrow_mut().deferred = Some((Instant::now() + delay, task));
         }
     }
 
@@ -173,16 +192,16 @@ impl Promise {
     }
 
     fn settle(&self, next: PromiseState) -> bool {
-        self.deferred.borrow_mut().take();
         let continuations = {
-            let mut state = self.state.borrow_mut();
-            if !matches!(*state, PromiseState::Pending) {
+            let mut inner = self.inner.borrow_mut();
+            if !matches!(inner.state, PromiseState::Pending) {
                 return false;
             }
-            *state = next.clone();
-            std::mem::take(&mut *self.continuations.borrow_mut())
+            inner.state = next.clone();
+            inner.deferred = None;
+            inner.hooks = PromiseHooks::default();
+            std::mem::take(&mut inner.continuations)
         };
-        *self.hooks.borrow_mut() = PromiseHooks::default();
         for continuation in continuations {
             continuation(next.clone());
         }
@@ -192,7 +211,7 @@ impl Promise {
     pub fn on_settle(&self, continuation: Rc<dyn Fn(PromiseState)>) {
         let state = self.state();
         if matches!(state, PromiseState::Pending) {
-            self.continuations.borrow_mut().push(continuation);
+            self.inner.borrow_mut().continuations.push(continuation);
         } else {
             continuation(state);
         }
@@ -222,11 +241,17 @@ impl Promise {
     }
 
     pub fn same_identity(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.state, &other.state)
+        Rc::ptr_eq(&self.inner, &other.inner)
     }
 
-    pub fn identity_address(&self) -> *const RefCell<PromiseState> {
-        Rc::as_ptr(&self.state)
+    pub(crate) fn downgrade(&self) -> WeakPromise {
+        WeakPromise {
+            inner: Rc::downgrade(&self.inner),
+        }
+    }
+
+    pub fn identity_address(&self) -> usize {
+        Rc::as_ptr(&self.inner) as usize
     }
 }
 

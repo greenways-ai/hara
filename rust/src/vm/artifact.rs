@@ -13,7 +13,8 @@ use crate::core::Value;
 use crate::kernel::Position;
 use crate::lang::data::{Keyword, Metadata, MetadataValue, Symbol};
 
-const MAGIC: &[u8; 4] = b"HBC1";
+const MAGIC_V1: &[u8; 4] = b"HBC1";
+const MAGIC_V2: &[u8; 4] = b"HBC2";
 
 /// Encodes a program after validating it. Constants use the portable HTA
 /// value codec; unsupported runtime-only values are rejected explicitly.
@@ -34,7 +35,7 @@ pub fn encode_program(program: &Program) -> Result<Vec<u8>, String> {
         write_function(&mut payload, function)?;
     }
     let digest = Sha256::digest(&payload.bytes);
-    let mut output = MAGIC.to_vec();
+    let mut output = MAGIC_V2.to_vec();
     output.extend_from_slice(
         &u32::try_from(payload.bytes.len())
             .map_err(|_| "bytecode artifact is too large")?
@@ -47,9 +48,13 @@ pub fn encode_program(program: &Program) -> Result<Vec<u8>, String> {
 
 /// Decodes, authenticates, and validates a persistent VM program.
 pub fn decode_program(bytes: &[u8]) -> Result<Program, String> {
-    if !bytes.starts_with(MAGIC) {
+    let version = if bytes.starts_with(MAGIC_V2) {
+        2
+    } else if bytes.starts_with(MAGIC_V1) {
+        1
+    } else {
         return Err("bytecode artifact has invalid magic".into());
-    }
+    };
     if bytes.len() < 8 + 32 {
         return Err("bytecode artifact is truncated".into());
     }
@@ -68,7 +73,7 @@ pub fn decode_program(bytes: &[u8]) -> Result<Program, String> {
     let entry = reader.u16()?;
     let constants = reader.many(|reader| crate::hta::decode(reader.bytes()?))?;
     let var_metadata = reader.many(|reader| read_metadata(reader))?;
-    let functions = reader.many(|reader| read_function(reader))?;
+    let functions = reader.many(|reader| read_function(reader, version))?;
     reader.finish()?;
     let program = Program {
         constants,
@@ -82,6 +87,7 @@ pub fn decode_program(bytes: &[u8]) -> Result<Program, String> {
 
 fn write_function(out: &mut Writer, function: &FunctionPrototype) -> Result<(), String> {
     out.option_string(function.name.as_deref())?;
+    out.byte(u8::from(function.async_function));
     out.u16(function.arity);
     out.byte(u8::from(function.variadic));
     out.u16(function.capture_count);
@@ -121,8 +127,9 @@ fn write_function(out: &mut Writer, function: &FunctionPrototype) -> Result<(), 
     Ok(())
 }
 
-fn read_function(reader: &mut Reader<'_>) -> Result<FunctionPrototype, String> {
+fn read_function(reader: &mut Reader<'_>, version: u8) -> Result<FunctionPrototype, String> {
     let name = reader.option_string()?;
+    let async_function = version >= 2 && reader.boolean()?;
     let arity = reader.u16()?;
     let variadic = reader.boolean()?;
     let capture_count = reader.u16()?;
@@ -167,6 +174,7 @@ fn read_function(reader: &mut Reader<'_>) -> Result<FunctionPrototype, String> {
     })?;
     Ok(FunctionPrototype {
         name,
+        async_function,
         arity,
         variadic,
         capture_count,
@@ -275,6 +283,8 @@ fn write_instruction(out: &mut Writer, instruction: &Instruction) {
             out.u32(*name);
             out.byte(*count);
         }
+        Await => out.byte(26),
+        HostCall => out.byte(27),
         Return => out.byte(24),
     }
 }
@@ -331,6 +341,8 @@ fn read_instruction(reader: &mut Reader<'_>) -> Result<Instruction, String> {
             local: reader.u16()?,
             constant: reader.u32()?,
         },
+        26 => Instruction::Await,
+        27 => Instruction::HostCall,
         _ => return Err("bytecode artifact contains an unknown opcode".into()),
     })
 }
@@ -670,6 +682,7 @@ mod tests {
         let source = "(do (defn add-one [x] (+ x 1)) (add-one 41))";
         let program = compile_source(source).unwrap();
         let encoded = encode_program(&program).unwrap();
+        assert!(encoded.starts_with(b"HBC2"));
         let decoded = decode_program(&encoded).unwrap();
         assert_eq!(disassemble(&decoded), disassemble(&program));
         assert_eq!(

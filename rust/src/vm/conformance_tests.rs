@@ -17,10 +17,12 @@ use crate::kernel::{self, Form};
 use crate::Runtime;
 
 fn entry<'a>(entries: &'a [(Form, Form)], key: &str) -> Option<&'a Form> {
-    entries.iter().find_map(|(candidate, value)| match candidate {
-        Form::Keyword(name) if name == key => Some(value),
-        _ => None,
-    })
+    entries
+        .iter()
+        .find_map(|(candidate, value)| match candidate {
+            Form::Keyword(name) if name == key => Some(value),
+            _ => None,
+        })
 }
 
 fn required<'a>(entries: &'a [(Form, Form)], key: &str, id: &str) -> &'a Form {

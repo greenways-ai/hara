@@ -1,0 +1,9 @@
+{:hara/type :project
+ :hara/version "1.0.0"
+ :project/id hoplite/example
+ :project/version "0.1.0"
+ :project/source-paths ["."]
+ :project/test-paths []
+ :project/extension-paths []
+ :project/capabilities #{:host/nginx}
+ :project/main hoplite.app}

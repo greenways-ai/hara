@@ -94,6 +94,11 @@ struct FnContext {
     /// Whether the function has a `& rest` parameter (occupying the slot
     /// directly above the fixed params, below the captures).
     variadic: bool,
+    /// Whether `std.foundation.coroutine/await` may be emitted in this
+    /// function. Every function context resets this flag.
+    suspend_allowed: bool,
+    /// Whether calls to this prototype return a result promise.
+    async_function: bool,
     /// Captured free variables in slot order (slots `params..`); each
     /// entry carries the first-occurrence position for diagnostics.
     captures: Vec<(String, Option<Position>)>,
@@ -134,9 +139,11 @@ fn placeholder(
     arity: u16,
     capture_count: u16,
     variadic: bool,
+    async_function: bool,
 ) -> FunctionPrototype {
     FunctionPrototype {
         name,
+        async_function,
         arity,
         variadic,
         capture_count,
@@ -155,12 +162,14 @@ impl Compiler {
         Compiler {
             constants: Vec::new(),
             constant_index: HashMap::new(),
-            functions: vec![placeholder(None, 0, 0, false)],
+            functions: vec![placeholder(None, 0, 0, false, false)],
             contexts: vec![FnContext {
                 proto_id: 0,
                 name: None,
                 params: 0,
                 variadic: false,
+                suspend_allowed: false,
+                async_function: false,
                 captures: Vec::new(),
                 code: Vec::new(),
                 source_map: SourceMap::default(),
@@ -182,6 +191,80 @@ impl Compiler {
 
     fn ctx_mut(&mut self) -> &mut FnContext {
         self.contexts.last_mut().expect("function context is open")
+    }
+
+    /// Resolves coroutine forms by canonical Var identity so aliases and
+    /// referred names behave exactly like fully-qualified source.
+    fn is_coroutine_var(&self, name: &str, member: &str) -> bool {
+        let canonical = format!("std.foundation.coroutine/{member}");
+        if name == canonical {
+            return true;
+        }
+        crate::core::namespace_registry()
+            .ok()
+            .and_then(|registry| {
+                let source = registry.resolve(&crate::lang::data::Symbol::parse(name))?;
+                let target = registry.resolve(&crate::lang::data::Symbol::parse(&canonical))?;
+                Some(source.same_identity(&target))
+            })
+            .unwrap_or(false)
+    }
+
+    fn is_host_call_var(&self, name: &str) -> bool {
+        let canonical = "std.native.Host/call";
+        if name == canonical {
+            return true;
+        }
+        crate::core::namespace_registry()
+            .ok()
+            .and_then(|registry| {
+                let source = registry.resolve(&crate::lang::data::Symbol::parse(name))?;
+                let target = registry.resolve(&crate::lang::data::Symbol::parse(canonical))?;
+                Some(source.same_identity(&target))
+            })
+            .unwrap_or(false)
+    }
+
+    fn compile_host_call(
+        &mut self,
+        children: &[Child<'_>],
+        span: &Span,
+    ) -> Result<(), CompileError> {
+        if children.len() != 4 {
+            return Err(CompileError::new(
+                CompileErrorKind::Arity,
+                "std.native.Host/call expects service, method, and an argument vector",
+                Some(span.start),
+            ));
+        }
+        self.compile_call_arguments(children, span)?;
+        if self.ctx().fallthrough {
+            self.emit(Instruction::HostCall, Some(span.start));
+        }
+        Ok(())
+    }
+
+    fn compile_await(&mut self, children: &[Child<'_>], span: &Span) -> Result<(), CompileError> {
+        if children.len() != 2 {
+            return Err(CompileError::new(
+                CompileErrorKind::Arity,
+                "co/await expects one promise",
+                Some(span.start),
+            ));
+        }
+        if !self.ctx().suspend_allowed {
+            return Err(CompileError::new(
+                CompileErrorKind::InvalidEffect,
+                "co/await requires ^:async or co/create",
+                Some(span.start),
+            ));
+        }
+        let promise = &children[1];
+        self.compile_form(promise.form, promise.span, promise.children, false)?;
+        if self.ctx().fallthrough {
+            self.emit(Instruction::Await, Some(span.start));
+        }
+        Ok(())
     }
 
     /// Pairs parsed forms with their spans. When a node's children do not
@@ -370,6 +453,12 @@ impl Compiler {
             Form::List(elements) => {
                 let children = self.list_children(elements, span, children);
                 match &elements[0] {
+                    Form::Symbol(name) if self.is_coroutine_var(name, "await") => {
+                        self.compile_await(&children, span)
+                    }
+                    Form::Symbol(name) if self.is_host_call_var(name) => {
+                        self.compile_host_call(&children, span)
+                    }
                     Form::Symbol(name) if name == "if" => self.compile_if(&children, span, tail),
                     Form::Symbol(name) if name == "do" => {
                         // A top-level `do` is transparent: its statements
@@ -458,11 +547,8 @@ impl Compiler {
         if op == Primitive::First && argc == 1 {
             if let Form::List(elements) = children[1].form {
                 if matches!(elements.as_slice(), [Form::Symbol(name), _] if name == "rest") {
-                    let nested = self.list_children(
-                        elements,
-                        children[1].span,
-                        children[1].children,
-                    );
+                    let nested =
+                        self.list_children(elements, children[1].span, children[1].children);
                     if constant_form(nested[1].form) {
                         if let Ok(argument) = crate::core::form_to_value(nested[1].form) {
                             if let Ok(value) =
@@ -472,12 +558,7 @@ impl Compiler {
                             }
                         }
                     }
-                    self.compile_form(
-                        nested[1].form,
-                        nested[1].span,
-                        nested[1].children,
-                        false,
-                    )?;
+                    self.compile_form(nested[1].form, nested[1].span, nested[1].children, false)?;
                     if self.ctx().fallthrough {
                         self.emit(
                             Instruction::Primitive {

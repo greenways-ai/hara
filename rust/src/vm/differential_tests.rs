@@ -255,7 +255,10 @@ fn shared_benchmark_workloads_match() {
         assert_eq!(reference, expected, "{id} reference mismatch");
         assert_eq!(vm, expected, "{id} vm mismatch");
     }
-    assert_eq!(seen, supported, "corpus must contain the supported workloads");
+    assert_eq!(
+        seen, supported,
+        "corpus must contain the supported workloads"
+    );
 }
 
 /// Runtime-based differential (issue #223): the VM compiles against the
@@ -281,7 +284,10 @@ fn runtime_differential(source: &str) {
 
 #[test]
 fn callable_var_namespace_cases_match_shared_spec() {
-    fn entry<'a>(entries: &'a [(crate::kernel::Form, crate::kernel::Form)], key: &str) -> Option<&'a crate::kernel::Form> {
+    fn entry<'a>(
+        entries: &'a [(crate::kernel::Form, crate::kernel::Form)],
+        key: &str,
+    ) -> Option<&'a crate::kernel::Form> {
         entries.iter().find_map(|(candidate, value)| {
             matches!(candidate, crate::kernel::Form::Keyword(name) if name == key).then_some(value)
         })
@@ -337,9 +343,7 @@ fn callable_var_namespace_cases_match_shared_spec() {
                 *expected,
                 ":{id}"
             );
-        } else if let Some(crate::kernel::Form::String(marker)) =
-            entry(expect, "error-contains")
-        {
+        } else if let Some(crate::kernel::Form::String(marker)) = entry(expect, "error-contains") {
             let error = runtime
                 .eval_bytecode_native(source)
                 .expect_err(&format!(":{id} VM must fail"));
@@ -410,10 +414,16 @@ fn l0_namespace_corpus_cases_match() {
 #[test]
 fn runtime_globals_interop_issue_223() {
     let mut runtime = Runtime::new();
-    assert_eq!(runtime.eval_bytecode_native("(defn f [x] (+ x 1))"), Ok("#'user/f".into()));
+    assert_eq!(
+        runtime.eval_bytecode_native("(defn f [x] (+ x 1))"),
+        Ok("#'user/f".into())
+    );
     // The tree evaluator sees the var the VM interned...
     assert_eq!(runtime.eval_native("(f 41)"), Ok("42".into()));
     // ...and the VM sees vars the evaluator interned.
-    assert_eq!(runtime.eval_native("(defn g [x] (+ x 2))"), Ok("#'user/g".into()));
+    assert_eq!(
+        runtime.eval_native("(defn g [x] (+ x 2))"),
+        Ok("#'user/g".into())
+    );
     assert_eq!(runtime.eval_bytecode_native("(g 40)"), Ok("42".into()));
 }

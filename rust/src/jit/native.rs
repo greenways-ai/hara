@@ -345,7 +345,7 @@ fn lower(trace: &Trace, local_count: usize, constant_offsets: &[usize]) -> Resul
     section(&mut module, 10, code);
     if local_count
         .checked_mul(8)
-        .is_none_or(|bytes| bytes > MAX_TRACE_MEMORY_BYTES)
+        .map_or(true, |bytes| bytes > MAX_TRACE_MEMORY_BYTES)
     {
         return Err("native trace locals exceed the memory limit".into());
     }

@@ -10,7 +10,8 @@
 #                         (default: https://github.com/hara-lang/hara/releases/download/$HARA_VERSION)
 #   HARA_TARGET_TRIPLE    override platform detection (for testing)
 #
-# --rust installs hara for Linux x86_64, macOS arm64, and macOS x86_64.
+# --rust installs hara and its version-matched hoplite host for Linux x86_64,
+# macOS arm64, and macOS x86_64.
 # --truffle installs the hara-truffle native image.
 # At least one runtime flag is required.
 set -eu
@@ -140,11 +141,17 @@ install_rust() {
   verify "$TARBALL" || die "checksum mismatch for $TARBALL; aborting (file not installed)"
   tar -xzf "$TMP/$TARBALL" -C "$TMP" || die "failed to extract $TARBALL"
   [ -f "$TMP/hara" ] || die "archive did not contain a hara binary"
+  [ -f "$TMP/hoplite" ] || die "archive did not contain a hoplite binary"
   DEST="$INSTALL_DIR/hara"
   [ ! -e "$DEST" ] || info "Existing installation found at $DEST, overwriting"
   cp "$TMP/hara" "$DEST"
   chmod 755 "$DEST"
+  HOPLITE_DEST="$INSTALL_DIR/hoplite"
+  [ ! -e "$HOPLITE_DEST" ] || info "Existing installation found at $HOPLITE_DEST, overwriting"
+  cp "$TMP/hoplite" "$HOPLITE_DEST"
+  chmod 755 "$HOPLITE_DEST"
   info "installed Rust runtime: $("$DEST" --version 2>/dev/null || echo "hara $VERSION")"
+  info "installed Hoplite host: $("$HOPLITE_DEST" version 2>/dev/null || echo "hoplite $VERSION")"
   info "location:  $DEST"
 }
 

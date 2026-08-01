@@ -18,12 +18,9 @@
 //! `core::catch_matches`/`core::caught_error` boundary, so thrown values
 //! and runtime-error strings behave exactly as in the tree evaluator.
 
-#[cfg(feature = "tracing-jit")]
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
-#[cfg(feature = "tracing-jit")]
-use std::rc::Weak;
+use std::collections::{HashMap, VecDeque};
+use std::rc::{Rc, Weak};
 
 use super::error::VmError;
 use super::frame::Frame;
@@ -32,8 +29,10 @@ use super::program::{FunctionPrototype, Program};
 use super::slot::{VmClosure, VmMultiArity, VmSlot};
 use crate::core::{
     apply_binary_numbers, apply_binary_primitive, apply_primitive, call_value,
-    native_fixed_variadic_function, native_function, with_namespace_registry, Value,
+    native_fixed_variadic_function, native_function, with_namespace_registry, Promise,
+    PromiseState, Value,
 };
+use crate::task::promise::settle_result;
 
 #[path = "machine/globals.rs"]
 mod globals;
@@ -44,6 +43,7 @@ mod globals;
 pub enum VmOutcome {
     Returned(Value),
     Failed(VmError),
+    Suspended(Promise),
 }
 
 /// Result of executing one instruction. Call actions only carry their
@@ -63,6 +63,7 @@ enum Dispatch {
     },
     Returned(VmSlot),
     Failed(VmError),
+    Suspended(Promise),
 }
 
 /// A synchronous interpreter for one function of a validated [`Program`].
@@ -77,6 +78,8 @@ pub struct Machine {
     free_args: Vec<Vec<VmSlot>>,
     vm_globals: HashMap<usize, VmSlot>,
     next_closure_identity: u64,
+    scheduler: Weak<RefCell<AsyncScheduler>>,
+    scheduler_owner: Option<Rc<RefCell<AsyncScheduler>>>,
     ip: usize,
     #[cfg(feature = "tracing-jit")]
     jit: crate::jit::runtime::JitRuntime,
@@ -136,12 +139,26 @@ struct SavedFrame {
     call_ip: usize,
 }
 
+struct AsyncChild {
+    machine: Machine,
+    result: crate::task::promise::WeakPromise,
+    pending: Promise,
+}
+
+#[derive(Default)]
+struct AsyncScheduler {
+    next_id: u64,
+    children: HashMap<u64, AsyncChild>,
+    ready: VecDeque<(u64, PromiseState)>,
+}
+
 impl Machine {
     /// The machine for the program's entry function.
     pub fn entry(program: Rc<Program>) -> Machine {
         let index = usize::from(program.entry);
         let local_count = usize::from(program.functions[index].local_count);
         let max_stack = usize::from(program.functions[index].max_stack);
+        let scheduler = Rc::new(RefCell::new(AsyncScheduler::default()));
         Machine {
             program,
             function: index,
@@ -153,6 +170,8 @@ impl Machine {
             free_args: Vec::new(),
             vm_globals: HashMap::new(),
             next_closure_identity: 0,
+            scheduler: Rc::downgrade(&scheduler),
+            scheduler_owner: Some(scheduler),
             ip: 0,
             #[cfg(feature = "tracing-jit")]
             jit: crate::jit::runtime::JitRuntime::default(),
@@ -178,8 +197,27 @@ impl Machine {
     fn call_slots(
         program: Rc<Program>,
         prototype: u16,
+        args: Vec<VmSlot>,
+        captures: Vec<VmSlot>,
+    ) -> Machine {
+        let scheduler = Rc::new(RefCell::new(AsyncScheduler::default()));
+        Self::call_slots_with_scheduler(
+            program,
+            prototype,
+            args,
+            captures,
+            Rc::downgrade(&scheduler),
+            Some(scheduler),
+        )
+    }
+
+    fn call_slots_with_scheduler(
+        program: Rc<Program>,
+        prototype: u16,
         mut args: Vec<VmSlot>,
         captures: Vec<VmSlot>,
+        scheduler: Weak<RefCell<AsyncScheduler>>,
+        scheduler_owner: Option<Rc<RefCell<AsyncScheduler>>>,
     ) -> Machine {
         let index = usize::from(prototype);
         let proto = &program.functions[index];
@@ -209,6 +247,8 @@ impl Machine {
             free_args: Vec::new(),
             vm_globals: HashMap::new(),
             next_closure_identity: 0,
+            scheduler,
+            scheduler_owner,
             ip: 0,
             #[cfg(feature = "tracing-jit")]
             jit: crate::jit::runtime::JitRuntime::default(),
@@ -263,19 +303,27 @@ impl Machine {
         let proto = &program.functions[usize::from(closure.prototype)];
         let arity = usize::from(proto.arity);
         let variadic = proto.variadic;
+        let async_function = proto.async_function;
         let name = proto.name.clone();
         let registry = crate::core::namespace_registry().ok();
         let callback = move |args: Vec<Value>| {
-            let run = || match Machine::call_slots(
-                program.clone(),
-                closure.prototype,
-                args.into_iter().map(VmSlot::from).collect(),
-                closure.captures.clone(),
-            )
-            .run()
-            {
-                VmOutcome::Returned(value) => Ok(value),
-                VmOutcome::Failed(error) => Err(error.message),
+            let run = || {
+                let mut machine = Machine::call_slots(
+                    program.clone(),
+                    closure.prototype,
+                    args.into_iter().map(VmSlot::from).collect(),
+                    closure.captures.clone(),
+                );
+                if async_function {
+                    return Ok(Value::Promise(async_result(machine)));
+                }
+                match machine.run() {
+                    VmOutcome::Returned(value) => Ok(value),
+                    VmOutcome::Failed(error) => Err(error.message),
+                    VmOutcome::Suspended(_) => {
+                        Err("async VM function suspended across a synchronous call boundary".into())
+                    }
+                }
             };
             match &registry {
                 Some(registry) => with_namespace_registry(registry, run),
@@ -289,6 +337,123 @@ impl Machine {
         }
     }
 
+    fn retain_async_child(
+        scheduler: &Rc<RefCell<AsyncScheduler>>,
+        machine: Machine,
+        result: Promise,
+        pending: Promise,
+    ) {
+        let id = {
+            let mut state = scheduler.borrow_mut();
+            let id = state.next_id;
+            state.next_id = id.wrapping_add(1);
+            state.children.insert(
+                id,
+                AsyncChild {
+                    machine,
+                    result: result.downgrade(),
+                    pending: pending.clone(),
+                },
+            );
+            id
+        };
+        let weak = Rc::downgrade(scheduler);
+        pending.on_settle(Rc::new(move |state| {
+            if let Some(scheduler) = weak.upgrade() {
+                scheduler.borrow_mut().ready.push_back((id, state));
+            }
+        }));
+    }
+
+    fn finish_async(
+        scheduler: &Rc<RefCell<AsyncScheduler>>,
+        machine: Machine,
+        result: Promise,
+        outcome: VmOutcome,
+    ) {
+        match outcome {
+            VmOutcome::Returned(value) => settle_result(&result, Ok(value)),
+            VmOutcome::Failed(error) => {
+                result.reject(error.message);
+            }
+            VmOutcome::Suspended(pending) => {
+                Self::retain_async_child(scheduler, machine, result, pending);
+            }
+        }
+    }
+
+    fn poll_scheduler(scheduler: &Rc<RefCell<AsyncScheduler>>) -> usize {
+        let mut count = 0;
+        loop {
+            let ready = scheduler.borrow_mut().ready.pop_front();
+            let Some((id, state)) = ready else { break };
+            let child = scheduler.borrow_mut().children.remove(&id);
+            let Some(mut child) = child else { continue };
+            let Some(result) = child.result.upgrade() else {
+                child.pending.cancel();
+                continue;
+            };
+            count += 1;
+            let outcome = child.machine.resume(state);
+            Self::finish_async(scheduler, child.machine, result, outcome);
+        }
+        count
+    }
+
+    fn cancel_async_result(scheduler: &Rc<RefCell<AsyncScheduler>>, identity: usize) {
+        let ids = scheduler
+            .borrow()
+            .children
+            .iter()
+            .filter_map(|(id, child)| {
+                child
+                    .result
+                    .upgrade()
+                    .is_some_and(|candidate| candidate.identity_address() == identity)
+                    .then_some(*id)
+            })
+            .collect::<Vec<_>>();
+        for id in ids {
+            let child = { scheduler.borrow_mut().children.remove(&id) };
+            if let Some(child) = child {
+                child.pending.cancel();
+            }
+        }
+    }
+
+    fn spawn_async(&self, mut machine: Machine) -> Promise {
+        let scheduler = self
+            .scheduler
+            .upgrade()
+            .expect("root VM owns its async scheduler");
+        machine.scheduler = Rc::downgrade(&scheduler);
+        machine.scheduler_owner = None;
+        let result = Promise::new();
+        let poll = scheduler.clone();
+        result.set_poller(Rc::new(move || {
+            Self::poll_scheduler(&poll);
+        }));
+        let wait = scheduler.clone();
+        result.set_waiter(Rc::new(move || {
+            Self::poll_scheduler(&wait);
+        }));
+        let cancel_scheduler = scheduler.clone();
+        let cancel_identity = result.identity_address();
+        result.set_cancel_hook(Rc::new(move || {
+            Self::cancel_async_result(&cancel_scheduler, cancel_identity);
+        }));
+        let outcome = machine.run();
+        Self::finish_async(&scheduler, machine, result.clone(), outcome);
+        result
+    }
+
+    pub fn poll_async(&mut self) -> usize {
+        self.scheduler
+            .upgrade()
+            .map(|scheduler| Self::poll_scheduler(&scheduler))
+            .unwrap_or(0)
+    }
+
     fn enter_callable(
         &mut self,
         program: &Rc<Program>,
@@ -298,12 +463,12 @@ impl Machine {
         match callee {
             VmSlot::InlineClosure { prototype, .. } => {
                 self.check_arity(program, prototype, args.len())?;
-                self.enter_prototype(program, prototype, args, Vec::new());
+                self.enter_or_spawn(program, prototype, args, Vec::new());
                 Ok(())
             }
             VmSlot::Closure(closure) => {
                 self.check_arity(program, closure.prototype, args.len())?;
-                self.enter_prototype(program, closure.prototype, args, closure.captures.clone());
+                self.enter_or_spawn(program, closure.prototype, args, closure.captures.clone());
                 Ok(())
             }
             VmSlot::MultiArity(dispatch) => {
@@ -317,7 +482,7 @@ impl Machine {
                     })
                     .cloned()
                     .ok_or_else(|| format!("{} has no arity {}", dispatch.name, args.len()))?;
-                self.enter_prototype(program, closure.prototype, args, closure.captures.clone());
+                self.enter_or_spawn(program, closure.prototype, args, closure.captures.clone());
                 Ok(())
             }
             value => {
@@ -332,6 +497,25 @@ impl Machine {
                 self.ip += 1;
                 Ok(())
             }
+        }
+    }
+
+    fn enter_or_spawn(
+        &mut self,
+        program: &Rc<Program>,
+        prototype: u16,
+        args: Vec<VmSlot>,
+        captures: Vec<VmSlot>,
+    ) {
+        if program.functions[usize::from(prototype)].async_function {
+            let mut child = Machine::call_slots(program.clone(), prototype, args, captures);
+            child.vm_globals = self.vm_globals.clone();
+            child.next_closure_identity = self.next_closure_identity;
+            self.stack
+                .push(Value::Promise(self.spawn_async(child)).into());
+            self.ip += 1;
+        } else {
+            self.enter_prototype(program, prototype, args, captures);
         }
     }
 
@@ -405,7 +589,13 @@ impl Machine {
                     #[cfg(feature = "tracing-jit")]
                     if ip <= self.ip {
                         let (mut locals, writable) = self.frame.trace_locals();
-                        if self.jit.backedge(&program, self.function as u16, self.ip as u32, ip as u32, &mut locals) {
+                        if self.jit.backedge(
+                            &program,
+                            self.function as u16,
+                            self.ip as u32,
+                            ip as u32,
+                            &mut locals,
+                        ) {
                             self.frame.apply_trace_locals(&locals, &writable);
                         }
                     }
@@ -423,7 +613,7 @@ impl Machine {
                     prototype,
                     args,
                     captures,
-                } => self.enter_prototype(&program, prototype, args, captures),
+                } => self.enter_or_spawn(&program, prototype, args, captures),
                 Dispatch::Returned(value) => {
                     self.stack.truncate(self.frame.base());
                     if let Some(caller) = self.calls.pop() {
@@ -436,6 +626,7 @@ impl Machine {
                         return VmOutcome::Returned(Self::into_value(program.clone(), value));
                     }
                 }
+                Dispatch::Suspended(promise) => return VmOutcome::Suspended(promise),
                 Dispatch::Failed(error) => return VmOutcome::Failed(error),
             }
         }
@@ -535,7 +726,9 @@ impl Machine {
                                     }
                                     (
                                         VmSlot::InlineClosure { identity: left, .. },
-                                        VmSlot::InlineClosure { identity: right, .. },
+                                        VmSlot::InlineClosure {
+                                            identity: right, ..
+                                        },
                                     ) => left == right,
                                     (VmSlot::MultiArity(left), VmSlot::MultiArity(right)) => {
                                         Rc::ptr_eq(left, right)
@@ -703,6 +896,59 @@ impl Machine {
             Instruction::MakeMultiArity { name, count } => {
                 guarded!(self.exec_make_multi_arity(program, *name, *count));
             }
+            Instruction::Await => {
+                let Some(value) = self.stack.last() else {
+                    return Dispatch::Failed(self.error(function, "stack underflow"));
+                };
+                let Some(Value::Promise(promise)) = value.runtime_value() else {
+                    match self.raise(function, "await expects a promise") {
+                        Ok(target) => return Dispatch::Next(target),
+                        Err(error) => return Dispatch::Failed(error),
+                    }
+                };
+                match promise.state() {
+                    PromiseState::Pending => return Dispatch::Suspended(promise),
+                    PromiseState::Fulfilled(value) => {
+                        self.stack.pop();
+                        self.stack.push(value.into());
+                    }
+                    PromiseState::Rejected(error) => {
+                        self.stack.pop();
+                        match self.raise(function, error.message()) {
+                            Ok(target) => return Dispatch::Next(target),
+                            Err(error) => return Dispatch::Failed(error),
+                        }
+                    }
+                }
+            }
+            Instruction::HostCall => {
+                if self.stack.len() < 3 {
+                    return Dispatch::Failed(self.error(function, "stack underflow"));
+                }
+                let values = self.stack.split_off(self.stack.len() - 3);
+                let mut values = values
+                    .into_iter()
+                    .map(|value| value.into_runtime_value().ok_or("Host/call expects values"));
+                let service = match values.next().expect("three host arguments") {
+                    Ok(value) => value,
+                    Err(message) => return Dispatch::Failed(self.error(function, message)),
+                };
+                let target = match values.next().expect("three host arguments") {
+                    Ok(value) => value,
+                    Err(message) => return Dispatch::Failed(self.error(function, message)),
+                };
+                let arguments = match values.next().expect("three host arguments") {
+                    Ok(value) => value,
+                    Err(message) => return Dispatch::Failed(self.error(function, message)),
+                };
+                match crate::core::call_host_value(service, target, arguments) {
+                    Ok(value) => self.stack.push(value.into()),
+                    Err(message) => match self.raise(function, message) {
+                        Ok(target) => return Dispatch::Next(target),
+                        Err(error) => return Dispatch::Failed(error),
+                    },
+                }
+            }
             Instruction::Return => {
                 return match self.stack.pop() {
                     Some(value) => Dispatch::Returned(value),
@@ -864,6 +1110,71 @@ impl Machine {
     }
 }
 
+impl Machine {
+    /// Continues a machine stopped at `Await`. The settlement is applied at
+    /// the suspended instruction so ordinary exception handlers see a
+    /// rejected promise exactly like a guest throw.
+    pub fn resume(&mut self, state: PromiseState) -> VmOutcome {
+        let Some(function) = self.program.functions.get(self.function).cloned() else {
+            return VmOutcome::Failed(VmError::new("function index out of range", 0, None));
+        };
+        if !matches!(function.code.get(self.ip), Some(Instruction::Await)) {
+            return VmOutcome::Failed(self.error(&function, "VM is not suspended at await"));
+        }
+        match state {
+            PromiseState::Pending => {
+                let promise = match self.stack.last().and_then(VmSlot::runtime_value) {
+                    Some(Value::Promise(promise)) => promise,
+                    _ => {
+                        return VmOutcome::Failed(self.error(&function, "await expects a promise"))
+                    }
+                };
+                return VmOutcome::Suspended(promise);
+            }
+            PromiseState::Fulfilled(value) => {
+                self.stack.pop();
+                self.stack.push(value.into());
+                self.ip += 1;
+            }
+            PromiseState::Rejected(error) => {
+                self.stack.pop();
+                match self.raise(&function, error.message()) {
+                    Ok(target) => self.ip = target,
+                    Err(error) => return VmOutcome::Failed(error),
+                }
+            }
+        }
+        self.run()
+    }
+}
+
+fn async_result(mut machine: Machine) -> Promise {
+    let scheduler = machine
+        .scheduler
+        .upgrade()
+        .or_else(|| machine.scheduler_owner.clone())
+        .expect("VM owns its async scheduler");
+    machine.scheduler = Rc::downgrade(&scheduler);
+    machine.scheduler_owner = None;
+    let result = Promise::new();
+    let poll = scheduler.clone();
+    result.set_poller(Rc::new(move || {
+        Machine::poll_scheduler(&poll);
+    }));
+    let wait = scheduler.clone();
+    result.set_waiter(Rc::new(move || {
+        Machine::poll_scheduler(&wait);
+    }));
+    let cancel_scheduler = scheduler.clone();
+    let cancel_identity = result.identity_address();
+    result.set_cancel_hook(Rc::new(move || {
+        Machine::cancel_async_result(&cancel_scheduler, cancel_identity);
+    }));
+    let outcome = machine.run();
+    Machine::finish_async(&scheduler, machine, result.clone(), outcome);
+    result
+}
+
 /// Reads a string constant (the global-name operands).
 fn constant_string(program: &Program, index: u32) -> Option<&str> {
     match program.constants.get(index as usize) {
@@ -898,6 +1209,11 @@ fn run_entry(program: Rc<Program>) -> Result<Value, VmError> {
     match outcome {
         VmOutcome::Returned(value) => Ok(value),
         VmOutcome::Failed(error) => Err(error),
+        VmOutcome::Suspended(_) => Err(VmError::new(
+            "VM fiber suspended on an unresolved promise",
+            0,
+            None,
+        )),
     }
 }
 
@@ -907,7 +1223,12 @@ pub(crate) fn cached_trace_count(program: &Rc<Program>) -> usize {
         cache
             .borrow()
             .get(&program_key(program))
-            .and_then(|cached| cached.program.upgrade().map(|owner| (owner, &cached.runtime)))
+            .and_then(|cached| {
+                cached
+                    .program
+                    .upgrade()
+                    .map(|owner| (owner, &cached.runtime))
+            })
             .filter(|(owner, _)| Rc::ptr_eq(owner, program))
             .map(|(_, runtime)| runtime.compiled_count())
             .unwrap_or(0)
