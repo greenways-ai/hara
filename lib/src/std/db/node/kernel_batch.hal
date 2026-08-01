@@ -1,0 +1,96 @@
+;; ============================================================================
+;; std.db.node.kernel-batch — sequential and transactional statement batches.
+;; ============================================================================
+(ns std.db.node.kernel-batch
+  (:require [std.db.node.kernel-base :as kernel]
+            [std.foundation.promise :as promise]
+            [std.lib.substrate.protocol :as substrate]))
+
+(def ACTION-BATCH "@xt.db/batch")
+
+(defn- compatible-get
+  [value lookup-key]
+  (cond
+    (not (map? value)) nil
+    (has? value lookup-key) (get value lookup-key)
+    (string? lookup-key) (get value (keyword lookup-key))
+    (keyword? lookup-key) (get value (name lookup-key))
+    :else nil))
+
+(defn- normalize-mode
+  [value]
+  (cond
+    (keyword? value) value
+    (string? value) (keyword value)
+    :else :exec))
+
+(defn run-statement
+  "Runs one {:sql :parameters :mode} statement descriptor."
+  [node service-id statement]
+  (let [sql (compatible-get statement :sql)
+        parameters (or (compatible-get statement :parameters) [])
+        mode (normalize-mode (compatible-get statement :mode))]
+    (if (= mode :query)
+      (kernel/query-main node service-id sql parameters)
+      (kernel/exec-main node service-id sql parameters))))
+
+(defn run-statements
+  "Runs statement descriptors sequentially and returns ordered results."
+  ([node service-id statements]
+   (run-statements node service-id statements 0 []))
+  ([node service-id statements index results]
+   (if (= index (count statements))
+     (promise/from results)
+     (promise/then
+      (run-statement node service-id (nth statements index))
+      (fn [result]
+        (run-statements node
+                        service-id
+                        statements
+                        (+ index 1)
+                        (conj results result)))))))
+
+(defn transaction-main
+  "Runs statements within one non-interleaved transaction handler."
+  [node service-id statements]
+  (promise/then
+   (kernel/exec-main node service-id "begin" [])
+   (fn [_]
+     (promise/catch
+      (promise/then
+       (run-statements node service-id statements)
+       (fn [results]
+         (promise/then
+          (kernel/exec-main node service-id "commit" [])
+          (fn [_]
+            {:status :committed
+             :results results}))))
+      (fn [error]
+        (promise/then
+         (kernel/exec-main node service-id "rollback" [])
+         (fn [_]
+           (throw error))))))))
+
+(defn batch-main
+  "Runs a sequential batch, optionally inside a transaction."
+  [node service-id statements transactional]
+  (if transactional
+    (transaction-main node service-id statements)
+    (promise/then
+     (run-statements node service-id statements)
+     (fn [results]
+       {:status :complete
+        :results results}))))
+
+(defn batch-handler
+  [space args request node]
+  (batch-main node
+              (nth args 0)
+              (nth args 1)
+              (nth args 2)))
+
+(defn init-handlers
+  "Installs statement batch handlers on node."
+  [node]
+  (substrate/register-handler node ACTION-BATCH batch-handler {})
+  node)
