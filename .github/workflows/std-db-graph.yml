@@ -8,6 +8,8 @@ on:
       - "lib/src/std/db/text/sql_graph.hal"
       - "lib/src/std/db/text/base_tree.hal"
       - "lib/src/std/db/text/sql_tree.hal"
+      - "lib/src/std/db/text/sql_view.hal"
+      - "lib/src/std/db/text/sql_call.hal"
       - "lib/src/std/db/text/sql_util.hal"
       - "lib/src/std/db/text/base_check.hal"
       - "lib/test/std/db/text/base_scope_test.hal"
@@ -15,6 +17,8 @@ on:
       - "lib/test/std/db/text/sql_graph_test.hal"
       - "lib/test/std/db/text/base_tree_test.hal"
       - "lib/test/std/db/text/sql_tree_test.hal"
+      - "lib/test/std/db/text/sql_view_test.hal"
+      - "lib/test/std/db/text/sql_call_test.hal"
       - "java/src/test/java/hara/truffle/HaraDbGraphTest.java"
       - ".github/workflows/std-db-graph.yml"
   workflow_dispatch:
