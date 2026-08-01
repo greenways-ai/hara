@@ -4,8 +4,9 @@ on:
   pull_request:
     paths:
       - "lib/src/std/db.hal"
-      - "lib/src/std/db/protocol.hal"
-      - "lib/src/std/db/pglite.hal"
+      - "lib/src/std/db/**"
+      - "lib/test/std/db/**"
+      - "java/src/test/java/hara/truffle/HaraDbRuntimeTest.java"
       - "java/src/test/java/hara/truffle/HaraPgliteProcessExtensionTest.java"
       - "rust/extensions/std-db-pglite/**"
       - "rust/web/entries/pglite-*.mjs"
@@ -56,5 +57,5 @@ jobs:
       - name: Assemble extension package
         working-directory: rust/web
         run: node package-pglite-extension.mjs
-      - name: Execute PGlite through the Hara language
-        run: mvn -f java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraPgliteProcessExtensionTest test
+      - name: Execute PGlite and database runtimes through Hara
+        run: mvn -f java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraDbRuntimeTest,hara.truffle.HaraPgliteProcessExtensionTest test
