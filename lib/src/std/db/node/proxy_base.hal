@@ -3,6 +3,7 @@
 ;; ============================================================================
 (ns std.db.node.proxy-base
   (:require [std.db.node.kernel-base :as kernel]
+            [std.db.node.kernel-batch :as batch]
             [std.db.node.kernel-service :as service]
             [std.db.node.proxy-util :as proxy]
             [std.lib.substrate.protocol :as substrate]))
@@ -14,6 +15,7 @@
    kernel/ACTION-SERVICE-INFO
    kernel/ACTION-EXEC
    kernel/ACTION-QUERY
+   batch/ACTION-BATCH
    service/ACTION-RUNTIME-STATUS
    service/ACTION-DRIVER-LIST
    service/ACTION-SERVICE-LIST
