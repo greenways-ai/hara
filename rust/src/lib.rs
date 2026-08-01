@@ -2657,6 +2657,33 @@ mod tests {
     }
 
     #[test]
+    fn dash_qualifier_resolves_values_and_vars_in_the_current_namespace() {
+        let mut runtime = Runtime::new();
+        runtime.use_namespace("example.current");
+        assert_eq!(
+            runtime
+                .eval_text("(def answer 42) [answer -/answer (= #'answer #'-/answer)]")
+                .unwrap(),
+            "[42 42 true]"
+        );
+        assert_eq!(runtime.eval_text("(quote -/answer)").unwrap(), "-/answer");
+        assert!(runtime.eval_text("-/missing").unwrap_err().contains("unbound symbol"));
+    }
+
+    #[cfg(feature = "bytecode-vm")]
+    #[test]
+    fn bytecode_vm_canonicalizes_the_current_namespace_qualifier() {
+        let mut runtime = Runtime::new();
+        runtime.use_namespace("example.bytecode-current");
+        assert_eq!(
+            runtime
+                .eval_bytecode_native("(def answer 42) [answer -/answer (= #'answer #'-/answer)]")
+                .unwrap(),
+            "[42 42 true]"
+        );
+    }
+
+    #[test]
     fn requiring_resolve_loads_a_qualified_resource_and_returns_its_var() {
         let mut runtime = Runtime::new();
         runtime.register_resource("demo.required", "(ns demo.required) (def answer 42)");

@@ -8406,7 +8406,9 @@ fn binding_var(env: &mut HashMap<String, Value>, name: &str) -> Option<KernelVar
             env.insert(name.to_string(), Value::Var(var.clone()));
             Some(var)
         }
-        None => None,
+        None => namespace_registry()
+            .ok()?
+            .resolve(&crate::lang::data::Symbol::parse(name)),
     }
 }
 

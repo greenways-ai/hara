@@ -37,6 +37,29 @@ public class HaraCoreFormsTest {
   }
 
   @Test
+  public void dashQualifierResolvesValuesAndVarsInTheCurrentNamespace() {
+    try (Context context = context()) {
+      assertEquals(
+          "[42 42 true]",
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(ns example.current) "
+                      + "(def answer 42) "
+                      + "[answer -/answer (= #'answer #'-/answer)]")
+              .toString());
+      assertEquals(
+          "-/answer", context.eval(HaraLanguage.ID, "(quote -/answer)").toString());
+      assertTrue(
+          assertThrows(
+                  PolyglotException.class,
+                  () -> context.eval(HaraLanguage.ID, "-/missing"))
+              .getMessage()
+              .contains("Unbound symbol"));
+    }
+  }
+
+  @Test
   public void derefUsesTheLanguageProtocol() {
     try (Context context = context()) {
       assertEquals(
