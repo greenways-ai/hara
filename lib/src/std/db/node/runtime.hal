@@ -9,6 +9,7 @@
   (:require [std.db.node.client-base :as client]
             [std.db.node.connection :as connection]
             [std.db.node.kernel-base :as kernel]
+            [std.db.node.kernel-service :as service]
             [std.db.node.proxy-base :as proxy]
             [std.db.node.proxy-util :as proxy-util]
             [std.foundation.promise :as promise]
@@ -59,9 +60,11 @@
    "worker" worker-id})
 
 (defn init-server
-  "Installs database kernel handlers on a server node."
+  "Installs database kernel and dynamic service handlers on a server node."
   [node]
-  (kernel/init-handlers node))
+  (kernel/init-handlers node)
+  (service/init-handlers node)
+  node)
 
 (defn init-server-proxy
   "Installs database forwarding handlers on a client node."
