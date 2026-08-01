@@ -8,7 +8,7 @@ const source = process.env.HARA_SQLITE_SOURCE
   : resolve(repository, "rust/extensions/std-db-sqlite");
 const output = process.env.HARA_SQLITE_OUTPUT
   ? resolve(process.env.HARA_SQLITE_OUTPUT)
-  : resolve(source, "target/package/std/db/sqlite");
+  : resolve(source, "target/package/std/db/provider/sqlite");
 
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
