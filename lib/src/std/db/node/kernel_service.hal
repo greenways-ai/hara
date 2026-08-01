@@ -52,6 +52,11 @@
       (substrate/set-service node SERVICE-REGISTRY registry))
     service-id))
 
+(defn service-managed?
+  "Returns true when service-id is owned by the dynamic service registry."
+  [node service-id]
+  (= true (get (or (substrate/get-service node SERVICE-REGISTRY) {}) service-id)))
+
 (defn driver-list-main
   "Returns driver IDs registered on node."
   [node]
@@ -85,14 +90,21 @@
             :service (kernel/service-info-main node service-id)}))))))
 
 (defn service-close-main
-  "Closes and removes a named database service."
+  "Closes and removes a dynamically managed database service."
   [node service-id]
   (let [service (substrate/get-service node service-id)]
-    (if (nil? service)
+    (cond
+      (nil? service)
       (do
         (unregister-service node service-id)
         (promise/from {:status :not-found
                        :service service-id}))
+
+      (not (service-managed? node service-id))
+      (promise/from {:status :protected
+                     :service service-id})
+
+      :else
       (let [connection (compatible-get service :connection)]
         (promise/then
          (promise/finally
