@@ -1,8 +1,10 @@
 import { defineConfig } from "vite";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
+const web = dirname(fileURLToPath(import.meta.url));
 const pglite = resolve(
-  import.meta.dirname,
+  web,
   "../extensions/std-db-pglite/node_modules/@electric-sql/pglite/dist/index.js"
 );
 
@@ -18,7 +20,7 @@ export default defineConfig({
     emptyOutDir: true,
     assetsInlineLimit: 0,
     lib: {
-      entry: resolve(import.meta.dirname, "entries/pglite-browser.mjs"),
+      entry: resolve(web, "entries/pglite-browser.mjs"),
       formats: ["es"],
       fileName: () => "worker.mjs"
     },
