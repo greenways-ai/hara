@@ -1,0 +1,129 @@
+(ns std.db.text.base-tree-test
+  (:use code.test)
+  (:require [std.db.text.base-tree :as tree]
+            [std.db.text.sql-util :as sql]))
+
+(def schema
+  {"Currency"
+   {"id" {"ident" "id" "order" 0 "type" "text" "scope" "id"}
+    "type" {"ident" "type" "order" 1 "type" "text" "scope" "data"}
+    "name" {"ident" "name" "order" 2 "type" "text" "scope" "data"}
+    "description" {"ident" "description" "order" 3 "type" "text" "scope" "detail"}}})
+
+(def select-entry
+  {:input [{:symbol "i_type" :type "text"}]
+   :control {:order-by ["name"] :order-sort "asc" :limit 5}
+   :view {:table "Currency"
+          :type "select"
+          :query {"type" "{{i_type}}"}}})
+
+(def return-entry
+  {:input [{:symbol "i_currency_id" :type "text"}
+           {:symbol "i_note" :type "text"}]
+   :view {:table "Currency"
+          :type "return"
+          :query ["id" "name" "description"
+                  {"::" "sql/arg" "name" "{{i_note}}"}]}})
+
+(def results
+  [(fact "view controls become ordered SQL keyword nodes"
+     (tree/tree-control-array
+      {:order-by ["name"] :order-sort "desc" :limit 20 :offset 5})
+     => [(sql/ORDER-BY ["name"])
+         (sql/ORDER-SORT "desc")
+         (sql/LIMIT 20)
+         (sql/OFFSET 5)])
+
+   (fact "tree-base merges selection and runtime clauses"
+     (tree/tree-base schema
+                     "Currency"
+                     [{"id" "USD"} {"id" "AUD"}]
+                     {"type" "fiat"}
+                     ["*/data"]
+                     {})
+     => ["Currency"
+         {"where" [{"id" "USD" "type" "fiat"}
+                    {"id" "AUD" "type" "fiat"}]
+          "data" ["id" "type" "name"]
+          "links" []
+          "custom" []}])
+
+   (fact "select and count plans bind typed placeholders"
+     [(tree/plan-select schema select-entry ["fiat"] {})
+      (tree/plan-count schema select-entry ["crypto"] {})]
+     => [["Currency"
+          {"where" [{"type" "fiat"}]
+           "data" ["id"]
+           "links" []
+           "custom" [(sql/ORDER-BY ["name"])
+                     (sql/ORDER-SORT "asc")
+                     (sql/LIMIT 5)]}]
+         ["Currency"
+          {"where" [{"type" "crypto"}]
+           "data" []
+           "links" []
+           "custom" [{"::" "sql/count"}
+                     (sql/ORDER-BY ["name"])
+                     (sql/ORDER-SORT "asc")
+                     (sql/LIMIT 5)]}]])
+
+   (fact "return plans reserve the first input for the selected ID"
+     [(tree/plan-return schema return-entry "USD" ["note"] {})
+      (tree/plan-return-bulk schema return-entry ["USD" "AUD"] ["bulk"] {})]
+     => [["Currency"
+          {"where" [{"id" "USD"}]
+           "data" ["id" "name" "description"]
+           "links" []
+           "custom" [{"::" "sql/arg" "name" "note"}]}]
+         ["Currency"
+          {"where" [{"id" ["in" [["USD" "AUD"]]]}]
+           "data" ["id" "name" "description"]
+           "links" []
+           "custom" [{"::" "sql/arg" "name" "bulk"}]}]])
+
+   (fact "combined plans bind return inputs before selection inputs"
+     (tree/plan-combined schema
+                         select-entry
+                         ["fiat"]
+                         return-entry
+                         ["note"]
+                         nil
+                         {}
+                         true)
+     => ["Currency"
+         {"where" [{"type" "fiat"}]
+          "data" ["id" "name" "description"]
+          "links" []
+          "custom" [{"::" "sql/arg" "name" "note"}
+                    (sql/ORDER-BY ["name"])
+                    (sql/ORDER-SORT "asc")
+                    (sql/LIMIT 5)]}])
+
+   (fact "view argument validation reports length and type failures"
+     [(tree/plan-view-check select-entry ["fiat"] false)
+      (first (tree/plan-view-check select-entry [] false))
+      (first (tree/plan-view-check select-entry [1] false))]
+     => [[true nil] false false])
+
+   (fact "plan-view selects the correct planning mode"
+     [(first
+       (tree/plan-view
+        schema
+        {:select-entry select-entry :select-args ["fiat"]}))
+      (get-in
+       (second
+        (tree/plan-view
+         schema
+         {:select-entry select-entry :select-args ["fiat"]}))
+       [1 "where" 0 "type"])
+      (get-in
+       (second
+        (tree/plan-view
+         schema
+         {:return-entry return-entry
+          :return-id "USD"
+          :return-args ["note"]}))
+       [1 "where" 0 "id"])]
+     => [true "fiat" "USD"])])
+
+(pr-str (run '[std.db.text.base-tree-test]))
