@@ -6,6 +6,11 @@ Port the database library from `zcaudate-xyz/foundation-base/src-lang/xt/db` int
 
 This is a compatibility port, not a redesign. Structural cleanup can happen after parity is established.
 
+The port now has two coordinated tracks:
+
+1. **Library parity** — move the pure `xt.db` namespaces in dependency order.
+2. **Executable providers** — prove that the resulting `std.db` API can execute SQL through runtime-neutral HTA packages.
+
 ## Porting rules
 
 1. Port one source namespace at a time with its matching test namespace.
@@ -15,6 +20,7 @@ This is a compatibility port, not a redesign. Structural cleanup can happen afte
 5. Add compatibility handling only where the xtalk boundary changed representation, such as keyword versus string map keys.
 6. A file is complete only when its direct tests pass and downstream namespaces can load it.
 7. Record intentional differences in this plan before moving to the next file.
+8. Database engines must live behind explicit extension/provider boundaries. HAL code must not receive JavaScript, Java, Rust or raw WASM implementation objects.
 
 ## Dependency order
 
@@ -46,7 +52,39 @@ Port low-level client and proxy helpers before `xt.db.node.runtime`. Host-facing
 
 ### Phase 5 — system assembly
 
-Port `xt.db.system.*` and the public `std.db` facade last, then run integration and parity tests across the complete namespace graph.
+Port `xt.db.system.*` and the generic `std.db` facade last, then run integration and parity tests across the complete namespace graph. Provider-specific facades such as `std.db.sqlite` may land earlier to create executable vertical slices.
+
+## Executable provider track
+
+| Provider | Role | Status |
+|---|---|---|
+| `std.db.provider.sqlite` | Embedded SQLite compiled to WASM | Provider, package, HAL facade and real-engine tests implemented; CI running |
+| `std.db.provider.pglite` | Embedded PostgreSQL compiled to WASM | Next provider after SQLite is green |
+| remote PostgreSQL | Network connection to an external PostgreSQL server | Separate future provider; must use an explicit network-capable host bridge rather than treating PGlite as a remote connector |
+
+### SQLite vertical slice
+
+The first executable provider uses the official `@sqlite.org/sqlite-wasm` package through Hara's existing HTA worker transports. The package is pinned to `3.50.4-build1` because the current Hara managed-process baseline is Node 18, while newer package releases declare a newer Node requirement.
+
+The initial portable contract is deliberately small:
+
+- `version`
+- `open` using isolated in-memory storage
+- parameterized `exec`
+- parameterized row-returning `query`
+- `close`
+- transaction helpers implemented in HAL using `begin`, `commit` and `rollback`
+
+Connections cross the HTA boundary as immutable descriptors containing an opaque provider-local integer ID. The SQLite database object remains inside its worker. Browser persistence is not selected implicitly; OPFS support will be added only after an explicit storage capability and persistence lifecycle are defined.
+
+Validation has two levels:
+
+1. A Node test invokes the real SQLite WASM engine, creates a table, inserts with bind parameters, selects rows and verifies stale-handle failure.
+2. A Java/Truffle integration test requires `std.db.sqlite` as ordinary HAL code, dereferences its promises, executes SQL and verifies that process capability is denied when not granted.
+
+### PostgreSQL direction
+
+PGlite will provide the first embedded PostgreSQL implementation because it runs PostgreSQL in WASM and can share the same Hara-facing connection contract. It is not a remote PostgreSQL connector. Remote PostgreSQL will use a distinct provider with explicit network capability and a transport appropriate to the host, such as a managed process, HTTP bridge or WebSocket service.
 
 ## Per-file checklist
 
@@ -70,6 +108,6 @@ The port also accepts both `:type` and `"type"` in argument descriptors. This pr
 
 `xt.db.text.base-util` has been ported using immutable Hara maps and vectors. Route, view and ID helpers accept both keyword-keyed native maps and string-keyed boundary maps. `merge-views` preserves the source collision rule: on an existing table entry it merges the existing `select` and `return` categories rather than replacing the complete table descriptor.
 
-## Next slice: `base-scope`
+## Next parity slice: `base-scope`
 
 `base-scope` is not a single low-level helper file: it combines scope constants, nested query merging, schema-column selection, link normalisation and recursive tree construction. It depends on behaviours currently supplied by `xt.lang.common-data`, `xt.lang.common-tree` and `xt.lang.common-string`. Before porting it, split its dependency requirements into native Hara equivalents and verify whether `base-schema` or a smaller tree helper must move ahead of it.
