@@ -3,7 +3,7 @@
 ;;
 ;; The core runtime is host-neutral. Local linked nodes provide the reference
 ;; implementation; browser, SharedWorker and Node worker hosts plug in through
-;; adapter descriptors that attach a transport to the client node.
+;; adapter descriptors that attach a transport to a client or server node.
 ;; ============================================================================
 (ns std.db.node.runtime
   (:require [std.db.node.client-base :as client]
@@ -28,6 +28,13 @@
     (string? lookup-key) (get value (keyword lookup-key))
     (keyword? lookup-key) (get value (name lookup-key))
     :else nil))
+
+(defn ready-signal
+  "Creates the wire-compatible worker ready signal."
+  [transport-id worker-id]
+  {"signal" "ready"
+   "transport" transport-id
+   "worker" worker-id})
 
 (defn init-server
   "Installs database kernel handlers on a server node."
@@ -149,6 +156,54 @@
                       (or (compatible-get options :server-id) "db/server"))]
      (local-connect client-node server-node config schema lookup options))))
 
+(defn adapter-boot
+  "Boots a server kernel through a host adapter descriptor.
+
+   adapter requires :boot, called with node, transport-id, worker-id and the
+   ready signal. The adapter must attach its inbound/outbound transport to node."
+  [kind node adapter options]
+  (let [transport-id (or (compatible-get options :transport-id) DEFAULT-TRANSPORT)
+        worker-id (or (compatible-get options :worker-id) DEFAULT-WORKER)
+        drivers (compatible-get options :drivers)
+        boot-function (compatible-get adapter :boot)
+        ready (ready-signal transport-id worker-id)]
+    (if (nil? boot-function)
+      (throw (ex-info "Database runtime adapter requires :boot"
+                      {:kind kind :adapter adapter}))
+      (do
+        (install-drivers node drivers)
+        (init-server node)
+        (promise/then
+         (promise/run
+          (fn []
+            (boot-function node transport-id worker-id ready)))
+         (fn [status]
+           {:runtime (std.db.node.runtime/DatabaseRuntime
+                      kind nil node transport-id worker-id adapter)
+            :ready ready
+            :boot status
+            :transport transport-id
+            :transport-attached
+            (not (nil? (protocol/get-transport node transport-id)))}))))))
+
+(defn sharedworker-init-kernel
+  ([node adapter]
+   (sharedworker-init-kernel node adapter {}))
+  ([node adapter options]
+   (adapter-boot :shared-worker node adapter options)))
+
+(defn webworker-init-kernel
+  ([node adapter]
+   (webworker-init-kernel node adapter {}))
+  ([node adapter options]
+   (adapter-boot :web-worker node adapter options)))
+
+(defn nodeworker-init-kernel
+  ([node adapter]
+   (nodeworker-init-kernel node adapter {}))
+  ([node adapter options]
+   (adapter-boot :node-worker node adapter options)))
+
 (defn adapter-connect
   "Connects a client through a host adapter descriptor.
 
@@ -203,8 +258,16 @@
     (promise/finally
      teardown
      (fn []
-       (if server-node
+       (cond
+         (and client-node server-node)
          (disconnect-nodes client-node server-node transport-id)
+
+         server-node
+         (do
+           (protocol/detach-transport server-node transport-id)
+           (when close-function (close-function)))
+
+         :else
          (do
            (protocol/detach-transport client-node transport-id)
            (when close-function (close-function))))))))
