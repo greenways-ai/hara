@@ -1,0 +1,37 @@
+(ns hara.runtime-test
+  (:require [std.lib.test :as test]
+            [hara.runtime :as runtime]))
+
+(def results
+  [(test/check "JavaScript command construction uses language :js"
+               (runtime/command :js
+                                "console.log(42)"
+                                {:executable "node-test"})
+               ["node-test" "--input-type=module" "--eval" "console.log(42)"])
+   (test/check "Python command construction uses language :python"
+               (runtime/command :python
+                                "print(42)"
+                                {:executable "python-test"})
+               ["python-test" "-c" "print(42)"])
+   (test/check "Tahto can override program arguments without replacing host execution"
+               [(runtime/command :js
+                                 "console.log(42)"
+                                 {:executable "node-test"
+                                  :arguments ["-e"]})
+                (runtime/command :python
+                                 "print(42)"
+                                 {:executable "python-test"
+                                  :arguments ["-c"]})]
+               [["node-test" "-e" "console.log(42)"]
+                ["python-test" "-c" "print(42)"]])
+   (test/check "runtime descriptors preserve Foundation language/tag identity"
+               [(select-keys (runtime/runtime :js)
+                             [:runtime/language :runtime/tag])
+                (select-keys (runtime/runtime :python)
+                             [:runtime/language :runtime/tag])]
+               [{:runtime/language :js
+                 :runtime/tag :js}
+                {:runtime/language :python
+                 :runtime/tag :py}])])
+
+(test/print-results results)

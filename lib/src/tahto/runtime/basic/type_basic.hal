@@ -1,0 +1,64 @@
+(ns tahto.runtime.basic.type-basic
+  (:require [tahto.runtime.basic.type-oneshot :as oneshot]))
+
+(defstruct RuntimeBasic [id lang runtime program exec process state])
+
+(defn- default-id
+  [language]
+  (keyword (str (name language) ".basic")))
+
+(defn rt-basic:create
+  "Creates the Foundation-shaped basic runtime.
+
+   The registry and lifecycle are now in Tahto. Until Hara exposes incremental
+   child-process streams, evaluation uses the installed oneshot transport and
+   records that compatibility boundary explicitly in :process."
+  [{:keys [id lang runtime exec program process]
+    :or {runtime :basic}}]
+  (let [[program process exec]
+        (oneshot/rt-oneshot-setup lang program process exec runtime)
+        process (merge process
+                       {:transport :oneshot-bootstrap
+                        :persistent false})]
+    (tahto.runtime.basic.type-basic/RuntimeBasic
+     (or id (default-id lang))
+     lang
+     runtime
+     program
+     exec
+     process
+     (atom {:status :created
+            :transport (:transport process)}))))
+
+(defn start-basic
+  [runtime]
+  (reset! (:state runtime)
+          {:status :started
+           :transport (get-in runtime [:process :transport])})
+  runtime)
+
+(defn stop-basic
+  [runtime]
+  (reset! (:state runtime)
+          {:status :stopped
+           :transport (get-in runtime [:process :transport])})
+  runtime)
+
+(defn basic-state
+  [runtime]
+  @(:state runtime))
+
+(defn raw-eval-basic
+  [runtime source]
+  (if (= :started (:status (basic-state runtime)))
+    (oneshot/raw-eval-oneshot runtime source)
+    (throw
+     (ex-info "Basic runtime is not started"
+              {:id (:id runtime)
+               :lang (:lang runtime)
+               :state (basic-state runtime)}))))
+
+(defn rt-basic
+  "Creates and starts a basic runtime, matching Foundation's public function."
+  [options]
+  (start-basic (rt-basic:create options)))

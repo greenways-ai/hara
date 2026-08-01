@@ -1,0 +1,44 @@
+(ns tahto.common.emit-compat-test
+  (:require [std.lib.test :as test]
+            [tahto.common.emit :as emit]
+            [tahto.common.emit-helper :as helper]))
+
+(def operator-grammar
+  (assoc helper/+default+
+         :reserved
+         {'+ {:op :add :emit :infix :raw "+"}
+          '- {:op :sub :emit :infix- :raw "-"}
+          'not {:op :not :emit :pre :raw "!"}
+          := {:op :assign :emit :assign :raw "="}
+          '. {:op :index :emit :index}
+          'return {:op :return :emit :return :raw "return"}}))
+
+(def results
+  [(test/check "direct infix emission matches the Foundation common helper"
+               (emit/emit-infix "|" '[x y z] helper/+default+ {})
+               "x | y | z")
+   (test/check "unary subtraction uses prefix syntax"
+               (emit/emit '(- x) operator-grammar)
+               "(-x)")
+   (test/check "nested infix operations retain grouping"
+               (emit/emit '(+ 1 (+ 2 3)) operator-grammar)
+               "(1 + (2 + 3))")
+   (test/check "assignment uses the grammar assignment operator"
+               (emit/emit '(:= x 1) operator-grammar)
+               "x = 1")
+   (test/check "generic calls emit without a reserved entry"
+               (emit/emit '(print (+ 19 23)) operator-grammar)
+               "print((19 + 23))")
+   (test/check "index access supports string keys"
+               (emit/emit '(. user ["name"]) operator-grammar)
+               "user[\"name\"]")
+   (test/check "vectors and maps use grammar collection delimiters"
+               [(emit/emit [1 2 3] helper/+default+)
+                (emit/emit {:answer 42} helper/+default+)]
+               ["[1,2,3]"
+                "{answer:42}"])
+   (test/check "return statements emit nested expressions"
+               (emit/emit '(return (+ 20 22)) operator-grammar)
+               "return (20 + 22)")])
+
+(test/print-results results)

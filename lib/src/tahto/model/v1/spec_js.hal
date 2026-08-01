@@ -1,0 +1,102 @@
+(ns tahto.model.v1.spec-js
+  (:require [tahto.base.v1.grammar-spec :as spec]
+            [tahto.common.grammar-api :as grammar]
+            [tahto.common.registry :as registry]
+            [tahto.model.v1.spec-xtalk :as xtalk]))
+
+(def +language+ :js)
+(def +tag+ :js)
+(def +version+ spec/+version+)
+
+(def +grammar+
+  (grammar/definition
+   {:grammar/id +tag+
+    :grammar/version +version+
+    :grammar/release "foundation-v1"
+    :grammar/language +language+
+    :grammar/tag +tag+
+    :grammar/engine {:minimum 1 :maximum 1}
+    :grammar/parent
+    {:grammar/id xtalk/+tag+
+     :grammar/version xtalk/+version+}
+    :operators
+    {:override
+     {:pow {:raw "Math.pow" :emit :invoke}
+      :eq {:raw "==="}
+      :neq {:raw "!=="}
+      :var {:raw "let"}}}
+    :emit
+    {:defaults
+     {:default
+      {:comment {:prefix "//"}
+       :common {:start "("
+                :end ")"
+                :space " "
+                :assign "="
+                :sep ","
+                :statement ";"
+                :namespace "."
+                :newline "\n"
+                :indent "  "}
+       :invoke {:start "(" :end ")" :sep "," :space " "}
+       :block {:parameter {:start "(" :end ")"}
+               :body {:start "{" :end "}"}
+               :space-before-body " "}
+       :function {:raw "function"
+                  :args {:start "(" :end ")" :sep "," :space " "}
+                  :body {:start "{" :end "}"}
+                  :space-before-body " "}}
+      :token
+      {:nil "null"
+       :true "true"
+       :false "false"
+       :string {:quote :double}
+       :symbol {:namespace "."
+                :replace {"-" "_"
+                          "?" "_p"
+                          "!" "_bang"}}}
+      :data
+      {:vector {:start "[" :end "]" :sep "," :space " "}
+       :set {:start "new Set([" :end "])" :sep "," :space " "}
+       :map {:start "{" :end "}" :sep "," :space " "}
+       :map-entry {:assign ":" :space " "}}
+      :define
+      {:defglobal {:raw ""}
+       :def {:raw "const"}
+       :declare {:raw "let"}}}}}))
+
+(defn- install-source
+  [catalog source]
+  (if (registry/find catalog (grammar/source-coordinate source))
+    catalog
+    (registry/install catalog source)))
+
+(defn install
+  "Installs the Foundation-named JavaScript V1 model."
+  [catalog]
+  (install-source (xtalk/install catalog) +grammar+))
+
+(defn catalog
+  []
+  (install (registry/registry)))
+
+(defn select
+  "Resolves JavaScript language :js using grammar tag :js."
+  ([]
+   (select (catalog)))
+  ([catalog]
+   (registry/resolve catalog
+                     {:grammar/id +tag+
+                      :grammar/version +version+})))
+
+(def +selection+ (select))
+
+(def +book+
+  {:lang +language+
+   :parent :xtalk
+   :version +version+
+   :coordinate (:coordinate +selection+)
+   :grammar (:grammar +selection+)
+   :selection +selection+})
+
+(def +init+ +book+)

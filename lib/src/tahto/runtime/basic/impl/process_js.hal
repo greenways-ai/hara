@@ -1,0 +1,55 @@
+(ns tahto.runtime.basic.impl.process-js
+  (:require [tahto.core.runtime :as runtime]
+            [tahto.runtime.basic.type-basic :as basic]
+            [tahto.runtime.basic.type-common :as common]
+            [tahto.runtime.basic.type-oneshot :as oneshot]))
+
+(def +program-init+
+  (common/put-program-options
+   :js
+   {:default {:oneshot :nodejs
+              :basic :nodejs}
+    :env {:nodejs
+          {:exec "node"
+           :extension "js"
+           :flags {:oneshot ["-e"]
+                   :basic ["-e"]}}}}))
+
+(def +js-oneshot-config+
+  (common/set-context-options
+   [:js :oneshot :default]
+   {:main {}
+    :emit {}
+    :json :full}))
+
+(def +js-basic-config+
+  (common/set-context-options
+   [:js :basic :default]
+   {:main {}
+    :emit {}
+    :json :full
+    :timeout 2000
+    :transport :oneshot-bootstrap}))
+
+(def +js-oneshot+
+  (runtime/install-type!
+   :js :oneshot
+   {:type :tahto/rt.oneshot
+    :instance {:create oneshot/rt-oneshot:create
+               :raw-eval oneshot/raw-eval-oneshot}}))
+
+(def +js-basic+
+  (runtime/install-type!
+   :js :basic
+   {:type :tahto/rt.basic
+    :config {:layout :full}
+    :instance {:create basic/rt-basic:create
+               :start basic/start-basic
+               :stop basic/stop-basic
+               :raw-eval basic/raw-eval-basic}}))
+
+(def +init+
+  {:lang :js
+   :program +program-init+
+   :oneshot +js-oneshot+
+   :basic +js-basic+})
