@@ -1208,7 +1208,10 @@ public final class HaraContext {
       return form;
     }
     HaraMacro macro = resolveMacro(operator);
-    return macro == null ? form : macro.expand(list, environment);
+    if (macro == null) return form;
+    Object expansion = macro.expand(list, environment);
+    EvaluationJournal.macro(operator.toString(), form, expansion);
+    return expansion;
   }
 
   @SuppressWarnings({"rawtypes", "unchecked"})
