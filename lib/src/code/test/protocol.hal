@@ -1,30 +1,47 @@
 ;; ============================================================================
-;; code.test.protocol — behaviour contracts for the portable test stack.
+;; code.test.protocol — compatibility aliases for the standard test contracts.
 ;;
-;; Test definitions and results remain ordinary immutable data. Protocols are
-;; reserved for stateful registries, host reporting/time, and matcher behaviour.
+;; Canonical protocol identities live under std.protocol.*. This namespace is
+;; retained so the existing code.test implementation and downstream users can
+;; migrate without creating a second, incompatible protocol set.
 ;; ============================================================================
-(ns code.test.protocol)
+(ns code.test.protocol
+  (:require [std.protocol.itestregistry :as registry]
+            [std.protocol.itestreporter :as reporter]
+            [std.protocol.itestclock :as clock]
+            [std.protocol.itesttimer :as timer]
+            [std.protocol.itestcontrol :as control]
+            [std.protocol.itestsession :as session]
+            [std.protocol.imatch :as match]))
 
-(defprotocol ITestRegistry
-  (registry-register [registry fact])
-  (registry-remove [registry namespace name])
-  (registry-clear [registry namespace])
-  (registry-facts [registry])
-  (registry-find [registry namespace name]))
+(def ITestRegistry registry/ITestRegistry)
+(def registry-register registry/registry-register)
+(def registry-remove registry/registry-remove)
+(def registry-clear registry/registry-clear)
+(def registry-facts registry/registry-facts)
+(def registry-find registry/registry-find)
 
-(defprotocol ITestReporter
-  (report-event [reporter event]))
+(def ITestReporter reporter/ITestReporter)
+(def report-event reporter/report-event)
 
-(defprotocol ITestClock
-  (now-ms [clock]))
+(def ITestClock clock/ITestClock)
+(def now-ms clock/now-ms)
 
-(defprotocol ITestTimer
-  (timeout-promise [timer promise milliseconds])
-  (cancel-timeout [timer timeout]))
+(def ITestTimer timer/ITestTimer)
+(def timeout-promise timer/timeout-promise)
+(def cancel-timeout timer/cancel-timeout)
 
-(defprotocol ITestControl
-  (cancelled? [control fact]))
+(def ITestControl control/ITestControl)
+(def cancelled? control/cancelled?)
 
-(defprotocol IMatcher
-  (match-value [matcher actual]))
+(def ITestSession session/ITestSession)
+(def session-run session/session-run)
+(def session-cancel session/session-cancel)
+(def session-status session/session-status)
+(def session-results session/session-results)
+(def session-close session/session-close)
+
+;; Archived name retained for code.test matchers. New code should use IMatch.
+(def IMatcher match/IMatch)
+(def IMatch match/IMatch)
+(def match-value match/match-value)
