@@ -5,7 +5,16 @@
 
 use super::{ExitReason, ExitSnapshot, Trace, TraceBackend, TraceOp, TraceOutcome, TraceValue};
 use crate::core::Primitive;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use wasmtime::{Engine, Instance, Memory, Module, Store, TypedFunc};
+
+const MAX_CACHED_MODULES: usize = 128;
+
+thread_local! {
+    static NATIVE_ENGINE: Engine = Engine::default();
+    static MODULE_CACHE: RefCell<HashMap<Vec<u8>, Module>> = RefCell::new(HashMap::new());
+}
 
 pub struct NativeTrace {
     store: Store<()>,
@@ -21,9 +30,7 @@ pub struct NativeBackend {
 
 impl Default for NativeBackend {
     fn default() -> Self {
-        Self {
-            engine: Engine::default(),
-        }
+        Self { engine: NATIVE_ENGINE.with(Clone::clone) }
     }
 }
 
@@ -43,7 +50,18 @@ impl TraceBackend for NativeBackend {
             .max()
             .unwrap_or(0);
         let wasm = lower(trace, local_count)?;
-        let module = Module::new(&self.engine, wasm).map_err(|error| format!("{error:?}"))?;
+        let module = MODULE_CACHE.with(|cache| -> Result<Module, String> {
+            if let Some(module) = cache.borrow().get(&wasm) {
+                return Ok(module.clone());
+            }
+            let module = Module::new(&self.engine, &wasm).map_err(|error| format!("{error:?}"))?;
+            let mut cache = cache.borrow_mut();
+            if cache.len() >= MAX_CACHED_MODULES {
+                cache.clear();
+            }
+            cache.insert(wasm, module.clone());
+            Ok(module)
+        })?;
         let mut store = Store::new(&self.engine, ());
         let instance =
             Instance::new(&mut store, &module, &[]).map_err(|error| error.to_string())?;
