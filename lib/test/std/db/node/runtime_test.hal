@@ -48,14 +48,17 @@
              (get options :id "mock-1")
              (atom {:opened true :options options}))))})
 
+(defn failing-open
+  [options]
+  (promise/new
+   (fn [resolve reject]
+     (reject (ex-info "driver failed" {:options options})))))
+
 (defn failing-driver
   []
   {:id :failing
    :engine :failing-sql
-   :open (fn [options]
-           (promise/new
-            (fn [resolve reject]
-              (reject (ex-info "driver failed" {:options options})))))} )
+   :open failing-open})
 
 (def config
   {:primary {:type :mock
