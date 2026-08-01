@@ -55,6 +55,68 @@ public class HaraSqliteProcessExtensionTest {
   }
 
   @Test
+  public void sqliteWasmExecutesARecursiveSchemaGraphQuery() {
+    Assume.assumeTrue(
+        Files.isRegularFile(ROOT.resolve("std/db/provider/sqlite/hara.extension.edn")));
+    String previous = System.getProperty("hara.extensions.path");
+    System.setProperty("hara.extensions.path", ROOT.toString());
+    try (Context context =
+        Context.newBuilder(HaraLanguage.ID).allowCreateProcess(true).build()) {
+      context.eval(
+          HaraLanguage.ID,
+          "(ns graph-app (:require [std.db :as db] "
+              + "[std.db.sqlite :as sqlite] "
+              + "[std.db.text.sql-graph :as graph] "
+              + "[std.db.text.sql-util :as sql] "
+              + "[std.foundation.json :as json] "
+              + "[std.foundation.string :as string])) "
+              + "(def graph-schema "
+              + "{\"User\" {\"id\" {\"ident\" \"id\" \"order\" 0 \"type\" \"uuid\" \"scope\" \"id\"} "
+              + "\"name\" {\"ident\" \"name\" \"order\" 1 \"type\" \"text\" \"scope\" \"data\"} "
+              + "\"team\" {\"ident\" \"team\" \"order\" 2 \"type\" \"ref\" \"scope\" \"ref\" "
+              + "\"ref\" {\"ns\" \"Team\" \"type\" \"forward\" \"key\" \"team\"}} "
+              + "\"profile\" {\"ident\" \"profile\" \"type\" \"ref\" \"scope\" \"ref\" "
+              + "\"ref\" {\"ns\" \"Profile\" \"type\" \"reverse\" \"rkey\" \"user\"}}} "
+              + "\"Team\" {\"id\" {\"ident\" \"id\" \"order\" 0 \"type\" \"uuid\" \"scope\" \"id\"} "
+              + "\"title\" {\"ident\" \"title\" \"order\" 1 \"type\" \"text\" \"scope\" \"data\"}} "
+              + "\"Profile\" {\"id\" {\"ident\" \"id\" \"order\" 0 \"type\" \"uuid\" \"scope\" \"id\"} "
+              + "\"bio\" {\"ident\" \"bio\" \"order\" 1 \"type\" \"text\" \"scope\" \"data\"} "
+              + "\"user\" {\"ident\" \"user\" \"order\" 2 \"type\" \"ref\" \"scope\" \"ref\" "
+              + "\"ref\" {\"ns\" \"User\" \"type\" \"forward\" \"key\" \"user\"}}}}) "
+              + "(def graph-connection (deref (sqlite/open))) "
+              + "(deref (db/exec graph-connection \"create table Team (id text primary key, title text not null)\")) "
+              + "(deref (db/exec graph-connection \"create table User (id text primary key, name text not null, team_id text)\")) "
+              + "(deref (db/exec graph-connection \"create table Profile (id text primary key, bio text, user_id text)\")) "
+              + "(deref (db/exec graph-connection \"insert into Team (id, title) values (?, ?)\" [\"t1\" \"Core\"])) "
+              + "(deref (db/exec graph-connection \"insert into User (id, name, team_id) values (?, ?, ?)\" [\"u1\" \"Ada\" \"t1\"])) "
+              + "(deref (db/exec graph-connection \"insert into Profile (id, bio, user_id) values (?, ?, ?)\" [\"p1\" \"Compiler\" \"u1\"])) "
+              + "(def graph-statement "
+              + "(graph/select graph-schema "
+              + "[\"User\" {\"name\" \"Ada\"} "
+              + "[\"id\" \"name\" [\"team\" [\"id\" \"title\"]] [\"profile\" [\"id\" \"bio\"]]]] "
+              + "(sql/sqlite-opts {}))) "
+              + "(def graph-result (deref (db/query graph-connection graph-statement))) "
+              + "(def graph-json (get (get (get graph-result :rows) 0) 0)) "
+              + "(def graph-data (json/read graph-json))");
+      assertTrue(
+          context.eval(HaraLanguage.ID, "(string/includes? graph-statement \"FROM \\\"Team\\\"\")").asBoolean());
+      assertTrue(
+          context.eval(HaraLanguage.ID, "(string/includes? graph-statement \"FROM \\\"Profile\\\"\")").asBoolean());
+      assertTrue(
+          context.eval(HaraLanguage.ID, "(string/includes? graph-json \"Core\")").asBoolean());
+      assertTrue(
+          context.eval(HaraLanguage.ID, "(string/includes? graph-json \"Compiler\")").asBoolean());
+      assertEquals(
+          "Ada",
+          context.eval(HaraLanguage.ID, "(get (get graph-data 0) \"name\")").asString());
+      assertTrue(context.eval(HaraLanguage.ID, "(deref (db/close graph-connection))").asBoolean());
+    } finally {
+      if (previous == null) System.clearProperty("hara.extensions.path");
+      else System.setProperty("hara.extensions.path", previous);
+    }
+  }
+
+  @Test
   public void sqliteWasmRunsThroughTheDatabaseKernelRuntime() {
     Assume.assumeTrue(
         Files.isRegularFile(ROOT.resolve("std/db/provider/sqlite/hara.extension.edn")));
