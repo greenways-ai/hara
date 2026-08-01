@@ -84,10 +84,13 @@ fn collect(path: &Path, output: &mut Vec<PathBuf>) -> Result<(), String> {
 }
 
 fn parse_summary(path: PathBuf, output: &str) -> Result<TestSummary, String> {
-    let mut form = parse(output).map_err(|error| format!("invalid test result: {error}"))?;
-    if let Form::String(encoded) = form {
-        form = parse(&encoded).map_err(|error| format!("invalid encoded test result: {error}"))?;
-    }
+    let form = parse(output).map_err(|error| format!("invalid test result: {error}"))?;
+    let form = match form {
+        Form::String(encoded) => {
+            parse(&encoded).map_err(|error| format!("invalid encoded test result: {error}"))?
+        }
+        value => value,
+    };
 
     match form {
         Form::Map(entries) => parse_code_test_summary(path, entries, output),
