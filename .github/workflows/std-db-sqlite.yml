@@ -10,6 +10,7 @@ on:
       - "rust/web/packages/db-sqlite/**"
       - "rust/web/sqlite-provider.test.mjs"
       - "rust/web/vite.sqlite-*.config.js"
+      - "rust/web/package-db-provider.mjs"
       - "rust/web/package-sqlite-extension.mjs"
       - "scripts/build-db-sqlite-extension"
       - ".github/workflows/std-db-sqlite.yml"
