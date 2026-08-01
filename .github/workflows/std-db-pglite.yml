@@ -10,6 +10,7 @@ on:
       - "rust/web/packages/db-pglite/**"
       - "rust/web/pglite-provider.test.mjs"
       - "rust/web/vite.pglite-*.config.js"
+      - "rust/web/package-db-provider.mjs"
       - "rust/web/package-pglite-extension.mjs"
       - "scripts/build-db-pglite-extension"
       - ".github/workflows/std-db-pglite.yml"
