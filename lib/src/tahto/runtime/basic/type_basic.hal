@@ -13,9 +13,14 @@
    The registry and lifecycle are now in Tahto. Until Hara exposes incremental
    child-process streams, evaluation uses the installed oneshot transport and
    records that compatibility boundary explicitly in :process."
-  [{:keys [id lang runtime exec program process]
-    :or {runtime :basic}}]
-  (let [[program process exec]
+  [options]
+  (let [id (get options :id)
+        lang (get options :lang)
+        runtime (or (get options :runtime) :basic)
+        exec (get options :exec)
+        program (get options :program)
+        process (get options :process)
+        [program process exec]
         (oneshot/rt-oneshot-setup lang program process exec runtime)
         process (merge process
                        {:transport :oneshot-bootstrap
@@ -28,34 +33,34 @@
      exec
      process
      (atom {:status :created
-            :transport (:transport process)}))))
+            :transport (get process :transport)}))))
 
 (defn start-basic
   [runtime]
-  (reset! (:state runtime)
+  (reset! (get runtime :state)
           {:status :started
            :transport (get-in runtime [:process :transport])})
   runtime)
 
 (defn stop-basic
   [runtime]
-  (reset! (:state runtime)
+  (reset! (get runtime :state)
           {:status :stopped
            :transport (get-in runtime [:process :transport])})
   runtime)
 
 (defn basic-state
   [runtime]
-  @(:state runtime))
+  (deref (get runtime :state)))
 
 (defn raw-eval-basic
   [runtime source]
-  (if (= :started (:status (basic-state runtime)))
+  (if (= :started (get (basic-state runtime) :status))
     (oneshot/raw-eval-oneshot runtime source)
     (throw
      (ex-info "Basic runtime is not started"
-              {:id (:id runtime)
-               :lang (:lang runtime)
+              {:id (get runtime :id)
+               :lang (get runtime :lang)
                :state (basic-state runtime)}))))
 
 (defn rt-basic

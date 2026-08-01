@@ -1,6 +1,6 @@
 (ns tahto.common.compiler-test
-  (:require [std.lib.test :as test]
-            [tahto.common.compiler :as compiler]
+  (:use code.test)
+  (:require [tahto.common.compiler :as compiler]
             [tahto.common.grammar-api :as grammar]
             [tahto.common.registry :as registry]
             [tahto.protocol.compiler :as protocol]))
@@ -182,76 +182,89 @@
     (catch Throwable error
       (ex-data error))))
 
-(def results
-  [(test/check "caller resolves explicit grammar versions before compilation"
-               [(:output compiled-v1)
-                (:output compiled-v2)]
-               ["(1 + 2)"
-                "(3 plus 3)"])
-   (test/check "compiler applies grammar facets after explicit resolution"
-               (:output compiled-jsx)
-               "(3 jsx-plus 3)")
-   (test/check "compiler exposes ordered rewrite and analysis stages"
-               [(get-in compiled-v2 [:stages :normalized])
-                (get-in compiled-v2 [:stages :staged])
-                (get-in compiled-v2 [:stages :canonical])
-                (get-in compiled-v2 [:stages :target])
-                (get-in compiled-v2 [:stages :staging])
-                (:inference compiled-v2)
-                (map (fn [event] (:phase event))
-                     (get-in compiled-v2 [:provenance :events]))]
-               ['(+ 1 2)
-                '(+ 1 2)
-                '(+ 2 2)
-                '(+ 2 3)
-                '(+ 3 3)
-                {:observed '(+ 2 2)}
-                [:normalize :stage :rewrite/canonical :infer :lint
-                 :rewrite/target :rewrite/staging :emit]])
-   (test/check "worklog preserves explicit attribution without inferring it"
-               [(get-in compiled-v2 [:provenance :tahto/actor])
-                (get-in compiled-v2 [:provenance :tahto/source])
-                (get-in compiled-v2 [:provenance :tahto/work])
-                (map (fn [event] (:index event))
-                     (get-in compiled-v2 [:provenance :events]))
-                (map (fn [event] (:tahto/actor event))
-                     (get-in compiled-v2 [:provenance :events]))]
-               [:build/runner
-                :source/input-1
-                :artifact/output-1
-                [0 1 2 3 4 5 6 7]
-                [:build/runner :build/runner :build/runner :build/runner
-                 :build/runner :build/runner :build/runner :build/runner]])
-   (test/check "entry hydration returns schema contributions without publishing"
-               [(get-in entry-result [:entry :formatted])
-                (get-in entry-result [:entry :static/schema-seed :tree :Task :id 0 :type])
-                (:contributions entry-result)
-                (IDeref/deref published)]
-               [true
-                :uuid
-                [{:kind :postgres/schema :table :Task}]
-                []])
-   (test/check "entry publication is an explicit post-compile operation"
-               [(get-in (compiler/publish
-                         (compiler/grammar-entry-publisher selected-entry)
-                         entry-result)
-                        [:value :accepted])
-                (IDeref/deref published)]
-               ['Task ['Task]])
-   (test/check "fatal phase errors retain stable context and causes"
-               (let [data (captured-lint-error)]
-                 [(:tahto/phase data)
-                  (:tahto/error-code data)
-                  (:probe data)
-                  (:tahto/module data)
-                  (:tahto/grammar-coordinate data)
-                  (map (fn [frame] (:tahto/phase frame))
-                       (:tahto/provenance-stack data))])
-               [:lint
-                :tahto/error-lint
-                true
-                'demo.core
-                (:coordinate selected-v1)
-                [:lint]])])
+(fact "caller resolves explicit grammar versions before compilation"
+  [(:output compiled-v1) (:output compiled-v2)]
+  => ["(1 + 2)" "(3 plus 3)"])
 
-(test/print-results results)
+(fact "compiler applies grammar facets after explicit resolution"
+  (:output compiled-jsx)
+  => "(3 jsx-plus 3)")
+
+(fact "the default compiler stager resolves module dependencies"
+  (protocol/stage-form
+   (compiler/grammar-stager)
+   '(call u/value)
+   {:grammar {}}
+   {:modules {'demo {:id 'demo
+                     :code {'value {:id 'value :op 'def}}}}
+    :module {:id 'current :link {'u 'demo}}})
+  => {:form '(call demo/value)
+      :dependencies {:code '#{demo/value}
+                     :fragment #{}
+                     :native {}}})
+
+(fact "compiler exposes ordered rewrite and analysis stages"
+  [(get-in compiled-v2 [:stages :normalized])
+   (get-in compiled-v2 [:stages :staged])
+   (get-in compiled-v2 [:stages :canonical])
+   (get-in compiled-v2 [:stages :target])
+   (get-in compiled-v2 [:stages :staging])
+   (:inference compiled-v2)
+   (map (fn [event] (:phase event))
+        (get-in compiled-v2 [:provenance :events]))]
+  => ['(+ 1 2)
+      '(+ 1 2)
+      '(+ 2 2)
+      '(+ 2 3)
+      '(+ 3 3)
+      {:observed '(+ 2 2)}
+      [:normalize :stage :rewrite/canonical :infer :lint
+       :rewrite/target :rewrite/staging :emit]])
+
+(fact "worklog preserves explicit attribution without inferring it"
+  [(get-in compiled-v2 [:provenance :tahto/actor])
+   (get-in compiled-v2 [:provenance :tahto/source])
+   (get-in compiled-v2 [:provenance :tahto/work])
+   (map (fn [event] (:index event))
+        (get-in compiled-v2 [:provenance :events]))
+   (map (fn [event] (:tahto/actor event))
+        (get-in compiled-v2 [:provenance :events]))]
+  => [:build/runner
+      :source/input-1
+      :artifact/output-1
+      [0 1 2 3 4 5 6 7]
+      [:build/runner :build/runner :build/runner :build/runner
+       :build/runner :build/runner :build/runner :build/runner]])
+
+(fact "entry hydration returns schema contributions without publishing"
+  [(get-in entry-result [:entry :formatted])
+   (get-in entry-result [:entry :static/schema-seed :tree :Task :id 0 :type])
+   (:contributions entry-result)
+   (IDeref/deref published)]
+  => [true :uuid [{:kind :postgres/schema :table :Task}] []])
+
+(fact "entry publication is an explicit post-compile operation"
+  [(get-in (compiler/publish
+            (compiler/grammar-entry-publisher selected-entry)
+            entry-result)
+           [:value :accepted])
+   (IDeref/deref published)]
+  => ['Task ['Task]])
+
+(fact "fatal phase errors retain stable context and causes"
+  (let [data (captured-lint-error)]
+    [(:tahto/phase data)
+     (:tahto/error-code data)
+     (:probe data)
+     (:tahto/module data)
+     (:tahto/grammar-coordinate data)
+     (map (fn [frame] (:tahto/phase frame))
+          (:tahto/provenance-stack data))])
+  => [:lint
+      :tahto/error-lint
+      true
+      'demo.core
+      (:coordinate selected-v1)
+      [:lint]])
+
+(run {:namespace "tahto.common.compiler-test"})

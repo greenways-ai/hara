@@ -113,6 +113,11 @@
 ;; Predicates
 ;; ---------------------------------------------------------------------------
 
+(defn ^{:schema [:fn [:any] :bool]}
+  boolean
+  "Coerces value to true or false using Hara truthiness."
+  [value] (if value true false))
+
 (defn ^{:schema [:fn [:num] :bool]}
   zero?
   "Returns true if value equals 0."

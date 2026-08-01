@@ -58,4 +58,23 @@ public class CodeTestLibraryTest {
               .asString());
     }
   }
+
+  @Test
+  public void dynamicBindingsResolveInTheirDefiningNamespace() {
+    try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
+      assertEquals(
+          "[2 3]",
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(ns binding-source) "
+                      + "(def ^:dynamic *value* 1) "
+                      + "(defn locally [] (binding [*value* 2] *value*)) "
+                      + "(ns binding-caller) "
+                      + "[(binding-source/locally) "
+                      + " (binding [binding-source/*value* 3] binding-source/*value*)]")
+              .toString());
+    }
+  }
+
 }

@@ -1,0 +1,68 @@
+(ns tahto.common.emit-block-test
+  (:use code.test)
+  (:require [tahto.common.emit-block :as block]
+            [tahto.common.emit-common :as common]
+            [tahto.common.emit-helper :as helper]))
+
+(fact "emits statements and do blocks"
+  (binding [common/*emit-fn* common/emit-common]
+    [(block/emit-statement '(print 1) helper/+default+ {})
+     (block/emit-do '((print 1) (print 2)) helper/+default+ {})
+     (block/emit-do* '((print 1) (print 2)) helper/+default+ {})])
+  => ["print(1);" "print(1);\nprint(2);" "print(1);\nprint(2)"])
+
+(fact "merges block options"
+  (:space (block/block-options :for {:parameter {:space "|"}}
+                               :parameter helper/+default+))
+  => "|")
+
+(fact "parses and emits block parameters"
+  (block/parse-params '[i v :in (pairs)])
+  => [:statement '[i v :in (pairs)]]
+
+  (binding [common/*emit-fn* common/emit-common]
+    (block/emit-params-statement :for {} '[i v :in (pairs x)]
+                                 helper/+default+ {}))
+  => "i, v in pairs(x)")
+
+(fact "emits a block body"
+  (binding [common/*emit-fn* common/emit-common]
+    (block/emit-block-body :while {} '[(print 1) (print 2)]
+                           helper/+default+ {}))
+  => "{\n  print(1);\n  print(2);\n}")
+
+(fact "separates control clauses from a block body"
+  (block/emit-block-setup
+   :branch
+   {:raw "" :main #{:body}
+    :control {:if {} :elseif {} :else {}}}
+   '(branch
+      (if (= x 1) (print 1))
+      (elseif (= x 2) (print 2))
+      (else (print 3)))
+   helper/+default+ {})
+  => '["" nil []
+       {:if [(if (= x 1) (print 1))]
+        :elseif [(elseif (= x 2) (print 2))]
+        :else [(else (print 3))]}
+       nil])
+
+(fact "emits and validates required control clauses"
+  (let [definition {:main #{:body}
+                    :control
+                    {:catch {:main #{:parameter :body}
+                             :required true}}}]
+    (block/emit-block-controls
+     :try definition (:control definition)
+     {:catch '[(catch e (print e))]}
+     helper/+default+ {}))
+  => "\ncatch(e){\n  (print e);\n}"
+
+  (block/emit-block-controls
+   :try
+   {:main #{:body} :control {:catch {:required true}}}
+   {:catch {:required true}}
+   {} helper/+default+ {})
+  => (throws))
+
+(run {:namespace "tahto.common.emit-block-test"})

@@ -4,6 +4,9 @@
 (def +language-registry+ (atom {}))
 (def +type-registry+ (atom {}))
 
+(defn- atom-value [reference]
+  (deref (identity reference)))
+
 (defn install-lang!
   "Installs a selected version of a language into the runtime registry.
 
@@ -11,9 +14,9 @@
   ([language]
    (install-lang! language {}))
   ([language options]
-   (let [book-key (or (:book-key options) :default)
-         requested-version (:version options)
-         book (or (:book options)
+   (let [book-key (or (get options :book-key) :default)
+         requested-version (get options :version)
+         book (or (get options :book)
                   (registry/registry-book language
                                           book-key
                                           requested-version))]
@@ -24,7 +27,7 @@
                   :book-key book-key
                   :version requested-version}))
        (let [version (or requested-version
-                         (:version book)
+                         (get book :version)
                          (registry/registry-book-default-version
                           language
                           book-key))
@@ -55,11 +58,11 @@
 
 (defn language-info
   [language]
-  (get @+language-registry+ language))
+  (get (atom-value +language-registry+) language))
 
 (defn runtime-installed?
   [language runtime]
-  (boolean (get @+type-registry+ [language runtime])))
+  (boolean (get (atom-value +type-registry+) [language runtime])))
 
 (defn available-runtimes
   [language]
@@ -68,7 +71,7 @@
               (conj out (second coordinate))
               out))
           []
-          (keys @+type-registry+)))
+          (keys (atom-value +type-registry+))))
 
 (defn require-runtime!
   "Loads the implementation registered for [language runtime]."
@@ -84,7 +87,7 @@
   "Returns an installed runtime type, loading its implementation lazily."
   [language runtime]
   (require-runtime! language runtime)
-  (or (get @+type-registry+ [language runtime])
+  (or (get (atom-value +type-registry+) [language runtime])
       (throw
        (ex-info "Runtime implementation did not install its type"
                 {:lang language
@@ -98,7 +101,7 @@
   ([language runtime options]
    (let [spec (runtime-spec language runtime)
          create-fn (get-in spec [:instance :create])
-         config (merge (:config spec)
+         config (merge (get spec :config)
                        options
                        {:lang language
                         :runtime runtime})]
@@ -112,7 +115,7 @@
 
 (defn- instance-fn
   [runtime key]
-  (let [spec (runtime-spec (:lang runtime) (:runtime runtime))]
+  (let [spec (runtime-spec (get runtime :lang) (get runtime :runtime))]
     (get-in spec [:instance key])))
 
 (defn rt-start
@@ -134,8 +137,8 @@
     (raw-eval runtime source)
     (throw
      (ex-info "Runtime type has no raw evaluator"
-              {:lang (:lang runtime)
-               :runtime (:runtime runtime)}))))
+              {:lang (get runtime :lang)
+               :runtime (get runtime :runtime)}))))
 
 (defn- requested-version
   [language version versions]
@@ -152,11 +155,12 @@
   ([]
    (bootstrap! {:languages [:js :python]
                 :runtimes [:oneshot :basic]}))
-  ([{:keys [languages runtimes version versions]
-     :or {languages [:js :python]
-          runtimes [:oneshot :basic]
-          versions {}}}]
-   (let [selected
+  ([options]
+   (let [languages (or (get options :languages) [:js :python])
+         runtimes (or (get options :runtimes) [:oneshot :basic])
+         version (get options :version)
+         versions (or (get options :versions) {})
+         selected
          (reduce
           (fn [out language]
             (let [selected-version
@@ -169,18 +173,22 @@
                              {:book-key :default
                               :version selected-version
                               :book book})
-              {:books (assoc (:books out) language book)
-               :versions (assoc (:versions out)
+              {:books (assoc (get out :books) language book)
+               :versions (assoc (get out :versions)
                                 language
                                 selected-version)}))
           {:books {}
            :versions {}}
           languages)]
-     (doseq [language languages]
-       (doseq [runtime runtimes]
-         (require-runtime! language runtime)))
+     (reduce (fn [_ language]
+               (reduce (fn [_ runtime]
+                         (require-runtime! language runtime))
+                       nil
+                       runtimes))
+             nil
+             languages)
      {:version version
-      :versions (:versions selected)
-      :books (:books selected)
-      :languages @+language-registry+
-      :runtimes @+type-registry+})))
+      :versions (get selected :versions)
+      :books (get selected :books)
+      :languages (atom-value +language-registry+)
+      :runtimes (atom-value +type-registry+)})))

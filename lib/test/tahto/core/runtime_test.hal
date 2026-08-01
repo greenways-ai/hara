@@ -1,6 +1,6 @@
 (ns tahto.core.runtime-test
-  (:require [std.lib.test :as test]
-            [tahto.core.registry :as registry]
+  (:use code.test)
+  (:require [tahto.core.registry :as registry]
             [tahto.core.runtime :as runtime]
             [tahto.runtime.basic.type-basic :as basic]))
 
@@ -43,65 +43,72 @@
 (def preview-removed-v1
   (registry/registry-book-remove! :js :preview 1))
 
-(def results
-  [(test/check "bootstrap installs Foundation language names"
+(fact "bootstrap installs Foundation language names"
                [(boolean (runtime/language-info :js))
                 (boolean (runtime/language-info :python))]
-               [true true])
-   (test/check "bootstrap records the selected version per language"
+  => [true true])
+
+(fact "bootstrap records the selected version per language"
                [(:versions boot)
                 (:versions pinned-boot)
                 (:version (runtime/language-info :js))
                 (:version (runtime/language-info :python))]
-               [{:js 1 :python 1}
-                {:js 1 :python 1}
-                1
-                1])
-   (test/check "bootstrap installs oneshot and basic runtime types"
+  => [{:js 1 :python 1}
+      {:js 1 :python 1}
+      1
+      1])
+
+(fact "bootstrap installs oneshot and basic runtime types"
                [(runtime/runtime-installed? :js :oneshot)
                 (runtime/runtime-installed? :js :basic)
                 (runtime/runtime-installed? :python :oneshot)
                 (runtime/runtime-installed? :python :basic)]
-               [true true true true])
-   (test/check "book registry preserves Foundation language and grammar tags"
+  => [true true true true])
+
+(fact "book registry preserves Foundation language and grammar tags"
                [[(:lang js-book)
                  (:parent js-book)
                  (:tag (:grammar js-book))]
                 [(:lang python-book)
                  (:parent python-book)
                  (:tag (:grammar python-book))]]
-               [[:js :xtalk :js]
-                [:python :xtalk :py]])
-   (test/check "versionless and explicitly pinned book selection agree"
+  => [[:js :xtalk :js]
+      [:python :xtalk :py]])
+
+(fact "versionless and explicitly pinned book selection agree"
                [(registry/registry-book-default-version :js)
                 (registry/registry-book-versions :js)
                 (= (:fingerprint (:selection js-book))
                    (:fingerprint (:selection js-book-v1)))]
-               [1 [1] true])
-   (test/check "book coordinates support coexisting versions and configurable defaults"
+  => [1 [1] true])
+
+(fact "book coordinates support coexisting versions and configurable defaults"
                [preview-versions
                 preview-default-before
                 preview-default-change
                 preview-default-after
                 (:version preview-selected-info)]
-               [[1 2] 1 2 2 2])
-   (test/check "books contain materialized selections ready for compilation"
+  => [[1 2] 1 2 2 2])
+
+(fact "books contain materialized selections ready for compilation"
                [(get-in js-book [:coordinate :grammar/version])
                 (get-in python-book [:coordinate :grammar/version])
                 (boolean (:selection js-book))
                 (boolean (:selection python-book))]
-               [1 1 true true])
-   (test/check "oneshot constructors use Foundation program defaults"
+  => [1 1 true true])
+
+(fact "oneshot constructors use Foundation program defaults"
                [[(:lang js-oneshot) (:runtime js-oneshot)
                  (:program js-oneshot) (:exec js-oneshot)]
                 [(:lang python-oneshot) (:runtime python-oneshot)
                  (:program python-oneshot) (:exec python-oneshot)]]
-               [[:js :oneshot :nodejs ["node" "-e"]]
-                [:python :oneshot :cpython ["python3" "-c"]]])
-   (test/check "basic runtime has explicit bootstrap transport and lifecycle"
+  => [[:js :oneshot :nodejs ["node" "-e"]]
+      [:python :oneshot :cpython ["python3" "-c"]]])
+
+(fact "basic runtime has explicit bootstrap transport and lifecycle"
                [(get-in started-basic [:process :transport])
                 (get-in started-basic [:process :persistent])
                 (:status (basic/basic-state started-basic))]
-               [:oneshot-bootstrap false :started])])
+  => [:oneshot-bootstrap false :started])
 
-(test/print-results results)
+(run {:namespace "tahto.core.runtime-test"})

@@ -1,9 +1,11 @@
 (ns tahto.common.emit
   (:require [std.foundation.string :as string]
             [tahto.common.emit-helper :as helper]
+            [tahto.common.emit-preprocess :as preprocess]
+            [tahto.common.emit-rewrite :as rewrite]
             [tahto.protocol.compiler :as compiler]))
 
-(declare emit-node)
+(declare emit-node emit-main default-grammar)
 
 (def ^:dynamic *indent* 0)
 (def ^:dynamic *compressed* false)
@@ -42,7 +44,7 @@
 
 (defn- replace-symbol-parts [value replacements]
   (reduce-kv (fn [out match replacement]
-               (string/replace out match replacement))
+               (string/replace out (str match) replacement))
              value
              (or replacements {})))
 
@@ -75,7 +77,7 @@
 
 (defn emit-array
   ([values grammar context]
-   (emit-array values grammar context tahto.common.emit/emit-node))
+   (emit-array values grammar context *emit-fn*))
   ([values grammar context emit-function]
    (map (fn [value] (emit-function value grammar context)) values)))
 
@@ -99,9 +101,11 @@
     (let [entry (get-in grammar [:reserved (first form)])
           mode (:emit entry)]
       (or (:wrappable entry)
-          (contains? #{:infix :infix* :infix- :infix-if :assign
-                       :bi :prefix :postfix}
-                     mode)))
+          (reduce (fn [found candidate]
+                    (or found (= candidate mode)))
+                  false
+                  [:infix :infix* :infix- :infix-if :assign
+                   :bi :prefix :postfix])))
     false))
 
 (defn emit-wrapping [form grammar context]
@@ -150,7 +154,9 @@
 (defn emit-infix-default [raw arguments default grammar context]
   (let [arguments (vec arguments)]
     (emit-infix raw
-                (if (= 1 (count arguments)) (cons default arguments) arguments)
+                (if (= 1 (count arguments))
+                  (vec (concat [default] arguments))
+                  arguments)
                 grammar context)))
 
 (defn emit-infix-pre [raw arguments grammar context]
@@ -458,7 +464,99 @@
 (defn emit
   ([form selected] (emit form selected {}))
   ([form selected context]
-   (emit-node form (or (:grammar selected) selected) context)))
+   (emit-main form
+              (default-grammar (or (:grammar selected) selected))
+              context))
+  ([form grammar namespace mopts]
+   (if (:emit grammar)
+     ((:emit grammar) form mopts)
+     (tahto.common.emit/emit-main form (default-grammar grammar) mopts))))
+
+(defn- merge-nested
+  [left right]
+  (reduce-kv (fn [output key value]
+               (let [existing (get output key)]
+                 (assoc output key
+                        (if (and (map? existing) (map? value))
+                          (merge-nested existing value)
+                          value))))
+             (or left {}) (or right {})))
+
+(defn default-grammar
+  "returns the default emitter grammar"
+  {:added "4.0"}
+  ([] (default-grammar {}))
+  ([options]
+   (merge-nested
+    (merge-nested helper/+default+
+                  {:rewrite {:canonical [rewrite/canonical-stage]}})
+    options)))
+
+(def +option-keys+
+  [:lang :entry :module :book :snapshot :layout :emit
+   :tahto/xtalk-context :tahto/provenance])
+
+(defn emit-main-loop
+  "emits one form through the Foundation common/top-level pipeline"
+  {:added "4.0"}
+  [form grammar mopts]
+  ((deref (requiring-resolve
+           'tahto.common.emit-common/emit-common-loop-bound))
+   form grammar mopts
+   (deref (requiring-resolve
+           'tahto.common.emit-top-level/+emit-lookup+))
+   (deref (requiring-resolve
+           'tahto.common.emit-top-level/emit-form))
+   (deref (resolve 'tahto.common.emit/emit-main-loop))))
+
+(defn emit-main
+  "emits one top-level form with recursive emission"
+  {:added "4.0"}
+  [form grammar mopts]
+  (let [output (binding [*emit-fn* emit-main-loop]
+                 (emit-main-loop form grammar mopts))
+        options (common-options grammar)]
+    (if (and (emit-wrappable? form grammar)
+             (string/starts-with? output (:start options))
+             (string/ends-with? output (:end options)))
+      (string/slice output 1 (- (string/length output) 1))
+      output)))
+
+(defmacro with:emit [& body]
+  `(binding [*emit-fn* emit-main-loop] ~@body))
+
+(def +steps+ [[:raw] [:input] [:staging]])
+(def +test-grammar+ (default-grammar))
+
+(defn prep-options
+  "prepares options for processing"
+  {:added "4.0"}
+  [metadata]
+  (let [lang (:lang metadata)
+        snapshot (:snapshot metadata)
+        book (or (:book metadata) (get-in snapshot [lang :book]))
+        step (or (get metadata :-)
+                 (if (or book (and lang snapshot)) :staging :input))
+        grammar (or (:grammar metadata) (:grammar book) (default-grammar))]
+    [step grammar book (:namespace metadata)
+     (select-keys metadata +option-keys+)]))
+
+(defn prep-form
+  "prepares a form through raw, input, or staging"
+  {:added "4.0"}
+  [step form grammar book mopts]
+  (let [input-form (preprocess/to-input form)]
+    (cond (= step :raw) [form]
+          (= step :input) [input-form]
+          (= step :staging)
+          (let [staged (preprocess/to-staging input-form grammar
+                                              (or (:modules book) {}) mopts)
+                rewritten (rewrite/rewrite-stage :staging (nth staged 0)
+                                                  grammar
+                                                  (assoc mopts :book book))]
+            [rewritten (nth staged 1) (nth staged 2) (nth staged 3)])
+          :else (throw (ex-info "Unknown preparation step"
+                                {:step step :form form})))))
 
 (defstruct Emitter [])
 (defn emitter [] (tahto.common.emit/Emitter))

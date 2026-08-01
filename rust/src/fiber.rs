@@ -697,9 +697,7 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
         Some("std.foundation.coroutine/yield") => coroutine::yield_form(v, env, k),
         Some("std.foundation.coroutine/await") => coroutine::await_form(v, env, k),
         Some("def") | Some("set!") | Some("var/set") => bind_form(v, env, k),
-        Some("resolve")
-            if matches!(env.borrow().get("resolve"), Some(value) if !matches!(value, Value::Var(_))) =>
-        {
+        Some("resolve") if matches!(env.borrow().get("resolve"), Some(value) if !matches!(value, Value::Var(_))) => {
             application(v, env, k)
         }
         Some(name) if SYNC_SPECIAL_FORMS.contains(&name) => sync(Form::List(v), env, k),

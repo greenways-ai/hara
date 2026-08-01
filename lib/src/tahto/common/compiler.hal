@@ -1,6 +1,7 @@
 (ns tahto.common.compiler
   (:require [tahto.common.emit :as emit]
             [tahto.common.preprocess-input :as input]
+            [tahto.common.preprocess-staging :as staging]
             [tahto.common.provenance :as provenance]
             [tahto.protocol.compiler :as protocol]))
 
@@ -111,6 +112,22 @@
     {:form normalized
      :dependencies +empty-dependencies+}))
 
+(defstruct GrammarStager [])
+
+(extend-type GrammarStager protocol/IStager
+  (stage-form [stager normalized selected context]
+    (let [grammar (built-grammar selected)
+          modules (or (:modules context)
+                      (get-in context [:book :modules])
+                      (:modules selected)
+                      {})
+          options (dissoc context :tahto/provenance :tahto/provenance-stack)
+          staged (staging/to-staging normalized grammar modules options)]
+      {:form (nth staged 0)
+       :dependencies {:code (nth staged 1)
+                      :fragment (nth staged 2)
+                      :native (nth staged 3)}})))
+
 (defstruct EmptyInferencer [])
 
 (extend-type EmptyInferencer protocol/IInferencer
@@ -158,6 +175,9 @@
 
 (defn structural-stager []
   (tahto.common.compiler/StructuralStager))
+
+(defn grammar-stager []
+  (tahto.common.compiler/GrammarStager))
 
 (defn empty-inferencer []
   (tahto.common.compiler/EmptyInferencer))
@@ -320,7 +340,7 @@
     (or (:formatter components) (grammar-entry-formatter))
     (or (:normalizer components) (input-normalizer))
     (or (:hydrator components) (grammar-entry-hydrator))
-    (or (:stager components) (structural-stager))
+    (or (:stager components) (grammar-stager))
     (or (:inferencer components) (empty-inferencer))
     (or (:linter components) (empty-linter))
     (or (:rewriter components) (grammar-rewriter))

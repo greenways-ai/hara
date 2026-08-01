@@ -597,7 +597,10 @@ final class HaraAnalyzer {
       if (!(name instanceof Symbol)) {
         throw error("binding names must be symbols");
       }
-      symbols[i] = (Symbol) name;
+      // Dynamic bindings execute after analysis and may run while a caller's
+      // namespace is current. Capture the defining Var now so unqualified
+      // symbols and namespace aliases do not resolve against that caller.
+      symbols[i] = context.canonicalSymbol((Symbol) name);
       initializers[i] = analyze(bindings.nth(i * 2L + 1));
     }
     return new HaraNodes.Binding(symbols, initializers, analyzeDo(form, 2));

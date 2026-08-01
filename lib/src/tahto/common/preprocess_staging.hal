@@ -13,7 +13,8 @@
         options (provenance/with-provenance options {:tahto/form form :tahto/symbol symbol})
         template-assignment (assign/process-template-assignment form grammar modules options)]
     (cond (= symbol '!:template) (walk-fn (eval (second form)))
-          ('#{!:lang !:eval !:deref !:decorate} symbol) (assign/ProtectedHead form)
+          ('#{!:lang !:eval !:deref !:decorate} symbol)
+          (tahto.common.preprocess-assign/ProtectedHead form)
           (= :template (:type reserved))
           (binding [base/*macro-opts* options]
             (walk-fn ((:macro reserved) form)))

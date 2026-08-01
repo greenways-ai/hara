@@ -12,7 +12,7 @@
         (outer (with-meta (apply list (map inner form)) (meta form)))
 
         (vector? form)
-        (outer (with-meta (mapv inner form) (meta form)))
+        (outer (with-meta (vec (map inner form)) (meta form)))
 
         (set? form)
         (outer (with-meta (reduce (fn [out value]

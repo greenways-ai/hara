@@ -73,13 +73,14 @@
          :else
          (let [head (first form)
                args (vec (rest form))
-               rewritten (mapv (fn [arg]
-                                 (let [block (resolve-block-form arg grammar modules options)]
-                                   (if block
-                                     (with-meta (cons (value-standalone (first block) grammar)
-                                                      (rest block))
-                                                (meta arg))
-                                     arg)))
-                               args)]
+               rewritten (vec (map (fn [arg]
+                                     (let [block (resolve-block-form arg grammar modules options)]
+                                       (if block
+                                         (with-meta (apply list
+                                                           (value-standalone (first block) grammar)
+                                                           (rest block))
+                                                    (meta arg))
+                                         arg)))
+                                   args))]
            (if (not (= rewritten args))
              (with-meta (apply list head rewritten) (meta form)))))))

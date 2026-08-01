@@ -1,0 +1,25 @@
+(ns tahto.common.emit-orchestration-test
+  (:use code.test)
+  (:require [tahto.common.emit :as emit]
+            [tahto.common.emit-helper :as helper]))
+
+(def grammar
+  (assoc helper/+default+
+         :reserved {'+ {:op :add :emit :infix :raw "+"}}))
+
+(fact "provides Foundation emitter orchestration"
+  (map? (emit/default-grammar)) => true
+  (emit/emit-main '(+ 1 2) grammar {}) => "1 + 2"
+  (first (emit/prep-options {})) => :input)
+
+(fact "prepares raw and input forms"
+  (emit/prep-form :raw '(+ 1 2) nil nil {})
+  => ['(+ 1 2)]
+  (emit/prep-form :input '(+ 1 2) nil nil {})
+  => ['(+ 1 2)])
+
+(fact "supports the Foundation four-argument emit arity"
+  (emit/emit '(+ 1 2) grammar nil {})
+  => "1 + 2")
+
+(run {:namespace "tahto.common.emit-orchestration-test"})

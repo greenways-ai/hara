@@ -1,16 +1,16 @@
 (ns tahto.core-test
-  (:require [std.lib.test :as test]
-            [std.lib.walk :as walk]
+  (:use code.test)
+  (:require [std.lib.walk :as walk]
             [tahto.core :as tahto]))
 
-(def results
-  [(test/check "prewalk replaces nested values"
-               (walk/prewalk-replace {'a 'x} '(a (a b)))
-               '(x (x b)))
-   (test/check "resolves namespaced code symbols"
-               (tahto/to-resolve '(u/add 1 2) nil
-                                 {'L.core {:code {'add {:id 'add :op 'defn}}}}
-                                 {:module {:id 'L.current :link '{u L.core}}})
-               '(L.core/add 1 2))])
+(fact "prewalk replaces nested values"
+  (walk/prewalk-replace {'a 'x} '(a (a b)))
+  => '(x (x b)))
 
-(test/print-results results)
+(fact "resolves namespaced code symbols"
+  (tahto/to-resolve '(u/add 1 2) nil
+                    {'L.core {:code {'add {:id 'add :op 'defn}}}}
+                    {:module {:id 'L.current :link '{u L.core}}})
+  => '(L.core/add 1 2))
+
+(run {:namespace "tahto.core-test"})

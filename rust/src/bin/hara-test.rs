@@ -4,6 +4,8 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+const TEST_STACK_SIZE: usize = 64 * 1024 * 1024;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TestSummary {
     pub path: PathBuf,
@@ -38,15 +40,27 @@ pub fn run_file(root: &Path, file: &Path) -> Result<TestSummary, String> {
     }
     let source = fs::read_to_string(&file)
         .map_err(|error| format!("cannot read {}: {error}", file.display()))?;
-
-    let mut kernel = SessionKernel::new();
     let root_text = root
         .to_str()
-        .ok_or_else(|| format!("project root is not UTF-8: {}", root.display()))?;
-    let mount = kernel.create_native_filesystem(root_text);
-    kernel.attach_filesystem("ROOT", mount)?;
-    let output = kernel.eval("ROOT", &source)?;
-    parse_summary(file, &output)
+        .ok_or_else(|| format!("project root is not UTF-8: {}", root.display()))?
+        .to_owned();
+
+    let execution = std::thread::Builder::new()
+        .name("hara-test-file".into())
+        .stack_size(TEST_STACK_SIZE)
+        .spawn(move || {
+            let mut kernel = SessionKernel::new();
+            let mount = kernel.create_native_filesystem(&root_text);
+            kernel.attach_filesystem("ROOT", mount)?;
+            let output = kernel.eval("ROOT", &source)?;
+            parse_summary(file, &output)
+        })
+        .map_err(|error| format!("cannot start test thread: {error}"))?;
+
+    match execution.join() {
+        Ok(result) => result,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
 }
 
 pub fn run_paths(root: &Path, paths: &[PathBuf]) -> Result<Vec<TestSummary>, String> {

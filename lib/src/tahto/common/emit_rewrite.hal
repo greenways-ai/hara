@@ -1,0 +1,84 @@
+(ns tahto.common.emit-rewrite)
+
+(defn stage-transforms
+  "returns rewrite transforms for a compile stage"
+  {:added "4.1"}
+  [grammar stage]
+  (vec (or (get-in grammar [:rewrite stage]) [])))
+
+(defn- rewrite-symbol-value [value aliases]
+  (if (and (symbol? value) (namespace value))
+    (let [target (get aliases (symbol (namespace value)))]
+      (if target
+        (symbol (str target) (name value))
+        value))
+    value))
+
+(defn- array-target? [target environment]
+  (= :array (get-in environment [target :kind])))
+
+(defn- canonical-lower [value aliases environment]
+  (cond
+    (symbol? value) (rewrite-symbol-value value aliases)
+    (vector? value) (vec (map (fn [item]
+                                (canonical-lower item aliases environment))
+                              value))
+    (map? value) (reduce-kv
+                  (fn [output key item]
+                    (assoc output
+                           (canonical-lower key aliases environment)
+                           (canonical-lower item aliases environment)))
+                  {} value)
+    (list? value)
+    (let [items (vec value)]
+      (if (and (= '. (first items))
+               (= 3 (count items))
+               (vector? (nth items 2))
+               (= 1 (count (nth items 2))))
+        (let [target (canonical-lower (second items) aliases environment)
+              key (canonical-lower (first (nth items 2)) aliases environment)]
+          (cond (string? key) (list 'x:get-key target key)
+                (or (number? key) (array-target? target environment))
+                (list 'x:get-idx target key)
+                :else (apply list
+                             (map (fn [item]
+                                    (canonical-lower item aliases environment))
+                                  items))))
+        (apply list
+               (map (fn [item]
+                      (canonical-lower item aliases environment))
+                    items))))
+    :else value))
+
+(defn canonical-stage
+  "rewrites canonical XTalk access forms when type or module context is available"
+  {:added "4.1"}
+  [form context]
+  (let [mopts (:mopts context)
+        explicit (:tahto/xtalk-context mopts)
+        module (:module mopts)
+        aliases (or (:aliases explicit)
+                    (:aliases mopts)
+                    (:alias module)
+                    {})
+        environment (or (:env explicit) {})
+        enabled (or explicit (:id module) (:namespace module) (> (count aliases) 0))]
+    (if enabled
+      (canonical-lower form aliases environment)
+      form)))
+
+(defn rewrite-stage
+  "applies language rewrite transforms for a compile stage"
+  {:added "4.1"}
+  [stage form grammar mopts]
+  (let [canonical (if (= stage :canonical)
+                    form
+                    (canonical-stage form {:stage :canonical
+                                           :grammar grammar
+                                           :mopts mopts}))]
+    (reduce (fn [output transform]
+              (transform output {:stage stage
+                                 :grammar grammar
+                                 :mopts mopts}))
+            canonical
+            (stage-transforms grammar stage))))

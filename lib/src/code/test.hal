@@ -720,13 +720,18 @@
              {:main {:fn run-task-main}}))
 
 (defn run
-  "Runs selected facts through std.lib.task and returns a structured summary."
+  "Runs selected facts and returns a structured summary.
+
+   In-process execution is deliberately direct. The portable task descriptor is
+   retained for external task/CLI integration, but routing `run` back through a
+   Task caused recursive IFn dispatch on Rust and unresolved protocol dispatch on
+   the JVM."
   ([] (run {}))
   ([selector-or-options]
    (let [options (if (map? selector-or-options)
                    selector-or-options
                    {:namespace selector-or-options})]
-     (task/invoke +runner-task+ (list options)))))
+     (run-selected nil options))))
 
 (defn run-tests
   "Compatibility name for run."

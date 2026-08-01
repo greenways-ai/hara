@@ -1,5 +1,7 @@
 (ns hara.runtime
-  (:require [std.foundation.os :as os]
+  (:config {:blank true})
+  (:require [std.foundation :refer :all :exclude [eval]]
+            [std.foundation.os :as os]
             [std.foundation.promise :as promise]
             [std.foundation.string :as string]))
 

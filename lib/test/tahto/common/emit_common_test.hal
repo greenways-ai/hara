@@ -1,0 +1,74 @@
+(ns tahto.common.emit-common-test
+  (:use code.test)
+  (:require [tahto.common.emit-common :as common]
+            [tahto.common.emit-helper :as helper]))
+
+(def operator-grammar
+  (assoc helper/+default+
+         :reserved
+         {'+ {:op :add :emit :infix :raw "+"}
+          '- {:op :sub :emit :infix- :raw "-"}
+          'not {:op :not :emit :pre :raw "!"}
+          := {:op :assign :emit :assign :raw "="}
+          '. {:op :index :emit :index}}))
+
+(fact "Foundation argument order is preserved for common helpers"
+  [(common/emit-pre "!" '[x] helper/+default+ {})
+   (common/emit-post "--" '[x] helper/+default+ {})
+   (common/emit-infix "|" '[x y z] helper/+default+ {})
+   (common/emit-infix-default "/" '[x] 1 helper/+default+ {})]
+  => ["!x" "x--" "x | y | z" "1 / x"])
+
+(fact "dynamic emit-fn controls helper emission"
+  (binding [common/*emit-fn* (fn [value grammar context]
+                               (str "<" value ">"))]
+    (common/emit-free " " '(:- a b) helper/+default+ {}))
+  => "<a> <b>")
+
+(fact "common emission installs recursive emission"
+  (common/emit-common '(+ 1 (+ 2 3)) operator-grammar {})
+  => "(1 + (2 + 3))")
+
+(fact "index compatibility keeps Foundation's argument shape"
+  (common/emit-index nil '[user ["name"]] operator-grammar {})
+  => "user[\"name\"]")
+
+(fact "symbol classification preserves aliases, links, self, and globals"
+  [(common/emit-symbol-classify 't/hello
+                                {:module {:alias {'t 'table}}})
+   (common/emit-symbol-classify 't.n/hello
+                                {:module {:alias {'t 'table}}})
+   (common/emit-symbol-classify 'self/hello
+                                {:module {:id 'self}})
+   (common/emit-symbol-classify
+    'shared/value
+    {:module {:id 'current}
+     :book {:modules {'shared {:code {'value {:op-key :defglobal}}}}}})]
+  => [[:alias 'table]
+      [:link 't.n]
+      [:self 'self]
+      [:global 'shared]])
+
+(fact "symbol emission preserves Foundation layout modes"
+  [(common/emit-symbol 'hello/hello helper/+default+
+                       {:layout :full :module {:link {'hello 'hello}}})
+   (common/emit-symbol 'hello/hello helper/+default+
+                       {:layout :module :module {:link {'hello 'hello}}})
+   (common/emit-symbol 'hello/hello helper/+default+
+                       {:layout :host :module {:link {'hello 'hello}}})
+   (common/emit-symbol 'hello/hello helper/+default+
+                       {:layout :flat :module {:link {'hello 'hello}}})
+   (common/emit-symbol 'hello/hello helper/+default+
+                       {:layout :full
+                        :module {:link {'hello 'hello.world.again}}})]
+  => ["hello____hello"
+      "hello.hello"
+      "hello____hello"
+      "hello"
+      "hello_world_again____hello"])
+
+(fact "the port preserves Foundation metadata"
+  (:added (meta (var tahto.common.emit-common/emit-common)))
+  => "4.0")
+
+(run {:namespace "tahto.common.emit-common-test"})

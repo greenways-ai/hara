@@ -2132,6 +2132,11 @@ mod tests {
         assert_eq!(runtime.eval_text("(+ 19 23)").unwrap(), "42");
         assert_eq!(runtime.eval_text("(let (x 7) (* x 6))").unwrap(), "42");
         assert_eq!(runtime.eval_text("(if true 1 0)").unwrap(), "1");
+        assert_eq!(runtime.eval_text("(boolean :present)").unwrap(), "true");
+        assert_eq!(runtime.eval_text("(boolean nil)").unwrap(), "false");
+        assert_eq!(runtime.eval_text("(not= 1 2)").unwrap(), "true");
+        assert_eq!(runtime.eval_text("(not= 1 1 2)").unwrap(), "true");
+        assert_eq!(runtime.eval_text("(not= 1 1)").unwrap(), "false");
     }
 
     #[test]
@@ -4467,6 +4472,16 @@ mod tests {
         assert_eq!(
             runtime.eval_text("(namespace :core/answer)").unwrap(),
             "\"core\""
+        );
+        assert_eq!(
+            runtime.eval_text("(name :core/answer)").unwrap(),
+            "\"answer\""
+        );
+        assert_eq!(
+            runtime
+                .eval_text("(name (symbol \"core\" \"answer\"))")
+                .unwrap(),
+            "\"answer\""
         );
         assert!(runtime
             .eval_text("(keyword \"a/b/c\")")

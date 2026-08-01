@@ -1,0 +1,40 @@
+(ns tahto.common.emit-template-test
+  (:use code.test)
+  (:require [tahto.common.emit-template :as template]))
+
+(fact "gets reserved entries"
+  (template/entry-reserved {:reserved {:add {:emit :macro}}} {:op :add})
+  => {:emit :macro}
+  (template/entry-reserved {:reserved {:add {:emit :macro}}} {:op :sub})
+  => nil)
+
+(fact "returns entries unchanged without materialization inputs"
+  (template/materialize-code-entry {:grammar {} :modules {:math {}}} {:op :add})
+  => {:op :add}
+  (template/materialize-code-entry
+   {:grammar {:reserved {:add {:emit :macro}}} :modules nil}
+   {:op :add})
+  => {:op :add})
+
+(fact "creates and caches staged code state"
+  (let [entry {:op 'defn :form-input '(defn foo [x] x)
+               :module 'M :lang :js :id 'foo}
+        grammar {:reserved {'defn {:op :defn}}}
+        modules {'M {:id 'M}}
+        cache (atom {})
+        cached (assoc entry :static/code.cache cache)]
+    [(select-keys (template/create-code-state entry {:op :defn} grammar modules)
+                  [:form :deps])
+     (= (template/cached-code-state cached {:op :defn} grammar modules)
+        (template/cached-code-state cached {:op :defn} grammar modules))
+     (count (deref cache))])
+  => [{:form '(defn foo [x] x) :deps #{}} true 1])
+
+(fact "reports recursion while hydrating"
+  (let [entry {:op 'test :form-input '(foo) :module 'M :lang :js :id 'foo}
+        reserved {:hydrate (fn [form grammar context]
+                             [nil (template/code-state-computing? (:entry context))])}]
+    (:form (template/create-code-state entry reserved {:reserved {}} {})))
+  => true)
+
+(run {:namespace "tahto.common.emit-template-test"})

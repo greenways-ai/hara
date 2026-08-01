@@ -126,7 +126,8 @@
 
 (defn with-provenance
   [mopts & inputs]
-  (let [merged (apply provenance (:tahto/provenance mopts) inputs)]
+  (let [merged (apply provenance
+                      (concat [(:tahto/provenance mopts)] inputs))]
     (if (empty? merged)
       mopts
       (assoc mopts :tahto/provenance merged))))

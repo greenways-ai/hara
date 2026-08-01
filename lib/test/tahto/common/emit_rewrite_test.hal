@@ -1,0 +1,45 @@
+(ns tahto.common.emit-rewrite-test
+  (:use code.test)
+  (:require [tahto.common.emit-rewrite :as rewrite]))
+
+(fact "returns transforms registered for a stage"
+  (count (rewrite/stage-transforms
+          {:rewrite {:staging [(fn [value context] value)]}}
+          :staging))
+  => 1
+
+  (rewrite/stage-transforms {:rewrite {}} :staging)
+  => [])
+
+(fact "lowers typed and keyed XTalk access forms"
+  (rewrite/canonical-stage
+   '(. arr [i])
+   {:mopts {:tahto/xtalk-context
+            {:env {'arr {:kind :array
+                         :item {:kind :primitive :name :xt/int}}}}}})
+  => '(x:get-idx arr i)
+
+  (rewrite/canonical-stage
+   '(. (. r ["listeners"]) ["a1"])
+   {:mopts {:module {:id 'demo.core}}})
+  => '(x:get-key (x:get-key r "listeners") "a1")
+
+  (rewrite/canonical-stage '(. value [key]) {:mopts {}})
+  => '(. value [key]))
+
+(fact "resolves module aliases while canonicalizing"
+  (rewrite/canonical-stage
+   '(route/make-route)
+   {:mopts {:module {:id 'demo.test
+                     :alias {'route 'demo.route}}}})
+  => '(demo.route/make-route))
+
+(fact "applies stage transforms in order"
+  (rewrite/rewrite-stage
+   :emit 5
+   {:rewrite {:emit [(fn [value context] (* value 2))
+                     (fn [value context] (+ value 1))]}}
+   {})
+  => 11)
+
+(run {:namespace "tahto.common.emit-rewrite-test"})

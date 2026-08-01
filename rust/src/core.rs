@@ -796,16 +796,33 @@ pub(crate) fn exception_function_values() -> Vec<(&'static str, Value)> {
 }
 
 pub(crate) fn basic_function_values() -> Vec<(&'static str, Value)> {
-    let mut functions = vec![(
-        "compare",
-        native_function("compare", 2, |arguments| {
-            Ok(Value::Number(match arguments[0].cmp(&arguments[1]) {
-                std::cmp::Ordering::Less => -1,
-                std::cmp::Ordering::Equal => 0,
-                std::cmp::Ordering::Greater => 1,
-            }))
-        }),
-    )];
+    let mut functions = vec![
+        (
+            "compare",
+            native_function("compare", 2, |arguments| {
+                Ok(Value::Number(match arguments[0].cmp(&arguments[1]) {
+                    std::cmp::Ordering::Less => -1,
+                    std::cmp::Ordering::Equal => 0,
+                    std::cmp::Ordering::Greater => 1,
+                }))
+            }),
+        ),
+        (
+            "boolean",
+            native_function("boolean", 1, |arguments| {
+                Ok(Value::Bool(arguments[0].truthy()))
+            }),
+        ),
+        (
+            "not=",
+            native_variadic_function("not=", |arguments| {
+                match apply_primitive(Primitive::Equal, &arguments)? {
+                    Value::Bool(equal) => Ok(Value::Bool(!equal)),
+                    _ => unreachable!("equality primitive must return a boolean"),
+                }
+            }),
+        ),
+    ];
     for (name, primitive) in [
         ("+", Primitive::Add),
         ("-", Primitive::Subtract),
@@ -7439,10 +7456,7 @@ pub(crate) fn definition_metadata(
     Ok((metadata, rest))
 }
 
-fn attach_optional_metadata(
-    value: Value,
-    metadata: Option<Rc<Metadata>>,
-) -> Result<Value, String> {
+fn attach_optional_metadata(value: Value, metadata: Option<Rc<Metadata>>) -> Result<Value, String> {
     Ok(match value {
         Value::Symbol(value) => Value::Symbol(value.with_meta(metadata.clone())),
         Value::Pointer(value) => Value::Pointer(value.with_meta(metadata.clone())),
@@ -7452,18 +7466,12 @@ fn attach_optional_metadata(
         Value::Cons(value) => Value::Cons(Box::new(value.with_meta(metadata.clone()))),
         Value::Queue(value) => Value::Queue(Box::new(value.with_meta(metadata.clone()))),
         Value::Map(value) => Value::Map(value.with_meta(metadata.clone())),
-        Value::OrderedMap(value) => {
-            Value::OrderedMap(Box::new(value.with_meta(metadata.clone())))
-        }
+        Value::OrderedMap(value) => Value::OrderedMap(Box::new(value.with_meta(metadata.clone()))),
         Value::SortedMap(value) => Value::SortedMap(Box::new(value.with_meta(metadata.clone()))),
         Value::Trie(value) => Value::Trie(Box::new(value.with_meta(metadata.clone()))),
         Value::Set(value) => Value::Set(value.with_meta(metadata.clone())),
-        Value::OrderedSet(value) => {
-            Value::OrderedSet(Box::new(value.with_meta(metadata.clone())))
-        }
-        Value::SortedSet(value) => {
-            Value::SortedSet(Box::new(value.with_meta(metadata.clone())))
-        }
+        Value::OrderedSet(value) => Value::OrderedSet(Box::new(value.with_meta(metadata.clone()))),
+        Value::SortedSet(value) => Value::SortedSet(Box::new(value.with_meta(metadata.clone()))),
         Value::Var(value) => {
             value.set_hara_metadata(metadata);
             Value::Var(value)
@@ -8890,6 +8898,25 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     .map(Value::Var)
                     .unwrap_or(Value::Nil))
             }
+            Form::Symbol(n) if n == "requiring-resolve" && !env.contains_key(n) => {
+                if fs.len() != 2 {
+                    return Err("requiring-resolve expects one symbol".into());
+                }
+                let symbol = match eval(&fs[1], env)? {
+                    Value::Symbol(value) => value,
+                    _ => return Err("requiring-resolve expects a symbol".into()),
+                };
+                let namespace = symbol
+                    .get_namespace()
+                    .ok_or_else(|| "requiring-resolve expects a qualified symbol".to_string())?
+                    .to_owned();
+                let registry = namespace_registry()?;
+                ensure_namespace(&registry, env, &namespace, false)?;
+                Ok(registry
+                    .resolve(&symbol)
+                    .map(Value::Var)
+                    .unwrap_or(Value::Nil))
+            }
             Form::Symbol(n) if n == "module-revision" => {
                 if fs.len() != 2 {
                     return Err("module-revision expects one namespace".into());
@@ -10112,8 +10139,8 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("name expects one value".into());
                 }
                 match eval(&fs[1], env)? {
-                    Value::Keyword(value) => Ok(Value::String(value.as_str().into())),
-                    Value::Symbol(value) => Ok(Value::String(value.as_str().into())),
+                    Value::Keyword(value) => Ok(Value::String(value.get_name().into())),
+                    Value::Symbol(value) => Ok(Value::String(value.get_name().into())),
                     _ => Err("name expects a keyword or symbol".into()),
                 }
             }
@@ -10128,8 +10155,8 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     return Err("select-keys expects a map and keys".into());
                 }
                 let source = eval(&fs[1], env)?;
-                let entries = map_entries(&source)
-                    .ok_or_else(|| "select-keys expects a map".to_string())?;
+                let entries =
+                    map_entries(&source).ok_or_else(|| "select-keys expects a map".to_string())?;
                 let keys = iterator_values(eval(&fs[2], env)?)?;
                 let selected = keys.into_iter().filter_map(|key| {
                     entries
@@ -10137,7 +10164,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         .find(|(candidate, _)| candidate == &key)
                         .map(|(_, value)| (key, value.clone()))
                 });
-                Ok(Value::OrderedMap(Box::new(POrderedMap::from_iter(selected))))
+                Ok(Value::OrderedMap(Box::new(POrderedMap::from_iter(
+                    selected,
+                ))))
             }
             Form::Symbol(n) if ["list", "vector", "pair", "tup"].contains(&n.as_str()) => {
                 eval_sequential_constructor(n, &fs[1..], env)
@@ -11187,8 +11216,8 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 let function = eval(&fs[1], env)?;
                 let mut result = eval(&fs[2], env)?;
                 let source = eval(&fs[3], env)?;
-                let entries = map_entries(&source)
-                    .ok_or_else(|| "reduce-kv expects a map".to_string())?;
+                let entries =
+                    map_entries(&source).ok_or_else(|| "reduce-kv expects a map".to_string())?;
                 for (key, value) in entries {
                     result = call_value(function.clone(), vec![result, key, value])?;
                 }
@@ -11409,8 +11438,20 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             }
             Form::Symbol(n)
                 if [
-                    "list?", "vector?", "map?", "set?", "keyword?", "symbol?", "string?",
-                    "char?", "number?", "integer?", "decimal?", "boolean?", "fn?",
+                    "list?",
+                    "vector?",
+                    "map?",
+                    "map-entry?",
+                    "set?",
+                    "keyword?",
+                    "symbol?",
+                    "string?",
+                    "char?",
+                    "number?",
+                    "integer?",
+                    "decimal?",
+                    "boolean?",
+                    "fn?",
                 ]
                 .contains(&n.as_str()) =>
             {
@@ -11425,6 +11466,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         value,
                         Value::Map(_) | Value::OrderedMap(_) | Value::SortedMap(_) | Value::Trie(_)
                     ),
+                    // Rust materializes map iteration entries as ordinary
+                    // two-element vectors rather than a distinct MapEntry.
+                    "map-entry?" => false,
                     "set?" => matches!(
                         value,
                         Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_)

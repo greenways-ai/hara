@@ -8,7 +8,8 @@
 
 (defstruct ProtectedHead [value])
 
-(defn protected-head? [value] (instance? ProtectedHead value))
+(defn protected-head? [value]
+  (instance? tahto.common.preprocess-assign/ProtectedHead value))
 (defn unwrap-protected-head [value] (:value value))
 
 (defn- fail [message data] (throw (ex-info message data)))
@@ -37,7 +38,8 @@
      (concat declaration
              [(with-meta (cons (if unwrapped
                                  (util/sym-full resolved-module symbol-id)
-                                 (ProtectedHead (util/sym-full resolved-module symbol-id)))
+                                 (tahto.common.preprocess-assign/ProtectedHead
+                                  (util/sym-full resolved-module symbol-id)))
                                args)
                          (assoc (meta bind-form) :assign/inline true))]))))
 
@@ -67,15 +69,21 @@
         :else (list := target form)))
 
 (defn- assignment-target [form grammar]
-  (case (get-in grammar [:reserved (first form) :emit])
-    :assign (let [target (second form) value (nth form 2)]
-              (if value {:declare? false :target target :value value}))
-    :def-assign (let [args (helper/emit-typed-args (rest form) grammar
-                                                   {:shorthand (get-in grammar [:define :shorthand])})]
-                  (if (= 1 (count args))
-                    (let [arg (first args)]
-                      (if (:value arg)
-                        {:declare? true :target (:symbol arg) :value (:value arg)}))))))
+  (let [mode (get-in grammar [:reserved (first form) :emit])]
+    (cond (= mode :assign)
+          (let [target (second form) value (nth form 2)]
+            (if value {:declare? false :target target :value value}))
+
+          (= mode :def-assign)
+          (let [args (helper/emit-typed-args
+                      (rest form) grammar
+                      {:shorthand (get-in grammar [:define :shorthand])})]
+            (if (= 1 (count args))
+              (let [arg (first args)]
+                (if (:value arg)
+                  {:declare? true :target (:symbol arg) :value (:value arg)}))))
+
+          :else nil)))
 
 (defn process-template-assignment
   ([form grammar options] (process-template-assignment form grammar nil options))
@@ -111,4 +119,8 @@
                         (assoc (meta rewritten) :assign/template-default true)))))))))
 
 (defn protect-reserved-head [form]
-  (with-meta (cons (ProtectedHead (first form)) (rest form)) (meta form)))
+  (with-meta
+   (apply list
+          (tahto.common.preprocess-assign/ProtectedHead (first form))
+          (rest form))
+   (meta form)))

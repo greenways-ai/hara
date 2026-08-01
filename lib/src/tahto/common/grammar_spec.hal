@@ -1,5 +1,9 @@
 (ns tahto.common.grammar-spec)
 
+(defn- resolve-required [qualified]
+  (or (resolve qualified)
+      (requiring-resolve qualified)))
+
 (def ^:dynamic *symbol* nil)
 
 (defn as-list
@@ -65,7 +69,7 @@
           (mixin-pairs arguments)
 
           :else
-          (let [resolved (requiring-resolve operation)]
+          (let [resolved (resolve-required operation)]
             (if resolved
               (apply (deref resolved) arguments)
               (throw (ex-info "Unable to resolve mixin form"
@@ -76,7 +80,7 @@
   [m mixins]
   (reduce (fn [m entry]
             (cond (symbol? entry)
-                  ((deref (requiring-resolve entry)) m)
+                  ((deref (resolve-required entry)) m)
 
                   (map? entry)
                   (merge m (mixin-map entry))

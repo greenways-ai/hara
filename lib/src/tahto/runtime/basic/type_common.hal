@@ -5,35 +5,43 @@
 (def *context-options* (atom {}))
 (def *program-options* (atom {}))
 
+(defn- atom-value [reference]
+  (deref (identity reference)))
+
 (def +valid-contexts+
   #{:oneshot :basic :interactive :websocket :remote-port :remote-ws :verify})
 
 (defn get-context-options
-  ([] @*context-options*)
-  ([language] (get @*context-options* language))
-  ([language context] (get-in @*context-options* [language context]))
+  ([] (atom-value *context-options*))
+  ([language] (get (atom-value *context-options*) language))
+  ([language context] (get-in (atom-value *context-options*) [language context]))
   ([language context program]
-   (get-in @*context-options* [language context program])))
+   (get-in (atom-value *context-options*) [language context program])))
 
 (defn put-context-options
-  [[language context] value]
-  (let [current (get-in @*context-options* [language context])
+  [coordinate value]
+  (let [language (first coordinate)
+        context (second coordinate)
+        current (get-in (atom-value *context-options*) [language context])
         next (grammar/deep-merge current value)]
     (swap! *context-options* assoc-in [language context] next)
     next))
 
 (defn set-context-options
-  [[language context program] value]
-  (swap! *context-options* assoc-in [language context program] value)
-  value)
+  [coordinate value]
+  (let [language (nth coordinate 0)
+        context (nth coordinate 1)
+        program (nth coordinate 2)]
+    (swap! *context-options* assoc-in [language context program] value)
+    value))
 
 (defn get-program-options
-  ([] @*program-options*)
-  ([language] (get @*program-options* language)))
+  ([] (atom-value *program-options*))
+  ([language] (get (atom-value *program-options*) language)))
 
 (defn put-program-options
   [language value]
-  (let [current (get @*program-options* language)
+  (let [current (get (atom-value *program-options*) language)
         next (grammar/deep-merge current value)]
     (swap! *program-options* assoc language next)
     next))
@@ -45,11 +53,11 @@
               (conj out (second coordinate))
               out))
           []
-          (keys @registry/+registry+)))
+          (keys (atom-value registry/+registry+))))
 
 (defn valid-context!
   [context]
-  (if (contains? +valid-contexts+ context)
+  (if (+valid-contexts+ context)
     context
     (throw
      (ex-info "Invalid runtime context"
@@ -77,7 +85,7 @@
          (ex-info "No program found for runtime"
                   {:lang language
                    :runtime context
-                   :available (keys (:env all))})))))
+                   :available (keys (get all :env))})))))
 
 (defn get-program-flags
   [language program]
@@ -88,7 +96,7 @@
   (require-runtime! language context)
   (let [all (get-program-options language)
         environment (get-in all [:env program])
-        executable (:exec environment)
+        executable (get environment :exec)
         arguments (get-in environment [:flags context])]
     (if arguments
       (vec (concat [executable] arguments))
@@ -96,16 +104,16 @@
        (ex-info "Program does not support runtime"
                 {:lang language
                  :runtime context
-                 :program program}))))))
+                 :program program})))))
 
 (defn get-options
   [language context program]
   (require-runtime! language context)
-  (let [context-options (get-in @*context-options* [language context])
-        program-options (get-in @*program-options* [language :env program])]
+  (let [context-options (get-in (atom-value *context-options*) [language context])
+        program-options (get-in (atom-value *program-options*) [language :env program])]
     (if context-options
       (grammar/deep-merge
-       (grammar/deep-merge (:default context-options) program-options)
+       (grammar/deep-merge (get context-options :default) program-options)
        (get context-options program))
       (throw
        (ex-info "Runtime configuration not installed"

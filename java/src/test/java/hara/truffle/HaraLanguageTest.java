@@ -47,6 +47,8 @@ public class HaraLanguageTest {
       assertEquals(0, context.eval(HaraLanguage.ID, "(count (empty [1 2]))").asLong());
       assertEquals(0, context.eval(HaraLanguage.ID, "(count nil)").asLong());
       assertEquals(7, context.eval(HaraLanguage.ID, "(get nil :missing 7)").asLong());
+      assertEquals(1, context.eval(HaraLanguage.ID, "(:a {:a 1})").asLong());
+      assertEquals(7, context.eval(HaraLanguage.ID, "(:missing {} 7)").asLong());
       assertTrue(context.eval(HaraLanguage.ID, "(empty nil)").isNull());
       assertEquals(1, context.eval(HaraLanguage.ID, "(count (conj nil 1))").asLong());
       assertEquals(1, context.eval(HaraLanguage.ID, "(count (cons 1 nil))").asLong());

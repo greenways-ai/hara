@@ -11,6 +11,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Value;
 import org.graalvm.polyglot.io.IOAccess;
@@ -102,9 +104,16 @@ public final class HaraNativeTestRunner {
 
   @SuppressWarnings({"rawtypes", "unchecked"})
   static Result parseResult(Path path, String transfer) {
-    Object parsed = Parser.LispReader.readString(transfer, null);
-    if (parsed instanceof String encoded) {
-      parsed = Parser.LispReader.readString(encoded, null);
+    Object parsed;
+    String summaryText = transfer;
+    try {
+      parsed = Parser.LispReader.readString(transfer, null);
+      if (parsed instanceof String encoded) {
+        summaryText = encoded;
+        parsed = Parser.LispReader.readString(encoded, null);
+      }
+    } catch (RuntimeException unreadableDiagnostic) {
+      return parsePrintedSummary(path, summaryText, transfer, unreadableDiagnostic);
     }
 
     if (parsed instanceof IMapType summary) {
@@ -165,6 +174,44 @@ public final class HaraNativeTestRunner {
 
     throw new HaraException(
         "test file must return code.test/run summary or test/print-results vector");
+  }
+
+  private static final Pattern PRINTED_SUMMARY =
+      Pattern.compile(
+          "^\\s*\\{:status\\s+:([a-z-]+).*?"
+              + ":files\\s+\\d+\\s+:facts\\s+(\\d+)\\s+:checks\\s+(\\d+)"
+              + "\\s+:passed\\s+(\\d+)\\s+:failed\\s+(\\d+)"
+              + "\\s+:throw\\s+(\\d+)\\s+:timeout\\s+(\\d+)",
+          Pattern.DOTALL);
+
+  /**
+   * Extracts the stable code.test summary prefix when diagnostic values in :results are purposely
+   * non-readable (for example #&lt;ThrownValue ...&gt;). The pass/fail decision and all reported counts
+   * precede :results, so host reporting does not need to deserialize those guest diagnostics.
+   */
+  private static Result parsePrintedSummary(
+      Path path, String summaryText, String transfer, RuntimeException unreadableDiagnostic) {
+    Matcher matcher = PRINTED_SUMMARY.matcher(summaryText);
+    if (!matcher.find()) {
+      throw unreadableDiagnostic;
+    }
+    boolean passed = "passed".equals(matcher.group(1));
+    int facts = Integer.parseInt(matcher.group(2));
+    int checks = Integer.parseInt(matcher.group(3));
+    int passedChecks = Integer.parseInt(matcher.group(4));
+    int failedChecks = Integer.parseInt(matcher.group(5));
+    int errors = Integer.parseInt(matcher.group(6));
+    int timeouts = Integer.parseInt(matcher.group(7));
+    return new Result(
+        path,
+        passed,
+        facts,
+        checks,
+        passedChecks,
+        failedChecks,
+        errors,
+        timeouts,
+        transfer);
   }
 
   @SuppressWarnings({"rawtypes", "unchecked"})

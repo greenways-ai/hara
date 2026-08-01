@@ -187,11 +187,7 @@
 
 (defn- drop-last-one
   [values]
-  (reduce (fn [result value]
-            (cons value result))
-          '()
-          (reverse
-           (vec (take (- (count values) 1) values)))))
+  (apply list (vec (take (- (count values) 1) values))))
 
 (defn emit-typed-allowed-args
   "allowed declared args other than symbols"
