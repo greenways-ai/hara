@@ -1,0 +1,180 @@
+package hara.truffle;
+
+import hara.kernel.base.Parser;
+import hara.lang.data.Keyword;
+import hara.lang.data.types.ILinearType;
+import hara.lang.data.types.IMapType;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.Value;
+import org.graalvm.polyglot.io.IOAccess;
+
+/** Runs Hara test files in isolated JVM runtime contexts. */
+public final class HaraNativeTestRunner {
+  private HaraNativeTestRunner() {}
+
+  /** Host-neutral result extracted from a code.test summary or legacy result vector. */
+  public record Result(
+      Path path,
+      boolean passed,
+      int facts,
+      int checks,
+      int passedChecks,
+      int failedChecks,
+      int errors,
+      int timeouts,
+      String rawSummary) {
+
+    public String failureMessage() {
+      return path + " failed: " + rawSummary;
+    }
+  }
+
+  /** Runs one .hal test file in a fresh GraalVM Hara context. */
+  public static Result runFile(Path projectRoot, Path testFile) throws IOException {
+    Path root = projectRoot.toAbsolutePath().normalize();
+    Path file = testFile.toAbsolutePath().normalize();
+    if (!Files.isRegularFile(file)) {
+      throw new HaraException("test file not found: " + file);
+    }
+    if (!file.toString().endsWith(".hal")) {
+      throw new HaraException("test file must use the .hal extension: " + file);
+    }
+
+    String source = Files.readString(file, StandardCharsets.UTF_8);
+    try (Context context =
+        Context.newBuilder(HaraLanguage.ID)
+            .currentWorkingDirectory(root)
+            .allowIO(IOAccess.ALL)
+            .build()) {
+      Value value = context.eval(HaraLanguage.ID, source);
+      String transfer = value.isString() ? value.asString() : value.toString();
+      return parseResult(file, transfer);
+    }
+  }
+
+  /** Discovers .hal test files from a project descriptor or explicit path. */
+  public static List<Path> discover(Path start, Path requested) throws IOException {
+    ArrayList<Path> files = new ArrayList<>();
+    if (requested != null) {
+      Path target = requested.toAbsolutePath().normalize();
+      if (Files.isRegularFile(target)) {
+        if (!target.toString().endsWith(".hal")) {
+          throw new HaraException("test file must use the .hal extension: " + target);
+        }
+        files.add(target);
+      } else if (Files.isDirectory(target)) {
+        collect(target, files);
+      } else {
+        throw new HaraException("test path not found: " + target);
+      }
+    } else {
+      HaraProject project = HaraProject.discover(start);
+      if (project == null) {
+        throw new HaraException("no project.edn found above " + start);
+      }
+      for (Path testPath : project.testPaths()) {
+        if (Files.exists(testPath)) collect(testPath, files);
+      }
+    }
+    files.sort(Comparator.naturalOrder());
+    return List.copyOf(files);
+  }
+
+  public static List<Path> discover(Path start) throws IOException {
+    return discover(start, null);
+  }
+
+  private static void collect(Path directory, List<Path> output) throws IOException {
+    try (java.util.stream.Stream<Path> paths = Files.walk(directory)) {
+      paths
+          .filter(Files::isRegularFile)
+          .filter(path -> path.toString().endsWith(".hal"))
+          .forEach(output::add);
+    }
+  }
+
+  @SuppressWarnings({"rawtypes", "unchecked"})
+  static Result parseResult(Path path, String transfer) {
+    Object parsed = Parser.LispReader.readString(transfer, null);
+    if (parsed instanceof String encoded) {
+      parsed = Parser.LispReader.readString(encoded, null);
+    }
+
+    if (parsed instanceof IMapType summary) {
+      Object status = lookup(summary, "status");
+      Object countsValue = lookup(summary, "counts");
+      if (!(status instanceof Keyword) || !(countsValue instanceof IMapType counts)) {
+        throw new HaraException("code.test/run result is missing :status or :counts");
+      }
+      int passedFacts = number(counts, "passed", 0);
+      int failedFacts = number(counts, "failed", 0);
+      int errors = number(counts, "error", 0);
+      int timeouts = number(counts, "timeout", 0);
+      int skipped = number(counts, "skipped", 0);
+      int cancelled = number(counts, "cancelled", 0);
+      int facts =
+          number(
+              summary,
+              "facts",
+              passedFacts + failedFacts + errors + timeouts + skipped + cancelled);
+      int passedChecks = number(summary, "passed", passedFacts);
+      int failedChecks = number(summary, "failed", failedFacts);
+      int checks = number(summary, "checks", passedChecks + failedChecks);
+      boolean passing = Keyword.create("passed").equals(status);
+      return new Result(
+          path,
+          passing,
+          facts,
+          checks,
+          passedChecks,
+          failedChecks,
+          errors,
+          timeouts,
+          transfer);
+    }
+
+    if (parsed instanceof ILinearType<?> items) {
+      int passed = 0;
+      int failed = 0;
+      for (Object item : items) {
+        if (!(item instanceof IMapType map)
+            || !(lookup(map, "pass") instanceof Boolean result)) {
+          throw new HaraException("test result is missing boolean :pass");
+        }
+        if (result) passed++;
+        else failed++;
+      }
+      return new Result(
+          path,
+          failed == 0,
+          passed + failed,
+          passed + failed,
+          passed,
+          failed,
+          0,
+          0,
+          transfer);
+    }
+
+    throw new HaraException(
+        "test file must return code.test/run summary or test/print-results vector");
+  }
+
+  @SuppressWarnings({"rawtypes", "unchecked"})
+  private static Object lookup(IMapType map, String key) {
+    return map.lookup(Keyword.create(key));
+  }
+
+  @SuppressWarnings("rawtypes")
+  private static int number(IMapType map, String key, int fallback) {
+    Object value = lookup(map, key);
+    return value instanceof Number number ? Math.toIntExact(number.longValue()) : fallback;
+  }
+}
