@@ -15,6 +15,11 @@
     (keyword? lookup-key) (get value (name lookup-key))
     :else nil))
 
+(defn- option
+  [value primary alternate]
+  (or (compatible-get value primary)
+      (compatible-get value alternate)))
+
 (defn set-default-transport
   "Sets the default server transport ID for database proxy requests."
   [node transport-id]
@@ -29,36 +34,47 @@
 (defn get-transport-id
   "Resolves a transport from options, node default or first attached transport."
   [node options]
-  (or (compatible-get options :transport-id)
-      (compatible-get options :transport_id)
+  (or (option options :transport-id :transport_id)
       (get-default-transport node)
       (first (substrate/list-transports node))))
 
-(defn request-meta
-  "Builds request metadata with an explicit transport ID."
+(defn request-options
+  "Preserves Substrate timeout, cancellation and metadata while choosing transport."
   [node options]
-  (let [transport-id (get-transport-id node options)]
-    (if transport-id
-      {:transport-id transport-id}
-      {})))
+  (let [transport-id (get-transport-id node options)
+        timeout-ms (option options :timeout-ms :timeout_ms)
+        signal (compatible-get options :signal)
+        metadata (or (compatible-get options :meta) {})
+        base {:meta metadata}
+        with-transport (if transport-id
+                         (assoc base :transport-id transport-id)
+                         base)
+        with-timeout (if timeout-ms
+                       (assoc with-transport :timeout-ms timeout-ms)
+                       with-transport)]
+    (if signal
+      (assoc with-timeout :signal signal)
+      with-timeout)))
 
 (defn request-proxy
   "Forwards the current request action across the configured transport."
   [space args request node]
-  (substrate/request node
-                     nil
-                     (field request :action)
-                     args
-                     (request-meta node (field request :meta))))
+  (let [options (request-options node {})
+        options (assoc options :meta (or (field request :meta) {}))]
+    (substrate/request node
+                       nil
+                       (field request :action)
+                       args
+                       options)))
 
 (defn request-client
   "Invokes a local handler when present, otherwise forwards over transport."
   [node action args options]
-  (if (substrate/get-handler node action)
-    (substrate/request node nil action args {:local true})
-    (let [meta (request-meta node options)]
-      (if (get meta :transport-id)
-        (substrate/request node nil action args meta)
+  (let [request-options (request-options node options)]
+    (if (substrate/get-handler node action)
+      (substrate/request node nil action args (assoc request-options :local true))
+      (if (get request-options :transport-id)
+        (substrate/request node nil action args request-options)
         (throw (ex-info "No database runtime transport is attached"
                         {:action action
                          :transports (substrate/list-transports node)}))))))
