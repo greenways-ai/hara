@@ -114,11 +114,16 @@
 (defn- service-summary
   [service]
   (when service
-    {:id (compatible-get service :id)
-     :role (compatible-get service :role)
-     :type (compatible-get service :type)
-     :database (db/info (service-connection service))
-     :metadata (or (compatible-get service :metadata) {})}))
+    (let [database (db/info (service-connection service))]
+      {:id (compatible-get service :id)
+       :role (compatible-get service :role)
+       :type (compatible-get service :type)
+       :engine (compatible-get database :engine)
+       :provider (compatible-get database :provider)
+       :storage (compatible-get database :storage)
+       :filename (compatible-get database :filename)
+       :database database
+       :metadata (or (compatible-get service :metadata) {})})))
 
 (defn kernel-check-exists
   "Returns true when all configured runtime services already exist."
@@ -164,8 +169,10 @@
              (substrate/set-service node service-id service)
              service))))))
 
+(declare kernel-teardown-main)
+
 (defn kernel-setup-main
-  "Creates common, primary and optional caching services."
+  "Creates common, primary and optional caching services atomically."
   [node config schema lookup]
   (let [normalized (kernel-create-config config)
         common (:common normalized)
@@ -190,12 +197,18 @@
                  (kernel-setup-single node :caching caching schema lookup caching-metadata)]
                 [(kernel-setup-single node :primary primary schema lookup primary-metadata)])]
     (substrate/set-service node common-id common-service)
-    (promise/then
-     (promise/all opens)
-     (fn [services]
-       {:status :setup
-        :data normalized
-        :services (map service-summary services)}))))
+    (promise/catch
+     (promise/then
+      (promise/all opens)
+      (fn [services]
+        {:status :setup
+         :data normalized
+         :services (map service-summary services)}))
+     (fn [error]
+       (promise/then
+        (kernel-teardown-main node normalized)
+        (fn [_]
+          (throw error)))))))
 
 (defn- close-service
   [node service-id]
