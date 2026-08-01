@@ -1,0 +1,225 @@
+;; ============================================================================
+;; std.native.Test — runtime-facing test session scaffolding.
+;;
+;; This is the small standard surface shared by Rust, Java, WASM and hosted
+;; runners. code.test remains the authoring/checker library; this namespace
+;; owns explicit isolated sessions, registries, lifecycle and structured runs.
+;; ============================================================================
+(ns std.native.Test
+  (:require [code.test :as test]
+            [std.protocol.itestregistry :as registry]
+            [std.protocol.itestsession :as session]))
+
+(defstruct Session [id registry reporter options state])
+
+(defn create
+  "Creates an isolated test session with its own registry, reporter and state."
+  ([] (create {}))
+  ([options]
+   (let [reporter (or (:reporter options) (test/event-reporter))]
+     (std.native.Test/Session
+      (or (:id options) (gensym "test-session-"))
+      (code.test/TestRegistry (atom {}))
+      reporter
+      (dissoc options :id :reporter)
+      (atom {:status :idle
+             :run-id nil
+             :next-run 0
+             :results nil})))))
+
+(defn registry-value
+  "Returns the session-local registry implementation."
+  [test-session]
+  (field test-session :registry))
+
+(defn reporter-value
+  "Returns the session reporter."
+  [test-session]
+  (field test-session :reporter))
+
+(defn session-facts*
+  [test-session]
+  (registry/registry-facts (registry-value test-session)))
+
+(defn ensure-open
+  [test-session]
+  (if (= :closed (:status (deref (field test-session :state))))
+    (throw "test session is closed")
+    test-session))
+
+(defn begin-run
+  [test-session options]
+  (ensure-open test-session)
+  (let [state (field test-session :state)
+        current (deref state)
+        run-id (or (:run-id options) (inc (:next-run current)))]
+    (swap! state
+           (fn [value]
+             (assoc value
+                    :status :running
+                    :run-id run-id
+                    :next-run run-id
+                    :results nil)))
+    run-id))
+
+(defn session-cancelled?
+  [test-session]
+  (= :cancelling (:status (deref (field test-session :state)))))
+
+(defn summarize
+  [results]
+  (let [counts (test/result-counts results)
+        checks (test/attach-check-total (test/check-counts results))
+        status (if (and (= 0 (:failed counts))
+                        (= 0 (:error counts))
+                        (= 0 (:timeout counts)))
+                 :passed
+                 :failed)
+        namespaces (reduce (fn [output result]
+                             (conj output (:namespace result)))
+                           #{}
+                           results)]
+    {:status status
+     :counts counts
+     :check-counts checks
+     :files (count namespaces)
+     :facts (count results)
+     :checks (:total checks)
+     :passed (:passed checks)
+     :failed (:failed checks)
+     :throw (:error counts)
+     :timeout (:timeout counts)
+     :results results}))
+
+(defn run-session
+  "Runs facts registered in one explicit session and returns a summary."
+  ([test-session] (run-session test-session {}))
+  ([test-session options]
+   (let [run-id (begin-run test-session options)
+         state (field test-session :state)
+         merged-options (merge (field test-session :options) options)
+         reporter (or (:reporter merged-options) (reporter-value test-session))
+         control (or (:control merged-options)
+                     (test/function-control
+                      (fn [fact] (session-cancelled? test-session))))
+         run-options (assoc merged-options :control control)
+         selected (test/order-facts
+                   (filter (fn [fact]
+                             (test/matches-selection? fact run-options))
+                           (session-facts* test-session)))
+         start-report (test/report! reporter
+                                    {:event :run/start
+                                     :run-id run-id
+                                     :session-id (field test-session :id)
+                                     :count (count selected)})
+         results (try
+                   (do
+                     (test/run-hook (:before-all run-options) run-options)
+                     (test/run-facts selected reporter run-options))
+                   (finally
+                     (test/run-hook (:after-all run-options) run-options)))
+         summary (assoc (summarize results)
+                        :run-id run-id
+                        :session-id (field test-session :id))
+         end-report (test/report! reporter (merge {:event :run/end} summary))]
+     (swap! state
+            (fn [value]
+              (assoc value
+                     :status :idle
+                     :results summary)))
+     summary)))
+
+(extend-type Session registry/ITestRegistry
+  (registry-register [test-session fact]
+    (do
+      (ensure-open test-session)
+      (registry/registry-register (registry-value test-session) fact)))
+  (registry-remove [test-session namespace name]
+    (do
+      (ensure-open test-session)
+      (registry/registry-remove (registry-value test-session) namespace name)))
+  (registry-clear [test-session namespace]
+    (do
+      (ensure-open test-session)
+      (registry/registry-clear (registry-value test-session) namespace)))
+  (registry-facts [test-session]
+    (session-facts* test-session))
+  (registry-find [test-session namespace name]
+    (registry/registry-find (registry-value test-session) namespace name)))
+
+(extend-type Session session/ITestSession
+  (session-run [test-session options]
+    (run-session test-session options))
+  (session-cancel [test-session run-id]
+    (let [state (field test-session :state)
+          current (deref state)]
+      (if (and (= :running (:status current))
+               (or (nil? run-id) (= run-id (:run-id current))))
+        (do
+          (swap! state (fn [value] (assoc value :status :cancelling)))
+          true)
+        false)))
+  (session-status [test-session]
+    (deref (field test-session :state)))
+  (session-results [test-session]
+    (:results (deref (field test-session :state))))
+  (session-close [test-session]
+    (do
+      (registry/registry-clear (registry-value test-session) nil)
+      (swap! (field test-session :state)
+             (fn [value] (assoc value :status :closed)))
+      true)))
+
+(defn register
+  "Registers one immutable fact definition in a session."
+  [test-session fact]
+  (registry/registry-register test-session fact))
+
+(defn register-all
+  "Registers a collection of fact definitions in a session."
+  [test-session facts]
+  (reduce (fn [output fact]
+            (do (register test-session fact) output))
+          test-session
+          facts))
+
+(defn remove
+  [test-session namespace name]
+  (registry/registry-remove test-session namespace name))
+
+(defn clear
+  ([test-session] (clear test-session nil))
+  ([test-session namespace]
+   (registry/registry-clear test-session namespace)))
+
+(defn facts
+  [test-session]
+  (registry/registry-facts test-session))
+
+(defn find
+  [test-session namespace name]
+  (registry/registry-find test-session namespace name))
+
+(defn run
+  ([test-session] (session/session-run test-session {}))
+  ([test-session options] (session/session-run test-session options)))
+
+(defn cancel
+  ([test-session] (session/session-cancel test-session nil))
+  ([test-session run-id] (session/session-cancel test-session run-id)))
+
+(defn status
+  [test-session]
+  (session/session-status test-session))
+
+(defn results
+  [test-session]
+  (session/session-results test-session))
+
+(defn events
+  [test-session]
+  (test/reporter-events (reporter-value test-session)))
+
+(defn close
+  [test-session]
+  (session/session-close test-session))
