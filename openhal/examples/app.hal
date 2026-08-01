@@ -1,0 +1,23 @@
+(ns openhal.app)
+
+(defn hello
+  [request]
+  {:status 200
+   :headers {"content-type" "text/plain; charset=utf-8"
+             "x-openhal" "true"}
+   :body "Hello from OpenHAL\n"})
+
+(defn delayed
+  [request]
+  (std.foundation.coroutine/await
+    (std.native.Host/call "nginx" "sleep" [25]))
+  {:status 200
+   :headers {"content-type" "text/plain; charset=utf-8"
+             "x-openhal" "promise-resumed"}
+   :body "Hara coroutine resumed from the Nginx event loop\n"})
+
+(defn inspect
+  [request]
+  {:status 200
+   :headers {"content-type" "text/plain; charset=utf-8"}
+   :body (get request :uri)})
