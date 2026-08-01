@@ -97,4 +97,31 @@ impl Frame {
     pub(crate) fn base(&self) -> usize {
         self.base
     }
+
+    #[cfg(feature = "tracing-jit")]
+    pub(crate) fn trace_locals(&self) -> (Vec<crate::jit::TraceValue>, Vec<bool>) {
+        let mut scalar = Vec::with_capacity(self.locals.len());
+        let mut writable = Vec::with_capacity(self.locals.len());
+        for value in &self.locals {
+            match value {
+                VmSlot::Number(value) => { scalar.push(crate::jit::TraceValue::I64(*value)); writable.push(true); }
+                VmSlot::Bool(value) => { scalar.push(crate::jit::TraceValue::Bool(*value)); writable.push(true); }
+                VmSlot::Nil => { scalar.push(crate::jit::TraceValue::Nil); writable.push(true); }
+                _ => { scalar.push(crate::jit::TraceValue::Nil); writable.push(false); }
+            }
+        }
+        (scalar, writable)
+    }
+
+    #[cfg(feature = "tracing-jit")]
+    pub(crate) fn apply_trace_locals(&mut self, values: &[crate::jit::TraceValue], writable: &[bool]) {
+        for (index, (value, writable)) in values.iter().zip(writable).enumerate() {
+            if !writable { continue; }
+            self.locals[index] = match value {
+                crate::jit::TraceValue::I64(value) => VmSlot::Number(*value),
+                crate::jit::TraceValue::Bool(value) => VmSlot::Bool(*value),
+                crate::jit::TraceValue::Nil => VmSlot::Nil,
+            };
+        }
+    }
 }

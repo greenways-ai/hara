@@ -1208,7 +1208,10 @@ public final class HaraContext {
       return form;
     }
     HaraMacro macro = resolveMacro(operator);
-    return macro == null ? form : macro.expand(list, environment);
+    if (macro == null) return form;
+    Object expansion = macro.expand(list, environment);
+    EvaluationJournal.macro(operator.toString(), form, expansion);
+    return expansion;
   }
 
   @SuppressWarnings({"rawtypes", "unchecked"})
@@ -4039,7 +4042,7 @@ public final class HaraContext {
     requireHalPath((String) value, "load-resource");
     ContextSnapshot snapshot = snapshot();
     try {
-      FoundationHirLoader.Attempt hir = FoundationHirLoader.load((String) value);
+      FoundationHalcLoader.Attempt hir = FoundationHalcLoader.load((String) value);
       if (hir.loaded) return hir.value;
     } catch (RuntimeException error) {
       restore(snapshot);

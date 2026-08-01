@@ -21,6 +21,12 @@ ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CORPUS = ROOT / "lib/bench/runtime/workloads.json"
 RESULTS = ROOT / "lib/bench/results/reference.json"
 REPORT = ROOT / "website/docs/reference/runtime-benchmarks.md"
+DEFAULT_BASELINE = ROOT / "lib/bench/runtime/regression-baselines.json"
+BYTECODE_VARIANTS = {
+    "hara-rust-bytecode": ("bytecode-vm", "vm"),
+    "hara-rust-trace-checked": ("tracing-jit", "trace-checked"),
+    "hara-rust-trace-native": ("native-jit", "trace-native"),
+}
 PROFILES = {
     "smoke": {"startup_samples": 2, "windows": 3, "calls": 1},
     "standard": {"startup_samples": 30, "windows": 60, "calls": 10},
@@ -69,11 +75,10 @@ def adapters():
         return command + [runtime, workload["id"], payload, workload["expected"],
                           str(windows), str(calls)]
 
-    def bytecode(mode, workload, windows, calls):
+    def bytecode(binary, runtime, mode, workload, windows, calls):
         source = workload["source"].encode().hex()
-        return [str(ROOT / "rust/target/release/hara-bytecode-benchmark"), mode,
-                workload["id"], source, workload["expected"],
-                str(windows), str(calls)]
+        return [str(binary), mode, workload["id"], source, workload["expected"],
+                str(windows), str(calls), runtime]
 
     return {
         "clojure": lambda w, n, c: common(
@@ -88,26 +93,40 @@ def adapters():
         "hara-rust-native": lambda w, n, c: common(
             [str(ROOT / "rust/target/release/hara-runtime-benchmark")],
             "hara-rust-native", w, n, c, "hex"),
-        "hara-rust-bytecode-compile-execute": lambda w, n, c: bytecode(
-            "compile-execute", w, n, c),
-        "hara-rust-bytecode-execute-only": lambda w, n, c: bytecode(
-            "execute-only", w, n, c),
+        "hara-rust-bytecode": lambda w, n, c: bytecode(
+            bytecode_binary("vm"), "hara-rust-bytecode", "execute-only", w, n, c),
+        "hara-rust-trace-checked": lambda w, n, c: bytecode(
+            bytecode_binary("trace-checked"), "hara-rust-trace-checked", "execute-only", w, n, c),
+        "hara-rust-trace-native": lambda w, n, c: bytecode(
+            bytecode_binary("trace-native"), "hara-rust-trace-native", "execute-only", w, n, c),
         "hara-wasm-node": lambda w, n, c: common(
             ["node", node_script], "hara-wasm-node", w, n, c),
     }, glue
 
 
-def build(include_native):
+def bytecode_binary(label):
+    return ROOT / "target/runtime-benchmark" / label / "release/hara-bytecode-benchmark"
+
+
+def build(include_native, selected):
     if include_native:
         run([str(ROOT / "scripts/build-truffle-native")], timeout=1200)
-    run(["mvn", "-q", "-f", "java/pom.xml", "-Ptruffle", "-DskipTests", "compile",
-         "dependency:build-classpath", "-Dmdep.outputFile=java/target/hara-runtime-classpath.txt"],
-        timeout=300)
-    run(["cargo", "build", "--manifest-path", "rust/Cargo.toml", "--release",
-         "--bin", "hara-runtime-benchmark"], timeout=600)
-    run(["cargo", "build", "--manifest-path", "rust/Cargo.toml", "--release",
-         "--features", "bytecode-vm", "--bin", "hara-bytecode-benchmark"], timeout=600)
-    if shutil.which("wasm-bindgen"):
+    if "hara-truffle" in selected:
+        run(["mvn", "-q", "-f", "java/pom.xml", "-Ptruffle", "-DskipTests", "compile",
+             "dependency:build-classpath", "-Dmdep.outputFile=java/target/hara-runtime-classpath.txt"],
+            timeout=300)
+    if "hara-rust-native" in selected:
+        run(["cargo", "build", "--manifest-path", "rust/Cargo.toml", "--release",
+             "--bin", "hara-runtime-benchmark"], timeout=600)
+    for runtime, (features, label) in BYTECODE_VARIANTS.items():
+        if runtime not in selected:
+            continue
+        env = os.environ.copy()
+        env["CARGO_TARGET_DIR"] = str(ROOT / "target/runtime-benchmark" / label)
+        run(["cargo", "build", "--manifest-path", "rust/Cargo.toml", "--release",
+             "--features", features, "--bin", "hara-bytecode-benchmark"],
+            env=env, timeout=600)
+    if "hara-wasm-node" in selected and shutil.which("wasm-bindgen"):
         run(["cargo", "build", "--manifest-path", "rust/Cargo.toml", "--release",
              "--target", "wasm32-unknown-unknown", "--lib"], timeout=600)
         (ROOT / "target/wasm-bindgen").mkdir(parents=True, exist_ok=True)
@@ -174,10 +193,9 @@ def payload_sizes(glue):
         "hara-truffle": truffle_files,
         "hara-native-image": [ROOT / "target/hara-truffle"],
         "hara-rust-native": [ROOT / "rust/target/release/hara-runtime-benchmark"],
-        "hara-rust-bytecode-compile-execute": [
-            ROOT / "rust/target/release/hara-bytecode-benchmark"],
-        "hara-rust-bytecode-execute-only": [
-            ROOT / "rust/target/release/hara-bytecode-benchmark"],
+        "hara-rust-bytecode": [bytecode_binary("vm")],
+        "hara-rust-trace-checked": [bytecode_binary("trace-checked")],
+        "hara-rust-trace-native": [bytecode_binary("trace-native")],
         "hara-wasm-node": [ROOT / "rust/target/wasm32-unknown-unknown/release/hara_wasm.wasm", glue],
     }
     def size(path):
@@ -186,6 +204,29 @@ def payload_sizes(glue):
         return 0
     return {name: sum(size(path) for path in files)
             for name, files in paths.items()}
+
+
+def measurement_index(measurements):
+    return {(item["runtime"], item["workload"]): item for item in measurements}
+
+
+def check_regressions(data, baseline):
+    index = measurement_index(data["measurements"])
+    failures = []
+    for rule in baseline.get("rules", []):
+        candidate_key = (rule["runtime"], rule["workload"])
+        reference_key = (rule["relative_to"], rule["workload"])
+        candidate = index.get(candidate_key)
+        reference = index.get(reference_key)
+        if candidate is None or reference is None:
+            failures.append(f"missing measurement for {candidate_key} or {reference_key}")
+            continue
+        ratio = candidate["analysis"]["steady_ns"] / reference["analysis"]["steady_ns"]
+        if ratio > rule["max_ratio"]:
+            failures.append(
+                f"{rule['runtime']} / {rule['workload']} ratio {ratio:.3f} "
+                f"exceeds {rule['max_ratio']:.3f} vs {rule['relative_to']}")
+    return failures
 
 
 def markdown(data):
@@ -199,11 +240,13 @@ def markdown(data):
         rss = "—" if item["peak_rss_kib"] is None else f"{item['peak_rss_kib']/1024:.1f}"
         size = f"{sizes.get(name, 0)/1048576:.1f}" if name in sizes else "—"
         lines.append(f"| {name} | {item['p50_ns']/1e6:.2f} | {item['p95_ns']/1e6:.2f} | {rss} | {size} |")
-    lines += ["", "## Warm evaluation", "", "| Runtime / workload | First ms | Steady ms | calls/s | Converged window |", "|---|---:|---:|---:|---:|"]
+    lines += ["", "## Warm evaluation", "", "| Runtime / workload | First ms | Steady ms | ns/iteration | calls/s | Converged window |", "|---|---:|---:|---:|---:|---:|"]
     for row in data["measurements"]:
         convergence = row["analysis"]["converged_window"]
-        lines.append(f"| {row['runtime']} / {row['workload']} | {row['first_ns']/1e6:.3f} | {row['analysis']['steady_ns']/1e6:.3f} | {row['analysis']['throughput_per_sec']:.1f} | {convergence if convergence is not None else '—'} |")
-    lines += ["", "Warm values above are per-call milliseconds (the raw samples are stored as nanoseconds). Lower is better. Each adapter re-reads, evaluates, and checks the same source form, but this is an implementation snapshot rather than a source-normalized language shootout. Convergence is the first five-window run within ±5% of the final ten-window median with CV ≤10%.", ""]
+        per_iteration = row["analysis"].get("ns_per_iteration")
+        per_iteration_text = "—" if per_iteration is None else f"{per_iteration:.2f}"
+        lines.append(f"| {row['runtime']} / {row['workload']} | {row['first_ns']/1e6:.3f} | {row['analysis']['steady_ns']/1e6:.3f} | {per_iteration_text} | {row['analysis']['throughput_per_sec']:.1f} | {convergence if convergence is not None else '—'} |")
+    lines += ["", "Warm values above are per-call milliseconds (the raw samples are stored as nanoseconds). Lower is better. Each adapter receives the same source and checks the same displayed result. Execute-only VM tiers compile once before measurement; their first value is the first execution, not compilation. Convergence is the first five-window run within ±5% of the final ten-window median with CV ≤10%.", ""]
     return "\n".join(lines)
 
 
@@ -215,12 +258,17 @@ def main():
                         help="workload JSON (default: %(default)s)")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--reference", action="store_true")
+    parser.add_argument("--check-regressions", nargs="?", const=DEFAULT_BASELINE, type=Path,
+                        help="check relative performance rules (default: %(const)s)")
     args = parser.parse_args()
     profile = PROFILES[args.profile]
-    if not args.no_build:
-        build(include_native=args.reference or (args.runtime and "hara-native-image" in args.runtime))
     runtime_adapters, glue = adapters()
     selected = args.runtime or list(runtime_adapters)
+    unknown = sorted(set(selected) - set(runtime_adapters))
+    if unknown:
+        parser.error("unknown runtime(s): " + ", ".join(unknown))
+    if not args.no_build:
+        build(include_native=args.reference or "hara-native-image" in selected, selected=selected)
     missing = []
     if "hara-wasm-node" in selected and not glue.is_file():
         missing.append("hara-wasm-node (install version-matched wasm-bindgen-cli and rebuild)")
@@ -275,9 +323,18 @@ def main():
     report_path = REPORT if args.reference else ROOT / "target/runtime-benchmark.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(report)
+    failures = []
+    if args.check_regressions:
+        baseline_path = (args.check_regressions if args.check_regressions.is_absolute()
+                         else ROOT / args.check_regressions)
+        failures = check_regressions(data, json.loads(baseline_path.read_text()))
+        for failure in failures:
+            print("REGRESSION: " + failure, file=sys.stderr)
     if missing:
         print("Unavailable: " + ", ".join(missing), file=sys.stderr)
     print(f"wrote {output} and {report_path}")
+    if failures:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

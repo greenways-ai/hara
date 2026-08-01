@@ -401,12 +401,12 @@ public class HaraModuleConformanceTest {
     String source = "(ns parity.demo) (defn value \"answer\" [] 42) (value)";
     Object[] forms = HaraLanguage.readAll(source, "parity/demo.hal");
     byte[] artifact =
-        HirArtifact.encode(
+        HalcArtifact.encode(
             "parity.demo",
             "parity/demo.hal",
             source.getBytes(StandardCharsets.UTF_8),
             forms);
-    HirArtifact.Module module = HirArtifact.decode(artifact);
+    HalcArtifact.Module module = HalcArtifact.decode(artifact);
 
     try (Context sourceContext = Context.newBuilder(HaraLanguage.ID).build();
         Context hirContext = Context.newBuilder(HaraLanguage.ID).build()) {
@@ -416,7 +416,7 @@ public class HaraModuleConformanceTest {
       hirContext.enter();
       try {
         hirResult =
-            HaraLanguage.compileHir(module.forms, "hir:parity/demo.hal").call();
+            HaraLanguage.compileHalc(module.forms, "hir:parity/demo.hal").call();
       } finally {
         hirContext.leave();
       }
@@ -441,7 +441,7 @@ public class HaraModuleConformanceTest {
             assertThrows(
                 RuntimeException.class,
                 () ->
-                    HaraLanguage.compileHir(failure, "hir:parity/failure.hal")
+                    HaraLanguage.compileHalc(failure, "hir:parity/failure.hal")
                         .call());
       } finally {
         hirContext.leave();

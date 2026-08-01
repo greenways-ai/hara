@@ -5,13 +5,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** Build-time compiler for deterministic portable HIR module artifacts. */
-final class HirCompiler {
-  private HirCompiler() {}
+/** Build-time compiler for deterministic portable HALC module artifacts. */
+final class HalcCompiler {
+  private HalcCompiler() {}
 
   static int run(String[] args, java.io.PrintStream output, java.io.PrintStream error) {
-    if (args.length != 3 || !"--output".equals(args[1])) {
-      error.println("compile-hir expects SOURCE --output OUTPUT");
+    if ((args.length != 3 && args.length != 5) || !"--output".equals(args[1])
+        || (args.length == 5 && !"--resource".equals(args[3]))) {
+      error.println("compile-halc expects SOURCE --output OUTPUT [--resource ID]");
       return 2;
     }
     Path source = Path.of(args[0]);
@@ -21,14 +22,12 @@ final class HirCompiler {
       Object[] forms =
           HaraLanguage.readAll(
               new String(sourceBytes, StandardCharsets.UTF_8),
-              HirArtifact.FOUNDATION_RESOURCE);
-      String namespace = HirArtifact.declaredNamespace(forms);
-      if (!"std.foundation".equals(namespace)) {
-        throw new HaraException(
-            "foundation HIR compiler expected std.foundation, received " + namespace);
-      }
+              HalcArtifact.FOUNDATION_RESOURCE);
+      String namespace = HalcArtifact.declaredNamespace(forms);
+      String resource = args.length == 5 ? args[4] :
+          ("std.foundation".equals(namespace) ? HalcArtifact.FOUNDATION_RESOURCE : args[0]);
       byte[] artifact =
-          HirArtifact.encode(namespace, HirArtifact.FOUNDATION_RESOURCE, sourceBytes, forms);
+          HalcArtifact.encode(namespace, resource, sourceBytes, forms);
       Path parent = target.toAbsolutePath().getParent();
       if (parent != null) Files.createDirectories(parent);
       Files.write(target, artifact);
@@ -42,7 +41,7 @@ final class HirCompiler {
               + " bytes)");
       return 0;
     } catch (IOException | RuntimeException failure) {
-      error.println("Unable to compile HIR: " + failure.getMessage());
+      error.println("Unable to compile HALC: " + failure.getMessage());
       return 1;
     }
   }

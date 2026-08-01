@@ -2,8 +2,8 @@
 pub mod form;
 #[path = "kernel/generated.rs"]
 pub mod generated;
-#[path = "kernel/hir.rs"]
-pub mod hir;
+#[path = "kernel/halc.rs"]
+pub mod halc;
 #[path = "kernel/namespace.rs"]
 pub mod namespace;
 #[path = "kernel/parser.rs"]
@@ -16,6 +16,6 @@ pub mod var;
 pub use form::Form;
 pub use generated::GeneratedNamespaceConfig;
 pub use namespace::{Namespace, NamespaceLoadState, NamespaceRegistry};
-pub use parser::{parse, parse_forms, read_forms, ParseError, Parser, Span, SpannedForm};
+pub use parser::{ParseError, Parser, Span, SpannedForm, parse, parse_forms, read_forms};
 pub use reader::{Position, Reader};
 pub use var::{Var, VarMetadata, VarOrigin};

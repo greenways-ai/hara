@@ -3,7 +3,7 @@
 //! Network reconciliation deliberately does not live here yet: package roots
 //! are only activated after a registry and identity client has verified them.
 
-use crate::kernel::{parse, parse_forms, Form};
+use crate::kernel::{Form, parse, parse_forms};
 use crate::project::{self, Project};
 use crate::tap::{self, Tap};
 use sha2::{Digest, Sha256};
@@ -22,13 +22,19 @@ use install::{install_archive, json_string, validate_recipe};
 pub fn run(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
         Some("check") => {
-            let root = args.get(1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+            let root = args
+                .get(1)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."));
             let project = read_project(&root)?;
             println!("package check: {} {}", project.id, project.version);
             Ok(())
         }
         Some("build") => {
-            let root = args.get(1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+            let root = args
+                .get(1)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."));
             let project = read_project(&root)?;
             let output = args
                 .iter()
@@ -36,10 +42,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 .and_then(|index| args.get(index + 1))
                 .map(PathBuf::from)
                 .unwrap_or_else(|| {
-                    project
-                        .root
-                        .join("target")
-                        .join(format!("{}-{}.harp", archive_name(&project.id), project.version))
+                    project.root.join("target").join(format!(
+                        "{}-{}.harp",
+                        archive_name(&project.id),
+                        project.version
+                    ))
                 });
             build_archive(&project, &output)?;
             println!("package build: {}", output.display());
@@ -53,13 +60,22 @@ pub fn run(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         Some("install") => {
-            let input = args.get(1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+            let input = args
+                .get(1)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("."));
             let archive = if input.is_dir() {
                 let project = read_project(&input)?;
-                let output = project.root.join("target").join(format!("{}-{}.harp", archive_name(&project.id), project.version));
+                let output = project.root.join("target").join(format!(
+                    "{}-{}.harp",
+                    archive_name(&project.id),
+                    project.version
+                ));
                 build_archive(&project, &output)?;
                 output
-            } else { input };
+            } else {
+                input
+            };
             let installed = install_archive(&archive)?;
             println!("package install: {}", installed.display());
             Ok(())
@@ -67,7 +83,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
         Some("publish") => publish(&args[1..]),
         Some("tap") => tap_command(&args[1..]),
         Some("registry") => registry_command(&args[1..]),
-        Some("sync") | Some("add") | Some("remove") | Some("update") | Some("search") | Some("info") => Err(format!(
+        Some("sync") | Some("add") | Some("remove") | Some("update") | Some("search")
+        | Some("info") => Err(format!(
             "hara package {} requires a configured GitHub registry and identity client; local package commands available now: check, build, inspect",
             args[0]
         )),
@@ -260,7 +277,13 @@ pub fn tap_command(args: &[String]) -> Result<(), String> {
 
 fn publish(args: &[String]) -> Result<(), String> {
     let tap_name = optional_option(args, "--tap")
-        .map(|name| if name == "official" { "hara".into() } else { name })
+        .map(|name| {
+            if name == "official" {
+                "hara".into()
+            } else {
+                name
+            }
+        })
         .unwrap_or_else(|| "hara".into());
     let dry_run = args.iter().any(|arg| arg == "--dry-run");
     let path = args
@@ -542,8 +565,8 @@ fn package_manifest(project: &Project, contents: &[(PathBuf, Vec<u8>)]) -> Resul
             {
                 resources.push((namespace, path.clone()));
             }
-        } else if path.ends_with(".hir") {
-            let module = crate::kernel::hir::decode_hir(bytes)
+        } else if path.ends_with(".halc") || path.ends_with(".hir") {
+            let module = crate::kernel::halc::decode_halc(bytes)
                 .map_err(|error| format!("cannot decode package resource {path}: {error}"))?;
             resources.push((module.namespace, path.clone()));
         }

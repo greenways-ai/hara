@@ -1716,7 +1716,10 @@ final class HaraAnalyzer {
     if ("->".equals(operator.getName())) return expandThread(list, false);
     if ("->>".equals(operator.getName())) return expandThread(list, true);
     HaraMacro macro = context.resolveMacro(operator);
-    return macro == null ? form : macro.expand(list, macroEnvironment(list));
+    if (macro == null) return form;
+    Object expansion = macro.expand(list, macroEnvironment(list));
+    EvaluationJournal.macro(operator.toString(), form, expansion);
+    return expansion;
   }
 
   private Object macroEnvironment(List<?> invocation) {

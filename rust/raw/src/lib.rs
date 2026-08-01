@@ -10,9 +10,9 @@ mod kernel;
 mod lang;
 #[path = "../../src/task.rs"]
 mod task;
-#[cfg(feature = "dev-trace")]
-#[path = "../../src/trace.rs"]
-mod trace;
+#[cfg(feature = "evaluation-journal")]
+#[path = "../../src/journal.rs"]
+mod journal;
 
 use core::{EvalFiber, EvalFiberState, Promise, PromiseRejection, PromiseState, Value};
 use std::cell::RefCell;
@@ -68,8 +68,8 @@ struct Session {
     tasks: HashMap<u64, Promise>,
     resources: Rc<RefCell<HashMap<String, String>>>,
     mount_id: Option<u64>,
-    #[cfg(feature = "dev-trace")]
-    next_trace_id: u64,
+    #[cfg(feature = "evaluation-journal")]
+    next_journal_id: u64,
 }
 impl Session {
     fn new() -> Self {
@@ -177,23 +177,23 @@ impl Session {
             tasks: HashMap::new(),
             resources,
             mount_id: None,
-            #[cfg(feature = "dev-trace")]
-            next_trace_id: 1,
+            #[cfg(feature = "evaluation-journal")]
+            next_journal_id: 1,
         }
     }
 
-    #[cfg(feature = "dev-trace")]
-    fn trace_eval(&mut self, source: &str) -> trace::Trace {
-        let trace_id = trace::TraceId(self.next_trace_id);
-        self.next_trace_id += 1;
+    #[cfg(feature = "evaluation-journal")]
+    fn journal_eval(&mut self, source: &str) -> journal::Journal {
+        let journal_id = journal::JournalId(self.next_journal_id);
+        self.next_journal_id += 1;
         let namespaces = self.namespaces.clone();
         let protocols = self.protocols.clone();
         let resources = self.resources.clone();
         let provider = Rc::new(move |name: &str| resources.borrow().get(name).cloned());
         let mut environment = self.env.clone();
-        let (result, trace) = core::with_development_trace(
-            trace_id,
-            trace::TraceLimits::default(),
+        let (result, journal) = core::with_evaluation_journal(
+            journal_id,
+            journal::JournalLimits::default(),
             || {
                 core::with_namespace_registry(&namespaces, || {
                     core::with_namespace_source(provider, || {
@@ -217,7 +217,7 @@ impl Session {
             core::save_namespace_environment(&self.namespaces, &mut self.env);
             core::refresh_namespace_environment(&self.namespaces, &mut self.env);
         }
-        trace
+        journal
     }
 
     fn busy(&self) -> bool {
@@ -339,13 +339,13 @@ impl Session {
         self.drive(task, fiber);
         Ok(())
     }
-    fn start_hir_fiber(&mut self, task: u64, bytes: &[u8]) -> Result<(), String> {
-        self.start_hir_bundle(task, &[bytes])
+    fn start_halc_fiber(&mut self, task: u64, bytes: &[u8]) -> Result<(), String> {
+        self.start_halc_bundle(task, &[bytes])
     }
-    fn start_hir_bundle(&mut self, task: u64, modules: &[&[u8]]) -> Result<(), String> {
+    fn start_halc_bundle(&mut self, task: u64, modules: &[&[u8]]) -> Result<(), String> {
         let mut forms = Vec::new();
         for bytes in modules {
-            forms.extend(kernel::hir::decode_hir(bytes)?.forms);
+            forms.extend(kernel::halc::decode_halc(bytes)?.forms);
         }
         forms.push(kernel::Form::Bool(true));
         let environment = self.env.clone();
@@ -824,20 +824,22 @@ fn dispatch(
 ) -> Result<(), String> {
     match target {
         "eval" => dispatch_eval(kernel, task, "ROOT", &args, false),
-        "eval-hir" => dispatch_eval_hir(kernel, task, "ROOT", &args),
-        "eval-hir-bundle" => dispatch_eval_hir_bundle(kernel, task, "ROOT", &args),
-        "session/eval-hir" => match args.as_slice() {
+        "eval-halc" | "eval-hir" => dispatch_eval_halc(kernel, task, "ROOT", &args),
+        "eval-halc-bundle" | "eval-hir-bundle" => {
+            dispatch_eval_halc_bundle(kernel, task, "ROOT", &args)
+        }
+        "session/eval-halc" | "session/eval-hir" => match args.as_slice() {
             [Value::String(session), Value::Bytes(bytes)] => {
-                dispatch_eval_hir_bytes(kernel, task, session, bytes)
+                dispatch_eval_halc_bytes(kernel, task, session, bytes)
             }
-            _ => Err("hta session/eval-hir expects session and byte array".into()),
+            _ => Err("hta session/eval-halc expects session and byte array".into()),
         },
-        "session/eval-hir-bundle" => match args.as_slice() {
+        "session/eval-halc-bundle" | "session/eval-hir-bundle" => match args.as_slice() {
             [Value::String(session), Value::Vector(modules)] => {
                 let modules = modules.iter().cloned().collect::<Vec<_>>();
-                dispatch_eval_hir_bundle_values(kernel, task, session, &modules)
+                dispatch_eval_halc_bundle_values(kernel, task, session, &modules)
             }
-            _ => Err("hta session/eval-hir-bundle expects session and byte arrays".into()),
+            _ => Err("hta session/eval-halc-bundle expects session and byte arrays".into()),
         },
         "eval-bound" => dispatch_eval(kernel, task, "ROOT", &args, true),
         "complete" => dispatch_complete(kernel, task, "ROOT", &args),
@@ -847,32 +849,34 @@ fn dispatch(
             }
             _ => Err("hta session/eval expects session and source strings".into()),
         },
-        "session/trace-eval" => match args.as_slice() {
+        "session/journal-eval" | "session/trace-eval" => match args.as_slice() {
             [Value::String(session), Value::String(source)] => {
-                #[cfg(feature = "dev-trace")]
+                #[cfg(feature = "evaluation-journal")]
                 {
-                    let trace = kernel.session_mut(session)?.trace_eval(source);
-                    enqueue_event(&kernel.events, event(0, task, trace_value(&trace)));
+                    let journal = kernel.session_mut(session)?.journal_eval(source);
+                    enqueue_event(&kernel.events, event(0, task, journal_value(&journal)));
                     Ok(())
                 }
-                #[cfg(not(feature = "dev-trace"))]
+                #[cfg(not(feature = "evaluation-journal"))]
                 {
                     let _ = (kernel, task, session, source);
                     Err("TRACE_UNAVAILABLE".into())
                 }
             }
-            _ => Err("hta session/trace-eval expects session and source strings".into()),
+            _ => Err("hta session/journal-eval expects session and source strings".into()),
         },
         "session/eval-bound" => match args.as_slice() {
-            [Value::String(session), Value::String(source), Value::Vector(bindings)] => {
-                dispatch_eval_values(
-                    kernel,
-                    task,
-                    session,
-                    source,
-                    Some(bindings.iter().cloned().collect()),
-                )
-            }
+            [
+                Value::String(session),
+                Value::String(source),
+                Value::Vector(bindings),
+            ] => dispatch_eval_values(
+                kernel,
+                task,
+                session,
+                source,
+                Some(bindings.iter().cloned().collect()),
+            ),
             _ => Err("hta session/eval-bound expects session, source, and binding vector".into()),
         },
         "session/complete" => match args.as_slice() {
@@ -1057,8 +1061,8 @@ fn dispatch(
     }
 }
 
-#[cfg(feature = "dev-trace")]
-fn trace_value(trace: &trace::Trace) -> Value {
+#[cfg(feature = "evaluation-journal")]
+fn journal_value(journal: &journal::Journal) -> Value {
     fn key(name: &str) -> Value {
         Value::Keyword(name.into())
     }
@@ -1067,91 +1071,103 @@ fn trace_value(trace: &trace::Trace) -> Value {
             .map(|value| Value::Number(value as i64))
             .unwrap_or(Value::Nil)
     }
-    fn preview(value: &trace::ValuePreview) -> Value {
+    fn preview(value: &journal::ValuePreview) -> Value {
         Value::Map(
             vec![
-                (key("type"), Value::String(value.type_name.clone())),
-                (key("display"), Value::String(value.display.clone())),
-                (key("truncated"), Value::Bool(value.truncated)),
+                (key("value/type"), Value::String(value.type_name.clone())),
+                (key("value/display"), Value::String(value.display.clone())),
+                (key("value/truncated"), Value::Bool(value.truncated)),
             ]
             .into_iter()
             .collect(),
         )
     }
-    fn kind(value: &trace::TraceEventKind) -> &'static str {
+    fn kind(value: &journal::JournalEventKind) -> &'static str {
         match value {
-            trace::TraceEventKind::EvaluationStart => "evaluation-start",
-            trace::TraceEventKind::MacroExpand => "macro-expand",
-            trace::TraceEventKind::OperationEnter => "operation-enter",
-            trace::TraceEventKind::OperationReturn => "operation-return",
-            trace::TraceEventKind::Error => "error",
-            trace::TraceEventKind::TraceTruncated => "trace-truncated",
+            journal::JournalEventKind::EvaluationStart => "evaluation/start",
+            journal::JournalEventKind::MacroExpand => "macro/expand",
+            journal::JournalEventKind::OperationEnter => "operation/enter",
+            journal::JournalEventKind::OperationReturn => "operation/return",
+            journal::JournalEventKind::Error => "evaluation/error",
+            journal::JournalEventKind::JournalTruncated => "journal/truncated",
         }
     }
-    fn status(value: &trace::TraceStatus) -> &'static str {
+    fn status(value: &journal::JournalStatus) -> &'static str {
         match value {
-            trace::TraceStatus::Ok => "ok",
-            trace::TraceStatus::Error => "error",
-            trace::TraceStatus::Truncated => "truncated",
+            journal::JournalStatus::Ok => "ok",
+            journal::JournalStatus::Error => "error",
+            journal::JournalStatus::Truncated => "truncated",
         }
     }
-    let events = trace
+    let events = journal
         .events
         .iter()
         .map(|event| {
-            Value::Map(
-                vec![
-                    (key("id"), Value::Number(event.id.0 as i64)),
-                    (key("sequence"), Value::Number(event.sequence as i64)),
-                    (key("kind"), key(kind(&event.kind))),
+            let mut fields = vec![
+                    (key("event/id"), Value::Number(event.id.0 as i64)),
+                    (key("event/sequence"), Value::Number(event.sequence as i64)),
+                    (key("event/kind"), key(kind(&event.kind))),
+            ];
+            if matches!(event.kind, journal::JournalEventKind::OperationEnter | journal::JournalEventKind::OperationReturn) {
+                fields.extend([
                     (
-                        key("operation"),
+                        key("operation/id"),
                         option_number(event.operation.map(|id| id.0)),
                     ),
                     (
-                        key("parent-operation"),
+                        key("operation/parent"),
                         option_number(event.parent_operation.map(|id| id.0)),
                     ),
-                    (key("depth"), Value::Number(event.depth as i64)),
+                    (key("operation/depth"), Value::Number(event.depth as i64)),
                     (
-                        key("function"),
+                        key("operation/name"),
                         event
                             .function
                             .clone()
                             .map(Value::String)
                             .unwrap_or(Value::Nil),
                     ),
-                    (
-                        key("values"),
+                ]);
+            }
+            match event.kind {
+                journal::JournalEventKind::OperationEnter => fields.push((
+                        key("operation/arguments"),
                         Value::Vector(event.values.iter().map(preview).collect::<Vec<_>>().into()),
-                    ),
-                    (
-                        key("message"),
-                        event
-                            .message
-                            .clone()
-                            .map(Value::String)
-                            .unwrap_or(Value::Nil),
-                    ),
-                ]
-                .into_iter()
-                .collect(),
-            )
+                    )),
+                journal::JournalEventKind::OperationReturn => fields.push((
+                    key("operation/result"),
+                    event.values.first().map(preview).unwrap_or(Value::Nil),
+                )),
+                journal::JournalEventKind::Error => fields.push((
+                    key("error/message"),
+                    event.message.clone().map(Value::String).unwrap_or(Value::Nil),
+                )),
+                journal::JournalEventKind::JournalTruncated => fields.push((
+                    key("truncation/reason"),
+                    event.message.clone().map(Value::String).unwrap_or(Value::Nil),
+                )),
+                journal::JournalEventKind::MacroExpand => {
+                    fields.push((key("macro/name"), event.function.clone().map(Value::String).unwrap_or(Value::Nil)));
+                    fields.push((key("macro/values"), Value::Vector(event.values.iter().map(preview).collect::<Vec<_>>().into())));
+                }
+                journal::JournalEventKind::EvaluationStart => {}
+            }
+            Value::Map(fields.into_iter().collect())
         })
         .collect::<Vec<_>>();
     Value::Map(
         vec![
-            (key("schema"), Value::String(trace.schema.into())),
-            (key("trace-id"), Value::String(trace.trace_id.to_string())),
-            (key("status"), key(status(&trace.status))),
-            (key("events"), Value::Vector(events.into())),
+            (key("journal/schema"), Value::String(journal.schema.into())),
+            (key("journal/id"), Value::String(journal.journal_id.to_string())),
+            (key("journal/status"), key(status(&journal.status))),
+            (key("journal/events"), Value::Vector(events.into())),
             (
-                key("result"),
-                trace.result.as_ref().map(preview).unwrap_or(Value::Nil),
+                key("journal/result"),
+                journal.result.as_ref().map(preview).unwrap_or(Value::Nil),
             ),
             (
-                key("error"),
-                trace.error.clone().map(Value::String).unwrap_or(Value::Nil),
+                key("journal/error"),
+                journal.error.clone().map(Value::String).unwrap_or(Value::Nil),
             ),
         ]
         .into_iter()
@@ -1202,19 +1218,19 @@ fn dispatch_eval_values(
     }
 }
 
-fn dispatch_eval_hir(
+fn dispatch_eval_halc(
     kernel: &mut SessionKernel,
     task: u64,
     session: &str,
     args: &[Value],
 ) -> Result<(), String> {
     let [Value::Bytes(bytes)] = args else {
-        return Err("hta eval-hir expects one byte array".into());
+        return Err("hta eval-halc expects one byte array".into());
     };
-    dispatch_eval_hir_bytes(kernel, task, session, bytes)
+    dispatch_eval_halc_bytes(kernel, task, session, bytes)
 }
 
-fn dispatch_eval_hir_bytes(
+fn dispatch_eval_halc_bytes(
     kernel: &mut SessionKernel,
     task: u64,
     session: &str,
@@ -1223,23 +1239,23 @@ fn dispatch_eval_hir_bytes(
     validate_session_name(session)?;
     kernel.session(session)?;
     kernel.task_sessions.insert(task, session.into());
-    kernel.session_mut(session)?.start_hir_fiber(task, bytes)
+    kernel.session_mut(session)?.start_halc_fiber(task, bytes)
 }
 
-fn dispatch_eval_hir_bundle(
+fn dispatch_eval_halc_bundle(
     kernel: &mut SessionKernel,
     task: u64,
     session: &str,
     args: &[Value],
 ) -> Result<(), String> {
     let [Value::Vector(modules)] = args else {
-        return Err("hta eval-hir-bundle expects one vector of byte arrays".into());
+        return Err("hta eval-halc-bundle expects one vector of byte arrays".into());
     };
     let modules = modules.iter().cloned().collect::<Vec<_>>();
-    dispatch_eval_hir_bundle_values(kernel, task, session, &modules)
+    dispatch_eval_halc_bundle_values(kernel, task, session, &modules)
 }
 
-fn dispatch_eval_hir_bundle_values(
+fn dispatch_eval_halc_bundle_values(
     kernel: &mut SessionKernel,
     task: u64,
     session: &str,
@@ -1249,13 +1265,13 @@ fn dispatch_eval_hir_bundle_values(
         .iter()
         .map(|module| match module {
             Value::Bytes(bytes) => Ok(bytes.as_slice()),
-            _ => Err("hta eval-hir-bundle expects byte arrays".to_owned()),
+            _ => Err("hta eval-halc-bundle expects byte arrays".to_owned()),
         })
         .collect::<Result<Vec<_>, _>>()?;
     validate_session_name(session)?;
     kernel.session(session)?;
     kernel.task_sessions.insert(task, session.into());
-    kernel.session_mut(session)?.start_hir_bundle(task, &bytes)
+    kernel.session_mut(session)?.start_halc_bundle(task, &bytes)
 }
 
 fn dispatch_complete(
@@ -2048,13 +2064,15 @@ mod tests {
         runtime.start_fiber(2, "(ns user) (def local 7)").unwrap();
         assert_eq!(runtime.namespaces.current().name().as_str(), "user");
         assert_eq!(answer.deref(), Value::Number(42));
-        assert!(runtime
-            .namespaces
-            .find("example.lib")
-            .unwrap()
-            .resolve(&Symbol::parse("answer"))
-            .unwrap()
-            .same_identity(&answer));
+        assert!(
+            runtime
+                .namespaces
+                .find("example.lib")
+                .unwrap()
+                .resolve(&Symbol::parse("answer"))
+                .unwrap()
+                .same_identity(&answer)
+        );
     }
 }
 

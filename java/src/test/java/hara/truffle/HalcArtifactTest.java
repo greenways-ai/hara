@@ -14,11 +14,11 @@ import java.nio.file.Path;
 import org.graalvm.polyglot.Context;
 import org.junit.Test;
 
-public class HirArtifactTest {
+public class HalcArtifactTest {
   @Test
   public void mapsAndSetsEncodeInCanonicalOrder() {
     byte[] mapA =
-        HirArtifact.encode(
+        HalcArtifact.encode(
             "t",
             "t",
             new byte[0],
@@ -26,7 +26,7 @@ public class HirArtifactTest {
               hara.lang.data.Map.Standard.from(null, new Object[] {"b", 2L, "a", 1L, "c", 3L})
             });
     byte[] mapB =
-        HirArtifact.encode(
+        HalcArtifact.encode(
             "t",
             "t",
             new byte[0],
@@ -36,13 +36,13 @@ public class HirArtifactTest {
     assertArrayEquals(mapA, mapB);
 
     byte[] setA =
-        HirArtifact.encode(
+        HalcArtifact.encode(
             "t",
             "t",
             new byte[0],
             new Object[] {hara.lang.data.Set.Standard.from(null, new Object[] {3L, 1L, 2L})});
     byte[] setB =
-        HirArtifact.encode(
+        HalcArtifact.encode(
             "t",
             "t",
             new byte[0],
@@ -57,7 +57,7 @@ public class HirArtifactTest {
     byte[] minusOne = {3, -1, -1, -1, -1, -1, -1, -1, -1};
 
     byte[] mapEncoded =
-        HirArtifact.encode(
+        HalcArtifact.encode(
             "t",
             "t",
             new byte[0],
@@ -70,7 +70,7 @@ public class HirArtifactTest {
     assertTrue(indexOf(mapEncoded, hundred) < indexOf(mapEncoded, minusOne));
 
     byte[] setEncoded =
-        HirArtifact.encode(
+        HalcArtifact.encode(
             "t",
             "t",
             new byte[0],
@@ -81,7 +81,7 @@ public class HirArtifactTest {
 
     // Ordered collections keep insertion order: it is semantic there.
     byte[] orderedA =
-        HirArtifact.encode(
+        HalcArtifact.encode(
             "t",
             "t",
             new byte[0],
@@ -89,7 +89,7 @@ public class HirArtifactTest {
               hara.lang.data.OrderedMap.Standard.from(null, new Object[] {"b", 2L, "a", 1L})
             });
     byte[] orderedB =
-        HirArtifact.encode(
+        HalcArtifact.encode(
             "t",
             "t",
             new byte[0],
@@ -113,8 +113,8 @@ public class HirArtifactTest {
   @Test
   public void regexValuesRoundTripPortably() {
     java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("a+b");
-    HirArtifact.Module module =
-        HirArtifact.decode(HirArtifact.encode("t", "t", new byte[0], new Object[] {pattern}));
+    HalcArtifact.Module module =
+        HalcArtifact.decode(HalcArtifact.encode("t", "t", new byte[0], new Object[] {pattern}));
     assertTrue(module.forms[0] instanceof java.util.regex.Pattern);
     assertEquals("a+b", ((java.util.regex.Pattern) module.forms[0]).pattern());
 
@@ -123,7 +123,7 @@ public class HirArtifactTest {
     HaraException error =
         assertThrows(
             HaraException.class,
-            () -> HirArtifact.encode("t", "t", new byte[0], new Object[] {flagged}));
+            () -> HalcArtifact.encode("t", "t", new byte[0], new Object[] {flagged}));
     assertTrue(error.getMessage().contains("regex flags"));
   }
 
@@ -131,7 +131,7 @@ public class HirArtifactTest {
   public void goldenBytesLockThePortableFormat() {
     // One form per opcode (0-17). Any change to the byte layout, the opcode
     // numbering, or the canonical collection ordering must update this golden
-    // value and specs/01-lang/009-hir/draft/hal-hir-format.md together.
+    // value and specs/01-lang/009-halc/draft/halc-format.md together.
     Object[] forms =
         new Object[] {
           null,
@@ -155,7 +155,7 @@ public class HirArtifactTest {
         };
     byte[] expected =
         hexBytes(
-            "48495200000100010000014b7640e14591506ea3c5e004467edc15b2ea8bb319"
+            "48414c43000100010000014b7640e14591506ea3c5e004467edc15b2ea8bb319"
                 + "3b48a4596d99c242ca5531a000000001740000000174e3b0c44298fc1c149afb"
                 + "f4c8996fb92427ae41e4649b934ca495991b7852b85500000012000102030000"
                 + "00000000002a044004000000000000050000001e313233343536373839303132"
@@ -167,14 +167,28 @@ public class HirArtifactTest {
                 + "030000000000000001030000000000000002000f000000020300000000000000"
                 + "0207000000016203000000000000000107000000016100100000000203000000"
                 + "0000000002030000000000000001001100000003612b62");
-    byte[] encoded = HirArtifact.encode("t", "t", new byte[0], forms);
+    byte[] encoded = HalcArtifact.encode("t", "t", new byte[0], forms);
     assertArrayEquals(expected, encoded);
 
     // The golden artifact must also remain decodable.
-    HirArtifact.Module module = HirArtifact.decode(expected);
+    HalcArtifact.Module module = HalcArtifact.decode(expected);
+    assertEquals(HalcArtifact.Origin.HALC, module.origin);
     assertEquals("t", module.namespace);
     assertEquals(18, module.forms.length);
     assertEquals("a+b", ((java.util.regex.Pattern) module.forms[17]).pattern());
+  }
+
+  @Test
+  public void legacyHirMagicDecodesButEncodingAlwaysUsesHalcMagic() {
+    byte[] halc = HalcArtifact.encode("t", "t", new byte[0], new Object[] {42L});
+    byte[] legacy = halc.clone();
+    legacy[0] = 'H';
+    legacy[1] = 'I';
+    legacy[2] = 'R';
+    legacy[3] = 0;
+
+    assertEquals(HalcArtifact.Origin.LEGACY_HIR, HalcArtifact.decode(legacy).origin);
+    assertArrayEquals(new byte[] {'H', 'A', 'L', 'C'}, java.util.Arrays.copyOf(halc, 4));
   }
 
   private static byte[] hexBytes(String hex) {
@@ -192,19 +206,19 @@ public class HirArtifactTest {
     Object[] forms =
         HaraLanguage.readAll(
             Files.readString(source, StandardCharsets.UTF_8),
-            HirArtifact.FOUNDATION_RESOURCE);
+            HalcArtifact.FOUNDATION_RESOURCE);
 
     byte[] first =
-        HirArtifact.encode(
-            "std.foundation", HirArtifact.FOUNDATION_RESOURCE, sourceBytes, forms);
+        HalcArtifact.encode(
+            "std.foundation", HalcArtifact.FOUNDATION_RESOURCE, sourceBytes, forms);
     byte[] second =
-        HirArtifact.encode(
-            "std.foundation", HirArtifact.FOUNDATION_RESOURCE, sourceBytes, forms);
+        HalcArtifact.encode(
+            "std.foundation", HalcArtifact.FOUNDATION_RESOURCE, sourceBytes, forms);
     assertArrayEquals(first, second);
 
-    HirArtifact.Module decoded = HirArtifact.decode(first);
+    HalcArtifact.Module decoded = HalcArtifact.decode(first);
     assertEquals("std.foundation", decoded.namespace);
-    assertEquals(HirArtifact.FOUNDATION_RESOURCE, decoded.resource);
+    assertEquals(HalcArtifact.FOUNDATION_RESOURCE, decoded.resource);
     assertEquals(forms.length, decoded.forms.length);
     for (int index = 0; index < forms.length; index++) {
       assertEquals(G.display(forms[index]), G.display(decoded.forms[index]));
@@ -217,19 +231,19 @@ public class HirArtifactTest {
     Object[] forms =
         HaraLanguage.readAll(new String(source, StandardCharsets.UTF_8), "foundation.hal");
     byte[] artifact =
-        HirArtifact.encode(
-            "std.foundation", HirArtifact.FOUNDATION_RESOURCE, source, forms);
+        HalcArtifact.encode(
+            "std.foundation", HalcArtifact.FOUNDATION_RESOURCE, source, forms);
 
     byte[] corrupt = artifact.clone();
     corrupt[corrupt.length - 1] ^= 1;
     assertTrue(
-        assertThrows(HaraException.class, () -> HirArtifact.decode(corrupt))
+        assertThrows(HaraException.class, () -> HalcArtifact.decode(corrupt))
             .getMessage()
             .contains("checksum"));
 
     byte[] truncated = java.util.Arrays.copyOf(artifact, artifact.length - 1);
     assertTrue(
-        assertThrows(HaraException.class, () -> HirArtifact.decode(truncated))
+        assertThrows(HaraException.class, () -> HalcArtifact.decode(truncated))
             .getMessage()
             .contains("truncated"));
 
@@ -237,21 +251,21 @@ public class HirArtifactTest {
     missingExecutableFlag[6] = 0;
     missingExecutableFlag[7] = 0;
     assertTrue(
-        assertThrows(HaraException.class, () -> HirArtifact.decode(missingExecutableFlag))
+        assertThrows(HaraException.class, () -> HalcArtifact.decode(missingExecutableFlag))
             .getMessage()
             .contains("unsupported flags"));
   }
 
   @Test
   public void compileCommandWritesLoadableFoundationArtifact() throws Exception {
-    Path output = Files.createTempFile("foundation-", ".hir");
+    Path output = Files.createTempFile("foundation-", ".halc");
     try {
       ByteArrayOutputStream stdout = new ByteArrayOutputStream();
       ByteArrayOutputStream stderr = new ByteArrayOutputStream();
       int status =
           Main.run(
               new String[] {
-                "compile-hir",
+                "compile-halc",
                 "lib/src/std/foundation.hal",
                 "--output",
                 output.toString()
@@ -259,25 +273,37 @@ public class HirArtifactTest {
               new PrintStream(stdout, true, StandardCharsets.UTF_8),
               new PrintStream(stderr, true, StandardCharsets.UTF_8));
       assertEquals(stderr.toString(StandardCharsets.UTF_8), 0, status);
-      assertEquals("std.foundation", HirArtifact.decode(Files.readAllBytes(output)).namespace);
+      assertEquals("std.foundation", HalcArtifact.decode(Files.readAllBytes(output)).namespace);
     } finally {
       Files.deleteIfExists(output);
     }
   }
 
   @Test
+  public void sharedCrossRuntimeGoldensDecode() throws Exception {
+    Path root = Path.of("specs/01-lang/009-halc/draft/conformance/golden");
+    HalcArtifact.Module current = HalcArtifact.decode(Files.readAllBytes(root.resolve("complete.halc")));
+    assertEquals(HalcArtifact.Origin.HALC, current.origin);
+    assertEquals("halc.conformance.complete", current.namespace);
+    assertEquals("conformance/complete.hal", current.resource);
+    assertEquals(
+        HalcArtifact.Origin.LEGACY_HIR,
+        HalcArtifact.decode(Files.readAllBytes(root.resolve("legacy-v1.hir"))).origin);
+  }
+
+  @Test
   public void strictAndOffModesBothPreserveFoundationSemantics() {
-    String previous = System.getProperty("hara.HirMode");
+    String previous = System.getProperty("hara.HalcMode");
     try {
-      System.setProperty("hara.HirMode", "strict");
-      long before = FoundationHirLowerer.compilationCount();
+      System.setProperty("hara.HalcMode", "strict");
+      long before = FoundationHalcLowerer.compilationCount();
       assertFoundation();
-      assertTrue(FoundationHirLowerer.compilationCount() > before);
-      System.setProperty("hara.HirMode", "off");
+      assertTrue(FoundationHalcLowerer.compilationCount() > before);
+      System.setProperty("hara.HalcMode", "off");
       assertFoundation();
     } finally {
-      if (previous == null) System.clearProperty("hara.HirMode");
-      else System.setProperty("hara.HirMode", previous);
+      if (previous == null) System.clearProperty("hara.HalcMode");
+      else System.setProperty("hara.HalcMode", previous);
     }
   }
 

@@ -1,4 +1,4 @@
-//! Development-only structured trace contract.
+//! Runtime implementation of the portable HAL Evaluation Journal contract.
 //!
 //! This module deliberately owns no evaluator state.  The evaluator will add
 //! hooks in the next slice; keeping collection separate makes it possible to
@@ -6,10 +6,10 @@
 
 use std::fmt;
 
-pub const SCHEMA: &str = "hara.trace/v1";
+pub const SCHEMA: &str = "hal.evaluation-journal/v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TraceId(pub u64);
+pub struct JournalId(pub u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EventId(pub u64);
@@ -18,13 +18,13 @@ pub struct EventId(pub u64);
 pub struct OperationId(pub u64);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TraceLimits {
+pub struct JournalLimits {
     pub max_events: usize,
     pub max_depth: usize,
     pub max_value_chars: usize,
 }
 
-impl Default for TraceLimits {
+impl Default for JournalLimits {
     fn default() -> Self {
         Self {
             max_events: 10_000,
@@ -47,6 +47,11 @@ impl ValuePreview {
         let mut chars = display.chars();
         let bounded: String = chars.by_ref().take(limit).collect();
         let truncated = chars.next().is_some();
+        let bounded = if truncated {
+            display.chars().take(limit.saturating_sub(1)).collect()
+        } else {
+            bounded
+        };
         Self {
             type_name: type_name.into(),
             display: if truncated {
@@ -60,20 +65,20 @@ impl ValuePreview {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TraceEventKind {
+pub enum JournalEventKind {
     EvaluationStart,
     MacroExpand,
     OperationEnter,
     OperationReturn,
     Error,
-    TraceTruncated,
+    JournalTruncated,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TraceEvent {
+pub struct JournalEvent {
     pub id: EventId,
     pub sequence: u64,
-    pub kind: TraceEventKind,
+    pub kind: JournalEventKind,
     pub operation: Option<OperationId>,
     pub parent_operation: Option<OperationId>,
     pub depth: usize,
@@ -83,39 +88,39 @@ pub struct TraceEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TraceStatus {
+pub enum JournalStatus {
     Ok,
     Error,
     Truncated,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Trace {
+pub struct Journal {
     pub schema: &'static str,
-    pub trace_id: TraceId,
-    pub status: TraceStatus,
-    pub events: Vec<TraceEvent>,
+    pub journal_id: JournalId,
+    pub status: JournalStatus,
+    pub events: Vec<JournalEvent>,
     pub result: Option<ValuePreview>,
     pub error: Option<String>,
 }
 
 /// Bounded event collector used by development evaluator hooks.
 #[derive(Debug)]
-pub struct TraceCollector {
-    trace: Trace,
-    limits: TraceLimits,
+pub struct JournalCollector {
+    journal: Journal,
+    limits: JournalLimits,
     next_event: u64,
     next_operation: u64,
     truncated: bool,
 }
 
-impl TraceCollector {
-    pub fn new(trace_id: TraceId, limits: TraceLimits) -> Self {
+impl JournalCollector {
+    pub fn new(journal_id: JournalId, limits: JournalLimits) -> Self {
         Self {
-            trace: Trace {
+            journal: Journal {
                 schema: SCHEMA,
-                trace_id,
-                status: TraceStatus::Ok,
+                journal_id,
+                status: JournalStatus::Ok,
                 events: Vec::new(),
                 result: None,
                 error: None,
@@ -141,60 +146,60 @@ impl TraceCollector {
         ValuePreview::new(type_name, display, self.limits.max_value_chars)
     }
 
-    pub fn record(&mut self, mut event: TraceEvent) {
+    pub fn record(&mut self, mut event: JournalEvent) {
         if self.truncated {
             return;
         }
-        if event.depth > self.limits.max_depth || self.trace.events.len() >= self.limits.max_events
+        if event.depth > self.limits.max_depth || self.journal.events.len() >= self.limits.max_events
         {
             self.truncated = true;
-            self.trace.status = TraceStatus::Truncated;
+            self.journal.status = JournalStatus::Truncated;
             self.push_truncation_event();
             return;
         }
         event.id = EventId(self.next_event);
         event.sequence = self.next_event;
         self.next_event += 1;
-        self.trace.events.push(event);
+        self.journal.events.push(event);
     }
 
-    pub fn finish(mut self, result: ValuePreview) -> Trace {
-        self.trace.result = Some(result);
-        self.trace
+    pub fn finish(mut self, result: ValuePreview) -> Journal {
+        self.journal.result = Some(result);
+        self.journal
     }
 
-    pub fn fail(mut self, error: impl Into<String>) -> Trace {
+    pub fn fail(mut self, error: impl Into<String>) -> Journal {
         let error = error.into();
-        self.record(TraceEvent::error(error.clone()));
-        self.trace.status = if self.truncated {
-            TraceStatus::Truncated
+        self.record(JournalEvent::error(error.clone()));
+        self.journal.status = if self.truncated {
+            JournalStatus::Truncated
         } else {
-            TraceStatus::Error
+            JournalStatus::Error
         };
-        self.trace.error = Some(error);
-        self.trace
+        self.journal.error = Some(error);
+        self.journal
     }
 
     fn push_truncation_event(&mut self) {
         // Reserve no extra capacity: the diagnostic replaces further detail.
         let id = EventId(self.next_event);
         self.next_event += 1;
-        self.trace.events.push(TraceEvent {
+        self.journal.events.push(JournalEvent {
             id,
             sequence: id.0,
-            kind: TraceEventKind::TraceTruncated,
+            kind: JournalEventKind::JournalTruncated,
             operation: None,
             parent_operation: None,
             depth: 0,
             function: None,
             values: Vec::new(),
-            message: Some("trace limit reached; evaluation continued".into()),
+            message: Some("journal limit reached; evaluation continued".into()),
         });
     }
 }
 
-impl TraceEvent {
-    pub fn new(kind: TraceEventKind) -> Self {
+impl JournalEvent {
+    pub fn new(kind: JournalEventKind) -> Self {
         Self {
             id: EventId(0),
             sequence: 0,
@@ -209,15 +214,15 @@ impl TraceEvent {
     }
 
     pub fn error(error: impl Into<String>) -> Self {
-        let mut event = Self::new(TraceEventKind::Error);
+        let mut event = Self::new(JournalEventKind::Error);
         event.message = Some(error.into());
         event
     }
 }
 
-impl fmt::Display for TraceId {
+impl fmt::Display for JournalId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "trace-{}", self.0)
+        write!(formatter, "journal-{}", self.0)
     }
 }
 
@@ -226,15 +231,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn shared_conformance_corpus_is_readable_by_the_rust_runtime() {
+        let source = include_str!(
+            "../../specs/00-unsorted/diagnostics/draft/conformance/evaluation-journal.edn"
+        );
+        let forms = crate::kernel::parse_forms(source).unwrap();
+        assert_eq!(forms.len(), 1);
+        assert!(source.contains(":function/nested"));
+        assert!(source.contains(":disabled/equivalence"));
+    }
+
+    #[test]
     fn collector_assigns_parent_linkable_operation_and_event_ids() {
-        let mut collector = TraceCollector::new(TraceId(17), TraceLimits::default());
+        let mut collector = JournalCollector::new(JournalId(17), JournalLimits::default());
         let parent = collector.next_operation_id();
         let child = collector.next_operation_id();
-        let mut enter = TraceEvent::new(TraceEventKind::OperationEnter);
+        let mut enter = JournalEvent::new(JournalEventKind::OperationEnter);
         enter.operation = Some(parent);
         enter.function = Some("app.main/run".into());
         collector.record(enter);
-        let mut nested = TraceEvent::new(TraceEventKind::OperationEnter);
+        let mut nested = JournalEvent::new(JournalEventKind::OperationEnter);
         nested.operation = Some(child);
         nested.parent_operation = Some(parent);
         nested.depth = 1;
@@ -250,21 +266,21 @@ mod tests {
 
     #[test]
     fn collector_truncates_recording_without_losing_final_result() {
-        let mut collector = TraceCollector::new(
-            TraceId(1),
-            TraceLimits {
+        let mut collector = JournalCollector::new(
+            JournalId(1),
+            JournalLimits {
                 max_events: 1,
-                ..TraceLimits::default()
+                ..JournalLimits::default()
             },
         );
-        collector.record(TraceEvent::new(TraceEventKind::EvaluationStart));
-        collector.record(TraceEvent::new(TraceEventKind::OperationEnter));
+        collector.record(JournalEvent::new(JournalEventKind::EvaluationStart));
+        collector.record(JournalEvent::new(JournalEventKind::OperationEnter));
         let trace = collector.finish(ValuePreview::new("number", "12", 10));
 
-        assert_eq!(trace.status, TraceStatus::Truncated);
+        assert_eq!(trace.status, JournalStatus::Truncated);
         assert!(matches!(
             trace.events.last().unwrap().kind,
-            TraceEventKind::TraceTruncated
+            JournalEventKind::JournalTruncated
         ));
         assert_eq!(trace.result.unwrap().display, "12");
     }
@@ -272,7 +288,7 @@ mod tests {
     #[test]
     fn value_previews_bound_unicode_without_invalid_utf8() {
         let value = ValuePreview::new("string", "λabcdef", 2);
-        assert_eq!(value.display, "λa…");
+        assert_eq!(value.display, "λ…");
         assert!(value.truncated);
     }
 }

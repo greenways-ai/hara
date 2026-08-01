@@ -3,26 +3,26 @@ package hara.truffle;
 import java.io.IOException;
 import java.io.InputStream;
 
-/** Resolves the optional packaged foundation HIR without owning namespace transactions. */
-final class FoundationHirLoader {
-  private static volatile HirArtifact.Module cachedModule;
+/** Resolves the optional packaged foundation HALC without owning namespace transactions. */
+final class FoundationHalcLoader {
+  private static volatile HalcArtifact.Module cachedModule;
 
-  private FoundationHirLoader() {}
+  private FoundationHalcLoader() {}
 
   static Attempt load(String resourceName) {
-    HirMode mode = HirMode.current();
-    if (mode == HirMode.OFF || !HirArtifact.FOUNDATION_RESOURCE.equals(resourceName)) {
+    HalcMode mode = HalcMode.current();
+    if (mode == HalcMode.OFF || !HalcArtifact.FOUNDATION_RESOURCE.equals(resourceName)) {
       return Attempt.missing();
     }
-    HirArtifact.Module module;
+    HalcArtifact.Module module;
     try (InputStream input =
-        FoundationHirLoader.class
+        FoundationHalcLoader.class
             .getClassLoader()
-            .getResourceAsStream(HirArtifact.FOUNDATION_HIR_RESOURCE)) {
+            .getResourceAsStream(HalcArtifact.FOUNDATION_HALC_RESOURCE)) {
       if (input == null) {
-        if (mode == HirMode.STRICT) {
+        if (mode == HalcMode.STRICT) {
           throw new HaraException(
-              "Strict HIR mode could not find " + HirArtifact.FOUNDATION_HIR_RESOURCE);
+              "Strict HALC mode could not find " + HalcArtifact.FOUNDATION_HALC_RESOURCE);
         }
         return Attempt.missing();
       }
@@ -30,32 +30,32 @@ final class FoundationHirLoader {
       if (!"std.foundation".equals(module.namespace)
           || !resourceName.equals(module.resource)) {
         throw new HaraException(
-            "HIR module identity mismatch: "
+            "HALC module identity mismatch: "
                 + module.namespace
                 + " from "
                 + module.resource);
       }
     } catch (IOException | RuntimeException error) {
-      if (mode == HirMode.STRICT) {
+      if (mode == HalcMode.STRICT) {
         if (error instanceof HaraException) throw (HaraException) error;
-        throw new HaraException("Unable to load foundation HIR: " + error.getMessage());
+        throw new HaraException("Unable to load foundation HALC: " + error.getMessage());
       }
       return Attempt.missing();
     }
     // Execution errors must escape even in auto mode so HaraContext can roll back its snapshot.
     return Attempt.loaded(
-        HaraLanguage.compileHir(
-                module.forms, "classpath:" + HirArtifact.FOUNDATION_HIR_RESOURCE)
+        HaraLanguage.compileHalc(
+                module.forms, "classpath:" + HalcArtifact.FOUNDATION_HALC_RESOURCE)
             .call());
   }
 
-  private static HirArtifact.Module cachedModule(InputStream input) throws IOException {
-    HirArtifact.Module module = cachedModule;
+  private static HalcArtifact.Module cachedModule(InputStream input) throws IOException {
+    HalcArtifact.Module module = cachedModule;
     if (module != null) return module;
-    synchronized (FoundationHirLoader.class) {
+    synchronized (FoundationHalcLoader.class) {
       module = cachedModule;
       if (module == null) {
-        module = HirArtifact.decode(input.readAllBytes());
+        module = HalcArtifact.decode(input.readAllBytes());
         cachedModule = module;
       }
       return module;

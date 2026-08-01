@@ -10,6 +10,7 @@ import hara.kernel.builtin.BuiltinStruct;
 import hara.truffle.HaraBox;
 import hara.truffle.HaraException;
 import hara.truffle.HaraLanguage;
+import hara.truffle.EvaluationJournal;
 
 public final class HaraRootNode extends RootNode {
   @Child private HaraExpressionNode body;
@@ -71,10 +72,13 @@ public final class HaraRootNode extends RootNode {
       frame.setObject(parameterSlots[minimumArity], BuiltinStruct.vector(rest));
     }
 
+    long journalOperation = EvaluationJournal.enter(frameLabel(), arguments, argumentOffset);
     try {
       Object result = body.execute(frame);
+      EvaluationJournal.returned(journalOperation, result);
       return exportResult ? HaraBox.export(result) : result;
     } catch (RuntimeException error) {
+      EvaluationJournal.failed(journalOperation, error);
       if (!HaraException.tracingEnabled()) throw error;
       throw HaraException.withFrame(error, this, frameLabel());
     }

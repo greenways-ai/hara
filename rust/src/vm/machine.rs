@@ -18,8 +18,12 @@
 //! `core::catch_matches`/`core::caught_error` boundary, so thrown values
 //! and runtime-error strings behave exactly as in the tree evaluator.
 
+#[cfg(feature = "tracing-jit")]
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+#[cfg(feature = "tracing-jit")]
+use std::rc::Weak;
 
 use super::error::VmError;
 use super::frame::Frame;
@@ -74,6 +78,56 @@ pub struct Machine {
     vm_globals: HashMap<usize, VmSlot>,
     next_closure_identity: u64,
     ip: usize,
+    #[cfg(feature = "tracing-jit")]
+    jit: crate::jit::runtime::JitRuntime,
+}
+
+#[cfg(feature = "tracing-jit")]
+struct CachedJit {
+    program: Weak<Program>,
+    runtime: crate::jit::runtime::JitRuntime,
+}
+
+#[cfg(feature = "tracing-jit")]
+thread_local! {
+    static PROGRAM_JITS: RefCell<HashMap<usize, CachedJit>> = RefCell::new(HashMap::new());
+}
+
+#[cfg(feature = "tracing-jit")]
+fn program_key(program: &Rc<Program>) -> usize {
+    Rc::as_ptr(program) as usize
+}
+
+#[cfg(feature = "tracing-jit")]
+fn take_program_jit(program: &Rc<Program>) -> crate::jit::runtime::JitRuntime {
+    PROGRAM_JITS.with(|cache| {
+        cache
+            .borrow_mut()
+            .remove(&program_key(program))
+            .filter(|cached| {
+                cached
+                    .program
+                    .upgrade()
+                    .is_some_and(|owner| Rc::ptr_eq(&owner, program))
+            })
+            .map(|cached| cached.runtime)
+            .unwrap_or_default()
+    })
+}
+
+#[cfg(feature = "tracing-jit")]
+fn store_program_jit(program: &Rc<Program>, runtime: crate::jit::runtime::JitRuntime) {
+    PROGRAM_JITS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        cache.retain(|_, cached| cached.program.strong_count() > 0);
+        cache.insert(
+            program_key(program),
+            CachedJit {
+                program: Rc::downgrade(program),
+                runtime,
+            },
+        );
+    });
 }
 
 struct SavedFrame {
@@ -100,6 +154,8 @@ impl Machine {
             vm_globals: HashMap::new(),
             next_closure_identity: 0,
             ip: 0,
+            #[cfg(feature = "tracing-jit")]
+            jit: crate::jit::runtime::JitRuntime::default(),
         }
     }
 
@@ -154,6 +210,8 @@ impl Machine {
             vm_globals: HashMap::new(),
             next_closure_identity: 0,
             ip: 0,
+            #[cfg(feature = "tracing-jit")]
+            jit: crate::jit::runtime::JitRuntime::default(),
         }
     }
 
@@ -343,7 +401,16 @@ impl Machine {
                 return VmOutcome::Failed(self.error(function, "instruction pointer out of range"));
             };
             match self.dispatch(&program, function, instruction) {
-                Dispatch::Next(ip) => self.ip = ip,
+                Dispatch::Next(ip) => {
+                    #[cfg(feature = "tracing-jit")]
+                    if ip <= self.ip {
+                        let (mut locals, writable) = self.frame.trace_locals();
+                        if self.jit.backedge(&program, self.function as u16, self.ip as u32, ip as u32, &mut locals) {
+                            self.frame.apply_trace_locals(&locals, &writable);
+                        }
+                    }
+                    self.ip = ip;
+                }
                 Dispatch::Call { callee, args } => {
                     if let Err(message) = self.enter_callable(&program, callee, args) {
                         match self.raise(function, message) {
@@ -820,10 +887,31 @@ fn constant_string_vector(program: &Program, index: u32) -> Option<Vec<String>> 
 }
 
 fn run_entry(program: Rc<Program>) -> Result<Value, VmError> {
-    match Machine::entry(program).run() {
+    let mut machine = Machine::entry(program.clone());
+    #[cfg(feature = "tracing-jit")]
+    {
+        machine.jit = take_program_jit(&program);
+    }
+    let outcome = machine.run();
+    #[cfg(feature = "tracing-jit")]
+    store_program_jit(&program, machine.jit);
+    match outcome {
         VmOutcome::Returned(value) => Ok(value),
         VmOutcome::Failed(error) => Err(error),
     }
+}
+
+#[cfg(all(test, feature = "tracing-jit"))]
+pub(crate) fn cached_trace_count(program: &Rc<Program>) -> usize {
+    PROGRAM_JITS.with(|cache| {
+        cache
+            .borrow()
+            .get(&program_key(program))
+            .and_then(|cached| cached.program.upgrade().map(|owner| (owner, &cached.runtime)))
+            .filter(|(owner, _)| Rc::ptr_eq(owner, program))
+            .map(|(_, runtime)| runtime.compiled_count())
+            .unwrap_or(0)
+    })
 }
 
 /// Executes a validated program's entry function.

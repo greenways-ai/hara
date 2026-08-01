@@ -71,12 +71,12 @@ public final class Main {
       printUsage(output);
       return 0;
     }
-    if (args.length > 0 && "compile-hir".equals(args[0])) {
-      return HirCompiler.run(
+    if (args.length > 0 && "compile-halc".equals(args[0])) {
+      return HalcCompiler.run(
           java.util.Arrays.copyOfRange(args, 1, args.length), output, error);
     }
-    if (args.length > 0 && "foundation-hir-benchmark".equals(args[0])) {
-      return FoundationHirBenchmark.run(
+    if (args.length > 0 && "foundation-halc-benchmark".equals(args[0])) {
+      return FoundationHalcBenchmark.run(
           java.util.Arrays.copyOfRange(args, 1, args.length), output, error);
     }
     Capabilities capabilities;

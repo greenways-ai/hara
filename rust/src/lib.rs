@@ -8,11 +8,11 @@ pub mod extension;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod extension_tool;
 pub mod hta;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod identity_tool;
 mod json;
 pub mod kernel;
 pub mod lang;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod identity_tool;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_cli;
 #[cfg(not(target_arch = "wasm32"))]
@@ -28,12 +28,14 @@ pub mod resp;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tap;
 pub mod task;
-#[cfg(feature = "dev-trace")]
-pub mod trace;
+#[cfg(feature = "evaluation-journal")]
+pub mod journal;
 // Experimental staged bytecode VM (issue #195). Non-default feature; the
 // default evaluator is untouched.
 #[cfg(feature = "bytecode-vm")]
 pub mod vm;
+#[cfg(feature = "tracing-jit")]
+pub mod jit;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod wasmtime_provider;
 use crate::kernel::Form;
@@ -124,8 +126,8 @@ pub struct Runtime {
     namespace_registry: kernel::NamespaceRegistry<core::Value>,
     macros: Rc<RefCell<HashMap<(String, String), Rc<core::Function>>>>,
     generated_configs: HashMap<String, kernel::GeneratedNamespaceConfig>,
-    #[cfg(feature = "dev-trace")]
-    next_trace_id: u64,
+    #[cfg(feature = "evaluation-journal")]
+    next_journal_id: u64,
     #[cfg(target_arch = "wasm32")]
     host_handler: Option<js_sys::Function>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -300,7 +302,8 @@ impl SessionKernel {
         for (resource, source) in &self.resources {
             runtime.register_resource(resource, source);
         }
-        self.sessions.insert(name.into(), Session::new(name, runtime));
+        self.sessions
+            .insert(name.into(), Session::new(name, runtime));
         Ok(())
     }
 
@@ -468,11 +471,31 @@ fn validate_session_name(name: &str) -> Result<(), String> {
 /// an alias to its backing method name.
 fn reject_legacy_iterator_calls(form: &Form) -> Result<(), String> {
     const LEGACY: &[&str] = &[
-        "iter-has?", "iter-finite?", "iter-materialize", "iter-close", "iter-map",
-        "iter-filter", "iter-take-while", "iter-drop-while", "iter-mapcat", "iter-keep",
-        "iter-interpose", "iter-interleave", "iter-every?", "iter-any?", "iter-take",
-        "iter-drop", "iter-zip", "iter-cycle", "iter-partition-pair", "iter-partition-all",
-        "iter-partition", "iter-range", "iter-constantly", "iter-repeatedly", "iter-iterate",
+        "iter-has?",
+        "iter-finite?",
+        "iter-materialize",
+        "iter-close",
+        "iter-map",
+        "iter-filter",
+        "iter-take-while",
+        "iter-drop-while",
+        "iter-mapcat",
+        "iter-keep",
+        "iter-interpose",
+        "iter-interleave",
+        "iter-every?",
+        "iter-any?",
+        "iter-take",
+        "iter-drop",
+        "iter-zip",
+        "iter-cycle",
+        "iter-partition-pair",
+        "iter-partition-all",
+        "iter-partition",
+        "iter-range",
+        "iter-constantly",
+        "iter-repeatedly",
+        "iter-iterate",
     ];
     match form {
         Form::List(values) => {
@@ -570,8 +593,8 @@ impl Runtime {
                 "user".into(),
                 kernel::GeneratedNamespaceConfig::defaults(),
             )]),
-            #[cfg(feature = "dev-trace")]
-            next_trace_id: 1,
+            #[cfg(feature = "evaluation-journal")]
+            next_journal_id: 1,
             #[cfg(target_arch = "wasm32")]
             host_handler: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -614,10 +637,8 @@ impl Runtime {
                 if target.resolve(&name).is_none() {
                     target.map_var(name.clone(), var.clone());
                 }
-                let canonical = crate::lang::data::Symbol::parse(&format!(
-                    "std.native.{}",
-                    name.as_str()
-                ));
+                let canonical =
+                    crate::lang::data::Symbol::parse(&format!("std.native.{}", name.as_str()));
                 if target.resolve(&canonical).is_none() {
                     target.map_var(canonical, var);
                 }
@@ -731,9 +752,9 @@ impl Runtime {
         Ok(result.display())
     }
 
-    pub fn eval_hir(&mut self, bytes: &[u8]) -> Result<String, String> {
+    pub fn eval_halc(&mut self, bytes: &[u8]) -> Result<String, String> {
         self.refresh_qualified_bindings();
-        let module = kernel::hir::decode_hir(bytes)?;
+        let module = kernel::halc::decode_halc(bytes)?;
         let result = self.eval_forms(module.forms, false)?;
         self.save_namespace();
         self.refresh_qualified_bindings();
@@ -1422,19 +1443,38 @@ impl Runtime {
 }
 
 impl Runtime {
-    /// Evaluates once through the existing evaluator and returns a
-    /// development-only structured trace.
-    #[cfg(feature = "dev-trace")]
-    pub fn eval_native_trace(&mut self, source: &str) -> Result<trace::Trace, String> {
-        let trace_id = trace::TraceId(self.next_trace_id);
-        self.next_trace_id += 1;
-        let (result, trace) = core::with_development_trace(
-            trace_id,
-            trace::TraceLimits::default(),
-            || self.eval_text_mode(source, true),
-            |value, collector| collector.preview_value("result", value),
+    /// Evaluates once through the existing evaluator and returns a portable
+    /// bounded Evaluation Journal.
+    #[cfg(feature = "evaluation-journal")]
+    pub fn eval_native_journal(&mut self, source: &str) -> journal::Journal {
+        let journal_id = journal::JournalId(self.next_journal_id);
+        self.next_journal_id += 1;
+        let (_, journal) = core::with_evaluation_journal(
+            journal_id,
+            journal::JournalLimits::default(),
+            || {
+                self.refresh_qualified_bindings();
+                let forms = kernel::parse_forms(source)?;
+                let result = self.eval_forms(forms, true)?;
+                self.save_namespace();
+                self.refresh_qualified_bindings();
+                Ok(result)
+            },
+            |value, collector| {
+                collector.preview_value(core::portable_type_name(value), value.display())
+            },
         );
-        result.map(|_| trace)
+        journal
+    }
+
+    #[cfg(feature = "evaluation-journal")]
+    #[deprecated(note = "use eval_native_journal")]
+    pub fn eval_native_trace(&mut self, source: &str) -> Result<journal::Journal, String> {
+        let journal = self.eval_native_journal(source);
+        match journal.status {
+            journal::JournalStatus::Error => Err(journal.error.clone().unwrap_or_default()),
+            _ => Ok(journal),
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1945,7 +1985,10 @@ mod tests {
 
         assert!(alpha.started());
         assert_eq!(alpha.props().namespace, "user");
-        assert_eq!(alpha.call("(do (ns alpha.core) (def answer 41) answer)"), Ok("41".into()));
+        assert_eq!(
+            alpha.call("(do (ns alpha.core) (def answer 41) answer)"),
+            Ok("41".into())
+        );
         assert_eq!(alpha.props().namespace, "alpha.core");
         assert_eq!(beta.current_namespace(), "user");
 
@@ -2133,10 +2176,12 @@ mod tests {
     #[test]
     fn hara_file_operations_use_capability_providers() {
         let mut runtime = Runtime::new();
-        assert!(runtime
-            .eval_text("(file/read \"/sandbox/data.bin\")")
-            .unwrap_err()
-            .contains("unsupported or file access is denied"));
+        assert!(
+            runtime
+                .eval_text("(file/read \"/sandbox/data.bin\")")
+                .unwrap_err()
+                .contains("unsupported or file access is denied")
+        );
 
         runtime.install_memory_file_provider("/sandbox");
         assert_eq!(
@@ -2157,10 +2202,12 @@ mod tests {
                 .unwrap(),
             "#bytes[0 127 -1]"
         );
-        assert!(runtime
-            .eval_text("(file/resolve \"/sandbox\" \"../escape\")")
-            .unwrap_err()
-            .contains("file/denied"));
+        assert!(
+            runtime
+                .eval_text("(file/resolve \"/sandbox\" \"../escape\")")
+                .unwrap_err()
+                .contains("file/denied")
+        );
         assert_eq!(
             runtime
                 .eval_text("(deref (file/exists? \"/sandbox/data.bin\"))")
@@ -2208,10 +2255,12 @@ mod tests {
     #[test]
     fn hara_socket_operations_use_callback_providers() {
         let mut runtime = Runtime::new();
-        assert!(runtime
-            .eval_text("(socket/connect \"localhost\" 8080 {} (fn [error socket] socket))")
-            .unwrap_err()
-            .contains("unsupported or network access is denied"));
+        assert!(
+            runtime
+                .eval_text("(socket/connect \"localhost\" 8080 {} (fn [error socket] socket))")
+                .unwrap_err()
+                .contains("unsupported or network access is denied")
+        );
 
         runtime.install_loopback_socket_provider();
         assert_eq!(
@@ -2230,10 +2279,12 @@ mod tests {
             runtime.eval_text("(socket/close socket-handle)").unwrap(),
             "nil"
         );
-        assert!(runtime
-            .eval_text("(socket/send socket-handle (bytes 1))")
-            .unwrap_err()
-            .contains("socket/invalid"));
+        assert!(
+            runtime
+                .eval_text("(socket/send socket-handle (bytes 1))")
+                .unwrap_err()
+                .contains("socket/invalid")
+        );
     }
 
     #[test]
@@ -2476,10 +2527,12 @@ mod tests {
                 .unwrap(),
             "\"X\""
         );
-        assert!(runtime
-            .eval_text("(bytes/count (bytes 1))")
-            .unwrap_err()
-            .contains("bytes/count"));
+        assert!(
+            runtime
+                .eval_text("(bytes/count (bytes 1))")
+                .unwrap_err()
+                .contains("bytes/count")
+        );
         assert_eq!(
             runtime
                 .eval_text("(ns core-user (:require [hara.lib.core :as core])) (core/bit-not 0)")
@@ -2498,10 +2551,12 @@ mod tests {
                 .unwrap(),
             "\"x\""
         );
-        assert!(runtime
-            .eval_text("poisoned")
-            .unwrap_err()
-            .contains("unbound symbol"));
+        assert!(
+            runtime
+                .eval_text("poisoned")
+                .unwrap_err()
+                .contains("unbound symbol")
+        );
     }
 
     #[test]
@@ -2531,14 +2586,18 @@ mod tests {
                 .unwrap(),
             "\"{\\n  \\\"a\\\": 1\\n}\""
         );
-        assert!(runtime
-            .eval_text("(std.foundation.json/pretty {\"a\" 1} nil)")
-            .unwrap_err()
-            .contains("options map"));
-        assert!(runtime
-            .eval_text("(std.foundation.json/read \"1.5\")")
-            .unwrap_err()
-            .contains("signed 64-bit integers"));
+        assert!(
+            runtime
+                .eval_text("(std.foundation.json/pretty {\"a\" 1} nil)")
+                .unwrap_err()
+                .contains("options map")
+        );
+        assert!(
+            runtime
+                .eval_text("(std.foundation.json/read \"1.5\")")
+                .unwrap_err()
+                .contains("signed 64-bit integers")
+        );
         assert_eq!(
             runtime
                 .eval_text("(do (require 'std.pretty) (std.pretty/pprint-str {:a [1 2]}))")
@@ -2569,13 +2628,15 @@ mod tests {
                 .unwrap(),
             "[\"{:a [1 2]}\" \"[:a 1]\"]"
         );
-        assert!(runtime
-            .eval_text(
-                "(do (require 'std.foundation.edn) \
+        assert!(
+            runtime
+                .eval_text(
+                    "(do (require 'std.foundation.edn) \
                  (std.foundation.edn/pretty [:a 1] nil))"
-            )
-            .unwrap_err()
-            .contains("options map"));
+                )
+                .unwrap_err()
+                .contains("options map")
+        );
         assert_eq!(
             runtime
                 .eval_text(
@@ -2605,14 +2666,16 @@ mod tests {
                 .unwrap(),
             "{:kind :invalid}"
         );
-        for source in ["1/2", "1N", "1M", "1 2"] {
+        for source in ["1/2", "1 2"] {
             let escaped = source.replace('\\', "\\\\").replace('"', "\\\"");
-            assert!(runtime
-                .eval_text(&format!(
-                    "(do (require 'std.foundation.edn) \
+            assert!(
+                runtime
+                    .eval_text(&format!(
+                        "(do (require 'std.foundation.edn) \
                      (std.foundation.edn/read \"{escaped}\"))"
-                ))
-                .is_err());
+                    ))
+                    .is_err()
+            );
         }
     }
 
@@ -2695,9 +2758,11 @@ mod tests {
         assert_eq!(runtime.eval_text("ordinary").unwrap(), "1");
         assert!(runtime.eval_text("fresh").is_err());
         assert!(runtime.eval_text("Broken").is_err());
-        assert!(runtime
-            .eval_text("(protocol-call BoxOps read (Box 1))")
-            .is_err());
+        assert!(
+            runtime
+                .eval_text("(protocol-call BoxOps read (Box 1))")
+                .is_err()
+        );
         assert!(runtime.eval_text("(BoxOps/read (Box 1))").is_err());
     }
 
@@ -2725,7 +2790,9 @@ mod tests {
     #[test]
     fn foundation_protocols_are_canonical_and_method_names_reject_bangs() {
         let mut runtime = Runtime::new();
-        let Some(contract) = repo_text("specs/00-unsorted/platform-language/draft/conformance/protocols.edn") else {
+        let Some(contract) =
+            repo_text("specs/00-unsorted/platform-language/draft/conformance/protocols.edn")
+        else {
             return;
         };
         let fixture =
@@ -2761,10 +2828,12 @@ mod tests {
             };
             assert_eq!(descriptor.name, core::builtin_protocol_name(name));
             assert_eq!(descriptor.methods.len(), methods.len());
-            assert!(descriptor
-                .methods
-                .keys()
-                .all(|method| !method.ends_with('!')));
+            assert!(
+                descriptor
+                    .methods
+                    .keys()
+                    .all(|method| !method.ends_with('!'))
+            );
             assert_eq!(
                 foundation
                     .resolve(&lang::data::Symbol::parse(name))
@@ -2854,10 +2923,12 @@ mod tests {
                 .unwrap(),
             "#protocol[user/PredicateProtocol]"
         );
-        assert!(runtime
-            .eval_text("(defprotocol MutatingProtocol (mutate! [self]))")
-            .unwrap_err()
-            .contains("protocol method names must not end with !"));
+        assert!(
+            runtime
+                .eval_text("(defprotocol MutatingProtocol (mutate! [self]))")
+                .unwrap_err()
+                .contains("protocol method names must not end with !")
+        );
     }
 
     #[test]
@@ -2876,8 +2947,9 @@ mod tests {
     fn shared_foundation_protocol_functionality_fixture_runs_in_the_native_runtime() {
         let source =
             include_str!("../../lib/test-fixtures/std/foundation/protocol_functionality.hal");
-        let Some(catalog) = repo_text("specs/00-unsorted/platform-language/draft/conformance/protocol-method-cases.edn")
-        else {
+        let Some(catalog) = repo_text(
+            "specs/00-unsorted/platform-language/draft/conformance/protocol-method-cases.edn",
+        ) else {
             return;
         };
         assert_eq!(catalog.matches("{:protocol ").count(), 88);
@@ -3010,16 +3082,20 @@ mod tests {
         let mut runtime = Runtime::new();
         assert_eq!(
             runtime
-                .eval_text(include_str!("../../lib/test-fixtures/std/lib/substrate/frame_conformance.hal"))
+                .eval_text(include_str!(
+                    "../../lib/test-fixtures/std/lib/substrate/frame_conformance.hal"
+                ))
                 .unwrap(),
             "\"{\\\"version\\\":\\\"substrate.v1\\\",\\\"kind\\\":\\\"request\\\",\\\"id\\\":\\\"req-1\\\",\\\"source\\\":\\\"client/a\\\",\\\"target\\\":\\\"server/b\\\",\\\"space\\\":\\\"workspace/main\\\",\\\"meta\\\":{\\\"trace\\\":\\\"trace-1\\\"},\\\"action\\\":\\\"math/add\\\",\\\"args\\\":[19,23],\\\"reply_to\\\":null,\\\"status\\\":null,\\\"data\\\":null,\\\"error\\\":null,\\\"signal\\\":null,\\\"cause\\\":null}\""
         );
-        assert!(runtime
-            .eval_text(
-                "(do (require 'std.lib.substrate.frame) \\
+        assert!(
+            runtime
+                .eval_text(
+                    "(do (require 'std.lib.substrate.frame) \\
                      (std.lib.substrate.frame/normalize-frame {:kind :unknown :id \"evt-1\"}))",
-            )
-            .is_err());
+                )
+                .is_err()
+        );
     }
 
     #[test]
@@ -3134,14 +3210,18 @@ mod tests {
     #[test]
     fn set_literals_reject_duplicate_items() {
         let mut runtime = Runtime::new();
-        assert!(runtime
-            .eval_text("#{1 (+ 1 1) 1}")
-            .unwrap_err()
-            .contains("Duplicate item"));
-        assert!(runtime
-            .eval_text("(count #{1 2 2})")
-            .unwrap_err()
-            .contains("Duplicate item"));
+        assert!(
+            runtime
+                .eval_text("#{1 (+ 1 1) 1}")
+                .unwrap_err()
+                .contains("Duplicate item")
+        );
+        assert!(
+            runtime
+                .eval_text("(count #{1 2 2})")
+                .unwrap_err()
+                .contains("Duplicate item")
+        );
         assert_eq!(runtime.eval_text("(has? #{1 2} 2)").unwrap(), "true");
         assert_eq!(runtime.eval_text("(conj #{1} 2)").unwrap(), "#{1 2}");
         assert_eq!(runtime.eval_text("(= (set 1 2 1) #{1 2})").unwrap(), "true");
@@ -3173,18 +3253,24 @@ mod tests {
     fn fn_star_and_eval_forms_execute_while_hash_dispatch_extensions_are_rejected() {
         let mut runtime = Runtime::new();
         assert_eq!(runtime.eval_text("((fn* [x] (+ x 1)) 4)").unwrap(), "5");
-        assert!(runtime
-            .eval_text("#=(+ 2 3)")
-            .unwrap_err()
-            .contains("No dispatch macro for: ="));
-        assert!(runtime
-            .eval_text("#[(def x 4) (+ x 2)]")
-            .unwrap_err()
-            .contains("No dispatch macro for: ["));
-        assert!(runtime
-            .eval_text("(eval)")
-            .unwrap_err()
-            .contains("one form"));
+        assert!(
+            runtime
+                .eval_text("#=(+ 2 3)")
+                .unwrap_err()
+                .contains("No dispatch macro for: =")
+        );
+        assert!(
+            runtime
+                .eval_text("#[(def x 4) (+ x 2)]")
+                .unwrap_err()
+                .contains("No dispatch macro for: [")
+        );
+        assert!(
+            runtime
+                .eval_text("(eval)")
+                .unwrap_err()
+                .contains("one form")
+        );
     }
 
     #[test]
@@ -3210,6 +3296,8 @@ mod tests {
         let mut runtime = Runtime::new();
         let cases = [
             ("1.5", "1.5"),
+            ("123N", "123N"),
+            ("1.20M", "1.2M"),
             ("\\newline", "\\newline"),
             ("#\"a+\"", "#\"a+\""),
             ("#demo {:a 1}", "#demo{:a 1}"),
@@ -3220,7 +3308,7 @@ mod tests {
         for (source, expected) in cases {
             assert_eq!(runtime.eval_text(source).unwrap(), expected, "{source}");
         }
-        for unsupported in ["123N", "1.20M", "9223372036854775808"] {
+        for unsupported in ["9223372036854775808"] {
             assert!(runtime.eval_text(unsupported).is_err(), "{unsupported}");
         }
         assert_eq!(runtime.eval_text("(= ##NaN ##NaN)").unwrap(), "true");
@@ -3246,10 +3334,12 @@ mod tests {
         assert_eq!(runtime.eval_text("(= (sqrt -1) ##NaN)").unwrap(), "true");
         assert_eq!(runtime.eval_text("(sqrt (long 9.9))").unwrap(), "3");
         assert_eq!(runtime.eval_text("(sqrt (double 9))").unwrap(), "3");
-        assert!(runtime
-            .eval_text("(abs -9223372036854775808)")
-            .unwrap_err()
-            .contains("overflow"));
+        assert!(
+            runtime
+                .eval_text("(abs -9223372036854775808)")
+                .unwrap_err()
+                .contains("overflow")
+        );
         assert_eq!(
             runtime
                 .eval_text("[(= (asinh 1.0e300) ##Inf) (= (acosh 1.0e300) ##Inf)]")
@@ -3298,7 +3388,8 @@ mod tests {
                 .unwrap_or_else(|| panic!("unknown wrapper source: {path}"))
         }
 
-        let Some(contract_source) = repo_text("specs/00-unsorted/platform-language/draft/conformance/native.edn")
+        let Some(contract_source) =
+            repo_text("specs/00-unsorted/platform-language/draft/conformance/native.edn")
         else {
             return;
         };
@@ -3639,10 +3730,12 @@ mod tests {
         assert_eq!(runtime.eval_text("(key (pair 1 2))").unwrap(), "1");
         assert_eq!(runtime.eval_text("(val (pair 1 2))").unwrap(), "2");
         assert_eq!(runtime.eval_text("(tup 1 2 3 4 5)").unwrap(), "[1 2 3 4 5]");
-        assert!(runtime
-            .eval_text("(tup 1 2 3 4 5 6)")
-            .unwrap_err()
-            .contains("at most 5"));
+        assert!(
+            runtime
+                .eval_text("(tup 1 2 3 4 5 6)")
+                .unwrap_err()
+                .contains("at most 5")
+        );
         assert_eq!(runtime.eval_text("(= [1 2] [1 2 3])").unwrap(), "false");
         assert_eq!(
             runtime.eval_text("(get {[1 2] :found} '(1 2))").unwrap(),
@@ -3702,14 +3795,18 @@ mod tests {
                 .unwrap(),
             "9"
         );
-        assert!(runtime
-            .eval_text("(hash-map :a)")
-            .unwrap_err()
-            .contains("even number"));
-        assert!(runtime
-            .eval_text("(trie :a 1)")
-            .unwrap_err()
-            .contains("string keys"));
+        assert!(
+            runtime
+                .eval_text("(hash-map :a)")
+                .unwrap_err()
+                .contains("even number")
+        );
+        assert!(
+            runtime
+                .eval_text("(trie :a 1)")
+                .unwrap_err()
+                .contains("string keys")
+        );
     }
 
     #[test]
@@ -3795,18 +3892,24 @@ mod tests {
             runtime.eval_text("(let [a (atom 1) seen (atom nil)] (do (watch-add a :log (fn [key ref old new] (reset! seen new))) (watch-remove a :log) (reset! a 2) @seen))").unwrap(),
             "nil"
         );
-        assert!(runtime
-            .eval_text("(watch-add (atom:basic 1) :log (fn [key ref old new] new))")
-            .unwrap_err()
-            .contains("watch-add"));
-        assert!(runtime
-            .eval_text("(reset! 1 2)")
-            .unwrap_err()
-            .contains("IReset/reset"));
-        assert!(runtime
-            .eval_text("(swap! (atom 1) 2)")
-            .unwrap_err()
-            .contains("expects a function"));
+        assert!(
+            runtime
+                .eval_text("(watch-add (atom:basic 1) :log (fn [key ref old new] new))")
+                .unwrap_err()
+                .contains("watch-add")
+        );
+        assert!(
+            runtime
+                .eval_text("(reset! 1 2)")
+                .unwrap_err()
+                .contains("IReset/reset")
+        );
+        assert!(
+            runtime
+                .eval_text("(swap! (atom 1) 2)")
+                .unwrap_err()
+                .contains("expects a function")
+        );
         for legacy in [
             "compare:set!",
             "compare-and-set!",
@@ -4028,10 +4131,12 @@ mod tests {
                 .unwrap(),
             "true"
         );
-        assert!(runtime
-            .eval_text("(ns:create (quote bad/name))")
-            .unwrap_err()
-            .contains("unqualified symbol"));
+        assert!(
+            runtime
+                .eval_text("(ns:create (quote bad/name))")
+                .unwrap_err()
+                .contains("unqualified symbol")
+        );
     }
 
     #[test]
@@ -4128,10 +4233,12 @@ mod tests {
                 .unwrap(),
             "[true [:a :b]]"
         );
-        assert!(runtime
-            .eval_text("(require [std.foundation.component :as old])")
-            .unwrap_err()
-            .contains("missing"));
+        assert!(
+            runtime
+                .eval_text("(require [std.foundation.component :as old])")
+                .unwrap_err()
+                .contains("missing")
+        );
     }
 
     #[test]
@@ -4288,10 +4395,12 @@ mod tests {
                 .unwrap(),
             "[10 43]"
         );
-        assert!(runtime
-            .eval_text("(vec (map (fn [value] (/ 1 value)) [1 0]))")
-            .unwrap_err()
-            .contains("division by zero"));
+        assert!(
+            runtime
+                .eval_text("(vec (map (fn [value] (/ 1 value)) [1 0]))")
+                .unwrap_err()
+                .contains("division by zero")
+        );
     }
 
     #[test]
@@ -4398,14 +4507,18 @@ mod tests {
                 .unwrap(),
             "nil"
         );
-        assert!(runtime
-            .eval_text("(keyword \"a/b/c\")")
-            .unwrap_err()
-            .contains("one slash"));
-        assert!(runtime
-            .eval_text("(symbol 1)")
-            .unwrap_err()
-            .contains("string arguments"));
+        assert!(
+            runtime
+                .eval_text("(keyword \"a/b/c\")")
+                .unwrap_err()
+                .contains("one slash")
+        );
+        assert!(
+            runtime
+                .eval_text("(symbol 1)")
+                .unwrap_err()
+                .contains("string arguments")
+        );
     }
 
     #[test]
@@ -4503,10 +4616,12 @@ mod tests {
                 .unwrap(),
             "2"
         );
-        assert!(runtime
-            .eval_text("(conj (rest [1 2]) 2)")
-            .unwrap_err()
-            .contains("IConj/conj expects a collection"));
+        assert!(
+            runtime
+                .eval_text("(conj (rest [1 2]) 2)")
+                .unwrap_err()
+                .contains("IConj/conj expects a collection")
+        );
         assert_eq!(
             runtime.eval_text("(vec (cons 0 (rest [1 2])))").unwrap(),
             "[0 2]"
@@ -4635,14 +4750,18 @@ mod tests {
                 .unwrap(),
             "5"
         );
-        assert!(runtime
-            .eval_text("(promise/delay -1 (fn [] 1))")
-            .unwrap_err()
-            .contains("non-negative"));
-        assert!(runtime
-            .eval_text("(promise/new 1)")
-            .unwrap_err()
-            .contains("expects a function"));
+        assert!(
+            runtime
+                .eval_text("(promise/delay -1 (fn [] 1))")
+                .unwrap_err()
+                .contains("non-negative")
+        );
+        assert!(
+            runtime
+                .eval_text("(promise/new 1)")
+                .unwrap_err()
+                .contains("expects a function")
+        );
     }
     #[test]
     fn promise_continuations_preserve_registration_order_and_late_delivery() {
@@ -5088,14 +5207,18 @@ mod tests {
                 .unwrap(),
             "[2 [2 1] [[1 0]] [1 0]]"
         );
-        assert!(runtime
-            .eval_text("(count (Iter/iter-map (fn [x] (throw \"boom\")) [1]))")
-            .unwrap_err()
-            .contains("boom"));
-        assert!(runtime
-            .eval_text("(count (Iter/iter-map (fn [x] (throw \"weekend\")) [1]))")
-            .unwrap_err()
-            .contains("weekend"));
+        assert!(
+            runtime
+                .eval_text("(count (Iter/iter-map (fn [x] (throw \"boom\")) [1]))")
+                .unwrap_err()
+                .contains("boom")
+        );
+        assert!(
+            runtime
+                .eval_text("(count (Iter/iter-map (fn [x] (throw \"weekend\")) [1]))")
+                .unwrap_err()
+                .contains("weekend")
+        );
         assert_eq!(
             runtime
                 .eval_text(
@@ -5107,10 +5230,12 @@ mod tests {
                 .unwrap(),
             "[true true [0 2] [0 1 1 1]]"
         );
-        assert!(runtime
-            .eval_text("(cycle [])")
-            .unwrap_err()
-            .contains("cycle expects a non-empty source"));
+        assert!(
+            runtime
+                .eval_text("(cycle [])")
+                .unwrap_err()
+                .contains("cycle expects a non-empty source")
+        );
     }
 
     #[test]
@@ -5128,7 +5253,10 @@ mod tests {
                 .unwrap(),
             "2"
         );
-        assert_eq!(runtime.eval_text("(iter-next? (iter [1]))").unwrap(), "true");
+        assert_eq!(
+            runtime.eval_text("(iter-next? (iter [1]))").unwrap(),
+            "true"
+        );
         assert_eq!(
             runtime
                 .eval_text("(let (it (iter [1])) (do (Iter/iter-close it) (iter-next? it)))")
@@ -5205,10 +5333,12 @@ mod tests {
             .register("IIter", "iter", protocol_custom_iterator);
         assert_eq!(runtime.eval_text("(iter-next (iter 99))").unwrap(), "7");
         assert!(runtime.has_protocol_method("IAssoc", "assoc"));
-        assert!(runtime
-            .eval_text("(ICount/count 1)")
-            .unwrap_err()
-            .contains("protocol/unsupported-receiver"));
+        assert!(
+            runtime
+                .eval_text("(ICount/count 1)")
+                .unwrap_err()
+                .contains("protocol/unsupported-receiver")
+        );
     }
 
     #[test]
@@ -5244,10 +5374,12 @@ mod tests {
             runtime.eval_text("(type (type []))").unwrap(),
             ":hara.type/keyword"
         );
-        assert!(runtime
-            .eval_text("(type)")
-            .unwrap_err()
-            .contains("one value"));
+        assert!(
+            runtime
+                .eval_text("(type)")
+                .unwrap_err()
+                .contains("one value")
+        );
     }
 
     #[test]
@@ -5262,10 +5394,12 @@ mod tests {
                 .unwrap(),
             core::Value::Number(7)
         );
-        assert!(registry
-            .invoke("IIdentity", "missing", &[])
-            .unwrap_err()
-            .contains("missing protocol method"));
+        assert!(
+            registry
+                .invoke("IIdentity", "missing", &[])
+                .unwrap_err()
+                .contains("missing protocol method")
+        );
         assert_eq!(
             core::receiver_category(&core::Value::Vector(Default::default())),
             "vector"
@@ -5287,10 +5421,12 @@ mod tests {
                 .unwrap(),
             "3"
         );
-        assert!(runtime
-            .eval_text("((fn [x & rest] x))")
-            .unwrap_err()
-            .contains("at least 1"));
+        assert!(
+            runtime
+                .eval_text("((fn [x & rest] x))")
+                .unwrap_err()
+                .contains("at least 1")
+        );
     }
 
     #[test]
@@ -5305,7 +5441,9 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing :{key}"))
         }
 
-        let Some(corpus) = repo_text("specs/00-unsorted/platform-language/draft/conformance/l0.edn") else {
+        let Some(corpus) =
+            repo_text("specs/00-unsorted/platform-language/draft/conformance/l0.edn")
+        else {
             return;
         };
         let manifest = kernel::parse_forms(&corpus).unwrap().remove(0);
@@ -5403,7 +5541,9 @@ mod tests {
                 })
         }
 
-        let Some(corpus) = repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn") else {
+        let Some(corpus) =
+            repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn")
+        else {
             return;
         };
         let manifest = kernel::parse_forms(&corpus).unwrap().remove(0);
@@ -5496,9 +5636,7 @@ mod tests {
                         runtime
                             .eval_text(source)
                             .expect_err("shared reload eval must fail");
-                    } else if let Some(Form::String(marker)) =
-                        entry(expect, "error-contains")
-                    {
+                    } else if let Some(Form::String(marker)) = entry(expect, "error-contains") {
                         let error = runtime
                             .eval_text(source)
                             .expect_err("shared reload eval must fail");
@@ -5572,7 +5710,8 @@ mod tests {
 
     #[test]
     fn issue_134_lazy_namespace_state_is_non_forcing_and_failure_is_sticky() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        {
             return;
         }
         assert_eq!(
@@ -5674,9 +5813,11 @@ mod tests {
             "example.lazy",
             "(ns example.lazy) (def answer 99) (def reload-leaked-134 1) (throw :reload-failed)",
         );
-        assert!(runtime
-            .eval_text("(require [example.lazy :as lazy :reload true])")
-            .is_err());
+        assert!(
+            runtime
+                .eval_text("(require [example.lazy :as lazy :reload true])")
+                .is_err()
+        );
         assert_eq!(runtime.eval_text("lazy/answer").unwrap(), "43");
         assert_eq!(
             runtime
@@ -5688,12 +5829,14 @@ mod tests {
             runtime.eval_text("(ns-state 'example.lazy)").unwrap(),
             ":loaded"
         );
-        assert!(runtime
-            .namespace_registry
-            .find("example.lazy")
-            .unwrap()
-            .resolve(&crate::lang::data::Symbol::parse("reload-leaked-134"))
-            .is_none());
+        assert!(
+            runtime
+                .namespace_registry
+                .find("example.lazy")
+                .unwrap()
+                .resolve(&crate::lang::data::Symbol::parse("reload-leaked-134"))
+                .is_none()
+        );
 
         runtime.register_resource(
             "example.broken",
@@ -5760,7 +5903,8 @@ mod tests {
 
     #[test]
     fn issue_134_dependency_order_cycles_and_canonical_cache_are_transactional() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        {
             return;
         }
         assert_eq!(
@@ -5856,14 +6000,18 @@ mod tests {
                 .unwrap(),
             "0"
         );
-        assert!(runtime
-            .namespace_registry
-            .module_dependencies("cycle.first")
-            .is_empty());
-        assert!(runtime
-            .namespace_registry
-            .module_dependencies("cycle.second")
-            .is_empty());
+        assert!(
+            runtime
+                .namespace_registry
+                .module_dependencies("cycle.first")
+                .is_empty()
+        );
+        assert!(
+            runtime
+                .namespace_registry
+                .module_dependencies("cycle.second")
+                .is_empty()
+        );
 
         runtime.register_resource(
             "failure.root",
@@ -5874,19 +6022,24 @@ mod tests {
                 "(throw :failure)"
             ),
         );
-        assert!(runtime
-            .eval_text("(require [failure.root :as failure])")
-            .is_err());
+        assert!(
+            runtime
+                .eval_text("(require [failure.root :as failure])")
+                .is_err()
+        );
         assert!(runtime.namespace_registry.find("failure.root").is_none());
-        assert!(runtime
-            .namespace_registry
-            .module_dependencies("failure.root")
-            .is_empty());
+        assert!(
+            runtime
+                .namespace_registry
+                .module_dependencies("failure.root")
+                .is_empty()
+        );
     }
 
     #[test]
     fn issue_134_with_ns_uses_target_globals_and_restores_the_caller() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        {
             return;
         }
         assert_eq!(
@@ -5918,20 +6071,25 @@ mod tests {
         assert_eq!(runtime.current_namespace(), "user");
         assert_eq!(runtime.eval_text("target/answer").unwrap(), "42");
 
-        assert!(runtime
-            .eval_text("(with-ns 'target (throw :with-ns-failed))")
-            .is_err());
+        assert!(
+            runtime
+                .eval_text("(with-ns 'target (throw :with-ns-failed))")
+                .is_err()
+        );
         assert_eq!(runtime.current_namespace(), "user");
 
-        assert!(runtime
-            .eval_text("(let [caller-local 42] (with-ns 'target caller-local))")
-            .is_err());
+        assert!(
+            runtime
+                .eval_text("(let [caller-local 42] (with-ns 'target caller-local))")
+                .is_err()
+        );
         assert_eq!(runtime.current_namespace(), "user");
     }
 
     #[test]
     fn issue_134_facade_vars_copy_roots_and_metadata_without_sharing_identity() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        {
             return;
         }
         assert_eq!(
@@ -5979,7 +6137,8 @@ mod tests {
 
     #[test]
     fn issue_134_aliases_and_refers_share_live_var_identity() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        {
             return;
         }
         assert_eq!(
@@ -6029,7 +6188,8 @@ mod tests {
 
     #[test]
     fn issue_134_macro_reload_only_changes_new_compilations() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        {
             return;
         }
         assert_eq!(
@@ -6067,7 +6227,8 @@ mod tests {
 
     #[test]
     fn issue_134_session_namespace_module_and_macro_state_is_isolated() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        {
             return;
         }
         assert_eq!(
@@ -6116,7 +6277,8 @@ mod tests {
 
     #[test]
     fn issue_134_source_and_hir_have_value_metadata_and_error_parity() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        {
             return;
         }
         assert_eq!(
@@ -6132,16 +6294,16 @@ mod tests {
             Form::Bool(true)
         );
 
-        use crate::kernel::hir::encode_hir_module;
+        use crate::kernel::halc::encode_halc_module;
 
         let source = "(ns parity.demo) (defn value \"answer\" [] 42) (value)";
         let forms = kernel::parse_forms(source).unwrap();
-        let artifact = encode_hir_module("parity.demo", "parity/demo.hal", source, forms);
+        let artifact = encode_halc_module("parity.demo", "parity/demo.hal", source, forms);
 
         let mut source_runtime = Runtime::new();
         let mut hir_runtime = Runtime::new();
         assert_eq!(source_runtime.eval_text(source).unwrap(), "42");
-        assert_eq!(hir_runtime.eval_hir(&artifact).unwrap(), "42");
+        assert_eq!(hir_runtime.eval_halc(&artifact).unwrap(), "42");
 
         let source_var = source_runtime
             .namespace_registry
@@ -6158,21 +6320,22 @@ mod tests {
         assert_eq!(source_var.metadata(), hir_var.metadata());
 
         let failing_source = "(throw :parity-failed)";
-        let failing_artifact = encode_hir_module(
+        let failing_artifact = encode_halc_module(
             "parity.failure",
             "parity/failure.hal",
             failing_source,
             kernel::parse_forms(failing_source).unwrap(),
         );
         let source_error = source_runtime.eval_text(failing_source).unwrap_err();
-        let hir_error = hir_runtime.eval_hir(&failing_artifact).unwrap_err();
+        let hir_error = hir_runtime.eval_halc(&failing_artifact).unwrap_err();
         assert!(source_error.contains("thrown: :parity-failed"));
         assert!(hir_error.contains("thrown: :parity-failed"));
     }
 
     #[test]
     fn issue_134_runtime_profile_declares_deterministic_resource_precedence() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        {
             return;
         }
         assert_eq!(
@@ -6208,7 +6371,8 @@ mod tests {
 
     #[test]
     fn issue_134_sessions_unwind_bindings_and_transfer_only_immutable_data() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        {
             return;
         }
         assert_eq!(
@@ -6252,9 +6416,11 @@ mod tests {
                 .unwrap(),
             "nil"
         );
-        assert!(kernel
-            .eval("alpha", "(binding [*answer* 2] (throw :binding-failed))")
-            .is_err());
+        assert!(
+            kernel
+                .eval("alpha", "(binding [*answer* 2] (throw :binding-failed))")
+                .is_err()
+        );
         assert_eq!(kernel.eval("alpha", "*answer*").unwrap(), "1");
         assert_eq!(kernel.eval("beta", "*answer*").unwrap(), "10");
 
@@ -6287,7 +6453,8 @@ mod tests {
 
     #[test]
     fn issue_134_retained_repl_state_survives_errors_and_multiline_forms() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none() {
+        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        {
             return;
         }
         assert_eq!(
@@ -6435,10 +6602,12 @@ mod tests {
                 .unwrap(),
             "\":failed:handled\""
         );
-        assert!(runtime
-            .eval_text("(throw :failed)")
-            .unwrap_err()
-            .contains("thrown: :failed"));
+        assert!(
+            runtime
+                .eval_text("(throw :failed)")
+                .unwrap_err()
+                .contains("thrown: :failed")
+        );
     }
 
     #[test]
@@ -6456,20 +6625,24 @@ mod tests {
                 .unwrap(),
             "42"
         );
-        assert!(runtime
-            .eval_text("(deref 42)")
-            .unwrap_err()
-            .contains("deref expects a var"));
+        assert!(
+            runtime
+                .eval_text("(deref 42)")
+                .unwrap_err()
+                .contains("deref expects a var")
+        );
         assert_eq!(
             runtime
                 .eval_text("(do (def answer 1) (def answer 42) answer)")
                 .unwrap(),
             "42"
         );
-        assert!(runtime
-            .eval_text("(def 1 2)")
-            .unwrap_err()
-            .contains("def name must be a symbol"));
+        assert!(
+            runtime
+                .eval_text("(def 1 2)")
+                .unwrap_err()
+                .contains("def name must be a symbol")
+        );
     }
 
     #[test]
@@ -6560,10 +6733,12 @@ mod tests {
             runtime.eval_text("(bit-shift-left 1 31)").unwrap(),
             "-2147483648"
         );
-        assert!(runtime
-            .eval_text("(bit-shift-left 1 -1)")
-            .unwrap_err()
-            .contains("distance must be in the range 0..31"));
+        assert!(
+            runtime
+                .eval_text("(bit-shift-left 1 -1)")
+                .unwrap_err()
+                .contains("distance must be in the range 0..31")
+        );
     }
 
     #[test]
@@ -6966,10 +7141,12 @@ mod tests {
                 .unwrap(),
             "7"
         );
-        assert!(runtime
-            .eval_text("(loop [x 0 y 1] (recur 2))")
-            .unwrap_err()
-            .contains("loop recur arity mismatch"));
+        assert!(
+            runtime
+                .eval_text("(loop [x 0 y 1] (recur 2))")
+                .unwrap_err()
+                .contains("loop recur arity mismatch")
+        );
     }
 
     #[test]
@@ -7000,10 +7177,12 @@ mod tests {
             runtime.eval_text("(let (x 19 y (+ x 23)) y)").unwrap(),
             "42"
         );
-        assert!(runtime
-            .eval_text("(let [x 1 y] y)")
-            .unwrap_err()
-            .contains("name/value pairs"));
+        assert!(
+            runtime
+                .eval_text("(let [x 1 y] y)")
+                .unwrap_err()
+                .contains("name/value pairs")
+        );
     }
 
     #[test]
@@ -7028,10 +7207,12 @@ mod tests {
             "\"silver\""
         );
         assert_eq!(runtime.eval_text("(cond false 1)").unwrap(), "nil");
-        assert!(runtime
-            .eval_text("(cond true 1 false)")
-            .unwrap_err()
-            .contains("test/expression pairs"));
+        assert!(
+            runtime
+                .eval_text("(cond true 1 false)")
+                .unwrap_err()
+                .contains("test/expression pairs")
+        );
     }
 
     #[test]
@@ -7145,10 +7326,12 @@ mod tests {
             "true"
         );
         assert_eq!(runtime.eval_text("(do (def ^{:doc \"answer doc\"} answer 42) (ILookup/lookup (IObjType/meta (var answer)) :doc))").unwrap(), "\"answer doc\"");
-        assert!(runtime
-            .eval_text("(do (def plain 1) (binding [plain 2] plain))")
-            .unwrap_err()
-            .contains("dynamic Var"));
+        assert!(
+            runtime
+                .eval_text("(do (def plain 1) (binding [plain 2] plain))")
+                .unwrap_err()
+                .contains("dynamic Var")
+        );
         let err = runtime
             .eval_text("(do (def ^:dynamic *left* 1) (binding [*left* 2 plain 3] *left*))")
             .unwrap_err();
@@ -7160,7 +7343,11 @@ mod tests {
     fn coroutine_introspection_works_in_cli_path() {
         let mut runtime = Runtime::new();
         assert_eq!(
-            runtime.eval_text("(std.foundation.coroutine/status (std.foundation.coroutine/create (fn [x] x)))").unwrap(),
+            runtime
+                .eval_text(
+                    "(std.foundation.coroutine/status (std.foundation.coroutine/create (fn [x] x)))"
+                )
+                .unwrap(),
             ":suspended"
         );
         assert_eq!(
@@ -7178,14 +7365,18 @@ mod tests {
             runtime.eval_text("(def c (std.foundation.coroutine/create (fn [] 1))) (std.foundation.coroutine/status (std.foundation.coroutine/close c))").unwrap(),
             ":dead"
         );
-        assert!(runtime
-            .eval_text("(std.foundation.coroutine/resume c)")
-            .unwrap_err()
-            .contains("cannot resume a dead coroutine"));
-        assert!(runtime
-            .eval_text("(std.foundation.coroutine/yield 1)")
-            .unwrap_err()
-            .contains("coroutine/yield used outside of a coroutine"));
+        assert!(
+            runtime
+                .eval_text("(std.foundation.coroutine/resume c)")
+                .unwrap_err()
+                .contains("cannot resume a dead coroutine")
+        );
+        assert!(
+            runtime
+                .eval_text("(std.foundation.coroutine/yield 1)")
+                .unwrap_err()
+                .contains("coroutine/yield used outside of a coroutine")
+        );
         assert_eq!(
             runtime
                 .eval_text("(std.foundation.coroutine/await (promise/run (fn [] 1)))")
@@ -7201,14 +7392,18 @@ mod tests {
             .eval_native_traced("(def c (std.foundation.coroutine/create (fn [] 1))) (std.foundation.coroutine/resume c)")
             .unwrap_err()
             .contains("fiber evaluator"));
-        assert!(runtime
-            .eval_native_traced("(std.foundation.coroutine/yield 1)")
-            .unwrap_err()
-            .contains("fiber evaluator"));
-        assert!(runtime
-            .eval_native_traced("(std.foundation.coroutine/await (promise (fn [] 1)))")
-            .unwrap_err()
-            .contains("fiber evaluator"));
+        assert!(
+            runtime
+                .eval_native_traced("(std.foundation.coroutine/yield 1)")
+                .unwrap_err()
+                .contains("fiber evaluator")
+        );
+        assert!(
+            runtime
+                .eval_native_traced("(std.foundation.coroutine/await (promise (fn [] 1)))")
+                .unwrap_err()
+                .contains("fiber evaluator")
+        );
     }
     #[test]
     fn fiber_cli_path_evaluates_coroutine_resume_and_yield() {
@@ -7284,44 +7479,44 @@ mod tests {
         );
     }
     #[test]
-    fn eval_hir_runs_encoded_library() {
-        use crate::kernel::hir::encode_hir_module;
+    fn eval_halc_runs_encoded_library() {
+        use crate::kernel::halc::encode_halc_module;
 
         let source = "(ns demo)\n(def answer 42)\nanswer";
         let forms = kernel::parse_forms(source).unwrap();
-        let artifact = encode_hir_module("demo", "demo.hal", source, forms);
+        let artifact = encode_halc_module("demo", "demo.hal", source, forms);
         let mut runtime = Runtime::new();
-        assert_eq!(runtime.eval_hir(&artifact).unwrap(), "42");
+        assert_eq!(runtime.eval_halc(&artifact).unwrap(), "42");
     }
 
     #[test]
-    #[ignore = "requires a Truffle-compiled foundation HIR artifact"]
-    fn truffle_compiled_foundation_hir_loads_with_foundation_semantics() {
-        let artifact = std::env::var("HARA_TRUFFLE_FOUNDATION_HIR")
-            .expect("HARA_TRUFFLE_FOUNDATION_HIR must point to the compiled artifact");
-        let bytes = std::fs::read(&artifact).expect("read Truffle-compiled foundation HIR");
+    #[ignore = "requires a Truffle-compiled foundation HALC artifact"]
+    fn truffle_compiled_foundation_halc_loads_with_foundation_semantics() {
+        let artifact = std::env::var("HARA_TRUFFLE_FOUNDATION_HALC")
+            .or_else(|_| std::env::var("HARA_TRUFFLE_FOUNDATION_HIR"))
+            .expect("HARA_TRUFFLE_FOUNDATION_HALC must point to the compiled artifact");
+        let bytes = std::fs::read(&artifact).expect("read Truffle-compiled foundation HALC");
         let mut runtime = Runtime::new();
 
-        assert_eq!(runtime.eval_hir(&bytes).unwrap(), "<fn>");
+        assert_eq!(runtime.eval_halc(&bytes).unwrap(), "<fn>");
         assert_eq!(runtime.eval_native("((comp inc inc) 40)").unwrap(), "42");
     }
 
-    #[cfg(feature = "dev-trace")]
+    #[cfg(feature = "evaluation-journal")]
     #[test]
-    fn development_trace_uses_the_real_macro_and_invocation_paths() {
+    fn evaluation_journal_uses_the_real_macro_and_invocation_paths() {
         let mut runtime = Runtime::new();
         let trace = runtime
-            .eval_native_trace("(defn observed [x] x) (if-not false (observed 5))")
-            .unwrap();
+            .eval_native_journal("(defn observed [x] x) (if-not false (observed 5))");
 
-        assert_eq!(trace.schema, crate::trace::SCHEMA);
+        assert_eq!(trace.schema, crate::journal::SCHEMA);
         assert_eq!(trace.result.as_ref().unwrap().display, "5");
         assert!(trace.events.iter().any(|event| {
-            event.kind == crate::trace::TraceEventKind::MacroExpand
+            event.kind == crate::journal::JournalEventKind::MacroExpand
                 && event.function.as_deref() == Some("if-not")
         }));
         assert!(trace.events.iter().any(|event| {
-            event.kind == crate::trace::TraceEventKind::OperationEnter
+            event.kind == crate::journal::JournalEventKind::OperationEnter
                 && event.function.as_deref() == Some("observed")
                 && event
                     .values
@@ -7329,7 +7524,7 @@ mod tests {
                     .is_some_and(|value| value.display == "5")
         }));
         assert!(trace.events.iter().any(|event| {
-            event.kind == crate::trace::TraceEventKind::OperationReturn
+            event.kind == crate::journal::JournalEventKind::OperationReturn
                 && event.function.as_deref() == Some("observed")
                 && event
                     .values

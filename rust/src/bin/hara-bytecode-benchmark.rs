@@ -3,7 +3,7 @@
 //! Same wire protocol as `hara-runtime-benchmark` plus a leading MODE:
 //!
 //! ```text
-//! hara-bytecode-benchmark MODE ID SOURCE_HEX EXPECTED WINDOWS CALLS
+//! hara-bytecode-benchmark MODE ID SOURCE_HEX EXPECTED WINDOWS CALLS [RUNTIME]
 //! ```
 //!
 //! Modes:
@@ -23,8 +23,8 @@ use std::time::Instant;
 
 fn main() {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
-    if args.len() != 6 {
-        eprintln!("benchmark expects MODE ID SOURCE_HEX EXPECTED WINDOWS CALLS");
+    if !(6..=7).contains(&args.len()) {
+        eprintln!("benchmark expects MODE ID SOURCE_HEX EXPECTED WINDOWS CALLS [RUNTIME]");
         std::process::exit(2);
     }
     let mode = &args[0];
@@ -37,12 +37,13 @@ fn main() {
     let calls: usize = args[5]
         .parse()
         .unwrap_or_else(|_| fail(id, "invalid calls"));
-    let runtime_name = match mode.as_str() {
+    let default_runtime_name = match mode.as_str() {
         "existing" => "hara-rust-existing",
         "compile-execute" => "hara-rust-bytecode-compile-execute",
         "execute-only" => "hara-rust-bytecode-execute-only",
         other => fail(id, &format!("unknown mode: {other}")),
     };
+    let runtime_name = args.get(6).map(String::as_str).unwrap_or(default_runtime_name);
 
     let mut runtime = Runtime::new();
     // For execute-only the program is compiled once, outside the samples.
