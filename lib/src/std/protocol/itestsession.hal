@@ -1,0 +1,9 @@
+;; Canonical lifecycle and execution contract for isolated test sessions.
+(ns std.protocol.itestsession)
+
+(defprotocol ITestSession
+  (session-run [session options])
+  (session-cancel [session run-id])
+  (session-status [session])
+  (session-results [session])
+  (session-close [session]))
