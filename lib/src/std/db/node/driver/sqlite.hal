@@ -1,0 +1,28 @@
+;; ============================================================================
+;; std.db.node.driver.sqlite — SQLite runtime driver registration.
+;; ============================================================================
+(ns std.db.node.driver.sqlite
+  (:require [std.db.node.kernel-base :as kernel]
+            [std.db.sqlite :as sqlite]))
+
+(def DRIVER-ID :sqlite)
+
+(defn descriptor
+  "Returns the SQLite runtime driver descriptor."
+  []
+  {:id DRIVER-ID
+   :engine :sqlite
+   :open sqlite/open
+   :version sqlite/version})
+
+(defn install
+  "Registers the SQLite driver on a database runtime node."
+  [node]
+  (kernel/register-driver node DRIVER-ID (descriptor))
+  node)
+
+(defn uninstall
+  "Removes the SQLite driver from a database runtime node."
+  [node]
+  (kernel/unregister-driver node DRIVER-ID)
+  node)
