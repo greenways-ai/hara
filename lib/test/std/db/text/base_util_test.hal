@@ -1,0 +1,102 @@
+(ns std.db.text.base-util-test
+  (:use code.test)
+  (:require [std.db.text.base-util :as util]))
+
+(def results
+  [(fact "collect-routes indexes string-keyed boundary routes"
+     (util/collect-routes
+      [{"url" "api/ping" "id" "ping"}
+       {"url" "api/echo" "id" "echo" "type" "existing"}]
+      "db")
+     => {"api/ping" {"url" "api/ping" "id" "ping" "type" "db"}
+         "api/echo" {"url" "api/echo" "id" "echo" "type" "existing"}})
+
+   (fact "collect-routes preserves native keyword maps"
+     (util/collect-routes
+      [{:url "api/ping" :id "ping"}]
+      "db")
+     => {"api/ping" {:url "api/ping" :id "ping" :type "db"}})
+
+   (fact "collect-routes-object indexes descriptor values by URL"
+     (util/collect-routes-object
+      {"one" {"url" "/one" "id" 1}
+       "two" {"url" "/two" "id" 2}})
+     => {"/one" {"url" "/one" "id" 1}
+         "/two" {"url" "/two" "id" 2}})
+
+   (fact "collect-views indexes routes by table, type and tag"
+     (util/collect-views
+      [{:id "currency-all"
+        :view {:table "Currency" :type "select" :tag "all"}}
+       {"id" "currency-default"
+        "view" {"table" "Currency" "type" "return" "tag" "default"}}])
+     => {"Currency"
+         {"select"
+          {"all"
+           {:id "currency-all"
+            :view {:table "Currency" :type "select" :tag "all"}}}
+          "return"
+          {"default"
+           {"id" "currency-default"
+            "view" {"table" "Currency"
+                    "type" "return"
+                    "tag" "default"}}}}})
+
+   (fact "merge-views combines existing select and return categories"
+     (util/merge-views
+      [{"Currency" {"select" {"all" {"id" "currency-all"}}
+                    "return" {}}}
+       {"Currency" {"select" {"by-type" {"id" "currency-by-type"}}
+                    "return" {"default" {"id" "currency-default"}}}}
+       {"Wallet" {"return" {"default" {"id" "wallet-default"}}}}]
+      {"RegionCountry" {"select" {"all" {"id" "country-all"}}}})
+     => {"Currency"
+         {"select" {"all" {"id" "currency-all"}
+                    "by-type" {"id" "currency-by-type"}}
+          "return" {"default" {"id" "currency-default"}}}
+         "Wallet"
+         {"return" {"default" {"id" "wallet-default"}}}
+         "RegionCountry"
+         {"select" {"all" {"id" "country-all"}}}})
+
+   (fact "keepf-limit retains supported results up to the limit"
+     (util/keepf-limit [1 2 3 4 5]
+                       odd?
+                       (fn [value] value)
+                       3)
+     => [1 3 5])
+
+   (fact "keepf-limit drops unsupported and empty mapped results"
+     (util/keepf-limit [1 2 3 4]
+                       (fn [value] true)
+                       (fn [value]
+                         (cond
+                           (= value 1) false
+                           (= value 2) {}
+                           (= value 3) []
+                           :else "kept"))
+                       2)
+     => ["kept"])
+
+   (fact "lu-nested recursively indexes vectors with a supplied key"
+     (util/lu-nested
+      [{"code" "one" "value" 1}
+       {"code" "two" "value" 2}]
+      (fn [item] (get item "code")))
+     => {"one" {"code" "one" "value" 1}
+         "two" {"code" "two" "value" 2}})
+
+   (fact "lu-map recursively indexes records by id"
+     (util/lu-map
+      {:groups
+       [{:id "a"
+         :members [{:id "b"}
+                   {:id "c"}]}]})
+     => {:groups
+         {"a"
+          {:id "a"
+           :members
+           {"b" {:id "b"}
+            "c" {:id "c"}}}}})])
+
+(pr-str (run '[std.db.text.base-util-test]))

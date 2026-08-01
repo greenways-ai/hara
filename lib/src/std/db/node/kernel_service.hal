@@ -1,0 +1,203 @@
+;; ============================================================================
+;; std.db.node.kernel-service — dynamic database service lifecycle handlers.
+;; ============================================================================
+(ns std.db.node.kernel-service
+  (:require [std.db :as db]
+            [std.db.node.kernel-base :as kernel]
+            [std.db.node.kernel-batch :as batch]
+            [std.db.node.lifecycle :as lifecycle]
+            [std.foundation.promise :as promise]
+            [std.lib.substrate.protocol :as substrate]))
+
+(def SERVICE-REGISTRY "std.db.runtime/dynamic-services")
+
+(def ACTION-RUNTIME-STATUS "@xt.db/runtime-status")
+(def ACTION-DRIVER-LIST "@xt.db/driver-list")
+(def ACTION-SERVICE-LIST "@xt.db/service-list")
+(def ACTION-SERVICE-OPEN "@xt.db/service-open")
+(def ACTION-SERVICE-CLOSE "@xt.db/service-close")
+(def ACTION-SERVICE-CLOSE-ALL "@xt.db/service-close-all")
+(def ACTION-SERVICE-EXISTS "@xt.db/service-exists")
+
+(defn- compatible-get
+  [value lookup-key]
+  (cond
+    (not (map? value)) nil
+    (has? value lookup-key) (get value lookup-key)
+    (string? lookup-key) (get value (keyword lookup-key))
+    (keyword? lookup-key) (get value (name lookup-key))
+    :else nil))
+
+(defn- normalize-entry
+  [service-id entry]
+  (assoc
+   (reduce (fn [out pair]
+             (let [entry-key (key pair)]
+               (assoc out
+                      (if (string? entry-key) (keyword entry-key) entry-key)
+                      (val pair))))
+           {}
+           (or entry {}))
+   :id service-id))
+
+(defn- register-service
+  [node service-id]
+  (let [registry (or (substrate/get-service node SERVICE-REGISTRY) {})]
+    (substrate/set-service node SERVICE-REGISTRY (assoc registry service-id true))
+    service-id))
+
+(defn- unregister-service
+  [node service-id]
+  (let [registry (dissoc (or (substrate/get-service node SERVICE-REGISTRY) {})
+                         service-id)]
+    (if (empty? registry)
+      (substrate/remove-service node SERVICE-REGISTRY)
+      (substrate/set-service node SERVICE-REGISTRY registry))
+    service-id))
+
+(defn service-managed?
+  "Returns true when service-id is owned by the dynamic service registry."
+  [node service-id]
+  (= true (get (or (substrate/get-service node SERVICE-REGISTRY) {}) service-id)))
+
+(defn driver-list-main
+  "Returns driver IDs registered on node."
+  [node]
+  (kernel/list-drivers node))
+
+(defn service-list-main
+  "Returns dynamically managed service IDs."
+  [node]
+  (vec (keys (or (substrate/get-service node SERVICE-REGISTRY) {}))))
+
+(defn service-exists-main
+  "Returns true when a named database service exists."
+  [node service-id]
+  (not (nil? (substrate/get-service node service-id))))
+
+(defn- optional-service-info
+  [node service-id]
+  (when (service-exists-main node service-id)
+    (kernel/service-info-main node service-id)))
+
+(defn runtime-status-main
+  "Returns an inspectable snapshot of the database runtime node."
+  [node]
+  {:node-id (field node :id)
+   :drivers (driver-list-main node)
+   :common (service-exists-main node kernel/COMMON-SERVICE)
+   :primary (optional-service-info node kernel/PRIMARY-SERVICE)
+   :caching (optional-service-info node kernel/CACHING-SERVICE)
+   :dynamic-services (service-list-main node)
+   :finalizers (lifecycle/list-finalizers node)})
+
+(defn service-open-main
+  "Opens or returns a named database service."
+  [node service-id entry schema lookup]
+  (let [existing (substrate/get-service node service-id)]
+    (if existing
+      (promise/from {:status :no-change
+                     :service (kernel/service-info-main node service-id)})
+      (let [normalized (normalize-entry service-id entry)
+            role (or (compatible-get normalized :role) :service)
+            metadata (or (compatible-get normalized :metadata) {})]
+        (promise/then
+         (kernel/kernel-setup-single node role normalized schema lookup metadata)
+         (fn [_]
+           (register-service node service-id)
+           {:status :opened
+            :service (kernel/service-info-main node service-id)}))))))
+
+(defn service-close-main
+  "Closes and removes a dynamically managed database service."
+  [node service-id]
+  (let [service (substrate/get-service node service-id)]
+    (cond
+      (nil? service)
+      (do
+        (unregister-service node service-id)
+        (promise/from {:status :not-found
+                       :service service-id}))
+
+      (not (service-managed? node service-id))
+      (promise/from {:status :protected
+                     :service service-id})
+
+      :else
+      (promise/then
+       (promise/finally
+        (kernel/service-submit
+         service
+         (fn []
+           (db/close (kernel/service-connection service))))
+        (fn []
+          (substrate/remove-service node service-id)
+          (unregister-service node service-id)))
+       (fn [closed]
+         {:status :closed
+          :service service-id
+          :closed closed})))))
+
+(defn service-close-all-main
+  "Closes every dynamically managed database service."
+  [node]
+  (let [service-ids (service-list-main node)
+        closes (map (fn [service-id]
+                      (promise/catch
+                       (service-close-main node service-id)
+                       (fn [error]
+                         {:status :error
+                          :service service-id
+                          :error error})))
+                    service-ids)]
+    (promise/then
+     (promise/all closes)
+     (fn [results]
+       {:status :closed-all
+        :services results}))))
+
+(defn runtime-status-handler
+  [space args request node]
+  (runtime-status-main node))
+
+(defn driver-list-handler
+  [space args request node]
+  (driver-list-main node))
+
+(defn service-list-handler
+  [space args request node]
+  (service-list-main node))
+
+(defn service-exists-handler
+  [space args request node]
+  (service-exists-main node (nth args 0)))
+
+(defn service-open-handler
+  [space args request node]
+  (service-open-main node
+                     (nth args 0)
+                     (nth args 1)
+                     (nth args 2)
+                     (nth args 3)))
+
+(defn service-close-handler
+  [space args request node]
+  (service-close-main node (nth args 0)))
+
+(defn service-close-all-handler
+  [space args request node]
+  (service-close-all-main node))
+
+(defn init-handlers
+  "Installs runtime inspection, batches, finalizers and service handlers."
+  [node]
+  (substrate/register-handler node ACTION-RUNTIME-STATUS runtime-status-handler {})
+  (substrate/register-handler node ACTION-DRIVER-LIST driver-list-handler {})
+  (substrate/register-handler node ACTION-SERVICE-LIST service-list-handler {})
+  (substrate/register-handler node ACTION-SERVICE-OPEN service-open-handler {})
+  (substrate/register-handler node ACTION-SERVICE-CLOSE service-close-handler {})
+  (substrate/register-handler node ACTION-SERVICE-CLOSE-ALL service-close-all-handler {})
+  (substrate/register-handler node ACTION-SERVICE-EXISTS service-exists-handler {})
+  (batch/init-handlers node)
+  (lifecycle/init-handlers node)
+  node)

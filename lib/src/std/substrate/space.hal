@@ -1,0 +1,77 @@
+;; ============================================================================
+;; std.substrate.space — direct portable port of xt.substrate.base-space.
+;; ============================================================================
+(ns std.substrate.space
+  (:require [std.lib.substrate :as core]
+            [std.substrate.frame :as frame]))
+
+(defn node-space-id
+  [space-id]
+  (or space-id frame/SPACE_NODE))
+
+(defn space
+  "Constructs a node space record."
+  [space-id options]
+  (let [options (or options {})]
+    {"id" space-id
+     "state" (or (get options "state")
+                  (get options :state)
+                  {})
+     "meta" (or (get options "meta")
+                 (get options :meta)
+                 {})}))
+
+(defn get-space
+  "Gets a node space by id."
+  [node space-id]
+  (get (core/node-section node :spaces)
+       (node-space-id space-id)))
+
+(defn create-space
+  "Creates or replaces a node space."
+  [node space-id options]
+  (let [entry (space (node-space-id space-id) options)]
+    (core/section-put node :spaces (get entry "id") entry)
+    entry))
+
+(defn ensure-space
+  "Ensures that a node space exists."
+  [node space-id options]
+  (let [space-id (node-space-id space-id)
+        entry (get-space node space-id)]
+    (if entry
+      entry
+      (create-space node space-id options))))
+
+(defn remove-space
+  "Removes a node space and returns the previous entry."
+  [node space-id]
+  (core/section-remove node :spaces (node-space-id space-id)))
+
+(defn list-spaces
+  "Lists active space ids in deterministic order."
+  [node]
+  (vec (sort (keys (core/node-section node :spaces)))))
+
+(defn get-space-state
+  "Gets state for a node space, creating the space on demand."
+  [node space-id]
+  (get (ensure-space node space-id nil) "state"))
+
+(defn set-space-state
+  "Sets state for a node space."
+  [node space-id state]
+  (let [space-id (node-space-id space-id)
+        entry (ensure-space node space-id nil)]
+    (core/section-put node :spaces space-id (assoc entry "state" state))
+    state))
+
+(defn update-space-state
+  "Updates state with updater(current-state, entry, node)."
+  [node space-id updater]
+  (let [space-id (node-space-id space-id)
+        entry (ensure-space node space-id nil)
+        next-state (updater (get entry "state") entry node)]
+    (core/section-put node :spaces space-id
+                      (assoc entry "state" next-state))
+    next-state))

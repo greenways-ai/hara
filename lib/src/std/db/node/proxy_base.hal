@@ -1,0 +1,41 @@
+;; ============================================================================
+;; std.db.node.proxy-base — client-side forwarding handlers.
+;; ============================================================================
+(ns std.db.node.proxy-base
+  (:require [std.db.node.kernel-base :as kernel]
+            [std.db.node.kernel-batch :as batch]
+            [std.db.node.kernel-service :as service]
+            [std.db.node.lifecycle :as lifecycle]
+            [std.db.node.proxy-util :as proxy]
+            [std.lib.substrate.protocol :as substrate]))
+
+(def CALL-ACTIONS
+  [kernel/ACTION-KERNEL-INIT
+   kernel/ACTION-KERNEL-SETUP
+   kernel/ACTION-KERNEL-TEARDOWN
+   kernel/ACTION-SERVICE-INFO
+   kernel/ACTION-EXEC
+   kernel/ACTION-QUERY
+   batch/ACTION-BATCH
+   lifecycle/ACTION-FINALIZE
+   service/ACTION-RUNTIME-STATUS
+   service/ACTION-DRIVER-LIST
+   service/ACTION-SERVICE-LIST
+   service/ACTION-SERVICE-OPEN
+   service/ACTION-SERVICE-CLOSE
+   service/ACTION-SERVICE-CLOSE-ALL
+   service/ACTION-SERVICE-EXISTS])
+
+(defn request-proxy
+  [space args request node]
+  (proxy/request-proxy space args request node))
+
+(defn init-proxy-handlers
+  "Installs forwarding handlers for all database runtime actions."
+  [node]
+  (reduce (fn [current action]
+            (substrate/register-handler current action request-proxy {})
+            current)
+          node
+          CALL-ACTIONS)
+  node)

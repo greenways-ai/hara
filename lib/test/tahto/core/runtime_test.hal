@@ -1,0 +1,107 @@
+(ns tahto.core.runtime-test
+  (:require [std.lib.test :as test]
+            [tahto.core.registry :as registry]
+            [tahto.core.runtime :as runtime]
+            [tahto.runtime.basic.type-basic :as basic]))
+
+(def boot (runtime/bootstrap!))
+(def pinned-boot
+  (runtime/bootstrap! {:versions {:js 1
+                                  :python 1}}))
+
+(def js-book (registry/registry-book :js))
+(def js-book-v1 (registry/registry-book :js :default 1))
+(def python-book (registry/registry-book :python))
+(def js-oneshot (runtime/rt-create :js :oneshot))
+(def python-oneshot (runtime/rt-create :python :oneshot))
+(def js-basic (runtime/rt-create :js :basic))
+(def started-basic (runtime/rt-start js-basic))
+
+;; Exercise coexistence and configurable defaults without claiming a real V2
+;; grammar. Metadata can coexist before the corresponding book is loaded.
+(def preview-info
+  {:ns 'tahto.model.v1.spec-js
+   :book '+book+
+   :parent :xtalk})
+
+(def preview-v1
+  (registry/registry-book-add! :js :preview 1 preview-info))
+(def preview-v2
+  (registry/registry-book-add! :js :preview 2 preview-info))
+(def preview-versions
+  (registry/registry-book-versions :js :preview))
+(def preview-default-before
+  (registry/registry-book-default-version :js :preview))
+(def preview-default-change
+  (registry/registry-book-set-default! :js :preview 2))
+(def preview-default-after
+  (registry/registry-book-default-version :js :preview))
+(def preview-selected-info
+  (registry/registry-book-info :js :preview))
+(def preview-removed-v2
+  (registry/registry-book-remove! :js :preview 2))
+(def preview-removed-v1
+  (registry/registry-book-remove! :js :preview 1))
+
+(def results
+  [(test/check "bootstrap installs Foundation language names"
+               [(boolean (runtime/language-info :js))
+                (boolean (runtime/language-info :python))]
+               [true true])
+   (test/check "bootstrap records the selected version per language"
+               [(:versions boot)
+                (:versions pinned-boot)
+                (:version (runtime/language-info :js))
+                (:version (runtime/language-info :python))]
+               [{:js 1 :python 1}
+                {:js 1 :python 1}
+                1
+                1])
+   (test/check "bootstrap installs oneshot and basic runtime types"
+               [(runtime/runtime-installed? :js :oneshot)
+                (runtime/runtime-installed? :js :basic)
+                (runtime/runtime-installed? :python :oneshot)
+                (runtime/runtime-installed? :python :basic)]
+               [true true true true])
+   (test/check "book registry preserves Foundation language and grammar tags"
+               [[(:lang js-book)
+                 (:parent js-book)
+                 (:tag (:grammar js-book))]
+                [(:lang python-book)
+                 (:parent python-book)
+                 (:tag (:grammar python-book))]]
+               [[:js :xtalk :js]
+                [:python :xtalk :py]])
+   (test/check "versionless and explicitly pinned book selection agree"
+               [(registry/registry-book-default-version :js)
+                (registry/registry-book-versions :js)
+                (= (:fingerprint (:selection js-book))
+                   (:fingerprint (:selection js-book-v1)))]
+               [1 [1] true])
+   (test/check "book coordinates support coexisting versions and configurable defaults"
+               [preview-versions
+                preview-default-before
+                preview-default-change
+                preview-default-after
+                (:version preview-selected-info)]
+               [[1 2] 1 2 2 2])
+   (test/check "books contain materialized selections ready for compilation"
+               [(get-in js-book [:coordinate :grammar/version])
+                (get-in python-book [:coordinate :grammar/version])
+                (boolean (:selection js-book))
+                (boolean (:selection python-book))]
+               [1 1 true true])
+   (test/check "oneshot constructors use Foundation program defaults"
+               [[(:lang js-oneshot) (:runtime js-oneshot)
+                 (:program js-oneshot) (:exec js-oneshot)]
+                [(:lang python-oneshot) (:runtime python-oneshot)
+                 (:program python-oneshot) (:exec python-oneshot)]]
+               [[:js :oneshot :nodejs ["node" "-e"]]
+                [:python :oneshot :cpython ["python3" "-c"]]])
+   (test/check "basic runtime has explicit bootstrap transport and lifecycle"
+               [(get-in started-basic [:process :transport])
+                (get-in started-basic [:process :persistent])
+                (:status (basic/basic-state started-basic))]
+               [:oneshot-bootstrap false :started])])
+
+(test/print-results results)

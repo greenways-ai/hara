@@ -1,0 +1,47 @@
+(ns std.db.text.sql-tree-test
+  (:use code.test)
+  (:require [std.db.text.sql-tree :as tree]))
+
+(def schema
+  {"Currency"
+   {"id" {"ident" "id" "order" 0 "type" "text" "scope" "id"}
+    "type" {"ident" "type" "order" 1 "type" "text" "scope" "data"}
+    "name" {"ident" "name" "order" 2 "type" "text" "scope" "data"}
+    "description" {"ident" "description" "order" 3 "type" "text" "scope" "detail"}}})
+
+(def select-entry
+  {:input [{:symbol "i_type" :type "text"}]
+   :view {:table "Currency"
+          :type "select"
+          :query {"type" "{{i_type}}"}}})
+
+(def return-entry
+  {:input [{:symbol "i_currency_id" :type "text"}]
+   :view {:table "Currency"
+          :type "return"
+          :query ["id" "description"]}})
+
+(def results
+  [(fact "select and count views plan and render"
+     [(tree/sql-query-select schema select-entry ["crypto"] {})
+      (tree/sql-query-count schema select-entry ["crypto"] {})]
+     => ["SELECT id FROM Currency\n  WHERE type = 'crypto'"
+         "SELECT count(*) FROM Currency\n  WHERE type = 'crypto'"])
+
+   (fact "single and bulk return views render ID predicates"
+     [(tree/sql-query-return schema return-entry "USD" [] {})
+      (tree/sql-query-return-bulk schema return-entry ["USD" "AUD"] [] {})]
+     => ["SELECT id, description FROM Currency\n  WHERE id = 'USD'"
+         "SELECT id, description FROM Currency\n  WHERE id in ('USD', 'AUD')"])
+
+   (fact "combined plans use select filtering with return columns"
+     (tree/sql-query-combined schema
+                              select-entry
+                              ["fiat"]
+                              return-entry
+                              []
+                              nil
+                              {})
+     => "SELECT id, description FROM Currency\n  WHERE type = 'fiat'")])
+
+(pr-str (run '[std.db.text.sql-tree-test]))

@@ -1,0 +1,128 @@
+(ns hara.runtime
+  (:require [std.foundation.os :as os]
+            [std.foundation.promise :as promise]
+            [std.foundation.string :as string]))
+
+(def +runtimes+
+  {:js {:runtime/id :js
+        :runtime/language :js
+        :runtime/tag :js
+        :runtime/name "JavaScript"
+        :runtime/environment "HARA_NODE"
+        :runtime/executable "node"
+        :runtime/arguments ["--input-type=module" "--eval"]}
+   :python {:runtime/id :python
+            :runtime/language :python
+            :runtime/tag :py
+            :runtime/name "Python"
+            :runtime/environment "HARA_PYTHON"
+            :runtime/executable "python3"
+            :runtime/arguments ["-c"]}})
+
+(defn runtime
+  "Returns the immutable descriptor for a supported target language."
+  [language]
+  (or (get +runtimes+ language)
+      (throw
+       (ex-info "Unknown Hara target language"
+                {:runtime/language language
+                 :runtime/supported [:js :python]}))))
+
+(defn executable
+  "Resolves a runtime executable from options, environment, or its default."
+  [descriptor options]
+  (or (:executable options)
+      (os/getenv (:runtime/environment descriptor))
+      (:runtime/executable descriptor)))
+
+(defn command
+  "Builds argv for one target-language source evaluation.
+
+   :arguments may override the descriptor arguments. Tahto uses this to select
+   Foundation programs such as Node :nodejs or Python :cpython without
+   duplicating process execution."
+  ([language source]
+   (command language source {}))
+  ([language source options]
+   (let [descriptor (runtime language)
+         arguments (or (:arguments options)
+                       (:runtime/arguments descriptor))]
+     (vec
+      (concat [(executable descriptor options)]
+              arguments
+              [source])))))
+
+(defn- process-options
+  [options]
+  (let [cwd (:cwd options)
+        env (:env options)
+        selected (if cwd {:cwd cwd} {})]
+    (if env
+      (assoc selected :env env)
+      selected)))
+
+(defn- start-process
+  [argv options]
+  (let [selected (process-options options)]
+    (if (empty? selected)
+      (os/spawn argv)
+      (os/spawn argv selected))))
+
+(defn- decode-result
+  [descriptor argv values]
+  {:runtime/id (:runtime/id descriptor)
+   :runtime/language (:runtime/language descriptor)
+   :runtime/tag (:runtime/tag descriptor)
+   :runtime/name (:runtime/name descriptor)
+   :command argv
+   :exit (nth values 2)
+   :stdout (string/decode-utf8 (nth values 0))
+   :stderr (string/decode-utf8 (nth values 1))})
+
+(defn execute
+  "Executes JavaScript or Python source once and returns a promise of its result.
+
+   Runtime selection uses the Foundation language names :js and :python. The
+   corresponding grammar tags are :js and :py. Process launch requires the
+   host :process capability."
+  ([language source]
+   (execute language source {}))
+  ([language source options]
+   (let [descriptor (runtime language)
+         argv (command language source options)
+         process (start-process argv options)
+         outputs [(os/process-stdout process)
+                  (os/process-stderr process)
+                  (os/process-wait process)]]
+     (promise/then
+      (promise/all outputs)
+      (fn [values]
+        (decode-result descriptor argv values))))))
+
+(defn run
+  "Executes target source and rejects the returned promise on non-zero exit."
+  ([language source]
+   (run language source {}))
+  ([language source options]
+   (promise/then
+    (execute language source options)
+    (fn [result]
+      (if (= 0 (:exit result))
+        result
+        (throw
+         (ex-info "Target runtime execution failed"
+                  result)))))))
+
+(defn eval
+  "Compatibility spelling for run."
+  ([language source]
+   (run language source))
+  ([language source options]
+   (run language source options)))
+
+(defn oneshot
+  "Compatibility spelling for execute."
+  ([language source]
+   (execute language source))
+  ([language source options]
+   (execute language source options)))

@@ -1,18 +1,23 @@
-use crate::core::Primitive;
+use crate::core::{Primitive, Value};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TraceValue {
     I64(i64),
     Bool(bool),
     Nil,
+    Indexed(Box<Value>),
+    Unsupported,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TraceOp {
     GuardLocalI64 { local: u16 },
+    GuardLocalVectorI64 { local: u16 },
     LoadLocal { local: u16 },
     ConstantI64(i64),
+    ConstantVectorI64 { vector: u16 },
     BinaryI64(Primitive),
+    VectorNthI64,
     StoreLocal { local: u16 },
     GuardTruthy { expected: bool },
     Pop,
@@ -25,6 +30,7 @@ pub struct Trace {
     pub header: u32,
     pub resume_ip: u32,
     pub operations: Vec<TraceOp>,
+    pub vectors: Vec<Vec<i64>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,10 +39,11 @@ pub enum ExitReason {
     BranchChanged,
     Overflow,
     DivisionByZero,
+    IndexOutOfBounds,
     Unsupported,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExitSnapshot {
     pub function: u16,
     pub instruction: u32,
@@ -44,8 +51,23 @@ pub struct ExitSnapshot {
     pub stack: Vec<TraceValue>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TraceOutcome {
-    Completed { iterations: u32 },
-    SideExit { reason: ExitReason, snapshot: ExitSnapshot },
+    Completed {
+        iterations: u32,
+    },
+    SideExit {
+        reason: ExitReason,
+        snapshot: ExitSnapshot,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TraceValue;
+
+    #[test]
+    fn trace_values_keep_heap_values_indirect() {
+        assert!(std::mem::size_of::<TraceValue>() <= 16);
+    }
 }

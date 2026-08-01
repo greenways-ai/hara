@@ -1,0 +1,129 @@
+(ns std.db.text.sql-graph-test
+  (:use code.test)
+  (:require [std.db.text.sql-graph :as graph]
+            [std.db.text.sql-util :as sql]
+            [std.foundation.string :as string]))
+
+(def schema
+  {"User"
+   {"id" {"ident" "id" "order" 0 "type" "uuid" "scope" "id"}
+    "name" {"ident" "name" "order" 1 "type" "text" "scope" "data"}
+    "team" {"ident" "team" "order" 2 "type" "ref" "scope" "ref"
+            "ref" {"ns" "Team" "type" "forward" "key" "team"}}
+    "profile" {"ident" "profile" "type" "ref" "scope" "ref"
+               "ref" {"ns" "Profile" "type" "reverse" "rkey" "user"}}}
+   "Team"
+   {"id" {"ident" "id" "order" 0 "type" "uuid" "scope" "id"}
+    "title" {"ident" "title" "order" 1 "type" "text" "scope" "data"}}
+   "Profile"
+   {"id" {"ident" "id" "order" 0 "type" "uuid" "scope" "id"}
+    "bio" {"ident" "bio" "order" 1 "type" "text" "scope" "data"}
+    "user" {"ident" "user" "order" 2 "type" "ref" "scope" "ref"
+            "ref" {"ns" "User" "type" "forward" "key" "user"}}}})
+
+(def results
+  [(fact "plain, forward and reverse predicates compile through the schema"
+     [(graph/select-where-pair schema
+                               "User"
+                               "name"
+                               ["in" [["Ada" "Grace"]]]
+                               2
+                               {}
+                               graph/select-where)
+      (graph/select-where-pair schema
+                               "User"
+                               "team"
+                               {"title" "Core"}
+                               2
+                               {}
+                               graph/select-where)
+      (graph/select-where-pair schema
+                               "User"
+                               "profile"
+                               {"bio" "Compiler"}
+                               2
+                               {}
+                               graph/select-where)]
+     => ["name in ('Ada', 'Grace')"
+         "team_id IN (\n  SELECT id FROM Team\n  WHERE title = 'Core'\n)"
+         "id IN (\n  SELECT user_id FROM Profile\n  WHERE bio = 'Compiler'\n)"])
+
+   (fact "recursive where clauses traverse forward and reverse references"
+     (graph/select-where
+      schema
+      "User"
+      "id"
+      {"team" {"title" "Core"}
+       "profile" {"bio" "Compiler"}
+       "name" "Ada"}
+      0
+      {})
+     => (str "SELECT id FROM User\n"
+             "WHERE name = 'Ada' AND id IN (\n"
+             "  SELECT user_id FROM Profile\n"
+             "  WHERE bio = 'Compiler'\n"
+             ") AND team_id IN (\n"
+             "  SELECT id FROM Team\n"
+             "  WHERE title = 'Core'\n"
+             ")"))
+
+   (fact "compact graph queries become canonical trees"
+     (graph/select-tree
+      schema
+      ["User"
+       {"name" "Ada"}
+       ["id" "name"
+        ["team" ["id" "title"]]
+        ["profile" ["id" "bio"]]]]
+      {})
+     => ["User"
+         {"where" [{"name" "Ada"}]
+          "data" ["id" "name"]
+          "custom" []
+          "links"
+          [["team"
+            "forward"
+            ["Team"
+             {"where" [{"id" ["eq" ["User.team_id"]]}]
+              "data" ["id" "title"]
+              "links" []
+              "custom" []}]]
+           ["profile"
+            "reverse"
+            ["Profile"
+             {"where" [{"user" ["eq" ["User.id"]]}]
+              "data" ["id" "bio"]
+              "links" []
+              "custom" []}]]]]}])
+
+   (fact "PostgreSQL graph output contains nested JSON aggregation subqueries"
+     (let [statement
+           (graph/select
+            schema
+            ["User"
+             {"name" "Ada"}
+             ["id" "name"
+              ["team" ["id" "title"]]
+              ["profile" ["id" "bio"]]]]
+            {:wrapper-fn sql/postgres-wrapper-fn})]
+       [(string/starts-with? statement "WITH j_ret AS (")
+        (string/includes? statement "SELECT id, title FROM Team")
+        (string/includes? statement "WHERE id = User.team_id")
+        (string/includes? statement "SELECT id, bio FROM Profile")
+        (string/includes? statement "WHERE user_id = User.id")
+        (string/includes? statement "WHERE name = 'Ada'")])
+     => [true true true true true true])
+
+   (fact "SQLite graph output uses json_group_array and quoted identifiers"
+     (let [statement
+           (graph/select
+            schema
+            ["User" {"name" "Ada"} ["id" "name"]]
+            (sql/sqlite-opts {}))]
+       [(string/includes? statement
+                          "json_group_array(json_object('id', \"id\", 'name', \"name\"))")
+        (string/includes? statement "FROM \"User\"")
+        (string/includes? statement "WHERE \"name\" = 'Ada'")])
+     => [true true true])])
+
+(pr-str (run '[std.db.text.sql-graph-test]))

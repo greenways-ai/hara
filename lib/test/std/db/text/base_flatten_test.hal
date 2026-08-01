@@ -1,0 +1,103 @@
+(ns std.db.text.base-flatten-test
+  (:use code.test)
+  (:require [std.db.text.base-flatten :as flatten]))
+
+(def sample-schema
+  {"User"
+   {"id" {"ident" "id" "order" 0 "type" "uuid"}
+    "name" {"ident" "name" "order" 1 "type" "text"}
+    "parent" {"ident" "parent"
+              "order" 2
+              "type" "ref"
+              "ref" {"ns" "User" "rval" "children"}}
+    "children" {"ident" "children"
+                "type" "ref"
+                "ref" {"ns" "User" "rval" "parent"}}}
+   "Group"
+   {"id" {"ident" "id" "order" 0 "type" "uuid"}
+    "name" {"ident" "name" "order" 1 "type" "text"}}})
+
+(def sample-lookup
+  {"User" {"position" 0}
+   "Group" {"position" 1}})
+
+(def root-user
+  {"id" "u1"
+   "name" "Root"
+   "children" [{"id" "u2" "name" "Child"}]})
+
+(def results
+  [(fact "flatten-get-links indexes string and record links by ID"
+     (flatten/flatten-get-links
+      {"children" [{"id" "u2"} "u3"]})
+     => {"children" {"u2" true "u3" true}})
+
+   (fact "flatten-get-links rejects nil link values inside arrays"
+     (flatten/flatten-get-links {"children" [nil]})
+     => (throws))
+
+   (fact "flatten-merge creates and updates the source record shape"
+     (flatten/flatten-merge
+      {}
+      {"id" "u1" "name" "Root"}
+      {"parent" {"p1" true}}
+      {})
+     => {"u1" {"id" "u1"
+                "data" {"id" "u1" "name" "Root"}
+                "ref_links" {"parent" {"p1" true}}
+                "rev_links" {}}})
+
+   (fact "flatten-node separates data and reverse-link objects"
+     (flatten/flatten-node sample-schema "User" root-user {} {})
+     => {"table_map"
+         {"u1" {"id" "u1"
+                 "data" {"id" "u1" "name" "Root"}
+                 "ref_links" {}
+                 "rev_links" {"children" {"u2" true}}}}
+         "data_obj" {"id" "u1" "name" "Root"}
+         "ref_obj" {}
+         "rev_obj" {"children" [{"id" "u2" "name" "Child"}]}})
+
+   (fact "flatten recursively separates children and preserves both link directions"
+     (flatten/flatten sample-schema "User" root-user {})
+     => {"User"
+         {"u1" {"id" "u1"
+                 "data" {"id" "u1" "name" "Root"}
+                 "ref_links" {}
+                 "rev_links" {"children" {"u2" true}}}
+          "u2" {"id" "u2"
+                 "data" {"id" "u2" "name" "Child"}
+                 "ref_links" {"parent" {"u1" true}}
+                 "rev_links" {}}}})
+
+   (fact "flatten-bulk merges tables into one accumulator"
+     (flatten/flatten-bulk
+      sample-schema
+      {"User" [root-user]
+       "Group" {"id" "g1" "name" "Admins"}})
+     => {"User"
+         {"u1" {"id" "u1"
+                 "data" {"id" "u1" "name" "Root"}
+                 "ref_links" {}
+                 "rev_links" {"children" {"u2" true}}}
+          "u2" {"id" "u2"
+                 "data" {"id" "u2" "name" "Child"}
+                 "ref_links" {"parent" {"u1" true}}
+                 "rev_links" {}}}
+         "Group"
+         {"g1" {"id" "g1"
+                 "data" {"id" "g1" "name" "Admins"}
+                 "ref_links" {}
+                 "rev_links" {}}}})
+
+   (fact "flatten-bulk-ids follows lookup order and sorts IDs"
+     (flatten/flatten-bulk-ids
+      sample-schema
+      sample-lookup
+      {"User" [{"id" "u2" "name" "Second"}
+                {"id" "u1" "name" "First"}]
+       "Group" {"id" "g1" "name" "Admins"}})
+     => [["User" ["u1" "u2"]]
+         ["Group" ["g1"]]])])
+
+(pr-str (run '[std.db.text.base-flatten-test]))

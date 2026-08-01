@@ -1,0 +1,43 @@
+;; ============================================================================
+;; std.substrate.pubsub — direct portable port of xt.substrate.base-pubsub.
+;; ============================================================================
+(ns std.substrate.pubsub
+  (:require [std.foundation.promise :as promise]
+            [std.lib.substrate :as core]
+            [std.substrate.router :as router]
+            [std.substrate.space :as space]))
+
+(defn subscribe
+  "Constructs a subscription control frame."
+  [node space-id signal subscription-id meta]
+  (router/subscribe-frame space-id signal subscription-id meta))
+
+(defn unsubscribe
+  "Constructs an unsubscription control frame."
+  [node space-id signal subscription-id meta]
+  (router/unsubscribe-frame space-id signal subscription-id meta))
+
+(defn trigger-function
+  [entry]
+  (or (get entry "fn")
+      (get entry :fn)))
+
+(defn invoke-trigger
+  "Invokes a registered trigger for a stream frame."
+  [node stream]
+  (let [signal (get stream "signal")
+        entry (get (core/node-section node :triggers) signal)]
+    (if (nil? entry)
+      (promise/from nil)
+      (let [current-space
+            (space/ensure-space node (get stream "space") nil)
+            trigger (trigger-function entry)]
+        (promise/from (trigger current-space stream node))))))
+
+(defn receive-publish
+  "Handles an inbound stream frame."
+  [node stream]
+  (space/ensure-space node (get stream "space") nil)
+  (promise/then
+   (invoke-trigger node stream)
+   (fn [_] stream)))

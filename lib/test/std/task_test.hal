@@ -1,6 +1,7 @@
 (ns std.lib.task-test
   (:require [std.lib.test :as test]
             [std.lib.task :as task]
+            [std.lib.task.protocol :as protocol]
             [std.lib.task.bulk :as bulk]
             [std.lib.task.print :as print]))
 
@@ -39,6 +40,24 @@
     :lookup (fn [task options] {:input (get options :environment)})}
    :params {:flag true}})
 
+(defstruct ProtocolTask [type name config])
+
+(extend-type ProtocolTask protocol/ITaskDefinition
+  (task-type [task]
+    (field task :type))
+  (task-name [task]
+    (field task :name))
+  (task-config [task]
+    (field task :config)))
+
+(def protocol-task
+  (std.lib.task-test/ProtocolTask
+   :custom
+   "protocol-task"
+   {:main {:fn (fn [input params lookup env]
+                 (* input (get params :factor)))}
+    :params {:factor 3}}))
+
 (def results
   [(test/check "deftask creates a portable task"
                [(task/task? double-task)
@@ -46,6 +65,14 @@
                 (task/task-info double-task)
                 (task/invoke double-task 3)]
                [true :default {:fn 'double-task} 6])
+   (test/check "task definitions dispatch through ITaskDefinition"
+               [(protocol/task-type protocol-task)
+                (protocol/task-name protocol-task)
+                (protocol/task-section protocol-task :params)
+                (task/invoke protocol-task 4)
+                (task/invoke protocol-task [1 2 3])]
+               [:custom "protocol-task" {:factor 3}
+                12 {1 3 2 6 3 9}])
    (test/check "bulk execution reports data without printing"
                (let [reporter (bulk/event-reporter)
                      output (task/invoke

@@ -1,0 +1,80 @@
+(ns std.db.text.base-check-test
+  (:use code.test)
+  (:require [std.db.text.base-check :as check]))
+
+(def results
+  [(fact "is-uuid? accepts the source UUID shape"
+     (check/is-uuid? "527a67de-a499-4c51-a435-953e3272b00d")
+     => true)
+
+   (fact "is-uuid? rejects non-strings and wrong group lengths"
+     [(check/is-uuid? nil)
+      (check/is-uuid? 1)
+      (check/is-uuid? "527a67de-a499-4c51-a435-953e2b00d")]
+     => [false false false])
+
+   (fact "is-uuid? deliberately preserves shallow source validation"
+     (check/is-uuid? "zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz")
+     => true)
+
+   (fact "check-arg-type recognises the xt.db database type names"
+     [(check/check-arg-type "any" nil)
+      (check/check-arg-type "numeric" 1.0)
+      (check/check-arg-type "numeric" "1.0")
+      (check/check-arg-type "integer" 1)
+      (check/check-arg-type "jsonb" {:a 1 :b 2})
+      (check/check-arg-type "jsonb" [1 2])
+      (check/check-arg-type "citext" "hello")
+      (check/check-arg-type "text" "hello")
+      (check/check-arg-type "boolean" true)
+      (check/check-arg-type "uuid" "527a67de-a499-4c51-a435-953e3272b00d")]
+     => [true true true true true true true true true true])
+
+   (fact "check-arg-type rejects incompatible and unknown values"
+     [(check/check-arg-type "integer" "1")
+      (check/check-arg-type "jsonb" '(1 2))
+      (check/check-arg-type "unknown" 1)]
+     => [false false false])
+
+   (fact "check-args-type accepts native keyword descriptors"
+     (check/check-args-type
+      [1 2]
+      [{:symbol "x" :type "numeric"}
+       {:symbol "y" :type "numeric"}])
+     => [true nil])
+
+   (fact "check-args-type accepts boundary string descriptors"
+     (check/check-args-type
+      ["hello"]
+      [{"symbol" "x" "type" "text"}])
+     => [true nil])
+
+   (fact "check-args-type returns the source error data shape"
+     (check/check-args-type
+      [1 "wrong"]
+      [{:symbol "x" :type "numeric"}
+       {:symbol "y" :type "boolean"}])
+     => [false {:status "error"
+                :tag "net/arg-typecheck-failed"
+                :data {:input "wrong"
+                       :spec {:symbol "y" :type "boolean"}}}])
+
+   (fact "check-args-length accepts equal lengths"
+     (check/check-args-length
+      [1 2]
+      [{:type "numeric"}
+       {:type "numeric"}])
+     => [true nil])
+
+   (fact "check-args-length returns the source error data shape"
+     (check/check-args-length
+      [1]
+      [{:type "numeric"}
+       {:type "numeric"}])
+     => [false {:status "error"
+                :tag "net/args-not-same-length"
+                :data {:expected 2
+                       :actual 1
+                       :input [1]}}])])
+
+(pr-str (run '[std.db.text.base-check-test]))

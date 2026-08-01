@@ -1,0 +1,50 @@
+(ns tahto.model.target-models-test
+  (:require [std.lib.test :as test]
+            [tahto.common.emit :as emit]
+            [tahto.model.v1.spec-js :as spec-js]
+            [tahto.model.v1.spec-python :as spec-python]))
+
+(def js (spec-js/select))
+(def py (spec-python/select))
+
+(def results
+  [(test/check "JavaScript keeps the Foundation language and grammar tag"
+               [spec-js/+language+
+                spec-js/+tag+
+                (get-in js [:coordinate :grammar/id])
+                (get-in js [:grammar :tag])]
+               [:js :js :js :js])
+   (test/check "Python keeps the Foundation language and grammar tag"
+               [spec-python/+language+
+                spec-python/+tag+
+                (get-in py [:coordinate :grammar/id])
+                (get-in py [:grammar :tag])]
+               [:python :py :py :py])
+   (test/check "target models inherit the versioned XTalk/common model"
+               [(:provenance js) (:provenance py)]
+               [[[:emit-template :xtalk 1]
+                 [:profile :xtalk 1]
+                 [:grammar :xtalk 1]
+                 [:grammar :js 1]]
+                [[:emit-template :xtalk 1]
+                 [:profile :xtalk 1]
+                 [:grammar :xtalk 1]
+                 [:grammar :py 1]]])
+   (test/check "JavaScript grammar emits executable console output"
+               (emit/emit '(console.log (+ 19 23)) js)
+               "console.log((19 + 23))")
+   (test/check "Python grammar emits executable print output"
+               (emit/emit '(print (+ 19 23)) py)
+               "print((19 + 23))")
+   (test/check "JavaScript grammar emits named functions"
+               (emit/emit '(defn add [x y] (return (+ x y))) js)
+               "function add(x, y) {\n  return (x + y);\n}")
+   (test/check "Python grammar emits named functions"
+               (emit/emit '(defn add [x y] (return (+ x y))) py)
+               "def add(x, y):\n    return (x + y)")
+   (test/check "target literals differ by language"
+               [(emit/emit nil js) (emit/emit true js)
+                (emit/emit nil py) (emit/emit true py)]
+               ["null" "true" "None" "True"])])
+
+(test/print-results results)

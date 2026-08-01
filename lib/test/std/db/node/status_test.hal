@@ -1,0 +1,70 @@
+(ns std.db.node.status-test
+  (:use code.test)
+  (:require [std.db.node.client-base :as client]
+            [std.db.node.runtime :as runtime]
+            [std.db.protocol :as protocol]
+            [std.foundation.promise :as promise]
+            [std.lib.substrate :as substrate]))
+
+(defstruct StatusConnection
+  [id])
+
+(extend-type StatusConnection protocol/IDatabase
+  (db-engine [connection] :status-sql)
+  (db-provider [connection] :status)
+  (db-info [connection]
+    {:id (field connection :id)
+     :engine :status-sql
+     :provider :status})
+  (db-exec [connection sql parameters]
+    (promise/from {:affected 0}))
+  (db-query [connection sql parameters]
+    (promise/from {:columns [] :rows [] :affected 0}))
+  (db-close [connection]
+    (promise/from true)))
+
+(defn status-driver
+  []
+  {:id :status
+   :engine :status-sql
+   :open (fn [options]
+           (promise/from
+            (std.db.node.status-test/StatusConnection
+             (get options :id "status-default"))))})
+
+(def results
+  [(fact "runtime status reports drivers configured services and dynamic services"
+     (let [server (substrate/node-create "status-server")
+           client-node (substrate/node-create "status-client")
+           config {:primary {:type :status :options {:id "primary"}}}
+           connected (deref
+                      (runtime/local-connect
+                       client-node
+                       server
+                       config
+                       {}
+                       {}
+                       {:drivers {:status (status-driver)}}))
+           runtime-value (get connected :runtime)]
+       (deref
+        (runtime/create-service
+         runtime-value
+         "db/extra"
+         {:type :status :options {:id "extra"}}
+         {}
+         {}))
+       (let [status (deref (client/runtime-status client-node {}))]
+         [(get status :node-id)
+          (get status :drivers)
+          (get status :common)
+          (get-in status [:primary :provider])
+          (get status :caching)
+          (get status :dynamic-services)]))
+     => ["status-server"
+         [:status]
+         true
+         :status
+         nil
+         ["db/extra"]])])
+
+(pr-str (run '[std.db.node.status-test]))

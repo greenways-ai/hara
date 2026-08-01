@@ -1,0 +1,65 @@
+(ns std.db.text.sql-view-test
+  (:use code.test)
+  (:require [std.db.text.sql-view :as view]))
+
+(def schema
+  {"Currency"
+   {"id" {"ident" "id" "order" 0 "type" "text" "scope" "id"}
+    "type" {"ident" "type" "order" 1 "type" "text" "scope" "data"}
+    "name" {"ident" "name" "order" 2 "type" "text" "scope" "data"}
+    "description" {"ident" "description" "order" 3 "type" "text" "scope" "detail"}}})
+
+(def select-entry
+  {:input [{:symbol "i_type" :type "text"}]
+   :view {:table "Currency"
+          :query {"type" "{{i_type}}"}}})
+
+(def return-entry
+  {:input [{:symbol "i_id" :type "text"}]
+   :view {:table "Currency"
+          :query ["id" "description"]}})
+
+(def results
+  [(fact "view select can return canonical tree or rendered SQL"
+     [(view/query-select schema select-entry ["crypto"] {} true)
+      (view/query-select schema select-entry ["crypto"] {} false)]
+     => [["Currency"
+          {"where" [{"type" "crypto"}]
+           "data" ["id"]
+           "links" []
+           "custom" []}]
+         "SELECT id FROM Currency\n  WHERE type = 'crypto'"])
+
+   (fact "count and return views render through recursive graph SQL"
+     [(view/query-count schema select-entry ["crypto"] {} false)
+      (view/query-return schema return-entry "USD" [] {} false)
+      (view/query-return-bulk schema return-entry ["USD" "AUD"] [] {} false)]
+     => ["SELECT count(*) FROM Currency\n  WHERE type = 'crypto'"
+         "SELECT id, description FROM Currency\n  WHERE id = 'USD'"
+         "SELECT id, description FROM Currency\n  WHERE id in ('USD', 'AUD')"])
+
+   (fact "combined views preserve selection filters and return columns"
+     [(view/query-combined schema
+                           select-entry
+                           ["fiat"]
+                           return-entry
+                           []
+                           nil
+                           {}
+                           true)
+      (view/query-combined schema
+                           select-entry
+                           ["fiat"]
+                           return-entry
+                           []
+                           nil
+                           {}
+                           false)]
+     => [["Currency"
+          {"where" [{"type" "fiat"}]
+           "data" ["id" "description"]
+           "links" []
+           "custom" []}]
+         "SELECT id, description FROM Currency\n  WHERE type = 'fiat'"])])
+
+(pr-str (run '[std.db.text.sql-view-test]))

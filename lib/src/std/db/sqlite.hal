@@ -1,0 +1,108 @@
+;; ============================================================================
+;; std.db.sqlite — Hara-facing SQLite connection API.
+;;
+;; The implementation is supplied by the std.db.provider.sqlite HTA package.
+;; Provider descriptors are wrapped as typed SQLiteConnection values that
+;; implement the provider-neutral std.db.protocol/IDatabase contract.
+;; ============================================================================
+(ns std.db.sqlite
+  (:require [std.db.protocol :as protocol]
+            [std.db.provider.sqlite :as provider]
+            [std.foundation.promise :as promise]))
+
+(defstruct SQLiteConnection
+  [id engine provider storage filename])
+
+(defn- descriptor-field
+  "Returns a provider descriptor field from keyword or string keys."
+  [descriptor keyword-key string-key]
+  (if (has? descriptor keyword-key)
+    (get descriptor keyword-key)
+    (get descriptor string-key)))
+
+(defn- connection
+  "Wraps a raw provider descriptor as a typed SQLite connection."
+  [descriptor]
+  (std.db.sqlite/SQLiteConnection
+   (descriptor-field descriptor :id "id")
+   :sqlite
+   :sqlite
+   (descriptor-field descriptor :storage "storage")
+   (descriptor-field descriptor :filename "filename")))
+
+(extend-type SQLiteConnection protocol/IDatabase
+  (db-engine [value]
+    :sqlite)
+  (db-provider [value]
+    :sqlite)
+  (db-info [value]
+    {:id (field value :id)
+     :engine :sqlite
+     :provider :sqlite
+     :storage (field value :storage)
+     :filename (field value :filename)})
+  (db-exec [value sql parameters]
+    (provider/exec (field value :id) sql parameters))
+  (db-query [value sql parameters]
+    (provider/query (field value :id) sql parameters))
+  (db-close [value]
+    (provider/close (field value :id))))
+
+(defn ^{:schema [:fn [] :any]}
+  version
+  "Returns a promise resolving to the SQLite engine and library version."
+  []
+  (provider/version))
+
+(defn ^{:schema [:function [:fn [] :any]
+                            [:fn [:map] :any]]}
+  open
+  "Returns a promise resolving to a typed SQLiteConnection.
+
+   The initial portable storage mode is in-memory. Browser persistence will be
+   added behind an explicit storage capability rather than selected implicitly."
+  ([] (open {}))
+  ([options]
+   (promise/then (provider/open options) connection)))
+
+(defn ^{:schema [:function [:fn [:any :str] :any]
+                            [:fn [:any :str :vector] :any]]}
+  exec
+  "Executes SQL with optional positional parameters."
+  ([value sql]
+   (exec value sql []))
+  ([value sql parameters]
+   (protocol/db-exec value sql parameters)))
+
+(defn ^{:schema [:function [:fn [:any :str] :any]
+                            [:fn [:any :str :vector] :any]]}
+  query
+  "Executes a row-returning SQL statement with optional positional parameters."
+  ([value sql]
+   (query value sql []))
+  ([value sql parameters]
+   (protocol/db-query value sql parameters)))
+
+(defn ^{:schema [:fn [:any] :any]}
+  close
+  "Closes connection."
+  [value]
+  (protocol/db-close value))
+
+(defn ^{:schema [:fn [:any] :any]}
+  begin
+  "Begins a transaction on connection."
+  [value]
+  (exec value "begin"))
+
+(defn ^{:schema [:fn [:any] :any]}
+  commit
+  "Commits the current transaction on connection."
+  [value]
+  (exec value "commit"))
+
+(defn ^{:schema [:fn [:any] :any]}
+  rollback
+  "Rolls back the current transaction on connection."
+  [value]
+  (exec value "rollback"))

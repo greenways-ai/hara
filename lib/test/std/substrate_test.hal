@@ -1,0 +1,113 @@
+(ns std.substrate-test
+  (:use code.test)
+  (:require [std.foundation.promise :as promise]
+            [std.substrate :as substrate]))
+
+(fact "node-create applies declarative spaces services and handlers"
+  (let [node (substrate/node-create
+              {:id "node/config"
+               :spaces {"main" {:state {:count 1}
+                                  :meta {:owner "test"}}}
+               :services {"cache" 41}
+               :handlers
+               {"sum" (fn [space args request current-node]
+                        (+ (nth args 0) (nth args 1)))}})]
+    (substrate/update-space-state
+     node "main"
+     (fn [state space current-node]
+       (assoc state :count
+              (+ (get state :count)
+                 (substrate/get-service current-node "cache")))))
+    [(substrate/node-id node)
+     (substrate/get-space-state node "main")
+     (promise/value
+      (substrate/request node "main" "sum" [19 23] {:local true}))])
+  => ["node/config" {:count 42} 42])
+
+(fact "transport lifecycle stores listener and invokes send and stop"
+  (let [node (substrate/node-create {:id "node/transport"})
+        started (atom false)
+        stopped (atom false)
+        sent (atom nil)
+        transport
+        (substrate/transport-create
+         "peer"
+         {:send-fn (fn [frame]
+                     (reset! sent (substrate/frame-id frame))
+                     frame)
+          :start-fn (fn [listener]
+                      (reset! started true)
+                      listener)
+          :stop-fn (fn [listener]
+                     (reset! stopped (fn? listener))
+                     true)})]
+    (promise/value (substrate/attach-transport node "peer" transport))
+    (promise/value
+     (substrate/transport-send
+      node "peer"
+      (substrate/stream-frame "main" "changed" 1 {:id "evt-1"} nil)))
+    (promise/value (substrate/detach-transport node "peer"))
+    [@started @sent @stopped (substrate/transport-list node)])
+  => [true "evt-1" true []])
+
+(fact "remote requests settle through symmetric substrate transports"
+  (let [client (substrate/node-create {:id "node/client"})
+        server (substrate/node-create
+                {:id "node/server"
+                 :handlers
+                 {"sum" (fn [space args request current-node]
+                          (+ (nth args 0) (nth args 1)))}})]
+    (promise/value
+     (substrate/attach-transport
+      client "server"
+      {:send-fn
+       (fn [frame]
+         (substrate/receive-frame server frame {:transport-id "client"}))}))
+    (promise/value
+     (substrate/attach-transport
+      server "client"
+      {:send-fn
+       (fn [frame]
+         (substrate/receive-frame client frame {:transport-id "server"}))}))
+    (promise/value
+     (substrate/request client "main" "sum" [19 23] {})))
+  => 42)
+
+(fact "subscriptions route streams without echoing to inbound transport"
+  (let [node (substrate/node-create {:id "node/router"})
+        peer-a (atom [])
+        peer-b (atom [])]
+    (promise/value
+     (substrate/attach-transport
+      node "peer-a"
+      {:send-fn (fn [frame]
+                  (reset! peer-a (conj @peer-a (substrate/frame-id frame)))
+                  frame)}))
+    (promise/value
+     (substrate/attach-transport
+      node "peer-b"
+      {:send-fn (fn [frame]
+                  (reset! peer-b (conj @peer-b (substrate/frame-id frame)))
+                  frame)}))
+    (promise/value
+     (substrate/receive-frame
+      node
+      (promise/value (substrate/subscribe node "main" "changed" "sub-a"
+                                          {:transport-id "peer-a"}))
+      {:transport-id "peer-a"}))
+    (promise/value
+     (substrate/receive-frame
+      node
+      (promise/value (substrate/subscribe node "main" "changed" "sub-b"
+                                          {:transport-id "peer-b"}))
+      {:transport-id "peer-b"}))
+    (promise/value
+     (substrate/receive-frame
+      node
+      (substrate/stream-frame "main" "changed" 42 {:id "evt-in"} nil)
+      {:transport-id "peer-a"}))
+    [@peer-a @peer-b
+     (substrate/list-subscriptions node "main" "changed")])
+  => [["sub-a"] ["sub-b" "evt-in"] ["peer-a" "peer-b"]])
+
+(pr-str (run '[std.substrate-test]))

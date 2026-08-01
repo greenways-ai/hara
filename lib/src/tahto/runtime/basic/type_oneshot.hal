@@ -1,0 +1,57 @@
+(ns tahto.runtime.basic.type-oneshot
+  (:require [hara.runtime :as host]
+            [std.foundation.string :as string]
+            [tahto.runtime.basic.type-common :as common]))
+
+(defstruct RuntimeOneshot [id lang runtime program exec process])
+
+(defn- default-id
+  [language runtime]
+  (keyword (str (name language) "." (name runtime))))
+
+(defn rt-oneshot-setup
+  "Prepares Foundation-compatible program, process and exec values."
+  ([language program process exec]
+   (rt-oneshot-setup language program process exec :oneshot))
+  ([language program process exec context]
+   (let [program (common/get-program-default language context program)
+         process-options (common/get-options language context program)
+         process (merge process-options process)
+         exec (or exec
+                  (common/get-program-exec language context program))]
+     [program process exec])))
+
+(defn rt-oneshot:create
+  "Creates a Foundation-shaped oneshot runtime."
+  [{:keys [id lang runtime exec program process]
+    :or {runtime :oneshot}}]
+  (let [[program process exec]
+        (rt-oneshot-setup lang program process exec runtime)]
+    (tahto.runtime.basic.type-oneshot/RuntimeOneshot
+     (or id (default-id lang runtime))
+     lang
+     runtime
+     program
+     exec
+     process)))
+
+(defn rt-oneshot
+  [options]
+  (rt-oneshot:create options))
+
+(defn raw-eval-oneshot
+  "Evaluates emitted target source using the selected local program."
+  [runtime source]
+  (let [exec (:exec runtime)
+        result
+        (deref
+         (host/run
+          (:lang runtime)
+          source
+          {:executable (first exec)
+           :arguments (vec (rest exec))
+           :cwd (get-in runtime [:process :cwd])
+           :env (get-in runtime [:process :env])}))]
+    (if (get-in runtime [:process :raw])
+      result
+      (string/trim-right (:stdout result)))))

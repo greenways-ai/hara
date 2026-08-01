@@ -51,6 +51,53 @@ public class HaraProjectTest {
   }
 
   @Test
+  public void parsesLeinStyleJvmDependenciesAndBuildPaths() throws Exception {
+    Path root = Files.createTempDirectory("hara-project-jvm");
+    Files.writeString(
+        root.resolve("project.edn"),
+        "{:project/id sample :project/capabilities #{:jvm/reflection} "
+            + ":jvm/dependencies [[org.apache.commons/commons-lang3 \"3.12.0\"]] "
+            + ":jvm/source-paths [\"java-src\"] :jvm/target-path \"build/classes\"}");
+
+    HaraProject project = HaraProject.read(root.resolve("project.edn"));
+
+    assertEquals(
+        java.util.List.of("org.apache.commons:commons-lang3:3.12.0"),
+        project.jvmDependencies().stream().map(HaraProject.JvmDependency::coordinate).toList());
+    assertEquals(java.util.List.of(root.resolve("java-src")), project.jvmSourcePaths());
+    assertEquals(root.resolve("build/classes"), project.jvmTargetPath());
+    assertTrue(project.hasCapability("jvm/reflection"));
+  }
+
+  @Test
+  public void rejectsJvmDependencyRanges() throws Exception {
+    Path root = Files.createTempDirectory("hara-project-jvm-invalid");
+    Path descriptor = root.resolve("project.edn");
+    Files.writeString(
+        descriptor,
+        "{:project/id sample :jvm/dependencies "
+            + "[[org.example/library \"[1,2)\"]]}");
+
+    HaraException error =
+        assertThrows(HaraException.class, () -> HaraProject.read(descriptor));
+    assertTrue(error.getMessage().contains("exact Maven version"));
+  }
+
+  @Test
+  public void rejectsDuplicateJvmDependencyCoordinates() throws Exception {
+    Path root = Files.createTempDirectory("hara-project-jvm-duplicate");
+    Path descriptor = root.resolve("project.edn");
+    Files.writeString(
+        descriptor,
+        "{:project/id sample :jvm/dependencies "
+            + "[[org.example/library \"1.0.0\"] [org.example/library \"2.0.0\"]]}");
+
+    HaraException error =
+        assertThrows(HaraException.class, () -> HaraProject.read(descriptor));
+    assertTrue(error.getMessage().contains("duplicate JVM dependency"));
+  }
+
+  @Test
   public void requiresProjectNamespacesByConvention() {
     Path benchmark =
         Path.of("lib", "bench", "001-simple-test").toAbsolutePath().normalize();

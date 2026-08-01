@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.HostAccess;
 import org.graalvm.polyglot.PolyglotException;
 import org.graalvm.polyglot.Source;
 import org.graalvm.polyglot.Value;
@@ -25,6 +26,7 @@ final class SessionKernel implements AutoCloseable {
   private final boolean allowFile;
   private final boolean allowNetwork;
   private final boolean allowProcess;
+  private final HaraProject project;
   private final ConcurrentHashMap<String, Session> sessions = new ConcurrentHashMap<>();
 
   SessionKernel(boolean allowFile, boolean allowNetwork) {
@@ -32,10 +34,16 @@ final class SessionKernel implements AutoCloseable {
   }
 
   SessionKernel(boolean allowFile, boolean allowNetwork, boolean allowProcess) {
+    this(allowFile, allowNetwork, allowProcess, null);
+  }
+
+  SessionKernel(
+      boolean allowFile, boolean allowNetwork, boolean allowProcess, HaraProject project) {
     this.allowFile = allowFile;
     this.allowNetwork = allowNetwork;
     this.allowProcess = allowProcess;
-    sessions.put("ROOT", new Session("ROOT", allowFile, allowNetwork, allowProcess));
+    this.project = project;
+    sessions.put("ROOT", new Session("ROOT", allowFile, allowNetwork, allowProcess, project));
   }
 
   Session root() {
@@ -51,7 +59,7 @@ final class SessionKernel implements AutoCloseable {
   synchronized Session create(String value) {
     String name = normalizeName(value);
     if (sessions.containsKey(name)) throw new IllegalArgumentException("SESSION_EXISTS " + name);
-    Session session = new Session(name, allowFile, allowNetwork, allowProcess);
+    Session session = new Session(name, allowFile, allowNetwork, allowProcess, project);
     sessions.put(name, session);
     return session;
   }
@@ -95,6 +103,7 @@ final class SessionKernel implements AutoCloseable {
     private final boolean allowFile;
     private final boolean allowNetwork;
     private final boolean allowProcess;
+    private final HaraProject project;
     private Context context;
     private Path filesystemRoot;
     private final AtomicInteger activeEvaluations = new AtomicInteger();
@@ -121,11 +130,16 @@ final class SessionKernel implements AutoCloseable {
     }
 
     private Session(
-        String name, boolean allowFile, boolean allowNetwork, boolean allowProcess) {
+        String name,
+        boolean allowFile,
+        boolean allowNetwork,
+        boolean allowProcess,
+        HaraProject project) {
       this.name = name;
       this.allowFile = allowFile;
       this.allowNetwork = allowNetwork;
       this.allowProcess = allowProcess;
+      this.project = project;
       context = createContext(null);
     }
 
@@ -133,14 +147,19 @@ final class SessionKernel implements AutoCloseable {
       IOAccess.Builder io =
           IOAccess.newBuilder().allowHostSocketAccess(allowNetwork);
       if (root == null) {
-        io.allowHostFileAccess(allowFile);
+        io.allowHostFileAccess(allowFile || project != null);
       } else {
         io.allowHostFileAccess(false).fileSystem(new HaraMountedFileSystem(root));
       }
-      return Context.newBuilder(HaraLanguage.ID)
+      Context.Builder builder =
+          Context.newBuilder(HaraLanguage.ID)
           .allowCreateProcess(allowProcess)
-          .allowIO(io.build())
-          .build();
+          .allowIO(io.build());
+      if (project != null && root == null) builder.currentWorkingDirectory(project.root());
+      if (project != null && project.hasCapability("jvm/reflection")) {
+        builder.allowHostAccess(HostAccess.ALL).allowHostClassLookup(name -> true);
+      }
+      return builder.build();
     }
 
     private void requireActive() {

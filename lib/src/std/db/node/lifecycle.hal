@@ -1,0 +1,76 @@
+(ns std.db.node.lifecycle
+  (:require [std.foundation.promise :as promise]
+            [std.lib.substrate.protocol :as substrate]))
+
+(def FINALIZER-REGISTRY "std.db.runtime/finalizers")
+(def ACTION-FINALIZE "@xt.db/runtime-finalize")
+
+(defn register-finalizer
+  "Registers an idempotent zero-argument runtime finalizer."
+  [node finalizer-id function]
+  (let [registry (or (substrate/get-service node FINALIZER-REGISTRY) {})]
+    (substrate/set-service node FINALIZER-REGISTRY
+                           (assoc registry finalizer-id function))
+    finalizer-id))
+
+(defn unregister-finalizer
+  "Removes a finalizer registration and returns its function."
+  [node finalizer-id]
+  (let [registry (or (substrate/get-service node FINALIZER-REGISTRY) {})
+        function (get registry finalizer-id)
+        remaining (dissoc registry finalizer-id)]
+    (if (empty? remaining)
+      (substrate/remove-service node FINALIZER-REGISTRY)
+      (substrate/set-service node FINALIZER-REGISTRY remaining))
+    function))
+
+(defn list-finalizers
+  "Returns registered runtime finalizer IDs."
+  [node]
+  (vec (keys (or (substrate/get-service node FINALIZER-REGISTRY) {}))))
+
+(defn- call-finalizer
+  [function]
+  (try
+    (let [result (function)]
+      (if (promise? result) result (promise/from result)))
+    (catch Throwable error
+      (promise/new (fn [resolve reject] (reject error))))))
+
+(defn finalize-all-main
+  "Runs and unregisters all runtime finalizers sequentially."
+  ([node]
+   (finalize-all-main node (list-finalizers node) 0 []))
+  ([node finalizer-ids index results]
+   (if (= index (count finalizer-ids))
+     (do
+       (substrate/remove-service node FINALIZER-REGISTRY)
+       (promise/from {:status :finalized
+                      :results results}))
+     (let [finalizer-id (nth finalizer-ids index)
+           function (unregister-finalizer node finalizer-id)]
+       (if (nil? function)
+         (finalize-all-main node finalizer-ids (+ index 1) results)
+         (promise/then
+          (promise/catch
+           (call-finalizer function)
+           (fn [error]
+             {:status :error
+              :finalizer finalizer-id
+              :error error}))
+          (fn [result]
+            (finalize-all-main node
+                               finalizer-ids
+                               (+ index 1)
+                               (conj results {:finalizer finalizer-id
+                                              :result result})))))))))
+
+(defn finalize-handler
+  [space args request node]
+  (finalize-all-main node))
+
+(defn init-handlers
+  "Installs the runtime finalization action on node."
+  [node]
+  (substrate/register-handler node ACTION-FINALIZE finalize-handler {})
+  node)

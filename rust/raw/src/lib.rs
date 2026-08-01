@@ -51,7 +51,7 @@ pub extern "C" fn hta_abi_version() -> i32 {
     2
 }
 
-struct Runtime {
+struct Session {
     name: String,
     env: HashMap<String, Value>,
     namespaces: kernel::NamespaceRegistry<Value>,
@@ -71,7 +71,7 @@ struct Runtime {
     #[cfg(feature = "evaluation-journal")]
     next_journal_id: u64,
 }
-impl Runtime {
+impl Session {
     fn new() -> Self {
         Self::shared(
             "ROOT",
@@ -520,17 +520,17 @@ struct FilesystemMount {
     attachments: usize,
 }
 
-struct KernelRuntime {
+struct SessionKernel {
     next_task: u64,
     resources: Rc<RefCell<HashMap<String, String>>>,
     events: Rc<RefCell<VecDeque<Vec<u8>>>>,
-    sessions: HashMap<String, Runtime>,
+    sessions: HashMap<String, Session>,
     task_sessions: HashMap<u64, String>,
     mounts: HashMap<u64, FilesystemMount>,
     next_mount_id: u64,
 }
 
-impl KernelRuntime {
+impl SessionKernel {
     fn new() -> Self {
         let resources = Rc::new(RefCell::new(HashMap::new()));
         resources.borrow_mut().insert(
@@ -545,7 +545,7 @@ impl KernelRuntime {
         let mut sessions = HashMap::new();
         sessions.insert(
             "ROOT".into(),
-            Runtime::shared("ROOT", resources.clone(), events.clone()),
+            Session::shared("ROOT", resources.clone(), events.clone()),
         );
         Self {
             next_task: 1,
@@ -564,13 +564,13 @@ impl KernelRuntime {
         task
     }
 
-    fn session(&self, name: &str) -> Result<&Runtime, String> {
+    fn session(&self, name: &str) -> Result<&Session, String> {
         self.sessions
             .get(name)
             .ok_or_else(|| format!("NO_SESSION {name}"))
     }
 
-    fn session_mut(&mut self, name: &str) -> Result<&mut Runtime, String> {
+    fn session_mut(&mut self, name: &str) -> Result<&mut Session, String> {
         self.sessions
             .get_mut(name)
             .ok_or_else(|| format!("NO_SESSION {name}"))
@@ -583,7 +583,7 @@ impl KernelRuntime {
         }
         self.sessions.insert(
             name.into(),
-            Runtime::shared(name, self.resources.clone(), self.events.clone()),
+            Session::shared(name, self.resources.clone(), self.events.clone()),
         );
         Ok(())
     }
@@ -727,7 +727,7 @@ fn validate_session_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-thread_local! {static KERNEL:RefCell<KernelRuntime>=RefCell::new(KernelRuntime::new());}
+thread_local! {static KERNEL:RefCell<SessionKernel>=RefCell::new(SessionKernel::new());}
 fn event(kind: i64, id: u64, value: Value) -> Value {
     Value::Vector(vec![Value::Number(kind), Value::Number(id as i64), value].into())
 }
@@ -817,7 +817,7 @@ pub extern "C" fn hta_start(pointer: *const u8, size: usize) -> i64 {
 }
 
 fn dispatch(
-    kernel: &mut KernelRuntime,
+    kernel: &mut SessionKernel,
     task: u64,
     target: &str,
     args: Vec<Value>,
@@ -1176,7 +1176,7 @@ fn journal_value(journal: &journal::Journal) -> Value {
 }
 
 fn dispatch_eval(
-    kernel: &mut KernelRuntime,
+    kernel: &mut SessionKernel,
     task: u64,
     session: &str,
     args: &[Value],
@@ -1202,7 +1202,7 @@ fn dispatch_eval(
 }
 
 fn dispatch_eval_values(
-    kernel: &mut KernelRuntime,
+    kernel: &mut SessionKernel,
     task: u64,
     session: &str,
     source: &str,
@@ -1219,7 +1219,7 @@ fn dispatch_eval_values(
 }
 
 fn dispatch_eval_halc(
-    kernel: &mut KernelRuntime,
+    kernel: &mut SessionKernel,
     task: u64,
     session: &str,
     args: &[Value],
@@ -1231,7 +1231,7 @@ fn dispatch_eval_halc(
 }
 
 fn dispatch_eval_halc_bytes(
-    kernel: &mut KernelRuntime,
+    kernel: &mut SessionKernel,
     task: u64,
     session: &str,
     bytes: &[u8],
@@ -1243,7 +1243,7 @@ fn dispatch_eval_halc_bytes(
 }
 
 fn dispatch_eval_halc_bundle(
-    kernel: &mut KernelRuntime,
+    kernel: &mut SessionKernel,
     task: u64,
     session: &str,
     args: &[Value],
@@ -1256,7 +1256,7 @@ fn dispatch_eval_halc_bundle(
 }
 
 fn dispatch_eval_halc_bundle_values(
-    kernel: &mut KernelRuntime,
+    kernel: &mut SessionKernel,
     task: u64,
     session: &str,
     modules: &[Value],
@@ -1275,7 +1275,7 @@ fn dispatch_eval_halc_bundle_values(
 }
 
 fn dispatch_complete(
-    kernel: &mut KernelRuntime,
+    kernel: &mut SessionKernel,
     task: u64,
     session: &str,
     args: &[Value],
@@ -1287,7 +1287,7 @@ fn dispatch_complete(
 }
 
 fn dispatch_complete_values(
-    kernel: &mut KernelRuntime,
+    kernel: &mut SessionKernel,
     task: u64,
     session: &str,
     prefix: &str,
@@ -1493,7 +1493,7 @@ pub extern "C" fn eval_error_code(source_ptr: *const u8, source_len: usize) -> i
 
 #[cfg(test)]
 mod tests {
-    use super::{KernelRuntime, Runtime, dispatch, emit_settlement, eval_error_code, evaluate};
+    use super::{dispatch, emit_settlement, eval_error_code, evaluate, Session, SessionKernel};
     use crate::core::{PromiseRejection, PromiseState, Value};
     use crate::lang::data::Symbol;
     use crate::lang::protocol::IDeref;
@@ -1501,7 +1501,7 @@ mod tests {
     use std::collections::VecDeque;
     use std::rc::Rc;
 
-    fn result(kernel: &mut KernelRuntime) -> Vec<Value> {
+    fn result(kernel: &mut SessionKernel) -> Vec<Value> {
         kernel.drain_ready();
         let bytes = kernel
             .events
@@ -1516,7 +1516,7 @@ mod tests {
 
     #[test]
     fn kernel_sessions_isolate_namespaces_in_one_runtime() {
-        let mut kernel = KernelRuntime::new();
+        let mut kernel = SessionKernel::new();
         kernel.create_session("alpha").unwrap();
         kernel.create_session("beta").unwrap();
 
@@ -1568,7 +1568,7 @@ mod tests {
 
     #[test]
     fn filesystem_reattachment_preserves_idle_session_state() {
-        let mut kernel = KernelRuntime::new();
+        let mut kernel = SessionKernel::new();
         kernel.create_session("example").unwrap();
         dispatch(
             &mut kernel,
@@ -1612,7 +1612,7 @@ mod tests {
 
     #[test]
     fn filesystem_reattachment_rejects_busy_session() {
-        let mut kernel = KernelRuntime::new();
+        let mut kernel = SessionKernel::new();
         kernel.create_session("busy").unwrap();
         dispatch(
             &mut kernel,
@@ -1642,7 +1642,7 @@ mod tests {
 
     #[test]
     fn mounted_file_calls_use_the_canonical_hal_module_and_v2_identity() {
-        let mut kernel = KernelRuntime::new();
+        let mut kernel = SessionKernel::new();
         kernel.create_session("files").unwrap();
         let mount_id = kernel
             .create_filesystem(&Value::Map(
@@ -1719,15 +1719,15 @@ mod tests {
     #[test]
     fn iterator_lifecycle_matches_native_core_in_raw_wasm() {
         for source in [
-            "(let (it (iter-cycle [1 2])) (do (iter-next it) (iter-close it) (if (iter-has? it) 0 42)))",
-            "(let (it (iter-zip [1 2] [3 4])) (do (iter-close it) (if (iter-has? it) 0 42)))",
-            "(let (it (iter-map (fn [x] x) [1 2])) (do (iter-close it) (if (iter-has? it) 0 42)))",
+            "(let (it (iter-cycle [1 2])) (do (iter-next it) (iter-close it) (if (iter-next? it) 0 42)))",
+            "(let (it (iter-zip [1 2] [3 4])) (do (iter-close it) (if (iter-next? it) 0 42)))",
+            "(let (it (iter-map (fn [x] x) [1 2])) (do (iter-close it) (if (iter-next? it) 0 42)))",
         ] {
             assert_eq!(evaluate(source), Ok(42), "{source}");
         }
     }
 
-    fn completion_value(runtime: &mut Runtime, task: u64) -> crate::core::Value {
+    fn completion_value(runtime: &mut Session, task: u64) -> crate::core::Value {
         let frame = runtime
             .events
             .borrow_mut()
@@ -1751,7 +1751,7 @@ mod tests {
 
     #[test]
     fn require_loads_registered_resource_and_binds_alias() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Session::new();
         runtime.resources.borrow_mut().insert(
             "chrome.api".to_string(),
             "(ns chrome.api) (defn answer [] 42)".to_string(),
@@ -1767,7 +1767,7 @@ mod tests {
 
     #[test]
     fn require_supports_ns_form_clauses_and_qualified_access() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Session::new();
         runtime.resources.borrow_mut().insert(
             "acme.tools".to_string(),
             "(ns acme.tools) (defn seven [] 7)".to_string(),
@@ -1791,7 +1791,7 @@ mod tests {
 
     #[test]
     fn fibers_preserve_guest_protocol_extensions() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Session::new();
         runtime
             .start_fiber(
                 1,
@@ -1810,7 +1810,7 @@ mod tests {
 
     #[test]
     fn bound_fibers_receive_hta_values_without_serializing_source() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Session::new();
         runtime
             .start_fiber_with_bindings(
                 1,
@@ -1833,9 +1833,9 @@ mod tests {
                 .iter()
                 .map(|(_, methods)| methods.len())
                 .sum::<usize>(),
-            164
+            161
         );
-        let mut runtime = Runtime::new();
+        let mut runtime = Session::new();
         assert!(runtime.env.contains_key("edn/write"));
         assert!(runtime.env.contains_key("ICount"));
         for native_type in [
@@ -1930,7 +1930,7 @@ mod tests {
 
     #[test]
     fn raw_kernel_keeps_the_three_bang_name_compatibility_operations() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Session::new();
         runtime
             .start_fiber(
                 1,
@@ -1950,7 +1950,7 @@ mod tests {
 
     #[test]
     fn raw_kernels_run_the_shared_substrate_frame_fixture() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Session::new();
         runtime.resources.borrow_mut().insert(
             "std.lib.substrate.frame".into(),
             include_str!("../../../lib/src/std/lib/substrate/frame.hal").into(),
@@ -1971,7 +1971,7 @@ mod tests {
 
     #[test]
     fn raw_kernels_run_atom_backed_substrate_request_stream_and_cancellation_lifecycle() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Session::new();
         runtime.resources.borrow_mut().extend([
             (
                 "std.lib.substrate.protocol".into(),
@@ -2005,7 +2005,7 @@ mod tests {
 
     #[test]
     fn require_missing_namespace_is_a_clean_error() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Session::new();
         runtime.start_fiber(4, "(require [no.such.ns])").unwrap();
         let frame = runtime
             .events
@@ -2047,7 +2047,7 @@ mod tests {
 
     #[test]
     fn fibers_persist_namespace_selection_defs_and_var_identity() {
-        let mut runtime = Runtime::new();
+        let mut runtime = Session::new();
         runtime
             .start_fiber(1, "(ns example.lib) (def answer 42)")
             .unwrap();

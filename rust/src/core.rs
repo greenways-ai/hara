@@ -1868,18 +1868,13 @@ impl Ord for Value {
 impl Hash for Value {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
-            // Avoid constructing a nested DefaultHasher for the hottest
-            // persistent-map key types. Equal values still hash identically;
-            // stable_hash remains the portable structural hash API.
-            Value::Number(value) => {
-                state.write_u8(0);
-                state.write_i64(*value);
-            }
-            Value::Bool(value) => {
-                state.write_u8(1);
-                state.write_u8(u8::from(*value));
-            }
-            Value::Nil => state.write_u8(19),
+            // Keep the hottest persistent-map key types allocation-free while
+            // still writing their Java-parity hash as one value. CHAMP's hash
+            // probe captures this write directly to preserve JVM iteration
+            // order instead of falling back to Rust's DefaultHasher.
+            Value::Number(value) => state.write_u64(crate::lang::hash::hash_long(*value) as u64),
+            Value::Bool(value) => state.write_u64(crate::lang::hash::hash_bool(*value) as u64),
+            Value::Nil => state.write_u64(0),
             _ => state.write_u64(self.stable_hash()),
         }
     }
