@@ -1,0 +1,76 @@
+;; ============================================================================
+;; std.db.node.supabase — integrated Supabase runtime lifecycle.
+;; ============================================================================
+(ns std.db.node.supabase
+  (:require [std.db.node.client-supabase :as client]
+            [std.db.node.kernel-supabase :as kernel]
+            [std.db.node.lifecycle :as lifecycle]
+            [std.db.node.proxy-supabase :as proxy]))
+
+(defn finalizer-id
+  "Returns the runtime finalizer ID for a Supabase service."
+  [service-id]
+  [:supabase service-id])
+
+(defn create-service
+  "Creates a host-neutral Supabase service descriptor."
+  ([request-function]
+   (kernel/create-service request-function))
+  ([request-function options]
+   (kernel/create-service request-function options)))
+
+(defn install-service
+  "Installs a Supabase service and registers runtime-owned finalization."
+  [node service-id service]
+  (kernel/install-service node service-id service)
+  (lifecycle/register-finalizer
+   node
+   (finalizer-id service-id)
+   (fn []
+     (kernel/remove-service node service-id)))
+  service)
+
+(defn remove-service
+  "Removes a Supabase service and its finalizer registration."
+  [node service-id]
+  (lifecycle/unregister-finalizer node (finalizer-id service-id))
+  (kernel/remove-service node service-id))
+
+(defn init-server
+  "Installs Supabase kernel actions on a server node."
+  [node]
+  (kernel/init-handlers node))
+
+(defn init-client
+  "Installs Supabase proxy actions on a client node."
+  [node]
+  (proxy/init-proxy-handlers node))
+
+(def sign-up client/sign-up)
+(def sign-in client/sign-in)
+(def sign-out client/sign-out)
+(def refresh client/refresh)
+(def signed-in? client/signed-in?)
+(def current-session client/current-session)
+(def rpc-call client/rpc-call)
+(def query-table client/query-table)
+(def attach-model client/attach-model)
+(def health client/health)
+(def admin-create-user client/admin-create-user)
+(def admin-delete-user client/admin-delete-user)
+(def admin-generate-link client/admin-generate-link)
+(def admin-get-user client/admin-get-user)
+(def admin-list-users client/admin-list-users)
+(def admin-update-user client/admin-update-user)
+(def authorize client/authorize)
+(def callback client/callback)
+(def invite client/invite)
+(def otp client/otp)
+(def recovery client/recovery)
+(def settings client/settings)
+(def token-refresh client/token-refresh)
+(def user-get client/user-get)
+(def user-info client/user-info)
+(def user-put client/user-put)
+(def verify-get client/verify-get)
+(def verify-post client/verify-post)
