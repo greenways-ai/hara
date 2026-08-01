@@ -275,25 +275,6 @@ openhal_write_text(openhal_writer_t *writer, u_char tag, const ngx_str_t *value)
 }
 
 static ngx_int_t
-openhal_write_i64(openhal_writer_t *writer, int64_t value)
-{
-    uint64_t raw = (uint64_t) value;
-    u_char bytes[8];
-    bytes[0] = (u_char) (raw >> 56);
-    bytes[1] = (u_char) (raw >> 48);
-    bytes[2] = (u_char) (raw >> 40);
-    bytes[3] = (u_char) (raw >> 32);
-    bytes[4] = (u_char) (raw >> 24);
-    bytes[5] = (u_char) (raw >> 16);
-    bytes[6] = (u_char) (raw >> 8);
-    bytes[7] = (u_char) raw;
-    if (openhal_write_byte(writer, OH_I64) != NGX_OK) {
-        return NGX_ERROR;
-    }
-    return openhal_write(writer, bytes, sizeof(bytes));
-}
-
-static ngx_int_t
 openhal_write_pair(openhal_writer_t *writer, const char *key,
                    const ngx_str_t *value)
 {
