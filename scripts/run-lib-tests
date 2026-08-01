@@ -4,86 +4,19 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-FRAMEWORK="lib/test/std/lib/test.hal"
-FAILURES=0
-PASSED=0
-TOTAL=0
+mapfile -t TEST_FILES < <(
+    find lib/test -name '*.hal' \
+        ! -path 'lib/test/std/lib/test.hal' \
+        -print | sort
+)
 
-run_file() {
-    local file="$1"
-    local output
-    local status=0
-    output=$("$REPO_ROOT/hara" run "$file" 2>&1) || status=$?
-
-    if [ "$status" -ne 0 ]; then
-        echo "FAIL  $file (exit $status)"
-        echo "$output" | tail -n 5 | sed 's/^/      /'
-        return 1
-    fi
-
-    # code.test/fact suites return a structured summary map.
-    local last_summary
-    last_summary=$(echo "$output" | grep -E '^"?\{' | tail -n 1)
-    if [ -n "$last_summary" ]; then
-        if echo "$last_summary" | grep -q ':status :passed'; then
-            local fact_count
-            local check_count
-            fact_count=$(echo "$last_summary" |
-                sed -n 's/.*:facts \([0-9][0-9]*\).*/\1/p')
-            check_count=$(echo "$last_summary" |
-                sed -n 's/.*:checks \([0-9][0-9]*\).*/\1/p')
-            echo "PASS  $file ($fact_count facts, $check_count checks)"
-            return 0
-        fi
-        echo "FAIL  $file"
-        echo "$last_summary" | sed 's/^/      /'
-        return 1
-    fi
-
-    # Accept either a result vector or its pr-str representation. Older tests
-    # return the serialized form, while std.lib.test returns the vector itself.
-    local last_vector
-    last_vector=$(echo "$output" | grep -E '^"?\[' | tail -n 1)
-
-    if [ -z "$last_vector" ]; then
-        echo "FAIL  $file (no result vector found)"
-        echo "$output" | tail -n 5 | sed 's/^/      /'
-        return 1
-    fi
-
-    if echo "$last_vector" | grep -q ':pass false'; then
-        echo "FAIL  $file"
-        echo "$last_vector" | sed 's/^/      /'
-        return 1
-    fi
-
-    if echo "$last_vector" | grep -q ':pass true'; then
-        local count
-        count=$(echo "$last_vector" | grep -o ':pass true' | wc -l)
-        echo "PASS  $file ($count checks)"
-        return 0
-    fi
-
-    echo "FAIL  $file (result vector has no :pass markers)"
-    echo "$last_vector" | sed 's/^/      /'
-    return 1
-}
-
-for file in $(find lib/test -name '*.hal' | sort); do
-    if [ "$file" = "$FRAMEWORK" ]; then
-        continue
-    fi
-    TOTAL=$((TOTAL + 1))
-    if run_file "$file"; then
-        PASSED=$((PASSED + 1))
-    else
-        FAILURES=$((FAILURES + 1))
-    fi
-done
-
-echo ""
-echo "lib/test summary: $PASSED passed, $FAILURES failed, $TOTAL total"
-
-if [ "$FAILURES" -ne 0 ]; then
-    exit 1
+if [ "${#TEST_FILES[@]}" -eq 0 ]; then
+    echo "No .hal tests found under lib/test" >&2
+    exit 2
 fi
+
+exec cargo run --quiet \
+    --manifest-path "$REPO_ROOT/rust/Cargo.toml" \
+    --bin hara-test -- \
+    --root "$REPO_ROOT" \
+    "${TEST_FILES[@]}"
