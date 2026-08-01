@@ -1,0 +1,91 @@
+(ns std.db.text.base-schema-test
+  (:use code.test)
+  (:require [std.db.text.base-schema :as schema]))
+
+(def sample-schema
+  {"Owner"
+   {"id" {"ident" "id" "order" 0 "type" "uuid"}}
+   "User"
+   {"id" {"ident" "id" "order" 0 "type" "uuid"}
+    "active" {"ident" "active"
+              "order" 1
+              "type" "boolean"
+              "sql" {"default" false}}
+    "owner" {"ident" "owner"
+             "order" 2
+             "type" "ref"
+             "ref" {"ns" "Owner"}}
+    "children" {"ident" "children"
+                "type" "ref"
+                "ref" {"ns" "User"}}}})
+
+(def sample-lookup
+  {"User" {"position" 1}
+   "Owner" {"position" 0}})
+
+(def results
+  [(fact "get-ident-id appends _id only to references"
+     [(schema/get-ident-id {"ident" "name" "type" "text"})
+      (schema/get-ident-id {"ident" "owner" "type" "ref"})]
+     => ["name" "owner_id"])
+
+   (fact "list-tables returns lexical table order"
+     (schema/list-tables sample-schema)
+     => ["Owner" "User"])
+
+   (fact "schema entries are classified by physical order and reference type"
+     [(schema/create-data-keys sample-schema "User")
+      (schema/create-ref-keys sample-schema "User")
+      (schema/create-rev-keys sample-schema "User")]
+     => [["id" "active"]
+         ["owner"]
+         ["children"]])
+
+   (fact "defaults, table entries and SQL column names preserve source shapes"
+     [(schema/create-defaults sample-schema "User")
+      (schema/table-columns sample-schema "User")]
+     => [{"active" false}
+         ["id" "active" "owner_id"]])
+
+   (fact "create-all-keys follows string-keyed boundary convention"
+     (schema/create-all-keys sample-schema "User")
+     => {"data" ["id" "active"]
+         "ref" ["owner"]
+         "ref_id" {"owner_id" "owner"}
+         "rev" ["children"]
+         "defaults" {"active" false}
+         "table" [{"ident" "id" "order" 0 "type" "uuid"}
+                  {"ident" "active"
+                   "order" 1
+                   "type" "boolean"
+                   "sql" {"default" false}}
+                  {"ident" "owner"
+                   "order" 2
+                   "type" "ref"
+                   "ref" {"ns" "Owner"}}]})
+
+   (fact "get-all-keys populates the Hara atom cache"
+     [(schema/get-all-keys sample-schema "User")
+      (get (schema/get-cached-schema sample-schema) "User")]
+     => [(schema/create-all-keys sample-schema "User")
+         (schema/create-all-keys sample-schema "User")])
+
+   (fact "table-order sorts lookup metadata and caches the result"
+     [(schema/create-table-order sample-lookup)
+      (schema/table-order sample-lookup)]
+     => [["Owner" "User"]
+         ["Owner" "User"]])
+
+   (fact "table-coerce accepts native keyword coercion keys and recurses"
+     (schema/table-coerce
+      sample-schema
+      "User"
+      {"active" 1
+       "owner" [{"id" "owner-1"}]
+       "unknown" "kept"}
+      {:boolean (fn [value] (= value 1))})
+     => {"active" true
+         "owner" [{"id" "owner-1"}]
+         "unknown" "kept"})])
+
+(pr-str (run '[std.db.text.base-schema-test]))

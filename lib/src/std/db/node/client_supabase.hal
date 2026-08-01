@@ -1,0 +1,169 @@
+;; ============================================================================
+;; std.db.node.client-supabase — client API for Supabase runtime actions.
+;; ============================================================================
+(ns std.db.node.client-supabase
+  (:require [std.db.node.proxy-util :as proxy]))
+
+(defn- call
+  [node action arguments options]
+  (proxy/request-client node action arguments options))
+
+(defn sign-up
+  [node service-id credentials options]
+  (call node "@xt.supabase/sign-up"
+        [service-id credentials (or options {})]
+        options))
+
+(defn sign-in
+  [node service-id credentials options]
+  (call node "@xt.supabase/sign-in"
+        [service-id credentials (or options {})]
+        options))
+
+(defn sign-out
+  [node service-id options]
+  (call node "@xt.supabase/sign-out"
+        [service-id (or options {})]
+        options))
+
+(defn refresh
+  [node service-id options]
+  (call node "@xt.supabase/refresh" [service-id] options))
+
+(defn signed-in?
+  [node service-id options]
+  (call node "@xt.supabase/signed-in?" [service-id] options))
+
+(defn current-session
+  [node service-id options]
+  (call node "@xt.supabase/current-session" [service-id] options))
+
+(defn rpc-call
+  [node service-id rpc-name data options]
+  (call node "@xt.supabase/rpc-call"
+        [service-id rpc-name (or data {}) (or options {})]
+        options))
+
+(defn query-table
+  [node service-id table-name query options]
+  (call node "@xt.supabase/query-table"
+        [service-id table-name query (or options {})]
+        options))
+
+(defn attach-model
+  [node service-id page-args supabase-handler model options]
+  (call node "@xt.supabase/attach-model"
+        [service-id page-args supabase-handler model]
+        options))
+
+(defn health
+  [node service-id options]
+  (call node "@xt.supabase/health"
+        [service-id (or options {})]
+        options))
+
+(defn admin-create-user
+  [node service-id data options]
+  (call node "@xt.supabase/admin-create-user"
+        [service-id data (or options {})]
+        options))
+
+(defn admin-delete-user
+  [node service-id user-id options]
+  (call node "@xt.supabase/admin-delete-user"
+        [service-id user-id (or options {})]
+        options))
+
+(defn admin-generate-link
+  [node service-id data options]
+  (call node "@xt.supabase/admin-generate-link"
+        [service-id data (or options {})]
+        options))
+
+(defn admin-get-user
+  [node service-id user-id options]
+  (call node "@xt.supabase/admin-get-user"
+        [service-id user-id (or options {})]
+        options))
+
+(defn admin-list-users
+  [node service-id options]
+  (call node "@xt.supabase/admin-list-users"
+        [service-id (or options {})]
+        options))
+
+(defn admin-update-user
+  [node service-id user-id options]
+  (call node "@xt.supabase/admin-update-user"
+        [service-id user-id (or options {})]
+        options))
+
+(defn authorize
+  [node service-id data options]
+  (call node "@xt.supabase/authorize"
+        [service-id data (or options {})]
+        options))
+
+(defn callback
+  [node service-id options]
+  (call node "@xt.supabase/callback"
+        [service-id (or options {})]
+        options))
+
+(defn invite
+  [node service-id data options]
+  (call node "@xt.supabase/invite"
+        [service-id data (or options {})]
+        options))
+
+(defn otp
+  [node service-id data options]
+  (call node "@xt.supabase/otp"
+        [service-id data (or options {})]
+        options))
+
+(defn recovery
+  [node service-id data options]
+  (call node "@xt.supabase/recovery"
+        [service-id data (or options {})]
+        options))
+
+(defn settings
+  [node service-id options]
+  (call node "@xt.supabase/settings"
+        [service-id (or options {})]
+        options))
+
+(defn token-refresh
+  [node service-id data options]
+  (call node "@xt.supabase/token-refresh"
+        [service-id data (or options {})]
+        options))
+
+(defn user-get
+  [node service-id options]
+  (call node "@xt.supabase/user-get"
+        [service-id (or options {})]
+        options))
+
+(defn user-info
+  [node service-id options]
+  (user-get node service-id options))
+
+(defn user-put
+  [node service-id data options]
+  (call node "@xt.supabase/user-put"
+        [service-id data (or options {})]
+        options))
+
+(defn verify-get
+  [node service-id data options]
+  (call node "@xt.supabase/verify-get"
+        [service-id data (or options {})]
+        options))
+
+(defn verify-post
+  [node service-id data options]
+  (call node "@xt.supabase/verify-post"
+        [service-id data (or options {})]
+        options))

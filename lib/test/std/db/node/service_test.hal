@@ -1,0 +1,201 @@
+(ns std.db.node.service-test
+  (:use code.test)
+  (:require [std.db :as db]
+            [std.db.node.client-base :as client]
+            [std.db.node.runtime :as runtime]
+            [std.db.protocol :as protocol]
+            [std.foundation.promise :as promise]
+            [std.lib.substrate :as substrate]
+            [std.lib.substrate.protocol :as substrate-protocol]))
+
+(defstruct ServiceConnection
+  [id])
+
+(extend-type ServiceConnection protocol/IDatabase
+  (db-engine [connection]
+    :service-sql)
+  (db-provider [connection]
+    :service-mock)
+  (db-info [connection]
+    {:id (field connection :id)
+     :engine :service-sql
+     :provider :service-mock})
+  (db-exec [connection sql parameters]
+    (promise/from {:affected 1
+                   :connection (field connection :id)
+                   :sql sql
+                   :parameters parameters}))
+  (db-query [connection sql parameters]
+    (promise/from {:columns ["connection" "value"]
+                   :rows [[(field connection :id) (first parameters)]]
+                   :affected 0}))
+  (db-close [connection]
+    (promise/from true)))
+
+(defn service-driver
+  []
+  {:id :service-mock
+   :engine :service-sql
+   :open (fn [options]
+           (promise/from
+            (std.db.node.service-test/ServiceConnection
+             (get options :id "service-default"))))})
+
+(def base-config
+  {:primary {:type :service-mock
+             :options {:id "primary"}}})
+
+(def results
+  [(fact "drivers are discoverable through the client runtime API"
+     (let [server (substrate/node-create "service-driver-server")
+           client-node (substrate/node-create "service-driver-client")]
+       (let [connected (deref
+                        (runtime/local-connect
+                         client-node
+                         server
+                         base-config
+                         {}
+                         {}
+                         {:drivers {:service-mock (service-driver)}}))]
+         [(get (get connected :init) :status)
+          (deref (client/driver-list client-node {}))]))
+     => [:setup [:service-mock]])
+
+   (fact "named services can be opened, listed, reused and queried generically"
+     (let [server (substrate/node-create "service-open-server")
+           client-node (substrate/node-create "service-open-client")
+           connected (deref
+                      (runtime/local-connect
+                       client-node
+                       server
+                       base-config
+                       {}
+                       {}
+                       {:drivers {:service-mock (service-driver)}}))
+           runtime-value (get connected :runtime)
+           opened (deref
+                   (runtime/create-service
+                    runtime-value
+                    "db/analytics"
+                    {:type :service-mock
+                     :role :analytics
+                     :options {:id "analytics"}}
+                    {}
+                    {}))
+           reopened (deref
+                     (runtime/create-service
+                      runtime-value
+                      "db/analytics"
+                      {:type :service-mock}
+                      {}
+                      {}))
+           services (deref (runtime/list-services runtime-value))
+           connection (deref (runtime/open-service runtime-value "db/analytics"))
+           output (deref (db/query connection "select value" [42]))]
+       [(get opened :status)
+        (get reopened :status)
+        services
+        (db/engine connection)
+        (db/provider connection)
+        (get output :rows)])
+     => [:opened
+         :no-change
+         ["db/analytics"]
+         :service-sql
+         :service-mock
+         [["analytics" 42]]])
+
+   (fact "dynamic close cannot remove kernel-owned primary services"
+     (let [server (substrate/node-create "service-protected-server")
+           client-node (substrate/node-create "service-protected-client")]
+       (deref
+        (runtime/local-connect
+         client-node
+         server
+         base-config
+         {}
+         {}
+         {:drivers {:service-mock (service-driver)}}))
+       (let [closed (deref (client/service-close client-node "db/primary" {}))
+             exists (deref (client/service-exists? client-node "db/primary" {}))]
+         [(get closed :status) exists]))
+     => [:protected true])
+
+   (fact "named service close removes only that service"
+     (let [server (substrate/node-create "service-close-server")
+           client-node (substrate/node-create "service-close-client")
+           connected (deref
+                      (runtime/local-connect
+                       client-node
+                       server
+                       base-config
+                       {}
+                       {}
+                       {:drivers {:service-mock (service-driver)}}))
+           runtime-value (get connected :runtime)]
+       (deref
+        (runtime/create-service
+         runtime-value
+         "db/analytics"
+         {:type :service-mock :options {:id "analytics"}}
+         {}
+         {}))
+       (let [before (deref (client/service-exists? client-node "db/analytics" {}))
+             closed (deref (runtime/remove-service runtime-value "db/analytics"))
+             after (deref (client/service-exists? client-node "db/analytics" {}))
+             primary (deref (client/service-exists? client-node "db/primary" {}))]
+         [before
+          (get closed :status)
+          (get closed :closed)
+          after
+          primary]))
+     => [true :closed true false true])
+
+   (fact "runtime shutdown closes all remaining dynamic services"
+     (let [server (substrate/node-create "service-shutdown-server")
+           client-node (substrate/node-create "service-shutdown-client")
+           connected (deref
+                      (runtime/local-connect
+                       client-node
+                       server
+                       base-config
+                       {}
+                       {}
+                       {:drivers {:service-mock (service-driver)}}))
+           runtime-value (get connected :runtime)]
+       (deref
+        (runtime/create-service
+         runtime-value
+         "db/analytics"
+         {:type :service-mock :options {:id "analytics"}}
+         {}
+         {}))
+       (deref
+        (runtime/create-service
+         runtime-value
+         "db/reporting"
+         {:type :service-mock :options {:id "reporting"}}
+         {}
+         {}))
+       (deref (runtime/close-runtime runtime-value base-config))
+       [(substrate-protocol/get-service server "db/analytics")
+        (substrate-protocol/get-service server "db/reporting")
+        (substrate-protocol/get-service server "db/primary")
+        (substrate-protocol/get-service server "std.db.runtime/dynamic-services")])
+     => [nil nil nil nil])
+
+   (fact "closing an unknown named service is idempotent"
+     (let [server (substrate/node-create "service-missing-server")
+           client-node (substrate/node-create "service-missing-client")]
+       (deref
+        (runtime/local-connect
+         client-node
+         server
+         base-config
+         {}
+         {}
+         {:drivers {:service-mock (service-driver)}}))
+       (deref (client/service-close client-node "db/missing" {})))
+     => {:status :not-found :service "db/missing"})])
+
+(pr-str (run '[std.db.node.service-test]))
