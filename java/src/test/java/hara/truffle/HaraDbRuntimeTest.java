@@ -27,6 +27,11 @@ public class HaraDbRuntimeTest {
   }
 
   @Test
+  public void databaseSerializedExecutionFixturePasses() throws Exception {
+    assertHalFixturePasses("lib/test/std/db/node/serial_test.hal");
+  }
+
+  @Test
   public void databaseDynamicServiceLifecycleFixturePasses() throws Exception {
     assertHalFixturePasses("lib/test/std/db/node/service_test.hal");
   }
