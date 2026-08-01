@@ -18,6 +18,10 @@
   [node config options]
   (proxy/request-client node kernel/ACTION-KERNEL-TEARDOWN [config] options))
 
+(defn runtime-status
+  [node options]
+  (proxy/request-client node service/ACTION-RUNTIME-STATUS [] options))
+
 (defn driver-list
   [node options]
   (proxy/request-client node service/ACTION-DRIVER-LIST [] options))
