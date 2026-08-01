@@ -133,9 +133,9 @@
                      (assoc out language book)))
                  {}
                  languages)]
-     (doseq [language languages
-             runtime runtimes]
-       (require-runtime! language runtime))
+     (doseq [language languages]
+       (doseq [runtime runtimes]
+         (require-runtime! language runtime)))
      {:version version
       :books books
       :languages @+language-registry+

@@ -46,12 +46,19 @@
   (get @+registry+ [language runtime]))
 
 (defn registry-runtime
-  "Requires a registered runtime implementation and returns its namespace."
+  "Loads a registered runtime implementation and returns its namespace."
   [language runtime]
   (let [namespace-symbol (registry-runtime-ns language runtime)]
     (if namespace-symbol
-      (do (require namespace-symbol)
-          namespace-symbol)
+      (let [init-symbol (symbol (name namespace-symbol) "+init+")
+            init-var (requiring-resolve init-symbol)]
+        (if init-var
+          namespace-symbol
+          (throw
+           (ex-info "Registered runtime namespace has no +init+ Var"
+                    {:lang language
+                     :runtime runtime
+                     :namespace namespace-symbol}))))
       nil)))
 
 (defn registry-book-list
@@ -90,8 +97,7 @@
                     :key key
                     :version version
                     :registered (:version info)}))
-         (let [_ (require ns)
-               qualified (symbol (name ns) (name book))
+         (let [qualified (symbol (name ns) (name book))
                resolved (requiring-resolve qualified)]
            (if resolved
              (deref resolved)
