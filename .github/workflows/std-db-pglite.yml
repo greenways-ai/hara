@@ -3,6 +3,8 @@ name: std.db PGlite WASM
 on:
   pull_request:
     paths:
+      - "lib/src/std/db.hal"
+      - "lib/src/std/db/protocol.hal"
       - "lib/src/std/db/pglite.hal"
       - "java/src/test/java/hara/truffle/HaraPgliteProcessExtensionTest.java"
       - "rust/extensions/std-db-pglite/**"
