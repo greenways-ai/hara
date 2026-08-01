@@ -3,6 +3,7 @@
 ;; ============================================================================
 (ns std.db.node.client-base
   (:require [std.db.node.kernel-base :as kernel]
+            [std.db.node.kernel-service :as service]
             [std.db.node.proxy-util :as proxy]))
 
 (defn kernel-init
@@ -17,9 +18,28 @@
   [node config options]
   (proxy/request-client node kernel/ACTION-KERNEL-TEARDOWN [config] options))
 
+(defn driver-list
+  [node options]
+  (proxy/request-client node service/ACTION-DRIVER-LIST [] options))
+
 (defn service-info
   [node service-id options]
   (proxy/request-client node kernel/ACTION-SERVICE-INFO [service-id] options))
+
+(defn service-exists?
+  [node service-id options]
+  (proxy/request-client node service/ACTION-SERVICE-EXISTS [service-id] options))
+
+(defn service-open
+  [node service-id entry schema lookup options]
+  (proxy/request-client node
+                        service/ACTION-SERVICE-OPEN
+                        [service-id entry schema lookup]
+                        options))
+
+(defn service-close
+  [node service-id options]
+  (proxy/request-client node service/ACTION-SERVICE-CLOSE [service-id] options))
 
 (defn exec
   ([node service-id sql options]
