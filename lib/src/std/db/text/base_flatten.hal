@@ -6,7 +6,6 @@
 ;; preserving the public maps and link indexes.
 ;; ============================================================================
 (ns std.db.text.base-flatten
-  (:refer-clojure :exclude [flatten])
   (:require [std.db.text.base-schema :as schema]))
 
 (defn- ^{:schema [:fn [:map :any :any] :any]}
