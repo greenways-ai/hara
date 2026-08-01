@@ -105,6 +105,22 @@
          :service-mock
          [["analytics" 42]]])
 
+   (fact "dynamic close cannot remove kernel-owned primary services"
+     (let [server (substrate/node-create "service-protected-server")
+           client-node (substrate/node-create "service-protected-client")]
+       (deref
+        (runtime/local-connect
+         client-node
+         server
+         base-config
+         {}
+         {}
+         {:drivers {:service-mock (service-driver)}}))
+       (let [closed (deref (client/service-close client-node "db/primary" {}))
+             exists (deref (client/service-exists? client-node "db/primary" {}))]
+         [(get closed :status) exists]))
+     => [:protected true])
+
    (fact "named service close removes only that service"
      (let [server (substrate/node-create "service-close-server")
            client-node (substrate/node-create "service-close-client")
