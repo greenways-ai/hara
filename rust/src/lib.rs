@@ -34,6 +34,8 @@ pub mod journal;
 // default evaluator is untouched.
 #[cfg(feature = "bytecode-vm")]
 pub mod vm;
+#[cfg(feature = "tracing-jit")]
+pub mod jit;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod wasmtime_provider;
 use crate::kernel::Form;

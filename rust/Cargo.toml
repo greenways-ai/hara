@@ -20,6 +20,8 @@ hir-encoder = ["halc-encoder"]
 # Experimental staged bytecode VM (notes/rust-bytecode-vm.md). Non-default:
 # all VM entry points are gated behind this feature.
 bytecode-vm = []
+tracing-jit = ["bytecode-vm"]
+native-jit = ["tracing-jit"]
 
 [profile.browser-release]
 inherits = "release"

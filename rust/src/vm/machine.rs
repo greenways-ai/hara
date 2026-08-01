@@ -74,6 +74,8 @@ pub struct Machine {
     vm_globals: HashMap<usize, VmSlot>,
     next_closure_identity: u64,
     ip: usize,
+    #[cfg(feature = "tracing-jit")]
+    jit: crate::jit::runtime::JitRuntime,
 }
 
 struct SavedFrame {
@@ -100,6 +102,8 @@ impl Machine {
             vm_globals: HashMap::new(),
             next_closure_identity: 0,
             ip: 0,
+            #[cfg(feature = "tracing-jit")]
+            jit: crate::jit::runtime::JitRuntime::default(),
         }
     }
 
@@ -154,6 +158,8 @@ impl Machine {
             vm_globals: HashMap::new(),
             next_closure_identity: 0,
             ip: 0,
+            #[cfg(feature = "tracing-jit")]
+            jit: crate::jit::runtime::JitRuntime::default(),
         }
     }
 
@@ -343,7 +349,16 @@ impl Machine {
                 return VmOutcome::Failed(self.error(function, "instruction pointer out of range"));
             };
             match self.dispatch(&program, function, instruction) {
-                Dispatch::Next(ip) => self.ip = ip,
+                Dispatch::Next(ip) => {
+                    #[cfg(feature = "tracing-jit")]
+                    if ip <= self.ip {
+                        let (mut locals, writable) = self.frame.trace_locals();
+                        if self.jit.backedge(&program, self.function as u16, self.ip as u32, ip as u32, &mut locals) {
+                            self.frame.apply_trace_locals(&locals, &writable);
+                        }
+                    }
+                    self.ip = ip;
+                }
                 Dispatch::Call { callee, args } => {
                     if let Err(message) = self.enter_callable(&program, callee, args) {
                         match self.raise(function, message) {
