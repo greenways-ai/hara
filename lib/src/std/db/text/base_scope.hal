@@ -4,7 +4,8 @@
 ;; Converts compact query vectors and scope selectors into the canonical tree
 ;; consumed by std.db.text.base-graph and std.db.text.sql-graph.
 ;; ============================================================================
-(ns std.db.text.base-scope)
+(ns std.db.text.base-scope
+  (:require [std.foundation.string :as string]))
 
 (def Scopes
   {"*/min" {"-/id" true "-/key" true}
@@ -43,7 +44,7 @@
     (nil? value) false
     (map? value) (not (empty? value))
     (vector? value) (not (empty? value))
-    (string? value) (> (count value) 0)
+    (string? value) (> (string/length value) 0)
     :else true))
 
 (defn- deep-copy
@@ -93,8 +94,8 @@
 (defn- selector-namespace
   [value]
   (if (string? value)
-    (let [index (.indexOf value "/")]
-      (if (< index 0) nil (.substring value 0 index)))
+    (let [index (string/index-of value "/")]
+      (if (< index 0) nil (string/slice value 0 index)))
     nil))
 
 (defn- map-merge
@@ -124,9 +125,9 @@
   [value]
   (when (and (string? value)
              (nil? (selector-namespace value)))
-    (if (and (>= (count value) 3)
-             (.endsWith value "_id"))
-      (.substring value 0 (- (count value) 3))
+    (if (and (>= (string/length value) 3)
+             (string/ends-with? value "_id"))
+      (string/slice value 0 (- (string/length value) 3))
       value)))
 
 (defn filter-plain
