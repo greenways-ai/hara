@@ -173,7 +173,7 @@ public class HaraMutableBoundaryTest {
                       context.eval(HaraLanguage.ID, "(iter-next (iter [1])) (iter-next (iter []))"))
               .getMessage()
               .contains("reached the end"));
-      context.eval(HaraLanguage.ID, "(iter-close (iter \"abc\"))");
+      context.eval(HaraLanguage.ID, "(Iter/iter-close (iter \"abc\"))");
       assertEquals(
           4,
           context
@@ -212,35 +212,35 @@ public class HaraMutableBoundaryTest {
           context
               .eval(
                   HaraLanguage.ID,
-                  "(let [it (iter-map (fn [x] (* x 2)) [1 2])] (iter-next it) (iter-next it))")
+                  "(let [it (Iter/iter-map (fn [x] (* x 2)) [1 2])] (iter-next it) (iter-next it))")
               .asLong());
       assertEquals(
           2,
           context
               .eval(
                   HaraLanguage.ID,
-                  "(let [it (iter-filter (fn [x] (= x 2)) [1 2 3])] (iter-next it))")
+                  "(let [it (Iter/iter-filter (fn [x] (= x 2)) [1 2 3])] (iter-next it))")
               .asLong());
       assertEquals(
           2,
           context
               .eval(
                   HaraLanguage.ID,
-                  "(let [it (iter-drop 1 (iter-take 3 [1 2 3 4]))] (iter-next it))")
+                  "(let [it (Iter/iter-drop 1 (Iter/iter-take 3 [1 2 3 4]))] (iter-next it))")
               .asLong());
       assertEquals(
-          3, context.eval(HaraLanguage.ID, "(nth (iter-next (iter-zip [1 2] [3 4])) 1)").asLong());
+          3, context.eval(HaraLanguage.ID, "(nth (iter-next (Iter/iter-zip [1 2] [3 4])) 1)").asLong());
       assertTrue(
           !context
               .eval(
                   HaraLanguage.ID,
-                  "(let [it (iter-map (fn [x] x) [1 2])] (iter-close it) (iter-next? it))")
+                  "(let [it (Iter/iter-map (fn [x] x) [1 2])] (Iter/iter-close it) (iter-next? it))")
               .asBoolean());
       assertTrue(
           !context
               .eval(
                   HaraLanguage.ID,
-                  "(let [it (iter-zip [1 2] [3 4])] (iter-close it) (iter-next? it))")
+                  "(let [it (Iter/iter-zip [1 2] [3 4])] (Iter/iter-close it) (iter-next? it))")
               .asBoolean());
     }
   }
@@ -253,12 +253,12 @@ public class HaraMutableBoundaryTest {
           context
               .eval(
                   HaraLanguage.ID,
-                  "(let [it (iter-cycle [1 2])] (iter-next it) (iter-next it) (iter-next it))")
+                  "(let [it (Iter/iter-cycle [1 2])] (iter-next it) (iter-next it) (iter-next it))")
               .asLong());
       assertEquals(
           2,
           context
-              .eval(HaraLanguage.ID, "(nth (iter-next (iter-partition-pair [1 2 3 4])) 1)")
+              .eval(HaraLanguage.ID, "(nth (iter-next (Iter/iter-partition-pair [1 2 3 4])) 1)")
               .asLong());
     }
   }
@@ -271,13 +271,13 @@ public class HaraMutableBoundaryTest {
           context
               .eval(
                   HaraLanguage.ID,
-                  "(let [it (iter-mapcat (fn [x] [x (+ x 10)]) [1 2])] "
+                  "(let [it (Iter/iter-mapcat (fn [x] [x (+ x 10)]) [1 2])] "
                       + "(iter-next it) (iter-next it) (iter-next it))")
               .asLong());
       assertEquals(
           2,
           context
-              .eval(HaraLanguage.ID, "(iter-next (iter-keep (fn [x] (if (= x 2) x nil)) [1 2 3]))")
+              .eval(HaraLanguage.ID, "(iter-next (Iter/iter-keep (fn [x] (if (= x 2) x nil)) [1 2 3]))")
               .asLong());
     }
   }

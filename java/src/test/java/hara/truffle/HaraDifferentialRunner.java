@@ -1,6 +1,8 @@
 package hara.truffle;
 
 import hara.kernel.base.RT;
+import hara.kernel.base.Namespace;
+import hara.kernel.base.Var;
 import hara.lang.base.G;
 import hara.lang.data.Keyword;
 import hara.lang.data.types.ILinearType;
@@ -196,10 +198,23 @@ final class HaraDifferentialRunner {
   private static Outcome evaluateJvm(String source) {
     RT.Instance<Object> runtime = new RT.Instance<>(null, "differential-jvm");
     try {
+      installIteratorNamespace(runtime);
       return normalizeJvm(runtime.eval(runtime.readString(source)));
     } catch (Throwable error) {
       return Outcome.error(normalizeError(error));
     }
+  }
+
+  private static void installIteratorNamespace(RT.Instance<Object> runtime) {
+    Namespace iterator = runtime.addNamespace(hara.lang.data.Symbol.create("std.native.Iter"));
+    for (String name : List.of("iter-next?", "iter-next", "iter-close")) {
+      Object function = runtime.eval(hara.lang.data.Symbol.create(name));
+      iterator.mappings.put(hara.lang.data.Symbol.create(name), new Var("std.native.Iter", function));
+    }
+    runtime
+        .getCurrentNs()
+        .aliases
+        .put(hara.lang.data.Symbol.create("Iter"), iterator);
   }
 
   private static Outcome evaluateTruffle(String source) {

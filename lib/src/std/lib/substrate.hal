@@ -76,7 +76,7 @@
   (frame-cause [frame] (field frame :cause))
   (frame-data [frame] (field frame :data)))
 
-(extend-type std.lib.substrate/SubstrateNode protocol/ISpace
+(extend-type std.lib.substrate/SubstrateNode protocol/ISubstrateSpace
   (get-space [node space-id] (get (node-section node :spaces) (node-space-id space-id)))
   (create-space [node space-id opts]
     (let [space-id (node-space-id space-id)]

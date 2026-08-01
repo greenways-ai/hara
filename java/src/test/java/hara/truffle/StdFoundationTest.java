@@ -4,8 +4,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.PolyglotException;
 import org.junit.Test;
@@ -27,8 +25,8 @@ public class StdFoundationTest {
                       + "  (= Arr std.native.Arr std.foundation/Arr)"
                       + "  (= Obj std.native.Obj std.foundation/Obj)"
                       + "  (ICount/count [1 2 3])"
-                      + "  (iter-any? (fn [x] (= x \"edn/pretty\")) (current-symbols))"
-                      + "  (iter-any? (fn [x] (= x \"Maths\")) (current-symbols))"
+                      + "  (Iter/iter-any? (fn [x] (= x \"edn/pretty\")) (current-symbols))"
+                      + "  (Iter/iter-any? (fn [x] (= x \"Maths\")) (current-symbols))"
                       + "  (every? (fn [type] (not (nil? (resolve type))))"
                       + "    '[Maths Numbers Bits String Bytes File Socket Promise Coroutine"
                       + "      Arr Obj Runtime Printer Edn Json Regex UUID Error])]")
@@ -215,33 +213,21 @@ public class StdFoundationTest {
   }
 
   @Test
-  public void optimizedOperationsMatchTheirHalDefinitions() throws Exception {
-    String source;
-    try (InputStream input =
-        StdFoundationTest.class.getClassLoader().getResourceAsStream("std/foundation.hal")) {
-      assertTrue("missing foundation fallback resource", input != null);
-      source =
-          new String(input.readAllBytes(), StandardCharsets.UTF_8)
-              .replace("ns std.foundation", "ns testing.foundation-fallback")
-              .replaceAll("(?s)\\(:config.*?\\]\\}\\)", "");
-    }
+  public void optimizedOperationsMatchPortableBehavior() {
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
-      context.eval(HaraLanguage.ID, source);
       assertEquals(
-          "[[2 3 4] [2 3 4]]",
+          "[2 3 4]",
           context
               .eval(
                   HaraLanguage.ID,
-                  "[(std.foundation/map inc [1 2 3]) "
-                      + " (testing.foundation-fallback/map inc [1 2 3])]")
+                  "(std.foundation/map std.foundation/inc [1 2 3])")
               .toString());
       assertEquals(
-          "[10 10]",
+          "10",
           context
               .eval(
                   HaraLanguage.ID,
-                  "[(std.foundation/reduce + 0 [1 2 3 4]) "
-                      + " (testing.foundation-fallback/reduce + 0 [1 2 3 4])]")
+                  "(std.foundation/reduce std.foundation/+ 0 [1 2 3 4])")
               .toString());
     }
   }

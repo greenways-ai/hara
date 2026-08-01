@@ -7,8 +7,8 @@
 (ns std.db.text.base-util)
 
 (defn- ^{:schema [:fn [:map :any :any] :any]}
-  field
-  "Returns a field from its keyword key or fallback string key."
+  compatible-field
+  "Returns a compatible-field from its keyword key or fallback string key."
   [value keyword-key string-key]
   (if (has? value keyword-key)
     (get value keyword-key)
@@ -40,7 +40,7 @@
   [routes type]
   (reduce (fn [out route]
             (assoc out
-                   (field route :url "url")
+                   (compatible-field route :url "url")
                    (route-with-type route type)))
           {}
           routes))
@@ -52,7 +52,7 @@
   (reduce (fn [out entry]
             (let [route (val entry)]
               (assoc out
-                     (field route :url "url")
+                     (compatible-field route :url "url")
                      route)))
           {}
           routes))
@@ -62,10 +62,10 @@
   "Indexes routes by their view table, type and tag."
   [routes]
   (reduce (fn [out route]
-            (let [view (field route :view "view")
-                  table (field view :table "table")
-                  type (field view :type "type")
-                  tag (field view :tag "tag")]
+            (let [view (compatible-field route :view "view")
+                  table (compatible-field view :table "table")
+                  type (compatible-field view :type "type")
+                  tag (compatible-field view :tag "tag")]
               (assoc-in out [table type tag] route)))
           {}
           routes))
@@ -79,13 +79,13 @@
     (assoc current
            keyword-key
            (map-merge (get current keyword-key)
-                      (field incoming keyword-key string-key)))
+                      (compatible-field incoming keyword-key string-key)))
 
     (has? current string-key)
     (assoc current
            string-key
            (map-merge (get current string-key)
-                      (field incoming keyword-key string-key)))
+                      (compatible-field incoming keyword-key string-key)))
 
     :else
     current))
@@ -173,6 +173,6 @@
 
 (defn ^{:schema [:fn [:any] :any]}
   lu-map
-  "Recursively indexes vectors of records by their id field."
+  "Recursively indexes vectors of records by their id compatible-field."
   [value]
-  (lu-nested value (fn [item] (field item :id "id"))))
+  (lu-nested value (fn [item] (compatible-field item :id "id"))))

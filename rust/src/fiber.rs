@@ -420,19 +420,16 @@ impl EvalFiber {
                     let Some(pending) = self.pending() else {
                         return Err("fiber suspended without promise".into());
                     };
-                    match pending.state() {
+                    match pending.wait_state() {
                         PromiseState::Fulfilled(v) => {
                             self.resume(PromiseState::Fulfilled(v));
                         }
                         PromiseState::Rejected(e) => {
                             self.resume(PromiseState::Rejected(e));
                         }
-                        PromiseState::Pending => {
-                            return Err(
-                                "deref cannot block on a pending promise outside an HTA fiber"
-                                    .into(),
-                            );
-                        }
+                        PromiseState::Pending => return Err(
+                            "fiber suspended on a promise without a synchronous waiter".into(),
+                        ),
                     }
                 }
             }
@@ -582,34 +579,17 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
                 let target = {
                     let env = env.borrow();
                     match env.get(name) {
-                        Some(Value::Var(cell)) => Some(Value::Var(cell.clone())),
-                        Some(Value::Atom(cell)) => Some(Value::Atom(cell.clone())),
-                        Some(Value::Promise(p)) => Some(Value::Promise(p.clone())),
+                        Some(Value::Var(cell))
+                            if cell.symbol().get_name()
+                                != Symbol::parse(name).get_name() =>
+                        {
+                            Some(Value::Var(cell.clone()))
+                        }
                         _ => None,
                     }
                 };
-                if let Some(target) = target {
-                    return match target {
-                        Value::Var(x) => k(Ok(x.deref_value())),
-                        Value::Atom(x) => k(Ok(x.deref_value())),
-                        Value::Promise(p) => match p.state() {
-                            PromiseState::Fulfilled(x) => k(Ok(x)),
-                            PromiseState::Rejected(e) => {
-                                k(Err(crate::core::promise_rejection_error(e)))
-                            }
-                            PromiseState::Pending => Step::Wait(
-                                p,
-                                Box::new(move |s| match s {
-                                    PromiseState::Fulfilled(x) => k(Ok(x)),
-                                    PromiseState::Rejected(e) => {
-                                        k(Err(crate::core::promise_rejection_error(e)))
-                                    }
-                                    PromiseState::Pending => k(Err("fiber resumed pending".into())),
-                                }),
-                            ),
-                        },
-                        _ => unreachable!(),
-                    };
+                if let Some(Value::Var(target)) = target {
+                    return k(Ok(target.deref_value()));
                 }
             }
             one(
@@ -634,7 +614,10 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
                             }),
                         ),
                     },
-                    Ok(_) => k(Err("deref expects a var or promise".into())),
+                    Ok(value) => k(Err(format!(
+                        "deref expects a var, atom, or promise, got {}",
+                        value.display()
+                    ))),
                     Err(e) => k(Err(e)),
                 }),
             )
@@ -1243,6 +1226,16 @@ mod tests {
             f.resume(p.state()),
             EvalFiberState::Completed(Value::Number(42))
         );
+    }
+
+    #[test]
+    fn drive_sync_waits_for_a_deferred_promise() {
+        let mut fiber = EvalFiber::start(
+            "(deref (promise/delay 1 (fn [] 42)))",
+            HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(fiber.drive_sync(), Ok(Value::Number(42)));
     }
     #[test]
     fn resumes_function_finally() {

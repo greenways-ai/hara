@@ -1,6 +1,7 @@
 ;; Persistent, context-driven zipper used by the portable block editor.
 (ns std.lib.zip
-  (:require [std.foundation :refer :all :exclude [get]]))
+  (:config {:blank true})
+  (:require [std.foundation :refer :all :exclude [get find]]))
 
 (def +types+ (atom {}))
 

@@ -269,6 +269,13 @@ public final class HaraJavaAdapters {
 
   public static void installCount(HaraProtocol protocol) {
     protocol.extend(ICount.class, "count", (receiver, arguments) -> ((ICount) receiver).count());
+    protocol.extend(
+        String.class,
+        "count",
+        (receiver, arguments) -> {
+          String value = (String) receiver;
+          return (long) value.codePointCount(0, value.length());
+        });
     protocol.extend(byte[].class, "count", (receiver, arguments) -> ((byte[]) receiver).length);
     protocol.extendNil("count", (receiver, arguments) -> 0L);
   }

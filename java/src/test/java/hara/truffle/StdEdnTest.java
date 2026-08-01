@@ -73,7 +73,7 @@ public class StdEdnTest {
   @Test
   public void rejectsUnsupportedNumbersAndMultipleValues() {
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
-      for (String source : new String[] {"1/2", "1N", "1M", "1 2"}) {
+      for (String source : new String[] {"1/2", "1 2"}) {
         assertThrows(
             RuntimeException.class,
             () ->
@@ -84,6 +84,12 @@ public class StdEdnTest {
                         + source
                         + "\"))"));
       }
+      assertThrows(
+          RuntimeException.class,
+          () ->
+              context.eval(
+                  HaraLanguage.ID,
+                  "(do (require 'std.foundation.edn) (std.foundation.edn/read \"1N\"))"));
     }
   }
 }

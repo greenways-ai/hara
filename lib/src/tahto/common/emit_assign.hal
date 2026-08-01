@@ -1,8 +1,10 @@
 (ns tahto.common.emit-assign
   (:require [std.foundation.string :as string]
             [std.lib.walk :as walk]
+            [tahto.common.emit-block :as block]
             [tahto.common.emit-common :as common]
             [tahto.common.emit-data :as data]
+            [tahto.common.emit-fn :as function]
             [tahto.common.emit-helper :as helper]
             [tahto.common.emit-template :as template]
             [tahto.common.util :as util]))
@@ -217,8 +219,9 @@
                              (conj output
                                    (if custom
                                      (common/*emit-fn* (second custom) grammar mopts)
-                                     (emit-input-default argument (:assign options)
-                                                         grammar mopts)))))))
+                                     (function/emit-input-default
+                                      argument (:assign options)
+                                      grammar mopts)))))))
         raw (:raw props)]
     (str (if (and raw (not (= "" raw)))
            (str raw (:space options))
@@ -229,10 +232,18 @@
   "emits assignment forms without recursive installation"
   {:added "4.0" :adopt true}
   [form grammar mopts]
-  (let [entry (if (list? form) (get-in grammar [:reserved (first form)]) nil)]
-    (if (= :def-assign (:emit entry))
-      (emit-def-assign :def-assign entry form grammar mopts)
-      (common/emit-common-loop form grammar mopts))))
+  (common/emit-common-loop
+   form grammar mopts
+   (assoc common/+emit-lookup+
+          :data data/emit-data
+          :block block/emit-block)
+   (fn [key form grammar mopts]
+     (if (= key :fn)
+       (function/emit-fn :function form grammar mopts)
+       (common/emit-op key form grammar mopts
+                       {:def-assign emit-def-assign
+                        :quote data/emit-quote
+                        :table data/emit-table})))))
 
 (defn test-assign-emit
   "emits assignment forms recursively"

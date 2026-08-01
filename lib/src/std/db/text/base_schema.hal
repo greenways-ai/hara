@@ -10,8 +10,8 @@
 (def CACHED_LOOKUP (atom {}))
 
 (defn- ^{:schema [:fn [:map :any :any] :any]}
-  field
-  "Returns a field from its keyword key or fallback string key."
+  compatible-field
+  "Returns a compatible-field from its keyword key or fallback string key."
   [value keyword-key string-key]
   (if (has? value keyword-key)
     (get value keyword-key)
@@ -34,20 +34,20 @@
   get-order
   "Returns a schema entry's order."
   [entry]
-  (field entry :order "order"))
+  (compatible-field entry :order "order"))
 
 (defn ^{:schema [:fn [:map] :any]}
   get-ident
   "Returns a schema entry's identifier."
   [entry]
-  (field entry :ident "ident"))
+  (compatible-field entry :ident "ident"))
 
 (defn ^{:schema [:fn [:map] :str]}
   get-ident-id
   "Returns ident, appending _id for reference entries."
   [entry]
   (let [ident (get-ident entry)]
-    (if (= "ref" (field entry :type "type"))
+    (if (= "ref" (compatible-field entry :type "type"))
       (str ident "_id")
       ident)))
 
@@ -84,7 +84,7 @@
   [schema table-name]
   (map get-ident
        (filter (fn [entry]
-                 (not (= "ref" (field entry :type "type"))))
+                 (not (= "ref" (compatible-field entry :type "type"))))
                (ordered-entries schema table-name))))
 
 (defn ^{:schema [:fn [:map :str] :vector]}
@@ -93,7 +93,7 @@
   [schema table-name]
   (map get-ident
        (filter (fn [entry]
-                 (= "ref" (field entry :type "type")))
+                 (= "ref" (compatible-field entry :type "type")))
                (ordered-entries schema table-name))))
 
 (defn ^{:schema [:fn [:map :str] :vector]}
@@ -114,18 +114,18 @@
 
 (defn ^{:schema [:fn [:map :str] :map]}
   create-defaults
-  "Returns column defaults declared under each entry's sql/default field."
+  "Returns column defaults declared under each entry's sql/default compatible-field."
   [schema table-name]
   (let [table-definition (get schema table-name)]
     (reduce (fn [out pair]
               (let [entry (val pair)
-                    sql (field entry :sql "sql")]
+                    sql (compatible-field entry :sql "sql")]
                 (if (and (map? sql)
                          (or (has? sql :default)
                              (has? sql "default")))
                   (assoc out
                          (key pair)
-                         (field sql :default "default"))
+                         (compatible-field sql :default "default"))
                   out)))
             {}
             table-definition)))
@@ -169,37 +169,37 @@
   data-keys
   "Returns data column identifiers for table-name."
   [schema table-name]
-  (field (get-all-keys schema table-name) :data "data"))
+  (compatible-field (get-all-keys schema table-name) :data "data"))
 
 (defn ^{:schema [:fn [:map :str] :vector]}
   ref-keys
   "Returns reference identifiers for table-name."
   [schema table-name]
-  (field (get-all-keys schema table-name) :ref "ref"))
+  (compatible-field (get-all-keys schema table-name) :ref "ref"))
 
 (defn ^{:schema [:fn [:map :str] :map]}
   ref-id-keys
   "Returns reference-id column to reference identifier mappings."
   [schema table-name]
-  (field (get-all-keys schema table-name) :ref-id "ref_id"))
+  (compatible-field (get-all-keys schema table-name) :ref-id "ref_id"))
 
 (defn ^{:schema [:fn [:map :str] :vector]}
   rev-keys
   "Returns reverse-link identifiers for table-name."
   [schema table-name]
-  (field (get-all-keys schema table-name) :rev "rev"))
+  (compatible-field (get-all-keys schema table-name) :rev "rev"))
 
 (defn ^{:schema [:fn [:map :str] :map]}
   table-defaults
   "Returns SQL defaults for table-name."
   [schema table-name]
-  (field (get-all-keys schema table-name) :defaults "defaults"))
+  (compatible-field (get-all-keys schema table-name) :defaults "defaults"))
 
 (defn ^{:schema [:fn [:map :str] :vector]}
   table-entries
   "Returns ordered physical schema entries for table-name."
   [schema table-name]
-  (field (get-all-keys schema table-name) :table "table"))
+  (compatible-field (get-all-keys schema table-name) :table "table"))
 
 (defn ^{:schema [:fn [:map :str] :vector]}
   table-columns
@@ -213,7 +213,7 @@
   [lookup]
   (map key
        (sort-by (fn [pair]
-                  (field (val pair) :position "position"))
+                  (compatible-field (val pair) :position "position"))
                 lookup)))
 
 (defn ^{:schema [:fn [:map] :vector]}
@@ -254,23 +254,23 @@
          data)
     (let [table-definition (get schema table-name)]
       (reduce (fn [out pair]
-                (let [field-key (key pair)
+                (let [compatible-field-key (key pair)
                       value (val pair)
-                      entry (get table-definition field-key)]
+                      entry (get table-definition compatible-field-key)]
                   (if (nil? entry)
-                    (assoc out field-key value)
-                    (if (= "ref" (field entry :type "type"))
-                      (let [reference (field entry :ref "ref")
-                            next-table (field reference :ns "ns")]
+                    (assoc out compatible-field-key value)
+                    (if (= "ref" (compatible-field entry :type "type"))
+                      (let [reference (compatible-field entry :ref "ref")
+                            next-table (compatible-field reference :ns "ns")]
                         (assoc out
-                               field-key
+                               compatible-field-key
                                (map (fn [item]
                                       (table-coerce schema next-table item coercions))
                                     value)))
-                      (let [entry-type (field entry :type "type")
+                      (let [entry-type (compatible-field entry :type "type")
                             coercion (coercion-for coercions entry-type)]
                         (assoc out
-                               field-key
+                               compatible-field-key
                                (if (nil? coercion)
                                  value
                                  (coercion value))))))))

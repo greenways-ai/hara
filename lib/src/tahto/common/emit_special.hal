@@ -90,9 +90,25 @@
       (emit-with-preprocess (nth form 2) (:grammar book)
                             (merge mopts options {:book book})))))
 
-(defn test-special-loop [form grammar mopts]
-  (common/emit-common-loop form grammar mopts))
+(defn test-special-loop
+  "test step for special ops"
+  {:added "4.0"}
+  [form grammar mopts]
+  (common/emit-common-loop
+   form grammar mopts
+   (assoc common/+emit-lookup+ :data data/emit-data)
+   (fn [key form grammar mopts]
+     (common/emit-op key form grammar mopts
+                     {:quote data/emit-quote
+                      :table data/emit-table
+                      :with-module emit-with-module
+                      :with-lang emit-with-lang
+                      :with-eval emit-with-eval
+                      :with-deref emit-with-deref}))))
 
-(defn test-special-emit [form grammar mopts]
+(defn test-special-emit
+  "test function for special ops"
+  {:added "4.0"}
+  [form grammar mopts]
   (binding [common/*emit-fn* test-special-loop]
     (test-special-loop form grammar mopts)))

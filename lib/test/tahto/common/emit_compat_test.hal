@@ -15,16 +15,16 @@
 
 (fact "common helpers retain Foundation behavior"
   (emit/emit-infix "|" '[x y z] helper/+default+ {}) => "x | y | z"
-  (emit/emit '(- x) operator-grammar) => "(-x)"
-  (emit/emit '(+ 1 (+ 2 3)) operator-grammar) => "(1 + (2 + 3))"
+  (emit/emit '(- x) operator-grammar) => "-x"
+  (emit/emit '(+ 1 (+ 2 3)) operator-grammar) => "1 + (2 + 3)"
   (emit/emit '(:= x 1) operator-grammar) => "x = 1")
 
 (fact "calls, indexing, data, and returns retain compatibility"
-  (emit/emit '(print (+ 19 23)) operator-grammar) => "print((19 + 23))"
+  (emit/emit '(print (+ 19 23)) operator-grammar) => "print(19 + 23)"
   (emit/emit '(. user ["name"]) operator-grammar) => "user[\"name\"]"
   [(emit/emit [1 2 3] helper/+default+)
    (emit/emit {:answer 42} helper/+default+)]
-  => ["[1,2,3]" "{answer:42}"]
-  (emit/emit '(return (+ 20 22)) operator-grammar) => "return (20 + 22)")
+  => ["[1,2,3]" "{\"answer\":42}"]
+  (emit/emit '(return (+ 20 22)) operator-grammar) => "return 20 + 22")
 
 (run {:namespace "tahto.common.emit-compat-test"})

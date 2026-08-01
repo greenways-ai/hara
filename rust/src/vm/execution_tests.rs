@@ -55,8 +55,8 @@ fn literals() {
     assert_eq!(eval("\"hello\""), "\"hello\"");
     assert_eq!(eval(":hara/name"), ":hara/name");
     assert_eq!(eval("\\a"), "\\a");
-    assert_eq!(eval("42N"), "42N");
-    assert_eq!(eval("1.25M"), "1.25M");
+    assert!(compile_source("42N").is_err());
+    assert!(compile_source("1.25M").is_err());
     assert_eq!(eval("#\"\\d+\""), "#\"\\d+\"");
     assert_eq!(eval("()"), "()");
     assert_eq!(eval("^:private (+ 1 2)"), "3");

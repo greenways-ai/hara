@@ -1,4 +1,5 @@
 (ns std.lib.block
+  (:config {:blank true})
   (:require [std.foundation :refer :all :exclude [empty]]
             [std.lib.block.base :as base]
             [std.lib.block.construct :as construct]

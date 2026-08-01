@@ -33,8 +33,10 @@
 (def results
   [(fact "API envelopes decode successful data and reject errors"
      [(call/decode-return "{\"status\":\"ok\",\"data\":{\"id\":1}}" nil)
-      (call/decode-return "{\"status\":\"error\",\"data\":{\"tag\":\"bad\"}}" nil)]
-     => [{"id" 1} (throws)])
+      (try
+        (call/decode-return "{\"status\":\"error\",\"data\":{\"tag\":\"bad\"}}" nil)
+        (catch Throwable error :throws))]
+     => [{"id" 1} :throws])
 
    (fact "function inputs and schema-qualified names are encoded"
      [(call/call-format-input json-spec ["Ada" {:role "admin"}])
@@ -69,8 +71,10 @@
    (fact "invalid raw calls fail before querying the connection"
      (let [queries (atom [])
            connection (std.db.text.sql-call-test/CallConnection queries "{}")]
-       [(call/call-raw connection json-spec [] )
+       [(try
+          (call/call-raw connection json-spec [])
+          (catch Throwable error :throws))
         @queries])
-     => [(throws) []])])
+     => [:throws []])])
 
 (pr-str (run '[std.db.text.sql-call-test]))

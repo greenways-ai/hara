@@ -55,8 +55,8 @@
     :else nil))
 
 (defn- ^{:schema [:fn [:map :any :any] :any]}
-  field
-  "Gets a field from its keyword or string spelling."
+  compatible-field
+  "Gets a compatible-field from its keyword or string spelling."
   [value keyword-key string-key]
   (if (and (map? value) (has? value keyword-key))
     (get value keyword-key)
@@ -142,11 +142,27 @@
       (not (nil? custom)) custom
       :else operator)))
 
+(defn json-value
+  "Converts keyword-keyed portable maps into strict JSON-compatible data."
+  [value]
+  (cond
+    (map? value)
+    (reduce (fn [output entry]
+              (let [key (key entry)]
+                (assoc output
+                       (if (string? key) key (name key))
+                       (std.db.text.sql-util/json-value (val entry)))))
+            {}
+            value)
+    (vector? value) (map std.db.text.sql-util/json-value value)
+    (set? value) (vec (map std.db.text.sql-util/json-value value))
+    :else value))
+
 (defn ^{:schema [:fn [:any] :str]}
   encode-json
   "Encodes a JSON value as a single-quoted SQL literal."
   [value]
-  (str "'" (string/replace (json/write value) "'" "''") "'"))
+  (str "'" (string/replace (json/write (json-value value)) "'" "''") "'"))
 
 (defn ^{:schema [:fn [:any] :str]}
   encode-value
@@ -164,19 +180,19 @@
   encode-sql-arg
   "Encodes an sql/arg node."
   [value column-function options loop-function]
-  (encode-value (field value :name "name")))
+  (encode-value (compatible-field value :name "name")))
 
 (defn ^{:schema [:fn [:map :fn :map :any] :str]}
   encode-sql-column
   "Encodes an sql/column node."
   [value column-function options loop-function]
-  (column-function (field value :name "name")))
+  (column-function (compatible-field value :name "name")))
 
 (defn ^{:schema [:fn [:map :fn :map :fn] :str]}
   encode-sql-tuple
   "Encodes an sql/tuple node."
   [value column-function options loop-function]
-  (let [arguments (arrayify (field value :args "args"))]
+  (let [arguments (arrayify (compatible-field value :args "args"))]
     (string/join ", "
                  (map (fn [argument]
                         (loop-function argument
@@ -189,8 +205,8 @@
   encode-sql-table
   "Encodes an SQL table/type node."
   [value column-function options loop-function]
-  (let [schema-name (field value :schema "schema")
-        table-name (field value :name "name")]
+  (let [schema-name (compatible-field value :schema "schema")
+        table-name (compatible-field value :name "name")]
     (if (option options :strict false)
       (str (column-function schema-name) "." (column-function table-name))
       (column-function table-name))))
@@ -199,7 +215,7 @@
   encode-sql-cast
   "Encodes an sql/cast node."
   [value column-function options loop-function]
-  (let [arguments (field value :args "args")
+  (let [arguments (compatible-field value :args "args")
         expression (first arguments)
         cast (second arguments)]
     (if (option options :strict false)
@@ -212,8 +228,8 @@
   encode-sql-keyword
   "Encodes an sql/keyword node."
   [value column-function options loop-function]
-  (let [keyword-name (field value :name "name")
-        arguments (arrayify (field value :args "args"))
+  (let [keyword-name (compatible-field value :name "name")
+        arguments (arrayify (compatible-field value :args "args"))
         encoded (map (fn [argument]
                        (loop-function argument
                                       column-function
@@ -228,8 +244,8 @@
   encode-sql-fn
   "Encodes an sql/fn node, applying dialect replacements when configured."
   [value column-function options loop-function]
-  (let [function-name (field value :name "name")
-        arguments (arrayify (field value :args "args"))
+  (let [function-name (compatible-field value :name "name")
+        arguments (arrayify (compatible-field value :args "args"))
         encoded (map (fn [argument]
                        (loop-function argument
                                       column-function
@@ -244,17 +260,17 @@
           (nil? replacement)
           (str function-name "(" (string/join ", " encoded) ")")
 
-          (= "alias" (field replacement :type "type"))
-          (str (field replacement :name "name")
+          (= "alias" (compatible-field replacement :type "type"))
+          (str (compatible-field replacement :name "name")
                "(" (string/join ", " encoded) ")")
 
-          (= "macro" (field replacement :type "type"))
-          (apply (field replacement :fn "fn") encoded)
+          (= "macro" (compatible-field replacement :type "type"))
+          (apply (compatible-field replacement :fn "fn") encoded)
 
           :else
           (throw (ex-info
                   (str "Invalid Spec Type - "
-                       (field replacement :type "type"))
+                       (compatible-field replacement :type "type"))
                   {:spec replacement})))))))
 
 (declare encode-sql)
@@ -265,7 +281,7 @@
   encode-sql-select
   "Encodes an sql/select node."
   [value column-function options loop-function]
-  (let [arguments (arrayify (field value :args "args"))
+  (let [arguments (arrayify (compatible-field value :args "args"))
         query-string-function (option options :querystr-fn encode-query-string)
         encoded (map (fn [argument]
                        (if (and (map? argument)
@@ -448,9 +464,9 @@
     (map? input)
     (if (not (nil? (compatible-get input "::")))
       (encode-sql input column-function options encode-loop-fn)
-      (str (field input :expr "expr")
+      (str (compatible-field input :expr "expr")
            (if (or (has? input :as) (has? input "as"))
-             (str " AS " (field input :as "as"))
+             (str " AS " (compatible-field input :as "as"))
              "")))
 
     (vector? input)
@@ -467,7 +483,7 @@
   "Returns a quoted schema-qualified table name from lookup."
   [table lookup]
   (let [entry (compatible-get lookup table)
-        schema-name (field entry :schema "schema")]
+        schema-name (compatible-field entry :schema "schema")]
     (str "\"" schema-name "\".\"" table "\"")))
 
 (defn ^{:schema [:fn [:str :int] :str]}
@@ -502,7 +518,7 @@
   [input nest-function column-function options]
   (cond
     (map? input)
-    (str "'" (field input :as "as") "', " (field input :expr "expr"))
+    (str "'" (compatible-field input :as "as") "', " (compatible-field input :expr "expr"))
 
     (vector? input)
     (nest-function input)

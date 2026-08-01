@@ -140,7 +140,7 @@ public class HaraLanguageTest {
       assertEquals(
           3,
           context
-              .eval(HaraLanguage.ID, "(iter-next (iter-drop 1 (interleave [1 2] [3 4])))")
+              .eval(HaraLanguage.ID, "(iter-next (Iter/iter-drop 1 (interleave [1 2] [3 4])))")
               .asLong());
       assertTrue(context.eval(HaraLanguage.ID, "(not-empty [1])").hasArrayElements());
       assertTrue(context.eval(HaraLanguage.ID, "(not-empty [])").isNull());
@@ -1182,7 +1182,7 @@ public class HaraLanguageTest {
       assertEquals(
           "#<lazy-iterator>",
           context
-              .eval(HaraLanguage.ID, "(str (iter-map (fn [x] (+ x 1)) [1 2 3]))")
+              .eval(HaraLanguage.ID, "(str (Iter/iter-map (fn [x] (+ x 1)) [1 2 3]))")
               .asString());
     }
   }
@@ -2095,7 +2095,7 @@ public class HaraLanguageTest {
               .asString());
       assertEquals(
           "1",
-          context.eval(HaraLanguage.ID, "(first (iter-map str [1 2 3]))").asString());
+          context.eval(HaraLanguage.ID, "(first (Iter/iter-map str [1 2 3]))").asString());
     }
   }
 
@@ -2132,7 +2132,10 @@ public class HaraLanguageTest {
     try (Context context = context()) {
       // Redefine get to a builtin: the CollectionOp generic fallback must invoke it
       // through the same builtin fast path as a plain Invoke node.
-      context.eval(HaraLanguage.ID, "(def get str)");
+      context.eval(
+          HaraLanguage.ID,
+          "(ns builtin-redefinition "
+              + "(:require [std.foundation :refer :all :exclude [get]])) (def get str)");
       assertEquals("ab", context.eval(HaraLanguage.ID, "(get \"a\" \"b\")").asString());
     }
   }
@@ -2186,7 +2189,9 @@ public class HaraLanguageTest {
           context
               .eval(
                   HaraLanguage.ID,
-                  "(= :redefined (do (def first (fn [x] :redefined)) (first [1 2 3])))")
+                  "(do (ns first-rest-redefinition "
+                      + "(:require [std.foundation :refer :all :exclude [first rest]])) "
+                      + "(= :redefined (do (def first (fn [x] :redefined)) (first [1 2 3]))))")
               .asBoolean());
       assertTrue(
           context

@@ -1,7 +1,8 @@
 ;; Portable task descriptions and invocation, including Foundation-compatible
 ;; invocation and display protocols.
 (ns std.lib.task
-  (:require [std.lib.task.protocol :as protocol]
+  (:require [std.lib.task.protocol :as protocol
+             :refer [task-type task-name task-config]]
             [std.lib.task.process :as process]
             [std.foundation.string :as string]
             [std.foundation.edn :as edn]))

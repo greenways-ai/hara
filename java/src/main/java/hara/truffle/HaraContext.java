@@ -3669,6 +3669,10 @@ public final class HaraContext {
     Object result = values[0];
     for (int i = 1; i < values.length; i++) {
       Object value = values[i];
+      if (!(HaraBox.unwrap(result) instanceof Number)
+          || !(HaraBox.unwrap(value) instanceof Number)) {
+        throw new HaraException(operator + " expects two numbers");
+      }
       if (operator.equals("+")) {
         result = Num.addP(result, value);
       } else if (operator.equals("-")) {

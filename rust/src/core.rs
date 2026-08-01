@@ -5829,6 +5829,7 @@ fn promise_all(values: Vec<Value>) -> Promise {
     let count = values.len();
     let remaining = Rc::new(Cell::new(count));
     let results = Rc::new(RefCell::new(vec![Value::Nil; count]));
+    let mut sources = Vec::with_capacity(count);
     for (index, value) in values.into_iter().enumerate() {
         let source = match value {
             Value::Promise(promise) => promise,
@@ -5838,6 +5839,7 @@ fn promise_all(values: Vec<Value>) -> Promise {
                 promise
             }
         };
+        sources.push(source.clone());
         let destination = output.clone();
         let remaining = remaining.clone();
         let results = results.clone();
@@ -5858,6 +5860,17 @@ fn promise_all(values: Vec<Value>) -> Promise {
             PromiseState::Pending => {}
         }));
     }
+    let poll_sources = sources.clone();
+    output.set_poller(Rc::new(move || {
+        for source in &poll_sources {
+            source.state();
+        }
+    }));
+    output.set_waiter(Rc::new(move || {
+        for source in &sources {
+            source.wait_state();
+        }
+    }));
     output
 }
 fn settle_promise_result(destination: &Promise, result: Result<Value, String>) {
@@ -5904,6 +5917,14 @@ fn finish_promise(destination: Promise, original: PromiseState, cleanup: Result<
 
 fn promise_chain(source: Promise, operation: &str, function: Rc<Function>) -> Promise {
     let output = Promise::new();
+    let poll_source = source.clone();
+    output.set_poller(Rc::new(move || {
+        poll_source.state();
+    }));
+    let wait_source = source.clone();
+    output.set_waiter(Rc::new(move || {
+        wait_source.wait_state();
+    }));
     let operation = operation.to_string();
     let destination = output.clone();
     source.on_settle(Rc::new(move |state| match state.clone() {
@@ -8861,7 +8882,16 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             binding_value(env, n).ok_or_else(|| format!("unbound symbol: {n}"))
         }
         Form::List(fs) if fs.is_empty() => Ok(Value::List(PList::new())),
-        Form::List(fs) => match &fs[0] {
+        Form::List(fs) => {
+            let normalized_operator;
+            let operator = match &fs[0] {
+                Form::Symbol(name) if name.starts_with("Iter/iter-") => {
+                    normalized_operator = Form::Symbol(name[5..].to_owned());
+                    &normalized_operator
+                }
+                operator => operator,
+            };
+            match operator {
             Form::Symbol(n) if n == "fn" || n == "fn*" => {
                 if fs.len() < 3 {
                     return Err("fn expects parameters and a body".into());
@@ -9192,7 +9222,11 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 }
                 let target = match &fs[1] {
                     Form::Symbol(name) => match env.get(name) {
-                        Some(Value::Var(cell)) => Value::Var(cell.clone()),
+                        Some(Value::Var(cell))
+                            if cell.symbol().get_name() != Symbol::parse(name).get_name() =>
+                        {
+                            Value::Var(cell.clone())
+                        }
                         _ => eval(&fs[1], env)?,
                     },
                     _ => eval(&fs[1], env)?,
@@ -9207,7 +9241,10 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                             "deref cannot block on a pending promise outside an HTA fiber".into(),
                         ),
                     },
-                    _ => Err("deref expects a var, atom, or promise".into()),
+                    value => Err(format!(
+                        "deref expects a var, atom, or promise, got {}",
+                        value.display()
+                    )),
                 }
             }
             Form::Symbol(n) if n == "set!" || n == "var/set" => {
@@ -11863,7 +11900,8 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     .collect::<Result<Vec<_>, _>>()?;
                 call_value(function, arguments)
             }
-        },
+            }
+        }
     }
 }
 

@@ -201,14 +201,13 @@
   "emits data structures through the common emitter"
   {:added "4.0" :adopt true}
   [form grammar mopts]
-  (cond (vector? form) (emit-data :vector form grammar mopts)
-        (map? form) (emit-data :map form grammar mopts)
-        (set? form) (emit-data :set form grammar mopts)
-        (and (list? form) (= 'quote (first form)))
-        (emit-quote nil nil form grammar mopts)
-        (and (list? form) (= 'tab (first form)))
-        (emit-table nil nil form grammar mopts)
-        :else (common/emit-common-loop form grammar mopts)))
+  (common/emit-common-loop
+   form grammar mopts
+   (assoc common/+emit-lookup+ :data emit-data)
+   (fn [key form grammar mopts]
+     (common/emit-op key form grammar mopts
+                     {:quote emit-quote
+                      :table emit-table}))))
 
 (defn test-data-emit
   [form grammar mopts]

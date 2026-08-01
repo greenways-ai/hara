@@ -152,11 +152,12 @@
 
    (fact "foundation macros expand portably"
      [(if-not false :yes :no)
+                (when true :yes)
                 (if-let [x 4] (+ x 1) 0)
                 (when-let [x 4] (+ x 2))
                 (cond-> 1 true inc false (+ 10) true (* 3))
                 (cond->> [1 2] true (map inc))]
-     => [:yes 5 6 6 [2 3]])
+     => [:yes :yes 5 6 6 [2 3]])
    (fact "doto evaluates its target once and returns it"
      (let [calls (atom 0)
                      value (doto

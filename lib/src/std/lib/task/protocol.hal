@@ -30,19 +30,19 @@
   [task]
   (if (map? task)
     task
-    (merge (or (task-config task) {})
-           {:type (task-type task)
-            :name (task-name task)})))
+    (merge (or (std.lib.task.protocol/task-config task) {})
+           {:type (std.lib.task.protocol/task-type task)
+            :name (std.lib.task.protocol/task-name task)})))
 
 (defn task-section
   [task key]
-  (get (task-config-map task) key))
+  (get (std.lib.task.protocol/task-config-map task) key))
 
 (defn task-definition
   "Adapts any protocol-backed or map task into the field-compatible definition
    consumed by the existing bulk execution pipeline."
   [task]
-  (let [config (task-config-map task)]
+  (let [config (std.lib.task.protocol/task-config-map task)]
     (std.lib.task.protocol/TaskDefinition
      (:type config)
      (:name config)

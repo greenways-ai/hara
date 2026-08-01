@@ -75,25 +75,26 @@
 
 (def results
   [(fact "plain batches run mixed exec and query statements sequentially"
-     (reset! EVENTS [])
-     (let [connected (connected-runtime "plain")
-           client-node (get connected :client)
-           output (deref
-                   (client/batch
-                    client-node
-                    "db/primary"
-                    [{:sql "insert-one" :parameters [1]}
-                     {:sql "select-one" :parameters [42] :mode :query}
-                     {:sql "insert-two" :parameters [2]}]
-                    {}))]
-       [(get output :status)
-        (map (fn [result]
-               (or (get result :sql)
-                   (get result :rows)))
-             (get output :results))
-        (map (fn [event]
-               [(get event :mode) (get event :sql)])
-             @EVENTS)])
+     (do
+       (reset! EVENTS [])
+       (let [connected (connected-runtime "plain")
+             client-node (get connected :client)
+             output (deref
+                     (client/batch
+                      client-node
+                      "db/primary"
+                      [{:sql "insert-one" :parameters [1]}
+                       {:sql "select-one" :parameters [42] :mode :query}
+                       {:sql "insert-two" :parameters [2]}]
+                      {}))]
+         [(get output :status)
+          (map (fn [result]
+                 (or (get result :sql)
+                     (get result :rows)))
+               (get output :results))
+          (map (fn [event]
+                 [(get event :mode) (get event :sql)])
+               @EVENTS)]))
      => [:complete
          ["insert-one" [[42]] "insert-two"]
          [[:exec "insert-one"]
@@ -101,39 +102,41 @@
           [:exec "insert-two"]]])
 
    (fact "transaction batches begin run and commit without interleaving"
-     (reset! EVENTS [])
-     (let [connected (connected-runtime "commit")
-           client-node (get connected :client)
-           output (deref
-                   (client/transaction
-                    client-node
-                    "db/primary"
-                    [{:sql "insert" :parameters [1]}
-                     {:sql "select" :parameters [7] :mode "query"}]
-                    {}))]
-       [(get output :status)
-        (get-in output [:results 1 :rows])
-        (map (fn [event] (get event :sql)) @EVENTS)])
+     (do
+       (reset! EVENTS [])
+       (let [connected (connected-runtime "commit")
+             client-node (get connected :client)
+             output (deref
+                     (client/transaction
+                      client-node
+                      "db/primary"
+                      [{:sql "insert" :parameters [1]}
+                       {:sql "select" :parameters [7] :mode "query"}]
+                      {}))]
+         [(get output :status)
+          (get-in output [:results 1 :rows])
+          (map (fn [event] (get event :sql)) @EVENTS)]))
      => [:committed
          [[7]]
          ["begin" "insert" "select" "commit"]])
 
    (fact "failed transaction batches roll back and propagate the error"
-     (reset! EVENTS [])
-     (let [connected (connected-runtime "rollback")
-           client-node (get connected :client)
-           status (deref
-                   (promise/catch
-                    (client/transaction
-                     client-node
-                     "db/primary"
-                     [{:sql "before-failure"}
-                      {:sql "fail"}
-                      {:sql "after-failure"}]
-                     {})
-                    (fn [error] :failed)))]
-       [status
-        (map (fn [event] (get event :sql)) @EVENTS)])
+     (do
+       (reset! EVENTS [])
+       (let [connected (connected-runtime "rollback")
+             client-node (get connected :client)
+             status (deref
+                     (promise/catch
+                      (client/transaction
+                       client-node
+                       "db/primary"
+                       [{:sql "before-failure"}
+                        {:sql "fail"}
+                        {:sql "after-failure"}]
+                       {})
+                      (fn [error] :failed)))]
+         [status
+          (map (fn [event] (get event :sql)) @EVENTS)]))
      => [:failed
          ["begin" "before-failure" "fail" "rollback"]])])
 

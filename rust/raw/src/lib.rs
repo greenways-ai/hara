@@ -71,6 +71,7 @@ struct Session {
     #[cfg(feature = "evaluation-journal")]
     next_journal_id: u64,
 }
+
 impl Session {
     fn new() -> Self {
         Self::shared(
@@ -1449,10 +1450,14 @@ fn error_code(error: &str) -> i32 {
     4
 }
 
+fn evaluation_namespaces() -> kernel::NamespaceRegistry<Value> {
+    kernel::NamespaceRegistry::new("user")
+}
+
 fn evaluate(source: &str) -> Result<i64, i32> {
     kernel::parse_forms(source).map_err(|_| 1)?;
     let mut env = HashMap::new();
-    let namespaces = kernel::NamespaceRegistry::new("user");
+    let namespaces = evaluation_namespaces();
     let protocols = core::ProtocolRegistry::core();
     let value = core::with_namespace_registry(&namespaces, || {
         core::with_protocols(&protocols, || core::eval_text(source, &mut env))
@@ -1478,7 +1483,7 @@ pub extern "C" fn eval_error_code(source_ptr: *const u8, source_len: usize) -> i
                 return 1;
             }
             let mut env = HashMap::new();
-            let namespaces = kernel::NamespaceRegistry::new("user");
+            let namespaces = evaluation_namespaces();
             let protocols = core::ProtocolRegistry::core();
             match core::with_namespace_registry(&namespaces, || {
                 core::with_protocols(&protocols, || core::eval_text(source, &mut env))

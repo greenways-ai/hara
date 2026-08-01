@@ -9,8 +9,8 @@
   (:require [std.db.text.base-schema :as schema]))
 
 (defn- ^{:schema [:fn [:map :any :any] :any]}
-  field
-  "Returns a field from its keyword key or fallback string key."
+  compatible-field
+  "Returns a compatible-field from its keyword key or fallback string key."
   [value keyword-key string-key]
   (if (has? value keyword-key)
     (get value keyword-key)
@@ -125,7 +125,7 @@
     value
 
     (map? value)
-    (field value :id "id")
+    (compatible-field value :id "id")
 
     :else
     (throw (ex-info (str "Invalid link - " (pr-str source))
@@ -154,7 +154,7 @@
   flatten-merge
   "Merges one flattened record into table-map."
   [table-map data-object reference-links reverse-links]
-  (let [id (field data-object :id "id")
+  (let [id (compatible-field data-object :id "id")
         existing (get table-map id)
         sample (if (map? existing) existing data-object)
         id-key (convention-key sample :id "id")
@@ -170,14 +170,14 @@
         updated (assoc record
                        id-key id
                        data-key
-                       (map-merge (field record :data "data") data-object)
+                       (map-merge (compatible-field record :data "data") data-object)
                        reference-key
                        (nested-map-merge
-                        (field record :ref-links "ref_links")
+                        (compatible-field record :ref-links "ref_links")
                         reference-links)
                        reverse-key
                        (nested-map-merge
-                        (field record :rev-links "rev_links")
+                        (compatible-field record :rev-links "rev_links")
                         reverse-links))]
     (assoc table-map id updated)))
 
@@ -231,9 +231,9 @@
            entry (compatible-get
                   (compatible-get schema-map table-name)
                   link-key)
-           reference (field entry :ref "ref")
-           next-table (field reference :ns "ns")
-           reverse-value (field reference :rval "rval")]
+           reference (compatible-field entry :ref "ref")
+           next-table (compatible-field reference :ns "ns")
+           reverse-value (compatible-field reference :rval "rval")]
        (if (vector? value)
          (reduce (fn [nested child]
                    (if (map? child)
@@ -254,11 +254,11 @@
   "Flattens one record and all nested linked records."
   [schema-map table-name value parent acc]
   (let [node (flatten-node schema-map table-name value parent acc)
-        table-map (field node :table-map "table_map")
-        data-object (field node :data-object "data_obj")
-        reference-object (field node :ref-object "ref_obj")
-        reverse-object (field node :rev-object "rev_obj")
-        link-id-value (field data-object :id "id")
+        table-map (compatible-field node :table-map "table_map")
+        data-object (compatible-field node :data-object "data_obj")
+        reference-object (compatible-field node :ref-object "ref_obj")
+        reverse-object (compatible-field node :rev-object "rev_obj")
+        link-id-value (compatible-field data-object :id "id")
         with-table (assoc acc table-name table-map)
         with-reverse (flatten-linked schema-map
                                      table-name
