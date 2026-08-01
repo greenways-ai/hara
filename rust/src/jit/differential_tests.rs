@@ -25,3 +25,15 @@ fn hot_loop_errors_remain_interpreter_errors() {
     assert!(evaluator.contains("integer overflow"));
     assert!(vm.contains("integer overflow"));
 }
+
+#[test]
+fn compiled_traces_survive_repeated_execution_of_one_program() {
+    let program = crate::compile_bytecode(
+        "(loop [i 0 acc 0] (if (< i 5000) (recur (+ i 1) (+ acc i)) acc))",
+    )
+    .unwrap();
+    assert_eq!(crate::execute_bytecode(&program).unwrap(), "12497500");
+    assert!(crate::vm::machine::cached_trace_count(&program) > 0);
+    assert_eq!(crate::execute_bytecode(&program).unwrap(), "12497500");
+    assert!(crate::vm::machine::cached_trace_count(&program) > 0);
+}
