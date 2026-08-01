@@ -1,9 +1,16 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
 
+const sqlite = resolve(
+  import.meta.dirname,
+  "../extensions/std-db-sqlite/node_modules/@sqlite.org/sqlite-wasm/index.mjs"
+);
+
 export default defineConfig({
-  optimizeDeps: {
-    exclude: ["@sqlite.org/sqlite-wasm"]
+  resolve: {
+    alias: {
+      "@sqlite.org/sqlite-wasm": sqlite
+    }
   },
   build: {
     target: "es2022",
