@@ -57,9 +57,9 @@
      (kernel/kernel-create-config
       {"primary" {"type" "mock"}
        "caching" {"type" "mock"}})
-     => {:common {"id" "db/common"}
-         :primary {"type" "mock" :id "db/primary"}
-         :caching {"type" "mock" :id "db/caching"}})
+     => {:common {:id "db/common"}
+         :primary {:type "mock" :id "db/primary"}
+         :caching {:type "mock" :id "db/caching"}})
 
    (fact "server initialization installs database handlers"
      (let [node (substrate/node-create "server")]
