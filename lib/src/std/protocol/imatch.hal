@@ -1,0 +1,5 @@
+;; Canonical value matching contract used by testing and validation libraries.
+(ns std.protocol.imatch)
+
+(defprotocol IMatch
+  (match-value [matcher actual]))
