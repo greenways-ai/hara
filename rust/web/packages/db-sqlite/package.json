@@ -1,0 +1,14 @@
+{
+  "name": "@hara-lang/db-sqlite",
+  "version": "0.1.0",
+  "description": "SQLite WASM provider core for Hara std.db",
+  "license": "EPL-2.0",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./index.mjs"
+  },
+  "dependencies": {
+    "@sqlite.org/sqlite-wasm": "3.53.0-build1"
+  }
+}
