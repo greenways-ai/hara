@@ -1,2 +1,0 @@
-{:hoplite/listen 8080
- :hoplite/workers 1}

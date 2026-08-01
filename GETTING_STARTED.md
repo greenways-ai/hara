@@ -5,13 +5,23 @@
 Linux (x86_64) and macOS (arm64, x86_64):
 
 ```shell
+brew install hara-lang/tap/hara
+# or: brew install hara-lang/tap/hara-truffle
+```
+
+The Rust CLI and Truffle native image are separate Homebrew formulas. Both
+provide a native executable and neither needs a JVM at runtime.
+
+The verified release installer remains available without Homebrew:
+
+```shell
 curl -fsSL https://www.hara-lang.org/install.sh | sh -- --rust --truffle
 ```
 
 This installs `hara` and the native-image `hara-truffle` to `~/.local/bin`; neither needs a
 JVM at runtime. GitHub Releases is the publishing authority for the downloaded packages and
 checksums. Install only one runtime with `--rust` or `--truffle`.
-Override the location with `HARA_INSTALL_DIR`, or pin a release with `HARA_VERSION=v0.1.0`.
+Override the location with `HARA_INSTALL_DIR`, or pin a release with `HARA_VERSION=v0.1.1`.
 
 The sections below build the Java/Truffle runtime from source instead.
 

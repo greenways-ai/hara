@@ -28,8 +28,8 @@ use super::opcode::Instruction;
 use super::program::{FunctionPrototype, Program};
 use super::slot::{VmClosure, VmMultiArity, VmSlot};
 use crate::core::{
-    apply_binary_numbers, apply_binary_primitive, apply_primitive, call_value,
-    native_fixed_variadic_function, native_function, with_namespace_registry, Promise,
+    apply_binary_numbers, apply_binary_primitive, apply_primitive, apply_ternary_primitive_owned,
+    call_value, native_fixed_variadic_function, native_function, with_namespace_registry, Promise,
     PromiseState, Value,
 };
 use crate::task::promise::settle_result;
@@ -738,6 +738,21 @@ impl Machine {
                             }
                             _ => Err(format!("{} expects values", op.operator())),
                         },
+                    }
+                } else if argc == 3 && matches!(op, crate::core::Primitive::Assoc) {
+                    let replacement = self.stack.pop().expect("primitive arity checked above");
+                    let key = self.stack.pop().expect("primitive arity checked above");
+                    let collection = self.stack.pop().expect("primitive arity checked above");
+                    match (
+                        collection.into_runtime_value(),
+                        key.into_runtime_value(),
+                        replacement.into_runtime_value(),
+                    ) {
+                        (Some(collection), Some(key), Some(replacement)) => {
+                            apply_ternary_primitive_owned(*op, collection, key, replacement)
+                                .map(VmSlot::from)
+                        }
+                        _ => Err(format!("{} expects values", op.operator())),
                     }
                 } else {
                     self.scratch.clear();

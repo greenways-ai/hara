@@ -71,7 +71,18 @@ several Git submodules at the root:
 
 ## Quick start
 
-Requirements: JDK 21 and Maven.
+Install the native Rust CLI with Homebrew:
+
+```shell
+brew install hara-lang/tap/hara
+hara eval '(+ 19 23)'
+```
+
+The separately packaged Truffle native image is available as
+`brew install hara-lang/tap/hara-truffle`. Neither Homebrew formula requires a
+JVM at runtime.
+
+To build the Truffle runtime from source, install JDK 21 and Maven:
 
 ```shell
 mvn -f java/pom.xml -Ptruffle package

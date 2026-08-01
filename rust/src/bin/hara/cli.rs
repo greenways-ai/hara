@@ -257,12 +257,8 @@ pub(crate) fn error_exit_code(error: &str) -> i32 {
 }
 
 pub(crate) fn usage() {
-    let program = program_name();
-    if program == "hoplite" {
-        println!("Hoplite · Hara CLI with embedded Nginx");
-    } else {
-        println!("Hara CLI · Rust runtime");
-    }
+    let program = "hara";
+    println!("Hara CLI · Rust runtime");
     println!();
     println!("Usage:");
     println!("  {program} [OPTIONS] repl");
@@ -278,9 +274,6 @@ pub(crate) fn usage() {
     println!("  {program} spec <COMMAND> ...");
     println!("  {program} snapshot <build|verify|inspect|diff> ...");
     println!("  {program} extension <check|build|install|test> ...");
-    if program == "hoplite" {
-        println!("  hoplite serve [PROJECT]");
-    }
     println!();
     println!("Compatibility aliases:");
     println!("  new check test add remove sync update headless standalone");
@@ -293,20 +286,8 @@ pub(crate) fn usage() {
 }
 
 pub(crate) fn exit_error(message: &str, status: i32) -> ! {
-    eprintln!("{}: {message}", program_name());
+    eprintln!("hara: {message}");
     std::process::exit(status)
-}
-
-fn program_name() -> &'static str {
-    let is_hoplite = env::args_os()
-        .next()
-        .and_then(|path| PathBuf::from(path).file_stem().map(|name| name.to_owned()))
-        .is_some_and(|name| name.to_string_lossy().starts_with("hoplite"));
-    if is_hoplite {
-        "hoplite"
-    } else {
-        "hara"
-    }
 }
 
 #[cfg(test)]

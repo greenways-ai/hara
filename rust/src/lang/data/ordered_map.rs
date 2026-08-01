@@ -67,6 +67,29 @@ impl<K: Clone + Eq + Hash, V: Clone> Standard<K, V> {
             },
         }
     }
+    /// Associates into a consumed ordered map, reusing the CHAMP lookup path
+    /// when it is uniquely owned while retaining persistent alias semantics.
+    pub fn assoc_value_owned(mut self, key: K, value: V) -> Self {
+        match self.lookup.get(&key).map(|(index, _)| *index) {
+            None => {
+                let index = self.order.len();
+                self.lookup = self
+                    .lookup
+                    .assoc_value_owned(key.clone(), (index, value.clone()));
+                self.order = self.order.push_last_owned(Some((key, value)));
+            }
+            Some(index) => {
+                self.lookup = self
+                    .lookup
+                    .assoc_value_owned(key.clone(), (index, value.clone()));
+                self.order = self
+                    .order
+                    .assoc_value_owned(index, Some((key, value)))
+                    .expect("ordered-map index");
+            }
+        }
+        self
+    }
     pub fn dissoc_value(&self, key: &K) -> Self {
         let Some((index, _)) = self.lookup.get(key) else {
             return self.clone();
