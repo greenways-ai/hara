@@ -5,15 +5,41 @@
 (def +type-registry+ (atom {}))
 
 (defn install-lang!
-  "Installs a language into the portable Tahto runtime registry."
+  "Installs a selected version of a language into the runtime registry.
+
+   Omitting :version uses the configured default for the selected book key."
   ([language]
    (install-lang! language {}))
   ([language options]
-   (let [entry (merge {:lang language
-                       :book-key :default}
-                      options)]
-     (swap! +language-registry+ assoc language entry)
-     entry)))
+   (let [book-key (or (:book-key options) :default)
+         requested-version (:version options)
+         book (or (:book options)
+                  (registry/registry-book language
+                                          book-key
+                                          requested-version))]
+     (if (nil? book)
+       (throw
+        (ex-info "Language book is not registered"
+                 {:language language
+                  :book-key book-key
+                  :version requested-version}))
+       (let [version (or requested-version
+                         (:version book)
+                         (registry/registry-book-default-version
+                          language
+                          book-key))
+             entry (merge options
+                          {:lang language
+                           :book-key book-key
+                           :version version
+                           :book book})]
+         (swap! +language-registry+ assoc language entry)
+         entry)))))
+
+(defn select-lang-version!
+  "Selects one installed book version as the active language grammar."
+  [language version]
+  (install-lang! language {:version version}))
 
 (defn install-type!
   "Installs one runtime type for a language.
@@ -111,32 +137,50 @@
               {:lang (:lang runtime)
                :runtime (:runtime runtime)}))))
 
-(defn bootstrap!
-  "Bootstraps the first Foundation-compatible Tahto runtime slice.
+(defn- requested-version
+  [language version versions]
+  (or (get versions language)
+      version
+      (registry/registry-book-default-version language :default)))
 
-   Books and runtime implementations are loaded separately, matching
-   Foundation. The initial supported languages are :js and :python and the
-   installed runtime types are :oneshot and :basic."
+(defn bootstrap!
+  "Bootstraps Foundation-compatible books and runtime types.
+
+   :version pins one version for every language.
+   :versions pins versions per language and takes precedence over :version.
+   With neither option, each language uses its configured default version."
   ([]
    (bootstrap! {:languages [:js :python]
-                :runtimes [:oneshot :basic]
-                :version 1}))
-  ([{:keys [languages runtimes version]
+                :runtimes [:oneshot :basic]}))
+  ([{:keys [languages runtimes version versions]
      :or {languages [:js :python]
           runtimes [:oneshot :basic]
-          version 1}}]
-   (let [books
-         (reduce (fn [out language]
-                   (let [book (registry/registry-book language :default version)]
-                     (install-lang! language {:version version
-                                              :book book})
-                     (assoc out language book)))
-                 {}
-                 languages)]
+          versions {}}}]
+   (let [selected
+         (reduce
+          (fn [out language]
+            (let [selected-version
+                  (requested-version language version versions)
+                  book
+                  (registry/registry-book language
+                                          :default
+                                          selected-version)]
+              (install-lang! language
+                             {:book-key :default
+                              :version selected-version
+                              :book book})
+              {:books (assoc (:books out) language book)
+               :versions (assoc (:versions out)
+                                language
+                                selected-version)}))
+          {:books {}
+           :versions {}}
+          languages)]
      (doseq [language languages]
        (doseq [runtime runtimes]
          (require-runtime! language runtime)))
      {:version version
-      :books books
+      :versions (:versions selected)
+      :books (:books selected)
       :languages @+language-registry+
       :runtimes @+type-registry+})))
