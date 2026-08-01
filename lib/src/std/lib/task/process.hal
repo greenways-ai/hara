@@ -1,19 +1,9 @@
 (ns std.lib.task.process
-  (:require [std.lib.task.bulk :as bulk]
+  (:require [std.lib.task.protocol :as protocol]
+            [std.lib.task.bulk :as bulk]
             [std.foundation.string :as string]))
 
-(defn task-section
-  [task key]
-  (if (map? task)
-    (get task key)
-    (cond
-      (= key :main) (field task :main)
-      (= key :construct) (field task :construct)
-      (= key :item) (field task :item)
-      (= key :result) (field task :result)
-      (= key :summary) (field task :summary)
-      (= key :params) (field task :params)
-      :else nil)))
+(def task-section protocol/task-section)
 
 (defn main-function
   "Adapts a task function to the portable four-slot invocation contract.
@@ -102,12 +92,13 @@
                  (vector? input)
                  (set? input)
                  (list? input)))
-        (apply bulk/bulk task function
+        (apply bulk/bulk (protocol/task-definition task) function
                (select-inputs task lookup env input)
                params lookup env args)
 
         (vector? input)
-        (apply bulk/bulk task function input params lookup env args)
+        (apply bulk/bulk (protocol/task-definition task) function
+               input params lookup env args)
 
         :else
         (apply function input params lookup env args)))))
