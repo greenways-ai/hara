@@ -5,6 +5,7 @@
   (:require [std.db.node.kernel-base :as kernel]
             [std.db.node.kernel-batch :as batch]
             [std.db.node.kernel-service :as service]
+            [std.db.node.lifecycle :as lifecycle]
             [std.db.node.proxy-util :as proxy]
             [std.lib.substrate.protocol :as substrate]))
 
@@ -16,6 +17,7 @@
    kernel/ACTION-EXEC
    kernel/ACTION-QUERY
    batch/ACTION-BATCH
+   lifecycle/ACTION-FINALIZE
    service/ACTION-RUNTIME-STATUS
    service/ACTION-DRIVER-LIST
    service/ACTION-SERVICE-LIST
