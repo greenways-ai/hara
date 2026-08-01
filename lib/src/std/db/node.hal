@@ -1,0 +1,215 @@
+;; ============================================================================
+;; std.db.node — substrate-backed database node control plane.
+;;
+;; This first cut ports the stable xt.db.node action vocabulary and client /
+;; proxy dispatch model. Concrete database implementations remain services
+;; installed behind these handlers.
+;; ============================================================================
+(ns std.db.node
+  (:require [std.substrate :as substrate]))
+
+(def DEFAULT_TRANSPORT "xt.db.default.transport")
+(def DEFAULT_WORKER "xt.db.default.worker")
+(def DEFAULT_TRANSPORT_SERVICE "std.db.node/default-transport")
+
+(def ACTION_KERNEL_INIT "@xt.db/kernel-init")
+(def ACTION_KERNEL_SETUP "@xt.db/kernel-setup")
+(def ACTION_KERNEL_TEARDOWN "@xt.db/kernel-teardown")
+(def ACTION_SUBSCRIBE_DB "@xt.db/subscribe-db")
+(def ACTION_UNSUBSCRIBE_DB "@xt.db/unsubscribe-db")
+(def ACTION_SYNC_CACHED "@xt.db/sync-cached")
+(def ACTION_ATTACH_MODEL "@xt.db/attach-model")
+(def ACTION_DETACH_MODEL "@xt.db/detach-model")
+(def ACTION_RPC_CALL "@xt.db/rpc-call")
+(def ACTION_RPC_ATTACH_MODEL "@xt.db/rpc-attach-model")
+(def ACTION_PULL_CALL "@xt.db/pull-call")
+(def ACTION_PULL_CACHED "@xt.db/pull-cached")
+(def ACTION_PULL_ATTACH_MODEL "@xt.db/pull-attach-model")
+(def ACTION_DATAVIEW_CALL "@xt.db/dataview-call")
+(def ACTION_DATAVIEW_CACHED "@xt.db/dataview-cached")
+(def ACTION_DATAVIEW_ATTACH_MODEL "@xt.db/dataview-attach-model")
+
+(def ACTIONS
+  [ACTION_KERNEL_INIT
+   ACTION_KERNEL_SETUP
+   ACTION_KERNEL_TEARDOWN
+   ACTION_SUBSCRIBE_DB
+   ACTION_UNSUBSCRIBE_DB
+   ACTION_SYNC_CACHED
+   ACTION_ATTACH_MODEL
+   ACTION_DETACH_MODEL
+   ACTION_RPC_CALL
+   ACTION_RPC_ATTACH_MODEL
+   ACTION_PULL_CALL
+   ACTION_PULL_CACHED
+   ACTION_PULL_ATTACH_MODEL
+   ACTION_DATAVIEW_CALL
+   ACTION_DATAVIEW_CACHED
+   ACTION_DATAVIEW_ATTACH_MODEL])
+
+(defn set-default-transport
+  [node transport-id]
+  (substrate/set-service node DEFAULT_TRANSPORT_SERVICE transport-id)
+  transport-id)
+
+(defn get-default-transport
+  [node]
+  (substrate/get-service node DEFAULT_TRANSPORT_SERVICE))
+
+(defn option-transport-id
+  [options]
+  (or (get (or options {}) :transport-id)
+      (get (or options {}) :transport_id)
+      (get (or options {}) "transport-id")
+      (get (or options {}) "transport_id")))
+
+(defn get-transport-id
+  [node options]
+  (or (option-transport-id options)
+      (get-default-transport node)
+      (first (substrate/transport-list node))))
+
+(defn request-meta
+  [node options]
+  (let [transport-id (get-transport-id node options)]
+    (if transport-id
+      {:transport-id transport-id}
+      {})))
+
+(defn request-client
+  [node action args options]
+  (if (substrate/get-handler node action)
+    (substrate/request node nil action args {:local true})
+    (substrate/request node nil action args (request-meta node options))))
+
+(defn install-handler
+  [node action configuration]
+  (if (fn? configuration)
+    (substrate/register-handler node action configuration {})
+    (let [handler (or (get configuration :fn)
+                      (get configuration "fn"))
+          metadata (or (get configuration :meta)
+                       (get configuration "meta") {})]
+      (if (fn? handler)
+        (substrate/register-handler node action handler metadata)
+        (throw (ex-info "Invalid database node handler"
+                        {:action action :configuration configuration}))))))
+
+(defn install-handlers
+  [node handlers]
+  (let [handlers (or handlers {})
+        actions (vec (keys handlers))]
+    (loop [index 0]
+      (if (= index (count actions))
+        node
+        (let [action (nth actions index)]
+          (do (install-handler node action (get handlers action))
+              (recur (inc index))))))))
+
+(defn proxy-handler
+  [action transport-id]
+  (fn [space args request node]
+    (substrate/request node nil action args
+                       {:transport-id transport-id})))
+
+(defn install-proxy-handlers
+  [node actions transport-id]
+  (let [actions (or actions ACTIONS)]
+    (loop [index 0]
+      (if (= index (count actions))
+        node
+        (let [action (nth actions index)]
+          (do (substrate/register-handler
+               node action (proxy-handler action transport-id)
+               {:proxy true :transport-id transport-id})
+              (recur (inc index))))))))
+
+(defn init-server
+  [node handlers]
+  (install-handlers node handlers))
+
+(defn init-server-proxy
+  ([node]
+   (init-server-proxy node nil))
+  ([node transport-id]
+   (let [transport-id (or transport-id
+                          (get-transport-id node {}))]
+     (if transport-id
+       (do (set-default-transport node transport-id)
+           (install-proxy-handlers node ACTIONS transport-id))
+       (throw (ex-info "Database node proxy requires a transport"
+                       {:node (substrate/node-id node)}))))))
+
+(defn kernel-init
+  [node config schema lookup options]
+  (request-client node ACTION_KERNEL_INIT [config schema lookup] options))
+
+(defn kernel-setup
+  [node config schema lookup options]
+  (request-client node ACTION_KERNEL_SETUP [config schema lookup] options))
+
+(defn kernel-teardown
+  [node config options]
+  (request-client node ACTION_KERNEL_TEARDOWN [config] options))
+
+(defn subscribe-db
+  [node primary-id connection-id topics options]
+  (request-client node ACTION_SUBSCRIBE_DB
+                  [primary-id connection-id topics] options))
+
+(defn unsubscribe-db
+  [node primary-id connection-id topics options]
+  (request-client node ACTION_UNSUBSCRIBE_DB
+                  [primary-id connection-id topics] options))
+
+(defn sync-cached
+  [node primary-id payload options]
+  (request-client node ACTION_SYNC_CACHED [primary-id payload] options))
+
+(defn attach-model
+  [node primary-id page-args model-spec options]
+  (request-client node ACTION_ATTACH_MODEL
+                  [primary-id page-args model-spec] options))
+
+(defn detach-model
+  [node primary-id page-args options]
+  (request-client node ACTION_DETACH_MODEL
+                  [primary-id page-args] options))
+
+(defn rpc-call
+  [node service-id rpc-spec rpc-args options]
+  (request-client node ACTION_RPC_CALL
+                  [service-id rpc-spec rpc-args] options))
+
+(defn rpc-attach-model
+  [node primary-id page-args rpc-spec model options]
+  (request-client node ACTION_RPC_ATTACH_MODEL
+                  [primary-id page-args rpc-spec model] options))
+
+(defn pull-call
+  [node primary-id tree options]
+  (request-client node ACTION_PULL_CALL [primary-id tree] options))
+
+(defn pull-cached
+  [node primary-id tree options]
+  (request-client node ACTION_PULL_CACHED [primary-id tree] options))
+
+(defn pull-attach-model
+  [node primary-id page-args tree model options]
+  (request-client node ACTION_PULL_ATTACH_MODEL
+                  [primary-id page-args tree model] options))
+
+(defn dataview-call
+  [node primary-id dataview options]
+  (request-client node ACTION_DATAVIEW_CALL
+                  [primary-id dataview] options))
+
+(defn dataview-cached
+  [node primary-id dataview options]
+  (request-client node ACTION_DATAVIEW_CACHED
+                  [primary-id dataview] options))
+
+(defn dataview-attach-model
+  [node primary-id page-args dataview model options]
+  (request-client node ACTION_DATAVIEW_ATTACH_MODEL
+                  [primary-id page-args dataview model] options))

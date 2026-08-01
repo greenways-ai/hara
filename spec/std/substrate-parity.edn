@@ -1,0 +1,120 @@
+{:reference
+ {:repository "zcaudate-xyz/foundation-base"
+  :substrate-root "src-lang/xt/substrate.clj"
+  :db-node-root "src-lang/xt/db/node"}
+
+ :target
+ {:substrate "std.substrate"
+  :db-node "std.db.node"
+  :legacy-engine "std.lib.substrate"}
+
+ :first-cut
+ {:status :implemented
+  :substrate
+  {:ported
+   ["node-create"
+    "node-configure"
+    "create-space"
+    "get-space"
+    "ensure-space"
+    "remove-space"
+    "list-spaces"
+    "get-space-state"
+    "set-space-state"
+    "update-space-state"
+    "get-services"
+    "get-service"
+    "set-service"
+    "remove-service"
+    "register-handler"
+    "unregister-handler"
+    "get-handler"
+    "list-handlers"
+    "register-trigger"
+    "unregister-trigger"
+    "get-trigger"
+    "list-triggers"
+    "transport-create"
+    "transport-get"
+    "transport-list"
+    "transport-send"
+    "attach-transport"
+    "detach-transport"
+    "request"
+    "receive-request"
+    "receive-response"
+    "subscribe"
+    "unsubscribe"
+    "publish"
+    "receive-publish"
+    "receive-frame"
+    "broadcast-transport"
+    "route-stream"
+    "cancel-request"
+    "reject-pending"]
+
+   :partial
+   {"base-frame" "Canonical constructors exist; exact string-keyed Foundation wire shape remains."
+    "base-router" "Per-signal routing works through the existing engine; nested connection/subscription state remains."
+    "base-json" "The existing std.lib.substrate.frame substrate.v1 codec remains separate from Foundation JSON parity."
+    "base-util-handlers" "Declarative user handlers are supported; Foundation utility handler installation remains."
+    "event-listeners" "Transport and stream callbacks exist; the complete keyed listener container remains."}
+
+   :pending
+   ["page-core"
+    "page-util"
+    "page-proxy"
+    "view"
+    "view-catalog"
+    "transport-memory"
+    "transport-browser"
+    "transport-websocket"]}
+
+  :db-node
+  {:ported
+   ["stable @xt.db action identifiers"
+    "client request wrappers"
+    "local-handler preference"
+    "default transport selection"
+    "handler installation"
+    "proxy handler installation"
+    "kernel-init"
+    "kernel-setup"
+    "kernel-teardown"
+    "subscribe-db"
+    "unsubscribe-db"
+    "sync-cached"
+    "attach-model"
+    "detach-model"
+    "rpc-call"
+    "rpc-attach-model"
+    "pull-call"
+    "pull-cached"
+    "pull-attach-model"
+    "dataview-call"
+    "dataview-cached"
+    "dataview-attach-model"]
+
+   :pending
+   ["kernel-base service implementation"
+    "proxy-base complete handler set"
+    "kernel-supabase"
+    "proxy-supabase"
+    "client-supabase"
+    "page model integration"
+    "database implementation protocols"
+    "memory database conformance implementation"
+    "SQLite adapter"
+    "PostgreSQL adapter"
+    "Supabase adapter"
+    "SharedWorker runtime"
+    "WebWorker runtime"
+    "Node worker runtime"]}}
+
+ :acceptance
+ {:portable-targets [:jvm :rust :browser]
+  :requirements
+  ["Every public Foundation symbol is mapped to ported, host-owned, deferred, or obsolete."
+   "Translated Foundation facts preserve values, errors, promise settlement, and deterministic ordering."
+   "Local and two-node remote paths produce equivalent database-node results."
+   "Host transports and database drivers remain adapters above portable std.substrate and std.db.node."]}}

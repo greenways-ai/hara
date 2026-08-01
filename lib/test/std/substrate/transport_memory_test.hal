@@ -1,0 +1,115 @@
+(ns std.substrate.transport-memory-test
+  (:use code.test)
+  (:require [std.foundation.promise :as promise]
+            [std.substrate :as substrate]
+            [std.substrate.frame :as frame]
+            [std.substrate.json :as substrate-json]
+            [std.substrate.transport-memory :as memory]))
+
+(fact "unwraps endpoint event text and normalises targets"
+  [(memory/event-text {"data" "ping"})
+   (memory/event-text {"text" "pong"})
+   (memory/event-text "echo")
+   (memory/network-targets nil)
+   (memory/network-targets ["a" "b"])
+   (memory/network-targets "hub")]
+  => ["ping" "pong" "echo" [] ["a" "b"] ["hub"]])
+
+(fact "memory pair endpoints deliver text with wire context"
+  (let [wire (memory/memory-pair
+              {"left_id" "host" "right_id" "peer"})
+        left (get wire "left")
+        right (get wire "right")
+        seen (atom nil)]
+    ((get right "start_fn")
+     (fn [event context]
+       (reset! seen
+               [(memory/event-text event)
+                (get context "wire")
+                (get context "peer")])
+       true))
+    (promise/value ((get left "write_fn") "ping"))
+    @seen)
+  => ["ping" "host" "peer"])
+
+(fact "JSON endpoint encodes outbound and decodes inbound frames"
+  (let [wire (memory/memory-pair
+              {"left_id" "host" "right_id" "peer"})
+        left (get wire "left")
+        right-transport (memory/text-endpoint (get wire "right"))
+        outbound (atom nil)
+        inbound (atom nil)]
+    ((get left "start_fn")
+     (fn [event context]
+       (reset! outbound
+               (substrate-json/decode-frame
+                (memory/event-text event)))
+       true))
+    ((get right-transport "start_fn")
+     (fn [incoming context]
+       (reset! inbound incoming)
+       true))
+    (promise/value
+     ((get right-transport "send_fn")
+      (frame/stream-frame
+       "room/a" "event/pinged" {"count" 1} nil nil)))
+    (promise/value
+     ((get left "write_fn")
+      (substrate-json/encode-frame
+       (frame/request-frame
+        "room/a" "demo/echo" [{"ping" 1}]
+        {"id" "req-echo"}))))
+    [[(get @outbound "kind")
+      (get @outbound "signal")
+      (get-in @outbound ["data" "count"])]
+     [(get @inbound "kind")
+      (get @inbound "action")
+      (get @inbound "id")]])
+  => [["stream" "event/pinged" 1]
+      ["request" "demo/echo" "req-echo"]])
+
+(fact "memory network delivers to every configured peer in order"
+  (let [network
+        (memory/memory-network
+         {"hub" ["peer-a" "peer-b"]
+          "peer-a" ["hub"]
+          "peer-b" ["hub"]})
+        seen (atom [])]
+    ((get-in network ["peer-a" "start_fn"])
+     (fn [event context]
+       (reset! seen
+               (conj @seen
+                     ["peer-a"
+                      (memory/event-text event)
+                      (get context "wire")
+                      (get context "peer")]))
+       true))
+    ((get-in network ["peer-b" "start_fn"])
+     (fn [event context]
+       (reset! seen
+               (conj @seen
+                     ["peer-b"
+                      (memory/event-text event)
+                      (get context "wire")
+                      (get context "peer")]))
+       true))
+    (promise/value ((get-in network ["hub" "write_fn"]) "ping"))
+    @seen)
+  => [["peer-a" "ping" "hub" "peer-a"]
+      ["peer-b" "ping" "hub" "peer-b"]])
+
+(fact "link-pair supports end-to-end substrate requests"
+  (let [client (substrate/node-create {"id" "client"})
+        server
+        (substrate/node-create
+         {"id" "server"
+          "handlers"
+          {"sum"
+           (fn [space args incoming node]
+             (+ (nth args 0) (nth args 1)))}})]
+    (promise/value (memory/link-pair server client))
+    (promise/value
+     (substrate/request client "room/a" "sum" [19 23] {})))
+  => 42)
+
+(pr-str (run '[std.substrate.transport-memory-test]))

@@ -1,0 +1,63 @@
+(ns std.db.node-test
+  (:use code.test)
+  (:require [std.db.node :as db]
+            [std.foundation.promise :as promise]
+            [std.substrate :as substrate]))
+
+(defn kernel-init-handler
+  [space args request node]
+  {:status "setup"
+   :config (nth args 0)
+   :schema (nth args 1)
+   :lookup (nth args 2)
+   :space (get space "id")})
+
+(fact "database node client prefers a locally installed kernel handler"
+  (let [node (substrate/node-create {:id "db/local"})]
+    (db/init-server node {db/ACTION_KERNEL_INIT kernel-init-handler})
+    (promise/value
+     (db/kernel-init node {:primary {:type "memory"}}
+                     {:Task {:id "uuid"}}
+                     {:Task {:table "task"}}
+                     {})))
+  => {:status "setup"
+      :config {:primary {:type "memory"}}
+      :schema {:Task {:id "uuid"}}
+      :lookup {:Task {:table "task"}}
+      :space "__NODE__"})
+
+(fact "database node proxy forwards the stable xt.db action vocabulary"
+  (let [client (substrate/node-create {:id "db/client"})
+        server (substrate/node-create {:id "db/server"})]
+    (db/init-server server {db/ACTION_KERNEL_INIT kernel-init-handler})
+    (promise/value
+     (substrate/attach-transport
+      client "server"
+      {:send-fn
+       (fn [frame]
+         (substrate/receive-frame server frame {:transport-id "client"}))}))
+    (promise/value
+     (substrate/attach-transport
+      server "client"
+      {:send-fn
+       (fn [frame]
+         (substrate/receive-frame client frame {:transport-id "server"}))}))
+    (db/init-server-proxy client "server")
+    (promise/value
+     (db/kernel-init client {:primary {:type "memory"}}
+                     {:Task {:id "uuid"}}
+                     {:Task {:table "task"}}
+                     {})))
+  => {:status "setup"
+      :config {:primary {:type "memory"}}
+      :schema {:Task {:id "uuid"}}
+      :lookup {:Task {:table "task"}}
+      :space "__NODE__"})
+
+(fact "database node exposes the complete first-cut action set"
+  [(count db/ACTIONS)
+   (first db/ACTIONS)
+   (nth db/ACTIONS 15)]
+  => [16 "@xt.db/kernel-init" "@xt.db/dataview-attach-model"])
+
+(pr-str (run '[std.db.node-test]))

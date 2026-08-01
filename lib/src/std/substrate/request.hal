@@ -1,0 +1,74 @@
+;; ============================================================================
+;; std.substrate.request — direct portable port of xt.substrate.base-request.
+;; ============================================================================
+(ns std.substrate.request
+  (:require [std.foundation.promise :as promise]
+            [std.lib.substrate :as core]
+            [std.substrate.frame :as frame]
+            [std.substrate.space :as space]))
+
+(defn ensure-promise
+  "Normalises raw and promised values to a portable promise."
+  [value]
+  (promise/from value))
+
+(defn add-pending
+  "Adds a pending request entry to a node."
+  [node request resolve reject meta]
+  (let [request-id (get request "id")
+        entry {"resolve" resolve
+               "reject" reject
+               "request" request
+               "meta" (or meta {})}]
+    (core/section-put node :pending request-id entry)
+    entry))
+
+(defn remove-pending
+  "Removes a pending request entry."
+  [node request-id]
+  (core/section-remove node :pending request-id))
+
+(defn entry-function
+  [entry]
+  (or (get entry "fn")
+      (get entry :fn)))
+
+(defn settle-pending
+  "Settles a pending request using a response frame."
+  [node response]
+  (let [entry (remove-pending node (get response "reply_to"))]
+    (if (nil? entry)
+      nil
+      (let [resolve (get entry "resolve")
+            reject (get entry "reject")]
+        (if (= (get response "status") frame/STATUS_OK)
+          (resolve (get response "data"))
+          (reject response))
+        entry))))
+
+(defn invoke-handler
+  "Invokes the handler selected by request action."
+  [node request]
+  (let [action (get request "action")
+        entry (get (core/node-section node :handlers) action)]
+    (if (nil? entry)
+      (throw (ex-info (str "handler not found - " action)
+                      {:action action}))
+      (let [handler (entry-function entry)
+            current-space
+            (space/ensure-space node (get request "space") nil)]
+        (ensure-promise
+         (handler current-space
+                  (get request "args")
+                  request
+                  node))))))
+
+(defn response-body
+  "Normalises a response frame into request output."
+  [response]
+  (promise/then
+   (ensure-promise response)
+   (fn [resolved]
+     (if (= (get resolved "status") frame/STATUS_OK)
+       (get resolved "data")
+       (throw resolved)))))

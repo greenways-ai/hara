@@ -1,0 +1,302 @@
+;; ============================================================================
+;; std.substrate.util — portable port of xt.substrate.base-util.
+;; ============================================================================
+(ns std.substrate.util
+  (:require [std.foundation.promise :as promise]
+            [std.lib.substrate :as core]
+            [std.substrate.frame :as frame]
+            [std.substrate.pubsub :as pubsub]
+            [std.substrate.request :as request]
+            [std.substrate.router :as router]))
+
+(defn option-value
+  [options string-key keyword-key]
+  (or (get (or options {}) string-key)
+      (get (or options {}) keyword-key)))
+
+(defn transport-get
+  "Gets an attached transport."
+  [node transport-id]
+  (get (core/node-section node :transports) transport-id))
+
+(defn transport-list
+  "Lists active transport ids in deterministic order."
+  [node]
+  (vec (sort (keys (core/node-section node :transports)))))
+
+(defn transport-send
+  "Sends a frame through a transport."
+  [node transport-id outgoing]
+  (let [transport (transport-get node transport-id)]
+    (if (nil? transport)
+      (throw (ex-info (str "transport not found - " transport-id)
+                      {:transport-id transport-id}))
+      (let [send-function
+            (or (get transport "send_fn")
+                (get transport :send-fn)
+                (get transport :send_fn))]
+        (if (nil? send-function)
+          (throw (ex-info (str "transport missing send_fn - " transport-id)
+                          {:transport-id transport-id}))
+          (request/ensure-promise (send-function outgoing)))))))
+
+(defn transport-broadcast-loop
+  "Broadcasts a frame sequentially across transports."
+  [node ids outgoing exclude-id index]
+  (if (>= index (count ids))
+    (promise/from outgoing)
+    (let [transport-id (nth ids index)]
+      (if (= transport-id exclude-id)
+        (transport-broadcast-loop node ids outgoing exclude-id (inc index))
+        (promise/then
+         (transport-send node transport-id outgoing)
+         (fn [_]
+           (transport-broadcast-loop
+            node ids outgoing exclude-id (inc index))))))))
+
+(defn transport-request-target
+  "Resolves the outbound request target transport."
+  [node meta]
+  (let [meta (or meta {})]
+    (if (option-value meta "local" :local)
+      nil
+      (or (option-value meta "transport_id" :transport_id)
+          (option-value meta "transport-id" :transport-id)
+          (first (transport-list node))))))
+
+(defn stream-route-loop
+  "Routes a stream sequentially across subscribed transports."
+  [node ids outgoing exclude-id index]
+  (if (>= index (count ids))
+    (promise/from outgoing)
+    (let [transport-id (nth ids index)]
+      (if (= transport-id exclude-id)
+        (stream-route-loop node ids outgoing exclude-id (inc index))
+        (promise/then
+         (transport-send node transport-id outgoing)
+         (fn [_]
+           (stream-route-loop
+            node ids outgoing exclude-id (inc index))))))))
+
+(defn pending-state
+  [state]
+  (if (map? state) state @state))
+
+(defn pending-await
+  "Waits for a pending state map or atom to resolve or reject."
+  [state]
+  (let [current (pending-state state)
+        status (get current "status")]
+    (cond
+      (= status "resolved")
+      (promise/from (get current "value"))
+
+      (= status "rejected")
+      (promise/new
+       (fn [resolve reject]
+         (reject (get current "error"))))
+
+      :else
+      (promise/then
+       (promise/delay 1 (fn [] nil))
+       (fn [_] (pending-await state))))))
+
+(defn context-transport-id
+  [context]
+  (or (option-value context "transport_id" :transport_id)
+      (option-value context "transport-id" :transport-id)))
+
+(defn request-context-merge
+  "Merges transport context into request metadata and returns a new frame."
+  [incoming context]
+  (let [meta (or (get incoming "meta") {})
+        transport-id (context-transport-id context)
+        next-meta (if transport-id
+                    (assoc meta "transport_id" transport-id)
+                    meta)]
+    (assoc incoming "meta" next-meta)))
+
+(defn response-target
+  [incoming context]
+  (or (context-transport-id context)
+      (option-value (get incoming "meta") "transport_id" :transport_id)
+      (option-value (get incoming "meta") "transport-id" :transport-id)))
+
+(defn response-ok
+  "Constructs and optionally sends a successful response."
+  [node incoming data meta context]
+  (let [response
+        (frame/response-ok-frame
+         (get incoming "id") (get incoming "space") data meta)
+        transport-id (response-target incoming context)]
+    (if transport-id
+      (promise/then
+       (transport-send node transport-id response)
+       (fn [_] response))
+      (promise/from response))))
+
+(defn response-error
+  "Constructs and optionally sends an errored response."
+  [node incoming error meta context]
+  (let [response
+        (frame/response-error-frame
+         (get incoming "id") (get incoming "space") error meta)
+        transport-id (response-target incoming context)]
+    (if transport-id
+      (promise/then
+       (transport-send node transport-id response)
+       (fn [_] response))
+      (promise/from response))))
+
+(defn config-normalize-space
+  "Normalises declarative space config."
+  [space-id config]
+  (cond
+    (nil? config) nil
+
+    (map? config)
+    (let [configured-id (or (get config "id") (get config :id))]
+      (if (and configured-id (not= configured-id space-id))
+        (throw (ex-info (str "space id mismatch - " space-id)
+                        {:space-id space-id :config config}))
+        {"state" (or (get config "state") (get config :state))
+         "meta" (or (get config "meta") (get config :meta) {})}))
+
+    :else
+    (throw (ex-info (str "invalid space config - " space-id)
+                    {:space-id space-id :config config}))))
+
+(defn config-normalize-handler
+  "Normalises handler config from a function or declarative entry."
+  [action config]
+  (cond
+    (fn? config)
+    {"fn" config "meta" {}}
+
+    (and (map? config)
+         (fn? (or (get config "fn") (get config :fn))))
+    (let [configured-id (or (get config "id") (get config :id))]
+      (if (and configured-id (not= configured-id action))
+        (throw (ex-info (str "handler id mismatch - " action)
+                        {:action action :config config}))
+        {"fn" (or (get config "fn") (get config :fn))
+         "meta" (or (get config "meta") (get config :meta) {})}))
+
+    :else
+    (throw (ex-info (str "invalid handler config - " action)
+                    {:action action :config config}))))
+
+(defn config-normalize-trigger
+  "Normalises trigger config from a function or declarative entry."
+  [signal config]
+  (cond
+    (fn? config)
+    {"fn" config "meta" {}}
+
+    (and (map? config)
+         (fn? (or (get config "fn") (get config :fn))))
+    (let [configured-id (or (get config "id") (get config :id))]
+      (if (and configured-id (not= configured-id signal))
+        (throw (ex-info (str "trigger id mismatch - " signal)
+                        {:signal signal :config config}))
+        {"fn" (or (get config "fn") (get config :fn))
+         "meta" (or (get config "meta") (get config :meta) {})}))
+
+    :else
+    (throw (ex-info (str "invalid trigger config - " signal)
+                    {:signal signal :config config}))))
+
+(defn node-base-opts
+  "Removes declarative config keys before node construction."
+  [options]
+  (dissoc
+   (dissoc
+    (dissoc
+     (dissoc
+      (dissoc
+       (dissoc (or options {}) "spaces") :spaces)
+      "handlers") :handlers)
+     "triggers") :triggers))
+
+(defn register-handler
+  [node action handler meta]
+  (let [entry {"id" action
+               "fn" handler
+               "meta" (or meta {})}]
+    (core/section-put node :handlers action entry)
+    entry))
+
+(defn unregister-handler
+  [node action]
+  (core/section-remove node :handlers action))
+
+(defn get-handler
+  [node action]
+  (get (core/node-section node :handlers) action))
+
+(defn list-handlers
+  [node]
+  (vec (sort (keys (core/node-section node :handlers)))))
+
+(defn register-trigger
+  [node signal trigger meta]
+  (let [entry {"id" signal
+               "fn" trigger
+               "meta" (or meta {})}]
+    (core/section-put node :triggers signal entry)
+    entry))
+
+(defn unregister-trigger
+  [node signal]
+  (core/section-remove node :triggers signal))
+
+(defn get-trigger
+  [node signal]
+  (get (core/node-section node :triggers) signal))
+
+(defn list-triggers
+  [node]
+  (vec (sort (keys (core/node-section node :triggers)))))
+
+(defn request
+  "Issues a request locally or over an attached transport."
+  [node space action args meta]
+  (let [meta (or meta {})
+        outgoing (frame/request-frame space action args meta)
+        target (transport-request-target node meta)]
+    (if (nil? target)
+      (request/invoke-handler node outgoing)
+      (promise/new
+       (fn [resolve reject]
+         (request/add-pending
+          node outgoing resolve reject {"transport_id" target})
+         (try
+           (promise/catch
+            (transport-send node target outgoing)
+            (fn [error]
+              (request/remove-pending node (get outgoing "id"))
+              (reject error)))
+           (catch error
+             (request/remove-pending node (get outgoing "id"))
+             (reject error))))))))
+
+(defn publish
+  "Publishes a stream through the local trigger and subscribed transports."
+  [node space signal data meta]
+  (let [meta (or meta {})
+        stream
+        (frame/stream-frame
+         space signal data meta
+         (or (get meta "cause") (get meta :cause)))
+        exclude-id
+        (or (option-value meta "transport_id" :transport_id)
+            (option-value meta "transport-id" :transport-id))]
+    (promise/then
+     (pubsub/receive-publish node stream)
+     (fn [_]
+       (stream-route-loop
+        node
+        (router/target-ids node (get stream "space") (get stream "signal"))
+        stream
+        exclude-id
+        0)))))

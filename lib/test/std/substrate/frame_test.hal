@@ -1,0 +1,122 @@
+(ns std.substrate.frame-test
+  (:use code.test)
+  (:require [std.substrate.frame :as frame]))
+
+(fact "creates ids with the requested prefix and length"
+  (let [id (frame/rand-id "sub-" 4)]
+    [(count id)
+     (string? id)
+     (= "sub-" (str (nth id 0)
+                     (nth id 1)
+                     (nth id 2)
+                     (nth id 3)))])
+  => [8 true true])
+
+(fact "defaults metadata and node space"
+  (let [base (frame/frame "request" "req-1" nil nil
+                          {"action" "echo"})
+        error (frame/response-error-frame
+               "req-1" "space/a" {"message" "boom"} nil)]
+    [(get base "space")
+     (get base "meta")
+     (get error "status")
+     (get-in error ["error" "message"])])
+  => ["__NODE__" {} "error" "boom"])
+
+(fact "constructs request response and stream frames"
+  (let [request (frame/request-frame
+                 "space/a" "echo" [1 2] {"label" "req"})
+        response (frame/response-ok-frame
+                  (get request "id")
+                  (get request "space")
+                  {"ok" true}
+                  {"label" "res"})
+        stream (frame/stream-frame
+                "space/a"
+                "event/updated"
+                {"value" 9}
+                {"label" "evt"}
+                {"request_id" (get request "id")})]
+    [(string? (frame/rand-id "x-" 4))
+     (get request "kind")
+     (get request "space")
+     (get request "action")
+     (get request "args")
+     (frame/request-frame? request)
+     (get response "kind")
+     (string? (get response "reply_to"))
+     (get response "status")
+     (frame/response-frame? response)
+     (get stream "kind")
+     (get stream "signal")
+     (string? (get-in stream ["cause" "request_id"]))
+     (frame/stream-frame? stream)])
+  => [true
+      "request"
+      "space/a"
+      "echo"
+      [1 2]
+      true
+      "response"
+      true
+      "ok"
+      true
+      "stream"
+      "event/updated"
+      true
+      true])
+
+(fact "constructs raw response frames"
+  (let [response (frame/response-frame
+                  "req-1" "space/a" "ok"
+                  {"ok" true} nil {"tag" "v"})]
+    [(get response "kind")
+     (get response "reply_to")
+     (get response "status")
+     (get-in response ["data" "ok"])
+     (get-in response ["meta" "tag"])])
+  => ["response" "req-1" "ok" true "v"])
+
+(fact "constructs successful response frames"
+  (let [response (frame/response-ok-frame
+                  "req-1" "space/a" {"ok" true} nil)]
+    [(get response "status")
+     (get-in response ["data" "ok"])
+     (nil? (get response "error"))])
+  => ["ok" true true])
+
+(fact "constructs errored response frames"
+  (let [response (frame/response-error-frame
+                  "req-1" "space/a" {"message" "boom"} nil)]
+    [(get response "status")
+     (nil? (get response "data"))
+     (get-in response ["error" "message"])])
+  => ["error" true "boom"])
+
+(fact "constructs stream frames with optional causes"
+  (let [stream (frame/stream-frame
+                "space/a" "event/ping" {"value" 1}
+                {"tag" "v"} {"request_id" "req-1"})]
+    [(get stream "kind")
+     (get stream "signal")
+     (get-in stream ["data" "value"])
+     (get-in stream ["meta" "tag"])
+     (get-in stream ["cause" "request_id"])])
+  => ["stream" "event/ping" 1 "v" "req-1"])
+
+(fact "detects each frame category"
+  [(frame/request-frame?
+    (frame/request-frame "space/a" "echo" [] nil))
+   (frame/request-frame?
+    (frame/stream-frame "space/a" "event/ping" {} nil nil))
+   (frame/response-frame?
+    (frame/response-ok-frame "req-1" "space/a" {"ok" true} nil))
+   (frame/response-frame?
+    (frame/request-frame "space/a" "echo" [] nil))
+   (frame/stream-frame?
+    (frame/stream-frame "space/a" "event/ping" {} nil nil))
+   (frame/stream-frame?
+    (frame/request-frame "space/a" "echo" [] nil))]
+  => [true false true false true false])
+
+(pr-str (run '[std.substrate.frame-test]))
