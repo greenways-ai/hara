@@ -1,0 +1,170 @@
+(ns std.db.node.supabase-test
+  (:use code.test)
+  (:require [std.db.node.client-supabase :as client]
+            [std.db.node.kernel-supabase :as supabase]
+            [std.db.node.proxy-supabase :as proxy]
+            [std.db.node.runtime :as runtime]
+            [std.foundation.promise :as promise]
+            [std.lib.substrate :as substrate]
+            [std.lib.substrate.protocol :as substrate-protocol]))
+
+(def CALLS (atom []))
+(def REFRESH-STARTS (atom 0))
+(def REFRESH-STOPS (atom 0))
+
+(defn request-adapter
+  [operation arguments options service]
+  (swap! CALLS conj {:operation operation
+                     :arguments arguments
+                     :options options})
+  (cond
+    (= operation :sign-up)
+    (promise/from {:status 200
+                   :body {:data {:access-token "signup-token"
+                                 :refresh-token "signup-refresh"}}})
+
+    (= operation :sign-in)
+    (promise/from {:status 200
+                   :body {:data {:access-token "signin-token"
+                                 :refresh-token "signin-refresh"}}})
+
+    (= operation :sign-out)
+    (promise/from {:status 204 :body nil})
+
+    (= operation :rpc-call)
+    (promise/from {:status 200
+                   :body {:data {:rpc (first arguments)}}})
+
+    (= operation :query-table)
+    (promise/from {:status 200
+                   :body {:data [{:id 1 :table (first arguments)}]}})
+
+    (= operation :health)
+    (promise/from {:status 200
+                   :body {:name "GoTrue"}})
+
+    :else
+    (promise/from {:status 200
+                   :body {:operation operation
+                          :arguments arguments}})))
+
+(defn supabase-service
+  []
+  (supabase/create-service
+   request-adapter
+   {:refresh (fn [service]
+               (promise/from {:access-token "refreshed-token"}))
+    :auto-refresh-start (fn [service]
+                          (swap! REFRESH-STARTS + 1))
+    :auto-refresh-stop (fn [service]
+                         (swap! REFRESH-STOPS + 1))}))
+
+(defn connected-nodes
+  [suffix]
+  (let [server (substrate/node-create (str "supabase-server-" suffix))
+        client-node (substrate/node-create (str "supabase-client-" suffix))]
+    (runtime/init-server server)
+    (runtime/init-server-proxy client-node)
+    (supabase/init-handlers server)
+    (proxy/init-proxy-handlers client-node)
+    (runtime/connect-nodes client-node server)
+    (supabase/install-service server "auth/supabase" (supabase-service))
+    {:server server :client client-node}))
+
+(def results
+  [(fact "Supabase gateway RPC details are decoded and normalized"
+     (let [data (supabase/supabase-error-data
+                 {:status 400
+                  :body {:message "RPC failed"
+                         :details "{\"type\":\"gw.rpc.error\",\"tag\":\"bad-input\"}"}})]
+       [(get data "type")
+        (get data "tag")
+        (get data :status)
+        (get data :http-status)])
+     => ["gw.rpc.error" "bad-input" 400 400])
+
+   (fact "failed HTTP-style responses throw normalized exception data"
+     (supabase/supabase-response-data
+      {:status 401
+       :body {:message "Unauthorized"}})
+     => (throws))
+
+   (fact "Supabase proxy installs every legacy action"
+     (let [node (substrate/node-create "supabase-proxy")]
+       (proxy/init-proxy-handlers node)
+       [(count supabase/ACTIONS)
+        (count (substrate-protocol/list-handlers node))])
+     => [28 28])
+
+   (fact "sign-in stores session and starts refresh through the remote kernel"
+     (reset! CALLS [])
+     (reset! REFRESH-STARTS 0)
+     (let [nodes (connected-nodes "signin")
+           client-node (get nodes :client)
+           session (deref
+                    (client/sign-in client-node
+                                    "auth/supabase"
+                                    {:email "wombat@example.com"
+                                     :password "secret"}
+                                    {:timeout-ms 1000}))
+           current (deref (client/current-session client-node "auth/supabase" {}))
+           signed-in (deref (client/signed-in? client-node "auth/supabase" {}))]
+       [session
+        current
+        signed-in
+        @REFRESH-STARTS
+        (get (first @CALLS) :operation)])
+     => [{:access-token "signin-token" :refresh-token "signin-refresh"}
+         {:access-token "signin-token" :refresh-token "signin-refresh"}
+         true
+         1
+         :sign-in])
+
+   (fact "refresh updates the stored session through the optional refresh hook"
+     (let [nodes (connected-nodes "refresh")
+           client-node (get nodes :client)]
+       (deref
+        (client/sign-in client-node
+                        "auth/supabase"
+                        {:email "wombat@example.com" :password "secret"}
+                        {}))
+       [(deref (client/refresh client-node "auth/supabase" {}))
+        (deref (client/current-session client-node "auth/supabase" {}))])
+     => [{:access-token "refreshed-token"}
+         {:access-token "refreshed-token"}])
+
+   (fact "RPC table and health actions preserve their legacy payloads"
+     (reset! CALLS [])
+     (let [nodes (connected-nodes "requests")
+           client-node (get nodes :client)]
+       [(deref (client/rpc-call client-node
+                                "auth/supabase"
+                                "ping"
+                                {:input 1}
+                                {:headers {:profile "public"}}))
+        (deref (client/query-table client-node
+                                   "auth/supabase"
+                                   "items"
+                                   {:select "*"}
+                                   {}))
+        (deref (client/health client-node "auth/supabase" {}))])
+     => [{:rpc "ping"}
+         [{:id 1 :table "items"}]
+         {:name "GoTrue"}])
+
+   (fact "sign-out stops refresh and clears the stored session"
+     (reset! REFRESH-STOPS 0)
+     (let [nodes (connected-nodes "signout")
+           client-node (get nodes :client)]
+       (deref
+        (client/sign-in client-node
+                        "auth/supabase"
+                        {:email "wombat@example.com" :password "secret"}
+                        {}))
+       [(deref (client/sign-out client-node "auth/supabase" {}))
+        (deref (client/current-session client-node "auth/supabase" {}))
+        (deref (client/signed-in? client-node "auth/supabase" {}))
+        @REFRESH-STOPS])
+     => [{"status" "ok"} nil false 1])])
+
+(pr-str (run '[std.db.node.supabase-test]))
