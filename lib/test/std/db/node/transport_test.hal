@@ -1,0 +1,123 @@
+(ns std.db.node.transport-test
+  (:use code.test)
+  (:require [std.db.node.client-base :as client]
+            [std.db.node.runtime :as runtime]
+            [std.db.node.transport :as transport]
+            [std.db.protocol :as db-protocol]
+            [std.foundation.promise :as promise]
+            [std.lib.substrate :as substrate]
+            [std.lib.substrate.protocol :as substrate-protocol]))
+
+(defstruct MessageConnection
+  [id closed])
+
+(extend-type MessageConnection db-protocol/IDatabase
+  (db-engine [connection]
+    :message-sql)
+  (db-provider [connection]
+    :message)
+  (db-info [connection]
+    {:id (field connection :id)
+     :engine :message-sql
+     :provider :message})
+  (db-exec [connection sql parameters]
+    (promise/from {:affected 1
+                   :sql sql
+                   :parameters parameters}))
+  (db-query [connection sql parameters]
+    (promise/from {:columns ["value"]
+                   :rows [[(first parameters)]]
+                   :affected 0}))
+  (db-close [connection]
+    (reset! (field connection :closed) true)
+    (promise/from true)))
+
+(defn message-driver
+  []
+  {:id :message
+   :engine :message-sql
+   :open (fn [options]
+           (promise/from
+            (std.db.node.transport-test/MessageConnection
+             (get options :id "message-1")
+             (atom false))))})
+
+(defn endpoint-pair
+  []
+  (let [left-listener (atom nil)
+        right-listener (atom nil)
+        left-closed (atom false)
+        right-closed (atom false)]
+    [{:send (fn [message]
+              (let [listener @right-listener]
+                (when listener (listener message))))
+      :listen (fn [listener]
+                (reset! left-listener listener))
+      :close (fn [] (reset! left-closed true))
+      :closed left-closed}
+     {:send (fn [message]
+              (let [listener @left-listener]
+                (when listener (listener message))))
+      :listen (fn [listener]
+                (reset! right-listener listener))
+      :close (fn [] (reset! right-closed true))
+      :closed right-closed}]))
+
+(def results
+  [(fact "frames round-trip through the structured message representation"
+     (let [frame (substrate/node-frame :request
+                                       "req-1"
+                                       "main"
+                                       {:trace "t1"}
+                                       "@xt.db/query"
+                                       ["db/primary" "select 1" []]
+                                       nil nil nil nil nil nil)
+           decoded (transport/wire->frame (transport/frame->wire frame))]
+       [(substrate-protocol/frame-id decoded)
+        (substrate-protocol/frame-kind decoded)
+        (substrate-protocol/frame-space decoded)
+        (field decoded :action)
+        (field decoded :args)])
+     => ["req-1"
+         :request
+         "main"
+         "@xt.db/query"
+         ["db/primary" "select 1" []]])
+
+   (fact "ready messages are separated from substrate frames"
+     [(transport/ready-message?
+       {"signal" "ready"
+        "transport" "transport"
+        "worker" "worker"})
+      (transport/ready-message? {"kind" "response"})]
+     => [true false])
+
+   (fact "node worker adapters initialize and query across paired endpoints"
+     (let [endpoints (endpoint-pair)
+           client-endpoint (first endpoints)
+           server-endpoint (second endpoints)
+           client-node (substrate/node-create "message-client")
+           server-node (substrate/node-create "message-server")
+           client-adapter (transport/nodeworker-adapter client-endpoint)
+           server-adapter (transport/nodeworker-adapter server-endpoint)
+           config {:primary {:type :message
+                             :options {:id "runtime-message"}}}
+           connected-promise (runtime/nodeworker-connect
+                              client-node config {} {} client-adapter {})
+           booted (deref (runtime/nodeworker-init-kernel
+                          server-node
+                          server-adapter
+                          {:drivers {:message (message-driver)}}))
+           connected (deref connected-promise)
+           output (deref (client/query client-node
+                                       "db/primary"
+                                       "select value"
+                                       [42]
+                                       {}))]
+       [(get booted :transport-attached)
+        (get connected :transport-attached)
+        (get (get connected :init) :status)
+        (get output :rows)])
+     => [true true :setup [[42]]])])
+
+(pr-str (run '[std.db.node.transport-test]))
