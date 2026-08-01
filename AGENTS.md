@@ -37,7 +37,7 @@ component map and `website/docs/development.md` for the developer guide.
     persistent data structures and the cross-runtime hashing stack, with machine-checked
     corpora in `01-lang/020-data-structures/draft/conformance/` (hash-parity.edn,
     collections.edn). Java is the reference runtime; the corpora regenerate from the
-    generators in `target/hashdump/` (see the area README).
+    generators in `specs/scripts/hashdump/` (see the area README).
   - `00-unsorted/` holds platform, ecosystem, user-space, and broad execution material awaiting classification
   - `99-archive/planning/` contains non-normative historical source material
 - `contrib/` — separately owned specifications and reference implementations.
