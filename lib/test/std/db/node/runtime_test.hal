@@ -1,6 +1,8 @@
 (ns std.db.node.runtime-test
   (:use code.test)
-  (:require [std.db.node.client-base :as client]
+  (:require [std.db :as db]
+            [std.db.node.client-base :as client]
+            [std.db.node.connection :as remote]
             [std.db.node.kernel-base :as kernel]
             [std.db.node.runtime :as runtime]
             [std.db.protocol :as db-protocol]
@@ -45,6 +47,15 @@
             (std.db.node.runtime-test/MockConnection
              (get options :id "mock-1")
              (atom {:opened true :options options}))))})
+
+(defn failing-driver
+  []
+  {:id :failing
+   :engine :failing-sql
+   :open (fn [options]
+           (promise/new
+            (fn [resolve reject]
+              (reject (ex-info "driver failed" {:options options})))))} )
 
 (def config
   {:primary {:type :mock
@@ -112,6 +123,31 @@
           :rows [[1 "wombat"]]
           :affected 0}])
 
+   (fact "runtime services can be used as ordinary std.db connections"
+     (let [server (substrate/node-create "server-connection")
+           client-node (substrate/node-create "client-connection")]
+       (kernel/register-driver server :mock (mock-driver))
+       (deref (runtime/local-connect client-node server config {} {}))
+       (let [connection (deref (remote/open client-node "db/primary"))
+             output (deref (db/query connection "select id, name from items" []))]
+         [(db/engine connection)
+          (db/provider connection)
+          (get (db/info connection) :remote)
+          (get output :rows)
+          (deref (db/close connection))
+          (remote/closed? connection)]))
+     => [:mock-sql :mock true [[1 "wombat"]] true true])
+
+   (fact "closed runtime connection handles reject further operations"
+     (let [server (substrate/node-create "server-closed-handle")
+           client-node (substrate/node-create "client-closed-handle")]
+       (kernel/register-driver server :mock (mock-driver))
+       (deref (runtime/local-connect client-node server config {} {}))
+       (let [connection (deref (remote/open client-node "db/primary"))]
+         (deref (db/close connection))
+         (db/query connection "select 1" [])))
+     => (throws))
+
    (fact "reinitialization reports no change and preserves services"
      (let [server (substrate/node-create "server-repeat")
            client-node (substrate/node-create "client-repeat")]
@@ -119,6 +155,22 @@
        (deref (runtime/local-connect client-node server config {} {}))
        (get (deref (client/kernel-init client-node config {} {} {})) :status))
      => :no-change)
+
+   (fact "failed multi-service setup rolls back opened services"
+     (let [server (substrate/node-create "server-failed")
+           failed-config {:primary {:type :mock}
+                          :caching {:type :failing}}]
+       (kernel/register-driver server :mock (mock-driver))
+       (kernel/register-driver server :failing (failing-driver))
+       (let [status (deref
+                     (promise/catch
+                      (kernel/kernel-setup-main server failed-config {} {})
+                      (fn [error] :failed)))]
+         [status
+          (substrate-protocol/get-service server "db/common")
+          (substrate-protocol/get-service server "db/primary")
+          (substrate-protocol/get-service server "db/caching")]))
+     => [:failed nil nil nil])
 
    (fact "teardown closes services and removes the runtime transport"
      (let [server (substrate/node-create "server-close")
