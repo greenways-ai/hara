@@ -1,0 +1,5 @@
+;; Canonical clock contract for deterministic test timing.
+(ns std.protocol.itestclock)
+
+(defprotocol ITestClock
+  (now-ms [clock]))

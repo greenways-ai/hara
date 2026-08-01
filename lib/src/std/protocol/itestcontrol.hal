@@ -1,0 +1,5 @@
+;; Canonical cancellation contract for portable test execution.
+(ns std.protocol.itestcontrol)
+
+(defprotocol ITestControl
+  (cancelled? [control fact]))

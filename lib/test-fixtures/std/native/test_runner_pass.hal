@@ -1,0 +1,7 @@
+(ns std.native.test-runner-pass
+  (:use code.test))
+
+(fact "native runner executes a passing fact"
+  (+ 20 22) => 42)
+
+(run {:namespace "std.native.test-runner-pass"})
