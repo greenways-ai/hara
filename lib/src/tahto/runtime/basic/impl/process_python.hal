@@ -1,0 +1,55 @@
+(ns tahto.runtime.basic.impl.process-python
+  (:require [tahto.core.runtime :as runtime]
+            [tahto.runtime.basic.type-basic :as basic]
+            [tahto.runtime.basic.type-common :as common]
+            [tahto.runtime.basic.type-oneshot :as oneshot]))
+
+(def +python-init+
+  (common/put-program-options
+   :python
+   {:default {:oneshot :cpython
+              :basic :cpython}
+    :env {:cpython
+          {:exec "python3"
+           :extension "py"
+           :flags {:oneshot ["-c"]
+                   :basic ["-c"]}}}}))
+
+(def +python-oneshot-config+
+  (common/set-context-options
+   [:python :oneshot :default]
+   {:main {}
+    :emit {}
+    :json :full}))
+
+(def +python-basic-config+
+  (common/set-context-options
+   [:python :basic :default]
+   {:main {}
+    :emit {}
+    :json :full
+    :timeout 2000
+    :transport :oneshot-bootstrap}))
+
+(def +python-oneshot+
+  (runtime/install-type!
+   :python :oneshot
+   {:type :tahto/rt.oneshot
+    :instance {:create oneshot/rt-oneshot:create
+               :raw-eval oneshot/raw-eval-oneshot}}))
+
+(def +python-basic+
+  (runtime/install-type!
+   :python :basic
+   {:type :tahto/rt.basic
+    :config {:layout :full}
+    :instance {:create basic/rt-basic:create
+               :start basic/start-basic
+               :stop basic/stop-basic
+               :raw-eval basic/raw-eval-basic}}))
+
+(def +init+
+  {:lang :python
+   :program +python-init+
+   :oneshot +python-oneshot+
+   :basic +python-basic+})

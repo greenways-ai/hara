@@ -36,19 +36,30 @@
       (:runtime/executable descriptor)))
 
 (defn command
-  "Builds the argv vector for one target-language source evaluation."
+  "Builds argv for one target-language source evaluation.
+
+   :arguments may override the descriptor arguments. Tahto uses this to select
+   Foundation programs such as Node :nodejs or Python :cpython without
+   duplicating process execution."
   ([language source]
    (command language source {}))
   ([language source options]
-   (let [descriptor (runtime language)]
+   (let [descriptor (runtime language)
+         arguments (or (:arguments options)
+                       (:runtime/arguments descriptor))]
      (vec
       (concat [(executable descriptor options)]
-              (:runtime/arguments descriptor)
+              arguments
               [source])))))
 
 (defn- process-options
   [options]
-  (select-keys options [:cwd :env]))
+  (let [cwd (:cwd options)
+        env (:env options)
+        selected (if cwd {:cwd cwd} {})]
+    (if env
+      (assoc selected :env env)
+      selected)))
 
 (defn- start-process
   [argv options]

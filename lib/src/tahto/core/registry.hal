@@ -1,0 +1,103 @@
+(ns tahto.core.registry)
+
+;; Foundation-compatible runtime registry. Runtime implementations are loaded
+;; lazily from the exact [language runtime] coordinate.
+(def +registry+
+  (atom {[:js :oneshot] 'tahto.runtime.basic.impl.process-js
+         [:js :basic] 'tahto.runtime.basic.impl.process-js
+         [:python :oneshot] 'tahto.runtime.basic.impl.process-python
+         [:python :basic] 'tahto.runtime.basic.impl.process-python}))
+
+;; Foundation keeps the public language name separate from the grammar tag.
+;; Version is data on the registry entry so the original [:lang :default]
+;; coordinate remains stable.
+(def +book-registry+
+  (atom {[:xtalk :default]
+         {:ns 'tahto.model.v1.spec-xtalk
+          :book '+book+
+          :version 1}
+
+         [:js :default]
+         {:ns 'tahto.model.v1.spec-js
+          :book '+book+
+          :parent :xtalk
+          :version 1}
+
+         [:python :default]
+         {:ns 'tahto.model.v1.spec-python
+          :book '+book+
+          :parent :xtalk
+          :version 1}}))
+
+(defn registry-list
+  "Lists registered [language runtime] coordinates."
+  []
+  (vec (keys @+registry+)))
+
+(defn registry-add!
+  "Registers one runtime implementation namespace."
+  [language runtime namespace-symbol]
+  (swap! +registry+ assoc [language runtime] namespace-symbol)
+  namespace-symbol)
+
+(defn registry-runtime-ns
+  "Returns the implementation namespace for a runtime coordinate."
+  [language runtime]
+  (get @+registry+ [language runtime]))
+
+(defn registry-runtime
+  "Requires a registered runtime implementation and returns its namespace."
+  [language runtime]
+  (let [namespace-symbol (registry-runtime-ns language runtime)]
+    (if namespace-symbol
+      (do (require namespace-symbol)
+          namespace-symbol)
+      nil)))
+
+(defn registry-book-list
+  "Lists all registered Foundation book coordinates."
+  []
+  (vec (keys @+book-registry+)))
+
+(defn registry-book-info
+  "Returns the registry entry for a language book."
+  ([language]
+   (registry-book-info language :default))
+  ([language key]
+   (get @+book-registry+ [language key])))
+
+(defn registry-book-ns
+  "Returns the namespace that owns a language book."
+  ([language]
+   (registry-book-ns language :default))
+  ([language key]
+   (:ns (registry-book-info language key))))
+
+(defn registry-book
+  "Loads and returns a versioned language book using Foundation names."
+  ([language]
+   (registry-book language :default nil))
+  ([language key]
+   (registry-book language key nil))
+  ([language key version]
+   (let [{:keys [ns book] :as info} (registry-book-info language key)]
+     (if (nil? info)
+       nil
+       (if (and version (not= version (:version info)))
+         (throw
+          (ex-info "Book version is not registered"
+                   {:language language
+                    :key key
+                    :version version
+                    :registered (:version info)}))
+         (let [_ (require ns)
+               qualified (symbol (name ns) (name book))
+               resolved (requiring-resolve qualified)]
+           (if resolved
+             (deref resolved)
+             (throw
+              (ex-info "Registered book Var is missing"
+                       {:language language
+                        :key key
+                        :namespace ns
+                        :book book})))))))))

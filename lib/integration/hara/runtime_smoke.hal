@@ -1,7 +1,6 @@
 (ns hara.runtime-smoke
-  (:require [std.foundation.string :as string]
-            [hara.runtime :as runtime]
-            [tahto.common.emit :as emit]
+  (:require [tahto.common.emit :as emit]
+            [tahto.core :as tahto]
             [tahto.model.v1.spec-js :as spec-js]
             [tahto.model.v1.spec-python :as spec-python]))
 
@@ -13,20 +12,32 @@
   (emit/emit '(print (+ 19 23))
              (spec-python/select)))
 
-(def js-result
-  (deref (runtime/run :js js-source)))
+(def js-oneshot (tahto/rt-create :js :oneshot))
+(def python-oneshot (tahto/rt-create :python :oneshot))
+(def js-basic (tahto/rt-start (tahto/rt-create :js :basic)))
+(def python-basic (tahto/rt-start (tahto/rt-create :python :basic)))
 
-(def python-result
-  (deref (runtime/run :python python-source)))
+(def js-oneshot-output (tahto/rt-raw-eval js-oneshot js-source))
+(def python-oneshot-output (tahto/rt-raw-eval python-oneshot python-source))
+(def js-basic-output (tahto/rt-raw-eval js-basic js-source))
+(def python-basic-output (tahto/rt-raw-eval python-basic python-source))
 
-(if (and (= "42" (string/trim (:stdout js-result)))
-         (= "42" (string/trim (:stdout python-result)))
-         (= :js (:runtime/tag js-result))
-         (= :py (:runtime/tag python-result)))
+(if (and (= "42" js-oneshot-output)
+         (= "42" python-oneshot-output)
+         (= "42" js-basic-output)
+         (= "42" python-basic-output)
+         (= :oneshot-bootstrap (get-in js-basic [:process :transport]))
+         (= :oneshot-bootstrap (get-in python-basic [:process :transport])))
   {:status :passed
-   :js js-result
-   :python python-result}
+   :bootstrap tahto/+bootstrap+
+   :oneshot {:js js-oneshot-output
+             :python python-oneshot-output}
+   :basic {:js js-basic-output
+           :python python-basic-output
+           :transport :oneshot-bootstrap}}
   (throw
-   (ex-info "Tahto target-runtime smoke failed"
-            {:js js-result
-             :python python-result})))
+   (ex-info "Tahto basic runtime bootstrap smoke failed"
+            {:oneshot {:js js-oneshot-output
+                       :python python-oneshot-output}
+             :basic {:js js-basic-output
+                     :python python-basic-output}})))

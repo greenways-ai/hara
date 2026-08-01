@@ -35,6 +35,14 @@
     [{:profile/id +tag+
       :profile/version +version+}]}))
 
+(def +book+
+  {:lang +language+
+   :parent nil
+   :version +version+
+   :grammar +grammar+})
+
+(def +init+ +book+)
+
 (defn- install-source
   [catalog source]
   (if (registry/find catalog (grammar/source-coordinate source))

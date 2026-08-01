@@ -65,6 +65,14 @@
        :def {:raw "const"}
        :declare {:raw "let"}}}}}))
 
+(def +book+
+  {:lang +language+
+   :parent :xtalk
+   :version +version+
+   :grammar +grammar+})
+
+(def +init+ +book+)
+
 (defn- install-source
   [catalog source]
   (if (registry/find catalog (grammar/source-coordinate source))

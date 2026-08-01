@@ -13,6 +13,17 @@
                                 "print(42)"
                                 {:executable "python-test"})
                ["python-test" "-c" "print(42)"])
+   (test/check "Tahto can override program arguments without replacing host execution"
+               [(runtime/command :js
+                                 "console.log(42)"
+                                 {:executable "node-test"
+                                  :arguments ["-e"]})
+                (runtime/command :python
+                                 "print(42)"
+                                 {:executable "python-test"
+                                  :arguments ["-c"]})]
+               [["node-test" "-e" "console.log(42)"]
+                ["python-test" "-c" "print(42)"]])
    (test/check "runtime descriptors preserve Foundation language/tag identity"
                [(select-keys (runtime/runtime :js)
                              [:runtime/language :runtime/tag])

@@ -5,7 +5,10 @@
             [tahto.common.preprocess-input :as input]
             [tahto.common.preprocess-resolve :as resolve]
             [tahto.common.preprocess-staging :as staging]
-            [tahto.common.preprocess-value :as value]))
+            [tahto.common.preprocess-value :as value]
+            [tahto.core.registry :as registry]
+            [tahto.core.runtime :as runtime]
+            [tahto.runtime.basic :as basic]))
 
 (def book-entry entry/book-entry)
 (def book-entry? entry/book-entry?)
@@ -20,3 +23,24 @@
 (def to-staging staging/to-staging)
 (def get-fragment resolve/get-fragment)
 (def value-standalone value/value-standalone)
+
+;; Foundation-compatible runtime/bootstrap entry points.
+(def bootstrap! runtime/bootstrap!)
+(def install-lang! runtime/install-lang!)
+(def install-type! runtime/install-type!)
+(def rt-create runtime/rt-create)
+(def rt-start runtime/rt-start)
+(def rt-stop runtime/rt-stop)
+(def rt-raw-eval runtime/rt-raw-eval)
+(def runtime-spec runtime/runtime-spec)
+(def registry-book registry/registry-book)
+(def registry-book-info registry/registry-book-info)
+
+(def rt-basic basic/rt-basic)
+(def rt-basic:create basic/rt-basic:create)
+(def rt-oneshot basic/rt-oneshot)
+(def rt-oneshot:create basic/rt-oneshot:create)
+
+;; Loading tahto.core installs the V1 books and the first local runtimes. No
+;; target process is started during bootstrap.
+(def +bootstrap+ (bootstrap!))

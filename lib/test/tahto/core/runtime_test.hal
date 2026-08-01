@@ -1,0 +1,48 @@
+(ns tahto.core.runtime-test
+  (:require [std.lib.test :as test]
+            [tahto.core.registry :as registry]
+            [tahto.core.runtime :as runtime]
+            [tahto.runtime.basic.type-basic :as basic]))
+
+(def boot (runtime/bootstrap!))
+(def js-book (registry/registry-book :js))
+(def python-book (registry/registry-book :python))
+(def js-oneshot (runtime/rt-create :js :oneshot))
+(def python-oneshot (runtime/rt-create :python :oneshot))
+(def js-basic (runtime/rt-create :js :basic))
+(def started-basic (runtime/rt-start js-basic))
+
+(def results
+  [(test/check "bootstrap installs Foundation language names"
+               [(boolean (runtime/language-info :js))
+                (boolean (runtime/language-info :python))]
+               [true true])
+   (test/check "bootstrap installs oneshot and basic runtime types"
+               [(runtime/runtime-installed? :js :oneshot)
+                (runtime/runtime-installed? :js :basic)
+                (runtime/runtime-installed? :python :oneshot)
+                (runtime/runtime-installed? :python :basic)]
+               [true true true true])
+   (test/check "book registry preserves Foundation language and grammar tags"
+               [[(:lang js-book)
+                 (:parent js-book)
+                 (get-in js-book [:grammar :grammar/id])]
+                [(:lang python-book)
+                 (:parent python-book)
+                 (get-in python-book [:grammar :grammar/id])]]
+               [[:js :xtalk :js]
+                [:python :xtalk :py]])
+   (test/check "oneshot constructors use Foundation program defaults"
+               [[(:lang js-oneshot) (:runtime js-oneshot)
+                 (:program js-oneshot) (:exec js-oneshot)]
+                [(:lang python-oneshot) (:runtime python-oneshot)
+                 (:program python-oneshot) (:exec python-oneshot)]]
+               [[:js :oneshot :nodejs ["node" "-e"]]
+                [:python :oneshot :cpython ["python3" "-c"]]])
+   (test/check "basic runtime has explicit bootstrap transport and lifecycle"
+               [(get-in started-basic [:process :transport])
+                (get-in started-basic [:process :persistent])
+                (:status (basic/basic-state started-basic))]
+               [:oneshot-bootstrap false :started])])
+
+(test/print-results results)
