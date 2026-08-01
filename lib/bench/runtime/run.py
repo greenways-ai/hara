@@ -256,6 +256,8 @@ def main():
     parser.add_argument("--runtime", action="append")
     parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS,
                         help="workload JSON (default: %(default)s)")
+    parser.add_argument("--output", type=Path,
+                        help="result JSON path; Markdown uses the same stem")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--reference", action="store_true")
     parser.add_argument("--check-regressions", nargs="?", const=DEFAULT_BASELINE, type=Path,
@@ -316,11 +318,17 @@ def main():
                          "native_image": version(["native-image", "--version"])},
             "missing": missing, "startup": startup, "measurements": measurements,
             "payload_bytes": payload_sizes(glue)}
-    output = RESULTS if args.reference else ROOT / "target/runtime-benchmark.json"
+    if args.output:
+        output = args.output if args.output.is_absolute() else ROOT / args.output
+    else:
+        output = RESULTS if args.reference else ROOT / "target/runtime-benchmark.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(data, indent=2) + "\n")
     report = markdown(data)
-    report_path = REPORT if args.reference else ROOT / "target/runtime-benchmark.md"
+    if args.output:
+        report_path = output.with_suffix(".md")
+    else:
+        report_path = REPORT if args.reference else ROOT / "target/runtime-benchmark.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(report)
     failures = []

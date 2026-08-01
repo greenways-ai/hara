@@ -679,6 +679,14 @@ impl<K: Clone + Eq + Hash, V: Clone> Standard<K, V> {
             size: self.size + usize::from(added),
         }
     }
+    /// Associates into a consumed map using clone-on-write nodes. This keeps
+    /// persistent aliases immutable while allowing uniquely owned paths to be
+    /// updated without first cloning every node on the path.
+    pub fn assoc_value_owned(mut self, key: K, value: V) -> Self {
+        let added = assoc_node(&mut self.root, Some(0), 0, key_hash(&key), key, value);
+        self.size += usize::from(added);
+        self
+    }
     pub fn dissoc_value(&self, key: &K) -> Self {
         let hash = key_hash(key);
         if find_node(&self.root, 0, hash, key).is_none() {

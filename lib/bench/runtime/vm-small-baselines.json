@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "description": "Relative bb gates for the compact VM optimization corpus.",
+  "rules": [
+    {"runtime": "hara-rust-bytecode", "workload": "arithmetic", "relative_to": "bb", "max_ratio": 0.90},
+    {"runtime": "hara-rust-trace-native", "workload": "arithmetic", "relative_to": "bb", "max_ratio": 0.10},
+    {"runtime": "hara-rust-bytecode", "workload": "function-call", "relative_to": "bb", "max_ratio": 1.10},
+    {"runtime": "hara-rust-trace-native", "workload": "function-call", "relative_to": "bb", "max_ratio": 0.15},
+    {"runtime": "hara-rust-bytecode", "workload": "persistent-map", "relative_to": "bb", "max_ratio": 1.00},
+    {"runtime": "hara-rust-trace-native", "workload": "persistent-map", "relative_to": "bb", "max_ratio": 1.00}
+  ]
+}

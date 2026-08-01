@@ -358,6 +358,10 @@ fn literal_collections_and_collection_primitives() {
     assert_eq!(eval("#{1 2}"), "#{1 2}");
     assert_eq!(eval("(nth [10 20 30] 1)"), "20");
     assert_eq!(eval("(assoc {} :answer 42)"), "{:answer 42}");
+    assert_eq!(
+        eval("(let [before {:a 1} after (assoc before :b 2)] (+ (if (= nil (get before :b)) 40 0) (get after :b)))"),
+        "42"
+    );
     assert_eq!(eval("(first (rest [1 2]))"), "2");
 }
 
