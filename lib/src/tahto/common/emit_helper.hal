@@ -5,14 +5,14 @@
 (defn default-emit-fn
   "the default emit function"
   {:added "4.0"}
-  [form grammar options]
+  [form grammar mopts]
   (pr-str form))
 
 (defn pr-single
   "prints a single quoted string"
   {:added "3.0"}
-  [value]
-  (let [printed (pr-str value)
+  [s]
+  (let [printed (pr-str s)
         escaped (string/replace printed "'" "\\'")
         unquoted (string/slice escaped
                                    1
@@ -22,13 +22,13 @@
          "'")))
 
 (def +sym-replace+
-  {"-" "_"
-   "*" "__"
-   "?" "p"
-   "!" "f"
-   "=" "_eq"
-   "<" "_lt"
-   ">" "_gt"})
+  {\- "_"
+   \* "__"
+   \? "p"
+   \! "f"
+   \= "_eq"
+   \< "_lt"
+   \> "_gt"})
 
 (def +default+
   {:type :std/algol
@@ -51,7 +51,7 @@
              :static "."
              :apply "."
              :line-spacing 1}
-    :symbol {:full {:replace {"." "_"}
+    :symbol {:full {:replace {\. "_"}
                     :sep "_"}
              :global identity}
     :index {:start "[" :end "]"
@@ -151,7 +151,7 @@
                  (vec (drop 1 remaining))))))))
 
 (defn rest-arg-form?
-  "Checks for the canonical xtalk rest argument form `(:.. args)`."
+  "checks for the canonical xtalk rest argument form `(:.. args)`"
   {:added "4.1"}
   [form]
   (and (list? form)
@@ -160,7 +160,7 @@
        (symbol? (second form))))
 
 (defn rest-arg-symbol
-  "Returns the symbol bound by a canonical rest argument."
+  "returns the symbol bound by a canonical xtalk rest argument form"
   {:added "4.1"}
   [form]
   (if (rest-arg-form? form)
@@ -389,7 +389,7 @@
   [value replacements]
   (reduce (fn [result pair]
             (string/replace result
-                            (first pair)
+                            (str (first pair))
                             (second pair)))
           value
           replacements))
@@ -397,15 +397,15 @@
 (defn emit-symbol-full
   "emits a full symbol"
   {:added "4.0"}
-  [symbol namespace grammar]
+  [sym ns grammar]
   (let [common-options (get-in grammar [:default :common])
         symbol-options (get-in grammar [:default :symbol :full])
         token-options (get-in grammar [:token :symbol])
-        symbol-string (if namespace
-                        (str namespace
+        symbol-string (if ns
+                        (str ns
                              (:namespace-full common-options)
-                             (name symbol))
-                        (name symbol))
+                             (name sym))
+                        (name sym))
         namespaced (string/replace
                     symbol-string
                     "."

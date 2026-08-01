@@ -252,7 +252,7 @@
   [state entries context]
   (reduce
    (fn [out entry]
-     (if (not= 2 (count entry))
+     (if (not (= 2 (count entry)))
        (fail "Invalid grammar customization section"
              {:entry entry
               :context context})
@@ -365,7 +365,7 @@
          (filter (fn [facet-id]
                    (member? selected facet-id))
                  order))]
-    (if (not= (count ordered) (count selected))
+    (if (not (= (count ordered) (count selected)))
       (fail "Selected grammar facet is missing from facet order"
             {:selected selected :order order})
       (do
@@ -416,7 +416,7 @@
 (defn fingerprint
   "Returns a deterministic fingerprint for normalized grammar source data."
   [value]
-  (let [bytes (string/encode-utf8 (pr-str value))]
+  (let [bytes (vec (string/encode-utf8 (pr-str value)))]
     (loop [index 0
            hash 5381]
       (if (= index (count bytes))
@@ -585,15 +585,15 @@
 (defn materialize
   "Materializes a declared grammar through an IGrammarCatalog."
   [catalog source request]
-  (if (not= :grammar (:source/kind source))
+  (if (not (= :grammar (:source/kind source)))
     (fail "Only grammar definitions can be materialized"
           {:source source})
     (let [request-id (:grammar/id request)
           request-version (:grammar/version request)]
       (if (or (nil? request-id)
               (nil? request-version)
-              (not= request-id (:grammar/id source))
-              (not= request-version (:grammar/version source)))
+              (not (= request-id (:grammar/id source)))
+              (not (= request-version (:grammar/version source))))
         (fail "Grammar request does not match source"
               {:request request
                :source (source-coordinate source)})

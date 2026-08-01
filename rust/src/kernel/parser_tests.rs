@@ -76,11 +76,17 @@ fn matches_canonical_numbers_characters_and_duplicate_errors() {
             .contains("Invalid number"));
     }
     assert_eq!(
-        parse_forms("\\newline \\u03bb \\o377").unwrap(),
+        parse_forms("\\newline \\u03bb \\o377 \\( \\) \\[ \\] \\{ \\}").unwrap(),
         vec![
             Form::Character('\n'),
             Form::Character('λ'),
-            Form::Character('ÿ')
+            Form::Character('ÿ'),
+            Form::Character('('),
+            Form::Character(')'),
+            Form::Character('['),
+            Form::Character(']'),
+            Form::Character('{'),
+            Form::Character('}')
         ]
     );
     assert!(parse_forms("{:a 1 :a 2}")

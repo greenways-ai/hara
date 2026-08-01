@@ -38,7 +38,7 @@
                        base/*macro-opts* options]
                (let [expanded (apply (:template fragment) (rest form))
                      expanded (with-meta expanded (merge (meta form) (meta expanded)))]
-                 (if (not= form expanded)
+                 (if (not (= form expanded))
                    (resolve-block-form expanded grammar modules options))))))
          :else nil)))
 
@@ -81,5 +81,5 @@
                                                 (meta arg))
                                      arg)))
                                args)]
-           (if (not= rewritten args)
+           (if (not (= rewritten args))
              (with-meta (apply list head rewritten) (meta form)))))))

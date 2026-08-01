@@ -7,7 +7,9 @@
 
 (def ^:dynamic *indent* 0)
 (def ^:dynamic *compressed* false)
-(def ^:dynamic *emit-fn* nil)
+(def ^:dynamic *emit-fn*
+  (fn [form grammar context]
+    (tahto.common.emit/emit-node form grammar context)))
 
 (defn- fail [message data]
   (throw (ex-info message data)))
@@ -73,7 +75,7 @@
 
 (defn emit-array
   ([values grammar context]
-   (emit-array values grammar context emit-node))
+   (emit-array values grammar context tahto.common.emit/emit-node))
   ([values grammar context emit-function]
    (map (fn [value] (emit-function value grammar context)) values)))
 
@@ -103,7 +105,7 @@
     false))
 
 (defn emit-wrapping [form grammar context]
-  (let [output (emit-node form grammar context)
+  (let [output (tahto.common.emit/emit-node form grammar context)
         options (common-options grammar)]
     (if (and (emit-wrappable? form grammar)
              (not (and (string/starts-with? output (:start options))
@@ -112,62 +114,71 @@
       output)))
 
 (defn emit-pre [raw arguments grammar context]
-  (if (not= 1 (count arguments))
-    (fail "Prefix operation expects one argument" {:raw raw :arguments arguments})
-    (str raw (emit-wrapping (first arguments) grammar context))))
+  (let [arguments (vec arguments)]
+    (if (not (= 1 (count arguments)))
+      (fail "Prefix operation expects one argument" {:raw raw :arguments arguments})
+      (str raw (emit-wrapping (first arguments) grammar context)))))
 
 (defn emit-post [raw arguments grammar context]
-  (if (not= 1 (count arguments))
-    (fail "Post operation expects one argument" {:raw raw :arguments arguments})
-    (str (emit-wrapping (first arguments) grammar context) raw)))
+  (let [arguments (vec arguments)]
+    (if (not (= 1 (count arguments)))
+      (fail "Post operation expects one argument" {:raw raw :arguments arguments})
+      (str (emit-wrapping (first arguments) grammar context) raw))))
 
 (defn emit-prefix [raw arguments grammar context]
-  (if (not= 1 (count arguments))
-    (fail "Prefix operation expects one argument" {:raw raw :arguments arguments})
-    (str raw (:space (common-options grammar))
-         (emit-wrapping (first arguments) grammar context))))
+  (let [arguments (vec arguments)]
+    (if (not (= 1 (count arguments)))
+      (fail "Prefix operation expects one argument" {:raw raw :arguments arguments})
+      (str raw (:space (common-options grammar))
+           (emit-wrapping (first arguments) grammar context)))))
 
 (defn emit-postfix [raw arguments grammar context]
-  (if (not= 1 (count arguments))
-    (fail "Postfix operation expects one argument" {:raw raw :arguments arguments})
-    (str (emit-wrapping (first arguments) grammar context)
-         (:space (common-options grammar)) raw)))
+  (let [arguments (vec arguments)]
+    (if (not (= 1 (count arguments)))
+      (fail "Postfix operation expects one argument" {:raw raw :arguments arguments})
+      (str (emit-wrapping (first arguments) grammar context)
+           (:space (common-options grammar)) raw))))
 
 (defn emit-infix [raw arguments grammar context]
-  (if (= 0 (count arguments))
-    (fail "Infix operation expects arguments" {:raw raw :arguments arguments})
-    (let [space (:space (common-options grammar))]
-      (string/join (str space raw space)
-                   (emit-array arguments grammar context emit-wrapping)))))
+  (let [arguments (vec arguments)]
+    (if (= 0 (count arguments))
+      (fail "Infix operation expects arguments" {:raw raw :arguments arguments})
+      (let [space (:space (common-options grammar))]
+        (string/join (str space raw space)
+                     (emit-array arguments grammar context emit-wrapping))))))
 
 (defn emit-infix-default [raw arguments default grammar context]
-  (emit-infix raw
-              (if (= 1 (count arguments)) (cons default arguments) arguments)
-              grammar context))
+  (let [arguments (vec arguments)]
+    (emit-infix raw
+                (if (= 1 (count arguments)) (cons default arguments) arguments)
+                grammar context)))
 
 (defn emit-infix-pre [raw arguments grammar context]
-  (if (= 1 (count arguments))
-    (emit-pre raw arguments grammar context)
-    (emit-infix raw arguments grammar context)))
+  (let [arguments (vec arguments)]
+    (if (= 1 (count arguments))
+      (emit-pre raw arguments grammar context)
+      (emit-infix raw arguments grammar context))))
 
 (defn emit-bi [raw arguments grammar context]
-  (if (not= 2 (count arguments))
-    (fail "Binary operation expects two arguments" {:raw raw :arguments arguments})
-    (emit-infix raw arguments grammar context)))
+  (let [arguments (vec arguments)]
+    (if (not (= 2 (count arguments)))
+      (fail "Binary operation expects two arguments" {:raw raw :arguments arguments})
+      (emit-infix raw arguments grammar context))))
 
 (defn emit-between [raw arguments grammar context]
   (string/join raw (emit-array arguments grammar context emit-wrapping)))
 
 (defn emit-assign [raw arguments grammar context]
-  (if (not= 2 (count arguments))
-    (fail "Assignment expects two arguments" {:raw raw :arguments arguments})
-    (let [options (common-options grammar)]
-      (string/join (str (:space options) (or raw (:assign options)) (:space options))
-                   (emit-array arguments grammar context emit-wrapping)))))
+  (let [arguments (vec arguments)]
+    (if (not (= 2 (count arguments)))
+      (fail "Assignment expects two arguments" {:raw raw :arguments arguments})
+      (let [options (common-options grammar)]
+        (string/join (str (:space options) (or raw (:assign options)) (:space options))
+                     (emit-array arguments grammar context emit-wrapping))))))
 
 (defn emit-infix-if [form entry grammar context]
   (let [arguments (vec (rest form))]
-    (if (not= 3 (count arguments))
+    (if (not (= 3 (count arguments)))
       (fail "Ternary operation expects three arguments" {:form form :entry entry})
       (let [options (common-options grammar)
             infix (get-in grammar [:default :infix :if])]
@@ -178,7 +189,7 @@
              (emit-wrapping (nth arguments 2) grammar context))))))
 
 (defn emit-return [form entry grammar context]
-  (let [arguments (rest form)
+  (let [arguments (vec (rest form))
         options (common-options grammar)]
     (if (and (not (get-in grammar [:default :return :multi]))
              (> (count arguments) 1))
@@ -216,9 +227,10 @@
                                           {:assign ":" :space " "})
         entries (reduce-kv
                  (fn [out key item]
-                   (conj out (str (emit-node key grammar context)
+                   (conj out (str (tahto.common.emit/emit-node key grammar context)
                                   (:space entry-options) (:assign entry-options)
-                                  (:space entry-options) (emit-node item grammar context))))
+                                  (:space entry-options)
+                                  (tahto.common.emit/emit-node item grammar context))))
                  [] value)]
     (str (:start options)
          (string/join (str (:sep options) (:space options)) entries)
@@ -243,11 +255,12 @@
        (emit-invoke-args (rest form) grammar context)))
 
 (defn emit-index-entry [entry grammar context]
-  (cond (vector? entry) (str "[" (emit-node (first entry) grammar context) "]")
+  (cond (vector? entry) (str "[" (tahto.common.emit/emit-node
+                                   (first entry) grammar context) "]")
         (keyword? entry) (str "." (name entry))
         (symbol? entry) (str "." (emit-symbol entry grammar context))
         (list? entry) (str "." (emit-invoke entry nil grammar context))
-        :else (str "[" (emit-node entry grammar context) "]")))
+        :else (str "[" (tahto.common.emit/emit-node entry grammar context) "]")))
 
 (defn emit-index [form entry grammar context]
   (str (emit-wrapping (second form) grammar context)
@@ -256,7 +269,7 @@
                          (drop 2 form)))))
 
 (defn- statement-output [form grammar context]
-  (let [output (emit-node form grammar context)
+  (let [output (tahto.common.emit/emit-node form grammar context)
         statement (:statement (common-options grammar))]
     (if (or (= "" statement) (= 0 (string/length output))
             (string/ends-with? output statement)
@@ -300,7 +313,7 @@
         parameter-output (if (vector? parameter)
                            (string/join (str (:sep common) (:space common))
                                         (emit-array parameter grammar context))
-                           (emit-node parameter grammar context))]
+                           (tahto.common.emit/emit-node parameter grammar context))]
     (str (or (get-in entry [:block :raw]) (:raw entry) (name (first form)))
          (:space common) (:start parameter-options) parameter-output
          (:end parameter-options)
@@ -342,7 +355,7 @@
     (str raw (if (= "" raw) "" (:space common))
          (emit-symbol name-value grammar context)
          (:space common) (:assign common) (:space common)
-         (emit-node value grammar context))))
+         (tahto.common.emit/emit-node value grammar context))))
 
 (defn emit-defn [form entry grammar context]
   (emit-function (cons 'fn (rest form)) entry grammar context))
@@ -350,7 +363,7 @@
 (defn emit-macro [form entry grammar context]
   (let [macro-function (or (:macro entry) (:value/template entry))]
     (if macro-function
-      (emit-node (macro-function form) grammar context)
+      (tahto.common.emit/emit-node (macro-function form) grammar context)
       (fail "Macro operation has no expansion function" {:form form :entry entry}))))
 
 (defn- operation-mode [entry]
@@ -385,9 +398,11 @@
 (defmethod operation-handler :macro [mode] emit-macro)
 (defmethod operation-handler :return [mode] emit-return)
 (defmethod operation-handler :quote [mode]
-  (fn [form entry grammar context] (emit-node (second form) grammar context)))
+  (fn [form entry grammar context]
+    (tahto.common.emit/emit-node (second form) grammar context)))
 (defmethod operation-handler :internal [mode]
-  (fn [form entry grammar context] (emit-node (second form) grammar context)))
+  (fn [form entry grammar context]
+    (tahto.common.emit/emit-node (second form) grammar context)))
 (defmethod operation-handler :discard [mode]
   (fn [form entry grammar context] ""))
 (defmethod operation-handler :pre [mode]
@@ -435,11 +450,10 @@
       (emit-invoke form nil grammar context))))
 
 (defn emit-node [form grammar context]
-  (binding [*emit-fn* emit-node]
-    (cond (list? form) (emit-operation form grammar context)
-          (or (vector? form) (map? form) (set? form))
-          (emit-data form grammar context)
-          :else (emit-token form grammar context))))
+  (cond (list? form) (emit-operation form grammar context)
+        (or (vector? form) (map? form) (set? form))
+        (emit-data form grammar context)
+        :else (emit-token form grammar context)))
 
 (defn emit
   ([form selected] (emit form selected {}))

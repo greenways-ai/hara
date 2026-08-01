@@ -101,6 +101,7 @@ pub(crate) const CORE_SPECIAL_FORMS: &[&str] = &[
     "bytes/u8",
     "cas!",
     "ceil",
+    "char?",
     "comp",
     "comp2",
     "comp3",
@@ -206,6 +207,7 @@ pub(crate) const CORE_SPECIAL_FORMS: &[&str] = &[
     "mod",
     "neg?",
     "name",
+    "namespace",
     "nil?",
     "number?",
     "ns",
@@ -240,13 +242,16 @@ pub(crate) const CORE_SPECIAL_FORMS: &[&str] = &[
     "read-string",
     "recur",
     "reduce",
+    "reduce-kv",
     "repeat",
     "repeatedly",
     "require",
+    "resolve",
     "reset!",
     "rest",
     "reverse",
     "second",
+    "select-keys",
     "seq",
     "seq?",
     "set",
@@ -548,7 +553,7 @@ fn one(form: Form, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step {
             env,
             Box::new(move |r| k(r.and_then(vector_literal))),
         ),
-        Form::List(v) if v.is_empty() => k(Ok(Value::Nil)),
+        Form::List(v) if v.is_empty() => k(Ok(Value::List(PList::new()))),
         Form::List(v) if v.len() == 2 && matches!(&v[0],Form::Symbol(n)if n=="quote") => {
             k(literal_value(&v[1]))
         }
@@ -692,6 +697,11 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
         Some("std.foundation.coroutine/yield") => coroutine::yield_form(v, env, k),
         Some("std.foundation.coroutine/await") => coroutine::await_form(v, env, k),
         Some("def") | Some("set!") | Some("var/set") => bind_form(v, env, k),
+        Some("resolve")
+            if matches!(env.borrow().get("resolve"), Some(value) if !matches!(value, Value::Var(_))) =>
+        {
+            application(v, env, k)
+        }
         Some(name) if SYNC_SPECIAL_FORMS.contains(&name) => sync(Form::List(v), env, k),
         _ => application(v, env, k),
     }
@@ -1318,6 +1328,18 @@ mod tests {
             ("(decimal? 42)", Value::Bool(false)),
             ("(boolean? false)", Value::Bool(true)),
             ("(boolean? nil)", Value::Bool(false)),
+        ];
+        for (source, expected) in cases {
+            let fiber = EvalFiber::start(source, HashMap::new()).unwrap();
+            assert_eq!(fiber.state(), EvalFiberState::Completed(expected));
+        }
+    }
+
+    #[test]
+    fn character_predicate_matches_foundation_types() {
+        let cases = [
+            ("(char? \\x)", Value::Bool(true)),
+            ("(char? \"x\")", Value::Bool(false)),
         ];
         for (source, expected) in cases {
             let fiber = EvalFiber::start(source, HashMap::new()).unwrap();

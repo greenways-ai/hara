@@ -10,7 +10,7 @@
 (defn to-staging-form [form grammar modules options deps-fragment walk-fn]
   (let [symbol (first form)
         reserved (get-in grammar [:reserved symbol])
-        options (provenance/with-provenance options {:polis/form form :polis/symbol symbol})
+        options (provenance/with-provenance options {:tahto/form form :tahto/symbol symbol})
         template-assignment (assign/process-template-assignment form grammar modules options)]
     (cond (= symbol '!:template) (walk-fn (eval (second form)))
           ('#{!:lang !:eval !:deref !:decorate} symbol) (assign/ProtectedHead form)

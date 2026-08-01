@@ -21,6 +21,7 @@
 
 use crate::core::{Primitive, Value};
 use crate::kernel::{Form, Position, Span, SpannedForm};
+use crate::lang::data::List as PList;
 use std::collections::HashMap;
 
 use super::error::{CompileError, CompileErrorKind};
@@ -447,8 +448,7 @@ impl Compiler {
                 )),
             },
             Form::List(elements) if elements.is_empty() => {
-                self.emit(Instruction::Nil, Some(span.start));
-                Ok(())
+                self.constant(Value::List(PList::new()), span)
             }
             Form::List(elements) => {
                 let children = self.list_children(elements, span, children);
