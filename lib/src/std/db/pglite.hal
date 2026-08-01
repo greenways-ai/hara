@@ -1,0 +1,66 @@
+;; ============================================================================
+;; std.db.pglite — Hara-facing embedded PostgreSQL API.
+;;
+;; PGlite runs PostgreSQL in WASM inside an HTA provider. This is an embedded
+;; database, not a connection to a remote PostgreSQL server.
+;; ============================================================================
+(ns std.db.pglite
+  (:require [std.db.provider.pglite :as provider]))
+
+(defn ^{:schema [:fn [] :any]}
+  version
+  "Returns a promise resolving to the embedded PostgreSQL version."
+  []
+  (provider/version))
+
+(defn ^{:schema [:function [:fn [] :any]
+                            [:fn [:map] :any]]}
+  open
+  "Returns a promise resolving to an in-memory PGlite connection descriptor."
+  ([] (open {}))
+  ([options] (provider/open options)))
+
+(defn ^{:schema [:function [:fn [:map :str] :any]
+                            [:fn [:map :str :vector] :any]]}
+  exec
+  "Executes one PostgreSQL statement with optional positional parameters."
+  ([connection sql]
+   (exec connection sql []))
+  ([connection sql parameters]
+   (provider/exec (get connection :id) sql parameters)))
+
+(defn ^{:schema [:function [:fn [:map :str] :any]
+                            [:fn [:map :str :vector] :any]]}
+  query
+  "Executes a row-returning PostgreSQL statement with optional parameters.
+
+   PostgreSQL parameters use $1, $2 and so on. The promise resolves to
+   {:columns [...], :rows [[...]], :affected n}."
+  ([connection sql]
+   (query connection sql []))
+  ([connection sql parameters]
+   (provider/query (get connection :id) sql parameters)))
+
+(defn ^{:schema [:fn [:map] :any]}
+  close
+  "Closes connection and returns a promise resolving to whether it was open."
+  [connection]
+  (provider/close (get connection :id)))
+
+(defn ^{:schema [:fn [:map] :any]}
+  begin
+  "Begins a transaction on connection."
+  [connection]
+  (exec connection "begin"))
+
+(defn ^{:schema [:fn [:map] :any]}
+  commit
+  "Commits the current transaction on connection."
+  [connection]
+  (exec connection "commit"))
+
+(defn ^{:schema [:fn [:map] :any]}
+  rollback
+  "Rolls back the current transaction on connection."
+  [connection]
+  (exec connection "rollback"))
