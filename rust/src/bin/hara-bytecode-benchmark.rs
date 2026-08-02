@@ -11,8 +11,15 @@
 //! - `existing`        — `Runtime::eval_native` baseline (parse + fiber
 //!                       evaluation per call).
 //! - `compile-execute` — parse + compile + validate + execute + display
-//!                       per call.
+//!                       per call through the isolated VM API used by issues
+//!                       #195 and #202.
 //! - `execute-only`    — compile once; execute + display per call.
+//! - `runtime-compile-execute` — compile and execute through a `Runtime`,
+//!                       including namespace compatibility synchronization.
+//! - `runtime-execute` — compile once against a `Runtime`; execute through
+//!                       the namespace-integrated compatibility path.
+//! - `halc-execute`    — encode as HALC and lower to typed HBC4 once, then
+//!                       execute it against the module namespace.
 //!
 //! Every call checks the result against EXPECTED (the correctness
 //! checksum); a mismatch aborts the run. Output is one JSON line with
@@ -41,6 +48,9 @@ fn main() {
         "existing" => "hara-rust-existing",
         "compile-execute" => "hara-rust-bytecode-compile-execute",
         "execute-only" => "hara-rust-bytecode-execute-only",
+        "runtime-compile-execute" => "hara-rust-bytecode-runtime-compile-execute",
+        "runtime-execute" => "hara-rust-bytecode-runtime-execute",
+        "halc-execute" => "hara-rust-bytecode-halc-execute",
         other => fail(id, &format!("unknown mode: {other}")),
     };
     let runtime_name = args
@@ -50,20 +60,28 @@ fn main() {
 
     let mut runtime = Runtime::new();
     // For execute-only the program is compiled once, outside the samples.
-    let program = if mode == "execute-only" {
-        Some(
+    let program = match mode.as_str() {
+        "execute-only" => {
+            Some(hara_wasm::compile_bytecode(&source).unwrap_or_else(|error| fail(id, &error)))
+        }
+        "runtime-execute" => Some(
             runtime
                 .compile_bytecode(&source)
                 .unwrap_or_else(|error| fail(id, &error)),
-        )
-    } else {
-        None
+        ),
+        "halc-execute" => Some(compile_halc(&mut runtime, id, &source)),
+        _ => None,
     };
     let mut call = || {
         let value = match mode.as_str() {
             "existing" => runtime.eval_native(&source),
-            "compile-execute" => runtime.eval_bytecode_native(&source),
-            "execute-only" => {
+            "compile-execute" => hara_wasm::eval_bytecode_native(&source),
+            "execute-only" => hara_wasm::execute_bytecode(program.as_ref().expect("program")),
+            "runtime-compile-execute" => runtime.eval_bytecode_native(&source),
+            "runtime-execute" => {
+                runtime.execute_compiled_bytecode(program.as_ref().expect("program").clone())
+            }
+            "halc-execute" => {
                 runtime.execute_compiled_bytecode(program.as_ref().expect("program").clone())
             }
             _ => unreachable!(),
@@ -120,6 +138,37 @@ fn main() {
         samples,
         telemetry,
     );
+}
+
+#[cfg(feature = "halc-encoder")]
+fn compile_halc(
+    runtime: &mut Runtime,
+    id: &str,
+    source: &str,
+) -> std::rc::Rc<hara_wasm::vm::Program> {
+    let forms = hara_wasm::kernel::parse_forms(source).unwrap_or_else(|error| fail(id, &error));
+    let artifact = hara_wasm::kernel::halc::encode_halc_module(
+        "benchmark.typed",
+        "benchmark/typed.hal",
+        source,
+        forms,
+    )
+    .unwrap_or_else(|error| fail(id, &error));
+    let bytecode = runtime
+        .compile_halc_bytecode_artifact(&artifact)
+        .unwrap_or_else(|error| fail(id, &error));
+    hara_wasm::vm::decode_program(&bytecode)
+        .map(std::rc::Rc::new)
+        .unwrap_or_else(|error| fail(id, &error))
+}
+
+#[cfg(not(feature = "halc-encoder"))]
+fn compile_halc(
+    _runtime: &mut Runtime,
+    id: &str,
+    _source: &str,
+) -> std::rc::Rc<hara_wasm::vm::Program> {
+    fail(id, "halc-execute requires the halc-encoder feature")
 }
 
 fn decode_hex(value: &str) -> Result<String, String> {
