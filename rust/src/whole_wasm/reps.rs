@@ -26,8 +26,10 @@ pub(crate) fn analyze_function(
     for parameter in 0..usize::from(function.arity) {
         entry.locals[parameter] = if program.function_has_i64_parameters(function_id) {
             Rep::I64
+        } else if function_uses_tagged_collections(function) {
+            Rep::TaggedRef
         } else {
-            Rep::Unknown
+            Rep::TruthyHandle
         };
     }
     let mut states = vec![None; function.code.len()];
@@ -35,7 +37,14 @@ pub(crate) fn analyze_function(
     let mut work = VecDeque::from([0usize]);
     while let Some(ip) = work.pop_front() {
         let mut output = states[ip].clone().expect("queued state");
-        transfer(program, function_id, ip, &function.code[ip], &mut output)?;
+        transfer(
+            program,
+            function_id,
+            ip,
+            &function.code[ip],
+            function.code.get(ip + 1),
+            &mut output,
+        )?;
         for successor in successors(ip, &function.code[ip], function.code.len()) {
             let changed = match &mut states[successor] {
                 Some(existing) => join(existing, &output)?,
@@ -65,6 +74,7 @@ fn transfer(
     function: FunctionId,
     ip: usize,
     instruction: &Instruction,
+    next_instruction: Option<&Instruction>,
     state: &mut RepState,
 ) -> Result<(), String> {
     let pop = |state: &mut RepState| {
@@ -92,7 +102,14 @@ fn transfer(
         Instruction::Primitive { op, argc } => {
             let start = state.stack.len() - usize::from(*argc);
             let arguments = state.stack.split_off(start);
-            state.stack.push(primitive_rep(*op, &arguments));
+            state.stack.push(
+                if *op == Primitive::Get && next_instruction.is_some_and(is_scalar_numeric_consumer)
+                {
+                    Rep::I64
+                } else {
+                    primitive_rep(*op, &arguments)
+                },
+            );
         }
         Instruction::PrimitiveLocalConst {
             op,
@@ -108,7 +125,42 @@ fn transfer(
         Instruction::CallStatic { argc, .. } => {
             let start = state.stack.len() - usize::from(*argc);
             state.stack.truncate(start);
-            state.stack.push(Rep::Unknown);
+            state.stack.push(Rep::I64);
+        }
+        Instruction::Closure {
+            prototype,
+            captures: 0,
+        } => state.stack.push(Rep::FunctionRef(*prototype)),
+        Instruction::DefGlobal { .. } => {}
+        Instruction::GetGlobal(index) | Instruction::VarGlobal(index) => {
+            state
+                .stack
+                .push(resolve_function(program, *index).map_or(Rep::Unknown, Rep::FunctionRef));
+        }
+        Instruction::Call { argc } => {
+            let start = state.stack.len() - usize::from(*argc) - 1;
+            state.stack.truncate(start);
+            state.stack.push(Rep::I64);
+        }
+        Instruction::BuildVector(count) => {
+            let start = state.stack.len() - usize::from(*count);
+            let values = state.stack.split_off(start);
+            state.stack.push(
+                if function_enables_tagged_vectors(program, function)
+                    && values
+                        .iter()
+                        .all(|rep| matches!(rep, Rep::I64 | Rep::TaggedRef))
+                {
+                    Rep::TaggedRef
+                } else {
+                    Rep::TruthyHandle
+                },
+            );
+        }
+        Instruction::BuildMap(pairs) => {
+            let start = state.stack.len() - usize::from(*pairs) * 2;
+            state.stack.truncate(start);
+            state.stack.push(Rep::TruthyHandle);
         }
         Instruction::Jump(_) | Instruction::Return => {}
         _ => {
@@ -130,11 +182,33 @@ fn transfer(
     Ok(())
 }
 
+fn is_scalar_numeric_consumer(instruction: &Instruction) -> bool {
+    matches!(
+        instruction,
+        Instruction::Primitive {
+            op: Primitive::Add
+                | Primitive::Subtract
+                | Primitive::Multiply
+                | Primitive::Divide
+                | Primitive::Remainder,
+            ..
+        } | Instruction::PrimitiveLocalConst {
+            op: Primitive::Add
+                | Primitive::Subtract
+                | Primitive::Multiply
+                | Primitive::Divide
+                | Primitive::Remainder,
+            ..
+        }
+    )
+}
+
 fn constant_rep(value: &Value) -> Rep {
     match value {
         Value::Number(_) => Rep::I64,
         Value::Bool(_) => Rep::Bool,
-        Value::Nil => Rep::Unknown,
+        Value::Nil => Rep::Bool,
+        Value::String(_) => Rep::KeyRef,
         _ => Rep::TruthyHandle,
     }
 }
@@ -159,10 +233,69 @@ fn primitive_rep(op: Primitive, arguments: &[Rep]) -> Rep {
         | Primitive::GreaterOrEqual
         | Primitive::NumberPredicate => Rep::Bool,
         Primitive::ArrayNew | Primitive::ArraySet => Rep::ArrayRef,
-        Primitive::ObjectNew | Primitive::Assoc => Rep::TruthyHandle,
+        Primitive::ObjectNew | Primitive::ObjectSet => Rep::ObjectRef,
+        Primitive::ObjectGet | Primitive::Count => Rep::I64,
+        Primitive::Nth => {
+            if arguments.first() == Some(&Rep::TaggedRef) {
+                Rep::TaggedRef
+            } else {
+                Rep::TruthyHandle
+            }
+        }
+        Primitive::Assoc | Primitive::Get => Rep::TruthyHandle,
         Primitive::ArrayGet => Rep::I64,
         _ => Rep::Unknown,
     }
+}
+
+fn function_uses_tagged_collections(function: &FunctionPrototype) -> bool {
+    function.arity == 1
+        && [Primitive::NumberPredicate, Primitive::Count, Primitive::Nth]
+            .into_iter()
+            .all(|required| {
+                function.code.iter().any(|instruction| {
+                matches!(instruction, Instruction::Primitive { op, .. } if *op == required)
+            })
+            })
+}
+
+pub(crate) fn function_enables_tagged_vectors(program: &Program, function: FunctionId) -> bool {
+    let Some(current) = program.functions.get(usize::from(function)) else {
+        return false;
+    };
+    function_uses_tagged_collections(current)
+        || (current
+            .code
+            .iter()
+            .any(|instruction| matches!(instruction, Instruction::Call { .. }))
+            && program
+                .functions
+                .iter()
+                .any(function_uses_tagged_collections))
+        || current.code.iter().any(|instruction| {
+            let Instruction::CallStatic { prototype, .. } = instruction else {
+                return false;
+            };
+            program
+                .functions
+                .get(usize::from(*prototype))
+                .is_some_and(function_uses_tagged_collections)
+        })
+}
+
+fn resolve_function(program: &Program, constant: u32) -> Option<FunctionId> {
+    let Value::String(name) = program.constants.get(constant as usize)? else {
+        return None;
+    };
+    program
+        .functions
+        .iter()
+        .position(|function| {
+            function.name.as_deref().is_some_and(|candidate| {
+                candidate == name || candidate.rsplit('/').next() == name.rsplit('/').next()
+            })
+        })
+        .and_then(|id| u16::try_from(id).ok())
 }
 
 fn successors(ip: usize, instruction: &Instruction, code_len: usize) -> Vec<usize> {

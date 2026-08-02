@@ -16,13 +16,15 @@
   <meta name="twitter:description" content="A programmable Lisp kernel for native and WebAssembly hosts.">
   <meta name="twitter:image" content="https://www.hara-lang.org/og-hara-ribbon.jpg">
   <link rel="canonical" href="https://www.hara-lang.org/">
-  <link rel="icon" href="./assets/hara-favicon.svg?v=3" type="image/svg+xml">
+  <link rel="icon" href="./vendor/hara-ui/favicon-48.svg?v=2" type="image/svg+xml" sizes="48x48">
+  <link rel="icon" href="./vendor/hara-ui/favicon-128.svg?v=2" type="image/svg+xml" sizes="128x128">
+  <link rel="icon" href="./vendor/hara-ui/favicon-256.svg?v=2" type="image/svg+xml" sizes="256x256">
   <title>Hara — one embeddable language, many runtimes</title>
-  <link rel="stylesheet" href="./landing.css?v=roman-1">
+  <link rel="stylesheet" href="./landing.css?v=mosaic-1">
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="./"><img src="./assets/hara-mark.svg" alt="" width="34" height="34"><span>HARA</span></a>
+    <a class="brand" href="./"><img src="./vendor/hara-ui/favicon-48.svg" alt="" width="34" height="34"><span>HARA</span></a>
     <nav aria-label="Primary navigation">
       <a href="#why">WHY HARA</a><a href="#runtimes">RUNTIMES</a><a href="#libraries">LIBRARIES</a>
       <a href="https://docs.hara-lang.org/">DOCS</a><a href="https://github.com/hara-lang/hara">GITHUB</a>
@@ -33,7 +35,8 @@
   <main>
     <section class="hero">
       <div class="hero-stage">
-        <canvas data-hero-canvas aria-label="Animated monumental Roman colonnade"></canvas>
+        <canvas data-hero-canvas aria-label="Animated luminous Roman cathedral nave"></canvas>
+        <div class="hero-mosaic-backdrop" data-hero-mosaic aria-hidden="true"></div>
         <div class="hero-stage-shade" aria-hidden="true"></div>
       </div>
       <div class="hero-copy">
@@ -45,8 +48,8 @@
       </div>
       <div class="hero-scenes" role="group" aria-label="Hero animation">
         <span>SCENE</span>
-        <button type="button" data-hero-scene="columns" aria-pressed="true">COLONNADE</button>
-        <button type="button" data-hero-scene="mosaic" aria-pressed="false">MARBLE MOSAIC</button>
+        <button type="button" data-hero-scene="columns" aria-pressed="true">CATHEDRAL</button>
+        <button type="button" data-hero-scene="mosaic" aria-pressed="false">BATHHOUSE MOSAIC</button>
       </div>
       <a class="learn-more" href="#why"><span>LEARN MORE</span><i aria-hidden="true">↓</i></a>
     </section>
@@ -140,7 +143,7 @@ hara eval '(+ 19 23)'
 <b># Optional Truffle native image</b>
 brew install hara-lang/tap/hara-truffle</code></pre></article></section>
 
-    <section class="closing"><img src="./assets/hara-mark.svg" alt="" width="60" height="60"><p class="eyebrow">THE KERNEL IS SMALL. THE BOUNDARY IS EXPLICIT.</p><h2>Embed the language.<br>Keep control of the host.</h2><div class="actions"><a class="button primary" href="https://docs.hara-lang.org/start/orientation/">START WITH HARA →</a><a class="button" href="./v1/">V1 SHOWCASE</a></div></section>
+    <section class="closing"><img src="./vendor/hara-ui/favicon-128.svg" alt="" width="60" height="60"><p class="eyebrow">THE KERNEL IS SMALL. THE BOUNDARY IS EXPLICIT.</p><h2>Embed the language.<br>Keep control of the host.</h2><div class="actions"><a class="button primary" href="https://docs.hara-lang.org/start/orientation/">START WITH HARA →</a><a class="button" href="./v1/">V1 SHOWCASE</a></div></section>
   </main>
   <dialog class="install-dialog" data-install-dialog aria-labelledby="install-title">
     <div class="install-dialog-head"><div><p class="eyebrow">HOMEBREW</p><h2 id="install-title">Get Hara.</h2></div><button type="button" data-install-close aria-label="Close installation dialog">×</button></div>
@@ -149,6 +152,6 @@ brew install hara-lang/tap/hara-truffle</code></pre></article></section>
     <p class="install-note">Then verify it with <code>hara eval '(+ 19 23)'</code>.</p>
   </dialog>
   <footer class="site-footer"><div><strong>HARA</strong><span>One embeddable language. Many runtimes.</span></div><nav><a href="https://docs.hara-lang.org/">Docs</a><a href="https://specs.hara-lang.org/">Specs</a><a href="https://github.com/hara-lang/hara">Source</a><a href="./v1/">Studio</a></nav><p>Built by <a href="https://www.greenways.ai/">Greenways</a> · Eclipse Public License 2.0</p></footer>
-  <script type="module" src="./hero-animation.js?v=roman-1"></script>
+  <script defer src="./hero-animation.js?v=voronoi-temple-2"></script>
 </body>
 </html>

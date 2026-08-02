@@ -1,7 +1,7 @@
 use wasm_encoder::{
-    BlockType, CodeSection, ConstExpr, ExportKind, ExportSection, Function, FunctionSection,
-    GlobalSection, GlobalType, Instruction, MemArg, MemorySection, MemoryType, Module, TypeSection,
-    ValType,
+    BlockType, CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, Function,
+    FunctionSection, GlobalSection, GlobalType, ImportSection, Instruction, MemArg, MemorySection,
+    MemoryType, Module, TypeSection, ValType,
 };
 
 use crate::core::Primitive;
@@ -13,7 +13,24 @@ use crate::vm::Program;
 pub const ERROR_INTEGER_OVERFLOW: i32 = 1;
 pub const ERROR_DIVISION_BY_ZERO: i32 = 2;
 pub const ERROR_ARRAY_BOUNDS: i32 = 3;
-const HOST_FUNCTION_COUNT: u32 = 0;
+pub const ERROR_OBJECT_KEY: i32 = 4;
+const HOST_TYPE_COUNT: u32 = 5;
+const HOST_FUNCTION_COUNT: u32 = 15;
+const HOST_CONSTANT: u32 = 0;
+const HOST_BOX_I64: u32 = 1;
+const HOST_UNBOX_I64: u32 = 2;
+const HOST_VECTOR_EMPTY: u32 = 3;
+const HOST_VECTOR_PUSH: u32 = 4;
+const HOST_MAP_EMPTY: u32 = 5;
+const HOST_MAP_ASSOC: u32 = 6;
+const HOST_GET: u32 = 7;
+const HOST_IS_NUMBER: u32 = 8;
+const HOST_COUNT: u32 = 9;
+const HOST_NTH: u32 = 10;
+const HOST_MAP_I64_PAIR: u32 = 11;
+const HOST_GET_I64: u32 = 12;
+const HOST_GET_PATH_I64_CONSTANTS: u32 = 13;
+const HOST_ASSOC_MAP_I64_PAIR: u32 = 14;
 const ARRAY_MEMORY: u32 = 0;
 const ARRAY_HEAP_GLOBAL: u32 = 1;
 const I64_MEMORY: MemArg = MemArg {
@@ -32,14 +49,43 @@ pub(crate) fn emit_program(program: &MirProgram) -> Result<Vec<u8>, String> {
     let mut module = Module::new();
     let mut types = TypeSection::new();
     let mut functions = FunctionSection::new();
+    types.function([ValType::I64], [ValType::I64]);
+    types.function([], [ValType::I64]);
+    types.function([ValType::I64, ValType::I64], [ValType::I64]);
+    types.function([ValType::I64, ValType::I64, ValType::I64], [ValType::I64]);
+    types.function(
+        [ValType::I64, ValType::I64, ValType::I64, ValType::I64],
+        [ValType::I64],
+    );
     for function in &program.functions {
         types.function(
             std::iter::repeat(ValType::I64).take(usize::from(function.arity)),
             [ValType::I64],
         );
-        functions.function(HOST_FUNCTION_COUNT + u32::from(function.id));
+        functions.function(HOST_TYPE_COUNT + u32::from(function.id));
     }
     module.section(&types);
+    let mut imports = ImportSection::new();
+    for (name, ty) in [
+        ("constant_handle", 0),
+        ("box_i64", 0),
+        ("unbox_i64", 0),
+        ("vector_empty", 1),
+        ("vector_push", 2),
+        ("map_empty", 1),
+        ("map_assoc", 3),
+        ("get", 2),
+        ("is_number", 0),
+        ("count", 0),
+        ("nth", 2),
+        ("map_i64_pair", 2),
+        ("get_i64", 2),
+        ("get_path_i64_constants", 3),
+        ("assoc_map_i64_pair", 4),
+    ] {
+        imports.import("hara", name, EntityType::Function(ty));
+    }
+    module.section(&imports);
     module.section(&functions);
 
     let mut globals = GlobalSection::new();
@@ -140,6 +186,30 @@ fn emit_operation(
             destination, value, ..
         } => {
             out.instruction(&Instruction::I64Const(*value));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::ConstantHandle {
+            destination,
+            constant,
+        } => {
+            out.instruction(&Instruction::I64Const(i64::from(*constant)));
+            out.instruction(&Instruction::Call(HOST_CONSTANT));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::BoxI64 {
+            destination,
+            source,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*source)));
+            out.instruction(&Instruction::Call(HOST_BOX_I64));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::UnboxI64 {
+            destination,
+            source,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*source)));
+            out.instruction(&Instruction::Call(HOST_UNBOX_I64));
             out.instruction(&Instruction::LocalSet(u32::from(*destination)));
         }
         MirOp::Move {
@@ -244,6 +314,338 @@ fn emit_operation(
             out.instruction(&Instruction::LocalGet(u32::from(*value)));
             out.instruction(&Instruction::I64Store(I64_MEMORY));
             out.instruction(&Instruction::LocalGet(u32::from(*array)));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::ObjectNew {
+            destination,
+            entries,
+        } => {
+            let bytes = entries
+                .len()
+                .checked_mul(16)
+                .and_then(|value| value.checked_add(8))
+                .and_then(|value| i32::try_from(value).ok())
+                .ok_or("whole-Wasm object allocation is too large")?;
+            out.instruction(&Instruction::GlobalGet(ARRAY_HEAP_GLOBAL));
+            out.instruction(&Instruction::I64ExtendI32U);
+            out.instruction(&Instruction::LocalSet(result));
+            out.instruction(&Instruction::LocalGet(result));
+            out.instruction(&Instruction::I32WrapI64);
+            out.instruction(&Instruction::I64Const(entries.len() as i64));
+            out.instruction(&Instruction::I64Store(I64_MEMORY));
+            for (index, (key, value)) in entries.iter().enumerate() {
+                let key_offset = 8 + index * 16;
+                out.instruction(&Instruction::LocalGet(result));
+                out.instruction(&Instruction::I32WrapI64);
+                out.instruction(&Instruction::LocalGet(u32::from(*key)));
+                out.instruction(&Instruction::I64Store(MemArg {
+                    offset: key_offset as u64,
+                    ..I64_MEMORY
+                }));
+                out.instruction(&Instruction::LocalGet(result));
+                out.instruction(&Instruction::I32WrapI64);
+                out.instruction(&Instruction::LocalGet(u32::from(*value)));
+                out.instruction(&Instruction::I64Store(MemArg {
+                    offset: (key_offset + 8) as u64,
+                    ..I64_MEMORY
+                }));
+            }
+            out.instruction(&Instruction::GlobalGet(ARRAY_HEAP_GLOBAL));
+            out.instruction(&Instruction::I32Const(bytes));
+            out.instruction(&Instruction::I32Add);
+            out.instruction(&Instruction::GlobalSet(ARRAY_HEAP_GLOBAL));
+            out.instruction(&Instruction::LocalGet(result));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::ObjectGetI64 {
+            destination,
+            object,
+            key,
+        } => {
+            emit_object_value_address(out, *object, *key, temp_a, result);
+            out.instruction(&Instruction::I64Load(I64_MEMORY));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::ObjectSetI64 {
+            destination,
+            object,
+            key,
+            value,
+        } => {
+            emit_object_value_address(out, *object, *key, temp_a, result);
+            out.instruction(&Instruction::LocalGet(u32::from(*value)));
+            out.instruction(&Instruction::I64Store(I64_MEMORY));
+            out.instruction(&Instruction::LocalGet(u32::from(*object)));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::BuildVector {
+            destination,
+            values,
+        } => {
+            out.instruction(&Instruction::Call(HOST_VECTOR_EMPTY));
+            out.instruction(&Instruction::LocalSet(result));
+            for value in values {
+                out.instruction(&Instruction::LocalGet(result));
+                out.instruction(&Instruction::LocalGet(u32::from(*value)));
+                out.instruction(&Instruction::Call(HOST_VECTOR_PUSH));
+                out.instruction(&Instruction::LocalSet(result));
+            }
+            out.instruction(&Instruction::LocalGet(result));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::NativeVector {
+            destination,
+            values,
+        } => {
+            let bytes = values
+                .len()
+                .checked_mul(16)
+                .and_then(|value| value.checked_add(24))
+                .and_then(|value| i32::try_from(value).ok())
+                .ok_or("whole-Wasm tagged vector allocation is too large")?;
+            out.instruction(&Instruction::GlobalGet(ARRAY_HEAP_GLOBAL));
+            out.instruction(&Instruction::I64ExtendI32U);
+            out.instruction(&Instruction::LocalSet(result));
+            out.instruction(&Instruction::LocalGet(result));
+            out.instruction(&Instruction::I32WrapI64);
+            out.instruction(&Instruction::I64Const(1));
+            out.instruction(&Instruction::I64Store(I64_MEMORY));
+            out.instruction(&Instruction::LocalGet(result));
+            out.instruction(&Instruction::I32WrapI64);
+            out.instruction(&Instruction::LocalGet(result));
+            out.instruction(&Instruction::I64Const(16));
+            out.instruction(&Instruction::I64Add);
+            out.instruction(&Instruction::I64Store(MemArg {
+                offset: 8,
+                ..I64_MEMORY
+            }));
+            out.instruction(&Instruction::LocalGet(result));
+            out.instruction(&Instruction::I32WrapI64);
+            out.instruction(&Instruction::I64Const(values.len() as i64));
+            out.instruction(&Instruction::I64Store(MemArg {
+                offset: 16,
+                ..I64_MEMORY
+            }));
+            for (index, (value, rep)) in values.iter().enumerate() {
+                let tag_offset = 24 + index * 16;
+                let payload_offset = tag_offset + 8;
+                out.instruction(&Instruction::LocalGet(result));
+                out.instruction(&Instruction::I32WrapI64);
+                match rep {
+                    super::ir::Rep::I64 => out.instruction(&Instruction::I64Const(0)),
+                    super::ir::Rep::TaggedRef => {
+                        out.instruction(&Instruction::LocalGet(u32::from(*value)));
+                        out.instruction(&Instruction::I32WrapI64);
+                        out.instruction(&Instruction::I64Load(I64_MEMORY))
+                    }
+                    _ => unreachable!("native vector reps verified by MIR"),
+                };
+                out.instruction(&Instruction::I64Store(MemArg {
+                    offset: tag_offset as u64,
+                    ..I64_MEMORY
+                }));
+                out.instruction(&Instruction::LocalGet(result));
+                out.instruction(&Instruction::I32WrapI64);
+                match rep {
+                    super::ir::Rep::I64 => {
+                        out.instruction(&Instruction::LocalGet(u32::from(*value)))
+                    }
+                    super::ir::Rep::TaggedRef => {
+                        out.instruction(&Instruction::LocalGet(u32::from(*value)));
+                        out.instruction(&Instruction::I32WrapI64);
+                        out.instruction(&Instruction::I64Load(MemArg {
+                            offset: 8,
+                            ..I64_MEMORY
+                        }))
+                    }
+                    _ => unreachable!("native vector reps verified by MIR"),
+                };
+                out.instruction(&Instruction::I64Store(MemArg {
+                    offset: payload_offset as u64,
+                    ..I64_MEMORY
+                }));
+            }
+            out.instruction(&Instruction::GlobalGet(ARRAY_HEAP_GLOBAL));
+            out.instruction(&Instruction::I32Const(bytes));
+            out.instruction(&Instruction::I32Add);
+            out.instruction(&Instruction::GlobalSet(ARRAY_HEAP_GLOBAL));
+            out.instruction(&Instruction::LocalGet(result));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::BuildMap {
+            destination,
+            entries,
+        } => {
+            out.instruction(&Instruction::Call(HOST_MAP_EMPTY));
+            out.instruction(&Instruction::LocalSet(result));
+            for (key, value) in entries {
+                out.instruction(&Instruction::LocalGet(result));
+                out.instruction(&Instruction::LocalGet(u32::from(*key)));
+                out.instruction(&Instruction::LocalGet(u32::from(*value)));
+                out.instruction(&Instruction::Call(HOST_MAP_ASSOC));
+                out.instruction(&Instruction::LocalSet(result));
+            }
+            out.instruction(&Instruction::LocalGet(result));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::BuildMapI64Pair {
+            destination,
+            key,
+            value,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*key)));
+            out.instruction(&Instruction::LocalGet(u32::from(*value)));
+            out.instruction(&Instruction::Call(HOST_MAP_I64_PAIR));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::Assoc {
+            destination,
+            collection,
+            key,
+            value,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*collection)));
+            out.instruction(&Instruction::LocalGet(u32::from(*key)));
+            out.instruction(&Instruction::LocalGet(u32::from(*value)));
+            out.instruction(&Instruction::Call(HOST_MAP_ASSOC));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::AssocMapI64Pair {
+            destination,
+            collection,
+            outer_key,
+            inner_key,
+            value,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*collection)));
+            out.instruction(&Instruction::LocalGet(u32::from(*outer_key)));
+            out.instruction(&Instruction::LocalGet(u32::from(*inner_key)));
+            out.instruction(&Instruction::LocalGet(u32::from(*value)));
+            out.instruction(&Instruction::Call(HOST_ASSOC_MAP_I64_PAIR));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::Get {
+            destination,
+            collection,
+            key,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*collection)));
+            out.instruction(&Instruction::LocalGet(u32::from(*key)));
+            out.instruction(&Instruction::Call(HOST_GET));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::GetI64 {
+            destination,
+            collection,
+            key,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*collection)));
+            out.instruction(&Instruction::LocalGet(u32::from(*key)));
+            out.instruction(&Instruction::Call(HOST_GET_I64));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::GetPathI64Constants {
+            destination,
+            collection,
+            first_key,
+            second_key,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*collection)));
+            out.instruction(&Instruction::I64Const(i64::from(*first_key)));
+            out.instruction(&Instruction::I64Const(i64::from(*second_key)));
+            out.instruction(&Instruction::Call(HOST_GET_PATH_I64_CONSTANTS));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::IsNumber { destination, value } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*value)));
+            out.instruction(&Instruction::Call(HOST_IS_NUMBER));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::TaggedIsNumber { destination, value } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*value)));
+            out.instruction(&Instruction::I32WrapI64);
+            out.instruction(&Instruction::I64Load(I64_MEMORY));
+            out.instruction(&Instruction::I64Eqz);
+            out.instruction(&Instruction::I64ExtendI32U);
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::Count {
+            destination,
+            collection,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*collection)));
+            out.instruction(&Instruction::Call(HOST_COUNT));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::TaggedCount {
+            destination,
+            collection,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*collection)));
+            out.instruction(&Instruction::I32WrapI64);
+            out.instruction(&Instruction::I64Load(MemArg {
+                offset: 8,
+                ..I64_MEMORY
+            }));
+            out.instruction(&Instruction::I32WrapI64);
+            out.instruction(&Instruction::I64Load(I64_MEMORY));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::Nth {
+            destination,
+            collection,
+            index,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*collection)));
+            out.instruction(&Instruction::LocalGet(u32::from(*index)));
+            out.instruction(&Instruction::Call(HOST_NTH));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::TaggedNth {
+            destination,
+            collection,
+            index,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*collection)));
+            out.instruction(&Instruction::I32WrapI64);
+            out.instruction(&Instruction::I64Load(MemArg {
+                offset: 8,
+                ..I64_MEMORY
+            }));
+            out.instruction(&Instruction::LocalSet(temp_a));
+            out.instruction(&Instruction::LocalGet(u32::from(*index)));
+            out.instruction(&Instruction::I64Const(0));
+            out.instruction(&Instruction::I64LtS);
+            out.instruction(&Instruction::If(BlockType::Empty));
+            emit_error(out, ERROR_ARRAY_BOUNDS);
+            out.instruction(&Instruction::End);
+            out.instruction(&Instruction::LocalGet(u32::from(*index)));
+            out.instruction(&Instruction::LocalGet(temp_a));
+            out.instruction(&Instruction::I32WrapI64);
+            out.instruction(&Instruction::I64Load(I64_MEMORY));
+            out.instruction(&Instruction::I64GeU);
+            out.instruction(&Instruction::If(BlockType::Empty));
+            emit_error(out, ERROR_ARRAY_BOUNDS);
+            out.instruction(&Instruction::End);
+            out.instruction(&Instruction::LocalGet(temp_a));
+            out.instruction(&Instruction::LocalGet(u32::from(*index)));
+            out.instruction(&Instruction::I64Const(16));
+            out.instruction(&Instruction::I64Mul);
+            out.instruction(&Instruction::I64Add);
+            out.instruction(&Instruction::I64Const(8));
+            out.instruction(&Instruction::I64Add);
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::TaggedUnboxI64 {
+            destination,
+            source,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*source)));
+            out.instruction(&Instruction::I32WrapI64);
+            out.instruction(&Instruction::I64Load(MemArg {
+                offset: 8,
+                ..I64_MEMORY
+            }));
             out.instruction(&Instruction::LocalSet(u32::from(*destination)));
         }
         MirOp::CallStatic {
@@ -453,7 +855,13 @@ fn emit_terminator(out: &mut Function, terminator: &MirTerminator, pc: u32) {
                     out.instruction(&Instruction::LocalGet(u32::from(*condition)));
                     out.instruction(&Instruction::I64Eqz);
                 }
-                super::ir::Rep::I64 | super::ir::Rep::ArrayRef | super::ir::Rep::TruthyHandle => {
+                super::ir::Rep::I64
+                | super::ir::Rep::ArrayRef
+                | super::ir::Rep::ObjectRef
+                | super::ir::Rep::KeyRef
+                | super::ir::Rep::TaggedRef
+                | super::ir::Rep::TruthyHandle
+                | super::ir::Rep::FunctionRef(_) => {
                     out.instruction(&Instruction::I32Const(0));
                 }
                 super::ir::Rep::Unknown => unreachable!("unknown truthiness rejected by MIR"),
@@ -471,4 +879,55 @@ fn emit_terminator(out: &mut Function, terminator: &MirTerminator, pc: u32) {
             out.instruction(&Instruction::Return);
         }
     }
+}
+
+fn emit_object_value_address(out: &mut Function, object: u16, key: u16, cursor: u32, address: u32) {
+    out.instruction(&Instruction::I64Const(0));
+    out.instruction(&Instruction::LocalSet(cursor));
+    out.instruction(&Instruction::Block(BlockType::Empty));
+    out.instruction(&Instruction::Loop(BlockType::Empty));
+
+    out.instruction(&Instruction::LocalGet(cursor));
+    out.instruction(&Instruction::LocalGet(u32::from(object)));
+    out.instruction(&Instruction::I32WrapI64);
+    out.instruction(&Instruction::I64Load(I64_MEMORY));
+    out.instruction(&Instruction::I64GeU);
+    out.instruction(&Instruction::If(BlockType::Empty));
+    emit_error(out, ERROR_OBJECT_KEY);
+    out.instruction(&Instruction::End);
+
+    out.instruction(&Instruction::LocalGet(u32::from(object)));
+    out.instruction(&Instruction::I32WrapI64);
+    out.instruction(&Instruction::LocalGet(cursor));
+    out.instruction(&Instruction::I32WrapI64);
+    out.instruction(&Instruction::I32Const(16));
+    out.instruction(&Instruction::I32Mul);
+    out.instruction(&Instruction::I32Add);
+    out.instruction(&Instruction::I64Load(MemArg {
+        offset: 8,
+        ..I64_MEMORY
+    }));
+    out.instruction(&Instruction::LocalGet(u32::from(key)));
+    out.instruction(&Instruction::I64Eq);
+    out.instruction(&Instruction::If(BlockType::Empty));
+    out.instruction(&Instruction::LocalGet(u32::from(object)));
+    out.instruction(&Instruction::LocalGet(cursor));
+    out.instruction(&Instruction::I64Const(16));
+    out.instruction(&Instruction::I64Mul);
+    out.instruction(&Instruction::I64Add);
+    out.instruction(&Instruction::I64Const(16));
+    out.instruction(&Instruction::I64Add);
+    out.instruction(&Instruction::LocalSet(address));
+    out.instruction(&Instruction::Br(2));
+    out.instruction(&Instruction::End);
+
+    out.instruction(&Instruction::LocalGet(cursor));
+    out.instruction(&Instruction::I64Const(1));
+    out.instruction(&Instruction::I64Add);
+    out.instruction(&Instruction::LocalSet(cursor));
+    out.instruction(&Instruction::Br(0));
+    out.instruction(&Instruction::End);
+    out.instruction(&Instruction::End);
+    out.instruction(&Instruction::LocalGet(address));
+    out.instruction(&Instruction::I32WrapI64);
 }

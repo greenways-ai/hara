@@ -18,6 +18,9 @@ test("the main site presents Hara as an embeddable multi-runtime language", asyn
   assert.match(source, /Active experimental runtime/);
   assert.match(source, /data-hero-scene="columns"/);
   assert.match(source, /data-hero-scene="mosaic"/);
+  assert.match(source, /href="\.\/vendor\/hara-ui\/favicon-48\.svg\?v=2"/);
+  assert.match(source, /src="\.\/vendor\/hara-ui\/favicon-48\.svg"/);
+  assert.match(source, /data-hero-mosaic/);
   assert.match(source, /class="learn-more" href="#why"/);
   assert.match(source, /brew install hara-lang\/tap\/hara/);
   assert.match(source, /src="\.\/hero-animation\.js/);

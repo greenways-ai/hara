@@ -353,8 +353,10 @@ pub fn authorize(
 /// The external signer receives canonical intent bytes on stdin and returns
 /// `{:key/id "..." :signature "<hex-ed25519-signature>"}` on stdout.
 pub fn sign(intent: &[u8]) -> Result<(String, String), String> {
-    let signer = env::var("HARA_SIGNER")
-        .map_err(|_| "HARA_SIGNER must name an external signer command".to_owned())?;
+    let Ok(signer) = env::var("HARA_SIGNER") else {
+        let key = crate::publisher_key::PublisherKey::active()?;
+        return Ok((key.id.clone(), key.sign(intent)));
+    };
     let mut child = Command::new(signer)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -407,6 +409,19 @@ pub fn canonical_recipe_intent(
     identity_revision: &str,
 ) -> String {
     format!("{{:intent/format 2 :tap \"{tap}\" :coordinate \"{coordinate}\" :version \"{version}\" :repository \"{repository}\" :tag \"{tag}\" :commit \"{commit}\" :recipe-sha256 \"sha256:{recipe_sha256}\" :identity-revision \"{identity_revision}\"}}\n")
+}
+
+pub fn canonical_github_recipe_intent(
+    coordinate: &str,
+    version: &str,
+    source: &str,
+    repository_id: u64,
+    commit: &str,
+    recipe_sha256: &str,
+    tap: &str,
+    identity_revision: &str,
+) -> String {
+    format!("{{:intent/format 3 :intent/kind :package :intent/tap \"{tap}\" :intent/source \"{source}\" :intent/coordinate \"{coordinate}\" :intent/version \"{version}\" :intent/repository-id {repository_id} :intent/commit \"{commit}\" :intent/recipe-sha256 \"sha256:{recipe_sha256}\" :intent/identity-revision \"{identity_revision}\"}}\n")
 }
 
 pub fn git(

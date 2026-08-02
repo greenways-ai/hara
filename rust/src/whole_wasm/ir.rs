@@ -8,7 +8,11 @@ pub enum Rep {
     I64,
     Bool,
     ArrayRef,
+    ObjectRef,
+    KeyRef,
+    TaggedRef,
     TruthyHandle,
+    FunctionRef(FunctionId),
     Unknown,
 }
 
@@ -18,6 +22,18 @@ pub enum MirOp {
         destination: u16,
         value: i64,
         rep: Rep,
+    },
+    ConstantHandle {
+        destination: u16,
+        constant: u32,
+    },
+    BoxI64 {
+        destination: u16,
+        source: u16,
+    },
+    UnboxI64 {
+        destination: u16,
+        source: u16,
     },
     Move {
         destination: u16,
@@ -54,6 +70,97 @@ pub enum MirOp {
         array: u16,
         index: u16,
         value: u16,
+    },
+    ObjectNew {
+        destination: u16,
+        entries: Vec<(u16, u16)>,
+    },
+    ObjectGetI64 {
+        destination: u16,
+        object: u16,
+        key: u16,
+    },
+    ObjectSetI64 {
+        destination: u16,
+        object: u16,
+        key: u16,
+        value: u16,
+    },
+    BuildVector {
+        destination: u16,
+        values: Vec<u16>,
+    },
+    NativeVector {
+        destination: u16,
+        values: Vec<(u16, Rep)>,
+    },
+    BuildMap {
+        destination: u16,
+        entries: Vec<(u16, u16)>,
+    },
+    BuildMapI64Pair {
+        destination: u16,
+        key: u16,
+        value: u16,
+    },
+    Assoc {
+        destination: u16,
+        collection: u16,
+        key: u16,
+        value: u16,
+    },
+    AssocMapI64Pair {
+        destination: u16,
+        collection: u16,
+        outer_key: u16,
+        inner_key: u16,
+        value: u16,
+    },
+    Get {
+        destination: u16,
+        collection: u16,
+        key: u16,
+    },
+    GetI64 {
+        destination: u16,
+        collection: u16,
+        key: u16,
+    },
+    GetPathI64Constants {
+        destination: u16,
+        collection: u16,
+        first_key: u32,
+        second_key: u32,
+    },
+    IsNumber {
+        destination: u16,
+        value: u16,
+    },
+    TaggedIsNumber {
+        destination: u16,
+        value: u16,
+    },
+    Count {
+        destination: u16,
+        collection: u16,
+    },
+    TaggedCount {
+        destination: u16,
+        collection: u16,
+    },
+    Nth {
+        destination: u16,
+        collection: u16,
+        index: u16,
+    },
+    TaggedNth {
+        destination: u16,
+        collection: u16,
+        index: u16,
+    },
+    TaggedUnboxI64 {
+        destination: u16,
+        source: u16,
     },
     CallStatic {
         destination: u16,
@@ -153,6 +260,10 @@ fn lower_function(
         .map(|(id, start)| (*start, id as u16))
         .collect::<BTreeMap<_, _>>();
     let stack_base = function.local_count;
+    let scalar_scratch = function
+        .local_count
+        .checked_add(function.max_stack)
+        .ok_or_else(|| "whole-Wasm scalar scratch slot overflow".to_string())?;
     let mut blocks = Vec::with_capacity(starts.len());
     for (block_index, start) in starts.iter().copied().enumerate() {
         let end = starts
@@ -171,8 +282,22 @@ fn lower_function(
             };
             match instruction {
                 Instruction::Constant(index) => {
-                    let (value, rep) = scalar_constant(program.constants.get(*index as usize))
-                        .ok_or_else(|| unsupported(id, ip, "non-scalar constant"))?;
+                    let (value, rep) = match program.constants.get(*index as usize) {
+                        Some(Value::String(_)) => (i64::from(*index) + 1, Rep::KeyRef),
+                        Some(Value::Nil) => (0, Rep::Bool),
+                        Some(value) => {
+                            if let Some(value) = scalar_constant(Some(value)) {
+                                value
+                            } else {
+                                operations.push(MirOp::ConstantHandle {
+                                    destination: stack(height)?,
+                                    constant: *index,
+                                });
+                                continue;
+                            }
+                        }
+                        None => return Err(unsupported(id, ip, "missing constant")),
+                    };
                     operations.push(MirOp::Constant {
                         destination: stack(height)?,
                         value,
@@ -189,6 +314,29 @@ fn lower_function(
                     value: 0,
                     rep: Rep::Bool,
                 }),
+                Instruction::Nil => operations.push(MirOp::Constant {
+                    destination: stack(height)?,
+                    value: 0,
+                    rep: Rep::Bool,
+                }),
+                Instruction::Closure {
+                    prototype,
+                    captures: 0,
+                } => operations.push(MirOp::Constant {
+                    destination: stack(height)?,
+                    value: i64::from(*prototype),
+                    rep: Rep::FunctionRef(*prototype),
+                }),
+                Instruction::DefGlobal { .. } => {}
+                Instruction::VarGlobal(index) | Instruction::GetGlobal(index) => {
+                    let prototype = function_for_global(program, *index)
+                        .ok_or_else(|| unsupported(id, ip, "global is not a compiled function"))?;
+                    operations.push(MirOp::Constant {
+                        destination: stack(height)?,
+                        value: i64::from(prototype),
+                        rep: Rep::FunctionRef(prototype),
+                    });
+                }
                 Instruction::LoadLocal(source) => operations.push(MirOp::Move {
                     destination: stack(height)?,
                     source: *source,
@@ -203,12 +351,34 @@ fn lower_function(
                 }),
                 Instruction::Pop => {}
                 Instruction::Primitive { op, argc: 2 } if scalar_binary(*op) => {
+                    for offset in 0..2 {
+                        if matches!(
+                            representations[ip].stack[height - 2 + offset],
+                            Rep::TruthyHandle
+                        ) {
+                            operations.push(MirOp::UnboxI64 {
+                                destination: stack(height - 2 + offset)?,
+                                source: stack(height - 2 + offset)?,
+                            });
+                        }
+                    }
                     operations.push(MirOp::Binary {
                         destination: stack(height - 2)?,
                         left: stack(height - 2)?,
                         right: stack(height - 1)?,
                         op: *op,
                     });
+                }
+                Instruction::Primitive { op, argc } if *argc > 2 && scalar_arithmetic(*op) => {
+                    let base = height - usize::from(*argc);
+                    for offset in 1..usize::from(*argc) {
+                        operations.push(MirOp::Binary {
+                            destination: stack(base)?,
+                            left: stack(base)?,
+                            right: stack(base + offset)?,
+                            op: *op,
+                        });
+                    }
                 }
                 Instruction::Primitive {
                     op: Primitive::ArrayNew,
@@ -247,6 +417,234 @@ fn lower_function(
                     index: stack(height - 2)?,
                     value: stack(height - 1)?,
                 }),
+                Instruction::Primitive {
+                    op: Primitive::ObjectNew,
+                    argc,
+                } => {
+                    if *argc % 2 != 0 {
+                        return Err(unsupported(id, ip, "object constructor pairs"));
+                    }
+                    let base = height - usize::from(*argc);
+                    let mut entries = Vec::with_capacity(usize::from(*argc) / 2);
+                    for offset in (0..usize::from(*argc)).step_by(2) {
+                        if representations[ip].stack[base + offset] != Rep::KeyRef
+                            || representations[ip].stack[base + offset + 1] != Rep::I64
+                        {
+                            return Err(unsupported(
+                                id,
+                                ip,
+                                "object constructor requires string/i64 pairs",
+                            ));
+                        }
+                        entries.push((stack(base + offset)?, stack(base + offset + 1)?));
+                    }
+                    operations.push(MirOp::ObjectNew {
+                        destination: stack(base)?,
+                        entries,
+                    });
+                }
+                Instruction::Primitive {
+                    op: Primitive::ObjectGet,
+                    argc: 2,
+                } => operations.push(MirOp::ObjectGetI64 {
+                    destination: stack(height - 2)?,
+                    object: stack(height - 2)?,
+                    key: stack(height - 1)?,
+                }),
+                Instruction::Primitive {
+                    op: Primitive::ObjectSet,
+                    argc: 3,
+                } => operations.push(MirOp::ObjectSetI64 {
+                    destination: stack(height - 3)?,
+                    object: stack(height - 3)?,
+                    key: stack(height - 2)?,
+                    value: stack(height - 1)?,
+                }),
+                Instruction::BuildVector(count) => {
+                    let base = height - usize::from(*count);
+                    if super::reps::function_enables_tagged_vectors(program, id)
+                        && representations[ip].stack[base..height]
+                            .iter()
+                            .all(|rep| matches!(rep, Rep::I64 | Rep::TaggedRef))
+                    {
+                        operations.push(MirOp::NativeVector {
+                            destination: stack(base)?,
+                            values: (0..usize::from(*count))
+                                .map(|offset| {
+                                    Ok((
+                                        stack(base + offset)?,
+                                        representations[ip].stack[base + offset],
+                                    ))
+                                })
+                                .collect::<Result<Vec<_>, String>>()?,
+                        });
+                        continue;
+                    }
+                    if representations[ip].stack[base..height].contains(&Rep::TaggedRef) {
+                        return Err(unsupported(id, ip, "tagged vector escapes native storage"));
+                    }
+                    let values = (0..usize::from(*count))
+                        .map(|offset| {
+                            let slot = stack(base + offset)?;
+                            if representations[ip].stack[base + offset] == Rep::I64 {
+                                operations.push(MirOp::BoxI64 {
+                                    destination: slot,
+                                    source: slot,
+                                });
+                            }
+                            Ok(slot)
+                        })
+                        .collect::<Result<Vec<_>, String>>()?;
+                    operations.push(MirOp::BuildVector {
+                        destination: stack(base)?,
+                        values,
+                    });
+                }
+                Instruction::BuildMap(pairs) => {
+                    let count = usize::from(*pairs) * 2;
+                    let base = height - count;
+                    if representations[ip].stack[base..height].contains(&Rep::TaggedRef) {
+                        return Err(unsupported(
+                            id,
+                            ip,
+                            "tagged value escapes into persistent map",
+                        ));
+                    }
+                    if *pairs == 1
+                        && representations[ip].stack[base] != Rep::I64
+                        && representations[ip].stack[base + 1] == Rep::I64
+                    {
+                        operations.push(MirOp::BuildMapI64Pair {
+                            destination: stack(base)?,
+                            key: stack(base)?,
+                            value: stack(base + 1)?,
+                        });
+                        continue;
+                    }
+                    let mut entries = Vec::with_capacity(usize::from(*pairs));
+                    for offset in (0..count).step_by(2) {
+                        let key = stack(base + offset)?;
+                        let value = stack(base + offset + 1)?;
+                        if representations[ip].stack[base + offset] == Rep::I64 {
+                            operations.push(MirOp::BoxI64 {
+                                destination: key,
+                                source: key,
+                            });
+                        }
+                        if representations[ip].stack[base + offset + 1] == Rep::I64 {
+                            operations.push(MirOp::BoxI64 {
+                                destination: value,
+                                source: value,
+                            });
+                        }
+                        entries.push((key, value));
+                    }
+                    operations.push(MirOp::BuildMap {
+                        destination: stack(base)?,
+                        entries,
+                    });
+                }
+                Instruction::Primitive {
+                    op: Primitive::Assoc,
+                    argc: 3,
+                } => {
+                    let base = height - 3;
+                    if representations[ip].stack[base..height].contains(&Rep::TaggedRef) {
+                        return Err(unsupported(id, ip, "tagged value escapes through assoc"));
+                    }
+                    for offset in 1..3 {
+                        if representations[ip].stack[base + offset] == Rep::I64 {
+                            let slot = stack(base + offset)?;
+                            operations.push(MirOp::BoxI64 {
+                                destination: slot,
+                                source: slot,
+                            });
+                        }
+                    }
+                    operations.push(MirOp::Assoc {
+                        destination: stack(base)?,
+                        collection: stack(base)?,
+                        key: stack(base + 1)?,
+                        value: stack(base + 2)?,
+                    });
+                }
+                Instruction::Primitive {
+                    op: Primitive::Get,
+                    argc: 2,
+                } => {
+                    let numeric_consumer =
+                        function.code.get(ip + 1).is_some_and(|next| match next {
+                            Instruction::Primitive { op, .. }
+                            | Instruction::PrimitiveLocalConst { op, .. } => scalar_arithmetic(*op),
+                            _ => false,
+                        });
+                    if numeric_consumer {
+                        operations.push(MirOp::GetI64 {
+                            destination: stack(height - 2)?,
+                            collection: stack(height - 2)?,
+                            key: stack(height - 1)?,
+                        });
+                    } else {
+                        operations.push(MirOp::Get {
+                            destination: stack(height - 2)?,
+                            collection: stack(height - 2)?,
+                            key: stack(height - 1)?,
+                        });
+                    }
+                }
+                Instruction::Primitive {
+                    op: Primitive::NumberPredicate,
+                    argc: 1,
+                } => {
+                    let operation = if representations[ip].stack[height - 1] == Rep::TaggedRef {
+                        MirOp::TaggedIsNumber {
+                            destination: stack(height - 1)?,
+                            value: stack(height - 1)?,
+                        }
+                    } else {
+                        MirOp::IsNumber {
+                            destination: stack(height - 1)?,
+                            value: stack(height - 1)?,
+                        }
+                    };
+                    operations.push(operation);
+                }
+                Instruction::Primitive {
+                    op: Primitive::Count,
+                    argc: 1,
+                } => {
+                    let operation = if representations[ip].stack[height - 1] == Rep::TaggedRef {
+                        MirOp::TaggedCount {
+                            destination: stack(height - 1)?,
+                            collection: stack(height - 1)?,
+                        }
+                    } else {
+                        MirOp::Count {
+                            destination: stack(height - 1)?,
+                            collection: stack(height - 1)?,
+                        }
+                    };
+                    operations.push(operation);
+                }
+                Instruction::Primitive {
+                    op: Primitive::Nth,
+                    argc: 2,
+                } => {
+                    let operation = if representations[ip].stack[height - 2] == Rep::TaggedRef {
+                        MirOp::TaggedNth {
+                            destination: stack(height - 2)?,
+                            collection: stack(height - 2)?,
+                            index: stack(height - 1)?,
+                        }
+                    } else {
+                        MirOp::Nth {
+                            destination: stack(height - 2)?,
+                            collection: stack(height - 2)?,
+                            index: stack(height - 1)?,
+                        }
+                    };
+                    operations.push(operation);
+                }
                 Instruction::PrimitiveLocalConst {
                     op,
                     local,
@@ -299,7 +697,39 @@ fn lower_function(
                             .collect::<Result<Vec<_>, _>>()?,
                     });
                 }
+                Instruction::Call { argc } => {
+                    let base = height - usize::from(*argc) - 1;
+                    let Rep::FunctionRef(prototype) = representations[ip].stack[base] else {
+                        return Err(unsupported(id, ip, "dynamic call target"));
+                    };
+                    operations.push(MirOp::CallStatic {
+                        destination: stack(base)?,
+                        function: prototype,
+                        arguments: (0..usize::from(*argc))
+                            .map(|offset| stack(base + 1 + offset))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    });
+                }
                 Instruction::Jump(target) => {
+                    let target_rep = representations[*target as usize].stack.last().copied();
+                    if representations[ip].stack.last() == Some(&Rep::TruthyHandle)
+                        && target_rep == Some(Rep::Unknown)
+                        && height != 0
+                    {
+                        operations.push(MirOp::UnboxI64 {
+                            destination: stack(height - 1)?,
+                            source: stack(height - 1)?,
+                        });
+                    }
+                    if representations[ip].stack.last() == Some(&Rep::TaggedRef)
+                        && target_rep == Some(Rep::Unknown)
+                        && height != 0
+                    {
+                        operations.push(MirOp::TaggedUnboxI64 {
+                            destination: stack(height - 1)?,
+                            source: stack(height - 1)?,
+                        });
+                    }
                     terminator = Some(MirTerminator::Goto(block_id(&ids, *target)?));
                 }
                 Instruction::JumpIfFalse(target) => {
@@ -320,6 +750,18 @@ fn lower_function(
                     });
                 }
                 Instruction::Return => {
+                    if representations[ip].stack.last() == Some(&Rep::TruthyHandle) {
+                        operations.push(MirOp::UnboxI64 {
+                            destination: stack(height - 1)?,
+                            source: stack(height - 1)?,
+                        });
+                    }
+                    if representations[ip].stack.last() == Some(&Rep::TaggedRef) {
+                        operations.push(MirOp::TaggedUnboxI64 {
+                            destination: stack(height - 1)?,
+                            source: stack(height - 1)?,
+                        });
+                    }
                     terminator = Some(MirTerminator::Return(stack(height - 1)?));
                 }
                 other => return Err(unsupported(id, ip, &other.to_string())),
@@ -334,18 +776,423 @@ fn lower_function(
         blocks.push(MirBlock {
             id: block_index as u16,
             start: start as u32,
-            operations,
+            operations: forward_known_nested_fields(
+                fuse_constant_get_paths(operations),
+                scalar_scratch,
+            ),
             terminator,
         });
     }
+    virtualize_unobserved_loop_assocs(&mut blocks, function.local_count);
     Ok(MirFunction {
         id,
         name: function.name.clone(),
         arity: function.arity,
         local_count: function.local_count,
-        stack_count: function.max_stack,
+        stack_count: function
+            .max_stack
+            .checked_add(1)
+            .ok_or_else(|| "whole-Wasm scalar scratch count overflow".to_string())?,
         blocks,
     })
+}
+
+/// Replaces a persistent assoc with a carrier move when the loop-carried
+/// collection has no observable uses. Field reads must already have been
+/// scalar-forwarded, and every result alias must flow only back to the same
+/// local. The original immutable value remains available for deoptimization;
+/// no persistent node is allocated on the optimized loop edge.
+fn virtualize_unobserved_loop_assocs(blocks: &mut [MirBlock], local_count: u16) {
+    let mut candidates = Vec::new();
+    for (block_index, block) in blocks.iter().enumerate() {
+        for (operation_index, operation) in block.operations.iter().enumerate() {
+            let MirOp::AssocMapI64Pair {
+                destination,
+                collection,
+                ..
+            } = operation
+            else {
+                continue;
+            };
+            let Some(local) = originating_local(
+                &block.operations[..operation_index],
+                *collection,
+                local_count,
+            ) else {
+                continue;
+            };
+            if operation_source_count(blocks, local) != 1
+                || terminators_read_slot(blocks, local)
+                || !assoc_result_returns_only_to_local(
+                    &block.operations[operation_index + 1..],
+                    *destination,
+                    local,
+                )
+            {
+                continue;
+            }
+            candidates.push((block_index, operation_index, *destination, *collection));
+        }
+    }
+    for (block, operation, destination, collection) in candidates {
+        blocks[block].operations[operation] = MirOp::Move {
+            destination,
+            source: collection,
+        };
+    }
+}
+
+fn originating_local(operations: &[MirOp], slot: u16, local_count: u16) -> Option<u16> {
+    for operation in operations.iter().rev() {
+        if operation_destination(operation) != Some(slot) {
+            continue;
+        }
+        return match operation {
+            MirOp::Move { source, .. } if *source < local_count => Some(*source),
+            _ => None,
+        };
+    }
+    None
+}
+
+fn operation_source_count(blocks: &[MirBlock], slot: u16) -> usize {
+    blocks
+        .iter()
+        .flat_map(|block| &block.operations)
+        .map(|operation| {
+            operation_sources(operation)
+                .filter(|source| *source == slot)
+                .count()
+        })
+        .sum()
+}
+
+fn terminators_read_slot(blocks: &[MirBlock], slot: u16) -> bool {
+    blocks.iter().any(|block| match block.terminator {
+        MirTerminator::Goto(_) => false,
+        MirTerminator::BranchZero { condition, .. } => condition == slot,
+        MirTerminator::Return(value) => value == slot,
+    })
+}
+
+fn assoc_result_returns_only_to_local(operations: &[MirOp], result: u16, local: u16) -> bool {
+    let mut aliases = BTreeSet::from([result]);
+    for operation in operations {
+        if let MirOp::Move {
+            destination,
+            source,
+        } = operation
+        {
+            let propagates = aliases.contains(source);
+            aliases.remove(destination);
+            if propagates {
+                aliases.insert(*destination);
+            }
+            continue;
+        }
+        if operation_sources(operation).any(|source| aliases.contains(&source)) {
+            return false;
+        }
+        if let Some(destination) = operation_destination(operation) {
+            aliases.remove(&destination);
+        }
+    }
+    aliases.contains(&local)
+}
+
+fn operation_destination(operation: &MirOp) -> Option<u16> {
+    Some(match operation {
+        MirOp::Constant { destination, .. }
+        | MirOp::ConstantHandle { destination, .. }
+        | MirOp::BoxI64 { destination, .. }
+        | MirOp::UnboxI64 { destination, .. }
+        | MirOp::Move { destination, .. }
+        | MirOp::Binary { destination, .. }
+        | MirOp::BinaryConstant { destination, .. }
+        | MirOp::ArrayNew { destination, .. }
+        | MirOp::ArrayGetI64 { destination, .. }
+        | MirOp::ArrayGetI64Constant { destination, .. }
+        | MirOp::ArraySetI64 { destination, .. }
+        | MirOp::ObjectNew { destination, .. }
+        | MirOp::ObjectGetI64 { destination, .. }
+        | MirOp::ObjectSetI64 { destination, .. }
+        | MirOp::BuildVector { destination, .. }
+        | MirOp::NativeVector { destination, .. }
+        | MirOp::BuildMap { destination, .. }
+        | MirOp::BuildMapI64Pair { destination, .. }
+        | MirOp::Assoc { destination, .. }
+        | MirOp::AssocMapI64Pair { destination, .. }
+        | MirOp::Get { destination, .. }
+        | MirOp::GetI64 { destination, .. }
+        | MirOp::GetPathI64Constants { destination, .. }
+        | MirOp::IsNumber { destination, .. }
+        | MirOp::TaggedIsNumber { destination, .. }
+        | MirOp::Count { destination, .. }
+        | MirOp::TaggedCount { destination, .. }
+        | MirOp::Nth { destination, .. }
+        | MirOp::TaggedNth { destination, .. }
+        | MirOp::TaggedUnboxI64 { destination, .. }
+        | MirOp::CallStatic { destination, .. } => *destination,
+    })
+}
+
+fn operation_sources(operation: &MirOp) -> impl Iterator<Item = u16> {
+    let mut sources = Vec::new();
+    match operation {
+        MirOp::Constant { .. } | MirOp::ConstantHandle { .. } => {}
+        MirOp::BoxI64 { source, .. }
+        | MirOp::UnboxI64 { source, .. }
+        | MirOp::Move { source, .. }
+        | MirOp::TaggedUnboxI64 { source, .. } => sources.push(*source),
+        MirOp::Binary { left, right, .. } => sources.extend([*left, *right]),
+        MirOp::BinaryConstant { left, .. } => sources.push(*left),
+        MirOp::ArrayNew { values, .. } | MirOp::BuildVector { values, .. } => {
+            sources.extend(values.iter().copied())
+        }
+        MirOp::NativeVector { values, .. } => sources.extend(values.iter().map(|(slot, _)| *slot)),
+        MirOp::ArrayGetI64 { array, index, .. } => sources.extend([*array, *index]),
+        MirOp::ArrayGetI64Constant { array, .. } => sources.push(*array),
+        MirOp::ArraySetI64 {
+            array,
+            index,
+            value,
+            ..
+        } => sources.extend([*array, *index, *value]),
+        MirOp::ObjectNew { entries, .. } | MirOp::BuildMap { entries, .. } => {
+            sources.extend(entries.iter().flat_map(|(key, value)| [*key, *value]))
+        }
+        MirOp::ObjectGetI64 { object, key, .. } => sources.extend([*object, *key]),
+        MirOp::ObjectSetI64 {
+            object, key, value, ..
+        } => sources.extend([*object, *key, *value]),
+        MirOp::BuildMapI64Pair { key, value, .. } => sources.extend([*key, *value]),
+        MirOp::Assoc {
+            collection,
+            key,
+            value,
+            ..
+        } => sources.extend([*collection, *key, *value]),
+        MirOp::AssocMapI64Pair {
+            collection,
+            outer_key,
+            inner_key,
+            value,
+            ..
+        } => sources.extend([*collection, *outer_key, *inner_key, *value]),
+        MirOp::Get {
+            collection, key, ..
+        }
+        | MirOp::GetI64 {
+            collection, key, ..
+        } => sources.extend([*collection, *key]),
+        MirOp::GetPathI64Constants { collection, .. }
+        | MirOp::Count { collection, .. }
+        | MirOp::TaggedCount { collection, .. } => sources.push(*collection),
+        MirOp::IsNumber { value, .. } | MirOp::TaggedIsNumber { value, .. } => sources.push(*value),
+        MirOp::Nth {
+            collection, index, ..
+        }
+        | MirOp::TaggedNth {
+            collection, index, ..
+        } => sources.extend([*collection, *index]),
+        MirOp::CallStatic { arguments, .. } => sources.extend(arguments.iter().copied()),
+    }
+    sources.into_iter()
+}
+
+/// Collapses `(get (get value :outer) :inner)` when its final result is
+/// numeric. Both keyword constants are resolved by the host import, avoiding
+/// two constant handles, an intermediate value handle, and one host crossing.
+fn fuse_constant_get_paths(operations: Vec<MirOp>) -> Vec<MirOp> {
+    let mut fused = Vec::with_capacity(operations.len());
+    let mut index = 0;
+    while index < operations.len() {
+        if let [MirOp::BuildMapI64Pair {
+            destination: map,
+            key: inner_key,
+            value,
+        }, MirOp::Assoc {
+            destination,
+            collection,
+            key: outer_key,
+            value: assoc_value,
+        }, ..] = &operations[index..]
+        {
+            if map == assoc_value {
+                fused.push(MirOp::AssocMapI64Pair {
+                    destination: *destination,
+                    collection: *collection,
+                    outer_key: *outer_key,
+                    inner_key: *inner_key,
+                    value: *value,
+                });
+                index += 2;
+                continue;
+            }
+        }
+        if let [MirOp::ConstantHandle {
+            destination: first_key_slot,
+            constant: first_key,
+        }, MirOp::Get {
+            destination: intermediate,
+            collection,
+            key: get_first_key,
+        }, MirOp::ConstantHandle {
+            destination: second_key_slot,
+            constant: second_key,
+        }, MirOp::GetI64 {
+            destination,
+            collection: get_intermediate,
+            key: get_second_key,
+        }, ..] = &operations[index..]
+        {
+            if first_key_slot == get_first_key
+                && intermediate == get_intermediate
+                && second_key_slot == get_second_key
+            {
+                fused.push(MirOp::GetPathI64Constants {
+                    destination: *destination,
+                    collection: *collection,
+                    first_key: *first_key,
+                    second_key: *second_key,
+                });
+                index += 4;
+                continue;
+            }
+        }
+        fused.push(operations[index].clone());
+        index += 1;
+    }
+    fused
+}
+
+/// Gives stack-machine values stable identities within one CFG block. Known
+/// nested scalar writes are copied to a compiler-reserved slot and matching
+/// reads are forwarded without observing the materialized collection.
+fn forward_known_nested_fields(operations: Vec<MirOp>, scratch: u16) -> Vec<MirOp> {
+    let mut constants = BTreeMap::<u16, u32>::new();
+    let mut nested = BTreeMap::<u16, (u32, u32, u64)>::new();
+    let mut generation = 0u64;
+    let mut output = Vec::with_capacity(operations.len());
+    for operation in operations {
+        match operation {
+            MirOp::ConstantHandle {
+                destination,
+                constant,
+            } => {
+                constants.insert(destination, constant);
+                nested.remove(&destination);
+                output.push(MirOp::ConstantHandle {
+                    destination,
+                    constant,
+                });
+            }
+            MirOp::Move {
+                destination,
+                source,
+            } => {
+                let constant = constants.get(&source).copied();
+                let known = nested.get(&source).copied();
+                constants.remove(&destination);
+                nested.remove(&destination);
+                if let Some(constant) = constant {
+                    constants.insert(destination, constant);
+                }
+                if let Some(known) = known {
+                    nested.insert(destination, known);
+                }
+                output.push(MirOp::Move {
+                    destination,
+                    source,
+                });
+            }
+            assoc @ MirOp::AssocMapI64Pair {
+                destination,
+                outer_key,
+                inner_key,
+                value,
+                ..
+            } => {
+                let keys = (
+                    constants.get(&outer_key).copied(),
+                    constants.get(&inner_key).copied(),
+                );
+                constants.remove(&destination);
+                nested.remove(&destination);
+                if let (Some(outer), Some(inner)) = keys {
+                    generation = generation.wrapping_add(1);
+                    output.push(MirOp::Move {
+                        destination: scratch,
+                        source: value,
+                    });
+                    nested.insert(destination, (outer, inner, generation));
+                }
+                output.push(assoc);
+            }
+            MirOp::GetPathI64Constants {
+                destination,
+                collection,
+                first_key,
+                second_key,
+            } => {
+                let known = nested.get(&collection).copied();
+                constants.remove(&destination);
+                nested.remove(&destination);
+                if matches!(known, Some((outer, inner, current)) if outer == first_key && inner == second_key && current == generation)
+                {
+                    output.push(MirOp::Move {
+                        destination,
+                        source: scratch,
+                    });
+                } else {
+                    output.push(MirOp::GetPathI64Constants {
+                        destination,
+                        collection,
+                        first_key,
+                        second_key,
+                    });
+                }
+            }
+            operation => {
+                let destination = match &operation {
+                    MirOp::Constant { destination, .. }
+                    | MirOp::BoxI64 { destination, .. }
+                    | MirOp::UnboxI64 { destination, .. }
+                    | MirOp::Binary { destination, .. }
+                    | MirOp::BinaryConstant { destination, .. }
+                    | MirOp::ArrayNew { destination, .. }
+                    | MirOp::ArrayGetI64 { destination, .. }
+                    | MirOp::ArrayGetI64Constant { destination, .. }
+                    | MirOp::ArraySetI64 { destination, .. }
+                    | MirOp::ObjectNew { destination, .. }
+                    | MirOp::ObjectGetI64 { destination, .. }
+                    | MirOp::ObjectSetI64 { destination, .. }
+                    | MirOp::BuildVector { destination, .. }
+                    | MirOp::NativeVector { destination, .. }
+                    | MirOp::BuildMap { destination, .. }
+                    | MirOp::BuildMapI64Pair { destination, .. }
+                    | MirOp::Assoc { destination, .. }
+                    | MirOp::Get { destination, .. }
+                    | MirOp::GetI64 { destination, .. }
+                    | MirOp::IsNumber { destination, .. }
+                    | MirOp::TaggedIsNumber { destination, .. }
+                    | MirOp::Count { destination, .. }
+                    | MirOp::TaggedCount { destination, .. }
+                    | MirOp::Nth { destination, .. }
+                    | MirOp::TaggedNth { destination, .. }
+                    | MirOp::TaggedUnboxI64 { destination, .. }
+                    | MirOp::CallStatic { destination, .. } => Some(*destination),
+                    _ => None,
+                };
+                if let Some(destination) = destination {
+                    constants.remove(&destination);
+                    nested.remove(&destination);
+                }
+                output.push(operation);
+            }
+        }
+    }
+    output
 }
 
 fn scalar_constant(value: Option<&Value>) -> Option<(i64, Rep)> {
@@ -370,6 +1217,32 @@ fn scalar_binary(op: Primitive) -> bool {
             | Primitive::Greater
             | Primitive::GreaterOrEqual
     )
+}
+
+fn scalar_arithmetic(op: Primitive) -> bool {
+    matches!(
+        op,
+        Primitive::Add
+            | Primitive::Subtract
+            | Primitive::Multiply
+            | Primitive::Divide
+            | Primitive::Remainder
+    )
+}
+
+fn function_for_global(program: &Program, constant: u32) -> Option<FunctionId> {
+    let Value::String(name) = program.constants.get(constant as usize)? else {
+        return None;
+    };
+    program
+        .functions
+        .iter()
+        .position(|function| {
+            function.name.as_deref().is_some_and(|candidate| {
+                candidate == name || candidate.rsplit('/').next() == name.rsplit('/').next()
+            })
+        })
+        .and_then(|id| u16::try_from(id).ok())
 }
 
 fn block_id(ids: &BTreeMap<usize, u16>, target: u32) -> Result<u16, String> {
@@ -404,6 +1277,15 @@ pub fn verify(program: &MirProgram) -> Result<(), String> {
             for operation in &block.operations {
                 let valid = match operation {
                     MirOp::Constant { destination, .. } => valid_slot(*destination),
+                    MirOp::ConstantHandle { destination, .. } => valid_slot(*destination),
+                    MirOp::BoxI64 {
+                        destination,
+                        source,
+                    }
+                    | MirOp::UnboxI64 {
+                        destination,
+                        source,
+                    } => valid_slot(*destination) && valid_slot(*source),
                     MirOp::Move {
                         destination,
                         source,
@@ -440,6 +1322,125 @@ pub fn verify(program: &MirProgram) -> Result<(), String> {
                             && valid_slot(*index)
                             && valid_slot(*value)
                     }
+                    MirOp::ObjectNew {
+                        destination,
+                        entries,
+                    } => {
+                        valid_slot(*destination)
+                            && entries
+                                .iter()
+                                .all(|(key, value)| valid_slot(*key) && valid_slot(*value))
+                    }
+                    MirOp::ObjectGetI64 {
+                        destination,
+                        object,
+                        key,
+                    } => valid_slot(*destination) && valid_slot(*object) && valid_slot(*key),
+                    MirOp::ObjectSetI64 {
+                        destination,
+                        object,
+                        key,
+                        value,
+                    } => {
+                        valid_slot(*destination)
+                            && valid_slot(*object)
+                            && valid_slot(*key)
+                            && valid_slot(*value)
+                    }
+                    MirOp::BuildVector {
+                        destination,
+                        values,
+                    } => valid_slot(*destination) && values.iter().all(|slot| valid_slot(*slot)),
+                    MirOp::NativeVector {
+                        destination,
+                        values,
+                    } => {
+                        valid_slot(*destination)
+                            && values.iter().all(|(slot, rep)| {
+                                valid_slot(*slot) && matches!(rep, Rep::I64 | Rep::TaggedRef)
+                            })
+                    }
+                    MirOp::BuildMap {
+                        destination,
+                        entries,
+                    } => {
+                        valid_slot(*destination)
+                            && entries
+                                .iter()
+                                .all(|(key, value)| valid_slot(*key) && valid_slot(*value))
+                    }
+                    MirOp::BuildMapI64Pair {
+                        destination,
+                        key,
+                        value,
+                    } => valid_slot(*destination) && valid_slot(*key) && valid_slot(*value),
+                    MirOp::Assoc {
+                        destination,
+                        collection,
+                        key,
+                        value,
+                    } => {
+                        valid_slot(*destination)
+                            && valid_slot(*collection)
+                            && valid_slot(*key)
+                            && valid_slot(*value)
+                    }
+                    MirOp::AssocMapI64Pair {
+                        destination,
+                        collection,
+                        outer_key,
+                        inner_key,
+                        value,
+                    } => {
+                        valid_slot(*destination)
+                            && valid_slot(*collection)
+                            && valid_slot(*outer_key)
+                            && valid_slot(*inner_key)
+                            && valid_slot(*value)
+                    }
+                    MirOp::Get {
+                        destination,
+                        collection,
+                        key,
+                    } => valid_slot(*destination) && valid_slot(*collection) && valid_slot(*key),
+                    MirOp::GetI64 {
+                        destination,
+                        collection,
+                        key,
+                    } => valid_slot(*destination) && valid_slot(*collection) && valid_slot(*key),
+                    MirOp::GetPathI64Constants {
+                        destination,
+                        collection,
+                        ..
+                    } => valid_slot(*destination) && valid_slot(*collection),
+                    MirOp::IsNumber { destination, value } => {
+                        valid_slot(*destination) && valid_slot(*value)
+                    }
+                    MirOp::TaggedIsNumber { destination, value } => {
+                        valid_slot(*destination) && valid_slot(*value)
+                    }
+                    MirOp::Count {
+                        destination,
+                        collection,
+                    } => valid_slot(*destination) && valid_slot(*collection),
+                    MirOp::TaggedCount {
+                        destination,
+                        collection,
+                    } => valid_slot(*destination) && valid_slot(*collection),
+                    MirOp::Nth {
+                        destination,
+                        collection,
+                        index,
+                    } => valid_slot(*destination) && valid_slot(*collection) && valid_slot(*index),
+                    MirOp::TaggedNth {
+                        destination,
+                        collection,
+                        index,
+                    } => valid_slot(*destination) && valid_slot(*collection) && valid_slot(*index),
+                    MirOp::TaggedUnboxI64 {
+                        destination,
+                        source,
+                    } => valid_slot(*destination) && valid_slot(*source),
                     MirOp::CallStatic {
                         destination,
                         function: target,

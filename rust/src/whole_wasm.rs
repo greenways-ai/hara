@@ -101,4 +101,72 @@ mod tests {
             Err("array index out of bounds".into())
         );
     }
+
+    #[test]
+    fn fixed_shape_numeric_objects_use_wasm_linear_memory() {
+        let source = "(let [o (std.native.Obj/new \"a\" 19 \"b\" 2)]
+                        (std.native.Obj/set-key o \"b\" 23)
+                        (+ (std.native.Obj/get-key o \"a\")
+                           (std.native.Obj/get-key o \"b\")))";
+        assert_eq!(module(source).call_entry_i64(), Ok(42));
+    }
+
+    #[test]
+    fn wasm_linear_objects_report_missing_numeric_keys() {
+        assert_eq!(
+            module("(std.native.Obj/get-key (std.native.Obj/new \"a\" 1) \"b\")").call_entry_i64(),
+            Err("object key not found".into())
+        );
+    }
+
+    #[test]
+    fn persistent_nested_values_cross_scoped_handles_without_copy_on_read() {
+        let source = "(loop [i 0 state {:left [1 2 3] :right {:count 0}} checksum 0]
+                        (if (< i 10)
+                          (let [next (assoc state :right {:count (+ i 1)})]
+                            (recur (+ i 1) next
+                                   (+ checksum (get (get next :right) :count))))
+                          checksum))";
+        assert_eq!(module(source).call_entry_i64(), Ok(55));
+    }
+
+    #[test]
+    fn persistent_loop_virtualization_preserves_observable_old_versions() {
+        let source = "(loop [i 0 state {:right {:count 0}} checksum 0]
+                        (if (< i 10)
+                          (let [old state
+                                next (assoc state :right {:count (+ i 1)})]
+                            (recur (+ i 1) next
+                                   (+ checksum (get (get old :right) :count))))
+                          checksum))";
+        assert_eq!(module(source).call_entry_i64(), Ok(45));
+    }
+
+    #[test]
+    fn persistent_loop_virtualization_materializes_observed_exit_state() {
+        let source = "(loop [i 0 state {:right {:count 0}}]
+                        (if (< i 10)
+                          (recur (+ i 1)
+                                 (assoc state :right {:count (+ i 1)}))
+                          (get (get state :right) :count)))";
+        assert_eq!(module(source).call_entry_i64(), Ok(10));
+    }
+
+    #[test]
+    fn recursive_tree_calls_compile_as_direct_wasm_calls() {
+        let source = "(do
+          (defn bench-tree-walk [node]
+            (if (number? node)
+              node
+              (loop [i 0 acc 0]
+                (if (< i (count node))
+                  (recur (+ i 1) (+ acc (bench-tree-walk (nth node i))))
+                  acc))))
+          (let [tree [1 [2 3 4] [5 [6 7] 8]]]
+            (loop [i 0 acc 0]
+              (if (< i 2)
+                (recur (+ i 1) (+ acc (bench-tree-walk tree)))
+                acc))))";
+        assert_eq!(module(source).call_entry_i64(), Ok(72));
+    }
 }

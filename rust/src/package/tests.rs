@@ -83,6 +83,29 @@ fn packages_declared_artifacts_under_the_archive_root() {
 }
 
 #[test]
+fn github_sources_bind_numeric_repository_identity_and_matching_remotes() {
+    assert_eq!(
+        github_source("gh:hara-lang/hara").unwrap(),
+        "gh:hara-lang/hara"
+    );
+    assert!(github_source("gh:hara-lang").is_err());
+    assert!(require_matching_github_remote(
+        "git@github.com:hara-lang/hara.git",
+        "gh:hara-lang/hara"
+    )
+    .is_ok());
+    assert!(require_matching_github_remote(
+        "https://github.com/attacker/hara.git",
+        "gh:hara-lang/hara"
+    )
+    .is_err());
+    assert_eq!(
+        parse_github_repository_id("{\"id\": 1234, \"name\":\"hara\"}").unwrap(),
+        1234
+    );
+}
+
+#[test]
 fn rejects_missing_declared_artifacts() {
     let root = fixture();
     fs::write(

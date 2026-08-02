@@ -28,6 +28,8 @@ mod process_extension;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod project;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod publisher_key;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod resp;
 pub mod snapshot;
 #[cfg(not(target_arch = "wasm32"))]

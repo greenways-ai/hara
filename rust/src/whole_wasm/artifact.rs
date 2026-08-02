@@ -5,7 +5,7 @@ use crate::vm::{decode_program, encode_program, FunctionId, Program};
 use super::codegen::compile_program;
 
 const MAGIC: &[u8; 4] = b"HNW1";
-pub const HNW_ABI_VERSION: u16 = 1;
+pub const HNW_ABI_VERSION: u16 = 2;
 
 #[derive(Debug, Clone)]
 pub struct NativeArtifact {

@@ -3,7 +3,7 @@
 //! Private keys remain behind `HARA_SIGNER`.  This client exchanges only
 //! canonical enrollment bytes, detached signatures and public key material.
 
-use crate::tap;
+use crate::{publisher_key::PublisherKey, tap};
 use std::env;
 use std::process::Command;
 
@@ -15,10 +15,10 @@ pub fn run(args: &[String]) -> Result<(), String> {
             usage();
             Ok(())
         }
-        Some("login") => {
-            println!("{}/login/github", endpoint().trim_end_matches('/'));
-            Ok(())
+        Some("github") if args.get(1).map(String::as_str) == Some("login") => {
+            github_login(&args[2..])
         }
+        Some("login") => github_login(&args[1..]),
         Some("enroll") => enroll(&args[1..]),
         Some("status") => get("/v1/status", &args[1..]),
         Some("namespace") => get("/v1/namespaces", &args[1..]),
@@ -61,6 +61,7 @@ fn enroll(args: &[String]) -> Result<(), String> {
 
 fn key_command(args: &[String]) -> Result<(), String> {
     match args.first().map(String::as_str) {
+        Some("create") => create_key(&args[1..]),
         Some("list") => get("/v1/keys", &args[1..]),
         Some("rotate") => post("/v1/keys/rotate", "{}\n"),
         Some("revoke") => {
@@ -70,8 +71,39 @@ fn key_command(args: &[String]) -> Result<(), String> {
                 "{:revocation/reason :publisher-request}\n",
             )
         }
-        _ => Err("usage: hara id key <list|rotate|revoke KEY_ID>".into()),
+        _ => Err("usage: hara id key <create|list|rotate|revoke KEY_ID>".into()),
     }
+}
+
+fn github_login(args: &[String]) -> Result<(), String> {
+    let suffix = github_login_path(args);
+    println!("{}{}", endpoint().trim_end_matches('/'), suffix);
+    Ok(())
+}
+
+fn github_login_path(args: &[String]) -> &'static str {
+    if args.iter().any(|arg| arg == "--device") {
+        "/login/github/device"
+    } else {
+        "/login/github"
+    }
+}
+
+fn create_key(args: &[String]) -> Result<(), String> {
+    let key = PublisherKey::generate();
+    if args.iter().any(|arg| arg == "--dry-run") {
+        println!("key-id={} public-key={}", key.id, key.public_key);
+        return Ok(());
+    }
+    key.store_as_active()?;
+    let body = format!(
+        "{{:key/id {} :key/algorithm :ed25519 :key/public-key {}}}\n",
+        edn_string(&key.id),
+        edn_string(&key.public_key),
+    );
+    post("/v1/keys", &body)?;
+    println!("created publisher key {}", key.id);
+    Ok(())
 }
 
 pub fn canonical_enrollment(tap: &str, owner: &str, public_key: &str, challenge: &str) -> String {
@@ -184,11 +216,11 @@ fn edn_string(value: &str) -> String {
 }
 
 fn usage() {
-    println!("hara id login");
+    println!("hara id github login [--device]");
     println!("hara id enroll --owner OWNER [--tap hara] [--dry-run]");
     println!("hara id status");
     println!("hara id namespace");
-    println!("hara id key <list|rotate|revoke KEY_ID>");
+    println!("hara id key <create|list|rotate|revoke KEY_ID>");
 }
 
 #[cfg(test)]
@@ -208,6 +240,15 @@ mod tests {
                 "{{:enrollment/format 1 :enrollment/tap \"hara\" :enrollment/provider :github :enrollment/owner \"alice\" :enrollment/public-key \"{}\" :enrollment/challenge \"challenge-1\"}}\n",
                 "ab".repeat(32)
             )
+        );
+    }
+
+    #[test]
+    fn github_login_has_browser_and_device_routes() {
+        assert_eq!(github_login_path(&[]), "/login/github");
+        assert_eq!(
+            github_login_path(&["--device".into()]),
+            "/login/github/device"
         );
     }
 }

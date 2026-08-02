@@ -275,7 +275,7 @@ pub fn tap_command(args: &[String]) -> Result<(), String> {
     }
 }
 
-fn publish(args: &[String]) -> Result<(), String> {
+pub fn publish(args: &[String]) -> Result<(), String> {
     let tap_name = optional_option(args, "--tap")
         .map(|name| {
             if name == "official" {
@@ -286,10 +286,10 @@ fn publish(args: &[String]) -> Result<(), String> {
         })
         .unwrap_or_else(|| "hara".into());
     let dry_run = args.iter().any(|arg| arg == "--dry-run");
+    let source = args.iter().find(|arg| arg.starts_with("gh:")).cloned();
     let path = args
         .iter()
-        .skip(1)
-        .find(|arg| !arg.starts_with('-') && *arg != &tap_name)
+        .find(|arg| !arg.starts_with('-') && !arg.starts_with("gh:") && *arg != &tap_name)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     let project = read_project(&path)?;
@@ -303,7 +303,7 @@ fn publish(args: &[String]) -> Result<(), String> {
     }
     let trusted_tap = tap::trusted_or_builtin(&tap::config_root(), &tap_name)?;
     let scratch = scratch("publish")?;
-    let result = publish_inner(&project, &trusted_tap, dry_run, &scratch);
+    let result = publish_inner(&project, &trusted_tap, source.as_deref(), dry_run, &scratch);
     let _ = fs::remove_dir_all(&scratch);
     result
 }
@@ -311,28 +311,51 @@ fn publish(args: &[String]) -> Result<(), String> {
 fn publish_inner(
     project: &Project,
     trusted_tap: &Tap,
+    source: Option<&str>,
     dry_run: bool,
     scratch_root: &Path,
 ) -> Result<(), String> {
     let policy = tap::fetch_verified_policy(trusted_tap, scratch_root)?;
-    let tag = format!("v{}", project.version);
-    tap::git(&project.root, ["tag", "-v", &tag])
-        .map_err(|error| format!("publish requires a valid signed tag {tag}: {error}"))?;
-    let commit = tap::git(&project.root, ["rev-list", "-n", "1", &tag])?;
+    if !tap::git(&project.root, ["status", "--porcelain"])?.is_empty() {
+        return Err("publish requires a clean working tree".into());
+    }
+    let commit = tap::git(&project.root, ["rev-parse", "HEAD"])?;
+    let upstream = tap::git(&project.root, ["rev-parse", "@{upstream}"])
+        .map_err(|_| "publish requires HEAD to have a pushed upstream".to_owned())?;
+    if commit != upstream {
+        return Err("publish requires HEAD to match its pushed upstream".into());
+    }
     let repository = tap::git(&project.root, ["config", "--get", "remote.origin.url"])?;
     let recipe = validate_recipe(project)?;
     let recipe_sha256 = file_sha256(&recipe)?;
     let coordinate = project::normalize_coordinate(&project.id)?;
-    let intent = tap::canonical_recipe_intent(
-        &coordinate,
-        &project.version.to_string(),
-        &repository,
-        &tag,
-        &commit,
-        &recipe_sha256,
-        &trusted_tap.name,
-        &policy.revision,
-    );
+    let intent = if let Some(source) = source {
+        let source = github_source(source)?;
+        require_matching_github_remote(&repository, &source)?;
+        let repository_id = github_repository_id(&source)?;
+        tap::canonical_github_recipe_intent(
+            &coordinate,
+            &project.version.to_string(),
+            &source,
+            repository_id,
+            &commit,
+            &recipe_sha256,
+            &trusted_tap.name,
+            &policy.revision,
+        )
+    } else {
+        let tag = format!("v{}", project.version);
+        tap::canonical_recipe_intent(
+            &coordinate,
+            &project.version.to_string(),
+            &repository,
+            &tag,
+            &commit,
+            &recipe_sha256,
+            &trusted_tap.name,
+            &policy.revision,
+        )
+    };
     let (key_id, signature) = tap::sign(intent.as_bytes())?;
     tap::authorize(&policy, &key_id, &coordinate, intent.as_bytes(), &signature)?;
     if dry_run {
@@ -376,6 +399,74 @@ fn publish_inner(
         String::from_utf8_lossy(&output.stdout).trim()
     );
     Ok(())
+}
+
+fn github_source(value: &str) -> Result<String, String> {
+    let path = value
+        .strip_prefix("gh:")
+        .ok_or("publish source must use gh:ORG/REPO")?;
+    let mut parts = path.split('/');
+    if !matches!((parts.next(), parts.next(), parts.next()), (Some(owner), Some(repo), None)
+        if !owner.is_empty() && !repo.is_empty() && owner.chars().all(github_char) && repo.chars().all(github_char))
+    {
+        return Err(format!("invalid GitHub source: {value}"));
+    }
+    Ok(format!("gh:{}", path.trim_end_matches(".git")))
+}
+
+fn github_char(value: char) -> bool {
+    value.is_ascii_alphanumeric() || matches!(value, '-' | '_' | '.')
+}
+
+fn require_matching_github_remote(remote: &str, source: &str) -> Result<(), String> {
+    let expected = source.trim_start_matches("gh:").trim_end_matches(".git");
+    let actual = remote.trim_end_matches('/').trim_end_matches(".git");
+    if actual.ends_with(&format!("/{expected}")) || actual.ends_with(&format!(":{expected}")) {
+        Ok(())
+    } else {
+        Err(format!(
+            "origin {remote} does not match publication source {source}"
+        ))
+    }
+}
+
+fn github_repository_id(source: &str) -> Result<u64, String> {
+    let repository = source.trim_start_matches("gh:");
+    let output = std::process::Command::new("curl")
+        .args([
+            "--fail-with-body",
+            "--silent",
+            "--show-error",
+            "-H",
+            "accept: application/vnd.github+json",
+            &format!("https://api.github.com/repos/{repository}"),
+        ])
+        .output()
+        .map_err(|error| format!("cannot query GitHub repository identity: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "cannot verify GitHub repository identity: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    parse_github_repository_id(
+        &String::from_utf8(output.stdout).map_err(|_| "GitHub response must be UTF-8")?,
+    )
+}
+
+fn parse_github_repository_id(json: &str) -> Result<u64, String> {
+    let id = json
+        .find("\"id\"")
+        .ok_or("GitHub response is missing repository id")?;
+    let value = json[id + 4..]
+        .split_once(':')
+        .ok_or("GitHub repository id is invalid")?
+        .1
+        .trim_start();
+    let digits: String = value.chars().take_while(char::is_ascii_digit).collect();
+    digits
+        .parse()
+        .map_err(|_| "GitHub repository id is invalid".into())
 }
 
 fn option_value(args: &[String], flag: &str) -> Result<String, String> {

@@ -148,6 +148,7 @@ pub(crate) fn run(options: Options) -> Result<(), String> {
         Some("asset") => asset::run(&command[1..]),
         Some("tap") => package::tap_command(&command[1..]),
         Some("package") => package::run(&command[1..]),
+        Some("publish") => package::publish(&command[1..]),
         #[cfg(feature = "halc-encoder")]
         Some("compile-halc") => compile_halc(&command[1..]),
         Some("new") => new_project(&command[1..]),
@@ -266,6 +267,7 @@ pub(crate) fn usage() {
     println!("  {program} server | remote HOST:PORT");
     println!("  {program} project <new|check|run|test|add|remove|sync|update> ...");
     println!("  {program} package <COMMAND> ...");
+    println!("  {program} publish gh:ORG/REPO");
     println!("  {program} id <login|enroll|status|key|namespace> ...");
     println!(
         "  {program} asset <check|build|inspect|publish|status|search|info|pull|sync|yank> ..."
