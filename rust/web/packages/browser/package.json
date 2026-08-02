@@ -6,15 +6,26 @@
   "type": "module",
   "exports": {
     ".": {
-      "types": "./dist/hara.d.ts",
-      "import": "./dist/hara.mjs",
-      "default": "./dist/hara.mjs"
+      "types": "./dist/hara-wasm-vm/hara.d.ts",
+      "import": "./dist/hara-wasm-vm/hara.mjs",
+      "default": "./dist/hara-wasm-vm/hara.mjs"
+    },
+    "./vm": {
+      "types": "./dist/hara-wasm-vm/hara.d.ts",
+      "import": "./dist/hara-wasm-vm/hara.mjs",
+      "default": "./dist/hara-wasm-vm/hara.mjs"
+    },
+    "./full": {
+      "types": "./dist/hara-wasm-full/hara.d.ts",
+      "import": "./dist/hara-wasm-full/hara.mjs",
+      "default": "./dist/hara-wasm-full/hara.mjs"
     }
   },
-  "unpkg": "./dist/hara.js",
-  "jsdelivr": "./dist/hara.js",
+  "unpkg": "./dist/hara-wasm-vm/hara.js",
+  "jsdelivr": "./dist/hara-wasm-vm/hara.js",
   "files": [
-    "dist"
+    "dist/hara-wasm-vm",
+    "dist/hara-wasm-full"
   ],
   "publishConfig": {
     "access": "public"

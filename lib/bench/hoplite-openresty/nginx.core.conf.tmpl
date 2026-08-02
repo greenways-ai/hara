@@ -1,0 +1,20 @@
+worker_processes 1;
+pid logs/nginx.pid;
+error_log logs/error.log info;
+
+events {}
+
+http {
+    access_log off;
+    server {
+        listen 127.0.0.1:18083;
+        location = /hello {
+            default_type "text/plain; charset=utf-8";
+            return 200 "Hello from Nginx\n";
+        }
+        location = /json {
+            default_type application/json;
+            return 200 '{"message":"Hello from Nginx"}\n';
+        }
+    }
+}

@@ -93,6 +93,57 @@ fn compiled_execution_can_return_an_immutable_value_directly() {
 }
 
 #[test]
+fn registry_only_execution_remains_visible_to_later_interpreter_entries() {
+    let mut runtime = Runtime::core();
+    let program = runtime
+        .compile_bytecode("(def prepared-answer 42)")
+        .expect("definition must compile");
+    assert_eq!(
+        runtime
+            .execute_compiled_bytecode_registry_value(program)
+            .expect("definition must execute"),
+        Value::Number(42)
+    );
+
+    // eval_native refreshes from the authoritative namespace registry, so
+    // omitting the eager compatibility copy does not make definitions stale.
+    assert_eq!(runtime.eval_native("prepared-answer"), Ok("42".into()));
+}
+
+#[test]
+fn runtime_native_array_and_object_calls_lower_to_vm_primitives() {
+    let mut runtime = Runtime::core();
+    let source = "(let [a (std.native.Arr/new 1 2) \
+                        o (std.native.Obj/new \"count\" 3)] \
+                    (std.native.Arr/set-index a 0 7) \
+                    (std.native.Obj/set-key o \"count\" 11) \
+                    [(std.native.Arr/get-index a 0) \
+                     (std.native.Obj/get-key o \"count\") \
+                     (number? (std.native.Arr/get-index a 0))])";
+    let program = runtime
+        .compile_bytecode(source)
+        .expect("native calls must compile");
+    let disassembly = crate::vm::disassemble(&program);
+    for operator in [
+        "std.native.Arr/new",
+        "std.native.Arr/get-index",
+        "std.native.Arr/set-index",
+        "std.native.Obj/new",
+        "std.native.Obj/get-key",
+        "std.native.Obj/set-key",
+        "number?",
+    ] {
+        assert!(disassembly.contains(operator), "{operator}:\n{disassembly}");
+    }
+    assert_eq!(
+        runtime
+            .execute_compiled_bytecode_registry_value(program)
+            .map(|value| value.display()),
+        Ok("[7 11 true]".into())
+    );
+}
+
+#[test]
 fn runtime_bytecode_defmacro_registers_and_expands() {
     let mut runtime = Runtime::core();
     assert_eq!(
@@ -535,6 +586,12 @@ fn defn_lowering_binds_direct_calls() {
         eval("(do (defn countdown [n] (if (< n 1) 0 (+ 1 (countdown (- n 1))))) (countdown 100))"),
         "100"
     );
+    let program = compile_source(
+        "(do (defn countdown [n] (if (< n 1) 0 (countdown (- n 1)))) (countdown 10))",
+    )
+    .unwrap();
+    let listing = disassemble(&program);
+    assert!(listing.contains("CallStatic 0001 1"), "{listing}");
 }
 
 #[test]

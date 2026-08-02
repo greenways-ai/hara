@@ -3,16 +3,34 @@
 Embeddable Hara runtime for browsers and CDN scripts.
 
 ```js
-import { start } from "@hara-lang/browser";
+import { start } from "@hara-lang/browser/vm";
 
 const hara = await start();
 console.log(hara.eval("(+ 19 23)"));
 ```
 
+The package root remains an alias for `/vm`. Heavy-duty whole-function
+WebAssembly compilation is available from `@hara-lang/browser/full`. The
+compiler runs inside the browser runtime and the resulting module executes on
+the browser's own WebAssembly engine:
+
+```js
+import { start } from "@hara-lang/browser/full";
+const hara = await start();
+const compiled = await hara.compileWholeWasm(
+  "(loop [i 0 acc 0] (if (< i 5000) (recur (+ i 1) (+ acc i)) acc))"
+);
+console.log(compiled.call()); // 12497500n
+```
+
+The full package owns dynamic constants and persistent values in the outer Hara
+runtime while generated scalar and specialized collection work runs directly
+inside the browser's WebAssembly engine.
+
 The release also provides an IIFE bundle for a plain script tag:
 
 ```html
-<script src="https://unpkg.com/@hara-lang/browser@0.1.0/dist/hara.js"></script>
+<script src="https://unpkg.com/@hara-lang/browser@0.1.0/dist/hara-wasm-vm/hara.js"></script>
 <script>
   Hara.start().then((hara) => console.log(hara.eval("(+ 19 23)")));
 </script>

@@ -8,7 +8,7 @@ exec "$ROOT/scripts/run-runtime-benchmarks" \
   --corpus lib/bench/runtime/vm-small.json \
   --output target/vm-bb-benchmark.json \
   --runtime bb \
-  --runtime hara-rust-bytecode \
+  --runtime hara-rust-vm \
   --runtime hara-rust-trace-native \
   --check-regressions lib/bench/runtime/vm-small-baselines.json \
   "$@"

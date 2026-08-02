@@ -45,6 +45,8 @@ pub mod jit;
 pub mod vm;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod wasmtime_provider;
+#[cfg(feature = "whole-wasm")]
+pub mod whole_wasm;
 use crate::kernel::Form;
 use crate::lang::protocol::INamespaced;
 use std::cell::RefCell;
@@ -1480,6 +1482,17 @@ impl Runtime {
             .map_err(|error| JsValue::from_str(&error))
     }
 
+    /// Compiles source into an HNW1 artifact whose generated module can be
+    /// instantiated by either Wasmtime or a browser WebAssembly engine.
+    #[cfg(feature = "whole-wasm")]
+    #[wasm_bindgen(js_name = compileWholeWasmArtifact)]
+    pub fn compile_whole_wasm_artifact_js(&self, source: &str) -> Result<Vec<u8>, JsValue> {
+        let program = self
+            .compile_bytecode(source)
+            .map_err(|error| JsValue::from_str(&error))?;
+        whole_wasm::compile_artifact(program.as_ref()).map_err(|error| JsValue::from_str(&error))
+    }
+
     #[cfg(feature = "bytecode-vm")]
     #[wasm_bindgen(js_name = evalBytecodeArtifact)]
     pub fn eval_bytecode_artifact_js(&mut self, bytes: &[u8]) -> Result<String, JsValue> {
@@ -1596,13 +1609,22 @@ impl Runtime {
         &mut self,
         program: std::rc::Rc<vm::Program>,
     ) -> Result<core::Value, String> {
-        let result = core::with_macros(self.macros.clone(), || {
-            vm::execute_program_with_globals(program, &self.namespace_registry)
-                .map_err(|error| error.to_string())
-        });
+        let result = self.execute_compiled_bytecode_registry_value(program);
         let current = self.namespace_registry.current().name().as_str().to_owned();
         core::select_namespace_environment(&self.namespace_registry, &mut self.env, &current);
         result
+    }
+
+    /// Executes a prepared program directly against the namespace registry,
+    /// without copying bindings into the compatibility environment per call.
+    pub fn execute_compiled_bytecode_registry_value(
+        &mut self,
+        program: std::rc::Rc<vm::Program>,
+    ) -> Result<core::Value, String> {
+        core::with_macros(self.macros.clone(), || {
+            vm::execute_program_with_globals(program, &self.namespace_registry)
+                .map_err(|error| error.to_string())
+        })
     }
 
     /// Compiles and executes through the experimental VM against this

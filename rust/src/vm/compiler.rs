@@ -702,6 +702,17 @@ impl Compiler {
                     Form::Symbol(name) if UNSUPPORTED_OPERATORS.contains(&name.as_str()) => {
                         Err(self.unsupported(form, span))
                     }
+                    Form::Symbol(name)
+                        if (name.starts_with("std.native.Arr/")
+                            || name.starts_with("std.native.Obj/"))
+                            && Primitive::from_symbol(name).is_some() =>
+                    {
+                        self.compile_primitive(
+                            &children,
+                            span,
+                            Primitive::from_symbol(name).expect("intrinsic was checked"),
+                        )
+                    }
                     // Precedence mirrors the evaluator (core.rs operator
                     // dispatch): a bound var wins over the structural
                     // builtin arms, so a program-declared or registry
@@ -874,10 +885,17 @@ impl Compiler {
         // Mutable conversion creates/consumes runtime identity and must run on
         // every execution. Folding it would place a one-shot transient in the
         // constant pool, so the second execution would observe a frozen value.
-        if !matches!(op, Primitive::ToMutable | Primitive::ToPersistent)
-            && children[1..]
-                .iter()
-                .all(|argument| constant_form(argument.form))
+        if !matches!(
+            op,
+            Primitive::ToMutable
+                | Primitive::ToPersistent
+                | Primitive::ArrayNew
+                | Primitive::ArraySet
+                | Primitive::ObjectNew
+                | Primitive::ObjectSet
+        ) && children[1..]
+            .iter()
+            .all(|argument| constant_form(argument.form))
         {
             let arguments = children[1..]
                 .iter()

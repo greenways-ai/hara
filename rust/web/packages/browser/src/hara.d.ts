@@ -11,8 +11,17 @@ export interface HaraRuntime {
   registerResource(namespace: string, source: string): void;
   evalInNamespace(namespace: string, source: string): string;
   currentNamespace(): string;
+  compileBytecode(source: string): Uint8Array;
+  evalBytecode(artifact: Uint8Array): string;
+  compileWholeWasm(source: string): Promise<WholeWasmModule>;
   dispose(): void;
   readonly raw: unknown;
+}
+
+export interface WholeWasmModule {
+  call(...arguments: Array<number | bigint>): bigint;
+  readonly module: WebAssembly.Module;
+  readonly instance: WebAssembly.Instance;
 }
 
 export function start(options?: StartOptions): Promise<HaraRuntime>;

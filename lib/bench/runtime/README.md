@@ -8,7 +8,8 @@ scripts/run-runtime-benchmarks --profile smoke
 scripts/run-runtime-benchmarks --profile standard --reference
 scripts/run-runtime-benchmarks --profile standard --check-regressions \
   --runtime bb \
-  --runtime hara-rust-bytecode \
+  --runtime hara-rust-vm \
+  --runtime hara-rust-full \
   --runtime hara-rust-trace-checked \
   --runtime hara-rust-trace-native
 ```
@@ -18,11 +19,12 @@ convergence, steady-state throughput, peak resident memory when available, and
 runtime payload size. Workloads with an `iterations` field also report normalized
 nanoseconds per iteration.
 
-The three Rust execution tiers are built into separate target directories. This
+The Rust execution tiers are built into separate target directories. This
 prevents a later Cargo feature build from silently changing the binary measured
 by an earlier adapter:
 
-- `hara-rust-bytecode` — plain bytecode VM;
+- `hara-rust-vm` — plain bytecode VM;
+- `hara-rust-full` — whole-function Wasm compiled through Wasmtime;
 - `hara-rust-trace-checked` — guarded checked Trace IR;
 - `hara-rust-trace-native` — guarded Wasmtime/Cranelift trace backend.
 

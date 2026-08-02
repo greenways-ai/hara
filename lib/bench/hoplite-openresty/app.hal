@@ -11,6 +11,12 @@
    :headers {"content-type" "text/plain; charset=utf-8"}
    :body "Hello from Hoplite\n"})
 
+(defn json
+  [request]
+  {:status 200
+   :headers {"content-type" "application/json"}
+   :body "{\"message\":\"Hello from Hoplite\"}\n"})
+
 (defn ^:async delay
   [request]
   (std.foundation.coroutine/await

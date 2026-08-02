@@ -1,0 +1,24 @@
+site_name: Hara Benchmarks
+site_description: Complete, reproducible Hara runtime and framework benchmark specifications.
+site_url: https://benchmarks.hara-lang.org/
+docs_dir: docs
+theme:
+  name: material
+  font: false
+  features:
+    - navigation.top
+    - content.code.copy
+  palette:
+    - scheme: slate
+      primary: black
+      accent: cyan
+extra_css:
+  - styles.css
+nav:
+  - Complete results: index.md
+markdown_extensions:
+  - attr_list
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+strict: true

@@ -7,7 +7,7 @@ pub(crate) enum VmSlot {
     Number(i64),
     Bool(bool),
     Nil,
-    Value(Box<Value>),
+    Value(Rc<Value>),
     InlineClosure { prototype: u16, identity: u64 },
     Closure(Rc<VmClosure>),
     MultiArity(Rc<VmMultiArity>),
@@ -31,7 +31,7 @@ impl VmSlot {
             VmSlot::Number(value) => Some(Value::Number(*value)),
             VmSlot::Bool(value) => Some(Value::Bool(*value)),
             VmSlot::Nil => Some(Value::Nil),
-            VmSlot::Value(value) => Some((**value).clone()),
+            VmSlot::Value(value) => Some(value.as_ref().clone()),
             VmSlot::InlineClosure { .. } | VmSlot::Closure(_) | VmSlot::MultiArity(_) => None,
         }
     }
@@ -41,7 +41,9 @@ impl VmSlot {
             VmSlot::Number(value) => Some(Value::Number(value)),
             VmSlot::Bool(value) => Some(Value::Bool(value)),
             VmSlot::Nil => Some(Value::Nil),
-            VmSlot::Value(value) => Some(*value),
+            VmSlot::Value(value) => {
+                Some(Rc::try_unwrap(value).unwrap_or_else(|value| (*value).clone()))
+            }
             VmSlot::InlineClosure { .. } | VmSlot::Closure(_) | VmSlot::MultiArity(_) => None,
         }
     }
@@ -57,7 +59,7 @@ impl From<Value> for VmSlot {
             Value::Number(value) => VmSlot::Number(value),
             Value::Bool(value) => VmSlot::Bool(value),
             Value::Nil => VmSlot::Nil,
-            value => VmSlot::Value(Box::new(value)),
+            value => VmSlot::Value(Rc::new(value)),
         }
     }
 }

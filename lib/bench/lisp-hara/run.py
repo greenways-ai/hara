@@ -27,11 +27,16 @@ DEFAULT_CORPUS = HERE / "workloads.json"
 CHEZ_RUNNER = HERE / "chez_runner.scm"
 GUILE_RUNNER = HERE / "guile_runner.scm"
 SBCL_RUNNER = HERE / "sbcl_runner.lisp"
+BB_RUNNER = HERE / "bb_runner.clj"
+PYTHON_RUNNER = HERE / "python_runner.py"
+C_RUNNER = HERE / "c_runner.py"
+JAVA_RUNNER = HERE / "java_runner.py"
 LUA_RUNNER = ROOT / "lib/bench/luajit-hara/lua_runner.lua"
 HARA_BENCH = ROOT / "rust/target/release/hara-runtime-benchmark"
 
 PROFILES = {
     "smoke": {"startup_samples": 2, "windows": 3, "calls": 1},
+    "algorithm": {"startup_samples": 10, "windows": 30, "calls": 3},
     "standard": {"startup_samples": 30, "windows": 60, "calls": 10},
 }
 
@@ -45,6 +50,16 @@ LISP_RUNTIMES = {
 }
 
 LANGUAGE_RUNTIMES = {**LISP_RUNTIMES,
+                     "bb": {"command": ["bb", str(BB_RUNNER)],
+                            "source_field": "bb_source", "binary": "bb"},
+                     "python": {"command": ["python3", str(PYTHON_RUNNER)],
+                                "source_field": "python_source", "binary": "python3"},
+                     "c": {"command": ["python3", str(C_RUNNER)],
+                           "source_field": "c_source", "binary": "cc",
+                           "modes": ("prepared",)},
+                     "java": {"command": ["python3", str(JAVA_RUNNER)],
+                              "source_field": "java_source", "binary": "python3",
+                              "modes": ("prepared",)},
                      "luajit": {"command": ["luajit", str(LUA_RUNNER)],
                                 "source_field": "lua_source", "binary": "luajit"}}
 
@@ -68,10 +83,10 @@ def hex_payload(source):
 
 
 BYTECODE_VARIANTS = {
-    "hara-rust-bytecode": ("bytecode-vm", "vm"),
+    "hara-rust-vm": ("bytecode-vm", "vm"),
     "hara-rust-trace-checked": ("tracing-jit", "trace-checked"),
     "hara-rust-trace-native": ("native-jit", "trace-native"),
-    "hara-rust-whole-wasm": ("whole-wasm", "whole-wasm"),
+    "hara-rust-full": ("whole-wasm", "whole-wasm"),
 }
 
 
@@ -82,8 +97,8 @@ def bytecode_binary(label):
 def build_bytecode(selected):
     for runtime, (features, label) in BYTECODE_VARIANTS.items():
         if (f"{runtime}-prepared" not in selected and
-                not (runtime == "hara-rust-bytecode" and
-                     "hara-rust-bytecode-eval" in selected)):
+                not (runtime == "hara-rust-vm" and
+                     "hara-rust-vm-eval" in selected)):
             continue
         env = os.environ.copy()
         env["CARGO_TARGET_DIR"] = str(ROOT / "target/runtime-benchmark" / label)
@@ -101,8 +116,9 @@ def adapters():
 
     def language(name, mode, workload, windows, calls):
         spec = LANGUAGE_RUNTIMES[name]
+        source = workload.get(spec["source_field"], workload["hara_source"])
         return spec["command"] + [
-            mode, workload["id"], hex_payload(workload[spec["source_field"]]),
+            mode, workload["id"], hex_payload(source),
             workload["expected"], str(windows), str(calls)]
 
     result = {
@@ -111,12 +127,12 @@ def adapters():
             hex_payload(w["hara_source"]), w["expected"], str(n), str(c)],
     }
     for name in LANGUAGE_RUNTIMES:
-        for mode in ("eval", "prepared"):
+        for mode in LANGUAGE_RUNTIMES[name].get("modes", ("eval", "prepared")):
             label = f"{name}-{mode}"
             result[label] = lambda w, n, c, name=name, mode=mode: language(
                 name, mode, w, n, c)
     for runtime, (_, label) in BYTECODE_VARIANTS.items():
-        if runtime == "hara-rust-whole-wasm":
+        if runtime == "hara-rust-full":
             result[f"{runtime}-prepared"] = (
                 lambda w, n, c, b=bytecode_binary(label), r=runtime:
                 bytecode(b, f"{r}-prepared", "whole-wasm", w, n, c))
@@ -124,9 +140,9 @@ def adapters():
         result[f"{runtime}-prepared"] = (
             lambda w, n, c, b=bytecode_binary(label), r=runtime:
             bytecode(b, f"{r}-prepared", "runtime-registry-execute", w, n, c))
-    result["hara-rust-bytecode-eval"] = (
+    result["hara-rust-vm-eval"] = (
         lambda w, n, c, b=bytecode_binary("vm"):
-        bytecode(b, "hara-rust-bytecode-eval", "compile-execute", w, n, c))
+        bytecode(b, "hara-rust-vm-eval", "compile-execute", w, n, c))
     return result
 
 
@@ -174,7 +190,10 @@ def markdown(data):
              "from different lanes are not apples-to-apples.", "",
              "## Startup", "", "| Runtime | p50 ms | p95 ms |", "|---|---:|---:|"]
     for name, item in data["startup"].items():
-        lines.append(f"| {name} | {item['p50_ns']/1e6:.2f} | {item['p95_ns']/1e6:.2f} |")
+        if item.get("status") == "unsupported":
+            lines.append(f"| {name} | — | — |")
+        else:
+            lines.append(f"| {name} | {item['p50_ns']/1e6:.2f} | {item['p95_ns']/1e6:.2f} |")
     lines += ["", "## Warm evaluation", "",
               "| Runtime / workload | First ms | Steady ms | ns/iteration | calls/s | Converged window |",
               "|---|---:|---:|---:|---:|---:|"]
@@ -246,8 +265,8 @@ def main():
         parser.error(f"missing {HARA_BENCH} (build it or drop --no-build)")
     for runtime, (_, label) in BYTECODE_VARIANTS.items():
         if (f"{runtime}-prepared" in selected or
-                (runtime == "hara-rust-bytecode" and
-                 "hara-rust-bytecode-eval" in selected)) and not bytecode_binary(label).is_file():
+                (runtime == "hara-rust-vm" and
+                 "hara-rust-vm-eval" in selected)) and not bytecode_binary(label).is_file():
             parser.error(f"missing {bytecode_binary(label)} (build it or drop --no-build)")
     for name, spec in LANGUAGE_RUNTIMES.items():
         if any(runtime.startswith(f"{name}-") for runtime in selected) and not shutil.which(spec["binary"]):
@@ -262,12 +281,27 @@ def main():
     for name in selected:
         adapter = runtime_adapters[name]
         elapsed = []
-        for _ in range(profile["startup_samples"]):
-            wall, _ = timed(adapter(corpus[0], 0, 1))
+        startup_workload = None
+        for candidate in corpus:
+            try:
+                wall, _ = timed(adapter(candidate, 0, 1))
+            except subprocess.CalledProcessError:
+                continue
+            startup_workload = candidate
             elapsed.append(wall)
-        startup[name] = {"samples_ns": elapsed,
-                         "p50_ns": int(statistics.median(elapsed)),
-                         "p95_ns": percentile(elapsed, 0.95)}
+            break
+        if startup_workload is None:
+            startup[name] = {"status": "unsupported",
+                             "reason": "no corpus workload is supported"}
+        else:
+            for _ in range(1, profile["startup_samples"]):
+                wall, _ = timed(adapter(startup_workload, 0, 1))
+                elapsed.append(wall)
+            startup[name] = {
+                "status": "ok", "workload": startup_workload["id"],
+                "samples_ns": elapsed,
+                "p50_ns": int(statistics.median(elapsed)),
+                "p95_ns": percentile(elapsed, 0.95)}
         for workload in corpus:
             try:
                 _, result = timed(adapter(workload, profile["windows"], profile["calls"]))

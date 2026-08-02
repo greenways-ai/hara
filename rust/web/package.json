@@ -9,7 +9,7 @@
   "scripts": {
     "build:noir": "vite build --config vite.noir.config.js && vite build --config vite.noir-node.config.js && vite build --config vite.noir-provider.config.js && node package-noir-extension.mjs",
     "build:browser": "vite build --config packages/browser/vite.config.js",
-    "build:browser:wasm": "bash ../../scripts/build-hara-browser",
+    "build:browser:wasm": "bash ../../scripts/build-hara-browser all",
     "test:browser-sdk": "npm run build:browser:wasm && node packages/browser/test.mjs",
     "build:package:noir": "npm run build:noir && cargo run --quiet --manifest-path ../Cargo.toml --bin hara -- package build ../extensions/ledger-noir",
     "test:noir": "npm run build:package:noir && node --test packages/noir/noir.test.mjs noir-loader.test.js",

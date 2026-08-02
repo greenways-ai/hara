@@ -23,7 +23,8 @@ RESULTS = ROOT / "lib/bench/results/reference.json"
 REPORT = ROOT / "website/docs/reference/runtime-benchmarks.md"
 DEFAULT_BASELINE = ROOT / "lib/bench/runtime/regression-baselines.json"
 BYTECODE_VARIANTS = {
-    "hara-rust-bytecode": ("bytecode-vm", "vm"),
+    "hara-rust-vm": ("bytecode-vm", "vm"),
+    "hara-rust-full": ("whole-wasm", "whole-wasm"),
     "hara-rust-trace-checked": ("tracing-jit", "trace-checked"),
     "hara-rust-trace-native": ("native-jit", "trace-native"),
 }
@@ -43,7 +44,11 @@ def workload_for_runtime(workload, runtime):
     sources = workload.get("sources")
     if not sources:
         return workload
-    source = sources.get(runtime, sources.get("default"))
+    source_aliases = {
+        "hara-rust-vm": "hara-rust-bytecode",
+        "hara-rust-full": "hara-rust-bytecode",
+    }
+    source = sources.get(runtime, sources.get(source_aliases.get(runtime), sources.get("default")))
     if source is None:
         return None
     return {**workload, "source": source}
@@ -69,7 +74,10 @@ def classpaths():
     spec = local / "spec.alpha/0.5.238/spec.alpha-0.5.238.jar"
     core_spec = local / "core.specs.alpha/0.4.74/core.specs.alpha-0.4.74.jar"
     cp_file = ROOT / "java/target/hara-runtime-classpath.txt"
-    truffle = str(ROOT / "java/target/classes")
+    truffle = os.pathsep.join((
+        str(ROOT / "java/target/classes"),
+        str(ROOT / "java/target/truffle-dependencies/*"),
+    ))
     if cp_file.exists():
         truffle += os.pathsep + cp_file.read_text().strip()
     return os.pathsep.join(map(str, (clojure, spec, core_spec))), truffle
@@ -100,17 +108,19 @@ def adapters():
         "clojure": lambda w, n, c: common(
             ["java", "-cp", clj_cp, "clojure.main", clj_script], "clojure", w, n, c),
         "bb": lambda w, n, c: common(["bb", clj_script], "bb", w, n, c),
-        "hara-truffle": lambda w, n, c: common(
+        "hara-truffle-jvm": lambda w, n, c: common(
             ["java", "-cp", truffle_cp, "hara.truffle.Main", "benchmark"],
-            "hara-truffle", w, n, c),
-        "hara-native-image": lambda w, n, c: common(
-            [str(ROOT / "target/hara-truffle"), "benchmark"],
-            "hara-native-image", w, n, c),
-        "hara-rust-native": lambda w, n, c: common(
-            [str(ROOT / "rust/target/release/hara-runtime-benchmark")],
-            "hara-rust-native", w, n, c, "hex"),
-        "hara-rust-bytecode": lambda w, n, c: bytecode(
-            bytecode_binary("vm"), "hara-rust-bytecode", "runtime-registry-execute", w, n, c),
+            "hara-truffle-jvm", w, n, c),
+        "hara-truffle-native-vm": lambda w, n, c: common(
+            [str(ROOT / "target/hara-truffle-native-vm"), "benchmark"],
+            "hara-truffle-native-vm", w, n, c),
+        "hara-truffle-native-full": lambda w, n, c: common(
+            [str(ROOT / "target/hara-truffle-native-full"), "benchmark"],
+            "hara-truffle-native-full", w, n, c),
+        "hara-rust-vm": lambda w, n, c: bytecode(
+            bytecode_binary("vm"), "hara-rust-vm", "runtime-registry-execute", w, n, c),
+        "hara-rust-full": lambda w, n, c: bytecode(
+            bytecode_binary("whole-wasm"), "hara-rust-full", "whole-wasm", w, n, c),
         "hara-rust-trace-checked": lambda w, n, c: bytecode(
             bytecode_binary("trace-checked"), "hara-rust-trace-checked", "runtime-registry-execute", w, n, c),
         "hara-rust-trace-native": lambda w, n, c: bytecode(
@@ -125,15 +135,20 @@ def bytecode_binary(label):
 
 
 def build(include_native, selected):
-    if include_native:
-        run([str(ROOT / "scripts/build-truffle-native")], timeout=1200)
-    if "hara-truffle" in selected:
+    native_variants = {
+        "hara-truffle-native-vm": ("target/hara-truffle-native-vm", "true"),
+        "hara-truffle-native-full": ("target/hara-truffle-native-full", "false"),
+    }
+    for runtime, (output, fallback) in native_variants.items():
+        if include_native or runtime in selected:
+            env = os.environ.copy()
+            env["HARA_NATIVE_OUTPUT"] = str(ROOT / output)
+            env["HARA_NATIVE_USE_FALLBACK_RUNTIME"] = fallback
+            run([str(ROOT / "scripts/build-truffle-native")], env=env, timeout=1200)
+    if "hara-truffle-jvm" in selected:
         run(["mvn", "-q", "-f", "java/pom.xml", "-Ptruffle", "-DskipTests", "compile",
              "dependency:build-classpath", "-Dmdep.outputFile=java/target/hara-runtime-classpath.txt"],
             timeout=300)
-    if "hara-rust-native" in selected:
-        run(["cargo", "build", "--manifest-path", "rust/Cargo.toml", "--release",
-             "--bin", "hara-runtime-benchmark"], timeout=600)
     for runtime, (features, label) in BYTECODE_VARIANTS.items():
         if runtime not in selected:
             continue
@@ -206,10 +221,11 @@ def payload_sizes(glue):
     paths = {
         "clojure": clojure_files,
         "bb": [Path(shutil.which("bb") or "")],
-        "hara-truffle": truffle_files,
-        "hara-native-image": [ROOT / "target/hara-truffle"],
-        "hara-rust-native": [ROOT / "rust/target/release/hara-runtime-benchmark"],
-        "hara-rust-bytecode": [bytecode_binary("vm")],
+        "hara-truffle-jvm": truffle_files,
+        "hara-truffle-native-vm": [ROOT / "target/hara-truffle-native-vm"],
+        "hara-truffle-native-full": [ROOT / "target/hara-truffle-native-full"],
+        "hara-rust-vm": [bytecode_binary("vm")],
+        "hara-rust-full": [bytecode_binary("whole-wasm")],
         "hara-rust-trace-checked": [bytecode_binary("trace-checked")],
         "hara-rust-trace-native": [bytecode_binary("trace-native")],
         "hara-wasm-node": [ROOT / "rust/target/wasm32-unknown-unknown/release/hara_wasm.wasm", glue],
@@ -286,7 +302,7 @@ def main():
     if unknown:
         parser.error("unknown runtime(s): " + ", ".join(unknown))
     if not args.no_build:
-        build(include_native=args.reference or "hara-native-image" in selected, selected=selected)
+        build(include_native=False, selected=selected)
     missing = []
     if "hara-wasm-node" in selected and not glue.is_file():
         missing.append("hara-wasm-node (install version-matched wasm-bindgen-cli and rebuild)")

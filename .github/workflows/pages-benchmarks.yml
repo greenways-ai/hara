@@ -1,0 +1,37 @@
+name: Deploy benchmarks.hara-lang.org
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - benchmarks/**
+      - lib/bench/**
+      - scripts/build-benchmarks
+      - .github/workflows/pages-benchmarks.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: netlify-hara-benchmarks
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r docs/requirements-docs.txt
+      - name: Build standalone benchmark publication
+        run: mkdocs build --strict -f benchmarks/mkdocs.yml -d target/benchmarks
+      - name: Deploy benchmark publication
+        run: npx --yes netlify-cli deploy --prod --dir target/benchmarks --message "benchmarks ${GITHUB_SHA}"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.BENCHMARKS_NETLIFY_SITE_ID }}
