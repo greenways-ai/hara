@@ -11,6 +11,8 @@ mod artifact;
 mod codegen;
 #[path = "whole_wasm/ir.rs"]
 pub mod ir;
+#[path = "whole_wasm/reps.rs"]
+mod reps;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "whole_wasm/runtime.rs"]
 mod runtime;
@@ -72,9 +74,8 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_truthiness_is_rejected_until_representations_prove_it() {
-        let program = compile_source("(if 0 19 23)").unwrap();
-        let error = compile_artifact(&program).unwrap_err();
-        assert!(error.contains("unproven dynamic truthiness"), "{error}");
+    fn point_sensitive_representations_preserve_numeric_truthiness() {
+        assert_eq!(module("(if 0 19 23)").call_entry_i64(), Ok(19));
+        assert_eq!(module("(if false 19 23)").call_entry_i64(), Ok(23));
     }
 }

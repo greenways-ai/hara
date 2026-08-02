@@ -317,11 +317,20 @@ fn emit_terminator(out: &mut Function, terminator: &MirTerminator, pc: u32) {
         }
         MirTerminator::BranchZero {
             condition,
+            rep,
             zero,
             nonzero,
         } => {
-            out.instruction(&Instruction::LocalGet(u32::from(*condition)));
-            out.instruction(&Instruction::I64Eqz);
+            match rep {
+                super::ir::Rep::Bool => {
+                    out.instruction(&Instruction::LocalGet(u32::from(*condition)));
+                    out.instruction(&Instruction::I64Eqz);
+                }
+                super::ir::Rep::I64 | super::ir::Rep::TruthyHandle => {
+                    out.instruction(&Instruction::I32Const(0));
+                }
+                super::ir::Rep::Unknown => unreachable!("unknown truthiness rejected by MIR"),
+            }
             out.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
             out.instruction(&Instruction::I32Const(i32::from(*zero)));
             out.instruction(&Instruction::Else);

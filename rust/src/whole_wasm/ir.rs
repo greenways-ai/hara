@@ -7,6 +7,8 @@ use crate::vm::{FunctionId, Instruction, Program};
 pub enum Rep {
     I64,
     Bool,
+    TruthyHandle,
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +46,7 @@ pub enum MirTerminator {
     Goto(u16),
     BranchZero {
         condition: u16,
+        rep: Rep,
         zero: u16,
         nonzero: u16,
     },
@@ -104,6 +107,7 @@ fn lower_function(
     }
     let heights =
         crate::vm::validate::stack_heights(program, function).map_err(|error| error.to_string())?;
+    let representations = super::reps::analyze_function(program, id, function)?;
     let mut leaders = BTreeSet::from([0usize]);
     for (ip, instruction) in function.code.iter().enumerate() {
         if let Some(target) = instruction.jump_target() {
@@ -224,13 +228,18 @@ fn lower_function(
                     terminator = Some(MirTerminator::Goto(block_id(&ids, *target)?));
                 }
                 Instruction::JumpIfFalse(target) => {
-                    if !boolean_result(function.code.get(ip.wrapping_sub(1))) {
+                    let rep =
+                        representations[ip].stack.last().copied().ok_or_else(|| {
+                            unsupported(id, ip, "condition has no representation")
+                        })?;
+                    if rep == Rep::Unknown {
                         return Err(unsupported(id, ip, "unproven dynamic truthiness"));
                     }
                     let fallthrough = u32::try_from(ip + 1)
                         .map_err(|_| "whole-Wasm instruction index overflow")?;
                     terminator = Some(MirTerminator::BranchZero {
                         condition: stack(height - 1)?,
+                        rep,
                         zero: block_id(&ids, *target)?,
                         nonzero: block_id(&ids, fallthrough)?,
                     });
@@ -262,23 +271,6 @@ fn lower_function(
         stack_count: function.max_stack,
         blocks,
     })
-}
-
-fn boolean_result(instruction: Option<&Instruction>) -> bool {
-    match instruction {
-        Some(Instruction::True | Instruction::False) => true,
-        Some(Instruction::Primitive { op, .. } | Instruction::PrimitiveLocalConst { op, .. }) => {
-            matches!(
-                op,
-                Primitive::Equal
-                    | Primitive::Less
-                    | Primitive::LessOrEqual
-                    | Primitive::Greater
-                    | Primitive::GreaterOrEqual
-            )
-        }
-        _ => false,
-    }
 }
 
 fn scalar_constant(value: Option<&Value>) -> Option<(i64, Rep)> {
@@ -376,6 +368,7 @@ pub fn verify(program: &MirProgram) -> Result<(), String> {
                 MirTerminator::Goto(target) => usize::from(target) < block_count,
                 MirTerminator::BranchZero {
                     condition,
+                    rep: _,
                     zero,
                     nonzero,
                 } => {
