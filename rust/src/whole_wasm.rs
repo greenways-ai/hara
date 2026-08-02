@@ -9,6 +9,8 @@
 mod artifact;
 #[path = "whole_wasm/codegen.rs"]
 mod codegen;
+#[path = "whole_wasm/handles.rs"]
+mod handles;
 #[path = "whole_wasm/ir.rs"]
 pub mod ir;
 #[path = "whole_wasm/reps.rs"]
