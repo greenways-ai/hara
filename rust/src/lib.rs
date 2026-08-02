@@ -43,6 +43,8 @@ pub mod jit;
 pub mod vm;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod wasmtime_provider;
+#[cfg(feature = "whole-wasm")]
+pub mod whole_wasm;
 use crate::kernel::Form;
 use crate::lang::protocol::INamespaced;
 use std::cell::RefCell;
@@ -1562,13 +1564,25 @@ impl Runtime {
         &mut self,
         program: std::rc::Rc<vm::Program>,
     ) -> Result<core::Value, String> {
-        let result = core::with_macros(self.macros.clone(), || {
-            vm::execute_program_with_globals(program, &self.namespace_registry)
-                .map_err(|error| error.to_string())
-        });
+        let result = self.execute_compiled_bytecode_registry_value(program);
         let current = self.namespace_registry.current().name().as_str().to_owned();
         core::select_namespace_environment(&self.namespace_registry, &mut self.env, &current);
         result
+    }
+
+    /// Executes an already compiled program against the namespace registry
+    /// without copying bindings into the tree-walker's compatibility
+    /// environment. Prepared native hosts should use this path when they stay
+    /// inside the VM between calls. A later evaluator entry refreshes its
+    /// environment from the registry before evaluating source.
+    pub fn execute_compiled_bytecode_registry_value(
+        &mut self,
+        program: std::rc::Rc<vm::Program>,
+    ) -> Result<core::Value, String> {
+        core::with_macros(self.macros.clone(), || {
+            vm::execute_program_with_globals(program, &self.namespace_registry)
+                .map_err(|error| error.to_string())
+        })
     }
 
     /// Compiles and executes through the experimental VM against this

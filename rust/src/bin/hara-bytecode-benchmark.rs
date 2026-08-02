@@ -18,8 +18,13 @@
 //!                       including namespace compatibility synchronization.
 //! - `runtime-execute` — compile once against a `Runtime`; execute through
 //!                       the namespace-integrated compatibility path.
+//! - `runtime-registry-execute` — compile once against a `Runtime`; execute
+//!                       against its namespace registry without copying the
+//!                       registry into the tree-walker environment per call.
 //! - `halc-execute`    — encode as HALC and lower to typed HBC4 once, then
 //!                       execute it against the module namespace.
+//! - `whole-wasm`      — compile HBC4 to an HNW1 whole-function Wasm module
+//!                       once, then call the generated entry through Wasmtime.
 //!
 //! Every call checks the result against EXPECTED (the correctness
 //! checksum); a mismatch aborts the run. Output is one JSON line with
@@ -50,7 +55,9 @@ fn main() {
         "execute-only" => "hara-rust-bytecode-execute-only",
         "runtime-compile-execute" => "hara-rust-bytecode-runtime-compile-execute",
         "runtime-execute" => "hara-rust-bytecode-runtime-execute",
+        "runtime-registry-execute" => "hara-rust-bytecode-runtime-registry-execute",
         "halc-execute" => "hara-rust-bytecode-halc-execute",
+        "whole-wasm" => "hara-rust-whole-wasm",
         other => fail(id, &format!("unknown mode: {other}")),
     };
     let runtime_name = args
@@ -64,7 +71,7 @@ fn main() {
         "execute-only" => {
             Some(hara_wasm::compile_bytecode(&source).unwrap_or_else(|error| fail(id, &error)))
         }
-        "runtime-execute" => Some(
+        "runtime-execute" | "runtime-registry-execute" => Some(
             runtime
                 .compile_bytecode(&source)
                 .unwrap_or_else(|error| fail(id, &error)),
@@ -72,6 +79,22 @@ fn main() {
         "halc-execute" => Some(compile_halc(&mut runtime, id, &source)),
         _ => None,
     };
+    #[cfg(feature = "whole-wasm")]
+    let mut native = if mode == "whole-wasm" {
+        let program = runtime
+            .compile_bytecode(&source)
+            .unwrap_or_else(|error| fail(id, &error));
+        let artifact = hara_wasm::whole_wasm::compile_artifact(&program)
+            .unwrap_or_else(|error| fail(id, &error));
+        Some(
+            hara_wasm::whole_wasm::NativeModule::load(&artifact)
+                .unwrap_or_else(|error| fail(id, &error)),
+        )
+    } else {
+        None
+    };
+    #[cfg(not(feature = "whole-wasm"))]
+    let mut native: Option<()> = None;
     let mut call = || {
         let value = match mode.as_str() {
             "existing" => runtime.eval_native(&source),
@@ -81,9 +104,22 @@ fn main() {
             "runtime-execute" => {
                 runtime.execute_compiled_bytecode(program.as_ref().expect("program").clone())
             }
+            "runtime-registry-execute" => runtime
+                .execute_compiled_bytecode_registry_value(
+                    program.as_ref().expect("program").clone(),
+                )
+                .map(|value| value.display()),
             "halc-execute" => {
                 runtime.execute_compiled_bytecode(program.as_ref().expect("program").clone())
             }
+            #[cfg(feature = "whole-wasm")]
+            "whole-wasm" => native
+                .as_mut()
+                .expect("native module")
+                .call_entry_i64()
+                .map(|value| value.to_string()),
+            #[cfg(not(feature = "whole-wasm"))]
+            "whole-wasm" => fail(id, "whole-wasm mode requires the whole-wasm feature"),
             _ => unreachable!(),
         };
         value.unwrap_or_else(|error| fail(id, &error))
