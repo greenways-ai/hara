@@ -66,6 +66,7 @@ fn main() {
         .unwrap_or(default_runtime_name);
 
     let mut runtime = Runtime::new();
+    let prepare_started = Instant::now();
     // For execute-only the program is compiled once, outside the samples.
     let program = match mode.as_str() {
         "execute-only" => {
@@ -95,6 +96,11 @@ fn main() {
     };
     #[cfg(not(feature = "whole-wasm"))]
     let mut native: Option<()> = None;
+    let prepare_ns = match mode.as_str() {
+        "execute-only" | "runtime-execute" | "runtime-registry-execute" | "halc-execute"
+        | "whole-wasm" => Some(prepare_started.elapsed().as_nanos()),
+        _ => None,
+    };
     let mut call = || {
         let value = match mode.as_str() {
             "existing" => runtime.eval_native(&source),
@@ -167,9 +173,10 @@ fn main() {
     #[cfg(not(feature = "tracing-jit"))]
     let telemetry = String::new();
     println!(
-        "{{\"runtime\":\"{}\",\"workload\":\"{}\",\"first_ns\":{},\"samples_ns\":[{}]{} }}",
+        "{{\"runtime\":\"{}\",\"workload\":\"{}\",\"prepare_ns\":{},\"first_ns\":{},\"samples_ns\":[{}]{} }}",
         json(runtime_name),
         json(id),
+        prepare_ns.map_or_else(|| "null".to_string(), |value| value.to_string()),
         first_ns,
         samples,
         telemetry,
