@@ -3,403 +3,155 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#020408">
-  <meta name="description" content="Hara is a programmable kernel for building, inspecting, and changing live systems.">
-  <meta property="og:title" content="Hara">
-  <meta property="og:description" content="A Programmable Kernel for the Agentic Age.">
+  <meta name="theme-color" content="#07100d">
+  <meta name="description" content="Hara is a fast embeddable Lisp for native, WebAssembly, Redis, PostgreSQL, and application runtimes.">
+  <meta property="og:title" content="Hara — one embeddable language, many runtimes">
+  <meta property="og:description" content="A programmable Lisp kernel with native and WebAssembly reach, persistent data, and first-class host interop.">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Hara">
   <meta property="og:url" content="https://www.hara-lang.org/">
   <meta property="og:image" content="https://www.hara-lang.org/og-hara-ribbon.jpg">
-  <meta property="og:image:secure_url" content="https://www.hara-lang.org/og-hara-ribbon.jpg">
-  <meta property="og:image:type" content="image/jpeg">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Hara — A Programmable Kernel for the Agentic Age">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Hara">
-  <meta name="twitter:description" content="A Programmable Kernel for the Agentic Age.">
+  <meta name="twitter:title" content="Hara — one embeddable language, many runtimes">
+  <meta name="twitter:description" content="A programmable Lisp kernel for native and WebAssembly hosts.">
   <meta name="twitter:image" content="https://www.hara-lang.org/og-hara-ribbon.jpg">
-  <meta name="twitter:image:alt" content="Hara — A Programmable Kernel for the Agentic Age">
   <link rel="canonical" href="https://www.hara-lang.org/">
-  <meta name="hara-auth-api" content="">
-  <link rel="icon" href="./assets/hara-favicon.svg?v=3" type="image/svg+xml">
-  <title>Hara</title>
-  <link rel="alternate" href="./hara-animation.html" title="Hara Animation Pipeline Demo">
-  <link rel="stylesheet" href="./vendor/hara-ui/tokens.css">
-  <link rel="stylesheet" href="./vendor/hara-ui/components.css">
-  <link rel="stylesheet" href="./app.css?v=studio-effects-9">
+  <link rel="icon" href="./vendor/hara-ui/favicon-48.svg?v=2" type="image/svg+xml" sizes="48x48">
+  <link rel="icon" href="./vendor/hara-ui/favicon-128.svg?v=2" type="image/svg+xml" sizes="128x128">
+  <link rel="icon" href="./vendor/hara-ui/favicon-256.svg?v=2" type="image/svg+xml" sizes="256x256">
+  <title>Hara — one embeddable language, many runtimes</title>
+  <link rel="stylesheet" href="./landing.css?v=mosaic-1">
 </head>
 <body>
-  <canvas class="tron-field" data-tron aria-hidden="true"></canvas>
-  <div class="atmosphere" aria-hidden="true"></div>
-
-  <div class="background-picker floating-background-picker" data-background-picker hidden>
-    <select class="sr-only" data-background-source aria-label="Background source"></select>
-    <button class="background-menu-toggle" type="button" data-background-menu-toggle
-            aria-haspopup="menu" aria-expanded="false" aria-controls="background-source-menu">
-      <span data-background-menu-label>SELECT</span>
-      <span aria-hidden="true">⌄</span>
-    </button>
-    <div class="background-source-menu" id="background-source-menu"
-         data-background-menu role="menu" hidden></div>
-  </div>
-
-  <aside class="background-source-panel" id="background-source-panel"
-         data-background-panel aria-hidden="true">
-    <button type="button" class="background-panel-resizer" data-background-resizer
-            aria-label="Resize code editor"></button>
-    <div class="hara-editor-menubar background-editor-toolbar">
-      <div class="hara-editor-menubar__group">
-        <button type="button" class="paredit-button" data-background-paredit
-                aria-pressed="true" hidden>PAREDIT ON</button>
-        <button type="button" class="run-button" data-background-apply>
-          <span aria-hidden="true">▶</span> APPLY
-        </button>
-        <button type="button" data-background-eval>EVAL</button>
-        <button type="button" data-background-save>SAVE</button>
-        <button type="button" data-background-trace aria-pressed="false">TRACE OFF</button>
-        <button type="button" data-background-font-decrease
-                aria-label="Decrease editor text size">A−</button>
-        <button type="button" data-background-font-increase
-                aria-label="Increase editor text size">A+</button>
-      </div>
-      <span class="sr-only" data-background-status aria-live="polite">WAITING FOR RUNTIME</span>
-      <button type="button" class="hara-editor-menubar__help" data-background-help
-              aria-expanded="false" aria-controls="background-editor-help"
-              aria-label="Editor help">?</button>
-      <button type="button" class="hara-editor-menubar__close" data-background-close
-              aria-label="Close code editor">×</button>
-      <div class="hara-editor-menubar__popover" id="background-editor-help"
-           data-background-help-panel hidden>
-        <strong>EDITOR SHORTCUTS</strong>
-        <span><kbd>Ctrl/⌘ Enter</kbd> apply preview</span>
-        <span><kbd>Ctrl/⌘ E</kbd> evaluate selection or current form</span>
-        <span><kbd>Ctrl/⌘ S</kbd> save locally</span>
-        <span><kbd>Tab</kbd> structurally align</span>
-        <span><kbd>A− / A+</kbd> adjust editor text size</span>
-        <span>Drag the editor’s left edge to adjust its width.</span>
-        <span>Paredit is always on. Comments mark safe changes.</span>
-        <span>Trace captures compiler and runtime events for this background.</span>
-      </div>
-    </div>
-    <label class="editor-surface background-editor-shell">
-      <span class="sr-only">Live HAL background source</span>
-      <span class="line-numbers" data-background-line-numbers aria-hidden="true">1</span>
-      <pre class="code-highlight" data-background-highlight aria-hidden="true"></pre>
-      <textarea data-background-editor spellcheck="false" wrap="off"
-                aria-label="Live HAL background source"></textarea>
-    </label>
-  </aside>
-
-  <aside class="app-launcher" id="app-launcher" data-launcher aria-hidden="true">
-    <nav class="site-launcher-links" aria-label="Hara sites">
-      <a href="https://playground.hara-lang.org/" target="_blank" rel="noopener noreferrer">
-        <span aria-hidden="true">&gt;_</span><strong>PLAYGROUND</strong>
-      </a>
-      <a href="https://docs.hara-lang.org/" target="_blank" rel="noopener noreferrer">
-        <span aria-hidden="true">D</span><strong>DOCS</strong>
-      </a>
-      <a href="https://specs.hara-lang.org/" target="_blank" rel="noopener noreferrer">
-        <span aria-hidden="true">{ }</span><strong>SPECS</strong>
-      </a>
-      <a href="https://github.com/hara-lang/hara" target="_blank" rel="noopener noreferrer">
-        <span aria-hidden="true">GH</span><strong>GITHUB</strong>
-      </a>
-      <a href="https://www.youtube.com/results?search_query=Hara+programming+language"
-         target="_blank" rel="noopener noreferrer">
-        <span aria-hidden="true">▶</span><strong>YOUTUBE</strong>
-      </a>
+  <header class="site-header">
+    <a class="brand" href="./"><img src="./vendor/hara-ui/favicon-48.svg" alt="" width="34" height="34"><span>HARA</span></a>
+    <nav aria-label="Primary navigation">
+      <a href="#why">WHY HARA</a><a href="#runtimes">RUNTIMES</a><a href="#libraries">LIBRARIES</a>
+      <a href="https://docs.hara-lang.org/">DOCS</a><a href="https://github.com/hara-lang/hara">GITHUB</a>
+      <button type="button" class="nav-install" data-install-trigger>GET HARA</button>
     </nav>
-    <div class="launcher-workspace-hooks" hidden>
-      <button type="button" data-new-workspace></button>
-      <button type="button" data-close-active-workspace></button>
-      <button type="button" data-clear-workspaces></button>
-      <div data-saved-workspaces></div>
-    </div>
-  </aside>
-  <div class="launcher-scrim" data-launcher-scrim></div>
-  <main class="workspace-viewport">
-    <div class="workspace-track" data-workspace-track>
-      <section class="workspace welcome-workspace" aria-labelledby="welcome-title">
-        <div class="welcome-copy">
-          <p class="welcome-kicker">FAST · SECURE · WEB NATIVE</p>
-          <h1 id="welcome-title">HARA</h1>
-          <p class="welcome-tagline">A Programmable Kernel for the Agentic Age.</p>
-        </div>
-        <div class="hero-callout">
-          <button class="start-button" type="button" data-start disabled>
-            <span>START</span>
-            <i aria-hidden="true">→</i>
-          </button>
-          <div class="kernel-loading" data-kernel-loading hidden role="status" aria-live="polite">
-            <span>KERNEL LOADING</span>
-            <strong data-kernel-progress>0%</strong>
-            <small data-kernel-detail>PREPARING RUNTIME</small>
-            <i><b data-kernel-meter></b></i>
-          </div>
-        </div>
-      </section>
+  </header>
 
-      <section class="workspace desktop-workspace" aria-label="Hara workspace" data-workspace-template="blank">
-        <div class="desktop-grid" aria-hidden="true"></div>
-        <nav class="mobile-panel-tabs hara-tabs" data-mobile-panels aria-label="Workspace panels">
-          <button class="hara-tab" type="button" data-focus-window="files" aria-selected="false">explorer</button>
-          <button class="hara-tab" type="button" data-focus-window="editor" aria-selected="true">source</button>
-          <button class="hara-tab" type="button" data-focus-window="canvas" aria-selected="false">output</button>
-        </nav>
-        <section class="app-window files-window" data-window="files"
-                 aria-label="Files window" tabindex="-1">
-          <div class="window-titlebar" data-drag-handle>
-            <div class="window-title">
-              <span class="window-number">01</span>
-              <span data-area-title="files">EXPLORER</span>
-            </div>
-            <div class="window-controls">
-              <button type="button" data-window-maximize aria-label="Maximize Files">□</button>
-              <button type="button" data-window-close aria-label="Close Files">×</button>
-            </div>
-          </div>
-          <div class="window-toolbar">
-            <span>HOME</span>
-            <div>
-              <button type="button" data-file-new>NEW</button>
-              <button type="button" data-file-rename>RENAME</button>
-              <button type="button" data-file-delete>DELETE</button>
-            </div>
-          </div>
-          <div class="file-tree" data-file-tree>
-            <div class="window-loading">OPENING WORKSPACE…</div>
-          </div>
-          <div class="window-status">
-            <span data-file-count>0 FILES</span>
-            <span>INDEXEDDB</span>
-          </div>
-        </section>
+  <main>
+    <section class="hero">
+      <div class="hero-stage">
+        <canvas data-hero-canvas aria-label="Animated luminous Roman cathedral nave"></canvas>
+        <div class="hero-mosaic-backdrop" data-hero-mosaic aria-hidden="true"></div>
+        <div class="hero-stage-shade" aria-hidden="true"></div>
+      </div>
+      <div class="hero-copy">
+        <p class="eyebrow">ONE LANGUAGE · MANY RUNTIMES</p>
+        <h1>A programmable kernel.<br><em>Embedded everywhere.</em></h1>
+        <p class="lede">Hara is a small Lisp kernel for putting programmable logic inside native applications, WebAssembly, databases, servers, editors, and devices—without giving up immutable data or explicit boundaries.</p>
+        <div class="actions"><button class="button primary" type="button" data-install-trigger>GET HARA →</button><a class="button" href="https://playground.hara-lang.org/">OPEN PLAYGROUND</a></div>
+        <p class="fine-print">Active experimental runtime. Performance varies by workload and machine. <a href="https://docs.hara-lang.org/reference/runtime-benchmarks/">Benchmark methodology and current evidence →</a></p>
+      </div>
+      <div class="hero-scenes" role="group" aria-label="Hero animation">
+        <span>SCENE</span>
+        <button type="button" data-hero-scene="columns" aria-pressed="true">CATHEDRAL</button>
+        <button type="button" data-hero-scene="mosaic" aria-pressed="false">BATHHOUSE MOSAIC</button>
+      </div>
+      <a class="learn-more" href="#why"><span>LEARN MORE</span><i aria-hidden="true">↓</i></a>
+    </section>
 
-        <section class="app-window editor-window" data-window="editor"
-                 aria-label="Editor window" tabindex="-1">
-          <div class="window-titlebar" data-drag-handle>
-            <div class="window-title">
-              <span class="window-number">02</span>
-              <span data-editor-title>SOURCE</span>
-              <i class="dirty-indicator" data-dirty aria-label="Unsaved changes"></i>
-            </div>
-            <div class="window-controls">
-              <button type="button" data-window-maximize aria-label="Maximize Editor">□</button>
-              <button type="button" data-window-close aria-label="Close Editor">×</button>
-            </div>
-          </div>
-          <div class="window-toolbar editor-toolbar">
-            <div>
-              <button type="button" class="paredit-button" data-paredit aria-pressed="true">PAREDIT ON</button>
-              <button type="button" data-save disabled>SAVE</button>
-              <button type="button" class="run-button" data-run disabled>
-                <span aria-hidden="true">▶</span> RUN FILE
-              </button>
-            </div>
-          </div>
-          <label class="editor-surface">
-            <span class="sr-only">Hara source editor</span>
-            <span class="line-numbers" data-line-numbers aria-hidden="true">1</span>
-            <pre class="code-highlight" data-code-highlight aria-hidden="true"></pre>
-            <textarea data-editor spellcheck="false" wrap="off"
-                      aria-label="Hara source editor" disabled></textarea>
-            <output class="inline-eval" data-inline-eval aria-live="polite" hidden></output>
-            <div class="hal-completions" data-hal-completions role="listbox" aria-label="HAL form completions" hidden></div>
-            <output class="structural-diff" data-structural-diff aria-live="polite" hidden></output>
-          </label>
-          <div class="window-status">
-            <span data-editor-status>WAITING FOR RUNTIME</span>
-            <span>HOLD CTRL: E FORM · E E FILE · X E INSERT · CTRL-S SAVE</span>
-          </div>
-        </section>
+    <section class="proof"><div><strong>PERSISTENT VALUES</strong><span>structural sharing</span></div><div><strong>NATIVE + WASM</strong><span>shared Rust core</span></div><div><strong>EMBEDDABLE</strong><span>capability boundary</span></div><div><strong>TAHTO</strong><span>target languages</span></div></section>
 
-        <section class="app-window canvas-window" data-window="canvas"
-                 aria-label="Canvas output window" tabindex="-1">
-          <div class="window-titlebar" data-drag-handle>
-            <div class="window-title">
-              <span class="window-number">03</span>
-              <span data-area-title="canvas">OUTPUT</span>
-            </div>
-            <div class="window-controls">
-              <button type="button" data-window-maximize aria-label="Maximize Canvas">□</button>
-              <button type="button" data-window-close aria-label="Close Canvas">×</button>
-            </div>
-          </div>
-          <div class="canvas-wrap" data-canvas-wrap>
-            <canvas data-output-canvas aria-label="Rendered output from the Hara program"></canvas>
-            <canvas data-creative-canvas aria-label="Rendered 3D Hara scene" hidden></canvas>
-            <div class="canvas-empty" data-canvas-empty>
-              <span>NO SIGNAL</span>
-              <small>RUN A HARA FILE TO RENDER</small>
-            </div>
-          </div>
-          <div class="window-status">
-            <span data-canvas-status>FRAME // —</span>
-            <span data-canvas-size>960 × 600</span>
-          </div>
-        </section>
+    <section class="section" id="why">
+      <p class="eyebrow">01 // THE ADVANTAGE</p><h2>The language goes where the data lives.</h2>
+      <p class="section-lede">Instead of moving logic into another service or exposing an entire host, embed Hara and grant a script only the operations it needs.</p>
+      <div class="cards three">
+        <article><small>01</small><h3>Fast kernel</h3><p>Native and WASM execution share the same language and collection semantics, with performance work measured against established Lisp runtimes.</p></article>
+        <article><small>02</small><h3>Safe values</h3><p>Persistent vectors, maps, sets, queues, ordered collections, sorted collections, and tries use structural sharing and deterministic hashing.</p></article>
+        <article><small>03</small><h3>Explicit interop</h3><p>Files, sockets, processes, WASM exports, database calls, and host objects are visible capabilities—not ambient language escape hatches.</p></article>
+      </div>
+    </section>
 
-        <div class="desktop-hint" aria-hidden="true">
-          DRAG WINDOWS · RESIZE FROM EDGES · RUN THE OPEN FILE
-        </div>
-      </section>
-    </div>
+    <section class="section" id="runtimes">
+      <p class="eyebrow">02 // EMBED TARGETS</p><h2>One Hara program. Different hosts.</h2>
+      <div class="runtime-grid">
+        <article><strong>NATIVE</strong><h3>Rust applications</h3><p>Embed the compact kernel in CLIs, services, and products. Isolate sessions while sharing immutable runtime infrastructure.</p><span>AVAILABLE</span></article>
+        <article><strong>WEBASSEMBLY</strong><h3>Browsers and WASM hosts</h3><p>The Rust core compiles to WASM and runs in workers with the same evaluator, values, protocols, and provider boundary.</p><span>AVAILABLE</span></article>
+        <article><strong>TRUFFLE</strong><h3>JVM and native image</h3><p>A Java/Truffle runtime with a JLine REPL, explicit JVM flavor, native-image packaging, and capability-gated services.</p><span>AVAILABLE</span></article>
+        <article><strong>REDIS</strong><h3>Server-side scripts</h3><p>Use Hara where Lua normally runs: load functions beside the data and call Redis commands through a constrained script capability.</p><span>IN DEVELOPMENT</span></article>
+        <article><strong>POSTGRESQL</strong><h3>PL/pgSQL target</h3><p>Use Tahto to emit PostgreSQL procedural code from typed Hara forms, keeping database logic in the same source language.</p><span>IN DEVELOPMENT</span></article>
+        <article><strong>YOUR HOST</strong><h3>Application kernels</h3><p>Define providers, values, handles, and limits for a game, editor, database, web server, device, or agent runtime.</p><span>EMBEDDING API</span></article>
+      </div>
+    </section>
+
+    <section class="section split">
+      <div><p class="eyebrow">03 // WASM INTEROP</p><h2>Use WASM like a library.</h2><p>Require an extension namespace and call its generated Vars. Hara validates the manifest, selects an ABI, checks capabilities, owns opaque handles, and settles asynchronous results.</p><ul><li><code>core.v1</code> for direct scalar exports</li><li><code>hta.v1</code> for stateful async modules</li><li>Import-free modules and explicit host calls</li></ul><a class="text-link" href="https://docs.hara-lang.org/reference/extensions-contract/">EXTENSION CONTRACT →</a></div>
+      <article class="terminal compact"><header><span>digest.hal</span><i>WASM</i></header><pre><code>(ns digest.app
+  (:require
+    [crypto.hash.sha256 :as sha]))
+
+(deref (sha/sha256 payload))
+<strong>;; =&gt; #bytes[32]</strong></code></pre></article>
+    </section>
+
+    <section class="section">
+      <p class="eyebrow">04 // DATABASE SCRIPTING</p><h2>Write the logic once.</h2>
+      <p class="section-lede">Redis and PostgreSQL are the first database hosts: one executes Hara in an embedded kernel; the other receives procedural source from Tahto.</p>
+      <div class="examples">
+        <article class="terminal compact"><header><span>rate_limit.hal</span><i>REDIS SCRIPT</i></header><pre><code>(ns scripts.rate-limit
+  (:require [redis.script :as redis]))
+
+(defn allow? [key limit]
+  (let [count (redis/call "INCR" key)]
+    (when (= count 1)
+      (redis/call "EXPIRE" key 60))
+    (&lt;= count limit)))</code></pre><footer><span>ATOMIC HOST CALLS</span><span>NO AMBIENT NETWORK</span></footer></article>
+        <article class="terminal compact"><header><span>account.hal</span><i>TAHTO / PLPGSQL</i></header><pre><code>(defn ^{:returns :boolean} active?
+  [:uuid account-id]
+  (return
+    (sql/exists
+      (sql/select :accounts
+        {:id account-id :active true}))))
+
+<strong>;; typed procedural target</strong></code></pre><footer><span>VERSIONED GRAMMAR</span><span>GENERATED SQL</span></footer></article>
+      </div>
+    </section>
+
+    <section class="section">
+      <p class="eyebrow">05 // TAHTO</p><h2>Programs are data. Targets are models.</h2>
+      <p class="section-lede">Tahto is Hara's grammar-driven transpiler. JavaScript and Python emission are tested today; PL/pgSQL extends the same versioned model.</p>
+      <div class="compare"><article class="terminal compact"><header><span>input.hal</span><i>HAL</i></header><pre><code>(defn add [x y]
+  (return (+ x y)))</code></pre></article><article class="terminal compact"><header><span>output.js</span><i>JAVASCRIPT</i></header><pre><code>function add(x,y){
+  return x + y;
+}</code></pre></article><article class="terminal compact"><header><span>output.py</span><i>PYTHON</i></header><pre><code>def add(x,y):
+  return x + y</code></pre></article></div>
+    </section>
+
+    <section class="section" id="libraries">
+      <p class="eyebrow">06 // LIBRARIES</p><h2>Batteries included. Authority excluded.</h2>
+      <div class="cards four">
+        <article><code>std.foundation</code><h3>Core + collections</h3><p>Sequences, protocols, macros, collection transforms, and persistent values.</p><small>PORTABLE</small></article>
+        <article><code>std.foundation.string</code><h3>Text</h3><p>Comparison, slicing, joining, case conversion, trimming, and UTF-8.</p><small>PORTABLE</small></article>
+        <article><code>std.foundation.edn<br>std.foundation.json</code><h3>Formats</h3><p>Strict parsing, canonical encoding, and readable pretty printing.</p><small>PORTABLE</small></article>
+        <article><code>std.foundation.promise<br>std.foundation.coroutine</code><h3>Async</h3><p>Promise composition, recovery, bidirectional yield, and await.</p><small>PORTABLE</small></article>
+        <article><code>std.foundation.file<br>std.foundation.socket<br>std.foundation.os</code><h3>Host services</h3><p>Asynchronous I/O and process operations behind explicit capabilities.</p><small>CAPABILITY-GATED</small></article>
+        <article><code>std.lib.task<br>std.lib.block<br>std.lib.zip</code><h3>Program tools</h3><p>Task composition, structured source, and persistent zipper editing.</p><small>PORTABLE</small></article>
+        <article><code>code.test</code><h3>Testing</h3><p>Facts, structured results, project discovery, and repeatable execution.</p><small>SHIPPED</small></article>
+        <article><code>tahto.*</code><h3>Transpilation</h3><p>Versioned grammars, preprocessing, target models, and source emission.</p><small>JS · PY · PLPGSQL</small></article>
+      </div>
+      <a class="text-link" href="https://docs.hara-lang.org/reference/namespaces/">NAMESPACE CATALOG →</a>
+    </section>
+
+    <section class="section install"><div><p class="eyebrow">07 // QUICK START</p><h2>A native REPL in two commands.</h2><p>The Rust runtime and Truffle native image install without requiring a JVM at runtime.</p></div><article class="terminal compact"><header><span>terminal</span><i>INSTALL</i></header><pre><code>brew install hara-lang/tap/hara
+hara eval '(+ 19 23)'
+<strong>42</strong>
+
+<b># Optional Truffle native image</b>
+brew install hara-lang/tap/hara-truffle</code></pre></article></section>
+
+    <section class="closing"><img src="./vendor/hara-ui/favicon-128.svg" alt="" width="60" height="60"><p class="eyebrow">THE KERNEL IS SMALL. THE BOUNDARY IS EXPLICIT.</p><h2>Embed the language.<br>Keep control of the host.</h2><div class="actions"><a class="button primary" href="https://docs.hara-lang.org/start/orientation/">START WITH HARA →</a><a class="button" href="./v1/">V1 SHOWCASE</a></div></section>
   </main>
-
-  <footer class="system-bottom-bar">
-    <div class="system-actions bottom-navigation">
-      <button class="system-button launcher-button" type="button"
-              data-launcher-toggle aria-expanded="false"
-              aria-controls="app-launcher" aria-label="Open application launcher">
-        <span class="app-launcher-glyph" aria-hidden="true">
-          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-        </span>
-      </button>
-      <button class="system-button workspace-nav-button" type="button" data-workspace-prev
-              aria-label="Previous screen" disabled>
-        <span aria-hidden="true">‹</span>
-      </button>
-      <button class="system-button workspace-nav-button" type="button" data-workspace-next
-              aria-label="Next screen" disabled>
-        <span aria-hidden="true">›</span>
-      </button>
-    </div>
-    <nav class="project-tabs" data-project-tabs aria-label="Open workspaces"></nav>
-    <div class="home-tools">
-      <button class="source-toggle" type="button" data-source-toggle
-              aria-expanded="false" aria-controls="background-source-panel">CODE</button>
-    </div>
-    <button type="button" class="publish-button" data-publish disabled>PUBLISH</button>
-    <button class="runtime-state" type="button" data-runtime-toggle
-            aria-live="polite" aria-expanded="false" aria-controls="kernel-statistics">
-      <span class="runtime-led" data-runtime-led></span>
-      <span class="sr-only" data-runtime-label>WASM // STANDBY</span>
-    </button>
-  </footer>
-
-  <section class="kernel-statistics" id="kernel-statistics" data-kernel-statistics hidden
-           aria-label="Kernel statistics">
-    <header>
-      <div>
-        <span>KERNEL TELEMETRY</span>
-        <strong data-kernel-state>STANDBY</strong>
-      </div>
-      <button type="button" data-kernel-statistics-close aria-label="Close kernel statistics">×</button>
-    </header>
-    <div class="kernel-statistics-grid" data-kernel-statistics-grid></div>
-    <footer>
-      <span>LIVE BROWSER TELEMETRY</span>
-      <time data-kernel-statistics-updated>—</time>
-    </footer>
-  </section>
-
-  <dialog class="hara-dialog hara-help-dialog" data-help-dialog>
-    <div class="dialog-head"><span>HARA // HELP</span><button type="button" data-help-close aria-label="Close help">×</button></div>
-    <div class="help-content">
-      <p>Use the launcher to start a template, open a book, or return home.</p>
-      <dl>
-        <div><dt>‹ / ›</dt><dd>Move between the welcome page and workspace.</dd></div>
-        <div><dt>Ctrl E</dt><dd>Evaluate the current form in the editor.</dd></div>
-        <div><dt>Ctrl E E</dt><dd>Run the open Hara file.</dd></div>
-        <div><dt>Ctrl S</dt><dd>Save the open file.</dd></div>
-      </dl>
-    </div>
+  <dialog class="install-dialog" data-install-dialog aria-labelledby="install-title">
+    <div class="install-dialog-head"><div><p class="eyebrow">HOMEBREW</p><h2 id="install-title">Get Hara.</h2></div><button type="button" data-install-close aria-label="Close installation dialog">×</button></div>
+    <p>Install the native CLI from the Hara tap.</p>
+    <div class="install-command"><code>brew install hara-lang/tap/hara</code><button type="button" data-install-copy>COPY</button></div>
+    <p class="install-note">Then verify it with <code>hara eval '(+ 19 23)'</code>.</p>
   </dialog>
-
-  <dialog class="hara-dialog workspace-template-dialog" data-template-dialog>
-    <div class="dialog-head"><span>NEW WORKSPACE</span><button type="button" data-template-close aria-label="Close">×</button></div>
-    <label class="workspace-name-field">
-      <span>NAME</span>
-      <input type="text" data-workspace-name value="Untitled Workspace" maxlength="48">
-    </label>
-    <div class="template-grid" data-template-grid></div>
-  </dialog>
-
-  <dialog class="hara-dialog publish-dialog" data-publish-dialog>
-    <div class="dialog-head"><span>PUBLISH WORKSPACE</span><button type="button" data-publish-close aria-label="Close">×</button></div>
-    <p>Publish the complete project, including project.edn, workspace.edn and source files.</p>
-    <label class="publish-visibility"><input type="checkbox" data-publish-public checked> PUBLIC</label>
-    <div class="publish-options">
-      <button type="button" data-publish-provider="download">SELF-HOST EXPORT</button>
-      <button type="button" data-publish-provider="gist">GITHUB GIST</button>
-      <button type="button" data-publish-provider="greenways">GREENWAYS</button>
-    </div>
-    <p class="publish-note" data-publish-note>GitHub and Greenways connect through a server-side GitHub profile authorization.</p>
-  </dialog>
-
-  <dialog class="hara-dialog account-dialog" data-account-dialog>
-    <div class="dialog-head"><span>GITHUB ACCOUNT</span><button type="button" data-account-close aria-label="Close">×</button></div>
-    <div class="account-state">
-      <img data-account-avatar alt="" hidden>
-      <div>
-        <strong data-account-name>NOT CONNECTED</strong>
-        <span data-account-status>GitHub identity is used for publishing and your Greenways profile.</span>
-      </div>
-    </div>
-    <div class="dialog-actions account-actions">
-      <button type="button" data-account-signout hidden>SIGN OUT</button>
-      <button type="button" class="dialog-confirm" data-account-signin>CONNECT GITHUB</button>
-    </div>
-  </dialog>
-
-  <dialog class="hara-dialog settings-dialog" data-settings-dialog>
-    <div class="dialog-head"><span>HARA // SETTINGS</span><button type="button" data-settings-close aria-label="Close">×</button></div>
-    <div class="settings-options">
-      <button type="button" data-github-account>
-        <strong data-github-label>CONNECT GITHUB</strong>
-        <span>Publishing identity and Greenways profile</span>
-      </button>
-      <button type="button" data-ai-adapters>
-        <strong>AI ADAPTERS</strong>
-        <span>Models and endpoints for the current workspace</span>
-      </button>
-    </div>
-  </dialog>
-
-  <dialog class="hara-dialog ai-dialog" data-ai-dialog>
-    <div class="dialog-head"><span>AI ADAPTERS</span><button type="button" data-ai-close aria-label="Close">×</button></div>
-    <p>Adapters belong to the current workspace. Keys stay in this browser tab and are never saved with the project.</p>
-    <div class="adapter-list" data-adapter-list></div>
-    <form class="adapter-form" data-adapter-form>
-      <label><span>NAME</span><input name="name" required placeholder="My model"></label>
-      <label><span>TYPE</span><select name="kind">
-        <option value="openai-compatible">OPENAI COMPATIBLE</option>
-        <option value="anthropic">ANTHROPIC</option>
-        <option value="custom-json">CUSTOM JSON PROXY</option>
-      </select></label>
-      <label><span>ENDPOINT</span><input name="endpoint" required type="url" placeholder="https://api.example/v1/chat/completions"></label>
-      <label><span>MODEL</span><input name="model" required placeholder="model-name"></label>
-      <label><span>API KEY — SESSION ONLY</span><input name="apiKey" type="password" autocomplete="off"></label>
-      <div class="dialog-actions">
-        <button type="button" data-ai-test>TEST</button>
-        <button type="submit" class="dialog-confirm">ADD ADAPTER</button>
-      </div>
-    </form>
-    <p class="publish-note" data-ai-note>Select a workspace before adding an adapter.</p>
-  </dialog>
-
-  <dialog class="hara-dialog" data-dialog>
-    <form method="dialog" data-dialog-form>
-      <div class="dialog-head">
-        <span data-dialog-title>HARA // INPUT</span>
-        <button type="submit" value="cancel" aria-label="Close dialog">×</button>
-      </div>
-      <label>
-        <span data-dialog-label>VALUE</span>
-        <input type="text" data-dialog-input autocomplete="off">
-      </label>
-      <p data-dialog-message></p>
-      <div class="dialog-actions">
-        <button type="submit" value="cancel">CANCEL</button>
-        <button type="submit" value="confirm" class="dialog-confirm">CONFIRM</button>
-      </div>
-    </form>
-  </dialog>
-
-  <div class="toast-stack" data-toasts aria-live="polite"></div>
-  <script type="module" src="./story.js?v=amp-story-2"></script>
-  <script type="module" src="./app.js?v=amp-story-1"></script>
+  <footer class="site-footer"><div><strong>HARA</strong><span>One embeddable language. Many runtimes.</span></div><nav><a href="https://docs.hara-lang.org/">Docs</a><a href="https://specs.hara-lang.org/">Specs</a><a href="https://github.com/hara-lang/hara">Source</a><a href="./v1/">Studio</a></nav><p>Built by <a href="https://www.greenways.ai/">Greenways</a> · Eclipse Public License 2.0</p></footer>
+  <script defer src="./hero-animation.js?v=voronoi-temple-2"></script>
 </body>
 </html>

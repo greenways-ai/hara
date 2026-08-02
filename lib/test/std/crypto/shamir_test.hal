@@ -1,0 +1,27 @@
+(ns std.crypto.shamir-test
+  (:use code.test)
+  (:require [std.crypto.shamir :as shamir]
+            [std.foundation.bytes :as byte]))
+
+(fact "any threshold subset reconstructs the secret"
+  (let [secret (bytes 1 2 3 4)
+        shares (shamir/split-with-coefficients
+                secret 3 2 (bytes 17 23 42 99))]
+    [(= secret (shamir/combine [(nth shares 0) (nth shares 1)]))
+     (= secret (shamir/combine [(nth shares 0) (nth shares 2)]))
+     (= secret (shamir/combine [(nth shares 1) (nth shares 2)]))
+     (mapv byte/count shares)])
+  => [true true true [5 5 5]])
+
+(fact "rejects duplicate and inconsistent shares"
+  (let [shares (shamir/split-with-coefficients
+                (bytes 1 2 3) 3 2 (bytes 7 11 13))]
+    [(try (shamir/combine [(nth shares 0) (nth shares 0)]) false
+          (catch Throwable error true))
+     (try (shamir/combine [(nth shares 0)
+                           (byte/slice (nth shares 1) 0 2)])
+          false
+          (catch Throwable error true))])
+  => [true true])
+
+(pr-str (run '[std.crypto.shamir-test]))

@@ -71,6 +71,7 @@ BYTECODE_VARIANTS = {
     "hara-rust-bytecode": ("bytecode-vm", "vm"),
     "hara-rust-trace-checked": ("tracing-jit", "trace-checked"),
     "hara-rust-trace-native": ("native-jit", "trace-native"),
+    "hara-rust-whole-wasm": ("whole-wasm", "whole-wasm"),
 }
 
 
@@ -115,9 +116,14 @@ def adapters():
             result[label] = lambda w, n, c, name=name, mode=mode: language(
                 name, mode, w, n, c)
     for runtime, (_, label) in BYTECODE_VARIANTS.items():
+        if runtime == "hara-rust-whole-wasm":
+            result[f"{runtime}-prepared"] = (
+                lambda w, n, c, b=bytecode_binary(label), r=runtime:
+                bytecode(b, f"{r}-prepared", "whole-wasm", w, n, c))
+            continue
         result[f"{runtime}-prepared"] = (
             lambda w, n, c, b=bytecode_binary(label), r=runtime:
-            bytecode(b, f"{r}-prepared", "execute-only", w, n, c))
+            bytecode(b, f"{r}-prepared", "runtime-registry-execute", w, n, c))
     result["hara-rust-bytecode-eval"] = (
         lambda w, n, c, b=bytecode_binary("vm"):
         bytecode(b, "hara-rust-bytecode-eval", "compile-execute", w, n, c))

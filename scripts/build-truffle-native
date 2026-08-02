@@ -13,8 +13,12 @@ mvn -f "$ROOT/java/pom.xml" -Ptruffle -DskipTests clean compile dependency:copy-
   -DoutputDirectory="$DEPENDENCIES"
 
 NATIVE_IMAGE_OPTIONS=(--no-fallback)
+OUTPUT="${HARA_NATIVE_OUTPUT:-$ROOT/target/hara-truffle}"
 if native-image --help 2>&1 | grep -q -- '--emit'; then
   NATIVE_IMAGE_OPTIONS+=(--emit=build-report)
+fi
+if [[ "${HARA_NATIVE_ANALYSIS_ONLY:-false}" == "true" ]]; then
+  NATIVE_IMAGE_OPTIONS+=(-H:+ExitAfterAnalysis)
 fi
 if [[ "${HARA_NATIVE_USE_FALLBACK_RUNTIME:-false}" == "true" ]]; then
   NATIVE_IMAGE_OPTIONS+=(-Dtruffle.UseFallbackRuntime=true)
@@ -46,6 +50,10 @@ native-image \
   --initialize-at-build-time=hara.truffle \
   --initialize-at-build-time=hara.lang.data.Keyword \
   --initialize-at-build-time=hara.lang.base.primitive.RefCache \
-  -o "$ROOT/target/hara-truffle"
+  -o "$OUTPUT"
 
-echo "Built $ROOT/target/hara-truffle"
+if [[ "${HARA_NATIVE_ANALYSIS_ONLY:-false}" == "true" ]]; then
+  echo "Native Image analysis completed for $OUTPUT"
+else
+  echo "Built $OUTPUT"
+fi

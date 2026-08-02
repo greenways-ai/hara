@@ -32,6 +32,8 @@ mkdir -p "$OUT/sources"
 mkdir -p "$OUT/vendor"
 
 cp "$ROOT/website/index.html" \
+   "$ROOT/website/landing.css" \
+   "$ROOT/website/hero-animation.js" \
    "$ROOT/website/app.css" \
    "$ROOT/website/app.js" \
    "$ROOT/website/story.css" \
@@ -57,6 +59,8 @@ cp "$ROOT/website/index.html" \
    "$ROOT/website/og.png" \
    "$ROOT/website/scene.js" \
    "$OUT/"
+mkdir -p "$OUT/v1"
+cp "$ROOT/website/v1.html" "$OUT/v1/index.html"
 node -e 'process.stdout.write(`globalThis.HARA_GITHUB_OAUTH_CLIENT_ID = ${JSON.stringify(process.env.HARA_GITHUB_OAUTH_CLIENT_ID || "Iv23lixQbnKYwkRBihCQ")};\n`)' \
   > "$OUT/github-auth-config.js"
 cp "$ROOT/scripts/install.sh" "$OUT/install.sh"
