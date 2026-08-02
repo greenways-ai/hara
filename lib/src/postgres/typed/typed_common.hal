@@ -128,7 +128,7 @@
 (defstruct JsonbArray [element-type])
 (defstruct TypeUnion [types])
 (defstruct JsonbInference [return-shape intermediate-vars operations-detected])
-(defstruct BindingContext [bindings jsonb-shapes jsonb-paths parent])
+(defstruct BindingContext [bindings jsonb-shapes jsonb-paths parent aliases])
 
 (defn type-ref? [value] (instance? TypeRef value))
 (defn table-def? [value] (instance? TableDef value))
@@ -250,12 +250,14 @@
 (defn make-jsonb-inference [return-shape intermediate-vars operations-detected]
   (JsonbInference return-shape intermediate-vars operations-detected))
 (defn make-context
-  ([] (BindingContext {} {} {} nil))
-  ([bindings] (BindingContext bindings {} {} nil))
-  ([bindings shapes] (BindingContext bindings shapes {} nil))
-  ([bindings shapes paths] (BindingContext bindings shapes paths nil)))
+  ([] (BindingContext {} {} {} nil {}))
+  ([bindings] (BindingContext bindings {} {} nil {}))
+  ([bindings shapes] (BindingContext bindings shapes {} nil {}))
+  ([bindings shapes paths] (BindingContext bindings shapes paths nil {}))
+  ([bindings shapes paths aliases]
+   (BindingContext bindings shapes paths nil aliases)))
 
-(defn push-scope [ctx] (BindingContext {} {} {} ctx))
+(defn push-scope [ctx] (BindingContext {} {} {} ctx (:aliases ctx)))
 (defn pop-scope [ctx] (:parent ctx))
 
 (defn- options-map
