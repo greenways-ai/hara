@@ -1,6 +1,6 @@
 use wasm_encoder::{
-    BlockType, CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, Function,
-    FunctionSection, GlobalSection, GlobalType, ImportSection, Instruction, Module, TypeSection,
+    BlockType, CodeSection, ConstExpr, ExportKind, ExportSection, Function, FunctionSection,
+    GlobalSection, GlobalType, Instruction, MemArg, MemorySection, MemoryType, Module, TypeSection,
     ValType,
 };
 
@@ -12,11 +12,15 @@ use crate::vm::Program;
 /// Error codes published through the `hara_error` Wasm global before a trap.
 pub const ERROR_INTEGER_OVERFLOW: i32 = 1;
 pub const ERROR_DIVISION_BY_ZERO: i32 = 2;
-const HOST_FUNCTION_COUNT: u32 = 4;
-const HOST_ARRAY_EMPTY: u32 = 0;
-const HOST_ARRAY_PUSH_I64: u32 = 1;
-const HOST_ARRAY_GET_I64: u32 = 2;
-const HOST_ARRAY_SET_I64: u32 = 3;
+pub const ERROR_ARRAY_BOUNDS: i32 = 3;
+const HOST_FUNCTION_COUNT: u32 = 0;
+const ARRAY_MEMORY: u32 = 0;
+const ARRAY_HEAP_GLOBAL: u32 = 1;
+const I64_MEMORY: MemArg = MemArg {
+    offset: 0,
+    align: 3,
+    memory_index: ARRAY_MEMORY,
+};
 
 /// Compiles a complete eligible bytecode program into deterministic Wasm.
 pub fn compile_program(program: &Program) -> Result<Vec<u8>, String> {
@@ -28,10 +32,6 @@ pub(crate) fn emit_program(program: &MirProgram) -> Result<Vec<u8>, String> {
     let mut module = Module::new();
     let mut types = TypeSection::new();
     let mut functions = FunctionSection::new();
-    types.function([], [ValType::I64]);
-    types.function([ValType::I64, ValType::I64], [ValType::I64]);
-    types.function([ValType::I64, ValType::I64], [ValType::I64]);
-    types.function([ValType::I64, ValType::I64, ValType::I64], [ValType::I64]);
     for function in &program.functions {
         types.function(
             std::iter::repeat(ValType::I64).take(usize::from(function.arity)),
@@ -40,28 +40,6 @@ pub(crate) fn emit_program(program: &MirProgram) -> Result<Vec<u8>, String> {
         functions.function(HOST_FUNCTION_COUNT + u32::from(function.id));
     }
     module.section(&types);
-    let mut imports = ImportSection::new();
-    imports.import(
-        "hara",
-        "array_empty",
-        EntityType::Function(HOST_ARRAY_EMPTY),
-    );
-    imports.import(
-        "hara",
-        "array_push_i64",
-        EntityType::Function(HOST_ARRAY_PUSH_I64),
-    );
-    imports.import(
-        "hara",
-        "array_get_i64",
-        EntityType::Function(HOST_ARRAY_GET_I64),
-    );
-    imports.import(
-        "hara",
-        "array_set_i64",
-        EntityType::Function(HOST_ARRAY_SET_I64),
-    );
-    module.section(&imports);
     module.section(&functions);
 
     let mut globals = GlobalSection::new();
@@ -72,6 +50,21 @@ pub(crate) fn emit_program(program: &MirProgram) -> Result<Vec<u8>, String> {
         },
         &ConstExpr::i32_const(0),
     );
+    globals.global(
+        GlobalType {
+            val_type: ValType::I32,
+            mutable: true,
+        },
+        &ConstExpr::i32_const(0),
+    );
+    let mut memories = MemorySection::new();
+    memories.memory(MemoryType {
+        minimum: 1,
+        maximum: Some(1),
+        memory64: false,
+        shared: false,
+    });
+    module.section(&memories);
     module.section(&globals);
 
     let mut exports = ExportSection::new();
@@ -83,6 +76,8 @@ pub(crate) fn emit_program(program: &MirProgram) -> Result<Vec<u8>, String> {
         );
     }
     exports.export("hara_error", ExportKind::Global, 0);
+    exports.export("hara_heap", ExportKind::Global, ARRAY_HEAP_GLOBAL);
+    exports.export("hara_memory", ExportKind::Memory, ARRAY_MEMORY);
     module.section(&exports);
 
     let mut code = CodeSection::new();
@@ -188,17 +183,30 @@ fn emit_operation(
             destination,
             values,
         } => {
-            out.instruction(&Instruction::Call(HOST_ARRAY_EMPTY));
-            // Keep the handle in a temporary until every constructor operand
-            // has been consumed: destination aliases the first operand stack
-            // slot in stack-machine lowering.
+            let bytes = (values.len() + 1)
+                .checked_mul(8)
+                .and_then(|value| i32::try_from(value).ok())
+                .ok_or("whole-Wasm array allocation is too large")?;
+            out.instruction(&Instruction::GlobalGet(ARRAY_HEAP_GLOBAL));
+            out.instruction(&Instruction::I64ExtendI32U);
             out.instruction(&Instruction::LocalSet(result));
-            for value in values {
+            out.instruction(&Instruction::LocalGet(result));
+            out.instruction(&Instruction::I32WrapI64);
+            out.instruction(&Instruction::I64Const(values.len() as i64));
+            out.instruction(&Instruction::I64Store(I64_MEMORY));
+            for (index, value) in values.iter().enumerate() {
                 out.instruction(&Instruction::LocalGet(result));
+                out.instruction(&Instruction::I32WrapI64);
                 out.instruction(&Instruction::LocalGet(u32::from(*value)));
-                out.instruction(&Instruction::Call(HOST_ARRAY_PUSH_I64));
-                out.instruction(&Instruction::LocalSet(result));
+                out.instruction(&Instruction::I64Store(MemArg {
+                    offset: ((index + 1) * 8) as u64,
+                    ..I64_MEMORY
+                }));
             }
+            out.instruction(&Instruction::GlobalGet(ARRAY_HEAP_GLOBAL));
+            out.instruction(&Instruction::I32Const(bytes));
+            out.instruction(&Instruction::I32Add);
+            out.instruction(&Instruction::GlobalSet(ARRAY_HEAP_GLOBAL));
             out.instruction(&Instruction::LocalGet(result));
             out.instruction(&Instruction::LocalSet(u32::from(*destination)));
         }
@@ -207,9 +215,10 @@ fn emit_operation(
             array,
             index,
         } => {
-            out.instruction(&Instruction::LocalGet(u32::from(*array)));
-            out.instruction(&Instruction::LocalGet(u32::from(*index)));
-            out.instruction(&Instruction::Call(HOST_ARRAY_GET_I64));
+            emit_array_address(out, *array, |out| {
+                out.instruction(&Instruction::LocalGet(u32::from(*index)))
+            });
+            out.instruction(&Instruction::I64Load(I64_MEMORY));
             out.instruction(&Instruction::LocalSet(u32::from(*destination)));
         }
         MirOp::ArrayGetI64Constant {
@@ -217,9 +226,10 @@ fn emit_operation(
             array,
             index,
         } => {
-            out.instruction(&Instruction::LocalGet(u32::from(*array)));
-            out.instruction(&Instruction::I64Const(*index));
-            out.instruction(&Instruction::Call(HOST_ARRAY_GET_I64));
+            emit_array_address(out, *array, |out| {
+                out.instruction(&Instruction::I64Const(*index))
+            });
+            out.instruction(&Instruction::I64Load(I64_MEMORY));
             out.instruction(&Instruction::LocalSet(u32::from(*destination)));
         }
         MirOp::ArraySetI64 {
@@ -228,10 +238,12 @@ fn emit_operation(
             index,
             value,
         } => {
-            out.instruction(&Instruction::LocalGet(u32::from(*array)));
-            out.instruction(&Instruction::LocalGet(u32::from(*index)));
+            emit_array_address(out, *array, |out| {
+                out.instruction(&Instruction::LocalGet(u32::from(*index)))
+            });
             out.instruction(&Instruction::LocalGet(u32::from(*value)));
-            out.instruction(&Instruction::Call(HOST_ARRAY_SET_I64));
+            out.instruction(&Instruction::I64Store(I64_MEMORY));
+            out.instruction(&Instruction::LocalGet(u32::from(*array)));
             out.instruction(&Instruction::LocalSet(u32::from(*destination)));
         }
         MirOp::CallStatic {
@@ -392,6 +404,37 @@ fn emit_error(out: &mut Function, code: i32) {
     out.instruction(&Instruction::Unreachable);
 }
 
+fn emit_array_address<I>(out: &mut Function, array: u16, index: I)
+where
+    I: Fn(&mut Function) -> &mut Function,
+{
+    index(out);
+    out.instruction(&Instruction::I64Const(0));
+    out.instruction(&Instruction::I64LtS);
+    out.instruction(&Instruction::If(BlockType::Empty));
+    emit_error(out, ERROR_ARRAY_BOUNDS);
+    out.instruction(&Instruction::End);
+
+    index(out);
+    out.instruction(&Instruction::LocalGet(u32::from(array)));
+    out.instruction(&Instruction::I32WrapI64);
+    out.instruction(&Instruction::I64Load(I64_MEMORY));
+    out.instruction(&Instruction::I64GeU);
+    out.instruction(&Instruction::If(BlockType::Empty));
+    emit_error(out, ERROR_ARRAY_BOUNDS);
+    out.instruction(&Instruction::End);
+
+    out.instruction(&Instruction::LocalGet(u32::from(array)));
+    out.instruction(&Instruction::I32WrapI64);
+    index(out);
+    out.instruction(&Instruction::I32WrapI64);
+    out.instruction(&Instruction::I32Const(8));
+    out.instruction(&Instruction::I32Mul);
+    out.instruction(&Instruction::I32Add);
+    out.instruction(&Instruction::I32Const(8));
+    out.instruction(&Instruction::I32Add);
+}
+
 fn emit_terminator(out: &mut Function, terminator: &MirTerminator, pc: u32) {
     match terminator {
         MirTerminator::Goto(target) => {
@@ -410,7 +453,7 @@ fn emit_terminator(out: &mut Function, terminator: &MirTerminator, pc: u32) {
                     out.instruction(&Instruction::LocalGet(u32::from(*condition)));
                     out.instruction(&Instruction::I64Eqz);
                 }
-                super::ir::Rep::I64 | super::ir::Rep::TruthyHandle => {
+                super::ir::Rep::I64 | super::ir::Rep::ArrayRef | super::ir::Rep::TruthyHandle => {
                     out.instruction(&Instruction::I32Const(0));
                 }
                 super::ir::Rep::Unknown => unreachable!("unknown truthiness rejected by MIR"),

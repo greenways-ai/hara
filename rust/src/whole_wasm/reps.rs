@@ -158,9 +158,8 @@ fn primitive_rep(op: Primitive, arguments: &[Rep]) -> Rep {
         | Primitive::Greater
         | Primitive::GreaterOrEqual
         | Primitive::NumberPredicate => Rep::Bool,
-        Primitive::ArrayNew | Primitive::ArraySet | Primitive::ObjectNew | Primitive::Assoc => {
-            Rep::TruthyHandle
-        }
+        Primitive::ArrayNew | Primitive::ArraySet => Rep::ArrayRef,
+        Primitive::ObjectNew | Primitive::Assoc => Rep::TruthyHandle,
         Primitive::ArrayGet => Rep::I64,
         _ => Rep::Unknown,
     }

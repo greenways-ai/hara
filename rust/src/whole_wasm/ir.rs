@@ -7,6 +7,7 @@ use crate::vm::{FunctionId, Instruction, Program};
 pub enum Rep {
     I64,
     Bool,
+    ArrayRef,
     TruthyHandle,
     Unknown,
 }

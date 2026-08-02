@@ -7,7 +7,7 @@ use crate::core::Value;
 use crate::vm::FunctionId;
 
 use super::artifact::{decode_artifact, NativeArtifact};
-use super::codegen::{ERROR_DIVISION_BY_ZERO, ERROR_INTEGER_OVERFLOW};
+use super::codegen::{ERROR_ARRAY_BOUNDS, ERROR_DIVISION_BY_ZERO, ERROR_INTEGER_OVERFLOW};
 use super::handles::{Handle, HandleScope};
 
 #[derive(Default)]
@@ -66,6 +66,11 @@ impl NativeModule {
         error
             .set(&mut self.store, Val::I32(0))
             .map_err(|error| error.to_string())?;
+        self.instance
+            .get_global(&mut self.store, "hara_heap")
+            .ok_or("whole-Wasm module has no hara_heap global")?
+            .set(&mut self.store, Val::I32(0))
+            .map_err(|error| error.to_string())?;
         let callable = self
             .instance
             .get_func(&mut self.store, &format!("hara_fn_{function}"))
@@ -81,6 +86,7 @@ impl NativeModule {
                 match code {
                     ERROR_INTEGER_OVERFLOW => Err("integer overflow".into()),
                     ERROR_DIVISION_BY_ZERO => Err("division by zero".into()),
+                    ERROR_ARRAY_BOUNDS => Err("array index out of bounds".into()),
                     _ => Err(format!("whole-Wasm trap: {trap}")),
                 }
             }

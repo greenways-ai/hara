@@ -82,11 +82,23 @@ mod tests {
     }
 
     #[test]
-    fn mutable_arrays_use_scoped_handles_with_unboxed_elements() {
+    fn non_escaping_mutable_arrays_use_wasm_linear_memory() {
         let source = "(let [a (std.native.Arr/new 1 2 3)]
                         (std.native.Arr/set-index a 1 40)
                         (+ (std.native.Arr/get-index a 0)
                            (+ (std.native.Arr/get-index a 1) 1)))";
         assert_eq!(module(source).call_entry_i64(), Ok(42));
+    }
+
+    #[test]
+    fn wasm_linear_arrays_preserve_bounds_errors() {
+        assert_eq!(
+            module("(std.native.Arr/get-index (std.native.Arr/new 1 2) 2)").call_entry_i64(),
+            Err("array index out of bounds".into())
+        );
+        assert_eq!(
+            module("(std.native.Arr/get-index (std.native.Arr/new 1 2) -1)").call_entry_i64(),
+            Err("array index out of bounds".into())
+        );
     }
 }
