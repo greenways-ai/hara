@@ -15,6 +15,10 @@ http {
             hoplite_content bench.hoplite.app/hello;
         }
 
+        location = /json {
+            hoplite_content bench.hoplite.app/json;
+        }
+
         location = /delay {
             hoplite_content bench.hoplite.app/delay;
         }

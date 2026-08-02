@@ -1,0 +1,10 @@
+[package]
+name = "hara-axum-benchmark"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+axum = "0.8.6"
+serde_json = "1.0"
+tokio = { version = "1.48", features = ["macros", "net", "rt", "time"] }

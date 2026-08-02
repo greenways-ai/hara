@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [[ -f "$ROOT/target/hara-rust-vm-vs-full-smoke.json" ]]; then
+  python3 "$ROOT/lib/bench/render-dashboard.py"
+fi
+
+"$ROOT/.venv-docs/bin/mkdocs" build --strict \
+  -f "$ROOT/benchmarks/mkdocs.yml" \
+  -d "$ROOT/target/benchmarks"

@@ -24,6 +24,29 @@ impl Compiler {
         span: &Span,
     ) -> Result<(), CompileError> {
         let argc = (children.len() - 1) as u8;
+        // A named function's self-reference targets the prototype already
+        // being compiled. Keep the externally visible Var late-bound, but do
+        // not load, dereference, and convert that Var for every recursive
+        // call. Defn prototypes are capture-free; closures with captures keep
+        // the generic lexical-call path below.
+        if self.ctx().name.as_deref() == Some(name) && self.ctx().captures.is_empty() {
+            let prototype = self.ctx().proto_id as u16;
+            let accepts = {
+                let proto = &self.functions[usize::from(prototype)];
+                (!proto.variadic && proto.arity == u16::from(argc))
+                    || (proto.variadic && u16::from(argc) >= proto.arity)
+            };
+            if accepts {
+                self.compile_call_arguments(children, span)?;
+                if self.ctx().fallthrough {
+                    self.emit(
+                        Instruction::CallStatic { prototype, argc },
+                        Some(span.start),
+                    );
+                }
+                return Ok(());
+            }
+        }
         match self.ctx().scopes.resolve(name) {
             Some(slot) => self.emit(Instruction::LoadLocal(slot), Some(span.start)),
             None if self.visible_global(name) => {

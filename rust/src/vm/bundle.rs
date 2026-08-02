@@ -35,7 +35,7 @@ pub fn compile_bytecode_bundle(sources: &[ModuleSource<'_>]) -> Result<Vec<u8>, 
     let mut encoded = Vec::new();
     for source in sources {
         let (namespace_form, body) = split_namespace_form(source.source)?;
-        runtime.eval_native(namespace_form)?;
+        runtime.eval_text(namespace_form)?;
         if source.resource == "std.foundation" {
             runtime.prepare_foundation_bytecode();
         }
@@ -63,7 +63,7 @@ pub fn compile_embedded_foundation_bundle() -> Result<Vec<u8>, String> {
 
 pub fn eval_bytecode_bundle(runtime: &mut Runtime, bytes: &[u8]) -> Result<(), String> {
     for module in decode(bytes)? {
-        runtime.eval_native(&module.namespace_form)?;
+        runtime.eval_text(&module.namespace_form)?;
         if module.resource == "std.foundation" {
             runtime.prepare_foundation_bytecode();
         }

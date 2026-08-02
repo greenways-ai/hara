@@ -61,6 +61,10 @@ enum Dispatch {
         args: Vec<VmSlot>,
         captures: Vec<VmSlot>,
     },
+    CallStaticDirect {
+        prototype: u16,
+        argc: u8,
+    },
     Returned(VmSlot),
     Failed(VmError),
     Suspended(Promise),
@@ -287,7 +291,7 @@ impl Machine {
             VmSlot::Number(value) => Value::Number(value),
             VmSlot::Bool(value) => Value::Bool(value),
             VmSlot::Nil => Value::Nil,
-            VmSlot::Value(value) => *value,
+            VmSlot::Value(value) => Rc::try_unwrap(value).unwrap_or_else(|value| (*value).clone()),
             VmSlot::InlineClosure { prototype, .. } => Self::closure_value(
                 program,
                 Rc::new(VmClosure {
@@ -599,6 +603,31 @@ impl Machine {
         self.ip = 0;
     }
 
+    /// Enters a synchronous, capture-free, fixed-arity static target by
+    /// transferring its operands straight into a recycled local frame.
+    fn enter_static_direct(&mut self, program: &Program, prototype: u16, argc: u8) {
+        let proto = &program.functions[usize::from(prototype)];
+        debug_assert_eq!(proto.capture_count, 0);
+        debug_assert!(!proto.async_function);
+        debug_assert!(!proto.variadic);
+        debug_assert_eq!(usize::from(proto.arity), usize::from(argc));
+        let locals = self.free_locals.pop().unwrap_or_default();
+        let frame = Frame::call_static_reusing(
+            locals,
+            usize::from(proto.local_count),
+            &mut self.stack,
+            usize::from(argc),
+        );
+        let caller = std::mem::replace(&mut self.frame, frame);
+        self.calls.push(SavedFrame {
+            function: self.function,
+            frame: caller,
+            call_ip: self.ip,
+        });
+        self.function = usize::from(prototype);
+        self.ip = 0;
+    }
+
     /// Runs the function to completion or failure.
     pub fn run(&mut self) -> VmOutcome {
         let program = self.program.clone();
@@ -700,6 +729,14 @@ impl Machine {
                         self.jit_loop_entries.clear();
                     }
                     self.enter_or_spawn(&program, prototype, args, captures)
+                }
+                Dispatch::CallStaticDirect { prototype, argc } => {
+                    #[cfg(feature = "tracing-jit")]
+                    {
+                        self.jit_path.clear();
+                        self.jit_loop_entries.clear();
+                    }
+                    self.enter_static_direct(&program, prototype, argc)
                 }
                 Dispatch::Returned(value) => {
                     #[cfg(feature = "tracing-jit")]
@@ -809,33 +846,48 @@ impl Machine {
                 let result = if argc == 2 {
                     let right = self.stack.pop().expect("primitive arity checked above");
                     let left = self.stack.pop().expect("primitive arity checked above");
-                    match (&left, &right) {
+                    match (left, right) {
                         (VmSlot::Number(left), VmSlot::Number(right)) => {
-                            apply_binary_numbers(*op, *left, *right).map(VmSlot::from)
+                            apply_binary_numbers(*op, left, right).map(VmSlot::from)
                         }
-                        _ => match (left.runtime_value(), right.runtime_value()) {
-                            (Some(left), Some(right)) => {
-                                apply_binary_primitive(*op, &left, &right).map(VmSlot::from)
+                        (VmSlot::Closure(left), VmSlot::Closure(right))
+                            if matches!(op, crate::core::Primitive::Equal) =>
+                        {
+                            Ok(VmSlot::Bool(Rc::ptr_eq(&left, &right)))
+                        }
+                        (
+                            VmSlot::InlineClosure { identity: left, .. },
+                            VmSlot::InlineClosure {
+                                identity: right, ..
+                            },
+                        ) if matches!(op, crate::core::Primitive::Equal) => {
+                            Ok(VmSlot::Bool(left == right))
+                        }
+                        (VmSlot::MultiArity(left), VmSlot::MultiArity(right))
+                            if matches!(op, crate::core::Primitive::Equal) =>
+                        {
+                            Ok(VmSlot::Bool(Rc::ptr_eq(&left, &right)))
+                        }
+                        (
+                            VmSlot::Closure(_)
+                            | VmSlot::InlineClosure { .. }
+                            | VmSlot::MultiArity(_),
+                            _,
+                        )
+                        | (
+                            _,
+                            VmSlot::Closure(_)
+                            | VmSlot::InlineClosure { .. }
+                            | VmSlot::MultiArity(_),
+                        ) if matches!(op, crate::core::Primitive::Equal) => Ok(VmSlot::Bool(false)),
+                        (left, right) => {
+                            match (left.into_runtime_value(), right.into_runtime_value()) {
+                                (Some(left), Some(right)) => {
+                                    apply_binary_primitive(*op, &left, &right).map(VmSlot::from)
+                                }
+                                _ => Err(format!("{} expects values", op.operator())),
                             }
-                            _ if matches!(op, crate::core::Primitive::Equal) => {
-                                Ok(VmSlot::Bool(match (&left, &right) {
-                                    (VmSlot::Closure(left), VmSlot::Closure(right)) => {
-                                        Rc::ptr_eq(left, right)
-                                    }
-                                    (
-                                        VmSlot::InlineClosure { identity: left, .. },
-                                        VmSlot::InlineClosure {
-                                            identity: right, ..
-                                        },
-                                    ) => left == right,
-                                    (VmSlot::MultiArity(left), VmSlot::MultiArity(right)) => {
-                                        Rc::ptr_eq(left, right)
-                                    }
-                                    _ => false,
-                                }))
-                            }
-                            _ => Err(format!("{} expects values", op.operator())),
-                        },
+                        }
                     }
                 } else if argc == 3 && matches!(op, crate::core::Primitive::Assoc) {
                     let replacement = self.stack.pop().expect("primitive arity checked above");
@@ -854,13 +906,18 @@ impl Machine {
                     }
                 } else {
                     self.scratch.clear();
-                    for value in self.stack.split_off(self.stack.len() - argc) {
-                        let Some(value) = value.into_runtime_value() else {
-                            return Dispatch::Failed(
-                                self.error(function, format!("{} expects values", op.operator())),
-                            );
-                        };
-                        self.scratch.push(value);
+                    let argument_base = self.stack.len() - argc;
+                    let mut values_supported = true;
+                    for value in self.stack.drain(argument_base..) {
+                        match value.into_runtime_value() {
+                            Some(value) => self.scratch.push(value),
+                            None => values_supported = false,
+                        }
+                    }
+                    if !values_supported {
+                        return Dispatch::Failed(
+                            self.error(function, format!("{} expects values", op.operator())),
+                        );
                     }
                     apply_primitive(*op, &self.scratch).map(VmSlot::from)
                 };
@@ -934,6 +991,24 @@ impl Machine {
                 },
             },
             Instruction::CallStatic { prototype, argc } => {
+                let direct = program
+                    .functions
+                    .get(usize::from(*prototype))
+                    .is_some_and(|proto| {
+                        proto.capture_count == 0 && !proto.async_function && !proto.variadic
+                    });
+                if direct {
+                    if self.stack.len() < usize::from(*argc) {
+                        match self.raise(function, "stack underflow") {
+                            Ok(target) => return Dispatch::Next(target),
+                            Err(error) => return Dispatch::Failed(error),
+                        }
+                    }
+                    return Dispatch::CallStaticDirect {
+                        prototype: *prototype,
+                        argc: *argc,
+                    };
+                }
                 match self.collect_call_static(program, function, *prototype, *argc) {
                     Ok((prototype, args, captures)) => {
                         return Dispatch::CallStatic {
@@ -968,14 +1043,14 @@ impl Machine {
                         Err(error) => return Dispatch::Failed(error),
                     }
                 };
-                let message = match value {
-                    VmSlot::Value(value) => match *value {
-                        Value::String(message) => message,
-                        _ => "rethrow expects a string message".to_string(),
-                    },
-                    // Defensive: the compiler only emits Rethrow behind a
-                    // pending-error flag it set to a message string.
-                    _ => "rethrow expects a string message".to_string(),
+                let message = match value.into_runtime_value() {
+                    Some(Value::String(message)) => message,
+                    Some(_) => "rethrow expects a string message".to_string(),
+                    None => {
+                        // Defensive: the compiler only emits Rethrow behind a
+                        // pending-error flag it set to a message string.
+                        "rethrow expects a string message".to_string()
+                    }
                 };
                 match self.raise(function, message) {
                     Ok(target) => return Dispatch::Next(target),

@@ -17,6 +17,13 @@ http {
             }
         }
 
+        location = /json {
+            content_by_lua_block {
+                ngx.header["content-type"] = "application/json"
+                ngx.say('{"message":"Hello from OpenResty"}')
+            }
+        }
+
         location = /delay {
             content_by_lua_block {
                 ngx.sleep(0.025)

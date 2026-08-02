@@ -1,7 +1,8 @@
 # lisp-hara benchmark
 
 Balanced application-kernel comparison of the Hara Rust runtime tiers against
-**SBCL**, **Chez Scheme**, **GNU Guile**, and **LuaJIT**. The original tiny
+**SBCL**, **Chez Scheme**, **GNU Guile**, **LuaJIT**, **Babashka**, **Python**,
+**C**, and **Java**. The original tiny
 microbenchmarks remain in `lib/bench/runtime/`; this corpus exercises mutable
 arrays, mutable objects, persistent data, recursion, and mixed control flow.
 
@@ -10,6 +11,10 @@ arrays, mutable objects, persistent data, recursion, and mixed control flow.
 ```shell
 brew install sbcl chezscheme guile
 ```
+
+The extended lanes also use `bb`, `python3`, `cc`, and JDK 21. Java defaults
+to Homebrew's `/opt/homebrew/opt/openjdk@21`; override it with
+`HARA_BENCH_JAVA_HOME`.
 
 Plus the hara benchmark binaries (built automatically unless `--no-build`):
 
@@ -21,7 +26,15 @@ Plus the hara benchmark binaries (built automatically unless `--no-build`):
 ```shell
 python3 lib/bench/lisp-hara/run.py                      # smoke profile, all runtimes
 python3 lib/bench/lisp-hara/run.py --profile standard   # full sampling
+python3 lib/bench/lisp-hara/run.py --profile algorithm  # longer kernels, 30 windows
 python3 lib/bench/lisp-hara/run.py --runtime sbcl-prepared --runtime hara-rust-trace-native-prepared
+
+# General-computing acceptance slice: Sieve, Towers, Queens, Heap permutation
+python3 lib/bench/lisp-hara/run.py --profile standard \
+  --corpus lib/bench/lisp-hara/general-workloads.json \
+  --runtime sbcl-prepared --runtime chez-prepared --runtime guile-prepared \
+  --runtime luajit-prepared --runtime hara-rust-full-prepared \
+  --output target/general-computing-standard.json
 ```
 
 Runtime names carry an explicit `-eval` or `-prepared` lane. Compare only
@@ -36,7 +49,7 @@ scratch — comparison evidence, not regression gating).
 Mirrors the luajit-hara suite so numbers are comparable across suites:
 
 - `workloads.json` carries per-language source fields (`hara_source`,
-  `scheme_source`, `cl_source`) plus a shared `expected` checksum.
+  `scheme_source`, `cl_source`, `bb_source`) plus a shared `expected` checksum.
 - `-eval` parses/loads and evaluates source on every measured call.
 - `-prepared` reads and compiles/loads once, then invokes repeatedly.
 - Mutable table rows use Hara `object`/`array` (through their canonical
@@ -54,7 +67,12 @@ Mirrors the luajit-hara suite so numbers are comparable across suites:
 ## Files
 
 - `workloads.json` — the shared corpus
+- `general-workloads.json` — the first general-computing acceptance slice,
+  derived from established benchmark families rather than micro-kernels
 - `chez_runner.scm`, `guile_runner.scm`, `sbcl_runner.lisp` — per-runtime
   runners implementing the `ID SOURCE_HEX EXPECTED WINDOWS CALLS` contract
+- `bb_runner.clj`, `python_runner.py`, `c_runner.py`, `java_runner.py` — the
+  additional dynamic and compiled runtime adapters; C and Java expose only a
+  prepared lane
 - `run.py` — the coordinator (windowed sampling, steady-state median,
   JSON + Markdown output)

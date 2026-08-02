@@ -55,6 +55,25 @@ impl Frame {
         Frame { locals, base }
     }
 
+    /// Builds a capture-free frame by moving the top `argc` operands
+    /// directly into its parameter slots. Static named calls use this path
+    /// so arguments do not make an otherwise redundant trip through a
+    /// temporary argument vector before entering the callee.
+    pub(crate) fn call_static_reusing(
+        mut locals: Vec<VmSlot>,
+        local_count: usize,
+        stack: &mut Vec<VmSlot>,
+        argc: usize,
+    ) -> Frame {
+        let base = stack.len() - argc;
+        locals.clear();
+        locals.resize(local_count, VmSlot::Nil);
+        for (index, value) in stack.drain(base..).enumerate() {
+            locals[index] = value;
+        }
+        Frame { locals, base }
+    }
+
     pub(crate) fn into_locals(self) -> Vec<VmSlot> {
         self.locals
     }
@@ -143,9 +162,11 @@ impl Frame {
                 crate::jit::TraceValue::I64(value) => VmSlot::Number(*value),
                 crate::jit::TraceValue::Bool(value) => VmSlot::Bool(*value),
                 crate::jit::TraceValue::Nil => VmSlot::Nil,
-                crate::jit::TraceValue::Indexed(value) => VmSlot::Value(value.clone()),
+                crate::jit::TraceValue::Indexed(value) => {
+                    VmSlot::Value(std::rc::Rc::new(value.as_ref().clone()))
+                }
                 crate::jit::TraceValue::VectorSlice(slice) => {
-                    VmSlot::Value(Box::new(crate::core::Value::Vector(
+                    VmSlot::Value(std::rc::Rc::new(crate::core::Value::Vector(
                         slice.values[slice.start..]
                             .iter()
                             .copied()
@@ -156,5 +177,21 @@ impl Frame {
                 crate::jit::TraceValue::Unsupported => continue,
             };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Frame, VmSlot};
+
+    #[test]
+    fn static_call_moves_arguments_and_preserves_caller_stack() {
+        let mut stack = vec![VmSlot::Number(9), VmSlot::Number(20), VmSlot::Number(22)];
+        let frame = Frame::call_static_reusing(Vec::new(), 3, &mut stack, 2);
+        assert!(matches!(stack.as_slice(), [VmSlot::Number(9)]));
+        assert_eq!(frame.base(), 1);
+        assert!(matches!(frame.local(0), Some(VmSlot::Number(20))));
+        assert!(matches!(frame.local(1), Some(VmSlot::Number(22))));
+        assert!(matches!(frame.local(2), Some(VmSlot::Nil)));
     }
 }

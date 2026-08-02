@@ -1,4 +1,7 @@
-import init, { Runtime } from "./wasm/hara_wasm.js";
+import init, * as wasmBindings from "./wasm/hara_wasm.js";
+import { instantiateWholeWasm } from "./whole-wasm.js";
+
+const { Runtime } = wasmBindings;
 
 let started;
 
@@ -24,6 +27,19 @@ function createApi(runtime) {
     },
     currentNamespace() {
       return runtime.current_namespace();
+    },
+    compileBytecode(source) {
+      return runtime.compileBytecodeArtifact(String(source));
+    },
+    evalBytecode(artifact) {
+      return runtime.evalBytecodeArtifact(artifact);
+    },
+    async compileWholeWasm(source) {
+      if (typeof runtime.compileWholeWasmArtifact !== "function") {
+        throw new Error("whole-Wasm compilation requires @hara-lang/browser/full");
+      }
+      const artifact = runtime.compileWholeWasmArtifact(String(source));
+      return instantiateWholeWasm(artifact, wasmBindings.WholeWasmHost);
     },
     raw: runtime,
     dispose() {

@@ -1,9 +1,11 @@
 import { defineConfig } from "vite";
 
+const variant = process.env.HARA_BROWSER_VARIANT ?? "vm";
+
 export default defineConfig({
   build: {
     emptyOutDir: true,
-    outDir: "packages/browser/dist",
+    outDir: `packages/browser/dist/${variant}`,
     assetsInlineLimit: 10_000_000,
     lib: {
       entry: "packages/browser/src/index.js",
