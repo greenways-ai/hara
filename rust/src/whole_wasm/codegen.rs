@@ -1,6 +1,7 @@
 use wasm_encoder::{
-    BlockType, CodeSection, ConstExpr, ExportKind, ExportSection, Function, FunctionSection,
-    GlobalSection, GlobalType, Instruction, Module, TypeSection, ValType,
+    BlockType, CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, Function,
+    FunctionSection, GlobalSection, GlobalType, ImportSection, Instruction, Module, TypeSection,
+    ValType,
 };
 
 use crate::core::Primitive;
@@ -11,6 +12,11 @@ use crate::vm::Program;
 /// Error codes published through the `hara_error` Wasm global before a trap.
 pub const ERROR_INTEGER_OVERFLOW: i32 = 1;
 pub const ERROR_DIVISION_BY_ZERO: i32 = 2;
+const HOST_FUNCTION_COUNT: u32 = 4;
+const HOST_ARRAY_EMPTY: u32 = 0;
+const HOST_ARRAY_PUSH_I64: u32 = 1;
+const HOST_ARRAY_GET_I64: u32 = 2;
+const HOST_ARRAY_SET_I64: u32 = 3;
 
 /// Compiles a complete eligible bytecode program into deterministic Wasm.
 pub fn compile_program(program: &Program) -> Result<Vec<u8>, String> {
@@ -22,14 +28,40 @@ pub(crate) fn emit_program(program: &MirProgram) -> Result<Vec<u8>, String> {
     let mut module = Module::new();
     let mut types = TypeSection::new();
     let mut functions = FunctionSection::new();
+    types.function([], [ValType::I64]);
+    types.function([ValType::I64, ValType::I64], [ValType::I64]);
+    types.function([ValType::I64, ValType::I64], [ValType::I64]);
+    types.function([ValType::I64, ValType::I64, ValType::I64], [ValType::I64]);
     for function in &program.functions {
         types.function(
             std::iter::repeat(ValType::I64).take(usize::from(function.arity)),
             [ValType::I64],
         );
-        functions.function(u32::from(function.id));
+        functions.function(HOST_FUNCTION_COUNT + u32::from(function.id));
     }
     module.section(&types);
+    let mut imports = ImportSection::new();
+    imports.import(
+        "hara",
+        "array_empty",
+        EntityType::Function(HOST_ARRAY_EMPTY),
+    );
+    imports.import(
+        "hara",
+        "array_push_i64",
+        EntityType::Function(HOST_ARRAY_PUSH_I64),
+    );
+    imports.import(
+        "hara",
+        "array_get_i64",
+        EntityType::Function(HOST_ARRAY_GET_I64),
+    );
+    imports.import(
+        "hara",
+        "array_set_i64",
+        EntityType::Function(HOST_ARRAY_SET_I64),
+    );
+    module.section(&imports);
     module.section(&functions);
 
     let mut globals = GlobalSection::new();
@@ -47,7 +79,7 @@ pub(crate) fn emit_program(program: &MirProgram) -> Result<Vec<u8>, String> {
         exports.export(
             &format!("hara_fn_{}", function.id),
             ExportKind::Func,
-            u32::from(function.id),
+            HOST_FUNCTION_COUNT + u32::from(function.id),
         );
     }
     exports.export("hara_error", ExportKind::Global, 0);
@@ -152,6 +184,56 @@ fn emit_operation(
             temp_b,
             result,
         )?,
+        MirOp::ArrayNew {
+            destination,
+            values,
+        } => {
+            out.instruction(&Instruction::Call(HOST_ARRAY_EMPTY));
+            // Keep the handle in a temporary until every constructor operand
+            // has been consumed: destination aliases the first operand stack
+            // slot in stack-machine lowering.
+            out.instruction(&Instruction::LocalSet(result));
+            for value in values {
+                out.instruction(&Instruction::LocalGet(result));
+                out.instruction(&Instruction::LocalGet(u32::from(*value)));
+                out.instruction(&Instruction::Call(HOST_ARRAY_PUSH_I64));
+                out.instruction(&Instruction::LocalSet(result));
+            }
+            out.instruction(&Instruction::LocalGet(result));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::ArrayGetI64 {
+            destination,
+            array,
+            index,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*array)));
+            out.instruction(&Instruction::LocalGet(u32::from(*index)));
+            out.instruction(&Instruction::Call(HOST_ARRAY_GET_I64));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::ArrayGetI64Constant {
+            destination,
+            array,
+            index,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*array)));
+            out.instruction(&Instruction::I64Const(*index));
+            out.instruction(&Instruction::Call(HOST_ARRAY_GET_I64));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
+        MirOp::ArraySetI64 {
+            destination,
+            array,
+            index,
+            value,
+        } => {
+            out.instruction(&Instruction::LocalGet(u32::from(*array)));
+            out.instruction(&Instruction::LocalGet(u32::from(*index)));
+            out.instruction(&Instruction::LocalGet(u32::from(*value)));
+            out.instruction(&Instruction::Call(HOST_ARRAY_SET_I64));
+            out.instruction(&Instruction::LocalSet(u32::from(*destination)));
+        }
         MirOp::CallStatic {
             destination,
             function,
@@ -160,7 +242,9 @@ fn emit_operation(
             for argument in arguments {
                 out.instruction(&Instruction::LocalGet(u32::from(*argument)));
             }
-            out.instruction(&Instruction::Call(u32::from(*function)));
+            out.instruction(&Instruction::Call(
+                HOST_FUNCTION_COUNT + u32::from(*function),
+            ));
             out.instruction(&Instruction::LocalSet(u32::from(*destination)));
         }
     }

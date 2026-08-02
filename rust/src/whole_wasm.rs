@@ -80,4 +80,13 @@ mod tests {
         assert_eq!(module("(if 0 19 23)").call_entry_i64(), Ok(19));
         assert_eq!(module("(if false 19 23)").call_entry_i64(), Ok(23));
     }
+
+    #[test]
+    fn mutable_arrays_use_scoped_handles_with_unboxed_elements() {
+        let source = "(let [a (std.native.Arr/new 1 2 3)]
+                        (std.native.Arr/set-index a 1 40)
+                        (+ (std.native.Arr/get-index a 0)
+                           (+ (std.native.Arr/get-index a 1) 1)))";
+        assert_eq!(module(source).call_entry_i64(), Ok(42));
+    }
 }

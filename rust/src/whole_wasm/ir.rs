@@ -34,6 +34,26 @@ pub enum MirOp {
         right: i64,
         op: Primitive,
     },
+    ArrayNew {
+        destination: u16,
+        values: Vec<u16>,
+    },
+    ArrayGetI64 {
+        destination: u16,
+        array: u16,
+        index: u16,
+    },
+    ArrayGetI64Constant {
+        destination: u16,
+        array: u16,
+        index: i64,
+    },
+    ArraySetI64 {
+        destination: u16,
+        array: u16,
+        index: u16,
+        value: u16,
+    },
     CallStatic {
         destination: u16,
         function: FunctionId,
@@ -189,6 +209,43 @@ fn lower_function(
                         op: *op,
                     });
                 }
+                Instruction::Primitive {
+                    op: Primitive::ArrayNew,
+                    argc,
+                } => {
+                    let base = height - usize::from(*argc);
+                    let values = (0..usize::from(*argc))
+                        .map(|index| stack(base + index))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    if values
+                        .iter()
+                        .enumerate()
+                        .any(|(index, _)| representations[ip].stack[base + index] != Rep::I64)
+                    {
+                        return Err(unsupported(id, ip, "array constructor requires i64 values"));
+                    }
+                    operations.push(MirOp::ArrayNew {
+                        destination: stack(base)?,
+                        values,
+                    });
+                }
+                Instruction::Primitive {
+                    op: Primitive::ArrayGet,
+                    argc: 2,
+                } => operations.push(MirOp::ArrayGetI64 {
+                    destination: stack(height - 2)?,
+                    array: stack(height - 2)?,
+                    index: stack(height - 1)?,
+                }),
+                Instruction::Primitive {
+                    op: Primitive::ArraySet,
+                    argc: 3,
+                } => operations.push(MirOp::ArraySetI64 {
+                    destination: stack(height - 3)?,
+                    array: stack(height - 3)?,
+                    index: stack(height - 2)?,
+                    value: stack(height - 1)?,
+                }),
                 Instruction::PrimitiveLocalConst {
                     op,
                     local,
@@ -201,6 +258,23 @@ fn lower_function(
                         left: *local,
                         right,
                         op: *op,
+                    });
+                }
+                Instruction::PrimitiveLocalConst {
+                    op: Primitive::ArrayGet,
+                    local,
+                    constant,
+                } => {
+                    let (index, rep) =
+                        scalar_constant(program.constants.get(*constant as usize))
+                            .ok_or_else(|| unsupported(id, ip, "array index constant"))?;
+                    if rep != Rep::I64 {
+                        return Err(unsupported(id, ip, "array index must be i64"));
+                    }
+                    operations.push(MirOp::ArrayGetI64Constant {
+                        destination: stack(height)?,
+                        array: *local,
+                        index,
                     });
                 }
                 Instruction::CallStatic { prototype, argc } => {
@@ -342,6 +416,29 @@ pub fn verify(program: &MirProgram) -> Result<(), String> {
                     MirOp::BinaryConstant {
                         destination, left, ..
                     } => valid_slot(*destination) && valid_slot(*left),
+                    MirOp::ArrayNew {
+                        destination,
+                        values,
+                    } => valid_slot(*destination) && values.iter().all(|slot| valid_slot(*slot)),
+                    MirOp::ArrayGetI64 {
+                        destination,
+                        array,
+                        index,
+                    } => valid_slot(*destination) && valid_slot(*array) && valid_slot(*index),
+                    MirOp::ArrayGetI64Constant {
+                        destination, array, ..
+                    } => valid_slot(*destination) && valid_slot(*array),
+                    MirOp::ArraySetI64 {
+                        destination,
+                        array,
+                        index,
+                        value,
+                    } => {
+                        valid_slot(*destination)
+                            && valid_slot(*array)
+                            && valid_slot(*index)
+                            && valid_slot(*value)
+                    }
                     MirOp::CallStatic {
                         destination,
                         function: target,
