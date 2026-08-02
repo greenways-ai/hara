@@ -137,7 +137,7 @@ float marble(vec2 p) {
 void main() {
   float time = u_time * .001;
   vec2 uv = (gl_FragCoord.xy * 2.0 - u_resolution) / u_resolution.y;
-  uv *= turn_placeholder;
+  uv = turn_placeholder * uv;
   float radius = length(uv);
   float angle = atan(uv.y, uv.x);
   float ring = floor(radius * 12.0);
@@ -171,7 +171,10 @@ void main() {
   float vignette = smoothstep(1.45, .18, radius);
   tile *= .34 + .66 * vignette;
   color = vec4(pow(tile, vec3(.78)), 1.0);
-}`.replace("uv *= turn_placeholder;", "uv *= mat2(cos(time * .012), -sin(time * .012), sin(time * .012), cos(time * .012));");
+}`.replace(
+  "turn_placeholder",
+  "mat2(cos(time * .012), -sin(time * .012), sin(time * .012), cos(time * .012))"
+);
 
 function compile(gl, type, source) {
   const shader = gl.createShader(type);

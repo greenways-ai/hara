@@ -8,7 +8,7 @@ test("the main site presents Hara as an embeddable multi-runtime language", asyn
   const source = await websiteFile("index.html");
 
   assert.match(source, /<title>Hara — one embeddable language, many runtimes<\/title>/);
-  assert.match(source, /SBCL-class speed/);
+  assert.match(source, /A programmable kernel/);
   assert.match(source, /ONE LANGUAGE · MANY RUNTIMES/);
   assert.match(source, /Use WASM like a library/);
   assert.match(source, /PERSISTENT VALUES/);

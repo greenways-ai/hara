@@ -22,7 +22,7 @@
   isolation: isolate;
   grid-template-columns: minmax(0, 1fr);
   min-height: calc(100svh - 68px);
-  padding: clamp(6rem, 13vh, 9rem) 0 8rem;
+  padding: clamp(4.5rem, 9vh, 6rem) 0 6rem;
 }
 .hero-stage {
   position: absolute;
@@ -47,7 +47,7 @@
   pointer-events: none;
 }
 .hero-copy { max-width: 49rem; }
-.hero h1 { max-width: 12ch; color: #f5efe2; text-wrap: balance; }
+.hero h1 { max-width: 12ch; color: #f5efe2; font-size: clamp(3.4rem, 6vw, 5.5rem); text-wrap: balance; }
 .hero h1 em { color: #d7bc83; text-shadow: 0 0 40px rgba(185, 145, 73, .18); }
 .hero .lede { max-width: 39rem; color: #b8b6ad; }
 .hero .button { cursor: pointer; background: rgba(3, 8, 7, .48); }
