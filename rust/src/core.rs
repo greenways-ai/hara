@@ -1008,7 +1008,18 @@ fn resolve_macro_in(namespace: &str, name: &str) -> Option<Rc<Function>> {
 
 pub(crate) fn resolve_macro(name: &str) -> Option<Rc<Function>> {
     if let Some((namespace, local)) = name.split_once('/') {
-        return resolve_macro_in(namespace, local);
+        let resolved = namespace_registry().ok().and_then(|registry| {
+            let current = registry.current();
+            if namespace == "-" {
+                return Some(current.name().as_str().to_owned());
+            }
+            current
+                .aliases()
+                .into_iter()
+                .find(|(alias, _)| alias.as_str() == namespace)
+                .map(|(_, target)| target.name().as_str().to_owned())
+        });
+        return resolve_macro_in(resolved.as_deref().unwrap_or(namespace), local);
     }
     let current = namespace_registry()
         .map(|registry| registry.current().name().as_str().to_owned())
@@ -2627,6 +2638,7 @@ thread_local! {
     static ACTIVE_PROMISE_PROVIDER: RefCell<Option<Rc<dyn PromiseProvider>>> = const { RefCell::new(None) };
     static ACTIVE_FILE_PROVIDER: RefCell<Option<Rc<dyn FileProvider>>> = const { RefCell::new(None) };
     static ACTIVE_SOCKET_PROVIDER: RefCell<Option<Rc<dyn SocketProvider>>> = const { RefCell::new(None) };
+    static ACTIVE_PROCESS_ALLOWED: Cell<bool> = const { Cell::new(false) };
     static HOST_CALL_HANDLER: RefCell<Option<Rc<dyn Fn(String, String, Vec<Value>) -> Result<Value, String>>>> = const { RefCell::new(None) };
     static NAMESPACE_SOURCE_PROVIDER: RefCell<Option<Rc<dyn Fn(&str) -> Option<String>>>> = const { RefCell::new(None) };
     static ACTIVE_THROWN_VALUE: RefCell<Option<(String, Value)>> = const { RefCell::new(None) };
@@ -3049,16 +3061,21 @@ fn promise_provider() -> Rc<dyn PromiseProvider> {
 pub fn with_capability_providers<R>(
     file: Option<Rc<dyn FileProvider>>,
     socket: Option<Rc<dyn SocketProvider>>,
+    process: bool,
     operation: impl FnOnce() -> R,
 ) -> R {
     ACTIVE_FILE_PROVIDER.with(|active_file| {
         ACTIVE_SOCKET_PROVIDER.with(|active_socket| {
-            let previous_file = active_file.replace(file);
-            let previous_socket = active_socket.replace(socket);
-            let result = operation();
-            active_file.replace(previous_file);
-            active_socket.replace(previous_socket);
-            result
+            ACTIVE_PROCESS_ALLOWED.with(|active_process| {
+                let previous_file = active_file.replace(file);
+                let previous_socket = active_socket.replace(socket);
+                let previous_process = active_process.replace(process);
+                let result = operation();
+                active_file.replace(previous_file);
+                active_socket.replace(previous_socket);
+                active_process.set(previous_process);
+                result
+            })
         })
     })
 }
@@ -3079,6 +3096,175 @@ fn socket_provider(operation: &str) -> Result<Rc<dyn SocketProvider>, String> {
             .clone()
             .ok_or_else(|| format!("{operation} is unsupported or network access is denied"))
     })
+}
+
+fn require_process_access(operation: &str) -> Result<(), String> {
+    ACTIVE_PROCESS_ALLOWED.with(|allowed| {
+        allowed
+            .get()
+            .then_some(())
+            .ok_or_else(|| format!("{operation} is unsupported or process access is denied"))
+    })
+}
+
+fn os_operation(
+    operation: &str,
+    forms: &[Form],
+    env: &mut HashMap<String, Value>,
+) -> Result<Value, String> {
+    let operation = operation
+        .strip_prefix("std.foundation.os/")
+        .or_else(|| operation.strip_prefix("os/"))
+        .unwrap_or(operation);
+    match operation {
+        "platform" => {
+            if !forms.is_empty() {
+                return Err("os/platform expects no arguments".into());
+            }
+            let platform = if cfg!(target_os = "linux") {
+                "linux"
+            } else if cfg!(target_os = "macos") {
+                "macos"
+            } else if cfg!(target_os = "windows") {
+                "windows"
+            } else {
+                "unknown"
+            };
+            return Ok(Value::Keyword(platform.into()));
+        }
+        "arch" => {
+            if !forms.is_empty() {
+                return Err("os/arch expects no arguments".into());
+            }
+            let arch = match std::env::consts::ARCH {
+                "x86_64" => "x86-64",
+                value => value,
+            };
+            return Ok(Value::Keyword(arch.into()));
+        }
+        "cwd" => {
+            if !forms.is_empty() {
+                return Err("os/cwd expects no arguments".into());
+            }
+            return std::env::current_dir()
+                .map(|path| Value::String(path.to_string_lossy().into_owned()))
+                .map_err(|error| format!("os/cwd failed: {error}"));
+        }
+        "env" => {
+            if !forms.is_empty() {
+                return Err("os/env expects no arguments".into());
+            }
+            return Ok(Value::Map(PMap::from_iter(
+                std::env::vars().map(|(key, value)| (Value::String(key), Value::String(value))),
+            )));
+        }
+        "getenv" => {
+            if forms.len() != 1 {
+                return Err("os/getenv expects a name".into());
+            }
+            let Value::String(name) = eval(&forms[0], env)? else {
+                return Err("os/getenv expects a string".into());
+            };
+            return Ok(std::env::var(name).map(Value::String).unwrap_or(Value::Nil));
+        }
+        "process?" => {
+            if forms.len() != 1 {
+                return Err("os/process? expects one argument".into());
+            }
+            let value = eval(&forms[0], env)?;
+            #[cfg(not(target_arch = "wasm32"))]
+            return Ok(Value::Bool(crate::native_process::is_process(&value)));
+            #[cfg(target_arch = "wasm32")]
+            return Ok(Value::Bool(false));
+        }
+        _ => {}
+    }
+    require_process_access(&format!("os/{operation}"))?;
+    #[cfg(target_arch = "wasm32")]
+    return Err(format!("os/{operation} is unsupported on wasm"));
+    #[cfg(not(target_arch = "wasm32"))]
+    match operation {
+        "spawn" => {
+            if !(1..=2).contains(&forms.len()) {
+                return Err("os/spawn expects argv and optional options".into());
+            }
+            let argv = iterator_values(eval(&forms[0], env)?)?
+                .into_iter()
+                .map(|value| match value {
+                    Value::String(value) => Ok(value),
+                    _ => Err("os/spawn argv must contain strings".to_owned()),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut cwd = None;
+            let mut environment = Vec::new();
+            if forms.len() == 2 {
+                let options = eval(&forms[1], env)?;
+                for (key, value) in map_entries(&options)
+                    .ok_or_else(|| "os/spawn options must be a map".to_owned())?
+                {
+                    match (key, value) {
+                        (Value::Keyword(key), Value::String(value)) if key.as_str() == "cwd" => {
+                            cwd = Some(value);
+                        }
+                        (Value::Keyword(key), value) if key.as_str() == "env" => {
+                            for (name, value) in map_entries(&value)
+                                .ok_or_else(|| "os/spawn :env must be a map".to_owned())?
+                            {
+                                let (Value::String(name), Value::String(value)) = (name, value)
+                                else {
+                                    return Err("os/spawn :env must contain string pairs".into());
+                                };
+                                environment.push((name, value));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            crate::native_process::spawn(&argv, cwd.as_deref(), &environment)
+        }
+        method @ ("process-alive?"
+        | "process-close-input"
+        | "process-stdout"
+        | "process-stderr"
+        | "process-wait"
+        | "process-kill") => {
+            if forms.len() != 1 {
+                return Err(format!("os/{method} expects a process"));
+            }
+            let process = eval(&forms[0], env)?;
+            match method {
+                "process-alive?" => crate::native_process::alive(&process).map(Value::Bool),
+                "process-close-input" => {
+                    crate::native_process::close_input(&process).map(|()| Value::Nil)
+                }
+                "process-stdout" => {
+                    crate::native_process::promise(&process, "stdout").map(Value::Promise)
+                }
+                "process-stderr" => {
+                    crate::native_process::promise(&process, "stderr").map(Value::Promise)
+                }
+                "process-wait" => {
+                    crate::native_process::promise(&process, "wait").map(Value::Promise)
+                }
+                "process-kill" => crate::native_process::kill(&process).map(|()| process),
+                _ => unreachable!(),
+            }
+        }
+        "process-write" => {
+            if forms.len() != 2 {
+                return Err("os/process-write expects a process and bytes".into());
+            }
+            let process = eval(&forms[0], env)?;
+            let bytes = match eval(&forms[1], env)? {
+                Value::Bytes(value) => value,
+                Value::ByteBuffer(value) => value.borrow().clone(),
+                _ => return Err("os/process-write expects bytes".into()),
+            };
+            crate::native_process::write(&process, &bytes).map(|count| Value::Number(count as i64))
+        }
+        _ => Err(format!("unknown os operation: {operation}")),
+    }
 }
 
 fn file_error(operation: &str, error: FileError) -> String {
@@ -4089,17 +4275,24 @@ impl SocketProvider for NativeSocketProvider {
 
     fn send(&self, socket: SocketHandle, bytes: &[u8]) -> Result<usize, SocketError> {
         let mut state = self.state.borrow_mut();
-        let stream = state
-            .sockets
-            .get_mut(&socket)
-            .ok_or_else(|| SocketError::Invalid("unknown socket".into()))?;
-        stream
+        if let Some(stream) = state.sockets.get_mut(&socket) {
+            stream
+                .write_all(bytes)
+                .map_err(|error| SocketError::Invalid(error.to_string()))?;
+            drop(state);
+            if let Some(callback) = self.state.borrow().callbacks.get(&socket).cloned() {
+                callback(SocketEvent::Data(socket, bytes.to_vec()));
+            }
+            return Ok(bytes.len());
+        }
+        let accepted = state.connections.get(&socket).cloned();
+        drop(state);
+        let accepted = accepted.ok_or_else(|| SocketError::Invalid("unknown socket".into()))?;
+        accepted
+            .lock()
+            .map_err(|_| SocketError::Invalid("socket lock poisoned".into()))?
             .write_all(bytes)
             .map_err(|error| SocketError::Invalid(error.to_string()))?;
-        drop(state);
-        if let Some(callback) = self.state.borrow().callbacks.get(&socket).cloned() {
-            callback(SocketEvent::Data(socket, bytes.to_vec()));
-        }
         Ok(bytes.len())
     }
 
@@ -4116,16 +4309,17 @@ impl SocketProvider for NativeSocketProvider {
             self.state.borrow_mut().server_callbacks.remove(&socket);
             return Ok(());
         }
-        if let Some(stream) = self.state.borrow_mut().connections.remove(&socket) {
-            let server = self
-                .state
-                .borrow()
-                .connection_servers
-                .get(&socket)
-                .copied()
-                .unwrap_or(0);
+        let (stream, server, sender) = {
+            let mut state = self.state.borrow_mut();
+            (
+                state.connections.remove(&socket),
+                state.connection_servers.remove(&socket).unwrap_or(0),
+                state.sender.clone(),
+            )
+        };
+        if let Some(stream) = stream {
             let _ = stream.lock().map(|stream| stream.shutdown(Shutdown::Both));
-            let _ = self.state.borrow().sender.send(RawSocketEvent::Closed {
+            let _ = sender.send(RawSocketEvent::Closed {
                 server,
                 connection: socket,
             });
@@ -4172,21 +4366,28 @@ impl SocketProvider for NativeSocketProvider {
                                 });
                                 continue;
                             }
+                            let mut reader = match stream.try_clone() {
+                                Ok(reader) => reader,
+                                Err(error) => {
+                                    let _ = sender.send(RawSocketEvent::Failed {
+                                        server,
+                                        connection,
+                                        error: error.to_string(),
+                                    });
+                                    continue;
+                                }
+                            };
                             let shared = Arc::new(Mutex::new(stream));
                             let _ = sender.send(RawSocketEvent::Open {
                                 server,
                                 connection,
                                 stream: shared.clone(),
                             });
-                            let reader = shared.clone();
                             let reader_sender = sender.clone();
                             std::thread::spawn(move || {
                                 let mut buffer = [0u8; 8192];
                                 loop {
-                                    let read = match reader.lock() {
-                                        Ok(mut stream) => stream.read(&mut buffer),
-                                        Err(_) => return,
-                                    };
+                                    let read = reader.read(&mut buffer);
                                     match read {
                                         Ok(0) => {
                                             let _ = reader_sender.send(RawSocketEvent::Closed {
@@ -4310,12 +4511,14 @@ impl SocketProvider for NativeSocketProvider {
 pub struct ProviderCapabilities {
     pub file: bool,
     pub socket: bool,
+    pub process: bool,
 }
 
 pub struct ProviderRegistry {
     file: Option<Rc<dyn FileProvider>>,
     socket: Option<Rc<dyn SocketProvider>>,
     promise: Rc<dyn PromiseProvider>,
+    process: bool,
 }
 
 impl Default for ProviderRegistry {
@@ -4324,6 +4527,7 @@ impl Default for ProviderRegistry {
             file: None,
             socket: None,
             promise: Rc::new(LocalPromiseProvider),
+            process: false,
         }
     }
 }
@@ -4342,6 +4546,9 @@ impl ProviderRegistry {
     pub fn install_socket<P: SocketProvider + 'static>(&mut self, provider: P) {
         self.socket = Some(Rc::new(provider));
     }
+    pub fn install_process(&mut self) {
+        self.process = true;
+    }
     pub fn install_promise<P: PromiseProvider + 'static>(&mut self, provider: P) {
         self.promise = Rc::new(provider);
     }
@@ -4354,10 +4561,14 @@ impl ProviderRegistry {
     pub fn socket(&self) -> Option<Rc<dyn SocketProvider>> {
         self.socket.clone()
     }
+    pub fn process(&self) -> bool {
+        self.process
+    }
     pub fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
             file: self.file.is_some(),
             socket: self.socket.is_some(),
+            process: self.process,
         }
     }
 }
@@ -4825,6 +5036,33 @@ pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Resu
             if arguments.is_empty() {
                 return Err(format!("{op} expects arguments"));
             }
+            if arguments
+                .iter()
+                .any(|value| matches!(value, Value::Float(_)))
+            {
+                let mut values = arguments.iter().map(|value| match value {
+                    Value::Number(value) => Ok(*value as f64),
+                    Value::Float(value) => Ok(*value),
+                    _ => Err(format!("{op} expects numbers")),
+                });
+                let mut result = values.next().expect("non-empty arguments")?;
+                for value in values {
+                    let value = value?;
+                    result = match primitive {
+                        Primitive::Add => result + value,
+                        Primitive::Subtract => result - value,
+                        Primitive::Multiply => result * value,
+                        Primitive::Divide if value == 0.0 => return Err("division by zero".into()),
+                        Primitive::Divide => result / value,
+                        Primitive::Remainder if value == 0.0 => {
+                            return Err("division by zero".into())
+                        }
+                        Primitive::Remainder => result % value,
+                        _ => unreachable!(),
+                    };
+                }
+                return Ok(Value::Float(result));
+            }
             let mut result = match &arguments[0] {
                 Value::Number(value) => *value,
                 _ => return Err(format!("{op} expects numbers")),
@@ -4886,7 +5124,8 @@ pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Resu
             let mut numbers = Vec::with_capacity(arguments.len());
             for argument in arguments {
                 match argument {
-                    Value::Number(number) => numbers.push(*number),
+                    Value::Number(number) => numbers.push(*number as f64),
+                    Value::Float(number) => numbers.push(*number),
                     _ => return Err(format!("{op} expects numbers")),
                 }
             }
@@ -4985,6 +5224,43 @@ pub(crate) fn apply_binary_primitive(
     if let (Value::Number(left), Value::Number(right)) = (left, right) {
         return apply_binary_numbers(primitive, *left, *right);
     }
+    if matches!(left, Value::Number(_) | Value::Float(_))
+        && matches!(right, Value::Number(_) | Value::Float(_))
+        && matches!(
+            primitive,
+            Primitive::Add
+                | Primitive::Subtract
+                | Primitive::Multiply
+                | Primitive::Divide
+                | Primitive::Remainder
+                | Primitive::Less
+                | Primitive::LessOrEqual
+                | Primitive::Greater
+                | Primitive::GreaterOrEqual
+        )
+    {
+        let number = |value: &Value| match value {
+            Value::Number(value) => Ok(*value as f64),
+            Value::Float(value) => Ok(*value),
+            _ => Err(format!("{op} expects numbers")),
+        };
+        let left = number(left)?;
+        let right = number(right)?;
+        return Ok(match primitive {
+            Primitive::Add => Value::Float(left + right),
+            Primitive::Subtract => Value::Float(left - right),
+            Primitive::Multiply => Value::Float(left * right),
+            Primitive::Divide if right == 0.0 => return Err("division by zero".into()),
+            Primitive::Divide => Value::Float(left / right),
+            Primitive::Remainder if right == 0.0 => return Err("division by zero".into()),
+            Primitive::Remainder => Value::Float(left % right),
+            Primitive::Less => Value::Bool(left < right),
+            Primitive::LessOrEqual => Value::Bool(left <= right),
+            Primitive::Greater => Value::Bool(left > right),
+            Primitive::GreaterOrEqual => Value::Bool(left >= right),
+            _ => unreachable!(),
+        });
+    }
     match primitive {
         Primitive::Add
         | Primitive::Subtract
@@ -5050,7 +5326,7 @@ fn arithmetic(op: &str, args: &[Form], env: &mut HashMap<String, Value>) -> Resu
     let mut values = Vec::with_capacity(args.len());
     for form in args {
         let value = eval(form, env)?;
-        if !matches!(value, Value::Number(_)) {
+        if !matches!(value, Value::Number(_) | Value::Float(_)) {
             return Err(format!("{} expects numbers", primitive.operator()));
         }
         values.push(value);
@@ -5653,7 +5929,7 @@ fn protocol_deref(arguments: &[Value]) -> Result<Value, String> {
 fn protocol_deref_timeout(arguments: &[Value]) -> Result<Value, String> {
     match arguments {
         [Value::Promise(promise), Value::Number(milliseconds), timeout] if *milliseconds >= 0 => {
-            match promise.state() {
+            match promise.wait_state_timeout(std::time::Duration::from_millis(*milliseconds as u64)) {
                 PromiseState::Fulfilled(value) => Ok(value),
                 PromiseState::Rejected(error) => Err(promise_rejection_error(error)),
                 PromiseState::Pending => Ok(timeout.clone()),
@@ -8736,8 +9012,9 @@ fn ensure_namespace(
         let source = NAMESPACE_SOURCE_PROVIDER
             .with(|active| active.borrow().as_ref().and_then(|provider| provider(name)))
             .ok_or_else(|| format!("Cannot require missing namespace: {name}"))?;
-        for form in crate::kernel::parse_forms(&source)? {
-            eval(&form, env)?;
+        for (index, form) in crate::kernel::parse_forms(&source)?.into_iter().enumerate() {
+            eval(&form, env)
+                .map_err(|error| format!("{name}: top-level form {}: {error}", index + 1))?;
         }
         if registry.find(name).is_none() {
             return Err(format!(
@@ -8911,6 +9188,7 @@ fn eval_require_spec(
                     .find(&target)
                     .ok_or_else(|| format!("Cannot require missing namespace: {target}"))?;
                 let destination = registry.current();
+                let destination_name = destination.name().as_str().to_owned();
                 let names = match &option[1] {
                     Form::Keyword(name) if name.as_str() == "all" => source
                         .mappings()
@@ -8934,6 +9212,16 @@ fn eval_require_spec(
                         .resolve(&crate::lang::data::Symbol::parse(&name))
                         .ok_or_else(|| format!("Cannot refer missing Var: {target}/{name}"))?;
                     destination.map_var(crate::lang::data::Symbol::parse(&name), var);
+                    ACTIVE_MACROS.with(|active| {
+                        if let Some(macros) = active.borrow().as_ref() {
+                            let mut macros = macros.borrow_mut();
+                            if let Some(function) =
+                                macros.get(&(target.clone(), name.clone())).cloned()
+                            {
+                                macros.insert((destination_name.clone(), name.clone()), function);
+                            }
+                        }
+                    });
                 }
             }
             "refer-macros" => {
@@ -9063,7 +9351,40 @@ fn eval_namespace_form(fs: &[Form], env: &mut HashMap<String, Value>) -> Result<
                 // files (e.g. runtime-library activation declarations), they are
                 // metadata-only and can be ignored here.
             }
-            _ => return Err("unsupported ns clause (only :require is supported)".into()),
+            Form::List(clause_forms) if matches!(clause_forms.first(), Some(Form::Keyword(k)) if k == "refer-clojure") =>
+            {
+                crate::kernel::generated::validate_refer_clojure_clause(clause_forms)?;
+                let Form::Vector(excluded) = &clause_forms[2] else {
+                    unreachable!()
+                };
+                let destination = registry.current();
+                let destination_name = destination.name().as_str().to_owned();
+                for item in excluded {
+                    let Form::Symbol(name) = item else {
+                        unreachable!()
+                    };
+                    let local = crate::lang::data::Symbol::parse(name);
+                    if destination
+                        .resolve(&local)
+                        .is_some_and(|var| var.symbol().get_namespace() == Some("std.foundation"))
+                    {
+                        destination.unmap(&local);
+                        env.remove(name);
+                    }
+                    ACTIVE_MACROS.with(|active| {
+                        if let Some(macros) = active.borrow().as_ref() {
+                            macros
+                                .borrow_mut()
+                                .remove(&(destination_name.clone(), name.clone()));
+                        }
+                    });
+                }
+            }
+            _ => {
+                return Err(
+                    "unsupported ns clause (only :require and :refer-clojure are supported)".into(),
+                )
+            }
         }
     }
     Ok(Value::Nil)
@@ -9269,6 +9590,9 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
             if fs.len() == 2 && matches!(&fs[0], Form::Symbol(name) if name == "quote") =>
         {
             literal_value(&fs[1])
+        }
+        Form::List(fs) if matches!(fs.first(), Some(Form::Symbol(name)) if name == "comment") => {
+            Ok(Value::Nil)
         }
         Form::Map(values) => Ok(Value::OrderedMap(Box::new(
             values
@@ -9580,9 +9904,22 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                             _ => return Err("intern-var metadata extension must be a map".into()),
                         }
                     }
+                    let value = source.deref_value();
+                    if let Value::Function(function) = &value {
+                        if function.is_macro {
+                            ACTIVE_MACROS.with(|active| {
+                                if let Some(macros) = active.borrow().as_ref() {
+                                    macros.borrow_mut().insert(
+                                        (target.clone(), name.as_str().to_owned()),
+                                        function.clone(),
+                                    );
+                                }
+                            });
+                        }
+                    }
                     let output = registry.find_or_create(&target).intern_with_metadata(
                         name.as_str(),
-                        source.deref_value(),
+                        value,
                         metadata,
                     );
                     Ok(Value::Var(output))
@@ -10284,13 +10621,21 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 })
                 }
                 Form::Symbol(n) if n == "defmacro" => {
-                    if fs.len() < 4 {
+                    if fs.len() < 3 {
                         return Err("defmacro expects a name, parameters, and a body".into());
                     }
                     let (name, metadata) = binding_symbol(&fs[1], "defmacro name")?;
                     let (metadata, rest) = definition_metadata(metadata, &fs[2..], false, true)?;
                     if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
                         return Ok(value);
+                    }
+                    if let Some(Value::Var(var)) = env.get(&name) {
+                        if var.symbol().get_namespace() == Some("std.foundation") {
+                            namespace_registry()?
+                                .current()
+                                .unmap(&crate::lang::data::Symbol::parse(&name));
+                            env.remove(&name);
+                        }
                     }
                     require_owned_definition(env, &name)?;
                     let cell = match env.get(&name) {
@@ -10828,6 +11173,28 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         || n.starts_with("std.native.Socket/") =>
                 {
                     socket_operation(n, &fs[1..], env)
+                }
+                Form::Symbol(n)
+                    if [
+                        "os/platform",
+                        "os/arch",
+                        "os/cwd",
+                        "os/env",
+                        "os/getenv",
+                        "os/spawn",
+                        "os/process?",
+                        "os/process-alive?",
+                        "os/process-write",
+                        "os/process-close-input",
+                        "os/process-stdout",
+                        "os/process-stderr",
+                        "os/process-wait",
+                        "os/process-kill",
+                    ]
+                    .contains(&n.as_str())
+                        || n.starts_with("std.foundation.os/") =>
+                {
+                    os_operation(n, &fs[1..], env)
                 }
                 Form::Symbol(n)
                     if [
@@ -12002,6 +12369,12 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         return Err("last expects one argument".into());
                     }
                     collection_last(eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "peek" => {
+                    if fs.len() != 2 {
+                        return Err("peek expects one argument".into());
+                    }
+                    collection_first(eval(&fs[1], env)?)
                 }
                 Form::Symbol(n) if n == "empty?" => {
                     if fs.len() != 2 {

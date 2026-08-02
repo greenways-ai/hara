@@ -31,6 +31,23 @@ public class HaraLanguageTest {
   }
 
   @Test
+  public void invokesTheFunctionValueHeldByAVar() {
+    try (Context context = context()) {
+      assertEquals(42, context.eval(HaraLanguage.ID, "((var +) 19 23)").asLong());
+    }
+  }
+
+  @Test
+  public void readsDataWithoutEvaluatingIt() {
+    try (Context context = context()) {
+      assertEquals(12.5, context.eval(HaraLanguage.ID, "(read-string \"12.5\")").asDouble(), 0.0);
+      assertEquals(
+          "{:value [1 2.5]}",
+          context.eval(HaraLanguage.ID, "(read-string \"{:value [1 2.5]}\")").toString());
+    }
+  }
+
+  @Test
   public void exposesOrdinaryProtocolBackedCollectionFunctions() {
     try (Context context = context()) {
       assertEquals(3, context.eval(HaraLanguage.ID, "(count [1 2 3])").asLong());

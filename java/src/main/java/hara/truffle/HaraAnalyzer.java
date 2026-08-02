@@ -231,6 +231,8 @@ final class HaraAnalyzer {
           return analyzeSyntaxQuote(list);
         case "do":
           return analyzeDo(list, 1);
+        case "comment":
+          return new HaraNodes.Literal(null);
         case "if":
           return analyzeIf(list);
         case "when":
@@ -1629,8 +1631,8 @@ final class HaraAnalyzer {
   }
 
   private HaraExpressionNode analyzeDefMacro(List<?> form) {
-    if (form.count() < 4) {
-      throw error("defmacro expects a name, parameter vector, and body");
+    if (form.count() < 3) {
+      throw error("defmacro expects a name, parameter vector or arity clauses, and body");
     }
     Object name = form.nth(1);
     if (!(name instanceof Symbol)) {
@@ -1652,16 +1654,59 @@ final class HaraAnalyzer {
       attributes = (IMapType<?, ?>) form.nth(parametersIndex);
       parametersIndex++;
     }
-    if (parametersIndex >= form.count()
-        || !isBindingVector(form.nth(parametersIndex))
-        || parametersIndex + 1 >= form.count()) {
-      throw error("defmacro expects a name, parameter vector, and body");
+    if (parametersIndex >= form.count()) {
+      throw error("defmacro expects a name, parameter vector or arity clauses, and body");
     }
 
-    ILinearType<?> parameters = (ILinearType<?>) form.nth(parametersIndex);
-    Object[] body = new Object[(int) form.count() - parametersIndex - 1];
-    for (int i = parametersIndex + 1; i < form.count(); i++) {
-      body[i - parametersIndex - 1] = form.nth(i);
+    Object parameterForm = form.nth(parametersIndex);
+    boolean singleArity = isBindingVector(parameterForm);
+    if (singleArity && parametersIndex + 1 >= form.count()) {
+      throw error("defmacro expects a body");
+    }
+    if (!singleArity
+        && (!(parameterForm instanceof List<?>) || ((List<?>) parameterForm).count() < 2)) {
+      throw error("defmacro expects a parameter vector or arity clauses");
+    }
+
+    ArrayList<Object> signatures = new ArrayList<>();
+    ArrayList<HaraFunction> compiledArities = new ArrayList<>();
+    int clauseCount = singleArity ? 1 : (int) form.count() - parametersIndex;
+    for (int clauseIndex = 0; clauseIndex < clauseCount; clauseIndex++) {
+      ILinearType<?> parameters;
+      Object[] body;
+      if (singleArity) {
+        parameters = (ILinearType<?>) parameterForm;
+        body = new Object[(int) form.count() - parametersIndex - 1];
+        for (int i = parametersIndex + 1; i < form.count(); i++) {
+          body[i - parametersIndex - 1] = form.nth(i);
+        }
+      } else {
+        Object clause = form.nth(parametersIndex + clauseIndex);
+        if (!(clause instanceof List<?>) || ((List<?>) clause).count() < 2) {
+          throw error("defmacro arity clauses must contain a parameter vector and body");
+        }
+        List<?> clauseList = (List<?>) clause;
+        if (!isBindingVector(clauseList.nth(0))) {
+          throw error("defmacro arity clause expects a parameter vector");
+        }
+        parameters = (ILinearType<?>) clauseList.nth(0);
+        body = new Object[(int) clauseList.count() - 1];
+        for (int i = 1; i < clauseList.count(); i++) {
+          body[i - 1] = clauseList.nth(i);
+        }
+      }
+      signatures.add(parameters);
+      ArrayList<Object> compiledParameters = new ArrayList<>();
+      compiledParameters.add(Symbol.create("&form"));
+      compiledParameters.add(Symbol.create("&env"));
+      for (Object parameter : parameters) compiledParameters.add(parameter);
+      HaraExpressionNode compiled =
+          analyzeFunction(
+              hara.lang.data.Vector.Standard.from(null, compiledParameters.toArray()), body);
+      if (!(compiled instanceof HaraNodes.FunctionLiteral function)) {
+        throw error("defmacro body did not compile to a Hara function");
+      }
+      compiledArities.add(function.instantiateWithoutClosure());
     }
 
     @SuppressWarnings("unchecked")
@@ -1683,29 +1728,23 @@ final class HaraAnalyzer {
             metadata
                 .assoc(
                     Keyword.create("arglists"),
-                    hara.lang.data.Vector.Standard.from(null, parameters))
+                    hara.lang.data.Vector.Standard.from(null, signatures.toArray()))
                 .assoc(Keyword.create("macro"), Boolean.TRUE);
     if (!locals.isEmpty() || parent != null) {
       throw error("defmacro is only valid at namespace scope");
     }
-    ArrayList<Object> compiledParameters = new ArrayList<>();
-    compiledParameters.add(Symbol.create("&form"));
-    compiledParameters.add(Symbol.create("&env"));
-    for (Object parameter : parameters) compiledParameters.add(parameter);
-    HaraExpressionNode compiled =
-        analyzeFunction(
-            hara.lang.data.Vector.Standard.from(null, compiledParameters.toArray()), body);
-    if (!(compiled instanceof HaraNodes.FunctionLiteral function)) {
-      throw error("defmacro body did not compile to a Hara function");
-    }
     Symbol definition = symbol.withMeta(metadata);
+    HaraFunction function =
+        compiledArities.size() == 1
+            ? compiledArities.get(0)
+            : new HaraFunction(compiledArities.toArray(new HaraFunction[0]));
     context.defineMacro(
         definition,
         new HaraMacro(
             context,
             context.currentNamespaceName(),
             definition,
-            function.instantiateWithoutClosure()));
+            function));
     return new HaraNodes.Literal(null);
   }
 

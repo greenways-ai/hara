@@ -6,7 +6,9 @@
   (atom {[:js :oneshot] 'tahto.runtime.basic.impl.process-js
          [:js :basic] 'tahto.runtime.basic.impl.process-js
          [:python :oneshot] 'tahto.runtime.basic.impl.process-python
-         [:python :basic] 'tahto.runtime.basic.impl.process-python}))
+         [:python :basic] 'tahto.runtime.basic.impl.process-python
+         [:lua :oneshot] 'tahto.runtime.basic.impl.process-lua
+         [:lua :basic] 'tahto.runtime.basic.impl.process-lua}))
 
 ;; Foundation keeps the public [:language :default] coordinate stable. Each
 ;; coordinate owns a configurable default and any number of immutable versions.
@@ -28,6 +30,13 @@
          {:default-version 1
           :versions
           {1 {:ns 'tahto.model.v1.spec-python
+              :book '+book+
+              :parent :xtalk}}}
+
+         [:lua :default]
+         {:default-version 1
+          :versions
+          {1 {:ns 'tahto.model.v1.spec-lua
               :book '+book+
               :parent :xtalk}}}}))
 

@@ -35,7 +35,19 @@
 (defn normalize-op-entry
   "Normalizes defaults shared by macro and hard-link operators."
   [entry]
-  (let [macro-entry
+  (let [control (get-in entry [:block :control])
+        control-order (if (vector? control) (vec (map first control)) nil)
+        entry (if (vector? control)
+                (assoc-in entry [:block :control]
+                          (reduce (fn [out pair]
+                                    (assoc out (first pair) (second pair)))
+                                  {}
+                                  control))
+                entry)
+        entry (if control-order
+                (assoc-in entry [:block :control-order] control-order)
+                entry)
+        macro-entry
         (if (and (= :macro (:emit entry))
                  (not (key-member? entry :value/template))
                  (:macro entry))

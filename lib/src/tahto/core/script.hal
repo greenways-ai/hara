@@ -1,0 +1,348 @@
+(ns tahto.core.script
+  (:require [std.foundation.string :as string]
+            [tahto.common.compiler :as compiler]
+            [tahto.core.eval :as evaluation]
+            [tahto.core.registry :as registry]
+            [tahto.core.runtime :as runtime]))
+
+(def +modules+ (atom {}))
+(def +specs+ (atom {}))
+(def +scripts+ (atom {}))
+
+(defn- namespace-symbol
+  []
+  (symbol (str (current-namespace))))
+
+(defn- symbol-id
+  [value]
+  (symbol (name value)))
+
+(defn- require-link
+  [spec]
+  (let [module (first spec)
+        values (vec (rest spec))]
+    (loop [remaining values]
+      (if (empty? remaining)
+        [module module]
+        (if (= :as (first remaining))
+          [(second remaining) module]
+          (recur (vec (rest remaining))))))))
+
+(defn- module-config
+  [module config]
+  (let [requires (or (:require config) [])
+        links (reduce (fn [out spec]
+                        (let [[alias target] (require-link spec)]
+                          (assoc out alias target)))
+                      {'- module}
+                      requires)]
+    {:id module
+     :lang :xtalk
+     :link links
+     :code {}
+     :fragment {}}))
+
+(defn configure-module!
+  [lang config]
+  (let [module (namespace-symbol)
+        value (module-config module config)]
+    (swap! +modules+ assoc module value)
+    value))
+
+(defn register-spec!
+  [id type-form metadata]
+  (let [module (namespace-symbol)
+        qualified (symbol (name module) (name id))
+        value {:symbol qualified
+               :module module
+               :id (symbol-id id)
+               :type type-form
+               :meta metadata}]
+    (swap! +specs+ assoc qualified value)
+    nil))
+
+(defn defspec-form
+  [symbol body]
+  (let [docstring (if (string? (first body)) (first body) nil)
+        remaining (if docstring (rest body) body)
+        attributes (if (map? (first remaining)) (first remaining) {})
+        remaining (if (map? (first remaining)) (rest remaining) remaining)
+        type-form (first remaining)
+        metadata (merge (meta symbol)
+                        attributes
+                        (if docstring {:docstring docstring} {}))]
+    `(tahto.core.script/register-spec!
+      '~symbol '~type-form '~metadata)))
+
+(defmacro defspec.xt
+  [symbol & body]
+  (tahto.core.script/defspec-form symbol body))
+
+(defn register-code!
+  [form]
+  (let [module (namespace-symbol)
+        symbol (second form)
+        id (symbol-id symbol)
+        entry {:id id
+               :module module
+               :lang :xtalk
+               :section :code
+               :op 'defn
+               :op-key :defn
+               :form form
+               :form-input form}]
+    (swap! +modules+
+           (fn [modules]
+             (let [current (or (get modules module)
+                               (module-config module {}))]
+               (assoc modules module
+                      (assoc-in current [:code id] entry)))))
+    nil))
+
+(defn register-fragment!
+  [form template]
+  (let [module (namespace-symbol)
+        symbol (second form)
+        id (symbol-id symbol)
+        entry {:id id
+               :module module
+               :lang :xtalk
+               :section :fragment
+               :op 'defmacro
+               :op-key :defmacro
+               :form form
+               :form-input form
+               :template template
+               :standalone (:standalone (meta symbol))}]
+    (swap! +modules+
+           (fn [modules]
+             (let [current (or (get modules module)
+                               (module-config module {}))]
+               (assoc modules module
+                      (assoc-in current [:fragment id] entry)))))
+    nil))
+
+(defmacro defn.xt
+  [symbol & body]
+  `(tahto.core.script/register-code!
+    '~(apply list 'defn symbol body)))
+
+(defmacro defmacro.xt
+  [symbol & body]
+  (let [form (apply list 'defmacro symbol body)]
+    `(do
+       ~form
+       (tahto.core.script/register-fragment!
+        '~form
+        (deref (resolve '~symbol))))))
+
+(defn load-module!
+  [spec]
+  (let [module (first spec)
+        sentinel (symbol (name module) "__tahto_load__")]
+    (requiring-resolve sentinel)
+    module))
+
+(defn- script-load-forms
+  [config]
+  (map (fn [spec]
+         (list 'tahto.core.script/load-module!
+               (list 'quote spec)))
+       (or (:require config) [])))
+
+(defn- intern-form
+  [target-symbol]
+  (list 'intern-var
+        (list 'current-namespace)
+        (list 'quote target-symbol)
+        (list 'var (symbol "tahto.core.script" (name target-symbol)))))
+
+
+(defn- install-macro!
+  [target-symbol]
+  (let [qualified (symbol "tahto.core.script" (name target-symbol))
+        source (requiring-resolve qualified)]
+    (intern-var (current-namespace) target-symbol source)
+    target-symbol))
+
+(defn script-form
+  [lang options]
+  (let [config (or (first options) {})]
+    (list 'tahto.core.script/setup!
+          (list 'quote lang)
+          (list 'quote config)
+          false)))
+
+(defmacro script
+  [lang & options]
+  (tahto.core.script/script-form lang options))
+
+(defn register-script!
+  [lang config]
+  (let [module (namespace-symbol)
+        coordinate [module lang]
+        value {:lang lang
+               :module module
+               :config config
+               :runtime nil}]
+    (swap! +scripts+ assoc coordinate value)
+    value))
+
+(defn setup!
+  [lang config test?]
+  (reduce (fn [_ spec]
+            (load-module! spec))
+          nil
+          (or (:require config) []))
+  (configure-module! :xtalk config)
+  (if test?
+    (register-script! lang config))
+  nil)
+
+
+(defn script-test-form
+  [lang options]
+  (let [config (or (first options) {})]
+    (list 'tahto.core.script/setup!
+          (list 'quote lang)
+          (list 'quote config)
+          true)))
+
+
+(defmacro script-
+  [lang & options]
+  (tahto.core.script/script-test-form lang options))
+(defn- selected-book
+  [lang]
+  (registry/registry-book lang :default nil))
+
+(defn- compile-one
+  [lang form module entry]
+  (let [book (selected-book lang)
+        selected (:selection book)
+        context {:book (assoc book :modules (deref +modules+))
+                 :modules (deref +modules+)
+                 :module module
+                 :entry entry
+                 :lang lang
+                 :layout :flat}]
+    (if entry
+      (compiler/compile-entry (compiler/compiler) entry selected context)
+      (compiler/compile (compiler/compiler) form selected context))))
+
+(defn- dependency-entry
+  [qualified]
+  (let [module (symbol (namespace qualified))
+        id (symbol (name qualified))]
+    (get-in (deref +modules+) [module :code id])))
+
+(defn- dependency-source
+  [lang qualified emitted]
+  (if (get emitted qualified)
+    [emitted []]
+    (let [entry (dependency-entry qualified)]
+      (if (nil? entry)
+        (throw (ex-info "Tahto dependency entry is missing"
+                        {:dependency qualified
+                         :lang lang}))
+        (let [module (get (deref +modules+) (:module entry))
+              result (compile-one lang (:form-input entry) module entry)
+              dependencies (vec (:code (:dependencies result)))
+              nested (reduce (fn [[seen sources] dependency]
+                               (let [[next-seen next-sources]
+                                     (dependency-source lang dependency seen)]
+                                 [next-seen (into sources next-sources)]))
+                             [emitted []]
+                             dependencies)
+              seen (assoc (first nested) qualified true)
+              sources (conj (second nested) (:output result))]
+          [seen sources])))))
+
+(defn compile-form
+  [lang module form]
+  (let [module-config (or (get (deref +modules+) module)
+                          (module-config module {}))
+        result (compile-one lang form module-config nil)
+        dependencies (vec (:code (:dependencies result)))
+        compiled (reduce (fn [[seen sources] dependency]
+                           (let [[next-seen next-sources]
+                                 (dependency-source lang dependency seen)]
+                             [next-seen (into sources next-sources)]))
+                         [{} []]
+                         dependencies)
+        expression (:output result)
+        expression (if (= lang :lua) (str "return " expression) expression)
+        sources (conj (second compiled) expression)]
+    (string/join "\n" sources)))
+
+(defn restart!
+  []
+  (let [module (namespace-symbol)
+        entries (filter (fn [entry]
+                          (= module (first (first entry))))
+                        (deref +scripts+))]
+    (reduce (fn [_ entry]
+              (let [coordinate (first entry)
+                    script (second entry)
+                    lang (:lang script)
+                    config (:config script)
+                    runtime-type (or (:runtime config) :basic)
+                    instance (runtime/rt-create lang runtime-type config)
+                    started (runtime/rt-start instance)]
+                (swap! +scripts+ assoc coordinate
+                       (assoc script :runtime started))))
+            nil
+            entries)
+    nil))
+
+(defn stop!
+  []
+  (let [module (namespace-symbol)
+        entries (filter (fn [entry]
+                          (= module (first (first entry))))
+                        (deref +scripts+))]
+    (reduce (fn [_ entry]
+              (let [coordinate (first entry)
+                    script (second entry)
+                    instance (:runtime script)]
+                (if instance (runtime/rt-stop instance))
+                (swap! +scripts+ assoc coordinate
+                       (assoc script :runtime nil))))
+            nil
+            entries)
+    nil))
+
+(defn eval-form!
+  [lang form]
+  (let [module (namespace-symbol)
+        script (get (deref +scripts+) [module lang])
+        instance (:runtime script)]
+    (if (nil? script)
+      (throw (ex-info "Tahto script is not configured"
+                      {:module module :lang lang}))
+      (if (nil? instance)
+        (throw (ex-info "Tahto script runtime is not started"
+                        {:module module :lang lang}))
+        (let [source (compile-form lang module form)
+              response (evaluation/eval-await instance source {})]
+          (if (and (map? response) (has? response :value))
+            (:value response)
+            response))))))
+
+(defmacro !.js
+  [& body]
+  `(tahto.core.script/eval-form! :js '~(if (= 1 (count body))
+                                         (first body)
+                                         (apply list 'do body))))
+
+(defmacro !.lua
+  [& body]
+  `(tahto.core.script/eval-form! :lua '~(if (= 1 (count body))
+                                          (first body)
+                                          (apply list 'do body))))
+
+(defmacro !.py
+  [& body]
+  `(tahto.core.script/eval-form! :python '~(if (= 1 (count body))
+                                             (first body)
+                                             (apply list 'do body))))

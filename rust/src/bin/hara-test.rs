@@ -1,4 +1,4 @@
-use hara_wasm::kernel::{parse, Form};
+use hara_wasm::kernel::{parse, parse_forms, Form};
 use hara_wasm::SessionKernel;
 use std::env;
 use std::fs;
@@ -52,8 +52,30 @@ pub fn run_file(root: &Path, file: &Path) -> Result<TestSummary, String> {
             let mut kernel = SessionKernel::new();
             let mount = kernel.create_native_filesystem(&root_text);
             kernel.attach_filesystem("ROOT", mount)?;
+            let session = kernel.session_mut("ROOT")?;
+            session.install_native_socket_provider();
+            session.install_native_process_provider();
+            let output = match kernel.eval("ROOT", &source) {
+                Ok(output) => match parse_summary(file.clone(), &output) {
+                    Ok(summary) => return Ok(summary),
+                    Err(_) => output,
+                },
+                Err(error) if error.starts_with("SESSION_TRANSFER_REJECTED ") => String::new(),
+                Err(error) => return Err(format!("{}: {error}", file.display())),
+            };
+            let namespace = test_namespace(&source).ok_or_else(|| {
+                if output.is_empty() {
+                    "test file loaded but its final value was not transferable and it has no ns declaration"
+                        .to_string()
+                } else {
+                    "test file did not return a summary and has no ns declaration".to_string()
+                }
+            })?;
             let output = kernel
-                .eval("ROOT", &source)
+                .eval(
+                    "ROOT",
+                    &test_run_source(&namespace),
+                )
                 .map_err(|error| format!("{}: {error}", file.display()))?;
             parse_summary(file.clone(), &output)
                 .map_err(|error| format!("{}: {error}", file.display()))
@@ -64,6 +86,30 @@ pub fn run_file(root: &Path, file: &Path) -> Result<TestSummary, String> {
         Ok(result) => result,
         Err(panic) => std::panic::resume_unwind(panic),
     }
+}
+
+fn test_run_source(namespace: &str) -> String {
+    format!(
+        "(let [summary (code.test/run {{:namespace \"{}\"}})] \
+         (assoc (dissoc summary :results) :results (str (:results summary))))",
+        namespace
+    )
+}
+
+fn test_namespace(source: &str) -> Option<String> {
+    parse_forms(source).ok()?.into_iter().find_map(|form| {
+        let Form::List(items) = form else {
+            return None;
+        };
+        match items.as_slice() {
+            [Form::Symbol(head), Form::Symbol(namespace), ..]
+                if head == "ns" && !namespace.contains('/') =>
+            {
+                Some(namespace.clone())
+            }
+            _ => None,
+        }
+    })
 }
 
 pub fn run_paths(root: &Path, paths: &[PathBuf]) -> Result<Vec<TestSummary>, String> {

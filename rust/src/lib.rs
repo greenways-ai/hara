@@ -22,6 +22,8 @@ pub mod native_cli;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_extension;
 #[cfg(not(target_arch = "wasm32"))]
+mod native_process;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod package;
 #[cfg(not(target_arch = "wasm32"))]
 mod process_extension;
@@ -89,6 +91,7 @@ const EAGER_HAL_RESOURCES: &[&str] = &[
     "std.foundation.file",
     "std.foundation.host",
     "std.foundation.socket",
+    "std.foundation.os",
     "std.foundation.edn",
     "std.foundation.json",
 ];
@@ -230,6 +233,16 @@ impl Session {
 
     pub fn current_namespace(&self) -> String {
         self.runtime.current_namespace()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn install_native_socket_provider(&mut self) {
+        self.runtime.install_native_socket_provider();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn install_native_process_provider(&mut self) {
+        self.runtime.install_native_process_provider();
     }
 }
 
@@ -1027,6 +1040,7 @@ impl Runtime {
             return core::with_capability_providers(
                 self.providers.file(),
                 self.providers.socket(),
+                self.providers.process(),
                 || {
                     core::with_promise_provider(self.providers.promise(), || {
                         core::with_macros(self.macros.clone(), || {
@@ -1060,6 +1074,7 @@ impl Runtime {
         let (result, fiber) = core::with_capability_providers(
             self.providers.file(),
             self.providers.socket(),
+            self.providers.process(),
             || {
                 core::with_promise_provider(self.providers.promise(), || {
                     core::with_macros(self.macros.clone(), || {
@@ -1133,6 +1148,20 @@ impl Runtime {
             self.install_structural_primitives_into(name);
         } else {
             self.refer_foundation_into(name);
+            let target = self.namespace_registry.find_or_create(name);
+            for excluded in config.excluded_foundation() {
+                let local = crate::lang::data::Symbol::parse(excluded);
+                if target
+                    .resolve(&local)
+                    .is_some_and(|var| var.symbol().get_namespace() == Some("std.foundation"))
+                {
+                    target.unmap(&local);
+                    self.env.remove(excluded);
+                }
+                self.macros
+                    .borrow_mut()
+                    .remove(&(name.to_owned(), excluded.clone()));
+            }
         }
         core::select_namespace_environment(&self.namespace_registry, &mut self.env, name);
         self.sync_generated_aliases(&config);
@@ -1233,6 +1262,11 @@ impl Runtime {
     pub fn install_native_socket_provider(&mut self) {
         self.providers
             .install_socket(core::NativeSocketProvider::default());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn install_native_process_provider(&mut self) {
+        self.providers.install_process();
     }
 
     pub fn install_loopback_socket_provider(&mut self) {
@@ -2537,20 +2571,24 @@ mod tests {
             registry.capabilities(),
             core::ProviderCapabilities {
                 file: false,
-                socket: false
+                socket: false,
+                process: false
             }
         );
         registry.install_file(core::MemoryFileProvider::new("/sandbox"));
         registry.install_socket(core::LoopbackSocketProvider::default());
+        registry.install_process();
         assert_eq!(
             registry.capabilities(),
             core::ProviderCapabilities {
                 file: true,
-                socket: true
+                socket: true,
+                process: true
             }
         );
         assert!(registry.file().is_some());
         assert!(registry.socket().is_some());
+        assert!(registry.process());
     }
 
     #[test]

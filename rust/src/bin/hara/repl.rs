@@ -110,7 +110,11 @@ pub(crate) fn parse_endpoint(value: &str, fallback_host: &str) -> Result<(String
 }
 
 pub(crate) fn run_repl(options: &Options, offline: bool) -> Result<(), String> {
-    let broker = RuntimeBroker::start_with(options.root.clone(), options.native_sockets)?;
+    let broker = RuntimeBroker::start_with(
+        options.root.clone(),
+        options.native_sockets,
+        options.allow_process,
+    )?;
     let mut resp = RespController::new(options.host.clone(), options.port, broker.clone());
     if !offline {
         resp.start(None)?;

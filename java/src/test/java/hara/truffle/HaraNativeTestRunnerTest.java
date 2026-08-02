@@ -36,4 +36,19 @@ public final class HaraNativeTestRunnerTest {
     assertEquals(1, result.failedChecks());
     assertTrue(result.failureMessage().contains(":failed"));
   }
+
+  @Test
+  public void runsPortableFoundationXtalkCommonMathSuite() throws Exception {
+    HaraNativeTestRunner.Result result =
+        HaraNativeTestRunner.runFile(
+            ROOT, ROOT.resolve("lib/test/xt/lang/common_math_test.hal"));
+
+    assertTrue(result.failureMessage(), result.passed());
+    assertEquals(29, result.facts());
+    assertEquals(87, result.checks());
+    assertEquals(87, result.passedChecks());
+    assertEquals(0, result.failedChecks());
+    assertEquals(0, result.errors());
+    assertEquals(0, result.timeouts());
+  }
 }

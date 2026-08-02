@@ -1,5 +1,7 @@
 (ns tahto.base.v1.grammar-spec
-  (:require [tahto.common.grammar-spec :as spec]))
+  (:require [tahto.common.grammar :as grammar]
+            [tahto.common.grammar-macro :as grammar-macro]
+            [tahto.common.grammar-spec :as spec]))
 
 (def +version+ 1)
 
@@ -37,6 +39,12 @@
 (def +op-coroutine+ spec/+op-coroutine+)
 (def +op-prototype+ spec/+op-prototype+)
 (def +op-functional-core+ spec/+op-functional-core+)
+(def +op-macro+ grammar-macro/+op-macro+)
+(def +op-macro-arrow+ grammar-macro/+op-macro-arrow+)
+(def +op-macro-let+ grammar-macro/+op-macro-let+)
+(def +op-macro-xor+ grammar-macro/+op-macro-xor+)
+(def +op-macro-case+ grammar-macro/+op-macro-case+)
+(def +op-macro-forange+ grammar-macro/+op-macro-forange+)
 
 (def +op-categories+
   [+op-builtin+
@@ -70,7 +78,13 @@
    +op-for+
    +op-coroutine+
    +op-prototype+
-   +op-functional-core+])
+   +op-functional-core+
+   +op-macro+
+   +op-macro-arrow+
+   +op-macro-let+
+   +op-macro-xor+
+   +op-macro-case+
+   +op-macro-forange+])
 
 (defn- entries-by-op
   [entries]
@@ -80,7 +94,9 @@
           entries))
 
 (def +features+
+  (merge
   (reduce (fn [out entries]
             (merge out (entries-by-op entries)))
           {}
-          +op-categories+))
+          +op-categories+)
+   (grammar/build-xtalk)))

@@ -133,6 +133,9 @@ pub(crate) fn run_project(options: &Options) -> Result<(), String> {
     if options.native_sockets {
         runtime.install_native_socket_provider();
     }
+    if options.allow_process {
+        runtime.install_native_process_provider();
+    }
     println!("{}", runtime.eval_native(&source)?);
     Ok(())
 }
@@ -165,6 +168,9 @@ pub(crate) fn test_project(options: &Options, args: &[String]) -> Result<(), Str
         let mut runtime = Runtime::new();
         runtime.install_native_file_provider(project.root.to_string_lossy().as_ref());
         project::register_sources(&project, &mut runtime)?;
+        if options.allow_process {
+            runtime.install_native_process_provider();
+        }
         runtime.eval_native(include_str!("../../../../../lib/src/std/lib/test.hal"))?;
         let evaluated = runtime.eval_native(&source)?;
         match test_results(&evaluated) {
@@ -232,6 +238,9 @@ pub(crate) fn direct_eval(options: &Options, source: &str) -> Result<(), String>
     if options.native_sockets {
         runtime.install_native_socket_provider();
     }
+    if options.allow_process {
+        runtime.install_native_process_provider();
+    }
     println!("{}", runtime.eval_native(source)?);
     Ok(())
 }
@@ -248,6 +257,9 @@ pub(crate) fn run_file(options: &Options, path: &str) -> Result<(), String> {
     }
     if options.native_sockets {
         runtime.install_native_socket_provider();
+    }
+    if options.allow_process {
+        runtime.install_native_process_provider();
     }
     if is_halc {
         println!("{}", runtime.eval_halc(&bytes)?);
@@ -267,7 +279,11 @@ pub(crate) fn run_headless(options: &Options) -> Result<(), String> {
     if options.offline {
         return Err("--offline cannot be used with headless".into());
     }
-    let broker = RuntimeBroker::start_with(options.root.clone(), options.native_sockets)?;
+    let broker = RuntimeBroker::start_with(
+        options.root.clone(),
+        options.native_sockets,
+        options.allow_process,
+    )?;
     let server = RespServer::start(&options.host, options.port, broker)?;
     println!("HARA RESP {} · session ROOT", server.endpoint());
     loop {

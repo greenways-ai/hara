@@ -1,0 +1,165 @@
+(ns tahto.core.eval
+  (:require [std.foundation.promise :as promise]
+            [std.protocol.icontexteval :as context-eval]
+            [tahto.protocol.runtime :as transport]))
+
+(defstruct EvalRequest [input stage])
+(defstruct EvalExchange [transport request response metadata])
+(defstruct EvalTrace [context profile phases exchange status result error])
+
+(def +plugins+ (atom {}))
+
+(defn register-plugin!
+  "Registers a reusable, versioned evaluation phase function."
+  [id version phase transform]
+  (let [plugin {:id id
+                :version version
+                :phase phase
+                :transform transform}]
+    (swap! +plugins+ assoc [id version] plugin)
+    plugin))
+
+(defn plugin
+  [coordinate]
+  (or (get (deref +plugins+) coordinate)
+      (throw
+       (ex-info "Evaluation plugin is not registered"
+                {:plugin coordinate
+                 :registered (keys (deref +plugins+))}))))
+
+(defn request
+  ([input]
+   (request input :source))
+  ([input stage]
+   (if (instance? tahto.core.eval/EvalRequest input)
+     input
+     (tahto.core.eval/EvalRequest input stage))))
+
+(defn ensure-promise
+  [value]
+  (if (promise? value) value (promise/from value)))
+
+(defn- phase-plugin
+  [descriptor]
+  (cond
+    (fn? descriptor) descriptor
+    (vector? descriptor) (get (plugin descriptor) :transform)
+    (map? descriptor) (get descriptor :transform)
+    :else
+    (throw
+     (ex-info "Invalid evaluation plugin descriptor"
+              {:plugin descriptor}))))
+
+(defn- run-phase
+  [frame descriptors]
+  (reduce
+   (fn [pending descriptor]
+     (promise/then
+      pending
+      (fn [current]
+        (ensure-promise ((phase-plugin descriptor) current)))))
+   (promise/from frame)
+   (or descriptors [])))
+
+(defn- profile
+  [context]
+  (or (get context :profile)
+      {:input [] :source [] :response []}))
+
+(defn- initial-frame
+  [context request options]
+  {:context context
+   :request request
+   :options options
+   :input (get request :input)
+   :source (get request :input)})
+
+(defn eval-raw-context
+  "Bypasses semantic plugins and exposes the transport exchange."
+  [context input options]
+  (let [request (request input)
+        eval-transport (get context :transport)]
+    (if eval-transport
+      (ensure-promise
+       (transport/exchange eval-transport
+                           (get request :input)
+                           options))
+      (throw
+       (ex-info "Evaluation context has no transport"
+                {:context context})))))
+
+(defn eval-context
+  "Runs the runtime-owned input/source/response profile and returns a promise."
+  [context input options]
+  (let [request (request input)
+        selected (profile context)
+        start (initial-frame context request options)]
+    (promise/then
+     (run-phase start (get selected :input))
+     (fn [input-frame]
+       (promise/then
+        (run-phase input-frame (get selected :source))
+        (fn [source-frame]
+          (promise/then
+           (eval-raw-context context
+                             (get source-frame :source)
+                             options)
+           (fn [exchange]
+             (promise/then
+              (run-phase (assoc source-frame :exchange exchange
+                                             :response (get exchange :response))
+                         (get selected :response))
+              (fn [response-frame]
+                (if (has? response-frame :result)
+                  (get response-frame :result)
+                  (get response-frame :response))))))))))))
+
+(defn eval-trace
+  "Evaluates and resolves a trace for either success or thrown target error."
+  [context input options]
+  (let [selected (profile context)
+        pending (context-eval/evaluate context input options)]
+    (promise/catch
+     (promise/then
+      pending
+      (fn [result]
+        (tahto.core.eval/EvalTrace
+         context selected [:input :source :transport :response]
+         nil :ok result nil)))
+     (fn [error]
+       (tahto.core.eval/EvalTrace
+        context selected [:input :source :transport :response]
+        nil :error nil error)))))
+
+(defn await
+  "Blocking compatibility adapter for promise-first evaluation."
+  ([pending]
+   (await pending 2000))
+  ([pending timeout]
+   (let [marker :tahto.eval/timeout
+         value (IDerefTimeout/deref-timeout pending timeout marker)]
+     (if (= marker value)
+       (do
+         (promise/cancel pending)
+         (throw
+          (ex-info "Evaluation timed out"
+                   {:timeout timeout})))
+       value))))
+
+(defn eval-await
+  ([context input]
+   (eval-await context input {}))
+  ([context input options]
+   (await (context-eval/evaluate context input options)
+          (or (get options :timeout)
+              (get context :timeout)
+              2000))))
+
+(defn eval-raw-await
+  ([context input]
+   (eval-raw-await context input {}))
+  ([context input options]
+   (await (context-eval/evaluate-raw context input options)
+          (or (get options :timeout)
+              (get context :timeout)
+              2000))))

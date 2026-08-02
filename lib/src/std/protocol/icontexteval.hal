@@ -1,0 +1,8 @@
+(ns std.protocol.icontexteval)
+
+;; Promise-first evaluation boundary shared by local language runtimes,
+;; databases and remote environments. Implementations own their profiles;
+;; callers only supply a request and portable options.
+(defprotocol IContextEval
+  (evaluate [context request options])
+  (evaluate-raw [context request options]))

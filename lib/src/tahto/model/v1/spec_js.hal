@@ -8,6 +8,10 @@
 (def +tag+ :js)
 (def +version+ spec/+version+)
 
+(defn js-math-quot
+  [form]
+  (list 'Math.floor (list '/ (nth form 1) (nth form 2))))
+
 (def +grammar+
   (grammar/definition
    {:grammar/id +tag+
@@ -24,7 +28,28 @@
      {:pow {:raw "Math.pow" :emit :invoke}
       :eq {:raw "==="}
       :neq {:raw "!=="}
-      :var {:raw "let"}}}
+      :var {:raw "let"}
+      :x-m-abs {:raw "Math.abs" :emit :invoke}
+      :x-m-acos {:raw "Math.acos" :emit :invoke}
+      :x-m-asin {:raw "Math.asin" :emit :invoke}
+      :x-m-atan {:raw "Math.atan" :emit :invoke}
+      :x-m-ceil {:raw "Math.ceil" :emit :invoke}
+      :x-m-cos {:raw "Math.cos" :emit :invoke}
+      :x-m-cosh {:raw "Math.cosh" :emit :invoke}
+      :x-m-exp {:raw "Math.exp" :emit :invoke}
+      :x-m-floor {:raw "Math.floor" :emit :invoke}
+      :x-m-loge {:raw "Math.log" :emit :invoke}
+      :x-m-log10 {:raw "Math.log10" :emit :invoke}
+      :x-m-max {:raw "Math.max" :emit :invoke}
+      :x-m-min {:raw "Math.min" :emit :invoke}
+      :x-m-mod {:raw "%" :emit :infix}
+      :x-m-pow {:raw "Math.pow" :emit :invoke}
+      :x-m-quot {:macro js-math-quot :emit :macro}
+      :x-m-sin {:raw "Math.sin" :emit :invoke}
+      :x-m-sinh {:raw "Math.sinh" :emit :invoke}
+      :x-m-sqrt {:raw "Math.sqrt" :emit :invoke}
+      :x-m-tan {:raw "Math.tan" :emit :invoke}
+      :x-m-tanh {:raw "Math.tanh" :emit :invoke}}}
     :emit
     {:defaults
      {:default

@@ -69,14 +69,18 @@ pub struct RuntimeBroker {
 
 impl RuntimeBroker {
     pub fn start() -> Result<Self, String> {
-        Self::start_with(None, false)
+        Self::start_with(None, false, false)
     }
 
-    pub fn start_with(root: Option<PathBuf>, native_sockets: bool) -> Result<Self, String> {
+    pub fn start_with(
+        root: Option<PathBuf>,
+        native_sockets: bool,
+        allow_process: bool,
+    ) -> Result<Self, String> {
         let (sender, receiver) = mpsc::channel();
         std::thread::Builder::new()
             .name("hara-runtime-broker".into())
-            .spawn(move || run(receiver, root, native_sockets))
+            .spawn(move || run(receiver, root, native_sockets, allow_process))
             .map_err(|error| format!("runtime broker failed: {error}"))?;
         Ok(Self {
             handle: Arc::new(BrokerHandle { sender }),
@@ -176,7 +180,7 @@ impl RuntimeBroker {
     }
 }
 
-fn runtime(root: Option<&PathBuf>, native_sockets: bool) -> Runtime {
+fn runtime(root: Option<&PathBuf>, native_sockets: bool, allow_process: bool) -> Runtime {
     let mut runtime = Runtime::new();
     if let Some(root) = root {
         runtime.install_native_file_provider(root.to_string_lossy().as_ref());
@@ -184,11 +188,22 @@ fn runtime(root: Option<&PathBuf>, native_sockets: bool) -> Runtime {
     if native_sockets {
         runtime.install_native_socket_provider();
     }
+    if allow_process {
+        runtime.install_native_process_provider();
+    }
     runtime
 }
 
-fn run(receiver: mpsc::Receiver<Request>, root: Option<PathBuf>, native_sockets: bool) {
-    let mut sessions = HashMap::from([("ROOT".to_owned(), runtime(root.as_ref(), native_sockets))]);
+fn run(
+    receiver: mpsc::Receiver<Request>,
+    root: Option<PathBuf>,
+    native_sockets: bool,
+    allow_process: bool,
+) {
+    let mut sessions = HashMap::from([(
+        "ROOT".to_owned(),
+        runtime(root.as_ref(), native_sockets, allow_process),
+    )]);
     while let Ok(request) = receiver.recv() {
         match request {
             Request::Eval {
@@ -233,7 +248,10 @@ fn run(receiver: mpsc::Receiver<Request>, root: Option<PathBuf>, native_sockets:
                 let result = if session.is_empty() || sessions.contains_key(&session) {
                     Err(format!("Session already exists or is invalid: {session}"))
                 } else {
-                    sessions.insert(session.clone(), runtime(root.as_ref(), native_sockets));
+                    sessions.insert(
+                        session.clone(),
+                        runtime(root.as_ref(), native_sockets, allow_process),
+                    );
                     Ok(session)
                 };
                 let _ = reply.send(result);

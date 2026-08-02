@@ -239,6 +239,26 @@ impl Promise {
         }
     }
 
+    pub fn wait_state_timeout(&self, timeout: Duration) -> PromiseState {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = timeout;
+            return self.state();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let deadline = Instant::now() + timeout;
+            loop {
+                let state = self.state();
+                if !matches!(state, PromiseState::Pending) || Instant::now() >= deadline {
+                    return state;
+                }
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                std::thread::sleep(remaining.min(Duration::from_millis(1)));
+            }
+        }
+    }
+
     pub(crate) fn notify_cancel(&self) {
         let cancel = self.inner.borrow().hooks.cancel.clone();
         if let Some(cancel) = cancel {

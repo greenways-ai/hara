@@ -4,6 +4,7 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.TruffleLanguage;
 import com.oracle.truffle.api.TruffleFile;
 import com.oracle.truffle.api.source.Source;
+import hara.kernel.base.Parser;
 import hara.kernel.builtin.BuiltinStruct;
 import hara.kernel.flavor.NativeCapability;
 import hara.kernel.flavor.NativeFlavorAccess;
@@ -29,6 +30,7 @@ import hara.lang.protocol.ICount;
 import hara.lang.protocol.ICons;
 import hara.lang.protocol.INth;
 import hara.lang.protocol.IPromise;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -627,6 +629,14 @@ public final class HaraContext {
     configureNativeFlavor(declaration.structuralClauses);
     applyNamespaceRequires(declaration.structuralClauses);
     applyNamespaceUses(declaration.structuralClauses);
+    for (String name : declaration.excludedFoundation) {
+      currentNamespace.removeReferredVar(name, FOUNDATION_NAMESPACE);
+      Map<String, HaraMacro> namespaceMacros = macros.get(currentNamespace.name());
+      HaraMacro foundationMacro = macros.getOrDefault(FOUNDATION_NAMESPACE, Map.of()).get(name);
+      if (namespaceMacros != null && namespaceMacros.get(name) == foundationMacro) {
+        namespaceMacros.remove(name);
+      }
+    }
   }
 
   private void configureFoundationAliases(HaraNamespaceDeclaration declaration) {
@@ -696,6 +706,15 @@ public final class HaraContext {
         }
         referNamespace(target.getName());
       }
+    }
+  }
+
+  private void referMacro(String target, String name) {
+    HaraMacro macro = macros.getOrDefault(target, Map.of()).get(name);
+    if (macro != null) {
+      macros
+          .computeIfAbsent(currentNamespace.name(), ignored -> new ConcurrentHashMap<>())
+          .put(name, macro);
     }
   }
 
@@ -897,7 +916,10 @@ public final class HaraContext {
       } else if ("refer".equals(option)) {
         if (value instanceof Keyword && "all".equals(((Keyword) value).getName())) {
           for (String referred : required.symbolNames()) {
-            if (!excludedRefers.contains(referred)) currentNamespace.refer(referred, required.lookup(referred));
+            if (!excludedRefers.contains(referred)) {
+              currentNamespace.refer(referred, required.lookup(referred));
+              referMacro(target, referred);
+            }
           }
         } else {
           if (!(value instanceof ILinearType<?>)) {
@@ -914,6 +936,7 @@ public final class HaraContext {
               throw new HaraException("Cannot refer missing var " + name + " from " + target);
             }
             currentNamespace.refer(name, variable);
+            referMacro(target, name);
           }
         }
       } else if ("refer-macros".equals(option)) {
@@ -1572,6 +1595,12 @@ public final class HaraContext {
       throw new HaraException("defmacro name must not be qualified");
     }
     HaraVar existing = currentNamespace.lookup(symbol.getName());
+    if (existing != null
+        && FOUNDATION_NAMESPACE.equals(existing.namespaceName())
+        && !FOUNDATION_NAMESPACE.equals(currentNamespace.name())) {
+      currentNamespace.removeReferredVar(symbol.getName(), FOUNDATION_NAMESPACE);
+      existing = null;
+    }
     if (definitionOrigin == HaraVar.Origin.HAL_FALLBACK
         && existing != null
         && (existing.origin() == HaraVar.Origin.JAVA_LIBRARY
@@ -1833,6 +1862,7 @@ public final class HaraContext {
               return unwrapped == null ? null : unwrapped.getClass().getName();
             }));
     target.define("load-string", new UnaryBuiltin("load-string", this::loadString));
+    target.define("read-string", new UnaryBuiltin("read-string", this::readString));
     target.define("eval", new UnaryBuiltin("eval", this::evalForm));
     target.define("load-file", new UnaryBuiltin("load-file", this::loadFile));
     target.define("load-resource", new UnaryBuiltin("load-resource", this::loadResource));
@@ -2456,6 +2486,7 @@ public final class HaraContext {
     java.util.List<Object> capabilities = new ArrayList<>();
     if (environment.isFileIOAllowed()) capabilities.add("filesystem");
     if (environment.isSocketIOAllowed()) capabilities.add("network/socket");
+    if (environment.isCreateProcessAllowed()) capabilities.add("process");
     return capabilities.toArray();
   }
 
@@ -2831,6 +2862,124 @@ public final class HaraContext {
 
   void installSocketLibrary() {
     withDefinitionOrigin(HaraVar.Origin.JAVA_LIBRARY, this::defineSocketLibrary);
+  }
+
+  void installOsLibrary() {
+    withDefinitionOrigin(HaraVar.Origin.JAVA_LIBRARY, this::defineOsLibrary);
+  }
+
+  private void defineOsLibrary() {
+    HaraNamespace os = namespace("std.foundation.os");
+    os.define("platform", new VariadicBuiltin("os/platform", this::osPlatform));
+    os.define("arch", new VariadicBuiltin("os/arch", this::osArch));
+    os.define("cwd", new VariadicBuiltin("os/cwd", this::osCwd));
+    os.define("env", new VariadicBuiltin("os/env", this::osEnv));
+    os.define("getenv", new UnaryBuiltin("os/getenv", this::osGetenv));
+    os.define("spawn", new VariadicBuiltin("os/spawn", this::osSpawn));
+    os.define("process?", new UnaryBuiltin("os/process?", value -> HaraBox.unwrap(value) instanceof HaraProcess));
+    os.define("process-alive?", new UnaryBuiltin("os/process-alive?", value -> requireProcess(value, "os/process-alive?").process.isAlive()));
+    os.define("process-write", new VariadicBuiltin("os/process-write", this::osProcessWrite));
+    os.define("process-close-input", new UnaryBuiltin("os/process-close-input", this::osProcessCloseInput));
+    os.define("process-stdout", new UnaryBuiltin("os/process-stdout", value -> new HaraPromise(requireProcess(value, "os/process-stdout").stdout)));
+    os.define("process-stderr", new UnaryBuiltin("os/process-stderr", value -> new HaraPromise(requireProcess(value, "os/process-stderr").stderr)));
+    os.define("process-wait", new UnaryBuiltin("os/process-wait", value -> new HaraPromise(requireProcess(value, "os/process-wait").exit)));
+    os.define("process-kill", new UnaryBuiltin("os/process-kill", this::osProcessKill));
+  }
+
+  private void requireProcessIO(String operation) {
+    if (!environment.isCreateProcessAllowed()) throw new HaraException(operation + " is unsupported or process access is denied");
+  }
+
+  private Object osPlatform(Object[] values) {
+    requireMethodArity("os/platform", values, 0);
+    String name = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+    return Keyword.create(name.contains("win") ? "windows" : name.contains("mac") ? "macos" : name.contains("nux") ? "linux" : "unknown");
+  }
+
+  private Object osArch(Object[] values) {
+    requireMethodArity("os/arch", values, 0);
+    String arch = System.getProperty("os.arch", "unknown").toLowerCase(java.util.Locale.ROOT);
+    if (arch.equals("amd64") || arch.equals("x86_64")) arch = "x86-64";
+    else if (arch.equals("aarch64") || arch.equals("arm64")) arch = "aarch64";
+    return Keyword.create(arch.replace('_', '-'));
+  }
+
+  private Object osCwd(Object[] values) {
+    requireMethodArity("os/cwd", values, 0);
+    return Path.of("").toAbsolutePath().normalize().toString();
+  }
+
+  @SuppressWarnings({"rawtypes", "unchecked"})
+  private Object osEnv(Object[] values) {
+    requireMethodArity("os/env", values, 0);
+    IMapType result = hara.lang.data.Map.Standard.EMPTY;
+    for (Map.Entry<String, String> entry : System.getenv().entrySet()) result = (IMapType) result.assoc(entry.getKey(), entry.getValue());
+    return result;
+  }
+
+  private Object osGetenv(Object value) {
+    String found = System.getenv(stringValue(value, "os/getenv"));
+    return found == null ? null : found;
+  }
+
+  private java.util.List<String> processArgv(Object value) {
+    Object raw = HaraBox.unwrap(value);
+    if (!(raw instanceof ILinearType<?> argv) || argv.count() == 0) throw new HaraException("os/spawn expects a non-empty vector of strings");
+    java.util.List<String> result = new ArrayList<>();
+    for (int index = 0; index < argv.count(); index++) result.add(stringValue(argv.nth(index), "os/spawn"));
+    return result;
+  }
+
+  @SuppressWarnings({"rawtypes"})
+  private Object osSpawn(Object[] values) {
+    requireProcessIO("os/spawn");
+    if (values.length < 1 || values.length > 2) throw new HaraException("os/spawn expects argv and optional options");
+    ProcessBuilder builder = new ProcessBuilder(processArgv(values[0]));
+    if (values.length == 2) {
+      Object raw = HaraBox.unwrap(values[1]);
+      if (!(raw instanceof IMapType options)) throw new HaraException("os/spawn options must be a map");
+      Object cwd = options.lookup(Keyword.create("cwd"));
+      if (cwd != null) builder.directory(new File(stringValue(cwd, "os/spawn :cwd")));
+      Object env = options.lookup(Keyword.create("env"));
+      if (env != null) {
+        if (!(HaraBox.unwrap(env) instanceof IMapType envMap)) throw new HaraException("os/spawn :env must be a map");
+        for (Object item : envMap) {
+          Map.Entry entry = (Map.Entry) item;
+          builder.environment().put(stringValue(entry.getKey(), "os/spawn :env"), stringValue(entry.getValue(), "os/spawn :env"));
+        }
+      }
+    }
+    try { return new HaraProcess(builder.start()); }
+    catch (IOException error) { throw new HaraException("os/spawn failed: " + error.getMessage()); }
+  }
+
+  private HaraProcess requireProcess(Object value, String operation) {
+    requireProcessIO(operation);
+    Object raw = HaraBox.unwrap(value);
+    if (!(raw instanceof HaraProcess process)) throw new HaraException(operation + " expects a process");
+    return process;
+  }
+
+  private Object osProcessWrite(Object[] values) {
+    if (values.length != 2) throw new HaraException("os/process-write expects a process and bytes");
+    HaraProcess process = requireProcess(values[0], "os/process-write");
+    byte[] bytes = bytesValue(values[1], "os/process-write");
+    synchronized (process.stdin) {
+      try { process.stdin.write(bytes); process.stdin.flush(); return (long) bytes.length; }
+      catch (IOException error) { throw new HaraException("os/process-write failed: " + error.getMessage()); }
+    }
+  }
+
+  private Object osProcessCloseInput(Object value) {
+    HaraProcess process = requireProcess(value, "os/process-close-input");
+    try { process.stdin.close(); } catch (IOException error) { throw new HaraException("os/process-close-input failed: " + error.getMessage()); }
+    return null;
+  }
+
+  private Object osProcessKill(Object value) {
+    HaraProcess process = requireProcess(value, "os/process-kill");
+    if (process.process.isAlive()) process.process.destroyForcibly();
+    return process;
   }
 
   private void defineSocketLibrary() {
@@ -3938,6 +4087,17 @@ public final class HaraContext {
     }
   }
 
+  private Object readString(Object value) {
+    if (!(value instanceof String source)) {
+      throw new HaraException("read-string expects a string");
+    }
+    try {
+      return Parser.LispReader.readString(source, null);
+    } catch (RuntimeException error) {
+      throw HaraException.withCause("read-string failed: " + error.getMessage(), error);
+    }
+  }
+
   private Object evalForm(Object value) {
     return parseAndExecute(
         hara.kernel.builtin.BuiltinUtil.prStr(HaraBox.unwrap(value)), "<eval>");
@@ -4043,7 +4203,16 @@ public final class HaraContext {
       }
       metadata = hara.lang.data.Map.Standard.from(null, entries.toArray());
     }
-    return namespace(namespaceName).define(symbol.getName(), source.get(), metadata, HaraVar.Origin.SOURCE);
+    Object value = source.get();
+    HaraVar imported =
+        namespace(namespaceName)
+            .define(symbol.getName(), value, metadata, HaraVar.Origin.SOURCE);
+    if (value instanceof HaraMacro macro) {
+      macros
+          .computeIfAbsent(namespaceName, ignored -> new ConcurrentHashMap<>())
+          .put(symbol.getName(), macro);
+    }
+    return imported;
   }
 
   private Object namespaceState(Object value) {
@@ -5482,15 +5651,21 @@ public final class HaraContext {
   private final class HaraSocket implements IDisplay {
     private final Socket socket;
     private final Object eventCallback;
+    private final HaraSocketServer parent;
     private final java.util.List<HaraSocketStream> streams = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     private HaraSocket(Socket socket) {
-      this(socket, null);
+      this(socket, null, null);
     }
 
     private HaraSocket(Socket socket, Object eventCallback) {
+      this(socket, eventCallback, null);
+    }
+
+    private HaraSocket(Socket socket, Object eventCallback, HaraSocketServer parent) {
       this.socket = socket;
       this.eventCallback = eventCallback;
+      this.parent = parent;
     }
 
     private HaraSocketStream events() {
@@ -5505,7 +5680,8 @@ public final class HaraContext {
 
     private void emit(Object event, int byteCount) {
       for (HaraSocketStream stream : streams) stream.publish(event, byteCount);
-      if (eventCallback != null) invokeInContext(() -> invokeCallable(eventCallback, new Object[] {event}));
+      if (parent != null) parent.emit(event, byteCount);
+      else if (eventCallback != null) invokeInContext(() -> invokeCallable(eventCallback, new Object[] {event}));
     }
 
     private void closeQuietly() {
@@ -5557,14 +5733,17 @@ public final class HaraContext {
       return stream;
     }
     private void emit(Object event) {
-      for (HaraSocketStream stream : streams) stream.publish(event, 0);
+      emit(event, 0);
+    }
+    private void emit(Object event, int byteCount) {
+      for (HaraSocketStream stream : streams) stream.publish(event, byteCount);
       invokeInContext(() -> invokeCallable(callback, new Object[] {event}));
     }
     private void start() {
       Thread acceptor = new Thread(() -> {
         while (!server.isClosed()) {
           try {
-            HaraSocket connection = new HaraSocket(server.accept(), callback);
+            HaraSocket connection = new HaraSocket(server.accept(), null, this);
             emit(socketEvent("open", connection, null, null, this));
             connection.startDrainer();
           } catch (IOException error) {
@@ -5614,6 +5793,29 @@ public final class HaraContext {
   }
 
   private record SocketStreamEntry(Object event, int byteCount) {}
+
+  private static final class HaraProcess implements IDisplay {
+    private final Process process;
+    private final OutputStream stdin;
+    private final CompletableFuture<Object> stdout;
+    private final CompletableFuture<Object> stderr;
+    private final CompletableFuture<Object> exit;
+
+    private HaraProcess(Process process) {
+      this.process = process;
+      this.stdin = process.getOutputStream();
+      this.stdout = CompletableFuture.supplyAsync(() -> readProcessBytes(process.getInputStream()));
+      this.stderr = CompletableFuture.supplyAsync(() -> readProcessBytes(process.getErrorStream()));
+      this.exit = process.onExit().thenApply(value -> (Object) (long) value.exitValue());
+    }
+
+    private static Object readProcessBytes(InputStream input) {
+      try { return input.readAllBytes(); }
+      catch (IOException error) { throw new CompletionException(error); }
+    }
+
+    @Override public String display() { return "#<process " + process.pid() + ">"; }
+  }
 
   private Object socketEvent(String type, HaraSocket connection, byte[] bytes, String error) {
     return socketEvent(type, connection, bytes, error, null);
@@ -5698,7 +5900,10 @@ public final class HaraContext {
         throw new HaraException("Promise wait interrupted");
       } catch (java.util.concurrent.ExecutionException error) {
         Throwable cause = error.getCause() == null ? error : error.getCause();
-        if (cause instanceof HaraException) throw (HaraException) cause;
+        if (cause instanceof HaraException haraError) throw haraError;
+        if (cause instanceof hara.lang.protocol.IExInfo && cause instanceof RuntimeException runtime) {
+          throw runtime;
+        }
         throw new HaraException("Promise rejected: " + cause.getMessage());
       } catch (java.util.concurrent.CancellationException error) {
         throw new HaraException("Promise cancelled");

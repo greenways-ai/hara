@@ -21,6 +21,7 @@ final class HaraNamespaceDeclaration {
   final Symbol name;
   final boolean blank;
   final java.util.List<Symbol> builtins;
+  final Set<String> excludedFoundation;
   final Set<String> excludedIntrinsics;
   final Map<String, String> intrinsicAliases;
   final Object[] structuralClauses;
@@ -29,12 +30,14 @@ final class HaraNamespaceDeclaration {
       Symbol name,
       boolean blank,
       java.util.List<Symbol> builtins,
+      Set<String> excludedFoundation,
       Set<String> excludedIntrinsics,
       Map<String, String> intrinsicAliases,
       Object[] structuralClauses) {
     this.name = name;
     this.blank = blank;
     this.builtins = java.util.List.copyOf(builtins);
+    this.excludedFoundation = Set.copyOf(excludedFoundation);
     this.excludedIntrinsics = Set.copyOf(excludedIntrinsics);
     this.intrinsicAliases = Map.copyOf(intrinsicAliases);
     this.structuralClauses = structuralClauses.clone();
@@ -48,6 +51,7 @@ final class HaraNamespaceDeclaration {
     boolean configSeen = false;
     boolean blank = false;
     ArrayList<Symbol> builtins = new ArrayList<>();
+    LinkedHashSet<String> excludedFoundation = new LinkedHashSet<>();
     LinkedHashSet<String> excluded = new LinkedHashSet<>();
     LinkedHashMap<String, String> aliases = new LinkedHashMap<>();
     ArrayList<Object> structural = new ArrayList<>();
@@ -93,6 +97,8 @@ final class HaraNamespaceDeclaration {
           || "flavor".equals(clauseName)
           || "import".equals(clauseName)) {
         structural.add(clause);
+      } else if ("refer-clojure".equals(clauseName)) {
+        parseReferClojure(clause, excludedFoundation);
       } else if ("intrinsics".equals(clauseName) || "builtins".equals(clauseName)) {
         throw new HaraException(":" + clauseName + " is valid only inside ns :config");
       } else {
@@ -106,7 +112,21 @@ final class HaraNamespaceDeclaration {
       }
     }
     return new HaraNamespaceDeclaration(
-        name, blank, builtins, excluded, aliases, structural.toArray());
+        name, blank, builtins, excludedFoundation, excluded, aliases, structural.toArray());
+  }
+
+  private static void parseReferClojure(List<?> clause, Set<String> excludedFoundation) {
+    if (clause.count() != 3
+        || !Keyword.create("exclude").equals(clause.nth(1))
+        || !(clause.nth(2) instanceof Vector<?> symbols)) {
+      throw new HaraException(":refer-clojure expects :exclude and a vector of symbols");
+    }
+    for (Object item : symbols) {
+      if (!(item instanceof Symbol symbol) || symbol.getNamespace() != null) {
+        throw new HaraException(":refer-clojure :exclude expects unqualified symbols");
+      }
+      excludedFoundation.add(symbol.getName());
+    }
   }
 
   private static void parseBuiltins(Object value, java.util.List<Symbol> output) {

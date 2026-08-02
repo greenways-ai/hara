@@ -50,15 +50,12 @@
 
 (defn emit-symbol [form grammar context]
   (or (emit-reserved-value form grammar context)
-      (let [options (get-in grammar [:token :symbol])
-            ns-value (namespace form)
-            separator (or (:namespace options)
-                          (get-in grammar [:default :common :namespace])
-                          ".")
-            raw (if ns-value
-                  (str ns-value separator (name form))
-                  (name form))]
-        (replace-symbol-parts raw (:replace options)))))
+      (if (namespace form)
+        ((deref (requiring-resolve
+                 'tahto.common.emit-common/emit-symbol))
+         form grammar context)
+        (let [options (get-in grammar [:token :symbol])]
+          (replace-symbol-parts (name form) (:replace options))))))
 
 (defn- emit-string [value grammar]
   (let [options (get-in grammar [:token :string])]

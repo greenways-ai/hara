@@ -42,6 +42,7 @@ pub struct GeneratedNamespaceConfig {
     required_namespaces: Vec<String>,
     used_namespaces: Vec<String>,
     builtins: Vec<String>,
+    excluded_foundation: HashSet<String>,
     blank: bool,
 }
 
@@ -62,6 +63,7 @@ impl GeneratedNamespaceConfig {
             required_namespaces: Vec::new(),
             used_namespaces: Vec::new(),
             builtins: Vec::new(),
+            excluded_foundation: HashSet::new(),
             blank: false,
         }
     }
@@ -79,6 +81,7 @@ impl GeneratedNamespaceConfig {
         let mut requires = Vec::new();
         let mut uses = Vec::new();
         let mut builtins = Vec::new();
+        let mut excluded_foundation = HashSet::new();
         let mut blank = false;
         let mut intrinsics_seen = false;
         let mut config_seen = false;
@@ -120,6 +123,9 @@ impl GeneratedNamespaceConfig {
                 }
                 "require" => requires.extend(values[1..].iter().cloned()),
                 "use" => uses.extend(values[1..].iter().cloned()),
+                "refer-clojure" => {
+                    excluded_foundation.extend(parse_refer_clojure(values)?);
+                }
                 "flavor" | "import" => {}
                 other => return Err(format!("Unsupported ns clause: :{other}")),
             }
@@ -135,6 +141,7 @@ impl GeneratedNamespaceConfig {
 
         let mut config = Self::default();
         config.builtins = builtins;
+        config.excluded_foundation = excluded_foundation;
         config.blank = blank;
         for native_type in NATIVE_TYPES {
             config.put_alias(native_type, &format!("std.native.{native_type}"))?;
@@ -167,6 +174,10 @@ impl GeneratedNamespaceConfig {
 
     pub fn builtins(&self) -> &[String] {
         &self.builtins
+    }
+
+    pub fn excluded_foundation(&self) -> &HashSet<String> {
+        &self.excluded_foundation
     }
 
     pub fn blank(&self) -> bool {
@@ -500,6 +511,26 @@ fn parse_intrinsics(
         }
     }
     Ok(())
+}
+
+pub(crate) fn validate_refer_clojure_clause(values: &[Form]) -> Result<(), String> {
+    parse_refer_clojure(values).map(|_| ())
+}
+
+fn parse_refer_clojure(values: &[Form]) -> Result<HashSet<String>, String> {
+    if values.len() != 3 || !matches!(&values[1], Form::Keyword(name) if name == "exclude") {
+        return Err(":refer-clojure expects :exclude and a vector of symbols".into());
+    }
+    let Form::Vector(symbols) = &values[2] else {
+        return Err(":refer-clojure expects :exclude and a vector of symbols".into());
+    };
+    symbols
+        .iter()
+        .map(|item| match item {
+            Form::Symbol(name) if !name.contains('/') => Ok(name.clone()),
+            _ => Err(":refer-clojure :exclude expects unqualified symbols".into()),
+        })
+        .collect()
 }
 
 fn list<'a>(form: &'a Form, error: &str) -> Result<&'a [Form], String> {

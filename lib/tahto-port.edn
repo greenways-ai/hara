@@ -7,6 +7,21 @@
  :target
  {:repository "hara-lang/hara"
   :root "lib/src/tahto"}
+ :portable-imports
+ [{:source "src-lang/xt/lang/spec_base.clj"
+   :target "lib/src/xt/lang/spec_base.hal"
+   :content :identical
+   :change :extension-only}
+  {:source "src-lang/xt/lang/common_math.clj"
+   :target "lib/src/xt/lang/common_math.hal"
+   :content :identical
+   :change :extension-only}
+  {:source "test-lang/xt/lang/common_math_test.clj"
+   :target "lib/test/xt/lang/common_math_test.hal"
+   :content :identical
+   :change :extension-only
+   :facts 29
+   :checks 87}]
  :rules
  {:reference-read-only true
   :language :hal
@@ -20,9 +35,11 @@
   :v1-xtalk "tahto.model.v1.spec-xtalk"
   :v1-js "tahto.model.v1.spec-js"
   :v1-python "tahto.model.v1.spec-python"
+  :v1-lua "tahto.model.v1.spec-lua"
   :identities
   {:js {:language :js :tag :js}
-   :python {:language :python :tag :py}}}
+   :python {:language :python :tag :py}
+   :lua {:language :lua :tag :lua}}}
  :phases
  [{:id :common-emit
    :priority 1
@@ -82,7 +99,11 @@
     {:source "src/tahto/model/spec_js/qml.clj" :status :pending}
     {:source "src/tahto/model/spec_c.clj" :status :pending}
     {:source "src/tahto/model/spec_go.clj" :status :pending}
-    {:source "src/tahto/model/spec_lua.clj" :status :pending}
+    {:source "src/tahto/model/spec_lua.clj"
+     :target "lib/src/tahto/model/v1/spec_lua.hal"
+     :status :foundation-v1
+     :language :lua
+     :tag :lua}
     {:source "src/tahto/model/spec_sql.clj" :status :pending}
     {:source "src/tahto/model/spec_postgres.clj" :status :pending}]}
   {:id :runtime-bootstrap
@@ -111,15 +132,19 @@
      :status :working-js-python}
     {:source "src/tahto/runtime/basic/type_basic.clj"
      :target "lib/src/tahto/runtime/basic/type_basic.hal"
-     :status :bootstrap-transport
-     :transport :oneshot-bootstrap
-     :remaining [:persistent-relay :incremental-stdout :server-basic :cleanup-timeouts]}
+     :status :process-socket-transport
+     :transport :persistent-json-lines
+     :wire-values [:json-v1 :typed-float]
+     :startup-errors :structured}
     {:source "src/tahto/runtime/basic/impl/process_js.clj"
      :target "lib/src/tahto/runtime/basic/impl/process_js.hal"
      :status :oneshot-and-basic-installed}
     {:source "src/tahto/runtime/basic/impl/process_python.clj"
      :target "lib/src/tahto/runtime/basic/impl/process_python.hal"
      :status :oneshot-and-basic-installed}
+    {:source "src/tahto/runtime/basic/impl/process_lua.clj"
+     :target "lib/src/tahto/runtime/basic/impl/process_lua.hal"
+     :status :basic-installed}
     {:source "src/tahto/runtime/basic/server_basic.clj"
      :status :blocked-on-portable-incremental-process-streams}
     {:source "src/tahto/runtime/basic/type_websocket.clj" :status :deferred}
@@ -144,8 +169,15 @@
                "lib/test/tahto/core/runtime_test.hal"
                "lib/test/hara/runtime_test.hal"]
   :integration-test "lib/integration/hara/runtime_smoke.hal"
-  :required-hosts ["node" "python3"]
+  :required-hosts ["node" "python3" "lua"]
   :current-runtime-cases [[:js :oneshot]
                           [:js :basic]
                           [:python :oneshot]
-                          [:python :basic]]}}
+                          [:python :basic]
+                          [:lua :basic]]
+  :portable-suite
+  {:path "lib/test/xt/lang/common_math_test.hal"
+   :hosts [:rust :jvm]
+   :targets [:js :lua :python]
+   :facts 29
+   :checks 87}}}

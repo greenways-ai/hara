@@ -1,5 +1,7 @@
 (ns tahto.core.runtime
-  (:require [tahto.core.registry :as registry]))
+  (:require [std.protocol.icontexteval :as context-eval]
+            [tahto.core.eval :as evaluation]
+            [tahto.core.registry :as registry]))
 
 (def +language-registry+ (atom {}))
 (def +type-registry+ (atom {}))
@@ -130,15 +132,31 @@
     (stop-fn runtime)
     runtime))
 
+(defn rt-eval
+  "Promise-first semantic evaluation through IContextEval."
+  ([runtime request] (rt-eval runtime request {}))
+  ([runtime request options] (context-eval/evaluate runtime request options)))
+
+(defn rt-eval-raw
+  "Promise-first transport exchange with semantic plugins bypassed."
+  ([runtime request] (rt-eval-raw runtime request {}))
+  ([runtime request options] (context-eval/evaluate-raw runtime request options)))
+
+(defn rt-eval-trace
+  "Returns a promise of an EvalTrace, including target failures."
+  ([runtime request] (rt-eval-trace runtime request {}))
+  ([runtime request options] (evaluation/eval-trace runtime request options)))
+
 (defn rt-raw-eval
-  "Evaluates already-emitted target source through a Tahto runtime."
+  "Blocking compatibility adapter for already-emitted target source."
   [runtime source]
-  (if-let [raw-eval (instance-fn runtime :raw-eval)]
-    (raw-eval runtime source)
-    (throw
-     (ex-info "Runtime type has no raw evaluator"
-              {:lang (get runtime :lang)
-               :runtime (get runtime :runtime)}))))
+  (if (get runtime :transport)
+    (evaluation/eval-await runtime source {})
+    (if-let [raw-eval (instance-fn runtime :raw-eval)]
+      (raw-eval runtime source)
+      (throw (ex-info "Runtime type has no raw evaluator"
+                      {:lang (get runtime :lang)
+                       :runtime (get runtime :runtime)})))))
 
 (defn- requested-version
   [language version versions]
@@ -153,10 +171,10 @@
    :versions pins versions per language and takes precedence over :version.
    With neither option, each language uses its configured default version."
   ([]
-   (bootstrap! {:languages [:js :python]
+   (bootstrap! {:languages [:js :python :lua]
                 :runtimes [:oneshot :basic]}))
   ([options]
-   (let [languages (or (get options :languages) [:js :python])
+   (let [languages (or (get options :languages) [:js :python :lua])
          runtimes (or (get options :runtimes) [:oneshot :basic])
          version (get options :version)
          versions (or (get options :versions) {})

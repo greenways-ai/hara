@@ -15,7 +15,7 @@
 (def js-oneshot (runtime/rt-create :js :oneshot))
 (def python-oneshot (runtime/rt-create :python :oneshot))
 (def js-basic (runtime/rt-create :js :basic))
-(def started-basic (runtime/rt-start js-basic))
+(def created-basic js-basic)
 
 ;; Exercise coexistence and configurable defaults without claiming a real V2
 ;; grammar. Metadata can coexist before the corresponding book is loaded.
@@ -106,9 +106,9 @@
       [:python :oneshot :cpython ["python3" "-c"]]])
 
 (fact "basic runtime has explicit bootstrap transport and lifecycle"
-               [(get-in started-basic [:process :transport])
-                (get-in started-basic [:process :persistent])
-                (:status (basic/basic-state started-basic))]
-  => [:oneshot-bootstrap false :started])
+               [(get-in created-basic [:process :transport])
+                (get-in created-basic [:process :persistent])
+                (:status (basic/basic-state created-basic))]
+  => [:node-socket true :created])
 
 (run {:namespace "tahto.core.runtime-test"})

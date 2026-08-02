@@ -157,8 +157,10 @@
   (let [merged-block (merge (get-in grammar [:default :block]) block)
         separator (if (:append merged-block) " " (common/newline-indent))
         main (:main merged-block)
-        outputs (reduce-kv
-                 (fn [result control-key control-block]
+        control-order (or (:control-order block) (vec (keys (or control {}))))
+        outputs (reduce
+                 (fn [result control-key]
+                   (let [control-block (get control control-key)]
                    (let [forms (or (get control-args control-key) [])
                          _ (if (and (:required control-block) (= 0 (count forms)))
                              (throw (ex-info "Form is required in body"
@@ -170,8 +172,8 @@
                      (reduce (fn [inner form]
                                (conj inner (emit-block-control control-key control-block
                                                                options form grammar mopts)))
-                             result forms)))
-                 [] (or control {}))]
+                             result forms))))
+                 [] control-order)]
     (str (if (or (= 0 (count outputs))
                  (nil? main)
                  (= 0 (count main)))
@@ -214,13 +216,13 @@
         controls (nth setup 3)
         wrap (nth setup 4)
         main (or (:main block) #{:parameter :body})]
-    (str (:start wrap)
+    (str (or (:start wrap) "")
          raw
          (if (member? main :parameter) (emit-params key block params grammar mopts) "")
          (if (member? main :body) (emit-block-body key block args grammar mopts) "")
          (emit-block-controls key block (:control block) controls grammar mopts)
          (if (and wrap (not (:append wrap))) (common/newline-indent) "")
-         (:end wrap))))
+         (or (:end wrap) ""))))
 
 (defn emit-block-inner
   "emits an inner block"
@@ -238,7 +240,7 @@
         (binding [common/*indent* (+ common/*indent* increment)]
           (string/trim-right
            (emit-block-controls key block (:control block) controls grammar mopts)))]
-    (str (:start wrap)
+    (str (or (:start wrap) "")
          raw
          (if (member? main :parameter)
            (emit-params key block params grammar mopts) "")
@@ -247,7 +249,7 @@
          (common/newline-indent)
          (:end body-options)
          (if (and wrap (not (:append wrap))) (common/newline-indent) "")
-         (:end wrap))))
+         (or (:end wrap) ""))))
 
 (defn emit-block
   "emits a block operation"

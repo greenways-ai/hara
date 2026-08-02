@@ -1,12 +1,16 @@
-(ns tahto.model.v1.spec-python
+(ns tahto.model.v1.spec-lua
   (:require [tahto.base.v1.grammar-spec :as spec]
             [tahto.common.grammar-api :as grammar]
             [tahto.common.registry :as registry]
             [tahto.model.v1.spec-xtalk :as xtalk]))
 
-(def +language+ :python)
-(def +tag+ :py)
+(def +language+ :lua)
+(def +tag+ :lua)
 (def +version+ spec/+version+)
+
+(defn lua-math-quot
+  [form]
+  (list 'math.floor (list '/ (nth form 1) (nth form 2))))
 
 (def +grammar+
   (grammar/definition
@@ -21,12 +25,13 @@
      :grammar/version xtalk/+version+}
     :operators
     {:override
-     {:pow {:raw "**"}
+     {:pow {:raw "^"}
+      :not {:raw "not " :emit :prefix}
       :and {:raw "and"}
       :or {:raw "or"}
-      :not {:raw "not" :emit :prefix}
-      :throw {:raw "raise" :emit :prefix}
-      :x-m-abs {:raw "abs" :emit :invoke}
+      :neq {:raw "~="}
+      :var {:raw "local"}
+      :x-m-abs {:raw "math.abs" :emit :invoke}
       :x-m-acos {:raw "math.acos" :emit :invoke}
       :x-m-asin {:raw "math.asin" :emit :invoke}
       :x-m-atan {:raw "math.atan" :emit :invoke}
@@ -37,11 +42,11 @@
       :x-m-floor {:raw "math.floor" :emit :invoke}
       :x-m-loge {:raw "math.log" :emit :invoke}
       :x-m-log10 {:raw "math.log10" :emit :invoke}
-      :x-m-max {:raw "max" :emit :invoke}
-      :x-m-min {:raw "min" :emit :invoke}
+      :x-m-max {:raw "math.max" :emit :invoke}
+      :x-m-min {:raw "math.min" :emit :invoke}
       :x-m-mod {:raw "%" :emit :infix}
-      :x-m-pow {:raw "pow" :emit :invoke}
-      :x-m-quot {:raw "//" :emit :infix}
+      :x-m-pow {:raw "math.pow" :emit :invoke}
+      :x-m-quot {:macro lua-math-quot :emit :macro}
       :x-m-sin {:raw "math.sin" :emit :invoke}
       :x-m-sinh {:raw "math.sinh" :emit :invoke}
       :x-m-sqrt {:raw "math.sqrt" :emit :invoke}
@@ -50,7 +55,7 @@
     :emit
     {:defaults
      {:default
-      {:comment {:prefix "#"}
+      {:comment {:prefix "--"}
        :common {:start "("
                 :end ")"
                 :space " "
@@ -59,36 +64,45 @@
                 :statement ""
                 :namespace "."
                 :newline "\n"
-                :indent 4}
+                :indent 2}
        :invoke {:start "(" :end ")" :sep "," :space " "}
        :infix {:if {:check "and" :then "or"}}
-       :block {:parameter {:start " " :end ""}
-               :body {:start ":" :end ""}
+       :block {:parameter {:start " " :end " "}
+               :body {:start "" :end ""}
                :space-before-body ""}
-       :function {:raw "def"
+       :function {:raw "function"
                   :space ""
                   :args {:start "(" :end ")" :sep "," :space ""}
-                  :body {:start ":" :end ""}
-                  :space-before-body ""}}
+                  :body {:start "" :end "end"}
+                  :space-before-body " "}}
       :token
-      {:nil "None"
-       :true "True"
-       :false "False"
-       :string {:quote :double}
+      {:nil "nil"
+       :true "true"
+       :false "false"
+       :string {:quote :single}
        :symbol {:namespace "."
                 :replace {"-" "_"
                           "?" "_p"
                           "!" "_bang"}}}
       :data
-      {:vector {:start "[" :end "]" :sep "," :space " "}
+      {:vector {:start "{" :end "}" :sep "," :space " "}
        :set {:start "{" :end "}" :sep "," :space " "}
        :map {:start "{" :end "}" :sep "," :space " "}
-       :map-entry {:assign ":" :space " "}}
+       :map-entry {:assign "=" :space " "}}
       :define
       {:defglobal {:raw ""}
-       :def {:raw ""}}
+       :def {:raw "local"}
+       :declare {:raw "local"}}
+      :function {:defn {:raw "local function"}}
       :block
-      {:branch {:control {:elseif {:raw "elif"}}}}}}}))
+      {:for {:body {:start "do" :end "end"}}
+       :while {:body {:start "do" :end "end"}}
+       :branch {:wrap {:start "" :end "end"}
+                :control {:default {:parameter {:start " " :end " then"}
+                                    :body {:append true}}
+                          :if {:raw "if"}
+                          :elseif {:raw "elseif"}
+                          :else {:raw "else"}}}}}}}))
 
 (defn- install-source
   [catalog source]
@@ -96,32 +110,15 @@
     catalog
     (registry/install catalog source)))
 
-(defn install
-  "Installs the Foundation-named Python V1 model."
-  [catalog]
-  (install-source (xtalk/install catalog) +grammar+))
-
-(defn catalog
-  []
-  (install (registry/registry)))
-
+(defn install [catalog] (install-source (xtalk/install catalog) +grammar+))
+(defn catalog [] (install (registry/registry)))
 (defn select
-  "Resolves Python language :python using grammar tag :py."
-  ([]
-   (select (catalog)))
+  ([] (select (catalog)))
   ([catalog]
-   (registry/resolve catalog
-                     {:grammar/id +tag+
-                      :grammar/version +version+})))
+   (registry/resolve catalog {:grammar/id +tag+ :grammar/version +version+})))
 
 (def +selection+ (select))
-
-(def +book+
-  {:lang +language+
-   :parent :xtalk
-   :version +version+
-   :coordinate (:coordinate +selection+)
-   :grammar (:grammar +selection+)
-   :selection +selection+})
-
+(def +book+ {:lang +language+ :parent :xtalk :version +version+
+             :coordinate (:coordinate +selection+)
+             :grammar (:grammar +selection+) :selection +selection+})
 (def +init+ +book+)

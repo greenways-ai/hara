@@ -2050,6 +2050,7 @@ public final class HaraNodes {
     @Override
     public Object execute(VirtualFrame frame) {
       Object target = function.execute(frame);
+      if (target instanceof HaraVar variable) target = variable.deref();
       if (target instanceof HaraMultiFunction) {
         return invokeMultiFunction((HaraMultiFunction) target, evaluateArguments(frame));
       }

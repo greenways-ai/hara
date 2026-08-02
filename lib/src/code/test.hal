@@ -408,7 +408,7 @@
     name)))
 
 (defn assertion-forms
-  [forms fact-options]
+  [forms form-meta options]
   (loop [remaining forms
          output []]
     (if (= 0 (count remaining))
@@ -417,7 +417,11 @@
         (throw "fact assertions must be actual => expected triples")
         (let [actual (nth remaining 0)
               arrow (nth remaining 1)
-              expected (nth remaining 2)]
+              expected (nth remaining 2)
+              check-options (list 'merge
+                                  (list 'quote form-meta)
+                                  options
+                                  'run-options)]
           (if (not (= arrow '=>))
             (throw "fact expects => between actual and expected")
             (recur
@@ -426,7 +430,7 @@
                    `(code.test/check
                      (fn [] ~actual)
                      ~expected
-                     (merge ~fact-options run-options))))))))))
+                     ~check-options)))))))))
 
 (defn fact-form
   "Builds the registration form for one or more fact assertions."
@@ -434,14 +438,14 @@
   (let [forms (vec body)
         options (if (map? (first forms)) (first forms) {})
         assertions (if (map? (first forms)) (vec (rest forms)) forms)
-        fact-options (merge form-meta options)
-        checks (assertion-forms assertions fact-options)]
+        checks (assertion-forms assertions form-meta options)
+        registration-options (list 'merge (list 'quote form-meta) options)]
     (if (= 0 (count checks))
       (throw "fact expects at least one assertion")
       `(code.test/register!
         ~description
         (fn [run-options] ~checks)
-        ~fact-options))))
+        ~registration-options))))
 
 (defmacro fact
   "Registers one or more actual => expected assertions."
@@ -677,6 +681,9 @@
         selected (order-facts
                   (filter (fn [fact] (matches-selection? fact options))
                           (tests)))
+        namespace (if (seq selected) (:namespace (first selected)) nil)
+        suite-options (or (get (deref +global-settings+) namespace) {})
+        options (merge suite-options options)
         start-report (report! reporter {:event :run/start :count (count selected)})
         results (try
                   (do
@@ -753,7 +760,13 @@
 (defmacro fact:template [description & body]
   `(code.test/fact ~description ~@body))
 (defmacro fact:global [settings]
-  `(reset! +global-settings+ ~settings))
+  (let [setup (or (:setup settings) [])
+        teardown (or (:teardown settings) [])]
+    `(swap! +global-settings+
+            assoc
+            (current-namespace)
+            {:before-all (fn [] ~@setup)
+             :after-all (fn [] ~@teardown)})))
 (defmacro fact:ns [& body] `(do ~@body))
 (defn fact:ns-load [namespace] namespace)
 

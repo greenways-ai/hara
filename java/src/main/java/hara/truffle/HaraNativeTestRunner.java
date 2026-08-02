@@ -54,11 +54,31 @@ public final class HaraNativeTestRunner {
         Context.newBuilder(HaraLanguage.ID)
             .currentWorkingDirectory(root)
             .allowIO(IOAccess.ALL)
+            .allowCreateProcess(true)
             .build()) {
       Value value = context.eval(HaraLanguage.ID, source);
       String transfer = value.isString() ? value.asString() : value.toString();
-      return parseResult(file, transfer);
+      try {
+        return parseResult(file, transfer);
+      } catch (HaraException noSummary) {
+        Matcher namespace = TEST_NAMESPACE.matcher(source);
+        if (!namespace.find() || !namespace.group(1).matches("[A-Za-z0-9_.-]+")) {
+          throw noSummary;
+        }
+        value =
+            context.eval(
+                HaraLanguage.ID,
+                testRunSource(namespace.group(1)));
+        transfer = value.isString() ? value.asString() : value.toString();
+        return parseResult(file, transfer);
+      }
     }
+  }
+
+  private static String testRunSource(String namespace) {
+    return "(let [summary (code.test/run {:namespace \""
+        + namespace
+        + "\"})] (assoc (dissoc summary :results) :results (str (:results summary))))";
   }
 
   /** Discovers .hal test files from a project descriptor or explicit path. */
@@ -183,6 +203,8 @@ public final class HaraNativeTestRunner {
               + "\\s+:passed\\s+(\\d+)\\s+:failed\\s+(\\d+)"
               + "\\s+:throw\\s+(\\d+)\\s+:timeout\\s+(\\d+)",
           Pattern.DOTALL);
+  private static final Pattern TEST_NAMESPACE =
+      Pattern.compile("(?m)^\\s*\\(ns\\s+([^\\s()]+)");
 
   /**
    * Extracts the stable code.test summary prefix when diagnostic values in :results are purposely

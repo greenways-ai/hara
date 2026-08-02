@@ -1,46 +1,38 @@
-(ns tahto.runtime.basic.impl.process-js
+(ns tahto.runtime.basic.impl.process-lua
   (:require [tahto.core.runtime :as runtime]
             [tahto.runtime.basic.type-basic :as basic]
             [tahto.runtime.basic.type-common :as common]
             [tahto.runtime.basic.type-oneshot :as oneshot]))
 
-(def +program-init+
+(def +lua-init+
   (common/put-program-options
-   :js
-   {:default {:oneshot :nodejs
-              :basic :nodejs}
-    :env {:nodejs
-          {:exec "node"
-           :extension "js"
-           :flags {:oneshot ["-e"]
-                   :basic ["-e"]}}}}))
+   :lua
+   {:default {:oneshot :lua :basic :lua}
+    :env {:lua {:exec "lua"
+                :extension "lua"
+                :flags {:oneshot ["-e"] :basic ["-e"]}}}}))
 
-(def +js-oneshot-config+
+(def +lua-oneshot-config+
   (common/set-context-options
-   [:js :oneshot :default]
-   {:main {}
-    :emit {}
-    :json :full}))
+   [:lua :oneshot :default]
+   {:main {} :emit {} :json :full}))
 
-(def +js-basic-config+
+(def +lua-basic-config+
   (common/set-context-options
-   [:js :basic :default]
-   {:main {}
-    :emit {}
-    :json :full
-    :timeout 2000
-    :transport :node-socket}))
+   [:lua :basic :default]
+   {:main {} :emit {} :json :full :timeout 2000
+    :transport :process-socket}))
 
-(def +js-oneshot+
+(def +lua-oneshot+
   (runtime/install-type!
-   :js :oneshot
+   :lua :oneshot
    {:type :tahto/rt.oneshot
     :instance {:create oneshot/rt-oneshot:create
                :raw-eval oneshot/raw-eval-oneshot}}))
 
-(def +js-basic+
+(def +lua-basic+
   (runtime/install-type!
-   :js :basic
+   :lua :basic
    {:type :tahto/rt.basic
     :config {:layout :full}
     :instance {:create basic/rt-basic:create
@@ -49,7 +41,5 @@
                :raw-eval basic/raw-eval-basic}}))
 
 (def +init+
-  {:lang :js
-   :program +program-init+
-   :oneshot +js-oneshot+
-   :basic +js-basic+})
+  {:lang :lua :program +lua-init+
+   :oneshot +lua-oneshot+ :basic +lua-basic+})
