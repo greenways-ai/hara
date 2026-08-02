@@ -7550,6 +7550,32 @@ mod tests {
     }
 
     #[test]
+    fn letfn_supports_local_recursion_mutual_recursion_and_scope_restoration() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(letfn [(sum [n acc] (if (= n 0) acc (sum (- n 1) (+ acc n))))] (sum 5 0))",
+                )
+                .unwrap(),
+            "15"
+        );
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(letfn [(even-local? [n] (if (= n 0) true (odd-local? (- n 1)))) (odd-local? [n] (if (= n 0) false (even-local? (- n 1))))] [(even-local? 8) (odd-local? 7)])",
+                )
+                .unwrap(),
+            "[true true]"
+        );
+        assert!(runtime.eval_text("even-local?").is_err());
+        assert!(runtime
+            .eval_text("(letfn [(f [x] x) (f [x] x)] (f 1))")
+            .unwrap_err()
+            .contains("Duplicate letfn name"));
+    }
+
+    #[test]
     fn conditional_and_let() {
         let mut runtime = Runtime::new();
         // Var display is namespace-qualified, matching the JVM runtime

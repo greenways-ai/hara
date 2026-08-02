@@ -164,18 +164,16 @@
              (let [[tag & body] form]
                (common/with-form-meta form
                  (apply list tag
-                        (-> body
-                            (rewrite-statements grammar)
-                            fnrw/splice-do*)))))
+                        (fnrw/splice-do*
+                         (rewrite-statements body grammar))))))
 
           (rewrite-defn
              [form grammar]
              (let [[tag name args & body] form]
                (common/with-form-meta form
                  (apply list tag name args
-                        (-> body
-                            (rewrite-statements grammar)
-                            fnrw/splice-do*)))))
+                        (fnrw/splice-do*
+                         (rewrite-statements body grammar))))))
 
           (rewrite-statement
             [form grammar]

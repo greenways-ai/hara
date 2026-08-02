@@ -46,11 +46,10 @@
                              :or {prepare-body identity
                                   include-name? true}}]
    (let [[name args body] (fn-parts form)
-         body             (-> body
-                              rewrite-statements
-                              prepare-body
-                              splice-do*
-                              wrap-body)]
+         body             (wrap-body
+                           (splice-do*
+                            (prepare-body
+                             (rewrite-statements body))))]
      (common/with-form-meta form
        (apply list 'fn
               (concat (when (and include-name? name) [name])

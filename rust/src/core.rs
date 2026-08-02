@@ -925,6 +925,7 @@ pub(crate) fn structural_callable_names() -> impl Iterator<Item = &'static str> 
         "fn*",
         "if",
         "let",
+        "letfn",
         "loop",
         "ns",
         "recur",
@@ -9804,6 +9805,83 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         clauses: Vec::new(),
                         is_macro: false,
                     })))
+                }
+                Form::Symbol(n) if n == "letfn" => {
+                    if fs.len() < 3 {
+                        return Err("letfn expects a function binding vector and a body".into());
+                    }
+                    let definitions = match &fs[1] {
+                        Form::Vector(values) => values,
+                        _ => {
+                            return Err(
+                                "letfn expects a function binding vector and a body".into(),
+                            )
+                        }
+                    };
+                    let captured = Rc::new(RefCell::new(env.clone()));
+                    let mut functions = Vec::with_capacity(definitions.len());
+                    let mut names = std::collections::HashSet::new();
+                    for definition in definitions {
+                        let Form::List(parts) = definition else {
+                            return Err(
+                                "letfn definitions must be (name [arguments] body...)".into(),
+                            );
+                        };
+                        if parts.len() < 3 {
+                            return Err(
+                                "letfn definitions must be (name [arguments] body...)".into(),
+                            );
+                        }
+                        let Form::Symbol(name) = &parts[0] else {
+                            return Err("letfn names must be unqualified symbols".into());
+                        };
+                        if name.contains('/') {
+                            return Err("letfn names must be unqualified symbols".into());
+                        }
+                        if !names.insert(name.clone()) {
+                            return Err(format!("Duplicate letfn name: {name}"));
+                        }
+                        let (params, variadic, patterns, variadic_pattern) =
+                            function_parts(&parts[1])
+                                .map_err(|_| "letfn parameters must be a binding vector")?;
+                        functions.push((
+                            name.clone(),
+                            Value::Function(Rc::new(Function {
+                                params,
+                                variadic,
+                                patterns,
+                                variadic_pattern,
+                                body: parts[2..].to_vec(),
+                                captured: captured.clone(),
+                                name: Some(name.clone()),
+                                native: None,
+                                clauses: Vec::new(),
+                                is_macro: false,
+                            })),
+                        ));
+                    }
+                    for (name, function) in &functions {
+                        captured.borrow_mut().insert(name.clone(), function.clone());
+                    }
+                    let mut previous = Vec::with_capacity(functions.len());
+                    for (name, function) in functions {
+                        previous.push((name.clone(), env.insert(name, function)));
+                    }
+                    let mut result = Ok(Value::Nil);
+                    for body in &fs[2..] {
+                        result = eval(body, env);
+                        if result.is_err() {
+                            break;
+                        }
+                    }
+                    for (name, old) in previous.into_iter().rev() {
+                        if let Some(old) = old {
+                            env.insert(name, old);
+                        } else {
+                            env.remove(&name);
+                        }
+                    }
+                    result
                 }
                 Form::Symbol(n) if n == "eval" => {
                     if fs.len() != 2 {

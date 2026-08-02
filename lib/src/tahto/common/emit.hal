@@ -532,7 +532,8 @@
   "emits one top-level form with recursive emission"
   {:added "4.0"}
   [form grammar mopts]
-  (preprocess/with:macro-opts mopts grammar
+  (binding [tahto.common.preprocess-base/*macro-opts* mopts
+            tahto.common.preprocess-base/*macro-grammar* grammar]
     (let [output (binding [*emit-fn* emit-main-loop]
                    (emit-main-loop form grammar mopts))
           options (common-options grammar)]

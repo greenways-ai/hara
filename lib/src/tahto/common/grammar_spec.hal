@@ -19,7 +19,7 @@
    (get-comment helper/+default+ {})
    => \"//\""
     [grammar _]
-  (-> grammar :default :comment :prefix))
+  (get-in grammar [:default :comment :prefix]))
 
 (defn format-fargs
   "formats function inputs"
