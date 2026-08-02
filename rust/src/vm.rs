@@ -31,6 +31,8 @@ pub mod frame;
 pub mod machine;
 #[path = "vm/opcode.rs"]
 pub mod opcode;
+#[path = "vm/prepared.rs"]
+pub mod prepared;
 #[path = "vm/program.rs"]
 pub mod program;
 #[path = "vm/slot.rs"]
@@ -111,6 +113,7 @@ pub use error::{CompileError, CompileErrorKind, ValidationError, VmError};
 pub use fiber::{VmFiber, VmFiberState};
 pub use machine::{execute_program, execute_program_with_globals, Machine, VmOutcome};
 pub use opcode::Instruction;
+pub use prepared::{prepare_call, PreparedCall};
 pub use program::{FunctionId, FunctionPrototype, Program};
 pub use validate::validate;
 

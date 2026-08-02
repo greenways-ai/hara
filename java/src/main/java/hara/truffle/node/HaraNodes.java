@@ -1,6 +1,7 @@
 package hara.truffle.node;
 
 import com.oracle.truffle.api.CompilerDirectives;
+import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.RootCallTarget;
 import com.oracle.truffle.api.frame.MaterializedFrame;
@@ -14,6 +15,7 @@ import com.oracle.truffle.api.nodes.ControlFlowException;
 import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 import com.oracle.truffle.api.nodes.LoopNode;
+import com.oracle.truffle.api.nodes.ExplodeLoop;
 import hara.kernel.builtin.BuiltinStruct;
 import hara.lang.base.Eq;
 import hara.lang.base.Ex;
@@ -48,8 +50,8 @@ public final class HaraNodes {
   private HaraNodes() {}
 
   public static final class RecurTarget {
-    private final int[] slots;
-    private final int[] scratchSlots;
+    @CompilationFinal(dimensions = 1) private final int[] slots;
+    @CompilationFinal(dimensions = 1) private final int[] scratchSlots;
     private final RecurException signal;
 
     public RecurTarget(int[] slots, int[] scratchSlots) {
@@ -938,6 +940,7 @@ public final class HaraNodes {
     }
 
     @Override
+    @ExplodeLoop
     public Object execute(VirtualFrame frame) {
       Object result = null;
       for (HaraExpressionNode expression : expressions) {
@@ -1081,7 +1084,7 @@ public final class HaraNodes {
 
   public static final class Loop extends HaraExpressionNode {
     private final RecurTarget target;
-    private final int[] slots;
+    @CompilationFinal(dimensions = 1) private final int[] slots;
     @Children private final HaraExpressionNode[] initializers;
     @Child private HaraExpressionNode body;
 
@@ -1098,9 +1101,7 @@ public final class HaraNodes {
 
     @Override
     public Object execute(VirtualFrame frame) {
-      for (int i = 0; i < initializers.length; i++) {
-        frame.setObject(slots[i], initializers[i].execute(frame));
-      }
+      initialize(frame);
       int recurrences = 0;
       while (true) {
         try {
@@ -1112,6 +1113,13 @@ public final class HaraNodes {
           recurrences++;
           LoopNode.reportLoopCount(this, recurrences);
         }
+      }
+    }
+
+    @ExplodeLoop
+    private void initialize(VirtualFrame frame) {
+      for (int i = 0; i < initializers.length; i++) {
+        frame.setObject(slots[i], initializers[i].execute(frame));
       }
     }
   }
@@ -1126,6 +1134,7 @@ public final class HaraNodes {
     }
 
     @Override
+    @ExplodeLoop
     public Object execute(VirtualFrame frame) {
       // Evaluate every recurrence value into the loop's scratch slots before touching the
       // binding slots, so expressions such as (recur (+ i 1) (+ acc i)) observe the current
@@ -1491,12 +1500,7 @@ public final class HaraNodes {
     public Object execute(VirtualFrame frame) {
       Object value = target.execute(frame);
       if (!(value instanceof HaraStruct)) {
-        throw new HaraException(
-            "field expects a struct: "
-                + field
-                + " on "
-                + (value == null ? "nil" : value.getClass().getName()),
-            this);
+        throw fieldTypeError(value);
       }
       try {
         return readStructField((HaraStruct) value);
@@ -1508,6 +1512,16 @@ public final class HaraNodes {
     @TruffleBoundary
     private HaraException unknownFieldError() {
       return new HaraException("Unknown struct field: " + field, this);
+    }
+
+    @TruffleBoundary
+    private HaraException fieldTypeError(Object value) {
+      return new HaraException(
+          "field expects a struct: "
+              + field
+              + " on "
+              + (value == null ? "nil" : value.getClass().getName()),
+          this);
     }
 
     @TruffleBoundary

@@ -92,6 +92,25 @@ impl TraceRecorder {
                 Instruction::Nil => operations.push(TraceOp::ConstantNil),
                 Instruction::True => operations.push(TraceOp::ConstantBool(true)),
                 Instruction::False => operations.push(TraceOp::ConstantBool(false)),
+                Instruction::BuildVector(count) => {
+                    let count = usize::from(*count);
+                    if operations.len() < count {
+                        return Err(RecordError::InvalidStack);
+                    }
+                    let start = operations.len() - count;
+                    let values = operations[start..]
+                        .iter()
+                        .map(|operation| match operation {
+                            TraceOp::ConstantI64(value) => Some(*value),
+                            _ => None,
+                        })
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or(RecordError::UnsupportedInstruction(absolute))?;
+                    operations.truncate(start);
+                    let vector = u16::try_from(vectors.len()).map_err(|_| RecordError::TooLong)?;
+                    vectors.push(values);
+                    operations.push(TraceOp::ConstantVectorI64 { vector });
+                }
                 Instruction::Primitive { op, argc: 2 }
                     if matches!(
                         op,

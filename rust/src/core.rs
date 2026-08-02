@@ -4748,6 +4748,13 @@ pub enum Primitive {
     Second,
     ToMutable,
     ToPersistent,
+    NumberPredicate,
+    ArrayNew,
+    ArrayGet,
+    ArraySet,
+    ObjectNew,
+    ObjectGet,
+    ObjectSet,
 }
 
 impl Primitive {
@@ -4776,6 +4783,13 @@ impl Primitive {
             "second" => Primitive::Second,
             "to-mutable" => Primitive::ToMutable,
             "to-persistent" => Primitive::ToPersistent,
+            "number?" => Primitive::NumberPredicate,
+            "std.native.Arr/new" => Primitive::ArrayNew,
+            "std.native.Arr/get-index" => Primitive::ArrayGet,
+            "std.native.Arr/set-index" => Primitive::ArraySet,
+            "std.native.Obj/new" => Primitive::ObjectNew,
+            "std.native.Obj/get-key" => Primitive::ObjectGet,
+            "std.native.Obj/set-key" => Primitive::ObjectSet,
             _ => return None,
         })
     }
@@ -4804,6 +4818,13 @@ impl Primitive {
             Primitive::Second => "second",
             Primitive::ToMutable => "to-mutable",
             Primitive::ToPersistent => "to-persistent",
+            Primitive::NumberPredicate => "number?",
+            Primitive::ArrayNew => "std.native.Arr/new",
+            Primitive::ArrayGet => "std.native.Arr/get-index",
+            Primitive::ArraySet => "std.native.Arr/set-index",
+            Primitive::ObjectNew => "std.native.Obj/new",
+            Primitive::ObjectGet => "std.native.Obj/get-key",
+            Primitive::ObjectSet => "std.native.Obj/set-key",
         }
     }
 }
@@ -4970,6 +4991,95 @@ pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Resu
             }
             collection_to_persistent(&arguments[0])
         }
+        Primitive::NumberPredicate => {
+            if arguments.len() != 1 {
+                return Err("number? expects one argument".into());
+            }
+            Ok(Value::Bool(matches!(
+                arguments[0],
+                Value::Number(_) | Value::Float(_) | Value::BigInteger(_) | Value::Decimal(_)
+            )))
+        }
+        Primitive::ArrayNew => Ok(Value::Array(Rc::new(RefCell::new(arguments.to_vec())))),
+        Primitive::ArrayGet => {
+            if arguments.len() != 2 {
+                return Err("std.native.Arr/get-index expects an array and index".into());
+            }
+            match &arguments[0] {
+                Value::Array(values) => values
+                    .borrow()
+                    .get(value_index(&arguments[1])?)
+                    .cloned()
+                    .ok_or_else(|| "array/get index out of bounds".into()),
+                _ => Err("std.native.Arr/get-index expects an array".into()),
+            }
+        }
+        Primitive::ArraySet => {
+            if arguments.len() != 3 {
+                return Err("std.native.Arr/set-index expects an array, index, and value".into());
+            }
+            match &arguments[0] {
+                Value::Array(values) => {
+                    let index = value_index(&arguments[1])?;
+                    let mut values = values.borrow_mut();
+                    if index >= values.len() {
+                        return Err("array/set index out of bounds".into());
+                    }
+                    values[index] = arguments[2].clone();
+                    drop(values);
+                    Ok(arguments[0].clone())
+                }
+                _ => Err("std.native.Arr/set-index expects an array".into()),
+            }
+        }
+        Primitive::ObjectNew => {
+            if arguments.len() % 2 != 0 {
+                return Err("std.native.Obj/new expects key/value pairs".into());
+            }
+            let mut entries = Vec::with_capacity(arguments.len() / 2);
+            for pair in arguments.chunks(2) {
+                entries.push((marker_key(&pair[0], "object")?, pair[1].clone()));
+            }
+            Ok(Value::Object(Rc::new(RefCell::new(entries))))
+        }
+        Primitive::ObjectGet => {
+            if arguments.len() != 2 {
+                return Err("std.native.Obj/get-key expects an object and key".into());
+            }
+            match &arguments[0] {
+                Value::Object(entries) => {
+                    let key = marker_key(&arguments[1], "object")?;
+                    Ok(entries
+                        .borrow()
+                        .iter()
+                        .find(|(candidate, _)| candidate == &key)
+                        .map(|(_, value)| value.clone())
+                        .unwrap_or(Value::Nil))
+                }
+                _ => Err("std.native.Obj/get-key expects an object".into()),
+            }
+        }
+        Primitive::ObjectSet => {
+            if arguments.len() != 3 {
+                return Err("std.native.Obj/set-key expects an object, key, and value".into());
+            }
+            match &arguments[0] {
+                Value::Object(entries) => {
+                    let key = marker_key(&arguments[1], "object")?;
+                    let mut entries = entries.borrow_mut();
+                    if let Some((_, value)) =
+                        entries.iter_mut().find(|(candidate, _)| candidate == &key)
+                    {
+                        *value = arguments[2].clone();
+                    } else {
+                        entries.push((key, arguments[2].clone()));
+                    }
+                    drop(entries);
+                    Ok(arguments[0].clone())
+                }
+                _ => Err("std.native.Obj/set-key expects an object".into()),
+            }
+        }
     }
 }
 
@@ -5009,6 +5119,34 @@ pub(crate) fn apply_binary_primitive(
         Primitive::Second => Err("second expects one argument".into()),
         Primitive::ToMutable => Err("to-mutable expects one argument".into()),
         Primitive::ToPersistent => Err("to-persistent expects one argument".into()),
+        Primitive::NumberPredicate => Err("number? expects one argument".into()),
+        Primitive::ArrayNew => unreachable!("array constructor is variadic"),
+        Primitive::ArrayGet => match left {
+            Value::Array(values) => values
+                .borrow()
+                .get(value_index(right)?)
+                .cloned()
+                .ok_or_else(|| "array/get index out of bounds".into()),
+            _ => Err("std.native.Arr/get-index expects an array".into()),
+        },
+        Primitive::ArraySet => Err("std.native.Arr/set-index expects three arguments".into()),
+        Primitive::ObjectNew => Ok(Value::Object(Rc::new(RefCell::new(vec![(
+            marker_key(left, "object")?,
+            right.clone(),
+        )])))),
+        Primitive::ObjectGet => match left {
+            Value::Object(entries) => {
+                let key = marker_key(right, "object")?;
+                Ok(entries
+                    .borrow()
+                    .iter()
+                    .find(|(candidate, _)| candidate == &key)
+                    .map(|(_, value)| value.clone())
+                    .unwrap_or(Value::Nil))
+            }
+            _ => Err("std.native.Obj/get-key expects an object".into()),
+        },
+        Primitive::ObjectSet => Err("std.native.Obj/set-key expects three arguments".into()),
     }
 }
 
@@ -5041,6 +5179,18 @@ pub(crate) fn apply_binary_numbers(
         Primitive::Second => return Err("second expects one argument".into()),
         Primitive::ToMutable => return Err("to-mutable expects one argument".into()),
         Primitive::ToPersistent => return Err("to-persistent expects one argument".into()),
+        Primitive::NumberPredicate => return Err("number? expects one argument".into()),
+        Primitive::ArrayNew => Value::Array(Rc::new(RefCell::new(vec![
+            Value::Number(left),
+            Value::Number(right),
+        ]))),
+        Primitive::ArrayGet
+        | Primitive::ArraySet
+        | Primitive::ObjectNew
+        | Primitive::ObjectGet
+        | Primitive::ObjectSet => {
+            return Err(format!("{} expects native values", primitive.operator()))
+        }
     };
     Ok(result)
 }

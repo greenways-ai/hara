@@ -30,6 +30,17 @@ public class HaraMigrationPrimitivesTest {
   }
 
   @Test
+  public void fieldRejectsNonStructValuesWithTypeContext() {
+    try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
+      PolyglotException error =
+          assertThrows(
+              PolyglotException.class,
+              () -> context.eval(HaraLanguage.ID, "(field 42 :answer)"));
+      assertTrue(error.getMessage().contains("field expects a struct: answer on java.lang.Long"));
+    }
+  }
+
+  @Test
   public void instancePredicateIsRestrictedToHaraStructTypes() {
     try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
       Value result =

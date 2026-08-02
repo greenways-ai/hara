@@ -110,11 +110,11 @@ def adapters():
             [str(ROOT / "rust/target/release/hara-runtime-benchmark")],
             "hara-rust-native", w, n, c, "hex"),
         "hara-rust-bytecode": lambda w, n, c: bytecode(
-            bytecode_binary("vm"), "hara-rust-bytecode", "execute-only", w, n, c),
+            bytecode_binary("vm"), "hara-rust-bytecode", "runtime-registry-execute", w, n, c),
         "hara-rust-trace-checked": lambda w, n, c: bytecode(
-            bytecode_binary("trace-checked"), "hara-rust-trace-checked", "execute-only", w, n, c),
+            bytecode_binary("trace-checked"), "hara-rust-trace-checked", "runtime-registry-execute", w, n, c),
         "hara-rust-trace-native": lambda w, n, c: bytecode(
-            bytecode_binary("trace-native"), "hara-rust-trace-native", "execute-only", w, n, c),
+            bytecode_binary("trace-native"), "hara-rust-trace-native", "runtime-registry-execute", w, n, c),
         "hara-wasm-node": lambda w, n, c: common(
             ["node", node_script], "hara-wasm-node", w, n, c),
     }, glue

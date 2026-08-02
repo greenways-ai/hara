@@ -60,6 +60,8 @@ pub(crate) struct JitRuntime {
     #[cfg(all(feature = "native-jit", not(target_arch = "wasm32")))]
     traces: HashMap<LoopKey, Vec<CachedTrace<NativeTrace>>>,
     candidates: HashMap<TracePathKey, u32>,
+    #[cfg(all(feature = "native-jit", not(target_arch = "wasm32")))]
+    observations: HashMap<TracePathKey, u32>,
     rejected: HashSet<TracePathKey>,
     disabled: HashSet<LoopKey>,
     profiles: HashMap<LoopKey, LoopProfile>,
@@ -82,6 +84,8 @@ impl JitRuntime {
             backend: Default::default(),
             traces: HashMap::new(),
             candidates: HashMap::new(),
+            #[cfg(all(feature = "native-jit", not(target_arch = "wasm32")))]
+            observations: HashMap::new(),
             rejected: HashSet::new(),
             disabled: HashSet::new(),
             profiles: HashMap::new(),
@@ -122,8 +126,52 @@ impl JitRuntime {
         {
             false
         } else if trace_count == 0 {
-            let hot = self.hotness.backedge(key);
-            hot || (self.hotness.count(key) == 1 && program.function_has_i64_parameters(function))
+            #[cfg(all(feature = "native-jit", not(target_arch = "wasm32")))]
+            {
+                self.hotness.backedge(key);
+                let eager =
+                    self.hotness.count(key) == 1 && program.function_has_i64_parameters(function);
+                if eager {
+                    true
+                } else {
+                    let current = {
+                        let count = self.observations.entry(path_key.clone()).or_default();
+                        *count = count.saturating_add(1);
+                        *count
+                    };
+                    let total = self
+                        .observations
+                        .iter()
+                        .filter(|(candidate, _)| candidate.loop_key == key)
+                        .map(|(_, count)| *count)
+                        .sum::<u32>();
+                    if total < self.config.hot_threshold {
+                        false
+                    } else {
+                        let dominant = self
+                            .observations
+                            .iter()
+                            .filter(|(candidate, _)| candidate.loop_key == key)
+                            .map(|(_, count)| *count)
+                            .max()
+                            .unwrap_or_default();
+                        if u64::from(dominant) * 4 < u64::from(total) * 3 {
+                            self.disabled.insert(key);
+                            self.observations
+                                .retain(|candidate, _| candidate.loop_key != key);
+                            self.telemetry.disabled_loops += 1;
+                            return None;
+                        }
+                        current == dominant
+                    }
+                }
+            }
+            #[cfg(any(not(feature = "native-jit"), target_arch = "wasm32"))]
+            {
+                let hot = self.hotness.backedge(key);
+                hot || (self.hotness.count(key) == 1
+                    && program.function_has_i64_parameters(function))
+            }
         } else {
             let count = self.candidates.entry(path_key.clone()).or_default();
             *count = count.saturating_add(1);
@@ -143,21 +191,20 @@ impl JitRuntime {
                             compiled,
                         });
                         self.candidates.remove(&path_key);
+                        #[cfg(all(feature = "native-jit", not(target_arch = "wasm32")))]
+                        self.observations
+                            .retain(|candidate, _| candidate.loop_key != key);
                         self.telemetry.compiled += 1;
                         self.telemetry.recording_completed += 1;
                         self.telemetry.trace_paths += 1;
                     }
                     Err(_) => {
-                        self.rejected.insert(path_key);
-                        self.telemetry.rejected += 1;
-                        self.telemetry.recording_aborts += 1;
+                        self.reject_path(key, path_key);
                         return None;
                     }
                 },
                 Err(_) => {
-                    self.rejected.insert(path_key);
-                    self.telemetry.rejected += 1;
-                    self.telemetry.recording_aborts += 1;
+                    self.reject_path(key, path_key);
                     return None;
                 }
             }
@@ -223,6 +270,27 @@ impl JitRuntime {
         }
         locals.clone_from_slice(&entry);
         None
+    }
+
+    fn reject_path(&mut self, key: LoopKey, path: TracePathKey) {
+        self.rejected.insert(path);
+        self.telemetry.rejected += 1;
+        self.telemetry.recording_aborts += 1;
+        // Native trace recording is substantially more expensive than the
+        // bytecode dispatch it observes. Once the backend or recorder proves
+        // a loop unsupported, stop collecting every instruction in that loop
+        // instead of rediscovering the rejected path on every backedge.
+        #[cfg(all(feature = "native-jit", not(target_arch = "wasm32")))]
+        {
+            if self.disabled.insert(key) {
+                self.telemetry.disabled_loops += 1;
+            }
+            self.traces.remove(&key);
+            self.observations
+                .retain(|candidate, _| candidate.loop_key != key);
+            self.candidates
+                .retain(|candidate, _| candidate.loop_key != key);
+        }
     }
 
     #[cfg(test)]

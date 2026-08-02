@@ -20,8 +20,12 @@ final class HaraRuntimeBenchmark {
     String expected = args[3];
     int windows = Integer.parseInt(args[4]);
     int calls = Integer.parseInt(args[5]);
-    try (Context context = Context.newBuilder(HaraLanguage.ID)
-        .option("engine.WarnInterpreterOnly", "false").build()) {
+    Context.Builder builder =
+        Context.newBuilder(HaraLanguage.ID).option("engine.WarnInterpreterOnly", "false");
+    if (Boolean.getBoolean("hara.benchmark.experimental")) {
+      builder.allowExperimentalOptions(true);
+    }
+    try (Context context = builder.build()) {
       long firstStart = System.nanoTime();
       Value first = context.eval(HaraLanguage.ID, source);
       long firstNanos = System.nanoTime() - firstStart;

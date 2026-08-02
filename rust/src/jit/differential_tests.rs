@@ -52,6 +52,25 @@ fn telemetry_distinguishes_hot_compilation_and_execution() {
 }
 
 #[test]
+fn rejected_native_trace_stops_recording_and_falls_back_to_bytecode() {
+    let source = "(do \
+        (defn sum-pair [node] \
+          (if (number? node) node \
+            (+ (sum-pair (nth node 0)) (sum-pair (nth node 1))))) \
+        (loop [i 0 acc 0] \
+          (if (< i 1000) (recur (+ i 1) (+ acc (sum-pair [1 2]))) acc)))";
+    let program = crate::compile_bytecode(source).unwrap();
+    assert_eq!(crate::execute_bytecode(&program).unwrap(), "3000");
+    let telemetry = crate::bytecode_jit_telemetry(&program);
+    #[cfg(all(feature = "native-jit", not(target_arch = "wasm32")))]
+    {
+        assert_eq!(telemetry.rejected, 1, "{telemetry:?}");
+        assert_eq!(telemetry.disabled_loops, 1, "{telemetry:?}");
+        assert_eq!(telemetry.backedges, 16, "{telemetry:?}");
+    }
+}
+
+#[test]
 fn indexed_numeric_vectors_trace_from_constants_and_locals() {
     for source in [
         "(loop [i 0 acc 0] (if (< i 5000) (recur (+ i 1) (+ acc (nth [3 5 7 11] (mod i 4)))) acc))",
@@ -90,8 +109,9 @@ fn indexed_numeric_vectors_trace_from_constants_and_locals() {
         );
         assert!(
             recorded.is_ok(),
-            "vector loop was rejected: {recorded:?}; constants: {:?}",
-            program.constants
+            "vector loop was rejected: {recorded:?}; constants: {:?}\n{}",
+            program.constants,
+            crate::vm::disassemble(&program)
         );
         assert_eq!(crate::execute_bytecode(&program).unwrap(), "32500");
         assert!(
@@ -119,7 +139,7 @@ fn unsupported_vectors_and_late_bounds_errors_fall_back_to_vm_semantics() {
 }
 
 #[test]
-fn dynamic_paths_compile_both_directions_of_an_alternating_branch() {
+fn dynamic_paths_fall_back_without_recording_in_native_mode() {
     let source = "(loop [i 0 flag true acc 0] (if (< i 5000) (if flag (recur (+ i 1) false (+ acc 3)) (recur (+ i 1) true (+ acc 7))) acc))";
     agrees(source);
     let program = crate::compile_bytecode(source).unwrap();
@@ -148,12 +168,21 @@ fn dynamic_paths_compile_both_directions_of_an_alternating_branch() {
     }
     assert_eq!(crate::execute_bytecode(&program).unwrap(), "25000");
     let telemetry = crate::bytecode_jit_telemetry(&program);
-    assert!(
-        telemetry.trace_paths >= 2,
-        "{telemetry:?}\n{}",
-        crate::vm::disassemble(&program)
-    );
-    assert!(telemetry.branch_exits > 0, "{telemetry:?}");
+    #[cfg(any(not(feature = "native-jit"), target_arch = "wasm32"))]
+    {
+        assert!(
+            telemetry.trace_paths >= 2,
+            "{telemetry:?}\n{}",
+            crate::vm::disassemble(&program)
+        );
+        assert!(telemetry.branch_exits > 0, "{telemetry:?}");
+    }
+    #[cfg(all(feature = "native-jit", not(target_arch = "wasm32")))]
+    {
+        assert_eq!(telemetry.compile_attempts, 0, "{telemetry:?}");
+        assert_eq!(telemetry.entries, 0, "{telemetry:?}");
+        assert_eq!(telemetry.backedges, 16, "{telemetry:?}");
+    }
     assert_eq!(telemetry.disabled_loops, 1, "{telemetry:?}");
 }
 

@@ -1,6 +1,9 @@
 package hara.truffle;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.Assumption;
+import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
+import com.oracle.truffle.api.Truffle;
 import hara.lang.data.Keyword;
 import hara.lang.data.Symbol;
 import hara.lang.data.types.ILinearType;
@@ -26,6 +29,7 @@ public final class EvaluationJournal {
   private static final AtomicInteger ENABLED = new AtomicInteger();
   private static final AtomicLong NEXT_JOURNAL = new AtomicLong(1);
   private static final ThreadLocal<Collector> ACTIVE = new ThreadLocal<>();
+  @CompilationFinal private static Assumption journalDisabled = disabledAssumption();
 
   private EvaluationJournal() {}
 
@@ -81,7 +85,7 @@ public final class EvaluationJournal {
     if (ACTIVE.get() != null) throw new IllegalStateException("Nested journals are not supported");
     Collector collector = new Collector(NEXT_JOURNAL.getAndIncrement(), limits);
     ACTIVE.set(collector);
-    ENABLED.incrementAndGet();
+    if (ENABLED.getAndIncrement() == 0) journalDisabled.invalidate();
     collector.record("evaluation/start", null, null, 0, null, List.of(), null);
     try {
       Object result = evaluation.get();
@@ -90,11 +94,20 @@ public final class EvaluationJournal {
       return collector.fail(failure.getMessage() == null ? failure.getClass().getName() : failure.getMessage());
     } finally {
       ACTIVE.remove();
-      ENABLED.decrementAndGet();
+      if (ENABLED.decrementAndGet() == 0) journalDisabled = disabledAssumption();
     }
   }
 
-  /** Fast disabled path used from Truffle roots. Zero means no ThreadLocal lookup. */
+  /** Compilation-stable fast path invalidated while any journal collector is active. */
+  public static Assumption journalDisabled() {
+    return journalDisabled;
+  }
+
+  private static Assumption disabledAssumption() {
+    return Truffle.getRuntime().createAssumption("evaluation journal disabled");
+  }
+
+  /** Records a root entry after the caller has transferred active journals to the interpreter. */
   @TruffleBoundary
   public static long enter(String name, Object[] arguments, int offset) {
     if (ENABLED.get() == 0) return 0;

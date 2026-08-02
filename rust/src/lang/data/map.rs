@@ -11,6 +11,7 @@ use crate::lang::protocol::{
 
 const SHIFT: usize = 5;
 const MASK: u64 = 0x1f;
+const ARRAY_MAP_THRESHOLD: usize = 8;
 
 // CHAMP port of `java/src/main/java/hara/lang/data/Map.java`.
 //
@@ -640,17 +641,27 @@ fn collect<'a, K, V>(node: &'a Node<K, V>, out: &mut Vec<(&'a K, &'a V)>) {
 }
 
 #[derive(Debug, Clone)]
+enum Representation<K, V> {
+    /// Tiny maps avoid hashing and CHAMP node allocation. The vector is
+    /// reference-counted so persistent aliases share it; consumed operations
+    /// use `Rc::make_mut` and edit it in place when uniquely owned.
+    Array(Rc<Vec<(K, V)>>),
+    Champ {
+        root: Rc<Node<K, V>>,
+        size: usize,
+    },
+}
+
+#[derive(Debug, Clone)]
 pub struct Standard<K, V> {
     metadata: Option<Rc<crate::lang::data::Metadata>>,
-    root: Rc<Node<K, V>>,
-    size: usize,
+    representation: Representation<K, V>,
 }
 impl<K, V> Default for Standard<K, V> {
     fn default() -> Self {
         Self {
             metadata: None,
-            root: Node::empty(),
-            size: 0,
+            representation: Representation::Array(Rc::new(Vec::new())),
         }
     }
 }
@@ -659,63 +670,219 @@ impl<K: Clone + Eq + Hash, V: Clone> Standard<K, V> {
         Self::default()
     }
     pub fn len(&self) -> usize {
-        self.size
+        match &self.representation {
+            Representation::Array(entries) => entries.len(),
+            Representation::Champ { size, .. } => *size,
+        }
     }
     pub fn is_empty(&self) -> bool {
-        self.size == 0
+        self.len() == 0
     }
     pub fn get(&self, key: &K) -> Option<&V> {
-        find_node(&self.root, 0, key_hash(key), key).map(|(_, v)| v)
+        match &self.representation {
+            Representation::Array(entries) => entries
+                .iter()
+                .find(|(entry_key, _)| entry_key == key)
+                .map(|(_, value)| value),
+            Representation::Champ { root, .. } => {
+                find_node(root, 0, key_hash(key), key).map(|(_, value)| value)
+            }
+        }
     }
     pub fn find_entry(&self, key: &K) -> Option<(&K, &V)> {
-        find_node(&self.root, 0, key_hash(key), key)
+        match &self.representation {
+            Representation::Array(entries) => entries
+                .iter()
+                .find(|(entry_key, _)| entry_key == key)
+                .map(|(entry_key, value)| (entry_key, value)),
+            Representation::Champ { root, .. } => find_node(root, 0, key_hash(key), key),
+        }
     }
     pub fn assoc_value(&self, key: K, value: V) -> Self {
-        let mut root = self.root.clone();
-        let added = assoc_node(&mut root, None, 0, key_hash(&key), key, value);
-        Self {
-            metadata: self.metadata.clone(),
-            root,
-            size: self.size + usize::from(added),
+        match &self.representation {
+            Representation::Array(entries) => {
+                let mut next = (**entries).clone();
+                if let Some((_, entry_value)) =
+                    next.iter_mut().find(|(entry_key, _)| entry_key == &key)
+                {
+                    *entry_value = value;
+                    return Self {
+                        metadata: self.metadata.clone(),
+                        representation: Representation::Array(Rc::new(next)),
+                    };
+                }
+                next.push((key, value));
+                Self {
+                    metadata: self.metadata.clone(),
+                    representation: Self::representation_from_entries(next, None),
+                }
+            }
+            Representation::Champ { root, size } => {
+                let mut root = root.clone();
+                let added = assoc_node(&mut root, None, 0, key_hash(&key), key, value);
+                Self {
+                    metadata: self.metadata.clone(),
+                    representation: Representation::Champ {
+                        root,
+                        size: *size + usize::from(added),
+                    },
+                }
+            }
         }
     }
     /// Associates into a consumed map using clone-on-write nodes. This keeps
     /// persistent aliases immutable while allowing uniquely owned paths to be
     /// updated without first cloning every node on the path.
-    pub fn assoc_value_owned(mut self, key: K, value: V) -> Self {
-        let added = assoc_node(&mut self.root, Some(0), 0, key_hash(&key), key, value);
-        self.size += usize::from(added);
+    pub fn assoc_value_owned(self, key: K, value: V) -> Self {
+        self.assoc_value_owned_with_edit(key, value, 0)
+    }
+    fn assoc_value_owned_with_edit(mut self, key: K, value: V, edit: u64) -> Self {
+        match &mut self.representation {
+            Representation::Array(entries) => {
+                let entries = Rc::make_mut(entries);
+                if let Some((_, entry_value)) =
+                    entries.iter_mut().find(|(entry_key, _)| entry_key == &key)
+                {
+                    *entry_value = value;
+                    return self;
+                }
+                entries.push((key, value));
+                if entries.len() > 1 {
+                    let entries = std::mem::take(entries);
+                    self.representation = Self::representation_from_entries(entries, Some(edit));
+                }
+            }
+            Representation::Champ { root, size } => {
+                let added = assoc_node(root, Some(edit), 0, key_hash(&key), key, value);
+                *size += usize::from(added);
+            }
+        }
         self
     }
     pub fn dissoc_value(&self, key: &K) -> Self {
-        let hash = key_hash(key);
-        if find_node(&self.root, 0, hash, key).is_none() {
-            return self.clone();
+        match &self.representation {
+            Representation::Array(entries) => {
+                let Some(index) = entries.iter().position(|(entry_key, _)| entry_key == key) else {
+                    return self.clone();
+                };
+                let mut next = (**entries).clone();
+                next.remove(index);
+                Self {
+                    metadata: self.metadata.clone(),
+                    representation: Self::representation_from_entries(next, None),
+                }
+            }
+            Representation::Champ { root, size } => {
+                let hash = key_hash(key);
+                if find_node(root, 0, hash, key).is_none() {
+                    return self.clone();
+                }
+                let mut root = root.clone();
+                without_present(&mut root, None, 0, hash, key);
+                Self {
+                    metadata: self.metadata.clone(),
+                    representation: Self::representation_from_champ(root, size - 1),
+                }
+            }
         }
-        let mut root = self.root.clone();
-        without_present(&mut root, None, 0, hash, key);
-        Self {
-            metadata: self.metadata.clone(),
-            root,
-            size: self.size - 1,
+    }
+    fn dissoc_value_owned_with_edit(mut self, key: &K, edit: u64) -> Self {
+        match &mut self.representation {
+            Representation::Array(entries) => {
+                if let Some(index) = entries.iter().position(|(entry_key, _)| entry_key == key) {
+                    let entries = Rc::make_mut(entries);
+                    entries.remove(index);
+                    if entries.len() > 1 {
+                        let entries = std::mem::take(entries);
+                        self.representation =
+                            Self::representation_from_entries(entries, Some(edit));
+                    }
+                }
+            }
+            Representation::Champ { root, size } => {
+                let hash = key_hash(key);
+                if find_node(root, 0, hash, key).is_some() {
+                    without_present(root, Some(edit), 0, hash, key);
+                    *size -= 1;
+                    if *size <= ARRAY_MAP_THRESHOLD {
+                        let entries = Self::owned_entries(root, *size);
+                        self.representation = Representation::Array(Rc::new(entries));
+                    }
+                }
+            }
         }
+        self
     }
     pub fn iter(&self) -> std::vec::IntoIter<(&K, &V)> {
         self.entries().into_iter()
     }
     pub fn entries(&self) -> Vec<(&K, &V)> {
-        let mut out = Vec::with_capacity(self.size);
-        collect(&self.root, &mut out);
-        out
+        match &self.representation {
+            Representation::Array(entries) => {
+                entries.iter().map(|(key, value)| (key, value)).collect()
+            }
+            Representation::Champ { root, size } => {
+                let mut out = Vec::with_capacity(*size);
+                collect(root, &mut out);
+                out
+            }
+        }
     }
     pub fn shares_root_with(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.root, &other.root)
+        match (&self.representation, &other.representation) {
+            (Representation::Array(a), Representation::Array(b)) => Rc::ptr_eq(a, b),
+            (Representation::Champ { root: a, .. }, Representation::Champ { root: b, .. }) => {
+                Rc::ptr_eq(a, b)
+            }
+            _ => false,
+        }
+    }
+    fn representation_from_entries(
+        entries: Vec<(K, V)>,
+        edit: Option<u64>,
+    ) -> Representation<K, V> {
+        if entries.len() <= ARRAY_MAP_THRESHOLD {
+            if entries.len() <= 1 {
+                return Representation::Array(Rc::new(entries));
+            }
+
+            // Map iteration is observable and specified to match the Java
+            // CHAMP traversal. Keep that order even while storing entries in
+            // a flat array. Existing-key lookup/update still avoids hashing;
+            // only cardinality-changing writes pay this bounded ordering cost.
+            let size = entries.len();
+            let mut root = Node::empty();
+            for (key, value) in entries {
+                assoc_node(&mut root, edit, 0, key_hash(&key), key, value);
+            }
+            return Representation::Array(Rc::new(Self::owned_entries(&root, size)));
+        }
+        let size = entries.len();
+        let mut root = Node::empty();
+        for (key, value) in entries {
+            assoc_node(&mut root, edit, 0, key_hash(&key), key, value);
+        }
+        Representation::Champ { root, size }
+    }
+    fn representation_from_champ(root: Rc<Node<K, V>>, size: usize) -> Representation<K, V> {
+        if size <= ARRAY_MAP_THRESHOLD {
+            return Representation::Array(Rc::new(Self::owned_entries(&root, size)));
+        }
+        Representation::Champ { root, size }
+    }
+    fn owned_entries(root: &Node<K, V>, size: usize) -> Vec<(K, V)> {
+        let mut entries = Vec::with_capacity(size);
+        collect(root, &mut entries);
+        entries
+            .into_iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect()
     }
 }
 impl<K: Clone + Eq + Hash, V: Clone> FromIterator<(K, V)> for Standard<K, V> {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         iter.into_iter()
-            .fold(Self::new(), |map, (k, v)| map.assoc_value(k, v))
+            .fold(Self::new(), |map, (k, v)| map.assoc_value_owned(k, v))
     }
 }
 impl<K: Clone + Eq + Hash, V: Clone> IntoIterator for Standard<K, V> {
@@ -731,12 +898,12 @@ impl<K: Clone + Eq + Hash, V: Clone> IntoIterator for Standard<K, V> {
 }
 impl<K: Clone + Eq + Hash, V: Clone + PartialEq> PartialEq for Standard<K, V> {
     fn eq(&self, other: &Self) -> bool {
-        self.size == other.size && self.entries().iter().all(|(k, v)| other.get(k) == Some(*v))
+        self.len() == other.len() && self.entries().iter().all(|(k, v)| other.get(k) == Some(*v))
     }
 }
 impl<K: Clone + Eq + Hash, V: Clone> ICount for Standard<K, V> {
     fn count(&self) -> usize {
-        self.size
+        self.len()
     }
 }
 impl<K: Clone + Eq + Hash, V: Clone> IAssoc<K, V> for Standard<K, V> {
@@ -890,24 +1057,14 @@ impl<K: Clone + Eq + Hash, V: Clone> Mutable<K, V> {
     }
     pub fn assoc(&mut self, key: K, value: V) -> &mut Self {
         self.check();
-        let hash = key_hash(&key);
-        // Take the root out first: otherwise this struct's own handle keeps
-        // the Rc shared and in-place editing never triggers.
-        let mut root = std::mem::replace(&mut self.standard.root, Node::empty());
-        let added = assoc_node(&mut root, Some(self.token), 0, hash, key, value);
-        self.standard.root = root;
-        self.standard.size += usize::from(added);
+        let standard = std::mem::take(&mut self.standard);
+        self.standard = standard.assoc_value_owned_with_edit(key, value, self.token);
         self
     }
     pub fn dissoc(&mut self, key: &K) -> &mut Self {
         self.check();
-        let hash = key_hash(key);
-        if find_node(&self.standard.root, 0, hash, key).is_some() {
-            let mut root = std::mem::replace(&mut self.standard.root, Node::empty());
-            without_present(&mut root, Some(self.token), 0, hash, key);
-            self.standard.root = root;
-            self.standard.size -= 1;
-        }
+        let standard = std::mem::take(&mut self.standard);
+        self.standard = standard.dissoc_value_owned_with_edit(key, self.token);
         self
     }
 }
@@ -930,7 +1087,10 @@ impl<K: Clone + Eq + Hash, V: Clone> IToPersistent for Mutable<K, V> {
 
 #[cfg(test)]
 mod tests {
-    use super::Standard;
+    use super::{
+        assoc_node, collect, key_hash, without_present, Node, Representation, Standard,
+        ARRAY_MAP_THRESHOLD,
+    };
     use crate::lang::protocol::{IEmpty, IMetadata, IToMutable, IToPersistent};
     use std::collections::HashMap;
     use std::hash::{Hash, Hasher};
@@ -989,6 +1149,98 @@ mod tests {
     }
 
     #[test]
+    fn small_maps_use_arrays_then_promote_and_demote() {
+        let mut map = Standard::new();
+        for key in 0..ARRAY_MAP_THRESHOLD {
+            map = map.assoc_value_owned(key, key * 10);
+        }
+        assert!(matches!(&map.representation, Representation::Array(_)));
+
+        // Replacing an existing key does not change cardinality or promote.
+        let replaced = map.clone().assoc_value_owned(0, 999);
+        assert!(matches!(&replaced.representation, Representation::Array(_)));
+        assert_eq!(replaced.get(&0), Some(&999));
+        assert_eq!(map.get(&0), Some(&0));
+
+        let promoted = map.assoc_value_owned(ARRAY_MAP_THRESHOLD, 80);
+        assert!(matches!(
+            &promoted.representation,
+            Representation::Champ { .. }
+        ));
+        for key in 0..=ARRAY_MAP_THRESHOLD {
+            assert_eq!(promoted.get(&key), Some(&(key * 10)));
+        }
+
+        let demoted = promoted.dissoc_value(&ARRAY_MAP_THRESHOLD);
+        assert!(matches!(&demoted.representation, Representation::Array(_)));
+        assert_eq!(demoted.len(), ARRAY_MAP_THRESHOLD);
+    }
+
+    #[test]
+    fn mutable_map_crosses_array_champ_boundary_without_losing_aliases() {
+        let original: Standard<usize, usize> =
+            (0..ARRAY_MAP_THRESHOLD).map(|key| (key, key)).collect();
+        let mut mutable = original.to_mutable();
+        mutable.assoc(ARRAY_MAP_THRESHOLD, 80);
+        assert!(matches!(
+            &mutable.representation,
+            Representation::Champ { .. }
+        ));
+        assert_eq!(original.get(&ARRAY_MAP_THRESHOLD), None);
+
+        mutable.dissoc(&ARRAY_MAP_THRESHOLD);
+        assert!(matches!(&mutable.representation, Representation::Array(_)));
+        let persistent = mutable.to_persistent();
+        assert_eq!(persistent, original);
+    }
+
+    #[test]
+    fn array_iteration_tracks_champ_order_through_updates() {
+        let mut map = Standard::new();
+        let mut root = Node::empty();
+        let mut size = 0;
+        let keys = [1, 33, 2, 31, 63, 65, 3, 95].map(Key);
+
+        for (index, key) in keys.into_iter().enumerate() {
+            map = map.assoc_value(key, index);
+            size += usize::from(assoc_node(&mut root, None, 0, key_hash(&key), key, index));
+            let expected: Vec<_> = {
+                let mut entries = Vec::with_capacity(size);
+                collect(&root, &mut entries);
+                entries
+                    .into_iter()
+                    .map(|(key, value)| (*key, *value))
+                    .collect()
+            };
+            let actual: Vec<_> = map
+                .entries()
+                .into_iter()
+                .map(|(key, value)| (*key, *value))
+                .collect();
+            assert_eq!(actual, expected);
+        }
+
+        map = map.assoc_value(Key(33), 99);
+        assoc_node(&mut root, None, 0, key_hash(&Key(33)), Key(33), 99);
+        map = map.dissoc_value(&Key(2));
+        without_present(&mut root, None, 0, key_hash(&Key(2)), &Key(2));
+        size -= 1;
+
+        let mut expected = Vec::with_capacity(size);
+        collect(&root, &mut expected);
+        let expected: Vec<_> = expected
+            .into_iter()
+            .map(|(key, value)| (*key, *value))
+            .collect();
+        let actual: Vec<_> = map
+            .entries()
+            .into_iter()
+            .map(|(key, value)| (*key, *value))
+            .collect();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn assoc_collision_removal_and_persistence() {
         let empty = Standard::new();
         let a = empty.assoc_value(Collision(1), 10);
@@ -1030,23 +1282,30 @@ mod tests {
         // land in a collision node past shift 32.
         let a = Key(1);
         let b = Key(0x1_0000_0001);
-        let map = Standard::new().assoc_value(a, 10).assoc_value(b, 20);
-        assert_eq!(map.len(), 2);
+        let mut map = Standard::new();
+        for key in 2..=10 {
+            map = map.assoc_value(Key(key), key);
+        }
+        map = map.assoc_value(a, 10).assoc_value(b, 20);
+        assert!(matches!(&map.representation, Representation::Champ { .. }));
+        assert_eq!(map.len(), 11);
         assert_eq!(map.get(&a), Some(&10));
         assert_eq!(map.get(&b), Some(&20));
         // Overwrite inside a collision node keeps the size exact.
         let overwritten = map.assoc_value(a, 99);
-        assert_eq!(overwritten.len(), 2);
+        assert_eq!(overwritten.len(), 11);
         assert_eq!(overwritten.get(&a), Some(&99));
         assert_eq!(map.get(&a), Some(&10));
         // Removing one of two converts the node to a single-pair DataNode.
         let one = map.dissoc_value(&a);
-        assert_eq!(one.len(), 1);
+        assert_eq!(one.len(), 10);
         assert_eq!(one.get(&a), None);
         assert_eq!(one.get(&b), Some(&20));
         // The pair still iterates.
-        let entries: Vec<_> = one.entries().into_iter().map(|(k, v)| (*k, *v)).collect();
-        assert_eq!(entries, vec![(b, 20)]);
+        assert!(one
+            .entries()
+            .iter()
+            .any(|(key, value)| **key == b && **value == 20));
     }
 
     /// Churn a map against a `HashMap` model, twice (DefaultHasher fallback

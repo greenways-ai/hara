@@ -35,6 +35,25 @@ impl VmFiber {
         fiber
     }
 
+    /// Starts a specific validated prototype with direct arguments and
+    /// captures. Prepared embedding calls use this to avoid namespace-backed
+    /// request bindings and synthetic source compilation.
+    pub fn start_call(
+        program: Rc<Program>,
+        prototype: u16,
+        arguments: Vec<Value>,
+        captures: Vec<Value>,
+    ) -> Self {
+        let mut fiber = Self {
+            machine: Machine::call(program, prototype, arguments, captures),
+            state: VmFiberState::Running,
+            pending: None,
+        };
+        let outcome = fiber.machine.run();
+        fiber.apply(outcome);
+        fiber
+    }
+
     pub fn state(&self) -> VmFiberState {
         self.state.clone()
     }

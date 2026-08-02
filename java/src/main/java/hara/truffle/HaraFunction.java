@@ -29,6 +29,11 @@ public final class HaraFunction implements TruffleObject {
     if (overloads.length == 0) {
       throw new IllegalArgumentException("A function must have at least one arity");
     }
+    for (HaraFunction overload : overloads) {
+      if (overload.overloads != null) {
+        throw new IllegalArgumentException("Nested overloaded functions are not supported");
+      }
+    }
     this.callTarget = null;
     this.minimumArity = -1;
     this.variadic = false;
@@ -51,22 +56,26 @@ public final class HaraFunction implements TruffleObject {
     if (overloads != null) {
       return resolveArity(actual) != null;
     }
-    return actual >= minimumArity && (variadic || actual == minimumArity);
+    return acceptsDirectArity(actual);
   }
 
   public HaraFunction resolveArity(int actual) {
     if (overloads == null) {
-      return acceptsArity(actual) ? this : null;
+      return acceptsDirectArity(actual) ? this : null;
     }
     HaraFunction variadicMatch = null;
     for (HaraFunction overload : overloads) {
-      if (overload.variadic() && overload.acceptsArity(actual)) {
+      if (overload.variadic && overload.acceptsDirectArity(actual)) {
         variadicMatch = overload;
-      } else if (!overload.variadic() && overload.acceptsArity(actual)) {
+      } else if (!overload.variadic && overload.acceptsDirectArity(actual)) {
         return overload;
       }
     }
     return variadicMatch;
+  }
+
+  private boolean acceptsDirectArity(int actual) {
+    return actual >= minimumArity && (variadic || actual == minimumArity);
   }
 
   public boolean variadic() {

@@ -5,6 +5,7 @@ import com.oracle.truffle.api.exception.AbstractTruffleException;
 import com.oracle.truffle.api.nodes.Node;
 
 public final class HaraException extends AbstractTruffleException {
+  private static final boolean TRACING_ENABLED = Boolean.getBoolean("hara.stacktrace");
   private final Node haraLocation;
 
   public HaraException(String message) {
@@ -32,9 +33,8 @@ public final class HaraException extends AbstractTruffleException {
   }
 
   /** Enables diagnostic Hara frames without changing normal exception messages. */
-  @TruffleBoundary
   public static boolean tracingEnabled() {
-    return Boolean.getBoolean("hara.stacktrace");
+    return TRACING_ENABLED;
   }
 
   @TruffleBoundary

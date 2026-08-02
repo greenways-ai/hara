@@ -4,13 +4,33 @@ import test from "node:test";
 
 const websiteFile = (name) => readFile(new URL(name, import.meta.url), "utf8");
 
-test("the main site presents Hara as a programmable kernel", async () => {
+test("the main site presents Hara as an embeddable multi-runtime language", async () => {
   const source = await websiteFile("index.html");
 
-  assert.match(source, /<title>Hara<\/title>/);
-  assert.match(source, /<meta property="og:title" content="Hara">/);
+  assert.match(source, /<title>Hara — one embeddable language, many runtimes<\/title>/);
+  assert.match(source, /SBCL-class speed/);
+  assert.match(source, /ONE LANGUAGE · MANY RUNTIMES/);
+  assert.match(source, /Use WASM like a library/);
+  assert.match(source, /PERSISTENT VALUES/);
+  assert.match(source, /REDIS SCRIPT/);
+  assert.match(source, /PLPGSQL/);
+  assert.match(source, /TAHTO/);
+  assert.match(source, /Active experimental runtime/);
+  assert.match(source, /data-hero-scene="columns"/);
+  assert.match(source, /data-hero-scene="mosaic"/);
+  assert.match(source, /class="learn-more" href="#why"/);
+  assert.match(source, /brew install hara-lang\/tap\/hara/);
+  assert.match(source, /src="\.\/hero-animation\.js/);
+  assert.doesNotMatch(source, /system-bottom-bar/);
+  assert.doesNotMatch(source, /src="\.\/app\.js/);
+});
+
+test("the v1 showcase remains available with root-relative assets", async () => {
+  const source = await websiteFile("v1.html");
+
+  assert.match(source, /<base href="\.\.\/">/);
   assert.match(source, /A Programmable Kernel for the Agentic Age\./);
-  assert.doesNotMatch(source, /A Modern Lisp/);
+  assert.match(source, /src="\.\/app\.js/);
 });
 
 test("the Amp demo uses the shared page identity", async () => {

@@ -1,10 +1,13 @@
 package hara.truffle.node;
 
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
+import com.oracle.truffle.api.CompilerDirectives;
+import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.frame.FrameDescriptor;
 import com.oracle.truffle.api.frame.MaterializedFrame;
 import com.oracle.truffle.api.frame.VirtualFrame;
 import com.oracle.truffle.api.nodes.RootNode;
+import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.source.SourceSection;
 import hara.kernel.builtin.BuiltinStruct;
 import hara.truffle.HaraBox;
@@ -14,10 +17,10 @@ import hara.truffle.EvaluationJournal;
 
 public final class HaraRootNode extends RootNode {
   @Child private HaraExpressionNode body;
-  private final int[] parameterSlots;
-  private final byte[] parameterKinds;
-  private final int[] captureSlots;
-  private final int[] captureSourceSlots;
+  @CompilationFinal(dimensions = 1) private final int[] parameterSlots;
+  @CompilationFinal(dimensions = 1) private final byte[] parameterKinds;
+  @CompilationFinal(dimensions = 1) private final int[] captureSlots;
+  @CompilationFinal(dimensions = 1) private final int[] captureSourceSlots;
   private final int minimumArity;
   private final boolean variadic;
   private final SourceSection sourceSection;
@@ -75,6 +78,7 @@ public final class HaraRootNode extends RootNode {
   }
 
   @Override
+  @ExplodeLoop
   public Object execute(VirtualFrame frame) {
     Object[] arguments = frame.getArguments();
     int argumentOffset = exportResult ? 0 : 1;
@@ -105,13 +109,17 @@ public final class HaraRootNode extends RootNode {
       frame.setObject(parameterSlots[minimumArity], BuiltinStruct.vector(rest));
     }
 
-    long journalOperation = EvaluationJournal.enter(frameLabel(), arguments, argumentOffset);
+    long journalOperation = 0;
+    if (!EvaluationJournal.journalDisabled().isValid()) {
+      CompilerDirectives.transferToInterpreterAndInvalidate();
+      journalOperation = EvaluationJournal.enter(frameLabel(), arguments, argumentOffset);
+    }
     try {
       Object result = body.execute(frame);
-      EvaluationJournal.returned(journalOperation, result);
+      if (journalOperation != 0) EvaluationJournal.returned(journalOperation, result);
       return exportResult ? HaraBox.export(result) : result;
     } catch (RuntimeException error) {
-      EvaluationJournal.failed(journalOperation, error);
+      if (journalOperation != 0) EvaluationJournal.failed(journalOperation, error);
       if (!HaraException.tracingEnabled()) throw error;
       throw HaraException.withFrame(error, this, frameLabel());
     }
