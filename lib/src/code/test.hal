@@ -153,13 +153,41 @@
        (catch Throwable error false)))
    expected))
 
+(declare sequence-exact? sequence-any-order? map-contains?)
+
 (defn matcher-for
   [expected]
-  (if (instance? code.test/Matcher expected)
-    expected
-    (if (fn? expected)
-      (code.test/Matcher expected expected)
-      (exactly expected))))
+  (cond (instance? code.test/Matcher expected)
+        expected
+
+        (fn? expected)
+        (code.test/Matcher expected expected)
+
+        (map? expected)
+        (code.test/Matcher
+         (fn [actual]
+           (and (map? actual)
+                (= (count expected) (count actual))
+                (map-contains? expected actual)))
+         expected)
+
+        (or (vector? expected) (list? expected))
+        (code.test/Matcher
+         (fn [actual]
+           (and (or (vector? actual) (list? actual))
+                (sequence-exact? expected actual)))
+         expected)
+
+        (set? expected)
+        (code.test/Matcher
+         (fn [actual]
+           (and (or (set? actual) (vector? actual) (list? actual))
+                (= (count expected) (count actual))
+                (sequence-any-order? (vec expected) (vec actual))))
+         expected)
+
+        :else
+        (exactly expected)))
 
 (defn sequence-exact?
   [expected actual]
@@ -174,6 +202,39 @@
                  (if (= index (count expected))
                    output
                    (recur (inc index) (conj output [index])))))))
+
+(defn modifier-present?
+  [modifiers target]
+  (loop [remaining modifiers]
+    (if (seq remaining)
+      (if (= target (first remaining))
+        true
+        (recur (rest remaining)))
+      false)))
+
+(defn vector-without
+  [values index]
+  (loop [position 0 output []]
+    (if (= position (count values))
+      output
+      (recur (inc position)
+             (if (= position index)
+               output
+               (conj output (nth values position)))))))
+
+(defn sequence-any-order?
+  [expected actual]
+  (if (empty? expected)
+    true
+    (let [matcher (matcher-for (first expected))]
+      (loop [index 0]
+        (if (= index (count actual))
+          false
+          (if (and (:pass (protocol/match-value matcher (nth actual index)))
+                   (sequence-any-order? (vec (rest expected))
+                                        (vector-without actual index)))
+            true
+            (recur (inc index))))))))
 
 (defn sequence-prefix?
   [expected actual]
@@ -205,16 +266,10 @@
      (if (map? expected)
        (map-contains? expected actual)
        (if (or (vector? expected) (list? expected) (set? expected))
-         (if (set? expected)
-           (reduce (fn [passing value]
-                     (and passing
-                          (reduce
-                           (fn [found candidate]
-                             (or found
-                                 (:pass
-                                  (protocol/match-value (matcher-for value) candidate))))
-                           false actual)))
-                   true expected)
+         (if (or (set? expected)
+                 (modifier-present? modifiers :in-any-order))
+           (and (<= (count expected) (count actual))
+                (sequence-any-order? (vec expected) (vec actual)))
            (sequence-prefix? (vec expected) (vec actual)))
          (:pass
           (protocol/match-value (matcher-for expected) actual)))))
@@ -227,16 +282,59 @@
      (if (map? expected)
        (and (= (count expected) (count actual))
             (map-contains? expected actual))
-       (sequence-exact? (vec expected) (vec actual))))
+       (and (= (count expected) (count actual))
+            (if (modifier-present? modifiers :in-any-order)
+              (sequence-any-order? (vec expected) (vec actual))
+              (sequence-exact? (vec expected) (vec actual))))))
    expected))
+
+(defn contains-in-form
+  [expected]
+  (cond (map? expected)
+        (list (quote code.test/contains)
+              (reduce-kv (fn [output key value]
+                           (assoc output key (contains-in-form value)))
+                         {}
+                         expected))
+
+        (set? expected)
+        (list (quote code.test/contains)
+              (vec (map contains-in-form expected))
+              :in-any-order)
+
+        (vector? expected)
+        (list (quote code.test/contains)
+              (vec (map contains-in-form expected)))
+
+        :else expected))
+
+(defn just-in-form
+  [expected]
+  (cond (map? expected)
+        (list (quote code.test/just)
+              (reduce-kv (fn [output key value]
+                           (assoc output key (just-in-form value)))
+                         {}
+                         expected))
+
+        (set? expected)
+        (list (quote code.test/just)
+              (vec (map just-in-form expected))
+              :in-any-order)
+
+        (vector? expected)
+        (list (quote code.test/just)
+              (vec (map just-in-form expected)))
+
+        :else expected))
 
 (defmacro contains-in
   [expected]
-  `(code.test/contains ~expected))
+  (contains-in-form expected))
 
 (defmacro just-in
   [expected]
-  `(code.test/just ~expected))
+  (just-in-form expected))
 
 (defn throws-info
   ([] (throws))
@@ -407,14 +505,15 @@
     namespace
     name)))
 
-(defn assertion-forms
+(defn assertion-forms-strict
   [forms form-meta options]
   (loop [remaining forms
          output []]
     (if (= 0 (count remaining))
       output
       (if (< (count remaining) 3)
-        (throw "fact assertions must be actual => expected triples")
+        (throw (ex-info "fact assertions must be actual => expected triples"
+                        {:remaining remaining :form-meta form-meta}))
         (let [actual (nth remaining 0)
               arrow (nth remaining 1)
               expected (nth remaining 2)
@@ -432,6 +531,23 @@
                      ~expected
                      ~check-options)))))))))
 
+(defn assertion-forms
+  [forms form-meta options]
+  (loop [remaining forms
+         setup []]
+    (if (= 0 (count remaining))
+      (if (= 0 (count setup))
+        []
+        (apply list (quote do) (concat setup [[]])))
+      (if (and (>= (count remaining) 3)
+               (= (nth remaining 1) (quote =>)))
+        (let [checks (assertion-forms-strict remaining form-meta options)]
+          (if (= 0 (count setup))
+            checks
+            (apply list (quote do) (concat setup [checks]))))
+        (recur (vec (rest remaining))
+               (conj setup (first remaining)))))))
+
 (defn fact-form
   "Builds the registration form for one or more fact assertions."
   [description body form-meta]
@@ -439,13 +555,26 @@
         options (if (map? (first forms)) (first forms) {})
         assertions (if (map? (first forms)) (vec (rest forms)) forms)
         checks (assertion-forms assertions form-meta options)
-        registration-options (list 'merge (list 'quote form-meta) options)]
-    (if (= 0 (count checks))
-      (throw "fact expects at least one assertion")
-      `(code.test/register!
-        ~description
-        (fn [run-options] ~checks)
-        ~registration-options))))
+        setup (:setup form-meta)
+        teardown (:teardown form-meta)
+        hooks (merge
+               (if setup
+                 {:before (apply list (quote fn) [] setup)}
+                 {})
+               (if teardown
+                 {:after (apply list (quote fn) [] teardown)}
+                 {}))
+        registration-options (list (quote merge)
+                                   (list (quote quote) form-meta)
+                                   options
+                                   hooks
+                                   (if (= 0 (count checks))
+                                     {:skip true}
+                                     {}))]
+    `(code.test/register!
+      ~description
+      (fn [run-options] ~checks)
+      ~registration-options)))
 
 (defmacro fact
   "Registers one or more actual => expected assertions."
@@ -678,7 +807,7 @@
 (defn run-selected
   [input options]
   (let [reporter (or (:reporter options) +null-reporter+)
-        selected (order-facts
+        selected (vec
                   (filter (fn [fact] (matches-selection? fact options))
                           (tests)))
         namespace (if (seq selected) (:namespace (first selected)) nil)

@@ -68,19 +68,20 @@
 (defn process-value-form
   ([form grammar options] (process-value-form form grammar nil options))
   ([form grammar modules options]
-   (cond (and (= 'return (first form)) (= 2 (count form)))
-         (expand-value-block (second form) grammar modules options)
-         :else
-         (let [head (first form)
-               args (vec (rest form))
-               rewritten (vec (map (fn [arg]
-                                     (let [block (resolve-block-form arg grammar modules options)]
-                                       (if block
-                                         (with-meta (apply list
-                                                           (value-standalone (first block) grammar)
-                                                           (rest block))
-                                                    (meta arg))
-                                         arg)))
-                                   args))]
-           (if (not (= rewritten args))
-             (with-meta (apply list head rewritten) (meta form)))))))
+   (let [items (vec form)]
+     (cond (and (= 'return (first items)) (= 2 (count items)))
+           (expand-value-block (second items) grammar modules options)
+           :else
+           (let [head (first items)
+                 args (vec (rest items))
+                 rewritten (vec (map (fn [arg]
+                                       (let [block (resolve-block-form arg grammar modules options)]
+                                         (if block
+                                           (with-meta (apply list
+                                                             (value-standalone (first block) grammar)
+                                                             (rest block))
+                                                      (meta arg))
+                                           arg)))
+                                     args))]
+             (if (not (= rewritten args))
+               (with-meta (apply list head rewritten) (meta form))))))))

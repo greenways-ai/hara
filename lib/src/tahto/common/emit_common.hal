@@ -547,8 +547,13 @@
           (and (keyword? sym) (namespace sym))
           (emit-invoke-static form grammar mopts)
           (keyword? sym) (emit-invoke-typecast form grammar mopts)
-          :else (emit-invoke-raw (emit-wrapping sym grammar mopts)
-                                 (rest form) grammar mopts))))
+          :else
+          (let [target (*emit-fn* sym grammar mopts)
+                options (get-in grammar [:default :common])
+                target (if (symbol? sym)
+                         target
+                         (str (:start options) target (:end options)))]
+            (emit-invoke-raw target (rest form) grammar mopts)))))
 
 (defn emit-new
   "emits a constructor invocation"
@@ -560,7 +565,10 @@
       (throw (ex-info "One or more arguments required for constructor"
                       {:raw raw :arguments args}))
       (str raw " "
-           (emit-invoke nil (cons target (rest args)) grammar mopts)))))
+           (*emit-fn* target grammar mopts)
+           (emit-invoke-layout
+            (emit-invoke-args (rest args) grammar mopts)
+            grammar mopts)))))
 
 (defn emit-class-static-invoke
   "emits a static field or method access"

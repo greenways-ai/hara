@@ -58,13 +58,14 @@
   (let [obj (item input 1)
         keys (item input 2)
         default (item input 3)
+        default? (> (count input) 3)
         target (if (symbol? obj)
                  obj
-                 (form ['quote (form [obj])]))
+                 (form ['quote obj]))
         value (form
                (concat ['. target]
                        (map (fn [key] [key]) keys)))]
-    (if default
+    (if default?
       (form [':? (form ['x:nil? value]) default value])
       value)))
 
@@ -74,11 +75,12 @@
   (let [obj (item input 1)
         key (item input 2)
         default (item input 3)
+        default? (> (count input) 3)
         target (if (symbol? obj)
                  obj
-                 (form ['quote (form [obj])]))
+                 (form ['quote obj]))
         value (form ['. target [key]])]
-    (if default
+    (if default?
       (form [':? (form ['x:nil? value]) default value])
       value)))
 
@@ -160,9 +162,9 @@
 (defn tf-global-set "Transforms global assignment." [input]
   (form ['x:set-key '!:G (str (item input 1)) (item input 2)]))
 (defn tf-global-has? "Transforms global membership." [input]
-  (form ['not
-         (form ['x:nil?
-                (form ['x:get-key '!:G (str (item input 1))])])]))
+  (form [(quote not=)
+         nil
+         (form [(quote x:get-key) (quote !:G) (str (item input 1))])]))
 (defn tf-global-del "Transforms global deletion." [input]
   (form ['x:set-key '!:G (str (item input 1)) nil]))
 (defn tf-lu-eq "Transforms lookup equality." [input] (binary '== input))
@@ -213,16 +215,16 @@
                  :arglists '([value])}}])
 
 (def +xt-common-index+
-  [{:op :x-offset         :symbol #{'x:offset}          :macro #'tf-offset      :emit :macro
+  [{:op :x-offset         :symbol #{'x:offset}          :macro #'tf-offset      :emit :macro :wrappable true
     :op-spec {:arglists '([] [n])
               :type [:fn [:xt/int] :xt/int]}}
-   {:op :x-offset-rev     :symbol #{'x:offset-rev}      :macro #'tf-offset-rev  :emit :macro
+   {:op :x-offset-rev     :symbol #{'x:offset-rev}      :macro #'tf-offset-rev  :emit :macro :wrappable true
     :op-spec {:arglists '([] [n])
               :type [:fn [:xt/int] :xt/int]}}
-   {:op :x-offset-len     :symbol #{'x:offset-len}      :macro #'tf-offset-len  :emit :macro
+   {:op :x-offset-len     :symbol #{'x:offset-len}      :macro #'tf-offset-len  :emit :macro :wrappable true
     :op-spec {:arglists '([] [n])
               :type [:fn [:xt/int] :xt/int]}}
-   {:op :x-offset-rlen    :symbol #{'x:offset-rlen}     :macro #'tf-offset-rlen :emit :macro
+   {:op :x-offset-rlen    :symbol #{'x:offset-rlen}     :macro #'tf-offset-rlen :emit :macro :wrappable true
     :op-spec {:arglists '([] [n])
               :type [:fn [:xt/int] :xt/int]}}])
 
@@ -344,10 +346,10 @@
    {:op :x-del-key        :symbol #{'x:del-key}         :macro #'tf-del-key     :emit :macro
     :op-spec {:type [:fn [:xt/obj :xt/str] :xt/any]
               :arglists '([obj key])}}
-    {:op :x-get-key        :symbol #{'x:get-key}         :macro #'tf-get-key     :emit :macro
+    {:op :x-get-key        :symbol #{'x:get-key} :wrappable true         :macro #'tf-get-key     :emit :macro
      :op-spec {:type [:fn [:xt/obj :xt/str  :xt/any] :xt/any]
                :arglists '([obj key] [obj key default])}}
-    {:op :x-get-path       :symbol #{'x:get-path}        :macro #'tf-get-path    :emit :macro
+    {:op :x-get-path       :symbol #{'x:get-path} :wrappable true        :macro #'tf-get-path    :emit :macro
      :op-spec {:type [:fn [:xt/obj [:xt/array :xt/str] :xt/any] :xt/any]
                :arglists '([obj path] [obj path default])}}
    {:op :x-set-key        :symbol #{'x:set-key}         :macro #'tf-set-key     :emit :macro

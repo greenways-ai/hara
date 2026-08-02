@@ -1,5 +1,6 @@
 package hara.lang.base;
 
+import hara.lang.protocol.IEquality;
 import org.junit.Test;
 
 import java.util.Arrays;
@@ -34,5 +35,8 @@ public class EqTest {
     assertTrue(Eq.eq(null, null));
     assertFalse(Eq.eq(1, null));
     assertFalse(Eq.eq(null, 1));
+    IEquality nilLike = other -> other == null;
+    assertTrue(Eq.eq(nilLike, null));
+    assertTrue(Eq.eq(null, nilLike));
   }
 }

@@ -24,6 +24,7 @@
 (def to-staging staging/to-staging)
 (def get-fragment resolve/get-fragment)
 (def value-standalone value/value-standalone)
+(def host-name name)
 
 (defn rt:restart [] (script/restart!))
 (defn rt:stop [] (script/stop!))
@@ -66,12 +67,21 @@
            (list 'quote lang)
            (list 'quote config)
            false)
+     '(defmacro def.xt [symbol value]
+        (list 'tahto.core.script/register-code!
+              (list 'quote (list 'def symbol value))))
+     '(defmacro defglobal.xt [symbol & body]
+        (list 'tahto.core.script/register-code!
+              (list 'quote (apply list 'defglobal symbol body))))
      '(defmacro defn.xt [symbol & body]
         (list 'tahto.core.script/register-code!
               (list 'quote (apply list 'defn symbol body))))
+     '(defmacro defgen.xt [symbol & body]
+        (list 'tahto.core.script/register-code!
+              (list 'quote (apply list 'defgen symbol body))))
      '(defmacro defmacro.xt [id & body]
         (let [form (apply list 'defmacro id body)
-              qualified (symbol (str (:ns &env)) (name id))]
+              qualified (symbol (str (:ns &env)) (tahto.core/host-name id))]
           (list 'do
                 form
                 (list 'tahto.core.script/register-fragment!
@@ -103,6 +113,31 @@
            (list 'quote lang)
            (list 'quote config)
            true)
+     '(defmacro def.xt [symbol value]
+        (list 'tahto.core.script/register-code!
+              (list 'quote (list 'def symbol value))))
+     '(defmacro defglobal.xt [symbol & body]
+        (list 'tahto.core.script/register-code!
+              (list 'quote (apply list 'defglobal symbol body))))
+     '(defmacro defn.xt [symbol & body]
+        (list 'tahto.core.script/register-code!
+              (list 'quote (apply list 'defn symbol body))))
+     '(defmacro defgen.xt [symbol & body]
+        (list 'tahto.core.script/register-code!
+              (list 'quote (apply list 'defgen symbol body))))
+     '(defmacro defmacro.xt [id & body]
+        (let [form (apply list 'defmacro id body)
+              qualified (symbol (str (:ns &env)) (tahto.core/host-name id))]
+          (list 'do
+                form
+                (list 'tahto.core.script/register-fragment!
+                      (list 'quote form)
+                      (list 'fn '[& args]
+                            (list 'macroexpand-1
+                                  (list 'apply
+                                        'list
+                                        (list 'quote qualified)
+                                        'args)))))))
      '(defmacro !.js [& body]
         (list 'tahto.core.script/eval-form!
               :js

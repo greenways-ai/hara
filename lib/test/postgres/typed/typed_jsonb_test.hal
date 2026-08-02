@@ -1,0 +1,126 @@
+(ns postgres.typed.typed-jsonb-test
+  (:require [postgres.typed.typed-common :as types]
+            [postgres.typed.typed-jsonb :as jsonb])
+  (:use code.test))
+
+(defn base-context
+  ([] (base-context nil))
+  ([shape]
+   (types/make-context {'m :jsonb}
+                       (if shape {'m shape} {})
+                       {'m (types/make-jsonb-path [] 'm)})))
+
+(fact "normalizes binding symbols and field descriptors"
+  (jsonb/symbol->field-key 'm-name) => :name
+  (jsonb/symbol->field-key 'o-profile) => :profile
+  (jsonb/symbol->field-key 'plain) => :plain
+  (jsonb/symbol->field-key "name") => nil
+  (jsonb/field-info :uuid) => {:type :uuid :nullable? true}
+  (jsonb/field-info nil {:nullable? false}) => {:type :jsonb :nullable? false})
+
+(fact "recognizes typed bindings and JSONB accessors"
+  (jsonb/typed-binding-form? '(:uuid v-id)) => true
+  (jsonb/typed-binding-form? 'v-id) => false
+  (jsonb/accessor-expr? '(:-> m "data")) => true
+  (jsonb/accessor-expr? '(:->> m "name")) => true
+  (jsonb/accessor-expr? '(pg/field-id m "org")) => true
+  (jsonb/accessor-expr? '(other m)) => false)
+
+(fact "appends JSONB paths"
+  (let [path (jsonb/append-path (types/make-jsonb-path [:a :b] 'm) :c)]
+    [(:segments path) (:root-var path)])
+  => [[:a :b :c] 'm]
+  (jsonb/append-path nil :c) => nil)
+
+(fact "creates access descriptors"
+  (:field-info (first (jsonb/access-descriptors (base-context) '(:-> m "data"))))
+  => {:type :jsonb :nullable? true}
+  (:field-info (first (jsonb/access-descriptors (base-context) '(:->> m "name"))))
+  => {:type :text :nullable? true}
+  (count (jsonb/access-descriptors (base-context) '(pg/field-id m "org"))) => 2
+  (:segments (jsonb/expr-jsonb-path (base-context) '(:-> m "data"))) => [:data])
+
+(fact "uses known source field information"
+  (let [shape (types/make-jsonb-shape
+               {:id {:type :uuid :nullable? false}
+                :name {:type :text :nullable? true}}
+               "User")
+        ctx (base-context shape)
+        path (types/make-jsonb-path [] 'm)]
+    [(jsonb/source-field-info ctx path :id :->)
+     (jsonb/source-field-info ctx path :missing :->>)
+     (get-in (jsonb/js-select-shape ctx '(js-select m (js ["id" "name"])))
+             [:fields :name :type])])
+  => [{:type :uuid :nullable? false}
+      {:type :text :nullable? true}
+      :text])
+
+(fact "extracts js selection keys"
+  (jsonb/js-keys-form->keywords ["id" :user_name "email"]) => [:id :user-name :email]
+  (jsonb/js-keys-form->keywords '(js ["a" "b"])) => [:a :b]
+  (jsonb/js-keys-form->keywords nil) => nil)
+
+(fact "creates descriptors for set and typed bindings"
+  (let [path (types/make-jsonb-path [:data] 'm)
+        set-desc (jsonb/set-binding-descriptors path '#{o-profile})
+        typed-desc (jsonb/set-binding-descriptors path '#{(:uuid v-id)})]
+    [[(:var (first set-desc)) (get-in (first set-desc) [:field-info :type])]
+     [(:var (first typed-desc)) (get-in (first typed-desc) [:field-info :type])]])
+  => [['o-profile :jsonb] ['v-id :uuid]])
+
+(fact "creates nested shapes from descriptors"
+  (let [shape (jsonb/descriptor-shape
+               {:path (types/make-jsonb-path [:profile :name] 'm)
+                :field-info {:type :text}})]
+    (get-in shape [:fields :profile :shape :fields :name :type]))
+  => :text
+  (jsonb/descriptor-shape
+   {:path (types/make-jsonb-path [] 'm) :field-info {}})
+  => nil)
+
+(fact "applies descriptors to root shapes and bindings"
+  (let [descriptor {:var 'v-id
+                    :path (types/make-jsonb-path [:id] 'm)
+                    :binding-type {:kind :cast :type :uuid}
+                    :field-info {:type :uuid}}
+        updated (jsonb/apply-descriptor (base-context) descriptor)]
+    [(get-in updated [:jsonb-shapes 'm :fields :id :type])
+     (get-in updated [:bindings 'v-id])])
+  => [:uuid {:kind :cast :type :uuid}])
+
+(fact "projects js-select descriptors with seeded types"
+  (let [shape (types/make-jsonb-shape
+               {:id {:type :uuid :nullable? false}
+                :name {:type :text :nullable? true}}
+               "User")
+        descriptors (jsonb/js-select-descriptors
+                     (base-context shape)
+                     '(js-select m (js ["id" "name"])))]
+    [(count descriptors)
+     (:field-info (first descriptors))
+     (:field-info (second descriptors))])
+  => [2 {:type :uuid :nullable? false} {:type :text :nullable? true}])
+
+(fact "scans let bindings and accumulates accessed fields"
+  (let [result (jsonb/scan-form
+                (base-context)
+                '(let [n (:-> m "id")
+                       (:text v-name) (:->> m "name")]
+                   [n v-name]))]
+    [(get-in result [:bindings 'n])
+     (get-in result [:bindings 'v-name])
+     (get-in result [:jsonb-shapes 'm :fields :id :type])
+     (get-in result [:jsonb-shapes 'm :fields :name :type])])
+  => [:jsonb {:kind :cast :type :text} :jsonb :text])
+
+(fact "infers argument access shape from function bodies"
+  (let [fn-def {:body-meta
+                {:raw-body '((fu/js-select m (js ["a" "b" "c"])))}}
+        shape (jsonb/infer-jsonb-arg-access-shape 'm fn-def)]
+    [(types/jsonb-shape? shape)
+     (vec (keys (:fields shape)))
+     (:confidence shape)
+     (:nullable? shape)])
+  => [true [:a :b :c] :medium true]
+  (jsonb/infer-jsonb-arg-access-shape 'm {:body-meta {:raw-body []}} nil :track)
+  => nil)

@@ -53,8 +53,8 @@
                 (:versions pinned-boot)
                 (:version (runtime/language-info :js))
                 (:version (runtime/language-info :python))]
-  => [{:js 1 :python 1}
-      {:js 1 :python 1}
+  => [{:js 1 :python 1 :lua 1}
+      {:js 1 :python 1 :lua 1}
       1
       1])
 
@@ -109,6 +109,6 @@
                [(get-in created-basic [:process :transport])
                 (get-in created-basic [:process :persistent])
                 (:status (basic/basic-state created-basic))]
-  => [:node-socket true :created])
+  => [:process-socket true :created])
 
 (run {:namespace "tahto.core.runtime-test"})

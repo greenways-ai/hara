@@ -14,7 +14,11 @@
 
 (fact "supports predicate matchers"
   {:tags [:unit :matcher]}
-  42 => (satisfies (fn [value] (= 42 value))))
+  42 => (satisfies (fn [value] (= 42 value)))
+
+  [2 1] => (just [1 2] :in-any-order)
+  [3 1 2] => (contains [1 2] :in-any-order)
+  [["b" 2] ["a" 1]] => (just [["a" 1] ["b" 2]] :in-any-order))
 
 (fact "records skipped facts"
   {:skip true :tags [:slow]}
@@ -112,7 +116,7 @@
                   (count (get summary :results))
                   (count (get (first (get summary :results)) :checks))
                   (deref lifecycle)]
-                 [:passed 5 6 1 [:before :after]])
+                 [:passed 5 9 1 [:before :after]])
    (legacy/check "runner emits structured events without printing"
                  (vec (map (fn [report] (get report :event))
                            (reporter-events reporter)))
@@ -147,6 +151,6 @@
                   (get (get fail-fast-summary :counts) :cancelled)
                   (deref fail-fast-runs)]
                  [[:before-all :before-each :after-each :after-all]
-                  1 1 1 6 1 1 0])])
+                  1 1 1 9 1 1 0])])
 
 (legacy/print-results results)

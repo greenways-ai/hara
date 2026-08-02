@@ -1203,7 +1203,7 @@
          (list 'intern-var
                (list 'current-namespace)
                (list 'quote entry)
-               (list 'var (symbol source (name entry)))))
+               (list 'var (symbol (str source) (name entry)))))
        (keys (ns-publics source))))
     namespaces)))
 

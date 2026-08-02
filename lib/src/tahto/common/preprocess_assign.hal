@@ -1,5 +1,6 @@
 (ns tahto.common.preprocess-assign
   (:require [tahto.common.emit-helper :as helper]
+            [tahto.common.grammar-spec :as spec]
             [tahto.common.preprocess-base :as base]
             [tahto.common.preprocess-value :as value]
             [tahto.common.util :as util]
@@ -35,13 +36,15 @@
        (fail "Cannot resolve module" {:input f :current module :modules (keys modules)}))
      (if (not (get-in modules [resolved-module :code symbol-id]))
        (fail "Code entry not found" {:input f :form form}))
-     (concat declaration
-             [(with-meta (cons (if unwrapped
-                                 (util/sym-full resolved-module symbol-id)
-                                 (tahto.common.preprocess-assign/ProtectedHead
-                                  (util/sym-full resolved-module symbol-id)))
-                               args)
-                         (assoc (meta bind-form) :assign/inline true))]))))
+     (apply list
+            (concat declaration
+             [(with-meta (apply list
+                          (concat [(if unwrapped
+                                     (util/sym-full resolved-module symbol-id)
+                                     (tahto.common.preprocess-assign/ProtectedHead
+                                      (util/sym-full resolved-module symbol-id)))]
+                                  args))
+                         (assoc (meta bind-form) :assign/inline true))])))))
 
 (def +tail-block-heads+ '#{do do* do:> when when-not let let*})
 
@@ -49,10 +52,11 @@
   (with-meta (apply list head items) (meta form)))
 
 (defn rewrite-tail-return [form target]
-  (cond (not (walk/form? form)) (list := target form)
+  (let [form (if (walk/form? form) (spec/as-list form) form)]
+   (cond (not (walk/form? form)) (list := target form)
         (= 'return (first form)) (list := target (second form))
         (+tail-block-heads+ (first form))
-        (let [head (first form) items (rest form)]
+        (let [head (first form) items (vec (rest form))]
           (if (or (= 'let head) (= 'let* head))
             (let [bindings (first items) body (rest items)]
               (rebuild-form form head
@@ -66,7 +70,7 @@
                       [(second form)
                        (rewrite-tail-return (nth form 2) target)
                        (rewrite-tail-return (nth form 3) target)])
-        :else (list := target form)))
+        :else (list := target form))))
 
 (defn- assignment-target [form grammar]
   (let [mode (get-in grammar [:reserved (first form) :emit])]
@@ -95,7 +99,8 @@
                     (binding [base/*macro-form* form
                               base/*macro-grammar* grammar
                               base/*macro-opts* options]
-                      (let [output ((:macro entry) form)]
+                      (let [output ((:macro entry) form)
+                            output (if (walk/form? output) (spec/as-list output) output)]
                         (if (assignment-target output grammar)
                           (with-meta output (merge (meta form) (meta output))))) )
                     form)
@@ -103,12 +108,14 @@
          expanded (if target
                     (let [resolved (value/resolve-block-form (:value target) grammar modules options)]
                       (if resolved
-                        (walk/prewalk-replace {(:value target) resolved} expanded)
+                        (let [output (walk/prewalk-replace {(:value target) resolved} expanded)]
+                          (if (walk/form? output) (spec/as-list output) output))
                         expanded))
                     expanded)
          target (assignment-target expanded grammar)]
      (if target
-       (let [value-form (value/expand-value-block (:value target) grammar modules options)]
+       (let [value-form (value/expand-value-block (:value target) grammar modules options)
+             value-form (if (walk/form? value-form) (spec/as-list value-form) value-form)]
          (if value-form
            (let [rewritten (rewrite-tail-return value-form (:target target))]
              (with-meta (if (:declare? target)
@@ -116,7 +123,7 @@
                                 (with-meta (apply list (concat (butlast expanded) [nil])) (meta expanded))
                                 rewritten)
                           rewritten)
-                        (assoc (meta rewritten) :assign/template-default true)))))))))
+                        (assoc (or (meta rewritten) {}) :assign/template-default true)))))))))
 
 (defn protect-reserved-head [form]
   (with-meta

@@ -1,0 +1,132 @@
+(ns postgres.typed.typed-infer-test
+  (:require [postgres.typed.typed-common :as types]
+            [postgres.typed.typed-infer :as infer])
+  (:use code.test))
+
+(defn entry-table
+  []
+  (types/make-table-def
+   "demo"
+   "Entry"
+   [(types/make-column-def :id (types/make-type-ref :primitive nil :uuid))
+    (types/make-column-def :tags (types/make-type-ref :primitive nil :text))
+    (types/make-column-def :name (types/make-type-ref :primitive nil :text))]
+   :id))
+
+(defn update-function
+  []
+  (types/make-fn-def
+   "demo"
+   "update-entry"
+   [{:name 'm :type :jsonb :role :payload}]
+   [:jsonb]
+   {:raw-body '((pg/t:update -/Entry {:set {:tags m}
+                                       :columns [:tags]}))}
+   nil))
+
+(fact "selects requested shape columns"
+  (let [value (types/make-jsonb-shape
+               {:id {:type :uuid} :name {:type :text}}
+               "Entry")]
+    [(:fields (infer/select-shape-columns value [:id]))
+     (:fields (infer/select-shape-columns value nil))])
+  => [{:id {:type :uuid}}
+      {:id {:type :uuid} :name {:type :text}}])
+
+(fact "resolves table definitions by qualified and short names"
+  (types/clear-registry!)
+  (let [table (entry-table)]
+    (types/register-type! 'demo/Entry table)
+    [(types/table-def? (infer/resolve-table-def 'demo/Entry))
+     (types/table-def? (infer/resolve-table-def 'Entry))
+     (types/table-def? (infer/resolve-table-def :Entry))])
+  => [true true true])
+
+(fact "detects tracked values and nested track parameters"
+  (infer/form-uses-tracked? '(let [x y] {:value x}) #{'y}) => true
+  (infer/form-uses-tracked? '(let [x z] {:value x}) #{'y}) => false
+  (infer/form-uses-track-param?
+   '(pg/t:insert -/Entry {:track {:id o-op}})
+   #{'o-op})
+  => true
+  (infer/form-uses-track-param?
+   '(pg/t:insert -/Entry {:set {:name o-op}})
+   #{'o-op})
+  => false)
+
+(fact "finds update and track specifications"
+  (infer/find-table-update-spec-in-body
+   '((pg/t:update -/Entry {:set {:tags x} :columns [:tags]}))
+   'x)
+  => {:table '-/Entry :columns [:tags] :set {:tags 'x} :op 'pg/t:update}
+
+  (infer/find-table-track-spec-in-body
+   '((pg/t:insert -/Entry {:track o-op}))
+   'o-op)
+  => {:table '-/Entry :track 'o-op :op 'pg/t:insert})
+
+(fact "tracks derived let bindings into table operations"
+  (infer/find-table-op-in-body
+   '(let [payload input]
+      (pg/t:insert -/Entry payload))
+   'input)
+  => '-/Entry)
+
+(fact "propagates tracked arguments through called functions"
+  (types/clear-registry!)
+  (let [inner (types/make-fn-def
+               "demo" "inner"
+               [{:name 'payload :type :jsonb}]
+               [:jsonb]
+               {:raw-body '((pg/t:insert -/Entry payload))}
+               nil)]
+    (types/register-type! 'demo/inner inner)
+    (infer/find-table-op-in-body '((demo/inner input)) 'input))
+  => '-/Entry)
+
+(fact "infers concrete types from seeded JSONB access"
+  (let [fn-def (types/make-fn-def
+                "demo" "select-entry"
+                [{:name 'm :type :jsonb :role :payload}]
+                [:jsonb]
+                {:raw-body '((js-select m (js ["id" "name"])))}
+                nil)
+        seed (types/make-jsonb-shape
+              {:id {:type :uuid :nullable? false}
+               :name {:type :text :nullable? true}}
+              "Entry")
+        result (infer/infer-jsonb-arg-access-shape 'm fn-def seed)]
+    [(get-in result [:fields :id :type])
+     (get-in result [:fields :name :type])])
+  => [:uuid :text])
+
+(fact "projects table update columns"
+  (types/clear-registry!)
+  (types/register-type! '-/Entry (entry-table))
+  (:fields (infer/infer-jsonb-arg-table-shape* 'm (update-function) #{}))
+  => {:tags {:type :text
+             :nullable? true
+             :source "Entry.:tags"
+             :is-ref? false}})
+
+(fact "uses api metadata table and column hints"
+  (types/clear-registry!)
+  (types/register-type! 'demo/Entry (entry-table))
+  (let [fn-def (types/make-fn-def
+                "demo" "meta-entry"
+                [{:name 'm :type :jsonb}]
+                [:jsonb]
+                {:api/meta {:table 'demo/Entry :columns [:id :name]}
+                 :raw-body []}
+                nil)]
+    (vec (keys (:fields
+                (infer/infer-jsonb-arg-table-shape* 'm fn-def #{})))))
+  => [:id :name])
+
+(fact "combines table and access inference and respects track roles"
+  (types/clear-registry!)
+  (types/register-type! '-/Entry (entry-table))
+  (let [result (infer/infer-jsonb-arg-shape 'm (update-function))]
+    (get-in result [:fields :tags :type]))
+  => :text
+  (infer/infer-jsonb-arg-shape* 'm (update-function) #{} :track) => nil)

@@ -301,6 +301,16 @@ public class HaraLanguageTest {
   }
 
   @Test
+  public void keepsSpecialFormsUnshadowableByMacros() {
+    try (Context context = context()) {
+      context.eval(HaraLanguage.ID, "(defmacro do [& forms] 99)");
+      assertEquals(3, context.eval(HaraLanguage.ID, "(do 1 2 3)").asLong());
+      assertEquals("(do 1 2 3)", context.eval(HaraLanguage.ID, "(macroexpand (quote (do 1 2 3)))").toString());
+      assertEquals(99, context.eval(HaraLanguage.ID, "(user/do 1 2 3)").asLong());
+    }
+  }
+
+  @Test
   public void defmacroPreservesDocumentationAttributesAndArglists() {
     try (Context context = context()) {
       var metadata =

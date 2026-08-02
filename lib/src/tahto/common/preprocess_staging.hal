@@ -18,7 +18,8 @@
           (= :template (:type reserved))
           (binding [base/*macro-opts* options]
             (walk-fn ((:macro reserved) form)))
-          (= :hard-link (:emit reserved)) (walk-fn (cons (:raw reserved) (rest form)))
+          (= :hard-link (:emit reserved))
+          (walk-fn (apply list (:raw reserved) (rest form)))
           (and (= :def-assign (:emit reserved))
                (or (= :inline (last form)) (:inline (meta (last form)))))
           (walk-fn (assign/process-inline-assignment form modules options))
@@ -29,25 +30,40 @@
               (walk-fn value-form)
               (if reserved
                 (assign/protect-reserved-head form)
-                (let [fragment (resolve/get-fragment (first form) modules options)]
-                  (if (:template fragment)
-                    (do (if deps-fragment (swap! deps-fragment conj (util/sym-full fragment)))
-                        (binding [base/*macro-form* form base/*macro-opts* options]
-                          (walk-fn (apply (:template fragment) (rest form)))))
-                    form))))))))
+                (let [fragment (resolve/get-fragment (first form) modules options)
+                      host-var (if (and (symbol? symbol) (namespace symbol))
+                                 (resolve symbol)
+                                 nil)]
+                  (cond (:template fragment)
+                        (do (if deps-fragment (swap! deps-fragment conj (util/sym-full fragment)))
+                            (binding [base/*macro-form* form base/*macro-opts* options]
+                              (walk-fn (apply (:template fragment) (rest form)))))
+
+                        (and host-var (:macro (meta host-var)))
+                        (walk-fn (macroexpand-1 form))
+
+                        :else form))))))))
 
 (defn- stage-form [form grammar modules options deps deps-fragment deps-native]
-  (cond (walk/form? form)
-        (to-staging-form form grammar modules options deps-fragment
-                         (fn [value] (stage-form value grammar modules options deps deps-fragment deps-native)))
-        (symbol? form)
-        (or (let [standalone (value/value-standalone form grammar)]
-              (if standalone (stage-form standalone grammar modules options deps deps-fragment deps-native)))
-            (if (namespace form)
-              (resolve/process-namespaced-symbol form modules options deps deps-fragment
-                                                 (fn [value] (stage-form value grammar modules options deps deps-fragment deps-native)))
-              (resolve/process-standard-symbol form options deps-native)))
-        :else form))
+  (try
+    (cond (walk/form? form)
+          (to-staging-form form grammar modules options deps-fragment
+                           (fn [value] (stage-form value grammar modules options deps deps-fragment deps-native)))
+          (symbol? form)
+          (or (let [standalone (value/value-standalone form grammar)]
+                (if standalone (stage-form standalone grammar modules options deps deps-fragment deps-native)))
+              (if (namespace form)
+                (resolve/process-namespaced-symbol form modules options deps deps-fragment
+                                                   (fn [value] (stage-form value grammar modules options deps deps-fragment deps-native)))
+                (resolve/process-standard-symbol form options deps-native)))
+          :else form)
+    (catch Throwable error
+      (if (:staging/form (ex-data error))
+        (throw error)
+        (throw (ex-info (str "Staging form failed: " (pr-str form) ": "
+                            (or (ex-message error) (str error)))
+                        {:staging/form form}
+                        error))))))
 
 (defn to-staging [input grammar modules options]
   (let [deps (atom #{}) deps-fragment (atom #{}) deps-native (atom {})

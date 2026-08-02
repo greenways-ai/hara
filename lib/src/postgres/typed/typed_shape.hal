@@ -1,0 +1,139 @@
+(ns postgres.typed.typed-shape
+  (:require [postgres.typed.typed-common :as types]))
+
+(def column->field-type
+  (merge
+   (reduce (fn [out key] (assoc out key {:type key}))
+           {}
+           (keys types/+type-formats+))
+   {:map {:type :jsonb}
+    :ref {:type :uuid}
+    :array {:type :array :items {:type :jsonb}}}))
+
+(declare map-schema->shape)
+
+(defn map-schema-entry->field-type
+  "Converts one map-schema entry into a field descriptor."
+  [entry-key entry-val]
+  (let [entry-type (get entry-val :type :unknown)
+        required? (boolean (get entry-val :required false))
+        base-type (get column->field-type entry-type {:type entry-type})
+        nested-map-schema (get entry-val :map)
+        with-nested-shape
+        (if (and (or (= :map entry-type) (= :jsonb entry-type)) nested-map-schema)
+          (assoc base-type :shape (map-schema->shape nested-map-schema))
+          base-type)]
+    (assoc with-nested-shape
+           :nullable? (not required?)
+           :source (str entry-key))))
+
+(defn map-schema->shape
+  "Converts a map-schema definition into a JsonbShape."
+  [map-schema]
+  (if (map? map-schema)
+    (types/make-jsonb-shape
+     (reduce-kv (fn [fields key value]
+                  (assoc fields
+                         (keyword (name key))
+                         (map-schema-entry->field-type key value)))
+                {}
+                map-schema))
+    nil))
+
+(defn resolve-column-type
+  "Resolves a ColumnDef into a field descriptor."
+  [column]
+  (let [type-ref (:type column)
+        base (cond (types/type-ref? type-ref)
+                   (cond (= :primitive (:kind type-ref))
+                         (get column->field-type (:name type-ref)
+                              {:type (:name type-ref)})
+                         (= :enum (:kind type-ref))
+                         {:type :enum
+                          :enum-ref (or (:enum-ref column) {:ns (:ns type-ref)})}
+                         (= :ref (:kind type-ref)) {:type :uuid}
+                         :else {:type :jsonb})
+                   (keyword? type-ref)
+                   (get column->field-type type-ref {:type type-ref})
+                   :else {:type :unknown})
+        map-schema (:map-schema column)
+        map-type? (or (= :map (:name type-ref))
+                      (= :map type-ref)
+                      (= :map (:type base)))
+        column-type (if (and map-type? map-schema)
+                      (assoc base :shape (map-schema->shape map-schema))
+                      base)]
+    (assoc column-type
+           :nullable? (not (:required column))
+           :source (str (:name column)))))
+
+(defn- member?
+  [values value]
+  (reduce (fn [found item] (or found (= item value))) false values))
+
+(defn table->shape
+  "Converts a TableDef into its canonical JsonbShape."
+  [table-def]
+  (if (not (types/table-def? table-def))
+    (throw (ex-info "Expected a TableDef" {:value table-def}))
+    (let [columns (:columns table-def)
+          column-names (map (fn [column] (:name column)) columns)
+          primary-key (:primary-key table-def)
+          primary-keys (if (vector? primary-key) primary-key [primary-key])
+          explicit-fields
+          (reduce (fn [fields column]
+                    (let [ref? (= :ref (get-in column [:type :kind]))
+                          column-name (keyword (str (name (:name column))
+                                                   (if ref? "-id" "")))
+                          primary? (member? primary-keys (:name column))
+                          field-type (assoc (resolve-column-type column)
+                                            :is-ref? ref?
+                                            :nullable? (if primary? false (not (:required column)))
+                                            :source (str (:name table-def) "." (:name column)))]
+                      (assoc fields column-name field-type)))
+                  {}
+                  columns)
+          standard-fields
+          (if (member? column-names :id)
+            {}
+            {:id {:type :uuid
+                  :nullable? (not (member? primary-keys :id))
+                  :source (str (:name table-def) ".id")}})]
+      (types/make-jsonb-shape
+       (merge standard-fields explicit-fields)
+       (:name table-def)
+       :high
+       false))))
+
+(defn shape-for-table-op
+  "Returns the type or shape produced by a table operation."
+  [op table-def opts]
+  (cond (member? [:insert :get :update :delete :upsert] op)
+        (table->shape table-def)
+        (= :select op) (types/make-jsonb-array (table->shape table-def))
+        (= :id op) {:type :uuid :source (str (:name table-def) ".id")}
+        (= :exists op) {:type :boolean}
+        (= :count op) {:type :integer}
+        (= :get-field op)
+        (let [field-name (:returning opts)]
+          (get-in (table->shape table-def)
+                  [:fields (keyword field-name)]
+                  {:type :unknown :source (str (:name table-def) "." field-name)}))
+        :else nil))
+
+(defn access-field
+  "Returns a selected field type, falling back by accessor kind."
+  [shape field-name accessor-type]
+  (let [field-info (get-in shape [:fields (keyword field-name)])]
+    (or (:type field-info)
+        (cond (= :-> accessor-type) :jsonb
+              (= :->> accessor-type) :text
+              :else :unknown))))
+
+(defn shape->map
+  [shape]
+  {:fields (types/flatten-shape shape)
+   :source-table (:source-table shape)
+   :confidence (:confidence shape)})
+
+(def __tahto_load__ true)

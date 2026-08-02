@@ -1284,6 +1284,10 @@ public final class HaraContext {
     return new ArrayList<>(names);
   }
 
+  boolean isSpecialSymbol(Symbol symbol) {
+    return symbol.getNamespace() == null && SPECIAL_SYMBOLS.contains(symbol.getName());
+  }
+
   @TruffleBoundary
   public Object macroExpand(Object form, boolean recursive) {
     Object result = form;
@@ -1304,6 +1308,7 @@ public final class HaraContext {
         || !(list.nth(0) instanceof Symbol operator)) {
       return form;
     }
+    if (isSpecialSymbol(operator)) return form;
     HaraMacro macro = resolveMacro(operator);
     if (macro == null) return form;
     Object expansion = macro.expand(list, environment);
@@ -1928,9 +1933,7 @@ public final class HaraContext {
             "special-symbol?",
             value -> {
               Object raw = HaraBox.unwrap(value);
-              return raw instanceof Symbol symbol
-                  && symbol.getNamespace() == null
-                  && SPECIAL_SYMBOLS.contains(symbol.getName());
+              return raw instanceof Symbol symbol && isSpecialSymbol(symbol);
             }));
     target.define(
         "requiring-resolve", new UnaryBuiltin("requiring-resolve", this::requiringResolve));

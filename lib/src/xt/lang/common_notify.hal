@@ -1,0 +1,293 @@
+(ns xt.lang.common-notify
+  (:require [tahto.core.script :as script]
+            [std.lib.walk :as walk]))
+
+(def ^:dynamic *override-id* nil)
+
+(def ^:dynamic *override-host* nil)
+
+(def ^:dynamic *override-port* nil)
+
+;;
+;; NOTIFY FN
+;;
+
+(defn notify-defaults
+  "creates the ceremony for webpages
+
+   (notify/notify-defaults {:type :webpage})
+   => '{:host window.location.hostname,
+        :port window.location.port,
+        :scheme (:? (== window.location.protocol \"https:\") \"https\" \"http\"),
+        :type :webpage}"
+  {:added "4.0"}
+  [{:keys [type] :as notify}]
+  (cond (= type :webpage)
+        (merge {:host 'window.location.hostname
+                :port 'window.location.port
+                :scheme '(:? (== window.location.protocol
+                                 "https:")
+                             "https"
+                             "http")}
+               notify)
+
+        :else
+        notify))
+
+
+(defn- registered-runtime
+  [lang]
+  (loop [remaining (vec (vals (deref script/+scripts+)))]
+    (if (empty? remaining)
+      nil
+      (let [entry (first remaining)
+            runtime (get entry :runtime)]
+        (if (and runtime
+                 (or (nil? lang) (= lang (get entry :lang))))
+          runtime
+          (recur (vec (rest remaining))))))))
+
+(defn notify-ceremony
+  "Creates the legacy notification coordinates from runtime-owned notify data."
+  {:added "4.0"}
+  [runtime]
+  (let [{:keys [id lang type container notify]} runtime]
+    (if (not id)
+      (throw (ex-info "Runtime Id Required." {:runtime runtime}))
+      (let [notify (notify-defaults notify)
+            tag (or (get runtime :tag) type)
+            http? (or (= tag :websocket)
+                      (= tag :javafx)
+                      (= tag :browser)
+                      (= tag :browser.instance)
+                      (= tag :playground))
+            protocol (if http? :http :socket)
+            default-port (if http?
+                           (get notify :http-port)
+                           (get notify :socket-port))
+            host (or *override-host*
+                     (get notify :host)
+                     (if container
+                       "host.docker.internal"
+                       "127.0.0.1"))
+            port (or *override-port*
+                     (get notify :port)
+                     default-port)
+            opts (select-keys notify [:path :scheme])]
+        [id port lang protocol host opts]))))
+
+(defn notify-ceremony-rt
+  "Gets a started Tahto runtime for the current ceremony."
+  {:added "4.0"}
+  [lang]
+  (cond (keyword? lang)
+        (or (registered-runtime lang)
+            (throw (ex-info "Runtime not started." {:lang lang})))
+
+        (vector? lang)
+        (notify-ceremony-rt (first lang))
+
+        (list? lang)
+        (eval lang)
+
+        (map? lang)
+        lang
+
+        (nil? lang)
+        (or (registered-runtime nil)
+            (throw (ex-info "No runtimes found." {})))
+
+        :else
+        (throw (ex-info "Not a valid runtime." {:runtime lang}))))
+
+;;
+;; WAIT
+;;
+
+(defmacro wait-on-call
+  "Runs a thunk directly, or routes a target-eval thunk through direct notification rewriting."
+  [& args]
+  (let [timeout (if (= 2 (count args)) (first args) 2000)
+        thunk (last args)
+        body (if (and (list? thunk) (= (quote fn) (first thunk)))
+               (vec (drop 2 thunk))
+               [])
+        target (if (= 1 (count body)) (first body) nil)
+        op (if (list? target) (first target) nil)
+        lang (cond (= op (quote !.js)) :js
+                   (= op (quote !.lua)) :lua
+                   (= op (quote !.py)) :python
+                   :else nil)
+        code (if lang (vec (rest target)) [])]
+    (if lang
+      (list (quote xt.lang.common-notify/wait-on-fn)
+            lang (list (quote quote) code) timeout nil)
+      (list thunk))))
+
+(defn direct-notify-form
+  "Rewrites legacy callback and link notifications to direct transport values.
+   Current Tahto transports await target promises and do not require a host
+   notification server."
+  [form]
+  (walk/postwalk
+   (fn [node]
+     (if (and (list? node) (symbol? (first node)))
+       (let [op (first node)
+             op-name (name op)
+             op-ns (namespace op)
+             repl? (or (= op-ns "repl")
+                       (= op-ns "xt.lang.common-repl"))
+             link? (or (= op-ns "spec-link")
+                       (= op-ns "xt.lang.spec-link"))]
+         (cond
+           (and (= op-name ".")
+                (map? (second node))
+                (vector? (nth node 2)))
+           (let [key (first (nth node 2))]
+             (or (get (second node) key)
+                 (get (second node) (keyword key))))
+
+           (and repl? (or (= op-name "notify")
+                          (= op-name "print")
+                          (= op-name "capture")))
+           (list (quote return) (second node))
+
+           (and repl? (= op-name ">notify"))
+           (list (quote fn) [(quote value)]
+                 (list (quote return) (quote value)))
+
+           (and repl? (= op-name "<!"))
+           {:success (list (quote fn) [(quote value)]
+                           (list (quote return) (quote value)))
+            :error (list (quote fn) [(quote error)]
+                         (list (quote return) (quote error)))}
+
+           (and link? (= op-name "x:socket-connect"))
+           (list (nth node 4) nil {})
+
+           (and link? (= op-name "x:socket-send"))
+           (list (quote x:len) (nth node 2))
+
+           (and link? (= op-name "x:socket-close"))
+           (list (quote do))
+
+           (and link? (= op-name "x:notify-http"))
+           (nth node 3)
+
+           (and repl? (= op-name "socket-connect"))
+           (let [opts (nth node 3)
+                 success (if (map? opts)
+                           (or (get opts :success) (get opts "success"))
+                           nil)]
+             (if success (list success {}) node))
+
+           (and repl? (= op-name "notify-socket-handler"))
+           (list (quote return)
+                 (list (quote x:get-key)
+                       (list (quote x:json-decode) (nth node 2))
+                       "value"))
+
+           (and repl? (= op-name "notify-socket-http-handler"))
+           (list (quote return)
+                 (list (quote x:get-key)
+                       (list (quote x:json-decode) (nth node 5))
+                       "value"))
+
+           (and repl? (= op-name "notify-with-promise"))
+           (let [value (nth node 4)]
+             (if (and (list? value) (= (quote x:promise) (first value)))
+               (list (quote return)
+                     (list (quote x:promise-catch) value
+                           (list (quote fn) [(quote error)]
+                                 (list (quote return)
+                                       (list :?
+                                             (list (quote x:ex-message) (quote error))
+                                             (list (quote x:ex-message) (quote error))
+                                             (quote error))))))
+               (list (quote return) value)))
+
+           (and repl? (or (= op-name "notify-socket")
+                          (= op-name "notify-socket-full")
+                          (= op-name "notify-socket-http")
+                          (= op-name "notify-http")
+                          (= op-name "notify-http-full")))
+           (list (quote return) (nth node 3))
+
+           (and (= op-ns "promise")
+                (= op-name "x:promise"))
+           (apply list (concat [(quote x:promise)] (rest node)))
+
+           (and (= op-ns "promise")
+                (= op-name "x:promise-then"))
+           (apply list (concat [(quote x:promise-then)] (rest node)))
+
+           :else node))
+       node))
+   form))
+
+(defn direct-notify-result-form
+  "Unwraps the settled legacy common-promise envelope for direct transports."
+  [form]
+  (let [body (if (and (list? form) (= (quote do) (first form)))
+               (vec (rest form))
+               [form])
+        statements (vec (drop-last body))
+        raw-result (last body)
+        result-form (if (and (list? raw-result)
+                             (= (quote return) (first raw-result)))
+                      (second raw-result)
+                      raw-result)
+        wrapper? (list (quote and)
+                       (list (quote x:is-object?) (quote notify-result))
+                       (list (quote ==) "xt.promise"
+                             (list (quote x:get-key)
+                                   (quote notify-result) "::")))
+        unwrap (list (quote if)
+                     wrapper?
+                     (list (quote if)
+                           (list (quote ==) "rejected"
+                                 (list (quote x:get-key)
+                                       (quote notify-result) "status"))
+                           (list (quote return)
+                                 (list :?
+                                       (list (quote x:ex-message)
+                                             (list (quote x:get-key)
+                                                   (quote notify-result) "error"))
+                                       (list (quote x:ex-message)
+                                             (list (quote x:get-key)
+                                                   (quote notify-result) "error"))
+                                       (list (quote x:get-key)
+                                             (quote notify-result) "error")))
+                           (list (quote return)
+                                 (list (quote x:get-key)
+                                       (quote notify-result) "value"))))
+        tail [(list (quote var) (quote notify-result) result-form)
+              unwrap
+              (list (quote return) (quote notify-result))]]
+    (apply list (quote do) (concat statements tail))))
+
+(defn wait-on-fn
+  "Evaluates target code through the current promise-aware Tahto transport."
+  {:added "4.0"}
+  [lang code timeout & [meta]]
+  (let [form (if (= 1 (count code))
+               (first code)
+               (apply list (quote do) code))]
+    (script/eval-form! lang
+                       (direct-notify-result-form
+                        (direct-notify-form form)))))
+
+(defmacro ^{:style/indent 1}
+  wait-on
+  "sets up a code context and waits for oneshot notification"
+  {:added "4.0"}
+  [lang & code]
+  (let [default-timeout (if (or (= lang :dart) (= lang :ruby))
+                          10000
+                          2000)
+        [lang timeout] (if (vector? lang)
+                         lang
+                         [lang default-timeout])]
+    `(xt.lang.common-notify/wait-on-fn ~lang (quote ~code)
+                 ~timeout
+                 ~(meta &form))))

@@ -1,7 +1,8 @@
 (ns tahto.common.emit-fn-test
   (:use code.test)
   (:require [tahto.common.emit-fn :as function]
-            [tahto.common.emit-helper :as helper]))
+            [tahto.common.emit-helper :as helper]
+            [tahto.common.grammar-spec :as spec]))
 
 (fact "emits typed function inputs"
   (function/emit-input-default
@@ -37,6 +38,15 @@
              [:function :function :args :multiline] true)
    {})
   => "add(\n  int x,\n  int y\n)")
+
+(fact "normalizes a canonical parenthesized single arity"
+  (second
+   (spec/format-defn
+    (quote (defn identity
+             "returns its argument"
+             {:added "4.0"}
+             ([x] (return x))))))
+  => (quote (defn identity [x] (return x))))
 
 (fact "emits function bodies and header-only declarations"
   (function/emit-fn

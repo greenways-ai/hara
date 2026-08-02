@@ -14,8 +14,10 @@ public interface Eq {
   public static boolean eq(Object a, Object b) {
     if (a == b) {
       return true;
-    } else if (a == null || b == null) {
-      return false;
+    } else if (a == null) {
+      return b instanceof IEquality && ((IEquality) b).equality(null);
+    } else if (b == null) {
+      return a instanceof IEquality && ((IEquality) a).equality(null);
     } else if (a instanceof Number && b instanceof Number) {
       return Num.eq(a, b);
     } else if (a instanceof byte[] && b instanceof byte[]) {

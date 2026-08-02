@@ -56,29 +56,38 @@ public final class HaraNativeTestRunner {
             .allowIO(IOAccess.ALL)
             .allowCreateProcess(true)
             .build()) {
-      Value value = context.eval(HaraLanguage.ID, source);
-      String transfer = value.isString() ? value.asString() : value.toString();
+      Value value;
       try {
-        return parseResult(file, transfer);
-      } catch (HaraException noSummary) {
-        Matcher namespace = TEST_NAMESPACE.matcher(source);
-        if (!namespace.find() || !namespace.group(1).matches("[A-Za-z0-9_.-]+")) {
-          throw noSummary;
-        }
-        value =
-            context.eval(
-                HaraLanguage.ID,
-                testRunSource(namespace.group(1)));
-        transfer = value.isString() ? value.asString() : value.toString();
-        return parseResult(file, transfer);
+        value = context.eval(HaraLanguage.ID, source);
+      } catch (RuntimeException error) {
+        throw HaraException.withCause(
+            "Unable to load test file: " + file + " (" + error.getMessage() + ")", error);
       }
+      Matcher namespace = TEST_NAMESPACE.matcher(source);
+      if (namespace.find() && namespace.group(1).matches("[A-Za-z0-9_.-]+")) {
+        try {
+          value = context.eval(HaraLanguage.ID, testRunSource(namespace.group(1)));
+        } catch (RuntimeException error) {
+          throw HaraException.withCause(
+              "Unable to execute test namespace: "
+                  + namespace.group(1)
+                  + " ("
+                  + error.getMessage()
+                  + ")",
+              error);
+        }
+      }
+      String transfer = value.isString() ? value.asString() : value.toString();
+      return parseResult(file, transfer);
     }
   }
 
   private static String testRunSource(String namespace) {
+    String fact = System.getProperty("hara.xt.fact");
+    String selection = fact == null || fact.isBlank() ? "" : " :name \"" + fact + "\"";
     return "(let [summary (code.test/run {:namespace \""
         + namespace
-        + "\"})] (assoc (dissoc summary :results) :results (str (:results summary))))";
+        + "\"" + selection + "}) failures (filter (fn [result] (not= :passed (:status result))) (:results summary)) diagnostic (map (fn [result] (let [check (first (filter (fn [item] (not (:pass item))) (:checks result))) error (or (:error result) (:error check))] {:name (:name result) :status (:status result) :error (if error (apply str (take 400 error)) nil) :actual (:actual check) :expected (:expected check)})) failures)] (assoc (dissoc summary :results) :results (str diagnostic)))";
   }
 
   /** Discovers .hal test files from a project descriptor or explicit path. */

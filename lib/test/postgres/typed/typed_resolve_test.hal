@@ -1,0 +1,59 @@
+(ns postgres.typed.typed-resolve-test
+  (:require [postgres.typed.typed-common :as types]
+            [postgres.typed.typed-resolve :as resolve])
+  (:use code.test))
+
+(fact "canonicalizes legacy runtime PostgreSQL symbols"
+  (resolve/canonical-fn-sym 'rt.postgres.foo/bar)
+  => 'tahto.runtime.postgres.foo/bar
+  (resolve/canonical-fn-sym 'rt.postgres/one) => 'rt.postgres/one
+  (resolve/canonical-fn-sym 'other.namespace/foo) => 'other.namespace/foo
+  (resolve/canonical-fn-sym 'plain) => 'plain
+  (resolve/canonical-fn-sym :keyword) => :keyword
+  (resolve/canonical-fn-sym nil) => nil)
+
+(fact "normalizes static application values"
+  (resolve/app-name-from-static ["demo"]) => "demo"
+  (resolve/app-name-from-static "demo") => "demo"
+  (resolve/app-name-from-static nil) => nil)
+
+(fact "resolves symbol and dereferenceable function references"
+  (resolve/fn-ref->fn-sym 'blank?)
+  => 'postgres.typed.typed-resolve-test/blank?
+  (resolve/fn-ref->fn-sym
+   (atom {:module 'demo.rpc :id 'find-user}))
+  => 'demo.rpc/find-user
+  (resolve/fn-ref->fn-sym
+   (atom {:id 'demo.rpc/find-user}))
+  => 'demo.rpc/find-user)
+
+(fact "reads application names from definition and pointer metadata"
+  (resolve/fn-ref->app-name
+   nil
+   {:body-meta {:static/application ["demo"]}})
+  => "demo"
+  (resolve/fn-ref->app-name
+   (atom {:static/application ["pointer-app"]})
+   {})
+  => "pointer-app")
+
+(fact "resolves aliases and keeps qualified misses namespace-strict"
+  (types/clear-registry!)
+  (let [fn-def (types/make-fn-def "demo.rpc" "user-set-handle" [] [:jsonb] {} nil)]
+    (types/register-type! 'demo.rpc/user-set-handle fn-def)
+    [(first (resolve/resolve-called-fn
+             'rpc/user-set-handle {'rpc 'demo.rpc}))
+     (types/fn-def?
+      (second (resolve/resolve-called-fn
+               'rpc/user-set-handle {'rpc 'demo.rpc})))
+     (resolve/resolve-called-fn 'other/user-set-handle {})])
+  => ['demo.rpc/user-set-handle true ['other/user-set-handle nil]])
+
+(fact "resolves unqualified and direct function definitions"
+  (types/clear-registry!)
+  (let [fn-def (types/make-fn-def "demo" "inner" [] [:jsonb] {} nil)]
+    (types/register-type! 'demo/inner fn-def)
+    [(types/fn-def? (second (resolve/resolve-called-fn 'inner {})))
+     (types/fn-def? (resolve/resolve-function-def fn-def))
+     (types/fn-def? (resolve/resolve-function-def 'demo/inner))])
+  => [true true true])

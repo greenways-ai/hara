@@ -1,0 +1,89 @@
+(ns xt.lang.common-notify-test
+  (:require [tahto.core :as l]
+            [xt.lang.common-notify :as notify])
+  (:use code.test))
+
+^{:seedgen/root {:all true, :langs [:js :lua :python]}}
+(l/script- :js
+  {:runtime :basic
+   :require [[xt.lang.common-lib :as k]
+             [xt.lang.common-repl :as repl]]})
+
+(l/script- :lua
+  {:runtime :basic
+   :require [[xt.lang.common-lib :as k]
+             [xt.lang.common-repl :as repl]]})
+
+(l/script- :python
+  {:runtime :basic
+   :require [[xt.lang.common-lib :as k]
+             [xt.lang.common-repl :as repl]]})
+
+(fact:global
+ {:setup [(l/rt:restart)]
+ :teardown [(l/rt:stop)]})
+
+^{:refer xt.lang.common-notify/notify-defaults :added "4.0"}
+(fact "creates the ceremony for webpages"
+
+  (notify/notify-defaults {:type :webpage})
+  => '{:host window.location.hostname,
+       :port window.location.port,
+       :scheme (:? (== window.location.protocol "https:") "https" "http"),
+       :type :webpage})
+
+^{:refer xt.lang.common-notify/notify-ceremony :added "4.0"}
+(fact "creates coordinates from runtime-owned notify data"
+
+  (notify/notify-ceremony
+   {:id :js.basic
+    :lang :js
+    :type :basic
+    :notify {:socket-port 19001}})
+  => [:js.basic 19001 :js :socket "127.0.0.1" {}]
+
+  (notify/notify-ceremony
+   {:id :browser
+    :lang :js
+    :type :browser
+    :notify {:http-port 19002 :path "/notify"}})
+  => [:browser 19002 :js :http "127.0.0.1" {:path "/notify"}])
+
+^{:refer xt.lang.common-notify/notify-ceremony-rt :added "4.0"}
+(fact "gets a started runtime for the ceremony"
+
+  (get (notify/notify-ceremony-rt :js) :lang)
+  => :js)
+
+^{:refer xt.lang.common-notify/wait-on-call :added "4.0"}
+(fact "runs synchronous compatibility thunks directly"
+
+  (notify/wait-on-call (fn [] "hello"))
+  => "hello"
+
+  (notify/wait-on-call 20 (fn [] 42))
+  => 42)
+
+^{:refer xt.lang.common-notify/wait-on-fn :added "4.0"}
+(fact "wait-on helper for in runtime calls")
+
+^{:refer xt.lang.common-notify/wait-on :added "4.0"}
+(fact "sets up a code context and waits for oneshot notification"
+
+  (notify/wait-on :js
+    (repl/notify 1))
+  => 1
+
+  (notify/wait-on :lua
+    (repl/notify 1))
+  => 1
+
+  (notify/wait-on :python
+    (repl/notify 1))
+  => 1)
+
+(comment
+  (s/seedgen-benchadd 'xt.lang.common-notify {:lang [:r] :write true})
+  (s/seedgen-benchadd 'xt.lang.common-notify {:lang [:dart] :write true})
+  (s/seedgen-langadd 'xt.lang.common-notify {:lang [:lua :python] :write true})
+  (s/seedgen-langremove 'xt.lang.common-notify {:lang [:lua :python] :write true}))

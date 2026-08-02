@@ -41,11 +41,17 @@
      :link links
      :code {}
      :fragment {}}))
-
 (defn configure-module!
   [lang config]
   (let [module (namespace-symbol)
-        value (module-config module config)]
+        current (get (deref +modules+) module)
+        value (module-config module config)
+        value (assoc value
+                     :code (or (:code current) {})
+                     :fragment (or (:fragment current) {}))
+        value (if (:native current)
+                (assoc value :native (:native current))
+                value)]
     (swap! +modules+ assoc module value)
     value))
 
@@ -83,12 +89,13 @@
   (let [module (namespace-symbol)
         symbol (second form)
         id (symbol-id symbol)
+        op (first form)
         entry {:id id
                :module module
                :lang :xtalk
                :section :code
-               :op 'defn
-               :op-key :defn
+               :op op
+               :op-key (keyword (name op))
                :form form
                :form-input form}]
     (swap! +modules+
@@ -248,31 +255,93 @@
         (let [module (get (deref +modules+) (:module entry))
               result (compile-one lang (:form-input entry) module entry)
               dependencies (vec (:code (:dependencies result)))
-              nested (reduce (fn [[seen sources] dependency]
-                               (let [[next-seen next-sources]
-                                     (dependency-source lang dependency seen)]
+              nested (reduce (fn [state dependency]
+                               (let [seen (nth state 0)
+                                     sources (nth state 1)
+                                     next-state (dependency-source lang dependency seen)
+                                     next-seen (nth next-state 0)
+                                     next-sources (nth next-state 1)]
                                  [next-seen (into sources next-sources)]))
                              [emitted []]
                              dependencies)
-              seen (assoc (first nested) qualified true)
-              sources (conj (second nested) (:output result))]
+              seen (assoc (nth nested 0) qualified true)
+              sources (conj (nth nested 1) (:output result))]
           [seen sources])))))
+
+(defn- lua-expression-form
+  [form]
+  (if (and (list? form) (= (quote do) (first form)))
+    (let [body (vec (rest form))
+          final-form (last body)
+          returned (if (and (list? final-form)
+                            (= (quote return) (first final-form)))
+                     final-form
+                     (list (quote return) final-form))]
+      (apply list (quote do)
+             (conj (vec (drop-last body)) returned)))
+    form))
+
+(defn- js-expression-form
+  [form]
+  (if (and (list? form) (= (quote do) (first form)))
+    (let [body (vec (rest form))
+          final-form (last body)
+          returned (if (and (list? final-form)
+                            (= (quote return) (first final-form)))
+                     final-form
+                     (list (quote return) final-form))
+          body (conj (vec (drop-last body)) returned)]
+      (list (apply list (quote fn) [] body)))
+    form))
+
+(defn- lua-return-output
+  [output]
+  (if (string/starts-with? output "local ")
+    (let [index (string/last-index-of output "\nend\n")
+          offset (+ index 5)]
+      (str (string/slice output 0 offset)
+           "return "
+           (string/slice output offset)))
+    (str "return " output)))
 
 (defn compile-form
   [lang module form]
-  (let [module-config (or (get (deref +modules+) module)
+  (let [lua-do? (and (= lang :lua)
+                     (list? form)
+                     (= (quote do) (first form)))
+        js-do? (and (= lang :js)
+                    (list? form)
+                    (= (quote do) (first form)))
+        python-do? (and (= lang :python)
+                        (list? form)
+                        (= (quote do) (first form)))
+        form (cond lua-do? (lua-expression-form form)
+                   js-do? (js-expression-form form)
+                   python-do? (js-expression-form form)
+                   :else form)
+        module-config (or (get (deref +modules+) module)
                           (module-config module {}))
         result (compile-one lang form module-config nil)
         dependencies (vec (:code (:dependencies result)))
-        compiled (reduce (fn [[seen sources] dependency]
-                           (let [[next-seen next-sources]
-                                 (dependency-source lang dependency seen)]
+        compiled (reduce (fn [state dependency]
+                           (let [seen (nth state 0)
+                                 sources (nth state 1)
+                                 next-state (dependency-source lang dependency seen)
+                                 next-seen (nth next-state 0)
+                                 next-sources (nth next-state 1)]
                              [next-seen (into sources next-sources)]))
                          [{} []]
                          dependencies)
         expression (:output result)
-        expression (if (= lang :lua) (str "return " expression) expression)
-        sources (conj (second compiled) expression)]
+        expression (if (and (= lang :lua) (not lua-do?))
+                     (lua-return-output expression)
+                     expression)
+        expression (if (and (= lang :js)
+                            (not js-do?)
+                            (string/starts-with? expression "{"))
+                     (str "(" expression ")")
+                     expression)
+        sources (conj (nth compiled 1) expression)]
     (string/join "\n" sources)))
 
 (defn restart!

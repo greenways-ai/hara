@@ -1,0 +1,106 @@
+(ns postgres.core-test
+  (:require [postgres.core :as pg]
+            [postgres.core.builtin :as builtin]
+            [tahto.core.registry :as registry]
+            [tahto.core.script :as script])
+  (:use code.test))
+
+(defn emit [form]
+  (script/compile-form :postgres 'postgres.core-test form))
+
+(fact "registers the versioned PostgreSQL language book"
+  (:lang (registry/registry-book :postgres :default nil))
+  => :postgres
+
+  (get-in (registry/registry-book :postgres :default nil)
+          [:selection :coordinate :grammar/version])
+  => 1)
+
+(fact "preserves the Foundation builtin template contract"
+  (builtin/pg-tmpl 'hello)
+  => '(def$.pg hello hello)
+
+  (macroexpand-1 '(pg/abs -3))
+  => '(abs -3))
+
+(fact "emits SQL clause vectors and string literals"
+  (emit [:select "hello" :as 'message])
+  => "SELECT 'hello' AS message")
+
+(fact "emits exported PostgreSQL builtins through the facade"
+  (emit '(pg/abs -3))
+  => "abs(-3)"
+
+  (emit '(pg/jsonb-build-object "a" 1))
+  => "jsonb_build_object('a',1)")
+
+(fact "emits PostgreSQL JSON field access"
+  (emit '(pg/field-id m :field))
+  => "coalesce(m ->> ':field_id',(m -> :field) ->> 'id')")
+
+(fact "emits basic DML aliases"
+  (emit '(pg/b:select 1))
+  => "SELECT 1"
+
+  (emit '(pg/b:update t {:a 1}))
+  => "UPDATE t \"a\" = 1"
+
+  (emit '(pg/b:insert t {:a 1}))
+  => "INSERT t \"a\" = 1"
+
+  (emit '(pg/b:delete t))
+  => "DELETE t"
+
+  (emit '(pg/perform 1))
+  => "PERFORM 1")
+
+(fact "emits array, cast, and clock helpers"
+  (emit '(pg/ARRAY 1 2 3))
+  => "ARRAY[1,2,3]"
+
+  (emit '(++ value :uuid))
+  => "(value)::UUID"
+
+  (emit '(pg/time-ms))
+  => "((bigint)1000 * extract(epoch FROM now()))")
+
+(fact "keeps entity coordinate helpers executable without a database"
+  (pg/name {:id 'Task :static/schema "scratch"})
+  => "Task"
+
+  (pg/full {:id 'Task :static/schema "scratch"})
+  => ["scratch" "Task"]
+
+  (pg/full-str {:id 'Task :static/schema "scratch"})
+  => "[\"scratch\",\"Task\"]")
+
+(fact "emits relation and JSON mapping helpers"
+  (emit '(pg/map:rel f rel))
+  => "jsonb_agg(f(o_ret)) FROM rel AS o_ret"
+
+  (emit '(pg/map:js f arr))
+  => "coalesce(jsonb_agg(f(o_ret)),jsonb_build_array())\nFROM jsonb_array_elements(arr) AS o_ret")
+
+(fact "emits structured PostgreSQL exceptions and assertions"
+  (emit '(pg/throw {:tag :invalid :value 3}))
+  => "RAISE EXCEPTION USING DETAIL = (jsonb_build_object('tag',':invalid','value',3))::TEXT, MESSAGE = 'nil'"
+
+  (emit '(pg/error value))
+  => "RAISE EXCEPTION USING DETAIL = (jsonb_build_object('status','error','value',value))::TEXT, MESSAGE = 'nil'"
+
+  (emit '(pg/assert (= value 3) [:invalid {:expected 3}]))
+  => "IF NOT (value = 3) THEN\n  RAISE EXCEPTION USING DETAIL = (jsonb_build_object('status','error','tag',':invalid','expected',3))::TEXT, MESSAGE = ':invalid';\nEND IF")
+
+(fact "emits procedural PostgreSQL blocks"
+  (emit '(pg/get-stack-diagnostics))
+  => "GET STACKED DIAGNOSTICS\n  e_code := RETURNED_SQLSTATE,\n  e_msg := MESSAGE_TEXT,\n  e_detail := PG_EXCEPTION_DETAIL,\n  e_hint := PG_EXCEPTION_HINT,\n  e_context := PG_EXCEPTION_CONTEXT"
+
+  (emit '(pg/do:reduce out merge-value :jsonb values))
+  => "DECLARE e JSONB;\nBEGIN\n  FOREACH e IN ARRAY values LOOP\n    out := merge_value(out,e);\n  END LOOP;\n  RETURN out;\nEND"
+
+  (emit '(pg/do:plpgsql (pg/perform (refresh-cache))))
+  => "DO $$\nBEGIN\n  PERFORM refresh_cache();\nEND\n$$ LANGUAGE plpgsql")
+
+(fact "emits enum sampling through enum_range"
+  (emit '(pg/random-enum :status))
+  => "SELECT p FROM unnest(enum_range((NULL)::STATUS)) AS p ORDER BY random() LIMIT 1")

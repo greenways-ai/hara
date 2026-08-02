@@ -21,13 +21,13 @@
    ["const net=require(\"net\"),vm=require(\"vm\"),readline=require(\"readline\");"
     (str "const socket=net.createConnection({host:\"127.0.0.1\",port:" port "});")
     "const rl=readline.createInterface({input:socket,crlfDelay:Infinity});"
-    "const context=vm.createContext({});context.globalThis=context;"
+    "const newContext=()=>{const context=vm.createContext({TextEncoder,TextDecoder,require,process});context.globalThis=context;return context;};"
     "let chain=Promise.resolve();"
     "const raw=(kind,value)=>({type:\"raw\",return:kind,value:String(value)});"
     "const encode=(value)=>{if(value===null||typeof value===\"string\"||typeof value===\"boolean\")return value;if(typeof value===\"number\"){if(Number.isSafeInteger(value))return value;return {\"$tahto\":\"float\",value:String(value)};}if(Array.isArray(value))return value.map(encode);if(typeof value===\"object\"){const out={};for(const [key,item] of Object.entries(value))out[key]=encode(item);return out;}return String(value);};"
     "const shape=(value)=>{const kind=value===null?\"nil\":Array.isArray(value)?\"array\":typeof value;if(value===null)return {type:\"data\",return:kind,value:null};if(kind===\"string\"||kind===\"number\"||kind===\"boolean\")return {type:\"data\",return:kind,value:encode(value)};if(kind===\"undefined\"||kind===\"function\"||kind===\"symbol\"||kind===\"bigint\")return raw(kind,value);try{JSON.stringify(value);return {type:\"data\",return:kind,value:encode(value)};}catch(_){return raw(kind,value);}};"
     "const thrown=(error)=>({name:error&&error.name||\"Error\",message:error&&error.message||String(error),stack:error&&error.stack||null,value:String(error)});"
-    "rl.on(\"line\",(line)=>{chain=chain.then(async()=>{let request;try{request=JSON.parse(line);let value=vm.runInContext(request.source,context,{timeout:request.timeout});value=await Promise.resolve(value);socket.write(JSON.stringify({id:request.id,ok:true,response:shape(value)})+\"\\n\");}catch(error){socket.write(JSON.stringify({id:request&&request.id,ok:false,error:thrown(error)})+\"\\n\");}});});"]))
+    "rl.on(\"line\",(line)=>{chain=chain.then(async()=>{let request;try{request=JSON.parse(line);let value=vm.runInContext(request.source,newContext(),{timeout:request.timeout});value=await Promise.resolve(value);socket.write(JSON.stringify({id:request.id,ok:true,response:shape(value)})+\"\\n\");}catch(error){socket.write(JSON.stringify({id:request&&request.id,ok:false,error:thrown(error)})+\"\\n\");}});});"]))
 
 (defn- python-source
   [port]
@@ -67,7 +67,7 @@
    "\n"
     ["local socket=require('socket');cjson=require('cjson')"
     (str "local wire=assert(socket.connect('127.0.0.1'," port "))")
-    "local function encode(value) local kind=type(value);if kind=='number' and value~=math.floor(value) then return {['$tahto']='float',value=tostring(value)} end;if kind=='table' then local out={};for key,item in pairs(value) do out[key]=encode(item) end;return out end;return value end"
+    "local function encode(value) local kind=type(value);if kind=='number' and value~=math.floor(value) then return {['$tahto']='float',value=tostring(value)} end;if kind=='table' then local mt=getmetatable(value);local out={};for key,item in pairs(value) do out[key]=encode(item) end;if mt==cjson.array_mt then setmetatable(out,cjson.array_mt) end;return out end;return value end"
     "local function shape(value) local kind=type(value);if value==nil then kind='nil' end;return {type='data',['return']=kind,value=encode(value)} end"
     "while true do local line=wire:receive('*l');if not line then break end;local request=nil;local ok,response=pcall(function() request=cjson.decode(line);local chunk,load_error=loadstring(request.source);if not chunk then error(load_error) end;local value=chunk();return {id=request.id,ok=true,response=shape(value)} end);if not ok then response={id=request and request.id or nil,ok=false,error={name='Error',message=tostring(response),stack=debug.traceback(),value=tostring(response)}} end;wire:send(cjson.encode(response)..'\\n') end"]))
 
@@ -270,6 +270,9 @@
 (defn- wire-value
   [value]
   (cond
+    (nil? value)
+    nil
+
     (vector? value)
     (vec (map wire-value value))
 
@@ -301,6 +304,9 @@
                       "Target evaluation failed")
                   {:error/type :tahto/target
                    :target (get-in frame [:context :lang])
+                   :target-source-tail (vec (take-last 4
+                                            (string/split-lines
+                                             (get-in frame [:exchange :request "source"]))))
                    :target-error error}))))))
 
 (def +response-plugin+

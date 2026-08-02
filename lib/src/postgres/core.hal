@@ -1,0 +1,11 @@
+(ns postgres.core
+  (:require [postgres.core.addon]
+            [postgres.core.builtin]
+            [std.foundation :as f
+             :exclude [abs assert case concat count format max min mod name
+                       replace repeat reverse bit-and bit-or]]))
+
+(f/intern-all postgres.core.builtin
+              postgres.core.addon)
+
+(def __tahto_load__ true)

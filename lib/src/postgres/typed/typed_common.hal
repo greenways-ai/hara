@@ -1,0 +1,375 @@
+(ns postgres.typed.typed-common
+  (:require [std.foundation.string :as string]))
+
+(def +type-formats+
+  {:uuid      {:openapi {:type "string" :format "uuid"}
+               :jschema {:type "string" :format "uuid"}
+               :ts "string"}
+   :text      {:openapi {:type "string"}
+               :jschema {:type "string"}
+               :ts "string"}
+   :citext    {:openapi {:type "string"}
+               :jschema {:type "string"}
+               :ts "string"}
+   :boolean   {:openapi {:type "boolean"}
+               :jschema {:type "boolean"}
+               :ts "boolean"}
+   :integer   {:openapi {:type "integer"}
+               :jschema {:type "integer"}
+               :ts "number"}
+   :bigint    {:openapi {:type "integer" :format "int64"}
+               :jschema {:type "integer" :format "int64"}
+               :ts "number"}
+   :smallint  {:openapi {:type "integer"}
+               :jschema {:type "integer"}
+               :ts "number"}
+   :numeric   {:openapi {:type "number"}
+               :jschema {:type "number"}
+               :ts "number"}
+   :float     {:openapi {:type "number" :format "float"}
+               :jschema {:type "number"}
+               :ts "number"}
+   :double    {:openapi {:type "number" :format "double"}
+               :jschema {:type "number"}
+               :ts "number"}
+   :timestamp {:openapi {:type "string" :format "date-time"}
+               :jschema {:type "string" :format "date-time"}
+               :ts "string"}
+   :date      {:openapi {:type "string" :format "date"}
+               :jschema {:type "string" :format "date"}
+               :ts "string"}
+   :time      {:openapi {:type "string" :format "time"}
+               :jschema {:type "string" :format "time"}
+               :ts "string"}
+   :jsonb     {:openapi {:type "object"}
+               :jschema {:type "object"}
+               :ts "Record<string, any>"}
+   :bytea     {:openapi {:type "string" :format "binary"}
+               :jschema {:type "string" :format "binary"}
+               :ts "string"}
+   :void      {:openapi {:type "object"}
+               :jschema {:type "object"}
+               :ts "void"}
+   :keyword   {:openapi {:type "string"}
+               :jschema {:type "string"}
+               :ts "string"}})
+
+(defn- snake-case
+  [value]
+  (let [value (str value)
+        lowered (string/lower value)]
+    (loop [index 0 output ""]
+      (if (= index (string/length value))
+        output
+        (let [ch (string/char-at value index)
+              lower-ch (string/char-at lowered index)
+              separator? (or (= ch "-") (= ch " "))
+              hump? (and (> index 0) (not separator?) (not= ch lower-ch))]
+          (recur (inc index)
+                 (str output
+                      (if (or separator? hump?) "_" "")
+                      (if separator? "" lower-ch))))))))
+
+(defn normalize-key
+  "Converts a structured key to a snake_case string."
+  [key]
+  (snake-case (name key)))
+
+(defn emitted-key
+  "Preserves literal string keys and normalizes structured keys."
+  [key]
+  (cond (string? key) key
+        (or (keyword? key) (symbol? key)) (normalize-key key)
+        :else (str key)))
+
+(defn- ts-first-char?
+  [ch]
+  (string/includes? "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$" ch))
+
+(defn- ts-rest-char?
+  [ch]
+  (string/includes? "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$" ch))
+
+(defn- ts-identifier?
+  [value]
+  (and (> (string/length value) 0)
+       (ts-first-char? (string/char-at value 0))
+       (loop [index 1]
+         (if (= index (string/length value))
+           true
+           (if (ts-rest-char? (string/char-at value index))
+             (recur (inc index))
+             false)))))
+
+(defn typescript-key
+  "Quotes invalid TypeScript property names."
+  [key]
+  (let [value (emitted-key key)]
+    (if (ts-identifier? value) value (pr-str value))))
+
+(def PRIMITIVE-TYPES
+  #{:uuid :text :citext :boolean :integer :bigint :smallint :numeric
+    :float :double :timestamp :date :time :jsonb :bytea :void :keyword})
+(def TYPE-KINDS
+  #{:primitive :enum :table :ref :array :composite
+    :jsonb-shape :jsonb-merge :jsonb-array :union :unknown})
+(def CONFIDENCE-LEVELS #{:high :medium :low})
+
+(defstruct TypeRef [kind ns name constraints])
+(defstruct EnumDef [ns name values dbschema])
+(defstruct ColumnDef [name type required default constraints enum-ref
+                      scope foreign map-schema ref-info unique primary])
+(defstruct TableDef [ns name columns primary-key addons entity-meta dbschema])
+(defstruct FnDef [ns name inputs output body-meta dbschema])
+(defstruct FnArg [name type modifiers role])
+(defstruct JsonbShape [fields source-table confidence nullable?])
+(defstruct JsonbPath [segments root-var])
+(defstruct JsonbMerge [left right])
+(defstruct JsonbArray [element-type])
+(defstruct TypeUnion [types])
+(defstruct JsonbInference [return-shape intermediate-vars operations-detected])
+(defstruct BindingContext [bindings jsonb-shapes jsonb-paths parent])
+
+(defn type-ref? [value] (instance? TypeRef value))
+(defn table-def? [value] (instance? TableDef value))
+(defn enum-def? [value] (instance? EnumDef value))
+(defn fn-def? [value] (instance? FnDef value))
+(defn jsonb-shape? [value] (instance? JsonbShape value))
+(defn jsonb-path? [value] (instance? JsonbPath value))
+(defn jsonb-merge? [value] (instance? JsonbMerge value))
+(defn jsonb-array? [value] (instance? JsonbArray value))
+(defn type-union? [value] (instance? TypeUnion value))
+(defn binding-context? [value] (instance? BindingContext value))
+
+(defn primitive? [type] (boolean (get +type-formats+ type)))
+(defn table? [type]
+  (or (and (type-ref? type) (= :table (:kind type))) (table-def? type)))
+(defn enum? [type]
+  (or (and (type-ref? type) (= :enum (:kind type))) (enum-def? type)))
+(defn ref? [type]
+  (and (type-ref? type) (= :ref (:kind type))))
+
+(def *type-registry* (atom {}))
+
+(defn valid-key?
+  "Returns true for a non-empty namespaced symbol."
+  [key]
+  (boolean (and (symbol? key)
+                (namespace key)
+                (> (string/length (namespace key)) 0)
+                (> (string/length (name key)) 0))))
+
+(defn register-type!
+  "Registers a type definition under a namespaced symbol."
+  [key type-def]
+  (if (valid-key? key)
+    (swap! *type-registry* assoc key type-def)
+    (throw (ex-info "Invalid registry key. Must be a namespaced symbol like 'ns/name"
+                    {:key key
+                     :type (type key)
+                     :help "Use (symbol \"namespace\" \"name\") to construct valid keys"}))))
+
+(defn get-type [key] (get @*type-registry* key))
+(defn clear-registry! [] (reset! *type-registry* {}))
+
+(defn type-key
+  "Returns a stable symbol key for a typed definition."
+  [type-def]
+  (let [ns-value (:ns type-def)
+        name-value (:name type-def)]
+    (if ns-value
+      (symbol (str ns-value) (str name-value))
+      (symbol (str name-value)))))
+
+(defn empty-typed [] {:tables {} :enums {} :functions {}})
+
+(defn add-typed
+  [typed type-def]
+  (cond (table-def? type-def)
+        (assoc-in typed [:tables (type-key type-def)] type-def)
+        (enum-def? type-def)
+        (assoc-in typed [:enums (type-key type-def)] type-def)
+        (fn-def? type-def)
+        (assoc-in typed [:functions (type-key type-def)] type-def)
+        :else typed))
+
+(defn analysis->typed
+  [analysis]
+  (reduce add-typed
+          (empty-typed)
+          (concat (:tables analysis) (:enums analysis) (:functions analysis))))
+
+(defn merge-typed
+  [& typed-maps]
+  (reduce (fn [acc value]
+            (let [with-tables (update acc :tables merge (:tables value))
+                  with-enums (update with-tables :enums merge (:enums value))]
+              (update with-enums :functions merge (:functions value))))
+          (empty-typed)
+          typed-maps))
+
+(defn make-type-ref
+  ([kind] (make-type-ref kind nil nil nil))
+  ([kind ns-value name-value] (make-type-ref kind ns-value name-value nil))
+  ([kind ns-value name-value constraints]
+   (TypeRef kind ns-value name-value constraints)))
+
+(defn make-enum-def [ns-value name-value values dbschema]
+  (EnumDef ns-value name-value (reduce conj #{} values) dbschema))
+
+(defn make-column-def
+  ([name-value type-value] (make-column-def name-value type-value {}))
+  ([name-value type-value opts]
+   (ColumnDef name-value type-value
+              (:required opts) (:default opts) (:constraints opts) (:enum-ref opts)
+              (:scope opts) (:foreign opts) (:map-schema opts) (:ref-info opts)
+              (:unique opts) (:primary opts))))
+
+(defn make-table-def
+  ([ns-value name-value columns primary-key]
+   (make-table-def ns-value name-value columns primary-key nil nil nil))
+  ([ns-value name-value columns primary-key addons entity-meta dbschema]
+   (TableDef ns-value name-value columns primary-key addons entity-meta dbschema)))
+
+(defn make-fn-def [ns-value name-value inputs output body-meta dbschema]
+  (FnDef ns-value name-value inputs output body-meta dbschema))
+
+(defn make-jsonb-shape
+  ([fields] (make-jsonb-shape fields nil :medium false))
+  ([fields source-table] (make-jsonb-shape fields source-table :medium false))
+  ([fields source-table confidence] (make-jsonb-shape fields source-table confidence false))
+  ([fields source-table confidence nullable?]
+   (JsonbShape fields source-table confidence nullable?)))
+
+(defn make-jsonb-merge [left right] (JsonbMerge left right))
+(defn make-jsonb-array [element-type] (JsonbArray element-type))
+(defn make-type-union [types] (TypeUnion (vec (distinct types))))
+(defn make-jsonb-path
+  ([segments] (make-jsonb-path segments nil))
+  ([segments root-var] (JsonbPath segments root-var)))
+(defn make-jsonb-inference [return-shape intermediate-vars operations-detected]
+  (JsonbInference return-shape intermediate-vars operations-detected))
+(defn make-context
+  ([] (BindingContext {} {} {} nil))
+  ([bindings] (BindingContext bindings {} {} nil))
+  ([bindings shapes] (BindingContext bindings shapes {} nil))
+  ([bindings shapes paths] (BindingContext bindings shapes paths nil)))
+
+(defn push-scope [ctx] (BindingContext {} {} {} ctx))
+(defn pop-scope [ctx] (:parent ctx))
+
+(defn- options-map
+  [options]
+  (reduce (fn [out pair] (assoc out (first pair) (second pair)))
+          {}
+          (partition 2 options)))
+
+(defn add-binding
+  [ctx var-name type-info & options]
+  (let [opts (options-map options)
+        with-binding (update ctx :bindings assoc var-name type-info)
+        with-shape (if (:shape opts)
+                     (update with-binding :jsonb-shapes assoc var-name (:shape opts))
+                     with-binding)]
+    (if (:path opts)
+      (update with-shape :jsonb-paths assoc var-name (:path opts))
+      with-shape)))
+
+(defn lookup-binding [ctx var-name]
+  (let [value (get-in ctx [:bindings var-name])]
+    (if value
+      value
+      (let [parent (:parent ctx)]
+        (if parent (lookup-binding parent var-name) nil)))))
+
+(declare shape-at-path empty-jsonb-shape)
+
+(defn get-var-shape [ctx var-name]
+  (let [direct (get-in ctx [:jsonb-shapes var-name])
+        path (get-in ctx [:jsonb-paths var-name])]
+    (or direct
+        (if (and path
+                 (not (and (= var-name (:root-var path))
+                           (empty? (:segments path)))))
+          (let [root-shape (get-var-shape ctx (:root-var path))]
+            (if root-shape (shape-at-path root-shape (:segments path)) nil))
+          nil)
+        (let [parent (:parent ctx)]
+          (if parent (get-var-shape parent var-name) nil)))))
+
+(defn set-var-shape [ctx var-name shape]
+  (update ctx :jsonb-shapes assoc var-name shape))
+
+(defn get-var-path [ctx var-name]
+  (or (get-in ctx [:jsonb-paths var-name])
+      (let [parent (:parent ctx)]
+        (if parent (get-var-path parent var-name) nil))))
+
+(defn set-var-path [ctx var-name path]
+  (update ctx :jsonb-paths assoc var-name path))
+
+(defn empty-jsonb-shape [] (JsonbShape {} nil :low false))
+
+(defn shape-at-path
+  [shape segments]
+  (cond (nil? shape) nil
+        (empty? segments) shape
+        :else
+        (let [field-info (get-in shape [:fields (first segments)])
+              nested-shape (:shape field-info)
+              remaining (rest segments)]
+          (cond (and (empty? remaining) (jsonb-shape? nested-shape)) nested-shape
+                (and (empty? remaining) (= :jsonb (:type field-info)))
+                (or nested-shape (empty-jsonb-shape))
+                (jsonb-shape? nested-shape) (shape-at-path nested-shape remaining)
+                :else nil))))
+
+(defn- require-shape [shape]
+  (if (jsonb-shape? shape)
+    shape
+    (throw (ex-info "Expected a JsonbShape" {:value shape}))))
+
+(defn add-key [shape key type-info]
+  (update (require-shape shape) :fields assoc key type-info))
+(defn get-key-type [shape key]
+  (get-in (require-shape shape) [:fields key]))
+(defn has-key? [shape key]
+  (let [missing ::missing]
+    (not= missing (get (:fields (require-shape shape)) key missing))))
+
+(defn- merge-field-type [left right]
+  (cond (= left right) left
+        (and (map? left) (map? right) (= (:type left) (:type right)) (:type left))
+        (merge left right)
+        (or (= left :unknown) (= left :jsonb)) right
+        (or (= right :unknown) (= right :jsonb)) left
+        :else (make-type-union [left right])))
+
+(defn merge-shapes
+  [shape1 shape2]
+  (cond (nil? shape1) shape2
+        (nil? shape2) shape1
+        (not (jsonb-shape? shape1))
+        (throw (ex-info "Expected a JsonbShape" {:value shape1}))
+        (not (jsonb-shape? shape2))
+        (throw (ex-info "Expected a JsonbShape" {:value shape2}))
+        :else
+        (let [merged-fields (merge-with merge-field-type (:fields shape1) (:fields shape2))
+              source1 (:source-table shape1)
+              source2 (:source-table shape2)
+              source-table (cond (= source1 source2) source1
+                                 (nil? source1) source2
+                                 (nil? source2) source1
+                                 :else nil)]
+          (JsonbShape merged-fields source-table :medium
+                      (or (:nullable? shape1) (:nullable? shape2))))))
+
+(defn flatten-shape
+  [shape]
+  (cond (jsonb-shape? shape) (:fields shape)
+        (jsonb-merge? shape) (merge (flatten-shape (:left shape))
+                                    (flatten-shape (:right shape)))
+        (map? shape) (if (:fields shape) (:fields shape) shape)
+        :else {}))
+
+(def __tahto_load__ true)

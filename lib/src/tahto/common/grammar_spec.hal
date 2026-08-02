@@ -36,7 +36,12 @@
         has-attr (map? attr-value)
         attr (if has-attr attr-value {})
         body-index (if has-attr (+ attr-index 1) attr-index)
-        body (as-list (drop body-index values))]
+        body (as-list (drop body-index values))
+        body (if (and (= 1 (count body))
+                      (sequential? (first body))
+                      (vector? (first (first body))))
+               (first body)
+               body)]
     [doc attr body]))
 
 (defn mixin-value

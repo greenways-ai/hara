@@ -1,0 +1,81 @@
+(ns postgres.typed.typed-shape-test
+  (:require [postgres.typed.typed-common :as types]
+            [postgres.typed.typed-shape :as shape])
+  (:use code.test))
+
+(fact "converts map-schema entries"
+  (select-keys (shape/map-schema-entry->field-type :id {:type :uuid})
+               [:type :nullable? :source])
+  => {:type :uuid :nullable? true :source ":id"}
+
+  (get-in (shape/map-schema-entry->field-type
+           :profile {:type :map :map {:name {:type :text}}})
+          [:shape :fields :name :type])
+  => :text)
+
+(fact "converts map schemas with required fields"
+  (let [result (shape/map-schema->shape
+                {:id {:type :uuid :required true}
+                 :bio {:type :text :required false}})]
+    [(get-in result [:fields :id :nullable?])
+     (get-in result [:fields :bio :nullable?])])
+  => [false true])
+
+(fact "resolves primitive, enum, ref, and nested map columns"
+  (select-keys
+   (shape/resolve-column-type
+    (types/make-column-def :id (types/make-type-ref :primitive nil :uuid)
+                           {:required true}))
+   [:type :nullable?])
+  => {:type :uuid :nullable? false}
+
+  (:type (shape/resolve-column-type
+          (types/make-column-def :status (types/make-type-ref :enum :core "Status")
+                                 {:enum-ref {:ns :core}})))
+  => :enum
+
+  (:type (shape/resolve-column-type
+          (types/make-column-def :org (types/make-type-ref :ref nil "Organisation")
+                                 {:required true})))
+  => :uuid
+
+  (get-in (shape/resolve-column-type
+           (types/make-column-def :settings (types/make-type-ref :primitive nil :map)
+                                  {:map-schema {:theme {:type :text}}}))
+          [:shape :fields :theme :type])
+  => :text)
+
+(fact "converts tables with default ids, ref suffixes, and primary nullability"
+  (let [columns [(types/make-column-def :org
+                                        (types/make-type-ref :ref nil "Organisation")
+                                        {:required true})]
+        result (shape/table->shape
+                (types/make-table-def "test" "User" columns :id))]
+    [(get-in result [:fields :id :nullable?])
+     (get-in result [:fields :org-id :type])
+     (get-in result [:fields :org-id :is-ref?])
+     (:source-table result)
+     (:confidence result)])
+  => [false :uuid true "User" :high])
+
+(fact "returns shapes for table operations"
+  (let [table (types/make-table-def "test" "User" [] :id)]
+    [(:type (shape/shape-for-table-op :id table {}))
+     (:type (shape/shape-for-table-op :exists table {}))
+     (:type (shape/shape-for-table-op :count table {}))
+     (types/jsonb-array? (shape/shape-for-table-op :select table {}))])
+  => [:uuid :boolean :integer true])
+
+(fact "accesses known and unknown fields"
+  (let [value (types/make-jsonb-shape {:id {:type :uuid}} :User)]
+    [(shape/access-field value "id" :->>)
+     (shape/access-field value "missing" :->)
+     (shape/access-field value "missing" :->>)
+     (shape/access-field value "missing" :other)])
+  => [:uuid :jsonb :text :unknown])
+
+(fact "converts shapes to plain maps"
+  (shape/shape->map (types/make-jsonb-shape {:id {:type :uuid}} :User :high))
+  => {:fields {:id {:type :uuid}}
+      :source-table :User
+      :confidence :high})

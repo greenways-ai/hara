@@ -60,11 +60,14 @@
 
 (defn- fragment-template-args [form template]
   (let [template-arglists (:arglists (meta template))
+        body (vec (drop 2 form))
+        body (if (string? (first body)) (vec (rest body)) body)
+        body (if (map? (first body)) (vec (rest body)) body)
+        args (first body)
         arglist (or (first template-arglists)
-                    (let [args (second form)]
-                      (if (vector? args) args
-                          (if (and (list? args) (vector? (first args)))
-                            (first args)))))]
+                    (if (vector? args) args
+                        (if (and (list? args) (vector? (first args)))
+                          (first args))))]
     (if arglist
       (vec arglist)
       (fail "Unable to derive standalone fragment args" {:form form}))))

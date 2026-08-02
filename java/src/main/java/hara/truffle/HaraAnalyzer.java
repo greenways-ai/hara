@@ -1802,6 +1802,9 @@ final class HaraAnalyzer {
     if (isLexicallyBound(operator)) {
       return form;
     }
+    if (context.isSpecialSymbol(operator)) {
+      return form;
+    }
     if ("defmacro".equals(operator.getName())) {
       return form;
     }

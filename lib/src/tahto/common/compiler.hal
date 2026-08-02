@@ -147,6 +147,7 @@
    (fn [rewritten hook]
      (hook rewritten
            (assoc context
+                  :grammar (:grammar selected)
                   :rewrite/phase phase
                   :tahto/hook hook)))
    form

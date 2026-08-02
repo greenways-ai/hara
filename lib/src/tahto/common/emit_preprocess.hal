@@ -10,8 +10,8 @@
 (defn macro-grammar [] base/*macro-grammar*)
 
 (defmacro with:macro-opts [options grammar & body]
-  `(binding [base/*macro-opts* ~options
-             base/*macro-grammar* ~grammar]
+  `(binding [tahto.common.preprocess-base/*macro-opts* ~options
+             tahto.common.preprocess-base/*macro-grammar* ~grammar]
      ~@body))
 
 (def to-input-form input/to-input-form)

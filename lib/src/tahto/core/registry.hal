@@ -38,6 +38,13 @@
           :versions
           {1 {:ns 'tahto.model.v1.spec-lua
               :book '+book+
+              :parent :xtalk}}}
+
+         [:postgres :default]
+         {:default-version 1
+          :versions
+          {1 {:ns 'tahto.model.v1.spec-postgres
+              :book '+book+
               :parent :xtalk}}}}))
 
 (defn- atom-value [reference]

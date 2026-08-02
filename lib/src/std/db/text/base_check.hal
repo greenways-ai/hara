@@ -63,8 +63,9 @@
         (string? argument))
 
     (= arg-type "jsonb")
-    (or (map? argument)
-        (vector? argument))
+    (boolean
+     (or (map? argument)
+         (vector? argument)))
 
     :else
     false))

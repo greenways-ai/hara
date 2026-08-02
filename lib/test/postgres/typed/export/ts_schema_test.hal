@@ -1,0 +1,41 @@
+(ns postgres.typed.export.ts-schema-test
+  (:require [std.foundation.string :as string]
+            [postgres.typed.export.ts-schema :as ts]
+            [postgres.typed.typed-common :as types])
+  (:use code.test))
+
+(fact "converts fields to TypeScript declarations"
+  (ts/field->ts [:id {:type :uuid :nullable? false}]) => "  id: string;"
+  (ts/field->ts [:name {:type :text :nullable? true}]) => "  name?: string;"
+  (ts/field->ts ["two words" {:type :boolean}]) => "  \"two words\": boolean;")
+
+(fact "converts scalar, reference, array, enum, and nested types"
+  (ts/type->ts {:type :integer}) => "number"
+  (ts/type->ts {:type :jsonb}) => "Record<string, any>"
+  (ts/type->ts {:is-ref? true}) => "string"
+  (ts/type->ts {:type :array :items {:type :text}}) => "string[]"
+  (ts/type->ts {:type :enum :enum-ref {:ns 'Status}}) => "Status"
+  (ts/type->ts {:type :jsonb
+                :shape (types/make-jsonb-shape {:id {:type :uuid}})})
+  => "{ id: string; }")
+
+(fact "emits named interfaces while preserving literal keys"
+  (let [nested (types/make-jsonb-shape {"UserProfile" {:type :array
+                                                        :items {:type :jsonb}}})
+        value (types/make-jsonb-shape {"db/sync" {:type :jsonb :shape nested}})
+        result (ts/shape->ts-interface value "IUserEvent")]
+    [(string/includes? result "\"db/sync\"")
+     (string/includes? result "UserProfile")
+     (string/includes? result "db_sync")])
+  => [true true false])
+
+(fact "generates TypeScript definitions from the registry"
+  (types/clear-registry!)
+  (types/register-type! 'demo/User
+                        (types/make-table-def "demo" "User" [] :id))
+  (types/register-type! 'demo/Status
+                        (types/make-enum-def "demo" "Status" [:active :disabled] nil))
+  (let [result (ts/generate-ts-schema)]
+    [(string/includes? result "export interface User")
+     (string/includes? result "export type Status")])
+  => [true true])
