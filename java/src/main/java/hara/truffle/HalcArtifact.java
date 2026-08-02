@@ -20,7 +20,13 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 
 /** Deterministic, host-neutral binary representation of a Hara source module. */
 final class HalcArtifact {
@@ -58,6 +64,8 @@ final class HalcArtifact {
 
   static byte[] encode(String namespace, String resource, byte[] source, Object[] forms) {
     try {
+      forms = canonicalizeSchemaReferences(namespace, forms);
+      buildSchemaIndex(namespace, forms);
       ByteArrayOutputStream payloadBytes = new ByteArrayOutputStream();
       try (DataOutputStream payload = new DataOutputStream(payloadBytes)) {
         writeString(payload, namespace);
@@ -124,7 +132,8 @@ final class HalcArtifact {
         Object[] forms = new Object[count];
         for (int index = 0; index < count; index++) forms[index] = readValue(payload);
         if (payload.read() != -1) throw invalid("trailing payload bytes");
-        return new Module(namespace, resource, sourceHash, forms, origin);
+        forms = canonicalizeSchemaReferences(namespace, forms);
+        return new Module(namespace, resource, sourceHash, forms, buildSchemaIndex(namespace, forms), origin);
       }
     } catch (EOFException error) {
       throw invalid("truncated artifact");
@@ -146,6 +155,283 @@ final class HalcArtifact {
       return namespace.getName();
     }
     throw new HaraException("HALC source does not declare a namespace");
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Object[] canonicalizeSchemaReferences(String namespace, Object[] forms) {
+    Set<String> definitions = new HashSet<>();
+    Map<String, Integer> schemaValues = new HashMap<>();
+    Map<String, String> aliases = namespaceAliases(forms);
+    for (int index = 0; index < forms.length; index++) {
+      Object form = forms[index];
+      if (!(form instanceof hara.lang.data.List<?> list) || list.count() < 2) continue;
+      if (!(list.nth(0) instanceof Symbol operator) || operator.getNamespace() != null) continue;
+      if (!(list.nth(1) instanceof Symbol name) || name.getNamespace() != null) continue;
+      if (Set.of("def", "defn", "defn-", "defmacro", "defstruct", "declare")
+          .contains(operator.getName())) {
+        definitions.add(name.getName());
+      }
+      if ("def".equals(operator.getName()) && list.count() >= 3) {
+        schemaValues.put(name.getName(), index);
+      }
+    }
+
+    Object[] canonical = forms.clone();
+    Deque<String> schemaRoots = new ArrayDeque<>();
+    for (int index = 0; index < canonical.length; index++) {
+      Object form = canonical[index];
+      if (!(form instanceof hara.lang.data.List<?> list) || list.count() < 2) continue;
+      if (!(list.nth(0) instanceof Symbol operator)
+          || operator.getNamespace() != null
+          || !("defn".equals(operator.getName()) || "defn-".equals(operator.getName()))) {
+        continue;
+      }
+      if (!(list.nth(1) instanceof Symbol name)
+          || !(name.meta() instanceof IMapType<?, ?> rawMetadata)) {
+        continue;
+      }
+      IMapType<Object, Object> metadata = (IMapType<Object, Object>) rawMetadata;
+      Object schema = metadata.lookup(Keyword.create("schema"));
+      if (!(schema instanceof hara.lang.data.List<?> reference)
+          || reference.count() != 2
+          || !(reference.nth(0) instanceof Symbol varOperator)
+          || varOperator.getNamespace() != null
+          || !"var".equals(varOperator.getName())
+          || !(reference.nth(1) instanceof Symbol target)) {
+        continue;
+      }
+      String targetNamespace = target.getNamespace();
+      if (targetNamespace == null || "-".equals(targetNamespace)) {
+        targetNamespace = namespace;
+      } else {
+        targetNamespace = aliases.getOrDefault(targetNamespace, targetNamespace);
+      }
+      if (namespace.equals(targetNamespace) && !definitions.contains(target.getName())) {
+        throw new HaraException("schema Var does not exist: " + target.display());
+      }
+      if (namespace.equals(targetNamespace)) schemaRoots.add(target.getName());
+      Symbol qualified = Symbol.create(targetNamespace, target.getName());
+      Object qualifiedReference =
+          hara.lang.data.List.Standard.from(
+              reference.meta(), new Object[] {reference.nth(0), qualified});
+      IMapType<Object, Object> qualifiedMetadata =
+          (IMapType<Object, Object>) metadata.assoc(Keyword.create("schema"), qualifiedReference);
+      Object[] values = new Object[Math.toIntExact(list.count())];
+      for (int item = 0; item < values.length; item++) values[item] = list.nth(item);
+      values[1] = name.withMeta(qualifiedMetadata);
+      canonical[index] = hara.lang.data.List.Standard.from(list.meta(), values);
+    }
+
+    Set<String> visited = new HashSet<>();
+    while (!schemaRoots.isEmpty()) {
+      String schemaName = schemaRoots.removeFirst();
+      if (!visited.add(schemaName)) continue;
+      Integer index = schemaValues.get(schemaName);
+      if (index == null) continue;
+      hara.lang.data.List<?> definition = (hara.lang.data.List<?>) canonical[index];
+      Object[] values = new Object[Math.toIntExact(definition.count())];
+      for (int item = 0; item < values.length; item++) values[item] = definition.nth(item);
+      values[2] =
+          canonicalizeNestedSchemaReferences(
+              values[2], namespace, aliases, definitions, schemaRoots);
+      canonical[index] = hara.lang.data.List.Standard.from(definition.meta(), values);
+    }
+    return canonical;
+  }
+
+  @SuppressWarnings("unchecked")
+  private static SchemaIndex buildSchemaIndex(String namespace, Object[] forms) {
+    Map<String, Object> values = new HashMap<>();
+    Map<String, Object> functions = new HashMap<>();
+    Deque<String> roots = new ArrayDeque<>();
+    for (Object form : forms) {
+      if (!(form instanceof hara.lang.data.List<?> definition) || definition.count() < 2) continue;
+      if (!(definition.nth(0) instanceof Symbol operator) || operator.getNamespace() != null) continue;
+      Object binding = definition.nth(1);
+      Symbol name = binding instanceof Symbol symbol
+          ? symbol
+          : binding instanceof IObjType object && object instanceof Symbol symbol ? symbol : null;
+      if (name == null) continue;
+      if ("def".equals(operator.getName()) && definition.count() >= 3) {
+        values.put(name.getName(), definition.nth(2));
+        continue;
+      }
+      if (!("defn".equals(operator.getName()) || "defn-".equals(operator.getName()))
+          || !(name.meta() instanceof IMapType<?, ?> rawMetadata)) continue;
+      Object schema = ((IMapType<Object, Object>) rawMetadata).lookup(Keyword.create("schema"));
+      if (schema == null) continue;
+      functions.put(namespace + "/" + name.getName(), schema);
+      collectLocalSchemaReferences(schema, namespace, roots);
+    }
+
+    Map<String, Object> definitions = new HashMap<>();
+    Set<String> visited = new HashSet<>();
+    while (!roots.isEmpty()) {
+      String name = roots.removeFirst();
+      if (!visited.add(name)) continue;
+      Object value = values.get(name);
+      if (value == null) continue;
+      definitions.put(namespace + "/" + name, value);
+      collectLocalSchemaReferences(value, namespace, roots);
+    }
+    Map<String, HalcSchema.Type> definitionTypes = new HashMap<>();
+    for (Entry<String, Object> entry : definitions.entrySet()) {
+      try {
+        definitionTypes.put(entry.getKey(), HalcSchema.normalize(entry.getValue()));
+      } catch (HaraException error) {
+        throw new HaraException("invalid schema " + entry.getKey() + ": " + error.getMessage());
+      }
+    }
+    Map<String, HalcSchema.Type> functionTypes = new HashMap<>();
+    for (Entry<String, Object> entry : functions.entrySet()) {
+      try {
+        functionTypes.put(entry.getKey(), HalcSchema.normalize(entry.getValue()));
+      } catch (HaraException error) {
+        throw new HaraException(
+            "invalid function schema " + entry.getKey() + ": " + error.getMessage());
+      }
+    }
+    Map<String, HalcSchema.Type> inferredFunctionTypes =
+        HalcSchema.inferFunctionTypes(namespace, forms, functionTypes, definitionTypes);
+    return new SchemaIndex(
+        definitions, functions, definitionTypes, functionTypes, inferredFunctionTypes);
+  }
+
+  private static void collectLocalSchemaReferences(
+      Object value, String namespace, Deque<String> output) {
+    if (value instanceof hara.lang.data.List<?> reference
+        && reference.count() == 2
+        && reference.nth(0) instanceof Symbol operator
+        && operator.getNamespace() == null
+        && "var".equals(operator.getName())
+        && reference.nth(1) instanceof Symbol target) {
+      if (namespace.equals(target.getNamespace())) output.add(target.getName());
+      return;
+    }
+    if (value instanceof ILinearType<?> values) {
+      for (int index = 0; index < values.count(); index++) {
+        collectLocalSchemaReferences(values.nth(index), namespace, output);
+      }
+    } else if (value instanceof IMapType<?, ?> map) {
+      for (Object item : map) {
+        Entry<?, ?> entry = (Entry<?, ?>) item;
+        collectLocalSchemaReferences(entry.getKey(), namespace, output);
+        collectLocalSchemaReferences(entry.getValue(), namespace, output);
+      }
+    } else if (value instanceof ISetType<?> set) {
+      for (Object item : set) collectLocalSchemaReferences(item, namespace, output);
+    }
+  }
+
+  private static Object canonicalizeNestedSchemaReferences(
+      Object value,
+      String namespace,
+      Map<String, String> aliases,
+      Set<String> definitions,
+      Deque<String> localReferences) {
+    if (value instanceof hara.lang.data.List<?> reference
+        && reference.count() == 2
+        && reference.nth(0) instanceof Symbol operator
+        && operator.getNamespace() == null
+        && "var".equals(operator.getName())
+        && reference.nth(1) instanceof Symbol target) {
+      String targetNamespace = target.getNamespace();
+      if (targetNamespace == null || "-".equals(targetNamespace)) {
+        targetNamespace = namespace;
+      } else {
+        targetNamespace = aliases.getOrDefault(targetNamespace, targetNamespace);
+      }
+      if (namespace.equals(targetNamespace)) {
+        if (!definitions.contains(target.getName())) {
+          throw new HaraException("schema Var does not exist: " + target.display());
+        }
+        localReferences.add(target.getName());
+      }
+      return hara.lang.data.List.Standard.from(
+          reference.meta(),
+          new Object[] {reference.nth(0), Symbol.create(targetNamespace, target.getName())});
+    }
+    if (value instanceof hara.lang.data.List<?> list) {
+      return hara.lang.data.List.Standard.from(list.meta(), canonicalizeLinear(list, namespace, aliases, definitions, localReferences));
+    }
+    if (value instanceof hara.lang.data.Vector<?> vector) {
+      return hara.lang.data.Vector.Standard.from(vector.meta(), canonicalizeLinear(vector, namespace, aliases, definitions, localReferences));
+    }
+    if (value instanceof IMapType<?, ?> map) {
+      Object[] entries = new Object[Math.toIntExact(map.count() * 2)];
+      int index = 0;
+      for (Object item : map) {
+        Entry<?, ?> entry = (Entry<?, ?>) item;
+        entries[index++] = canonicalizeNestedSchemaReferences(entry.getKey(), namespace, aliases, definitions, localReferences);
+        entries[index++] = canonicalizeNestedSchemaReferences(entry.getValue(), namespace, aliases, definitions, localReferences);
+      }
+      IMetadata metadata = ((IObjType) map).meta();
+      return value instanceof hara.lang.data.OrderedMap<?, ?>
+          ? hara.lang.data.OrderedMap.Standard.from(metadata, entries)
+          : hara.lang.data.Map.Standard.from(metadata, entries);
+    }
+    if (value instanceof ISetType<?> set) {
+      Object[] elements = new Object[Math.toIntExact(set.count())];
+      int index = 0;
+      for (Object element : set) {
+        elements[index++] = canonicalizeNestedSchemaReferences(element, namespace, aliases, definitions, localReferences);
+      }
+      IMetadata metadata = ((IObjType) set).meta();
+      return value instanceof hara.lang.data.OrderedSet<?>
+          ? hara.lang.data.OrderedSet.Standard.from(metadata, elements)
+          : hara.lang.data.Set.Standard.from(metadata, elements);
+    }
+    return value;
+  }
+
+  private static Object[] canonicalizeLinear(
+      ILinearType<?> values,
+      String namespace,
+      Map<String, String> aliases,
+      Set<String> definitions,
+      Deque<String> localReferences) {
+    Object[] canonical = new Object[Math.toIntExact(values.count())];
+    for (int index = 0; index < canonical.length; index++) {
+      canonical[index] = canonicalizeNestedSchemaReferences(values.nth(index), namespace, aliases, definitions, localReferences);
+    }
+    return canonical;
+  }
+
+  private static Map<String, String> namespaceAliases(Object[] forms) {
+    Map<String, String> aliases = new HashMap<>();
+    for (Object form : forms) {
+      if (!(form instanceof hara.lang.data.List<?> declaration) || declaration.count() < 2) {
+        continue;
+      }
+      if (!(declaration.nth(0) instanceof Symbol operator)
+          || operator.getNamespace() != null
+          || !"ns".equals(operator.getName())) {
+        continue;
+      }
+      for (int clauseIndex = 2; clauseIndex < declaration.count(); clauseIndex++) {
+        if (!(declaration.nth(clauseIndex) instanceof hara.lang.data.List<?> clause)
+            || clause.count() < 2
+            || !(clause.nth(0) instanceof Keyword keyword)
+            || !"require".equals(keyword.getName())) {
+          continue;
+        }
+        for (int specIndex = 1; specIndex < clause.count(); specIndex++) {
+          if (!(clause.nth(specIndex) instanceof hara.lang.data.Vector<?> spec)
+              || spec.count() < 3
+              || !(spec.nth(0) instanceof Symbol target)) {
+            continue;
+          }
+          for (int option = 1; option + 1 < spec.count(); option += 2) {
+            if (spec.nth(option) instanceof Keyword key
+                && "as".equals(key.getName())
+                && spec.nth(option + 1) instanceof Symbol alias) {
+              aliases.put(alias.getName(), target.display());
+            }
+          }
+        }
+      }
+    }
+    return aliases;
   }
 
   private static void writeValue(DataOutputStream output, Object value) throws IOException {
@@ -449,14 +735,51 @@ final class HalcArtifact {
     final String resource;
     final byte[] sourceHash;
     final Object[] forms;
+    final SchemaIndex schemas;
     final Origin origin;
 
-    Module(String namespace, String resource, byte[] sourceHash, Object[] forms, Origin origin) {
+    Module(
+        String namespace,
+        String resource,
+        byte[] sourceHash,
+        Object[] forms,
+        SchemaIndex schemas,
+        Origin origin) {
       this.namespace = namespace;
       this.resource = resource;
       this.sourceHash = sourceHash.clone();
       this.forms = forms.clone();
+      this.schemas = schemas;
       this.origin = origin;
+    }
+  }
+
+  static final class SchemaIndex {
+    final Map<String, Object> definitions;
+    final Map<String, Object> functions;
+    final Map<String, HalcSchema.Type> definitionTypes;
+    final Map<String, HalcSchema.Type> functionTypes;
+    final Map<String, HalcSchema.Type> inferredFunctionTypes;
+
+    SchemaIndex(
+        Map<String, Object> definitions,
+        Map<String, Object> functions,
+        Map<String, HalcSchema.Type> definitionTypes,
+        Map<String, HalcSchema.Type> functionTypes,
+        Map<String, HalcSchema.Type> inferredFunctionTypes) {
+      this.definitions = Map.copyOf(definitions);
+      this.functions = Map.copyOf(functions);
+      this.definitionTypes = Map.copyOf(definitionTypes);
+      this.functionTypes = Map.copyOf(functionTypes);
+      this.inferredFunctionTypes = Map.copyOf(inferredFunctionTypes);
+    }
+
+    HalcSchema.Type resolvedFunctionType(String qualifiedVar) {
+      HalcSchema.Type schema = functionTypes.get(qualifiedVar);
+      if (schema instanceof HalcSchema.Reference reference) {
+        return definitionTypes.getOrDefault(reference.name(), schema);
+      }
+      return schema;
     }
   }
 

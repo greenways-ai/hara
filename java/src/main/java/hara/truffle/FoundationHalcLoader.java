@@ -45,7 +45,7 @@ final class FoundationHalcLoader {
     // Execution errors must escape even in auto mode so HaraContext can roll back its snapshot.
     return Attempt.loaded(
         HaraLanguage.compileHalc(
-                module.forms, "classpath:" + HalcArtifact.FOUNDATION_HALC_RESOURCE)
+                module, "classpath:" + HalcArtifact.FOUNDATION_HALC_RESOURCE)
             .call());
   }
 

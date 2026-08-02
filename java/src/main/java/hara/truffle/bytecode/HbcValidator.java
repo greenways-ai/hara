@@ -1,6 +1,7 @@
 package hara.truffle.bytecode;
 
 import hara.lang.data.types.ILinearType;
+import hara.truffle.HalcSchema;
 import hara.truffle.bytecode.HbcProgram.Function;
 import hara.truffle.bytecode.HbcProgram.Instruction;
 import hara.truffle.bytecode.HbcProgram.Opcode;
@@ -11,7 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Rust-compatible structural and abstract-stack validation for HBC3. */
+/** Rust-compatible structural and abstract-stack validation for HBC4. */
 public final class HbcValidator {
   public static final int MAX_CONSTANTS = 1 << 24;
   public static final int MAX_INSTRUCTIONS = 1 << 24;
@@ -28,11 +29,32 @@ public final class HbcValidator {
     boolean multiple = program.functions().size() > 1;
     for (int index = 0; index < program.functions().size(); index++) {
       try {
+        validateDeclaredArity(program, index);
         validateFunction(program, program.functions().get(index));
       } catch (HbcFormatException error) {
         if (!multiple) throw error;
         throw new HbcFormatException("validation failed: function " + index + ": " + detail(error));
       }
+    }
+  }
+
+  private static void validateDeclaredArity(HbcProgram program, int index) {
+    Function function = program.functions().get(index);
+    if (!(program.functionSchema(index) instanceof HalcSchema.FunctionType schema)) return;
+    boolean compatible =
+        schema.arities().stream()
+            .anyMatch(
+                arity ->
+                    arity.fixed().size() == function.arity()
+                        && (arity.rest() != null) == function.variadic());
+    if (!compatible) {
+      fail(
+          "function schema for "
+              + function.name()
+              + " has no "
+              + function.arity()
+              + "-argument arity"
+              + (function.variadic() ? " with rest arguments" : ""));
     }
   }
 

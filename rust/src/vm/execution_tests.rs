@@ -1086,3 +1086,36 @@ fn vm_host_call_returns_a_native_promise_and_resumes_through_await() {
         PromiseState::Fulfilled(Value::String("done".into()))
     );
 }
+
+#[cfg(feature = "tracing-jit")]
+#[test]
+fn typed_numeric_functions_start_guarded_tracing_on_the_first_backedge() {
+    use crate::kernel::{FunctionSchema, SchemaType};
+
+    let mut program = compile_source(
+        "(do (defn sum-to [n] \
+           (loop [i 0 total 0] \
+             (if (< i n) (recur (+ i 1) (+ total i)) total))) \
+         (sum-to 10))",
+    )
+    .unwrap();
+    program.namespace = Some("user".into());
+    program.function_types.insert(
+        "user/sum-to".into(),
+        SchemaType::Function(vec![FunctionSchema {
+            fixed: vec![SchemaType::Primitive("int".into())],
+            rest: None,
+            output: Box::new(SchemaType::Primitive("int".into())),
+        }]),
+    );
+    let program = Rc::new(program);
+
+    assert_eq!(execute_program(program.clone()).unwrap(), Value::Number(45));
+    assert!(super::machine::cached_trace_count(&program) > 0);
+    let telemetry = super::machine::cached_jit_telemetry(&program);
+    assert_eq!(telemetry.recording_starts, 1);
+    assert!(
+        telemetry.backedges < 16,
+        "typed trace waited for the generic threshold"
+    );
+}

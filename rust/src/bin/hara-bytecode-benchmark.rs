@@ -51,7 +51,11 @@ fn main() {
     let mut runtime = Runtime::new();
     // For execute-only the program is compiled once, outside the samples.
     let program = if mode == "execute-only" {
-        Some(runtime.compile_bytecode(&source).unwrap_or_else(|error| fail(id, &error)))
+        Some(
+            runtime
+                .compile_bytecode(&source)
+                .unwrap_or_else(|error| fail(id, &error)),
+        )
     } else {
         None
     };
@@ -59,9 +63,9 @@ fn main() {
         let value = match mode.as_str() {
             "existing" => runtime.eval_native(&source),
             "compile-execute" => runtime.eval_bytecode_native(&source),
-            "execute-only" => runtime.execute_compiled_bytecode(
-                program.as_ref().expect("program").clone(),
-            ),
+            "execute-only" => {
+                runtime.execute_compiled_bytecode(program.as_ref().expect("program").clone())
+            }
             _ => unreachable!(),
         };
         value.unwrap_or_else(|error| fail(id, &error))

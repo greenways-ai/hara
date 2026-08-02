@@ -1,21 +1,58 @@
 package hara.truffle.bytecode;
 
+import hara.truffle.HalcSchema;
 import java.util.List;
 import java.util.Objects;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Map;
 
-/** Immutable, runtime-neutral representation of a validated HBC3 program. */
+/** Immutable, runtime-neutral representation of a validated HBC4 program. */
 public record HbcProgram(
+    String namespace,
     List<Object> constants,
     List<List<MetadataEntry>> varMetadata,
+    Map<String, HalcSchema.Type> schemaTypes,
+    Map<String, HalcSchema.Type> functionTypes,
+    Map<String, HalcSchema.Type> inferredFunctionTypes,
     List<Function> functions,
     int entry) {
 
   public HbcProgram {
     constants = List.copyOf(constants);
     varMetadata = varMetadata.stream().map(List::copyOf).toList();
+    schemaTypes = Map.copyOf(schemaTypes);
+    functionTypes = Map.copyOf(functionTypes);
+    inferredFunctionTypes = Map.copyOf(inferredFunctionTypes);
     functions = List.copyOf(functions);
+  }
+
+  /** Compatibility constructor for untyped HBC1-HBC3 programs and tests. */
+  public HbcProgram(
+      List<Object> constants,
+      List<List<MetadataEntry>> varMetadata,
+      List<Function> functions,
+      int entry) {
+    this(null, constants, varMetadata, Map.of(), Map.of(), Map.of(), functions, entry);
+  }
+
+  /** Resolves the normalized annotation attached to a compiled prototype. */
+  public HalcSchema.Type functionSchema(int function) {
+    if (function < 0 || function >= functions.size()) return null;
+    String name = functions.get(function).name();
+    if (name == null) return null;
+    String qualified = name.contains("/") ? name : namespace == null ? null : namespace + "/" + name;
+    if (qualified == null) return null;
+    HalcSchema.Type schema = functionTypes.get(qualified);
+    if (schema == null) schema = inferredFunctionTypes.get(qualified);
+    java.util.HashSet<String> visited = new java.util.HashSet<>();
+    while (schema instanceof HalcSchema.Reference reference) {
+      if (!visited.add(reference.name())) return schema;
+      HalcSchema.Type resolved = schemaTypes.get(reference.name());
+      if (resolved == null) return schema;
+      schema = resolved;
+    }
+    return schema;
   }
 
   public record Function(

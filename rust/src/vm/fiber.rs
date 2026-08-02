@@ -138,8 +138,12 @@ mod tests {
             source_map.record(None);
         }
         Rc::new(Program {
+            namespace: None,
             constants: vec![Value::Promise(promise)],
             var_metadata: vec![],
+            schema_types: Default::default(),
+            function_types: Default::default(),
+            inferred_function_types: Default::default(),
             functions: vec![FunctionPrototype {
                 name: None,
                 async_function: false,

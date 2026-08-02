@@ -6,6 +6,7 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import hara.truffle.HtaValueCodec;
+import hara.truffle.HalcSchema;
 import hara.truffle.HaraLanguage;
 import hara.lang.base.G;
 import hara.truffle.bytecode.HbcProgram.Function;
@@ -14,22 +15,68 @@ import hara.truffle.bytecode.HbcProgram.Opcode;
 import hara.truffle.bytecode.HbcProgram.Primitive;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.util.HexFormat;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Source;
 import org.graalvm.polyglot.io.ByteSequence;
 import org.junit.Test;
 
 public class HbcCodecTest {
+  private static final String RUST_TYPED_HBC4 =
+      "48424334000001c50000010000000464656d6f000000030000000d48544131030000000000000001000000104854413104000000076164642d6f6e650000000d4854413103000000000000002900000001000000010a000000086172676c697374730c000000010c000000010b0000000178000000010000000d64656d6f2f437573746f6d65720500000001000000033a69640000000003696e74000000010000000c64656d6f2f6164642d6f6e650600000001000000010000000003696e74000000000003696e74000000010000000d64656d6f2f696e666572726564060000000100000000000000000003696e74000000020000000000000000000002000000090a0001001000000001010000061200000001060f0000000100000000020b0118000000090100000004000000010000000501000000040000000100000005010000000400000001000000050100000004000000010000000501000000040000000100000005010000001f000000010000002001000000280000000100000029010000001f0000000100000020000000000001000000076164642d6f6e6500000100000000010001000000021900000000000000180000000201000000160000000100000017000000000048e8738a0750e3d46e11844b412d363e80c58f2099e6b4ae1582fd6f87061cbf";
+
   @Test
-  public void hbc3ProgramsRoundTripCanonically() {
-    HbcProgram program = arithmeticProgram();
+  public void decodesAndCanonicallyReencodesRustTypedHbc4() {
+    byte[] artifact = HexFormat.of().parseHex(RUST_TYPED_HBC4);
+    HbcProgram decoded = HbcCodec.decode(artifact);
+    assertEquals("demo", decoded.namespace());
+    assertTrue(decoded.schemaTypes().containsKey("demo/Customer"));
+    assertTrue(decoded.functionTypes().containsKey("demo/add-one"));
+    assertTrue(decoded.inferredFunctionTypes().containsKey("demo/inferred"));
+    assertArrayEquals(artifact, HbcCodec.encode(decoded));
+  }
+
+  @Test
+  public void hbc4TypedProgramsRoundTripCanonically() {
+    HbcProgram base = arithmeticProgram();
+    HbcProgram program =
+        new HbcProgram(
+            "demo",
+            base.constants(),
+            base.varMetadata(),
+            Map.of(
+                "demo/Customer",
+                new HalcSchema.MapType(
+                    List.of(
+                        new HalcSchema.Field(
+                            hara.lang.data.Keyword.create("id"),
+                            new HalcSchema.Primitive("int"))))),
+            Map.of(
+                "demo/add",
+                new HalcSchema.FunctionType(
+                    List.of(
+                        new HalcSchema.Function(
+                            List.of(
+                                new HalcSchema.Primitive("int"),
+                                new HalcSchema.Primitive("int")),
+                            null,
+                            new HalcSchema.Primitive("int"))))),
+            Map.of(
+                "demo/inferred",
+                new HalcSchema.FunctionType(
+                    List.of(
+                        new HalcSchema.Function(
+                            List.of(), null, new HalcSchema.Primitive("int"))))),
+            base.functions(),
+            base.entry());
     byte[] first = HbcCodec.encode(program);
-    assertArrayEquals(new byte[] {'H', 'B', 'C', '3'}, Arrays.copyOf(first, 4));
+    assertArrayEquals(new byte[] {'H', 'B', 'C', '4'}, Arrays.copyOf(first, 4));
     HbcProgram decoded = HbcCodec.decode(first);
     assertEquals(program, decoded);
     assertArrayEquals(first, HbcCodec.encode(decoded));

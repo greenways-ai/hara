@@ -60,6 +60,42 @@ public class HaraCoreFormsTest {
   }
 
   @Test
+  public void defnSchemaVarReferencesMustResolve() {
+    try (Context context = context()) {
+      assertEquals(
+          42,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(def Customer [:map [:id :int]]) "
+                      + "(defn ^{:schema #'-/Customer} customer-id [customer] "
+                      + "  (get customer :id)) "
+                      + "(customer-id {:id 42})")
+              .asLong());
+      assertTrue(
+          assertThrows(
+                  PolyglotException.class,
+                  () ->
+                      context.eval(
+                          HaraLanguage.ID,
+                          "(defn ^{:schema #'MissingSchema} invalid [value] value)"))
+              .getMessage()
+              .contains("schema Var does not exist: MissingSchema"));
+      assertEquals(
+          7,
+          context
+              .eval(
+                  HaraLanguage.ID,
+                  "(ns example.forward-schema) "
+                      + "(defn ^{:schema #'Customer} customer-id [customer] "
+                      + "  (get customer :id)) "
+                      + "(def Customer [:map [:id :int]]) "
+                      + "(customer-id {:id 7})")
+              .asLong());
+    }
+  }
+
+  @Test
   public void derefUsesTheLanguageProtocol() {
     try (Context context = context()) {
       assertEquals(

@@ -416,7 +416,7 @@ public class HaraModuleConformanceTest {
       hirContext.enter();
       try {
         hirResult =
-            HaraLanguage.compileHalc(module.forms, "hir:parity/demo.hal").call();
+            HaraLanguage.compileHalc(module, "hir:parity/demo.hal").call();
       } finally {
         hirContext.leave();
       }
@@ -449,6 +449,35 @@ public class HaraModuleConformanceTest {
       assertTrue(sourceError.isGuestException());
       assertTrue(hirError instanceof HaraException);
     }
+  }
+
+  @Test
+  public void typedHalcUsesPrimitiveTruffleParameterSlotsWithGuardedFallback() {
+    String source =
+        "(ns typed.truffle) "
+            + "(def Unary [:fn [:int] :int]) "
+            + "(defn ^{:schema #'Unary} identity-int [value] value) "
+            + "(identity-int 42)";
+    HalcArtifact.Module module =
+        HalcArtifact.decode(
+            HalcArtifact.encode(
+                "typed.truffle",
+                "typed/truffle.hal",
+                source.getBytes(StandardCharsets.UTF_8),
+                HaraLanguage.readAll(source, "typed/truffle.hal")));
+    long typedBefore = FoundationHalcLowerer.typedParameterSlotCount();
+
+    try (Context context = Context.newBuilder(HaraLanguage.ID).build()) {
+      context.eval(HaraLanguage.ID, "nil");
+      context.enter();
+      try {
+        assertEquals(42L, ((Number) HaraLanguage.compileHalc(module, "typed/truffle.hal").call()).longValue());
+      } finally {
+        context.leave();
+      }
+      assertEquals("dynamic", context.eval(HaraLanguage.ID, "(identity-int \"dynamic\")").asString());
+    }
+    assertTrue(FoundationHalcLowerer.typedParameterSlotCount() > typedBefore);
   }
 
   @Test

@@ -122,7 +122,8 @@ impl JitRuntime {
         {
             false
         } else if trace_count == 0 {
-            self.hotness.backedge(key)
+            let hot = self.hotness.backedge(key);
+            hot || (self.hotness.count(key) == 1 && program.function_has_i64_parameters(function))
         } else {
             let count = self.candidates.entry(path_key.clone()).or_default();
             *count = count.saturating_add(1);

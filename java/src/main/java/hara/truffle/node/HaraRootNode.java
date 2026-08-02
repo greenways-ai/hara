@@ -15,6 +15,7 @@ import hara.truffle.EvaluationJournal;
 public final class HaraRootNode extends RootNode {
   @Child private HaraExpressionNode body;
   private final int[] parameterSlots;
+  private final byte[] parameterKinds;
   private final int[] captureSlots;
   private final int[] captureSourceSlots;
   private final int minimumArity;
@@ -32,9 +33,34 @@ public final class HaraRootNode extends RootNode {
       SourceSection sourceSection,
       boolean exportResult,
       boolean variadic) {
+    this(
+        language,
+        descriptor,
+        body,
+        parameterSlots,
+        new byte[parameterSlots.length],
+        captureSlots,
+        captureSourceSlots,
+        sourceSection,
+        exportResult,
+        variadic);
+  }
+
+  public HaraRootNode(
+      HaraLanguage language,
+      FrameDescriptor descriptor,
+      HaraExpressionNode body,
+      int[] parameterSlots,
+      byte[] parameterKinds,
+      int[] captureSlots,
+      int[] captureSourceSlots,
+      SourceSection sourceSection,
+      boolean exportResult,
+      boolean variadic) {
     super(language, descriptor);
     this.body = body;
     this.parameterSlots = parameterSlots;
+    this.parameterKinds = parameterKinds.clone();
     this.captureSlots = captureSlots;
     this.captureSourceSlots = captureSourceSlots;
     this.minimumArity = parameterSlots.length - (variadic ? 1 : 0);
@@ -64,7 +90,14 @@ public final class HaraRootNode extends RootNode {
       }
     }
     for (int i = 0; i < minimumArity; i++) {
-      frame.setObject(parameterSlots[i], arguments[i + argumentOffset]);
+      Object argument = arguments[i + argumentOffset];
+      if (parameterKinds[i] == 1 && argument instanceof Long value) {
+        frame.setLong(parameterSlots[i], value);
+      } else if (parameterKinds[i] == 2 && argument instanceof Boolean value) {
+        frame.setBoolean(parameterSlots[i], value);
+      } else {
+        frame.setObject(parameterSlots[i], argument);
+      }
     }
     if (variadic) {
       Object[] rest = new Object[actualArity - minimumArity];

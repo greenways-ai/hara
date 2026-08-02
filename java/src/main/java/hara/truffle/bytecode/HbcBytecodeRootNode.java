@@ -14,8 +14,9 @@ import com.oracle.truffle.api.nodes.RootNode;
 import hara.truffle.HaraContext;
 import hara.truffle.HaraLanguage;
 import hara.truffle.HbcMachine;
+import hara.lang.data.Symbol;
 
-/** Truffle Bytecode DSL entry point for the portable HBC3 instruction set. */
+/** Truffle Bytecode DSL entry point for the portable HBC4 instruction set. */
 @GenerateBytecode(
     languageClass = HaraLanguage.class,
     enableUncachedInterpreter = true,
@@ -48,6 +49,11 @@ public abstract class HbcBytecodeRootNode extends RootNode implements BytecodeRo
     @TruffleBoundary
     public static Object execute(HbcProgram program) {
       HaraContext context = HaraLanguage.currentContext();
+      if (program.namespace() != null) {
+        context.setCurrentNamespace(Symbol.create(program.namespace()));
+      }
+      context.installHbcTypes(
+          program.schemaTypes(), program.functionTypes(), program.inferredFunctionTypes());
       return HbcMachine.execute(program, context);
     }
   }

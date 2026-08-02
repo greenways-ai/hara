@@ -11,7 +11,7 @@
 
 use std::rc::Rc;
 
-use crate::core::{binding_symbol, definition_metadata};
+use crate::core::{binding_symbol, definition_metadata, schema_var_reference};
 use crate::kernel::{Form, Span};
 use crate::lang::data::Metadata;
 use crate::lang::protocol::INamespaced;
@@ -210,7 +210,14 @@ impl Compiler {
         let declared = name
             .strip_prefix("-/")
             .is_some_and(|local| self.globals.iter().any(|global| global == local))
-            || self.globals.iter().any(|global| global == name);
+            || self.globals.iter().any(|global| global == name)
+            || crate::core::namespace_registry()
+                .ok()
+                .and_then(|registry| {
+                    name.strip_prefix(&format!("{}/", registry.current().name().as_str()))
+                        .map(|local| self.globals.iter().any(|global| global == local))
+                })
+                .unwrap_or(false);
         declared
             || crate::core::namespace_registry()
                 .map(|registry| {
@@ -581,6 +588,16 @@ impl Compiler {
         let raw: Vec<Form> = children.iter().map(|child| child.form.clone()).collect();
         let (metadata, rest) = definition_metadata(metadata, &raw[2..], private, false)
             .map_err(|message| unsupported(format!("{name}: {message}"), children[1].span.start))?;
+        if let Some(schema) = schema_var_reference(metadata.as_deref()) {
+            let schema_name = schema.as_str();
+            if !self.visible_global(schema_name) {
+                return Err(CompileError::new(
+                    CompileErrorKind::UnboundSymbol,
+                    format!("schema Var does not exist: {schema_name}"),
+                    Some(children[1].span.start),
+                ));
+            }
+        }
         let offset = children.len() - rest.len();
         let rest_children = &children[offset..];
         if rest_children.is_empty() {

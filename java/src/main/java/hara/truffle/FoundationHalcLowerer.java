@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 final class FoundationHalcLowerer {
   private static final AtomicLong COMPILATIONS = new AtomicLong();
+  private static final AtomicLong TYPED_PARAMETER_SLOTS = new AtomicLong();
   private final HaraLanguage language;
   private final HaraContext context;
   private final FrameDescriptor.Builder frames;
@@ -66,6 +67,10 @@ final class FoundationHalcLowerer {
 
   static long compilationCount() {
     return COMPILATIONS.get();
+  }
+
+  static long typedParameterSlotCount() {
+    return TYPED_PARAMETER_SLOTS.get();
   }
 
   private HaraExpressionNode lower(Object form) {
@@ -324,6 +329,11 @@ final class FoundationHalcLowerer {
   }
 
   private HaraExpressionNode lowerFunction(ILinearType<?> parameters, Object[] bodyForms) {
+    return lowerFunction(parameters, bodyForms, null);
+  }
+
+  private HaraExpressionNode lowerFunction(
+      ILinearType<?> parameters, Object[] bodyForms, HalcSchema.Function typeHint) {
     FrameDescriptor.Builder functionFrames = FrameDescriptor.newBuilder();
     Map<Symbol, Integer> functionLocals = new HashMap<>();
     int restIndex = -1;
@@ -334,6 +344,7 @@ final class FoundationHalcLowerer {
     boolean variadic = restIndex >= 0;
     int fixedArity = variadic ? restIndex : (int) parameters.count();
     int[] parameterSlots = new int[fixedArity + (variadic ? 1 : 0)];
+    byte[] parameterKinds = new byte[parameterSlots.length];
     for (int index = 0; index < parameterSlots.length; index++) {
       int sourceIndex = variadic && index == fixedArity ? restIndex + 1 : index;
       Object parameter = parameters.nth(sourceIndex);
@@ -343,7 +354,17 @@ final class FoundationHalcLowerer {
         fail("foundation HALC supports symbol parameters only");
       }
       Symbol symbol = (Symbol) parameter;
-      parameterSlots[index] = functionFrames.addSlot(FrameSlotKind.Object, symbol, null);
+      HalcSchema.Type parameterType =
+          typeHint == null
+              ? null
+              : index < fixedArity
+                  ? typeHint.fixed().get(index)
+                  : typeHint.rest();
+      FrameSlotKind slotKind = primitiveSlotKind(parameterType);
+      if (slotKind != FrameSlotKind.Object) TYPED_PARAMETER_SLOTS.incrementAndGet();
+      parameterKinds[index] =
+          slotKind == FrameSlotKind.Long ? (byte) 1 : slotKind == FrameSlotKind.Boolean ? (byte) 2 : 0;
+      parameterSlots[index] = functionFrames.addSlot(slotKind, symbol, null);
       functionLocals.put(symbol, parameterSlots[index]);
     }
     if (variadic && restIndex + 2 != parameters.count()) fail("invalid variadic parameters");
@@ -372,6 +393,7 @@ final class FoundationHalcLowerer {
             functionFrames.build(),
             functionBody,
             parameterSlots,
+            parameterKinds,
             captureSlots,
             captureSources,
             null,
@@ -402,12 +424,15 @@ final class FoundationHalcLowerer {
     Object parameterForm = form.nth(parametersIndex);
     HaraExpressionNode function;
     Object[] signatures;
+    HalcSchema.Type functionType =
+        context.halcBestFunctionType(context.currentNamespaceName() + "/" + name.getName());
     if (bindingVector(parameterForm)) {
       signatures = new Object[] {parameterForm};
       function =
           lowerFunction(
               (ILinearType<?>) parameterForm,
-              bodyForms(form, parametersIndex + 1));
+              bodyForms(form, parametersIndex + 1),
+              matchingFunctionType(functionType, (ILinearType<?>) parameterForm));
     } else {
       int count = (int) form.count() - parametersIndex;
       HaraExpressionNode[] alternatives = new HaraExpressionNode[count];
@@ -416,7 +441,10 @@ final class FoundationHalcLowerer {
         List<?> clause = requireClause(form.nth(parametersIndex + index), "defn");
         signatures[index] = clause.nth(0);
         alternatives[index] =
-            lowerFunction((ILinearType<?>) clause.nth(0), bodyForms(clause, 1));
+            lowerFunction(
+                (ILinearType<?>) clause.nth(0),
+                bodyForms(clause, 1),
+                matchingFunctionType(functionType, (ILinearType<?>) clause.nth(0)));
       }
       function = new HaraNodes.MultiFunction(alternatives);
     }
@@ -437,6 +465,30 @@ final class FoundationHalcLowerer {
                 Keyword.create("arglists"),
                 hara.lang.data.Vector.Standard.from(null, signatures));
     return new HaraNodes.DefineGlobal(name.withMeta(metadata), function);
+  }
+
+  private static HalcSchema.Function matchingFunctionType(
+      HalcSchema.Type type, ILinearType<?> parameters) {
+    if (!(type instanceof HalcSchema.FunctionType functions)) return null;
+    int fixed = 0;
+    boolean variadic = false;
+    for (int index = 0; index < parameters.count(); index++) {
+      Object parameter = parameters.nth(index);
+      if (parameter instanceof Symbol marker && "&".equals(marker.getName())) variadic = true;
+      else if (!variadic) fixed++;
+    }
+    for (HalcSchema.Function function : functions.arities()) {
+      if (function.fixed().size() == fixed && (function.rest() != null) == variadic) return function;
+    }
+    return null;
+  }
+
+  private static FrameSlotKind primitiveSlotKind(HalcSchema.Type type) {
+    if (type instanceof HalcSchema.Primitive primitive) {
+      if ("int".equals(primitive.name())) return FrameSlotKind.Long;
+      if ("bool".equals(primitive.name())) return FrameSlotKind.Boolean;
+    }
+    return FrameSlotKind.Object;
   }
 
   @SuppressWarnings("unchecked")

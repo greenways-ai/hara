@@ -60,7 +60,10 @@ pub struct ResolvedProfile {
 impl Project {
     /// Resolves a named runnable target without assigning any meaning to its
     /// language or options. Language hosts such as Hoplite own that policy.
-    pub fn resolve_profile(&self, requested: Option<&str>) -> Result<Option<ResolvedProfile>, String> {
+    pub fn resolve_profile(
+        &self,
+        requested: Option<&str>,
+    ) -> Result<Option<ResolvedProfile>, String> {
         if self.profiles.is_empty() {
             if requested.is_some() {
                 return Err("project.edn does not declare :project/profiles".into());

@@ -2,6 +2,7 @@ package hara.truffle.bytecode;
 
 import hara.lang.data.Keyword;
 import hara.lang.data.Symbol;
+import hara.truffle.HalcSchema;
 import hara.truffle.HtaValueCodec;
 import hara.truffle.bytecode.HbcProgram.CatchEntry;
 import hara.truffle.bytecode.HbcProgram.Function;
@@ -26,20 +27,29 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.regex.Pattern;
 
-/** Canonical HBC3 encoder/decoder shared with {@code rust/src/vm/artifact.rs}. */
+/** Canonical HBC4 encoder/decoder shared with {@code rust/src/vm/artifact.rs}. */
 public final class HbcCodec {
-  private static final byte[] MAGIC = {'H', 'B', 'C', '3'};
+  private static final byte[] MAGIC_V3 = {'H', 'B', 'C', '3'};
+  private static final byte[] MAGIC_V4 = {'H', 'B', 'C', '4'};
   private static final int DIGEST_BYTES = 32;
 
   private HbcCodec() {}
 
   public static HbcProgram decode(byte[] artifact) {
-    if (artifact.length < MAGIC.length + Integer.BYTES + DIGEST_BYTES) {
+    if (artifact.length < MAGIC_V4.length + Integer.BYTES + DIGEST_BYTES) {
       throw malformed("bytecode artifact is truncated");
     }
-    if (!Arrays.equals(MAGIC, Arrays.copyOf(artifact, MAGIC.length))) {
+    byte[] magic = Arrays.copyOf(artifact, MAGIC_V4.length);
+    int version;
+    if (Arrays.equals(MAGIC_V4, magic)) {
+      version = 4;
+    } else if (Arrays.equals(MAGIC_V3, magic)) {
+      version = 3;
+    } else {
       throw malformed("bytecode artifact has invalid magic");
     }
     long payloadLength = Integer.toUnsignedLong(ByteBuffer.wrap(artifact, 4, 4).getInt());
@@ -55,11 +65,27 @@ public final class HbcCodec {
 
     Reader in = new Reader(payload);
     int entry = in.u16();
+    String namespace = version >= 4 ? in.optionalString() : null;
     List<Object> constants = in.many(reader -> HtaValueCodec.decodeCanonical(reader.bytes()));
     List<List<MetadataEntry>> metadata = in.many(HbcCodec::readMetadata);
+    Map<String, HalcSchema.Type> schemaTypes =
+        version >= 4 ? readSchemaMap(in) : Map.of();
+    Map<String, HalcSchema.Type> functionTypes =
+        version >= 4 ? readSchemaMap(in) : Map.of();
+    Map<String, HalcSchema.Type> inferredFunctionTypes =
+        version >= 4 ? readSchemaMap(in) : Map.of();
     List<Function> functions = in.many(HbcCodec::readFunction);
     in.finish();
-    HbcProgram program = new HbcProgram(constants, metadata, functions, entry);
+    HbcProgram program =
+        new HbcProgram(
+            namespace,
+            constants,
+            metadata,
+            schemaTypes,
+            functionTypes,
+            inferredFunctionTypes,
+            functions,
+            entry);
     HbcValidator.validate(program);
     return program;
   }
@@ -68,12 +94,16 @@ public final class HbcCodec {
     HbcValidator.validate(program);
     Writer out = new Writer();
     out.u16(program.entry());
+    out.optionalString(program.namespace());
     out.many(program.constants(), value -> out.bytes(HtaValueCodec.encode(value)));
     out.many(program.varMetadata(), entries -> writeMetadata(out, entries));
+    writeSchemaMap(out, program.schemaTypes());
+    writeSchemaMap(out, program.functionTypes());
+    writeSchemaMap(out, program.inferredFunctionTypes());
     out.many(program.functions(), function -> writeFunction(out, function));
     byte[] payload = out.toByteArray();
     Writer artifact = new Writer();
-    artifact.raw(MAGIC);
+    artifact.raw(MAGIC_V4);
     artifact.u32(payload.length);
     artifact.raw(payload);
     artifact.raw(sha256(payload));
@@ -214,6 +244,133 @@ public final class HbcCodec {
         out.u8(instruction.second());
       }
       default -> {}
+    }
+  }
+
+  private static void writeSchemaMap(Writer out, Map<String, HalcSchema.Type> schemas) {
+    List<String> names = schemas.keySet().stream().sorted().toList();
+    out.u32(names.size());
+    for (String name : names) {
+      out.string(name);
+      writeSchemaType(out, schemas.get(name));
+    }
+  }
+
+  private static Map<String, HalcSchema.Type> readSchemaMap(Reader in) {
+    Map<String, HalcSchema.Type> schemas = new LinkedHashMap<>();
+    for (Map.Entry<String, HalcSchema.Type> entry :
+        in.many(reader -> Map.entry(reader.string(), readSchemaType(reader)))) {
+      if (schemas.put(entry.getKey(), entry.getValue()) != null) {
+        throw malformed("bytecode artifact contains duplicate schema " + entry.getKey());
+      }
+    }
+    return Map.copyOf(schemas);
+  }
+
+  private static void writeSchemaType(Writer out, HalcSchema.Type schema) {
+    switch (schema) {
+      case HalcSchema.Primitive primitive -> {
+        out.u8(0);
+        out.string(primitive.name());
+      }
+      case HalcSchema.Reference reference -> {
+        out.u8(1);
+        out.string(reference.name());
+      }
+      case HalcSchema.Union union -> {
+        out.u8(2);
+        out.many(union.types(), type -> writeSchemaType(out, type));
+      }
+      case HalcSchema.VectorType vector -> {
+        out.u8(3);
+        writeSchemaType(out, vector.item());
+      }
+      case HalcSchema.Tuple tuple -> {
+        out.u8(4);
+        out.many(tuple.items(), type -> writeSchemaType(out, type));
+      }
+      case HalcSchema.MapType map -> {
+        out.u8(5);
+        out.many(
+            map.fields(),
+            field -> {
+              writeSchemaSurface(out, field.name());
+              writeSchemaType(out, field.type());
+            });
+      }
+      case HalcSchema.FunctionType function -> {
+        out.u8(6);
+        out.many(
+            function.arities(),
+            arity -> {
+              out.many(arity.fixed(), type -> writeSchemaType(out, type));
+              out.bool(arity.rest() != null);
+              if (arity.rest() != null) writeSchemaType(out, arity.rest());
+              writeSchemaType(out, arity.output());
+            });
+      }
+      case HalcSchema.EnumType enumeration -> {
+        out.u8(7);
+        writeSchemaSurfaces(out, enumeration.values());
+      }
+      case HalcSchema.Extension extension -> {
+        out.u8(8);
+        out.string(extension.head());
+        writeSchemaSurfaces(out, extension.arguments());
+      }
+      case HalcSchema.Unknown unknown -> {
+        out.u8(9);
+        writeSchemaSurface(out, unknown.surface());
+      }
+    }
+  }
+
+  private static HalcSchema.Type readSchemaType(Reader in) {
+    return switch (in.u8()) {
+      case 0 -> new HalcSchema.Primitive(in.string());
+      case 1 -> new HalcSchema.Reference(in.string());
+      case 2 -> new HalcSchema.Union(in.many(HbcCodec::readSchemaType));
+      case 3 -> new HalcSchema.VectorType(readSchemaType(in));
+      case 4 -> new HalcSchema.Tuple(in.many(HbcCodec::readSchemaType));
+      case 5 ->
+          new HalcSchema.MapType(
+              in.many(
+                  reader ->
+                      new HalcSchema.Field(
+                          readSchemaSurface(reader), readSchemaType(reader))));
+      case 6 ->
+          new HalcSchema.FunctionType(
+              in.many(
+                  reader -> {
+                    List<HalcSchema.Type> fixed = reader.many(HbcCodec::readSchemaType);
+                    HalcSchema.Type rest = reader.bool() ? readSchemaType(reader) : null;
+                    return new HalcSchema.Function(fixed, rest, readSchemaType(reader));
+                  }));
+      case 7 -> new HalcSchema.EnumType(readSchemaSurfaces(in));
+      case 8 -> new HalcSchema.Extension(in.string(), readSchemaSurfaces(in));
+      case 9 -> new HalcSchema.Unknown(readSchemaSurface(in));
+      default -> throw malformed("bytecode artifact contains unknown schema type");
+    };
+  }
+
+  private static void writeSchemaSurfaces(Writer out, List<?> values) {
+    out.u32(values.size());
+    for (Object value : values) writeSchemaSurface(out, value);
+  }
+
+  private static List<Object> readSchemaSurfaces(Reader in) {
+    return in.many(HbcCodec::readSchemaSurface);
+  }
+
+  private static void writeSchemaSurface(Writer out, Object value) {
+    out.string(HalcSchema.displaySurface(value));
+  }
+
+  private static Object readSchemaSurface(Reader in) {
+    try {
+      return HalcSchema.readSurface(in.string());
+    } catch (RuntimeException error) {
+      throw malformed("bytecode artifact contains invalid schema form: " + error.getMessage());
     }
   }
 

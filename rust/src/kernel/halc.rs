@@ -1,5 +1,6 @@
 use super::Form;
 use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 
 const MAGIC: &[u8] = b"HALC";
 const LEGACY_MAGIC: &[u8] = b"HIR\0";
@@ -34,7 +35,30 @@ pub struct HalcModule {
     pub resource: String,
     pub source_hash: Vec<u8>,
     pub forms: Vec<Form>,
+    pub schemas: HalcSchemaIndex,
     pub origin: HalcOrigin,
+}
+
+/// The typed declarations recoverable from canonical HALC forms without
+/// evaluating the module. Keys are fully qualified Var names.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct HalcSchemaIndex {
+    pub definitions: HashMap<String, Form>,
+    pub functions: HashMap<String, Form>,
+    pub definition_types: HashMap<String, super::SchemaType>,
+    pub function_types: HashMap<String, super::SchemaType>,
+}
+
+impl HalcSchemaIndex {
+    /// Resolves a function annotation through named-schema references while
+    /// preserving recursive graph edges as `Reference` nodes.
+    pub fn resolved_function_type(&self, qualified_var: &str) -> Option<&super::SchemaType> {
+        let schema = self.function_types.get(qualified_var)?;
+        match schema {
+            super::SchemaType::Reference(name) => self.definition_types.get(name).or(Some(schema)),
+            _ => Some(schema),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,11 +81,14 @@ pub fn decode_halc(bytes: &[u8]) -> Result<HalcModule, String> {
     if !reader.is_empty() {
         return Err("trailing payload bytes".into());
     }
+    let forms = canonicalize_schema_references(&namespace, forms)?;
+    let schemas = build_schema_index(&namespace, &forms)?;
     Ok(HalcModule {
         namespace,
         resource,
         source_hash,
         forms,
+        schemas,
         origin,
     })
 }
@@ -412,7 +439,9 @@ pub fn encode_halc_module(
     resource: &str,
     source: &str,
     forms: Vec<Form>,
-) -> Vec<u8> {
+) -> Result<Vec<u8>, String> {
+    let forms = canonicalize_schema_references(namespace, forms)?;
+    build_schema_index(namespace, &forms)?;
     let mut payload = Vec::new();
     write_string(&mut payload, namespace);
     write_string(&mut payload, resource);
@@ -428,7 +457,353 @@ pub fn encode_halc_module(
     artifact.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     artifact.extend_from_slice(Sha256::digest(&payload).as_slice());
     artifact.extend_from_slice(&payload);
-    artifact
+    Ok(artifact)
+}
+
+fn canonicalize_schema_references(
+    namespace: &str,
+    mut forms: Vec<Form>,
+) -> Result<Vec<Form>, String> {
+    let definitions: HashSet<String> = forms
+        .iter()
+        .filter_map(|form| {
+            let Form::List(items) = form else { return None };
+            let Form::Symbol(operator) = items.first()? else {
+                return None;
+            };
+            if !matches!(
+                operator.as_str(),
+                "def" | "defn" | "defn-" | "defmacro" | "defstruct" | "declare"
+            ) {
+                return None;
+            }
+            binding_name(items.get(1)?).map(str::to_owned)
+        })
+        .collect();
+    let schema_values: HashMap<String, usize> = forms
+        .iter()
+        .enumerate()
+        .filter_map(|(index, form)| {
+            let Form::List(items) = form else { return None };
+            if !matches!(items.first(), Some(Form::Symbol(operator)) if operator == "def") {
+                return None;
+            }
+            binding_name(items.get(1)?).map(|name| (name.to_owned(), index))
+        })
+        .collect();
+    let aliases = module_aliases(&forms);
+    let mut schema_roots = Vec::new();
+
+    for form in &mut forms {
+        let Form::List(items) = form else { continue };
+        let Some(Form::Symbol(operator)) = items.first() else {
+            continue;
+        };
+        if operator != "defn" && operator != "defn-" {
+            continue;
+        }
+        let Some(Form::Metadata(metadata, _)) = items.get_mut(1) else {
+            continue;
+        };
+        let Form::Map(entries) = metadata.as_mut() else {
+            continue;
+        };
+        let Some((_, schema)) = entries
+            .iter_mut()
+            .find(|(key, _)| matches!(key, Form::Keyword(name) if name == "schema"))
+        else {
+            continue;
+        };
+        let Form::List(reference) = schema else {
+            continue;
+        };
+        if reference.len() != 2
+            || !matches!(&reference[0], Form::Symbol(operator) if operator == "var")
+        {
+            continue;
+        }
+        let Form::Symbol(target) = &reference[1] else {
+            continue;
+        };
+        let (qualifier, local) = target
+            .rsplit_once('/')
+            .map_or((None, target.as_str()), |(qualifier, local)| {
+                (Some(qualifier), local)
+            });
+        let target_namespace = match qualifier {
+            None | Some("-") => namespace,
+            Some(qualifier) => aliases.get(qualifier).map_or(qualifier, String::as_str),
+        };
+        if target_namespace == namespace && !definitions.contains(local) {
+            return Err(format!("schema Var does not exist: {target}"));
+        }
+        if target_namespace == namespace {
+            schema_roots.push(local.to_owned());
+        }
+        reference[1] = Form::Symbol(format!("{target_namespace}/{local}"));
+    }
+
+    let mut visited = HashSet::new();
+    while let Some(schema_name) = schema_roots.pop() {
+        if !visited.insert(schema_name.clone()) {
+            continue;
+        }
+        let Some(index) = schema_values.get(&schema_name).copied() else {
+            continue;
+        };
+        let Form::List(definition) = &mut forms[index] else {
+            continue;
+        };
+        let Some(schema_value) = definition.get_mut(2) else {
+            continue;
+        };
+        canonicalize_nested_schema_references(
+            schema_value,
+            namespace,
+            &aliases,
+            &definitions,
+            &mut schema_roots,
+        )?;
+    }
+    Ok(forms)
+}
+
+fn canonicalize_nested_schema_references(
+    form: &mut Form,
+    namespace: &str,
+    aliases: &HashMap<String, String>,
+    definitions: &HashSet<String>,
+    local_references: &mut Vec<String>,
+) -> Result<(), String> {
+    if let Form::List(reference) = form {
+        if reference.len() == 2
+            && matches!(&reference[0], Form::Symbol(operator) if operator == "var")
+        {
+            let Form::Symbol(target) = &reference[1] else {
+                return Ok(());
+            };
+            let original = target.clone();
+            let (qualifier, local) = original
+                .rsplit_once('/')
+                .map_or((None, original.as_str()), |(qualifier, local)| {
+                    (Some(qualifier), local)
+                });
+            let target_namespace = match qualifier {
+                None | Some("-") => namespace,
+                Some(qualifier) => aliases.get(qualifier).map_or(qualifier, String::as_str),
+            };
+            if target_namespace == namespace {
+                if !definitions.contains(local) {
+                    return Err(format!("schema Var does not exist: {original}"));
+                }
+                local_references.push(local.to_owned());
+            }
+            reference[1] = Form::Symbol(format!("{target_namespace}/{local}"));
+            return Ok(());
+        }
+    }
+
+    match form {
+        Form::Tagged(_, value) => canonicalize_nested_schema_references(
+            value,
+            namespace,
+            aliases,
+            definitions,
+            local_references,
+        ),
+        Form::Metadata(metadata, value) => {
+            canonicalize_nested_schema_references(
+                metadata,
+                namespace,
+                aliases,
+                definitions,
+                local_references,
+            )?;
+            canonicalize_nested_schema_references(
+                value,
+                namespace,
+                aliases,
+                definitions,
+                local_references,
+            )
+        }
+        Form::Map(entries) => {
+            for (key, value) in entries {
+                canonicalize_nested_schema_references(
+                    key,
+                    namespace,
+                    aliases,
+                    definitions,
+                    local_references,
+                )?;
+                canonicalize_nested_schema_references(
+                    value,
+                    namespace,
+                    aliases,
+                    definitions,
+                    local_references,
+                )?;
+            }
+            Ok(())
+        }
+        Form::Set(values) | Form::Vector(values) | Form::List(values) => {
+            for value in values {
+                canonicalize_nested_schema_references(
+                    value,
+                    namespace,
+                    aliases,
+                    definitions,
+                    local_references,
+                )?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn binding_name(form: &Form) -> Option<&str> {
+    match form {
+        Form::Symbol(name) => Some(name),
+        Form::Metadata(_, value) => binding_name(value),
+        _ => None,
+    }
+}
+
+fn module_aliases(forms: &[Form]) -> HashMap<String, String> {
+    let mut aliases = HashMap::new();
+    for form in forms {
+        let Form::List(declaration) = form else {
+            continue;
+        };
+        if !matches!(declaration.first(), Some(Form::Symbol(operator)) if operator == "ns") {
+            continue;
+        }
+        for clause in declaration.iter().skip(2) {
+            let Form::List(clause) = clause else { continue };
+            if !matches!(clause.first(), Some(Form::Keyword(keyword)) if keyword == "require") {
+                continue;
+            }
+            for spec in clause.iter().skip(1) {
+                let Form::Vector(spec) = spec else { continue };
+                let Some(Form::Symbol(target)) = spec.first() else {
+                    continue;
+                };
+                for option in spec[1..].chunks(2) {
+                    if let [Form::Keyword(key), Form::Symbol(alias)] = option {
+                        if key == "as" {
+                            aliases.insert(alias.clone(), target.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    aliases
+}
+
+fn build_schema_index(namespace: &str, forms: &[Form]) -> Result<HalcSchemaIndex, String> {
+    let mut index = HalcSchemaIndex::default();
+    let mut values = HashMap::new();
+    let mut roots = Vec::new();
+
+    for form in forms {
+        let Form::List(items) = form else { continue };
+        let Some(Form::Symbol(operator)) = items.first() else {
+            continue;
+        };
+        let Some(name) = items.get(1).and_then(binding_name) else {
+            continue;
+        };
+        let qualified_name = format!("{namespace}/{name}");
+        if operator == "def" {
+            if let Some(value) = items.get(2) {
+                values.insert(name.to_owned(), value.clone());
+            }
+            continue;
+        }
+        if operator != "defn" && operator != "defn-" {
+            continue;
+        }
+        let Some(Form::Metadata(metadata, _)) = items.get(1) else {
+            continue;
+        };
+        let Form::Map(entries) = metadata.as_ref() else {
+            continue;
+        };
+        let Some(schema) = entries.iter().find_map(|(key, value)| {
+            matches!(key, Form::Keyword(name) if name == "schema").then_some(value)
+        }) else {
+            continue;
+        };
+        index.functions.insert(qualified_name, schema.clone());
+        collect_local_schema_references(schema, namespace, &mut roots);
+    }
+
+    let mut visited = HashSet::new();
+    while let Some(name) = roots.pop() {
+        if !visited.insert(name.clone()) {
+            continue;
+        }
+        let Some(value) = values.get(&name) else {
+            continue;
+        };
+        index
+            .definitions
+            .insert(format!("{namespace}/{name}"), value.clone());
+        collect_local_schema_references(value, namespace, &mut roots);
+    }
+    for (name, schema) in &index.definitions {
+        index.definition_types.insert(
+            name.clone(),
+            super::normalize_schema(schema)
+                .map_err(|error| format!("invalid schema {name}: {error}"))?,
+        );
+    }
+    for (name, schema) in &index.functions {
+        index.function_types.insert(
+            name.clone(),
+            super::normalize_schema(schema)
+                .map_err(|error| format!("invalid function schema {name}: {error}"))?,
+        );
+    }
+    Ok(index)
+}
+
+fn collect_local_schema_references(form: &Form, namespace: &str, output: &mut Vec<String>) {
+    if let Form::List(reference) = form {
+        if reference.len() == 2
+            && matches!(&reference[0], Form::Symbol(operator) if operator == "var")
+        {
+            if let Form::Symbol(target) = &reference[1] {
+                if let Some((qualifier, local)) = target.rsplit_once('/') {
+                    if qualifier == namespace {
+                        output.push(local.to_owned());
+                    }
+                }
+            }
+            return;
+        }
+    }
+    match form {
+        Form::Tagged(_, value) => collect_local_schema_references(value, namespace, output),
+        Form::Metadata(metadata, value) => {
+            collect_local_schema_references(metadata, namespace, output);
+            collect_local_schema_references(value, namespace, output);
+        }
+        Form::Map(entries) => {
+            for (key, value) in entries {
+                collect_local_schema_references(key, namespace, output);
+                collect_local_schema_references(value, namespace, output);
+            }
+        }
+        Form::Set(values) | Form::Vector(values) | Form::List(values) => {
+            for value in values {
+                collect_local_schema_references(value, namespace, output);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -437,7 +812,7 @@ mod tests {
     use crate::kernel::parse;
 
     fn artifact_payload(forms: Vec<Form>) -> Vec<u8> {
-        encode_halc_module("demo.ns", "demo.hal", "", forms)
+        encode_halc_module("demo.ns", "demo.hal", "", forms).unwrap()
     }
 
     #[test]
@@ -472,6 +847,129 @@ mod tests {
         let decoded = decode_halc(&bytes).unwrap();
         assert_eq!(decoded.forms.len(), 1);
         assert_eq!(decoded.forms[0], original);
+    }
+
+    #[test]
+    fn schema_var_references_are_checked_and_namespace_canonicalized() {
+        let source = "(ns demo.schema) \
+                      (def Customer [:map [:id :int]]) \
+                      (defn ^{:schema #'-/Customer} customer-id [customer] customer)";
+        let bytes = encode_halc_module(
+            "demo.schema",
+            "demo/schema.hal",
+            source,
+            crate::kernel::parse_forms(source).unwrap(),
+        )
+        .unwrap();
+        let module = decode_halc(&bytes).unwrap();
+        let Form::List(definition) = &module.forms[2] else {
+            panic!("expected defn");
+        };
+        let Form::Metadata(metadata, _) = &definition[1] else {
+            panic!("expected definition metadata");
+        };
+        let Form::Map(metadata) = metadata.as_ref() else {
+            panic!("expected metadata map");
+        };
+        let schema = metadata
+            .iter()
+            .find_map(|(key, value)| {
+                matches!(key, Form::Keyword(name) if name == "schema").then_some(value)
+            })
+            .unwrap();
+        assert_eq!(
+            schema,
+            &Form::List(vec![
+                Form::Symbol("var".into()),
+                Form::Symbol("demo.schema/Customer".into()),
+            ])
+        );
+
+        let missing = "(ns demo.schema) \
+                       (defn ^{:schema #'MissingSchema} invalid [value] value)";
+        assert_eq!(
+            encode_halc_module(
+                "demo.schema",
+                "demo/schema.hal",
+                missing,
+                crate::kernel::parse_forms(missing).unwrap(),
+            )
+            .unwrap_err(),
+            "schema Var does not exist: MissingSchema"
+        );
+    }
+
+    #[test]
+    fn nested_schema_var_references_are_canonicalized_and_checked() {
+        let source = "(ns demo.schema) \
+                      (def Address [:map [:street :str]]) \
+                      (def Customer [:map [:address #'-/Address]]) \
+                      (defn ^{:schema #'Customer} save [customer] customer)";
+        let bytes = encode_halc_module(
+            "demo.schema",
+            "demo/schema.hal",
+            source,
+            crate::kernel::parse_forms(source).unwrap(),
+        )
+        .unwrap();
+        let module = decode_halc(&bytes).unwrap();
+        assert!(module.forms[2]
+            .to_string()
+            .contains("(var demo.schema/Address)"));
+        assert_eq!(module.schemas.functions.len(), 1);
+        assert!(module.schemas.functions.contains_key("demo.schema/save"));
+        assert_eq!(module.schemas.definitions.len(), 2);
+        assert!(module
+            .schemas
+            .definitions
+            .contains_key("demo.schema/Address"));
+        assert!(module
+            .schemas
+            .definitions
+            .contains_key("demo.schema/Customer"));
+        assert!(matches!(
+            module.schemas.resolved_function_type("demo.schema/save"),
+            Some(super::super::SchemaType::Map(fields)) if fields.len() == 1
+        ));
+
+        let missing = "(ns demo.schema) \
+                       (def Customer [:map [:address #'MissingAddress]]) \
+                       (defn ^{:schema #'Customer} save [customer] customer)";
+        assert_eq!(
+            encode_halc_module(
+                "demo.schema",
+                "demo/schema.hal",
+                missing,
+                crate::kernel::parse_forms(missing).unwrap(),
+            )
+            .unwrap_err(),
+            "schema Var does not exist: MissingAddress"
+        );
+
+        let recursive = "(ns demo.schema) \
+                         (def Node [:map [:children [:vector #'Node]]]) \
+                         (defn ^{:schema #'Node} walk [node] node)";
+        assert!(encode_halc_module(
+            "demo.schema",
+            "demo/schema.hal",
+            recursive,
+            crate::kernel::parse_forms(recursive).unwrap(),
+        )
+        .is_ok());
+
+        let malformed = "(ns demo.schema) \
+                         (def Customer [:map [:name]]) \
+                         (defn ^{:schema #'Customer} save [customer] customer)";
+        assert_eq!(
+            encode_halc_module(
+                "demo.schema",
+                "demo/schema.hal",
+                malformed,
+                crate::kernel::parse_forms(malformed).unwrap(),
+            )
+            .unwrap_err(),
+            "invalid schema demo.schema/Customer: :map schema fields must be [name type] pairs"
+        );
     }
 
     #[test]

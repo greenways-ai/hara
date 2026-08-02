@@ -157,6 +157,11 @@ pub struct Runtime {
     providers: core::ProviderRegistry,
     resources: HashMap<String, String>,
     loaded_resources: HashSet<String>,
+    halc_schema_definitions: HashMap<String, Form>,
+    halc_function_schemas: HashMap<String, Form>,
+    halc_schema_types: HashMap<String, kernel::SchemaType>,
+    halc_function_types: HashMap<String, kernel::SchemaType>,
+    halc_inferred_function_types: HashMap<String, kernel::SchemaType>,
     namespace_registry: kernel::NamespaceRegistry<core::Value>,
     macros: Rc<RefCell<HashMap<(String, String), Rc<core::Function>>>>,
     generated_configs: HashMap<String, kernel::GeneratedNamespaceConfig>,
@@ -165,9 +170,8 @@ pub struct Runtime {
     #[cfg(target_arch = "wasm32")]
     host_handler: Option<js_sys::Function>,
     #[cfg(not(target_arch = "wasm32"))]
-    native_host_handler: Option<
-        Rc<dyn Fn(String, String, Vec<core::Value>) -> Result<core::Value, String>>,
-    >,
+    native_host_handler:
+        Option<Rc<dyn Fn(String, String, Vec<core::Value>) -> Result<core::Value, String>>>,
     #[cfg(not(target_arch = "wasm32"))]
     extension_roots: Vec<std::path::PathBuf>,
 }
@@ -625,6 +629,11 @@ impl Runtime {
             providers: core::ProviderRegistry::new(),
             resources: HashMap::new(),
             loaded_resources: HashSet::new(),
+            halc_schema_definitions: HashMap::new(),
+            halc_function_schemas: HashMap::new(),
+            halc_schema_types: HashMap::new(),
+            halc_function_types: HashMap::new(),
+            halc_inferred_function_types: HashMap::new(),
             namespace_registry,
             macros: Rc::new(RefCell::new(HashMap::new())),
             generated_configs: HashMap::from([(
@@ -839,7 +848,12 @@ impl Runtime {
     pub fn eval_halc(&mut self, bytes: &[u8]) -> Result<String, String> {
         self.refresh_qualified_bindings();
         let module = kernel::halc::decode_halc(bytes)?;
+        let schemas = module.schemas;
         let result = self.eval_forms(module.forms, false)?;
+        self.halc_schema_definitions.extend(schemas.definitions);
+        self.halc_function_schemas.extend(schemas.functions);
+        self.halc_schema_types.extend(schemas.definition_types);
+        self.halc_function_types.extend(schemas.function_types);
         self.save_namespace();
         self.refresh_qualified_bindings();
         Ok(result.display())
@@ -1165,7 +1179,7 @@ impl Runtime {
     }
 
     pub fn alias_namespace(&mut self, alias: &str, target: &str) -> bool {
-        if alias.is_empty() || target.is_empty() {
+        if alias.is_empty() || alias == "-" || target.is_empty() {
             return false;
         }
         let Some(target) = self.namespace_registry.find(target) else {
@@ -1513,9 +1527,7 @@ impl Runtime {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn install_native_host_handler(
         &mut self,
-        handler: Rc<
-            dyn Fn(String, String, Vec<core::Value>) -> Result<core::Value, String>,
-        >,
+        handler: Rc<dyn Fn(String, String, Vec<core::Value>) -> Result<core::Value, String>>,
     ) {
         self.native_host_handler = Some(handler);
     }
@@ -1575,14 +1587,52 @@ impl Runtime {
         vm::encode_program(program.as_ref())
     }
 
+    /// Lowers a HALC module directly to persistent bytecode. No source text is
+    /// reconstructed, and the module's normalized schema graph is embedded in
+    /// the HBC artifact for later inference and specialization tiers.
+    pub fn compile_halc_bytecode_artifact(&mut self, bytes: &[u8]) -> Result<Vec<u8>, String> {
+        let module = kernel::halc::decode_halc(bytes)?;
+        // HALC retains the source namespace declaration as structured data.
+        // Apply it through the ordinary module loader before lowering so
+        // aliases, refers, intrinsics, and required resources are identical
+        // to interpreted HALC. Only the declaration is evaluated here; the
+        // remaining forms go directly to the bytecode compiler below.
+        if let Some(namespace_form) = module.forms.iter().find(|form| {
+            matches!(
+                core::form_without_metadata(form),
+                Form::List(items)
+                    if matches!(items.first(), Some(Form::Symbol(operator)) if operator == "ns")
+            )
+        }) {
+            self.eval_forms(vec![namespace_form.clone()], false)?;
+        } else {
+            self.use_namespace(&module.namespace);
+        }
+        let program = vm::compile_halc_module(&module, &self.namespace_registry)
+            .map_err(|error| error.to_string())?;
+        vm::encode_program(&program)
+    }
+
     /// Executes a persisted artifact against this runtime's namespaces.
     pub fn eval_bytecode_artifact(&mut self, bytes: &[u8]) -> Result<String, String> {
         let program = std::rc::Rc::new(vm::decode_program(bytes)?);
+        if let Some(namespace) = &program.namespace {
+            self.namespace_registry.set_current(namespace);
+        }
+        let schema_types = program.schema_types.clone();
+        let function_types = program.function_types.clone();
+        let inferred_function_types = program.inferred_function_types.clone();
         let result = core::with_macros(self.macros.clone(), || {
             vm::execute_program_with_globals(program, &self.namespace_registry)
                 .map(|value| value.display())
                 .map_err(|error| error.to_string())
         });
+        if result.is_ok() {
+            self.halc_schema_types.extend(schema_types);
+            self.halc_function_types.extend(function_types);
+            self.halc_inferred_function_types
+                .extend(inferred_function_types);
+        }
         let current = self.namespace_registry.current().name().as_str().to_owned();
         core::select_namespace_environment(&self.namespace_registry, &mut self.env, &current);
         result
@@ -1590,6 +1640,38 @@ impl Runtime {
 }
 
 impl Runtime {
+    /// Returns the canonical schema value loaded from HALC for a named schema Var.
+    pub fn halc_schema(&self, qualified_var: &str) -> Option<&Form> {
+        self.halc_schema_definitions.get(qualified_var)
+    }
+
+    /// Returns the canonical schema annotation loaded from HALC for a function Var.
+    pub fn halc_function_schema(&self, qualified_var: &str) -> Option<&Form> {
+        self.halc_function_schemas.get(qualified_var)
+    }
+
+    /// Returns the normalized compiler type for a named schema Var.
+    pub fn halc_schema_type(&self, qualified_var: &str) -> Option<&kernel::SchemaType> {
+        self.halc_schema_types.get(qualified_var)
+    }
+
+    /// Returns a conservative body-derived function signature, when the
+    /// compiler could prove one independently of the declared contract.
+    pub fn halc_inferred_function_type(&self, qualified_var: &str) -> Option<&kernel::SchemaType> {
+        self.halc_inferred_function_types.get(qualified_var)
+    }
+
+    /// Returns a function's normalized annotation, resolving one named edge.
+    pub fn halc_function_type(&self, qualified_var: &str) -> Option<&kernel::SchemaType> {
+        let schema = self.halc_function_types.get(qualified_var)?;
+        match schema {
+            kernel::SchemaType::Reference(name) => {
+                self.halc_schema_types.get(name).or(Some(schema))
+            }
+            _ => Some(schema),
+        }
+    }
+
     /// Evaluates native Hara source and returns its runtime value without a
     /// display round trip. Embedding hosts use this to inspect declarative
     /// values containing Vars, functions, bytes, and persistent collections.
@@ -2667,7 +2749,29 @@ mod tests {
             "[42 42 true]"
         );
         assert_eq!(runtime.eval_text("(quote -/answer)").unwrap(), "-/answer");
-        assert!(runtime.eval_text("-/missing").unwrap_err().contains("unbound symbol"));
+        assert!(runtime
+            .eval_text("-/missing")
+            .unwrap_err()
+            .contains("unbound symbol"));
+    }
+
+    #[test]
+    fn defn_schema_var_references_must_resolve() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(def Customer [:map [:id :int]]) \
+                     (defn ^{:schema #'-/Customer} customer-id [customer] (get customer :id)) \
+                     (customer-id {:id 42})",
+                )
+                .unwrap(),
+            "42"
+        );
+        assert!(runtime
+            .eval_text("(defn ^{:schema #'MissingSchema} invalid [value] value)")
+            .unwrap_err()
+            .contains("schema Var does not exist: MissingSchema"));
     }
 
     #[cfg(feature = "bytecode-vm")]
@@ -2681,6 +2785,26 @@ mod tests {
                 .unwrap(),
             "[42 42 true]"
         );
+    }
+
+    #[cfg(feature = "bytecode-vm")]
+    #[test]
+    fn bytecode_compiler_checks_named_schema_vars() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_bytecode_native(
+                    "(defn ^{:schema #'-/Customer} customer-id [customer] (get customer :id)) \
+                     (def Customer [:map [:id :int]]) \
+                     (customer-id {:id 42})",
+                )
+                .unwrap(),
+            "42"
+        );
+        assert!(runtime
+            .compile_bytecode("(defn ^{:schema #'MissingSchema} invalid [value] value)")
+            .unwrap_err()
+            .contains("schema Var does not exist: MissingSchema"));
     }
 
     #[test]
@@ -6491,7 +6615,7 @@ mod tests {
 
         let source = "(ns parity.demo) (defn value \"answer\" [] 42) (value)";
         let forms = kernel::parse_forms(source).unwrap();
-        let artifact = encode_halc_module("parity.demo", "parity/demo.hal", source, forms);
+        let artifact = encode_halc_module("parity.demo", "parity/demo.hal", source, forms).unwrap();
 
         let mut source_runtime = Runtime::new();
         let mut hir_runtime = Runtime::new();
@@ -6518,7 +6642,8 @@ mod tests {
             "parity/failure.hal",
             failing_source,
             kernel::parse_forms(failing_source).unwrap(),
-        );
+        )
+        .unwrap();
         let source_error = source_runtime.eval_text(failing_source).unwrap_err();
         let hir_error = hir_runtime.eval_halc(&failing_artifact).unwrap_err();
         assert!(source_error.contains("thrown: :parity-failed"));
@@ -7688,11 +7813,115 @@ mod tests {
     fn eval_halc_runs_encoded_library() {
         use crate::kernel::halc::encode_halc_module;
 
-        let source = "(ns demo)\n(def answer 42)\nanswer";
+        let source = "(ns demo)\n\
+                      (def Address [:map [:street :str]])\n\
+                      (def Customer [:map [:address #'Address]])\n\
+                      (defn ^{:schema #'Customer} identity-customer [customer] customer)\n\
+                      (identity-customer 42)";
         let forms = kernel::parse_forms(source).unwrap();
-        let artifact = encode_halc_module("demo", "demo.hal", source, forms);
+        let artifact = encode_halc_module("demo", "demo.hal", source, forms).unwrap();
         let mut runtime = Runtime::new();
         assert_eq!(runtime.eval_halc(&artifact).unwrap(), "42");
+        assert!(runtime.halc_schema("demo/Address").is_some());
+        assert!(runtime.halc_schema("demo/Customer").is_some());
+        assert!(matches!(
+            runtime.halc_function_type("demo/identity-customer"),
+            Some(kernel::SchemaType::Map(fields)) if fields.len() == 1
+        ));
+        assert_eq!(
+            runtime
+                .halc_function_schema("demo/identity-customer")
+                .unwrap()
+                .to_string(),
+            "(var demo/Customer)"
+        );
+    }
+
+    #[cfg(feature = "bytecode-vm")]
+    #[test]
+    fn halc_lowers_to_typed_bytecode_without_source_reconstruction() {
+        use crate::kernel::halc::encode_halc_module;
+
+        let source = "(ns typed.demo)\n\
+                      (def Customer [:map [:id :int]])\n\
+                      (def IdentityCustomer [:fn [#'Customer] #'Customer])\n\
+                      (defn ^{:schema #'IdentityCustomer} identity-customer [customer] customer)\n\
+                      (identity-customer 42)";
+        let halc = encode_halc_module(
+            "typed.demo",
+            "typed/demo.hal",
+            source,
+            kernel::parse_forms(source).unwrap(),
+        )
+        .unwrap();
+        let mut runtime = Runtime::new();
+        let bytecode = runtime.compile_halc_bytecode_artifact(&halc).unwrap();
+        let program = vm::decode_program(&bytecode).unwrap();
+        assert!(matches!(
+            program.function_types.get("typed.demo/identity-customer"),
+            Some(kernel::SchemaType::Reference(name)) if name == "typed.demo/IdentityCustomer"
+        ));
+        assert!(matches!(
+            program.schema_types.get("typed.demo/IdentityCustomer"),
+            Some(kernel::SchemaType::Function(arities)) if arities.len() == 1
+        ));
+        assert!(matches!(
+            program
+                .inferred_function_types
+                .get("typed.demo/identity-customer"),
+            Some(kernel::SchemaType::Function(arities))
+                if *arities[0].output == kernel::SchemaType::Reference("typed.demo/Customer".into())
+        ));
+        let identity_prototype = program
+            .functions
+            .iter()
+            .position(|prototype| prototype.name.as_deref() == Some("identity-customer"))
+            .unwrap() as u16;
+        assert!(matches!(
+            program.function_schema(identity_prototype),
+            Some(kernel::SchemaType::Function(arities)) if arities.len() == 1
+        ));
+        assert_eq!(runtime.eval_bytecode_artifact(&bytecode).unwrap(), "42");
+        assert!(runtime
+            .halc_inferred_function_type("typed.demo/identity-customer")
+            .is_some());
+
+        let mismatch_source = "(ns typed.bad)\n\
+                               (def Unary [:fn [:int] :int])\n\
+                               (defn ^{:schema #'Unary} wrong [left right] left)";
+        let mismatch_halc = encode_halc_module(
+            "typed.bad",
+            "typed/bad.hal",
+            mismatch_source,
+            kernel::parse_forms(mismatch_source).unwrap(),
+        )
+        .unwrap();
+        assert!(runtime
+            .compile_halc_bytecode_artifact(&mismatch_halc)
+            .unwrap_err()
+            .contains("function schema for wrong has no 2-argument arity"));
+    }
+
+    #[cfg(feature = "bytecode-vm")]
+    #[test]
+    fn halc_bytecode_lowering_applies_namespace_requires_before_compilation() {
+        use crate::kernel::halc::encode_halc_module;
+
+        let source = "(ns typed.consumer (:require [typed.dependency :refer [answer]]))\n\
+                      (defn read-answer [] answer)\n\
+                      (read-answer)";
+        let halc = encode_halc_module(
+            "typed.consumer",
+            "typed/consumer.hal",
+            source,
+            kernel::parse_forms(source).unwrap(),
+        )
+        .unwrap();
+        let mut runtime = Runtime::new();
+        runtime.register_resource("typed.dependency", "(ns typed.dependency) (def answer 42)");
+
+        let bytecode = runtime.compile_halc_bytecode_artifact(&halc).unwrap();
+        assert_eq!(runtime.eval_bytecode_artifact(&bytecode).unwrap(), "42");
     }
 
     #[test]

@@ -180,6 +180,11 @@ public final class HaraContext {
   private final Map<String, HaraNamespace> namespaces = new ConcurrentHashMap<>();
   private final Map<String, Map<String, HaraMacro>> macros = new ConcurrentHashMap<>();
   private final Map<String, Map<String, String>> aliases = new ConcurrentHashMap<>();
+  private final Map<String, Object> halcSchemaDefinitions = new ConcurrentHashMap<>();
+  private final Map<String, Object> halcFunctionSchemas = new ConcurrentHashMap<>();
+  private final Map<String, HalcSchema.Type> halcSchemaTypes = new ConcurrentHashMap<>();
+  private final Map<String, HalcSchema.Type> halcFunctionTypes = new ConcurrentHashMap<>();
+  private final Map<String, HalcSchema.Type> halcInferredFunctionTypes = new ConcurrentHashMap<>();
   private final Map<String, NamespaceLoadState> namespaceStates = new ConcurrentHashMap<>();
   private final Map<String, String> namespaceFailures = new ConcurrentHashMap<>();
   private final Map<String, String> nativeFlavors = new ConcurrentHashMap<>();
@@ -236,6 +241,52 @@ public final class HaraContext {
     hideIteratorImplementationBindings();
     currentNamespace = namespace("user");
     initializeUserNamespace(currentNamespace);
+  }
+
+  void installHalcSchemas(HalcArtifact.SchemaIndex schemas) {
+    halcSchemaDefinitions.putAll(schemas.definitions);
+    halcFunctionSchemas.putAll(schemas.functions);
+    halcSchemaTypes.putAll(schemas.definitionTypes);
+    halcFunctionTypes.putAll(schemas.functionTypes);
+    halcInferredFunctionTypes.putAll(schemas.inferredFunctionTypes);
+  }
+
+  Object halcSchema(String qualifiedVar) {
+    return halcSchemaDefinitions.get(qualifiedVar);
+  }
+
+  Object halcFunctionSchema(String qualifiedVar) {
+    return halcFunctionSchemas.get(qualifiedVar);
+  }
+
+  HalcSchema.Type halcSchemaType(String qualifiedVar) {
+    return halcSchemaTypes.get(qualifiedVar);
+  }
+
+  HalcSchema.Type halcFunctionType(String qualifiedVar) {
+    HalcSchema.Type schema = halcFunctionTypes.get(qualifiedVar);
+    if (schema instanceof HalcSchema.Reference reference) {
+      return halcSchemaTypes.getOrDefault(reference.name(), schema);
+    }
+    return schema;
+  }
+
+  HalcSchema.Type halcInferredFunctionType(String qualifiedVar) {
+    return halcInferredFunctionTypes.get(qualifiedVar);
+  }
+
+  HalcSchema.Type halcBestFunctionType(String qualifiedVar) {
+    HalcSchema.Type declared = halcFunctionType(qualifiedVar);
+    return declared != null ? declared : halcInferredFunctionType(qualifiedVar);
+  }
+
+  public void installHbcTypes(
+      Map<String, HalcSchema.Type> schemaTypes,
+      Map<String, HalcSchema.Type> functionTypes,
+      Map<String, HalcSchema.Type> inferredFunctionTypes) {
+    halcSchemaTypes.putAll(schemaTypes);
+    halcFunctionTypes.putAll(functionTypes);
+    halcInferredFunctionTypes.putAll(inferredFunctionTypes);
   }
 
   TruffleLanguage.Env environment() {
@@ -747,6 +798,7 @@ public final class HaraContext {
   }
 
   private void putAlias(Map<String, String> namespaceAliases, String alias, String target) {
+    if ("-".equals(alias)) throw new HaraException("Namespace alias is reserved: -");
     String previous = namespaceAliases.putIfAbsent(alias, target);
     if (previous != null && !previous.equals(target)) {
       throw new HaraException("Namespace alias already refers to " + previous + ": " + alias);

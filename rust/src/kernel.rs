@@ -10,6 +10,8 @@ pub mod namespace;
 pub mod parser;
 #[path = "kernel/reader.rs"]
 pub mod reader;
+#[path = "kernel/schema.rs"]
+pub mod schema;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "kernel/secret.rs"]
 pub mod secret;
@@ -24,6 +26,7 @@ pub use generated::GeneratedNamespaceConfig;
 pub use namespace::{Namespace, NamespaceLoadState, NamespaceRegistry};
 pub use parser::{parse, parse_forms, read_forms, ParseError, Parser, Span, SpannedForm};
 pub use reader::{Position, Reader};
+pub use schema::{normalize_schema, FunctionSchema, SchemaField, SchemaType};
 #[cfg(not(target_arch = "wasm32"))]
 pub use secret::{ResolvedSecret, ResolvedSecrets, SecretCatalog, SecretDescriptor};
 #[cfg(not(target_arch = "wasm32"))]

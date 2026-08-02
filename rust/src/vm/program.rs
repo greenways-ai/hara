@@ -7,6 +7,8 @@
 use super::opcode::Instruction;
 use super::source_map::SourceMap;
 use crate::core::Value;
+use crate::kernel::SchemaType;
+use std::collections::HashMap;
 
 /// Maximum number of entries in the constant pool.
 pub const MAX_CONSTANTS: usize = 1 << 24;
@@ -85,11 +87,19 @@ pub struct FunctionPrototype {
 /// A compiled program: a constant pool plus function prototypes.
 #[derive(Debug, Clone)]
 pub struct Program {
+    /// Owning namespace for a module lowered from HALC; source snippets have none.
+    pub namespace: Option<String>,
     pub constants: Vec<Value>,
     /// Hara metadata tables for `DefGlobal` (docstrings, attr maps,
     /// computed arglists), assembled at compile time from the source
     /// forms. Empty for programs without global definitions.
     pub var_metadata: Vec<std::rc::Rc<crate::lang::data::Metadata>>,
+    /// Canonical named-schema graph supplied by HALC lowering.
+    pub schema_types: HashMap<String, SchemaType>,
+    /// Function annotations normalized against `schema_types`.
+    pub function_types: HashMap<String, SchemaType>,
+    /// Conservative body-derived facts. These never replace declarations.
+    pub inferred_function_types: HashMap<String, SchemaType>,
     pub functions: Vec<FunctionPrototype>,
     pub entry: FunctionId,
 }
@@ -98,5 +108,55 @@ impl Program {
     /// The prototype execution starts from.
     pub fn entry_function(&self) -> &FunctionPrototype {
         &self.functions[self.entry as usize]
+    }
+
+    /// Returns the normalized annotation for a compiled prototype, following
+    /// named-schema references without expanding recursive schema graphs.
+    pub fn function_schema(&self, function: FunctionId) -> Option<&SchemaType> {
+        let prototype = self.functions.get(function as usize)?;
+        let name = prototype.name.as_deref()?;
+        let qualified = if name.contains('/') {
+            name.to_owned()
+        } else {
+            format!("{}/{}", self.namespace.as_deref()?, name)
+        };
+        let mut schema = self
+            .function_types
+            .get(&qualified)
+            .or_else(|| self.inferred_function_types.get(&qualified))?;
+        let mut visited = std::collections::HashSet::new();
+        while let SchemaType::Reference(target) = schema {
+            if !visited.insert(target.as_str()) {
+                return Some(schema);
+            }
+            let Some(resolved) = self.schema_types.get(target) else {
+                return Some(schema);
+            };
+            schema = resolved;
+        }
+        Some(schema)
+    }
+
+    /// Whether every argument slot for this prototype has a proven i64
+    /// representation. The tracing JIT still emits entry guards; this fact
+    /// only allows it to begin recording before the generic hot threshold.
+    pub fn function_has_i64_parameters(&self, function: FunctionId) -> bool {
+        let Some(prototype) = self.functions.get(function as usize) else {
+            return false;
+        };
+        let Some(SchemaType::Function(arities)) = self.function_schema(function) else {
+            return false;
+        };
+        arities.iter().any(|arity| {
+            arity.fixed.len() == usize::from(prototype.arity)
+                && arity.rest.is_some() == prototype.variadic
+                && arity
+                    .fixed
+                    .iter()
+                    .all(|value| matches!(value, SchemaType::Primitive(name) if name == "int"))
+                && arity.rest.as_deref().is_none_or(
+                    |value| matches!(value, SchemaType::Primitive(name) if name == "int"),
+                )
+        })
     }
 }

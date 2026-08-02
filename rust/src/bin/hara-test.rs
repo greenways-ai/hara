@@ -52,12 +52,11 @@ pub fn run_file(root: &Path, file: &Path) -> Result<TestSummary, String> {
             let mut kernel = SessionKernel::new();
             let mount = kernel.create_native_filesystem(&root_text);
             kernel.attach_filesystem("ROOT", mount)?;
-            let output = kernel.eval("ROOT", &source).map_err(|error| {
-                format!("{}: {error}", file.display())
-            })?;
-            parse_summary(file.clone(), &output).map_err(|error| {
-                format!("{}: {error}", file.display())
-            })
+            let output = kernel
+                .eval("ROOT", &source)
+                .map_err(|error| format!("{}: {error}", file.display()))?;
+            parse_summary(file.clone(), &output)
+                .map_err(|error| format!("{}: {error}", file.display()))
         })
         .map_err(|error| format!("cannot start test thread: {error}"))?;
 
@@ -79,10 +78,7 @@ pub fn run_paths(root: &Path, paths: &[PathBuf]) -> Result<Vec<TestSummary>, Str
     }
     files
         .iter()
-        .map(|file| {
-            run_file(root, file)
-                .map_err(|error| format!("{}: {error}", file.display()))
-        })
+        .map(|file| run_file(root, file).map_err(|error| format!("{}: {error}", file.display())))
         .collect::<Result<Vec<_>, _>>()
 }
 

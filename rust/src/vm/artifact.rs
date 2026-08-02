@@ -1,5 +1,6 @@
 //! Versioned persistent encoding for validated VM programs.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use sha2::{Digest, Sha256};
@@ -10,12 +11,13 @@ use super::source_map::SourceMap;
 use crate::core::Primitive;
 #[cfg(test)]
 use crate::core::Value;
-use crate::kernel::Position;
+use crate::kernel::{FunctionSchema, Position, SchemaField, SchemaType};
 use crate::lang::data::{Keyword, Metadata, MetadataValue, Symbol};
 
 const MAGIC_V1: &[u8; 4] = b"HBC1";
 const MAGIC_V2: &[u8; 4] = b"HBC2";
 const MAGIC_V3: &[u8; 4] = b"HBC3";
+const MAGIC_V4: &[u8; 4] = b"HBC4";
 
 /// Encodes a program after validating it. Constants use the portable HTA
 /// value codec; unsupported runtime-only values are rejected explicitly.
@@ -23,6 +25,7 @@ pub fn encode_program(program: &Program) -> Result<Vec<u8>, String> {
     super::validate::validate(program).map_err(|error| error.to_string())?;
     let mut payload = Writer::default();
     payload.u16(program.entry);
+    payload.option_string(program.namespace.as_deref())?;
     payload.len(program.constants.len())?;
     for value in &program.constants {
         payload.bytes(&crate::hta::encode(value)?)?;
@@ -31,12 +34,15 @@ pub fn encode_program(program: &Program) -> Result<Vec<u8>, String> {
     for metadata in &program.var_metadata {
         write_metadata(&mut payload, metadata)?;
     }
+    write_schema_map(&mut payload, &program.schema_types)?;
+    write_schema_map(&mut payload, &program.function_types)?;
+    write_schema_map(&mut payload, &program.inferred_function_types)?;
     payload.len(program.functions.len())?;
     for function in &program.functions {
         write_function(&mut payload, function)?;
     }
     let digest = Sha256::digest(&payload.bytes);
-    let mut output = MAGIC_V3.to_vec();
+    let mut output = MAGIC_V4.to_vec();
     output.extend_from_slice(
         &u32::try_from(payload.bytes.len())
             .map_err(|_| "bytecode artifact is too large")?
@@ -49,7 +55,9 @@ pub fn encode_program(program: &Program) -> Result<Vec<u8>, String> {
 
 /// Decodes, authenticates, and validates a persistent VM program.
 pub fn decode_program(bytes: &[u8]) -> Result<Program, String> {
-    let version = if bytes.starts_with(MAGIC_V3) {
+    let version = if bytes.starts_with(MAGIC_V4) {
+        4
+    } else if bytes.starts_with(MAGIC_V3) {
         3
     } else if bytes.starts_with(MAGIC_V2) {
         2
@@ -74,13 +82,37 @@ pub fn decode_program(bytes: &[u8]) -> Result<Program, String> {
     }
     let mut reader = Reader::new(payload);
     let entry = reader.u16()?;
+    let namespace = if version >= 4 {
+        reader.option_string()?
+    } else {
+        None
+    };
     let constants = reader.many(|reader| crate::hta::decode(reader.bytes()?))?;
     let var_metadata = reader.many(|reader| read_metadata(reader))?;
+    let schema_types = if version >= 4 {
+        read_schema_map(&mut reader)?
+    } else {
+        HashMap::new()
+    };
+    let function_types = if version >= 4 {
+        read_schema_map(&mut reader)?
+    } else {
+        HashMap::new()
+    };
+    let inferred_function_types = if version >= 4 {
+        read_schema_map(&mut reader)?
+    } else {
+        HashMap::new()
+    };
     let functions = reader.many(|reader| read_function(reader, version))?;
     reader.finish()?;
     let program = Program {
+        namespace,
         constants,
         var_metadata,
+        schema_types,
+        function_types,
+        inferred_function_types,
         functions,
         entry,
     };
@@ -561,6 +593,157 @@ fn read_metadata_value(reader: &mut Reader<'_>) -> Result<MetadataValue, String>
     })
 }
 
+fn write_schema_map(out: &mut Writer, schemas: &HashMap<String, SchemaType>) -> Result<(), String> {
+    let mut names = schemas.keys().collect::<Vec<_>>();
+    names.sort();
+    out.len(names.len())?;
+    for name in names {
+        out.string(name)?;
+        write_schema_type(out, &schemas[name])?;
+    }
+    Ok(())
+}
+
+fn read_schema_map(reader: &mut Reader<'_>) -> Result<HashMap<String, SchemaType>, String> {
+    let entries = reader.many(|reader| Ok((reader.string()?, read_schema_type(reader)?)))?;
+    let mut schemas = HashMap::with_capacity(entries.len());
+    for (name, schema) in entries {
+        if schemas.insert(name.clone(), schema).is_some() {
+            return Err(format!(
+                "bytecode artifact contains duplicate schema {name}"
+            ));
+        }
+    }
+    Ok(schemas)
+}
+
+fn write_schema_type(out: &mut Writer, schema: &SchemaType) -> Result<(), String> {
+    match schema {
+        SchemaType::Primitive(name) => {
+            out.byte(0);
+            out.string(name)?;
+        }
+        SchemaType::Reference(name) => {
+            out.byte(1);
+            out.string(name)?;
+        }
+        SchemaType::Union(types) => {
+            out.byte(2);
+            write_schema_types(out, types)?;
+        }
+        SchemaType::Vector(item) => {
+            out.byte(3);
+            write_schema_type(out, item)?;
+        }
+        SchemaType::Tuple(items) => {
+            out.byte(4);
+            write_schema_types(out, items)?;
+        }
+        SchemaType::Map(fields) => {
+            out.byte(5);
+            out.len(fields.len())?;
+            for field in fields {
+                write_schema_form(out, &field.name)?;
+                write_schema_type(out, &field.value_type)?;
+            }
+        }
+        SchemaType::Function(arities) => {
+            out.byte(6);
+            out.len(arities.len())?;
+            for arity in arities {
+                write_schema_types(out, &arity.fixed)?;
+                match &arity.rest {
+                    Some(rest) => {
+                        out.byte(1);
+                        write_schema_type(out, rest)?;
+                    }
+                    None => out.byte(0),
+                }
+                write_schema_type(out, &arity.output)?;
+            }
+        }
+        SchemaType::Enum(values) => {
+            out.byte(7);
+            write_schema_forms(out, values)?;
+        }
+        SchemaType::Extension { head, arguments } => {
+            out.byte(8);
+            out.string(head)?;
+            write_schema_forms(out, arguments)?;
+        }
+        SchemaType::Unknown(surface) => {
+            out.byte(9);
+            write_schema_form(out, surface)?;
+        }
+    }
+    Ok(())
+}
+
+fn read_schema_type(reader: &mut Reader<'_>) -> Result<SchemaType, String> {
+    Ok(match reader.byte()? {
+        0 => SchemaType::Primitive(reader.string()?),
+        1 => SchemaType::Reference(reader.string()?),
+        2 => SchemaType::Union(reader.many(read_schema_type)?),
+        3 => SchemaType::Vector(Box::new(read_schema_type(reader)?)),
+        4 => SchemaType::Tuple(reader.many(read_schema_type)?),
+        5 => SchemaType::Map(reader.many(|reader| {
+            Ok(SchemaField {
+                name: read_schema_form(reader)?,
+                value_type: read_schema_type(reader)?,
+            })
+        })?),
+        6 => SchemaType::Function(reader.many(|reader| {
+            let fixed = reader.many(read_schema_type)?;
+            let rest = if reader.boolean()? {
+                Some(Box::new(read_schema_type(reader)?))
+            } else {
+                None
+            };
+            Ok(FunctionSchema {
+                fixed,
+                rest,
+                output: Box::new(read_schema_type(reader)?),
+            })
+        })?),
+        7 => SchemaType::Enum(read_schema_forms(reader)?),
+        8 => SchemaType::Extension {
+            head: reader.string()?,
+            arguments: read_schema_forms(reader)?,
+        },
+        9 => SchemaType::Unknown(read_schema_form(reader)?),
+        _ => return Err("bytecode artifact contains unknown schema type".into()),
+    })
+}
+
+fn write_schema_types(out: &mut Writer, types: &[SchemaType]) -> Result<(), String> {
+    out.len(types.len())?;
+    for schema in types {
+        write_schema_type(out, schema)?;
+    }
+    Ok(())
+}
+
+fn write_schema_forms(out: &mut Writer, forms: &[crate::kernel::Form]) -> Result<(), String> {
+    out.len(forms.len())?;
+    for form in forms {
+        write_schema_form(out, form)?;
+    }
+    Ok(())
+}
+
+fn read_schema_forms(reader: &mut Reader<'_>) -> Result<Vec<crate::kernel::Form>, String> {
+    reader.many(read_schema_form)
+}
+
+fn write_schema_form(out: &mut Writer, form: &crate::kernel::Form) -> Result<(), String> {
+    out.string(&form.to_string())
+}
+
+fn read_schema_form(reader: &mut Reader<'_>) -> Result<crate::kernel::Form, String> {
+    crate::kernel::parse(&reader.string()?)
+        .map_err(|error| format!("bytecode artifact contains invalid schema form: {error}"))
+}
+
 #[derive(Default)]
 struct Writer {
     bytes: Vec<u8>,
@@ -725,11 +908,42 @@ mod tests {
     #[test]
     fn programs_round_trip_and_execute() {
         let source = "(do (defn add-one [x] (+ x 1)) (add-one 41))";
-        let program = compile_source(source).unwrap();
+        let mut program = compile_source(source).unwrap();
+        program.namespace = Some("demo".into());
+        program.schema_types.insert(
+            "demo/Customer".into(),
+            SchemaType::Map(vec![SchemaField {
+                name: crate::kernel::parse(":id").unwrap(),
+                value_type: SchemaType::Primitive("int".into()),
+            }]),
+        );
+        program.function_types.insert(
+            "demo/add-one".into(),
+            SchemaType::Function(vec![FunctionSchema {
+                fixed: vec![SchemaType::Primitive("int".into())],
+                rest: None,
+                output: Box::new(SchemaType::Primitive("int".into())),
+            }]),
+        );
+        program.inferred_function_types.insert(
+            "demo/inferred".into(),
+            SchemaType::Function(vec![FunctionSchema {
+                fixed: vec![],
+                rest: None,
+                output: Box::new(SchemaType::Primitive("int".into())),
+            }]),
+        );
         let encoded = encode_program(&program).unwrap();
-        assert!(encoded.starts_with(b"HBC3"));
+        assert!(encoded.starts_with(b"HBC4"));
         let decoded = decode_program(&encoded).unwrap();
         assert_eq!(disassemble(&decoded), disassemble(&program));
+        assert_eq!(decoded.schema_types, program.schema_types);
+        assert_eq!(decoded.function_types, program.function_types);
+        assert_eq!(
+            decoded.inferred_function_types,
+            program.inferred_function_types
+        );
+        assert_eq!(decoded.namespace, program.namespace);
         assert_eq!(
             execute_program(Rc::new(decoded)).unwrap(),
             Value::Number(42)

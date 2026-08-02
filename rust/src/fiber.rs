@@ -681,28 +681,20 @@ fn list(v: Vec<Form>, env: Rc<RefCell<HashMap<String, Value>>>, k: Cont) -> Step
         }
         Some("std.foundation.coroutine/create")
         | Some("std.native.Coroutine/create")
-        | Some("Coroutine/create") => {
-            coroutine::create_form(v, env, k)
-        }
+        | Some("Coroutine/create") => coroutine::create_form(v, env, k),
         Some("std.foundation.coroutine/coroutine?")
         | Some("std.native.Coroutine/instance?")
-        | Some("Coroutine/instance?") => {
-            coroutine::predicate_form(v, env, k)
-        }
+        | Some("Coroutine/instance?") => coroutine::predicate_form(v, env, k),
         Some("std.foundation.coroutine/status") => coroutine::status_form(v, env, k),
         Some("std.foundation.coroutine/close") => coroutine::close_form(v, env, k),
         Some("std.foundation.coroutine/resume") => coroutine::resume_form(v, env, k),
         Some("std.protocol.icoroutine/resume") => coroutine::resume_protocol_form(v, env, k),
         Some("std.foundation.coroutine/yield")
         | Some("std.native.Coroutine/yield")
-        | Some("Coroutine/yield") => {
-            coroutine::yield_form(v, env, k)
-        }
+        | Some("Coroutine/yield") => coroutine::yield_form(v, env, k),
         Some("std.foundation.coroutine/await")
         | Some("std.native.Coroutine/await")
-        | Some("Coroutine/await") => {
-            coroutine::await_form(v, env, k)
-        }
+        | Some("Coroutine/await") => coroutine::await_form(v, env, k),
         Some("def") | Some("set!") | Some("var/set") => bind_form(v, env, k),
         Some("resolve") if matches!(env.borrow().get("resolve"), Some(value) if !matches!(value, Value::Var(_))) => {
             application(v, env, k)
@@ -1255,11 +1247,8 @@ mod tests {
 
     #[test]
     fn drive_sync_waits_for_a_deferred_promise() {
-        let mut fiber = EvalFiber::start(
-            "(deref (promise/delay 1 (fn [] 42)))",
-            HashMap::new(),
-        )
-        .unwrap();
+        let mut fiber =
+            EvalFiber::start("(deref (promise/delay 1 (fn [] 42)))", HashMap::new()).unwrap();
         assert_eq!(fiber.drive_sync(), Ok(Value::Number(42)));
     }
 

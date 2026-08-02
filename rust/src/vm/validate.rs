@@ -29,14 +29,42 @@ pub fn validate(program: &Program) -> Result<(), ValidationError> {
     }
     let multiple = program.functions.len() > 1;
     for (index, function) in program.functions.iter().enumerate() {
-        validate_function(program, function).map_err(|mut error| {
-            if multiple {
-                error.message = format!("function {index}: {}", error.message);
-            }
-            error
-        })?;
+        validate_declared_arity(program, index)
+            .and_then(|_| validate_function(program, function))
+            .map_err(|mut error| {
+                if multiple {
+                    error.message = format!("function {index}: {}", error.message);
+                }
+                error
+            })?;
     }
     Ok(())
+}
+
+fn validate_declared_arity(program: &Program, index: usize) -> Result<(), ValidationError> {
+    let function = &program.functions[index];
+    let Some(crate::kernel::SchemaType::Function(arities)) = program.function_schema(index as u16)
+    else {
+        return Ok(());
+    };
+    if arities.iter().any(|schema| {
+        schema.fixed.len() == function.arity as usize && schema.rest.is_some() == function.variadic
+    }) {
+        return Ok(());
+    }
+    Err(ValidationError::new(
+        format!(
+            "function schema for {} has no {}-argument arity{}",
+            function.name.as_deref().unwrap_or("<anonymous>"),
+            function.arity,
+            if function.variadic {
+                " with rest arguments"
+            } else {
+                ""
+            }
+        ),
+        None,
+    ))
 }
 
 fn validate_function(

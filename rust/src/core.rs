@@ -2735,8 +2735,7 @@ pub(crate) fn protected_fallback_binding(
         return None;
     }
     match env.get(name) {
-        Some(Value::Var(var)) if matches!(var.origin(), VarOrigin::RustLibrary) =>
-        {
+        Some(Value::Var(var)) if matches!(var.origin(), VarOrigin::RustLibrary) => {
             var.set_hara_metadata(merge_metadata(var.hara_metadata(), metadata));
             Some(var.deref_value())
         }
@@ -7870,6 +7869,20 @@ pub(crate) fn definition_metadata(
     Ok((metadata, rest))
 }
 
+pub(crate) fn schema_var_reference(metadata: Option<&Metadata>) -> Option<&Symbol> {
+    let MetadataValue::List(reference) = metadata?.get_keyword("schema")? else {
+        return None;
+    };
+    match reference.as_slice() {
+        [MetadataValue::Symbol(operator), MetadataValue::Symbol(target)]
+            if operator.get_namespace().is_none() && operator.get_name() == "var" =>
+        {
+            Some(target)
+        }
+        _ => None,
+    }
+}
+
 fn attach_optional_metadata(value: Value, metadata: Option<Rc<Metadata>>) -> Result<Value, String> {
     Ok(match value {
         Value::Symbol(value) => Value::Symbol(value.with_meta(metadata.clone())),
@@ -8406,9 +8419,16 @@ fn binding_var(env: &mut HashMap<String, Value>, name: &str) -> Option<KernelVar
             env.insert(name.to_string(), Value::Var(var.clone()));
             Some(var)
         }
-        None => namespace_registry()
-            .ok()?
-            .resolve(&crate::lang::data::Symbol::parse(name)),
+        None => {
+            if let Some(local) = name.strip_prefix("-/") {
+                if let Some(Value::Var(var)) = env.get(local) {
+                    return Some(var.clone());
+                }
+            }
+            namespace_registry()
+                .ok()?
+                .resolve(&crate::lang::data::Symbol::parse(name))
+        }
     }
 }
 
@@ -8874,6 +8894,9 @@ fn eval_require_spec(
                     Form::Symbol(alias) if !alias.contains('/') => alias.clone(),
                     _ => return Err("require :as expects an unqualified symbol".into()),
                 };
+                if alias == "-" {
+                    return Err("Namespace alias is reserved: -".into());
+                }
                 if deferred {
                     registry.current().lazy_alias(alias, &target);
                 } else {
@@ -9310,817 +9333,940 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                 operator => operator,
             };
             match operator {
-            Form::Symbol(n) if n == "fn" || n == "fn*" => {
-                if fs.len() < 3 {
-                    return Err("fn expects parameters and a body".into());
+                Form::Symbol(n) if n == "fn" || n == "fn*" => {
+                    if fs.len() < 3 {
+                        return Err("fn expects parameters and a body".into());
+                    }
+                    let (params, variadic, patterns, variadic_pattern) = function_parts(&fs[1])?;
+                    Ok(Value::Function(Rc::new(Function {
+                        params,
+                        variadic,
+                        patterns,
+                        variadic_pattern,
+                        body: fs[2..].to_vec(),
+                        captured: Rc::new(RefCell::new(env.clone())),
+                        name: None,
+                        native: None,
+                        clauses: Vec::new(),
+                        is_macro: false,
+                    })))
                 }
-                let (params, variadic, patterns, variadic_pattern) = function_parts(&fs[1])?;
-                Ok(Value::Function(Rc::new(Function {
-                    params,
-                    variadic,
-                    patterns,
-                    variadic_pattern,
-                    body: fs[2..].to_vec(),
-                    captured: Rc::new(RefCell::new(env.clone())),
-                    name: None,
-                    native: None,
-                    clauses: Vec::new(),
-                    is_macro: false,
-                })))
-            }
-            Form::Symbol(n) if n == "eval" => {
-                if fs.len() != 2 {
-                    return Err("eval expects one form".into());
+                Form::Symbol(n) if n == "eval" => {
+                    if fs.len() != 2 {
+                        return Err("eval expects one form".into());
+                    }
+                    eval(&fs[1], env)
                 }
-                eval(&fs[1], env)
-            }
-            Form::Symbol(n) if n == "load-string" => {
-                if fs.len() != 2 {
-                    return Err("load-string expects one string".into());
+                Form::Symbol(n) if n == "load-string" => {
+                    if fs.len() != 2 {
+                        return Err("load-string expects one string".into());
+                    }
+                    match eval(&fs[1], env)? {
+                        Value::String(source) => eval_value_text(&source, env),
+                        _ => Err("load-string expects a string".into()),
+                    }
                 }
-                match eval(&fs[1], env)? {
-                    Value::String(source) => eval_value_text(&source, env),
-                    _ => Err("load-string expects a string".into()),
+                Form::Symbol(n) if n == "var-sym" => {
+                    if fs.len() != 2 {
+                        return Err("var-sym expects one var".into());
+                    }
+                    match eval(&fs[1], env)? {
+                        Value::Var(var) => Ok(Value::Symbol(var.symbol().clone())),
+                        _ => Err("var-sym expects a var".into()),
+                    }
                 }
-            }
-            Form::Symbol(n) if n == "var-sym" => {
-                if fs.len() != 2 {
-                    return Err("var-sym expects one var".into());
+                Form::Symbol(n) if n == "resolve" && !env.contains_key(n) => {
+                    if fs.len() != 2 {
+                        return Err("resolve expects one symbol".into());
+                    }
+                    let symbol = match eval(&fs[1], env)? {
+                        Value::Symbol(value) => value,
+                        _ => return Err("resolve expects a symbol".into()),
+                    };
+                    let registry = namespace_registry()?;
+                    force_lazy_alias(&registry, env, symbol.path_string().as_str())?;
+                    Ok(registry
+                        .resolve(&symbol)
+                        .map(Value::Var)
+                        .unwrap_or(Value::Nil))
                 }
-                match eval(&fs[1], env)? {
-                    Value::Var(var) => Ok(Value::Symbol(var.symbol().clone())),
-                    _ => Err("var-sym expects a var".into()),
+                Form::Symbol(n) if n == "requiring-resolve" && !env.contains_key(n) => {
+                    if fs.len() != 2 {
+                        return Err("requiring-resolve expects one symbol".into());
+                    }
+                    let symbol = match eval(&fs[1], env)? {
+                        Value::Symbol(value) => value,
+                        _ => return Err("requiring-resolve expects a symbol".into()),
+                    };
+                    let namespace = symbol
+                        .get_namespace()
+                        .ok_or_else(|| "requiring-resolve expects a qualified symbol".to_string())?
+                        .to_owned();
+                    let registry = namespace_registry()?;
+                    ensure_namespace(&registry, env, &namespace, false)?;
+                    Ok(registry
+                        .resolve(&symbol)
+                        .map(Value::Var)
+                        .unwrap_or(Value::Nil))
                 }
-            }
-            Form::Symbol(n) if n == "resolve" && !env.contains_key(n) => {
-                if fs.len() != 2 {
-                    return Err("resolve expects one symbol".into());
-                }
-                let symbol = match eval(&fs[1], env)? {
-                    Value::Symbol(value) => value,
-                    _ => return Err("resolve expects a symbol".into()),
-                };
-                let registry = namespace_registry()?;
-                force_lazy_alias(&registry, env, symbol.path_string().as_str())?;
-                Ok(registry
-                    .resolve(&symbol)
-                    .map(Value::Var)
-                    .unwrap_or(Value::Nil))
-            }
-            Form::Symbol(n) if n == "requiring-resolve" && !env.contains_key(n) => {
-                if fs.len() != 2 {
-                    return Err("requiring-resolve expects one symbol".into());
-                }
-                let symbol = match eval(&fs[1], env)? {
-                    Value::Symbol(value) => value,
-                    _ => return Err("requiring-resolve expects a symbol".into()),
-                };
-                let namespace = symbol
-                    .get_namespace()
-                    .ok_or_else(|| "requiring-resolve expects a qualified symbol".to_string())?
-                    .to_owned();
-                let registry = namespace_registry()?;
-                ensure_namespace(&registry, env, &namespace, false)?;
-                Ok(registry
-                    .resolve(&symbol)
-                    .map(Value::Var)
-                    .unwrap_or(Value::Nil))
-            }
-            Form::Symbol(n) if n == "module-revision" => {
-                if fs.len() != 2 {
-                    return Err("module-revision expects one namespace".into());
-                }
-                let name = match eval(&fs[1], env)? {
-                    Value::Symbol(value) => value.as_str().to_owned(),
-                    Value::String(value) => value,
-                    _ => return Err("module-revision expects a namespace symbol or string".into()),
-                };
-                Ok(Value::Number(
-                    namespace_registry()?.module_revision(&name) as i64
-                ))
-            }
-            Form::Symbol(n) if n == "ns-state" || n == "ns-loaded?" => {
-                if fs.len() != 2 {
-                    return Err(format!("{n} expects one namespace"));
-                }
-                let name = match eval(&fs[1], env)? {
-                    Value::Symbol(value) => value.as_str().to_owned(),
-                    Value::String(value) => value,
-                    _ => return Err(format!("{n} expects a namespace symbol or string")),
-                };
-                let registry = namespace_registry()?;
-                let state = registry
-                    .load_state(&name)
-                    .or_else(|| registry.find(&name).map(|_| NamespaceLoadState::Loaded));
-                let loaded = state == Some(NamespaceLoadState::Loaded);
-                if n == "ns-loaded?" {
-                    Ok(Value::Bool(loaded))
-                } else {
-                    Ok(Value::Keyword(
-                        state
-                            .map(NamespaceLoadState::as_str)
-                            .unwrap_or("unknown")
-                            .into(),
-                    ))
-                }
-            }
-            Form::Symbol(n) if n == "ns-alias-state" => {
-                if fs.len() != 2 && fs.len() != 3 {
-                    return Err("ns-alias-state expects alias or namespace and alias".into());
-                }
-                let registry = namespace_registry()?;
-                let (owner, alias_form) = if fs.len() == 3 {
-                    let owner = match eval(&fs[1], env)? {
+                Form::Symbol(n) if n == "module-revision" => {
+                    if fs.len() != 2 {
+                        return Err("module-revision expects one namespace".into());
+                    }
+                    let name = match eval(&fs[1], env)? {
                         Value::Symbol(value) => value.as_str().to_owned(),
                         Value::String(value) => value,
                         _ => {
-                            return Err("ns-alias-state expects a namespace symbol or string".into())
+                            return Err(
+                                "module-revision expects a namespace symbol or string".into()
+                            )
                         }
                     };
-                    (owner, &fs[2])
-                } else {
-                    (registry.current().name().as_str().to_owned(), &fs[1])
-                };
-                let alias = match eval(alias_form, env)? {
-                    Value::Symbol(value) if value.get_namespace().is_none() => value,
-                    _ => return Err("ns-alias-state expects an unqualified alias symbol".into()),
-                };
-                let Some(namespace) = registry.find(&owner) else {
-                    return Ok(Value::Nil);
-                };
-                let target = namespace.lazy_target(alias.as_str()).or_else(|| {
-                    namespace
-                        .aliases()
-                        .into_iter()
-                        .find(|(name, _)| name == &alias)
-                        .map(|(_, target)| target.name().clone())
-                });
-                let Some(target) = target else {
-                    return Ok(Value::Nil);
-                };
-                let state = registry
-                    .load_state(target.as_str())
-                    .or_else(|| {
-                        registry
-                            .find(target.as_str())
-                            .map(|_| NamespaceLoadState::Loaded)
-                    })
-                    .map(NamespaceLoadState::as_str)
-                    .unwrap_or("unknown");
-                Ok(Value::Map(PMap::from_iter([
-                    (Value::Keyword("alias".into()), Value::Symbol(alias)),
-                    (Value::Keyword("target".into()), Value::Symbol(target)),
-                    (Value::Keyword("state".into()), Value::Keyword(state.into())),
-                ])))
-            }
-            Form::Symbol(n) if n == "eval-in-ns" => {
-                if fs.len() != 3 {
-                    return Err("eval-in-ns expects namespace and forms".into());
+                    Ok(Value::Number(
+                        namespace_registry()?.module_revision(&name) as i64
+                    ))
                 }
-                let target = match eval(&fs[1], env)? {
-                    Value::Symbol(name) => name.as_str().to_owned(),
-                    Value::String(name) => name,
-                    _ => return Err("eval-in-ns expects a namespace symbol or string".into()),
-                };
-                let forms = iterator_values(eval(&fs[2], env)?)?
-                    .into_iter()
-                    .map(|value| value_to_form(&value))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let registry = namespace_registry()?;
-                if registry.find(&target).is_none() {
-                    return Err(format!(
-                        "eval-in-ns requires an existing namespace: {target}"
-                    ));
-                }
-                let previous = registry.current().name().as_str().to_owned();
-                select_namespace_environment(&registry, env, &target);
-                let result = (|| {
-                    let mut result = Value::Nil;
-                    for form in &forms {
-                        result = eval(form, env)?;
+                Form::Symbol(n) if n == "ns-state" || n == "ns-loaded?" => {
+                    if fs.len() != 2 {
+                        return Err(format!("{n} expects one namespace"));
                     }
-                    Ok(result)
-                })();
-                select_namespace_environment(&registry, env, &previous);
-                result
-            }
-            Form::Symbol(n) if n == "intern-var" => {
-                if fs.len() != 4 && fs.len() != 5 {
-                    return Err(
-                        "intern-var expects namespace, symbol, var, and optional metadata".into(),
-                    );
+                    let name = match eval(&fs[1], env)? {
+                        Value::Symbol(value) => value.as_str().to_owned(),
+                        Value::String(value) => value,
+                        _ => return Err(format!("{n} expects a namespace symbol or string")),
+                    };
+                    let registry = namespace_registry()?;
+                    let state = registry
+                        .load_state(&name)
+                        .or_else(|| registry.find(&name).map(|_| NamespaceLoadState::Loaded));
+                    let loaded = state == Some(NamespaceLoadState::Loaded);
+                    if n == "ns-loaded?" {
+                        Ok(Value::Bool(loaded))
+                    } else {
+                        Ok(Value::Keyword(
+                            state
+                                .map(NamespaceLoadState::as_str)
+                                .unwrap_or("unknown")
+                                .into(),
+                        ))
+                    }
                 }
-                let target = match eval(&fs[1], env)? {
-                    Value::Symbol(name) => name.as_str().to_owned(),
-                    Value::String(name) => name,
-                    _ => return Err("intern-var expects a namespace symbol or string".into()),
-                };
-                let name = match eval(&fs[2], env)? {
-                    Value::Symbol(name) if name.get_namespace().is_none() => name,
-                    _ => return Err("intern-var expects an unqualified target symbol".into()),
-                };
-                let registry = namespace_registry()?;
-                let source = match eval(&fs[3], env)? {
-                    Value::Var(var) => var,
-                    _ => match &fs[3] {
-                        Form::List(var_form)
-                            if var_form.len() == 2
-                                && matches!(&var_form[0], Form::Symbol(form) if form == "var") =>
-                        {
-                            let Form::Symbol(source) = &var_form[1] else {
-                                return Err("intern-var expects a source Var".into());
-                            };
+                Form::Symbol(n) if n == "ns-alias-state" => {
+                    if fs.len() != 2 && fs.len() != 3 {
+                        return Err("ns-alias-state expects alias or namespace and alias".into());
+                    }
+                    let registry = namespace_registry()?;
+                    let (owner, alias_form) = if fs.len() == 3 {
+                        let owner = match eval(&fs[1], env)? {
+                            Value::Symbol(value) => value.as_str().to_owned(),
+                            Value::String(value) => value,
+                            _ => {
+                                return Err(
+                                    "ns-alias-state expects a namespace symbol or string".into()
+                                )
+                            }
+                        };
+                        (owner, &fs[2])
+                    } else {
+                        (registry.current().name().as_str().to_owned(), &fs[1])
+                    };
+                    let alias = match eval(alias_form, env)? {
+                        Value::Symbol(value) if value.get_namespace().is_none() => value,
+                        _ => {
+                            return Err("ns-alias-state expects an unqualified alias symbol".into())
+                        }
+                    };
+                    let Some(namespace) = registry.find(&owner) else {
+                        return Ok(Value::Nil);
+                    };
+                    let target = namespace.lazy_target(alias.as_str()).or_else(|| {
+                        namespace
+                            .aliases()
+                            .into_iter()
+                            .find(|(name, _)| name == &alias)
+                            .map(|(_, target)| target.name().clone())
+                    });
+                    let Some(target) = target else {
+                        return Ok(Value::Nil);
+                    };
+                    let state = registry
+                        .load_state(target.as_str())
+                        .or_else(|| {
                             registry
-                                .resolve(&crate::lang::data::Symbol::parse(source))
-                                .ok_or_else(|| "intern-var expects a source Var".to_string())?
-                        }
-                        _ => return Err("intern-var expects a source Var".into()),
-                    },
-                };
-                let mut metadata = source.metadata();
-                if fs.len() == 5 {
-                    match eval(&fs[4], env)? {
-                        Value::OrderedMap(entries) => {
-                            for (key, value) in entries.iter() {
-                                metadata.extra.insert(key.display(), value.display());
-                            }
-                        }
-                        _ => return Err("intern-var metadata extension must be a map".into()),
+                                .find(target.as_str())
+                                .map(|_| NamespaceLoadState::Loaded)
+                        })
+                        .map(NamespaceLoadState::as_str)
+                        .unwrap_or("unknown");
+                    Ok(Value::Map(PMap::from_iter([
+                        (Value::Keyword("alias".into()), Value::Symbol(alias)),
+                        (Value::Keyword("target".into()), Value::Symbol(target)),
+                        (Value::Keyword("state".into()), Value::Keyword(state.into())),
+                    ])))
+                }
+                Form::Symbol(n) if n == "eval-in-ns" => {
+                    if fs.len() != 3 {
+                        return Err("eval-in-ns expects namespace and forms".into());
                     }
-                }
-                let output = registry.find_or_create(&target).intern_with_metadata(
-                    name.as_str(),
-                    source.deref_value(),
-                    metadata,
-                );
-                Ok(Value::Var(output))
-            }
-            Form::Symbol(n) if n == "var" => {
-                if fs.len() != 2 {
-                    return Err("var expects a symbol".into());
-                }
-                let name = match &fs[1] {
-                    Form::Symbol(name) => name,
-                    _ => return Err("var expects a symbol".into()),
-                };
-                if name.contains('/') {
-                    if let Ok(registry) = namespace_registry() {
-                        if let Some((namespace, _)) = name.split_once('/') {
-                            if registry.load_state(namespace) == Some(NamespaceLoadState::Failed) {
-                                return Err(previously_failed_error(&registry, namespace));
-                            }
-                        }
-                        force_lazy_alias(&registry, env, name)?;
+                    let target = match eval(&fs[1], env)? {
+                        Value::Symbol(name) => name.as_str().to_owned(),
+                        Value::String(name) => name,
+                        _ => return Err("eval-in-ns expects a namespace symbol or string".into()),
+                    };
+                    let forms = iterator_values(eval(&fs[2], env)?)?
+                        .into_iter()
+                        .map(|value| value_to_form(&value))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let registry = namespace_registry()?;
+                    if registry.find(&target).is_none() {
+                        return Err(format!(
+                            "eval-in-ns requires an existing namespace: {target}"
+                        ));
                     }
+                    let previous = registry.current().name().as_str().to_owned();
+                    select_namespace_environment(&registry, env, &target);
+                    let result = (|| {
+                        let mut result = Value::Nil;
+                        for form in &forms {
+                            result = eval(form, env)?;
+                        }
+                        Ok(result)
+                    })();
+                    select_namespace_environment(&registry, env, &previous);
+                    result
                 }
-                let cell =
-                    binding_var(env, name).ok_or_else(|| format!("unbound symbol: {name}"))?;
-                Ok(Value::Var(cell))
-            }
-            Form::Symbol(n)
-                if [
-                    "type",
-                    "compare",
-                    "hash",
-                    "meta",
-                    "with-meta",
-                    "macroexpand-1",
-                    "gensym",
-                ]
-                .contains(&n.as_str()) =>
-            {
-                eval_basic_object_form(n, fs, env)
-            }
-            Form::Symbol(n) if ["atom", "atom:basic"].contains(&n.as_str()) => {
-                eval_atom_form(n, fs, env)
-            }
-            Form::Symbol(n) if n == "reset!" => {
-                if fs.len() != 3 {
-                    return Err("reset! expects a reference and value".into());
-                }
-                protocol_reset(&[eval(&fs[1], env)?, eval(&fs[2], env)?])
-            }
-            Form::Symbol(n) if n == "cas!" => {
-                if fs.len() != 4 {
-                    return Err("cas! expects a reference, old value, and new value".into());
-                }
-                protocol_cas(&[eval(&fs[1], env)?, eval(&fs[2], env)?, eval(&fs[3], env)?])
-            }
-            Form::Symbol(n) if n == "swap!" => {
-                if fs.len() < 3 {
-                    return Err(
-                        "swap! expects a reference, function, and optional arguments".into(),
+                Form::Symbol(n) if n == "intern-var" => {
+                    if fs.len() != 4 && fs.len() != 5 {
+                        return Err(
+                            "intern-var expects namespace, symbol, var, and optional metadata"
+                                .into(),
+                        );
+                    }
+                    let target = match eval(&fs[1], env)? {
+                        Value::Symbol(name) => name.as_str().to_owned(),
+                        Value::String(name) => name,
+                        _ => return Err("intern-var expects a namespace symbol or string".into()),
+                    };
+                    let name = match eval(&fs[2], env)? {
+                        Value::Symbol(name) if name.get_namespace().is_none() => name,
+                        _ => return Err("intern-var expects an unqualified target symbol".into()),
+                    };
+                    let registry = namespace_registry()?;
+                    let source = match eval(&fs[3], env)? {
+                        Value::Var(var) => var,
+                        _ => match &fs[3] {
+                            Form::List(var_form)
+                                if var_form.len() == 2
+                                    && matches!(&var_form[0], Form::Symbol(form) if form == "var") =>
+                            {
+                                let Form::Symbol(source) = &var_form[1] else {
+                                    return Err("intern-var expects a source Var".into());
+                                };
+                                registry
+                                    .resolve(&crate::lang::data::Symbol::parse(source))
+                                    .ok_or_else(|| "intern-var expects a source Var".to_string())?
+                            }
+                            _ => return Err("intern-var expects a source Var".into()),
+                        },
+                    };
+                    let mut metadata = source.metadata();
+                    if fs.len() == 5 {
+                        match eval(&fs[4], env)? {
+                            Value::OrderedMap(entries) => {
+                                for (key, value) in entries.iter() {
+                                    metadata.extra.insert(key.display(), value.display());
+                                }
+                            }
+                            _ => return Err("intern-var metadata extension must be a map".into()),
+                        }
+                    }
+                    let output = registry.find_or_create(&target).intern_with_metadata(
+                        name.as_str(),
+                        source.deref_value(),
+                        metadata,
                     );
+                    Ok(Value::Var(output))
                 }
-                let reference = eval(&fs[1], env)?;
-                let function = eval(&fs[2], env)?;
-                if !matches!(function, Value::Function(_)) {
-                    return Err("swap! expects a function".into());
-                }
-                let arguments = fs[3..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                loop {
-                    let old_value = protocol_deref(std::slice::from_ref(&reference))?;
-                    let mut call_arguments = Vec::with_capacity(arguments.len() + 1);
-                    call_arguments.push(old_value.clone());
-                    call_arguments.extend(arguments.iter().cloned());
-                    let new_value = call_value(function.clone(), call_arguments)?;
-                    if protocol_cas(&[reference.clone(), old_value, new_value.clone()])?
-                        == Value::Bool(true)
-                    {
-                        break Ok(new_value);
+                Form::Symbol(n) if n == "var" => {
+                    if fs.len() != 2 {
+                        return Err("var expects a symbol".into());
                     }
-                }
-            }
-            Form::Symbol(n) if n == "deref" => {
-                if fs.len() != 2 {
-                    return Err("deref expects a var".into());
-                }
-                let target = match &fs[1] {
-                    Form::Symbol(name) => match env.get(name) {
-                        Some(Value::Var(cell))
-                            if cell.symbol().get_name() != Symbol::parse(name).get_name() =>
-                        {
-                            Value::Var(cell.clone())
+                    let name = match &fs[1] {
+                        Form::Symbol(name) => name,
+                        _ => return Err("var expects a symbol".into()),
+                    };
+                    if name.contains('/') {
+                        if let Ok(registry) = namespace_registry() {
+                            if let Some((namespace, _)) = name.split_once('/') {
+                                if registry.load_state(namespace)
+                                    == Some(NamespaceLoadState::Failed)
+                                {
+                                    return Err(previously_failed_error(&registry, namespace));
+                                }
+                            }
+                            force_lazy_alias(&registry, env, name)?;
                         }
-                        _ => eval(&fs[1], env)?,
-                    },
-                    _ => eval(&fs[1], env)?,
-                };
-                match target {
-                    Value::Var(value) => Ok(value.deref_value()),
-                    Value::Atom(value) => Ok(value.deref_value()),
-                    Value::Promise(promise) => match promise.wait_state() {
-                        PromiseState::Fulfilled(value) => Ok(value),
-                        PromiseState::Rejected(error) => Err(promise_rejection_error(error)),
-                        PromiseState::Pending => Err(
-                            "deref cannot block on a pending promise outside an HTA fiber".into(),
-                        ),
-                    },
-                    value => Err(format!(
-                        "deref expects a var, atom, or promise, got {}",
-                        value.display()
-                    )),
+                    }
+                    let cell =
+                        binding_var(env, name).ok_or_else(|| format!("unbound symbol: {name}"))?;
+                    Ok(Value::Var(cell))
                 }
-            }
-            Form::Symbol(n) if n == "set!" || n == "var/set" => {
-                if fs.len() != 3 {
-                    return Err(format!("{n} expects a symbol and value"));
+                Form::Symbol(n)
+                    if [
+                        "type",
+                        "compare",
+                        "hash",
+                        "meta",
+                        "with-meta",
+                        "macroexpand-1",
+                        "gensym",
+                    ]
+                    .contains(&n.as_str()) =>
+                {
+                    eval_basic_object_form(n, fs, env)
                 }
-                let name = match &fs[1] {
-                    Form::Symbol(name) => name,
-                    _ => return Err(format!("{n} expects a symbol")),
-                };
-                let value = eval(&fs[2], env)?;
-                let cell = binding_var(env, name).ok_or_else(|| format!("unbound var: {name}"))?;
-                if !binding_is_local(&cell) {
-                    return Err(format!(
-                        "Cannot replace referred Var without ns omission: {name}"
-                    ));
+                Form::Symbol(n) if ["atom", "atom:basic"].contains(&n.as_str()) => {
+                    eval_atom_form(n, fs, env)
                 }
-                cell.reset_value(value.clone());
-                Ok(value)
-            }
-            Form::Symbol(n) if n == "alter-var-root" => {
-                if fs.len() < 3 {
-                    return Err("alter-var-root expects a var and function".into());
+                Form::Symbol(n) if n == "reset!" => {
+                    if fs.len() != 3 {
+                        return Err("reset! expects a reference and value".into());
+                    }
+                    protocol_reset(&[eval(&fs[1], env)?, eval(&fs[2], env)?])
                 }
-                let target = match eval(&fs[1], env)? {
-                    Value::Var(cell) => cell,
-                    _ => return Err("alter-var-root expects a var".into()),
-                };
-                let function = match eval(&fs[2], env)? {
-                    Value::Function(function) => function,
-                    _ => return Err("alter-var-root expects a function".into()),
-                };
-                let mut arguments = vec![target.deref_value()];
-                arguments.extend(
-                    fs[3..]
+                Form::Symbol(n) if n == "cas!" => {
+                    if fs.len() != 4 {
+                        return Err("cas! expects a reference, old value, and new value".into());
+                    }
+                    protocol_cas(&[eval(&fs[1], env)?, eval(&fs[2], env)?, eval(&fs[3], env)?])
+                }
+                Form::Symbol(n) if n == "swap!" => {
+                    if fs.len() < 3 {
+                        return Err(
+                            "swap! expects a reference, function, and optional arguments".into(),
+                        );
+                    }
+                    let reference = eval(&fs[1], env)?;
+                    let function = eval(&fs[2], env)?;
+                    if !matches!(function, Value::Function(_)) {
+                        return Err("swap! expects a function".into());
+                    }
+                    let arguments = fs[3..]
                         .iter()
                         .map(|form| eval(form, env))
-                        .collect::<Result<Vec<_>, _>>()?,
-                );
-                let value = call_function(&function, arguments)?;
-                target.reset_value(value.clone());
-                Ok(value)
-            }
-            Form::Symbol(n) if n == "throw" => {
-                if fs.len() != 2 {
-                    return Err("throw expects one value".into());
-                }
-                let value = eval(&fs[1], env)?;
-                Err(thrown_error(value))
-            }
-            Form::Symbol(n) if n == "try" => {
-                if fs.len() < 2 {
-                    return Err("try expects a body".into());
-                }
-                let mut body = Vec::new();
-                let mut catch_forms = Vec::new();
-                let mut finally_forms = Vec::new();
-                let mut clauses_started = false;
-                for form in &fs[1..] {
-                    match form {
-                        Form::List(parts)
-                            if !parts.is_empty()
-                                && matches!(&parts[0],Form::Symbol(name) if name=="catch") =>
+                        .collect::<Result<Vec<_>, _>>()?;
+                    loop {
+                        let old_value = protocol_deref(std::slice::from_ref(&reference))?;
+                        let mut call_arguments = Vec::with_capacity(arguments.len() + 1);
+                        call_arguments.push(old_value.clone());
+                        call_arguments.extend(arguments.iter().cloned());
+                        let new_value = call_value(function.clone(), call_arguments)?;
+                        if protocol_cas(&[reference.clone(), old_value, new_value.clone()])?
+                            == Value::Bool(true)
                         {
-                            clauses_started = true;
-                            catch_forms.push(parts)
+                            break Ok(new_value);
                         }
-                        Form::List(parts)
-                            if !parts.is_empty()
-                                && matches!(&parts[0],Form::Symbol(name) if name=="finally") =>
-                        {
-                            clauses_started = true;
-                            finally_forms.extend_from_slice(&parts[1..])
-                        }
-                        _ if !clauses_started => body.push(form),
-                        _ => return Err("try clauses must follow the body".into()),
                     }
                 }
-                let mut result = Ok(Value::Nil);
-                for form in body {
-                    result = eval(form, env);
-                    if result.is_err() {
-                        break;
+                Form::Symbol(n) if n == "deref" => {
+                    if fs.len() != 2 {
+                        return Err("deref expects a var".into());
                     }
-                }
-                if let Err(ref error) = result {
-                    for parts in catch_forms {
-                        if parts.len() < 3 {
-                            return Err("catch expects a class, name, and body".into());
-                        }
-                        let (class, binding_index, body_index) = match parts.as_slice() {
-                            [_, Form::Symbol(name), ..] if parts.len() == 3 => ("Exception", 1, 2),
-                            [_, Form::Symbol(class), Form::Symbol(_), ..] => (class.as_str(), 2, 3),
-                            _ => return Err("catch expects a class, name, and body".into()),
-                        };
-                        if !catch_matches(error, class) {
-                            continue;
-                        }
-                        let name = match &parts[binding_index] {
-                            Form::Symbol(name) => name.clone(),
-                            _ => return Err("catch name must be a symbol".into()),
-                        };
-                        let old = env.insert(name.clone(), caught_error(error));
-                        result = Ok(Value::Nil);
-                        for form in &parts[body_index..] {
-                            result = eval(form, env);
-                            if result.is_err() {
-                                break;
+                    let target = match &fs[1] {
+                        Form::Symbol(name) => match env.get(name) {
+                            Some(Value::Var(cell))
+                                if cell.symbol().get_name() != Symbol::parse(name).get_name() =>
+                            {
+                                Value::Var(cell.clone())
                             }
-                        }
-                        if let Some(old) = old {
-                            env.insert(name, old);
-                        } else {
-                            env.remove(&name);
-                        }
-                        break;
+                            _ => eval(&fs[1], env)?,
+                        },
+                        _ => eval(&fs[1], env)?,
+                    };
+                    match target {
+                        Value::Var(value) => Ok(value.deref_value()),
+                        Value::Atom(value) => Ok(value.deref_value()),
+                        Value::Promise(promise) => match promise.wait_state() {
+                            PromiseState::Fulfilled(value) => Ok(value),
+                            PromiseState::Rejected(error) => Err(promise_rejection_error(error)),
+                            PromiseState::Pending => Err(
+                                "deref cannot block on a pending promise outside an HTA fiber"
+                                    .into(),
+                            ),
+                        },
+                        value => Err(format!(
+                            "deref expects a var, atom, or promise, got {}",
+                            value.display()
+                        )),
                     }
                 }
-                for form in finally_forms {
-                    let final_result = eval(&form, env);
-                    if final_result.is_err() {
-                        result = final_result;
+                Form::Symbol(n) if n == "set!" || n == "var/set" => {
+                    if fs.len() != 3 {
+                        return Err(format!("{n} expects a symbol and value"));
                     }
+                    let name = match &fs[1] {
+                        Form::Symbol(name) => name,
+                        _ => return Err(format!("{n} expects a symbol")),
+                    };
+                    let value = eval(&fs[2], env)?;
+                    let cell =
+                        binding_var(env, name).ok_or_else(|| format!("unbound var: {name}"))?;
+                    if !binding_is_local(&cell) {
+                        return Err(format!(
+                            "Cannot replace referred Var without ns omission: {name}"
+                        ));
+                    }
+                    cell.reset_value(value.clone());
+                    Ok(value)
                 }
-                result
-            }
-            Form::Symbol(n) if n == "def" => {
-                if fs.len() != 3 {
-                    return Err("def expects a name and value".into());
+                Form::Symbol(n) if n == "alter-var-root" => {
+                    if fs.len() < 3 {
+                        return Err("alter-var-root expects a var and function".into());
+                    }
+                    let target = match eval(&fs[1], env)? {
+                        Value::Var(cell) => cell,
+                        _ => return Err("alter-var-root expects a var".into()),
+                    };
+                    let function = match eval(&fs[2], env)? {
+                        Value::Function(function) => function,
+                        _ => return Err("alter-var-root expects a function".into()),
+                    };
+                    let mut arguments = vec![target.deref_value()];
+                    arguments.extend(
+                        fs[3..]
+                            .iter()
+                            .map(|form| eval(form, env))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    );
+                    let value = call_function(&function, arguments)?;
+                    target.reset_value(value.clone());
+                    Ok(value)
                 }
-                let (name, metadata) = binding_symbol(&fs[1], "def name")?;
-                if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
-                    return Ok(value);
+                Form::Symbol(n) if n == "throw" => {
+                    if fs.len() != 2 {
+                        return Err("throw expects one value".into());
+                    }
+                    let value = eval(&fs[1], env)?;
+                    Err(thrown_error(value))
                 }
-                require_owned_definition(env, &name)?;
-                let value = eval(&fs[2], env)?;
-                if let Some(Value::Var(var)) = env.get(&name) {
-                    if !binding_is_local(var) {
+                Form::Symbol(n) if n == "try" => {
+                    if fs.len() < 2 {
+                        return Err("try expects a body".into());
+                    }
+                    let mut body = Vec::new();
+                    let mut catch_forms = Vec::new();
+                    let mut finally_forms = Vec::new();
+                    let mut clauses_started = false;
+                    for form in &fs[1..] {
+                        match form {
+                            Form::List(parts)
+                                if !parts.is_empty()
+                                    && matches!(&parts[0],Form::Symbol(name) if name=="catch") =>
+                            {
+                                clauses_started = true;
+                                catch_forms.push(parts)
+                            }
+                            Form::List(parts)
+                                if !parts.is_empty()
+                                    && matches!(&parts[0],Form::Symbol(name) if name=="finally") =>
+                            {
+                                clauses_started = true;
+                                finally_forms.extend_from_slice(&parts[1..])
+                            }
+                            _ if !clauses_started => body.push(form),
+                            _ => return Err("try clauses must follow the body".into()),
+                        }
+                    }
+                    let mut result = Ok(Value::Nil);
+                    for form in body {
+                        result = eval(form, env);
+                        if result.is_err() {
+                            break;
+                        }
+                    }
+                    if let Err(ref error) = result {
+                        for parts in catch_forms {
+                            if parts.len() < 3 {
+                                return Err("catch expects a class, name, and body".into());
+                            }
+                            let (class, binding_index, body_index) = match parts.as_slice() {
+                                [_, Form::Symbol(name), ..] if parts.len() == 3 => {
+                                    ("Exception", 1, 2)
+                                }
+                                [_, Form::Symbol(class), Form::Symbol(_), ..] => {
+                                    (class.as_str(), 2, 3)
+                                }
+                                _ => return Err("catch expects a class, name, and body".into()),
+                            };
+                            if !catch_matches(error, class) {
+                                continue;
+                            }
+                            let name = match &parts[binding_index] {
+                                Form::Symbol(name) => name.clone(),
+                                _ => return Err("catch name must be a symbol".into()),
+                            };
+                            let old = env.insert(name.clone(), caught_error(error));
+                            result = Ok(Value::Nil);
+                            for form in &parts[body_index..] {
+                                result = eval(form, env);
+                                if result.is_err() {
+                                    break;
+                                }
+                            }
+                            if let Some(old) = old {
+                                env.insert(name, old);
+                            } else {
+                                env.remove(&name);
+                            }
+                            break;
+                        }
+                    }
+                    for form in finally_forms {
+                        let final_result = eval(&form, env);
+                        if final_result.is_err() {
+                            result = final_result;
+                        }
+                    }
+                    result
+                }
+                Form::Symbol(n) if n == "def" => {
+                    if fs.len() != 3 {
+                        return Err("def expects a name and value".into());
+                    }
+                    let (name, metadata) = binding_symbol(&fs[1], "def name")?;
+                    if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
+                        return Ok(value);
+                    }
+                    require_owned_definition(env, &name)?;
+                    let value = eval(&fs[2], env)?;
+                    if let Some(Value::Var(var)) = env.get(&name) {
+                        if !binding_is_local(var) {
+                            let var = KernelVar::new(local_var_name(&name), value.clone());
+                            var.set_origin(definition_origin());
+                            var.set_hara_metadata(metadata);
+                            env.insert(name, Value::Var(var));
+                            return Ok(value);
+                        }
+                        var.reset_value(value.clone());
+                        var.set_origin(definition_origin());
+                        if metadata.is_some() {
+                            var.set_hara_metadata(metadata);
+                        }
+                    } else {
                         let var = KernelVar::new(local_var_name(&name), value.clone());
                         var.set_origin(definition_origin());
                         var.set_hara_metadata(metadata);
                         env.insert(name, Value::Var(var));
-                        return Ok(value);
                     }
-                    var.reset_value(value.clone());
-                    var.set_origin(definition_origin());
-                    if metadata.is_some() {
-                        var.set_hara_metadata(metadata);
+                    Ok(value)
+                }
+                Form::Symbol(n) if n == "declare" => {
+                    if fs.len() < 2 {
+                        return Err("declare expects at least one symbol".into());
                     }
-                } else {
-                    let var = KernelVar::new(local_var_name(&name), value.clone());
-                    var.set_origin(definition_origin());
-                    var.set_hara_metadata(metadata);
-                    env.insert(name, Value::Var(var));
+                    for form in &fs[1..] {
+                        let name = match form {
+                            Form::Symbol(name) => name.clone(),
+                            _ => return Err("declare expects symbols".into()),
+                        };
+                        require_owned_definition(env, &name)?;
+                        let cell = match env.get(&name) {
+                            Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
+                            _ => KernelVar::new(local_var_name(&name), Value::Nil),
+                        };
+                        cell.set_origin(definition_origin());
+                        env.insert(name, Value::Var(cell));
+                    }
+                    Ok(Value::Nil)
                 }
-                Ok(value)
-            }
-            Form::Symbol(n) if n == "declare" => {
-                if fs.len() < 2 {
-                    return Err("declare expects at least one symbol".into());
-                }
-                for form in &fs[1..] {
-                    let name = match form {
-                        Form::Symbol(name) => name.clone(),
-                        _ => return Err("declare expects symbols".into()),
+                Form::Symbol(n) if n == "defstruct" => {
+                    if fs.len() < 3 {
+                        return Err("defstruct expects a name and field vector".into());
+                    }
+                    let name = match &fs[1] {
+                        Form::Symbol(name) if !name.contains('/') => name.clone(),
+                        _ => return Err("defstruct name must be an unqualified symbol".into()),
                     };
-                    require_owned_definition(env, &name)?;
-                    let cell = match env.get(&name) {
-                        Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
-                        _ => KernelVar::new(local_var_name(&name), Value::Nil),
+                    let fields = match &fs[2] {
+                        Form::Vector(fields) => fields
+                            .iter()
+                            .map(|field| match field {
+                                Form::Symbol(field) if !field.contains('/') => Ok(field.clone()),
+                                _ => {
+                                    Err("defstruct field names must be unqualified symbols".into())
+                                }
+                            })
+                            .collect::<Result<Vec<_>, String>>()?,
+                        _ => return Err("defstruct expects a field vector".into()),
                     };
-                    cell.set_origin(definition_origin());
-                    env.insert(name, Value::Var(cell));
+                    if fields.iter().collect::<HashSet<_>>().len() != fields.len() {
+                        return Err("Duplicate defstruct field".into());
+                    }
+                    let namespace = namespace_registry()?.current().name().as_str().to_owned();
+                    let ty = Rc::new(StructType {
+                        name: format!("{namespace}/{name}"),
+                        fields,
+                    });
+                    let map_type = ty.clone();
+                    let map_constructor =
+                        native_function(&format!("map->{name}"), 1, move |values| {
+                            let source = values.first().expect("native arity is checked");
+                            let fields = map_type
+                                .fields
+                                .iter()
+                                .map(|field| {
+                                    Ok(map_value(
+                                        source,
+                                        &Value::Keyword(Keyword::from(field.as_str())),
+                                    )
+                                    .cloned()
+                                    .unwrap_or(Value::Nil))
+                                })
+                                .collect::<Result<Vec<_>, String>>()?;
+                            Ok(Value::Struct(Rc::new(StructValue {
+                                ty: map_type.clone(),
+                                values: fields,
+                            })))
+                        });
+                    for (binding, value) in [
+                        (name.clone(), Value::StructType(ty.clone())),
+                        (format!("->{name}"), Value::StructType(ty.clone())),
+                        (format!("map->{name}"), map_constructor),
+                    ] {
+                        let var = KernelVar::new(format!("{namespace}/{binding}"), value);
+                        var.set_origin(definition_origin());
+                        env.insert(binding, Value::Var(var));
+                    }
+                    let mut index = 3;
+                    while index < fs.len() {
+                        let Form::Symbol(protocol) = &fs[index] else {
+                            return Err(
+                                "defstruct protocol clause expects a protocol symbol".into()
+                            );
+                        };
+                        index += 1;
+                        let start = index;
+                        while index < fs.len() && matches!(&fs[index], Form::List(_)) {
+                            index += 1;
+                        }
+                        if start == index {
+                            return Err(
+                                "defstruct protocol clause requires method implementations".into(),
+                            );
+                        }
+                        let extension = Form::List(
+                            std::iter::once(Form::Symbol("extend-type".into()))
+                                .chain(std::iter::once(Form::Symbol(name.clone())))
+                                .chain(std::iter::once(Form::Symbol(protocol.clone())))
+                                .chain(fs[start..index].iter().cloned())
+                                .collect(),
+                        );
+                        eval(&extension, env)?;
+                    }
+                    Ok(Value::Nil)
                 }
-                Ok(Value::Nil)
-            }
-            Form::Symbol(n) if n == "defstruct" => {
-                if fs.len() < 3 {
-                    return Err("defstruct expects a name and field vector".into());
-                }
-                let name = match &fs[1] {
-                    Form::Symbol(name) if !name.contains('/') => name.clone(),
-                    _ => return Err("defstruct name must be an unqualified symbol".into()),
-                };
-                let fields = match &fs[2] {
-                    Form::Vector(fields) => fields
-                        .iter()
-                        .map(|field| match field {
-                            Form::Symbol(field) if !field.contains('/') => Ok(field.clone()),
-                            _ => Err("defstruct field names must be unqualified symbols".into()),
-                        })
-                        .collect::<Result<Vec<_>, String>>()?,
-                    _ => return Err("defstruct expects a field vector".into()),
-                };
-                if fields.iter().collect::<HashSet<_>>().len() != fields.len() {
-                    return Err("Duplicate defstruct field".into());
-                }
-                let namespace = namespace_registry()?.current().name().as_str().to_owned();
-                let ty = Rc::new(StructType {
-                    name: format!("{namespace}/{name}"),
-                    fields,
-                });
-                let map_type = ty.clone();
-                let map_constructor = native_function(&format!("map->{name}"), 1, move |values| {
-                    let source = values.first().expect("native arity is checked");
-                    let fields = map_type
+                Form::Symbol(n) if n == "field" => {
+                    if fs.len() != 3 {
+                        return Err("field expects a struct and field name".into());
+                    }
+                    let field = match &fs[2] {
+                        Form::Keyword(field) | Form::Symbol(field) if !field.contains('/') => field,
+                        _ => {
+                            return Err("field name must be an unqualified keyword or symbol".into())
+                        }
+                    };
+                    let value = eval(&fs[1], env)?;
+                    let Value::Struct(value) = value else {
+                        return Err("field expects a struct".into());
+                    };
+                    value
+                        .ty
                         .fields
                         .iter()
-                        .map(|field| {
-                            Ok(
-                                map_value(source, &Value::Keyword(Keyword::from(field.as_str())))
-                                    .cloned()
-                                    .unwrap_or(Value::Nil),
-                            )
-                        })
-                        .collect::<Result<Vec<_>, String>>()?;
-                    Ok(Value::Struct(Rc::new(StructValue {
-                        ty: map_type.clone(),
-                        values: fields,
-                    })))
-                });
-                for (binding, value) in [
-                    (name.clone(), Value::StructType(ty.clone())),
-                    (format!("->{name}"), Value::StructType(ty.clone())),
-                    (format!("map->{name}"), map_constructor),
-                ] {
-                    let var = KernelVar::new(format!("{namespace}/{binding}"), value);
-                    var.set_origin(definition_origin());
-                    env.insert(binding, Value::Var(var));
+                        .position(|candidate| candidate == field)
+                        .map(|index| value.values[index].clone())
+                        .ok_or_else(|| format!("unknown struct field: {field}"))
                 }
-                let mut index = 3;
-                while index < fs.len() {
-                    let Form::Symbol(protocol) = &fs[index] else {
-                        return Err("defstruct protocol clause expects a protocol symbol".into());
-                    };
-                    index += 1;
-                    let start = index;
-                    while index < fs.len() && matches!(&fs[index], Form::List(_)) {
-                        index += 1;
+                Form::Symbol(n) if n == "instance?" => {
+                    if fs.len() != 3 {
+                        return Err("instance? expects a struct type and value".into());
                     }
-                    if start == index {
-                        return Err(
-                            "defstruct protocol clause requires method implementations".into()
-                        );
-                    }
-                    let extension = Form::List(
-                        std::iter::once(Form::Symbol("extend-type".into()))
-                            .chain(std::iter::once(Form::Symbol(name.clone())))
-                            .chain(std::iter::once(Form::Symbol(protocol.clone())))
-                            .chain(fs[start..index].iter().cloned())
-                            .collect(),
-                    );
-                    eval(&extension, env)?;
-                }
-                Ok(Value::Nil)
-            }
-            Form::Symbol(n) if n == "field" => {
-                if fs.len() != 3 {
-                    return Err("field expects a struct and field name".into());
-                }
-                let field = match &fs[2] {
-                    Form::Keyword(field) | Form::Symbol(field) if !field.contains('/') => field,
-                    _ => return Err("field name must be an unqualified keyword or symbol".into()),
-                };
-                let value = eval(&fs[1], env)?;
-                let Value::Struct(value) = value else {
-                    return Err("field expects a struct".into());
-                };
-                value
-                    .ty
-                    .fields
-                    .iter()
-                    .position(|candidate| candidate == field)
-                    .map(|index| value.values[index].clone())
-                    .ok_or_else(|| format!("unknown struct field: {field}"))
-            }
-            Form::Symbol(n) if n == "instance?" => {
-                if fs.len() != 3 {
-                    return Err("instance? expects a struct type and value".into());
-                }
-                let ty = match eval(&fs[1], env)? {
-                    Value::StructType(ty) => ty,
-                    _ => return Err("instance? expects a struct type".into()),
-                };
-                Ok(Value::Bool(
-                    matches!(eval(&fs[2], env)?, Value::Struct(value) if Rc::ptr_eq(&ty, &value.ty)),
-                ))
-            }
-            Form::Symbol(n) if n == "defprotocol" => {
-                if fs.len() < 3 {
-                    return Err("defprotocol expects a name and method declarations".into());
-                }
-                let name = match &fs[1] {
-                    Form::Symbol(name) if !name.contains('/') => name.clone(),
-                    _ => return Err("defprotocol name must be an unqualified symbol".into()),
-                };
-                let mut methods = HashMap::new();
-                for declaration in &fs[2..] {
-                    let Form::List(parts) = declaration else {
-                        return Err("defprotocol method declaration must be a list".into());
+                    let ty = match eval(&fs[1], env)? {
+                        Value::StructType(ty) => ty,
+                        _ => return Err("instance? expects a struct type".into()),
                     };
-                    if parts.len() != 2
-                        || !matches!(&parts[0], Form::Symbol(_))
-                        || !matches!(&parts[1], Form::Vector(_))
-                    {
-                        return Err(
+                    Ok(Value::Bool(
+                        matches!(eval(&fs[2], env)?, Value::Struct(value) if Rc::ptr_eq(&ty, &value.ty)),
+                    ))
+                }
+                Form::Symbol(n) if n == "defprotocol" => {
+                    if fs.len() < 3 {
+                        return Err("defprotocol expects a name and method declarations".into());
+                    }
+                    let name = match &fs[1] {
+                        Form::Symbol(name) if !name.contains('/') => name.clone(),
+                        _ => return Err("defprotocol name must be an unqualified symbol".into()),
+                    };
+                    let mut methods = HashMap::new();
+                    for declaration in &fs[2..] {
+                        let Form::List(parts) = declaration else {
+                            return Err("defprotocol method declaration must be a list".into());
+                        };
+                        if parts.len() != 2
+                            || !matches!(&parts[0], Form::Symbol(_))
+                            || !matches!(&parts[1], Form::Vector(_))
+                        {
+                            return Err(
                             "defprotocol method declaration expects a name and parameter vector"
                                 .into(),
                         );
+                        }
+                        let Form::Symbol(method) = &parts[0] else {
+                            unreachable!()
+                        };
+                        if method.ends_with('!') {
+                            return Err("protocol method names must not end with !".into());
+                        }
+                        let Form::Vector(arguments) = &parts[1] else {
+                            unreachable!()
+                        };
+                        if arguments.is_empty()
+                            || methods.insert(method.clone(), arguments.len()).is_some()
+                        {
+                            return Err(
+                                "protocol methods must be unique and take a receiver".into()
+                            );
+                        }
                     }
-                    let Form::Symbol(method) = &parts[0] else {
-                        unreachable!()
-                    };
-                    if method.ends_with('!') {
-                        return Err("protocol method names must not end with !".into());
-                    }
-                    let Form::Vector(arguments) = &parts[1] else {
-                        unreachable!()
-                    };
-                    if arguments.is_empty()
-                        || methods.insert(method.clone(), arguments.len()).is_some()
-                    {
-                        return Err("protocol methods must be unique and take a receiver".into());
-                    }
-                }
-                let namespace = namespace_registry()?.current().name().as_str().to_owned();
-                let protocol = Value::Protocol(Rc::new(GuestProtocol {
-                    name: format!("{namespace}/{name}"),
-                    methods,
-                }));
-                if let Value::Protocol(protocol_value) = &protocol {
-                    let current = namespace_registry()?.current();
-                    let previous_protocol = env
-                        .get(&name)
-                        .cloned()
-                        .map(deref_value)
-                        .and_then(|value| match value {
-                            Value::Protocol(previous) if previous.name == protocol_value.name => {
-                                Some(previous)
-                            }
-                            _ => None,
-                        })
-                        .or_else(|| {
-                            current
-                                .resolve(&crate::lang::data::Symbol::parse(&name))
-                                .filter(|var| var.get_namespace() == Some(namespace.as_str()))
-                                .and_then(|var| match var.deref_value() {
-                                    Value::Protocol(previous) => Some(previous),
-                                    _ => None,
-                                })
-                        });
-                    for method in protocol_value.methods.keys() {
-                        for (local, var) in current.mappings() {
-                            if local.as_str() == name
-                                || var.get_namespace() != Some(namespace.as_str())
-                            {
-                                continue;
-                            }
-                            if let Value::Protocol(other) = var.deref_value() {
-                                if other.methods.contains_key(method) {
-                                    return Err(format!(
+                    let namespace = namespace_registry()?.current().name().as_str().to_owned();
+                    let protocol = Value::Protocol(Rc::new(GuestProtocol {
+                        name: format!("{namespace}/{name}"),
+                        methods,
+                    }));
+                    if let Value::Protocol(protocol_value) = &protocol {
+                        let current = namespace_registry()?.current();
+                        let previous_protocol = env
+                            .get(&name)
+                            .cloned()
+                            .map(deref_value)
+                            .and_then(|value| match value {
+                                Value::Protocol(previous)
+                                    if previous.name == protocol_value.name =>
+                                {
+                                    Some(previous)
+                                }
+                                _ => None,
+                            })
+                            .or_else(|| {
+                                current
+                                    .resolve(&crate::lang::data::Symbol::parse(&name))
+                                    .filter(|var| var.get_namespace() == Some(namespace.as_str()))
+                                    .and_then(|var| match var.deref_value() {
+                                        Value::Protocol(previous) => Some(previous),
+                                        _ => None,
+                                    })
+                            });
+                        for method in protocol_value.methods.keys() {
+                            for (local, var) in current.mappings() {
+                                if local.as_str() == name
+                                    || var.get_namespace() != Some(namespace.as_str())
+                                {
+                                    continue;
+                                }
+                                if let Value::Protocol(other) = var.deref_value() {
+                                    if other.methods.contains_key(method) {
+                                        return Err(format!(
                                         "Protocol method Var already belongs to {}: {namespace}/{method}",
                                         local.as_str()
                                     ));
+                                    }
                                 }
                             }
+                            let existing_namespace_var = current
+                                .resolve(&crate::lang::data::Symbol::parse(method))
+                                .filter(|var| var.get_namespace() == Some(namespace.as_str()));
+                            let existing_environment_var =
+                                matches!(env.get(method), Some(Value::Var(_)));
+                            let same_protocol_reload = (existing_namespace_var.is_some()
+                                || existing_environment_var)
+                                && previous_protocol
+                                    .as_ref()
+                                    .is_some_and(|previous| previous.methods.contains_key(method));
+                            if (existing_namespace_var.is_some() || existing_environment_var)
+                                && !same_protocol_reload
+                            {
+                                return Err(format!(
+                                    "Protocol method Var already exists: {namespace}/{method}"
+                                ));
+                            }
                         }
-                        let existing_namespace_var = current
-                            .resolve(&crate::lang::data::Symbol::parse(method))
-                            .filter(|var| var.get_namespace() == Some(namespace.as_str()));
-                        let existing_environment_var =
-                            matches!(env.get(method), Some(Value::Var(_)));
-                        let same_protocol_reload = (existing_namespace_var.is_some()
-                            || existing_environment_var)
-                            && previous_protocol
+                        ACTIVE_PROTOCOLS.with(|active| -> Result<(), String> {
+                            let registry = active.borrow();
+                            let registry = registry
                                 .as_ref()
-                                .is_some_and(|previous| previous.methods.contains_key(method));
-                        if (existing_namespace_var.is_some() || existing_environment_var)
-                            && !same_protocol_reload
-                        {
+                                .ok_or_else(|| "protocol registry is unavailable".to_string())?;
+                            for method in protocol_value.methods.keys() {
+                                registry.declare_guest(protocol_value.name.clone(), method.clone());
+                            }
+                            Ok(())
+                        })?;
+                        for method in protocol_value.methods.keys() {
+                            let local_name = method.clone();
+                            let qualified_name = format!("{namespace}/{method}");
+                            let protocol_name = protocol_value.name.clone();
+                            let method_name = method.clone();
+                            let function_name = qualified_name.clone();
+                            let method_value =
+                                native_variadic_function(&function_name, move |arguments| {
+                                    protocol_call(&protocol_name, &method_name, &arguments)
+                                });
+                            let method_var = current.intern(&local_name, method_value);
+                            method_var.set_origin(definition_origin());
+                            env.insert(local_name, Value::Var(method_var.clone()));
+                            env.insert(qualified_name, Value::Var(method_var));
+                        }
+                    }
+                    let var = KernelVar::new(format!("{namespace}/{name}"), protocol.clone());
+                    var.set_origin(definition_origin());
+                    env.insert(name, Value::Var(var));
+                    Ok(protocol)
+                }
+                Form::Symbol(n) if n == "extend-type" => {
+                    if fs.len() < 4 {
+                        return Err(
+                            "extend-type expects a type, protocol, and method implementations"
+                                .into(),
+                        );
+                    }
+                    let ty = match eval(&fs[1], env)? {
+                        Value::StructType(ty) => ty,
+                        _ => return Err("extend-type expects a struct type".into()),
+                    };
+                    let protocol = match eval(&fs[2], env)? {
+                        Value::Protocol(protocol) => protocol,
+                        _ => return Err("extend-type expects a protocol".into()),
+                    };
+                    let mut seen = HashSet::new();
+                    for implementation in &fs[3..] {
+                        let Form::List(parts) = implementation else {
+                            return Err("extend-type implementations must be method forms".into());
+                        };
+                        if parts.len() < 3 {
+                            return Err("extend-type implementations require a body".into());
+                        }
+                        let Form::Symbol(method) = &parts[0] else {
+                            return Err("extended method name must be a symbol".into());
+                        };
+                        let Form::Vector(arguments) = &parts[1] else {
+                            return Err("extended method arguments must be a vector".into());
+                        };
+                        if !seen.insert(method.clone()) {
+                            return Err("Duplicate extended method".into());
+                        }
+                        let valid_arity = protocol.methods.get(method).is_some_and(|expected| {
+                            *expected == arguments.len()
+                                || (*expected == usize::MAX && !arguments.is_empty())
+                        });
+                        if !valid_arity {
                             return Err(format!(
-                                "Protocol method Var already exists: {namespace}/{method}"
+                                "invalid protocol method implementation: {method}"
                             ));
                         }
+                        let function = eval(
+                            &Form::List(
+                                std::iter::once(Form::Symbol("fn".into()))
+                                    .chain(parts[1..].iter().cloned())
+                                    .collect(),
+                            ),
+                            env,
+                        )?;
+                        let Value::Function(function) = function else {
+                            unreachable!()
+                        };
+                        ACTIVE_PROTOCOLS.with(|active| -> Result<(), String> {
+                            let registry = active.borrow();
+                            let registry = registry
+                                .as_ref()
+                                .ok_or_else(|| "protocol registry is unavailable".to_string())?;
+                            registry.register_guest(
+                                protocol.name.clone(),
+                                ty.name.clone(),
+                                method.clone(),
+                                function,
+                            );
+                            Ok(())
+                        })?;
                     }
-                    ACTIVE_PROTOCOLS.with(|active| -> Result<(), String> {
-                        let registry = active.borrow();
-                        let registry = registry
-                            .as_ref()
-                            .ok_or_else(|| "protocol registry is unavailable".to_string())?;
-                        for method in protocol_value.methods.keys() {
-                            registry.declare_guest(protocol_value.name.clone(), method.clone());
-                        }
-                        Ok(())
-                    })?;
-                    for method in protocol_value.methods.keys() {
-                        let local_name = method.clone();
-                        let qualified_name = format!("{namespace}/{method}");
-                        let protocol_name = protocol_value.name.clone();
-                        let method_name = method.clone();
-                        let function_name = qualified_name.clone();
-                        let method_value =
-                            native_variadic_function(&function_name, move |arguments| {
-                                protocol_call(&protocol_name, &method_name, &arguments)
-                            });
-                        let method_var = current.intern(&local_name, method_value);
-                        method_var.set_origin(definition_origin());
-                        env.insert(local_name, Value::Var(method_var.clone()));
-                        env.insert(qualified_name, Value::Var(method_var));
-                    }
+                    Ok(Value::Protocol(protocol))
                 }
-                let var = KernelVar::new(format!("{namespace}/{name}"), protocol.clone());
-                var.set_origin(definition_origin());
-                env.insert(name, Value::Var(var));
-                Ok(protocol)
-            }
-            Form::Symbol(n) if n == "extend-type" => {
-                if fs.len() < 4 {
-                    return Err(
-                        "extend-type expects a type, protocol, and method implementations".into(),
-                    );
-                }
-                let ty = match eval(&fs[1], env)? {
-                    Value::StructType(ty) => ty,
-                    _ => return Err("extend-type expects a struct type".into()),
-                };
-                let protocol = match eval(&fs[2], env)? {
-                    Value::Protocol(protocol) => protocol,
-                    _ => return Err("extend-type expects a protocol".into()),
-                };
-                let mut seen = HashSet::new();
-                for implementation in &fs[3..] {
-                    let Form::List(parts) = implementation else {
-                        return Err("extend-type implementations must be method forms".into());
-                    };
-                    if parts.len() < 3 {
-                        return Err("extend-type implementations require a body".into());
+                Form::Symbol(n) if n == "defmulti" => {
+                    if fs.len() != 3 {
+                        return Err("defmulti expects a name and dispatch function".into());
                     }
-                    let Form::Symbol(method) = &parts[0] else {
-                        return Err("extended method name must be a symbol".into());
+                    let Form::Symbol(name) = &fs[1] else {
+                        return Err("defmulti name must be an unqualified symbol".into());
                     };
-                    let Form::Vector(arguments) = &parts[1] else {
-                        return Err("extended method arguments must be a vector".into());
-                    };
-                    if !seen.insert(method.clone()) {
-                        return Err("Duplicate extended method".into());
+                    if name.contains('/') {
+                        return Err("defmulti name must be an unqualified symbol".into());
                     }
-                    let valid_arity = protocol.methods.get(method).is_some_and(|expected| {
-                        *expected == arguments.len()
-                            || (*expected == usize::MAX && !arguments.is_empty())
+                    let Value::Function(dispatch) = eval(&fs[2], env)? else {
+                        return Err("defmulti dispatch function must be callable".into());
+                    };
+                    let namespace = namespace_registry()?.current().name().as_str().to_owned();
+                    let qualified = format!("{namespace}/{name}");
+                    let state = Rc::new(RefCell::new(MultiMethod {
+                        dispatch,
+                        methods: Vec::new(),
+                        default: None,
+                    }));
+                    let invoke_state = state.clone();
+                    let value = native_variadic_function(&qualified, move |arguments| {
+                        let state = invoke_state.borrow();
+                        let key = call_function(&state.dispatch, arguments.clone())?;
+                        let method = state
+                            .methods
+                            .iter()
+                            .find(|(candidate, _)| *candidate == key)
+                            .map(|(_, method)| method.clone())
+                            .or_else(|| state.default.clone())
+                            .ok_or_else(|| {
+                                format!(
+                                    "No multimethod method for dispatch value {}",
+                                    key.display()
+                                )
+                            })?;
+                        call_function(&method, arguments)
                     });
-                    if !valid_arity {
-                        return Err(format!("invalid protocol method implementation: {method}"));
+                    let var = namespace_registry()?.current().intern(name, value.clone());
+                    var.set_origin(definition_origin());
+                    env.insert(name.clone(), Value::Var(var.clone()));
+                    env.insert(qualified.clone(), Value::Var(var));
+                    ACTIVE_MULTIMETHODS.with(|active| {
+                        active.borrow_mut().insert(qualified, state);
+                    });
+                    Ok(value)
+                }
+                Form::Symbol(n) if n == "defmethod" => {
+                    if fs.len() < 5 {
+                        return Err(
+                            "defmethod expects a multifn, dispatch value, parameters, and body"
+                                .into(),
+                        );
                     }
+                    let Form::Symbol(name) = &fs[1] else {
+                        return Err("defmethod multifn must be a symbol".into());
+                    };
+                    let namespace = namespace_registry()?.current().name().as_str().to_owned();
+                    let qualified = if name.contains('/') {
+                        name.clone()
+                    } else {
+                        format!("{namespace}/{name}")
+                    };
+                    let key = eval(&fs[2], env)?;
                     let function = eval(
                         &Form::List(
                             std::iter::once(Form::Symbol("fn".into()))
-                                .chain(parts[1..].iter().cloned())
+                                .chain(fs[3..].iter().cloned())
                                 .collect(),
                         ),
                         env,
@@ -10128,94 +10274,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     let Value::Function(function) = function else {
                         unreachable!()
                     };
-                    ACTIVE_PROTOCOLS.with(|active| -> Result<(), String> {
-                        let registry = active.borrow();
-                        let registry = registry
-                            .as_ref()
-                            .ok_or_else(|| "protocol registry is unavailable".to_string())?;
-                        registry.register_guest(
-                            protocol.name.clone(),
-                            ty.name.clone(),
-                            method.clone(),
-                            function,
-                        );
-                        Ok(())
-                    })?;
-                }
-                Ok(Value::Protocol(protocol))
-            }
-            Form::Symbol(n) if n == "defmulti" => {
-                if fs.len() != 3 {
-                    return Err("defmulti expects a name and dispatch function".into());
-                }
-                let Form::Symbol(name) = &fs[1] else {
-                    return Err("defmulti name must be an unqualified symbol".into());
-                };
-                if name.contains('/') {
-                    return Err("defmulti name must be an unqualified symbol".into());
-                }
-                let Value::Function(dispatch) = eval(&fs[2], env)? else {
-                    return Err("defmulti dispatch function must be callable".into());
-                };
-                let namespace = namespace_registry()?.current().name().as_str().to_owned();
-                let qualified = format!("{namespace}/{name}");
-                let state = Rc::new(RefCell::new(MultiMethod {
-                    dispatch,
-                    methods: Vec::new(),
-                    default: None,
-                }));
-                let invoke_state = state.clone();
-                let value = native_variadic_function(&qualified, move |arguments| {
-                    let state = invoke_state.borrow();
-                    let key = call_function(&state.dispatch, arguments.clone())?;
-                    let method = state
-                        .methods
-                        .iter()
-                        .find(|(candidate, _)| *candidate == key)
-                        .map(|(_, method)| method.clone())
-                        .or_else(|| state.default.clone())
-                        .ok_or_else(|| {
-                            format!("No multimethod method for dispatch value {}", key.display())
-                        })?;
-                    call_function(&method, arguments)
-                });
-                let var = namespace_registry()?.current().intern(name, value.clone());
-                var.set_origin(definition_origin());
-                env.insert(name.clone(), Value::Var(var.clone()));
-                env.insert(qualified.clone(), Value::Var(var));
-                ACTIVE_MULTIMETHODS.with(|active| {
-                    active.borrow_mut().insert(qualified, state);
-                });
-                Ok(value)
-            }
-            Form::Symbol(n) if n == "defmethod" => {
-                if fs.len() < 5 {
-                    return Err(
-                        "defmethod expects a multifn, dispatch value, parameters, and body".into(),
-                    );
-                }
-                let Form::Symbol(name) = &fs[1] else {
-                    return Err("defmethod multifn must be a symbol".into());
-                };
-                let namespace = namespace_registry()?.current().name().as_str().to_owned();
-                let qualified = if name.contains('/') {
-                    name.clone()
-                } else {
-                    format!("{namespace}/{name}")
-                };
-                let key = eval(&fs[2], env)?;
-                let function = eval(
-                    &Form::List(
-                        std::iter::once(Form::Symbol("fn".into()))
-                            .chain(fs[3..].iter().cloned())
-                            .collect(),
-                    ),
-                    env,
-                )?;
-                let Value::Function(function) = function else {
-                    unreachable!()
-                };
-                ACTIVE_MULTIMETHODS.with(|active| {
+                    ACTIVE_MULTIMETHODS.with(|active| {
                     let state = active.borrow().get(&qualified).cloned().ok_or_else(|| "defmethod expects an existing multifn".to_string())?;
                     let mut state = state.borrow_mut();
                     if matches!(&key, Value::Keyword(keyword) if keyword.get_namespace().is_none() && keyword.get_name() == "default") { state.default = Some(function); }
@@ -10223,2142 +10282,2162 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     else { state.methods.push((key, function)); }
                     Ok(Value::Nil)
                 })
-            }
-            Form::Symbol(n) if n == "defmacro" => {
-                if fs.len() < 4 {
-                    return Err("defmacro expects a name, parameters, and a body".into());
                 }
-                let (name, metadata) = binding_symbol(&fs[1], "defmacro name")?;
-                let (metadata, rest) = definition_metadata(metadata, &fs[2..], false, true)?;
-                if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
-                    return Ok(value);
-                }
-                require_owned_definition(env, &name)?;
-                let cell = match env.get(&name) {
-                    Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
-                    _ => KernelVar::new(local_var_name(&name), Value::Nil),
-                };
-                if metadata.is_some() {
-                    cell.set_hara_metadata(metadata);
-                }
-                env.insert(name.clone(), Value::Var(cell.clone()));
-                if rest.is_empty() {
-                    return Err("defmacro expects a name, parameters, and a body".into());
-                }
-                let function = if matches!(
-                    rest.first().map(form_without_metadata),
-                    Some(Form::Vector(_))
-                ) {
-                    let params = match form_without_metadata(&rest[0]) {
-                        Form::Vector(params) => params,
-                        _ => unreachable!(),
+                Form::Symbol(n) if n == "defmacro" => {
+                    if fs.len() < 4 {
+                        return Err("defmacro expects a name, parameters, and a body".into());
+                    }
+                    let (name, metadata) = binding_symbol(&fs[1], "defmacro name")?;
+                    let (metadata, rest) = definition_metadata(metadata, &fs[2..], false, true)?;
+                    if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
+                        return Ok(value);
+                    }
+                    require_owned_definition(env, &name)?;
+                    let cell = match env.get(&name) {
+                        Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
+                        _ => KernelVar::new(local_var_name(&name), Value::Nil),
                     };
-                    let mut macro_params =
-                        vec![Form::Symbol("&form".into()), Form::Symbol("&env".into())];
-                    macro_params.extend_from_slice(params);
-                    let (params, variadic, patterns, variadic_pattern) =
-                        function_parts(&Form::Vector(macro_params))?;
-                    Value::Function(Rc::new(Function {
-                        params,
-                        variadic,
-                        patterns,
-                        variadic_pattern,
-                        body: rest[1..].to_vec(),
-                        captured: Rc::new(RefCell::new(env.clone())),
-                        name: Some(name.clone()),
-                        native: None,
-                        clauses: Vec::new(),
-                        is_macro: true,
-                    }))
-                } else {
-                    let clauses = rest
-                        .iter()
-                        .map(macro_clause_with_implicit_params)
-                        .collect::<Result<Vec<_>, _>>()?;
-                    multi_arity_function(&name, &clauses, env, true)?
-                };
-                if let Value::Function(ref function) = function {
-                    let namespace = namespace_registry()?.current().name().as_str().to_owned();
-                    register_macro(&namespace, &name, function.clone())?;
-                }
-                cell.reset_value(function.clone());
-                cell.set_origin(definition_origin());
-                Ok(function)
-            }
-            Form::Symbol(n) if n == "defn" || n == "defn-" => {
-                if fs.len() < 4 {
-                    return Err("defn expects a name, parameters, and a body".into());
-                }
-                let (name, metadata) = binding_symbol(&fs[1], "defn name")?;
-                let (metadata, rest) = definition_metadata(metadata, &fs[2..], n == "defn-", false)
-                    .map_err(|error| format!("{name}: {error}"))?;
-                if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
-                    return Ok(value);
-                }
-                require_owned_definition(env, &name)?;
-                let cell = match env.get(&name) {
-                    Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
-                    _ => KernelVar::new(local_var_name(&name), Value::Nil),
-                };
-                if metadata.is_some() {
-                    cell.set_hara_metadata(metadata);
-                }
-                env.insert(name.clone(), Value::Var(cell.clone()));
-                if rest.is_empty() {
-                    return Err("defn expects a name, parameters, and a body".into());
-                }
-                let function = if matches!(
-                    rest.first().map(form_without_metadata),
-                    Some(Form::Vector(_))
-                ) {
-                    let (params, variadic, patterns, variadic_pattern) = function_parts(&rest[0])?;
-                    Value::Function(Rc::new(Function {
-                        params,
-                        variadic,
-                        patterns,
-                        variadic_pattern,
-                        body: rest[1..].to_vec(),
-                        captured: Rc::new(RefCell::new(env.clone())),
-                        name: Some(name.clone()),
-                        native: None,
-                        clauses: Vec::new(),
-                        is_macro: false,
-                    }))
-                } else {
-                    multi_arity_function(&name, rest, env, false)?
-                };
-                cell.reset_value(function.clone());
-                cell.set_origin(definition_origin());
-                Ok(Value::Var(cell))
-            }
-            Form::Symbol(n) if n == "do" => {
-                let mut result = Value::Nil;
-                for form in &fs[1..] {
-                    result = eval(form, env)?;
-                    if matches!(result, Value::Recur(_)) {
-                        return Ok(result);
+                    if metadata.is_some() {
+                        cell.set_hara_metadata(metadata);
                     }
-                }
-                Ok(result)
-            }
-            Form::Symbol(n) if n == "declare" => {
-                for form in &fs[1..] {
-                    if !matches!(form, Form::Symbol(_)) {
-                        return Err("declare expects symbols".into());
+                    env.insert(name.clone(), Value::Var(cell.clone()));
+                    if rest.is_empty() {
+                        return Err("defmacro expects a name, parameters, and a body".into());
                     }
-                }
-                Ok(Value::Nil)
-            }
-            Form::Symbol(n) if n == "=" => {
-                if fs.len() < 3 {
-                    return Err("= expects at least 2 arguments".into());
-                }
-                let first = eval(&fs[1], env)?;
-                let rest = fs[2..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let mut arguments = Vec::with_capacity(rest.len() + 1);
-                arguments.push(first);
-                arguments.extend(rest);
-                apply_primitive(Primitive::Equal, &arguments)
-            }
-            Form::Symbol(n) if n == "ns" || n == "require" => eval_namespace_form(fs, env),
-            Form::Symbol(n) if n == "current-namespace" => {
-                if fs.len() != 1 {
-                    return Err("current-namespace expects no arguments".into());
-                }
-                Ok(Value::String(
-                    namespace_registry()?.current().name().as_str().to_owned(),
-                ))
-            }
-            Form::Symbol(n) if n == "ns-publics" => {
-                if fs.len() != 2 {
-                    return Err("ns-publics expects one namespace".into());
-                }
-                let namespace = match eval(&fs[1], env)? {
-                    Value::Symbol(name) if name.get_namespace().is_none() => {
-                        name.get_name().to_owned()
-                    }
-                    Value::String(name) => name,
-                    Value::Namespace(namespace) => namespace.name().as_str().to_owned(),
-                    _ => return Err("ns-publics expects a namespace symbol or string".into()),
-                };
-                let registry = namespace_registry()?;
-                let target = registry
-                    .find(&namespace)
-                    .ok_or_else(|| format!("No such namespace: {namespace}"))?;
-                let mut mappings = target.mappings();
-                mappings.sort_by(|(left, _), (right, _)| left.as_str().cmp(right.as_str()));
-                Ok(Value::OrderedMap(Box::new(POrderedMap::from_iter(
-                    mappings.into_iter().map(|(name, var)| {
-                        (
-                            Value::Symbol(Symbol::create(None, name.as_str())),
-                            Value::Var(var),
-                        )
-                    }),
-                ))))
-            }
-            Form::Symbol(n) if n == "std.foundation.coroutine/create" => {
-                if fs.len() != 2 {
-                    return Err("coroutine/create expects one function".into());
-                }
-                let body = eval(&fs[1], env)?;
-                match body {
-                    Value::Function(_) => Ok(Value::Coroutine(Rc::new(Coroutine::new(body)))),
-                    _ => Err("coroutine/create expects a function".into()),
-                }
-            }
-            Form::Symbol(n) if n == "std.foundation.coroutine/coroutine?" => {
-                if fs.len() != 2 {
-                    return Err("coroutine/coroutine? expects one value".into());
-                }
-                Ok(Value::Bool(matches!(
-                    eval(&fs[1], env)?,
-                    Value::Coroutine(_)
-                )))
-            }
-            Form::Symbol(n) if n == "std.foundation.coroutine/status" => {
-                if fs.len() != 2 {
-                    return Err("coroutine/status expects one coroutine".into());
-                }
-                match eval(&fs[1], env)? {
-                    Value::Coroutine(coroutine) => Ok(coroutine_status(&coroutine)),
-                    _ => Err("coroutine/status expects a coroutine".into()),
-                }
-            }
-            Form::Symbol(n) if n == "std.foundation.coroutine/close" => {
-                if fs.len() != 2 {
-                    return Err("coroutine/close expects one coroutine".into());
-                }
-                match eval(&fs[1], env)? {
-                    Value::Coroutine(coroutine) => {
-                        coroutine_close(&coroutine)?;
-                        Ok(Value::Coroutine(coroutine))
-                    }
-                    _ => Err("coroutine/close expects a coroutine".into()),
-                }
-            }
-            Form::Symbol(n)
-                if n == "std.foundation.coroutine/resume"
-                    || n == "std.protocol.icoroutine/resume" =>
-            {
-                Err("coroutine/resume requires the fiber evaluator".into())
-            }
-            Form::Symbol(n) if n == "std.foundation.coroutine/yield" => {
-                Err("coroutine/yield requires the fiber evaluator".into())
-            }
-            Form::Symbol(n) if n == "std.foundation.coroutine/await" => {
-                Err("coroutine/await requires the fiber evaluator".into())
-            }
-            Form::Symbol(n)
-                if resolve_macro(n).is_none()
-                    && !structural_native_dispatch_active()
-                    && (matches!(env.get(n), Some(Value::Function(_)))
-                        || matches!(env.get(n), Some(Value::Var(var)) if ((binding_is_local(var) && (!cfg!(feature = "bytecode-vm") || var.origin() != VarOrigin::RuntimePrimitive)) || var.origin() == VarOrigin::RustLibrary) && matches!(var.deref_value(), Value::Function(_)))) =>
-            {
-                let function = binding_value(env, n).expect("function binding was checked");
-                let arguments = fs[1..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                call_value(function, arguments)
-            }
-            Form::Symbol(n) if n == "promise" || n == "promise/run" => {
-                if fs.len() != 2 {
-                    return Err("promise expects one function".into());
-                }
-                let function = match eval(&fs[1], env)? {
-                    Value::Function(function) => function,
-                    _ => return Err("promise expects a function".into()),
-                };
-                let provider = promise_provider();
-                let task = Rc::new(move || call_function(&function, Vec::new()));
-                Ok(Value::Promise(provider.run(task)))
-            }
-            Form::Symbol(n) if n == "promise?" => {
-                if fs.len() != 2 {
-                    return Err("promise? expects one value".into());
-                }
-                Ok(Value::Bool(matches!(eval(&fs[1], env)?, Value::Promise(_))))
-            }
-            Form::Symbol(n)
-                if ["bytes?", "array?", "object?", "regexp?", "uuid?"].contains(&n.as_str()) =>
-            {
-                if fs.len() != 2 {
-                    return Err(format!("{n} expects one value"));
-                }
-                let value = eval(&fs[1], env)?;
-                Ok(Value::Bool(match n.as_str() {
-                    "bytes?" => matches!(value, Value::Bytes(_) | Value::ByteBuffer(_)),
-                    "array?" => matches!(value, Value::Array(_)),
-                    "object?" => matches!(value, Value::Object(_)),
-                    "regexp?" => matches!(value, Value::Regex(_)),
-                    // UUID values are not yet represented by the Rust value model.
-                    "uuid?" => false,
-                    _ => unreachable!(),
-                }))
-            }
-            Form::Symbol(n) if n.starts_with("std.native.Host/") => {
-                native_host_operation(n, &fs[1..], env)
-            }
-            Form::Symbol(n) if n.starts_with("std.native.Kernel/") => {
-                Err(format!("{n} requires a kernel embedding"))
-            }
-            Form::Symbol(n)
-                if n.starts_with("std.native.Arr/") || n.starts_with("std.native.Obj/") =>
-            {
-                native_mutable_operation(n, &fs[1..], env)
-            }
-            Form::Symbol(n) if n == "promise/new" => {
-                if fs.len() != 2 {
-                    return Err("promise/new expects one function".into());
-                }
-                let function = match eval(&fs[1], env)? {
-                    Value::Function(function) => function,
-                    _ => return Err("promise/new expects a function".into()),
-                };
-                let promise = Promise::new();
-                let resolving = promise.clone();
-                let resolve = native_function("promise-resolve", 1, move |mut values| {
-                    let value = values.remove(0);
-                    settle_promise_result(&resolving, Ok(value.clone()));
-                    Ok(value)
-                });
-                let rejecting = promise.clone();
-                let reject = native_function("promise-reject", 1, move |mut values| {
-                    let value = values.remove(0);
-                    let error = match &value {
-                        Value::String(error) => error.clone(),
-                        value => value.display(),
+                    let function = if matches!(
+                        rest.first().map(form_without_metadata),
+                        Some(Form::Vector(_))
+                    ) {
+                        let params = match form_without_metadata(&rest[0]) {
+                            Form::Vector(params) => params,
+                            _ => unreachable!(),
+                        };
+                        let mut macro_params =
+                            vec![Form::Symbol("&form".into()), Form::Symbol("&env".into())];
+                        macro_params.extend_from_slice(params);
+                        let (params, variadic, patterns, variadic_pattern) =
+                            function_parts(&Form::Vector(macro_params))?;
+                        Value::Function(Rc::new(Function {
+                            params,
+                            variadic,
+                            patterns,
+                            variadic_pattern,
+                            body: rest[1..].to_vec(),
+                            captured: Rc::new(RefCell::new(env.clone())),
+                            name: Some(name.clone()),
+                            native: None,
+                            clauses: Vec::new(),
+                            is_macro: true,
+                        }))
+                    } else {
+                        let clauses = rest
+                            .iter()
+                            .map(macro_clause_with_implicit_params)
+                            .collect::<Result<Vec<_>, _>>()?;
+                        multi_arity_function(&name, &clauses, env, true)?
                     };
-                    rejecting.reject(error);
-                    Ok(value)
-                });
-                if let Err(error) = call_function(&function, vec![resolve, reject]) {
-                    promise.reject(error);
-                }
-                Ok(Value::Promise(promise))
-            }
-            Form::Symbol(n) if n == "promise/from" => {
-                if fs.len() != 2 {
-                    return Err("promise/from expects one value".into());
-                }
-                let value = eval(&fs[1], env)?;
-                Ok(Value::Promise(promise_from(value)))
-            }
-            Form::Symbol(n) if n == "promise/all" => {
-                if fs.len() != 2 {
-                    return Err("promise/all expects one collection".into());
-                }
-                Ok(Value::Promise(promise_all(iterator_values(eval(
-                    &fs[1], env,
-                )?)?)))
-            }
-            Form::Symbol(n) if n == "promise/delay" => {
-                if fs.len() != 3 {
-                    return Err("promise/delay expects milliseconds and a function".into());
-                }
-                let millis = match eval(&fs[1], env)? {
-                    Value::Number(value) if value >= 0 => value as u64,
-                    _ => return Err("promise/delay expects non-negative milliseconds".into()),
-                };
-                let function = match eval(&fs[2], env)? {
-                    Value::Function(function) => function,
-                    _ => return Err("promise/delay expects milliseconds and a function".into()),
-                };
-                let task = Rc::new(move || call_function(&function, Vec::new()));
-                Ok(Value::Promise(
-                    promise_provider().delay(std::time::Duration::from_millis(millis), task),
-                ))
-            }
-            Form::Symbol(n) if n == "promise/state" => {
-                if fs.len() != 2 {
-                    return Err("promise/state expects one promise".into());
-                }
-                let promise = promise_value(&eval(&fs[1], env)?, n)?;
-                Ok(promise_state_value(&promise))
-            }
-            Form::Symbol(n) if n == "promise/value" => {
-                if fs.len() != 2 {
-                    return Err("promise/value expects one promise".into());
-                }
-                let promise = promise_value(&eval(&fs[1], env)?, n)?;
-                promise_value_result(&promise)
-            }
-            Form::Symbol(n) if n == "promise/cancel" => {
-                if fs.len() != 2 {
-                    return Err("promise/cancel expects a promise".into());
-                }
-                let promise = promise_value(&eval(&fs[1], env)?, n)?;
-                if !promise.cancel() {
-                    return Err("promise is already settled".into());
-                }
-                Ok(Value::Promise(promise))
-            }
-            Form::Symbol(n)
-                if ["promise/then", "promise/catch", "promise/finally"].contains(&n.as_str()) =>
-            {
-                if fs.len() != 3 {
-                    return Err(format!("{n} expects a promise and function"));
-                }
-                let source = promise_value(&eval(&fs[1], env)?, n)?;
-                let function = match eval(&fs[2], env)? {
-                    Value::Function(function) => function,
-                    _ => return Err(format!("{n} expects a function")),
-                };
-                Ok(Value::Promise(promise_chain(source, n, function)))
-            }
-            Form::Symbol(n) if n.starts_with("ns:") => eval_namespace_operation(n, fs, env),
-            Form::Symbol(n) if n == "keyword" || n == "symbol" || n == "pointer" => {
-                if fs.len() != 2 && fs.len() != 3 {
-                    return Err(format!("{n} expects a name or namespace and name"));
-                }
-                let parts = fs[1..]
-                    .iter()
-                    .map(|form| match eval(form, env)? {
-                        Value::String(value) => Ok(value),
-                        _ => Err(format!("{n} expects string arguments")),
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                match (n.as_str(), parts.as_slice()) {
-                    ("keyword", [name]) => Keyword::parse(name)
-                        .map(Value::Keyword)
-                        .map_err(|error| format!("keyword failed: {error}")),
-                    ("keyword", [namespace, name]) => Keyword::create(Some(namespace), name)
-                        .map(Value::Keyword)
-                        .map_err(|error| format!("keyword failed: {error}")),
-                    ("symbol", [name]) => Ok(Value::Symbol(Symbol::parse(name))),
-                    ("symbol", [namespace, name]) => {
-                        Ok(Value::Symbol(Symbol::create(Some(namespace), name)))
+                    if let Value::Function(ref function) = function {
+                        let namespace = namespace_registry()?.current().name().as_str().to_owned();
+                        register_macro(&namespace, &name, function.clone())?;
                     }
-                    ("pointer", [name]) => Ok(Value::Pointer(PPointer::parse(name))),
-                    ("pointer", [namespace, name]) => {
-                        Ok(Value::Pointer(PPointer::create(Some(namespace), name)))
+                    cell.reset_value(function.clone());
+                    cell.set_origin(definition_origin());
+                    Ok(function)
+                }
+                Form::Symbol(n) if n == "defn" || n == "defn-" => {
+                    if fs.len() < 4 {
+                        return Err("defn expects a name, parameters, and a body".into());
                     }
-                    _ => unreachable!(),
+                    let (name, metadata) = binding_symbol(&fs[1], "defn name")?;
+                    let (metadata, rest) =
+                        definition_metadata(metadata, &fs[2..], n == "defn-", false)
+                            .map_err(|error| format!("{name}: {error}"))?;
+                    if let Some(schema) = schema_var_reference(metadata.as_deref()) {
+                        if binding_var(env, schema.as_str()).is_none() {
+                            return Err(format!("schema Var does not exist: {schema}"));
+                        }
+                    }
+                    if let Some(value) = protected_fallback_binding(env, &name, metadata.clone()) {
+                        return Ok(value);
+                    }
+                    require_owned_definition(env, &name)?;
+                    let cell = match env.get(&name) {
+                        Some(Value::Var(cell)) if binding_is_local(cell) => cell.clone(),
+                        _ => KernelVar::new(local_var_name(&name), Value::Nil),
+                    };
+                    if metadata.is_some() {
+                        cell.set_hara_metadata(metadata);
+                    }
+                    env.insert(name.clone(), Value::Var(cell.clone()));
+                    if rest.is_empty() {
+                        return Err("defn expects a name, parameters, and a body".into());
+                    }
+                    let function = if matches!(
+                        rest.first().map(form_without_metadata),
+                        Some(Form::Vector(_))
+                    ) {
+                        let (params, variadic, patterns, variadic_pattern) =
+                            function_parts(&rest[0])?;
+                        Value::Function(Rc::new(Function {
+                            params,
+                            variadic,
+                            patterns,
+                            variadic_pattern,
+                            body: rest[1..].to_vec(),
+                            captured: Rc::new(RefCell::new(env.clone())),
+                            name: Some(name.clone()),
+                            native: None,
+                            clauses: Vec::new(),
+                            is_macro: false,
+                        }))
+                    } else {
+                        multi_arity_function(&name, rest, env, false)?
+                    };
+                    cell.reset_value(function.clone());
+                    cell.set_origin(definition_origin());
+                    Ok(Value::Var(cell))
                 }
-            }
-            Form::Symbol(n) if n == "name" => {
-                if fs.len() != 2 {
-                    return Err("name expects one value".into());
+                Form::Symbol(n) if n == "do" => {
+                    let mut result = Value::Nil;
+                    for form in &fs[1..] {
+                        result = eval(form, env)?;
+                        if matches!(result, Value::Recur(_)) {
+                            return Ok(result);
+                        }
+                    }
+                    Ok(result)
                 }
-                match eval(&fs[1], env)? {
-                    Value::Keyword(value) => Ok(Value::String(value.get_name().into())),
-                    Value::Symbol(value) => Ok(Value::String(value.get_name().into())),
-                    _ => Err("name expects a keyword or symbol".into()),
+                Form::Symbol(n) if n == "declare" => {
+                    for form in &fs[1..] {
+                        if !matches!(form, Form::Symbol(_)) {
+                            return Err("declare expects symbols".into());
+                        }
+                    }
+                    Ok(Value::Nil)
                 }
-            }
-            Form::Symbol(n) if n == "namespace" => {
-                if fs.len() != 2 {
-                    return Err("namespace expects one value".into());
-                }
-                protocol_namespaced_namespace(&[eval(&fs[1], env)?])
-            }
-            Form::Symbol(n) if n == "select-keys" => {
-                if fs.len() != 3 {
-                    return Err("select-keys expects a map and keys".into());
-                }
-                let source = eval(&fs[1], env)?;
-                let entries =
-                    map_entries(&source).ok_or_else(|| "select-keys expects a map".to_string())?;
-                let keys = iterator_values(eval(&fs[2], env)?)?;
-                let selected = keys.into_iter().filter_map(|key| {
-                    entries
-                        .iter()
-                        .find(|(candidate, _)| candidate == &key)
-                        .map(|(_, value)| (key, value.clone()))
-                });
-                Ok(Value::OrderedMap(Box::new(POrderedMap::from_iter(
-                    selected,
-                ))))
-            }
-            Form::Symbol(n) if ["list", "vector", "pair", "tup"].contains(&n.as_str()) => {
-                eval_sequential_constructor(n, &fs[1..], env)
-            }
-            Form::Symbol(n) if n == "vec" => {
-                if fs.len() != 2 {
-                    return Err("vec expects one argument".into());
-                }
-                let value = eval(&fs[1], env)?;
-                Ok(match iterator_to_vec(value) {
-                    Ok(values) => Value::Vector(PVector::from_iter(values)),
-                    Err(error) => return Err(error),
-                })
-            }
-            Form::Symbol(n)
-                if [
-                    "hash-map",
-                    "hash-set",
-                    "ordered-map",
-                    "ordered-set",
-                    "queue",
-                    "sorted-map",
-                    "sorted-set",
-                    "trie",
-                ]
-                .contains(&n.as_str()) =>
-            {
-                eval_collection_constructor(n, &fs[1..], env)
-            }
-            Form::Symbol(n) if n == "set" => Ok(Value::Set(
-                unique_values(
-                    fs[1..]
+                Form::Symbol(n) if n == "=" => {
+                    if fs.len() < 3 {
+                        return Err("= expects at least 2 arguments".into());
+                    }
+                    let first = eval(&fs[1], env)?;
+                    let rest = fs[2..]
                         .iter()
                         .map(|form| eval(form, env))
-                        .collect::<Result<_, _>>()?,
-                )
-                .into(),
-            )),
-            Form::Symbol(n) if n == "array" => {
-                let values = fs[1..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Value::Array(Rc::new(RefCell::new(values))))
-            }
-            Form::Symbol(n) if n == "object" => {
-                if fs.len() % 2 != 1 {
-                    return Err("object expects key/value pairs".into());
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let mut arguments = Vec::with_capacity(rest.len() + 1);
+                    arguments.push(first);
+                    arguments.extend(rest);
+                    apply_primitive(Primitive::Equal, &arguments)
                 }
-                let mut values = Vec::new();
-                for pair in fs[1..].chunks(2) {
-                    let key = marker_key(&eval(&pair[0], env)?, "object")?;
-                    values.push((key, eval(&pair[1], env)?));
+                Form::Symbol(n) if n == "ns" || n == "require" => eval_namespace_form(fs, env),
+                Form::Symbol(n) if n == "current-namespace" => {
+                    if fs.len() != 1 {
+                        return Err("current-namespace expects no arguments".into());
+                    }
+                    Ok(Value::String(
+                        namespace_registry()?.current().name().as_str().to_owned(),
+                    ))
                 }
-                Ok(Value::Object(Rc::new(RefCell::new(values))))
-            }
-            Form::Symbol(n) if n == "." => {
-                if fs.len() != 3 {
-                    return Err("dot expects a receiver and method".into());
+                Form::Symbol(n) if n == "ns-publics" => {
+                    if fs.len() != 2 {
+                        return Err("ns-publics expects one namespace".into());
+                    }
+                    let namespace = match eval(&fs[1], env)? {
+                        Value::Symbol(name) if name.get_namespace().is_none() => {
+                            name.get_name().to_owned()
+                        }
+                        Value::String(name) => name,
+                        Value::Namespace(namespace) => namespace.name().as_str().to_owned(),
+                        _ => return Err("ns-publics expects a namespace symbol or string".into()),
+                    };
+                    let registry = namespace_registry()?;
+                    let target = registry
+                        .find(&namespace)
+                        .ok_or_else(|| format!("No such namespace: {namespace}"))?;
+                    let mut mappings = target.mappings();
+                    mappings.sort_by(|(left, _), (right, _)| left.as_str().cmp(right.as_str()));
+                    Ok(Value::OrderedMap(Box::new(POrderedMap::from_iter(
+                        mappings.into_iter().map(|(name, var)| {
+                            (
+                                Value::Symbol(Symbol::create(None, name.as_str())),
+                                Value::Var(var),
+                            )
+                        }),
+                    ))))
                 }
-                let receiver = eval(&fs[1], env)?;
-                dot_call(receiver, &fs[2], env)
-            }
-            Form::Symbol(n) if n == "bytes" => {
-                let values = fs[1..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let values = values
-                    .iter()
-                    .map(|value| byte_input(value, "bytes"))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Value::ByteBuffer(Rc::new(RefCell::new(values))))
-            }
-            Form::Symbol(n)
-                if [
-                    "socket/connect",
-                    "socket/listen",
-                    "socket/endpoint",
-                    "socket/events",
-                    "socket/next",
-                    "socket/send",
-                    "socket/close",
-                ]
-                .contains(&n.as_str())
-                    || n.starts_with("std.native.Socket/") =>
-            {
-                socket_operation(n, &fs[1..], env)
-            }
-            Form::Symbol(n)
-                if [
-                    "file/resolve",
-                    "file/read",
-                    "file/write",
-                    "file/exists?",
-                    "file/list",
-                    "file/mkdir",
-                    "file/delete",
-                ]
-                .contains(&n.as_str()) =>
-            {
-                file_operation(n, &fs[1..], env)
-            }
-            Form::Symbol(n) if n == "str" => {
-                if fs.len() == 1 {
-                    return Ok(Value::String(String::new()));
+                Form::Symbol(n) if n == "std.foundation.coroutine/create" => {
+                    if fs.len() != 2 {
+                        return Err("coroutine/create expects one function".into());
+                    }
+                    let body = eval(&fs[1], env)?;
+                    match body {
+                        Value::Function(_) => Ok(Value::Coroutine(Rc::new(Coroutine::new(body)))),
+                        _ => Err("coroutine/create expects a function".into()),
+                    }
                 }
-                let values = fs[1..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Value::String(
-                    values
+                Form::Symbol(n) if n == "std.foundation.coroutine/coroutine?" => {
+                    if fs.len() != 2 {
+                        return Err("coroutine/coroutine? expects one value".into());
+                    }
+                    Ok(Value::Bool(matches!(
+                        eval(&fs[1], env)?,
+                        Value::Coroutine(_)
+                    )))
+                }
+                Form::Symbol(n) if n == "std.foundation.coroutine/status" => {
+                    if fs.len() != 2 {
+                        return Err("coroutine/status expects one coroutine".into());
+                    }
+                    match eval(&fs[1], env)? {
+                        Value::Coroutine(coroutine) => Ok(coroutine_status(&coroutine)),
+                        _ => Err("coroutine/status expects a coroutine".into()),
+                    }
+                }
+                Form::Symbol(n) if n == "std.foundation.coroutine/close" => {
+                    if fs.len() != 2 {
+                        return Err("coroutine/close expects one coroutine".into());
+                    }
+                    match eval(&fs[1], env)? {
+                        Value::Coroutine(coroutine) => {
+                            coroutine_close(&coroutine)?;
+                            Ok(Value::Coroutine(coroutine))
+                        }
+                        _ => Err("coroutine/close expects a coroutine".into()),
+                    }
+                }
+                Form::Symbol(n)
+                    if n == "std.foundation.coroutine/resume"
+                        || n == "std.protocol.icoroutine/resume" =>
+                {
+                    Err("coroutine/resume requires the fiber evaluator".into())
+                }
+                Form::Symbol(n) if n == "std.foundation.coroutine/yield" => {
+                    Err("coroutine/yield requires the fiber evaluator".into())
+                }
+                Form::Symbol(n) if n == "std.foundation.coroutine/await" => {
+                    Err("coroutine/await requires the fiber evaluator".into())
+                }
+                Form::Symbol(n)
+                    if resolve_macro(n).is_none()
+                        && !structural_native_dispatch_active()
+                        && (matches!(env.get(n), Some(Value::Function(_)))
+                            || matches!(env.get(n), Some(Value::Var(var)) if ((binding_is_local(var) && (!cfg!(feature = "bytecode-vm") || var.origin() != VarOrigin::RuntimePrimitive)) || var.origin() == VarOrigin::RustLibrary) && matches!(var.deref_value(), Value::Function(_)))) =>
+                {
+                    let function = binding_value(env, n).expect("function binding was checked");
+                    let arguments = fs[1..]
+                        .iter()
+                        .map(|form| eval(form, env))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    call_value(function, arguments)
+                }
+                Form::Symbol(n) if n == "promise" || n == "promise/run" => {
+                    if fs.len() != 2 {
+                        return Err("promise expects one function".into());
+                    }
+                    let function = match eval(&fs[1], env)? {
+                        Value::Function(function) => function,
+                        _ => return Err("promise expects a function".into()),
+                    };
+                    let provider = promise_provider();
+                    let task = Rc::new(move || call_function(&function, Vec::new()));
+                    Ok(Value::Promise(provider.run(task)))
+                }
+                Form::Symbol(n) if n == "promise?" => {
+                    if fs.len() != 2 {
+                        return Err("promise? expects one value".into());
+                    }
+                    Ok(Value::Bool(matches!(eval(&fs[1], env)?, Value::Promise(_))))
+                }
+                Form::Symbol(n)
+                    if ["bytes?", "array?", "object?", "regexp?", "uuid?"]
+                        .contains(&n.as_str()) =>
+                {
+                    if fs.len() != 2 {
+                        return Err(format!("{n} expects one value"));
+                    }
+                    let value = eval(&fs[1], env)?;
+                    Ok(Value::Bool(match n.as_str() {
+                        "bytes?" => matches!(value, Value::Bytes(_) | Value::ByteBuffer(_)),
+                        "array?" => matches!(value, Value::Array(_)),
+                        "object?" => matches!(value, Value::Object(_)),
+                        "regexp?" => matches!(value, Value::Regex(_)),
+                        // UUID values are not yet represented by the Rust value model.
+                        "uuid?" => false,
+                        _ => unreachable!(),
+                    }))
+                }
+                Form::Symbol(n) if n.starts_with("std.native.Host/") => {
+                    native_host_operation(n, &fs[1..], env)
+                }
+                Form::Symbol(n) if n.starts_with("std.native.Kernel/") => {
+                    Err(format!("{n} requires a kernel embedding"))
+                }
+                Form::Symbol(n)
+                    if n.starts_with("std.native.Arr/") || n.starts_with("std.native.Obj/") =>
+                {
+                    native_mutable_operation(n, &fs[1..], env)
+                }
+                Form::Symbol(n) if n == "promise/new" => {
+                    if fs.len() != 2 {
+                        return Err("promise/new expects one function".into());
+                    }
+                    let function = match eval(&fs[1], env)? {
+                        Value::Function(function) => function,
+                        _ => return Err("promise/new expects a function".into()),
+                    };
+                    let promise = Promise::new();
+                    let resolving = promise.clone();
+                    let resolve = native_function("promise-resolve", 1, move |mut values| {
+                        let value = values.remove(0);
+                        settle_promise_result(&resolving, Ok(value.clone()));
+                        Ok(value)
+                    });
+                    let rejecting = promise.clone();
+                    let reject = native_function("promise-reject", 1, move |mut values| {
+                        let value = values.remove(0);
+                        let error = match &value {
+                            Value::String(error) => error.clone(),
+                            value => value.display(),
+                        };
+                        rejecting.reject(error);
+                        Ok(value)
+                    });
+                    if let Err(error) = call_function(&function, vec![resolve, reject]) {
+                        promise.reject(error);
+                    }
+                    Ok(Value::Promise(promise))
+                }
+                Form::Symbol(n) if n == "promise/from" => {
+                    if fs.len() != 2 {
+                        return Err("promise/from expects one value".into());
+                    }
+                    let value = eval(&fs[1], env)?;
+                    Ok(Value::Promise(promise_from(value)))
+                }
+                Form::Symbol(n) if n == "promise/all" => {
+                    if fs.len() != 2 {
+                        return Err("promise/all expects one collection".into());
+                    }
+                    Ok(Value::Promise(promise_all(iterator_values(eval(
+                        &fs[1], env,
+                    )?)?)))
+                }
+                Form::Symbol(n) if n == "promise/delay" => {
+                    if fs.len() != 3 {
+                        return Err("promise/delay expects milliseconds and a function".into());
+                    }
+                    let millis = match eval(&fs[1], env)? {
+                        Value::Number(value) if value >= 0 => value as u64,
+                        _ => return Err("promise/delay expects non-negative milliseconds".into()),
+                    };
+                    let function = match eval(&fs[2], env)? {
+                        Value::Function(function) => function,
+                        _ => return Err("promise/delay expects milliseconds and a function".into()),
+                    };
+                    let task = Rc::new(move || call_function(&function, Vec::new()));
+                    Ok(Value::Promise(
+                        promise_provider().delay(std::time::Duration::from_millis(millis), task),
+                    ))
+                }
+                Form::Symbol(n) if n == "promise/state" => {
+                    if fs.len() != 2 {
+                        return Err("promise/state expects one promise".into());
+                    }
+                    let promise = promise_value(&eval(&fs[1], env)?, n)?;
+                    Ok(promise_state_value(&promise))
+                }
+                Form::Symbol(n) if n == "promise/value" => {
+                    if fs.len() != 2 {
+                        return Err("promise/value expects one promise".into());
+                    }
+                    let promise = promise_value(&eval(&fs[1], env)?, n)?;
+                    promise_value_result(&promise)
+                }
+                Form::Symbol(n) if n == "promise/cancel" => {
+                    if fs.len() != 2 {
+                        return Err("promise/cancel expects a promise".into());
+                    }
+                    let promise = promise_value(&eval(&fs[1], env)?, n)?;
+                    if !promise.cancel() {
+                        return Err("promise is already settled".into());
+                    }
+                    Ok(Value::Promise(promise))
+                }
+                Form::Symbol(n)
+                    if ["promise/then", "promise/catch", "promise/finally"]
+                        .contains(&n.as_str()) =>
+                {
+                    if fs.len() != 3 {
+                        return Err(format!("{n} expects a promise and function"));
+                    }
+                    let source = promise_value(&eval(&fs[1], env)?, n)?;
+                    let function = match eval(&fs[2], env)? {
+                        Value::Function(function) => function,
+                        _ => return Err(format!("{n} expects a function")),
+                    };
+                    Ok(Value::Promise(promise_chain(source, n, function)))
+                }
+                Form::Symbol(n) if n.starts_with("ns:") => eval_namespace_operation(n, fs, env),
+                Form::Symbol(n) if n == "keyword" || n == "symbol" || n == "pointer" => {
+                    if fs.len() != 2 && fs.len() != 3 {
+                        return Err(format!("{n} expects a name or namespace and name"));
+                    }
+                    let parts = fs[1..]
+                        .iter()
+                        .map(|form| match eval(form, env)? {
+                            Value::String(value) => Ok(value),
+                            _ => Err(format!("{n} expects string arguments")),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    match (n.as_str(), parts.as_slice()) {
+                        ("keyword", [name]) => Keyword::parse(name)
+                            .map(Value::Keyword)
+                            .map_err(|error| format!("keyword failed: {error}")),
+                        ("keyword", [namespace, name]) => Keyword::create(Some(namespace), name)
+                            .map(Value::Keyword)
+                            .map_err(|error| format!("keyword failed: {error}")),
+                        ("symbol", [name]) => Ok(Value::Symbol(Symbol::parse(name))),
+                        ("symbol", [namespace, name]) => {
+                            Ok(Value::Symbol(Symbol::create(Some(namespace), name)))
+                        }
+                        ("pointer", [name]) => Ok(Value::Pointer(PPointer::parse(name))),
+                        ("pointer", [namespace, name]) => {
+                            Ok(Value::Pointer(PPointer::create(Some(namespace), name)))
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                Form::Symbol(n) if n == "name" => {
+                    if fs.len() != 2 {
+                        return Err("name expects one value".into());
+                    }
+                    match eval(&fs[1], env)? {
+                        Value::Keyword(value) => Ok(Value::String(value.get_name().into())),
+                        Value::Symbol(value) => Ok(Value::String(value.get_name().into())),
+                        _ => Err("name expects a keyword or symbol".into()),
+                    }
+                }
+                Form::Symbol(n) if n == "namespace" => {
+                    if fs.len() != 2 {
+                        return Err("namespace expects one value".into());
+                    }
+                    protocol_namespaced_namespace(&[eval(&fs[1], env)?])
+                }
+                Form::Symbol(n) if n == "select-keys" => {
+                    if fs.len() != 3 {
+                        return Err("select-keys expects a map and keys".into());
+                    }
+                    let source = eval(&fs[1], env)?;
+                    let entries = map_entries(&source)
+                        .ok_or_else(|| "select-keys expects a map".to_string())?;
+                    let keys = iterator_values(eval(&fs[2], env)?)?;
+                    let selected = keys.into_iter().filter_map(|key| {
+                        entries
+                            .iter()
+                            .find(|(candidate, _)| candidate == &key)
+                            .map(|(_, value)| (key, value.clone()))
+                    });
+                    Ok(Value::OrderedMap(Box::new(POrderedMap::from_iter(
+                        selected,
+                    ))))
+                }
+                Form::Symbol(n) if ["list", "vector", "pair", "tup"].contains(&n.as_str()) => {
+                    eval_sequential_constructor(n, &fs[1..], env)
+                }
+                Form::Symbol(n) if n == "vec" => {
+                    if fs.len() != 2 {
+                        return Err("vec expects one argument".into());
+                    }
+                    let value = eval(&fs[1], env)?;
+                    Ok(match iterator_to_vec(value) {
+                        Ok(values) => Value::Vector(PVector::from_iter(values)),
+                        Err(error) => return Err(error),
+                    })
+                }
+                Form::Symbol(n)
+                    if [
+                        "hash-map",
+                        "hash-set",
+                        "ordered-map",
+                        "ordered-set",
+                        "queue",
+                        "sorted-map",
+                        "sorted-set",
+                        "trie",
+                    ]
+                    .contains(&n.as_str()) =>
+                {
+                    eval_collection_constructor(n, &fs[1..], env)
+                }
+                Form::Symbol(n) if n == "set" => Ok(Value::Set(
+                    unique_values(
+                        fs[1..]
+                            .iter()
+                            .map(|form| eval(form, env))
+                            .collect::<Result<_, _>>()?,
+                    )
+                    .into(),
+                )),
+                Form::Symbol(n) if n == "array" => {
+                    let values = fs[1..]
+                        .iter()
+                        .map(|form| eval(form, env))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(Value::Array(Rc::new(RefCell::new(values))))
+                }
+                Form::Symbol(n) if n == "object" => {
+                    if fs.len() % 2 != 1 {
+                        return Err("object expects key/value pairs".into());
+                    }
+                    let mut values = Vec::new();
+                    for pair in fs[1..].chunks(2) {
+                        let key = marker_key(&eval(&pair[0], env)?, "object")?;
+                        values.push((key, eval(&pair[1], env)?));
+                    }
+                    Ok(Value::Object(Rc::new(RefCell::new(values))))
+                }
+                Form::Symbol(n) if n == "." => {
+                    if fs.len() != 3 {
+                        return Err("dot expects a receiver and method".into());
+                    }
+                    let receiver = eval(&fs[1], env)?;
+                    dot_call(receiver, &fs[2], env)
+                }
+                Form::Symbol(n) if n == "bytes" => {
+                    let values = fs[1..]
+                        .iter()
+                        .map(|form| eval(form, env))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let values = values
+                        .iter()
+                        .map(|value| byte_input(value, "bytes"))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(Value::ByteBuffer(Rc::new(RefCell::new(values))))
+                }
+                Form::Symbol(n)
+                    if [
+                        "socket/connect",
+                        "socket/listen",
+                        "socket/endpoint",
+                        "socket/events",
+                        "socket/next",
+                        "socket/send",
+                        "socket/close",
+                    ]
+                    .contains(&n.as_str())
+                        || n.starts_with("std.native.Socket/") =>
+                {
+                    socket_operation(n, &fs[1..], env)
+                }
+                Form::Symbol(n)
+                    if [
+                        "file/resolve",
+                        "file/read",
+                        "file/write",
+                        "file/exists?",
+                        "file/list",
+                        "file/mkdir",
+                        "file/delete",
+                    ]
+                    .contains(&n.as_str()) =>
+                {
+                    file_operation(n, &fs[1..], env)
+                }
+                Form::Symbol(n) if n == "str" => {
+                    if fs.len() == 1 {
+                        return Ok(Value::String(String::new()));
+                    }
+                    let values = fs[1..]
+                        .iter()
+                        .map(|form| eval(form, env))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(Value::String(
+                        values
+                            .iter()
+                            .map(|value| match value {
+                                Value::String(text) => text.clone(),
+                                _ => value.display(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(""),
+                    ))
+                }
+                Form::Symbol(n) if n == "pr-str" => {
+                    if fs.len() != 2 {
+                        return Err("pr-str expects one value".into());
+                    }
+                    Ok(Value::String(eval(&fs[1], env)?.display()))
+                }
+                Form::Symbol(n) if n == "p" || n == "std.native.Printer/p" => {
+                    use std::io::Write;
+                    let values = fs[1..]
+                        .iter()
+                        .map(|form| eval(form, env))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let text = values
                         .iter()
                         .map(|value| match value {
+                            Value::Nil => String::new(),
                             Value::String(text) => text.clone(),
                             _ => value.display(),
                         })
                         .collect::<Vec<_>>()
-                        .join(""),
-                ))
-            }
-            Form::Symbol(n) if n == "pr-str" => {
-                if fs.len() != 2 {
-                    return Err("pr-str expects one value".into());
+                        .join("");
+                    print!("{text}");
+                    std::io::stdout()
+                        .flush()
+                        .map_err(|error| format!("Printer output failed: {error}"))?;
+                    Ok(Value::Nil)
                 }
-                Ok(Value::String(eval(&fs[1], env)?.display()))
-            }
-            Form::Symbol(n) if n == "p" || n == "std.native.Printer/p" => {
-                use std::io::Write;
-                let values = fs[1..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let text = values
-                    .iter()
-                    .map(|value| match value {
-                        Value::Nil => String::new(),
-                        Value::String(text) => text.clone(),
-                        _ => value.display(),
-                    })
-                    .collect::<Vec<_>>()
-                    .join("");
-                print!("{text}");
-                std::io::stdout()
-                    .flush()
-                    .map_err(|error| format!("Printer output failed: {error}"))?;
-                Ok(Value::Nil)
-            }
-            Form::Symbol(n) if n == "println" || n == "std.native.Printer/println" => {
-                use std::io::Write;
-                let values = fs[1..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let text = values
-                    .iter()
-                    .map(|value| match value {
-                        Value::Nil => "nil".to_owned(),
-                        Value::String(text) => text.clone(),
-                        _ => value.display(),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                println!("{text}");
-                std::io::stdout()
-                    .flush()
-                    .map_err(|error| format!("Printer output failed: {error}"))?;
-                Ok(Value::Nil)
-            }
-            Form::Symbol(n)
-                if [
-                    "str/pad-left",
-                    "str/pad-right",
-                    "str/starts-with?",
-                    "str/ends-with?",
-                    "str/split",
-                    "str/join",
-                    "str/index-of",
-                    "str/to-fixed",
-                    "str/replace",
-                    "str/trim-left",
-                    "str/trim-right",
-                    "str/length",
-                    "str/blank?",
-                    "str/includes?",
-                    "str/char-at",
-                    "str/slice",
-                    "str/last-index-of",
-                    "str/split-lines",
-                    "str/repeat",
-                    "str/replace-first",
-                    "str/capitalize",
-                    "str/decapitalize",
-                    "str/reverse",
-                    "str/encode-utf8",
-                    "str/decode-utf8",
-                ]
-                .contains(&n.as_str()) =>
-            {
-                let values = fs[1..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                string_operation(n, values)
-            }
-            Form::Symbol(n) if n == "str/trim" || n == "str/upper" || n == "str/lower" => {
-                if fs.len() != 2 {
-                    return Err(format!("{n} expects one string"));
-                }
-                let text = match eval(&fs[1], env)? {
-                    Value::String(text) => text,
-                    _ => return Err(format!("{n} expects a string")),
-                };
-                match n.as_str() {
-                    "str/trim" => Ok(Value::String(text.trim().into())),
-                    "str/upper" => Ok(Value::String(text.to_uppercase())),
-                    "str/lower" => Ok(Value::String(text.to_lowercase())),
-                    _ => unreachable!(),
-                }
-            }
-            Form::Symbol(n) if n == "bytes/copy" => {
-                if fs.len() != 2 {
-                    return Err("bytes/copy expects bytes".into());
-                }
-                byte_copy(&eval(&fs[1], env)?)
-            }
-            Form::Symbol(n) if n == "bytes/slice" => {
-                if fs.len() != 3 && fs.len() != 4 {
-                    return Err("bytes/slice expects bytes, start, and optional end".into());
-                }
-                let value = eval(&fs[1], env)?;
-                let start = eval(&fs[2], env)?;
-                let end = if fs.len() == 4 {
-                    eval(&fs[3], env)?
-                } else {
-                    byte_count(&value)?
-                };
-                byte_slice(&value, &start, &end)
-            }
-            Form::Symbol(n) if n == "bytes/count" => {
-                if fs.len() != 2 {
-                    return Err("bytes/count expects one argument".into());
-                }
-                byte_count(&eval(&fs[1], env)?)
-            }
-            Form::Symbol(n) if n == "bytes/get" => {
-                if fs.len() != 3 && fs.len() != 4 {
-                    return Err("bytes/get expects an index and optional default".into());
-                }
-                let value = eval(&fs[1], env)?;
-                let index = eval(&fs[2], env)?;
-                let default = if fs.len() == 4 {
-                    Some(eval(&fs[3], env)?)
-                } else {
-                    None
-                };
-                let index_num = value_index(&index)?;
-                match byte_get(&value, &index, default) {
-                    Ok(value) => Ok(value),
-                    Err(error) if error.is_empty() => {
-                        Err(format!("bytes/get index out of bounds: {index_num}"))
-                    }
-                    Err(error) => Err(error),
-                }
-            }
-            Form::Symbol(n) if n == "bytes/set" => {
-                if fs.len() != 4 {
-                    return Err("bytes/set expects bytes, index, and value".into());
-                }
-                let value = eval(&fs[1], env)?;
-                let index = eval(&fs[2], env)?;
-                let item = eval(&fs[3], env)?;
-                byte_set(&value, &index, &item)
-            }
-            Form::Symbol(n) if n == "bytes/u8" || n == "bytes/s8" => {
-                if fs.len() != 2 {
-                    return Err(format!("{n} expects one argument"));
-                }
-                let number = match eval(&fs[1], env)? {
-                    Value::Number(number) => number,
-                    _ => return Err(format!("{n} expects a number")),
-                };
-                if !(-128..=255).contains(&number) {
-                    return Err(format!("{n} expects a value in the range -128..255"));
-                }
-                let raw = (number as i8) as u8;
-                Ok(Value::Number(if n == "bytes/u8" {
-                    raw as i64
-                } else {
-                    raw as i8 as i64
-                }))
-            }
-            Form::Symbol(n) if n == "iter" => {
-                if fs.len() != 2 {
-                    return Err("iter expects one argument".into());
-                }
-                make_iterator(eval(&fs[1], env)?)
-            }
-            Form::Symbol(n) if n == "iter-finite?" => {
-                if fs.len() != 2 {
-                    return Err("iter-finite? expects one argument".into());
-                }
-                Ok(Value::Bool(iterator_is_finite(&eval(&fs[1], env)?)))
-            }
-            Form::Symbol(n) if n == "iter-materialize" => {
-                if fs.len() != 2 {
-                    return Err("iter-materialize expects one argument".into());
-                }
-                Ok(Value::Vector(iterator_to_vec(eval(&fs[1], env)?)?.into()))
-            }
-            Form::Symbol(n) if n == "seq" => {
-                if fs.len() != 2 && fs.len() != 3 {
-                    return Err("seq expects a source, or a transform and source".into());
-                }
-                let source = eval(&fs[fs.len() - 1], env)?;
-                let lazy = iterator_seq(source)?;
-                if fs.len() == 2 {
-                    Ok(lazy)
-                } else {
-                    match eval(&fs[1], env)? {
-                        Value::Function(function) => {
-                            let result = call_function(&function, vec![lazy])?;
-                            iterator_seq(result)
-                        }
-                        _ => Err("seq expects a function and source".into()),
-                    }
-                }
-            }
-            Form::Symbol(n) if n == "seq?" || n == "iter?" => {
-                if fs.len() != 2 {
-                    return Err(format!("{n} expects one value"));
-                }
-                let value = eval(&fs[1], env)?;
-                let result = matches!(value, Value::Iterator(iterator) if n == "iter?" || iterator.borrow().seq);
-                Ok(Value::Bool(result))
-            }
-            Form::Symbol(n) if n == "iter-next?" => {
-                if fs.len() != 2 {
-                    return Err("iter-next? expects one argument".into());
-                }
-                iterator_has_next(&eval(&fs[1], env)?)
-            }
-            Form::Symbol(n) if n == "iter-next" => {
-                if fs.len() != 2 {
-                    return Err("iter-next expects one argument".into());
-                }
-                iterator_next(&eval(&fs[1], env)?)
-            }
-            Form::Symbol(n) if n == "iter-close" => {
-                if fs.len() != 2 {
-                    return Err("iter-close expects one argument".into());
-                }
-                iterator_close(&eval(&fs[1], env)?)
-            }
-            Form::Symbol(n)
-                if ["iter-map", "map", "iter-filter", "filter"].contains(&n.as_str()) =>
-            {
-                let is_map = n == "iter-map" || n == "map";
-                if n == "map" && fs.len() == 2 {
-                    let function = match eval(&fs[1], env)? {
-                        Value::Function(function) => function,
-                        _ => return Err("map expects a function".into()),
-                    };
-                    let body = Form::List(vec![
-                        Form::Symbol("__map-transform".into()),
-                        Form::Symbol("__function".into()),
-                        Form::Symbol("value".into()),
-                    ]);
-                    return Ok(generated_function(
-                        vec!["value".into()],
-                        vec![body],
-                        env.clone(),
-                        vec![("__function", Value::Function(function))],
-                    ));
-                }
-                if n == "filter" && fs.len() == 2 {
-                    let predicate = eval(&fs[1], env)?;
-                    return Ok(generated_unary_operation(
-                        "iter-filter",
-                        predicate,
-                        env.clone(),
-                    ));
-                }
-                if fs.len() < 3 {
-                    return Err(format!("{n} expects a function and collection"));
-                }
-                let function = eval(&fs[1], env)?;
-                if is_map && fs.len() > 3 {
-                    let sources = fs[2..]
+                Form::Symbol(n) if n == "println" || n == "std.native.Printer/println" => {
+                    use std::io::Write;
+                    let values = fs[1..]
                         .iter()
-                        .map(|form| eval(form, env).and_then(make_iterator))
+                        .map(|form| eval(form, env))
                         .collect::<Result<Vec<_>, _>>()?;
-                    let zipped = iterator_zip(sources)?;
-                    let result = match function {
-                        Value::Function(function) => iterator_map_spread(function, zipped)?,
-                        _ => return Err(format!("{n} expects a function")),
-                    };
-                    return if n == "map" {
-                        Ok(Value::Vector(iterator_to_vec(result)?.into()))
-                    } else {
-                        Ok(result)
-                    };
+                    let text = values
+                        .iter()
+                        .map(|value| match value {
+                            Value::Nil => "nil".to_owned(),
+                            Value::String(text) => text.clone(),
+                            _ => value.display(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    println!("{text}");
+                    std::io::stdout()
+                        .flush()
+                        .map_err(|error| format!("Printer output failed: {error}"))?;
+                    Ok(Value::Nil)
                 }
-                let raw_collection = if fs.len() == 3 {
-                    Some(eval(&fs[2], env)?)
-                } else {
-                    None
-                };
-                if fs.len() == 3 {
-                    if let Value::Function(function_ref) = &function {
-                        if is_map {
-                            if let Some(value) = raw_collection.clone() {
-                                let result = iterator_map(function_ref.clone(), value)?;
-                                return if n == "map" {
+                Form::Symbol(n)
+                    if [
+                        "str/pad-left",
+                        "str/pad-right",
+                        "str/starts-with?",
+                        "str/ends-with?",
+                        "str/split",
+                        "str/join",
+                        "str/index-of",
+                        "str/to-fixed",
+                        "str/replace",
+                        "str/trim-left",
+                        "str/trim-right",
+                        "str/length",
+                        "str/blank?",
+                        "str/includes?",
+                        "str/char-at",
+                        "str/slice",
+                        "str/last-index-of",
+                        "str/split-lines",
+                        "str/repeat",
+                        "str/replace-first",
+                        "str/capitalize",
+                        "str/decapitalize",
+                        "str/reverse",
+                        "str/encode-utf8",
+                        "str/decode-utf8",
+                    ]
+                    .contains(&n.as_str()) =>
+                {
+                    let values = fs[1..]
+                        .iter()
+                        .map(|form| eval(form, env))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    string_operation(n, values)
+                }
+                Form::Symbol(n) if n == "str/trim" || n == "str/upper" || n == "str/lower" => {
+                    if fs.len() != 2 {
+                        return Err(format!("{n} expects one string"));
+                    }
+                    let text = match eval(&fs[1], env)? {
+                        Value::String(text) => text,
+                        _ => return Err(format!("{n} expects a string")),
+                    };
+                    match n.as_str() {
+                        "str/trim" => Ok(Value::String(text.trim().into())),
+                        "str/upper" => Ok(Value::String(text.to_uppercase())),
+                        "str/lower" => Ok(Value::String(text.to_lowercase())),
+                        _ => unreachable!(),
+                    }
+                }
+                Form::Symbol(n) if n == "bytes/copy" => {
+                    if fs.len() != 2 {
+                        return Err("bytes/copy expects bytes".into());
+                    }
+                    byte_copy(&eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "bytes/slice" => {
+                    if fs.len() != 3 && fs.len() != 4 {
+                        return Err("bytes/slice expects bytes, start, and optional end".into());
+                    }
+                    let value = eval(&fs[1], env)?;
+                    let start = eval(&fs[2], env)?;
+                    let end = if fs.len() == 4 {
+                        eval(&fs[3], env)?
+                    } else {
+                        byte_count(&value)?
+                    };
+                    byte_slice(&value, &start, &end)
+                }
+                Form::Symbol(n) if n == "bytes/count" => {
+                    if fs.len() != 2 {
+                        return Err("bytes/count expects one argument".into());
+                    }
+                    byte_count(&eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "bytes/get" => {
+                    if fs.len() != 3 && fs.len() != 4 {
+                        return Err("bytes/get expects an index and optional default".into());
+                    }
+                    let value = eval(&fs[1], env)?;
+                    let index = eval(&fs[2], env)?;
+                    let default = if fs.len() == 4 {
+                        Some(eval(&fs[3], env)?)
+                    } else {
+                        None
+                    };
+                    let index_num = value_index(&index)?;
+                    match byte_get(&value, &index, default) {
+                        Ok(value) => Ok(value),
+                        Err(error) if error.is_empty() => {
+                            Err(format!("bytes/get index out of bounds: {index_num}"))
+                        }
+                        Err(error) => Err(error),
+                    }
+                }
+                Form::Symbol(n) if n == "bytes/set" => {
+                    if fs.len() != 4 {
+                        return Err("bytes/set expects bytes, index, and value".into());
+                    }
+                    let value = eval(&fs[1], env)?;
+                    let index = eval(&fs[2], env)?;
+                    let item = eval(&fs[3], env)?;
+                    byte_set(&value, &index, &item)
+                }
+                Form::Symbol(n) if n == "bytes/u8" || n == "bytes/s8" => {
+                    if fs.len() != 2 {
+                        return Err(format!("{n} expects one argument"));
+                    }
+                    let number = match eval(&fs[1], env)? {
+                        Value::Number(number) => number,
+                        _ => return Err(format!("{n} expects a number")),
+                    };
+                    if !(-128..=255).contains(&number) {
+                        return Err(format!("{n} expects a value in the range -128..255"));
+                    }
+                    let raw = (number as i8) as u8;
+                    Ok(Value::Number(if n == "bytes/u8" {
+                        raw as i64
+                    } else {
+                        raw as i8 as i64
+                    }))
+                }
+                Form::Symbol(n) if n == "iter" => {
+                    if fs.len() != 2 {
+                        return Err("iter expects one argument".into());
+                    }
+                    make_iterator(eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "iter-finite?" => {
+                    if fs.len() != 2 {
+                        return Err("iter-finite? expects one argument".into());
+                    }
+                    Ok(Value::Bool(iterator_is_finite(&eval(&fs[1], env)?)))
+                }
+                Form::Symbol(n) if n == "iter-materialize" => {
+                    if fs.len() != 2 {
+                        return Err("iter-materialize expects one argument".into());
+                    }
+                    Ok(Value::Vector(iterator_to_vec(eval(&fs[1], env)?)?.into()))
+                }
+                Form::Symbol(n) if n == "seq" => {
+                    if fs.len() != 2 && fs.len() != 3 {
+                        return Err("seq expects a source, or a transform and source".into());
+                    }
+                    let source = eval(&fs[fs.len() - 1], env)?;
+                    let lazy = iterator_seq(source)?;
+                    if fs.len() == 2 {
+                        Ok(lazy)
+                    } else {
+                        match eval(&fs[1], env)? {
+                            Value::Function(function) => {
+                                let result = call_function(&function, vec![lazy])?;
+                                iterator_seq(result)
+                            }
+                            _ => Err("seq expects a function and source".into()),
+                        }
+                    }
+                }
+                Form::Symbol(n) if n == "seq?" || n == "iter?" => {
+                    if fs.len() != 2 {
+                        return Err(format!("{n} expects one value"));
+                    }
+                    let value = eval(&fs[1], env)?;
+                    let result = matches!(value, Value::Iterator(iterator) if n == "iter?" || iterator.borrow().seq);
+                    Ok(Value::Bool(result))
+                }
+                Form::Symbol(n) if n == "iter-next?" => {
+                    if fs.len() != 2 {
+                        return Err("iter-next? expects one argument".into());
+                    }
+                    iterator_has_next(&eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "iter-next" => {
+                    if fs.len() != 2 {
+                        return Err("iter-next expects one argument".into());
+                    }
+                    iterator_next(&eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "iter-close" => {
+                    if fs.len() != 2 {
+                        return Err("iter-close expects one argument".into());
+                    }
+                    iterator_close(&eval(&fs[1], env)?)
+                }
+                Form::Symbol(n)
+                    if ["iter-map", "map", "iter-filter", "filter"].contains(&n.as_str()) =>
+                {
+                    let is_map = n == "iter-map" || n == "map";
+                    if n == "map" && fs.len() == 2 {
+                        let function = match eval(&fs[1], env)? {
+                            Value::Function(function) => function,
+                            _ => return Err("map expects a function".into()),
+                        };
+                        let body = Form::List(vec![
+                            Form::Symbol("__map-transform".into()),
+                            Form::Symbol("__function".into()),
+                            Form::Symbol("value".into()),
+                        ]);
+                        return Ok(generated_function(
+                            vec!["value".into()],
+                            vec![body],
+                            env.clone(),
+                            vec![("__function", Value::Function(function))],
+                        ));
+                    }
+                    if n == "filter" && fs.len() == 2 {
+                        let predicate = eval(&fs[1], env)?;
+                        return Ok(generated_unary_operation(
+                            "iter-filter",
+                            predicate,
+                            env.clone(),
+                        ));
+                    }
+                    if fs.len() < 3 {
+                        return Err(format!("{n} expects a function and collection"));
+                    }
+                    let function = eval(&fs[1], env)?;
+                    if is_map && fs.len() > 3 {
+                        let sources = fs[2..]
+                            .iter()
+                            .map(|form| eval(form, env).and_then(make_iterator))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let zipped = iterator_zip(sources)?;
+                        let result = match function {
+                            Value::Function(function) => iterator_map_spread(function, zipped)?,
+                            _ => return Err(format!("{n} expects a function")),
+                        };
+                        return if n == "map" {
+                            Ok(Value::Vector(iterator_to_vec(result)?.into()))
+                        } else {
+                            Ok(result)
+                        };
+                    }
+                    let raw_collection = if fs.len() == 3 {
+                        Some(eval(&fs[2], env)?)
+                    } else {
+                        None
+                    };
+                    if fs.len() == 3 {
+                        if let Value::Function(function_ref) = &function {
+                            if is_map {
+                                if let Some(value) = raw_collection.clone() {
+                                    let result = iterator_map(function_ref.clone(), value)?;
+                                    return if n == "map" {
+                                        Ok(Value::Vector(iterator_to_vec(result)?.into()))
+                                    } else {
+                                        Ok(result)
+                                    };
+                                }
+                            } else if let Some(value) = raw_collection.clone() {
+                                let result = iterator_filter(function_ref.clone(), value)?;
+                                return if n == "filter" {
                                     Ok(Value::Vector(iterator_to_vec(result)?.into()))
                                 } else {
                                     Ok(result)
                                 };
                             }
-                        } else if let Some(value) = raw_collection.clone() {
-                            let result = iterator_filter(function_ref.clone(), value)?;
-                            return if n == "filter" {
-                                Ok(Value::Vector(iterator_to_vec(result)?.into()))
-                            } else {
-                                Ok(result)
-                            };
                         }
                     }
-                }
-                let collections = if let Some(value) = raw_collection {
-                    vec![iterator_values(value)?]
-                } else {
-                    fs[2..]
-                        .iter()
-                        .map(|form| eval(form, env).and_then(iterator_values))
-                        .collect::<Result<Vec<_>, _>>()?
-                };
-                let mut output = Vec::new();
-                if is_map {
-                    let limit = collections.iter().map(Vec::len).min().unwrap_or(0);
-                    for index in 0..limit {
-                        let args = collections
+                    let collections = if let Some(value) = raw_collection {
+                        vec![iterator_values(value)?]
+                    } else {
+                        fs[2..]
                             .iter()
-                            .map(|values| values[index].clone())
-                            .collect();
-                        let mapped = match &function {
-                            Value::Function(f) => call_function(f, args)?,
-                            _ => return Err(format!("{n} expects a function")),
-                        };
-                        output.push(mapped);
-                    }
-                } else {
-                    if collections.len() != 1 {
-                        return Err(format!("{n} expects one collection"));
-                    }
-                    for value in collections.into_iter().next().unwrap() {
-                        let mapped = match &function {
-                            Value::Function(f) => call_function(f, vec![value.clone()])?,
-                            _ => return Err(format!("{n} expects a function")),
-                        };
-                        if mapped.truthy() {
-                            output.push(value);
+                            .map(|form| eval(form, env).and_then(iterator_values))
+                            .collect::<Result<Vec<_>, _>>()?
+                    };
+                    let mut output = Vec::new();
+                    if is_map {
+                        let limit = collections.iter().map(Vec::len).min().unwrap_or(0);
+                        for index in 0..limit {
+                            let args = collections
+                                .iter()
+                                .map(|values| values[index].clone())
+                                .collect();
+                            let mapped = match &function {
+                                Value::Function(f) => call_function(f, args)?,
+                                _ => return Err(format!("{n} expects a function")),
+                            };
+                            output.push(mapped);
+                        }
+                    } else {
+                        if collections.len() != 1 {
+                            return Err(format!("{n} expects one collection"));
+                        }
+                        for value in collections.into_iter().next().unwrap() {
+                            let mapped = match &function {
+                                Value::Function(f) => call_function(f, vec![value.clone()])?,
+                                _ => return Err(format!("{n} expects a function")),
+                            };
+                            if mapped.truthy() {
+                                output.push(value);
+                            }
                         }
                     }
-                }
-                if n == "map" || n == "filter" {
-                    Ok(Value::Vector(output.into()))
-                } else {
-                    Ok(iterator_from_values(output))
-                }
-            }
-            Form::Symbol(n) if ["iter-take", "take"].contains(&n.as_str()) => {
-                if n == "take" && fs.len() == 2 {
-                    let amount = eval(&fs[1], env)?;
-                    return Ok(generated_unary_operation("iter-take", amount, env.clone()));
-                }
-                if fs.len() != 3 {
-                    return Err(format!("{n} expects an amount and collection"));
-                }
-                let amount = value_index(&eval(&fs[1], env)?)?;
-                let result = iterator_take(eval(&fs[2], env)?, amount)?;
-                if n == "take" {
-                    Ok(Value::Vector(iterator_to_vec(result)?.into()))
-                } else {
-                    Ok(result)
-                }
-            }
-            Form::Symbol(n) if ["iter-drop", "drop"].contains(&n.as_str()) => {
-                if n == "drop" && fs.len() == 2 {
-                    let amount = eval(&fs[1], env)?;
-                    return Ok(generated_unary_operation("iter-drop", amount, env.clone()));
-                }
-                if fs.len() != 3 {
-                    return Err(format!("{n} expects an amount and collection"));
-                }
-                let amount = value_index(&eval(&fs[1], env)?)?;
-                let result = iterator_drop(eval(&fs[2], env)?, amount)?;
-                if n == "drop" {
-                    Ok(Value::Vector(iterator_to_vec(result)?.into()))
-                } else {
-                    Ok(result)
-                }
-            }
-            Form::Symbol(n)
-                if [
-                    "iter-take-while",
-                    "take-while",
-                    "iter-drop-while",
-                    "drop-while",
-                ]
-                .contains(&n.as_str()) =>
-            {
-                if !n.starts_with("iter-") && fs.len() == 2 {
-                    let predicate = eval(&fs[1], env)?;
-                    let operation = if n == "take-while" {
-                        "iter-take-while"
+                    if n == "map" || n == "filter" {
+                        Ok(Value::Vector(output.into()))
                     } else {
-                        "iter-drop-while"
-                    };
-                    return Ok(generated_unary_operation(operation, predicate, env.clone()));
-                }
-                if fs.len() != 3 {
-                    return Err(format!("{n} expects a predicate and collection"));
-                }
-                let predicate = match eval(&fs[1], env)? {
-                    Value::Function(function) => function,
-                    _ => return Err(format!("{n} expects a function")),
-                };
-                let value = eval(&fs[2], env)?;
-                let result = if n.contains("take-while") {
-                    iterator_take_while(predicate, value)?
-                } else {
-                    iterator_drop_while(predicate, value)?
-                };
-                if n.starts_with("iter-") {
-                    Ok(result)
-                } else {
-                    Ok(Value::Vector(iterator_to_vec(result)?.into()))
-                }
-            }
-            Form::Symbol(n) if ["iter-mapcat", "mapcat"].contains(&n.as_str()) => {
-                if n == "mapcat" && fs.len() == 2 {
-                    let function = eval(&fs[1], env)?;
-                    return Ok(generated_unary_operation(
-                        "iter-mapcat",
-                        function,
-                        env.clone(),
-                    ));
-                }
-                if fs.len() != 3 {
-                    return Err(format!("{n} expects a function and collection"));
-                }
-                let function = match eval(&fs[1], env)? {
-                    Value::Function(function) => function,
-                    _ => return Err(format!("{n} expects a function")),
-                };
-                let result = iterator_mapcat(function, eval(&fs[2], env)?)?;
-                if n == "mapcat" {
-                    Ok(Value::Vector(iterator_to_vec(result)?.into()))
-                } else {
-                    Ok(result)
-                }
-            }
-            Form::Symbol(n) if ["iter-keep", "keep"].contains(&n.as_str()) => {
-                if n == "keep" && fs.len() == 2 {
-                    let function = eval(&fs[1], env)?;
-                    return Ok(generated_unary_operation(
-                        "iter-keep",
-                        function,
-                        env.clone(),
-                    ));
-                }
-                if fs.len() != 3 {
-                    return Err(format!("{n} expects a function and collection"));
-                }
-                let function = match eval(&fs[1], env)? {
-                    Value::Function(function) => function,
-                    _ => return Err(format!("{n} expects a function")),
-                };
-                let result = iterator_keep(function, eval(&fs[2], env)?)?;
-                if n == "keep" {
-                    Ok(Value::Vector(iterator_to_vec(result)?.into()))
-                } else {
-                    Ok(result)
-                }
-            }
-            Form::Symbol(n)
-                if [
-                    "iter-partition-all",
-                    "partition-all",
-                    "iter-partition",
-                    "partition",
-                ]
-                .contains(&n.as_str()) =>
-            {
-                if !n.starts_with("iter-") && fs.len() == 2 {
-                    let amount = eval(&fs[1], env)?;
-                    let operation = if n == "partition-all" {
-                        "iter-partition-all"
-                    } else {
-                        "iter-partition"
-                    };
-                    return Ok(generated_unary_operation(operation, amount, env.clone()));
-                }
-                if fs.len() != 3 {
-                    return Err(format!("{n} expects an amount and collection"));
-                }
-                let amount = value_index(&eval(&fs[1], env)?)?;
-                let result = iterator_partition(eval(&fs[2], env)?, amount, n.contains("all"))?;
-                if n.starts_with("iter-") {
-                    Ok(result)
-                } else {
-                    Ok(Value::Vector(iterator_to_vec(result)?.into()))
-                }
-            }
-            Form::Symbol(n) if ["iter-interpose", "interpose"].contains(&n.as_str()) => {
-                if n == "interpose" && fs.len() == 2 {
-                    let separator = eval(&fs[1], env)?;
-                    return Ok(generated_unary_operation(
-                        "iter-interpose",
-                        separator,
-                        env.clone(),
-                    ));
-                }
-                if fs.len() != 3 {
-                    return Err(format!("{n} expects a separator and collection"));
-                }
-                let separator = eval(&fs[1], env)?;
-                let values = iterator_values(eval(&fs[2], env)?)?;
-                let mut output = Vec::new();
-                for (index, value) in values.into_iter().enumerate() {
-                    if index > 0 {
-                        output.push(separator.clone());
+                        Ok(iterator_from_values(output))
                     }
-                    output.push(value);
                 }
-                let result = iterator_from_values(output);
-                if n == "interpose" {
-                    Ok(Value::Vector(iterator_to_vec(result)?.into()))
-                } else {
-                    Ok(result)
+                Form::Symbol(n) if ["iter-take", "take"].contains(&n.as_str()) => {
+                    if n == "take" && fs.len() == 2 {
+                        let amount = eval(&fs[1], env)?;
+                        return Ok(generated_unary_operation("iter-take", amount, env.clone()));
+                    }
+                    if fs.len() != 3 {
+                        return Err(format!("{n} expects an amount and collection"));
+                    }
+                    let amount = value_index(&eval(&fs[1], env)?)?;
+                    let result = iterator_take(eval(&fs[2], env)?, amount)?;
+                    if n == "take" {
+                        Ok(Value::Vector(iterator_to_vec(result)?.into()))
+                    } else {
+                        Ok(result)
+                    }
                 }
-            }
-            Form::Symbol(n) if ["iter-interleave", "interleave"].contains(&n.as_str()) => {
-                if fs.len() < 2 {
-                    return Err(format!("{n} expects collections"));
+                Form::Symbol(n) if ["iter-drop", "drop"].contains(&n.as_str()) => {
+                    if n == "drop" && fs.len() == 2 {
+                        let amount = eval(&fs[1], env)?;
+                        return Ok(generated_unary_operation("iter-drop", amount, env.clone()));
+                    }
+                    if fs.len() != 3 {
+                        return Err(format!("{n} expects an amount and collection"));
+                    }
+                    let amount = value_index(&eval(&fs[1], env)?)?;
+                    let result = iterator_drop(eval(&fs[2], env)?, amount)?;
+                    if n == "drop" {
+                        Ok(Value::Vector(iterator_to_vec(result)?.into()))
+                    } else {
+                        Ok(result)
+                    }
                 }
-                let collections = fs[1..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let result = iterator_interleave(collections)?;
-                if n == "interleave" {
-                    Ok(Value::Vector(iterator_to_vec(result)?.into()))
-                } else {
-                    Ok(result)
-                }
-            }
-            Form::Symbol(n) if ["iter-partition-pair", "partition-pair"].contains(&n.as_str()) => {
-                if fs.len() != 2 {
-                    return Err(format!("{n} expects one collection"));
-                }
-                let values = iterator_values(eval(&fs[1], env)?)?;
-                let result = iterator_from_values(
-                    values
-                        .chunks(2)
-                        .filter(|chunk| chunk.len() == 2)
-                        .map(|chunk| Value::Vector(chunk.to_vec().into()))
-                        .collect(),
-                );
-                if n == "partition-pair" {
-                    Ok(Value::Vector(iterator_to_vec(result)?.into()))
-                } else {
-                    Ok(result)
-                }
-            }
-            Form::Symbol(n) if ["iter-zip", "zip"].contains(&n.as_str()) => {
-                if fs.len() < 3 {
-                    return Err(format!("{n} expects collections"));
-                }
-                let collections = fs[1..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let result = iterator_zip(collections)?;
-                if n == "zip" {
-                    Ok(Value::Vector(iterator_to_vec(result)?.into()))
-                } else {
-                    Ok(result)
-                }
-            }
-            Form::Symbol(n) if n == "iter-cycle" || n == "cycle" => {
-                if fs.len() != 2 {
-                    return Err(format!("{n} expects one collection"));
-                }
-                let result = iterator_cycle(eval(&fs[1], env)?)?;
-                if n == "cycle" {
-                    iterator_seq(result)
-                } else {
-                    Ok(result)
-                }
-            }
-            Form::Symbol(n) if n == "concat" => {
-                if fs.len() < 2 {
-                    return Err("concat expects collections".into());
-                }
-                let mut values = Vec::new();
-                for form in &fs[1..] {
-                    values.extend(iterator_values(eval(form, env)?)?);
-                }
-                iterator_seq(iterator_from_values(values))
-            }
-            Form::Symbol(n) if n == "iter-range" => {
-                if fs.len() != 2 && fs.len() != 3 {
-                    return Err("iter-range expects an end or start and end".into());
-                }
-                let nums = fs[1..]
-                    .iter()
-                    .map(|form| match eval(form, env)? {
-                        Value::Number(value) => Ok(value),
-                        _ => Err("iter-range bounds must be numbers".into()),
-                    })
-                    .collect::<Result<Vec<_>, String>>()?;
-                let (start, end) = match nums.as_slice() {
-                    [end] => (0, *end),
-                    [start, end] => (*start, *end),
-                    _ => unreachable!(),
-                };
-                Ok(iterator_from_values(
-                    (start..end).map(Value::Number).collect(),
-                ))
-            }
-            Form::Symbol(n) if n == "range" => {
-                if fs.len() < 1 || fs.len() > 3 {
-                    return Err("range expects zero, one, or two bounds".into());
-                }
-                let nums = fs[1..]
-                    .iter()
-                    .map(|form| match eval(form, env)? {
-                        Value::Number(v) => Ok(v),
-                        _ => Err("range bounds must be numbers".into()),
-                    })
-                    .collect::<Result<Vec<_>, String>>()?;
-                let (start, end) = match nums.as_slice() {
-                    [] => (0, 0),
-                    [end] => (0, *end),
-                    [start, end] => (*start, *end),
-                    _ => unreachable!(),
-                };
-                iterator_seq(iterator_from_values(
-                    (start..end).map(Value::Number).collect(),
-                ))
-            }
-            Form::Symbol(n) if n == "repeat" => {
-                if fs.len() != 2 && fs.len() != 3 {
-                    return Err("repeat expects a value or amount and value".into());
-                }
-                let (amount, form) = if fs.len() == 2 {
-                    (None, &fs[1])
-                } else {
-                    (Some(value_index(&eval(&fs[1], env)?)?), &fs[2])
-                };
-                let value = eval(form, env)?;
-                if amount.is_none() {
-                    return iterator_seq(iterator_constant(value));
-                }
-                let count = amount.unwrap();
-                iterator_seq(iterator_from_values(
-                    (0..count).map(|_| value.clone()).collect(),
-                ))
-            }
-            Form::Symbol(n) if n == "repeatedly" => {
-                if fs.len() != 2 && fs.len() != 3 {
-                    return Err("repeatedly expects a function or amount and function".into());
-                }
-                let (amount, form) = if fs.len() == 2 {
-                    (None, &fs[1])
-                } else {
-                    (Some(value_index(&eval(&fs[1], env)?)?), &fs[2])
-                };
-                let function = match eval(form, env)? {
-                    Value::Function(function) => function,
-                    _ => return Err("repeatedly expects a function".into()),
-                };
-                let generated = iterator_repeated(function);
-                let result = if let Some(amount) = amount {
-                    iterator_take(generated, amount)?
-                } else {
-                    generated
-                };
-                iterator_seq(result)
-            }
-            Form::Symbol(n) if n == "iterate" => {
-                if fs.len() != 3 {
-                    return Err("iterate expects a function and seed".into());
-                }
-                let function = match eval(&fs[1], env)? {
-                    Value::Function(function) => function,
-                    _ => return Err("iterate expects a function".into()),
-                };
-                iterator_seq(iterator_iterate(function, eval(&fs[2], env)?))
-            }
-            Form::Symbol(n) if n == "iter-constantly" => {
-                if fs.len() != 2 {
-                    return Err("iter-constantly expects a value".into());
-                }
-                Ok(iterator_constant(eval(&fs[1], env)?))
-            }
-            Form::Symbol(n) if n == "iter-repeatedly" => {
-                if fs.len() != 2 {
-                    return Err("iter-repeatedly expects a function".into());
-                }
-                match eval(&fs[1], env)? {
-                    Value::Function(function) => Ok(iterator_repeated(function)),
-                    _ => Err("iter-repeatedly expects a function".into()),
-                }
-            }
-            Form::Symbol(n) if n == "iter-iterate" => {
-                if fs.len() != 3 {
-                    return Err("iter-iterate expects a function and seed".into());
-                }
-                let function = match eval(&fs[1], env)? {
-                    Value::Function(function) => function,
-                    _ => return Err("iter-iterate expects a function".into()),
-                };
-                Ok(iterator_iterate(function, eval(&fs[2], env)?))
-            }
-            Form::Symbol(n)
-                if [
-                    "bit-and",
-                    "bit-or",
-                    "bit-xor",
-                    "bit-not",
-                    "bit-shift-left",
-                    "bit-shift-right",
-                ]
-                .contains(&n.as_str()) =>
-            {
-                bit_operation(n, &fs[1..], env)
-            }
-            Form::Symbol(n)
-                if n.starts_with("std.native.Bits/")
-                    && ["and", "or", "xor", "not", "shift-left", "shift-right"]
-                        .contains(&n.trim_start_matches("std.native.Bits/")) =>
-            {
-                bit_operation(n, &fs[1..], env)
-            }
-            Form::Symbol(n)
-                if n.starts_with("std.native.Numbers/")
-                    && ["long", "double"]
-                        .contains(&n.trim_start_matches("std.native.Numbers/")) =>
-            {
-                number_conversion(n, &fs[1..], env)
-            }
-            Form::Symbol(n)
-                if n.starts_with("std.native.Maths/")
-                    && [
-                        "abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "ceil",
-                        "cos", "cosh", "exp", "floor", "pow", "sin", "sinh", "sqrt", "tan", "tanh",
+                Form::Symbol(n)
+                    if [
+                        "iter-take-while",
+                        "take-while",
+                        "iter-drop-while",
+                        "drop-while",
                     ]
-                    .contains(&n.trim_start_matches("std.native.Maths/")) =>
-            {
-                math_operation(n, &fs[1..], env)
-            }
-            Form::Symbol(n) if n == "std.native.Edn/read" || n == "read-string" => {
-                if fs.len() != 2 {
-                    return Err(format!("{n} expects one string"));
-                }
-                match eval(&fs[1], env)? {
-                    Value::String(source) => read_edn(&source),
-                    _ => Err(format!("{n} expects a string")),
-                }
-            }
-            Form::Symbol(n)
-                if n.starts_with("std.native.Error/")
-                    && ["new", "message", "class"]
-                        .contains(&n.trim_start_matches("std.native.Error/")) =>
-            {
-                native_error_operation(n, &fs[1..], env)
-            }
-            Form::Symbol(n) if ["inc", "dec"].contains(&n.as_str()) => {
-                if fs.len() != 2 {
-                    return Err(format!("{n} expects one number"));
-                }
-                match eval(&fs[1], env)? {
-                    Value::Number(value) => Ok(Value::Number(if n == "inc" {
-                        value + 1
-                    } else {
-                        value - 1
-                    })),
-                    _ => Err(format!("{n} expects a number")),
-                }
-            }
-            Form::Symbol(n) if n == "__map-transform" => {
-                if fs.len() != 3 {
-                    return Err("map transform expects a function and source".into());
-                }
-                let function = match eval(&fs[1], env)? {
-                    Value::Function(function) => function,
-                    _ => return Err("map transform expects a function".into()),
-                };
-                let source = eval(&fs[2], env)?;
-                iterator_map(function, source)
-            }
-            Form::Symbol(n) if n == "__iterator-transform" => {
-                if fs.len() != 4 {
-                    return Err(
-                        "iterator transform expects an operation, parameter, and source".into(),
-                    );
-                }
-                let operation = match eval(&fs[1], env)? {
-                    Value::String(operation) => operation,
-                    _ => return Err("iterator transform operation must be a string".into()),
-                };
-                let parameter = eval(&fs[2], env)?;
-                let source = eval(&fs[3], env)?;
-                match operation.as_str() {
-                    "iter-filter" => match parameter {
-                        Value::Function(function) => iterator_filter(function, source),
-                        _ => Err("filter expects a function".into()),
-                    },
-                    "iter-take" => iterator_take(source, value_index(&parameter)?),
-                    "iter-drop" => iterator_drop(source, value_index(&parameter)?),
-                    "iter-take-while" => match parameter {
-                        Value::Function(function) => iterator_take_while(function, source),
-                        _ => Err("take-while expects a function".into()),
-                    },
-                    "iter-drop-while" => match parameter {
-                        Value::Function(function) => iterator_drop_while(function, source),
-                        _ => Err("drop-while expects a function".into()),
-                    },
-                    "iter-mapcat" => match parameter {
-                        Value::Function(function) => iterator_mapcat(function, source),
-                        _ => Err("mapcat expects a function".into()),
-                    },
-                    "iter-keep" => match parameter {
-                        Value::Function(function) => iterator_keep(function, source),
-                        _ => Err("keep expects a function".into()),
-                    },
-                    "iter-partition" | "iter-partition-all" => iterator_partition(
-                        source,
-                        value_index(&parameter)?,
-                        operation == "iter-partition-all",
-                    ),
-                    "every?" | "any?" => {
-                        let function = match parameter {
-                            Value::Function(function) => function,
-                            _ => return Err(format!("{operation} expects a function")),
+                    .contains(&n.as_str()) =>
+                {
+                    if !n.starts_with("iter-") && fs.len() == 2 {
+                        let predicate = eval(&fs[1], env)?;
+                        let operation = if n == "take-while" {
+                            "iter-take-while"
+                        } else {
+                            "iter-drop-while"
                         };
-                        while let Some(value) = iterator_try_next(&source)? {
-                            let matched = call_function(&function, vec![value])?.truthy();
-                            if operation == "every?" && !matched {
-                                return Ok(Value::Bool(false));
-                            }
-                            if operation == "any?" && matched {
-                                return Ok(Value::Bool(true));
-                            }
-                        }
-                        Ok(Value::Bool(operation == "every?"))
+                        return Ok(generated_unary_operation(operation, predicate, env.clone()));
                     }
-                    _ => Err(format!("unknown iterator transform: {operation}")),
-                }
-            }
-            Form::Symbol(n) if ["zero?", "pos?", "neg?", "even?", "odd?"].contains(&n.as_str()) => {
-                if fs.len() != 2 {
-                    return Err(format!("{n} expects one number"));
-                }
-                let value = match eval(&fs[1], env)? {
-                    Value::Number(value) => value,
-                    _ => return Err(format!("{n} expects a number")),
-                };
-                let result = match n.as_str() {
-                    "zero?" => value == 0,
-                    "pos?" => value > 0,
-                    "neg?" => value < 0,
-                    "even?" => value % 2 == 0,
-                    "odd?" => value % 2 != 0,
-                    _ => false,
-                };
-                Ok(Value::Bool(result))
-            }
-            Form::Symbol(n) if ["nil?", "true?", "false?"].contains(&n.as_str()) => {
-                if fs.len() != 2 {
-                    return Err(format!("{n} expects one value"));
-                }
-                let value = eval(&fs[1], env)?;
-                let result = match n.as_str() {
-                    "nil?" => matches!(value, Value::Nil),
-                    "true?" => matches!(value, Value::Bool(true)),
-                    "false?" => matches!(value, Value::Bool(false)),
-                    _ => false,
-                };
-                Ok(Value::Bool(result))
-            }
-            Form::Symbol(n)
-                if ["every?", "any?", "iter-every?", "iter-any?"].contains(&n.as_str()) =>
-            {
-                if !n.starts_with("iter-") && fs.len() == 2 {
-                    let predicate = eval(&fs[1], env)?;
-                    let operation = if n == "every?" { "every?" } else { "any?" };
-                    return Ok(generated_unary_operation(operation, predicate, env.clone()));
-                }
-                if fs.len() != 3 {
-                    return Err(format!("{n} expects a predicate and collection"));
-                }
-                let predicate = eval(&fs[1], env)?;
-                let values = iterator_values(eval(&fs[2], env)?)?;
-                for value in values {
-                    let result = match &predicate {
-                        Value::Function(function) => call_function(function, vec![value])?,
+                    if fs.len() != 3 {
+                        return Err(format!("{n} expects a predicate and collection"));
+                    }
+                    let predicate = match eval(&fs[1], env)? {
+                        Value::Function(function) => function,
                         _ => return Err(format!("{n} expects a function")),
                     };
-                    if n.contains("every?") && !result.truthy() {
-                        return Ok(Value::Bool(false));
-                    }
-                    if n.contains("any?") && result.truthy() {
-                        return Ok(Value::Bool(true));
-                    }
-                }
-                Ok(Value::Bool(n.contains("every?")))
-            }
-            Form::Symbol(n) if n == "reduce" => {
-                if fs.len() != 3 && fs.len() != 4 {
-                    return Err(
-                        "reduce expects a function, optional initial value, and collection".into(),
-                    );
-                }
-                let function = eval(&fs[1], env)?;
-                let mut values = iterator_values(eval(&fs[fs.len() - 1], env)?)?.into_iter();
-                let mut result = if fs.len() == 4 {
-                    eval(&fs[2], env)?
-                } else if let Some(first) = values.next() {
-                    first
-                } else {
-                    return call_value(function, Vec::new());
-                };
-                for value in values {
-                    result = call_value(function.clone(), vec![result, value])?;
-                }
-                Ok(result)
-            }
-            Form::Symbol(n) if n == "reduce-kv" => {
-                if fs.len() != 4 {
-                    return Err("reduce-kv expects a function, initial value, and map".into());
-                }
-                let function = eval(&fs[1], env)?;
-                let mut result = eval(&fs[2], env)?;
-                let source = eval(&fs[3], env)?;
-                let entries =
-                    map_entries(&source).ok_or_else(|| "reduce-kv expects a map".to_string())?;
-                for (key, value) in entries {
-                    result = call_value(function.clone(), vec![result, key, value])?;
-                }
-                Ok(result)
-            }
-            Form::Symbol(n) if n == "constantly" => {
-                if fs.len() != 2 {
-                    return Err("constantly expects one value".into());
-                }
-                let value = eval(&fs[1], env)?;
-                let mut captured = env.clone();
-                captured.insert("__constant".into(), value);
-                Ok(Value::Function(Rc::new(Function {
-                    params: Vec::new(),
-                    variadic: Some("_rest".into()),
-                    patterns: Vec::new(),
-                    variadic_pattern: None,
-                    body: vec![Form::Symbol("__constant".into())],
-                    captured: Rc::new(RefCell::new(captured)),
-                    name: None,
-                    native: None,
-                    clauses: Vec::new(),
-                    is_macro: false,
-                })))
-            }
-            Form::Symbol(n) if n == "complement" => {
-                if fs.len() != 2 {
-                    return Err("complement expects one function".into());
-                }
-                let predicate = eval(&fs[1], env)?;
-                if !matches!(predicate, Value::Function(_)) {
-                    return Err("complement expects a function".into());
-                }
-                Ok(generated_function(
-                    vec!["value".into()],
-                    vec![Form::List(vec![
-                        Form::Symbol("not".into()),
-                        Form::List(vec![
-                            Form::Symbol("__predicate".into()),
-                            Form::Symbol("value".into()),
-                        ]),
-                    ])],
-                    env.clone(),
-                    vec![("__predicate", predicate)],
-                ))
-            }
-            Form::Symbol(n) if n == "comp" || n == "comp2" || n == "comp3" => {
-                let arity = fs.len() - 1;
-                let expected = match n.as_str() {
-                    "comp2" => arity == 2,
-                    "comp3" => arity == 3,
-                    _ => arity >= 2,
-                };
-                if !expected {
-                    let arities = if n == "comp" {
-                        "2 or more"
-                    } else if n == "comp2" {
-                        "2"
+                    let value = eval(&fs[2], env)?;
+                    let result = if n.contains("take-while") {
+                        iterator_take_while(predicate, value)?
                     } else {
-                        "3"
+                        iterator_drop_while(predicate, value)?
                     };
-                    return Err(format!("{n} expects {arities} functions"));
+                    if n.starts_with("iter-") {
+                        Ok(result)
+                    } else {
+                        Ok(Value::Vector(iterator_to_vec(result)?.into()))
+                    }
                 }
-                let functions = fs[1..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                if functions
-                    .iter()
-                    .any(|value| !matches!(value, Value::Function(_)))
+                Form::Symbol(n) if ["iter-mapcat", "mapcat"].contains(&n.as_str()) => {
+                    if n == "mapcat" && fs.len() == 2 {
+                        let function = eval(&fs[1], env)?;
+                        return Ok(generated_unary_operation(
+                            "iter-mapcat",
+                            function,
+                            env.clone(),
+                        ));
+                    }
+                    if fs.len() != 3 {
+                        return Err(format!("{n} expects a function and collection"));
+                    }
+                    let function = match eval(&fs[1], env)? {
+                        Value::Function(function) => function,
+                        _ => return Err(format!("{n} expects a function")),
+                    };
+                    let result = iterator_mapcat(function, eval(&fs[2], env)?)?;
+                    if n == "mapcat" {
+                        Ok(Value::Vector(iterator_to_vec(result)?.into()))
+                    } else {
+                        Ok(result)
+                    }
+                }
+                Form::Symbol(n) if ["iter-keep", "keep"].contains(&n.as_str()) => {
+                    if n == "keep" && fs.len() == 2 {
+                        let function = eval(&fs[1], env)?;
+                        return Ok(generated_unary_operation(
+                            "iter-keep",
+                            function,
+                            env.clone(),
+                        ));
+                    }
+                    if fs.len() != 3 {
+                        return Err(format!("{n} expects a function and collection"));
+                    }
+                    let function = match eval(&fs[1], env)? {
+                        Value::Function(function) => function,
+                        _ => return Err(format!("{n} expects a function")),
+                    };
+                    let result = iterator_keep(function, eval(&fs[2], env)?)?;
+                    if n == "keep" {
+                        Ok(Value::Vector(iterator_to_vec(result)?.into()))
+                    } else {
+                        Ok(result)
+                    }
+                }
+                Form::Symbol(n)
+                    if [
+                        "iter-partition-all",
+                        "partition-all",
+                        "iter-partition",
+                        "partition",
+                    ]
+                    .contains(&n.as_str()) =>
                 {
-                    return Err(format!("{n} expects functions"));
-                }
-                let mut body = Form::Symbol("value".into());
-                let mut captured = env.clone();
-                for (index, function) in functions.into_iter().enumerate().rev() {
-                    let binding = format!("__comp_{index}");
-                    body = Form::List(vec![Form::Symbol(binding.clone()), body]);
-                    captured.insert(binding, function);
-                }
-                Ok(generated_function(
-                    vec!["value".into()],
-                    vec![body],
-                    captured,
-                    Vec::new(),
-                ))
-            }
-            Form::Symbol(n) if n == "identity" => {
-                if fs.len() != 2 {
-                    return Err("identity expects one value".into());
-                }
-                eval(&fs[1], env)
-            }
-            Form::Symbol(n) if n == "apply" => {
-                if fs.len() < 3 {
-                    return Err("apply expects a function and arguments".into());
-                }
-                let builtin_name = match &fs[1] {
-                    Form::Symbol(name) if ["+", "-", "*", "/"].contains(&name.as_str()) => {
-                        Some(name.as_str())
+                    if !n.starts_with("iter-") && fs.len() == 2 {
+                        let amount = eval(&fs[1], env)?;
+                        let operation = if n == "partition-all" {
+                            "iter-partition-all"
+                        } else {
+                            "iter-partition"
+                        };
+                        return Ok(generated_unary_operation(operation, amount, env.clone()));
                     }
-                    _ => None,
-                };
-                let function = if builtin_name.is_none() {
-                    Some(eval(&fs[1], env)?)
-                } else {
-                    None
-                };
-                let mut arguments = Vec::new();
-                for form in &fs[2..fs.len() - 1] {
-                    arguments.push(eval(form, env)?);
+                    if fs.len() != 3 {
+                        return Err(format!("{n} expects an amount and collection"));
+                    }
+                    let amount = value_index(&eval(&fs[1], env)?)?;
+                    let result = iterator_partition(eval(&fs[2], env)?, amount, n.contains("all"))?;
+                    if n.starts_with("iter-") {
+                        Ok(result)
+                    } else {
+                        Ok(Value::Vector(iterator_to_vec(result)?.into()))
+                    }
                 }
-                arguments.extend(iterator_values(eval(&fs[fs.len() - 1], env)?)?);
-                match function {
-                    Some(Value::Function(function)) => call_function(&function, arguments),
-                    Some(_) => Err("apply expects a function".into()),
-                    None => {
-                        let name = builtin_name.unwrap();
-                        let numbers = arguments
-                            .iter()
-                            .map(|value| match value {
-                                Value::Number(value) => Ok(*value),
-                                _ => Err("apply arithmetic expects numbers".into()),
-                            })
-                            .collect::<Result<Vec<_>, String>>()?;
-                        if numbers.is_empty() {
-                            return Err("apply expects a function".into());
+                Form::Symbol(n) if ["iter-interpose", "interpose"].contains(&n.as_str()) => {
+                    if n == "interpose" && fs.len() == 2 {
+                        let separator = eval(&fs[1], env)?;
+                        return Ok(generated_unary_operation(
+                            "iter-interpose",
+                            separator,
+                            env.clone(),
+                        ));
+                    }
+                    if fs.len() != 3 {
+                        return Err(format!("{n} expects a separator and collection"));
+                    }
+                    let separator = eval(&fs[1], env)?;
+                    let values = iterator_values(eval(&fs[2], env)?)?;
+                    let mut output = Vec::new();
+                    for (index, value) in values.into_iter().enumerate() {
+                        if index > 0 {
+                            output.push(separator.clone());
                         }
-                        let result = numbers[1..].iter().try_fold(numbers[0], |a, b| {
-                            match name {
-                                "+" => a.checked_add(*b),
-                                "-" => a.checked_sub(*b),
-                                "*" => a.checked_mul(*b),
-                                "/" if *b == 0 => return Err("division by zero".into()),
-                                "/" => a.checked_div(*b),
-                                _ => return Err("apply expects a function".into()),
-                            }
-                            .ok_or_else(|| "integer overflow".to_string())
-                        })?;
-                        Ok(Value::Number(result))
+                        output.push(value);
+                    }
+                    let result = iterator_from_values(output);
+                    if n == "interpose" {
+                        Ok(Value::Vector(iterator_to_vec(result)?.into()))
+                    } else {
+                        Ok(result)
                     }
                 }
-            }
-            Form::Symbol(n) if n == "key" || n == "val" => {
-                if fs.len() != 2 {
-                    return Err(format!("{n} expects an entry"));
-                }
-                let entry = eval(&fs[1], env)?;
-                match pair_parts(&entry) {
-                    Some((key, value)) => Ok(if n == "key" { key } else { value }),
-                    None => Err(format!("{n} expects a pair")),
-                }
-            }
-            Form::Symbol(n) if n == "reverse" => {
-                if fs.len() != 2 {
-                    return Err("reverse expects one collection".into());
-                }
-                let mut values = iterator_to_vec(eval(&fs[1], env)?)?;
-                values.reverse();
-                Ok(Value::List(values.into_iter().collect()))
-            }
-            Form::Symbol(n) if n == "keys" => {
-                if fs.len() != 2 {
-                    return Err("keys expects one collection".into());
-                }
-                collection_keys(&eval(&fs[1], env)?)
-            }
-            Form::Symbol(n) if n == "vals" => {
-                if fs.len() != 2 {
-                    return Err("vals expects one collection".into());
-                }
-                collection_vals(&eval(&fs[1], env)?)
-            }
-            Form::Symbol(n) if n == "not" => {
-                if fs.len() != 2 {
-                    return Err("not expects one argument".into());
-                }
-                Ok(Value::Bool(!eval(&fs[1], env)?.truthy()))
-            }
-            Form::Symbol(n) if ["<", ">", "<=", ">="].contains(&n.as_str()) => {
-                comparison(n, &fs[1..], env)
-            }
-            Form::Symbol(n) if n == "first" => {
-                if fs.len() != 2 {
-                    return Err("first expects one argument".into());
-                }
-                collection_first(eval(&fs[1], env)?)
-            }
-            Form::Symbol(n) if n == "second" => {
-                if fs.len() != 2 {
-                    return Err("second expects one argument".into());
-                }
-                collection_second(eval(&fs[1], env)?)
-            }
-            Form::Symbol(n) if n == "rest" => {
-                if fs.len() != 2 {
-                    return Err("rest expects one argument".into());
-                }
-                collection_rest(eval(&fs[1], env)?)
-            }
-            Form::Symbol(n) if n == "last" => {
-                if fs.len() != 2 {
-                    return Err("last expects one argument".into());
-                }
-                collection_last(eval(&fs[1], env)?)
-            }
-            Form::Symbol(n) if n == "empty?" => {
-                if fs.len() != 2 {
-                    return Err("empty? expects one argument".into());
-                }
-                collection_empty(eval(&fs[1], env)?)
-            }
-            Form::Symbol(n) if n == "empty" => {
-                if fs.len() != 2 {
-                    return Err("empty expects one argument".into());
-                }
-                collection_empty_value(eval(&fs[1], env)?)
-            }
-            Form::Symbol(n)
-                if [
-                    "list?",
-                    "vector?",
-                    "map?",
-                    "map-entry?",
-                    "set?",
-                    "keyword?",
-                    "symbol?",
-                    "string?",
-                    "char?",
-                    "number?",
-                    "integer?",
-                    "decimal?",
-                    "boolean?",
-                    "fn?",
-                ]
-                .contains(&n.as_str()) =>
-            {
-                if fs.len() != 2 {
-                    return Err(format!("{n} expects one argument"));
-                }
-                let value = eval(&fs[1], env)?;
-                Ok(Value::Bool(match n.as_str() {
-                    "list?" => matches!(value, Value::List(_) | Value::Cons(_) | Value::Queue(_)),
-                    "vector?" => matches!(value, Value::Vector(_) | Value::Tuple(_)),
-                    "map?" => matches!(
-                        value,
-                        Value::Map(_) | Value::OrderedMap(_) | Value::SortedMap(_) | Value::Trie(_)
-                    ),
-                    // Rust materializes map iteration entries as ordinary
-                    // two-element vectors rather than a distinct MapEntry.
-                    "map-entry?" => false,
-                    "set?" => matches!(
-                        value,
-                        Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_)
-                    ),
-                    "keyword?" => matches!(value, Value::Keyword(_)),
-                    "symbol?" => matches!(value, Value::Symbol(_)),
-                    "string?" => matches!(value, Value::String(_)),
-                    "char?" => matches!(value, Value::Character(_)),
-                    "number?" => matches!(
-                        value,
-                        Value::Number(_)
-                            | Value::Float(_)
-                            | Value::BigInteger(_)
-                            | Value::Decimal(_)
-                    ),
-                    "integer?" => {
-                        matches!(value, Value::Number(_) | Value::BigInteger(_))
+                Form::Symbol(n) if ["iter-interleave", "interleave"].contains(&n.as_str()) => {
+                    if fs.len() < 2 {
+                        return Err(format!("{n} expects collections"));
                     }
-                    "decimal?" => {
-                        matches!(value, Value::Float(_) | Value::Decimal(_))
+                    let collections = fs[1..]
+                        .iter()
+                        .map(|form| eval(form, env))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let result = iterator_interleave(collections)?;
+                    if n == "interleave" {
+                        Ok(Value::Vector(iterator_to_vec(result)?.into()))
+                    } else {
+                        Ok(result)
                     }
-                    "boolean?" => matches!(value, Value::Bool(_)),
-                    "fn?" => matches!(value, Value::Function(_)),
-                    _ => unreachable!(),
-                }))
-            }
-            Form::Symbol(n) if n == "not-empty" => {
-                if fs.len() != 2 {
-                    return Err("not-empty expects one argument".into());
                 }
-                let value = eval(&fs[1], env)?;
-                Ok(if collection_empty(value.clone())?.truthy() {
-                    Value::Nil
-                } else {
-                    value
-                })
-            }
-            Form::Symbol(n) if n == "count" => {
-                if fs.len() != 2 {
-                    return Err("count expects one argument".into());
+                Form::Symbol(n)
+                    if ["iter-partition-pair", "partition-pair"].contains(&n.as_str()) =>
+                {
+                    if fs.len() != 2 {
+                        return Err(format!("{n} expects one collection"));
+                    }
+                    let values = iterator_values(eval(&fs[1], env)?)?;
+                    let result = iterator_from_values(
+                        values
+                            .chunks(2)
+                            .filter(|chunk| chunk.len() == 2)
+                            .map(|chunk| Value::Vector(chunk.to_vec().into()))
+                            .collect(),
+                    );
+                    if n == "partition-pair" {
+                        Ok(Value::Vector(iterator_to_vec(result)?.into()))
+                    } else {
+                        Ok(result)
+                    }
                 }
-                collection_count(&eval(&fs[1], env)?)
-            }
-            Form::Symbol(n) if n == "to-mutable" => {
-                if fs.len() != 2 {
-                    return Err("to-mutable expects one argument".into());
+                Form::Symbol(n) if ["iter-zip", "zip"].contains(&n.as_str()) => {
+                    if fs.len() < 3 {
+                        return Err(format!("{n} expects collections"));
+                    }
+                    let collections = fs[1..]
+                        .iter()
+                        .map(|form| eval(form, env))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let result = iterator_zip(collections)?;
+                    if n == "zip" {
+                        Ok(Value::Vector(iterator_to_vec(result)?.into()))
+                    } else {
+                        Ok(result)
+                    }
                 }
-                collection_to_mutable(&eval(&fs[1], env)?)
-            }
-            Form::Symbol(n) if n == "to-persistent" => {
-                if fs.len() != 2 {
-                    return Err("to-persistent expects one argument".into());
+                Form::Symbol(n) if n == "iter-cycle" || n == "cycle" => {
+                    if fs.len() != 2 {
+                        return Err(format!("{n} expects one collection"));
+                    }
+                    let result = iterator_cycle(eval(&fs[1], env)?)?;
+                    if n == "cycle" {
+                        iterator_seq(result)
+                    } else {
+                        Ok(result)
+                    }
                 }
-                collection_to_persistent(&eval(&fs[1], env)?)
-            }
-            Form::Symbol(n) if n == "get" => {
-                if fs.len() != 3 && fs.len() != 4 {
-                    return Err("get expects 2 or 3 arguments".into());
+                Form::Symbol(n) if n == "concat" => {
+                    if fs.len() < 2 {
+                        return Err("concat expects collections".into());
+                    }
+                    let mut values = Vec::new();
+                    for form in &fs[1..] {
+                        values.extend(iterator_values(eval(form, env)?)?);
+                    }
+                    iterator_seq(iterator_from_values(values))
                 }
-                let value = eval(&fs[1], env)?;
-                let key = eval(&fs[2], env)?;
-                let default = if fs.len() == 4 {
-                    eval(&fs[3], env)?
-                } else {
-                    Value::Nil
-                };
-                collection_get(&value, &key, default)
-            }
-            Form::Symbol(n) if n == "nth" => {
-                if fs.len() != 3 {
-                    return Err("nth expects two arguments".into());
+                Form::Symbol(n) if n == "iter-range" => {
+                    if fs.len() != 2 && fs.len() != 3 {
+                        return Err("iter-range expects an end or start and end".into());
+                    }
+                    let nums = fs[1..]
+                        .iter()
+                        .map(|form| match eval(form, env)? {
+                            Value::Number(value) => Ok(value),
+                            _ => Err("iter-range bounds must be numbers".into()),
+                        })
+                        .collect::<Result<Vec<_>, String>>()?;
+                    let (start, end) = match nums.as_slice() {
+                        [end] => (0, *end),
+                        [start, end] => (*start, *end),
+                        _ => unreachable!(),
+                    };
+                    Ok(iterator_from_values(
+                        (start..end).map(Value::Number).collect(),
+                    ))
                 }
-                collection_nth(&eval(&fs[1], env)?, &eval(&fs[2], env)?)
-            }
-            Form::Symbol(n) if n == "assoc" => {
-                if fs.len() < 4 || fs.len() % 2 != 0 {
-                    return Err("assoc expects a collection and key/value pairs".into());
+                Form::Symbol(n) if n == "range" => {
+                    if fs.len() < 1 || fs.len() > 3 {
+                        return Err("range expects zero, one, or two bounds".into());
+                    }
+                    let nums = fs[1..]
+                        .iter()
+                        .map(|form| match eval(form, env)? {
+                            Value::Number(v) => Ok(v),
+                            _ => Err("range bounds must be numbers".into()),
+                        })
+                        .collect::<Result<Vec<_>, String>>()?;
+                    let (start, end) = match nums.as_slice() {
+                        [] => (0, 0),
+                        [end] => (0, *end),
+                        [start, end] => (*start, *end),
+                        _ => unreachable!(),
+                    };
+                    iterator_seq(iterator_from_values(
+                        (start..end).map(Value::Number).collect(),
+                    ))
                 }
-                let mut value = eval(&fs[1], env)?;
-                for pair in fs[2..].chunks(2) {
-                    let key = eval(&pair[0], env)?;
-                    let replacement = eval(&pair[1], env)?;
-                    value = collection_assoc(&value, &key, replacement)?;
-                }
-                Ok(value)
-            }
-            Form::Symbol(n) if n == "dissoc" => {
-                if fs.len() < 3 {
-                    return Err("dissoc expects a map and at least one key".into());
-                }
-                let value = eval(&fs[1], env)?;
-                let keys = fs[2..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                collection_dissoc(&value, &keys)
-            }
-            Form::Symbol(n) if n == "merge" => {
-                let mut result = Value::Map(PMap::new());
-                for form in &fs[1..] {
+                Form::Symbol(n) if n == "repeat" => {
+                    if fs.len() != 2 && fs.len() != 3 {
+                        return Err("repeat expects a value or amount and value".into());
+                    }
+                    let (amount, form) = if fs.len() == 2 {
+                        (None, &fs[1])
+                    } else {
+                        (Some(value_index(&eval(&fs[1], env)?)?), &fs[2])
+                    };
                     let value = eval(form, env)?;
-                    if matches!(value, Value::Nil) {
-                        continue;
+                    if amount.is_none() {
+                        return iterator_seq(iterator_constant(value));
                     }
-                    let entries =
-                        map_entries(&value).ok_or_else(|| "merge expects maps".to_string())?;
-                    for (key, value) in entries {
-                        result = collection_assoc(&result, &key, value)?;
+                    let count = amount.unwrap();
+                    iterator_seq(iterator_from_values(
+                        (0..count).map(|_| value.clone()).collect(),
+                    ))
+                }
+                Form::Symbol(n) if n == "repeatedly" => {
+                    if fs.len() != 2 && fs.len() != 3 {
+                        return Err("repeatedly expects a function or amount and function".into());
                     }
-                }
-                Ok(result)
-            }
-            Form::Symbol(n) if n == "get-in" => {
-                if fs.len() != 3 {
-                    return Err("get-in expects a collection and keys".into());
-                }
-                let value = eval(&fs[1], env)?;
-                let keys = iterator_values(eval(&fs[2], env)?)?;
-                collection_get_in(value, &keys)
-            }
-            Form::Symbol(n) if n == "assoc-in" => {
-                if fs.len() != 4 {
-                    return Err("assoc-in expects a collection, keys, and value".into());
-                }
-                let value = eval(&fs[1], env)?;
-                let keys = iterator_values(eval(&fs[2], env)?)?;
-                let replacement = eval(&fs[3], env)?;
-                collection_assoc_in(value, &keys, replacement)
-            }
-            Form::Symbol(n) if n == "update" || n == "update-in" => {
-                if (n == "update" && fs.len() < 4) || (n == "update-in" && fs.len() < 4) {
-                    return Err(format!("{n} expects a collection, key path, and function"));
-                }
-                let value = eval(&fs[1], env)?;
-                let (keys, function_form, extra_forms) = if n == "update" {
-                    (vec![eval(&fs[2], env)?], &fs[3], &fs[4..])
-                } else {
-                    (iterator_values(eval(&fs[2], env)?)?, &fs[3], &fs[4..])
-                };
-                let current = collection_get_in(value.clone(), &keys)?;
-                let function = eval(function_form, env)?;
-                let mut args = vec![current];
-                args.extend(
-                    extra_forms
-                        .iter()
-                        .map(|form| eval(form, env))
-                        .collect::<Result<Vec<_>, _>>()?,
-                );
-                let replacement = match function {
-                    Value::Function(function) => call_function(&function, args)?,
-                    _ => return Err(format!("{n} expects a function")),
-                };
-                if n == "update" {
-                    collection_assoc(&value, &keys[0], replacement)
-                } else {
-                    collection_assoc_in(value, &keys, replacement)
-                }
-            }
-            Form::Symbol(n) if n == "conj" => {
-                if fs.len() != 3 {
-                    return Err("conj expects two arguments".into());
-                }
-                let collection = eval(&fs[1], env)?;
-                let item = eval(&fs[2], env)?;
-                protocol_conj(&[collection, item])
-            }
-            Form::Symbol(n) if n == "cons" => {
-                if fs.len() != 3 {
-                    return Err("cons expects two arguments".into());
-                }
-                let item = eval(&fs[1], env)?;
-                let collection = eval(&fs[2], env)?;
-                protocol_cons(&[collection, item])
-            }
-            Form::Symbol(n) if n == "recur" => {
-                if fs.len() < 2 {
-                    return Err("recur expects values".into());
-                }
-                Ok(Value::Recur(
-                    fs[1..]
-                        .iter()
-                        .map(|form| eval(form, env))
-                        .collect::<Result<Vec<_>, _>>()?,
-                ))
-            }
-            Form::Symbol(n) if n == "binding" => {
-                if fs.len() < 3 {
-                    return Err("binding expects bindings and a body".into());
-                }
-                let pairs = match &fs[1] {
-                    Form::List(values) | Form::Vector(values) => values,
-                    _ => return Err("binding expects a binding list or vector".into()),
-                };
-                if pairs.len() % 2 != 0 {
-                    return Err("binding bindings require name/value pairs".into());
-                }
-                let mut pending = Vec::new();
-                for pair in pairs.chunks(2) {
-                    let name = match &pair[0] {
-                        Form::Symbol(name) => name,
-                        _ => return Err("binding name must be a symbol".into()),
+                    let (amount, form) = if fs.len() == 2 {
+                        (None, &fs[1])
+                    } else {
+                        (Some(value_index(&eval(&fs[1], env)?)?), &fs[2])
                     };
-                    let var = match env.get(name) {
-                        Some(Value::Var(var)) => var.clone(),
-                        _ => return Err(format!("binding expects a Var: {name}")),
+                    let function = match eval(form, env)? {
+                        Value::Function(function) => function,
+                        _ => return Err("repeatedly expects a function".into()),
                     };
-                    if !var.is_dynamic() {
-                        return Err(format!("binding expects a dynamic Var: {name}"));
+                    let generated = iterator_repeated(function);
+                    let result = if let Some(amount) = amount {
+                        iterator_take(generated, amount)?
+                    } else {
+                        generated
+                    };
+                    iterator_seq(result)
+                }
+                Form::Symbol(n) if n == "iterate" => {
+                    if fs.len() != 3 {
+                        return Err("iterate expects a function and seed".into());
                     }
-                    let value = eval(&pair[1], env)?;
-                    pending.push((var, value));
+                    let function = match eval(&fs[1], env)? {
+                        Value::Function(function) => function,
+                        _ => return Err("iterate expects a function".into()),
+                    };
+                    iterator_seq(iterator_iterate(function, eval(&fs[2], env)?))
                 }
-                for (var, value) in &pending {
-                    var.bind(value.clone());
+                Form::Symbol(n) if n == "iter-constantly" => {
+                    if fs.len() != 2 {
+                        return Err("iter-constantly expects a value".into());
+                    }
+                    Ok(iterator_constant(eval(&fs[1], env)?))
                 }
-                let bound = pending.into_iter().map(|(var, _)| var).collect::<Vec<_>>();
-                let mut result = Ok(Value::Nil);
-                for form in &fs[2..] {
-                    result = eval(form, env);
-                    if result.is_err() {
-                        break;
+                Form::Symbol(n) if n == "iter-repeatedly" => {
+                    if fs.len() != 2 {
+                        return Err("iter-repeatedly expects a function".into());
+                    }
+                    match eval(&fs[1], env)? {
+                        Value::Function(function) => Ok(iterator_repeated(function)),
+                        _ => Err("iter-repeatedly expects a function".into()),
                     }
                 }
-                for var in bound.into_iter().rev() {
-                    if let Err(error) = var.unbind() {
-                        if result.is_ok() {
-                            result = Err(error);
-                        }
+                Form::Symbol(n) if n == "iter-iterate" => {
+                    if fs.len() != 3 {
+                        return Err("iter-iterate expects a function and seed".into());
+                    }
+                    let function = match eval(&fs[1], env)? {
+                        Value::Function(function) => function,
+                        _ => return Err("iter-iterate expects a function".into()),
+                    };
+                    Ok(iterator_iterate(function, eval(&fs[2], env)?))
+                }
+                Form::Symbol(n)
+                    if [
+                        "bit-and",
+                        "bit-or",
+                        "bit-xor",
+                        "bit-not",
+                        "bit-shift-left",
+                        "bit-shift-right",
+                    ]
+                    .contains(&n.as_str()) =>
+                {
+                    bit_operation(n, &fs[1..], env)
+                }
+                Form::Symbol(n)
+                    if n.starts_with("std.native.Bits/")
+                        && ["and", "or", "xor", "not", "shift-left", "shift-right"]
+                            .contains(&n.trim_start_matches("std.native.Bits/")) =>
+                {
+                    bit_operation(n, &fs[1..], env)
+                }
+                Form::Symbol(n)
+                    if n.starts_with("std.native.Numbers/")
+                        && ["long", "double"]
+                            .contains(&n.trim_start_matches("std.native.Numbers/")) =>
+                {
+                    number_conversion(n, &fs[1..], env)
+                }
+                Form::Symbol(n)
+                    if n.starts_with("std.native.Maths/")
+                        && [
+                            "abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh",
+                            "ceil", "cos", "cosh", "exp", "floor", "pow", "sin", "sinh", "sqrt",
+                            "tan", "tanh",
+                        ]
+                        .contains(&n.trim_start_matches("std.native.Maths/")) =>
+                {
+                    math_operation(n, &fs[1..], env)
+                }
+                Form::Symbol(n) if n == "std.native.Edn/read" || n == "read-string" => {
+                    if fs.len() != 2 {
+                        return Err(format!("{n} expects one string"));
+                    }
+                    match eval(&fs[1], env)? {
+                        Value::String(source) => read_edn(&source),
+                        _ => Err(format!("{n} expects a string")),
                     }
                 }
-                result
-            }
-            Form::Symbol(n) if n == "loop" => {
-                if fs.len() != 3 {
-                    return Err("loop expects bindings and a body".into());
+                Form::Symbol(n)
+                    if n.starts_with("std.native.Error/")
+                        && ["new", "message", "class"]
+                            .contains(&n.trim_start_matches("std.native.Error/")) =>
+                {
+                    native_error_operation(n, &fs[1..], env)
                 }
-                let bindings = match &fs[1] {
-                    Form::List(values) | Form::Vector(values) => values,
-                    _ => return Err("loop expects a binding list or vector".into()),
-                };
-                if bindings.len() % 2 != 0 {
-                    return Err("loop bindings require name/value pairs".into());
-                }
-                let mut previous = Vec::new();
-                let mut patterns = Vec::new();
-                let mut pattern_names = Vec::new();
-                for pair in bindings.chunks(2) {
-                    let value = eval(&pair[1], env)?;
-                    let before = env.clone();
-                    let mut names = Vec::new();
-                    bind_pattern(&pair[0], value, env, &mut names, None)
-                        .map_err(|error| format!("loop destructuring failed: {error}"))?;
-                    for name in &names {
-                        previous.push((name.clone(), before.get(name).cloned()));
+                Form::Symbol(n) if ["inc", "dec"].contains(&n.as_str()) => {
+                    if fs.len() != 2 {
+                        return Err(format!("{n} expects one number"));
                     }
-                    patterns.push(pair[0].clone());
-                    pattern_names.push(names);
+                    match eval(&fs[1], env)? {
+                        Value::Number(value) => Ok(Value::Number(if n == "inc" {
+                            value + 1
+                        } else {
+                            value - 1
+                        })),
+                        _ => Err(format!("{n} expects a number")),
+                    }
                 }
-                let result = loop {
-                    match eval(&fs[2], env)? {
-                        Value::Recur(values) => {
-                            if values.len() != patterns.len() {
-                                break Err("loop recur arity mismatch".into());
-                            }
-                            for names in &pattern_names {
-                                for name in names {
-                                    env.remove(name);
+                Form::Symbol(n) if n == "__map-transform" => {
+                    if fs.len() != 3 {
+                        return Err("map transform expects a function and source".into());
+                    }
+                    let function = match eval(&fs[1], env)? {
+                        Value::Function(function) => function,
+                        _ => return Err("map transform expects a function".into()),
+                    };
+                    let source = eval(&fs[2], env)?;
+                    iterator_map(function, source)
+                }
+                Form::Symbol(n) if n == "__iterator-transform" => {
+                    if fs.len() != 4 {
+                        return Err(
+                            "iterator transform expects an operation, parameter, and source".into(),
+                        );
+                    }
+                    let operation = match eval(&fs[1], env)? {
+                        Value::String(operation) => operation,
+                        _ => return Err("iterator transform operation must be a string".into()),
+                    };
+                    let parameter = eval(&fs[2], env)?;
+                    let source = eval(&fs[3], env)?;
+                    match operation.as_str() {
+                        "iter-filter" => match parameter {
+                            Value::Function(function) => iterator_filter(function, source),
+                            _ => Err("filter expects a function".into()),
+                        },
+                        "iter-take" => iterator_take(source, value_index(&parameter)?),
+                        "iter-drop" => iterator_drop(source, value_index(&parameter)?),
+                        "iter-take-while" => match parameter {
+                            Value::Function(function) => iterator_take_while(function, source),
+                            _ => Err("take-while expects a function".into()),
+                        },
+                        "iter-drop-while" => match parameter {
+                            Value::Function(function) => iterator_drop_while(function, source),
+                            _ => Err("drop-while expects a function".into()),
+                        },
+                        "iter-mapcat" => match parameter {
+                            Value::Function(function) => iterator_mapcat(function, source),
+                            _ => Err("mapcat expects a function".into()),
+                        },
+                        "iter-keep" => match parameter {
+                            Value::Function(function) => iterator_keep(function, source),
+                            _ => Err("keep expects a function".into()),
+                        },
+                        "iter-partition" | "iter-partition-all" => iterator_partition(
+                            source,
+                            value_index(&parameter)?,
+                            operation == "iter-partition-all",
+                        ),
+                        "every?" | "any?" => {
+                            let function = match parameter {
+                                Value::Function(function) => function,
+                                _ => return Err(format!("{operation} expects a function")),
+                            };
+                            while let Some(value) = iterator_try_next(&source)? {
+                                let matched = call_function(&function, vec![value])?.truthy();
+                                if operation == "every?" && !matched {
+                                    return Ok(Value::Bool(false));
+                                }
+                                if operation == "any?" && matched {
+                                    return Ok(Value::Bool(true));
                                 }
                             }
-                            pattern_names.clear();
-                            for (pattern, value) in patterns.iter().zip(values) {
-                                let mut names = Vec::new();
-                                bind_pattern(pattern, value, env, &mut names, None)?;
-                                pattern_names.push(names);
+                            Ok(Value::Bool(operation == "every?"))
+                        }
+                        _ => Err(format!("unknown iterator transform: {operation}")),
+                    }
+                }
+                Form::Symbol(n)
+                    if ["zero?", "pos?", "neg?", "even?", "odd?"].contains(&n.as_str()) =>
+                {
+                    if fs.len() != 2 {
+                        return Err(format!("{n} expects one number"));
+                    }
+                    let value = match eval(&fs[1], env)? {
+                        Value::Number(value) => value,
+                        _ => return Err(format!("{n} expects a number")),
+                    };
+                    let result = match n.as_str() {
+                        "zero?" => value == 0,
+                        "pos?" => value > 0,
+                        "neg?" => value < 0,
+                        "even?" => value % 2 == 0,
+                        "odd?" => value % 2 != 0,
+                        _ => false,
+                    };
+                    Ok(Value::Bool(result))
+                }
+                Form::Symbol(n) if ["nil?", "true?", "false?"].contains(&n.as_str()) => {
+                    if fs.len() != 2 {
+                        return Err(format!("{n} expects one value"));
+                    }
+                    let value = eval(&fs[1], env)?;
+                    let result = match n.as_str() {
+                        "nil?" => matches!(value, Value::Nil),
+                        "true?" => matches!(value, Value::Bool(true)),
+                        "false?" => matches!(value, Value::Bool(false)),
+                        _ => false,
+                    };
+                    Ok(Value::Bool(result))
+                }
+                Form::Symbol(n)
+                    if ["every?", "any?", "iter-every?", "iter-any?"].contains(&n.as_str()) =>
+                {
+                    if !n.starts_with("iter-") && fs.len() == 2 {
+                        let predicate = eval(&fs[1], env)?;
+                        let operation = if n == "every?" { "every?" } else { "any?" };
+                        return Ok(generated_unary_operation(operation, predicate, env.clone()));
+                    }
+                    if fs.len() != 3 {
+                        return Err(format!("{n} expects a predicate and collection"));
+                    }
+                    let predicate = eval(&fs[1], env)?;
+                    let values = iterator_values(eval(&fs[2], env)?)?;
+                    for value in values {
+                        let result = match &predicate {
+                            Value::Function(function) => call_function(function, vec![value])?,
+                            _ => return Err(format!("{n} expects a function")),
+                        };
+                        if n.contains("every?") && !result.truthy() {
+                            return Ok(Value::Bool(false));
+                        }
+                        if n.contains("any?") && result.truthy() {
+                            return Ok(Value::Bool(true));
+                        }
+                    }
+                    Ok(Value::Bool(n.contains("every?")))
+                }
+                Form::Symbol(n) if n == "reduce" => {
+                    if fs.len() != 3 && fs.len() != 4 {
+                        return Err(
+                            "reduce expects a function, optional initial value, and collection"
+                                .into(),
+                        );
+                    }
+                    let function = eval(&fs[1], env)?;
+                    let mut values = iterator_values(eval(&fs[fs.len() - 1], env)?)?.into_iter();
+                    let mut result = if fs.len() == 4 {
+                        eval(&fs[2], env)?
+                    } else if let Some(first) = values.next() {
+                        first
+                    } else {
+                        return call_value(function, Vec::new());
+                    };
+                    for value in values {
+                        result = call_value(function.clone(), vec![result, value])?;
+                    }
+                    Ok(result)
+                }
+                Form::Symbol(n) if n == "reduce-kv" => {
+                    if fs.len() != 4 {
+                        return Err("reduce-kv expects a function, initial value, and map".into());
+                    }
+                    let function = eval(&fs[1], env)?;
+                    let mut result = eval(&fs[2], env)?;
+                    let source = eval(&fs[3], env)?;
+                    let entries = map_entries(&source)
+                        .ok_or_else(|| "reduce-kv expects a map".to_string())?;
+                    for (key, value) in entries {
+                        result = call_value(function.clone(), vec![result, key, value])?;
+                    }
+                    Ok(result)
+                }
+                Form::Symbol(n) if n == "constantly" => {
+                    if fs.len() != 2 {
+                        return Err("constantly expects one value".into());
+                    }
+                    let value = eval(&fs[1], env)?;
+                    let mut captured = env.clone();
+                    captured.insert("__constant".into(), value);
+                    Ok(Value::Function(Rc::new(Function {
+                        params: Vec::new(),
+                        variadic: Some("_rest".into()),
+                        patterns: Vec::new(),
+                        variadic_pattern: None,
+                        body: vec![Form::Symbol("__constant".into())],
+                        captured: Rc::new(RefCell::new(captured)),
+                        name: None,
+                        native: None,
+                        clauses: Vec::new(),
+                        is_macro: false,
+                    })))
+                }
+                Form::Symbol(n) if n == "complement" => {
+                    if fs.len() != 2 {
+                        return Err("complement expects one function".into());
+                    }
+                    let predicate = eval(&fs[1], env)?;
+                    if !matches!(predicate, Value::Function(_)) {
+                        return Err("complement expects a function".into());
+                    }
+                    Ok(generated_function(
+                        vec!["value".into()],
+                        vec![Form::List(vec![
+                            Form::Symbol("not".into()),
+                            Form::List(vec![
+                                Form::Symbol("__predicate".into()),
+                                Form::Symbol("value".into()),
+                            ]),
+                        ])],
+                        env.clone(),
+                        vec![("__predicate", predicate)],
+                    ))
+                }
+                Form::Symbol(n) if n == "comp" || n == "comp2" || n == "comp3" => {
+                    let arity = fs.len() - 1;
+                    let expected = match n.as_str() {
+                        "comp2" => arity == 2,
+                        "comp3" => arity == 3,
+                        _ => arity >= 2,
+                    };
+                    if !expected {
+                        let arities = if n == "comp" {
+                            "2 or more"
+                        } else if n == "comp2" {
+                            "2"
+                        } else {
+                            "3"
+                        };
+                        return Err(format!("{n} expects {arities} functions"));
+                    }
+                    let functions = fs[1..]
+                        .iter()
+                        .map(|form| eval(form, env))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    if functions
+                        .iter()
+                        .any(|value| !matches!(value, Value::Function(_)))
+                    {
+                        return Err(format!("{n} expects functions"));
+                    }
+                    let mut body = Form::Symbol("value".into());
+                    let mut captured = env.clone();
+                    for (index, function) in functions.into_iter().enumerate().rev() {
+                        let binding = format!("__comp_{index}");
+                        body = Form::List(vec![Form::Symbol(binding.clone()), body]);
+                        captured.insert(binding, function);
+                    }
+                    Ok(generated_function(
+                        vec!["value".into()],
+                        vec![body],
+                        captured,
+                        Vec::new(),
+                    ))
+                }
+                Form::Symbol(n) if n == "identity" => {
+                    if fs.len() != 2 {
+                        return Err("identity expects one value".into());
+                    }
+                    eval(&fs[1], env)
+                }
+                Form::Symbol(n) if n == "apply" => {
+                    if fs.len() < 3 {
+                        return Err("apply expects a function and arguments".into());
+                    }
+                    let builtin_name = match &fs[1] {
+                        Form::Symbol(name) if ["+", "-", "*", "/"].contains(&name.as_str()) => {
+                            Some(name.as_str())
+                        }
+                        _ => None,
+                    };
+                    let function = if builtin_name.is_none() {
+                        Some(eval(&fs[1], env)?)
+                    } else {
+                        None
+                    };
+                    let mut arguments = Vec::new();
+                    for form in &fs[2..fs.len() - 1] {
+                        arguments.push(eval(form, env)?);
+                    }
+                    arguments.extend(iterator_values(eval(&fs[fs.len() - 1], env)?)?);
+                    match function {
+                        Some(Value::Function(function)) => call_function(&function, arguments),
+                        Some(_) => Err("apply expects a function".into()),
+                        None => {
+                            let name = builtin_name.unwrap();
+                            let numbers = arguments
+                                .iter()
+                                .map(|value| match value {
+                                    Value::Number(value) => Ok(*value),
+                                    _ => Err("apply arithmetic expects numbers".into()),
+                                })
+                                .collect::<Result<Vec<_>, String>>()?;
+                            if numbers.is_empty() {
+                                return Err("apply expects a function".into());
+                            }
+                            let result = numbers[1..].iter().try_fold(numbers[0], |a, b| {
+                                match name {
+                                    "+" => a.checked_add(*b),
+                                    "-" => a.checked_sub(*b),
+                                    "*" => a.checked_mul(*b),
+                                    "/" if *b == 0 => return Err("division by zero".into()),
+                                    "/" => a.checked_div(*b),
+                                    _ => return Err("apply expects a function".into()),
+                                }
+                                .ok_or_else(|| "integer overflow".to_string())
+                            })?;
+                            Ok(Value::Number(result))
+                        }
+                    }
+                }
+                Form::Symbol(n) if n == "key" || n == "val" => {
+                    if fs.len() != 2 {
+                        return Err(format!("{n} expects an entry"));
+                    }
+                    let entry = eval(&fs[1], env)?;
+                    match pair_parts(&entry) {
+                        Some((key, value)) => Ok(if n == "key" { key } else { value }),
+                        None => Err(format!("{n} expects a pair")),
+                    }
+                }
+                Form::Symbol(n) if n == "reverse" => {
+                    if fs.len() != 2 {
+                        return Err("reverse expects one collection".into());
+                    }
+                    let mut values = iterator_to_vec(eval(&fs[1], env)?)?;
+                    values.reverse();
+                    Ok(Value::List(values.into_iter().collect()))
+                }
+                Form::Symbol(n) if n == "keys" => {
+                    if fs.len() != 2 {
+                        return Err("keys expects one collection".into());
+                    }
+                    collection_keys(&eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "vals" => {
+                    if fs.len() != 2 {
+                        return Err("vals expects one collection".into());
+                    }
+                    collection_vals(&eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "not" => {
+                    if fs.len() != 2 {
+                        return Err("not expects one argument".into());
+                    }
+                    Ok(Value::Bool(!eval(&fs[1], env)?.truthy()))
+                }
+                Form::Symbol(n) if ["<", ">", "<=", ">="].contains(&n.as_str()) => {
+                    comparison(n, &fs[1..], env)
+                }
+                Form::Symbol(n) if n == "first" => {
+                    if fs.len() != 2 {
+                        return Err("first expects one argument".into());
+                    }
+                    collection_first(eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "second" => {
+                    if fs.len() != 2 {
+                        return Err("second expects one argument".into());
+                    }
+                    collection_second(eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "rest" => {
+                    if fs.len() != 2 {
+                        return Err("rest expects one argument".into());
+                    }
+                    collection_rest(eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "last" => {
+                    if fs.len() != 2 {
+                        return Err("last expects one argument".into());
+                    }
+                    collection_last(eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "empty?" => {
+                    if fs.len() != 2 {
+                        return Err("empty? expects one argument".into());
+                    }
+                    collection_empty(eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "empty" => {
+                    if fs.len() != 2 {
+                        return Err("empty expects one argument".into());
+                    }
+                    collection_empty_value(eval(&fs[1], env)?)
+                }
+                Form::Symbol(n)
+                    if [
+                        "list?",
+                        "vector?",
+                        "map?",
+                        "map-entry?",
+                        "set?",
+                        "keyword?",
+                        "symbol?",
+                        "string?",
+                        "char?",
+                        "number?",
+                        "integer?",
+                        "decimal?",
+                        "boolean?",
+                        "fn?",
+                    ]
+                    .contains(&n.as_str()) =>
+                {
+                    if fs.len() != 2 {
+                        return Err(format!("{n} expects one argument"));
+                    }
+                    let value = eval(&fs[1], env)?;
+                    Ok(Value::Bool(match n.as_str() {
+                        "list?" => {
+                            matches!(value, Value::List(_) | Value::Cons(_) | Value::Queue(_))
+                        }
+                        "vector?" => matches!(value, Value::Vector(_) | Value::Tuple(_)),
+                        "map?" => matches!(
+                            value,
+                            Value::Map(_)
+                                | Value::OrderedMap(_)
+                                | Value::SortedMap(_)
+                                | Value::Trie(_)
+                        ),
+                        // Rust materializes map iteration entries as ordinary
+                        // two-element vectors rather than a distinct MapEntry.
+                        "map-entry?" => false,
+                        "set?" => matches!(
+                            value,
+                            Value::Set(_) | Value::OrderedSet(_) | Value::SortedSet(_)
+                        ),
+                        "keyword?" => matches!(value, Value::Keyword(_)),
+                        "symbol?" => matches!(value, Value::Symbol(_)),
+                        "string?" => matches!(value, Value::String(_)),
+                        "char?" => matches!(value, Value::Character(_)),
+                        "number?" => matches!(
+                            value,
+                            Value::Number(_)
+                                | Value::Float(_)
+                                | Value::BigInteger(_)
+                                | Value::Decimal(_)
+                        ),
+                        "integer?" => {
+                            matches!(value, Value::Number(_) | Value::BigInteger(_))
+                        }
+                        "decimal?" => {
+                            matches!(value, Value::Float(_) | Value::Decimal(_))
+                        }
+                        "boolean?" => matches!(value, Value::Bool(_)),
+                        "fn?" => matches!(value, Value::Function(_)),
+                        _ => unreachable!(),
+                    }))
+                }
+                Form::Symbol(n) if n == "not-empty" => {
+                    if fs.len() != 2 {
+                        return Err("not-empty expects one argument".into());
+                    }
+                    let value = eval(&fs[1], env)?;
+                    Ok(if collection_empty(value.clone())?.truthy() {
+                        Value::Nil
+                    } else {
+                        value
+                    })
+                }
+                Form::Symbol(n) if n == "count" => {
+                    if fs.len() != 2 {
+                        return Err("count expects one argument".into());
+                    }
+                    collection_count(&eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "to-mutable" => {
+                    if fs.len() != 2 {
+                        return Err("to-mutable expects one argument".into());
+                    }
+                    collection_to_mutable(&eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "to-persistent" => {
+                    if fs.len() != 2 {
+                        return Err("to-persistent expects one argument".into());
+                    }
+                    collection_to_persistent(&eval(&fs[1], env)?)
+                }
+                Form::Symbol(n) if n == "get" => {
+                    if fs.len() != 3 && fs.len() != 4 {
+                        return Err("get expects 2 or 3 arguments".into());
+                    }
+                    let value = eval(&fs[1], env)?;
+                    let key = eval(&fs[2], env)?;
+                    let default = if fs.len() == 4 {
+                        eval(&fs[3], env)?
+                    } else {
+                        Value::Nil
+                    };
+                    collection_get(&value, &key, default)
+                }
+                Form::Symbol(n) if n == "nth" => {
+                    if fs.len() != 3 {
+                        return Err("nth expects two arguments".into());
+                    }
+                    collection_nth(&eval(&fs[1], env)?, &eval(&fs[2], env)?)
+                }
+                Form::Symbol(n) if n == "assoc" => {
+                    if fs.len() < 4 || fs.len() % 2 != 0 {
+                        return Err("assoc expects a collection and key/value pairs".into());
+                    }
+                    let mut value = eval(&fs[1], env)?;
+                    for pair in fs[2..].chunks(2) {
+                        let key = eval(&pair[0], env)?;
+                        let replacement = eval(&pair[1], env)?;
+                        value = collection_assoc(&value, &key, replacement)?;
+                    }
+                    Ok(value)
+                }
+                Form::Symbol(n) if n == "dissoc" => {
+                    if fs.len() < 3 {
+                        return Err("dissoc expects a map and at least one key".into());
+                    }
+                    let value = eval(&fs[1], env)?;
+                    let keys = fs[2..]
+                        .iter()
+                        .map(|form| eval(form, env))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    collection_dissoc(&value, &keys)
+                }
+                Form::Symbol(n) if n == "merge" => {
+                    let mut result = Value::Map(PMap::new());
+                    for form in &fs[1..] {
+                        let value = eval(form, env)?;
+                        if matches!(value, Value::Nil) {
+                            continue;
+                        }
+                        let entries =
+                            map_entries(&value).ok_or_else(|| "merge expects maps".to_string())?;
+                        for (key, value) in entries {
+                            result = collection_assoc(&result, &key, value)?;
+                        }
+                    }
+                    Ok(result)
+                }
+                Form::Symbol(n) if n == "get-in" => {
+                    if fs.len() != 3 {
+                        return Err("get-in expects a collection and keys".into());
+                    }
+                    let value = eval(&fs[1], env)?;
+                    let keys = iterator_values(eval(&fs[2], env)?)?;
+                    collection_get_in(value, &keys)
+                }
+                Form::Symbol(n) if n == "assoc-in" => {
+                    if fs.len() != 4 {
+                        return Err("assoc-in expects a collection, keys, and value".into());
+                    }
+                    let value = eval(&fs[1], env)?;
+                    let keys = iterator_values(eval(&fs[2], env)?)?;
+                    let replacement = eval(&fs[3], env)?;
+                    collection_assoc_in(value, &keys, replacement)
+                }
+                Form::Symbol(n) if n == "update" || n == "update-in" => {
+                    if (n == "update" && fs.len() < 4) || (n == "update-in" && fs.len() < 4) {
+                        return Err(format!("{n} expects a collection, key path, and function"));
+                    }
+                    let value = eval(&fs[1], env)?;
+                    let (keys, function_form, extra_forms) = if n == "update" {
+                        (vec![eval(&fs[2], env)?], &fs[3], &fs[4..])
+                    } else {
+                        (iterator_values(eval(&fs[2], env)?)?, &fs[3], &fs[4..])
+                    };
+                    let current = collection_get_in(value.clone(), &keys)?;
+                    let function = eval(function_form, env)?;
+                    let mut args = vec![current];
+                    args.extend(
+                        extra_forms
+                            .iter()
+                            .map(|form| eval(form, env))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    );
+                    let replacement = match function {
+                        Value::Function(function) => call_function(&function, args)?,
+                        _ => return Err(format!("{n} expects a function")),
+                    };
+                    if n == "update" {
+                        collection_assoc(&value, &keys[0], replacement)
+                    } else {
+                        collection_assoc_in(value, &keys, replacement)
+                    }
+                }
+                Form::Symbol(n) if n == "conj" => {
+                    if fs.len() != 3 {
+                        return Err("conj expects two arguments".into());
+                    }
+                    let collection = eval(&fs[1], env)?;
+                    let item = eval(&fs[2], env)?;
+                    protocol_conj(&[collection, item])
+                }
+                Form::Symbol(n) if n == "cons" => {
+                    if fs.len() != 3 {
+                        return Err("cons expects two arguments".into());
+                    }
+                    let item = eval(&fs[1], env)?;
+                    let collection = eval(&fs[2], env)?;
+                    protocol_cons(&[collection, item])
+                }
+                Form::Symbol(n) if n == "recur" => {
+                    if fs.len() < 2 {
+                        return Err("recur expects values".into());
+                    }
+                    Ok(Value::Recur(
+                        fs[1..]
+                            .iter()
+                            .map(|form| eval(form, env))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    ))
+                }
+                Form::Symbol(n) if n == "binding" => {
+                    if fs.len() < 3 {
+                        return Err("binding expects bindings and a body".into());
+                    }
+                    let pairs = match &fs[1] {
+                        Form::List(values) | Form::Vector(values) => values,
+                        _ => return Err("binding expects a binding list or vector".into()),
+                    };
+                    if pairs.len() % 2 != 0 {
+                        return Err("binding bindings require name/value pairs".into());
+                    }
+                    let mut pending = Vec::new();
+                    for pair in pairs.chunks(2) {
+                        let name = match &pair[0] {
+                            Form::Symbol(name) => name,
+                            _ => return Err("binding name must be a symbol".into()),
+                        };
+                        let var = match env.get(name) {
+                            Some(Value::Var(var)) => var.clone(),
+                            _ => return Err(format!("binding expects a Var: {name}")),
+                        };
+                        if !var.is_dynamic() {
+                            return Err(format!("binding expects a dynamic Var: {name}"));
+                        }
+                        let value = eval(&pair[1], env)?;
+                        pending.push((var, value));
+                    }
+                    for (var, value) in &pending {
+                        var.bind(value.clone());
+                    }
+                    let bound = pending.into_iter().map(|(var, _)| var).collect::<Vec<_>>();
+                    let mut result = Ok(Value::Nil);
+                    for form in &fs[2..] {
+                        result = eval(form, env);
+                        if result.is_err() {
+                            break;
+                        }
+                    }
+                    for var in bound.into_iter().rev() {
+                        if let Err(error) = var.unbind() {
+                            if result.is_ok() {
+                                result = Err(error);
                             }
                         }
-                        result => break Ok(result),
                     }
-                };
-                for (name, old) in previous.into_iter().rev() {
-                    if let Some(old) = old {
-                        env.insert(name, old);
+                    result
+                }
+                Form::Symbol(n) if n == "loop" => {
+                    if fs.len() != 3 {
+                        return Err("loop expects bindings and a body".into());
+                    }
+                    let bindings = match &fs[1] {
+                        Form::List(values) | Form::Vector(values) => values,
+                        _ => return Err("loop expects a binding list or vector".into()),
+                    };
+                    if bindings.len() % 2 != 0 {
+                        return Err("loop bindings require name/value pairs".into());
+                    }
+                    let mut previous = Vec::new();
+                    let mut patterns = Vec::new();
+                    let mut pattern_names = Vec::new();
+                    for pair in bindings.chunks(2) {
+                        let value = eval(&pair[1], env)?;
+                        let before = env.clone();
+                        let mut names = Vec::new();
+                        bind_pattern(&pair[0], value, env, &mut names, None)
+                            .map_err(|error| format!("loop destructuring failed: {error}"))?;
+                        for name in &names {
+                            previous.push((name.clone(), before.get(name).cloned()));
+                        }
+                        patterns.push(pair[0].clone());
+                        pattern_names.push(names);
+                    }
+                    let result = loop {
+                        match eval(&fs[2], env)? {
+                            Value::Recur(values) => {
+                                if values.len() != patterns.len() {
+                                    break Err("loop recur arity mismatch".into());
+                                }
+                                for names in &pattern_names {
+                                    for name in names {
+                                        env.remove(name);
+                                    }
+                                }
+                                pattern_names.clear();
+                                for (pattern, value) in patterns.iter().zip(values) {
+                                    let mut names = Vec::new();
+                                    bind_pattern(pattern, value, env, &mut names, None)?;
+                                    pattern_names.push(names);
+                                }
+                            }
+                            result => break Ok(result),
+                        }
+                    };
+                    for (name, old) in previous.into_iter().rev() {
+                        if let Some(old) = old {
+                            env.insert(name, old);
+                        } else {
+                            env.remove(&name);
+                        }
+                    }
+                    result
+                }
+                Form::Symbol(n) if n == "if" => {
+                    if fs.len() != 3 && fs.len() != 4 {
+                        return Err("if expects 2 or 3 arguments".into());
+                    }
+                    if eval(&fs[1], env)?.truthy() {
+                        eval(&fs[2], env)
+                    } else if fs.len() == 4 {
+                        eval(&fs[3], env)
                     } else {
-                        env.remove(&name);
+                        Ok(Value::Nil)
                     }
                 }
-                result
-            }
-            Form::Symbol(n) if n == "if" => {
-                if fs.len() != 3 && fs.len() != 4 {
-                    return Err("if expects 2 or 3 arguments".into());
+                Form::Symbol(n) if n == "and" => {
+                    let mut result = Value::Bool(true);
+                    for form in &fs[1..] {
+                        result = eval(form, env)?;
+                        if !result.truthy() {
+                            return Ok(result);
+                        }
+                    }
+                    Ok(result)
                 }
-                if eval(&fs[1], env)?.truthy() {
-                    eval(&fs[2], env)
-                } else if fs.len() == 4 {
-                    eval(&fs[3], env)
-                } else {
+                Form::Symbol(n) if n == "or" => {
+                    for form in &fs[1..] {
+                        let result = eval(form, env)?;
+                        if result.truthy() {
+                            return Ok(result);
+                        }
+                    }
                     Ok(Value::Nil)
                 }
-            }
-            Form::Symbol(n) if n == "and" => {
-                let mut result = Value::Bool(true);
-                for form in &fs[1..] {
-                    result = eval(form, env)?;
-                    if !result.truthy() {
-                        return Ok(result);
+                Form::Symbol(n) if n == "cond" => {
+                    if fs.len() % 2 == 0 {
+                        return Err("cond expects test/expression pairs".into());
                     }
-                }
-                Ok(result)
-            }
-            Form::Symbol(n) if n == "or" => {
-                for form in &fs[1..] {
-                    let result = eval(form, env)?;
-                    if result.truthy() {
-                        return Ok(result);
+                    let mut clauses = fs[1..].chunks_exact(2);
+                    for clause in &mut clauses {
+                        if eval(&clause[0], env)?.truthy() {
+                            return eval(&clause[1], env);
+                        }
                     }
+                    Ok(Value::Nil)
                 }
-                Ok(Value::Nil)
-            }
-            Form::Symbol(n) if n == "cond" => {
-                if fs.len() % 2 == 0 {
-                    return Err("cond expects test/expression pairs".into());
-                }
-                let mut clauses = fs[1..].chunks_exact(2);
-                for clause in &mut clauses {
-                    if eval(&clause[0], env)?.truthy() {
-                        return eval(&clause[1], env);
+                Form::Symbol(n) if n == "let" => {
+                    if fs.len() < 3 {
+                        return Err("let expects bindings and a body".into());
                     }
-                }
-                Ok(Value::Nil)
-            }
-            Form::Symbol(n) if n == "let" => {
-                if fs.len() < 3 {
-                    return Err("let expects bindings and a body".into());
-                }
-                let bindings = match &fs[1] {
-                    Form::List(values) | Form::Vector(values) => values,
-                    _ => return Err("let expects a binding list or vector".into()),
-                };
-                if bindings.len() % 2 != 0 {
-                    return Err("let bindings require name/value pairs".into());
-                }
-                let mut previous = Vec::new();
-                for pair in bindings.chunks(2) {
-                    let value = eval(&pair[1], env)?;
-                    let before = env.clone();
-                    let mut names = Vec::new();
-                    bind_pattern(&pair[0], value, env, &mut names, None)
-                        .map_err(|error| format!("let destructuring failed: {error}"))?;
-                    for name in names {
-                        previous.push((name.clone(), before.get(&name).cloned()));
+                    let bindings = match &fs[1] {
+                        Form::List(values) | Form::Vector(values) => values,
+                        _ => return Err("let expects a binding list or vector".into()),
+                    };
+                    if bindings.len() % 2 != 0 {
+                        return Err("let bindings require name/value pairs".into());
                     }
-                }
-                let mut result = Ok(Value::Nil);
-                for body in &fs[2..] {
-                    result = eval(body, env);
-                    if result.is_err() {
-                        break;
+                    let mut previous = Vec::new();
+                    for pair in bindings.chunks(2) {
+                        let value = eval(&pair[1], env)?;
+                        let before = env.clone();
+                        let mut names = Vec::new();
+                        bind_pattern(&pair[0], value, env, &mut names, None)
+                            .map_err(|error| format!("let destructuring failed: {error}"))?;
+                        for name in names {
+                            previous.push((name.clone(), before.get(&name).cloned()));
+                        }
                     }
-                }
-                for (name, old) in previous.into_iter().rev() {
-                    if let Some(old) = old {
-                        env.insert(name, old);
-                    } else {
-                        env.remove(&name);
+                    let mut result = Ok(Value::Nil);
+                    for body in &fs[2..] {
+                        result = eval(body, env);
+                        if result.is_err() {
+                            break;
+                        }
                     }
-                }
-                result
-            }
-            Form::Symbol(n) if ["+", "-", "*", "/", "%", "mod"].contains(&n.as_str()) => {
-                arithmetic(if n == "mod" { "%" } else { n }, &fs[1..], env)
-            }
-            _ => {
-                if let Form::Symbol(name) = &fs[0] {
-                    if let Some(expanded) = macroexpand_call(name, fs, env)? {
-                        return eval(&expanded, env);
+                    for (name, old) in previous.into_iter().rev() {
+                        if let Some(old) = old {
+                            env.insert(name, old);
+                        } else {
+                            env.remove(&name);
+                        }
                     }
+                    result
                 }
-                let function = eval(&fs[0], env)?;
-                let arguments = fs[1..]
-                    .iter()
-                    .map(|form| eval(form, env))
-                    .collect::<Result<Vec<_>, _>>()?;
-                call_value(function, arguments)
-            }
+                Form::Symbol(n) if ["+", "-", "*", "/", "%", "mod"].contains(&n.as_str()) => {
+                    arithmetic(if n == "mod" { "%" } else { n }, &fs[1..], env)
+                }
+                _ => {
+                    if let Form::Symbol(name) = &fs[0] {
+                        if let Some(expanded) = macroexpand_call(name, fs, env)? {
+                            return eval(&expanded, env);
+                        }
+                    }
+                    let function = eval(&fs[0], env)?;
+                    let arguments = fs[1..]
+                        .iter()
+                        .map(|form| eval(form, env))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    call_value(function, arguments)
+                }
             }
         }
     }

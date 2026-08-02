@@ -8,7 +8,7 @@ use super::program::{FunctionPrototype, Program, MAX_OPERAND_STACK};
 use super::source_map::SourceMap;
 use super::validate::validate;
 use crate::core::{Primitive, Value};
-use crate::kernel::Position;
+use crate::kernel::{FunctionSchema, Position, SchemaType};
 
 fn source_map(len: usize) -> SourceMap {
     let mut map = SourceMap::default();
@@ -26,7 +26,11 @@ fn program(
 ) -> Program {
     let source_map = source_map(code.len());
     Program {
+        namespace: None,
         var_metadata: Vec::new(),
+        schema_types: Default::default(),
+        function_types: Default::default(),
+        inferred_function_types: Default::default(),
         constants,
         functions: vec![FunctionPrototype {
             name: None,
@@ -88,7 +92,11 @@ fn prototype(
 /// `Closure 1 / Call 0 / Return` with the target `Nil / Return`.
 fn closure_call_program() -> Program {
     Program {
+        namespace: None,
         var_metadata: Vec::new(),
+        schema_types: Default::default(),
+        function_types: Default::default(),
+        inferred_function_types: Default::default(),
         constants: vec![],
         functions: vec![
             prototype(
@@ -278,7 +286,11 @@ fn validator_rejects_callstatic_capture_mismatch() {
     // Entry directly self-calls a prototype with a different capture
     // count; no Closure instruction masks the CallStatic check.
     let program = Program {
+        namespace: None,
         var_metadata: Vec::new(),
+        schema_types: Default::default(),
+        function_types: Default::default(),
+        inferred_function_types: Default::default(),
         constants: vec![],
         functions: vec![
             prototype(
@@ -678,4 +690,31 @@ fn disassembler_renders_try_table() {
     catch Exception -> slot 0 @ 0002
 ";
     assert_eq!(disassemble(&throw_catch_program()), expected);
+}
+
+#[test]
+fn numeric_function_schemas_mark_guarded_eager_jit_candidates() {
+    let mut program = closure_call_program();
+    program.namespace = Some("typed".into());
+    program.functions[1].arity = 1;
+    program.functions[1].local_count = 1;
+    program.function_types.insert(
+        "typed/f".into(),
+        SchemaType::Function(vec![FunctionSchema {
+            fixed: vec![SchemaType::Primitive("int".into())],
+            rest: None,
+            output: Box::new(SchemaType::Primitive("int".into())),
+        }]),
+    );
+    assert!(program.function_has_i64_parameters(1));
+
+    program.function_types.insert(
+        "typed/f".into(),
+        SchemaType::Function(vec![FunctionSchema {
+            fixed: vec![SchemaType::Primitive("str".into())],
+            rest: None,
+            output: Box::new(SchemaType::Primitive("str".into())),
+        }]),
+    );
+    assert!(!program.function_has_i64_parameters(1));
 }

@@ -16,6 +16,113 @@ import org.junit.Test;
 
 public class HalcArtifactTest {
   @Test
+  public void schemaVarReferencesAreCheckedAndNamespaceCanonicalized() {
+    String source =
+        "(ns demo.schema) "
+            + "(def Customer [:map [:id :int]]) "
+            + "(defn ^{:schema #'-/Customer} customer-id [customer] (get customer :id))";
+    Object[] forms = HaraLanguage.readAll(source, "demo/schema.hal");
+    HalcArtifact.Module module =
+        HalcArtifact.decode(
+            HalcArtifact.encode(
+                "demo.schema",
+                "demo/schema.hal",
+                source.getBytes(StandardCharsets.UTF_8),
+                forms));
+    hara.lang.data.List<?> definition = (hara.lang.data.List<?>) module.forms[2];
+    hara.lang.data.Symbol definitionName = (hara.lang.data.Symbol) definition.nth(1);
+    @SuppressWarnings("unchecked")
+    hara.lang.data.types.IMapType<Object, Object> metadata =
+        (hara.lang.data.types.IMapType<Object, Object>) definitionName.meta();
+    hara.lang.data.List<?> reference =
+        (hara.lang.data.List<?>) metadata.lookup(hara.lang.data.Keyword.create("schema"));
+    hara.lang.data.Symbol target = (hara.lang.data.Symbol) reference.nth(1);
+    assertEquals("demo.schema/Customer", target.display());
+
+    String missing =
+        "(ns demo.schema) (defn ^{:schema #'MissingSchema} invalid [value] value)";
+    Object[] missingForms = HaraLanguage.readAll(missing, "demo/schema.hal");
+    HaraException error =
+        assertThrows(
+            HaraException.class,
+            () ->
+                HalcArtifact.encode(
+                    "demo.schema",
+                    "demo/schema.hal",
+                    missing.getBytes(StandardCharsets.UTF_8),
+                    missingForms));
+    assertTrue(error.getMessage().contains("schema Var does not exist: MissingSchema"));
+  }
+
+  @Test
+  public void nestedSchemaVarReferencesAreCanonicalizedAndChecked() {
+    String source =
+        "(ns demo.schema) "
+            + "(def Address [:map [:street :str]]) "
+            + "(def Customer [:map [:address #'-/Address]]) "
+            + "(defn ^{:schema #'Customer} save [customer] customer)";
+    HalcArtifact.Module module =
+        HalcArtifact.decode(
+            HalcArtifact.encode(
+                "demo.schema",
+                "demo/schema.hal",
+                source.getBytes(StandardCharsets.UTF_8),
+                HaraLanguage.readAll(source, "demo/schema.hal")));
+    assertTrue(G.display(module.forms[2]).contains("(var demo.schema/Address)"));
+    assertEquals(1, module.schemas.functions.size());
+    assertTrue(module.schemas.functions.containsKey("demo.schema/save"));
+    assertEquals(2, module.schemas.definitions.size());
+    assertTrue(module.schemas.definitions.containsKey("demo.schema/Address"));
+    assertTrue(module.schemas.definitions.containsKey("demo.schema/Customer"));
+    assertTrue(
+        module.schemas.resolvedFunctionType("demo.schema/save") instanceof HalcSchema.MapType);
+
+    String missing =
+        "(ns demo.schema) "
+            + "(def Customer [:map [:address #'MissingAddress]]) "
+            + "(defn ^{:schema #'Customer} save [customer] customer)";
+    HaraException error =
+        assertThrows(
+            HaraException.class,
+            () ->
+                HalcArtifact.encode(
+                    "demo.schema",
+                    "demo/schema.hal",
+                    missing.getBytes(StandardCharsets.UTF_8),
+                    HaraLanguage.readAll(missing, "demo/schema.hal")));
+    assertTrue(error.getMessage().contains("schema Var does not exist: MissingAddress"));
+
+    String recursive =
+        "(ns demo.schema) "
+            + "(def Node [:map [:children [:vector #'Node]]]) "
+            + "(defn ^{:schema #'Node} walk [node] node)";
+    HalcArtifact.encode(
+        "demo.schema",
+        "demo/schema.hal",
+        recursive.getBytes(StandardCharsets.UTF_8),
+        HaraLanguage.readAll(recursive, "demo/schema.hal"));
+
+    String malformed =
+        "(ns demo.schema) "
+            + "(def Customer [:map [:name]]) "
+            + "(defn ^{:schema #'Customer} save [customer] customer)";
+    HaraException malformedError =
+        assertThrows(
+            HaraException.class,
+            () ->
+                HalcArtifact.encode(
+                    "demo.schema",
+                    "demo/schema.hal",
+                    malformed.getBytes(StandardCharsets.UTF_8),
+                    HaraLanguage.readAll(malformed, "demo/schema.hal")));
+    assertTrue(
+        malformedError
+            .getMessage()
+            .contains(
+                "invalid schema demo.schema/Customer: :map schema fields must be [name type] pairs"));
+  }
+
+  @Test
   public void mapsAndSetsEncodeInCanonicalOrder() {
     byte[] mapA =
         HalcArtifact.encode(

@@ -105,7 +105,7 @@ pub use artifact::{decode_program, encode_program};
 pub use bundle::{
     compile_bytecode_bundle, compile_embedded_foundation_bundle, eval_bytecode_bundle,
 };
-pub use compiler::{compile_source, compile_source_with};
+pub use compiler::{compile_halc_module, compile_source, compile_source_with};
 pub use disassemble::disassemble;
 pub use error::{CompileError, CompileErrorKind, ValidationError, VmError};
 pub use fiber::{VmFiber, VmFiberState};

@@ -47,7 +47,7 @@ pub(crate) fn compile_halc(args: &[String]) -> Result<(), String> {
             _ => None,
         })
         .ok_or_else(|| format!("{source_path} does not declare an ns or ns+ namespace"))?;
-    let artifact = encode_halc_module(&namespace, resource, &source, forms);
+    let artifact = encode_halc_module(&namespace, resource, &source, forms)?;
     if let Some(parent) = std::path::Path::new(output_path).parent() {
         fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;

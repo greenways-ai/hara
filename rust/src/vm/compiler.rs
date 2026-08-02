@@ -58,8 +58,13 @@ const UNSUPPORTED_OPERATORS: &[&str] = &["quote", "ns", "in-ns", "require", "awa
 /// visible as globals (issue #223).
 pub fn compile_source(source: &str) -> Result<Program, CompileError> {
     let forms = crate::kernel::read_forms(source)?;
+    compile_spanned_forms(&forms)
+}
+
+fn compile_spanned_forms(forms: &[SpannedForm]) -> Result<Program, CompileError> {
     let mut compiler = Compiler::new();
-    let children = compiler.children(&forms);
+    compiler.predeclare_top_level(forms);
+    let children = compiler.children(forms);
     compiler.compile_sequence(&children, true)?;
     compiler.finish()
 }
@@ -73,6 +78,107 @@ pub fn compile_source_with(
     registry: &crate::kernel::NamespaceRegistry<crate::core::Value>,
 ) -> Result<Program, CompileError> {
     crate::core::with_namespace_registry(registry, || compile_source(source))
+}
+
+/// Lowers decoded HALC directly into bytecode while preserving its canonical
+/// schema graph in the resulting program. The module's `ns` declaration is
+/// loader configuration rather than executable code and is omitted here.
+pub fn compile_halc_module(
+    module: &crate::kernel::halc::HalcModule,
+    registry: &crate::kernel::NamespaceRegistry<crate::core::Value>,
+) -> Result<Program, CompileError> {
+    let previous = registry.current().name().as_str().to_owned();
+    registry.set_current(&module.namespace);
+    let forms = module
+        .forms
+        .iter()
+        .filter(|form| !top_level_operator(form, "ns"))
+        .cloned()
+        .map(synthetic_spanned_form)
+        .collect::<Vec<_>>();
+    let result = crate::core::with_namespace_registry(registry, || compile_spanned_forms(&forms));
+    registry.set_current(previous);
+    let mut program = result?;
+    program.namespace = Some(module.namespace.clone());
+    program.schema_types = module.schemas.definition_types.clone();
+    program.function_types = module.schemas.function_types.clone();
+    program.inferred_function_types = crate::kernel::schema::infer_function_types(
+        &module.namespace,
+        &module.forms,
+        &program.function_types,
+        &program.schema_types,
+    );
+    validate_declared_function_arities(&program)?;
+    Ok(program)
+}
+
+fn validate_declared_function_arities(program: &Program) -> Result<(), CompileError> {
+    for (index, prototype) in program.functions.iter().enumerate() {
+        let Some(crate::kernel::SchemaType::Function(arities)) =
+            program.function_schema(index as u16)
+        else {
+            continue;
+        };
+        let compatible = arities.iter().any(|schema| {
+            schema.fixed.len() == prototype.arity as usize
+                && schema.rest.is_some() == prototype.variadic
+        });
+        if !compatible {
+            return Err(CompileError::new(
+                CompileErrorKind::Arity,
+                format!(
+                    "function schema for {} has no {}-argument arity{}",
+                    prototype.name.as_deref().unwrap_or("<anonymous>"),
+                    prototype.arity,
+                    if prototype.variadic {
+                        " with rest arguments"
+                    } else {
+                        ""
+                    }
+                ),
+                None,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn top_level_operator(form: &Form, expected: &str) -> bool {
+    matches!(
+        crate::core::form_without_metadata(form),
+        Form::List(items)
+            if matches!(items.first(), Some(Form::Symbol(operator)) if operator == expected)
+    )
+}
+
+fn synthetic_spanned_form(form: Form) -> SpannedForm {
+    let position = Position {
+        offset: 0,
+        line: 1,
+        column: 1,
+    };
+    let children = match &form {
+        Form::List(values) | Form::Vector(values) | Form::Set(values) => {
+            values.iter().cloned().map(synthetic_spanned_form).collect()
+        }
+        Form::Map(entries) => entries
+            .iter()
+            .flat_map(|(key, value)| [key.clone(), value.clone()])
+            .map(synthetic_spanned_form)
+            .collect(),
+        Form::Tagged(_, value) | Form::Metadata(_, value) => {
+            vec![synthetic_spanned_form(value.as_ref().clone())]
+        }
+        _ => Vec::new(),
+    };
+    SpannedForm {
+        form,
+        span: Span {
+            start: position,
+            end: position,
+        },
+        children,
+    }
 }
 
 /// A form paired with its span and (when the parser provided matching
@@ -157,6 +263,45 @@ fn placeholder(
 }
 
 impl Compiler {
+    fn predeclare_top_level(&mut self, forms: &[SpannedForm]) {
+        for spanned in forms {
+            let Form::List(items) = crate::core::form_without_metadata(&spanned.form) else {
+                continue;
+            };
+            let Some(Form::Symbol(operator)) = items.first() else {
+                continue;
+            };
+            if operator == "declare" {
+                for item in items.iter().skip(1) {
+                    if let Form::Symbol(name) = crate::core::form_without_metadata(item) {
+                        if !name.contains('/') {
+                            self.declare_program_global(name);
+                        }
+                    }
+                }
+                continue;
+            }
+            if !matches!(
+                operator.as_str(),
+                "def" | "defn" | "defn-" | "defmacro" | "defstruct"
+            ) {
+                continue;
+            }
+            let Some(name_form) = items.get(1) else {
+                continue;
+            };
+            if let Ok((name, _)) = crate::core::binding_symbol(name_form, "definition name") {
+                if !name.contains('/') {
+                    self.declare_program_global(&name);
+                    if operator == "defstruct" {
+                        self.declare_program_global(&format!("->{name}"));
+                        self.declare_program_global(&format!("map->{name}"));
+                    }
+                }
+            }
+        }
+    }
+
     fn new() -> Compiler {
         let mut scopes = ScopeStack::new();
         scopes.push_scope();
@@ -1076,7 +1221,11 @@ impl Compiler {
         }
         self.close_context();
         let mut program = Program {
+            namespace: None,
             var_metadata: self.var_metadata,
+            schema_types: HashMap::new(),
+            function_types: HashMap::new(),
+            inferred_function_types: HashMap::new(),
             constants: self.constants,
             functions: self.functions,
             entry: 0,

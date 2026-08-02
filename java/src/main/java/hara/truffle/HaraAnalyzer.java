@@ -61,8 +61,19 @@ final class HaraAnalyzer {
         new HaraAnalyzer(
             language, sourceSection, context, frames, Map.of(), null, null, null, null);
     HaraExpressionNode[] expressions = new HaraExpressionNode[forms.length];
-    for (int i = 0; i < forms.length; i++) {
-      expressions[i] = analyzer.analyze(forms[i]);
+    int index = 0;
+    while (index < forms.length) {
+      if (analyzer.topLevelForm(forms[index], "ns")) {
+        expressions[index] = analyzer.analyze(forms[index]);
+        index++;
+      }
+      int end = index;
+      while (end < forms.length && !analyzer.topLevelForm(forms[end], "ns")) end++;
+      analyzer.predeclareTopLevel(forms, index, end);
+      while (index < end) {
+        expressions[index] = analyzer.analyze(forms[index]);
+        index++;
+      }
     }
     HaraExpressionNode body = new HaraNodes.Do(expressions);
     return new HaraRootNode(
@@ -76,6 +87,30 @@ final class HaraAnalyzer {
             true,
             false)
         .getCallTarget();
+  }
+
+  private boolean topLevelForm(Object form, String name) {
+    return form instanceof List<?> list
+        && list.count() > 0
+        && list.nth(0) instanceof Symbol operator
+        && operator.getNamespace() == null
+        && name.equals(operator.getName());
+  }
+
+  private void predeclareTopLevel(Object[] forms, int start, int end) {
+    Set<String> definitionForms = Set.of("def", "defn", "defn-", "defmacro", "defstruct");
+    for (int index = start; index < end; index++) {
+      if (!(forms[index] instanceof List<?> list)
+          || list.count() < 2
+          || !(list.nth(0) instanceof Symbol operator)
+          || operator.getNamespace() != null
+          || !definitionForms.contains(operator.getName())
+          || !(list.nth(1) instanceof Symbol name)
+          || name.getNamespace() != null) {
+        continue;
+      }
+      context.declareCurrent(name);
+    }
   }
 
   /** Creates a lexical sub-scope sharing the current function frame. */
@@ -819,6 +854,7 @@ final class HaraAnalyzer {
       definitionMetadata =
           (IMapType<Object, Object>) definitionMetadata.assoc(Keyword.create("doc"), docstring);
     }
+    validateSchemaVarReference(definitionMetadata.lookup(Keyword.create("schema")));
     definitionMetadata =
         (IMapType<Object, Object>)
             definitionMetadata.assoc(
@@ -831,6 +867,20 @@ final class HaraAnalyzer {
                   definitionMetadata.assoc(Keyword.create("private"), Boolean.TRUE));
     }
     return new HaraNodes.DefineGlobal(definitionSymbol, function);
+  }
+
+  private void validateSchemaVarReference(Object schema) {
+    if (!(schema instanceof List<?> reference)
+        || reference.count() != 2
+        || !(reference.nth(0) instanceof Symbol operator)
+        || operator.getNamespace() != null
+        || !"var".equals(operator.getName())
+        || !(reference.nth(1) instanceof Symbol target)) {
+      return;
+    }
+    if (context.resolve(target) == null) {
+      throw error("schema Var does not exist: " + target.display());
+    }
   }
 
   private HaraExpressionNode analyzeDeclare(List<?> form) {

@@ -101,6 +101,12 @@ public final class HaraLanguage extends TruffleLanguage<HaraContext> {
     return FoundationHalcLowerer.compile(currentLanguage(), currentContext(), forms);
   }
 
+  static CallTarget compileHalc(HalcArtifact.Module module, String sourceName) {
+    HaraContext context = currentContext();
+    context.installHalcSchemas(module.schemas);
+    return FoundationHalcLowerer.compile(currentLanguage(), context, module.forms);
+  }
+
   static Object[] readAll(String source, String sourceName) {
     Reader reader = new Reader(source);
     Object eof = new Object();
