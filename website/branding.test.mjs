@@ -9,6 +9,8 @@ test("the main site presents Hara as a programmable kernel", async () => {
 
   assert.match(source, /<title>Hara<\/title>/);
   assert.match(source, /<meta property="og:title" content="Hara">/);
+  assert.match(source, /<link rel="canonical" href="https:\/\/hara-lang\.org\/">/);
+  assert.doesNotMatch(source, /https:\/\/www\.hara-lang\.org/);
   assert.match(source, /A Programmable Kernel for the Agentic Age\./);
   assert.doesNotMatch(source, /A Modern Lisp/);
 });

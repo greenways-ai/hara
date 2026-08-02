@@ -155,7 +155,7 @@ jobs:
             --title "hara $TAG" \
             --notes "GitHub Releases are the publishing authority for Hara runtime packages. Install with:
           
-              curl -fsSL https://www.hara-lang.org/install.sh | sh -- --rust --truffle
+              curl -fsSL https://hara-lang.org/install.sh | sh -- --rust --truffle
           " \
             $FLAGS "${ASSETS[@]}"
         fi

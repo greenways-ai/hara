@@ -33,7 +33,7 @@ several Git submodules at the root:
   Talo compiler port (`lib/src`, `lib/test`), demo projects
   ([`lib/examples/`](lib/examples/)), and benchmark suites
   ([`lib/bench/`](lib/bench/)).
-- [`website/`](website/) — the landing page for `www.hara-lang.org`.
+- [`website/`](website/) — the landing page for `hara-lang.org`.
 - [`docs/`](docs/) — published documentation site (Material for MkDocs). Lives
   in the [`hara-lang/hara-docs`](https://github.com/hara-lang/hara-docs)
   submodule.

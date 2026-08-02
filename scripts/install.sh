@@ -1,7 +1,7 @@
 #!/bin/sh
 # install.sh — install Hara runtimes from GitHub Release packages.
 #
-#   curl -fsSL https://www.hara-lang.org/install.sh | sh -- --rust --truffle
+#   curl -fsSL https://hara-lang.org/install.sh | sh -- --rust --truffle
 #
 # Environment overrides:
 #   HARA_VERSION          release tag to install (default: latest release)

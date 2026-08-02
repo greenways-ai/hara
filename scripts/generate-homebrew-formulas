@@ -44,7 +44,7 @@ def formula(kind: str, version: str, tag: str, values: dict[str, str]) -> str:
     base = f"https://github.com/hara-lang/hara/releases/download/{tag}"
     return f'''class {class_name} < Formula
   desc "{description}"
-  homepage "https://www.hara-lang.org"
+  homepage "https://hara-lang.org"
   version "{version}"
   license "EPL-2.0"
 

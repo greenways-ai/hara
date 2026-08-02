@@ -1,4 +1,4 @@
-name: Deploy www.hara-lang.org
+name: Deploy hara-lang.org
 
 on:
   push:
@@ -45,13 +45,27 @@ jobs:
         run: |
           node --test website/branding.test.mjs website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
           test -s target/www/og-hara-ribbon.jpg
+      - name: Package verified production candidate
+        if: github.ref_name == 'main'
+        run: |
+          mkdir -p target/www-artifact
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -cf target/www-artifact/artifact.tar -C target/www .
+          shasum -a 256 target/www-artifact/artifact.tar
+      - name: Upload verified production candidate
+        if: github.ref_name == 'main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: www-production-candidate
+          path: target/www-artifact/artifact.tar
+          if-no-files-found: error
+          retention-days: 30
       - name: Deploy main to www.testing.hara-lang.org
         if: github.ref_name == 'main'
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "main ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
-      - name: Deploy production to www.hara-lang.org
+      - name: Deploy production to hara-lang.org
         if: github.ref_name == 'production'
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "production ${GITHUB_SHA}"
         env:
