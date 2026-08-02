@@ -1,0 +1,124 @@
+(ns postgres.typed.typed-parse-test
+  (:require [postgres.typed.typed-common :as types]
+            [postgres.typed.typed-parse :as parse])
+  (:use code.test))
+
+(fact "reads all forms from portable HAL source"
+  (vector? (parse/read-forms "lib/src/postgres/typed/typed_common.hal")) => true
+  (> (count (parse/read-forms "lib/src/postgres/typed/typed_common.hal")) 1) => true)
+
+(fact "identifies PostgreSQL definition forms"
+  (parse/deftype? '(deftype.pg User [:id {:type :uuid}])) => true
+  (parse/deftype? '(deftype User [])) => false
+  (parse/defenum? '(defenum.pg Status [:active])) => true
+  (parse/defenum? '(defenum Status [:active])) => false
+  (parse/defn? '(defn.pg test [:uuid id])) => true
+  (parse/defn? '(defn test [])) => false
+  (parse/script? '(script :postgres {:require []})) => true
+  (parse/script? '(script :mysql {:require []})) => false)
+
+(fact "extracts schema and aliases"
+  (parse/parse-schema '(script :postgres {:static {:all {:schema ["gw_data"]}}}))
+  => "gw_data"
+  (parse/parse-schema '(script :postgres {:static {:seed {:schema ["gw_seed"]}}}))
+  => "gw_seed"
+  (parse/parse-schema '(script :postgres {})) => nil
+  (parse/extract-aliases '[[postgres.core :as pg]
+                           [tahto.runtime.util :refer [foo]]])
+  => '{pg postgres.core}
+  (parse/parse-aliases '(script :postgres {:require [[postgres.core :as pg]]}))
+  => '{pg postgres.core})
+
+(fact "extracts process constraints"
+  (parse/parse-process-constraints
+   '((as-limit-length 100) (as-lower-formatted) (as-email)))
+  => {:max-length 100 :format :email}
+  (parse/parse-process-constraints nil) => {})
+
+(fact "parses column, table, enum, and function definitions"
+  (let [column (parse/parse-column-spec
+                [:settings {:type :map :map {:theme {:type :text}}}])]
+    (:name column) => :settings
+    (:map-schema column) => {:theme {:type :text}})
+
+  (let [table (parse/parse-deftype
+               '(deftype.pg ^{:! (et/E {:addons [:feed]})} Organisation
+                  [:id {:type :uuid :primary true}])
+               "test.ns" nil)]
+    (:name table) => "Organisation"
+    (:primary-key table) => :id
+    (:addons table) => [:feed])
+
+  (let [enum (parse/parse-defenum
+              '(defenum.pg Priority "Priority levels" [:low :medium :high])
+              "test.ns" nil)]
+    (:name enum) => "Priority"
+    (:values enum) => #{:low :medium :high})
+
+  (let [fn-def (parse/parse-defn
+                '(defn.pg ^{:%% :sql :- Entry}
+                   insert-entry
+                   "inserts an entry"
+                   [:text i-name :jsonb i-tags]
+                   (pg/t:insert Entry {:name i-name :tags i-tags}))
+                "test.ns" nil)]
+    (:name fn-def) => "insert-entry"
+    (:output fn-def) => 'Entry
+    (map (fn [arg] (:name arg)) (:inputs fn-def)) => '[i-name i-tags]))
+
+(fact "infers tracked function argument roles"
+  (parse/infer-fn-arg-role
+   'o-op
+   '((pg/t:update -/Task {:set {:status o-op} :track o-op})))
+  => :track
+  (parse/infer-fn-arg-role 'x '((return x))) => :payload)
+
+(fact "transforms runtime ref links"
+  (parse/transform-col-opts
+   {:type :ref :ref {:link {:module :Organisation :id :id}}})
+  => {:type :ref :ref {:key :Organisation/id}})
+
+(fact "parses runtime tables"
+  (let [table (parse/parse-runtime-table
+               :User
+               [:id {:type :uuid :primary true}
+                :org-id {:type :ref
+                         :ref {:link {:module :Organisation :id :id}}}])]
+    (:name table) => "User"
+    (:primary-key table) => :id
+    (count (:columns table)) => 2))
+
+(fact "analyzes runtime table maps"
+  (let [analysis (parse/analyze-tables
+                  {:User [:id {:type :uuid :primary true}
+                          :name {:type :text}]
+                   :Organisation [:id {:type :uuid :primary true}
+                                  :handle {:type :citext}]}
+                  "gwdb")]
+    (count (:tables analysis)) => 2
+    (:enums analysis) => []
+    (:functions analysis) => []))
+
+(fact "analyzes portable source files and namespaces"
+  (let [analysis (parse/analyze-file
+                  "lib/src/postgres/typed/typed_common.hal")]
+    (has? analysis :tables) => true
+    (has? analysis :enums) => true
+    (has? analysis :functions) => true)
+  (let [analysis (parse/analyze-namespace 'postgres.typed.typed-common)]
+    (has? analysis :tables) => true
+    (has? analysis :enums) => true
+    (has? analysis :functions) => true))
+
+(fact "registers every analyzed definition"
+  (do
+    (types/clear-registry!)
+    (parse/register-types!
+     {:tables [(types/make-table-def "ns" "TestTable" [] :id)]
+      :enums [(types/make-enum-def "ns" "TestEnum" [:a :b] nil)]
+      :functions [(types/make-fn-def "ns" "testFn" [] [:jsonb] {} nil)]})
+    (types/table-def? (types/get-type 'ns/TestTable)))
+  => true
+  (types/enum-def? (types/get-type 'ns/TestEnum)) => true
+  (types/fn-def? (types/get-type 'ns/testFn)) => true
+  (do (types/clear-registry!) true) => true)

@@ -179,7 +179,7 @@ pub(crate) const NATIVE_TYPES: &[(&str, &[&str])] = &[
         &["load-string", "macroexpand-1", "gensym", "var-sym"],
     ),
     ("Printer", &["p", "println"]),
-    ("Edn", &["read"]),
+    ("Edn", &["read", "read-forms"]),
     ("Json", &["read", "write", "pretty"]),
     ("Host", &["call", "describe", "capabilities", "capability?"]),
     ("Regex", &["instance?"]),
@@ -928,6 +928,7 @@ pub(crate) fn structural_callable_names() -> impl Iterator<Item = &'static str> 
         "letfn",
         "loop",
         "ns",
+        "read-forms",
         "recur",
         "require",
         "set!",
@@ -9882,6 +9883,50 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         }
                     }
                     result
+                }
+                Form::Symbol(n)
+                    if n == "read-forms" || n == "std.native.Edn/read-forms" =>
+                {
+                    if fs.len() != 2 {
+                        return Err("read-forms expects a path string".into());
+                    }
+                    let path = match eval(&fs[1], env)? {
+                        Value::String(path) => path,
+                        _ => return Err("read-forms expects a path string".into()),
+                    };
+                    if !(path.ends_with(".hal") || path.ends_with(".hrl")) {
+                        return Err("read-forms expects a .hal or .hrl path".into());
+                    }
+                    let promise = file_provider("read-forms")?
+                        .read(&path)
+                        .map_err(|error| file_error("read-forms", error))?;
+                    let bytes = match promise.wait_state() {
+                        PromiseState::Fulfilled(Value::Bytes(bytes)) => bytes,
+                        PromiseState::Fulfilled(Value::ByteBuffer(bytes)) => {
+                            bytes.borrow().clone()
+                        }
+                        PromiseState::Fulfilled(value) => {
+                            return Err(format!(
+                                "read-forms expected file bytes, got {}",
+                                value.display()
+                            ))
+                        }
+                        PromiseState::Rejected(error) => {
+                            return Err(promise_rejection_error(error))
+                        }
+                        PromiseState::Pending => {
+                            return Err("read-forms file read is still pending".into())
+                        }
+                    };
+                    let source = String::from_utf8(bytes)
+                        .map_err(|_| format!("read-forms source is not UTF-8: {path}"))?;
+                    let forms = crate::kernel::parse_forms(&source)
+                        .map_err(|error| format!("read-forms failed: {error}"))?;
+                    let values = forms
+                        .iter()
+                        .map(form_to_value)
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(Value::Vector(PVector::from_iter(values)))
                 }
                 Form::Symbol(n) if n == "eval" => {
                     if fs.len() != 2 {

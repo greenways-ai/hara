@@ -114,6 +114,7 @@ public final class HaraNativeTestRunnerTest {
       {"lib/test/postgres/typed/typed_resolve_test.hal", "6", "16"},
       {"lib/test/postgres/typed/typed_jsonb_test.hal", "12", "30"},
       {"lib/test/postgres/typed/typed_infer_test.hal", "10", "15"},
+      {"lib/test/postgres/typed/typed_parse_test.hal", "11", "24"},
       {"lib/test/postgres/typed/export/json_schema_test.hal", "5", "9"},
       {"lib/test/postgres/typed/export/ts_schema_test.hal", "4", "11"}
     };
