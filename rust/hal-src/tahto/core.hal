@@ -8,8 +8,9 @@
             [tahto.common.preprocess-value :as value]
             [tahto.core.registry :as registry]
             [tahto.core.script :as script]
+            [tahto.core.script-fragment]
             [tahto.core.runtime :as runtime]
-            [tahto.model.v3.spec-postgres]
+            [tahto.model.v4.spec-postgres]
             [tahto.runtime.basic :as basic]))
 
 (def book-entry entry/book-entry)
@@ -86,6 +87,11 @@
      '(defmacro deftrigger.pg [symbol & body]
         (list 'tahto.core.script/register-code!
               (list 'quote (apply list 'deftrigger symbol body))))
+     '(defmacro def$.pg [symbol value]
+        (list 'tahto.core.script-fragment/register-value!
+              (list 'quote symbol)
+              (list 'quote value)
+              (list 'quote (or (meta symbol) {}))))
      '(defmacro defgen.xt [symbol & body]
         (list 'tahto.core.script/register-code!
               (list 'quote (apply list 'defgen symbol body))))
@@ -141,6 +147,11 @@
      '(defmacro deftrigger.pg [symbol & body]
         (list 'tahto.core.script/register-code!
               (list 'quote (apply list 'deftrigger symbol body))))
+     '(defmacro def$.pg [symbol value]
+        (list 'tahto.core.script-fragment/register-value!
+              (list 'quote symbol)
+              (list 'quote value)
+              (list 'quote (or (meta symbol) {}))))
      '(defmacro defgen.xt [symbol & body]
         (list 'tahto.core.script/register-code!
               (list 'quote (apply list 'defgen symbol body))))
