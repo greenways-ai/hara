@@ -81,6 +81,28 @@
          ['demo.module/__tahto_load__]
          true])
 
+   (fact "registered modules with no entries are already loaded"
+     (let [calls (atom [])
+           module {:id 'demo.empty
+                   :lang :postgres
+                   :require []
+                   :link {'- 'demo.empty}
+                   :code {}
+                   :fragment {}}
+           _ (reset! script/+modules+ {'demo.empty module})
+           _ (reset! script/+loaded-modules+ {})
+           loaded
+           (binding [script/*module-loader*
+                     (fn [sentinel]
+                       (do
+                         (swap! calls conj sentinel)
+                         sentinel))]
+             (script/load-module! 'demo.empty))]
+       [loaded
+        (script/module-loaded? 'demo.empty)
+        (deref calls)])
+     => ['demo.empty true []])
+
    (fact "setup retains the requested target language and loads dependencies once"
      (let [module (current-module)
            calls (atom [])

@@ -17,9 +17,9 @@ public final class HaraTahtoScriptMetadataTest {
             ROOT.resolve("lib/test/tahto/core/script_metadata_test.hal"));
 
     assertTrue(result.failureMessage(), result.passed());
-    assertEquals(4, result.facts());
-    assertEquals(4, result.checks());
-    assertEquals(4, result.passedChecks());
+    assertEquals(5, result.facts());
+    assertEquals(5, result.checks());
+    assertEquals(5, result.passedChecks());
     assertEquals(0, result.failedChecks());
     assertEquals(0, result.errors());
     assertEquals(0, result.timeouts());

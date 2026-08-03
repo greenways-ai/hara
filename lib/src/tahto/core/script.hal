@@ -163,13 +163,10 @@
 
 (defn module-loaded?
   [module]
-  (let [record (get (deref +modules+) module)]
-    (if (or (get (deref +loaded-modules+) module)
-            (and record
-                 (or (not (empty? (:code record)))
-                     (not (empty? (:fragment record))))))
-      true
-      false)))
+  (if (or (get (deref +loaded-modules+) module)
+          (get (deref +modules+) module))
+    true
+    false))
 
 (defn load-module!
   [spec]
