@@ -12,7 +12,18 @@ test("publishes docs below /docs and uses the visual package", async () => {
   assert.doesNotMatch(layout, /docs\.hara-lang\.org/);
 });
 
-test("ships a runnable core kernel and three product modes without hero size claims", async () => {
+test("leads with the language and renders benchmark evidence from committed data", async () => {
+  const page = await readFile(new URL("../src/pages/index.astro", import.meta.url), "utf8");
+  assert.match(page, /Simple to pick up\.[\s\S]*Fast enough to keep\./);
+  assert.match(page, /Hara is Lisp/);
+  assert.match(page, /language-reference\.json/);
+  assert.match(page, /reference-v2\.json/);
+  assert.match(page, /formatRatio\("python-prepared"\)/);
+  assert.match(page, /hoplite-hara-rust-full/);
+  assert.doesNotMatch(page, /One language\.[\s\S]*Fit to its environment\./);
+});
+
+test("keeps the three runtime modes after the learning path", async () => {
   const page = await readFile(new URL("../src/pages/index.astro", import.meta.url), "utf8");
   const repl = await readFile(new URL("../public/assets/docs-repl.js", import.meta.url), "utf8");
   const prepare = await readFile(new URL("../scripts/prepare-docs.mjs", import.meta.url), "utf8");
@@ -22,4 +33,11 @@ test("ships a runnable core kernel and three product modes without hero size cla
   assert.match(repl, /manifest\.variants\.core\.url/);
   assert.match(repl, /data-hara-eval/);
   assert.match(prepare, /clojure\$1/);
+});
+
+test("orders the embedded docs around a first learning journey", async () => {
+  const config = await readFile(new URL("../astro.config.mjs", import.meta.url), "utf8");
+  assert.match(config, /Start here[\s\S]*Why Hara\?[\s\S]*Read Hara and build from scratch[\s\S]*Try Hara in the browser[\s\S]*Build Tic Tac Toe[\s\S]*Choose your setup/);
+  assert.match(config, /Hara language course/);
+  assert.match(config, /Guides & reference/);
 });
