@@ -109,6 +109,7 @@ public final class HaraNativeTestRunnerTest {
   @Test
   public void runsPortablePostgresTypedFoundation() throws Exception {
     String[][] suites = {
+      {"lib/test/postgres/typed_test.hal", "8", "9"},
       {"lib/test/postgres/typed/typed_common_test.hal", "11", "37"},
       {"lib/test/postgres/typed/typed_shape_test.hal", "7", "11"},
       {"lib/test/postgres/typed/typed_resolve_test.hal", "6", "16"},

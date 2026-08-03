@@ -1,0 +1,266 @@
+(ns postgres.typed
+  (:config {:blank true})
+  (:require [std.foundation :refer :all :exclude [load-file]]
+            [postgres.typed.export.json-openapi :as openapi]
+            [postgres.typed.export.json-schema :as json-schema]
+            [postgres.typed.export.ts-schema :as ts-schema]
+            [tahto.runtime.postgres.base.application :as app]
+            [postgres.typed.typed-analyze :as analyze]
+            [postgres.typed.typed-common :as types]
+            [postgres.typed.typed-infer :as typed-infer]
+            [postgres.typed.typed-resolve :as typed-resolve]
+            [postgres.typed.typed-parse :as parse]))
+
+(defn inferred->shape
+  [inferred]
+  (cond (types/jsonb-shape? inferred) inferred
+        (and (= :shaped (:kind inferred))
+             (types/jsonb-shape? (:shape inferred))) (:shape inferred)
+        :else nil))
+
+(defn format-shape
+  [jsonb-shape format]
+  (cond (= :shape format) jsonb-shape
+        (= :openapi format) (openapi/shape->openapi jsonb-shape)
+        (= :json-schema format) (json-schema/shape->json-schema jsonb-shape)
+        (= :typescript format) (ts-schema/shape->ts-interface jsonb-shape)
+        :else (throw (ex-info "Unknown schema format"
+                              {:format format
+                               :available [:shape :openapi :json-schema :typescript]}))))
+
+(defn report-json
+  ([report] (analyze/report-json report))
+  ([report pretty?] (analyze/report-json report pretty?)))
+
+(defn- arg-type
+  [arg]
+  (let [value (:type arg)]
+    (cond (keyword? value) value
+          (and (map? value) (keyword? (:name value))) (:name value)
+          :else nil)))
+
+(defn- arg-type-name
+  [arg]
+  (let [value (arg-type arg)]
+    (when value (name value))))
+
+(defn- enrich-function-arg-roles
+  [fn-def]
+  (if (types/fn-def? fn-def)
+    (update fn-def :inputs
+            (fn [inputs]
+              (vec (map (fn [arg]
+                          (assoc arg :role (or (:role arg) :payload)))
+                        inputs))))
+    fn-def))
+
+(defn- jsonb-arg?
+  [arg]
+  (or (= :jsonb (arg-type arg))
+      (reduce (fn [found modifier]
+                (or found (= :jsonb modifier)))
+              false
+              (or (:modifiers arg) []))))
+
+(defn- format-primitive
+  [format value]
+  (cond (= :shape format) {:type value}
+        (= :openapi format) (json-schema/resolve-type value :openapi)
+        (= :json-schema format) (json-schema/resolve-type value :jschema)
+        (= :typescript format) (json-schema/resolve-type value :ts)
+        :else (throw (ex-info "Unknown schema format" {:format format}))))
+
+(defn registry->typed
+  "Builds a typed payload from a flat registry map."
+  [registry]
+  (reduce types/add-typed (types/empty-typed) (vals registry)))
+
+(defn typed->registry
+  "Flattens a typed payload into the registry shape expected by inference."
+  [typed]
+  (merge (:tables typed) (:enums typed) (:functions typed)))
+
+(defn load-analysis
+  [analysis]
+  (let [typed (types/analysis->typed analysis)]
+    {:domain :postgres
+     :analysis analysis
+     :typed typed
+     :registry (typed->registry typed)}))
+
+(defn load-file [file-path]
+  (load-analysis (parse/analyze-file file-path)))
+
+(defn load-ns [ns-sym]
+  (load-analysis (parse/analyze-namespace ns-sym)))
+
+(defn load-app [app-name]
+  (let [typed (app/app-typed app-name)]
+    (if typed
+      {:domain :postgres
+       :app-name app-name
+       :typed typed
+       :registry (typed->registry typed)}
+      (throw (ex-info "Postgres application has no typed payload"
+                      {:app-name app-name})))))
+
+(defn load-registry
+  ([] (load-registry @types/*type-registry*))
+  ([registry]
+   {:domain :postgres
+    :typed (registry->typed registry)
+    :registry registry}))
+
+(defn with-context-registry
+  [ctx f]
+  (let [current @types/*type-registry*]
+    (try (reset! types/*type-registry* (:registry ctx))
+         (f)
+         (finally (reset! types/*type-registry* current)))))
+
+(defn entries [ctx] (vals (:registry ctx)))
+
+(defn entry
+  [ctx value]
+  (let [canonical (typed-resolve/canonical-fn-sym value)
+        short-name (name canonical)]
+    (or (get (:registry ctx) canonical)
+        (get (:registry ctx) (symbol short-name))
+        (get (:registry ctx) (keyword short-name)))))
+
+(defn missing-function! [fn-ref]
+  (throw (ex-info "Typed function not found"
+                  {:type :typed/missing-function :fn fn-ref})))
+
+(defn missing-argument! [fn-ref arg-sym]
+  (throw (ex-info "Typed function argument not found"
+                  {:type :typed/missing-argument :fn fn-ref :arg arg-sym})))
+
+(defn function-def
+  [ctx fn-ref]
+  (let [resolved
+        (with-context-registry
+          ctx
+          (fn []
+            (let [direct (when (types/fn-def? fn-ref) fn-ref)
+                  by-resolution (when (not direct)
+                                  (typed-resolve/resolve-function-def fn-ref))
+                  fn-sym (when (and (not direct) (not by-resolution))
+                           (typed-resolve/fn-ref->fn-sym fn-ref))]
+              (enrich-function-arg-roles
+               (or direct by-resolution (when fn-sym (entry ctx fn-sym)))))))]
+    (if (nil? resolved) (missing-function! fn-ref) resolved)))
+
+(defn function-report
+  [ctx fn-ref]
+  (with-context-registry
+    ctx
+    (fn [] (analyze/infer-report (function-def ctx fn-ref)))))
+
+(defn function-input
+  ([ctx fn-ref] (:inputs (function-def ctx fn-ref)))
+  ([ctx fn-ref arg-sym]
+   (let [found (reduce (fn [out arg]
+                         (if (nil? out)
+                           (when (= arg-sym (get arg :name)) arg)
+                           out))
+                       nil
+                       (:inputs (function-def ctx fn-ref)))]
+     (if (nil? found) (missing-argument! fn-ref arg-sym) found))))
+
+(defn function-output [ctx fn-ref]
+  (:output (function-def ctx fn-ref)))
+
+(defn input-shape
+  [ctx fn-ref arg-sym]
+  (let [fn-def (function-def ctx fn-ref)
+        arg (function-input ctx fn-ref arg-sym)]
+    (with-context-registry
+      ctx
+      (fn [] (typed-infer/infer-jsonb-arg-shape arg-sym fn-def (:role arg))))))
+
+(defn input-schema
+  ([ctx fn-ref arg-sym] (input-schema ctx fn-ref arg-sym :shape))
+  ([ctx fn-ref arg-sym format]
+   (let [jsonb-shape (input-shape ctx fn-ref arg-sym)]
+     (when jsonb-shape (format-shape jsonb-shape format)))))
+
+(defn output-shape
+  [ctx fn-ref]
+  (let [fn-def (function-def ctx fn-ref)]
+    (with-context-registry
+      ctx
+      (fn [] (inferred->shape (analyze/cached-infer fn-def))))))
+
+(defn output-schema
+  ([ctx fn-ref] (output-schema ctx fn-ref :shape))
+  ([ctx fn-ref format]
+   (let [jsonb-shape (output-shape ctx fn-ref)]
+     (when jsonb-shape (format-shape jsonb-shape format)))))
+
+(defn- build-input-schemas
+  [ctx fn-def format]
+  (reduce (fn [out arg]
+            (let [arg-name (:name arg)
+                  value-type (arg-type arg)]
+              (cond (= :track (:role arg))
+                    (assoc out (keyword (name arg-name))
+                           {:type :jsonb :role :track
+                            :schema (format-primitive format :jsonb)})
+                    (jsonb-arg? arg)
+                    (let [jsonb-shape (input-shape ctx fn-def arg-name)]
+                      (if jsonb-shape
+                        (assoc out (keyword (name arg-name))
+                               {:shape jsonb-shape
+                                :schema (format-shape jsonb-shape format)})
+                        out))
+                    value-type
+                    (assoc out (keyword (name arg-name))
+                           {:type value-type
+                            :schema (format-primitive format value-type)})
+                    :else out)))
+          {}
+          (:inputs fn-def)))
+
+(defn function-contract
+  ([ctx fn-ref] (function-contract ctx fn-ref {:format :shape}))
+  ([ctx fn-ref opts]
+   (let [format (get opts :format :shape)
+         fn-def (function-def ctx fn-ref)]
+     (with-context-registry
+       ctx
+       (fn []
+         (let [report (analyze/infer-report fn-def)
+               args (vec (map (fn [arg]
+                                {:name (:name arg)
+                                 :type (arg-type-name arg)
+                                 :modifiers (:modifiers arg)
+                                 :role (:role arg)})
+                              (:inputs fn-def)))
+               result-shape (inferred->shape (analyze/cached-infer fn-def))
+               output (when result-shape
+                        {:shape result-shape
+                         :schema (format-shape result-shape format)})]
+           (assoc (assoc report
+                         :input {:args args
+                                 :schemas (build-input-schemas ctx fn-def format)})
+                  :output output)))))))
+
+(defn export-openapi
+  ([ctx] (export-openapi ctx (fn [_] true)))
+  ([ctx fn-filter]
+   (with-context-registry
+     ctx
+     (fn []
+       (let [analysis-ns (get-in ctx [:analysis :ns])]
+         (openapi/generate-openapi
+          (or analysis-ns (:app-name ctx) "postgres")
+          fn-filter))))))
+
+(defn export-json-schema [ctx]
+  (with-context-registry ctx (fn [] (json-schema/generate-json-schema))))
+
+(defn export-typescript [ctx]
+  (with-context-registry ctx (fn [] (ts-schema/generate-ts-schema))))
+
+(def __tahto_load__ true)
