@@ -71,16 +71,23 @@ several Git submodules at the root:
 
 ## Quick start
 
-Install the native Rust CLI with Homebrew:
+Install the native Rust CLI on macOS or Linux from the Greenways ecosystem tap:
 
 ```shell
-brew install hara-lang/tap/hara
+brew install greenways-ai/tap/hara
 hara eval '(+ 19 23)'
 ```
 
+Hara also maintains its dedicated binary tap:
+
+```shell
+brew install hara-lang/tap/hara
+```
+
 The separately packaged Truffle native image is available as
-`brew install hara-lang/tap/hara-truffle`. Neither Homebrew formula requires a
-JVM at runtime.
+`brew install hara-lang/tap/hara-truffle`. Neither binary formula requires a
+JVM at runtime. The Greenways formula builds the Rust CLI from the exact tagged
+Hara source so the same formula works across macOS and Linux architectures.
 
 To build the Truffle runtime from source, install JDK 21 and Maven:
 
