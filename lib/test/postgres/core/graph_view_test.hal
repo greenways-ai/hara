@@ -1,0 +1,63 @@
+(ns postgres.core.graph-view-test
+  (:require [postgres.core.graph-view :as view])
+  (:use code.test))
+
+(def schema
+  {:id [{:type :uuid :primary true :order 0}]
+   :name [{:type :text :order 1}]})
+(def Task {:id 'Task :module 'demo :table-schema schema
+           :schema {:tree {:Task schema}}})
+(view/register-table! 'Task Task)
+
+(fact "prepares view descriptors"
+  (view/make-view-prep (with-meta 'task-named
+                         {:- '[Task] :scope #{:public}
+                          :args [:text :input-name] :tag "named"}))
+  => {:table 'demo/Task :table-entry Task :key :Task :scope #{:public}
+      :args [:text :input-name] :guards nil :autos nil :tag "named"})
+
+(fact "finds primary key types and lead symbols"
+  (view/primary-key Task) => :uuid
+  (view/lead-symbol '[:uuid task-id]) => 'task-id
+  (view/lead-symbol '[:uuid]) => (throws))
+
+(view/defsel.pg ^{:- [Task] :args [:text input-name] :tag "by-name"}
+  task-by-name {:name input-name})
+
+(view/defret.pg ^{:- [Task] :tag "basic"}
+  task-basic [:uuid task-id] #{:id :name})
+
+(fact "defines executable select views"
+  (task-by-name "hello")
+  => '[:select (--- [#{"id"}]) :from demo/Task
+       \\ :where {"name" [:eq "hello"]}]
+  (:type (view/view-descriptor 'task-by-name)) => :select)
+
+(fact "defines executable return views"
+  (task-basic "id-1")
+  => '[:with j-ret :as
+       [:select (--- [#{"id"} #{"name"}]) :from demo/Task
+        \\ :where {"id" [:eq "id-1"]} \\ :limit 1]
+       \\ :select (to-jsonb j-ret) :from j-ret]
+  (:type (view/view-descriptor 'task-basic)) => :return)
+
+(fact "composes select and return descriptors"
+  (let [prepared (view/view-fn ['postgres.core.graph-view-test/task-basic]
+                               ['postgres.core.graph-view-test/task-by-name "hello"]
+                               {:limit 10})]
+    (second prepared))
+  => {:where {:name "hello"} :returning #{:id :name} :limit 10})
+
+(fact "constructs composed view forms"
+  (view/view-form ['postgres.core.graph-view-test/task-basic]
+                  ['postgres.core.graph-view-test/task-by-name "hello"]
+                  {:limit 10})
+  => '[:with j-ret :as
+       [:select (--- [#{"id"} #{"name"}]) :from demo/Task
+        \\ :where {"name" [:eq "hello"]} \\ :limit 10]
+       \\ :select (jsonb-agg j-ret) :from j-ret])
+
+(fact "rejects mismatched view roles"
+  (view/view-fn ['postgres.core.graph-view-test/task-by-name]
+                ['postgres.core.graph-view-test/task-basic "id"] {})
+  => (throws))
