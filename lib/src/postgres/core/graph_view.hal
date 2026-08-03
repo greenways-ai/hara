@@ -29,7 +29,7 @@
 
 (defn- view-tag [sym table]
   (let [full (name sym)
-        prefix (str (string/lower-case (name table)) "-")]
+        prefix (str (name table) "-")]
     (if (string/starts-with? full prefix)
       (string/slice full (string/length prefix)) full)))
 

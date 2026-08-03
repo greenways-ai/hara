@@ -1,0 +1,42 @@
+(ns postgres.core.graph
+  (:config {:blank true})
+  (:require [std.foundation :refer :all]
+            [postgres.core.graph-base :as base]
+            [postgres.core.graph-insert :as insert]
+            [postgres.core.graph-query :as query]
+            [postgres.core.graph-view :as view]))
+
+(defn g:where [spec where]
+  (when (or (nil? where) (empty? where))
+    (throw (ex-info "No WHERE clause" {:where where})))
+  (base/id-where-fn spec {:where where}))
+
+(defn g:id [spec params]
+  (when (nil? (:where params))
+    (throw (ex-info "No WHERE clause" params)))
+  (base/id-fn spec (or params {})))
+
+(defn g:count [spec params] (base/count-fn spec (or params {})))
+(defn g:exists [spec params] (base/exists-fn spec (or params {})))
+(defn g:select [spec params] (base/select-fn spec (or params {})))
+
+(defn g:get [spec params]
+  (when (nil? (:where params))
+    (throw (ex-info "No WHERE clause" params)))
+  (with-meta (base/select-fn spec (merge {:single true} params))
+             {:op/type :get}))
+
+(defn g:update [spec params] (base/update-fn spec (or params {})))
+(defn g:modify [spec params] (base/modify-fn spec (or params {})))
+(defn g:delete [spec params] (base/delete-fn spec (or params {})))
+(defn g:insert [spec data params] (insert/insert-fn spec data (or params {})))
+(defn q [spec params] (query/query-fn spec (or params {})))
+
+(defn q:get [spec params]
+  (with-meta (query/query-fn spec (merge (or params {}) {:single true}))
+             {:op/type :get}))
+
+(defn view [return-view select-view options]
+  (view/view-form return-view select-view options))
+
+(def __tahto_load__ true)
