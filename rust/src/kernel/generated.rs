@@ -41,6 +41,7 @@ pub struct GeneratedNamespaceConfig {
     refers: HashMap<String, String>,
     required_namespaces: Vec<String>,
     used_namespaces: Vec<String>,
+    used_exclusions: HashMap<String, HashSet<String>>,
     builtins: Vec<String>,
     excluded_foundation: HashSet<String>,
     blank: bool,
@@ -62,6 +63,7 @@ impl GeneratedNamespaceConfig {
             refers: HashMap::new(),
             required_namespaces: Vec::new(),
             used_namespaces: Vec::new(),
+            used_exclusions: HashMap::new(),
             builtins: Vec::new(),
             excluded_foundation: HashSet::new(),
             blank: false,
@@ -170,6 +172,12 @@ impl GeneratedNamespaceConfig {
 
     pub fn used_namespaces(&self) -> &[String] {
         &self.used_namespaces
+    }
+
+    pub fn used_symbol_excluded(&self, namespace: &str, symbol: &str) -> bool {
+        self.used_exclusions
+            .get(namespace)
+            .is_some_and(|excluded| excluded.contains(symbol))
     }
 
     pub fn builtins(&self) -> &[String] {
@@ -338,6 +346,9 @@ impl GeneratedNamespaceConfig {
                         return Err(":require :lazy cannot be combined with :refer".into());
                     }
                     if matches!(&option[1], Form::Keyword(name) if name == "all") {
+                        if !self.used_namespaces.iter().any(|value| value == target) {
+                            self.used_namespaces.push(target.into());
+                        }
                         continue;
                     }
                     let names = vector(
@@ -346,7 +357,7 @@ impl GeneratedNamespaceConfig {
                     )?;
                     for value in names {
                         let name = symbol(value, ":require :refer expects unqualified symbols")?;
-                        if name.contains('/') {
+                        if qualified_symbol(name) {
                             return Err(":require :refer expects unqualified symbols".into());
                         }
                         let canonical = canonical(target, name);
@@ -368,7 +379,7 @@ impl GeneratedNamespaceConfig {
                     for value in names {
                         let name =
                             symbol(value, ":require :refer-macros expects unqualified symbols")?;
-                        if name.contains('/') {
+                        if qualified_symbol(name) {
                             return Err(":require :refer-macros expects unqualified symbols".into());
                         }
                     }
@@ -388,9 +399,13 @@ impl GeneratedNamespaceConfig {
                         vector(&option[1], ":require :exclude expects a vector of symbols")?;
                     for value in names {
                         let name = symbol(value, ":require :exclude expects unqualified symbols")?;
-                        if name.contains('/') {
+                        if qualified_symbol(name) {
                             return Err(":require :exclude expects unqualified symbols".into());
                         }
+                        self.used_exclusions
+                            .entry(target.into())
+                            .or_default()
+                            .insert(name.into());
                     }
                 }
                 other => return Err(format!("Unsupported :require option: :{other}")),
@@ -527,7 +542,7 @@ fn parse_refer_clojure(values: &[Form]) -> Result<HashSet<String>, String> {
     symbols
         .iter()
         .map(|item| match item {
-            Form::Symbol(name) if !name.contains('/') => Ok(name.clone()),
+            Form::Symbol(name) if !qualified_symbol(name) => Ok(name.clone()),
             _ => Err(":refer-clojure :exclude expects unqualified symbols".into()),
         })
         .collect()
@@ -556,6 +571,9 @@ fn symbol<'a>(form: &'a Form, error: &str) -> Result<&'a str, String> {
         Form::Symbol(value) => Ok(value),
         _ => Err(error.into()),
     }
+}
+fn qualified_symbol(value: &str) -> bool {
+    value != "/" && value.contains('/')
 }
 fn library(value: &str) -> Result<&str, String> {
     if value.contains('/') {

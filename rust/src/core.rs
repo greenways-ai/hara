@@ -9233,7 +9233,7 @@ fn eval_require_spec(
             Form::Vector(names) => names
                 .iter()
                 .map(|name| match name {
-                    Form::Symbol(name) if !name.contains('/') => Ok(name.clone()),
+                    Form::Symbol(name) if name == "/" || !name.contains('/') => Ok(name.clone()),
                     _ => Err("require :exclude expects unqualified symbols".to_string()),
                 })
                 .collect::<Result<HashSet<_>, _>>(),

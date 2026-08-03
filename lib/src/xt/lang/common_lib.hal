@@ -1,8 +1,8 @@
 (ns xt.lang.common-lib
-  (:require [tahto.core :as l :refer [defspec.xt]])
-  (:refer-clojure :exclude [identity fn? cat print
-                            nil? inc dec zero? pos?
-                            neg? even? odd?]))
+  (:config {:blank true})
+  (:require [tahto.core :as l :refer [defspec.xt]]
+            [std.foundation :refer :all :exclude [do if fn quote try identity fn? cat print
+                                                   nil? inc dec zero? pos? neg? even? odd?]]))
 
 (l/script :xtalk
   {:require [[xt.lang.spec-base :as xt]]})

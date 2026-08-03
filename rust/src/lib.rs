@@ -1181,7 +1181,9 @@ impl Runtime {
         for namespace in config.used_namespaces() {
             if let Some(source) = self.namespace_registry.find(namespace) {
                 for (symbol, var) in source.mappings() {
-                    target.map_var(symbol, var);
+                    if !config.used_symbol_excluded(namespace, symbol.as_str()) {
+                        target.map_var(symbol, var);
+                    }
                 }
                 let source_name = source.name().as_str().to_owned();
                 let target_name = target.name().as_str().to_owned();
@@ -1195,7 +1197,9 @@ impl Runtime {
                     .collect::<Vec<_>>();
                 let mut macros = self.macros.borrow_mut();
                 for (name, function) in referred {
-                    macros.insert((target_name.clone(), name), function);
+                    if !config.used_symbol_excluded(namespace, &name) {
+                        macros.insert((target_name.clone(), name), function);
+                    }
                 }
             }
         }
@@ -4356,6 +4360,57 @@ mod tests {
             runtime.eval_text("(std.foundation/identity 42)").unwrap(),
             "42"
         );
+    }
+
+    #[test]
+    fn blank_namespace_collision_controls_preserve_the_canonical_cache() {
+        let mut runtime = Runtime::new();
+        let foundation = runtime
+            .namespace_registry
+            .find("std.foundation")
+            .expect("foundation is bootstrapped");
+        let canonical_identity = foundation
+            .resolve(&crate::lang::data::Symbol::parse("identity"))
+            .expect("foundation identity is installed");
+
+        runtime.register_resource(
+            "xt.collision-probe",
+            concat!(
+                "(ns xt.collision-probe ",
+                "(:config {:blank true}) ",
+                "(:require [std.foundation :refer :all ",
+                ":exclude [/ do if fn quote try]])) ",
+                "(defmacro do [value] (list 'quote value)) ",
+                "(defmacro if [value] (list 'quote value)) ",
+                "(defmacro fn [value] (list 'quote value)) ",
+                "(defmacro quote [value] (list 'quote value)) ",
+                "(defmacro try [value] (list 'quote value))"
+            ),
+        );
+
+        runtime
+            .eval_text("(require [xt.collision-probe :as probe])")
+            .unwrap();
+        runtime
+            .eval_text("(require [xt.collision-probe :as probe-again])")
+            .unwrap();
+
+        assert_eq!(
+            runtime
+                .eval_text("(module-revision 'xt.collision-probe)")
+                .unwrap(),
+            "1"
+        );
+        assert_eq!(runtime.eval_text("(probe/do 42)").unwrap(), "42");
+        assert_eq!(runtime.eval_text("(probe-again/try 7)").unwrap(), "7");
+
+        let cached_identity = runtime
+            .namespace_registry
+            .find("std.foundation")
+            .unwrap()
+            .resolve(&crate::lang::data::Symbol::parse("identity"))
+            .unwrap();
+        assert!(canonical_identity.same_identity(&cached_identity));
     }
 
     #[test]
