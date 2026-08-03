@@ -45,7 +45,6 @@ async function walk(directory) {
     const output = join(destination, rel);
     let body = await readFile(input, "utf8");
     body = normalizeMkDocsFrontmatter(body);
-    body = body.replaceAll("https://docs.hara-lang.org/", "/docs/");
     // Shiki does not yet ship a Hara grammar. Clojure is the closest reader
     // grammar and preserves useful highlighting until the dedicated grammar lands.
     body = body.replace(/^```(?:hara|hal)(\s+eval)?\s*$/gm, "```clojure$1");
