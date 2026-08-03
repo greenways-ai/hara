@@ -1,0 +1,86 @@
+(ns postgres.typed.export.json-openapi-test
+  (:require [postgres.typed.export.json-openapi :as openapi]
+            [postgres.typed.typed-analyze :as analyze]
+            [postgres.typed.typed-common :as types]
+            [postgres.typed.typed-parse :as parse])
+  (:use code.test))
+
+(fact "converts field descriptors to OpenAPI schemas"
+  (openapi/field->openapi {:type :uuid :nullable? false})
+  => {:type "string" :format "uuid"}
+  (openapi/field->openapi {:type :text :nullable? true})
+  => {:type "string"}
+  (openapi/field->openapi {:type :boolean})
+  => {:type "boolean"}
+  (:type (openapi/field->openapi {:type :array :items {:type :text}}))
+  => "array"
+  (openapi/field->openapi {:is-ref? true})
+  => {:type "string" :format "uuid"})
+
+(fact "preserves raw string keys in nested shapes"
+  (let [nested (types/make-jsonb-shape
+                {"UserProfile" {:type :array :items {:type :jsonb}}})
+        value (types/make-jsonb-shape
+               {"db/sync" {:type :jsonb :shape nested}})
+        result (openapi/shape->openapi value)]
+    [(has? (:properties result) "db/sync")
+     (has? (get-in result [:properties "db/sync" :properties]) "UserProfile")
+     (get-in result [:properties "db_sync"])])
+  => [true true nil])
+
+(fact "converts function arguments and removes the input prefix"
+  (openapi/arg->openapi {:name 'm :type :text} {:inputs []})
+  => ["m" {:type "string"}]
+  (openapi/arg->openapi {:name 'i-count :type :integer} {:inputs []})
+  => ["count" {:type "integer"}]
+  (vector? (openapi/arg->openapi {:name 'm :type :jsonb} {:inputs []}))
+  => true)
+
+(fact "retains tracked arguments in request bodies"
+  (let [fn-def (types/make-fn-def
+                "test.ns" "insert-task"
+                [(types/FnArg 'i-name :text [] :payload)
+                 (types/FnArg 'o-op :jsonb [] :track)]
+                [:jsonb]
+                {:docstring "inserts a task"}
+                nil)
+        _ (swap! analyze/*infer-cache*
+                 assoc (symbol (:ns fn-def) (:name fn-def))
+                 {:kind :primitive :type :jsonb})
+        result (openapi/fn->openapi fn-def)]
+    (has? (get-in result [:requestBody :content "application/json"
+                          :schema :properties])
+          "o_op"))
+  => true)
+
+(fact "generates paths and component schemas from the registry"
+  (do
+    (types/clear-registry!)
+    (types/register-type!
+     'demo/Task
+     (types/make-table-def
+      "demo" "Task"
+      [(types/make-column-def
+        :id (types/make-type-ref :primitive nil :uuid) {:primary true})
+       (types/make-column-def
+        :name (types/make-type-ref :primitive nil :text))]
+      :id))
+    (types/register-type!
+     'demo/Status
+     (types/make-enum-def "demo" "Status" [:active :disabled] nil))
+    (let [fn-def (parse/parse-defn
+                  '(defn.pg ^{:%% :sql :- [:Task]}
+                     list-tasks
+                     []
+                     (pg/t:select Task {:returning #{:id :name}}))
+                  "demo" nil)]
+      (types/register-type! 'demo/list-tasks fn-def)
+      (swap! analyze/*infer-cache*
+             assoc 'demo/list-tasks
+             {:kind :array :table 'Task :element-type :jsonb}))
+    (let [spec (openapi/generate-openapi 'demo (fn [_] true))]
+      [(get-in spec [:paths "/rpc/list_tasks" "post" :responses "200" :description])
+       (get-in spec [:components :schemas "Task" :type])
+       (get-in spec [:components :schemas "Status" :enum])]))
+  => ["Successful response" "object" ["active" "disabled"]]
+  (do (types/clear-registry!) true) => true)

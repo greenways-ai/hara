@@ -151,7 +151,7 @@ public final class HaraContext {
           Map.entry("Obj", java.util.List.of("new", "instance?", "get-key", "set-key", "has-key?", "delete-key")),
           Map.entry("Runtime", java.util.List.of("load-string", "macroexpand-1", "gensym", "var-sym")),
           Map.entry("Printer", java.util.List.of("p", "println")),
-          Map.entry("Edn", java.util.List.of("read")),
+          Map.entry("Edn", java.util.List.of("read", "read-forms")),
           Map.entry("Json", java.util.List.of("read", "write", "pretty")),
           Map.entry("Host", java.util.List.of("call", "describe", "capabilities", "capability?")),
           Map.entry("Regex", java.util.List.of("instance?")),
@@ -2556,6 +2556,9 @@ public final class HaraContext {
     namespace("hara.native.jvm.classpath");
     namespace("hara.native.jvm.compiler");
     HaraNamespace edn = namespace("std.native.Edn");
+    edn.define(
+        "read-forms",
+        new VariadicBuiltin("std.native.Edn/read-forms", this::readForms));
     edn.define(
         "read",
         new UnaryBuiltin(

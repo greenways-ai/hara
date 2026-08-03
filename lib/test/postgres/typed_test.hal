@@ -1,0 +1,108 @@
+(ns postgres.typed-test
+  (:require [std.foundation.string :as string]
+            [postgres.typed :as typed]
+            [postgres.typed.typed-analyze :as analyze]
+            [postgres.typed.typed-common :as types]
+            [postgres.typed.typed-parse :as parse]
+            [tahto.runtime.postgres.base.application :as app])
+  (:use code.test))
+
+(defn fixture-registry []
+  (let [table (types/make-table-def
+               "demo" "Entry"
+               [(types/make-column-def
+                 :id (types/make-type-ref :primitive nil :uuid)
+                 {:required true :primary true})
+                (types/make-column-def
+                 :name (types/make-type-ref :primitive nil :text)
+                 {:required true})]
+               :id)
+        fn-def (parse/parse-defn
+                '(defn.pg make-entry
+                   [:uuid i-id :text i-name]
+                   (return {:id i-id :name i-name}))
+                "demo" nil)]
+    {'demo/Entry table 'demo/make-entry fn-def}))
+
+(defn fixture-shape []
+  (types/make-jsonb-shape
+   {:id {:type :uuid :nullable? false}
+    :name {:type :text :nullable? false}}))
+
+(defn seed-inference! []
+  (swap! analyze/*infer-cache*
+         assoc 'demo/make-entry
+         {:kind :shaped :shape (fixture-shape)}))
+
+(fact "unwraps and formats inferred JSONB shapes"
+  (let [jsonb-shape (types/make-jsonb-shape {:id {:type :uuid}} "Entry")]
+    [(:fields (typed/inferred->shape jsonb-shape))
+     (:source-table (typed/inferred->shape {:kind :shaped :shape jsonb-shape}))
+     (typed/inferred->shape {:kind :primitive})
+     (get-in (typed/format-shape jsonb-shape :openapi) [:properties "id" :format])
+     (string? (typed/format-shape jsonb-shape :typescript))])
+  => [{:id {:type :uuid}} "Entry" nil "uuid" true])
+
+(fact "creates contexts from registries and analysis"
+  (let [registry (fixture-registry)
+        ctx (typed/load-registry registry)
+        analysis {:ns "demo"
+                  :tables [(get registry 'demo/Entry)]
+                  :enums []
+                  :functions [(get registry 'demo/make-entry)]}
+        analyzed (typed/load-analysis analysis)]
+    [(:domain ctx) (count (typed/entries ctx))
+     (:domain analyzed) (count (:registry analyzed))])
+  => [:postgres 2 :postgres 2])
+
+(fact "loads registered application typed payloads"
+  (let [payload (typed/registry->typed (fixture-registry))]
+    (app/register-app! "demo" {:typed payload})
+    (let [ctx (typed/load-app "demo")]
+      [(:app-name ctx) (count (typed/entries ctx))]))
+  => ["demo" 2])
+
+(fact "resolves function declarations and signatures"
+  (let [ctx (typed/load-registry (fixture-registry))]
+    [(get (typed/function-def ctx 'demo/make-entry) :name)
+     (count (typed/function-input ctx 'demo/make-entry))
+     (get (typed/function-input ctx 'demo/make-entry 'i-name) :name)
+     (typed/function-output ctx 'demo/make-entry)])
+  => ["make-entry" 2 'i-name [:jsonb]])
+
+(fact "infers and formats function output shapes"
+  (let [_ (seed-inference!)
+        ctx (typed/load-registry (fixture-registry))
+        output (typed/output-shape ctx 'demo/make-entry)]
+    [(types/jsonb-shape? output)
+     (get-in output [:fields :id :type])
+     (get-in (typed/output-schema ctx 'demo/make-entry :json-schema)
+             [:properties "name" :type])])
+  => [true :uuid "string"])
+
+(fact "returns reports and grouped contracts"
+  (let [_ (seed-inference!)
+        ctx (typed/load-registry (fixture-registry))
+        report (typed/function-report ctx 'demo/make-entry)
+        contract (typed/function-contract ctx 'demo/make-entry {:format :openapi})]
+    [(get-in report [:function :name])
+     (count (get-in contract [:input :args]))
+     (get-in contract [:output :schema :properties "id" :format])])
+  => ["make-entry" 2 "uuid"])
+
+(fact "exports all supported schema formats"
+  (let [_ (seed-inference!)
+        ctx (typed/load-registry (fixture-registry))
+        openapi (typed/export-openapi ctx)
+        schema (typed/export-json-schema ctx)
+        typescript (typed/export-typescript ctx)]
+    [(:openapi openapi)
+     (get-in schema [:definitions "Entry" :type])
+     (string/includes? typescript "interface Entry")])
+  => ["3.0.3" "object" true])
+
+(fact "reports missing functions and arguments"
+  (let [ctx (typed/load-registry (fixture-registry))]
+    (typed/function-def ctx 'demo/missing)) => (throws)
+  (let [ctx (typed/load-registry (fixture-registry))]
+    (typed/function-input ctx 'demo/make-entry 'missing)) => (throws))

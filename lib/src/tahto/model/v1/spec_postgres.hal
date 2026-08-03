@@ -23,9 +23,7 @@
 
 (defn pg-type-name
   [value]
-  (-> (name value)
-      (string/replace "-" " ")
-      (string/upper)))
+  (string/upper (string/replace (name value) "-" " ")))
 
 (defn pg-typecast
   [form grammar context]
@@ -55,6 +53,21 @@
        ")::TEXT, MESSAGE = "
        (pg-string (pg-tag-string tag))))
 
+(defn pg-map-entries
+  "Emits ordered key/value pairs as a jsonb_build_object expression."
+  [entries grammar context]
+  (str "jsonb_build_object("
+       (string/join
+        ","
+        (mapcat (fn [entry]
+                  (let [entry-value (second entry)]
+                    [(pg-string (name (first entry)))
+                     (if (keyword? entry-value)
+                       (pg-string (str entry-value))
+                       (emit/*emit-fn* entry-value grammar context))]))
+                entries))
+       ")"))
+
 (defn pg-throw
   [form grammar context]
   (pg-throw-value (nth form 1) (nth form 2) grammar context))
@@ -64,11 +77,18 @@
   (let [check (nth form 1)
         tag (nth form 2)
         data (nth form 3)
-        detail (if (map? data)
-                 (merge {:status "error" :tag tag} data)
-                 {:status "error" :tag tag :data data})]
+        detail-entries (if (map? data)
+                         (let [detail (merge {:status "error" :tag tag} data)]
+                           (concat [[:status (:status detail)] [:tag (:tag detail)]]
+                                   (filter (fn [entry]
+                                             (and (not= :status (first entry))
+                                                  (not= :tag (first entry))))
+                                           data)))
+                         [[:status "error"] [:tag tag] [:data data]])
+        detail-output (pg-map-entries detail-entries grammar context)]
     (str "IF NOT (" (emit/*emit-fn* check grammar context) ") THEN\n"
-         "  " (pg-throw-value detail tag grammar context) ";\n"
+         "  RAISE EXCEPTION USING DETAIL = (" detail-output
+         ")::TEXT, MESSAGE = " (pg-string (pg-tag-string tag)) ";\n"
          "END IF")))
 
 (defn pg-stack-diagnostics
@@ -112,14 +132,7 @@
 (defn pg-map
   "Emits host maps as jsonb_build_object expressions."
   [value grammar context]
-  (str "jsonb_build_object("
-       (string/join
-        ","
-        (mapcat (fn [entry]
-                  [(pg-string (name (first entry)))
-                   (emit/*emit-fn* (second entry) grammar context)])
-                value))
-       ")"))
+  (pg-map-entries value grammar context))
 
 (defn pg-section-keyword
   [value]
@@ -127,9 +140,7 @@
     (cond (= value :->) "->"
           (= value :->>) "->>"
           (= value :#>>) "#>>"
-          :else (-> raw
-                    (string/replace "-" " ")
-                    (string/upper)))))
+          :else (string/upper (string/replace raw "-" " ")))))
 
 (defn pg-assignment-map
   [value grammar context]
@@ -155,12 +166,15 @@
                      (or found (keyword? item)))
                    false
                    value))
-    (-> (string/join " " (map (fn [item]
-                                  (pg-section-item item grammar context))
-                                value))
-        (string/replace " \n " "\n")
-        (string/replace "\n " "\n")
-        (string/replace " \n" "\n"))
+    (string/replace
+     (string/replace
+      (string/replace
+       (string/join " " (map (fn [item]
+                                (pg-section-item item grammar context))
+                              value))
+       " \n " "\n")
+      "\n " "\n")
+     " \n" "\n")
     (str "jsonb_build_array("
          (string/join "," (map (fn [item]
                                   (emit/*emit-fn* item grammar context))
@@ -180,7 +194,7 @@
      :grammar/version xtalk/+version+}
     :operators
     {:override
-     {:eq {:raw "="}
+     {:eq {:symbol #{'== '=} :raw "="}
       :not {:raw "NOT " :wrap true}
       :or {:raw "OR" :wrap true}
       :and {:raw "AND" :wrap true}

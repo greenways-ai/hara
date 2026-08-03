@@ -1,0 +1,78 @@
+(ns postgres.typed.export.server-db-test
+  (:require [std.foundation.string :as string]
+            [postgres.typed.export.server-db :as server-db]
+            [postgres.typed.typed-common :as types])
+  (:use code.test))
+
+(def +shape-fn+
+  (types/make-fn-def "demo.core" "create-user"
+                     [(types/FnArg 'm :jsonb [:jsonb] :payload)] :jsonb
+                     {:raw-body '[(pg/t:insert UserAccount {:id "u1"})]} nil))
+(def +manual-sync-fn+
+  (types/make-fn-def "demo.core" "create-user-manual" [] :jsonb
+                     {:raw-body '[(pg/t:insert UserAccount {:id "u1"})]
+                      :sync/mode :manual
+                      :sync/tables ['UserAccount 'UserProfile]} nil))
+(def +read-fn+
+  (types/make-fn-def "demo.core" "get-user" [] :jsonb
+                     {:raw-body '[(pg/t:get UserAccount {:where {:id "u1"}})]} nil))
+
+(fact "collects postgres operations from nested forms"
+  (server-db/collect-pg-ops '(pg/t:insert Task {:name "test"})) => #{:insert}
+  (server-db/collect-pg-ops '(pg/t:update Task {:name "test"} {:id 1})) => #{:update}
+  (server-db/collect-pg-ops '(pg/t:delete Task {:id 1})) => #{:delete}
+  (server-db/collect-pg-ops '(let [x 1] (pg/t:insert Task {:name "test"}))) => #{:insert}
+  (server-db/collect-pg-ops '(+ 1 2 3)) => #{}
+  (server-db/collect-pg-ops
+   '(do (pg/t:insert Task {:name "a"})
+        (pg/t:update Task {:name "b"} {:id 1}))) => #{:insert :update})
+
+(fact "respects manual and non-mutating sync modes"
+  (do (types/register-type! 'demo.core/UserAccount
+                            (types/make-table-def "demo.core" "UserAccount" [] :id))
+      (select-keys (server-db/infer-sync-spec +manual-sync-fn+)
+                   [:mode :mutating? :tables]))
+  => {:mode :manual :mutating? false :tables ["UserAccount" "UserProfile"]}
+  (select-keys (server-db/infer-sync-spec +read-fn+)
+               [:mode :mutating? :tables])
+  => {:mode :none :mutating? false :tables ["UserAccount"]})
+
+(fact "leaves nil and existing sync payloads unchanged"
+  (server-db/db-sync-merge nil ["UserAccount"]) => nil
+  (server-db/db-sync-merge
+   {:id "u1" :db/sync {"UserAccount" [{:id "u1"}]}}
+   ["UserAccount" "UserProfile"])
+  => {:id "u1" :db/sync {"UserAccount" [{:id "u1"}]}})
+
+(fact "prepares wrapper generation input"
+  (server-db/supabase-db-input
+   {:wrapper-sym 'create-user-manual-sync
+    :fn-def +manual-sync-fn+
+    :sync-spec {:sync-fn 'postgres.typed.export.server-db/db-sync-merge
+                :tables ["UserAccount" "UserProfile"]}})
+  => {'wrapper-sym 'create-user-manual-sync
+      'input []
+      'inner-sym 'demo.core/create-user-manual
+      'call-args []
+      'sync-fn 'postgres.typed.export.server-db/db-sync-merge
+      'tables ["UserAccount" "UserProfile"]})
+
+(fact "creates DB target entries"
+  (select-keys (server-db/target-entry +shape-fn+ :supabase-db)
+               [:target :emitted-sym :fn-def])
+  => {:target :supabase-db
+      :emitted-sym 'create-user-sync
+      :fn-def +shape-fn+})
+
+(fact "renders DB wrappers when sync is enabled"
+  (string/includes? (server-db/emit-target +manual-sync-fn+ :supabase-db)
+                    "create-user-manual-sync")
+  => true)
+
+(fact "renders configured DB targets"
+  (keys (server-db/emit-targets +manual-sync-fn+)) => '(:supabase-db)
+  (string? (:supabase-db
+            (server-db/emit-targets +manual-sync-fn+ [:supabase-db]))) => true)
+
+(fact "lists supported DB targets"
+  (server-db/list-targets) => '(:supabase-db))

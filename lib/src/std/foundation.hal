@@ -50,6 +50,12 @@
 ;; ============================================================================
 (ns std.foundation)
 
+(defn ^{:schema [:fn [:str] [:vec :any]]}
+  read-forms
+  "Reads every top-level form from a capability-gated HAL source file."
+  [path]
+  (std.native.Edn/read-forms path))
+
 ;; ---------------------------------------------------------------------------
 ;; Functions and composition
 ;; ---------------------------------------------------------------------------

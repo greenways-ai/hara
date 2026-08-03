@@ -7550,6 +7550,53 @@ mod tests {
     }
 
     #[test]
+    fn letfn_supports_local_recursion_mutual_recursion_and_scope_restoration() {
+        let mut runtime = Runtime::new();
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(letfn [(sum [n acc] (if (= n 0) acc (sum (- n 1) (+ acc n))))] (sum 5 0))",
+                )
+                .unwrap(),
+            "15"
+        );
+        assert_eq!(
+            runtime
+                .eval_text(
+                    "(letfn [(even-local? [n] (if (= n 0) true (odd-local? (- n 1)))) (odd-local? [n] (if (= n 0) false (even-local? (- n 1))))] [(even-local? 8) (odd-local? 7)])",
+                )
+                .unwrap(),
+            "[true true]"
+        );
+        assert!(runtime.eval_text("even-local?").is_err());
+        assert!(runtime
+            .eval_text("(letfn [(f [x] x) (f [x] x)] (f 1))")
+            .unwrap_err()
+            .contains("Duplicate letfn name"));
+    }
+
+    #[test]
+    fn read_forms_uses_the_capability_gated_file_provider() {
+        let mut runtime = Runtime::new();
+        runtime.install_memory_file_provider("/typed");
+        runtime
+            .eval_text(
+                "(deref (file/write \"/typed/sample.hal\" (bytes 40 110 115 32 116 121 112 101 100 46 115 97 109 112 108 101 41 10 40 100 101 102 32 118 97 108 117 101 32 52 50 41)))",
+            )
+            .unwrap();
+        assert_eq!(
+            runtime
+                .eval_text("(count (read-forms \"/typed/sample.hal\"))")
+                .unwrap(),
+            "2"
+        );
+        assert!(runtime
+            .eval_text("(read-forms \"typed/sample.clj\")")
+            .unwrap_err()
+            .contains(".hal or .hrl"));
+    }
+
+    #[test]
     fn conditional_and_let() {
         let mut runtime = Runtime::new();
         // Var display is namespace-qualified, matching the JVM runtime

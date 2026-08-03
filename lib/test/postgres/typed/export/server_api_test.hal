@@ -1,0 +1,48 @@
+(ns postgres.typed.export.server-api-test
+  (:require [std.foundation.string :as string]
+            [postgres.typed.export.server-api :as server-api]
+            [postgres.typed.typed-common :as types])
+  (:use code.test))
+
+(def +shape-fn+
+  (types/make-fn-def "demo.core" "create-user"
+                     [(types/FnArg 'm :jsonb [:jsonb] :payload)] :jsonb
+                     {:raw-body '[(pg/t:insert UserAccount {:id "u1"})]} nil))
+(def +manual-sync-fn+
+  (types/make-fn-def "demo.core" "create-user-manual" [] :jsonb
+                     {:raw-body '[(pg/t:insert UserAccount {:id "u1"})]
+                      :sync/mode :manual
+                      :sync/tables ['UserAccount 'UserProfile]} nil))
+
+(fact "normalizes xtalk contract input"
+  (server-api/xtalk-contract-input
+   {:contract-sym 'create-user-contract
+    :wrapper-sym 'create-user-sync
+    :fn-def +manual-sync-fn+
+    :sync-spec {:mode :manual :tables ["UserAccount" "UserProfile"]}})
+  => {'contract-sym 'create-user-contract
+      'id "create_user_manual"
+      'sync-mode :manual
+      'tables ["UserAccount" "UserProfile"]
+      'handler-sym 'create-user-sync})
+
+(fact "creates API target entries"
+  (select-keys (server-api/target-entry +shape-fn+ :xtalk-contracts)
+               [:target :emitted-sym :fn-def])
+  => {:target :xtalk-contracts
+      :emitted-sym 'create-user-contract
+      :fn-def +shape-fn+})
+
+(fact "renders xtalk contracts when sync is enabled"
+  (string/includes?
+   (server-api/emit-target +manual-sync-fn+ :xtalk-contracts)
+   "create-user-manual-contract")
+  => true)
+
+(fact "renders configured API targets"
+  (keys (server-api/emit-targets +manual-sync-fn+)) => '(:xtalk-contracts)
+  (string? (:xtalk-contracts
+            (server-api/emit-targets +manual-sync-fn+ [:xtalk-contracts]))) => true)
+
+(fact "lists supported API targets"
+  (server-api/list-targets) => '(:xtalk-contracts))

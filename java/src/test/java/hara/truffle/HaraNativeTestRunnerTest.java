@@ -109,12 +109,18 @@ public final class HaraNativeTestRunnerTest {
   @Test
   public void runsPortablePostgresTypedFoundation() throws Exception {
     String[][] suites = {
+      {"lib/test/postgres/typed_test.hal", "8", "9"},
       {"lib/test/postgres/typed/typed_common_test.hal", "11", "37"},
       {"lib/test/postgres/typed/typed_shape_test.hal", "7", "11"},
       {"lib/test/postgres/typed/typed_resolve_test.hal", "6", "16"},
       {"lib/test/postgres/typed/typed_jsonb_test.hal", "12", "30"},
       {"lib/test/postgres/typed/typed_infer_test.hal", "10", "15"},
+      {"lib/test/postgres/typed/typed_parse_test.hal", "11", "24"},
+      {"lib/test/postgres/typed/typed_analyze_test.hal", "27", "18"},
+      {"lib/test/postgres/typed/export/json_openapi_test.hal", "5", "12"},
       {"lib/test/postgres/typed/export/json_schema_test.hal", "5", "9"},
+      {"lib/test/postgres/typed/export/server_api_test.hal", "5", "6"},
+      {"lib/test/postgres/typed/export/server_db_test.hal", "8", "16"},
       {"lib/test/postgres/typed/export/ts_schema_test.hal", "4", "11"}
     };
 

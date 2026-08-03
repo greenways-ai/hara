@@ -1,0 +1,57 @@
+(ns postgres.typed.export.server-api
+  (:require [postgres.typed.export.server-db :as server-db]
+            [postgres.typed.typed-common :as types]))
+
+(def +default-targets+ [:xtalk-contracts])
+(def +targets+ {:xtalk-contracts {:suffix "-contract"}})
+
+(defn xtalk-contract-input
+  [input]
+  (let [fn-def (:fn-def input)]
+    {'contract-sym (:contract-sym input)
+     'id (types/normalize-key (:name fn-def))
+     'sync-mode (get-in input [:sync-spec :mode])
+     'tables (vec (get-in input [:sync-spec :tables]))
+     'handler-sym (or (:wrapper-sym input)
+                      (symbol (or (:ns fn-def) "") (:name fn-def)))}))
+
+(defn target-entry
+  [fn-def target]
+  (let [sync-spec (server-db/infer-sync-spec fn-def)
+        suffix (get-in +targets+ [target :suffix])]
+    {:target target
+     :fn-def fn-def
+     :sync-spec sync-spec
+     :emitted-sym (symbol (str (:name fn-def) suffix))}))
+
+(defn emit-target
+  [fn-def target]
+  (let [target-meta (get +targets+ target)
+        entry (target-entry fn-def target)
+        sync-spec (:sync-spec entry)]
+    (when (and target-meta (not= :off (:mode sync-spec)))
+      (let [input (xtalk-contract-input
+                   {:contract-sym (:emitted-sym entry)
+                    :fn-def fn-def
+                    :sync-spec sync-spec})]
+        (pr-str
+         (list 'def.xt
+               (get input 'contract-sym)
+               {:id (get input 'id)
+                :task "supabase.rpc"
+                :sync {:mode (get input 'sync-mode)
+                       :tables (get input 'tables)}
+                :handler {:fn (get input 'handler-sym)}}))))))
+
+(defn emit-targets
+  ([fn-def] (emit-targets fn-def +default-targets+))
+  ([fn-def targets]
+   (reduce (fn [out target]
+             (let [value (emit-target fn-def target)]
+               (if value (assoc out target value) out)))
+           {}
+           targets)))
+
+(defn list-targets [] (keys +targets+))
+
+(def __tahto_load__ true)
