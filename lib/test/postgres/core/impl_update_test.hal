@@ -1,0 +1,61 @@
+(ns postgres.core.impl-update-test
+  (:require [postgres.core.impl-update :as update])
+  (:use code.test))
+
+(def schema
+  {:id [{:type :uuid :primary true :order 0}]
+   :status [{:type :enum :order 1 :enum {:ns 'demo/Status}}]
+   :name [{:type :text :order 2}]
+   :cache [{:type :ref :order 3 :ref {:type :uuid}}]})
+(def prepared [{:id 'Entry :module 'demo} schema {}])
+(def entry {:id 'Entry :module 'demo :table-schema schema})
+
+(fact "constructs map updates in schema order"
+  (update/t-update-map schema {:name "n" :status "open"} {} {})
+  => '(--- [(== #{"status"} (++ "open" demo/Status))
+            (== #{"name"} (:text "n"))]))
+
+(fact "constructs coalescing symbol updates"
+  (update/t-update-symbol schema 'row {:columns [:name :cache]} {})
+  => '(--- [(== #{"name"} (coalesce (:text (:->> row "name")) #{"name"}))
+            (== #{"cache_id"}
+                (coalesce (:uuid (coalesce (:->> row "cache_id")
+                                            (:->> (:-> row "cache") "id")))
+                          #{"cache_id"}))]))
+
+(fact "can disable symbol coalescing"
+  (update/t-update-symbol schema 'row {:columns [:status] :coalesce false} {})
+  => '(--- [(== #{"status"} (++ (:->> row "status") demo/Status))]))
+
+(fact "constructs raw update statements"
+  (update/t-update-raw prepared {:as :raw :set {:status "open"}
+                                 :where {:id "a"}})
+  => '[:update demo/Entry :set (--- [(== #{"status"} (++ "open" demo/Status))])
+       :where {"id" [:eq "a"]}])
+
+(fact "wraps update returning rows as JSON"
+  (update/t-update entry {:set {:name "n"}})
+  => '[:with j-ret :as
+       [:update demo/Entry :set (--- [(== #{"name"} (:text "n"))])
+        \\ :returning (--- [#{"id"} #{"status"} #{"name"} #{"cache_id"}])]
+       \\ :select (jsonb-agg j-ret) :from j-ret])
+
+(fact "constructs guarded modify blocks"
+  (update/t-modify-raw prepared {:set {:status "open"} :where {:id "a"}})
+  => '(let [(++ u-ret demo/Entry)
+            [:update demo/Entry :set (--- [(== #{"status"} (++ "open" demo/Status))])
+             :where {"id" [:eq "a"]} \\ :returning * :into u-ret]
+            _ (if [:not (exists [:select u-ret])]
+                [:raise-exception (% "Record Not Found")])]
+        nil))
+
+(fact "provides a portable assignment protocol"
+  (:assign/fn (meta (update/t-modify entry {:set {:name "n"}})))
+  => 'postgres.core.impl-update/t-modify-assign
+  (update/t-modify-assign prepared {:set {:name "n"} :returning #{:name}} 'out)
+  => '(let [(++ u-ret demo/Entry)
+            [:update demo/Entry :set (--- [(== #{"name"} (:text "n"))])
+             \\ :returning (--- [#{"name"}]) :into u-ret]
+            _ (if [:not (exists [:select u-ret])]
+                [:raise-exception (% "Record Not Found")])]
+        [:select (to-jsonb u-ret) :into out]))

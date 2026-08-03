@@ -1,0 +1,97 @@
+(ns postgres.core.impl-update
+  (:config {:blank true})
+  (:require [std.foundation :refer :all]
+            [postgres.core.impl-base :as base]
+            [tahto.common.util :as util]))
+
+(defn- attrs [schema key]
+  (let [entry (get schema key)] (if (vector? entry) (first entry) entry)))
+
+(defn- ordered-keys [schema keys]
+  (sort-by (fn [key] (or (:order (attrs schema key)) 1000000)) keys))
+
+(defn- valid-keys! [schema keys]
+  (let [invalid (filter (fn [key] (nil? (get schema key))) keys)]
+    (when (seq invalid) (throw (ex-info "Invalid columns" {:keys (vec invalid)})))))
+
+(defn t-update-symbol [schema sym params options]
+  (let [columns (or (:columns params)
+                    (reduce (fn [out key]
+                              (let [a (attrs schema key)]
+                                (if (and (:order a) (not (:primary a)) (not (:ignore a)))
+                                  (conj out key) out))) [] (keys schema)))]
+    (valid-keys! schema columns)
+    (list '---
+          (vec (map (fn [key]
+                      (let [value (base/t-sym-fn schema key sym)
+                            output (if (false? (:coalesce params))
+                                     value (list 'coalesce value #{(base/t-key-fn schema key)}))]
+                        (list '== #{(base/t-key-fn schema key)} output)))
+                    (ordered-keys schema columns))))))
+
+(defn t-update-map [schema input params options]
+  (valid-keys! schema (keys input))
+  (let [keys (ordered-keys schema
+                           (filter (fn [key] (not (:ignore (attrs schema key))))
+                                   (keys input)))]
+    (list '---
+          (vec (map (fn [key]
+                      (list '== #{(base/t-key-fn schema key)}
+                            (base/t-val-fn schema key (get input key) params options)))
+                    keys)))))
+
+(defn- table-symbol [entry] (or (util/sym-full entry) (:id entry)))
+
+(defn t-update-raw [prepared params]
+  (let [entry (first prepared)
+        schema (second prepared)
+        options (nth prepared 2)
+        table-sym (table-symbol entry)
+        as (get params :as :json)
+        defaults (reduce (fn [out key]
+                           (let [a (attrs schema key)]
+                             (if (and (:order a) (not (:ignore a))) (conj out key) out)))
+                         #{} (keys schema))
+        returning (base/t-returning schema
+                                    (or (:returning params)
+                                        (when (not= :raw as) defaults)))
+        update-form (if (map? (:set params))
+                      (t-update-map schema (:set params) params options)
+                      (t-update-symbol schema (:set params) params options))
+        form [:update table-sym :set update-form]
+        filtered (base/t-wrap-where form (:where params) schema {} options)
+        extended (base/t-wrap-args filtered (:args params) {})
+        returned (base/t-wrap-returning extended returning {:newline true})
+        json-output (if (:single params) 'to-jsonb 'jsonb-agg)
+        json (base/t-wrap-json returned as json-output (:into params) nil)]
+    (with-meta (base/t-wrap-into json (:into params) {}) {:op/type :update})))
+
+(defn t-update [spec params]
+  (t-update-raw (base/prep-table spec false {}) params))
+
+(defn t-modify-assign [prepared params target]
+  (let [entry (first prepared)
+        schema (second prepared)
+        table-sym (table-symbol entry)
+        as (get params :as :json)
+        single (get params :single true)
+        returning (base/t-returning schema (or (:returning params) '*))
+        form (t-update-raw prepared
+                           (merge params {:returning returning :as :raw :into 'u-ret}))
+        assertion '(if [:not (exists [:select u-ret])]
+                     [:raise-exception (% "Record Not Found")])
+        json-output (if single 'to-jsonb 'jsonb-agg)
+        body (when target
+               [:select (if (has? #{:json :jsonb} as)
+                          (list json-output 'u-ret) 'u-ret)
+                :into target])]
+    (list 'let [(list '++ 'u-ret table-sym) form '_ assertion] body)))
+
+(defn t-modify-raw [prepared params]
+  (with-meta (t-modify-assign prepared params (:into params))
+             {:assign/fn 'postgres.core.impl-update/t-modify-assign}))
+
+(defn t-modify [spec params]
+  (t-modify-raw (base/prep-table spec false {}) params))
+
+(def __tahto_load__ true)

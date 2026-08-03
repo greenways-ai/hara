@@ -1,0 +1,322 @@
+(ns postgres.core.impl-base
+  (:config {:blank true})
+  (:require [std.foundation :as foundation :refer :all :exclude [resolve]]
+            [tahto.common.util :as util]))
+
+(def ^:dynamic *skip-checks* false)
+
+(defn- schema-attrs [table-schema key]
+  (let [entry (get table-schema key)]
+    (if (vector? entry) (first entry) entry)))
+
+(defn- schema-key? [table-schema key]
+  (not (nil? (get table-schema key))))
+
+(defn prep-entry
+  "Resolves a directly supplied or locally defined table entry."
+  [value options]
+  (cond (map? value) [nil value]
+        (symbol? value)
+        (let [resolved (foundation/resolve value)
+              entry (when resolved (deref resolved))]
+          (if (map? entry)
+            [nil entry]
+            (throw (ex-info "No entry found" {:input value :options options}))))
+        :else (throw (ex-info "No entry found" {:input value :options options}))))
+
+(defn prep-table
+  "Prepares a table entry that already carries a portable table schema."
+  [value full options]
+  (let [entry (second (prep-entry value options))
+        table-schema
+        (or (:table-schema entry)
+            (get-in entry
+                    [:static/schema-seed :tree
+                     (keyword (name (:id entry)))]))]
+    (if table-schema
+      [entry table-schema options]
+      (throw (ex-info "Table not found in schema"
+                      {:entry (:id entry) :full full})))))
+
+(defn t-input-check
+  ([table-schema input] (t-input-check table-schema input {}))
+  ([table-schema input params]
+   (let [valid? (get params :valid true)
+         missing? (get params :missing true)
+         invalid (filter (fn [key] (not (schema-key? table-schema key))) (keys input))
+         required (filter (fn [key]
+                            (let [attrs (schema-attrs table-schema key)]
+                              (and (not (:ignore attrs))
+                                   (or (:required attrs) (:primary attrs))
+                                   (nil? (get-in attrs [:sql :default])))))
+                          (keys table-schema))
+         absent (filter (fn [key] (nil? (get input key))) required)]
+     (cond (and valid? (seq invalid))
+           (throw (ex-info "Invalid keys" {:keys (vec invalid) :data input}))
+           (and missing? (seq absent))
+           (throw (ex-info "Missing keys" {:keys (vec absent) :data input}))
+           :else input))))
+
+(defn t-input-collect
+  [table-schema input]
+  (reduce-kv (fn [out key value]
+               (assoc out key [value (schema-attrs table-schema key)]))
+             {}
+             input))
+
+(defn t-val-process
+  [process output]
+  (if (vector? process)
+    (reduce (fn [out step]
+              (cond (symbol? step) (list step out)
+                    (vector? step) (apply list (first step) out (rest step))
+                    :else out))
+            output
+            process)
+    (list process output)))
+
+(defn- already-cast? [value type]
+  (and (list? value) (= type (first value))))
+
+(defn t-val-fn
+  [table-schema key value params options]
+  (let [attrs (schema-attrs table-schema key)
+        type (:type attrs)
+        sql (:sql attrs)
+        cast (cond (= :enum type)
+                   (if (and (list? value) (= '++ (first value)))
+                     value
+                     (list '++ value (get-in attrs [:enum :ns])))
+                   (= :ref type)
+                   (let [target-type (or (get-in attrs [:ref :type]) :uuid)]
+                     (if (already-cast? value target-type)
+                       value
+                       (list target-type value)))
+                   :else
+                   (let [target-type (or (get {:long :bigint :int :integer
+                                               :bool :boolean :string :text}
+                                              type)
+                                         type)]
+                     (if (already-cast? value target-type)
+                       value
+                       (list target-type value))))
+        with-default (if (and (not (nil? (:default sql))) (:coalesce params))
+                       (list 'coalesce cast (:default sql))
+                       cast)]
+    (if (:process sql)
+      (t-val-process (:process sql) with-default)
+      with-default)))
+
+(defn t-key-attrs-fn
+  [entry]
+  (let [key (first entry)
+        attrs-entry (second entry)
+        attrs (if (vector? attrs-entry) (first attrs-entry) attrs-entry)
+        base (cond (string? key) key
+                   (or (keyword? key) (symbol? key)) (util/sym-default-str key)
+                   :else (str key))]
+    (if (= :ref (:type attrs)) (str base "_id") base)))
+
+(defn t-key-fn [table-schema key]
+  (t-key-attrs-fn [key [(schema-attrs table-schema key)]]))
+
+(defn t-sym-fn
+  [table-schema key sym]
+  (let [attrs (schema-attrs table-schema key)
+        type (:type attrs)
+        column (t-key-fn table-schema key)]
+    (cond (= :ref type)
+          (list (or (get-in attrs [:ref :type]) :uuid)
+                (list 'coalesce
+                      (list :->> sym column)
+                      (list :->> (list :-> sym (util/sym-default-str key)) "id")))
+          (= :enum type)
+          (list '++ (list :->> sym column) (get-in attrs [:enum :ns]))
+          :else (list (or (get {:long :bigint :int :integer :bool :boolean
+                                :string :text} type) type)
+                      (list :->> sym column)))))
+
+(defn t-build-js-map
+  [table-schema input params options]
+  (let [values (reduce-kv (fn [out key pair]
+                            (assoc out key
+                                   (t-val-fn table-schema key (first pair) params options)))
+                          {}
+                          input)
+        ordered (filter (fn [key] (not (nil? (get values key))))
+                        (keys table-schema))]
+    (apply list 'jsonb-build-object
+           (reduce (fn [out key]
+                     (conj (conj out (t-key-fn table-schema key)) (get values key)))
+                   []
+                   ordered))))
+
+(defn t-create-fn [spec input params]
+  (let [prepared (prep-table spec false {})
+        table-schema (second prepared)
+        options (nth prepared 2)]
+    (t-input-check table-schema input params)
+    (t-build-js-map table-schema (t-input-collect table-schema input) params options)))
+
+(defn t-returning-cols-default [returning key-fn]
+  (vec (map (fn [key] #{(util/sym-default-str key)}) returning)))
+
+(defn t-join-target-sym [link]
+  (let [module (or (:module link) (:ns link))
+        id (:id link)]
+    (when (and module id)
+      (symbol (name module) (name id)))))
+
+(defn t-returning-cols
+  [table-schema returning key-fn]
+  (vec
+   (reduce (fn [out value]
+             (cond (map? value)
+                   (conj out (if (:as value)
+                               [(:expr value) :as (:as value)]
+                               (:expr value)))
+                   (keyword? value)
+                   (if (schema-key? table-schema value)
+                     (conj out #{(key-fn [value [(schema-attrs table-schema value)]])})
+                     out)
+                   (symbol? value) (conj out #{(util/sym-default-str value)})
+                   :else out))
+           []
+           returning)))
+
+(defn t-returning
+  ([table-schema returning] (t-returning table-schema returning nil))
+  ([table-schema returning key-fn]
+   (let [key-fn (or key-fn t-key-attrs-fn)]
+     (cond (or (= '* returning) (list? returning) (number? returning) (nil? returning)) returning
+           (set? returning) (list '--- (t-returning-cols table-schema returning key-fn))
+           (or (map? returning) (keyword? returning) (symbol? returning))
+           (list '--- (t-returning-cols table-schema #{returning} key-fn))
+           :else (throw (ex-info "Not valid" {:value returning}))))))
+
+(defn t-where-hashvec-transform
+  [clauses transform]
+  #{(vec
+     (reduce (fn [out clause]
+               (let [mapped (transform
+                             (reduce (fn [entry pair]
+                                       (assoc entry (first pair) (second pair)))
+                                     {}
+                                     (partition 2 clause)))
+                     flat (reduce (fn [values entry]
+                                    (conj (conj values (first entry)) (second entry)))
+                                  []
+                                  mapped)]
+                 (if (seq out)
+                   (into (into out [:or]) flat)
+                   flat)))
+             []
+             clauses))})
+
+(defn t-where-hashvec
+  [where transform]
+  (let [clauses (reduce (fn [state value]
+                          (cond (or (= value [:or]) (= value :or))
+                                {:done (conj (:done state) (:current state)) :current []}
+                                (or (= value [:and]) (= value :and)) state
+                                :else (assoc state :current (conj (:current state) value))))
+                        {:done [] :current []}
+                        (first where))]
+    (t-where-hashvec-transform
+     (conj (:done clauses) (:current clauses))
+     transform)))
+
+(defn t-where-transform
+  [table-schema where options]
+  (let [transform
+        (fn [input]
+          (reduce-kv
+           (fn [out key value]
+             (if (not (schema-key? table-schema key))
+               (if *skip-checks* out
+                   (throw (ex-info "Invalid columns" {:key key :data input})))
+               (let [attrs (schema-attrs table-schema key)
+                     type (:type attrs)
+                     pair (cond (nil? value) [:is-null]
+                                (and (= :enum type)
+                                     (not (and (list? value) (= '++ (first value)))))
+                                [:eq (list '++ value (get-in attrs [:enum :ns]))]
+                                (vector? value) value
+                                :else [:eq value])]
+                 (assoc out (t-key-fn table-schema key) pair))))
+           {}
+           input))]
+    (cond (util/hashvec? where) (t-where-hashvec where transform)
+          (map? where) (transform where)
+          :else (throw (ex-info "Not Allowed" {:value where})))))
+
+(defn t-wrap-json [form as json-output into field]
+  (if (or (= :json as) (= :jsonb as) (and (= :record as) into))
+    [:with 'j-ret :as form \\ :select
+     (list json-output (if field (list '. 'j-ret #{field}) 'j-ret))
+     :from 'j-ret]
+    form))
+
+(defn t-join-transform [table-schema join source-sym options]
+  (vec (reduce (fn [out value]
+                 (cond (keyword? value)
+                       (let [attrs (schema-attrs table-schema value)]
+                         (if (= :ref (:type attrs))
+                           (let [target (t-join-target-sym (get-in attrs [:ref :link]))]
+                             (conj out [:left-join target :on
+                                        [:= (list '. #{source-sym} #{(t-key-fn table-schema value)})
+                                         (list '. target #{"id"})]]))
+                           (throw (ex-info "Key is not a ref" {:key value}))))
+                       :else (conj out value)))
+               [] join)))
+
+(defn- newline [form enabled] (if enabled (conj form \\) form))
+(defn t-wrap-join [form join params]
+  (if join (into (newline form (and (seq join) (:newline params))) join) form))
+(defn t-wrap-where [form where table-schema params options]
+  (let [out (newline form (and where (:newline params)))
+        out (if where (conj (conj out :where) (t-where-transform table-schema where options)) out)]
+    (vec (if (:where-args params) (concat out (:where-args params)) out))))
+(defn t-wrap-order-by [form columns table-schema params]
+  (let [out (newline form (and columns (:newline params)))]
+    (if columns
+      (conj (conj out :order-by)
+            (if (vector? columns)
+              (list 'quote (vec (map (fn [key] #{(t-key-fn table-schema key)}) columns)))
+              columns))
+      out)))
+(defn t-wrap-order-sort [form sort table-schema params]
+  (if sort (conj form sort) form))
+(defn t-wrap-limit [form limit params]
+  (if limit (conj (conj (newline form (:newline params)) :limit) limit) form))
+(defn t-wrap-offset [form offset params]
+  (if offset (conj (conj (newline form (:newline params)) :offset) offset) form))
+(defn t-wrap-into [form target params]
+  (if target (conj (conj (newline form (:newline params)) :into) target) form))
+(defn t-wrap-returning [form returning params]
+  (if returning (conj (conj (newline form (:newline params)) :returning) returning) form))
+(defn t-wrap-group-by [form group-by params]
+  (if group-by (conj (conj (newline form (:newline params)) :group-by) group-by) form))
+(defn t-wrap-having [form having table-schema params options]
+  (if having
+    (conj (conj (newline form (:newline params)) :having)
+          (t-where-transform table-schema having options))
+    form))
+(defn t-wrap-args [form args params]
+  (vec (if args (concat (newline form (:newline params)) args) form)))
+(defn t-wrap-lock [form lock params]
+  (if (nil? lock)
+    form
+    (let [mode (first lock)
+          option (second lock)
+          clause (get {:update [:for :update]
+                       :share [:for :share]
+                       :key-share [:for :key :share]
+                       :no-key-update [:for :no :key :update]} mode)
+          suffix (get {:skip-locked [:skip :locked] :nowait [:nowait]} option)]
+      (if (nil? clause)
+        (throw (ex-info "Invalid lock mode" {:input mode}))
+        (into (newline form (:newline params))
+              (if suffix (into clause suffix) clause))))))
+
+(def __tahto_load__ true)

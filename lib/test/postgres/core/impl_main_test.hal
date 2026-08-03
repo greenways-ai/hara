@@ -1,0 +1,69 @@
+(ns postgres.core.impl-main-test
+  (:require [postgres.core.impl-main :as main])
+  (:use code.test))
+
+(def table-schema
+  {:id [{:type :uuid :primary true :required true :order 0}]
+   :status [{:type :text :order 1}]
+   :name [{:type :text :order 2}]
+   :cache [{:type :ref :order 3
+            :ref {:type :uuid :link {:module 'demo :id 'Cache}}}]})
+
+(def prepared
+  [{:id 'Entry :module 'demo} table-schema {}])
+
+(def entry
+  {:id 'Entry :module 'demo :table-schema table-schema})
+
+(fact "constructs select forms with raw and JSON outputs"
+  (main/t-select-raw prepared {:as :raw})
+  => '[:select * :from demo/Entry]
+  (main/t-select-raw prepared {:returning #{:id :name}})
+  => '[:with j-ret :as [:select (--- [#{"id"} #{"name"}]) :from demo/Entry]
+       \\ :select (jsonb-agg j-ret) :from j-ret])
+
+(fact "applies select joins filters ordering and limits"
+  (main/t-select-raw
+   prepared
+   {:as :raw :join [:cache] :where {:status "active"}
+    :order-by [:id] :order-sort :desc :limit 10 :offset 5
+    :for [:share :nowait]})
+  => '[:select * :from demo/Entry
+       \\ [:left-join demo/Cache :on [:= (. #{demo/Entry} #{"cache_id"})
+                                      (. demo/Cache #{"id"})]]
+       \\ :where {"status" [:eq "active"]}
+       \\ :order-by (quote [#{"id"}]) :desc
+       \\ :limit 10 :offset 5
+       \\ :for :share :nowait])
+
+(fact "constructs id queries"
+  (main/t-id-raw prepared {})
+  => '[:select (--- [#{"id"}]) :from demo/Entry \\ :limit 1]
+  (main/t-id entry {})
+  => '[:select (--- [#{"id"}]) :from demo/Entry \\ :limit 1])
+
+(fact "constructs count queries"
+  (main/t-count-raw prepared {}) => '[:select (count *) :from demo/Entry]
+  (main/t-count entry {}) => '[:select (count *) :from demo/Entry])
+
+(fact "constructs exists queries"
+  (main/t-exists-raw prepared {})
+  => '[:select (exists [:select 1 :from demo/Entry])]
+  (main/t-exists entry {})
+  => '[:select (exists [:select 1 :from demo/Entry])])
+
+(fact "constructs delete forms"
+  (main/t-delete-raw prepared {:as :raw :where {:id "a"}})
+  => '[:delete :from demo/Entry :where {"id" [:eq "a"]}]
+  (main/t-delete entry {:as :raw})
+  => '[:delete :from demo/Entry])
+
+(fact "wraps delete returning rows as JSON"
+  (main/t-delete-raw prepared {:returning #{:id :name}})
+  => '[:with j-ret :as
+       [:delete :from demo/Entry \\ :returning (--- [#{"id"} #{"name"}])]
+       \\ :select (jsonb-agg j-ret) :from j-ret])
+
+(fact "returns ordered non-primary fields"
+  (main/t-fields-raw prepared {}) => '[status name cache]
+  (main/t-fields entry {}) => '[status name cache])

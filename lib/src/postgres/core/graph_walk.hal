@@ -1,0 +1,126 @@
+(ns postgres.core.graph-walk
+  (:config {:blank true})
+  (:require [std.foundation :refer :all]))
+
+(defn- schema-attrs [entry]
+  (if (vector? entry) (first entry) entry))
+
+(defn- primary-key [table-schema]
+  (first (reduce-kv (fn [out key entry]
+                      (if (:primary (schema-attrs entry)) (conj out key) out))
+                    [] table-schema)))
+
+(defn- schema-table [schema table]
+  (or (get-in schema [:tree table]) (get schema table)))
+
+(defn- next-id! [counter attrs]
+  (let [value (swap! counter inc)]
+    (with-meta (symbol (str "?id-" value))
+               {:sql (:sql attrs) :type (:type attrs)})))
+
+(declare link-row)
+
+(defn- link-child [value attr parent-row schema counter]
+  (let [ref (:ref attr)
+        child-table (or (:ns ref) (get-in ref [:link :id]))
+        child-schema (schema-table schema child-table)
+        direction (:type ref)
+        reverse-key (:rval ref)
+        parent-key (primary-key (schema-table schema (:table attr)))
+        parent-id (or (get parent-row parent-key) (:id parent-row))
+        prepare (fn [child]
+                  (let [child (if (and (= :reverse direction) reverse-key)
+                                (assoc child reverse-key parent-id) child)]
+                    (link-row child child-table child-schema schema counter)))]
+    (if (vector? value) (vec (map prepare value)) (prepare value))))
+
+(defn link-row [row table table-schema schema counter]
+  (let [pkey (primary-key table-schema)
+        pattrs (schema-attrs (get table-schema pkey))
+        seeded (if (or (nil? pkey) (get row pkey)) row
+                 (assoc row pkey (next-id! counter pattrs)))]
+    (reduce-kv
+     (fn [out key entry]
+       (let [attr (assoc (schema-attrs entry) :table table)
+             value (get out key)]
+         (if (and (= :ref (:type attr)) (map? (:ref attr))
+                  (or (map? value) (vector? value)))
+           (assoc out key (link-child value attr out schema counter))
+           out)))
+     seeded table-schema)))
+
+(defn wrap-seed-id [f]
+  (fn [data table-schema table state]
+    (f (link-row data table table-schema (:schema state) (:counter state))
+       table-schema table state)))
+
+(defn wrap-sym-id [f]
+  (fn [data attr & args]
+    (if (and (= :ref (:type attr))
+             (or (symbol? data) (string? data) (list? data)))
+      data
+      (apply f data attr args))))
+
+(defn wrap-link-attr [f] f)
+
+(defn link-data [data schema]
+  (let [counter (atom 0)]
+    (reduce-kv
+     (fn [out table value]
+       (let [tsch (schema-table schema table)
+             linked (if (vector? value)
+                      (vec (map (fn [row] (link-row row table tsch schema counter)) value))
+                      (link-row value table tsch schema counter))]
+         (assoc out table linked)))
+     {} data)))
+
+(declare flatten-row)
+
+(defn- scalar-row [row table-schema]
+  (reduce-kv
+   (fn [out key entry]
+     (let [attr (schema-attrs entry)
+           value (get row key)]
+       (if (and (:order attr) (has? row key)
+                (not (map? value)) (not (vector? value)))
+         (assoc out key value) out)))
+   {} table-schema))
+
+(defn flatten-row [output row table table-schema schema]
+  (let [_ (swap! output update table
+                 (fn [rows] (conj (or rows []) (scalar-row row table-schema))))]
+    (reduce-kv
+     (fn [_ key entry]
+       (let [attr (schema-attrs entry)
+             value (get row key)
+             ref (:ref attr)
+             child-table (or (:ns ref) (get-in ref [:link :id]))
+             child-schema (schema-table schema child-table)]
+         (when (and (= :ref (:type attr)) child-schema)
+           (cond (vector? value)
+                 (reduce (fn [_ child]
+                           (flatten-row output child child-table child-schema schema)
+                           nil)
+                         nil value)
+                 (map? value) (flatten-row output value child-table child-schema schema)))
+         nil))
+     nil table-schema)))
+
+(defn wrap-output [f] f)
+
+(defn flatten-data [data schema]
+  (let [output (atom {})]
+    (reduce-kv
+     (fn [_ table value]
+       (let [tsch (schema-table schema table)]
+         (if (vector? value)
+           (reduce (fn [_ row]
+                     (flatten-row output row table tsch schema)
+                     nil)
+                   nil value)
+           (flatten-row output value table tsch schema)))
+       nil)
+     nil data)
+    @output))
+
+(def __tahto_load__ true)
