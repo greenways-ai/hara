@@ -17,9 +17,11 @@ test("theme contract supports cross-domain system, light, and dark preferences",
   assert.match(source, /hara:theme-change/);
 });
 
-test("motifs are resolution-independent and do not load the raster reference", async () => {
+test("motifs use restored responsive artwork instead of the low-resolution sprite", async () => {
   const motifs = await readFile(new URL("../src/motifs.css", import.meta.url), "utf8");
   assert.doesNotMatch(motifs, /precision-motifs\.png|background-size:\s*300%/);
-  for (const primitive of ["linear-gradient", "radial-gradient", "conic-gradient"])
-    assert.match(motifs, new RegExp(primitive));
+  assert.match(motifs, /image-set/);
+  for (const kind of ["edge", "aperture", "rack"])
+    for (const theme of ["light", "dark"])
+      assert.match(motifs, new RegExp(`${kind}-${theme}-2560\\.avif`));
 });

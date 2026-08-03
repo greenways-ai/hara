@@ -17,6 +17,7 @@
     "./assets/*": "./assets/*"
   },
   "scripts": {
+    "assets:build": "node scripts/build-motifs.mjs",
     "test": "node --test test/*.test.mjs",
     "site:dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev --root site",
     "site:build": "ASTRO_TELEMETRY_DISABLED=1 astro build --root site"
@@ -28,6 +29,7 @@
     "astro": { "optional": true }
   },
   "devDependencies": {
-    "astro": "^5.16.0"
+    "astro": "^5.16.0",
+    "sharp": "^0.34.5"
   }
 }

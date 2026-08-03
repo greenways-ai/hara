@@ -66,3 +66,18 @@
     transform: scale(1.012) translate3d(var(--motif-shift-x, 0), var(--motif-shift-y, 0), 0);
   }
 }
+
+/* Restored high-resolution source artwork. These declarations intentionally
+   override the geometric fallback above for browsers with image-set support. */
+.hara-motif[data-motif]::before {
+  inset: -3%;
+  background: var(--hara-motif-image) center / cover no-repeat;
+}
+
+.hara-motif[data-motif="edge"] { --hara-motif-image: image-set(url("../assets/motifs/web/edge-light-1280.avif") type("image/avif") 1x, url("../assets/motifs/web/edge-light-2560.avif") type("image/avif") 2x, url("../assets/motifs/web/edge-light-1280.webp") type("image/webp") 1x, url("../assets/motifs/web/edge-light-2560.webp") type("image/webp") 2x); }
+.hara-motif[data-motif="aperture"] { --hara-motif-image: image-set(url("../assets/motifs/web/aperture-light-1280.avif") type("image/avif") 1x, url("../assets/motifs/web/aperture-light-2560.avif") type("image/avif") 2x, url("../assets/motifs/web/aperture-light-1280.webp") type("image/webp") 1x, url("../assets/motifs/web/aperture-light-2560.webp") type("image/webp") 2x); }
+.hara-motif[data-motif="rack"] { --hara-motif-image: image-set(url("../assets/motifs/web/rack-light-1280.avif") type("image/avif") 1x, url("../assets/motifs/web/rack-light-2560.avif") type("image/avif") 2x, url("../assets/motifs/web/rack-light-1280.webp") type("image/webp") 1x, url("../assets/motifs/web/rack-light-2560.webp") type("image/webp") 2x); }
+
+:root[data-theme="dark"] .hara-motif[data-motif="edge"] { --hara-motif-image: image-set(url("../assets/motifs/web/edge-dark-1280.avif") type("image/avif") 1x, url("../assets/motifs/web/edge-dark-2560.avif") type("image/avif") 2x, url("../assets/motifs/web/edge-dark-1280.webp") type("image/webp") 1x, url("../assets/motifs/web/edge-dark-2560.webp") type("image/webp") 2x); }
+:root[data-theme="dark"] .hara-motif[data-motif="aperture"] { --hara-motif-image: image-set(url("../assets/motifs/web/aperture-dark-1280.avif") type("image/avif") 1x, url("../assets/motifs/web/aperture-dark-2560.avif") type("image/avif") 2x, url("../assets/motifs/web/aperture-dark-1280.webp") type("image/webp") 1x, url("../assets/motifs/web/aperture-dark-2560.webp") type("image/webp") 2x); }
+:root[data-theme="dark"] .hara-motif[data-motif="rack"] { --hara-motif-image: image-set(url("../assets/motifs/web/rack-dark-1280.avif") type("image/avif") 1x, url("../assets/motifs/web/rack-dark-2560.avif") type("image/avif") 2x, url("../assets/motifs/web/rack-dark-1280.webp") type("image/webp") 1x, url("../assets/motifs/web/rack-dark-2560.webp") type("image/webp") 2x); }

@@ -31,7 +31,9 @@ jobs:
           cache: npm
           cache-dependency-path: website/package-lock.json
       - name: Install Astro site dependencies
-        run: npm ci --prefix website
+        run: |
+          npm ci --prefix website
+          npm ci --prefix benchmarks
       - name: Build browser runtime and site
         env:
           HARA_GITHUB_OAUTH_CLIENT_ID: ${{ vars.HARA_GITHUB_OAUTH_CLIENT_ID }}
