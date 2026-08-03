@@ -1,5 +1,6 @@
 import init, * as wasmBindings from "./wasm/hara_wasm.js";
 import { instantiateWholeWasm } from "./whole-wasm.js";
+export { installLockedPackages, loadLockedPackageResources } from "./packages.js";
 
 const { Runtime } = wasmBindings;
 

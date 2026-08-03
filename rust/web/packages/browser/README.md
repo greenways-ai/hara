@@ -46,3 +46,22 @@ const hara = await Hara.start({
   }
 });
 ```
+
+Locked Hara packages can be fetched from an immutable package host (including
+`packages.*`) or a release asset and installed before application evaluation:
+
+```js
+import { installLockedPackages, start } from "@hara-lang/browser";
+
+const hara = await start();
+const lock = await fetch(projectLockUrl).then((response) => response.text());
+await installLockedPackages(hara, lock);
+hara.require("my.world");
+```
+
+Only format-2 locks are accepted. The loader verifies the HARP archive digest,
+optional archive size, every file declared by `package.edn`, safe archive paths,
+and unique HAL namespaces. Resources are registered only after the complete
+lock has passed verification. A lock entry may use `:distribution/url`,
+`:packages/url`, `:release-url`, or `:url`; package distribution URLs take
+precedence and the lock digest remains authoritative.
