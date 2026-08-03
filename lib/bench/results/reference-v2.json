@@ -16,12 +16,12 @@
     ]
   },
   "environment": {
-    "run_id": "reference-2026-08-03T152426",
-    "timestamp": "2026-08-03T15:24:26.717021+00:00",
+    "run_id": "reference-2026-08-03T155829",
+    "timestamp": "2026-08-03T15:58:29.663237+00:00",
     "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
     "machine": "arm64",
     "cpu": "arm",
-    "git_revision": "ff4eb6b040db5f126720c74d41ebbff615f7e855",
+    "git_revision": "bd8d6f3c2fe791c17747c39695ab41f752875ce3",
     "git_dirty": true,
     "browser": "Playwright Chromium",
     "native_image": "GraalVM 25.0.3 fallback executable"
@@ -4077,5 +4077,163 @@
     }
   ],
   "language_evidence": "lib/bench/results/language-reference.json",
-  "http_measurements": []
+  "http_environment": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "machine": "arm64"
+  },
+  "http_configuration": {
+    "requests": 20000,
+    "concurrency": 32,
+    "warmup": 500,
+    "trials": 5,
+    "workers": 1
+  },
+  "http_measurements": [
+    {
+      "server": "hoplite-hara-rust-full",
+      "route": "/hello",
+      "status": "ok",
+      "requests_per_second": 58575.1,
+      "mean_ms": 0.546,
+      "p50_ms": 1.0,
+      "p95_ms": 1.0,
+      "p99_ms": 1.0
+    },
+    {
+      "server": "hoplite-hara-rust-full",
+      "route": "/json",
+      "status": "ok",
+      "requests_per_second": 60294.54,
+      "mean_ms": 0.531,
+      "p50_ms": 1.0,
+      "p95_ms": 1.0,
+      "p99_ms": 1.0
+    },
+    {
+      "server": "hoplite-hara-rust-full",
+      "route": "/delay",
+      "status": "ok",
+      "requests_per_second": 1163.48,
+      "mean_ms": 27.504,
+      "p50_ms": 27.0,
+      "p95_ms": 29.0,
+      "p99_ms": 30.0
+    },
+    {
+      "server": "openresty",
+      "route": "/hello",
+      "status": "ok",
+      "requests_per_second": 250717.68,
+      "mean_ms": 0.128,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0
+    },
+    {
+      "server": "openresty",
+      "route": "/json",
+      "status": "ok",
+      "requests_per_second": 248873.85,
+      "mean_ms": 0.129,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0
+    },
+    {
+      "server": "openresty",
+      "route": "/delay",
+      "status": "ok",
+      "requests_per_second": 1209.6,
+      "mean_ms": 26.455,
+      "p50_ms": 27.0,
+      "p95_ms": 27.0,
+      "p99_ms": 28.0
+    },
+    {
+      "server": "nginx",
+      "route": "/hello",
+      "status": "ok",
+      "requests_per_second": 258094.49,
+      "mean_ms": 0.124,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0
+    },
+    {
+      "server": "nginx",
+      "route": "/json",
+      "status": "ok",
+      "requests_per_second": 276174.43,
+      "mean_ms": 0.116,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0
+    },
+    {
+      "server": "fastify",
+      "route": "/hello",
+      "status": "ok",
+      "requests_per_second": 110680.07,
+      "mean_ms": 0.289,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 1.0
+    },
+    {
+      "server": "fastify",
+      "route": "/json",
+      "status": "ok",
+      "requests_per_second": 114131.8,
+      "mean_ms": 0.28,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 1.0
+    },
+    {
+      "server": "fastify",
+      "route": "/delay",
+      "status": "ok",
+      "requests_per_second": 1187.19,
+      "mean_ms": 26.954,
+      "p50_ms": 27.0,
+      "p95_ms": 28.0,
+      "p99_ms": 29.0
+    },
+    {
+      "server": "axum",
+      "route": "/hello",
+      "status": "ok",
+      "requests_per_second": 263747.86,
+      "mean_ms": 0.121,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0
+    },
+    {
+      "server": "axum",
+      "route": "/json",
+      "status": "ok",
+      "requests_per_second": 246788.66,
+      "mean_ms": 0.13,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0
+    },
+    {
+      "server": "axum",
+      "route": "/delay",
+      "status": "ok",
+      "requests_per_second": 1169.45,
+      "mean_ms": 27.363,
+      "p50_ms": 27.0,
+      "p95_ms": 28.0,
+      "p99_ms": 30.0
+    },
+    {
+      "server": "nginx",
+      "route": "/delay",
+      "status": "not_applicable",
+      "reason": "core Nginx has no application timer"
+    }
+  ]
 }

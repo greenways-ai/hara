@@ -10,7 +10,7 @@ HERE, WORK = Path(__file__).resolve().parent, ROOT / "target/bench-hoplite-openr
 OUTPUT = ROOT / "target/hara-http-frameworks.json"
 HOPLITE = Path(os.environ.get("HOPLITE_NGINX", ROOT / "target/hoplite/nginx/sbin/nginx"))
 OPENRESTY = Path(os.environ.get("OPENRESTY_BIN", WORK / "openresty-install/nginx/sbin/nginx"))
-NGINX = Path(os.environ.get("NGINX_BIN", shutil.which("nginx") or OPENRESTY))
+NGINX = Path(os.environ.get("NGINX_BIN", shutil.which("nginx") or "/missing/nginx"))
 REQUESTS, CONCURRENCY = int(os.environ.get("REQUESTS", "20000")), int(os.environ.get("CONCURRENCY", "32"))
 WARMUP, TRIALS = int(os.environ.get("WARMUP", "500")), int(os.environ.get("TRIALS", "5"))
 
@@ -31,6 +31,17 @@ def wait_ready(url):
         except Exception: time.sleep(.05)
     raise RuntimeError(f"server did not become ready: {url}")
 
+def validate_route(url, route):
+    with urllib.request.urlopen(url, timeout=2) as response:
+        body = response.read().decode()
+        content_type = response.headers.get_content_type()
+    if route == "hello" and not (body.startswith("Hello from ") and content_type == "text/plain"):
+        raise RuntimeError(f"invalid hello response from {url}: {content_type} {body!r}")
+    if route == "json" and not (json.loads(body).get("message", "").startswith("Hello from ") and content_type == "application/json"):
+        raise RuntimeError(f"invalid JSON response from {url}: {content_type} {body!r}")
+    if route == "delay" and not (body == "delayed 25ms\n" and content_type == "text/plain"):
+        raise RuntimeError(f"invalid delay response from {url}: {content_type} {body!r}")
+
 def parse_ab(text):
     def value(pattern):
         match = re.search(pattern, text, re.MULTILINE)
@@ -46,6 +57,7 @@ def benchmark(label, base, routes):
     rows = []
     for route in routes:
         url = f"{base}/{route}"; wait_ready(url)
+        validate_route(url, route)
         run(["ab", "-k", "-n", str(WARMUP), "-c", str(CONCURRENCY), url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         trials = [parse_ab(run(["ab", "-k", "-n", str(REQUESTS), "-c", str(CONCURRENCY), url], capture_output=True).stdout) for _ in range(TRIALS)]
         rows.append({"server": label, "route": f"/{route}", "status": "ok",
@@ -81,7 +93,7 @@ def main():
         if not binary.is_file(): raise SystemExit(f"missing server binary: {binary}")
     if not (HERE / "node_modules/fastify").is_dir(): run(["npm", "install", "--ignore-scripts"], cwd=HERE)
     run(["cargo", "build", "--release", "--manifest-path", str(HERE / "axum/Cargo.toml")], cwd=ROOT)
-    rows = nginx_server("hoplite", HOPLITE, HERE / "nginx.hoplite.conf.tmpl", 18081, ["hello", "json", "delay"])
+    rows = nginx_server("hoplite-hara-rust-full", HOPLITE, HERE / "nginx.hoplite.conf.tmpl", 18081, ["hello", "json", "delay"])
     rows += nginx_server("openresty", OPENRESTY, HERE / "nginx.openresty.conf.tmpl", 18082, ["hello", "json", "delay"])
     rows += nginx_server("nginx", NGINX, HERE / "nginx.core.conf.tmpl", 18083, ["hello", "json"])
     rows += process_server("fastify", ["node", str(HERE / "fastify.mjs")], 18084)

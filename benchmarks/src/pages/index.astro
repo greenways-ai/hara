@@ -12,7 +12,8 @@ import catalog from "../../../lib/bench/catalog.json";
 const evidencePath = fileURLToPath(new URL("../../../lib/bench/results/reference-v2.json", import.meta.url));
 const languageEvidencePath = fileURLToPath(new URL("../../../lib/bench/results/language-reference.json", import.meta.url));
 type Measurement = { runtime:string; workload:string; prepare_ns:number; first_ns:number; steady_ns:number; throughput_per_sec:number };
-type Evidence = { measurements:Measurement[]; environment:{timestamp:string}; startup:Record<string,{p50_ns:number}>; artifacts:Record<string,{transfer_bytes:number}>; http_measurements?:unknown[] };
+type HttpMeasurement = { server:string; route:string; status:string; requests_per_second?:number; mean_ms?:number; p50_ms?:number; p95_ms?:number; p99_ms?:number; reason?:string };
+type Evidence = { measurements:Measurement[]; environment:{timestamp:string}; startup:Record<string,{p50_ns:number}>; artifacts:Record<string,{transfer_bytes:number}>; http_measurements?:HttpMeasurement[] };
 const evidence: Evidence | null = existsSync(evidencePath) ? JSON.parse(readFileSync(evidencePath, "utf8")) : null;
 const languageEvidence = existsSync(languageEvidencePath) ? JSON.parse(readFileSync(languageEvidencePath, "utf8")) : null;
 const index = new Map<string, Measurement>((evidence?.measurements ?? []).map((row) => [`${row.runtime}/${row.workload}`, row]));
@@ -32,6 +33,7 @@ const formatRatio = (runtime:string) => { const ratio = languageRatio(runtime); 
 const base = import.meta.env.BASE_URL;
 const basePath = base.endsWith("/") ? base : `${base}/`;
 const hasHttpEvidence = Boolean(evidence?.http_measurements?.length);
+const httpRows = evidence?.http_measurements ?? [];
 ---
 <!doctype html>
 <html lang="en">
@@ -79,7 +81,7 @@ const hasHttpEvidence = Boolean(evidence?.http_measurements?.length);
 
       <section class="tab-panel" role="tabpanel" id="http-results" aria-labelledby="tab-http" hidden>
         <header><p class="hara-kicker">Loopback HTTP/1.1 · keep-alive</p><h2>HTTP frameworks</h2><p>Hoplite, OpenResty, and the comparison servers use identical routes and payloads; results publish only after a complete standard run.</p></header>
-        <div class="detail-table"><table><thead><tr><th>Server</th><th>Routes</th><th>Worker model</th><th>Evidence</th></tr></thead><tbody>{catalog.http_competitors.map((server) => <tr><th><code>{server}</code></th><td>/hello · /json · /delay</td><td>One worker / event loop</td><td>{hasHttpEvidence ? "See committed evidence" : "Pending: local server binaries unavailable"}</td></tr>)}</tbody></table></div>
+        {hasHttpEvidence ? <div class="detail-table"><table><thead><tr><th>Server / route</th><th>Requests/s</th><th>Mean</th><th>p50</th><th>p95</th><th>p99</th></tr></thead><tbody>{httpRows.map((row) => <tr><th><code>{row.server}</code><small>{row.route}</small></th>{row.status === "ok" ? <><td>{row.requests_per_second!.toFixed(1)}</td><td>{row.mean_ms!.toFixed(3)} ms</td><td>{row.p50_ms!.toFixed(1)} ms</td><td>{row.p95_ms!.toFixed(1)} ms</td><td>{row.p99_ms!.toFixed(1)} ms</td></> : <td colspan="5">Not applicable · {row.reason}</td>}</tr>)}</tbody></table></div> : <p class="summary-note">Pending: local server binaries unavailable.</p>}
       </section>
 
       <section class="tab-panel methodology" role="tabpanel" id="methodology" aria-labelledby="tab-method" hidden>

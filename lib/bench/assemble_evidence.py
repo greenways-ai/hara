@@ -45,6 +45,7 @@ def main() -> None:
     browser = load("target/browser-tier-benchmark.json")
     core = load("target/browser-core-benchmark.json")
     browser_startup = load("target/browser-startup-benchmark.json")
+    http = load("target/hara-http-frameworks.json")
     catalog = load("lib/bench/catalog.json")
     rows = (runtime_rows(rust, {"hara-rust-vm", "hara-rust-full"})
             + runtime_rows(jvm, {"hara-jvm-vm", "hara-jvm-full"})
@@ -86,7 +87,9 @@ def main() -> None:
         },
         "startup": startup, "artifacts": artifacts, "measurements": rows,
         "language_evidence": "lib/bench/results/language-reference.json",
-        "http_measurements": [],
+        "http_environment": http["environment"],
+        "http_configuration": http["configuration"],
+        "http_measurements": http["measurements"],
     }
     RESULT.parent.mkdir(parents=True, exist_ok=True)
     RESULT.write_text(json.dumps(document, indent=2) + "\n")
