@@ -32,7 +32,6 @@ PYTHON_RUNNER = HERE / "python_runner.py"
 C_RUNNER = HERE / "c_runner.py"
 JAVA_RUNNER = HERE / "java_runner.py"
 LUA_RUNNER = ROOT / "lib/bench/luajit-hara/lua_runner.lua"
-HARA_BENCH = ROOT / "rust/target/release/hara-runtime-benchmark"
 
 PROFILES = {
     "smoke": {"startup_samples": 2, "windows": 3, "calls": 1},
@@ -83,9 +82,6 @@ def hex_payload(source):
 
 
 BYTECODE_VARIANTS = {
-    "hara-rust-vm": ("bytecode-vm", "vm"),
-    "hara-rust-trace-checked": ("tracing-jit", "trace-checked"),
-    "hara-rust-trace-native": ("native-jit", "trace-native"),
     "hara-rust-full": ("whole-wasm", "whole-wasm"),
 }
 
@@ -96,9 +92,7 @@ def bytecode_binary(label):
 
 def build_bytecode(selected):
     for runtime, (features, label) in BYTECODE_VARIANTS.items():
-        if (f"{runtime}-prepared" not in selected and
-                not (runtime == "hara-rust-vm" and
-                     "hara-rust-vm-eval" in selected)):
+        if runtime not in selected:
             continue
         env = os.environ.copy()
         env["CARGO_TARGET_DIR"] = str(ROOT / "target/runtime-benchmark" / label)
@@ -121,28 +115,16 @@ def adapters():
             mode, workload["id"], hex_payload(source),
             workload["expected"], str(windows), str(calls)]
 
-    result = {
-        "hara-rust-native-eval": lambda w, n, c: [
-            str(HARA_BENCH), "hara-rust-native-eval", w["id"],
-            hex_payload(w["hara_source"]), w["expected"], str(n), str(c)],
-    }
+    result = {}
     for name in LANGUAGE_RUNTIMES:
-        for mode in LANGUAGE_RUNTIMES[name].get("modes", ("eval", "prepared")):
+        for mode in LANGUAGE_RUNTIMES[name].get("modes", ("prepared",)):
             label = f"{name}-{mode}"
             result[label] = lambda w, n, c, name=name, mode=mode: language(
                 name, mode, w, n, c)
     for runtime, (_, label) in BYTECODE_VARIANTS.items():
-        if runtime == "hara-rust-full":
-            result[f"{runtime}-prepared"] = (
-                lambda w, n, c, b=bytecode_binary(label), r=runtime:
-                bytecode(b, f"{r}-prepared", "whole-wasm", w, n, c))
-            continue
-        result[f"{runtime}-prepared"] = (
+        result[runtime] = (
             lambda w, n, c, b=bytecode_binary(label), r=runtime:
-            bytecode(b, f"{r}-prepared", "runtime-registry-execute", w, n, c))
-    result["hara-rust-vm-eval"] = (
-        lambda w, n, c, b=bytecode_binary("vm"):
-        bytecode(b, "hara-rust-vm-eval", "compile-execute", w, n, c))
+            bytecode(b, r, "whole-wasm", w, n, c))
     return result
 
 
@@ -185,9 +167,8 @@ def markdown(data):
              f"Generated: `{data['environment']['timestamp']}` on "
              f"`{data['environment']['platform']}`.", "",
              "Values are machine-specific comparison evidence, not regression "
-             "thresholds. `-eval` rows include source loading on every call; "
-             "`-prepared` rows compile/load once and invoke repeatedly. Rows "
-             "from different lanes are not apples-to-apples.", "",
+             "thresholds. Every row prepares its program once and invokes it "
+             "repeatedly. Hara is represented only by `hara-rust-full`.", "",
              "## Startup", "", "| Runtime | p50 ms | p95 ms |", "|---|---:|---:|"]
     for name, item in data["startup"].items():
         if item.get("status") == "unsupported":
@@ -232,8 +213,7 @@ def markdown(data):
                     hara_ns = hara["analysis"]["steady_ns"]
                     lines.append(f"| {workload} | {lisp} | {tier} | {lisp_ns/1e6:.3f} "
                                  f"| {hara_ns/1e6:.3f} | {lisp_ns/hara_ns:.4f} |")
-    lines += ["", "Ratio < 1 means the comparison runtime is faster. Compare "
-              "only rows carrying the same `-eval` or `-prepared` suffix. "
+    lines += ["", "Ratio < 1 means the comparison runtime is faster. "
               "Convergence is the first "
               "five-window run within ±5% of the final ten-window median with "
               "CV ≤10%.", ""]
@@ -257,16 +237,9 @@ def main():
         parser.error("unknown runtime(s): " + ", ".join(unknown))
 
     if not args.no_build:
-        if "hara-rust-native-eval" in selected:
-            run(["cargo", "build", "--manifest-path", "rust/Cargo.toml", "--release",
-                 "--bin", "hara-runtime-benchmark"], timeout=600)
         build_bytecode(selected)
-    if "hara-rust-native-eval" in selected and not HARA_BENCH.is_file():
-        parser.error(f"missing {HARA_BENCH} (build it or drop --no-build)")
     for runtime, (_, label) in BYTECODE_VARIANTS.items():
-        if (f"{runtime}-prepared" in selected or
-                (runtime == "hara-rust-vm" and
-                 "hara-rust-vm-eval" in selected)) and not bytecode_binary(label).is_file():
+        if runtime in selected and not bytecode_binary(label).is_file():
             parser.error(f"missing {bytecode_binary(label)} (build it or drop --no-build)")
     for name, spec in LANGUAGE_RUNTIMES.items():
         if any(runtime.startswith(f"{name}-") for runtime in selected) and not shutil.which(spec["binary"]):

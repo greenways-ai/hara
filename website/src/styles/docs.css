@@ -1,0 +1,4 @@
+@import "@hara-lang/visual-language/theme.css";
+:root { --sl-color-accent-low:#d9e7ff; --sl-color-accent:#2f7cff; --sl-color-accent-high:#0c2f67; --sl-font:var(--hara-font-sans); --sl-font-mono:var(--hara-font-mono); }
+:root[data-theme="dark"] { --sl-color-accent-low:#102446; --sl-color-accent:#6ea0ff; --sl-color-accent-high:#dbe7ff; }
+.site-title { letter-spacing:-.03em; }

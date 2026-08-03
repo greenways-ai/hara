@@ -7,7 +7,7 @@ const standard = process.env.HARA_BENCH_PROFILE === "standard";
 test("benchmark browser bytecode against browser whole-Wasm", async ({ page }) => {
   await page.goto("/rust/web/index.html");
   const rows = await page.evaluate(async ({ standard }) => {
-    const corpus = await fetch("/lib/bench/lisp-hara/workloads.json").then((response) => response.json());
+    const corpus = await fetch("/lib/bench/lisp-hara/general-workloads.json").then((response) => response.json());
     const [{ start: startVm }, { start: startWhole }] = await Promise.all([
       import("/rust/web/packages/browser/dist/hara-wasm-vm/hara.mjs"),
       import("/rust/web/packages/browser/dist/hara-wasm-full/hara.mjs")
@@ -33,24 +33,38 @@ test("benchmark browser bytecode against browser whole-Wasm", async ({ page }) =
         for (let callIndex = 0; callIndex < calls; callIndex += 1) call();
         samples.push((performance.now() - started) * 1e6 / calls);
       }
-      return { steady_ns: Math.round(median(samples)), calls_per_window: calls };
+      const steady_ns = Math.round(median(samples));
+      return { steady_ns, samples_ns: samples.map(Math.round),
+        throughput_per_sec: 1e9 / steady_ns, calls_per_window: calls };
     };
     const results = [];
     for (const workload of corpus.workloads) {
+      let prepareStarted = performance.now();
       const artifact = vm.compileBytecode(workload.hara_source);
+      const prepareNs = Math.round((performance.now() - prepareStarted) * 1e6);
       const vmCall = () => {
         const value = vm.evalBytecode(artifact);
         if (value !== workload.expected) throw new Error(`VM checksum: ${value}`);
       };
+      let firstStarted = performance.now();
+      vmCall();
+      const firstNs = Math.round((performance.now() - firstStarted) * 1e6);
       results.push({ runtime: "hara-wasm-vm", workload: workload.id,
+        prepare_ns: prepareNs, first_ns: firstNs, checksum: workload.expected,
         ...measure(vmCall), status: "ok" });
       try {
+        prepareStarted = performance.now();
         const compiled = await whole.compileWholeWasm(workload.hara_source);
+        const wholePrepareNs = Math.round((performance.now() - prepareStarted) * 1e6);
         const wholeCall = () => {
           const value = String(compiled.call());
           if (value !== workload.expected) throw new Error(`whole-Wasm checksum: ${value}`);
         };
+        firstStarted = performance.now();
+        wholeCall();
+        const wholeFirstNs = Math.round((performance.now() - firstStarted) * 1e6);
         results.push({ runtime: "hara-wasm-full", workload: workload.id,
+          prepare_ns: wholePrepareNs, first_ns: wholeFirstNs, checksum: workload.expected,
           ...measure(wholeCall), status: "ok" });
       } catch (error) {
         results.push({ runtime: "hara-wasm-full", workload: workload.id,

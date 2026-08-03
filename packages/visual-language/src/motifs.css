@@ -1,0 +1,44 @@
+.hara-motif {
+  --hara-motif-x: 0%;
+  --hara-motif-y: 0%;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background-color: var(--hara-bg-clean);
+}
+.hara-motif::before {
+  position: absolute;
+  inset: -2%;
+  z-index: -2;
+  content: "";
+  background-image: var(--hara-motif-sheet, url("../assets/precision-motifs.png"));
+  background-repeat: no-repeat;
+  background-size: 300% 200%;
+  background-position: var(--hara-motif-x) var(--hara-motif-y);
+  transform: scale(1.035) translate3d(var(--motif-shift-x, 0), var(--motif-shift-y, 0), 0);
+  transition: transform var(--hara-motion-slow) cubic-bezier(.2,.8,.2,1), filter var(--hara-motion-slow) ease;
+}
+.hara-motif::after {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(90deg, var(--hara-bg) 0%, color-mix(in srgb, var(--hara-bg) 88%, transparent) 36%, transparent 72%);
+}
+.hara-motif[data-motif="edge"] { --hara-motif-x: 0%; }
+.hara-motif[data-motif="aperture"] { --hara-motif-x: 50%; }
+.hara-motif[data-motif="rack"] { --hara-motif-x: 100%; }
+:root[data-theme="dark"] .hara-motif { --hara-motif-y: 0%; }
+:root[data-theme="light"] .hara-motif { --hara-motif-y: 100%; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .hara-motif { --hara-motif-y: 0%; }
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .hara-motif { --hara-motif-y: 100%; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hara-motif[data-responsive="true"]:hover::before {
+    transform: scale(1.045) translate3d(var(--motif-shift-x, 0), var(--motif-shift-y, 0), 0);
+  }
+}

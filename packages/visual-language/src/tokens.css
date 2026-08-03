@@ -1,0 +1,63 @@
+:root {
+  color-scheme: light dark;
+  --hara-font-sans: "Geist", "Helvetica Neue", Arial, sans-serif;
+  --hara-font-mono: "Geist Mono", "SFMono-Regular", Consolas, monospace;
+  --hara-radius-sm: 8px;
+  --hara-radius-md: 14px;
+  --hara-radius-lg: 22px;
+  --hara-space-page: clamp(20px, 4vw, 64px);
+  --hara-content: 1180px;
+  --hara-signal: #2f7cff;
+  --hara-success: #238a5b;
+  --hara-warning: #a66512;
+  --hara-danger: #c63b4d;
+  --hara-motion-fast: 160ms;
+  --hara-motion-slow: 700ms;
+}
+
+:root,
+:root[data-theme="light"] {
+  --hara-bg: #f6f8fa;
+  --hara-bg-clean: #ffffff;
+  --hara-surface: rgba(255, 255, 255, .82);
+  --hara-surface-solid: #ffffff;
+  --hara-surface-raised: #edf1f4;
+  --hara-text: #11151a;
+  --hara-muted: #626a73;
+  --hara-faint: #8b949e;
+  --hara-line: rgba(24, 31, 38, .11);
+  --hara-line-strong: rgba(24, 31, 38, .22);
+  --hara-shadow: 0 18px 55px rgba(44, 53, 61, .10);
+  --hara-metal: linear-gradient(135deg, #fff, #dfe4e8 52%, #f9fafb);
+}
+
+:root[data-theme="dark"] {
+  --hara-bg: #080a0d;
+  --hara-bg-clean: #050608;
+  --hara-surface: rgba(15, 18, 23, .82);
+  --hara-surface-solid: #101318;
+  --hara-surface-raised: #171b21;
+  --hara-text: #f4f6f8;
+  --hara-muted: #a0a8b1;
+  --hara-faint: #6f7882;
+  --hara-line: rgba(222, 231, 240, .10);
+  --hara-line-strong: rgba(222, 231, 240, .20);
+  --hara-shadow: 0 20px 70px rgba(0, 0, 0, .42);
+  --hara-metal: linear-gradient(135deg, #252a31, #0c0e12 52%, #20242a);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --hara-bg: #080a0d;
+    --hara-bg-clean: #050608;
+    --hara-surface: rgba(15, 18, 23, .82);
+    --hara-surface-solid: #101318;
+    --hara-surface-raised: #171b21;
+    --hara-text: #f4f6f8;
+    --hara-muted: #a0a8b1;
+    --hara-faint: #6f7882;
+    --hara-line: rgba(222, 231, 240, .10);
+    --hara-line-strong: rgba(222, 231, 240, .20);
+    --hara-shadow: 0 20px 70px rgba(0, 0, 0, .42);
+  }
+}

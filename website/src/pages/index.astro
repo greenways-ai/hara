@@ -1,0 +1,50 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+import Motif from "@hara-lang/visual-language/astro/Motif.astro";
+---
+<SiteLayout title="Hara — one embeddable language, many runtimes">
+  <main>
+    <Motif kind="edge" class="hero">
+      <div class="hero-copy">
+        <p class="hara-kicker">One language · many runtimes</p>
+        <h1>A precise kernel.<br /><span>Embedded everywhere.</span></h1>
+        <p>Put programmable logic inside native applications, WebAssembly, databases, servers, editors, and devices—with immutable data and explicit host boundaries.</p>
+        <div class="actions"><a class="button primary" href="/install.sh">Get Hara</a><a class="button" href="https://playground.hara-lang.org/">Open playground</a></div>
+        <small>Active experimental runtime. See the complete benchmark methods and evidence.</small>
+      </div>
+    </Motif>
+
+    <section class="proof" aria-label="Hara capabilities">
+      <div><strong>Persistent values</strong><span>Structural sharing</span></div>
+      <div><strong>Native + WebAssembly</strong><span>Shared Rust core</span></div>
+      <div><strong>Explicit interop</strong><span>Capability boundaries</span></div>
+      <div><strong>Tahto</strong><span>Target languages</span></div>
+    </section>
+
+    <section class="content-section intro">
+      <p class="hara-kicker">The advantage</p>
+      <h2>The language goes where the data lives.</h2>
+      <p class="lede">Embed Hara and grant a program only the operations it needs. The runtime stays small, the data stays close, and authority remains visible.</p>
+      <div class="card-grid three">
+        <article><span>01</span><h3>Fast kernel</h3><p>Prepared bytecode and whole-program compilation for native, browser, JVM, and Native Image hosts.</p></article>
+        <article><span>02</span><h3>Durable values</h3><p>Persistent maps, vectors, sets, queues, sorted collections, tries, and deterministic hashing.</p></article>
+        <article><span>03</span><h3>Controlled interop</h3><p>Files, sockets, processes, extensions, and host objects are explicit capabilities.</p></article>
+      </div>
+    </section>
+
+    <section class="content-section">
+      <p class="hara-kicker">Execution targets</p>
+      <h2>One program. Eight measurable artifacts.</h2>
+      <div class="runtime-list">
+        <article><b>Rust</b><h3>Native VM and full compiler</h3><p>Compact HBC4 execution or whole-function Wasm through the native runtime.</p></article>
+        <article><b>Web</b><h3>Browser VM and full compiler</h3><p>The same two execution representations delivered through WebAssembly.</p></article>
+        <article><b>Truffle</b><h3>JVM and Native Image</h3><p>Prepared HBC4 or Truffle AST execution on both Java-family hosts.</p></article>
+      </div>
+      <a class="text-link" href="https://benchmarks.hara-lang.org/">Compare every artifact →</a>
+    </section>
+
+    <Motif kind="aperture" class="closing">
+      <div><p class="hara-kicker">Documentation is now part of Hara</p><h2>Learn the language without leaving the site.</h2><a class="button primary" href="/docs/start/orientation/">Read the docs</a></div>
+    </Motif>
+  </main>
+</SiteLayout>

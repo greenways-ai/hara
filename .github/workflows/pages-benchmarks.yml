@@ -24,12 +24,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.13"
-      - run: pip install -r docs/requirements-docs.txt
+          node-version: 22
+          cache: npm
+          cache-dependency-path: benchmarks/package-lock.json
+      - run: npm ci --prefix benchmarks
+      - name: Validate benchmark contracts
+        run: |
+          npm test --prefix benchmarks
+          python3 -m unittest lib/bench/test_validate_evidence.py
       - name: Build standalone benchmark publication
-        run: mkdocs build --strict -f benchmarks/mkdocs.yml -d target/benchmarks
+        run: bash scripts/build-benchmarks
       - name: Deploy benchmark publication
         run: npx --yes netlify-cli deploy --prod --dir target/benchmarks --message "benchmarks ${GITHUB_SHA}"
         env:

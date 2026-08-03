@@ -156,7 +156,14 @@ public record HbcProgram(
     REST(16),
     SECOND(17),
     TO_MUTABLE(18),
-    TO_PERSISTENT(19);
+    TO_PERSISTENT(19),
+    NUMBER_PREDICATE(20),
+    ARRAY_NEW(21),
+    ARRAY_GET(22),
+    ARRAY_SET(23),
+    OBJECT_NEW(24),
+    OBJECT_GET(25),
+    OBJECT_SET(26);
 
     private final int id;
 

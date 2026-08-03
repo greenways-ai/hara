@@ -1,0 +1,41 @@
+@import "./tokens.css";
+
+html { background: var(--hara-bg); }
+body {
+  margin: 0;
+  color: var(--hara-text);
+  background: var(--hara-bg);
+  font-family: var(--hara-font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+*, *::before, *::after { box-sizing: border-box; }
+a { color: inherit; }
+code, pre, kbd, samp { font-family: var(--hara-font-mono); }
+::selection { color: white; background: var(--hara-signal); }
+:focus-visible { outline: 2px solid var(--hara-signal); outline-offset: 3px; }
+
+.hara-surface {
+  background: var(--hara-surface);
+  border: 1px solid var(--hara-line);
+  border-radius: var(--hara-radius-md);
+  box-shadow: var(--hara-shadow);
+  backdrop-filter: blur(20px) saturate(120%);
+}
+
+.hara-kicker {
+  color: var(--hara-muted);
+  font-size: .72rem;
+  font-weight: 650;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
