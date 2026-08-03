@@ -71,9 +71,9 @@
                       (if separator? "" lower-ch))))))))
 
 (defn normalize-key
-  "Converts a structured key to a snake_case string."
+  "Converts a string or structured key to a snake_case string."
   [key]
-  (snake-case (name key)))
+  (snake-case (if (string? key) key (name key))))
 
 (defn emitted-key
   "Preserves literal string keys and normalizes structured keys."
