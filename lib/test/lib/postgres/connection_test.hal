@@ -1,0 +1,63 @@
+(ns lib.postgres.connection-test
+  (:use code.test)
+  (:require [lib.postgres.connection :as connection]
+            [std.db.protocol :as protocol]))
+
+(defstruct FakeDatabase [events])
+
+(extend-type FakeDatabase protocol/IDatabase
+  (db-engine [_] :postgresql)
+  (db-provider [_] :fake)
+  (db-info [_] {:engine :postgresql :provider :fake})
+  (db-exec [value sql parameters]
+    (do
+      (swap! (field value :events) conj [:exec sql parameters])
+      :exec-result))
+  (db-query [value sql parameters]
+    (do
+      (swap! (field value :events) conj [:query sql parameters])
+      :query-result))
+  (db-close [value]
+    (do
+      (swap! (field value :events) conj [:close])
+      :closed)))
+
+(def results
+  [(fact "conn-execute delegates command SQL to std.db"
+     (let [events (atom [])
+           database (FakeDatabase events)
+           result (connection/conn-execute database "create table t(id int)" [1])]
+       [result (deref events)])
+     => [:exec-result [[:exec "create table t(id int)" [1]]]])
+
+   (fact "the historical dynamic selector delegates row SQL to query"
+     (let [events (atom [])
+           database (FakeDatabase events)
+           result (binding [connection/*execute* :query]
+                    (connection/conn-execute database "select $1" [7]))]
+       [result (deref events)])
+     => [:query-result [[:query "select $1" [7]]]])
+
+   (fact "conn-query uses the provider-neutral query protocol"
+     (let [events (atom [])
+           database (FakeDatabase events)
+           result (connection/conn-query database "select 1")]
+       [result (deref events)])
+     => [:query-result [[:query "select 1" []]]])
+
+   (fact "conn-close is nil-safe and closes real connections"
+     (let [events (atom [])
+           database (FakeDatabase events)]
+       [(connection/conn-close nil)
+        (connection/conn-close database)
+        (deref events)])
+     => [nil :closed [[:close]]])
+
+   (fact "notification channels accept direct and historical config values"
+     [(connection/notification-channel "events")
+      (connection/notification-channel :events)
+      (connection/notification-channel {:channel :events})
+      (connection/notification-channel {"channel" "events"})]
+     => ["events" "events" "events" "events"])])
+
+(pr-str (run '[lib.postgres.connection-test]))

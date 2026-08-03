@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""Synchronize the packaged Rust HAL snapshot from canonical lib/src."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+
+REPOSITORY = Path(__file__).resolve().parents[1]
+SOURCE_ROOT = REPOSITORY / "lib" / "src"
+MIRROR_ROOT = REPOSITORY / "rust" / "hal-src"
+
+
+def editor_artifact(path: Path) -> bool:
+    name = path.name
+    return name.startswith(".#") or (name.startswith("#") and name.endswith("#"))
+
+
+def collect(root: Path) -> dict[Path, bytes]:
+    files: dict[Path, bytes] = {}
+    for path in sorted(root.rglob("*.hal")):
+        if path.is_file() and not editor_artifact(path):
+            files[path.relative_to(root)] = path.read_bytes()
+    return files
+
+
+def classify(
+    source: dict[Path, bytes], mirror: dict[Path, bytes]
+) -> tuple[list[Path], list[Path], list[Path]]:
+    source_paths = set(source)
+    mirror_paths = set(mirror)
+    missing = sorted(source_paths - mirror_paths)
+    stale = sorted(mirror_paths - source_paths)
+    changed = sorted(
+        path for path in source_paths & mirror_paths if source[path] != mirror[path]
+    )
+    return missing, stale, changed
+
+
+def display(paths: list[Path], label: str) -> None:
+    for path in paths:
+        print(f"{label}: {path.as_posix()}", file=sys.stderr)
+
+
+def prune_empty_directories(root: Path) -> None:
+    directories = sorted(
+        (path for path in root.rglob("*") if path.is_dir()),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    )
+    for directory in directories:
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
+
+
+def check() -> int:
+    source = collect(SOURCE_ROOT)
+    mirror = collect(MIRROR_ROOT)
+    missing, stale, changed = classify(source, mirror)
+    display(missing, "missing from rust/hal-src")
+    display(stale, "stale in rust/hal-src")
+    display(changed, "different in rust/hal-src")
+    if missing or stale or changed:
+        print(
+            "rust/hal-src is not synchronized; run scripts/sync-rust-hal-src",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"rust/hal-src matches {len(source)} canonical HAL sources")
+    return 0
+
+
+def synchronize() -> int:
+    source = collect(SOURCE_ROOT)
+    mirror = collect(MIRROR_ROOT)
+    missing, stale, changed = classify(source, mirror)
+
+    for path in stale:
+        (MIRROR_ROOT / path).unlink()
+
+    for path in missing + changed:
+        target = MIRROR_ROOT / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source[path])
+
+    prune_empty_directories(MIRROR_ROOT)
+    print(
+        "synchronized rust/hal-src: "
+        f"{len(missing)} added, {len(changed)} updated, {len(stale)} removed"
+    )
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Synchronize rust/hal-src from canonical lib/src"
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="report drift without changing files",
+    )
+    arguments = parser.parse_args()
+
+    if not SOURCE_ROOT.is_dir():
+        parser.error(f"canonical source directory is missing: {SOURCE_ROOT}")
+    if arguments.check and not MIRROR_ROOT.is_dir():
+        parser.error(f"generated mirror directory is missing: {MIRROR_ROOT}")
+
+    MIRROR_ROOT.mkdir(parents=True, exist_ok=True)
+    return check() if arguments.check else synchronize()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

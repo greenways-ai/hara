@@ -1,0 +1,102 @@
+;; ============================================================================
+;; lib.postgres.connection — Foundation PostgreSQL compatibility facade.
+;;
+;; The historical namespace selected JVM JDBC drivers and exposed pooled Java
+;; objects. Hara keeps the public connection/query/notification names consumed
+;; by Tahto while delegating engine state to std.db.postgres.
+;; ============================================================================
+(ns lib.postgres.connection
+  (:require [std.db :as db]
+            [std.db.postgres :as postgres]))
+
+(def ^:dynamic *execute*
+  "Compatibility selector for conn-execute. Bind to :query or :fetch when the
+   caller expects rows; every other value selects command execution."
+  :exec)
+
+(defn- query-mode?
+  [mode]
+  (or (= mode :query)
+      (= mode :fetch)))
+
+(defn conn-create
+  "Opens a PostgreSQL connection through the installed Hara provider."
+  ([]
+   (postgres/open))
+  ([options]
+   (postgres/open options)))
+
+(def conn-open conn-create)
+(def open conn-create)
+
+(defn conn-close
+  "Closes a provider-owned connection. Closing nil remains a no-op."
+  [connection]
+  (if (nil? connection)
+    nil
+    (db/close connection)))
+
+(def close conn-close)
+
+(defn conn-execute
+  "Executes SQL through std.db.postgres. Prefer conn-query for row-returning
+   calls; *execute* preserves the historical dynamic selection point."
+  ([connection sql]
+   (conn-execute connection sql []))
+  ([connection sql parameters]
+   (if (query-mode? *execute*)
+     (db/query connection sql parameters)
+     (db/exec connection sql parameters))))
+
+(def execute conn-execute)
+
+(defn conn-query
+  "Executes row-returning SQL with optional parameters and decode options."
+  ([connection sql]
+   (conn-query connection sql []))
+  ([connection sql parameters]
+   (db/query connection sql parameters))
+  ([connection sql parameters options]
+   (postgres/query connection sql parameters options)))
+
+(def query conn-query)
+
+(defn notification-channel
+  "Normalizes the historical notification config or a direct channel value."
+  [config]
+  (let [channel (cond
+                  (map? config) (if (has? config :channel)
+                                  (get config :channel)
+                                  (get config "channel"))
+                  :else config)]
+    (if (keyword? channel)
+      (name channel)
+      channel)))
+
+(defn notify-create
+  "Starts LISTEN and returns a provider-owned subscription."
+  [connection config]
+  (postgres/listen connection (notification-channel config)))
+
+(def listen notify-create)
+
+(defn notify-next
+  "Returns the next notification for a subscription."
+  [subscription]
+  (postgres/next-notification subscription))
+
+(def next-notification notify-next)
+
+(defn notify-close
+  "Stops LISTEN for a subscription."
+  [subscription]
+  (postgres/unlisten subscription))
+
+(def unlisten notify-close)
+
+(defn notify
+  "Publishes a PostgreSQL notification."
+  ([connection channel]
+   (postgres/notify connection (notification-channel channel)))
+  ([connection channel payload]
+   (postgres/notify connection (notification-channel channel) payload)))
