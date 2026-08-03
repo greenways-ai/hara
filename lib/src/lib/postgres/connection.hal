@@ -1,0 +1,5 @@
+(ns lib.postgres.connection
+  (:require [std.db.postgres :as postgres]))
+
+(def conn-create postgres/open)
+(def conn-close postgres/close)
