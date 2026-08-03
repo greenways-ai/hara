@@ -347,7 +347,7 @@ public interface Parser {
       Matcher m = intPat.matcher(s);
       if (m.matches()) {
         if (m.group(2) != null) {
-          if (m.group(8) != null) return null;
+          if (m.group(8) != null) return BigInteger.ZERO;
           return Num.num(0);
         }
         boolean negate = (m.group(1).equals("-"));
@@ -360,13 +360,12 @@ public interface Parser {
         if (n == null) return null;
         BigInteger bn = new BigInteger(n, radix);
         if (negate) bn = bn.negate();
-        if (m.group(8) != null) return null;
-        if (bn.bitLength() >= 64) return null;
+        if (m.group(8) != null || bn.bitLength() >= 64) return bn;
         return Num.num(bn.longValue());
       }
       m = floatPat.matcher(s);
       if (m.matches()) {
-        if (m.group(4) != null) return null;
+        if (m.group(4) != null) return new BigDecimal(m.group(1));
         return Double.parseDouble(s);
       }
       return null;
