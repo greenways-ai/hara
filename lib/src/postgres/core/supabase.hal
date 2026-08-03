@@ -1,0 +1,114 @@
+(ns postgres.core.supabase
+  (:require [tahto.core :as l]
+            [std.foundation :as f]))
+
+(l/script :postgres {:macro-only true})
+
+(defmacro.xt auth-uid [] '(auth.uid))
+(defmacro.xt auth-email [] '(auth.email))
+(defmacro.xt auth-role [] '(auth.role))
+(defmacro.xt auth-jwt [] '(auth.jwt))
+
+(defmacro.xt is-supabase []
+  (list 'exists
+        [:select 1 :from 'information_schema.schemata
+         :where {:schema-name "auth"}]))
+
+(defmacro.xt grant-usage
+  [schema & roles]
+  [:grant-usage-on-schema schema
+   :to (or (first roles) (list 'quote '[anon authenticated service_role]))])
+
+(defmacro.xt grant-tables
+  [schema & roles]
+  [:grant-all-on-all-tables-in-schema schema
+   :to (or (first roles) (list 'quote '[anon authenticated service_role]))])
+
+(defmacro.xt grant-privileges
+  [schema & roles]
+  [:alter-default-privileges-for-role 'postgres
+   :in-schema schema
+   :grant-all-on-tables-to
+   (or (first roles) (list 'quote '[anon authenticated service_role]))])
+
+(defmacro.xt revoke-execute-privileges-from-public [schema]
+  [:alter-default-privileges-for-role 'postgres
+   :in-schema schema
+   :revoke-execute-on-functions-from-public])
+
+(defmacro.xt grant-public [schema]
+  (list 'do
+        [:grant-usage-on-schema schema
+         :to (list 'quote '[anon authenticated service_role])]
+        [:grant-all-on-all-tables-in-schema schema
+         :to (list 'quote '[anon authenticated service_role])]
+        [:alter-default-privileges-for-role 'postgres
+         :in-schema schema
+         :grant-all-on-tables-to
+         (list 'quote '[anon authenticated service_role])]))
+
+(defn request-event [request]
+  (cond (has? request "db/sync") "db/sync"
+        (has? request "db/remove") "db/remove"
+        :else nil))
+
+(defn resolve-literal [form]
+  (cond
+    (or (map? form) (vector? form) (string? form) (number? form)
+        (boolean? form) (nil? form)) form
+    (symbol? form)
+    (let [resolved (resolve form)]
+      (if resolved (deref resolved) form))
+    :else form))
+
+(defn normalize-realtime-payload [payload]
+  (let [payload (resolve-literal payload)]
+    (if (map? payload)
+      (with-meta payload (assoc (meta payload) :js true))
+      payload)))
+
+(defmacro.xt realtime-send
+  ([topic event payload]
+   (list 'postgres.core.supabase/realtime-send topic event payload false))
+  ([topic event payload private?]
+   (list 'realtime.send
+         (normalize-realtime-payload payload)
+         event topic (if private? true false))))
+
+(defmacro.xt realtime-topic [] (list 'realtime.topic))
+
+(defmacro.xt realtime-send-request
+  ([topic request]
+   (list 'postgres.core.supabase/realtime-send-request topic request false))
+  ([topic request private?]
+   (let [request (resolve-literal request)
+         event (request-event request)]
+     (when (nil? event)
+       (throw (ex-info "Unsupported xt.db realtime request" {:request request})))
+     (list 'realtime.send
+           (normalize-realtime-payload request)
+           event topic (if private? true false)))))
+
+(defn process-return [ret]
+  (if (= ret "") nil ret))
+
+(defn get-form-type [form]
+  (cond
+    (string? form) :text
+    (integer? form) :bigint
+    (number? form) :numeric
+    (map? form) :jsonb
+    (:type (meta form)) (:type (meta form))
+    (and (list? form) (keyword? (first form))) (first form)
+    :else (throw (ex-info "Cannot determine type" {:form form}))))
+
+(defn transform-entry-defn [body env] body)
+(defn transform-entry-deftype [body env] body)
+
+(defn transform-entry [body env]
+  (let [op-key (get-in env [:entry :op-key])]
+    (cond (= op-key :defn) (transform-entry-defn body env)
+          (= op-key :deftype) (transform-entry-deftype body env)
+          :else body)))
+
+(def __tahto_load__ true)
