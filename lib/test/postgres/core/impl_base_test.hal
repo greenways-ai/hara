@@ -1,0 +1,99 @@
+(ns postgres.core.impl-base-test
+  (:require [postgres.core.impl-base :as base])
+  (:use code.test))
+
+(def table-schema
+  {:id [{:type :uuid :primary true :required true}]
+   :status [{:type :enum :enum {:ns 'demo/Status}}]
+   :name [{:type :text}]
+   :cache [{:type :ref :ref {:type :uuid :link {:module 'demo :id 'Cache}}}]})
+
+(fact "validates table inputs"
+  (base/t-input-check table-schema {:id "a"}) => {:id "a"}
+  (base/t-input-check table-schema {}) => (throws)
+  (base/t-input-check table-schema {:id "a" :unknown 1}) => (throws))
+
+(fact "collects schema attributes with values"
+  (base/t-input-collect table-schema {:status 'active})
+  => {:status ['active {:type :enum :enum {:ns 'demo/Status}}]})
+
+(fact "applies value process pipelines"
+  (base/t-val-process [['add 5] ['sub 5]] 'input)
+  => '(sub (add input 5) 5))
+
+(fact "casts primitive enum and reference values"
+  (base/t-val-fn table-schema :name "hello" {} {}) => '(:text "hello")
+  (base/t-val-fn table-schema :status 'active {} {}) => '(++ active demo/Status)
+  (base/t-val-fn table-schema :cache 'cache-id {} {}) => '(:uuid cache-id))
+
+(fact "builds database keys"
+  (base/t-key-fn table-schema :name) => "name"
+  (base/t-key-fn table-schema :cache) => "cache_id")
+
+(fact "builds JSON access forms"
+  (base/t-sym-fn table-schema :name 'row) => '(:text (:->> row "name"))
+  (base/t-sym-fn table-schema :cache 'row)
+  => '(:uuid (coalesce (:->> row "cache_id") (:->> (:-> row "cache") "id"))))
+
+(fact "builds JSON object forms in schema order"
+  (base/t-build-js-map
+   table-schema
+   (base/t-input-collect table-schema {:id 'id :name "hello"})
+   {} {})
+  => '(jsonb-build-object "id" (:uuid id) "name" (:text "hello")))
+
+(fact "builds joined table symbols"
+  (base/t-join-target-sym {:module 'demo :id 'Cache}) => 'demo/Cache
+  (base/t-join-target-sym {:ns 'demo :id 'Cache}) => 'demo/Cache
+  (base/t-join-target-sym {:module 'demo}) => nil)
+
+(fact "formats returning columns and expressions"
+  (base/t-returning table-schema #{:id :name})
+  => '(--- [#{"id"} #{"name"}])
+  (base/t-returning table-schema '*) => '*
+  (base/t-returning table-schema '#{external-id})
+  => '(--- [#{"external_id"}]))
+
+(fact "normalizes hash-vector where clauses"
+  (base/t-where-hashvec #{[:id 1]} identity) => #{[:id 1]}
+  (base/t-where-hashvec #{[:id 1 :or :name "a"]} identity)
+  => #{[:id 1 :or :name "a"]})
+
+(fact "transforms where keys and values"
+  (base/t-where-transform table-schema {:id 1} {}) => {"id" [:eq 1]}
+  (base/t-where-transform table-schema {:cache 1} {}) => {"cache_id" [:eq 1]}
+  (base/t-where-transform table-schema {:status 'active} {})
+  => '{"status" [:eq (++ active demo/Status)]})
+
+(fact "wraps JSON result forms"
+  (base/t-wrap-json '<FORM> :json 'json-agg 'output nil)
+  => '[:with j-ret :as <FORM> \\ :select (json-agg j-ret) :from j-ret]
+  (base/t-wrap-json '<FORM> :json 'json-agg 'output :id)
+  => '[:with j-ret :as <FORM> \\ :select (json-agg (. j-ret #{:id})) :from j-ret])
+
+(fact "transforms reference joins"
+  (let [result (base/t-join-transform table-schema [:cache] 'Entry {})]
+    [(first (first result)) (second (first result))])
+  => [:left-join 'demo/Cache])
+
+(fact "appends query clauses"
+  [(base/t-wrap-where [] {:id 1} table-schema {} {})
+   (base/t-wrap-order-by [] [:id :status] table-schema {})
+   (base/t-wrap-limit [] 10 {})
+   (base/t-wrap-offset [] 20 {})
+   (base/t-wrap-into [] 'output {})
+   (base/t-wrap-returning [] [#{"id"}] {})
+   (base/t-wrap-group-by [] [#{"id"}] {})
+   (base/t-wrap-having [] {:id 1} table-schema {} {})
+   (base/t-wrap-args [] [:extra] {})]
+  => '[[:where {"id" [:eq 1]}]
+      [:order-by (quote [#{"id"} #{"status"}])]
+      [:limit 10] [:offset 20] [:into output]
+      [:returning [#{"id"}]] [:group-by [#{"id"}]]
+      [:having {"id" [:eq 1]}] [:extra]])
+
+(fact "appends lock clauses"
+  (base/t-wrap-lock [] [:update] {}) => [:for :update]
+  (base/t-wrap-lock [:select '*] [:share :nowait] {:newline true})
+  => [:select '* \\ :for :share :nowait]
+  (base/t-wrap-lock [] [:invalid] {}) => (throws))

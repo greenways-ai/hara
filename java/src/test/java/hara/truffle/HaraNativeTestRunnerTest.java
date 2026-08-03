@@ -107,6 +107,21 @@ public final class HaraNativeTestRunnerTest {
   }
 
   @Test
+  public void runsPortablePostgresCoreImplBase() throws Exception {
+    HaraNativeTestRunner.Result result =
+        HaraNativeTestRunner.runFile(
+            ROOT, ROOT.resolve("lib/test/postgres/core/impl_base_test.hal"));
+
+    assertTrue(result.failureMessage(), result.passed());
+    assertEquals(15, result.facts());
+    assertEquals(31, result.checks());
+    assertEquals(31, result.passedChecks());
+    assertEquals(0, result.failedChecks());
+    assertEquals(0, result.errors());
+    assertEquals(0, result.timeouts());
+  }
+
+  @Test
   public void runsPortablePostgresTypedFoundation() throws Exception {
     String[][] suites = {
       {"lib/test/postgres/typed_test.hal", "8", "9"},
