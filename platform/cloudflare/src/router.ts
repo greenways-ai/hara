@@ -1,5 +1,6 @@
 const COMMIT = /^[0-9a-f]{40}$/;
 const DIGEST = /^[0-9a-f]{64}$/;
+const HARA_MARK = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#080a0d"/><path fill="#f4f6f8" d="M10 8h13v18h18V8h13v48H41V38H23v18H10z"/><path fill="#2f7cff" d="M27 8h10v10H27z"/></svg>`;
 
 type RepositoryKind = "identity" | "packages";
 
@@ -74,11 +75,22 @@ function discovery(): Response {
   );
 }
 
+function favicon(): Response {
+  return new Response(HARA_MARK, {
+    headers: {
+      "cache-control": "public, max-age=31536000, immutable",
+      "content-type": "image/svg+xml",
+      "x-content-type-options": "nosniff",
+    },
+  });
+}
+
 export async function route(request: Request, env: Env): Promise<Response> {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return problem(405, "method-not-allowed", "public service endpoints are read-only");
   }
   const url = new URL(request.url);
+  if (url.pathname === "/favicon.svg" || url.pathname === "/favicon.ico") return favicon();
   if (url.pathname === "/.well-known/hara-tap.edn") return discovery();
   if (url.hostname === "id.hara-lang.org" && url.pathname === "/v1/identity") {
     return gitDocument("identity", request, env);
