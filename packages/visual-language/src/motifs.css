@@ -1,44 +1,68 @@
 .hara-motif {
-  --hara-motif-x: 0%;
-  --hara-motif-y: 0%;
+  --hara-motif-ink: color-mix(in srgb, var(--hara-text) 72%, transparent);
+  --hara-motif-faint: color-mix(in srgb, var(--hara-text) 10%, transparent);
+  --hara-motif-glow: color-mix(in srgb, var(--hara-signal) 34%, transparent);
+  --hara-motif-metal: color-mix(in srgb, var(--hara-surface-solid) 84%, var(--hara-text));
   position: relative;
   overflow: hidden;
   isolation: isolate;
   background-color: var(--hara-bg-clean);
 }
+
 .hara-motif::before {
   position: absolute;
-  inset: -2%;
+  inset: -8%;
   z-index: -2;
   content: "";
-  background-image: var(--hara-motif-sheet, url("../assets/precision-motifs.png"));
   background-repeat: no-repeat;
-  background-size: 300% 200%;
-  background-position: var(--hara-motif-x) var(--hara-motif-y);
-  transform: scale(1.035) translate3d(var(--motif-shift-x, 0), var(--motif-shift-y, 0), 0);
+  transform: translate3d(var(--motif-shift-x, 0), var(--motif-shift-y, 0), 0);
+  transform-origin: 72% 50%;
   transition: transform var(--hara-motion-slow) cubic-bezier(.2,.8,.2,1), filter var(--hara-motion-slow) ease;
 }
+
 .hara-motif::after {
   position: absolute;
   inset: 0;
   z-index: -1;
   content: "";
   pointer-events: none;
-  background: linear-gradient(90deg, var(--hara-bg) 0%, color-mix(in srgb, var(--hara-bg) 88%, transparent) 36%, transparent 72%);
+  background: linear-gradient(90deg, var(--hara-bg) 0%, color-mix(in srgb, var(--hara-bg) 91%, transparent) 34%, transparent 74%);
 }
-.hara-motif[data-motif="edge"] { --hara-motif-x: 0%; }
-.hara-motif[data-motif="aperture"] { --hara-motif-x: 50%; }
-.hara-motif[data-motif="rack"] { --hara-motif-x: 100%; }
-:root[data-theme="dark"] .hara-motif { --hara-motif-y: 0%; }
-:root[data-theme="light"] .hara-motif { --hara-motif-y: 100%; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) .hara-motif { --hara-motif-y: 0%; }
+
+.hara-motif[data-motif="edge"]::before {
+  background:
+    linear-gradient(117deg, transparent 0 57.8%, var(--hara-motif-glow) 58%, transparent 58.8%),
+    linear-gradient(117deg, transparent 0 59%, var(--hara-motif-ink) 59.08% 59.22%, transparent 59.3%),
+    linear-gradient(117deg, transparent 0 61%, var(--hara-motif-faint) 61% 77%, transparent 77%),
+    repeating-linear-gradient(117deg, transparent 0 20px, var(--hara-motif-faint) 20px 21px, transparent 21px 42px),
+    radial-gradient(ellipse at 76% 48%, var(--hara-motif-glow), transparent 35%),
+    linear-gradient(135deg, var(--hara-bg-clean), var(--hara-motif-metal));
+  background-size: 100% 100%, 100% 100%, 100% 100%, 46% 100%, 100% 100%, 100% 100%;
+  background-position: center, center, center, right center, center, center;
 }
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme]) .hara-motif { --hara-motif-y: 100%; }
+
+.hara-motif[data-motif="aperture"]::before {
+  background:
+    radial-gradient(circle at 75% 50%, transparent 0 8%, var(--hara-motif-ink) 8.15% 8.35%, transparent 8.5% 15%, var(--hara-motif-faint) 15.1% 15.35%, transparent 15.5% 24%, var(--hara-motif-ink) 24.1% 24.3%, transparent 24.45%),
+    repeating-conic-gradient(from 7deg at 75% 50%, var(--hara-motif-faint) 0 .35deg, transparent .35deg 15deg),
+    radial-gradient(circle at 75% 50%, var(--hara-motif-glow) 0, transparent 31%),
+    linear-gradient(145deg, var(--hara-bg-clean), var(--hara-motif-metal));
+  background-size: 100% 100%;
 }
+
+.hara-motif[data-motif="rack"]::before {
+  background:
+    linear-gradient(90deg, transparent 0 61%, var(--hara-motif-ink) 61.08% 61.22%, transparent 61.3% 88%, var(--hara-motif-ink) 88.08% 88.22%, transparent 88.3%),
+    repeating-linear-gradient(0deg, transparent 0 42px, var(--hara-motif-faint) 42px 43px, transparent 43px 86px),
+    repeating-linear-gradient(90deg, transparent 0 11px, var(--hara-motif-faint) 11px 12px, transparent 12px 24px),
+    radial-gradient(circle at 84% 26%, var(--hara-signal) 0 2px, var(--hara-motif-glow) 3px, transparent 9px),
+    linear-gradient(160deg, var(--hara-bg-clean), var(--hara-motif-metal));
+  background-size: 100% 100%, 31% 100%, 31% 12px, 100% 100%, 100% 100%;
+  background-position: center, right center, right 12% top 13%, center, center;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .hara-motif[data-responsive="true"]:hover::before {
-    transform: scale(1.045) translate3d(var(--motif-shift-x, 0), var(--motif-shift-y, 0), 0);
+    transform: scale(1.012) translate3d(var(--motif-shift-x, 0), var(--motif-shift-y, 0), 0);
   }
 }

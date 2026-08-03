@@ -16,3 +16,10 @@ test("theme contract supports cross-domain system, light, and dark preferences",
   assert.match(source, /Domain=hara-lang\.org/);
   assert.match(source, /hara:theme-change/);
 });
+
+test("motifs are resolution-independent and do not load the raster reference", async () => {
+  const motifs = await readFile(new URL("../src/motifs.css", import.meta.url), "utf8");
+  assert.doesNotMatch(motifs, /precision-motifs\.png|background-size:\s*300%/);
+  for (const primitive of ["linear-gradient", "radial-gradient", "conic-gradient"])
+    assert.match(motifs, new RegExp(primitive));
+});
