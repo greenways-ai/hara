@@ -114,12 +114,15 @@ public final class HaraNativeTestRunnerTest {
       {"lib/test/postgres/core/impl_insert_test.hal", "7", "8"},
       {"lib/test/postgres/core/impl_update_test.hal", "7", "8"},
       {"lib/test/postgres/core/impl_test.hal", "4", "8"},
-      {"lib/test/postgres/core/graph_walk_test.hal", "4", "6"}
-      ,{"lib/test/postgres/core/graph_base_test.hal", "5", "9"}
-      ,{"lib/test/postgres/core/graph_query_test.hal", "7", "12"}
-      ,{"lib/test/postgres/core/graph_insert_test.hal", "6", "10"}
-      ,{"lib/test/postgres/core/graph_view_test.hal", "7", "11"}
-      ,{"lib/test/postgres/core/graph_test.hal", "6", "13"}
+      {"lib/test/postgres/core/graph_walk_test.hal", "4", "6"},
+      {"lib/test/postgres/core/graph_base_test.hal", "5", "9"},
+      {"lib/test/postgres/core/graph_query_test.hal", "7", "12"},
+      {"lib/test/postgres/core/graph_insert_test.hal", "6", "10"},
+      {"lib/test/postgres/core/graph_view_test.hal", "7", "11"},
+      {"lib/test/postgres/core/graph_test.hal", "6", "13"},
+      {"lib/test/postgres/core_public_test.hal", "5", "9"},
+      {"lib/test/postgres/core/system_test.hal", "2", "3"},
+      {"lib/test/postgres/core/supabase_test.hal", "8", "25"}
     };
     for (String[] suite : suites) {
       HaraNativeTestRunner.Result result =

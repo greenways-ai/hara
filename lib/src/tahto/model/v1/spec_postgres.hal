@@ -61,7 +61,8 @@
         ","
         (mapcat (fn [entry]
                   (let [entry-value (second entry)]
-                    [(pg-string (name (first entry)))
+                    [(pg-string (let [key (first entry)]
+                                  (if (string? key) key (name key))))
                      (if (keyword? entry-value)
                        (pg-string (str entry-value))
                        (emit/*emit-fn* entry-value grammar context))]))

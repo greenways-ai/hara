@@ -1,0 +1,15 @@
+(ns postgres.core.system-test
+  (:require [postgres.core.system :as sys]
+            [tahto.core.script :as script])
+  (:use code.test))
+
+(defn emit [form]
+  (script/compile-form :postgres 'postgres.core.system-test form))
+
+(fact "creates canonical PostgreSQL system templates"
+  (sys/pg-tmpl 'hello)
+  => '(def$.pg hello pg-hello))
+
+(fact "emits generated PostgreSQL system functions"
+  (emit '(sys/jit-available)) => "pg_jit_available()"
+  (emit '(sys/database-size "app")) => "pg_database_size('app')")

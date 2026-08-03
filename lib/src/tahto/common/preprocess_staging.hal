@@ -7,6 +7,14 @@
             [tahto.common.util :as util]
             [std.lib.walk :as walk]))
 
+(defn- macroexpand-host-form [form options]
+  (let [module-id (get-in options [:module :id])]
+    (try
+      (if module-id
+        (eval-in-ns module-id [(list 'macroexpand-1 (list 'quote form))])
+        (macroexpand-1 form))
+      (catch Throwable _ form))))
+
 (defn to-staging-form [form grammar modules options deps-fragment walk-fn]
   (let [symbol (first form)
         reserved (get-in grammar [:reserved symbol])
@@ -31,16 +39,16 @@
               (if reserved
                 (assign/protect-reserved-head form)
                 (let [fragment (resolve/get-fragment (first form) modules options)
-                      host-var (if (and (symbol? symbol) (namespace symbol))
-                                 (resolve symbol)
-                                 nil)]
+                      expanded (if (and (symbol? symbol) (namespace symbol))
+                                 (macroexpand-host-form form options)
+                                 form)]
                   (cond (:template fragment)
                         (do (if deps-fragment (swap! deps-fragment conj (util/sym-full fragment)))
                             (binding [base/*macro-form* form base/*macro-opts* options]
                               (walk-fn (apply (:template fragment) (rest form)))))
 
-                        (and host-var (:macro (meta host-var)))
-                        (walk-fn (macroexpand-1 form))
+                        (not= form expanded)
+                        (walk-fn expanded)
 
                         :else form))))))))
 

@@ -1,0 +1,56 @@
+(ns postgres.core.supabase-test
+  (:require [postgres.core.supabase :as s]
+            [tahto.core.script :as script])
+  (:use code.test))
+
+(def payload {"db/sync" {"Entry" []}})
+
+(defn emit [form]
+  (script/compile-form :postgres 'postgres.core.supabase-test form))
+
+(fact "emits Supabase auth helpers"
+  (emit '(s/auth-uid)) => "auth.uid()"
+  (emit '(s/auth-email)) => "auth.email()"
+  (emit '(s/auth-role)) => "auth.role()"
+  (emit '(s/auth-jwt)) => "auth.jwt()")
+
+(fact "emits Supabase installation checks"
+  (emit '(s/is-supabase))
+  => "exists(SELECT 1 FROM information_schema.schemata WHERE \"schema_name\" = 'auth')")
+
+(fact "returns canonical realtime request events"
+  (s/request-event {"db/sync" {}}) => "db/sync"
+  (s/request-event {"db/remove" {}}) => "db/remove"
+  (s/request-event {"db/query" {}}) => nil)
+
+(fact "resolves and normalizes realtime literals"
+  (s/resolve-literal 'postgres.core.supabase-test/payload) => payload
+  (meta (s/normalize-realtime-payload {:a 1})) => {:js true}
+  (s/normalize-realtime-payload [1 2]) => [1 2])
+
+(fact "emits realtime helpers"
+  (emit '(s/realtime-topic)) => "realtime.topic()"
+  (emit '(s/realtime-send "room:test" "db/sync"
+                          {"db/sync" {"Entry" []}} false))
+  => "realtime.send(jsonb_build_object('db/sync',jsonb_build_object('Entry',jsonb_build_array())),'db/sync','room:test',FALSE)"
+  (emit '(s/realtime-send-request "room:test"
+                                  {"db/sync" {"Entry" []}} false))
+  => "realtime.send(jsonb_build_object('db/sync',jsonb_build_object('Entry',jsonb_build_array())),'db/sync','room:test',FALSE)")
+
+(fact "rejects unsupported realtime requests"
+  (macroexpand-1 '(s/realtime-send-request "room" {"db/query" {}} false))
+  => (throws))
+
+(fact "processes return values and literal form types"
+  (s/process-return "value") => "value"
+  (s/process-return "") => nil
+  (s/get-form-type "hello") => :text
+  (s/get-form-type 1) => :bigint
+  (s/get-form-type 1.5) => :numeric
+  (s/get-form-type {:a 1}) => :jsonb
+  (s/get-form-type '(:uuid id)) => :uuid)
+
+(fact "keeps unconfigured entry transforms stable"
+  (s/transform-entry "BODY" {:entry {:op-key :defn}}) => "BODY"
+  (s/transform-entry "BODY" {:entry {:op-key :deftype}}) => "BODY"
+  (s/transform-entry "BODY" {:entry {:op-key :def}}) => "BODY")
