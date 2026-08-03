@@ -24,6 +24,21 @@ export interface WholeWasmModule {
   readonly instance: WebAssembly.Instance;
 }
 
+export interface LockedPackageOptions {
+  fetch?: typeof globalThis.fetch;
+}
+
+export function loadLockedPackageResources(
+  lockSource: string,
+  request?: typeof globalThis.fetch
+): Promise<Record<string, string>>;
+
+export function installLockedPackages(
+  runtime: Pick<HaraRuntime, "registerResource">,
+  lockSource: string,
+  options?: LockedPackageOptions
+): Promise<string[]>;
+
 export function start(options?: StartOptions): Promise<HaraRuntime>;
 export const ready: Promise<HaraRuntime>;
 export default start;

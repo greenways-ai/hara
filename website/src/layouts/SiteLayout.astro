@@ -6,7 +6,10 @@ import "@hara-lang/visual-language/motifs.css";
 import "../styles/site.css";
 import "@hara-lang/visual-language/theme.js";
 
-const { title = "Hara", description = "One embeddable language. Many runtimes." } = Astro.props;
+const {
+  title = "Hara",
+  description = "A small, high-performance Lisp for learning to build software from first principles."
+} = Astro.props;
 ---
 <!doctype html>
 <html lang="en">
@@ -31,6 +34,6 @@ const { title = "Hara", description = "One embeddable language. Many runtimes." 
       <ThemeToggle />
     </header>
     <slot />
-    <footer class="site-footer"><span>Hara</span><p>One embeddable language. Many runtimes.</p><a href="https://www.greenways.ai/">Built by Greenways</a></footer>
+    <footer class="site-footer"><span>Hara</span><p>Simple to pick up. Fast enough to keep.</p><a href="https://www.greenways.ai/">Built by Greenways</a></footer>
   </body>
 </html>

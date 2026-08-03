@@ -39,11 +39,11 @@ jobs:
     - name: Run raw HTA VM integration tests
       run: cargo test --manifest-path rust/raw/Cargo.toml --features bytecode-vm
     - name: Run bytecode VM tests
-      run: cargo test --manifest-path rust/Cargo.toml --features bytecode-vm vm:: --lib
+      run: "cargo test --manifest-path rust/Cargo.toml --features bytecode-vm vm:: --lib"
     - name: Run checked tracing JIT tests
-      run: cargo test --manifest-path rust/Cargo.toml --features tracing-jit jit:: --lib
+      run: "cargo test --manifest-path rust/Cargo.toml --features tracing-jit jit:: --lib"
     - name: Run native tracing JIT tests
-      run: cargo test --manifest-path rust/Cargo.toml --features native-jit jit:: --lib
+      run: "cargo test --manifest-path rust/Cargo.toml --features native-jit jit:: --lib"
     - name: Verify generated parity corpus
       run: ./scripts/generate-wasm-truffle-parity && git diff --exit-code -- specs/00-unsorted/platform-language/draft/conformance/parity/wasm-truffle.edn
     - name: Build raw Rust WASM extension artifact
