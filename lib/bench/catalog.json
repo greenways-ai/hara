@@ -15,6 +15,7 @@
     ]
   },
   "artifacts": [
+    {"id":"hara-wasm-core","family":"WebAssembly","host":"Browser","representation":"Interpreter core","invocation":"@hara-lang/browser/core","summary":"Small bridge-compatible interpreter kernel used by the live documentation."},
     {"id":"hara-rust-vm","family":"Rust","host":"Native","representation":"HBC4 VM","invocation":"hara eval --engine vm","summary":"Prepared HBC4 bytecode in the native Rust runtime."},
     {"id":"hara-rust-full","family":"Rust","host":"Native","representation":"Whole-Wasm","invocation":"hara eval --engine whole-wasm","summary":"Whole-function Wasm compiled and hosted by the native Rust runtime."},
     {"id":"hara-wasm-vm","family":"WebAssembly","host":"Browser","representation":"HBC4 VM","invocation":"@hara-lang/browser/vm","summary":"Prepared HBC4 bytecode in the browser WebAssembly runtime."},

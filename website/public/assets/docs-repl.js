@@ -34,21 +34,27 @@ const fetchWithProgress = async (input, init) => {
   return new Response(stream, { status: response.status, statusText: response.statusText, headers: response.headers });
 };
 
-const kernelPromise = createDocsKernel({
-  wasmUrl: "/runtime/hara-wasm-vm-0.1.1.wasm",
-  workerUrl: "/runtime/hta-worker.js",
-  resources: {
-    "studio.store": "/docs-assets/rust/studio/hal/store.hal",
-    "studio.fs": "/docs-assets/rust/studio/hal/fs.hal"
-  },
-  fetchAsset: fetchWithProgress
-}).then((kernel) => {
+const kernelPromise = fetch("/runtime/kernel-manifest.json")
+  .then(async (response) => {
+    if (!response.ok) throw new Error(`kernel manifest: ${response.status}`);
+    const manifest = await response.json();
+    return createDocsKernel({
+      wasmUrl: manifest.variants.core.url,
+      workerUrl: "/runtime/hta-worker.js",
+      manifest,
+      resources: {
+        "studio.store": "/docs-assets/rust/studio/hal/store.hal",
+        "studio.fs": "/docs-assets/rust/studio/hal/fs.hal"
+      },
+      fetchAsset: fetchWithProgress
+    });
+  }).then((kernel) => {
   toast.dataset.state = "ready";
-  toast.querySelector("span").textContent = "hara-wasm-vm ready";
+  toast.querySelector("span").textContent = "hara-wasm-core ready";
   toast.querySelector("b").textContent = "100%";
   toast.style.setProperty("--kernel-progress", "100%");
   setTimeout(() => { toast.hidden = true; }, 2400);
-  document.dispatchEvent(new CustomEvent("hara:kernel-ready", { detail: { artifact: "hara-wasm-vm" } }));
+  document.dispatchEvent(new CustomEvent("hara:kernel-ready", { detail: { artifact: "hara-wasm-core" } }));
   return kernel;
 }).catch((error) => {
   toast.dataset.state = "error";
@@ -67,19 +73,23 @@ const print = (value) => {
 };
 
 let sequence = 0;
-for (const code of document.querySelectorAll("main pre > code.language-clojure")) {
+for (const frame of document.querySelectorAll("main [data-hara-eval]")) {
+  const code = frame.querySelector("pre > code");
+  if (!code) continue;
   const pre = code.parentElement;
   if (!pre || pre.closest(".hara-repl")) continue;
-  const source = code.textContent.replace(/\n$/, "");
+  const source = frame.dataset.haraSource
+    ? decodeURIComponent(frame.dataset.haraSource)
+    : code.textContent.replace(/\n$/, "");
   const cell = document.createElement("section");
   cell.className = "hara-repl";
-  cell.innerHTML = `<header><span>Hara</span><small>hara-wasm-vm · isolated session</small><button type="button">Run</button></header><textarea spellcheck="false"></textarea><output aria-live="polite">Kernel loading…</output>`;
+  cell.innerHTML = `<header><span>Hara</span><small>hara-wasm-core · isolated session</small><button type="button">Run</button></header><textarea spellcheck="false"></textarea><output aria-live="polite">Kernel loading…</output>`;
   const editor = cell.querySelector("textarea");
   const output = cell.querySelector("output");
   const button = cell.querySelector("button");
   editor.value = source;
   editor.rows = Math.min(24, Math.max(2, source.split("\n").length));
-  pre.replaceWith(cell);
+  frame.replaceWith(cell);
   const sessionName = `docs-${location.pathname.replace(/\W+/g, "-")}-${++sequence}`;
   button.addEventListener("click", async () => {
     button.disabled = true;
@@ -95,5 +105,11 @@ for (const code of document.querySelectorAll("main pre > code.language-clojure")
       output.dataset.state = "error";
       output.textContent = String(error?.message ?? error);
     } finally { button.disabled = false; }
+  });
+  editor.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      button.click();
+    }
   });
 }

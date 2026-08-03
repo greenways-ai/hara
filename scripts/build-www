@@ -4,13 +4,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/target/www"
-RAW_WASM="$ROOT/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm"
+RAW_DIR="$ROOT/rust/raw/target/wasm32-unknown-unknown/browser-release"
 HALC_OUT="$ROOT/target/www-halc"
 HARA_COMPILER="$ROOT/rust/target/debug/hara"
 
 npm run build --prefix "$ROOT/website"
 HARA_BENCHMARK_BASE=/benchmarks npm run build --prefix "$ROOT/benchmarks"
-bash "$ROOT/scripts/build-hara-wasm-raw"
+bash "$ROOT/scripts/build-hara-wasm-raw" all
 cargo build --manifest-path "$ROOT/rust/Cargo.toml" --features hir-encoder --bin hara
 rm -rf "$HALC_OUT"
 mkdir -p "$HALC_OUT"
@@ -67,8 +67,11 @@ node -e 'process.stdout.write(`globalThis.HARA_GITHUB_OAUTH_CLIENT_ID = ${JSON.s
   > "$OUT/github-auth-config.js"
 cp "$ROOT/scripts/install.sh" "$OUT/install.sh"
 chmod 755 "$OUT/install.sh"
-cp "$RAW_WASM" "$OUT/runtime/hara.wasm"
-cp "$RAW_WASM" "$OUT/runtime/hara-wasm-vm-0.1.1.wasm"
+cp "$RAW_DIR/hara-wasm-core.wasm" "$OUT/runtime/hara.wasm"
+cp "$RAW_DIR/hara-wasm-core.wasm" "$OUT/runtime/hara-wasm-core-0.1.1.wasm"
+cp "$RAW_DIR/hara-wasm-vm.wasm" "$OUT/runtime/hara-wasm-vm-0.1.1.wasm"
+cp "$RAW_DIR/hara-wasm-trace.wasm" "$OUT/runtime/hara-wasm-trace-0.1.1.wasm"
+node "$ROOT/scripts/write-kernel-manifest.mjs" "$OUT/runtime" 0.1.1
 cp "$ROOT/rust/web/hta.js" \
    "$ROOT/rust/web/hta-worker.js" \
    "$ROOT/rust/web/hta-shared-worker.js" \

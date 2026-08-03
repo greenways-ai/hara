@@ -74,6 +74,10 @@ struct Session {
     fibers: HashMap<u64, EvalFiber>,
     #[cfg(feature = "bytecode-vm")]
     vm_fibers: HashMap<u64, vm::VmFiber>,
+    #[cfg(feature = "bytecode-vm")]
+    next_vm_program: u64,
+    #[cfg(feature = "bytecode-vm")]
+    vm_programs: HashMap<u64, Rc<vm::Program>>,
     tasks: HashMap<u64, Promise>,
     active_evaluation: Option<u64>,
     evaluation_queue: VecDeque<EvaluationRequest>,
@@ -98,6 +102,8 @@ enum EvaluationRequest {
         task: u64,
         source: String,
     },
+    #[cfg(feature = "bytecode-vm")]
+    PreparedVm { task: u64, program: u64 },
 }
 
 impl EvaluationRequest {
@@ -105,7 +111,7 @@ impl EvaluationRequest {
         match self {
             Self::Source { task, .. } | Self::Halc { task, .. } => *task,
             #[cfg(feature = "bytecode-vm")]
-            Self::Vm { task, .. } => *task,
+            Self::Vm { task, .. } | Self::PreparedVm { task, .. } => *task,
         }
     }
 }
@@ -249,6 +255,10 @@ impl Session {
             fibers: HashMap::new(),
             #[cfg(feature = "bytecode-vm")]
             vm_fibers: HashMap::new(),
+            #[cfg(feature = "bytecode-vm")]
+            next_vm_program: 1,
+            #[cfg(feature = "bytecode-vm")]
+            vm_programs: HashMap::new(),
             tasks: HashMap::new(),
             active_evaluation: None,
             evaluation_queue: VecDeque::new(),
@@ -430,6 +440,10 @@ impl Session {
                 }
                 #[cfg(feature = "bytecode-vm")]
                 EvaluationRequest::Vm { source, .. } => self.start_vm_fiber(task, &source),
+                #[cfg(feature = "bytecode-vm")]
+                EvaluationRequest::PreparedVm { program, .. } => {
+                    self.start_prepared_vm_fiber(task, program)
+                }
             };
             if let Err(error) = result {
                 self.event(event(1, task, error_value("eval/error", error)));
@@ -461,6 +475,28 @@ impl Session {
             source: source.into(),
         });
         self.start_next_evaluation();
+    }
+
+    #[cfg(feature = "bytecode-vm")]
+    fn prepare_vm(&mut self, source: &str) -> Result<u64, String> {
+        let program = vm::compile_source_with(source, &self.namespaces)
+            .map(Rc::new)
+            .map_err(|error| error.to_string())?;
+        let id = self.next_vm_program;
+        self.next_vm_program = id.saturating_add(1);
+        self.vm_programs.insert(id, program);
+        Ok(id)
+    }
+
+    #[cfg(feature = "bytecode-vm")]
+    fn enqueue_prepared_vm(&mut self, task: u64, program: u64) -> Result<(), String> {
+        if !self.vm_programs.contains_key(&program) {
+            return Err(format!("vm/program-missing: {program}"));
+        }
+        self.evaluation_queue
+            .push_back(EvaluationRequest::PreparedVm { task, program });
+        self.start_next_evaluation();
+        Ok(())
     }
 
     fn refresh_environment_from_namespaces(&mut self) {
@@ -543,6 +579,26 @@ impl Session {
         let program = vm::compile_source_with(source, &namespaces)
             .map(Rc::new)
             .map_err(|error| error.to_string())?;
+        let fiber = core::with_namespace_registry(&namespaces, || {
+            core::with_protocols(&protocols, || {
+                core::with_host_calls(handler, || vm::VmFiber::start(program))
+            })
+        });
+        self.collect_calls(task, pending, next);
+        self.drive_vm(task, fiber);
+        Ok(())
+    }
+
+    #[cfg(feature = "bytecode-vm")]
+    fn start_prepared_vm_fiber(&mut self, task: u64, program: u64) -> Result<(), String> {
+        let program = self
+            .vm_programs
+            .get(&program)
+            .cloned()
+            .ok_or_else(|| format!("vm/program-missing: {program}"))?;
+        let (handler, pending, next) = self.host_handler(task);
+        let namespaces = self.namespaces.clone();
+        let protocols = self.protocols.clone();
         let fiber = core::with_namespace_registry(&namespaces, || {
             core::with_protocols(&protocols, || {
                 core::with_host_calls(handler, || vm::VmFiber::start(program))
@@ -1106,6 +1162,41 @@ fn dispatch(
                 dispatch_eval_vm_values(kernel, task, session, source)
             }
             _ => Err("hta session/eval-vm expects session and source strings".into()),
+        },
+        "session/prepare-vm" => match args.as_slice() {
+            [Value::String(session), Value::String(source)] => {
+                #[cfg(feature = "bytecode-vm")]
+                {
+                    let program = kernel.session_mut(session)?.prepare_vm(source)?;
+                    enqueue_event(&kernel.events, event(0, task, Value::Number(program as i64)));
+                    Ok(())
+                }
+                #[cfg(not(feature = "bytecode-vm"))]
+                {
+                    let _ = (kernel, task, session, source);
+                    Err("VM_UNAVAILABLE".into())
+                }
+            }
+            _ => Err("hta session/prepare-vm expects session and source strings".into()),
+        },
+        "session/invoke-vm" => match args.as_slice() {
+            [Value::String(session), Value::Number(program)] if *program > 0 => {
+                #[cfg(feature = "bytecode-vm")]
+                {
+                    validate_session_name(session)?;
+                    kernel.session(session)?;
+                    kernel.task_sessions.insert(task, session.into());
+                    kernel
+                        .session_mut(session)?
+                        .enqueue_prepared_vm(task, *program as u64)
+                }
+                #[cfg(not(feature = "bytecode-vm"))]
+                {
+                    let _ = (kernel, task, session, program);
+                    Err("VM_UNAVAILABLE".into())
+                }
+            }
+            _ => Err("hta session/invoke-vm expects a session string and program id".into()),
         },
         "session/journal-eval" | "session/trace-eval" => match args.as_slice() {
             [Value::String(session), Value::String(source)] => {
@@ -1967,6 +2058,37 @@ mod tests {
         let failure = result(&mut kernel);
         assert_eq!(failure[0], Value::Number(1));
         assert_eq!(failure[1], Value::Number(20));
+    }
+
+    #[cfg(feature = "bytecode-vm")]
+    #[test]
+    fn prepared_vm_programs_compile_once_and_invoke_repeatedly() {
+        let mut kernel = SessionKernel::new();
+        kernel.create_session("prepared").unwrap();
+        dispatch(
+            &mut kernel,
+            1,
+            "session/prepare-vm",
+            vec![
+                Value::String("prepared".into()),
+                Value::String("(loop [i 0 total 0] (if (< i 7) (recur (+ i 1) (+ total i)) total))".into()),
+            ],
+        )
+        .unwrap();
+        let prepared = result(&mut kernel);
+        let Value::Number(program) = prepared[2] else {
+            panic!("expected prepared program id")
+        };
+        for task in 2..=4 {
+            dispatch(
+                &mut kernel,
+                task,
+                "session/invoke-vm",
+                vec![Value::String("prepared".into()), Value::Number(program)],
+            )
+            .unwrap();
+            assert_eq!(result(&mut kernel)[2], Value::Number(21));
+        }
     }
 
     #[test]

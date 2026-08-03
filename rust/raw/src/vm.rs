@@ -32,3 +32,4 @@ pub use compiler::{compile_source, compile_source_with};
 pub use disassemble::disassemble;
 pub use fiber::{VmFiber, VmFiberState};
 pub use machine::execute_program;
+pub use program::Program;

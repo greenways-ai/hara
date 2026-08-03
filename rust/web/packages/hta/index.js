@@ -260,6 +260,8 @@ export class HtaSession {
   call(target,args=[]){if(target==="eval")return this.eval(args[0]);if(target==="eval-vm")return this.evalVm(args[0]);if(target==="eval-bound")return this.evalBound(args[0],args[1]);if(target==="complete")return this.complete(args[0]);return this.context.call(target,args);}
   eval(source){return this.context.call("session/eval",[this.name,source]);}
   evalVm(source){return this.context.call("session/eval-vm",[this.name,source]);}
+  prepareVm(source){return this.context.call("session/prepare-vm",[this.name,source]);}
+  invokeVm(program){return this.context.call("session/invoke-vm",[this.name,program]);}
   evalBound(source,bindings=[]){return this.context.call("session/eval-bound",[this.name,source,bindings]);}
   complete(prefix){return this.context.call("session/complete",[this.name,prefix]);}
   info(){return this.context.call("session/info",[this.name]);}

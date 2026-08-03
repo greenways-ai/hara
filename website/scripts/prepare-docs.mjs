@@ -48,7 +48,7 @@ async function walk(directory) {
     body = body.replaceAll("https://docs.hara-lang.org/", "/docs/");
     // Shiki does not yet ship a Hara grammar. Clojure is the closest reader
     // grammar and preserves useful highlighting until the dedicated grammar lands.
-    body = body.replace(/^```(?:hara|hal)\s*$/gm, "```clojure");
+    body = body.replace(/^```(?:hara|hal)(\s+eval)?\s*$/gm, "```clojure$1");
     if (!hasTitle(body)) body = `---\ntitle: ${JSON.stringify(titleFor(body, entry.name))}\n---\n\n${body}`;
     const frontmatterEnd = body.indexOf("\n---", 4) + 4;
     const afterFrontmatter = body.slice(frontmatterEnd).replace(/^\s*#\s+[^\n]+\n+/, "\n");

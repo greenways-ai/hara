@@ -10,24 +10,25 @@ import "@hara-lang/visual-language/theme.js";
 import catalog from "../../../lib/bench/catalog.json";
 
 const evidencePath = resolve("lib/bench/results/reference-v2.json");
+const languageEvidencePath = resolve("lib/bench/results/language-reference.json");
 type Measurement = { runtime:string; workload:string; prepare_ns:number; first_ns:number; steady_ns:number; throughput_per_sec:number };
 type Evidence = { measurements:Measurement[]; environment:{timestamp:string}; startup:Record<string,{p50_ns:number}>; artifacts:Record<string,{transfer_bytes:number}> };
 const evidence: Evidence | null = existsSync(evidencePath) ? JSON.parse(readFileSync(evidencePath, "utf8")) : null;
+const languageEvidence = existsSync(languageEvidencePath) ? JSON.parse(readFileSync(languageEvidencePath, "utf8")) : null;
 const index = new Map<string, Measurement>((evidence?.measurements ?? []).map((row) => [`${row.runtime}/${row.workload}`, row]));
 const formatTime = (ns:number | null | undefined) => ns == null ? "Pending" : ns < 1e6 ? `${(ns / 1e3).toFixed(1)} µs` : `${(ns / 1e6).toFixed(2)} ms`;
-const formatSize = (bytes:number | null | undefined) => bytes == null ? "Pending" : bytes < 1e6 ? `${(bytes / 1e3).toFixed(0)} KB` : `${(bytes / 1e6).toFixed(2)} MB`;
 const geometricMean = (values:number[]) => values.length ? Math.exp(values.reduce((sum, value) => sum + Math.log(value), 0) / values.length) : null;
-const baseline = Object.fromEntries(catalog.corpus.workloads.map((workload) => [workload, index.get(`hara-rust-full/${workload}`)?.steady_ns]));
-const speedIndex = (runtime:string) => geometricMean(catalog.corpus.workloads.flatMap((workload) => {
-  const value = index.get(`${runtime}/${workload}`)?.steady_ns;
-  return value && baseline[workload] ? [baseline[workload] / value] : [];
-}));
-const artifactMetrics = catalog.artifacts.map((artifact) => ({ ...artifact,
-  speed: speedIndex(artifact.id),
-  startup: evidence?.startup?.[artifact.id]?.p50_ns,
-  size: evidence?.artifacts?.[artifact.id]?.transfer_bytes
-}));
 const timestamp = evidence?.environment?.timestamp ?? "A complete standard reference run has not been committed yet";
+type LanguageMeasurement = { runtime:string; workload:string; status:string; analysis?:{steady_ns?:number} };
+const languageRows: LanguageMeasurement[] = languageEvidence?.measurements ?? [];
+const languageIndex = new Map<string, number>(languageRows.filter((row) => row.status === "ok" && row.analysis?.steady_ns != null).map((row) => [`${row.runtime}/${row.workload}`, row.analysis!.steady_ns!]));
+const languageRuntimes: string[] = languageEvidence?.runtime_order ?? ["hara-rust-full", ...catalog.language_competitors.map((name) => `${name}-prepared`)];
+const languageRatio = (runtime:string) => geometricMean(catalog.corpus.workloads.flatMap((workload) => {
+  const hara = languageIndex.get(`hara-rust-full/${workload}`);
+  const candidate = languageIndex.get(`${runtime}/${workload}`);
+  return hara && candidate ? [candidate / hara] : [];
+}));
+const formatRatio = (runtime:string) => { const ratio = languageRatio(runtime); return ratio == null ? "Pending" : `${ratio.toFixed(2)}×`; };
 const base = import.meta.env.BASE_URL;
 const basePath = base.endsWith("/") ? base : `${base}/`;
 ---
@@ -41,39 +42,42 @@ const basePath = base.endsWith("/") ? base : `${base}/`;
       <div class="summary-inner">
         <p class="hara-kicker">Reproducible performance evidence</p>
         <h1>Hara benchmarks</h1>
-        <p class="lede">Bytecode VM and full compilation across native Rust, browser WebAssembly, JVM, and Truffle Native Image.</p>
-        <div class="evidence-line"><span class:list={["evidence-dot", { ready: evidence }]}></span><span>{timestamp}</span></div>
+        <p class="lede">Start with Hara against established languages, then inspect the Java, native, and modular web engines behind it.</p>
+        <div class="evidence-line"><span class:list={["evidence-dot", { ready: languageEvidence }]}></span><span>{languageEvidence?.environment?.timestamp ?? timestamp}</span></div>
         <div class="summary-table-wrap">
-          <table class="summary-table"><thead><tr><th>Artifact</th><th>Host</th><th>Representation</th><th>Speed index</th><th>Startup p50</th><th>Transfer size</th></tr></thead>
-          <tbody>{artifactMetrics.map((item) => <tr><th><code>{item.id}</code></th><td>{item.host}</td><td>{item.representation}</td><td>{item.speed == null ? "Pending" : `${item.speed.toFixed(2)}×`}</td><td>{formatTime(item.startup)}</td><td>{formatSize(item.size)}</td></tr>)}</tbody></table>
+          <table class="summary-table"><thead><tr><th>Mode</th><th>Primary runtime</th><th>Deployment</th><th>Purpose</th></tr></thead><tbody>
+            <tr><th>Java</th><td><code>hara-jvm-full</code></td><td>JVM · Native Image</td><td>Java systems and language tooling</td></tr>
+            <tr><th>Native</th><td><code>hara-rust-full</code></td><td>Native binary or library</td><td>Primary high-performance runtime</td></tr>
+            <tr><th>Web</th><td><code>hara-wasm-core</code> → <code>full</code></td><td>Browser worker</td><td>Modular core or full compilation</td></tr>
+          </tbody></table>
         </div>
-        <p class="summary-note">Speed index is the geometric mean of <code>hara-rust-full / artifact</code> steady time across all eight algorithms. Higher is faster; Rust full is 1.00×.</p>
+        <p class="summary-note">External comparisons use only <code>hara-rust-full</code>. Internal VM tiers are evidence, not additional product choices.</p>
       </div>
     </section>
 
     <section class="results-shell">
       <div class="tabs" role="tablist" aria-label="Benchmark sections">
-        <button role="tab" aria-selected="true" aria-controls="hara-artifacts" id="tab-hara">Hara artifacts</button>
-        <button role="tab" aria-selected="false" aria-controls="language-shootout" id="tab-languages" tabindex="-1">Language shootout</button>
+        <button role="tab" aria-selected="true" aria-controls="language-shootout" id="tab-languages">Language comparison</button>
+        <button role="tab" aria-selected="false" aria-controls="hara-artifacts" id="tab-hara" tabindex="-1">Hara internals</button>
         <button role="tab" aria-selected="false" aria-controls="http-results" id="tab-http" tabindex="-1">HTTP</button>
         <button role="tab" aria-selected="false" aria-controls="methodology" id="tab-method" tabindex="-1">Methodology</button>
       </div>
 
-      <section class="tab-panel" role="tabpanel" id="hara-artifacts" aria-labelledby="tab-hara">
-        <header><p class="hara-kicker">Eight artifacts · eight algorithms</p><h2>Prepared execution results</h2><p>Preparation, first invocation, steady state, and throughput are separate measurements. Every cell is checksum verified.</p></header>
-        <div class="detail-table"><table><thead><tr><th>Artifact / workload</th><th>Prepare</th><th>First</th><th>Steady</th><th>Calls/s</th></tr></thead><tbody>
+      <section class="tab-panel" role="tabpanel" id="hara-artifacts" aria-labelledby="tab-hara" hidden>
+        <header><p class="hara-kicker">Nine artifacts · eight algorithms</p><h2>Prepared execution results</h2><p>Preparation, first invocation, steady state, and throughput are separate measurements. Every published cell is checksum verified.</p></header>
+        {evidence ? <div class="detail-table"><table><thead><tr><th>Artifact / workload</th><th>Prepare</th><th>First</th><th>Steady</th><th>Calls/s</th></tr></thead><tbody>
         {catalog.artifacts.flatMap((artifact) => catalog.corpus.workloads.map((workload) => { const row = index.get(`${artifact.id}/${workload}`); return <tr><th><code>{artifact.id}</code><small>{workload}</small></th><td>{formatTime(row?.prepare_ns)}</td><td>{formatTime(row?.first_ns)}</td><td>{formatTime(row?.steady_ns)}</td><td>{row?.throughput_per_sec == null ? "Pending" : row.throughput_per_sec.toFixed(1)}</td></tr>; }))}
-        </tbody></table></div>
+        </tbody></table></div> : <p class="summary-note">The cross-language standard run is published first. The nine-runtime reference run remains gated until every native-image and browser cell can be produced on one pinned host.</p>}
         <div class="artifact-specs">{catalog.artifacts.map((artifact) => <article><code>{artifact.id}</code><b>{artifact.host} · {artifact.representation}</b><p>{artifact.summary}</p><small>{artifact.invocation}</small></article>)}</div>
       </section>
 
-      <section class="tab-panel" role="tabpanel" id="language-shootout" aria-labelledby="tab-languages" hidden>
+      <section class="tab-panel" role="tabpanel" id="language-shootout" aria-labelledby="tab-languages">
         <header><p class="hara-kicker">One Hara tier</p><h2>Language shootout</h2><p>Every competitor is compared with <code>hara-rust-full</code>, Hara’s highest-performance native tier, over the same eight algorithms.</p></header>
-        <div class="detail-table"><table><thead><tr><th>Runtime</th><th>Workloads</th><th>Execution boundary</th><th>Evidence</th></tr></thead><tbody>{catalog.language_competitors.map((runtime) => <tr><th>{runtime}</th><td>8 / 8 specified</td><td>Prepared execution</td><td>{evidence ? "See committed evidence" : "Pending standard run"}</td></tr>)}</tbody></table></div>
+        <div class="detail-table"><table><thead><tr><th>Runtime</th>{catalog.corpus.workloads.map((workload) => <th>{workload}</th>)}<th>vs Hara</th></tr></thead><tbody>{languageRuntimes.map((runtime) => <tr><th><code>{runtime}</code></th>{catalog.corpus.workloads.map((workload) => <td>{formatTime(languageIndex.get(`${runtime}/${workload}`))}</td>)}<td>{formatRatio(runtime)}</td></tr>)}</tbody></table></div>
       </section>
 
       <section class="tab-panel" role="tabpanel" id="http-results" aria-labelledby="tab-http" hidden>
-        <header><p class="hara-kicker">Loopback HTTP/1.1 · keep-alive</p><h2>HTTP frameworks</h2><p>Hoplite is measured only with genuine <code>hara-rust-full</code> handler compilation.</p></header>
+        <header><p class="hara-kicker">Loopback HTTP/1.1 · keep-alive</p><h2>HTTP frameworks</h2><p>Hoplite, OpenResty, and the comparison servers use identical routes and payloads; results publish only after a complete standard run.</p></header>
         <div class="detail-table"><table><thead><tr><th>Server</th><th>Routes</th><th>Worker model</th><th>Evidence</th></tr></thead><tbody>{catalog.http_competitors.map((server) => <tr><th><code>{server}</code></th><td>/hello · /json · /delay</td><td>One worker / event loop</td><td>{evidence ? "See committed evidence" : "Pending standard run"}</td></tr>)}</tbody></table></div>
       </section>
 
