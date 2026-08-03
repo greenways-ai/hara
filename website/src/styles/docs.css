@@ -1,7 +1,41 @@
 @import "@hara-lang/visual-language/theme.css";
-:root { --sl-color-accent-low:#d9e7ff; --sl-color-accent:#2f7cff; --sl-color-accent-high:#0c2f67; --sl-font:var(--hara-font-sans); --sl-font-mono:var(--hara-font-mono); }
+@import "@hara-lang/visual-language/motifs.css";
+:root,
+:root[data-theme="light"] {
+  --sl-color-bg:var(--hara-bg);
+  --sl-color-bg-nav:color-mix(in srgb,var(--hara-bg-clean) 88%,transparent);
+  --sl-color-bg-sidebar:var(--hara-bg);
+  --sl-color-hairline-light:var(--hara-line);
+  --sl-color-hairline:var(--hara-line-strong);
+  --sl-color-text:var(--hara-muted);
+  --sl-color-text-accent:var(--hara-signal);
+  --sl-color-white:var(--hara-text);
+  --sl-color-black:var(--hara-bg-clean);
+  --sl-color-gray-1:var(--hara-text);
+  --sl-color-gray-2:color-mix(in srgb,var(--hara-text) 84%,var(--hara-bg));
+  --sl-color-gray-3:var(--hara-muted);
+  --sl-color-gray-4:var(--hara-faint);
+  --sl-color-gray-5:var(--hara-line-strong);
+  --sl-color-gray-6:var(--hara-line);
+  --sl-color-gray-7:var(--hara-surface-raised);
+  --sl-color-accent-low:#d9e7ff;
+  --sl-color-accent:var(--hara-signal);
+  --sl-color-accent-high:#0c2f67;
+  --sl-font:var(--hara-font-sans);
+  --sl-font-mono:var(--hara-font-mono);
+}
 :root[data-theme="dark"] { --sl-color-accent-low:#102446; --sl-color-accent:#6ea0ff; --sl-color-accent-high:#dbe7ff; }
 .site-title { letter-spacing:-.03em; }
+.header { background:color-mix(in srgb,var(--hara-bg) 84%,transparent); border-bottom:1px solid var(--hara-line); backdrop-filter:blur(22px); }
+.sidebar-pane { background:color-mix(in srgb,var(--hara-bg) 94%,transparent); border-right-color:var(--hara-line); }
+.main-pane { position:relative; isolation:isolate; }
+.main-pane::before { position:fixed; z-index:-1; inset:var(--sl-nav-height) 0 auto 42%; height:min(66vw,760px); content:""; opacity:.11; background:image-set(url("@hara-lang/visual-language/assets/motifs/web/aperture-light-1280.avif") type("image/avif"),url("@hara-lang/visual-language/assets/motifs/web/aperture-light-1280.webp") type("image/webp")) center/cover no-repeat; pointer-events:none; mask-image:linear-gradient(120deg,transparent,#000 42%,transparent 86%); }
+:root[data-theme="dark"] .main-pane::before { opacity:.2; background-image:image-set(url("@hara-lang/visual-language/assets/motifs/web/aperture-dark-1280.avif") type("image/avif"),url("@hara-lang/visual-language/assets/motifs/web/aperture-dark-1280.webp") type("image/webp")); }
+.content-panel { background:transparent; }
+.card { background:var(--hara-surface-solid); border-color:var(--hara-line); border-radius:var(--hara-radius-md); box-shadow:none; }
+.sl-markdown-content code:not(:where(.not-content *)) { color:var(--hara-text); background:var(--hara-surface-raised); border-radius:var(--hara-radius-sm); }
+.expressive-code { --ec-brdRad:var(--hara-radius-md); --ec-brdCol:var(--hara-line); }
+.sl-markdown-content h1,.sl-markdown-content h2 { letter-spacing:-.035em; }
 /* Browser-local documentation evaluator. */
 .hara-kernel-toast { position:fixed; z-index:1000; right:1rem; bottom:1rem; display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:.65rem; min-width:270px; padding:.75rem .85rem; overflow:hidden; color:var(--sl-color-white); background:color-mix(in srgb,var(--sl-color-bg-nav) 92%,transparent); border:1px solid var(--sl-color-gray-5); border-radius:12px; box-shadow:0 18px 60px #0005; font:600 .72rem var(--hara-font-sans); backdrop-filter:blur(18px); }
 .hara-kernel-toast::after { position:absolute; left:0; bottom:0; width:var(--kernel-progress); height:2px; content:""; background:var(--hara-signal); transition:width 180ms ease; }

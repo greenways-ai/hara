@@ -9,7 +9,7 @@ HALC_OUT="$ROOT/target/www-halc"
 HARA_COMPILER="$ROOT/rust/target/debug/hara"
 
 npm run build --prefix "$ROOT/website"
-npm run build --prefix "$ROOT/benchmarks"
+HARA_BENCHMARK_BASE=/benchmarks npm run build --prefix "$ROOT/benchmarks"
 bash "$ROOT/scripts/build-hara-wasm-raw"
 cargo build --manifest-path "$ROOT/rust/Cargo.toml" --features hir-encoder --bin hara
 rm -rf "$HALC_OUT"
@@ -117,7 +117,6 @@ cp "$ROOT/website/assets/favicon-48.svg" \
    "$ROOT/website/assets/favicon-256.svg" \
    "$ROOT/website/assets/logo.svg" \
    "$ROOT/website/assets/hara-mark.svg" \
-   "$ROOT/website/assets/hara-favicon.svg" \
    "$ROOT/website/assets/logo-white.svg" \
    "$OUT/assets/"
 cp "$ROOT/website/og-hara-ribbon.png" \
