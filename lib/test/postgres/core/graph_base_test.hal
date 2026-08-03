@@ -1,0 +1,55 @@
+(ns postgres.core.graph-base-test
+  (:require [postgres.core.graph-base :as graph])
+  (:use code.test))
+
+(def task-schema
+  {:id [{:type :uuid :primary true :order 0}]
+   :name [{:type :text :order 1}]
+   :cache [{:type :ref :order 2
+            :ref {:type :forward :link {:module 'demo :id 'Cache}}}]})
+(def cache-schema
+  {:id [{:type :uuid :primary true :order 0}]
+   :tasks [{:type :ref
+            :ref {:type :reverse :rval :cache
+                  :link {:module 'demo :id 'Task}}}]})
+(def options {:schema {:tree {:Task task-schema :Cache cache-schema}}})
+(def task {:id 'Task :module 'demo :table-schema task-schema :schema (:schema options)})
+(def cache {:id 'Cache :module 'demo :table-schema cache-schema :schema (:schema options)})
+
+(fact "transforms scalar and normalized where pairs"
+  (graph/where-pair-fn [:name "hello"] graph/where-fn task-schema options)
+  => [:name [:eq "hello"]]
+  (graph/where-pair-fn ["cache_id" "c"] graph/where-fn task-schema options)
+  => [:cache [:eq "c"]])
+
+(fact "constructs reverse-reference subqueries"
+  (graph/where-pair-ref [:tasks "t"] graph/where-fn
+                        (first (:tasks cache-schema)) options)
+  => '[:id [:in [:select (--- [#{"cache_id"}]) :from demo/Task
+                 \\ :where {"id" [:eq "t"]}]]])
+
+(fact "preserves collisions as hash-vector clauses"
+  (graph/where-fn cache-schema {:tasks "t" :id "c"} options)
+  => '#{[:id [:in [:select (--- [#{"cache_id"}]) :from demo/Task
+                   \\ :where {"id" [:eq "t"]}]]
+         :id [:eq "c"]]})
+
+(fact "constructs graph-aware id count and select forms"
+  (graph/id-fn cache {:where {:tasks "t"}})
+  => '[:select (--- [#{"id"}]) :from demo/Cache
+       \\ :where {"id" [:in [:select (--- [#{"cache_id"}]) :from demo/Task
+                              \\ :where {"id" [:eq "t"]}]]}
+       \\ :limit 1]
+  (graph/count-fn cache {:where {:tasks "t"}})
+  => '[:select (count *) :from demo/Cache
+       \\ :where {"id" [:in [:select (--- [#{"cache_id"}]) :from demo/Task
+                              \\ :where {"id" [:eq "t"]}]]}]
+  (graph/select-fn task {:as :raw :where {:cache {:id "c"}}})
+  => '[:select * :from demo/Task \\ :where {"cache_id" [:eq "c"]}])
+
+(fact "constructs graph-aware delete and update forms"
+  (graph/delete-fn task {:as :raw :where {:cache "c"}})
+  => '[:delete :from demo/Task :where {"cache_id" [:eq "c"]}]
+  (graph/update-fn task {:as :raw :set {:name "n"} :where {:cache "c"}})
+  => '[:update demo/Task :set (--- [(== #{"name"} (:text "n"))])
+       :where {"cache_id" [:eq "c"]}])
