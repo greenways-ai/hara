@@ -71,3 +71,4 @@ apps/hara-world/runtime/
 site-build/
 rust/target/debug
 rust/web/dist/
+lib/bench
