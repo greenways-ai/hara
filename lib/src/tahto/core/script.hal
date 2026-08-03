@@ -8,6 +8,12 @@
 (def +modules+ (atom {}))
 (def +specs+ (atom {}))
 (def +scripts+ (atom {}))
+(def +loaded-modules+ (atom {}))
+
+(def ^:dynamic *module-loader* requiring-resolve)
+
+(def +module-metadata-keys+
+  [:static :application :schema :source])
 
 (defn- namespace-symbol
   []
@@ -17,10 +23,18 @@
   [value]
   (symbol (name value)))
 
+(defn- require-module
+  [spec]
+  (if (symbol? spec)
+    spec
+    (first spec)))
+
 (defn- require-link
   [spec]
-  (let [module (first spec)
-        values (vec (rest spec))]
+  (let [module (require-module spec)
+        values (if (symbol? spec)
+                 []
+                 (vec (rest spec)))]
     (loop [remaining values]
       (if (empty? remaining)
         [module module]
@@ -29,23 +43,27 @@
           (recur (vec (rest remaining))))))))
 
 (defn- module-config
-  [module config]
-  (let [requires (or (:require config) [])
+  [lang module config]
+  (let [requires (vec (or (:require config) []))
+        explicit-links (or (:link config) {})
         links (reduce (fn [out spec]
                         (let [[alias target] (require-link spec)]
                           (assoc out alias target)))
-                      {'- module}
+                      (merge {'- module} explicit-links)
                       requires)]
-    {:id module
-     :lang :xtalk
-     :link links
-     :code {}
-     :fragment {}}))
+    (merge {:id module
+            :lang lang
+            :require requires
+            :link links
+            :code {}
+            :fragment {}}
+           (select-keys config +module-metadata-keys+))))
+
 (defn configure-module!
   [lang config]
   (let [module (namespace-symbol)
         current (get (deref +modules+) module)
-        value (module-config module config)
+        value (module-config lang module config)
         value (assoc value
                      :code (or (:code current) {})
                      :fragment (or (:fragment current) {}))
@@ -101,7 +119,7 @@
     (swap! +modules+
            (fn [modules]
              (let [current (or (get modules module)
-                               (module-config module {}))]
+                               (module-config :xtalk module {}))]
                (assoc modules module
                       (assoc-in current [:code id] entry)))))
     nil))
@@ -124,7 +142,7 @@
     (swap! +modules+
            (fn [modules]
              (let [current (or (get modules module)
-                               (module-config module {}))]
+                               (module-config :xtalk module {}))]
                (assoc modules module
                       (assoc-in current [:fragment id] entry)))))
     nil))
@@ -143,11 +161,23 @@
         '~form
         (deref (resolve '~symbol))))))
 
+(defn module-loaded?
+  [module]
+  (let [record (get (deref +modules+) module)]
+    (if (or (get (deref +loaded-modules+) module)
+            (and record
+                 (or (not (empty? (:code record)))
+                     (not (empty? (:fragment record))))))
+      true
+      false)))
+
 (defn load-module!
   [spec]
-  (let [module (first spec)
-        sentinel (symbol (name module) "__tahto_load__")]
-    (requiring-resolve sentinel)
+  (let [module (require-module spec)]
+    (if (not (module-loaded? module))
+      (let [sentinel (symbol (name module) "__tahto_load__")]
+        (*module-loader* sentinel)
+        (swap! +loaded-modules+ assoc module true)))
     module))
 
 (defn- script-load-forms
@@ -163,7 +193,6 @@
         (list 'current-namespace)
         (list 'quote target-symbol)
         (list 'var (symbol "tahto.core.script" (name target-symbol)))))
-
 
 (defn- install-macro!
   [target-symbol]
@@ -201,11 +230,10 @@
             (load-module! spec))
           nil
           (or (:require config) []))
-  (configure-module! :xtalk config)
+  (configure-module! lang config)
   (if test?
     (register-script! lang config))
   nil)
-
 
 (defn script-test-form
   [lang options]
@@ -215,10 +243,10 @@
           (list 'quote config)
           true)))
 
-
 (defmacro script-
   [lang & options]
   (tahto.core.script/script-test-form lang options))
+
 (defn- selected-book
   [lang]
   (registry/registry-book lang :default nil))
@@ -320,7 +348,7 @@
                    python-do? (js-expression-form form)
                    :else form)
         module-config (or (get (deref +modules+) module)
-                          (module-config module {}))
+                          (module-config :xtalk module {}))
         result (compile-one lang form module-config nil)
         dependencies (vec (:code (:dependencies result)))
         compiled (reduce (fn [state dependency]
