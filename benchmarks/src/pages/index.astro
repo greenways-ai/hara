@@ -1,6 +1,6 @@
 ---
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import ThemeToggle from "@hara-lang/visual-language/astro/ThemeToggle.astro";
 import HaraMark from "@hara-lang/visual-language/astro/HaraMark.astro";
 import "@hara-lang/visual-language/theme.css";
@@ -9,8 +9,8 @@ import "../styles/site.css";
 import "@hara-lang/visual-language/theme.js";
 import catalog from "../../../lib/bench/catalog.json";
 
-const evidencePath = resolve("lib/bench/results/reference-v2.json");
-const languageEvidencePath = resolve("lib/bench/results/language-reference.json");
+const evidencePath = fileURLToPath(new URL("../../../lib/bench/results/reference-v2.json", import.meta.url));
+const languageEvidencePath = fileURLToPath(new URL("../../../lib/bench/results/language-reference.json", import.meta.url));
 type Measurement = { runtime:string; workload:string; prepare_ns:number; first_ns:number; steady_ns:number; throughput_per_sec:number };
 type Evidence = { measurements:Measurement[]; environment:{timestamp:string}; startup:Record<string,{p50_ns:number}>; artifacts:Record<string,{transfer_bytes:number}>; http_measurements?:unknown[] };
 const evidence: Evidence | null = existsSync(evidencePath) ? JSON.parse(readFileSync(evidencePath, "utf8")) : null;
