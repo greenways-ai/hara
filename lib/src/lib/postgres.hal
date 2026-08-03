@@ -1,0 +1,43 @@
+;; ============================================================================
+;; lib.postgres — Foundation PostgreSQL lifecycle compatibility facade.
+;;
+;; Connection lifecycle and SQL operations delegate to lib.postgres.connection;
+;; explicit server/database management delegates to std.db.postgres. This file
+;; intentionally does not recreate JDBC, Docker, or JVM component internals.
+;; ============================================================================
+(ns lib.postgres
+  (:require [lib.postgres.connection :as connection]
+            [std.db.postgres :as postgres]))
+
+(def open connection/conn-create)
+(def start open)
+(def start-pg open)
+
+(def close connection/conn-close)
+(def stop close)
+(def stop-pg close)
+
+(def execute connection/conn-execute)
+(def query connection/conn-query)
+
+(def listen connection/notify-create)
+(def next-notification connection/notify-next)
+(def unlisten connection/notify-close)
+(def notify connection/notify)
+
+(def describe postgres/describe)
+(def capabilities postgres/capabilities)
+(def version postgres/version)
+(def wait-ready postgres/wait-ready)
+
+(def server-start postgres/server-start)
+(def server-stop postgres/server-stop)
+(def database-create postgres/database-create)
+(def database-drop postgres/database-drop)
+
+(def begin postgres/begin)
+(def commit postgres/commit)
+(def rollback postgres/rollback)
+
+(def numeric postgres/numeric)
+(def sql-array postgres/sql-array)
