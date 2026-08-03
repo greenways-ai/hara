@@ -1,0 +1,173 @@
+(ns postgres.core.graph-insert
+  (:config {:blank true})
+  (:require [std.foundation :refer :all]
+            [postgres.core.graph-walk :as walk]
+            [postgres.core.impl-base :as base]
+            [postgres.core.impl-insert :as insert]))
+
+(declare annotate-value)
+
+(defn annotate-value [value counter]
+  (cond
+    (vector? value)
+    (let [id (deref counter)
+          _ (swap! counter inc)]
+      (with-meta (vec (map (fn [item] (annotate-value item counter)) value))
+                 {:walk/id id}))
+    (map? value)
+    (let [id (deref counter)
+          _ (swap! counter inc)
+          output (reduce-kv (fn [out key item]
+                              (assoc out key (annotate-value item counter))) {} value)
+          metadata (if (:id value) {:walk/id id} {:walk/id id :walk/data true})]
+      (with-meta output metadata))
+    :else value))
+
+(defn insert-walk-ids [data]
+  (annotate-value data (atom 0)))
+
+(defn- graph-data? [value] (:walk/data (meta value)))
+(defn- graph-id [value] (:walk/id (meta value)))
+
+(declare collect-graph!)
+
+(defn collect-graph! [lookup value]
+  (cond
+    (vector? value)
+    (let [_ (reduce (fn [_ item] (collect-graph! lookup item) nil) nil value)]
+      (swap! lookup assoc (graph-id value) (vec (map graph-id value))))
+    (map? value)
+    (let [_ (reduce-kv (fn [state key item] (collect-graph! lookup item) nil) nil value)]
+      (when (and (graph-id value) (not (graph-data? value)))
+        (swap! lookup assoc (graph-id value)
+               (reduce-kv (fn [out key item]
+                            (if (and (or (map? item) (vector? item))
+                                     (not (graph-data? item)))
+                              (assoc out key (graph-id item)) out)) {} value))))
+    :else nil))
+
+(defn insert-generate-graph-tree [data]
+  (let [lookup (atom {})]
+    (collect-graph! lookup data)
+    [data (dissoc @lookup nil)]))
+
+(declare collect-data!)
+
+(defn collect-data! [lookup value]
+  (cond
+    (vector? value) (reduce (fn [_ item] (collect-data! lookup item) nil) nil value)
+    (map? value)
+    (let [_ (when (:id value) (swap! lookup assoc (:id value) (graph-id value)))]
+      (reduce-kv (fn [state key item] (collect-data! lookup item) nil) nil value))
+    :else nil))
+
+(defn- dependency-values [value]
+  (cond (vector? value) value
+        (map? value) (vals value)
+        :else []))
+
+(declare topo-visit!)
+
+(defn topo-visit! [graph node visiting visited output]
+  (when (not (has? @visited node))
+    (when (has? @visiting node)
+      (throw (ex-info "Graph cycle" {:node node})))
+    (swap! visiting conj node)
+    (reduce (fn [_ dependency]
+              (topo-visit! graph dependency visiting visited output) nil)
+            nil (dependency-values (get graph node)))
+    (swap! visited conj node)
+    (swap! output conj node)))
+
+(defn insert-associate-graph-data [data graph]
+  (let [lookup (atom {})
+        collected (collect-data! lookup data)
+        symbols (reduce (fn [out gid] (assoc out gid (symbol (str "gid_" gid))))
+                        {} (keys graph))
+        visiting (atom #{})
+        visited (atom #{})
+        output (atom [])
+        ordered-result (reduce (fn [_ gid]
+                                 (topo-visit! graph gid visiting visited output) nil)
+                               nil (keys graph))]
+    [@output symbols @lookup]))
+
+(defn- table-entry [table options schema]
+  (or (get-in options [:entries table])
+      {:id (symbol (name table))
+       :module (or (:module options) 'postgres)
+       :table-schema schema}))
+
+(defn- declaration-data [data params options lookup symbols]
+  (let [schema (:schema options)
+        flattened (walk/flatten-data data schema)]
+    (reduce-kv
+     (fn [out table rows]
+       (let [table-schema (get-in schema [:tree table])
+             entry (table-entry table options table-schema)]
+         (reduce (fn [bindings row]
+                   (let [gid (get lookup (:id row))
+                         target (get symbols gid)]
+                     (conj (conj bindings target)
+                           (insert/t-insert-raw [entry table-schema options] row
+                                                (merge {:returning '* :single true} params)))))
+                 out rows)))
+     [] flattened)))
+
+(defn- reconstruction-data [graph ordered symbols]
+  (reduce
+   (fn [out gid]
+     (let [target (get symbols gid)
+           dependencies (get graph gid)]
+       (cond
+         (or (nil? dependencies) (empty? dependencies)) out
+         (map? dependencies)
+         (conj (conj out '_)
+               (list := target
+                     (list '|| target
+                           (reduce-kv (fn [m key dependency]
+                                        (assoc m key (get symbols dependency)))
+                                      {} dependencies))))
+         (vector? dependencies)
+         (conj (conj out target)
+               (list 'js (vec (map (fn [dependency] (get symbols dependency))
+                                   dependencies))))
+         :else out))) [] ordered))
+
+(defn insert-gen-sql-assign [data params options target]
+  (let [annotated (insert-walk-ids data)
+        generated (insert-generate-graph-tree annotated)
+        graph (second generated)
+        associated (insert-associate-graph-data annotated graph)
+        ordered (first associated)
+        symbols (second associated)
+        lookup (nth associated 2)
+        declarations (declaration-data annotated params options lookup symbols)
+        reconstruction (reconstruction-data graph ordered symbols)
+        root (get symbols (last ordered))]
+    (list 'let (vec (concat declarations reconstruction))
+          [:select root :into target])))
+
+(defn insert-gen-sql [data params options]
+  (with-meta (insert-gen-sql-assign data params options nil)
+             {:assign/fn 'postgres.core.graph-insert/insert-gen-sql-assign}))
+
+(defn insert-fn-raw [prepared data params]
+  (let [entry (first prepared)
+        options (nth prepared 2)
+        schema (or (:schema options) (:schema entry))
+        options (assoc options :schema schema)
+        table (keyword (name (:id entry)))
+        linked (walk/link-data {table data} schema)]
+    (insert-gen-sql linked params options)))
+
+(defn insert-fn [spec data params]
+  (let [prepared (base/prep-table spec true {})
+        entry (first prepared)
+        options (nth prepared 2)
+        prepared (if (:schema entry)
+                   [entry (second prepared) (assoc options :schema (:schema entry))]
+                   prepared)]
+    (insert-fn-raw prepared data params)))
+
+(def __tahto_load__ true)

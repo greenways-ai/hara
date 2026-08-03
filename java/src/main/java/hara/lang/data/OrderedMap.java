@@ -191,7 +191,7 @@ public interface OrderedMap<K, V> extends IMapType<K, V>, INth<Entry<K, V>> {
 
     @Override
     public Standard<K, V> withMeta(IMetadata meta) {
-      return new Standard<K, V>(_meta, _order, _lookup);
+      return new Standard<K, V>(meta, _order, _lookup);
     }
 
     @SuppressWarnings("rawtypes")

@@ -1,0 +1,198 @@
+(ns postgres.core.graph-view
+  (:config {:blank true})
+  (:require [std.foundation :as foundation :refer :all :exclude [resolve]]
+            [std.foundation.string :as string]
+            [tahto.common.util :as util]
+            [postgres.core.graph-base :as graph]
+            [postgres.core.graph-query :as query]))
+
+(def ^:dynamic *views* (atom {}))
+(def ^:dynamic *tables* (atom {}))
+
+(defn register-table! [name entry]
+  (swap! *tables* assoc name entry)
+  entry)
+
+(defn- resolve-entry
+  ([table] (resolve-entry table nil))
+  ([table caller-ns]
+  (cond
+    (map? table) table
+    (symbol? table)
+    (let [qualified (if (and caller-ns (nil? (namespace table)))
+                      (symbol (str caller-ns) (name table)) table)
+          registered (or (get @*tables* qualified)
+                         (get @*tables* table))
+          resolved (foundation/resolve qualified)]
+      (or registered (when resolved (deref resolved))))
+    :else nil)))
+
+(defn- view-tag [sym table]
+  (let [full (name sym)
+        prefix (str (name table) "-")]
+    (if (string/starts-with? full prefix)
+      (string/slice full (string/length prefix)) full)))
+
+(defn make-view-prep
+  ([sym] (make-view-prep sym nil))
+  ([sym runtime-args] (make-view-prep sym runtime-args nil))
+  ([sym runtime-args caller-ns]
+   (let [metadata (meta sym)
+         table (first (:- metadata))
+         entry (or (:table-entry metadata) (resolve-entry table caller-ns))
+         table-symbol (or (and entry (util/sym-full entry)) table)]
+     {:table table-symbol
+      :table-entry entry
+      :key (keyword (name table))
+      :scope (:scope metadata)
+      :args (or runtime-args (:args metadata) [])
+      :guards (:guards metadata)
+      :autos (:autos metadata)
+      :tag (or (:tag metadata) (view-tag sym table))})))
+
+(defn primary-key [table]
+  (let [entry (or (resolve-entry table) table)
+        primary (:static/schema-primary entry)
+        schema (:table-schema entry)]
+    (cond
+      (map? primary) (:type primary)
+      (vector? primary)
+      (let [id-entry (first (filter (fn [item] (= :id (:id item))) primary))]
+        (:type (or id-entry (first primary))))
+      :else
+      (first (reduce-kv (fn [out key value]
+                          (let [attr (if (vector? value) (first value) value)]
+                            (if (:primary attr) (conj out (:type attr)) out)))
+                        [] schema)))))
+
+(defn lead-symbol [args]
+  (let [found (first (filter symbol? args))]
+    (if found found (throw (ex-info "No lead symbol found" {:args args})))))
+
+(defn substitute [form replacements]
+  (cond
+    (and (symbol? form) (has? replacements form)) (get replacements form)
+    (vector? form) (vec (map (fn [value] (substitute value replacements)) form))
+    (list? form) (apply list (map (fn [value] (substitute value replacements)) form))
+    (set? form) (reduce (fn [out value] (conj out (substitute value replacements))) #{} form)
+    (map? form) (reduce-kv (fn [out key value]
+                             (assoc out (substitute key replacements)
+                                    (substitute value replacements))) {} form)
+    :else form))
+
+(defn- argument-symbols [args]
+  (vec (filter symbol? args)))
+
+(defn- replacements [symbols values]
+  (reduce (fn [out index]
+            (assoc out (nth symbols index) (nth values index)))
+          {} (range (count symbols))))
+
+(defn- descriptor-entry [descriptor]
+  (or (:table-entry descriptor)
+      (get @*tables* (:key descriptor))
+      (get @*tables* (symbol (name (:key descriptor))))
+      (throw (ex-info "View table not registered" {:view descriptor}))))
+
+(defn run-select [descriptor values]
+  (let [symbols (argument-symbols (:args descriptor))
+        where (substitute (:query-base descriptor) (replacements symbols values))]
+    (graph/select-fn (descriptor-entry descriptor)
+                     {:where where :returning #{:id} :as :raw})))
+
+(defn run-return [descriptor values]
+  (let [symbols (argument-symbols (:args descriptor))
+        lead (lead-symbol (:args descriptor))
+        values-map (replacements symbols values)
+        id (get values-map lead)
+        returning (substitute (:query descriptor) values-map)]
+    (query/query-fn (descriptor-entry descriptor)
+                    {:where {:id id} :returning returning :single true})))
+
+(defn register-view! [name descriptor]
+  (swap! *views* assoc name descriptor)
+  descriptor)
+
+(defn defsel-fn
+  ([form sym view-query] (defsel-fn form nil sym view-query))
+  ([form env sym view-query]
+  (let [caller-ns (:ns env)
+        prep (make-view-prep sym nil caller-ns)
+        descriptor (assoc prep :type :select :query-base (or view-query {}))
+        symbols (argument-symbols (:args descriptor))
+        qualified (if caller-ns (symbol (str caller-ns) (name sym)) sym)
+        tagged (with-meta sym (merge (meta sym) {:static/view descriptor}))]
+    (register-view! qualified descriptor)
+    (register-view! sym descriptor)
+    (list 'defn tagged symbols
+          (list 'postgres.core.graph-view/run-select
+                (list 'quote descriptor) (vec symbols))))))
+
+(defmacro defsel.pg [sym & query]
+  (defsel-fn &form &env sym (first query)))
+
+(defn defret-fn
+  ([form sym args view-query] (defret-fn form nil sym args view-query))
+  ([form env sym args view-query]
+  (let [caller-ns (:ns env)
+        prep (make-view-prep sym args caller-ns)
+        descriptor (assoc prep :type :return :query view-query)
+        symbols (argument-symbols args)
+        qualified (if caller-ns (symbol (str caller-ns) (name sym)) sym)
+        tagged (with-meta sym (merge (meta sym) {:static/view descriptor}))]
+    (lead-symbol args)
+    (register-view! qualified descriptor)
+    (register-view! sym descriptor)
+    (list 'defn tagged symbols
+          (list 'postgres.core.graph-view/run-return
+                (list 'quote descriptor) (vec symbols))))))
+
+(defmacro defret.pg [sym args view-query]
+  (defret-fn &form &env sym args view-query))
+
+(defn- descriptor [view]
+  (or (get @*views* view)
+      (get @*views* (symbol (name view)))
+      (let [resolved (foundation/resolve view)]
+        (when resolved (:static/view (meta (deref resolved)))))
+      (throw (ex-info "View not found" {:view view}))))
+
+(defn view-descriptor [view]
+  (descriptor view))
+
+(defn view-fn [return-view select-view options]
+  (let [return-symbol (if (vector? return-view) (first return-view) return-view)
+        return-values (if (vector? return-view) (vec (rest return-view)) [])
+        select-symbol (if (vector? select-view) (first select-view) select-view)
+        select-values (if (vector? select-view) (vec (rest select-view)) [])
+        return-descriptor (descriptor return-symbol)
+        select-descriptor (descriptor select-symbol)]
+    (when (not= (:table return-descriptor) (:table select-descriptor))
+      (throw (ex-info "Not the same table" {})))
+    (when (not= :return (:type return-descriptor))
+      (throw (ex-info "Not a return type" {:view return-symbol})))
+    (when (not= :select (:type select-descriptor))
+      (throw (ex-info "Not a select type" {:view select-symbol})))
+    (let [return-symbols (vec (rest (argument-symbols (:args return-descriptor))))
+          select-symbols (argument-symbols (:args select-descriptor))]
+      (when (not= (count return-values) (count return-symbols))
+        (throw (ex-info "Args need to be the same length"
+                        {:input return-values :template return-symbols})))
+      (when (not= (count select-values) (count select-symbols))
+        (throw (ex-info "Args need to be the same length"
+                        {:input select-values :template select-symbols})))
+      [(descriptor-entry return-descriptor)
+       (merge {:where (substitute (:query-base select-descriptor)
+                                  (replacements select-symbols select-values))
+               :returning (substitute (:query return-descriptor)
+                                      (replacements return-symbols return-values))}
+              (or options {}))])))
+
+(defn view-form [return-view select-view options]
+  (let [prepared (view-fn return-view select-view options)]
+    (query/query-fn (first prepared) (second prepared))))
+
+(defmacro view [return-view select-view & options]
+  (view-form return-view select-view (first options)))
+
+(def __tahto_load__ true)

@@ -1,0 +1,53 @@
+(ns postgres.core.graph-test
+  (:require [postgres.core.graph :as graph]
+            [postgres.core.graph-view :as view])
+  (:use code.test))
+
+(def schema
+  {:id [{:type :uuid :primary true :order 0}]
+   :name [{:type :text :order 1}]})
+(def app-schema {:tree {:Task schema}})
+(def Task {:id 'Task :module 'demo :table-schema schema :schema app-schema})
+(view/register-table! 'Task Task)
+
+(fact "exposes graph where and id operations"
+  (graph/g:where Task {:name "n"}) => '[{:name [:eq "n"]}]
+  (graph/g:where Task {}) => (throws)
+  (graph/g:id Task {:where {:name "n"}})
+  => '[:select (--- [#{"id"}]) :from demo/Task
+       \\ :where {"name" [:eq "n"]} \\ :limit 1])
+
+(fact "exposes graph count exists and selects"
+  (graph/g:count Task {}) => '[:select (count *) :from demo/Task]
+  (graph/g:exists Task {}) => '[:select (exists [:select 1 :from demo/Task])]
+  (graph/g:select Task {:as :raw}) => '[:select * :from demo/Task])
+
+(fact "guards and constructs graph gets"
+  (graph/g:get Task {}) => (throws)
+  (graph/g:get Task {:where {:id "a"} :as :raw})
+  => '[:select * :from demo/Task \\ :where {"id" [:eq "a"]} \\ :limit 1])
+
+(fact "exposes graph mutation operations"
+  (graph/g:update Task {:as :raw :set {:name "n"}})
+  => '[:update demo/Task :set (--- [(== #{"name"} (:text "n"))])]
+  (graph/g:delete Task {:as :raw :where {:id "a"}})
+  => '[:delete :from demo/Task :where {"id" [:eq "a"]}])
+
+(fact "exposes graph query operations"
+  (graph/q Task {:returning #{:id} :as :raw})
+  => '[:select (--- [#{"id"}]) :from demo/Task]
+  (graph/q:get Task {:returning #{:id} :as :raw})
+  => '[:select (--- [#{"id"}]) :from demo/Task \\ :limit 1])
+
+(view/defsel.pg ^{:- [Task] :args [:text input-name]}
+  task-by-name {:name input-name})
+(view/defret.pg ^{:- [Task]}
+  task-basic [:uuid task-id] #{:id :name})
+
+(fact "exposes composed views"
+  (graph/view ['postgres.core.graph-test/task-basic]
+              ['postgres.core.graph-test/task-by-name "n"] {:limit 2})
+  => '[:with j-ret :as
+       [:select (--- [#{"id"} #{"name"}]) :from demo/Task
+        \\ :where {"name" [:eq "n"]} \\ :limit 2]
+       \\ :select (jsonb-agg j-ret) :from j-ret])
