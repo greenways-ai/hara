@@ -477,6 +477,20 @@ impl Compiler {
         Ok(())
     }
 
+    fn unique_constant(&mut self, value: Value, span: &Span) -> Result<(), CompileError> {
+        if self.constants.len() >= MAX_CONSTANTS {
+            return Err(CompileError::new(
+                CompileErrorKind::Limit,
+                format!("constant pool exceeds limit of {MAX_CONSTANTS}"),
+                Some(span.start),
+            ));
+        }
+        let index = self.constants.len() as u32;
+        self.constants.push(value);
+        self.emit(Instruction::Constant(index), Some(span.start));
+        Ok(())
+    }
+
     /// The pool index for a constant, interning it if new. Used directly
     /// for instruction operands (global names, struct fields); `constant`
     /// additionally emits the load.
@@ -603,6 +617,18 @@ impl Compiler {
                 Ok(())
             }
             Form::Map(entries) => {
+                if entries.iter().all(|(key, value)| {
+                    literal_collection_form(key) && literal_collection_form(value)
+                }) {
+                    let value = crate::core::form_to_value(form).map_err(|message| {
+                        CompileError::new(
+                            CompileErrorKind::UnsupportedForm,
+                            message,
+                            Some(span.start),
+                        )
+                    })?;
+                    return self.unique_constant(value, span);
+                }
                 if entries.len() > usize::from(u16::MAX) {
                     return Err(CompileError::new(
                         CompileErrorKind::Limit,
@@ -1262,6 +1288,26 @@ impl Compiler {
         }
         validate::validate(&program).map_err(|error| internal(error.to_string()))?;
         Ok(program)
+    }
+}
+
+fn literal_collection_form(form: &Form) -> bool {
+    match form {
+        Form::Nil
+        | Form::Bool(_)
+        | Form::Number(_)
+        | Form::Float(_)
+        | Form::String(_)
+        | Form::Keyword(_)
+        | Form::Character(_)
+        | Form::BigInteger(_)
+        | Form::Decimal(_)
+        | Form::Regex(_) => true,
+        Form::Vector(values) | Form::Set(values) => values.iter().all(literal_collection_form),
+        Form::Map(entries) => entries
+            .iter()
+            .all(|(key, value)| literal_collection_form(key) && literal_collection_form(value)),
+        _ => false,
     }
 }
 

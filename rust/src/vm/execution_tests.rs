@@ -987,20 +987,57 @@ fn async_metadata_and_await_lowering_are_explicit() {
 }
 
 #[test]
-fn await_requires_a_fresh_suspension_context() {
-    let (kind, message) = compile_error("(defn bad [p] (std.foundation.coroutine/await p))");
-    assert_eq!(kind, CompileErrorKind::InvalidEffect);
-    assert!(
-        message.contains("co/await requires ^:async or co/create"),
-        "{message}"
-    );
+fn await_infers_a_suspending_synchronous_function() {
+    let program = compile_source("(defn delayed [p] (std.foundation.coroutine/await p))")
+        .expect("await should infer suspension support");
+    let prototype = program
+        .functions
+        .iter()
+        .find(|function| function.name.as_deref() == Some("delayed"))
+        .expect("named prototype");
+    assert!(!prototype.async_function, "inferred await must not force a promise wrapper");
+    assert!(prototype.code.contains(&super::Instruction::Await));
 
-    let (kind, message) =
-        compile_error("(defn ^:async outer [p] (fn [] (std.foundation.coroutine/await p)))");
-    assert_eq!(kind, CompileErrorKind::InvalidEffect);
-    assert!(
-        message.contains("co/await requires ^:async or co/create"),
-        "{message}"
+    compile_source("(defn outer [p] (fn [] (std.foundation.coroutine/await p)))")
+        .expect("nested functions infer their own suspension support");
+}
+
+#[test]
+fn inferred_await_returns_directly_until_it_really_suspends() {
+    let registry = NamespaceRegistry::new("user");
+    let source = Promise::new();
+    registry
+        .find_or_create("user")
+        .intern("source", Value::Promise(source.clone()));
+    let program = compile_source_with(
+        "(do (defn delayed [] (std.foundation.coroutine/await source)) (delayed))",
+        &registry,
+    )
+    .unwrap();
+    let mut fiber = crate::core::with_namespace_registry(&registry, || {
+        super::VmFiber::start(Rc::new(program))
+    });
+    assert!(matches!(fiber.state(), super::VmFiberState::Suspended));
+    source.resolve(Value::Number(9));
+    assert!(matches!(
+        fiber.poll(),
+        super::VmFiberState::Completed(Value::Number(9))
+    ));
+
+    let registry = NamespaceRegistry::new("user");
+    let ready = Promise::new();
+    ready.resolve(Value::Number(42));
+    registry
+        .find_or_create("user")
+        .intern("source", Value::Promise(ready));
+    let program = compile_source_with(
+        "(do (defn immediate [] (std.foundation.coroutine/await source)) (immediate))",
+        &registry,
+    )
+    .unwrap();
+    assert_eq!(
+        execute_program_with_globals(Rc::new(program), &registry).unwrap(),
+        Value::Number(42)
     );
 }
 

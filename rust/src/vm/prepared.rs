@@ -53,6 +53,23 @@ impl PreparedCall {
             Vec::new(),
         ))
     }
+
+    /// Invokes the prepared Var without the synthetic outer call machine.
+    ///
+    /// Compiled closures run their own machine and return a Promise only when
+    /// execution actually suspends. Embedders that already own continuation
+    /// scheduling can use this path to avoid wrapping every synchronous call
+    /// in a second VM.
+    pub fn invoke(&self, arguments: Vec<Value>) -> Result<Value, String> {
+        if arguments.len() != usize::from(self.arity) {
+            return Err(format!("{} expects {} arguments", self.symbol, self.arity));
+        }
+        let callable = self.var.deref_value();
+        let Value::Function(function) = callable else {
+            return Err(format!("prepared Var is not callable: {}", self.symbol));
+        };
+        crate::core::call_function(&function, arguments)
+    }
 }
 
 /// Resolves a callable Var once and prepares a validated direct-argument stub.
@@ -135,6 +152,10 @@ mod tests {
                 .unwrap()
                 .drive_sync()
                 .unwrap(),
+            Value::Number(42)
+        );
+        assert_eq!(
+            prepared.invoke(vec![Value::Number(42)]).unwrap(),
             Value::Number(42)
         );
 
