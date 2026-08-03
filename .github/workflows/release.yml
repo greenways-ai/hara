@@ -18,18 +18,26 @@ jobs:
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
+      revision: ${{ steps.meta.outputs.revision }}
     steps:
     - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+        fetch-depth: 0
     - name: Resolve tag and verify it matches rust/Cargo.toml
       id: meta
+      env:
+        RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
       run: |
-        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-          TAG="${{ inputs.tag }}"
-          git fetch --tags origin
-          git rev-parse --verify "refs/tags/$TAG" >/dev/null
-        else
-          TAG="${GITHUB_REF#refs/tags/}"
-        fi
+        TAG="$RELEASE_TAG"
+        case "$TAG" in
+          v*) ;;
+          *) echo "release tag must start with v: $TAG" >&2; exit 1 ;;
+        esac
+        TAG_REVISION=$(git rev-parse "refs/tags/${TAG}^{commit}")
+        REVISION=$(git rev-parse HEAD)
+        test "$REVISION" = "$TAG_REVISION"
+
         VERSION="${TAG#v}"
         CRATE_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -n 1)
         if [ "$VERSION" != "$CRATE_VERSION" ]; then
@@ -38,6 +46,7 @@ jobs:
         fi
         echo "tag=$TAG" >> "$GITHUB_OUTPUT"
         echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
 
   build:
     needs: guard
@@ -51,6 +60,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.guard.outputs.tag }}
     - uses: dtolnay/rust-toolchain@stable
       with:
         targets: ${{ matrix.target }}
@@ -86,6 +97,8 @@ jobs:
       HARA_NATIVE_USE_FALLBACK_RUNTIME: 'true'
     steps:
     - uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.guard.outputs.tag }}
     - uses: graalvm/setup-graalvm@v1
       with:
         distribution: graalvm-community
@@ -108,6 +121,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.guard.outputs.tag }}
     - uses: dtolnay/rust-toolchain@stable
       with:
         targets: wasm32-unknown-unknown
@@ -128,8 +143,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
     steps:
-    - uses: actions/checkout@v4
     - uses: actions/download-artifact@v4
       with:
         pattern: release-*
@@ -169,6 +184,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v4
+      with:
+        ref: ${{ needs.guard.outputs.tag }}
     - name: Install via scripts/install.sh
       run: |
         TAG="${{ needs.guard.outputs.tag }}"
@@ -198,6 +215,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || needs.guard.outputs.tag }}
     - uses: actions/checkout@v4
       with:
         repository: hara-lang/homebrew-tap
@@ -224,3 +243,42 @@ jobs:
         git add Formula/hara.rb Formula/hara-truffle.rb
         git commit -m "hara ${{ needs.guard.outputs.tag }}"
         git push
+
+  publish-greenways-homebrew:
+    needs: [guard, release, smoke-install, smoke-public-linux-install]
+    runs-on: ubuntu-latest
+    env:
+      TAP_TOKEN: ${{ secrets.GREENWAYS_HOMEBREW_TAP_TOKEN }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || needs.guard.outputs.tag }}
+    - name: Render Greenways source formula
+      run: |
+        python3 scripts/generate-greenways-homebrew-formula \
+          "${{ needs.guard.outputs.tag }}" \
+          "${{ needs.guard.outputs.revision }}" \
+          target/greenways-homebrew/Formula/hara.rb
+        ruby -c target/greenways-homebrew/Formula/hara.rb
+    - uses: actions/upload-artifact@v4
+      with:
+        name: greenways-homebrew-formula
+        path: target/greenways-homebrew/Formula/hara.rb
+    - name: Update Greenways Homebrew tap
+      if: ${{ env.TAP_TOKEN != '' }}
+      env:
+        GH_TOKEN: ${{ env.TAP_TOKEN }}
+      run: |
+        git clone "https://x-access-token:${GH_TOKEN}@github.com/greenways-ai/homebrew-tap.git" greenways-homebrew-tap
+        mkdir -p greenways-homebrew-tap/Formula
+        cp target/greenways-homebrew/Formula/hara.rb greenways-homebrew-tap/Formula/hara.rb
+        git -C greenways-homebrew-tap diff --check
+        if test -z "$(git -C greenways-homebrew-tap status --porcelain -- Formula/hara.rb)"; then
+          echo "Greenways tap already contains ${{ needs.guard.outputs.tag }}"
+          exit 0
+        fi
+        git -C greenways-homebrew-tap config user.name "hara release bot"
+        git -C greenways-homebrew-tap config user.email "actions@users.noreply.github.com"
+        git -C greenways-homebrew-tap add Formula/hara.rb
+        git -C greenways-homebrew-tap commit -m "hara ${{ needs.guard.outputs.tag }}"
+        git -C greenways-homebrew-tap push
