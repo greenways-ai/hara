@@ -1,11 +1,44 @@
 (ns postgres.core
   (:require [postgres.core.addon]
             [postgres.core.builtin]
+            [postgres.core.graph :as graph]
+            [postgres.core.graph-view :as graph-view]
+            [postgres.core.impl :as impl]
             [std.foundation :as f
              :exclude [abs assert case concat count format max min mod name
                        replace repeat reverse bit-and bit-or]]))
 
 (f/intern-all postgres.core.builtin
               postgres.core.addon)
+
+(f/intern-in impl/t:select
+             impl/t:get-field
+             impl/t:get
+             impl/t:id
+             impl/t:count
+             impl/t:exists
+             impl/t:delete
+             impl/t:insert
+             impl/t:insert!
+             impl/t:upsert
+             impl/t:update
+             impl/t:update!
+             impl/t:modify
+             impl/t:fields
+             graph/g:where
+             graph/g:id
+             graph/g:count
+             graph/g:exists
+             graph/g:select
+             graph/g:get
+             graph/g:update
+             graph/g:modify
+             graph/g:delete
+             graph/g:insert
+             graph/q
+             graph/q:get
+             graph/view
+             graph-view/defsel.pg
+             graph-view/defret.pg)
 
 (def __tahto_load__ true)

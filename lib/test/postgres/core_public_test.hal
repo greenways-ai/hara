@@ -1,0 +1,52 @@
+(ns postgres.core-public-test
+  (:require [postgres.core :as pg]
+            [postgres.core.graph-view :as graph-view])
+  (:use code.test))
+
+(def schema
+  {:id [{:type :uuid :primary true :order 0}]
+   :name [{:type :text :order 1}]})
+(def app-schema {:tree {:Task schema}})
+(def Task {:id 'Task :module 'demo :table-schema schema :schema app-schema})
+(graph-view/register-table! 'Task Task)
+
+(fact "exposes table reads through postgres.core"
+  (pg/t:select Task {:as :raw})
+  => '[:select * :from demo/Task]
+
+  (pg/t:get Task {}) => (throws))
+
+(fact "exposes table writes through postgres.core"
+  (pg/t:insert Task {:name "n"} {:as :raw})
+  => '[:insert-into demo/Task (>-< [#{"name"}])
+       :values (>-< [(:text "n")])]
+
+  (pg/t:update! Task {:set {:name "n"}})
+  => '[:update demo/Task :set (--- [(== #{"name"} (:text "n"))])])
+
+(fact "exposes graph reads through postgres.core"
+  (pg/g:select Task {:as :raw})
+  => '[:select * :from demo/Task]
+
+  (pg/q Task {:returning #{:id} :as :raw})
+  => '[:select (--- [#{"id"}]) :from demo/Task])
+
+(pg/defsel.pg ^{:- [Task] :args [:text input-name]}
+  task-by-name {:name input-name})
+(pg/defret.pg ^{:- [Task]}
+  task-basic [:uuid task-id] #{:id :name})
+
+(fact "forwards view macros with caller namespace metadata"
+  (:type (graph-view/view-descriptor 'postgres.core-public-test/task-by-name))
+  => :select
+
+  (:type (graph-view/view-descriptor 'postgres.core-public-test/task-basic))
+  => :return)
+
+(fact "exposes composed graph views through postgres.core"
+  (pg/view ['postgres.core-public-test/task-basic]
+           ['postgres.core-public-test/task-by-name "n"] {:limit 2})
+  => '[:with j-ret :as
+       [:select (--- [#{"id"} #{"name"}]) :from demo/Task
+        \\ :where {"name" [:eq "n"]} \\ :limit 2]
+       \\ :select (jsonb-agg j-ret) :from j-ret])
