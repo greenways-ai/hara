@@ -1,0 +1,42 @@
+(ns postgres.core.graph-walk-test
+  (:require [postgres.core.graph-walk :as walk])
+  (:use code.test))
+
+(def schema
+  {:tree
+   {:Cache {:id [{:type :uuid :primary true :order 0}]
+            :tasks [{:type :ref :ref {:type :reverse :ns :Task :rval :cache}
+                     :cardinality :many}]}
+    :Task {:id [{:type :uuid :primary true :order 0}]
+           :name [{:type :text :order 1}]
+           :cache [{:type :ref :order 2 :ref {:type :forward :ns :Cache}}]}}})
+
+(fact "seeds missing primary keys and preserves scalar references"
+  (let [linked (walk/link-data {:Task {:name "one" :cache "c"}} schema)]
+    (symbol? (get-in linked [:Task :id]))) => true
+  (get-in (walk/link-data {:Task {:name "one" :cache "c"}} schema)
+          [:Task :cache]) => "c")
+
+(fact "propagates reverse parent links"
+  (let [linked (walk/link-data
+                {:Cache {:id "c" :tasks [{:name "one"} {:name "two"}]}}
+                schema)]
+    (get-in linked [:Cache :tasks 0 :cache])) => "c"
+  (symbol? (get-in (walk/link-data
+                    {:Cache {:id "c" :tasks [{:name "one"}]}} schema)
+                   [:Cache :tasks 0 :id])) => true)
+
+(fact "flattens nested rows by table"
+  (walk/flatten-data
+   {:Cache {:id "c" :tasks [{:id "t1" :name "one" :cache "c"}
+                              {:id "t2" :name "two" :cache "c"}]}}
+   schema)
+  => {:Cache [{:id "c"}]
+      :Task [{:id "t1" :name "one" :cache "c"}
+             {:id "t2" :name "two" :cache "c"}]})
+
+(fact "handles top-level row vectors"
+  (walk/flatten-data {:Task [{:id "a" :name "one"}
+                              {:id "b" :name "two"}]} schema)
+  => {:Task [{:id "a" :name "one"}
+             {:id "b" :name "two"}]})
