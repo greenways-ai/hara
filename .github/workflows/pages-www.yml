@@ -2,7 +2,7 @@ name: Deploy www.hara-lang.org
 
 on:
   push:
-    branches: [main, production]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -33,35 +33,23 @@ jobs:
       - name: Install Astro site dependencies
         run: npm ci --prefix website
       - name: Build browser runtime and site
-        if: github.ref_name == 'main'
         env:
           HARA_GITHUB_OAUTH_CLIENT_ID: ${{ vars.HARA_GITHUB_OAUTH_CLIENT_ID }}
         run: |
           rustup target add wasm32-unknown-unknown
           bash scripts/build-www
-      - name: Restore verified production kernel
-        if: github.ref_name == 'production'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p target/www-artifact target/www
-          gh run download 30617918533 -n github-pages -D target/www-artifact
-          echo "325855873453b7ab7b0a3483c5e6b51b2e104377787bd10ee5e001d9da27aa4b  target/www-artifact/artifact.tar" | shasum -a 256 -c -
-          tar -xf target/www-artifact/artifact.tar -C target/www
       - name: Test website scene contract
         run: |
           npm test --prefix website
           node --test website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
           test -s target/www/og-hara-ribbon.jpg
       - name: Deploy main to www.testing.hara-lang.org
-        if: github.ref_name == 'main'
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "main ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
       - name: Deploy production to www.hara-lang.org
-        if: github.ref_name == 'production'
-        run: npx --yes netlify-cli deploy --prod --dir target/www --message "production ${GITHUB_SHA}"
+        run: npx --yes netlify-cli deploy --prod --dir target/www --message "main ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
