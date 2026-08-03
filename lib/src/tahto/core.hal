@@ -76,6 +76,9 @@
      '(defmacro defn.xt [symbol & body]
         (list 'tahto.core.script/register-code!
               (list 'quote (apply list 'defn symbol body))))
+     '(defmacro defn.pg [symbol & body]
+        (list 'tahto.core.script/register-code!
+              (list 'quote (apply list 'defn symbol body))))
      '(defmacro defgen.xt [symbol & body]
         (list 'tahto.core.script/register-code!
               (list 'quote (apply list 'defgen symbol body))))
@@ -120,6 +123,9 @@
         (list 'tahto.core.script/register-code!
               (list 'quote (apply list 'defglobal symbol body))))
      '(defmacro defn.xt [symbol & body]
+        (list 'tahto.core.script/register-code!
+              (list 'quote (apply list 'defn symbol body))))
+     '(defmacro defn.pg [symbol & body]
         (list 'tahto.core.script/register-code!
               (list 'quote (apply list 'defn symbol body))))
      '(defmacro defgen.xt [symbol & body]
