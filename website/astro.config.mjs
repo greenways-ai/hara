@@ -74,8 +74,7 @@ export default defineConfig({
         },
         {
           label: "Guides & reference",
-          collapsed: true,
-          items: [{ autogenerate: { directory: "docs/reference" } }]
+          autogenerate: { directory: "docs/reference" }
         }
       ]
     })
