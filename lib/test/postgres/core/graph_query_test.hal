@@ -1,0 +1,67 @@
+(ns postgres.core.graph-query-test
+  (:require [postgres.core.graph-query :as query])
+  (:use code.test))
+
+(def cache-schema
+  {:id [{:type :uuid :primary true :order 0 :scope #{:-/id}}]
+   :label [{:type :text :order 1 :scope #{:-/info}}]
+   :tasks [{:type :ref :ident :tasks
+            :ref {:type :reverse :rval :cache
+                  :link {:module 'demo :id 'Task}}}]})
+(def task-schema
+  {:id [{:type :uuid :primary true :order 0 :scope #{:-/id}}]
+   :name [{:type :text :order 1 :scope #{:-/info}}]
+   :cache [{:type :ref :ident :cache :order 2
+            :ref {:type :forward :link {:module 'demo :id 'Cache}}}]})
+(def app-schema {:tree {:Task task-schema :Cache cache-schema}})
+(def options {:schema app-schema})
+(def task {:id 'Task :module 'demo :table-schema task-schema :schema app-schema})
+(def cache {:id 'Cache :module 'demo :table-schema cache-schema :schema app-schema})
+
+(fact "constructs table relation tokens"
+  (query/table-col-token 'demo/Task :cache)
+  => '(. demo/Task #{"cache_id"})
+  (query/table-id-token 'demo/Task) => '(. demo/Task #{"id"})
+  (:fn/value (meta (query/table-id-token 'demo/Task))) => true)
+
+(fact "finds reverse relation keys"
+  (query/reverse-keys cache-schema) => #{:tasks})
+
+(fact "builds forward returning blocks"
+  (query/returning-block task (assoc (first (:cache task-schema)) :ident :cache)
+                         {} #{:id} {} query/query-raw-fn options)
+  => '(% [[:with j-ret :as
+           [:select (--- [#{"id"}]) :from demo/Cache
+            \\ :where {"id" [:eq (. demo/Task #{"cache_id"})]} \\ :limit 1]
+           \\ :select (to-jsonb j-ret) :from j-ret]
+          :as #{"cache"}]))
+
+(fact "validates relation markers"
+  (count (query/returning-map-markers cache cache-schema [[:tasks]]
+                                      query/query-raw-fn options)) => 1
+  (query/returning-map-markers cache cache-schema [[:id]]
+                               query/query-raw-fn options) => (throws))
+
+(fact "expands default and linked markers"
+  (query/returning-all-markers task task-schema #{:*/default}
+                               query/query-raw-fn options)
+  => #{:id :name :cache}
+  (count (query/returning-all-markers cache cache-schema #{:*/default :*/linked}
+                                      query/query-raw-fn options)) => 3)
+
+(fact "constructs graph queries with scalar returns"
+  (query/query-fn task {:returning #{:id} :as :raw})
+  => '[:select (--- [#{"id"}]) :from demo/Task]
+  (query/query-fn task {:returning 'cache-id :as :raw})
+  => '[:select (--- [#{"cache_id"}]) :from demo/Task])
+
+(fact "constructs nested graph queries"
+  (query/query-fn task {:returning #{[:cache #{:id}]} :as :raw})
+  => '[:select
+       (--- [(% [(quote ([:with j-ret :as
+                          [:select (--- [#{"id"}]) :from demo/Cache
+                           \\ :where {"id" [:eq (. demo/Task #{"cache_id"})]}
+                           \\ :limit 1]
+                          \\ :select (to-jsonb j-ret) :from j-ret]))
+                 :as #{"cache"}])])
+       :from demo/Task])
