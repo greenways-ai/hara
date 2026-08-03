@@ -1,0 +1,66 @@
+(ns lib.postgres-test
+  (:use code.test)
+  (:require [lib.postgres :as postgres]
+            [std.db.protocol :as protocol]))
+
+(defstruct FakeDatabase [events])
+
+(extend-type FakeDatabase protocol/IDatabase
+  (db-engine [_] :postgresql)
+  (db-provider [_] :fake)
+  (db-info [_] {:engine :postgresql :provider :fake})
+  (db-exec [value sql parameters]
+    (do
+      (swap! (field value :events) conj [:exec sql parameters])
+      :exec-result))
+  (db-query [value sql parameters]
+    (do
+      (swap! (field value :events) conj [:query sql parameters])
+      :query-result))
+  (db-close [value]
+    (do
+      (swap! (field value :events) conj [:close])
+      :closed)))
+
+(def results
+  [(fact "the public facade delegates execute, query, and stop"
+     (let [events (atom [])
+           database (lib.postgres-test/FakeDatabase events)]
+       [(postgres/execute database "create schema app")
+        (postgres/query database "select 1")
+        (postgres/stop database)
+        (deref events)])
+     => [:exec-result
+         :query-result
+         :closed
+         [[:exec "create schema app" []]
+          [:query "select 1" []]
+          [:close]]])
+
+   (fact "transaction helpers remain backed by the same connection"
+     (let [events (atom [])
+           database (lib.postgres-test/FakeDatabase events)]
+       [(postgres/begin database)
+        (postgres/commit database)
+        (postgres/rollback database)
+        (deref events)])
+     => [:exec-result
+         :exec-result
+         :exec-result
+         [[:exec "begin" []]
+          [:exec "commit" []]
+          [:exec "rollback" []]]])
+
+   (fact "exact NUMERIC parameters retain their text"
+     (postgres/numeric "12.3400")
+     => {"$postgres" "numeric"
+         "value" "12.3400"})
+
+   (fact "postgres/sql-array remains the array parameter constructor"
+     (postgres/sql-array :uuid [["a" "b"] ["c" "d"]])
+     => {"$postgres" "array"
+         "element" "uuid"
+         "dimensions" [[1 2] [1 2]]
+         "value" [["a" "b"] ["c" "d"]]})])
+
+(pr-str (run '[lib.postgres-test]))
