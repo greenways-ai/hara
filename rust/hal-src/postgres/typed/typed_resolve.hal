@@ -1,0 +1,136 @@
+(ns postgres.typed.typed-resolve
+  (:require [std.foundation.string :as string]
+            [postgres.typed.typed-common :as types]))
+
+(def +legacy-prefix+ "rt.postgres.")
+(def +canonical-prefix+ "tahto.runtime.postgres.")
+
+(defn canonical-fn-sym
+  [sym]
+  (if (and (symbol? sym)
+           (namespace sym)
+           (string/starts-with? (namespace sym) +legacy-prefix+))
+    (symbol (str +canonical-prefix+
+                 (string/slice (namespace sym) (string/length +legacy-prefix+)))
+            (name sym))
+    sym))
+
+(defn app-name-from-static
+  [app]
+  (cond (or (vector? app) (list? app)) (first app)
+        app app
+        :else nil))
+
+(defn- nsish->str
+  [value]
+  (cond (symbol? value) (str value)
+        (string? value) value
+        value (str value)
+        :else nil))
+
+(defn- nameish->str
+  [value]
+  (cond (symbol? value) (name value)
+        (keyword? value) (name value)
+        (string? value) value
+        :else nil))
+
+(defn- safe-deref
+  [value]
+  (try (deref value)
+       (catch Throwable error nil)))
+
+(defn- metadata-fn-symbol
+  [value]
+  (let [metadata (meta value)
+        ns-value (:ns metadata)
+        name-value (:name metadata)
+        ns-string (nsish->str ns-value)
+        name-string (nameish->str name-value)]
+    (if (and ns-string name-string)
+      (symbol ns-string name-string)
+      nil)))
+
+(defn- deref-fn-symbol
+  [value]
+  (let [deref-value (safe-deref value)]
+    (if (map? deref-value)
+      (let [module-string (or (nsish->str (get deref-value :module))
+                              (nsish->str (get deref-value :namespace))
+                              (nsish->str (get deref-value :ns)))
+            id-value (or (get deref-value :id) (get deref-value :name))
+            id-string (nameish->str id-value)]
+        (cond (and (symbol? id-value) (namespace id-value)) id-value
+              (and module-string id-string) (symbol module-string id-string)
+              :else nil))
+      nil)))
+
+(defn fn-ref->fn-sym
+  [fn-ref]
+  (cond (symbol? fn-ref)
+        (if (namespace fn-ref)
+          (canonical-fn-sym fn-ref)
+          (symbol (str (current-namespace)) (name fn-ref)))
+        (metadata-fn-symbol fn-ref) (metadata-fn-symbol fn-ref)
+        :else (deref-fn-symbol fn-ref)))
+
+(defn fn-ref->app-name
+  [fn-ref fn-def]
+  (let [from-definition
+        (app-name-from-static (get-in fn-def [:body-meta :static/application]))]
+    (or from-definition
+        (let [deref-value (safe-deref fn-ref)]
+          (if (map? deref-value)
+            (app-name-from-static (get deref-value :static/application))
+            nil)))))
+
+(defn- namespaced-symbol?
+  [sym]
+  (boolean (and (symbol? sym) (namespace sym))))
+
+(defn- resolve-by-name
+  [op-name]
+  (or (types/get-type (symbol op-name))
+      (reduce (fn [found candidate]
+                (or found
+                    (if (and (types/fn-def? candidate)
+                             (= op-name (:name candidate)))
+                      candidate
+                      nil)))
+              nil
+              (vals @types/*type-registry*))))
+
+(defn resolve-called-fn
+  [op aliases]
+  (let [op-name (name op)
+        resolved-op
+        (if (namespace op)
+          (let [alias-symbol (symbol (namespace op))
+                full-ns (get aliases alias-symbol)]
+            (if full-ns
+              (symbol (str full-ns) op-name)
+              op))
+          op)
+        resolved-op (canonical-fn-sym resolved-op)
+        canonical-op (canonical-fn-sym op)
+        qualified? (or (namespaced-symbol? canonical-op)
+                       (namespaced-symbol? resolved-op))
+        fn-def (or (types/get-type resolved-op)
+                   (types/get-type canonical-op)
+                   (if qualified? nil (resolve-by-name op-name)))]
+    [resolved-op fn-def]))
+
+(defn resolve-function-def
+  [fn-ref]
+  (let [direct (types/get-type fn-ref)]
+    (cond (types/fn-def? fn-ref) fn-ref
+          (types/fn-def? direct) direct
+          :else
+          (let [fn-sym (fn-ref->fn-sym fn-ref)]
+            (if fn-sym
+              (or (types/get-type fn-sym)
+                  (types/get-type (symbol (name fn-sym)))
+                  (types/get-type (keyword (name fn-sym))))
+              nil)))))
+
+(def __tahto_load__ true)

@@ -1,0 +1,292 @@
+(ns postgres.typed.typed-parse
+  (:config {:blank true})
+  (:require [std.foundation :as foundation :refer :all :exclude [read-forms]]
+            [std.foundation.string :as string]
+            [postgres.typed.typed-infer :as typed-infer]
+            [postgres.typed.typed-common :as types]))
+
+(defn read-forms [path]
+  (foundation/read-forms path))
+
+(defn- sequential-value? [value]
+  (or (list? value) (vector? value)))
+
+(defn- definition-name? [form expected]
+  (and (list? form)
+       (symbol? (first form))
+       (= expected (name (first form)))))
+
+(defn deftype? [form]
+  (definition-name? form "deftype.pg"))
+
+(defn defenum? [form]
+  (definition-name? form "defenum.pg"))
+
+(defn defn? [form]
+  (definition-name? form "defn.pg"))
+
+(defn script? [form]
+  (and (definition-name? form "script")
+       (= :postgres (second form))))
+
+(defn parse-schema [form]
+  (let [opts (if (script? form) (nth form 2) nil)]
+    (or (first (get-in opts [:static :all :schema]))
+        (first (get-in opts [:static :seed :schema])))))
+
+(defn extract-aliases [require-forms]
+  (reduce (fn [out form]
+            (if (and (vector? form)
+                     (= 3 (count form))
+                     (= :as (second form)))
+              (assoc out (nth form 2) (first form))
+              out))
+          {}
+          require-forms))
+
+(defn parse-aliases [form]
+  (if (script? form)
+    (extract-aliases
+     (or (get-in (nth form 2) [:require]) []))
+    nil))
+
+(defn parse-process-constraints [process]
+  (if (sequential-value? process)
+    (reduce (fn [out directive]
+              (if (sequential-value? directive)
+                (let [fn-name (name (first directive))]
+                  (cond (= fn-name "as-limit-length")
+                        (assoc out :max-length (second directive))
+                        (= fn-name "as-lower-formatted") (assoc out :format :handle)
+                        (= fn-name "as-email") (assoc out :format :email)
+                        (= fn-name "as-url") (assoc out :format :uri)
+                        :else out))
+                out))
+            {}
+            process)
+    {}))
+
+(defn parse-column-spec [column-spec]
+  (let [col-name (first column-spec)
+        col-opts (second column-spec)
+        opts (if (map? col-opts) col-opts {})
+        base-type (get opts :type :unknown)
+        required? (boolean (get opts :required false))
+        enum-ref (:enum opts)
+        ref-info (:ref opts)
+        type-ref (cond enum-ref (types/make-type-ref :enum (:ns enum-ref) base-type)
+                       (= :ref base-type) (types/make-type-ref :ref (:ns ref-info) base-type)
+                       :else (types/make-type-ref :primitive nil base-type))]
+    (types/make-column-def
+     col-name
+     type-ref
+     {:required required?
+      :default (or (get-in opts [:sql :default]) (get opts :default))
+      :constraints (merge (if required? {:required true} {})
+                          (if (get opts :unique) {:unique true} {})
+                          (if (get opts :primary) {:primary true} {})
+                          (parse-process-constraints (get-in opts [:sql :process])))
+      :enum-ref enum-ref
+      :scope (:scope opts)
+      :map-schema (:map opts)
+      :ref-info ref-info
+      :unique (:unique opts)
+      :primary (:primary opts)})))
+
+(defn- column-pairs [values]
+  (partition 2 values))
+
+(defn parse-deftype [form ns-name dbschema]
+  (let [type-sym (second form)
+        after-name (drop 2 form)
+        meta-data (meta (first form))
+        entity-meta (or (:! (meta type-sym)) (:! meta-data))
+        after-doc (if (string? (first after-name)) (rest after-name) after-name)
+        attr-map (if (map? (first after-doc)) (first after-doc) nil)
+        remaining (if attr-map (rest after-doc) after-doc)
+        combined-meta (merge meta-data (meta type-sym) attr-map)
+        col-vec (first remaining)
+        columns (if (vector? col-vec)
+                  (vec (map (fn [pair]
+                              (parse-column-spec
+                               [(keyword (name (first pair))) (second pair)]))
+                            (column-pairs col-vec)))
+                  [])
+        primary-keys (vec (map (fn [column] (:name column))
+                               (filter (fn [column]
+                                         (get-in column [:constraints :primary]))
+                                       columns)))
+        entity-args (if (and entity-meta (seq? entity-meta)
+                             (symbol? (first entity-meta)))
+                      (second entity-meta)
+                      nil)
+        addons (if (map? entity-args) (:addons entity-args) nil)
+        primary-key (cond (= 0 (count primary-keys)) :id
+                          (= 1 (count primary-keys)) (first primary-keys)
+                          :else primary-keys)]
+    (types/make-table-def ns-name (name type-sym) columns primary-key
+                          addons entity-meta
+                          (or (:static/schema combined-meta) dbschema))))
+
+(defn parse-defenum [form ns-name dbschema]
+  (let [enum-sym (second form)
+        values-vec (first (filter vector? (drop 2 form)))]
+    (types/make-enum-def ns-name (name enum-sym)
+                         (map (fn [value]
+                                (if (keyword? value) value (keyword (str value))))
+                              values-vec)
+                         dbschema)))
+
+(defn parse-fn-inputs [args-form]
+  (if (sequential-value? args-form)
+    (:result
+     (reduce (fn [state item]
+               (cond (keyword? item) (assoc state :current-type item)
+                     (symbol? item)
+                     {:result (conj (:result state)
+                                    (types/FnArg
+                                     item
+                                     (or (:current-type state) :unknown)
+                                     (if (:current-type state)
+                                       [(:current-type state)] nil)
+                                     (or (:role (meta item)) :payload)))
+                      :current-type nil}
+                     :else state))
+             {:result [] :current-type nil}
+             args-form))
+    nil))
+
+(defn- track-value-uses? [value arg-name]
+  (cond (= value arg-name) true
+        (or (list? value) (vector? value) (set? value))
+        (reduce (fn [found item]
+                  (or found (track-value-uses? item arg-name)))
+                false value)
+        (map? value)
+        (reduce (fn [found entry]
+                  (or found (track-value-uses? (second entry) arg-name)))
+                false value)
+        :else false))
+
+(defn- body-tracks? [value arg-name]
+  (cond (map? value)
+        (or (and (has? value :track)
+                 (track-value-uses? (:track value) arg-name))
+            (reduce (fn [found entry]
+                      (or found (body-tracks? (second entry) arg-name)))
+                    false value))
+        (or (list? value) (vector? value) (set? value))
+        (reduce (fn [found item]
+                  (or found (body-tracks? item arg-name)))
+                false value)
+        :else false))
+
+(defn infer-fn-arg-role [arg-name body]
+  (if (and body (body-tracks? body arg-name))
+    :track
+    :payload))
+
+(defn parse-defn [form ns-name dbschema]
+  (let [fn-sym (second form)
+        after-name (drop 2 form)
+        docstring (if (string? (first after-name)) (first after-name) nil)
+        after-doc (if docstring (rest after-name) after-name)
+        attr-map (if (and (map? (first after-doc))
+                          (not (has? (first after-doc) :type)))
+                   (first after-doc) nil)
+        remaining (if attr-map (rest after-doc) after-doc)
+        combined-meta (merge (meta (first form)) (meta fn-sym) attr-map)
+        args-form (if (vector? (first remaining))
+                    (first remaining)
+                    (first (first remaining)))
+        body (if (vector? (first remaining))
+               (rest remaining)
+               (rest (first remaining)))
+        inputs (vec (map (fn [arg]
+                           (assoc arg :role
+                                  (or (:role arg)
+                                      (infer-fn-arg-role (:name arg) body))))
+                         (parse-fn-inputs args-form)))
+        return-type (or (get combined-meta :-) [:jsonb])]
+    (types/make-fn-def ns-name (name fn-sym) inputs return-type
+                       (merge combined-meta
+                              {:raw-body (vec body)
+                               :expose (get-in combined-meta [:api/flags :expose])
+                               :docstring docstring})
+                       (or (:static/schema combined-meta) dbschema))))
+
+(defn transform-col-opts [opts]
+  (let [link (get-in opts [:ref :link])]
+    (if link
+      (assoc opts :ref {:key (keyword (str (name (:module link)) "/"
+                                           (name (:id link))))})
+      opts)))
+
+(defn parse-runtime-table
+  ([table-name table-entries]
+   (parse-runtime-table table-name table-entries nil))
+  ([table-name table-entries dbschema]
+   (let [columns (vec (map (fn [pair]
+                             (parse-column-spec
+                              [(first pair) (transform-col-opts (second pair))]))
+                           (column-pairs table-entries)))
+         primary-column (first (filter (fn [column]
+                                         (get-in column [:constraints :primary]))
+                                       columns))]
+     (types/make-table-def (namespace table-name) (name table-name)
+                           columns (or (:name primary-column) :id)
+                           nil nil dbschema))))
+
+(defn analyze-tables
+  ([tables-map] (analyze-tables tables-map nil))
+  ([tables-map dbschema]
+   {:enums []
+    :functions []
+    :tables (vec (map (fn [entry]
+                        (parse-runtime-table (first entry) (second entry) dbschema))
+                      tables-map))}))
+
+(defn- namespace-name [forms]
+  (reduce (fn [found form]
+            (if (and (nil? found) (list? form) (= 'ns (first form)))
+              (str (second form))
+              found))
+          nil forms))
+
+(defn analyze-file [file-path]
+  (let [forms (read-forms file-path)
+        ns-name (namespace-name forms)
+        script-form (reduce (fn [found form]
+                              (if (and (nil? found) (script? form)) form found))
+                            nil forms)
+        dbschema (if script-form (parse-schema script-form) nil)
+        aliases (assoc (if script-form (or (parse-aliases script-form) {}) {})
+                       '- (symbol ns-name))]
+    (reduce (fn [out form]
+              (cond (deftype? form)
+                    (update out :tables conj (parse-deftype form ns-name dbschema))
+                    (defenum? form)
+                    (update out :enums conj (parse-defenum form ns-name dbschema))
+                    (defn? form)
+                    (update out :functions conj
+                            (assoc-in (parse-defn form ns-name dbschema)
+                                      [:body-meta :aliases] aliases))
+                    :else out))
+            {:enums [] :tables [] :functions []}
+            forms)))
+
+(defn register-types! [analysis]
+  (reduce (fn [_ value]
+            (types/register-type!
+             (symbol (or (:ns value) "") (:name value)) value))
+          nil
+          (concat (:enums analysis) (:tables analysis) (:functions analysis)))
+  analysis)
+
+(defn analyze-namespace [ns-sym]
+  (analyze-file
+   (str "lib/src/"
+        (string/replace
+         (string/replace (str ns-sym) "." "/")
+         "-" "_")
+        ".hal")))

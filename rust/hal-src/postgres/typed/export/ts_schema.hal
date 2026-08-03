@@ -1,0 +1,83 @@
+(ns postgres.typed.export.ts-schema
+  (:require [std.foundation.string :as string]
+            [postgres.typed.typed-common :as types]
+            [postgres.typed.typed-shape :as shape]
+            [postgres.typed.export.json-schema :as json-schema]))
+
+(declare type->ts shape->ts-interface)
+
+(defn- name-string
+  [value]
+  (cond (string? value) value
+        (keyword? value) (string/slice (str value) 1)
+        (symbol? value) (name value)
+        :else (str value)))
+
+(defn field->ts
+  [entry]
+  (let [key (first entry)
+        field-info (second entry)]
+    (str "  "
+         (types/typescript-key key)
+         (if (:nullable? field-info) "?" "")
+         ": "
+         (type->ts field-info)
+         ";")))
+
+(defn type->ts
+  [field-info]
+  (let [field-type (:type field-info)]
+    (cond (:is-ref? field-info) "string"
+          (:shape field-info) (shape->ts-interface (:shape field-info) nil)
+          (= :array field-type) (str (type->ts (:items field-info)) "[]")
+          (:enum-ref field-info) (name-string (get-in field-info [:enum-ref :ns]))
+          :else (json-schema/resolve-type field-info :ts))))
+
+(defn shape->ts-interface
+  ([jsonb-shape]
+   (shape->ts-interface jsonb-shape nil))
+  ([jsonb-shape interface-name]
+   (let [field-lines (map field->ts (:fields jsonb-shape))]
+     (if interface-name
+       (str "export interface " interface-name " {\n"
+            (string/join "\n" field-lines)
+            "\n}")
+       (str "{ "
+            (string/join " "
+                         (map (fn [line] (string/slice line 2)) field-lines))
+            " }")))))
+
+(defn- quote-enum-value
+  [value]
+  (str "\"" (name-string value) "\""))
+
+(defn generate-ts-schema
+  []
+  (let [all
+        (vals
+         (reduce (fn [out value]
+                   (let [value-name (:name value)]
+                     (if (get out value-name)
+                       out
+                       (assoc out value-name value))))
+                 {}
+                 (vals @types/*type-registry*)))
+        blocks
+        (reduce (fn [out value]
+                  (cond (types/enum-def? value)
+                        (conj out
+                              (str "export type " (name-string (:name value)) " = "
+                                   (string/join " | "
+                                                (map quote-enum-value (:values value)))
+                                   ";"))
+                        (types/table-def? value)
+                        (conj out
+                              (shape->ts-interface
+                               (shape/table->shape value)
+                               (name-string (:name value))))
+                        :else out))
+                []
+                all)]
+    (string/join "\n\n" blocks)))
+
+(def __tahto_load__ true)

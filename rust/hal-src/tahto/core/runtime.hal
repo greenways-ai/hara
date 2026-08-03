@@ -1,0 +1,212 @@
+(ns tahto.core.runtime
+  (:require [std.protocol.icontexteval :as context-eval]
+            [tahto.core.eval :as evaluation]
+            [tahto.core.registry :as registry]))
+
+(def +language-registry+ (atom {}))
+(def +type-registry+ (atom {}))
+
+(defn- atom-value [reference]
+  (deref (identity reference)))
+
+(defn install-lang!
+  "Installs a selected version of a language into the runtime registry.
+
+   Omitting :version uses the configured default for the selected book key."
+  ([language]
+   (install-lang! language {}))
+  ([language options]
+   (let [book-key (or (get options :book-key) :default)
+         requested-version (get options :version)
+         book (or (get options :book)
+                  (registry/registry-book language
+                                          book-key
+                                          requested-version))]
+     (if (nil? book)
+       (throw
+        (ex-info "Language book is not registered"
+                 {:language language
+                  :book-key book-key
+                  :version requested-version}))
+       (let [version (or requested-version
+                         (get book :version)
+                         (registry/registry-book-default-version
+                          language
+                          book-key))
+             entry (merge options
+                          {:lang language
+                           :book-key book-key
+                           :version version
+                           :book book})]
+         (swap! +language-registry+ assoc language entry)
+         entry)))))
+
+(defn select-lang-version!
+  "Selects one installed book version as the active language grammar."
+  [language version]
+  (install-lang! language {:version version}))
+
+(defn install-type!
+  "Installs one runtime type for a language.
+
+   This keeps the Foundation [language runtime] coordinate and constructor
+   shape while replacing JVM resource specs with portable immutable data."
+  [language runtime spec]
+  (let [entry (merge {:lang language
+                      :runtime runtime}
+                     spec)]
+    (swap! +type-registry+ assoc [language runtime] entry)
+    entry))
+
+(defn language-info
+  [language]
+  (get (atom-value +language-registry+) language))
+
+(defn runtime-installed?
+  [language runtime]
+  (boolean (get (atom-value +type-registry+) [language runtime])))
+
+(defn available-runtimes
+  [language]
+  (reduce (fn [out coordinate]
+            (if (= language (first coordinate))
+              (conj out (second coordinate))
+              out))
+          []
+          (keys (atom-value +type-registry+))))
+
+(defn require-runtime!
+  "Loads the implementation registered for [language runtime]."
+  [language runtime]
+  (or (registry/registry-runtime language runtime)
+      (throw
+       (ex-info "Runtime is not registered"
+                {:lang language
+                 :runtime runtime
+                 :available (registry/registry-list)}))))
+
+(defn runtime-spec
+  "Returns an installed runtime type, loading its implementation lazily."
+  [language runtime]
+  (require-runtime! language runtime)
+  (or (get (atom-value +type-registry+) [language runtime])
+      (throw
+       (ex-info "Runtime implementation did not install its type"
+                {:lang language
+                 :runtime runtime
+                 :namespace (registry/registry-runtime-ns language runtime)}))))
+
+(defn rt-create
+  "Creates a runtime from its Foundation [language runtime] coordinate."
+  ([language runtime]
+   (rt-create language runtime {}))
+  ([language runtime options]
+   (let [spec (runtime-spec language runtime)
+         create-fn (get-in spec [:instance :create])
+         config (merge (get spec :config)
+                       options
+                       {:lang language
+                        :runtime runtime})]
+     (if create-fn
+       (create-fn config)
+       (throw
+        (ex-info "Runtime type has no constructor"
+                 {:lang language
+                  :runtime runtime
+                  :spec spec}))))))
+
+(defn- instance-fn
+  [runtime key]
+  (let [spec (runtime-spec (get runtime :lang) (get runtime :runtime))]
+    (get-in spec [:instance key])))
+
+(defn rt-start
+  [runtime]
+  (if-let [start-fn (instance-fn runtime :start)]
+    (start-fn runtime)
+    runtime))
+
+(defn rt-stop
+  [runtime]
+  (if-let [stop-fn (instance-fn runtime :stop)]
+    (stop-fn runtime)
+    runtime))
+
+(defn rt-eval
+  "Promise-first semantic evaluation through IContextEval."
+  ([runtime request] (rt-eval runtime request {}))
+  ([runtime request options] (context-eval/evaluate runtime request options)))
+
+(defn rt-eval-raw
+  "Promise-first transport exchange with semantic plugins bypassed."
+  ([runtime request] (rt-eval-raw runtime request {}))
+  ([runtime request options] (context-eval/evaluate-raw runtime request options)))
+
+(defn rt-eval-trace
+  "Returns a promise of an EvalTrace, including target failures."
+  ([runtime request] (rt-eval-trace runtime request {}))
+  ([runtime request options] (evaluation/eval-trace runtime request options)))
+
+(defn rt-raw-eval
+  "Blocking compatibility adapter for already-emitted target source."
+  [runtime source]
+  (if (get runtime :transport)
+    (evaluation/eval-await runtime source {})
+    (if-let [raw-eval (instance-fn runtime :raw-eval)]
+      (raw-eval runtime source)
+      (throw (ex-info "Runtime type has no raw evaluator"
+                      {:lang (get runtime :lang)
+                       :runtime (get runtime :runtime)})))))
+
+(defn- requested-version
+  [language version versions]
+  (or (get versions language)
+      version
+      (registry/registry-book-default-version language :default)))
+
+(defn bootstrap!
+  "Bootstraps Foundation-compatible books and runtime types.
+
+   :version pins one version for every language.
+   :versions pins versions per language and takes precedence over :version.
+   With neither option, each language uses its configured default version."
+  ([]
+   (bootstrap! {:languages [:js :python :lua]
+                :runtimes [:oneshot :basic]}))
+  ([options]
+   (let [languages (or (get options :languages) [:js :python :lua])
+         runtimes (or (get options :runtimes) [:oneshot :basic])
+         version (get options :version)
+         versions (or (get options :versions) {})
+         selected
+         (reduce
+          (fn [out language]
+            (let [selected-version
+                  (requested-version language version versions)
+                  book
+                  (registry/registry-book language
+                                          :default
+                                          selected-version)]
+              (install-lang! language
+                             {:book-key :default
+                              :version selected-version
+                              :book book})
+              {:books (assoc (get out :books) language book)
+               :versions (assoc (get out :versions)
+                                language
+                                selected-version)}))
+          {:books {}
+           :versions {}}
+          languages)]
+     (reduce (fn [_ language]
+               (reduce (fn [_ runtime]
+                         (require-runtime! language runtime))
+                       nil
+                       runtimes))
+             nil
+             languages)
+     {:version version
+      :versions (get selected :versions)
+      :books (get selected :books)
+      :languages (atom-value +language-registry+)
+      :runtimes (atom-value +type-registry+)})))

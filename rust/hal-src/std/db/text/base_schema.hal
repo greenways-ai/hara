@@ -1,0 +1,278 @@
+;; ============================================================================
+;; std.db.text.base-schema — schema key classification and table metadata.
+;;
+;; Native Hara port of xt.db.text.base-schema. Schema and record maps may use
+;; either keyword keys or string keys from xtalk/JSON boundaries.
+;; ============================================================================
+(ns std.db.text.base-schema)
+
+(def CACHED_SCHEMA (atom {}))
+(def CACHED_LOOKUP (atom {}))
+
+(defn- ^{:schema [:fn [:map :any :any] :any]}
+  compatible-field
+  "Returns a compatible-field from its keyword key or fallback string key."
+  [value keyword-key string-key]
+  (if (has? value keyword-key)
+    (get value keyword-key)
+    (get value string-key)))
+
+(defn- ^{:schema [:fn [:map] :bool]}
+  string-keyed?
+  "Returns true when a non-empty map uses string keys."
+  [value]
+  (and (not (empty? value))
+       (string? (key (first value)))))
+
+(defn- ^{:schema [:fn [:map :any :any] :any]}
+  convention-key
+  "Chooses keyword-key or string-key to match value's map convention."
+  [value keyword-key string-key]
+  (if (string-keyed? value) string-key keyword-key))
+
+(defn ^{:schema [:fn [:map] :any]}
+  get-order
+  "Returns a schema entry's order."
+  [entry]
+  (compatible-field entry :order "order"))
+
+(defn ^{:schema [:fn [:map] :any]}
+  get-ident
+  "Returns a schema entry's identifier."
+  [entry]
+  (compatible-field entry :ident "ident"))
+
+(defn ^{:schema [:fn [:map] :str]}
+  get-ident-id
+  "Returns ident, appending _id for reference entries."
+  [entry]
+  (let [ident (get-ident entry)]
+    (if (= "ref" (compatible-field entry :type "type"))
+      (str ident "_id")
+      ident)))
+
+(defn ^{:schema [:fn [:map] :vector]}
+  list-tables
+  "Returns schema table names in lexical order."
+  [schema]
+  (sort (keys schema)))
+
+(defn ^{:schema [:fn [:map] :map]}
+  get-cached-schema
+  "Returns the cached table metadata map for schema, creating it when absent."
+  [schema]
+  (let [cached (get (deref CACHED_SCHEMA) schema)]
+    (if (nil? cached)
+      (do
+        (swap! CACHED_SCHEMA assoc schema {})
+        {})
+      cached)))
+
+(defn- ^{:schema [:fn [:map :str] :vector]}
+  ordered-entries
+  "Returns ordered physical entries for table-name."
+  [schema table-name]
+  (let [table-definition (get schema table-name)]
+    (sort-by get-order
+             (filter (fn [entry]
+                       (number? (get-order entry)))
+                     (vals table-definition)))))
+
+(defn ^{:schema [:fn [:map :str] :vector]}
+  create-data-keys
+  "Returns ordered non-reference physical column identifiers."
+  [schema table-name]
+  (map get-ident
+       (filter (fn [entry]
+                 (not (= "ref" (compatible-field entry :type "type"))))
+               (ordered-entries schema table-name))))
+
+(defn ^{:schema [:fn [:map :str] :vector]}
+  create-ref-keys
+  "Returns ordered reference identifiers."
+  [schema table-name]
+  (map get-ident
+       (filter (fn [entry]
+                 (= "ref" (compatible-field entry :type "type")))
+               (ordered-entries schema table-name))))
+
+(defn ^{:schema [:fn [:map :str] :vector]}
+  create-rev-keys
+  "Returns identifiers for reverse entries without a physical order."
+  [schema table-name]
+  (let [table-definition (get schema table-name)]
+    (map get-ident
+         (filter (fn [entry]
+                   (not (number? (get-order entry))))
+                 (vals table-definition)))))
+
+(defn ^{:schema [:fn [:map :str] :vector]}
+  create-table-entries
+  "Returns ordered physical schema entries for table-name."
+  [schema table-name]
+  (ordered-entries schema table-name))
+
+(defn ^{:schema [:fn [:map :str] :map]}
+  create-defaults
+  "Returns column defaults declared under each entry's sql/default compatible-field."
+  [schema table-name]
+  (let [table-definition (get schema table-name)]
+    (reduce (fn [out pair]
+              (let [entry (val pair)
+                    sql (compatible-field entry :sql "sql")]
+                (if (and (map? sql)
+                         (or (has? sql :default)
+                             (has? sql "default")))
+                  (assoc out
+                         (key pair)
+                         (compatible-field sql :default "default"))
+                  out)))
+            {}
+            table-definition)))
+
+(defn ^{:schema [:fn [:map :str] :map]}
+  create-all-keys
+  "Creates all classified key collections for table-name."
+  [schema table-name]
+  (let [table-definition (get schema table-name)
+        references (create-ref-keys schema table-name)
+        reference-ids (reduce (fn [out ident]
+                                (assoc out (str ident "_id") ident))
+                              {}
+                              references)]
+    {(convention-key table-definition :data "data")
+     (create-data-keys schema table-name)
+     (convention-key table-definition :ref "ref")
+     references
+     (convention-key table-definition :ref-id "ref_id")
+     reference-ids
+     (convention-key table-definition :rev "rev")
+     (create-rev-keys schema table-name)
+     (convention-key table-definition :defaults "defaults")
+     (create-defaults schema table-name)
+     (convention-key table-definition :table "table")
+     (create-table-entries schema table-name)}))
+
+(defn ^{:schema [:fn [:map :str] :map]}
+  get-all-keys
+  "Returns cached classified keys for table-name."
+  [schema table-name]
+  (let [schema-cache (get-cached-schema schema)
+        cached (get schema-cache table-name)]
+    (if (nil? cached)
+      (let [created (create-all-keys schema table-name)]
+        (swap! CACHED_SCHEMA assoc-in [schema table-name] created)
+        created)
+      cached)))
+
+(defn ^{:schema [:fn [:map :str] :vector]}
+  data-keys
+  "Returns data column identifiers for table-name."
+  [schema table-name]
+  (compatible-field (get-all-keys schema table-name) :data "data"))
+
+(defn ^{:schema [:fn [:map :str] :vector]}
+  ref-keys
+  "Returns reference identifiers for table-name."
+  [schema table-name]
+  (compatible-field (get-all-keys schema table-name) :ref "ref"))
+
+(defn ^{:schema [:fn [:map :str] :map]}
+  ref-id-keys
+  "Returns reference-id column to reference identifier mappings."
+  [schema table-name]
+  (compatible-field (get-all-keys schema table-name) :ref-id "ref_id"))
+
+(defn ^{:schema [:fn [:map :str] :vector]}
+  rev-keys
+  "Returns reverse-link identifiers for table-name."
+  [schema table-name]
+  (compatible-field (get-all-keys schema table-name) :rev "rev"))
+
+(defn ^{:schema [:fn [:map :str] :map]}
+  table-defaults
+  "Returns SQL defaults for table-name."
+  [schema table-name]
+  (compatible-field (get-all-keys schema table-name) :defaults "defaults"))
+
+(defn ^{:schema [:fn [:map :str] :vector]}
+  table-entries
+  "Returns ordered physical schema entries for table-name."
+  [schema table-name]
+  (compatible-field (get-all-keys schema table-name) :table "table"))
+
+(defn ^{:schema [:fn [:map :str] :vector]}
+  table-columns
+  "Returns physical SQL column names for table-name."
+  [schema table-name]
+  (map get-ident-id (table-entries schema table-name)))
+
+(defn ^{:schema [:fn [:map] :vector]}
+  create-table-order
+  "Returns lookup table names ordered by their position metadata."
+  [lookup]
+  (map key
+       (sort-by (fn [pair]
+                  (compatible-field (val pair) :position "position"))
+                lookup)))
+
+(defn ^{:schema [:fn [:map] :vector]}
+  table-order
+  "Returns cached table order for lookup."
+  [lookup]
+  (let [cached (get (deref CACHED_LOOKUP) lookup)]
+    (if (nil? cached)
+      (let [created (create-table-order lookup)]
+        (swap! CACHED_LOOKUP assoc lookup created)
+        created)
+      cached)))
+
+(defn- ^{:schema [:fn [:map :any] :any]}
+  coercion-for
+  "Finds a coercion by exact type key or its string/keyword counterpart."
+  [coercions entry-type]
+  (cond
+    (has? coercions entry-type)
+    (get coercions entry-type)
+
+    (string? entry-type)
+    (get coercions (keyword entry-type))
+
+    (keyword? entry-type)
+    (get coercions (name entry-type))
+
+    :else
+    nil))
+
+(defn ^{:schema [:fn [:map :str :any :map] :any]}
+  table-coerce
+  "Recursively coerces physical values using functions keyed by schema type."
+  [schema table-name data coercions]
+  (if (vector? data)
+    (map (fn [item]
+           (table-coerce schema table-name item coercions))
+         data)
+    (let [table-definition (get schema table-name)]
+      (reduce (fn [out pair]
+                (let [compatible-field-key (key pair)
+                      value (val pair)
+                      entry (get table-definition compatible-field-key)]
+                  (if (nil? entry)
+                    (assoc out compatible-field-key value)
+                    (if (= "ref" (compatible-field entry :type "type"))
+                      (let [reference (compatible-field entry :ref "ref")
+                            next-table (compatible-field reference :ns "ns")]
+                        (assoc out
+                               compatible-field-key
+                               (map (fn [item]
+                                      (table-coerce schema next-table item coercions))
+                                    value)))
+                      (let [entry-type (compatible-field entry :type "type")
+                            coercion (coercion-for coercions entry-type)]
+                        (assoc out
+                               compatible-field-key
+                               (if (nil? coercion)
+                                 value
+                                 (coercion value))))))))
+              {}
+              data))))

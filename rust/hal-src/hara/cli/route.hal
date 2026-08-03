@@ -1,0 +1,97 @@
+(ns hara.cli.route
+  (:require [hara.cli.model :as model]))
+
+(defn route-by-id
+  [routes id]
+  (first
+   (filter (fn [route] (= id (:route/id route)))
+           routes)))
+
+(defn route-entries
+  [routes]
+  (vec
+   (mapcat
+    (fn [route]
+      (conj
+       (reduce
+        (fn [output path]
+          (conj output
+                {:match/path path
+                 :match/route route
+                 :match/alias true}))
+        []
+        (:route/aliases route))
+       {:match/path (:route/path route)
+        :match/route route
+        :match/alias false}))
+    routes)))
+
+(defn path-prefix?
+  [path argv]
+  (= path (vec (take (count path) argv))))
+
+(defn resolve-route
+  "Resolves argv by longest path prefix. Empty argv starts the REPL and the
+   historical no-argument run command resolves to project run."
+  [routes argv]
+  (if (empty? argv)
+    {:route (route-by-id routes :hara.cli.route/repl)
+     :arguments []
+     :alias false}
+    (if (and (= argv ["run"])
+             (route-by-id routes :hara.cli.route/project-run))
+      {:route (route-by-id routes :hara.cli.route/project-run)
+       :arguments []
+       :alias true}
+      (let [matches
+            (sort-by
+             (fn [entry] (- (count (:match/path entry))))
+             (filter
+              (fn [entry]
+                (path-prefix? (:match/path entry) argv))
+              (route-entries routes)))
+            match (first matches)]
+        (if match
+          (let [arguments
+                (vec (drop (count (:match/path match)) argv))]
+            {:route (:match/route match)
+             :arguments
+             (if (= "--" (first arguments))
+               (vec (rest arguments))
+               arguments)
+             :alias (:match/alias match)})
+          nil)))))
+
+(defn normalize-request
+  [manifest argv options context]
+  (let [resolved (resolve-route (:cli/routes manifest) argv)]
+    (if resolved
+      (model/request
+       (:route/id (:route resolved))
+       (:arguments resolved)
+       options
+       context)
+      (model/result
+       :hara.cli.outcome/usage-error
+       {:error/type :hara.cli/unknown-route
+        :error/argv (vec argv)}
+       []))))
+
+(defn public-routes
+  [manifest]
+  (vec
+   (filter (fn [route] (= :public (:route/tier route)))
+           (:cli/routes manifest))))
+
+(defn help-model
+  [manifest]
+  {:help/type :hara/cli
+   :help/version (:document/version manifest)
+   :help/routes
+   (vec
+    (map
+     (fn [route]
+       {:route/id (:route/id route)
+        :route/path (:route/path route)
+        :route/summary (:route/summary route)})
+     (public-routes manifest)))})

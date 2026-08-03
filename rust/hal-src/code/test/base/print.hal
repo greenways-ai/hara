@@ -1,0 +1,15 @@
+(ns code.test.base.print
+  (:require [std.lib.task.print :as print]))
+
+(defn format-diff-map [value] (str value))
+(defn format-diff-seq [value] (str value))
+(defn format-diff [value] (str value))
+(defn print-preliminary [value] (println value))
+(defn print-success [value] (println value))
+(defn print-on-error [value] (println value))
+(defn print-throw [value] (println value))
+(defn print-timeout [value] (println value))
+(defn print-failed [value] (println value))
+(defn print-fact [value] (println value))
+(defn print-summary [value]
+  (print/print-subtitle (str "SUMMARY " value)))

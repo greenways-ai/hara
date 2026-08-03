@@ -1,0 +1,235 @@
+(ns postgres.typed.export.json-openapi
+  (:require [std.foundation.string :as string]
+            [postgres.typed.typed-analyze :as analyze]
+            [postgres.typed.typed-common :as types]
+            [postgres.typed.typed-infer :as typed-infer]
+            [postgres.typed.typed-shape :as shape]
+            [postgres.typed.export.json-schema :as json-schema]))
+
+(declare shape->openapi)
+
+(defn- def-name
+  [x]
+  (let [value (:name x)]
+    (cond (string? value) value
+          (keyword? value) (string/slice (str value) 1)
+          (symbol? value) (name value)
+          value (str value)
+          :else nil)))
+
+(defn- unique-defs
+  [defs]
+  (vals
+   (reduce (fn [out value]
+             (let [value-name (def-name value)]
+               (if (get out value-name)
+                 out
+                 (assoc out value-name value))))
+           {}
+           defs)))
+
+(defn field->openapi
+  "Converts a field descriptor to OpenAPI schema."
+  [field-info]
+  (let [field-type (:type field-info)]
+    (cond (:is-ref? field-info) {:type "string" :format "uuid"}
+          (:shape field-info) (shape->openapi (:shape field-info))
+          (= :array field-type)
+          {:type "array"
+           :items (if (:items field-info)
+                    (field->openapi (:items field-info))
+                    {:type "object"})}
+          :else (json-schema/resolve-type field-info :openapi))))
+
+(defn shape->openapi
+  "Converts a JsonbShape to OpenAPI schema object."
+  [jsonb-shape]
+  (let [fields (:fields jsonb-shape)
+        properties (reduce-kv (fn [out key value]
+                                (assoc out (types/emitted-key key)
+                                       (field->openapi value)))
+                              {}
+                              fields)
+        required (reduce-kv (fn [out key value]
+                              (if (:nullable? value)
+                                out
+                                (conj out (types/emitted-key key))))
+                            []
+                            fields)
+        base {:type "object" :properties properties}]
+    (if (> (count required) 0) (assoc base :required required) base)))
+
+(defn arg->openapi
+  "Converts a function argument to an OpenAPI request property."
+  [arg fn-def]
+  (let [raw-name (def-name arg)
+        param-name (types/normalize-key
+                    (if (string/starts-with? raw-name "i-")
+                      (string/slice raw-name 2)
+                      raw-name))
+        arg-type (:type arg)
+        arg-role (:role arg)
+        meta-table (get-in fn-def [:body-meta :api/meta :table])
+        meta-cols (get-in fn-def [:body-meta :api/meta :columns])]
+    [param-name
+     (cond (= :track arg-role)
+           (json-schema/resolve-type arg-type :openapi)
+
+           (and (= :jsonb arg-type) (types/fn-def? fn-def))
+           (let [table-def (typed-infer/resolve-table-def meta-table)
+                 table-shape (when table-def
+                               (typed-infer/select-shape-columns
+                                (shape/table->shape table-def)
+                                meta-cols))
+                 inferred-shape (typed-infer/infer-jsonb-arg-shape (:name arg) fn-def)
+                 base-shape (or table-shape inferred-shape)]
+             (if base-shape
+               (shape->openapi base-shape)
+               (json-schema/resolve-type arg-type :openapi)))
+
+           :else (json-schema/resolve-type arg-type :openapi))]))
+
+(defn- source-table-name
+  [jsonb-shape]
+  (let [source (:source-table jsonb-shape)]
+    (when source (def-name {:name source}))))
+
+(defn- request-body
+  [fn-def]
+  (let [inputs (:inputs fn-def)]
+    (when (seq inputs)
+      {:content
+       {"application/json"
+        {:schema
+         {:type "object"
+          :properties
+          (reduce (fn [out input]
+                    (let [entry (arg->openapi input fn-def)]
+                      (assoc out (first entry) (second entry))))
+                  {}
+                  inputs)}}}})))
+
+(defn- inferred-response-schema
+  [fn-def inferred]
+  (let [meta-table (get-in fn-def [:body-meta :api/meta :table])
+        output (:output fn-def)
+        inferred-shape (:shape inferred)
+        table-name (cond meta-table (def-name {:name meta-table})
+                         (and (= :shaped (:kind inferred))
+                              (types/jsonb-shape? inferred-shape))
+                         (source-table-name inferred-shape)
+                         (types/jsonb-shape? inferred) (source-table-name inferred)
+                         (and (= :shaped (:kind inferred)) (:table inferred))
+                         (def-name {:name (:table inferred)})
+                         (symbol? output) (name output)
+                         :else nil)]
+    (cond table-name {:$ref (str "#/components/schemas/" table-name)}
+
+          (= :array (:kind inferred))
+          (let [element (:element-type inferred)]
+            {:type "array"
+             :items (cond (and (:table inferred) (not (types/jsonb-shape? element)))
+                          {:$ref (str "#/components/schemas/"
+                                      (def-name {:name (:table inferred)}))}
+                          (types/jsonb-shape? element)
+                          (let [source (source-table-name element)]
+                            (if source
+                              {:$ref (str "#/components/schemas/" source)}
+                              (shape->openapi element)))
+                          (keyword? element) (get-in types/+type-formats+ [element :openapi])
+                          :else {:type "object"})})
+
+          (= :shaped (:kind inferred))
+          (if (types/jsonb-shape? inferred-shape)
+            (shape->openapi inferred-shape)
+            {:type "object"})
+
+          (types/jsonb-shape? inferred) (shape->openapi inferred)
+          (and (vector? output)
+               (seq output)
+               (get-in types/+type-formats+ [(first output) :openapi]))
+          (get-in types/+type-formats+ [(first output) :openapi])
+          :else {:type "object"})))
+
+(defn- request-parameters
+  [schema-name body]
+  (let [base [{:name "apikey"
+               :in "header"
+               :required true
+               :schema {:type "string"}
+               :description "Supabase API key"}]
+        profiled (if schema-name
+                   (conj base {:name "Accept-Profile"
+                               :in "header"
+                               :required false
+                               :schema {:type "string" :default schema-name}
+                               :description "Database schema for the response"})
+                   base)]
+    (if (and schema-name body)
+      (conj profiled {:name "Content-Profile"
+                      :in "header"
+                      :required false
+                      :schema {:type "string" :default schema-name}
+                      :description "Database schema for the request body"})
+      profiled)))
+
+(defn fn->openapi
+  "Converts a FnDef to an OpenAPI operation."
+  [fn-def]
+  (let [expose (get-in fn-def [:body-meta :expose])
+        body (request-body fn-def)
+        inferred (analyze/cached-infer fn-def)
+        schema-name (:dbschema fn-def)
+        security (when (and expose (not= :sb/query expose))
+                   (cond (= :sb/auth expose) [{"bearerAuth" []}]
+                         (= :sb/super expose) [{"bearerAuth" ["super"]}]
+                         :else []))]
+    {:operationId (types/normalize-key (:name fn-def))
+     :tags [(or schema-name (:ns fn-def) "default")]
+     :summary (get-in fn-def [:body-meta :docstring])
+     :security security
+     :parameters (request-parameters schema-name body)
+     :requestBody body
+     :responses {"200" {:description "Successful response"
+                         :content {"application/json"
+                                   {:schema (inferred-response-schema fn-def inferred)}}}
+                 "400" {:description "Bad request"}
+                 "401" {:description "Unauthorized"}
+                 "500" {:description "Internal server error"}}}))
+
+(defn generate-openapi
+  "Generates a complete OpenAPI 3.0 specification."
+  [root-ns fn-filter]
+  (let [all-values (vals @types/*type-registry*)
+        functions (unique-defs (filter fn-filter (filter types/fn-def? all-values)))
+        tables (unique-defs (filter types/table-def? all-values))
+        enums (unique-defs (filter types/enum-def? all-values))
+        paths (reduce (fn [out fn-def]
+                        (assoc out
+                               (str "/rpc/" (types/normalize-key (:name fn-def)))
+                               {"post" (fn->openapi fn-def)}))
+                      {}
+                      functions)
+        table-schemas (reduce (fn [out table]
+                                (assoc out (def-name table)
+                                       (shape->openapi (shape/table->shape table))))
+                              {}
+                              tables)
+        schemas (reduce (fn [out enum]
+                          (assoc out (def-name enum)
+                                 {:type "string"
+                                  :enum (vec (map (fn [value]
+                                                    (def-name {:name value}))
+                                                  (:values enum)))}))
+                        table-schemas
+                        enums)]
+    {:openapi "3.0.3"
+     :info {:title (str root-ns " API") :version "0.1.0"}
+     :paths paths
+     :components {:schemas schemas
+                  :securitySchemes {"bearerAuth" {:type "http"
+                                                   :scheme "bearer"
+                                                   :bearerFormat "JWT"}}}
+     :security [{"bearerAuth" []}]}))
+
+(def __tahto_load__ true)

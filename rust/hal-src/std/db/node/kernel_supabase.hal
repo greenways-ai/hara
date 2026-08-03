@@ -1,0 +1,311 @@
+;; ============================================================================
+;; std.db.node.kernel-supabase — host-neutral Supabase runtime actions.
+;;
+;; A Supabase service descriptor contains:
+;;   :request             (fn [operation arguments options service])
+;;   :session             atom containing the current session
+;;   :refresh             optional (fn [service])
+;;   :auto-refresh-start  optional (fn [service])
+;;   :auto-refresh-stop   optional (fn [service])
+;;   :on-session          optional (fn [session service])
+;;
+;; HTTP command construction and execution remain host adapters. The kernel
+;; preserves action IDs, response/error normalization and session lifecycle.
+;; ============================================================================
+(ns std.db.node.kernel-supabase
+  (:require [std.foundation.json :as json]
+            [std.foundation.promise :as promise]
+            [std.lib.substrate.protocol :as substrate]))
+
+(def ACTIONS
+  ["@xt.supabase/sign-up"
+   "@xt.supabase/sign-in"
+   "@xt.supabase/sign-out"
+   "@xt.supabase/refresh"
+   "@xt.supabase/signed-in?"
+   "@xt.supabase/current-session"
+   "@xt.supabase/rpc-call"
+   "@xt.supabase/query-table"
+   "@xt.supabase/attach-model"
+   "@xt.supabase/health"
+   "@xt.supabase/admin-create-user"
+   "@xt.supabase/admin-delete-user"
+   "@xt.supabase/admin-generate-link"
+   "@xt.supabase/admin-get-user"
+   "@xt.supabase/admin-list-users"
+   "@xt.supabase/admin-update-user"
+   "@xt.supabase/authorize"
+   "@xt.supabase/callback"
+   "@xt.supabase/invite"
+   "@xt.supabase/otp"
+   "@xt.supabase/recovery"
+   "@xt.supabase/settings"
+   "@xt.supabase/token-refresh"
+   "@xt.supabase/user-get"
+   "@xt.supabase/user-info"
+   "@xt.supabase/user-put"
+   "@xt.supabase/verify-get"
+   "@xt.supabase/verify-post"])
+
+(def ACTION-OPERATIONS
+  {"@xt.supabase/sign-up" :sign-up
+   "@xt.supabase/sign-in" :sign-in
+   "@xt.supabase/sign-out" :sign-out
+   "@xt.supabase/refresh" :refresh
+   "@xt.supabase/signed-in?" :signed-in?
+   "@xt.supabase/current-session" :current-session
+   "@xt.supabase/rpc-call" :rpc-call
+   "@xt.supabase/query-table" :query-table
+   "@xt.supabase/attach-model" :attach-model
+   "@xt.supabase/health" :health
+   "@xt.supabase/admin-create-user" :admin-create-user
+   "@xt.supabase/admin-delete-user" :admin-delete-user
+   "@xt.supabase/admin-generate-link" :admin-generate-link
+   "@xt.supabase/admin-get-user" :admin-get-user
+   "@xt.supabase/admin-list-users" :admin-list-users
+   "@xt.supabase/admin-update-user" :admin-update-user
+   "@xt.supabase/authorize" :authorize
+   "@xt.supabase/callback" :callback
+   "@xt.supabase/invite" :invite
+   "@xt.supabase/otp" :otp
+   "@xt.supabase/recovery" :recovery
+   "@xt.supabase/settings" :settings
+   "@xt.supabase/token-refresh" :token-refresh
+   "@xt.supabase/user-get" :user-get
+   "@xt.supabase/user-info" :user-get
+   "@xt.supabase/user-put" :user-put
+   "@xt.supabase/verify-get" :verify-get
+   "@xt.supabase/verify-post" :verify-post})
+
+(defn- compatible-get
+  [value lookup-key]
+  (cond
+    (not (map? value)) nil
+    (has? value lookup-key) (get value lookup-key)
+    (string? lookup-key) (get value (keyword lookup-key))
+    (keyword? lookup-key) (get value (name lookup-key))
+    :else nil))
+
+(defn- option
+  [value lookup-key fallback]
+  (let [found (compatible-get value lookup-key)]
+    (if (nil? found) fallback found)))
+
+(defn- call-promise
+  [function arguments]
+  (try
+    (let [result (apply function arguments)]
+      (if (promise? result) result (promise/from result)))
+    (catch Throwable error
+      (promise/new (fn [resolve reject] (reject error))))))
+
+(defn create-service
+  "Creates a Supabase service descriptor around a host request adapter."
+  ([request-function]
+   (create-service request-function {}))
+  ([request-function options]
+   {:type :supabase
+    :request request-function
+    :session (or (compatible-get options :session) (atom nil))
+    :refresh (compatible-get options :refresh)
+    :auto-refresh-start (compatible-get options :auto-refresh-start)
+    :auto-refresh-stop (compatible-get options :auto-refresh-stop)
+    :on-session (compatible-get options :on-session)
+    :metadata (or (compatible-get options :metadata) {})}))
+
+(defn install-service
+  "Installs a Supabase service descriptor on a runtime node."
+  [node service-id service]
+  (substrate/set-service node service-id service)
+  service)
+
+(defn remove-service
+  "Stops refresh and removes a Supabase service descriptor."
+  [node service-id]
+  (let [service (substrate/get-service node service-id)]
+    (when service
+      (let [stop-function (compatible-get service :auto-refresh-stop)]
+        (when stop-function
+          (stop-function service))))
+    (substrate/remove-service node service-id)))
+
+(defn get-service
+  "Returns a Supabase service or throws a structured missing-service error."
+  [node service-id]
+  (let [service (substrate/get-service node service-id)]
+    (if service
+      service
+      (throw (ex-info "Supabase service is not configured"
+                      {:service service-id})))))
+
+(defn get-session
+  "Returns the session stored by service."
+  [service]
+  (let [session-reference (compatible-get service :session)]
+    (if session-reference (deref session-reference) nil)))
+
+(defn set-session
+  "Stores session and invokes the optional session observer."
+  [service session]
+  (let [session-reference (compatible-get service :session)
+        observer (compatible-get service :on-session)]
+    (when session-reference
+      (reset! session-reference session))
+    (when observer
+      (observer session service))
+    session))
+
+(defn auto-refresh-start
+  [service]
+  (let [function (compatible-get service :auto-refresh-start)]
+    (when function
+      (function service))))
+
+(defn auto-refresh-stop
+  [service]
+  (let [function (compatible-get service :auto-refresh-stop)]
+    (when function
+      (function service))))
+
+(defn supabase-rpc-error-detail
+  "Returns decoded structured gateway RPC error details when available."
+  [body]
+  (let [detail (or (compatible-get body :details)
+                   (compatible-get body :detail))]
+    (if (string? detail)
+      (try
+        (json/read detail)
+        (catch Throwable error detail))
+      detail)))
+
+(defn supabase-error-data
+  "Normalizes a failed Supabase response into exception data."
+  [response]
+  (let [status (compatible-get response :status)
+        body (or (compatible-get response :body) {})
+        detail (supabase-rpc-error-detail body)
+        data (if (and (map? detail)
+                      (= "gw.rpc.error" (compatible-get detail :type)))
+               detail
+               body)]
+    (if (map? data)
+      (assoc data
+             :status status
+             :http-status (or (compatible-get data :http-status)
+                              (compatible-get data :http_status)
+                              status))
+      {:status status
+       :http-status status
+       :detail data})))
+
+(defn supabase-response-data
+  "Extracts response data and throws for failed HTTP-style responses."
+  [response]
+  (if (and (map? response)
+           (not (nil? (compatible-get response :status))))
+    (let [status (compatible-get response :status)
+          body (compatible-get response :body)]
+      (if (>= status 400)
+        (let [data (supabase-error-data response)]
+          (throw (ex-info (or (compatible-get data :message)
+                              (compatible-get body :message)
+                              "Supabase request failed")
+                          data)))
+        (if (and (map? body)
+                 (or (has? body :data) (has? body "data")))
+          (compatible-get body :data)
+          body)))
+    response))
+
+(defn supabase-request
+  "Executes one Supabase operation through the service request adapter."
+  [node service-id operation arguments options]
+  (let [service (get-service node service-id)
+        request-function (compatible-get service :request)]
+    (if (nil? request-function)
+      (throw (ex-info "Supabase service has no request adapter"
+                      {:service service-id :operation operation}))
+      (promise/then
+       (call-promise request-function [operation arguments options service])
+       supabase-response-data))))
+
+(defn- sign-session
+  [node service-id operation arguments options]
+  (let [service (get-service node service-id)]
+    (promise/then
+     (supabase-request node service-id operation arguments options)
+     (fn [session]
+       (set-session service session)
+       (auto-refresh-start service)
+       session))))
+
+(defn- sign-out
+  [node service-id arguments options]
+  (let [service (get-service node service-id)]
+    (auto-refresh-stop service)
+    (promise/then
+     (supabase-request node service-id :sign-out arguments options)
+     (fn [_]
+       (set-session service nil)
+       {"status" "ok"}))))
+
+(defn- refresh
+  [node service-id]
+  (let [service (get-service node service-id)
+        refresh-function (compatible-get service :refresh)
+        refresh-promise (if refresh-function
+                          (call-promise refresh-function [service])
+                          (supabase-request node service-id :refresh [] {}))]
+    (promise/then
+     refresh-promise
+     (fn [session]
+       (when session
+         (set-session service session))
+       session))))
+
+(defn dispatch-main
+  "Dispatches one legacy Supabase action against a named service."
+  [node action args]
+  (let [operation (get ACTION-OPERATIONS action)
+        service-id (nth args 0)
+        payload (vec (drop 1 args))
+        options (let [candidate (last payload)]
+                  (if (map? candidate) candidate {}))]
+    (cond
+      (= operation :sign-up)
+      (sign-session node service-id :sign-up payload options)
+
+      (= operation :sign-in)
+      (sign-session node service-id :sign-in payload options)
+
+      (= operation :sign-out)
+      (sign-out node service-id payload options)
+
+      (= operation :refresh)
+      (refresh node service-id)
+
+      (= operation :signed-in?)
+      (not (nil? (get-session (get-service node service-id))))
+
+      (= operation :current-session)
+      (get-session (get-service node service-id))
+
+      (nil? operation)
+      (throw (ex-info "Unknown Supabase runtime action" {:action action}))
+
+      :else
+      (supabase-request node service-id operation payload options))))
+
+(defn supabase-handler
+  [space args request node]
+  (dispatch-main node (field request :action) args))
+
+(defn init-handlers
+  "Installs all legacy Supabase action handlers on node."
+  [node]
+  (reduce (fn [current action]
+            (substrate/register-handler current action supabase-handler {})
+            current)
+          node
+          ACTIONS)
+  node)

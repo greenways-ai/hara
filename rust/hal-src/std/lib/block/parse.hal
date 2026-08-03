@@ -1,0 +1,212 @@
+(ns std.lib.block.parse
+  (:require [std.lib.block.construct :as construct]
+            [std.foundation.string :as string]
+            [std.foundation.edn :as edn]))
+
+(defn source-char
+  [source index]
+  (if (or (< index 0) (>= index (string/length source)))
+    nil
+    (string/char-at source index)))
+
+(defn whitespace?
+  [character]
+  (or (= character " ")
+      (= character "\t")
+      (= character "\n")
+      (= character "\r")
+      (= character "\f")
+      (= character ",")))
+
+(defn dispatch-character?
+  [character]
+  (or (= character "^")
+      (= character "#")
+      (= character "\\")
+      (= character "(")
+      (= character "[")
+      (= character "{")
+      (= character "}")
+      (= character "]")
+      (= character ")")
+      (= character "~")
+      (= character "'")
+      (= character "`")
+      (= character ";")
+      (= character "@")
+      (= character "\"")
+      (= character ":")))
+
+(defn boundary?
+  [character]
+  (or (nil? character)
+      (whitespace? character)
+      (dispatch-character? character)))
+
+(defn closing-delimiter?
+  [character]
+  (or (= character ")")
+      (= character "]")
+      (= character "}")))
+
+(defn scan-token-end
+  [source index]
+  (if (boundary? (source-char source index))
+    index
+    (scan-token-end source (inc index))))
+
+(defn scan-comment-end
+  [source index]
+  (let [character (source-char source index)]
+    (if (or (nil? character)
+            (= character "\n")
+            (= character "\r"))
+      index
+      (scan-comment-end source (inc index)))))
+
+(defn scan-string-end
+  [source index escaped]
+  (let [character (source-char source index)]
+    (if (nil? character)
+      (throw "EOF while reading string")
+      (if escaped
+        (scan-string-end source (inc index) false)
+        (if (= character "\\")
+          (scan-string-end source (inc index) true)
+          (if (= character "\"")
+            (inc index)
+            (scan-string-end source (inc index) false)))))))
+
+(defn token-block
+  [text]
+  (construct/token-from-string
+   text
+   (try
+     (edn/read text)
+     (catch Throwable error text))))
+
+(defn parse-children
+  [source index expected children parser]
+  (let [character (source-char source index)]
+    (if (nil? character)
+      (throw (str "EOF while reading collection, expected " expected))
+      (if (= character expected)
+        [children index]
+        (if (closing-delimiter? character)
+          (throw (str "Mismatched delimiter: expected "
+                      expected " but found " character))
+          (let [[child next-index] (parser source index)]
+            (parse-children source next-index expected
+                            (conj children child) parser)))))))
+
+(defn parse-container
+  [source index tag expected parser]
+  (let [[children end-index] (parse-children source index expected [] parser)]
+    [(construct/container tag children) (inc end-index)]))
+
+(defn parse-prefix
+  [source index tag prefix-length parser]
+  (let [child-index (+ index prefix-length)]
+    (if (nil? (source-char source child-index))
+      (throw (str "EOF while reading " tag))
+      (let [[child next-index] (parser source child-index)]
+        [(construct/container tag [child]) next-index]))))
+
+(defn parse-hash
+  [source index parser]
+  (let [next (source-char source (inc index))]
+    (if (= next "{")
+      (parse-container source (+ index 2) :set "}" parser)
+      (if (= next "(")
+        (parse-container source (+ index 2) :fn ")" parser)
+        (if (= next "'")
+          (parse-prefix source index :var 2 parser)
+          (if (= next "_")
+            [(construct/uneval) (+ index 2)]
+            (if (= next "|")
+              [(construct/cursor) (+ index 2)]
+              (if (= next "?")
+                (if (= "@" (source-char source (+ index 2)))
+                  (if (= "(" (source-char source (+ index 3)))
+                    (parse-container source (+ index 4)
+                                     :select-splice ")" parser)
+                    (throw "Reader conditional splice requires a list"))
+                  (if (= "(" (source-char source (+ index 2)))
+                    (parse-container source (+ index 3)
+                                     :select ")" parser)
+                    (throw "Reader conditional requires a list")))
+                (throw (str "Unsupported hash dispatch: " next))))))))))
+
+(defn parse-at
+  [source index]
+  (let [character (source-char source index)]
+    (if (nil? character)
+      (throw "Cannot parse past end of source")
+      (if (= character " ")
+        [(construct/space) (inc index)]
+        (if (= character "\t")
+          [(construct/tab) (inc index)]
+          (if (or (= character "\n") (= character "\r") (= character "\f"))
+            [(construct/void :linebreak character) (inc index)]
+            (if (= character ",")
+              [(construct/void :space character) (inc index)]
+              (if (= character ";")
+                (let [end (scan-comment-end source index)]
+                  [(construct/comment (string/slice source index end)) end])
+                (if (= character "\"")
+                  (let [end (scan-string-end source (inc index) false)
+                        text (string/slice source index end)]
+                    [(token-block text) end])
+                  (if (= character ":")
+                    (let [end (scan-token-end source (inc index))
+                          text (string/slice source index end)]
+                      [(token-block text) end])
+                    (if (= character "\\")
+                      (let [end (scan-token-end source (inc index))
+                            text (string/slice source index end)]
+                        [(token-block text) end])
+                      (if (= character "(")
+                        (parse-container source (inc index) :list ")" parse-at)
+                        (if (= character "[")
+                          (parse-container source (inc index) :vector "]" parse-at)
+                          (if (= character "{")
+                            (parse-container source (inc index) :map "}" parse-at)
+                            (if (= character "^")
+                              (parse-prefix source index :meta 1 parse-at)
+                              (if (= character "'")
+                                (parse-prefix source index :quote 1 parse-at)
+                                (if (= character "`")
+                                  (parse-prefix source index :syntax 1 parse-at)
+                                  (if (= character "@")
+                                    (parse-prefix source index :deref 1 parse-at)
+                                    (if (= character "~")
+                                      (if (= "@" (source-char source (inc index)))
+                                        (parse-prefix source index :unquote-splice 2 parse-at)
+                                        (parse-prefix source index :unquote 1 parse-at))
+                                      (if (= character "#")
+                                        (parse-hash source index parse-at)
+                                        (if (closing-delimiter? character)
+                                          (throw (str "Unmatched delimiter: " character))
+                                          (let [end (scan-token-end source index)
+                                                text (string/slice source index end)]
+                                            [(token-block text) end]))))))))))))))))))))))
+
+(defn parse-root-children
+  [source index children]
+  (if (= index (string/length source))
+    children
+    (let [[child next-index] (parse-at source index)]
+      (parse-root-children source next-index (conj children child)))))
+
+(defn parse-root
+  [source]
+  (construct/root (parse-root-children source 0 []) source))
+
+(defn parse-string
+  [source]
+  (parse-root source))
+
+(defn parse-first
+  [source]
+  (let [[block next-index] (parse-at source 0)]
+    block))

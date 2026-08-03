@@ -1,0 +1,239 @@
+;; ============================================================================
+;; std.substrate.transport-memory — portable port of the Foundation memory wire.
+;;
+;; Foundation stores endpoint state in mutable target objects. The Hara port
+;; stores the same state maps in atoms while preserving endpoint and transport
+;; contracts.
+;; ============================================================================
+(ns std.substrate.transport-memory
+  (:require [std.foundation.promise :as promise]
+            [std.substrate :as substrate]
+            [std.substrate.json :as substrate-json]))
+
+(defn event-text
+  "Normalises inbound endpoint events into text payloads."
+  [event]
+  (if (map? event)
+    (if (contains? event "data")
+      (get event "data")
+      (if (contains? event "text")
+        (get event "text")
+        event))
+    event))
+
+(defn network-targets
+  "Normalises link configuration into a vector of peer ids."
+  [value]
+  (cond
+    (nil? value) []
+    (vector? value) value
+    :else [value]))
+
+(defn ensure-network-state
+  "Ensures shared network state exists for endpoint-id."
+  [network endpoint-id]
+  (let [states (get @network "states")
+        existing (get states endpoint-id)]
+    (if existing
+      existing
+      (let [state (atom {"id" endpoint-id
+                         "listener" nil
+                         "peers" []
+                         "network" network})]
+        (swap! network
+               (fn [current]
+                 (assoc current "states"
+                        (assoc (get current "states") endpoint-id state))))
+        state))))
+
+(defn ensure-network-targets-loop
+  [network peer-ids index]
+  (if (>= index (count peer-ids))
+    nil
+    (do
+      (ensure-network-state network (nth peer-ids index))
+      (ensure-network-targets-loop network peer-ids (inc index)))))
+
+(defn configure-network-links-loop
+  "Configures endpoint links on a shared memory network."
+  [network links endpoint-ids index]
+  (if (>= index (count endpoint-ids))
+    network
+    (let [endpoint-id (nth endpoint-ids index)
+          peer-ids (network-targets (get links endpoint-id))
+          state (ensure-network-state network endpoint-id)]
+      (swap! state (fn [current] (assoc current "peers" peer-ids)))
+      (ensure-network-targets-loop network peer-ids 0)
+      (configure-network-links-loop network links endpoint-ids (inc index)))))
+
+(defn deliver-network-loop
+  "Delivers text to each configured peer in order."
+  [network state peer-ids text index]
+  (if (>= index (count peer-ids))
+    (promise/from true)
+    (let [peer-id (nth peer-ids index)
+          peer (get (get @network "states") peer-id)]
+      (if (nil? peer)
+        (throw (ex-info (str "wire peer not found - " peer-id)
+                        {:peer peer-id}))
+        (let [listener (get @peer "listener")]
+          (if (nil? listener)
+            (throw (ex-info (str "wire peer not started - " peer-id)
+                            {:peer peer-id}))
+            (promise/then
+             (promise/from
+              (listener {"text" text}
+                        {"wire" (get @state "id")
+                         "peer" peer-id}))
+             (fn [_]
+               (deliver-network-loop
+                network state peer-ids text (inc index))))))))))
+
+(defn memory-endpoint
+  "Creates an in-memory text endpoint."
+  [state]
+  {"meta" {"kind" "wire.memory"
+            "id" (get @state "id")}
+   "write_fn"
+   (fn [text]
+     (let [current @state
+           network (get current "network")]
+       (if network
+         (let [peer-ids (get current "peers")]
+           (if (= 0 (count peer-ids))
+             (throw (ex-info "wire endpoint missing peers"
+                             {:endpoint (get current "id")}))
+             (deliver-network-loop network state peer-ids text 0)))
+         (let [peer (get current "peer")]
+           (if (nil? peer)
+             (throw (ex-info "wire endpoint missing peer"
+                             {:endpoint (get current "id")}))
+             (let [listener (get @peer "listener")]
+               (if (nil? listener)
+                 (throw (ex-info "wire peer not started"
+                                 {:endpoint (get current "id")}))
+                 (promise/from
+                  (listener {"text" text}
+                            {"wire" (get current "id")
+                             "peer" (get @peer "id")})))))))))
+   "start_fn"
+   (fn [listener]
+     (swap! state (fn [current] (assoc current "listener" listener)))
+     state)
+   "stop_fn"
+   (fn [_]
+     (swap! state (fn [current] (assoc current "listener" nil)))
+     true)})
+
+(defn create-network-endpoints-loop
+  [network endpoint-ids output index]
+  (if (>= index (count endpoint-ids))
+    output
+    (let [endpoint-id (nth endpoint-ids index)]
+      (create-network-endpoints-loop
+       network endpoint-ids
+       (assoc output endpoint-id
+              (memory-endpoint
+               (ensure-network-state network endpoint-id)))
+       (inc index)))))
+
+(defn text-endpoint
+  "Adapts a line-oriented text endpoint to the substrate transport contract."
+  [endpoint-source]
+  (let [current-endpoint (atom nil)
+        current-listener (atom nil)
+        current-callback (atom nil)
+        source-create-function (get endpoint-source "create_fn")]
+    {"meta" {"kind" "json"}
+     "send_fn"
+     (fn [outgoing]
+       (let [endpoint
+             (or @current-endpoint
+                 (if (fn? source-create-function) nil endpoint-source))]
+         (if (nil? endpoint)
+           (throw (ex-info "json endpoint not started" {}))
+           (let [write-function (get endpoint "write_fn")]
+             (if (not (fn? write-function))
+               (throw (ex-info "json endpoint missing write implementation" {}))
+               (write-function (substrate-json/encode-frame outgoing)))))))
+     "start_fn"
+     (fn [listener]
+       (let [callback
+             (fn [event context]
+               (let [text (event-text event)
+                     incoming (substrate-json/decode-frame text)
+                     context (assoc (assoc (or context {}) "raw" event)
+                                    "payload" text)]
+                 (listener incoming context)))]
+         (reset! current-callback callback)
+         (if (fn? source-create-function)
+           (let [endpoint (source-create-function callback)]
+             (reset! current-endpoint endpoint)
+             (reset! current-listener endpoint)
+             endpoint)
+           (let [endpoint endpoint-source
+                 start-function (get endpoint "start_fn")]
+             (reset! current-endpoint endpoint)
+             (if (nil? start-function)
+               (do (reset! current-listener endpoint)
+                   endpoint)
+               (let [started (start-function callback)
+                     listener-value (or started endpoint)]
+                 (reset! current-listener listener-value)
+                 listener-value))))))
+     "stop_fn"
+     (fn [_]
+       (let [endpoint (or @current-endpoint endpoint-source)
+             stop-function
+             (if (map? endpoint) (get endpoint "stop_fn") nil)]
+         (if (fn? stop-function)
+           (stop-function @current-listener)
+           nil)
+         (reset! current-endpoint nil)
+         (reset! current-listener nil)
+         (reset! current-callback nil)
+         true))}))
+
+(defn memory-pair
+  "Creates a bidirectional in-memory text wire."
+  [options]
+  (let [options (or options {})
+        left-state
+        (atom {"id" (or (get options "left_id") "left")
+               "listener" nil
+               "peer" nil})
+        right-state
+        (atom {"id" (or (get options "right_id") "right")
+               "listener" nil
+               "peer" nil})]
+    (swap! left-state (fn [current] (assoc current "peer" right-state)))
+    (swap! right-state (fn [current] (assoc current "peer" left-state)))
+    {"left" (memory-endpoint left-state)
+     "right" (memory-endpoint right-state)}))
+
+(defn memory-network
+  "Creates named memory endpoints for arbitrary routing topologies."
+  [options]
+  (let [options (or options {})
+        links (if (contains? options "links")
+                (get options "links")
+                options)
+        network (atom {"states" {}})
+        endpoint-ids (vec (keys links))]
+    (configure-network-links-loop network links endpoint-ids 0)
+    (create-network-endpoints-loop
+     network
+     (vec (keys (get @network "states")))
+     {}
+     0)))
+
+(defn link-pair
+  "Links two substrate nodes with an in-memory JSON transport wire."
+  [server client]
+  (let [wire (memory-pair {"left_id" "client"
+                           "right_id" "server"})]
+    (promise/all
+     [(substrate/attach-transport
+       client "server" (text-endpoint (get wire "left")))
+      (substrate/attach-transport
+       server "client" (text-endpoint (get wire "right")))])))

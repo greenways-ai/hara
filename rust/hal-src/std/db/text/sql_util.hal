@@ -1,0 +1,573 @@
+;; ============================================================================
+;; std.db.text.sql-util — portable SQL value and query encoding.
+;;
+;; Native Hara port of xt.db.text.sql-util. It keeps the original SQL AST data
+;; shapes while exposing runtime PostgreSQL and SQLite option maps.
+;; ============================================================================
+(ns std.db.text.sql-util
+  (:require [std.foundation.json :as json]
+            [std.foundation.string :as string]))
+
+(def OPERATORS
+  {"neq" "!=" :neq "!="
+   "gt" ">" :gt ">"
+   "gte" ">=" :gte ">="
+   "lt" "<" :lt "<"
+   "lte" "<=" :lte "<="
+   "eq" "=" :eq "="
+   "is-not-null" "IS NOT NULL" :is-not-null "IS NOT NULL"
+   "is-null" "IS NULL" :is-null "IS NULL"})
+
+(def INFIX
+  {"||" true
+   "+" true
+   "-" true
+   "*" true
+   "/" true})
+
+(def PG
+  {"map" "jsonb" :map "jsonb"
+   "long" "bigint" :long "bigint"
+   "enum" "text" :enum "text"
+   "image" "jsonb" :image "jsonb"
+   "array" "jsonb" :array "jsonb"})
+
+(def SQLITE
+  {"inet" "text" :inet "text"
+   "uuid" "text" :uuid "text"
+   "citext" "text" :citext "text"
+   "long" "integer" :long "integer"
+   "jsonb" "text" :jsonb "text"
+   "map" "text" :map "text"
+   "enum" "text" :enum "text"
+   "array" "text" :array "text"
+   "image" "text" :image "text"})
+
+(defn- ^{:schema [:fn [:map :any] :any]}
+  compatible-get
+  "Gets key directly, then by its string/keyword counterpart."
+  [value lookup-key]
+  (cond
+    (not (map? value)) nil
+    (has? value lookup-key) (get value lookup-key)
+    (string? lookup-key) (get value (keyword lookup-key))
+    (keyword? lookup-key) (get value (name lookup-key))
+    :else nil))
+
+(defn- ^{:schema [:fn [:map :any :any] :any]}
+  compatible-field
+  "Gets a compatible-field from its keyword or string spelling."
+  [value keyword-key string-key]
+  (if (and (map? value) (has? value keyword-key))
+    (get value keyword-key)
+    (if (map? value) (get value string-key) nil)))
+
+(defn- ^{:schema [:fn [:map :any :any] :any]}
+  option
+  "Gets an option or returns fallback."
+  [options option-key fallback]
+  (let [value (compatible-get options option-key)]
+    (if (nil? value) fallback value)))
+
+(defn- ^{:schema [:fn [:map :vector] :any]}
+  path
+  "Gets a nested option path using compatible key spellings."
+  [value keys]
+  (reduce (fn [current lookup-key]
+            (compatible-get current lookup-key))
+          value
+          keys))
+
+(defn- ^{:schema [:fn [:any] :vector]}
+  arrayify
+  "Returns value as a vector, mapping nil to an empty vector."
+  [value]
+  (cond
+    (nil? value) []
+    (vector? value) value
+    :else [value]))
+
+(defn- ^{:schema [:fn [:str :int :str] :str]}
+  pad-lines
+  "Prefixes every line with amount repetitions of padding."
+  [value amount padding]
+  (let [prefix (string/repeat padding amount)]
+    (string/join "\n"
+                 (map (fn [line] (str prefix line))
+                      (string/split-lines value)))))
+
+(defn ^{:schema [:fn [:str] :str]}
+  sqlite-json-values
+  "Returns a SQLite json_each value subquery."
+  [value]
+  (str "(SELECT value from json_each(" value "))"))
+
+(defn ^{:schema [:fn [:str] :str]}
+  sqlite-json-keys
+  "Returns a SQLite json_each key subquery."
+  [value]
+  (str "(SELECT key from json_each(" value "))"))
+
+(def SQLITE_FN
+  {"jsonb_build_object" {:type "alias" :name "json_object"}
+   "jsonb_build_array" {:type "alias" :name "json_array"}
+   "jsonb_array_elements_text" {:type "macro" :fn sqlite-json-values}
+   "jsonb_array_elements" {:type "macro" :fn sqlite-json-values}
+   "jsonb_object_keys" {:type "macro" :fn sqlite-json-keys}
+   "\"core/util\".as_array" {:type "macro" :fn identity}})
+
+(defn ^{:schema [:fn [:bool] :str]}
+  encode-bool
+  "Encodes a boolean SQL literal."
+  [value]
+  (cond
+    (= value true) "TRUE"
+    (= value false) "FALSE"
+    :else (throw (ex-info "Not Valid" {:input value}))))
+
+(defn ^{:schema [:fn [:num] :str]}
+  encode-number
+  "Encodes a number as the source quoted numeric literal."
+  [value]
+  (str "'" value "'"))
+
+(defn ^{:schema [:fn [:any :map] :any]}
+  encode-operator
+  "Encodes a built-in, option-provided or raw operator."
+  [operator options]
+  (let [built-in (compatible-get OPERATORS operator)
+        custom (path options [:operators operator])]
+    (cond
+      (not (nil? built-in)) built-in
+      (not (nil? custom)) custom
+      :else operator)))
+
+(defn ^{:schema [:fn [:any] :str]}
+  json-compatible
+  "Normalizes Hara keyword maps and values at a strict JSON boundary."
+  [value]
+  (cond
+    (map? value)
+    (into {}
+          (map (fn [entry-key]
+                 [(if (keyword? entry-key)
+                    (name entry-key)
+                    entry-key)
+                  (json-compatible (get value entry-key))])
+               (keys value)))
+
+    (vector? value)
+    (into [] (map json-compatible value))
+
+    (set? value)
+    (into [] (map json-compatible value))
+
+    (keyword? value)
+    (name value)
+
+    :else value))
+
+(defn ^{:schema [:fn [:any] :str]}
+  encode-json
+  "Encodes a JSON value as a single-quoted SQL literal."
+  [value]
+  (str "'" (string/replace (json/write (json-compatible value)) "'" "''") "'"))
+
+(defn ^{:schema [:fn [:any] :str]}
+  encode-value
+  "Encodes a primitive or collection as a SQL literal."
+  [value]
+  (cond
+    (nil? value) "NULL"
+    (string? value) (str "'" (string/replace value "'" "''") "'")
+    (boolean? value) (encode-bool value)
+    (or (vector? value) (map? value)) (encode-json value)
+    (number? value) (encode-number value)
+    :else (str "'" value "'")))
+
+(defn ^{:schema [:fn [:map :fn :map :any] :str]}
+  encode-sql-arg
+  "Encodes an sql/arg node."
+  [value column-function options loop-function]
+  (encode-value (compatible-field value :name "name")))
+
+(defn ^{:schema [:fn [:map :fn :map :any] :str]}
+  encode-sql-column
+  "Encodes an sql/column node."
+  [value column-function options loop-function]
+  (column-function (compatible-field value :name "name")))
+
+(defn ^{:schema [:fn [:map :fn :map :fn] :str]}
+  encode-sql-tuple
+  "Encodes an sql/tuple node."
+  [value column-function options loop-function]
+  (let [arguments (arrayify (compatible-field value :args "args"))]
+    (string/join ", "
+                 (map (fn [argument]
+                        (loop-function argument
+                                       column-function
+                                       options
+                                       loop-function))
+                      arguments))))
+
+(defn ^{:schema [:fn [:map :fn :map :any] :str]}
+  encode-sql-table
+  "Encodes an SQL table/type node."
+  [value column-function options loop-function]
+  (let [schema-name (compatible-field value :schema "schema")
+        table-name (compatible-field value :name "name")]
+    (if (option options :strict false)
+      (str (column-function schema-name) "." (column-function table-name))
+      (column-function table-name))))
+
+(defn ^{:schema [:fn [:map :fn :map :fn] :str]}
+  encode-sql-cast
+  "Encodes an sql/cast node."
+  [value column-function options loop-function]
+  (let [arguments (compatible-field value :args "args")
+        expression (first arguments)
+        cast (second arguments)]
+    (if (option options :strict false)
+      (str (loop-function expression column-function options loop-function)
+           "::"
+           (encode-sql-table cast column-function options loop-function))
+      (loop-function expression column-function options loop-function))))
+
+(defn ^{:schema [:fn [:map :fn :map :fn] :str]}
+  encode-sql-keyword
+  "Encodes an sql/keyword node."
+  [value column-function options loop-function]
+  (let [keyword-name (compatible-field value :name "name")
+        arguments (arrayify (compatible-field value :args "args"))
+        encoded (map (fn [argument]
+                       (loop-function argument
+                                      column-function
+                                      options
+                                      loop-function))
+                     arguments)]
+    (if (empty? encoded)
+      (str keyword-name)
+      (str keyword-name " " (string/join " " encoded)))))
+
+(defn ^{:schema [:fn [:map :fn :map :fn] :str]}
+  encode-sql-fn
+  "Encodes an sql/fn node, applying dialect replacements when configured."
+  [value column-function options loop-function]
+  (let [function-name (compatible-field value :name "name")
+        arguments (arrayify (compatible-field value :args "args"))
+        encoded (map (fn [argument]
+                       (loop-function argument
+                                      column-function
+                                      options
+                                      loop-function))
+                     arguments)]
+    (if (has? INFIX function-name)
+      (str "(" (string/join (str " " function-name " ") encoded) ")")
+      (let [replacement (compatible-get (path options [:values :replace])
+                                        function-name)]
+        (cond
+          (nil? replacement)
+          (str function-name "(" (string/join ", " encoded) ")")
+
+          (= "alias" (compatible-field replacement :type "type"))
+          (str (compatible-field replacement :name "name")
+               "(" (string/join ", " encoded) ")")
+
+          (= "macro" (compatible-field replacement :type "type"))
+          (apply (compatible-field replacement :fn "fn") encoded)
+
+          :else
+          (throw (ex-info
+                  (str "Invalid Spec Type - "
+                       (compatible-field replacement :type "type"))
+                  {:spec replacement})))))))
+
+(declare encode-sql)
+(declare encode-loop-fn)
+(declare encode-query-string)
+
+(defn ^{:schema [:fn [:map :fn :map :fn] :str]}
+  encode-sql-select
+  "Encodes an sql/select node."
+  [value column-function options loop-function]
+  (let [arguments (arrayify (compatible-field value :args "args"))
+        query-string-function (option options :querystr-fn encode-query-string)
+        encoded (map (fn [argument]
+                       (if (and (map? argument)
+                                (nil? (compatible-get argument "::")))
+                         (query-string-function argument "" options)
+                         (loop-function argument
+                                        column-function
+                                        options
+                                        loop-function)))
+                     arguments)]
+    (str "(SELECT " (string/join " " encoded) ")")))
+
+(def ENCODE_SQL
+  {"sql/arg" encode-sql-arg
+   "sql/column" encode-sql-column
+   "sql/tuple" encode-sql-tuple
+   "sql/defenum" encode-sql-table
+   "sql/deftype" encode-sql-table
+   "sql/table" encode-sql-table
+   "sql/cast" encode-sql-cast
+   "sql/fn" encode-sql-fn
+   "sql/keyword" encode-sql-keyword
+   "sql/select" encode-sql-select})
+
+(defn ^{:schema [:fn [:map :fn :map :fn] :str]}
+  encode-sql
+  "Encodes a tagged SQL AST node."
+  [value column-function options loop-function]
+  (let [type-class (compatible-get value "::")
+        encoder (get ENCODE_SQL type-class)]
+    (if (nil? encoder)
+      (throw (ex-info (str "Unsupported Type - " type-class)
+                      {:type type-class :input value}))
+      (encoder value column-function options loop-function))))
+
+(defn ^{:schema [:fn [:any :fn :map :fn] :str]}
+  encode-loop-fn
+  "Encodes a tagged SQL node, raw string or literal value."
+  [value column-function options loop-function]
+  (cond
+    (and (map? value) (not (nil? (compatible-get value "::"))))
+    (encode-sql value column-function options loop-function)
+
+    (string? value)
+    value
+
+    :else
+    (encode-value value)))
+
+(defn ^{:schema [:fn [:any :fn :map] :str]}
+  encode-query-value
+  "Recursively encodes a query value."
+  [value column-function options]
+  (cond
+    (and (map? value) (not (nil? (compatible-get value "::"))))
+    (encode-loop-fn value column-function options encode-loop-fn)
+
+    (vector? value)
+    (cond
+      (and (= 1 (count value))
+           (vector? (first value))
+           (every? string? (first value)))
+      (str "("
+           (string/join ", " (map encode-value (first value)))
+           ")")
+
+      (and (= 1 (count value)) (string? (first value)))
+      (first value)
+
+      :else
+      (string/join " "
+                   (map (fn [item]
+                          (encode-query-value item column-function options))
+                        value)))
+
+    (or (= value "and") (= value "or"))
+    value
+
+    :else
+    (encode-value value)))
+
+(defn ^{:schema [:fn [:any :any :fn :map] :str]}
+  encode-query-segment
+  "Encodes one query key/value predicate."
+  [key-value value column-function options]
+  (let [column (column-function key-value)]
+    (if (vector? value)
+      (let [encoded (map (fn [item]
+                           (encode-query-value item column-function options))
+                         (vec (drop 1 value)))]
+        (str column
+             " " (encode-operator (first value) options)
+             " " (string/join " " encoded)))
+      (str column " = " (encode-query-value value column-function options)))))
+
+(defn ^{:schema [:fn [:map :map] :str]}
+  encode-query-single-string
+  "Encodes one AND-connected query object."
+  [parameters options]
+  (let [column-function (option options :column-fn identity)
+        sort-keys (option options :sort-keys true)
+        pairs (if sort-keys
+                (sort-by (fn [pair] (str (key pair))) parameters)
+                (vec parameters))]
+    (string/join " AND "
+                 (map (fn [pair]
+                        (encode-query-segment (key pair)
+                                              (val pair)
+                                              column-function
+                                              options))
+                      pairs))))
+
+(defn ^{:schema [:fn [:any :str :map] :str]}
+  encode-query-string
+  "Encodes one or more query objects with an optional prefix."
+  [parameters prefix options]
+  (let [encoded (filter (fn [value]
+                          (and (not (nil? value))
+                               (> (count value) 0)))
+                        (map (fn [parameter]
+                               (encode-query-single-string parameter options))
+                             (arrayify parameters)))
+        joined (string/join " OR "
+                            (map (fn [value] (str "(" value ")")) encoded))]
+    (cond
+      (= 0 (count encoded)) ""
+      (= 1 (count encoded))
+      (if (> (count prefix) 0)
+        (str prefix " " (first encoded))
+        (first encoded))
+      :else
+      (if (> (count prefix) 0)
+        (str prefix " " joined)
+        joined))))
+
+(defn ^{:schema [:fn [:any] :map]}
+  LIMIT
+  "Creates a LIMIT SQL keyword node."
+  [value]
+  {"::" "sql/keyword"
+   :name "LIMIT"
+   :args [{"::" "sql/keyword" :name value}]})
+
+(defn ^{:schema [:fn [:any] :map]}
+  OFFSET
+  "Creates an OFFSET SQL keyword node."
+  [value]
+  {"::" "sql/keyword"
+   :name "OFFSET"
+   :args [{"::" "sql/keyword" :name value}]})
+
+(defn ^{:schema [:fn [:vector] :map]}
+  ORDER-BY
+  "Creates an ORDER BY SQL keyword node."
+  [columns]
+  {"::" "sql/keyword"
+   :name "ORDER BY"
+   :args [{"::" "sql/tuple"
+           :args (map (fn [column]
+                        {"::" "sql/column" :name column})
+                      columns)}]})
+
+(defn ^{:schema [:fn [:str] :map]}
+  ORDER-SORT
+  "Creates an uppercase ordering keyword node."
+  [order]
+  {"::" "sql/keyword" :name (string/upper order)})
+
+(defn ^{:schema [:fn [:str] :str]}
+  default-quote-fn
+  "Wraps an identifier in double quotes."
+  [value]
+  (str "\"" value "\""))
+
+(defn ^{:schema [:fn [:any :fn :fn :map] :str]}
+  default-return-format-fn
+  "Formats a return column, alias or nested expression."
+  [input nest-function column-function options]
+  (cond
+    (map? input)
+    (if (not (nil? (compatible-get input "::")))
+      (encode-sql input column-function options encode-loop-fn)
+      (str (compatible-field input :expr "expr")
+           (if (or (has? input :as) (has? input "as"))
+             (str " AS " (compatible-field input :as "as"))
+             "")))
+
+    (vector? input)
+    (nest-function input)
+
+    (string? input)
+    (column-function input)
+
+    :else
+    (throw (ex-info (str "Invalid input - " input) {:input input}))))
+
+(defn ^{:schema [:fn [:str :map] :str]}
+  default-table-fn
+  "Returns a quoted schema-qualified table name from lookup."
+  [table lookup]
+  (let [entry (compatible-get lookup table)
+        schema-name (compatible-field entry :schema "schema")]
+    (str "\"" schema-name "\".\"" table "\"")))
+
+(defn ^{:schema [:fn [:str :int] :str]}
+  postgres-wrapper-fn
+  "Wraps a query for PostgreSQL JSON aggregation."
+  [value indent]
+  (str "WITH j_ret AS (\n"
+       (pad-lines value 2 " ")
+       "\n) SELECT jsonb_agg(j_ret) FROM j_ret"))
+
+(defn ^{:schema [:fn [:map] :map]}
+  postgres-opts
+  "Constructs PostgreSQL SQL-generation options."
+  [lookup]
+  {:types PG
+   :values {:cast true :replace {}}
+   :strict true
+   :querystr-fn encode-query-string
+   :wrapper-fn postgres-wrapper-fn
+   :coerce {}
+   :column-fn default-quote-fn
+   :table-fn (fn [table] (default-table-fn table lookup))
+   :return-format-fn default-return-format-fn
+   :return-count-fn (fn [] "count(*)")
+   :return-join-fn (fn [values] (string/join ", " values))
+   :return-link-fn (fn [value link-name]
+                     (str "(" value ") AS " link-name))})
+
+(defn ^{:schema [:fn [:any :fn :fn :map] :str]}
+  sqlite-return-format-fn
+  "Formats return fields for SQLite json_object calls."
+  [input nest-function column-function options]
+  (cond
+    (map? input)
+    (str "'" (compatible-field input :as "as") "', " (compatible-field input :expr "expr"))
+
+    (vector? input)
+    (nest-function input)
+
+    (string? input)
+    (str "'" input "', " (column-function input))
+
+    :else
+    (throw (ex-info (str "Invalid input - " input) {:input input}))))
+
+(defn ^{:schema [:fn [:any] :any]}
+  sqlite-to-boolean
+  "Coerces numeric SQLite booleans while preserving other values."
+  [value]
+  (if (number? value) (= 1 value) value))
+
+(defn ^{:schema [:fn [:map] :map]}
+  sqlite-opts
+  "Constructs SQLite SQL-generation and result-coercion options."
+  [lookup]
+  {:types SQLITE
+   :values {:cast false :replace SQLITE_FN}
+   :strict false
+   :querystr-fn encode-query-string
+   :wrapper-fn (fn [value indent]
+                 (if (< indent 2)
+                   value
+                   (str "(\n" (pad-lines value 2 " ") ")")))
+   :operators {"ilike" "LIKE" :ilike "LIKE"}
+   :coerce {:boolean sqlite-to-boolean
+            :jsonb json/read
+            :map json/read
+            :array json/read}
+   :column-fn default-quote-fn
+   :table-fn default-quote-fn
+   :return-format-fn sqlite-return-format-fn
+   :return-count-fn (fn [] "json_array(json_object('count',count(*)))")
+   :return-join-fn (fn [values]
+                     (str "json_group_array(json_object("
+                          (string/join ", " values)
+                          "))"))
+   :return-link-fn (fn [value link-name]
+                     (str "'" link-name "', " value))})

@@ -1,0 +1,123 @@
+;; ============================================================================
+;; std.db.text.sql-call — validated SQL function invocation over std.db.
+;; ============================================================================
+(ns std.db.text.sql-call
+  (:require [std.db :as db]
+            [std.db.text.base-check :as check]
+            [std.db.text.sql-util :as sql]
+            [std.foundation.json :as json]
+            [std.foundation.promise :as promise]
+            [std.foundation.string :as string]))
+
+(defn- compatible-get
+  [value lookup-key]
+  (cond
+    (not (map? value)) nil
+    (has? value lookup-key) (get value lookup-key)
+    (string? lookup-key) (get value (keyword lookup-key))
+    (keyword? lookup-key) (get value (name lookup-key))
+    :else nil))
+
+(defn decode-return
+  "Decodes an API envelope and returns its data payload."
+  [output-string alternate]
+  (let [output (json/read output-string)
+        status (compatible-get output :status)
+        data (compatible-get output :data)]
+    (if (= "error" status)
+      (throw (ex-info "Database API returned an error" {:output output}))
+      data)))
+
+(defn- format-input-loop
+  [inputs arguments index output]
+  (if (= index (count arguments))
+    output
+    (let [argument (nth arguments index)
+          input (nth inputs index)
+          input-type (compatible-get input :type)
+          encoded (if (= "jsonb" input-type)
+                    (if (string? argument)
+                      argument
+                      (sql/encode-json argument))
+                    (sql/encode-value argument))]
+      (format-input-loop inputs
+                         arguments
+                         (+ index 1)
+                         (conj output encoded)))))
+
+(defn call-format-input
+  "Formats function arguments according to the declared input types."
+  [spec arguments]
+  (format-input-loop (or (compatible-get spec :input) [])
+                     arguments
+                     0
+                     []))
+
+(defn call-format-query
+  "Formats a schema-qualified SQL function invocation."
+  [spec arguments]
+  (let [schema-name (compatible-get spec :schema)
+        function-id (compatible-get spec :id)
+        database-name (str "\"" schema-name "\"."
+                           (string/replace function-id "-" "_"))
+        database-arguments (string/join ", "
+                                        (call-format-input spec arguments))]
+    (str "SELECT " database-name "(" database-arguments ");")))
+
+(defn- validation-result
+  [spec arguments]
+  (let [inputs (or (compatible-get spec :input) [])
+        length-result (check/check-args-length arguments inputs)]
+    (if (not (first length-result))
+      length-result
+      (check/check-args-type arguments inputs))))
+
+(defn- first-query-value
+  [result]
+  (let [rows (compatible-get result :rows)]
+    (if (and (vector? rows)
+             (> (count rows) 0)
+             (vector? (first rows))
+             (> (count (first rows)) 0))
+      (first (first rows))
+      result)))
+
+(defn- decode-function-value
+  [spec value]
+  (if (= "jsonb" (compatible-get spec :return))
+    (cond
+      (nil? value) nil
+      (= value "") nil
+      (string? value) (json/read value)
+      :else value)
+    value))
+
+(defn call-raw
+  "Validates and invokes a database function through a generic std.db connection."
+  [connection spec arguments]
+  (let [validation (validation-result spec arguments)]
+    (if (not (first validation))
+      (throw (ex-info "Invalid database function arguments"
+                      {:validation (second validation)}))
+      (promise/then
+       (db/query connection (call-format-query spec arguments))
+       (fn [result]
+         (decode-function-value spec (first-query-value result)))))))
+
+(defn call-api
+  "Invokes a database function and returns a JSON API envelope."
+  [connection spec arguments]
+  (let [validation (validation-result spec arguments)]
+    (if (not (first validation))
+      (json/write (sql/json-compatible {:status "error" :data (second validation)}))
+      (promise/catch
+       (promise/then
+        (db/query connection (call-format-query spec arguments))
+        (fn [result]
+          (let [value (first-query-value result)
+                decoded (decode-function-value spec value)]
+            (json/write (sql/json-compatible {:status "ok" :data decoded})))))
+       (fn [error]
+         (if (and (map? error) (compatible-get error :status))
+           (json/write (sql/json-compatible error))
+           (json/write (sql/json-compatible {:status "error" :data (str error)}))))))))

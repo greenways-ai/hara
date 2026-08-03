@@ -1,0 +1,46 @@
+(ns code.test.base.executive
+  (:require [code.test :as test]))
+
+(def +latest+ (atom {}))
+
+(defn report-edn-safe? [value] true)
+(defn report-edn [value] (pr-str value))
+(defn report-file-path [options] (:report options))
+(defn report->run-path [path] path)
+(defn run-file-path [options] (:run options))
+(defn history-file-path [options] (:history options))
+(defn run-file-params [options] options)
+(defn run-file-form [options] options)
+(defn save-run-history [report] report)
+(defn save-artifact [artifact] artifact)
+(defn artifact-notices [artifact] [])
+(defn save-report-paths [report] report)
+(defn announce-artifacts [report] report)
+(defn load-report [path] (read-string (file/read path)))
+(defn report-failed-facts [report] (:failed report))
+(defn accumulate [current result] (conj (or current []) result))
+(defn interim [results] results)
+(defn retrieve-line [key report] (or (get report key) []))
+
+(defn summarise
+  [summary]
+  (select-keys summary
+               [:files :facts :checks :passed :failed :throw :timeout]))
+
+(defn summarise-bulk
+  [summary items results]
+  summary)
+
+(defn save-report [path report]
+  (do (file/write path (pr-str report)) report))
+(defn unload-namespace [namespace params lookup env] namespace)
+(defn load-namespace [namespace params lookup env] namespace)
+(defn test-namespace [namespace params lookup env]
+  (test/run {:namespace namespace}))
+(defn run-namespace [namespace params lookup env]
+  (let [summary (test/run (merge params {:namespace namespace}))]
+    (reset! +latest+ summary)
+    summary))
+(defn run-current [input params lookup env]
+  (run-namespace (current-namespace) params lookup env))
+(defn eval-namespace [namespace] (test/run {:namespace namespace}))

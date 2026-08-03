@@ -1,0 +1,109 @@
+(ns postgres.typed.export.json-schema
+  (:require [std.foundation.string :as string]
+            [postgres.typed.typed-common :as types]
+            [postgres.typed.typed-shape :as shape]))
+
+(declare shape->json-schema)
+
+(defn- name-string
+  [value]
+  (cond (string? value) value
+        (keyword? value) (string/slice (str value) 1)
+        (symbol? value) (name value)
+        :else (str value)))
+
+(defn resolve-type
+  [value target]
+  (let [base-type
+        (cond (keyword? value) value
+              (types/type-ref? value)
+              (if (= :primitive (:kind value)) (:name value) (:kind value))
+              (map? value)
+              (let [inner (:type value)]
+                (cond (keyword? inner) inner
+                      (types/type-ref? inner)
+                      (if (= :primitive (:kind inner)) (:name inner) (:kind inner))
+                      :else (or (:kind value) :unknown)))
+              :else :unknown)
+        registered (get-in types/+type-formats+ [base-type target])]
+    (or registered
+        (if (= :enum base-type)
+          (if (and (map? value) (:enum-ref value))
+            (let [enum-name (name-string (get-in value [:enum-ref :ns]))]
+              (cond (= :openapi target)
+                    {:$ref (str "#/components/schemas/" enum-name)}
+                    (= :jschema target)
+                    {:$ref (str "#/definitions/" enum-name)}
+                    (= :ts target) enum-name
+                    :else nil))
+            (get-in types/+type-formats+ [:text target]))
+          (cond (= :openapi target) {:type "string"}
+                (= :jschema target) {:type "string"}
+                (= :ts target) "string"
+                :else nil)))))
+
+(defn field->json-schema
+  [field-info]
+  (let [field-type (:type field-info)]
+    (cond (:is-ref? field-info) {:type "string" :format "uuid"}
+          (:shape field-info) (shape->json-schema (:shape field-info))
+          (= :array field-type)
+          {:type "array"
+           :items (if (:items field-info)
+                    (field->json-schema (:items field-info))
+                    {:type "object"})}
+          :else (resolve-type field-info :jschema))))
+
+(defn shape->json-schema
+  [jsonb-shape]
+  (let [fields (:fields jsonb-shape)
+        properties
+        (reduce-kv (fn [out key value]
+                     (assoc out (types/emitted-key key) (field->json-schema value)))
+                   {}
+                   fields)
+        required
+        (reduce-kv (fn [out key value]
+                     (if (:nullable? value)
+                       out
+                       (conj out (types/emitted-key key))))
+                   []
+                   fields)
+        base {:type "object"
+              :properties properties
+              :additionalProperties false}]
+    (if (> (count required) 0) (assoc base :required required) base)))
+
+(defn- distinct-registry-values
+  []
+  (vals
+   (reduce (fn [out value]
+             (let [value-name (:name value)]
+               (if (get out value-name)
+                 out
+                 (assoc out value-name value))))
+           {}
+           (vals @types/*type-registry*))))
+
+(defn generate-json-schema
+  []
+  (let [all (distinct-registry-values)
+        definitions
+        (reduce (fn [out value]
+                  (cond (types/table-def? value)
+                        (assoc out
+                               (name-string (:name value))
+                               (shape->json-schema (shape/table->shape value)))
+                        (types/enum-def? value)
+                        (assoc out
+                               (name-string (:name value))
+                               {:type "string"
+                                :enum (vec (map (fn [item] (name-string item))
+                                                (:values value)))})
+                        :else out))
+                {}
+                all)]
+    {:$schema "http://json-schema.org/draft-07/schema#"
+     :definitions definitions}))
+
+(def __tahto_load__ true)

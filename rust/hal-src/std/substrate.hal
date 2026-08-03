@@ -1,0 +1,418 @@
+;; ============================================================================
+;; std.substrate — portable assembly of the Foundation xt.substrate runtime.
+;;
+;; The implementation is intentionally split along the original source-file
+;; boundaries. This namespace owns node and transport lifecycle plus frame
+;; demultiplexing; frame, space, router, request, pub-sub, utility, and utility
+;; handler behavior live in their corresponding modules.
+;; ============================================================================
+(ns std.substrate
+  (:require [std.foundation.promise :as promise]
+            [std.lib.substrate :as core]
+            [std.substrate.frame :as frame]
+            [std.substrate.pubsub :as pubsub]
+            [std.substrate.request :as node-request]
+            [std.substrate.router :as router]
+            [std.substrate.space :as space]
+            [std.substrate.util :as util]
+            [std.substrate.util-handlers :as util-handlers]))
+
+(def CANARY "std.substrate/file-port")
+
+(def KIND_REQUEST frame/KIND_REQUEST)
+(def KIND_RESPONSE frame/KIND_RESPONSE)
+(def KIND_STREAM frame/KIND_STREAM)
+(def KIND_SUBSCRIBE router/KIND_SUBSCRIBE)
+(def KIND_UNSUBSCRIBE router/KIND_UNSUBSCRIBE)
+(def STATUS_OK frame/STATUS_OK)
+(def STATUS_ERROR frame/STATUS_ERROR)
+(def SPACE_NODE frame/SPACE_NODE)
+
+(declare receive-frame)
+
+(defn option-value
+  [options string-key keyword-key]
+  (or (get (or options {}) string-key)
+      (get (or options {}) keyword-key)))
+
+(defn map-each
+  [entries function]
+  (let [entries (or entries {})
+        entry-keys (vec (keys entries))]
+    (loop [index 0]
+      (if (= index (count entry-keys))
+        nil
+        (let [key (nth entry-keys index)]
+          (do (function key (get entries key))
+              (recur (inc index))))))))
+
+(defn node?
+  "Checks if value is a substrate node."
+  [value]
+  (try
+    (do (field value :state)
+        (field value :id)
+        true)
+    (catch Throwable error false)))
+
+(defn node-id
+  [node]
+  (field node :id))
+
+(defn node-state
+  [node]
+  (core/node-state node))
+
+(defn node-section
+  [node section]
+  (core/node-section node section))
+
+(defn transport?
+  "Checks if value is a substrate transport."
+  [value]
+  (and (map? value)
+       (= "substrate.transport" (get value "::"))))
+
+(defn transport-create
+  "Wraps a transport implementation."
+  [transport-id implementation]
+  (let [implementation
+        (if (fn? implementation)
+          {"send_fn" implementation}
+          (or implementation {}))]
+    {"::" "substrate.transport"
+     "id" transport-id
+     "listener" nil
+     "meta" (or (option-value implementation "meta" :meta) {})
+     "send_fn" (or (option-value implementation "send_fn" :send_fn)
+                    (option-value implementation "send-fn" :send-fn))
+     "start_fn" (or (option-value implementation "start_fn" :start_fn)
+                     (option-value implementation "start-fn" :start-fn))
+     "stop_fn" (or (option-value implementation "stop_fn" :stop_fn)
+                    (option-value implementation "stop-fn" :stop-fn))}))
+
+(defn get-services
+  [node]
+  (core/node-section node :services))
+
+(defn get-service
+  [node service-id]
+  (get (get-services node) service-id))
+
+(defn set-service
+  [node service-id service]
+  (core/section-put node :services service-id service))
+
+(defn remove-service
+  [node service-id]
+  (core/section-remove node :services service-id))
+
+(defn transport-get [node transport-id]
+  (util/transport-get node transport-id))
+(defn transport-list [node]
+  (util/transport-list node))
+(defn transport-send [node transport-id outgoing]
+  (util/transport-send node transport-id outgoing))
+
+(defn get-space [node space-id]
+  (space/get-space node space-id))
+(defn create-space [node space-id options]
+  (space/create-space node space-id options))
+(defn ensure-space [node space-id options]
+  (space/ensure-space node space-id options))
+(defn remove-space [node space-id]
+  (space/remove-space node space-id))
+(defn list-spaces [node]
+  (space/list-spaces node))
+(defn get-space-state [node space-id]
+  (space/get-space-state node space-id))
+(defn set-space-state [node space-id state]
+  (space/set-space-state node space-id state))
+(defn update-space-state [node space-id updater]
+  (space/update-space-state node space-id updater))
+
+(defn register-handler [node action handler meta]
+  (util/register-handler node action handler meta))
+(defn unregister-handler [node action]
+  (util/unregister-handler node action))
+(defn get-handler [node action]
+  (util/get-handler node action))
+(defn list-handlers [node]
+  (util/list-handlers node))
+
+(defn register-trigger [node signal trigger meta]
+  (util/register-trigger node signal trigger meta))
+(defn unregister-trigger [node signal]
+  (util/unregister-trigger node signal))
+(defn get-trigger [node signal]
+  (util/get-trigger node signal))
+(defn list-triggers [node]
+  (util/list-triggers node))
+
+(defn list-subscriptions
+  ([node] (router/list-subscriptions node))
+  ([node space-id] (router/list-subscriptions node space-id))
+  ([node space-id signal]
+   (router/list-subscriptions node space-id signal)))
+
+(defn rand-id [prefix n]
+  (frame/rand-id prefix n))
+(defn base-frame [kind id space-id meta extra]
+  (frame/frame kind id space-id meta extra))
+(defn request-frame [space-id action args meta]
+  (frame/request-frame space-id action args meta))
+(defn response-frame [reply-to space-id status data error meta]
+  (frame/response-frame reply-to space-id status data error meta))
+(defn response-ok-frame [reply-to space-id data meta]
+  (frame/response-ok-frame reply-to space-id data meta))
+(defn response-error-frame [reply-to space-id error meta]
+  (frame/response-error-frame reply-to space-id error meta))
+(defn stream-frame [space-id signal data meta cause]
+  (frame/stream-frame space-id signal data meta cause))
+(defn request-frame? [value] (frame/request-frame? value))
+(defn response-frame? [value] (frame/response-frame? value))
+(defn stream-frame? [value] (frame/stream-frame? value))
+
+;; Compatibility constructor retained for the initial protocol-first slice.
+(defn node-frame
+  [kind id space-id meta action args reply-to status data error signal cause]
+  (frame/frame
+   (if (keyword? kind) (name kind) kind)
+   id
+   space-id
+   meta
+   {"action" action
+    "args" (or args [])
+    "reply_to" reply-to
+    "status" (if (keyword? status) (name status) status)
+    "data" data
+    "error" error
+    "signal" signal
+    "cause" cause}))
+
+(defn frame-id [value] (get value "id"))
+(defn frame-kind [value] (get value "kind"))
+(defn frame-space [value] (get value "space"))
+(defn frame-meta [value] (get value "meta"))
+(defn frame-cause [value] (get value "cause"))
+(defn frame-data [value] (get value "data"))
+
+(defn request
+  [node space-id action args meta]
+  (util/request node space-id action args meta))
+
+(defn publish
+  [node space-id signal data meta]
+  (util/publish node space-id signal data meta))
+
+(defn broadcast-transport
+  [node outgoing exclude-id]
+  (util/transport-broadcast-loop
+   node (transport-list node) outgoing exclude-id 0))
+
+(defn route-stream
+  [node stream exclude-id]
+  (util/stream-route-loop
+   node
+   (router/target-ids node
+                      (get stream "space")
+                      (get stream "signal"))
+   stream
+   exclude-id
+   0))
+
+(defn receive-request
+  [node incoming context]
+  (let [context (or context {})
+        incoming (util/request-context-merge incoming context)]
+    (try
+      (promise/catch
+       (promise/then
+        (node-request/invoke-handler node incoming)
+        (fn [data]
+          (util/response-ok node incoming data nil context)))
+       (fn [error]
+         (util/response-error node incoming error nil context)))
+      (catch Throwable error
+        (util/response-error node incoming error nil context)))))
+
+(defn receive-response
+  [node response]
+  (node-request/settle-pending node response)
+  (promise/from response))
+
+(defn subscribe
+  [node space-id signal subscription-id meta]
+  (let [meta (or meta {})
+        event (router/subscribe-frame
+               space-id signal subscription-id meta)
+        target (util/transport-request-target node meta)]
+    (if target
+      (promise/then
+       (transport-send node target event)
+       (fn [_] event))
+      (promise/from event))))
+
+(defn unsubscribe
+  [node space-id signal subscription-id meta]
+  (let [meta (or meta {})
+        event (router/unsubscribe-frame
+               space-id signal subscription-id meta)
+        target (util/transport-request-target node meta)]
+    (if target
+      (promise/then
+       (transport-send node target event)
+       (fn [_] event))
+      (promise/from event))))
+
+(defn receive-publish
+  [node stream context]
+  (let [context (or context {})]
+    (promise/then
+     (pubsub/receive-publish node stream)
+     (fn [_]
+       (route-stream node stream
+                     (router/context-transport-id context))))))
+
+(defn receive-frame
+  [node event context]
+  (let [kind (get event "kind")]
+    (cond
+      (= kind frame/KIND_REQUEST)
+      (receive-request node event context)
+
+      (= kind frame/KIND_RESPONSE)
+      (receive-response node event)
+
+      (= kind frame/KIND_STREAM)
+      (receive-publish node event context)
+
+      (= kind router/KIND_SUBSCRIBE)
+      (router/receive-subscribe node event context)
+
+      (= kind router/KIND_UNSUBSCRIBE)
+      (router/receive-unsubscribe node event context)
+
+      :else
+      (promise/from event))))
+
+(defn attach-transport
+  "Attaches and optionally starts a transport."
+  [node transport-id transport]
+  (let [transport
+        (if (transport? transport)
+          transport
+          (transport-create transport-id transport))
+        start-function (get transport "start_fn")]
+    (core/section-put node :transports transport-id transport)
+    (router/register-connection
+     node transport-id {"meta" (get transport "meta")})
+    (if (nil? start-function)
+      (promise/from transport)
+      (promise/then
+       (node-request/ensure-promise
+        (start-function
+         (fn [event context]
+           (let [context (or context {})
+                 context
+                 (if (router/context-transport-id context)
+                   context
+                   (assoc context "transport_id" transport-id))]
+             (receive-frame node event context)))))
+       (fn [listener]
+         (let [started (assoc transport "listener" listener)]
+           (core/section-put node :transports transport-id started)
+           started))))))
+
+(defn detach-transport
+  "Detaches and optionally stops a transport."
+  [node transport-id]
+  (let [transport (transport-get node transport-id)]
+    (if (nil? transport)
+      (promise/from nil)
+      (let [stop-function (get transport "stop_fn")
+            listener (get transport "listener")]
+        (core/section-remove node :transports transport-id)
+        (router/unregister-connection node transport-id)
+        (if (nil? stop-function)
+          (promise/from transport)
+          (promise/then
+           (node-request/ensure-promise (stop-function listener))
+           (fn [_] transport)))))))
+
+(defn cancel-request
+  [node request-id reason]
+  (let [entry (node-request/remove-pending node request-id)]
+    (if entry
+      (do ((get entry "reject") reason)
+          {"id" request-id "reason" reason})
+      nil)))
+
+(defn reject-pending
+  [node reason]
+  (let [pending (core/node-section node :pending)
+        request-ids (vec (keys pending))]
+    (loop [index 0]
+      (if (= index (count request-ids))
+        nil
+        (let [entry (get pending (nth request-ids index))]
+          (do ((get entry "reject") reason)
+              (recur (inc index))))))
+    (swap! (field node :state)
+           (fn [state] (assoc state :pending {})))
+    {"pending" pending "reason" reason}))
+
+(defn configure-space
+  [node space-id config]
+  (space/create-space
+   node space-id (util/config-normalize-space space-id config)))
+
+(defn configure-handler
+  [node action config]
+  (let [entry (util/config-normalize-handler action config)]
+    (register-handler node action
+                      (get entry "fn")
+                      (get entry "meta"))))
+
+(defn configure-trigger
+  [node signal config]
+  (let [entry (util/config-normalize-trigger signal config)]
+    (register-trigger node signal
+                      (get entry "fn")
+                      (get entry "meta"))))
+
+(defn node-configure
+  "Applies declarative spaces, handlers, and triggers."
+  [node options]
+  (let [options (or options {})]
+    (util-handlers/install-util-handlers node)
+    (map-each
+     (or (get options "spaces") (get options :spaces))
+     (fn [space-id config]
+       (configure-space node space-id config)))
+    (map-each
+     (or (get options "handlers") (get options :handlers))
+     (fn [action config]
+       (configure-handler node action config)))
+    (map-each
+     (or (get options "triggers") (get options :triggers))
+     (fn [signal config]
+       (configure-trigger node signal config)))
+    node))
+
+(defn node-create
+  "Creates a transport-agnostic node from declarative configuration."
+  [options]
+  (let [options (if (map? options) options {"id" options})
+        id (or (option-value options "id" :id)
+               (frame/rand-id "node-" 6))
+        node (core/node-create id)
+        meta (or (option-value options "meta" :meta) {})
+        services (or (option-value options "services" :services) {})]
+    (map-each meta
+              (fn [key value]
+                (core/section-put node :meta key value)))
+    (map-each services
+              (fn [service-id service]
+                (set-service node service-id service)))
+    (node-configure node options)))

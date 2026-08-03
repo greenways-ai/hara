@@ -1,0 +1,124 @@
+;; Shared metaspec relations for Datalog and miniKanren exploration.
+(ns hara.metaspec.logic
+  (:require [hara.metaspec.lint :as lint]
+            [hara.metaspec.model :as model]
+            [hara.metaspec.verify :as verify]
+            [std.logic.datalog :as datalog]
+            [std.logic.relational :as relational]))
+
+(def +rules+
+  '[{:rule/id :hara.metaspec.logic/missing-required-key
+     :rule/head [:missing-required-key ?key]
+     :rule/body [[:required-key ?key]
+                 [:not [:edge [] ?key ?path]]]}
+    {:rule/id :hara.metaspec.logic/duplicate-schema
+     :rule/head [:duplicate-schema ?id ?left ?right]
+     :rule/body [[:schema ?id ?type ?left]
+                 [:schema ?id ?type ?right]
+                 [:!= ?left ?right]]}
+    {:rule/id :hara.metaspec.logic/unresolved-schema-reference
+     :rule/head [:unresolved-schema-reference ?path ?id]
+     :rule/body [[:schema-ref ?path ?id]
+                 [:not [:schema ?id ?type ?declaration-path]]]}
+    {:rule/id :hara.metaspec.logic/missing-evidence
+     :rule/head [:missing-evidence ?requirement ?path]
+     :rule/body [[:requirement ?requirement :must ?path]
+                 [:not [:evidence ?requirement ?case ?evidence-path]]]}])
+
+(defn ^{:schema [:fn [:any] :map]}
+  spec-database
+  "Builds and derives the finite Datalog database for one specification."
+  [document]
+  (let [projected (model/project document)
+        required
+        (vec
+         (map (fn [key] [:required-key key])
+              lint/+required-keys+))]
+    (datalog/derive
+     (datalog/database
+      (:graph/catalog projected)
+      (vec (concat (:graph/facts projected) required)))
+     +rules+)))
+
+(defn ^{:schema [:fn [:any] :map]}
+  analyze
+  "Returns the four experimental relational finding categories."
+  [document]
+  (let [database (spec-database document)]
+    {:missing-required-keys
+     (datalog/query
+      database
+      '{:find [?key]
+        :where [[:missing-required-key ?key]]})
+
+     :duplicate-schemas
+     (datalog/query
+      database
+      '{:find [?id ?left ?right]
+        :where [[:duplicate-schema ?id ?left ?right]]})
+
+     :unresolved-schema-references
+     (datalog/query
+      database
+      '{:find [?path ?id]
+        :where [[:unresolved-schema-reference ?path ?id]]})
+
+     :missing-evidence
+     (datalog/query
+      database
+      '{:find [?requirement ?path]
+        :where [[:missing-evidence ?requirement ?path]]})}))
+
+(defn ^{:schema [:fn [:any] :map]}
+  compare-imperative
+  "Compares imperative and relational rule coverage for one document."
+  [document]
+  (let [imperative
+        (vec
+         (map
+          (fn [finding] (:rule/id finding))
+          (concat (lint/lint document)
+                  (verify/verify document))))
+        relational (analyze document)]
+    {:imperative imperative
+     :relational
+     {:required-key
+      (if (empty? (:missing-required-keys relational))
+        []
+        [:hara.metaspec.rule/required-key])
+      :duplicate-id
+      (if (empty? (:duplicate-schemas relational))
+        []
+        [:hara.metaspec.rule/duplicate-id])
+      :schema-reference
+      (if (empty? (:unresolved-schema-references relational))
+        []
+        [:hara.metaspec.rule/schema-reference])
+      :missing-evidence
+      (if (empty? (:missing-evidence relational))
+        []
+        [:hara.metaspec.rule/missing-evidence])}}))
+
+(defn ^{:schema [:fn [:map :any :any :any] :fn]}
+  schemao
+  "Relates schema ID, type, and source path through miniKanren."
+  [projected id type path]
+  (relational/projecto projected :schema [id type path]))
+
+(defn ^{:schema [:fn [:map :any :any] :fn]}
+  schema-refo
+  "Relates a schema reference path to its target ID through miniKanren."
+  [projected path id]
+  (relational/projecto projected :schema-ref [path id]))
+
+(defn ^{:schema [:fn [:map :any :any :any] :fn]}
+  requiremento
+  "Relates requirement ID, level, and source path through miniKanren."
+  [projected id level path]
+  (relational/projecto projected :requirement [id level path]))
+
+(defn ^{:schema [:fn [:map :any :any :any] :fn]}
+  evidenceo
+  "Relates requirement ID, evidence value, and source path through miniKanren."
+  [projected requirement evidence path]
+  (relational/projecto projected :evidence [requirement evidence path]))

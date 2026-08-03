@@ -1,0 +1,27 @@
+(ns hara.metaspec.core
+  (:require [hara.metaspec.conforms :as conforms]
+            [hara.metaspec.lint :as lint]
+            [hara.metaspec.registry :as registry]
+            [hara.metaspec.report :as report]
+            [hara.metaspec.verify :as verify]))
+
+(def conforms conforms/conforms)
+(def register-metaspec! registry/register-metaspec!)
+(def unregister-metaspec! registry/unregister-metaspec!)
+(def register-checker-package! registry/register-checker-package!)
+(def unregister-checker-package! registry/unregister-checker-package!)
+
+(def lint lint/lint)
+(def verify verify/verify)
+(def verification-report report/verification-report)
+
+(defn lint-report
+  [document]
+  (report/verification-report document (lint/lint document)))
+
+(defn verify-report
+  ([document]
+   (report/verification-report document (verify/verify document)))
+  ([document registry]
+   (report/verification-report document
+                               (verify/verify document registry))))

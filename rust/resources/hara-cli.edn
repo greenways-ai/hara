@@ -28,7 +28,29 @@
    :app/routes [:hara.cli.route/package :hara.cli.route/package-check
                 :hara.cli.route/package-build :hara.cli.route/package-inspect
                 :hara.cli.route/package-install :hara.cli.route/package-publish
-                :hara.cli.route/package-tap :hara.cli.route/package-registry]}
+                :hara.cli.route/package-status :hara.cli.route/package-search
+                :hara.cli.route/package-info :hara.cli.route/package-yank
+                :hara.cli.route/package-harp :hara.cli.route/package-extension
+                :hara.cli.route/package-registry]}
+  {:app/id :hara.cli/identity
+   :app/summary "Enroll and manage public tap identity and publisher keys."
+   :app/routes [:hara.cli.route/id :hara.cli.route/id-login
+                :hara.cli.route/id-enroll :hara.cli.route/id-status
+                :hara.cli.route/id-key :hara.cli.route/id-namespace]}
+  {:app/id :hara.cli/asset
+   :app/summary "Build, publish, inspect and retrieve versioned asset collections."
+   :app/routes [:hara.cli.route/asset :hara.cli.route/asset-check
+                :hara.cli.route/asset-build :hara.cli.route/asset-inspect
+                :hara.cli.route/asset-publish :hara.cli.route/asset-status
+                :hara.cli.route/asset-search :hara.cli.route/asset-info
+                :hara.cli.route/asset-pull :hara.cli.route/asset-sync
+                :hara.cli.route/asset-yank]}
+  {:app/id :hara.cli/tap
+   :app/summary "Bootstrap, trust, verify and mirror federated taps."
+   :app/routes [:hara.cli.route/tap :hara.cli.route/tap-bootstrap
+                :hara.cli.route/tap-init :hara.cli.route/tap-add
+                :hara.cli.route/tap-remove :hara.cli.route/tap-list
+                :hara.cli.route/tap-verify :hara.cli.route/tap-mirror]}
   {:app/id :hara.cli/spec
    :app/summary "Lint, verify, convert and check machine-readable specifications."
    :app/routes [:hara.cli.route/spec :hara.cli.route/spec-lint
@@ -280,11 +302,6 @@
    :route/summary "Publish through an explicitly granted registry provider."
    :route/arguments [] :route/options [:hara.cli.option/offline]
    :route/formats [:text :edn]}
-  {:route/id :hara.cli.route/package-tap :route/path ["package" "tap"]
-   :route/aliases [] :route/handler :hara.cli.handler/package
-   :route/execution :finite :route/tier :public
-   :route/summary "Manage reviewed package tap metadata." :route/arguments []
-   :route/options [:hara.cli.option/offline] :route/formats [:text :edn]}
   {:route/id :hara.cli.route/package-registry :route/path ["package" "registry"]
    :route/aliases [] :route/handler :hara.cli.handler/package
    :route/execution :finite :route/tier :public
@@ -377,6 +394,259 @@
    :route/execution :finite :route/tier :public
    :route/summary "Test an extension package." :route/arguments []
    :route/options [:hara.cli.option/allow-process :hara.cli.option/format]
+   :route/formats [:text :edn]}
+
+  {:route/id :hara.cli.route/id :route/path ["id"]
+   :route/aliases [] :route/handler :hara.cli.handler/identity
+   :route/execution :finite :route/tier :public
+   :route/summary "Route tap identity operations."
+   :route/arguments [{:argument/id :hara.cli.argument/id-command
+                      :argument/cardinality :zero-or-more
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/tap :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/id-login :route/path ["id" "login"]
+   :route/aliases [] :route/handler :hara.cli.handler/identity
+   :route/execution :interactive :route/tier :public
+   :route/summary "Authorize GitHub identity proof."
+   :route/arguments [] :route/options [:hara.cli.option/tap]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/id-enroll :route/path ["id" "enroll"]
+   :route/aliases [] :route/handler :hara.cli.handler/identity
+   :route/execution :interactive :route/tier :public
+   :route/summary "Enroll an external publisher key for an owned namespace."
+   :route/arguments [] :route/options [:hara.cli.option/tap
+                                      :hara.cli.option/owner]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/id-status :route/path ["id" "status"]
+   :route/aliases [] :route/handler :hara.cli.handler/identity
+   :route/execution :finite :route/tier :public
+   :route/summary "Show enrollment and publisher authorization status."
+   :route/arguments [] :route/options [:hara.cli.option/tap
+                                      :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/id-key :route/path ["id" "key"]
+   :route/aliases [] :route/handler :hara.cli.handler/identity
+   :route/execution :finite :route/tier :public
+   :route/summary "List, rotate or revoke enrolled public keys."
+   :route/arguments [{:argument/id :hara.cli.argument/key-command
+                      :argument/cardinality :one-or-more
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/tap :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/id-namespace :route/path ["id" "namespace"]
+   :route/aliases [] :route/handler :hara.cli.handler/identity
+   :route/execution :finite :route/tier :public
+   :route/summary "List publisher namespace grants."
+   :route/arguments [] :route/options [:hara.cli.option/tap
+                                      :hara.cli.option/format]
+   :route/formats [:text :edn]}
+
+  {:route/id :hara.cli.route/asset :route/path ["asset"]
+   :route/aliases [] :route/handler :hara.cli.handler/asset
+   :route/execution :finite :route/tier :public
+   :route/summary "Route versioned asset collection operations."
+   :route/arguments [{:argument/id :hara.cli.argument/asset-command
+                      :argument/cardinality :zero-or-more
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/project :hara.cli.option/tap
+                   :hara.cli.option/offline :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/asset-check :route/path ["asset" "check"]
+   :route/aliases [] :route/handler :hara.cli.handler/asset
+   :route/execution :finite :route/tier :public
+   :route/summary "Validate an asset collection and derivative recipe."
+   :route/arguments [] :route/options [:hara.cli.option/project
+                                      :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/asset-build :route/path ["asset" "build"]
+   :route/aliases [] :route/handler :hara.cli.handler/asset
+   :route/execution :finite :route/tier :public
+   :route/summary "Build declared deterministic asset derivatives."
+   :route/arguments [] :route/options [:hara.cli.option/project
+                                      :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/asset-inspect :route/path ["asset" "inspect"]
+   :route/aliases [] :route/handler :hara.cli.handler/asset
+   :route/execution :finite :route/tier :public
+   :route/summary "Inspect an asset collection manifest."
+   :route/arguments [] :route/options [:hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/asset-publish :route/path ["asset" "publish"]
+   :route/aliases [] :route/handler :hara.cli.handler/asset
+   :route/execution :finite :route/tier :public
+   :route/summary "Submit a signed asset collection recipe."
+   :route/arguments [] :route/options [:hara.cli.option/tap
+                                      :hara.cli.option/dry-run]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/asset-status :route/path ["asset" "status"]
+   :route/aliases [] :route/handler :hara.cli.handler/asset
+   :route/execution :finite :route/tier :public
+   :route/summary "Show asset publication status."
+   :route/arguments [] :route/options [:hara.cli.option/tap
+                                      :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/asset-search :route/path ["asset" "search"]
+   :route/aliases [] :route/handler :hara.cli.handler/asset
+   :route/execution :finite :route/tier :public
+   :route/summary "Search accepted asset collections."
+   :route/arguments [{:argument/id :hara.cli.argument/query
+                      :argument/cardinality :one
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/tap :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/asset-info :route/path ["asset" "info"]
+   :route/aliases [] :route/handler :hara.cli.handler/asset
+   :route/execution :finite :route/tier :public
+   :route/summary "Show one asset collection release."
+   :route/arguments [{:argument/id :hara.cli.argument/coordinate
+                      :argument/cardinality :one
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/version :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/asset-pull :route/path ["asset" "pull"]
+   :route/aliases [] :route/handler :hara.cli.handler/asset
+   :route/execution :finite :route/tier :public
+   :route/summary "Pull and verify an asset collection."
+   :route/arguments [{:argument/id :hara.cli.argument/coordinate
+                      :argument/cardinality :one
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/version :hara.cli.option/profile
+                   :hara.cli.option/offline]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/asset-sync :route/path ["asset" "sync"]
+   :route/aliases [] :route/handler :hara.cli.handler/asset
+   :route/execution :finite :route/tier :public
+   :route/summary "Synchronize declared asset dependencies."
+   :route/arguments [] :route/options [:hara.cli.option/project
+                                      :hara.cli.option/offline]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/asset-yank :route/path ["asset" "yank"]
+   :route/aliases [] :route/handler :hara.cli.handler/asset
+   :route/execution :finite :route/tier :public
+   :route/summary "Yank an asset release without deleting history."
+   :route/arguments [] :route/options [:hara.cli.option/tap
+                                      :hara.cli.option/version]
+   :route/formats [:text :edn]}
+
+  {:route/id :hara.cli.route/tap :route/path ["tap"]
+   :route/aliases [["package" "tap"]]
+   :route/handler :hara.cli.handler/tap
+   :route/execution :finite :route/tier :public
+   :route/summary "Route federated tap trust and mirror operations."
+   :route/arguments [{:argument/id :hara.cli.argument/tap-command
+                      :argument/cardinality :zero-or-more
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/offline :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/tap-bootstrap :route/path ["tap" "bootstrap"]
+   :route/aliases [["package" "tap" "bootstrap"]]
+   :route/handler :hara.cli.handler/tap
+   :route/execution :finite :route/tier :public
+   :route/summary "Install a built-in tap trust profile."
+   :route/arguments [] :route/options [:hara.cli.option/tap]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/tap-init :route/path ["tap" "init"]
+   :route/aliases [["package" "tap" "init"]]
+   :route/handler :hara.cli.handler/tap
+   :route/execution :finite :route/tier :public
+   :route/summary "Scaffold an independently operated tap."
+   :route/arguments [] :route/options [:hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/tap-add :route/path ["tap" "add"]
+   :route/aliases [["package" "tap" "add"]]
+   :route/handler :hara.cli.handler/tap
+   :route/execution :finite :route/tier :public
+   :route/summary "Add a tap with an out-of-band root fingerprint."
+   :route/arguments [] :route/options [:hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/tap-remove :route/path ["tap" "remove"]
+   :route/aliases [["package" "tap" "remove"]]
+   :route/handler :hara.cli.handler/tap
+   :route/execution :finite :route/tier :public
+   :route/summary "Remove local trust in a tap."
+   :route/arguments [] :route/options [:hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/tap-list :route/path ["tap" "list"]
+   :route/aliases [["package" "tap" "list"]]
+   :route/handler :hara.cli.handler/tap
+   :route/execution :finite :route/tier :public
+   :route/summary "List locally trusted taps."
+   :route/arguments [] :route/options [:hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/tap-verify :route/path ["tap" "verify"]
+   :route/aliases [["package" "tap" "verify"]]
+   :route/handler :hara.cli.handler/tap
+   :route/execution :finite :route/tier :public
+   :route/summary "Verify tap identity and registry provenance."
+   :route/arguments [] :route/options [:hara.cli.option/offline
+                                      :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/tap-mirror :route/path ["tap" "mirror"]
+   :route/aliases [["package" "tap" "mirror"]]
+   :route/handler :hara.cli.handler/tap
+   :route/execution :finite :route/tier :public
+   :route/summary "Add, remove, list, synchronize or inspect tap mirrors."
+   :route/arguments [{:argument/id :hara.cli.argument/mirror-command
+                      :argument/cardinality :one-or-more
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/offline :hara.cli.option/format]
+   :route/formats [:text :edn]}
+
+  {:route/id :hara.cli.route/package-status
+   :route/path ["package" "status"]
+   :route/aliases [] :route/handler :hara.cli.handler/package
+   :route/execution :finite :route/tier :public
+   :route/summary "Show package publication status." :route/arguments []
+   :route/options [:hara.cli.option/tap :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/package-search
+   :route/path ["package" "search"]
+   :route/aliases [] :route/handler :hara.cli.handler/package
+   :route/execution :finite :route/tier :public
+   :route/summary "Search accepted packages."
+   :route/arguments [{:argument/id :hara.cli.argument/query
+                      :argument/cardinality :one
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/tap :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/package-info
+   :route/path ["package" "info"]
+   :route/aliases [] :route/handler :hara.cli.handler/package
+   :route/execution :finite :route/tier :public
+   :route/summary "Show one accepted package release."
+   :route/arguments [{:argument/id :hara.cli.argument/coordinate
+                      :argument/cardinality :one
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/version :hara.cli.option/format]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/package-yank
+   :route/path ["package" "yank"]
+   :route/aliases [] :route/handler :hara.cli.handler/package
+   :route/execution :finite :route/tier :public
+   :route/summary "Yank a package release without deleting history."
+   :route/arguments [] :route/options [:hara.cli.option/tap
+                                      :hara.cli.option/version]
+   :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/package-harp
+   :route/path ["package" "harp"]
+   :route/aliases [] :route/handler :hara.cli.handler/package
+   :route/execution :finite :route/tier :public
+   :route/summary "Check or inspect deterministic HARP archives."
+   :route/arguments [{:argument/id :hara.cli.argument/harp-command
+                      :argument/cardinality :one-or-more
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/format] :route/formats [:text :edn]}
+  {:route/id :hara.cli.route/package-extension
+   :route/path ["package" "extension"]
+   :route/aliases []
+   :route/handler :hara.cli.handler/extension
+   :route/execution :finite :route/tier :public
+   :route/summary "Check or test an extension package specialization."
+   :route/arguments [{:argument/id :hara.cli.argument/extension-command
+                      :argument/cardinality :one-or-more
+                      :argument/type :string}]
+   :route/options [:hara.cli.option/allow-process :hara.cli.option/format]
    :route/formats [:text :edn]}]
 
  :cli/options
@@ -432,6 +702,26 @@
    :option/names ["--format"]
    :option/type :enum
    :option/values [:text :edn]
+   :option/scope :route}
+  {:option/id :hara.cli.option/tap
+   :option/names ["--tap"]
+   :option/type :string
+   :option/scope :route}
+  {:option/id :hara.cli.option/owner
+   :option/names ["--owner"]
+   :option/type :string
+   :option/scope :route}
+  {:option/id :hara.cli.option/version
+   :option/names ["--version"]
+   :option/type :string
+   :option/scope :route}
+  {:option/id :hara.cli.option/profile
+   :option/names ["--profile"]
+   :option/type :string
+   :option/scope :route}
+  {:option/id :hara.cli.option/dry-run
+   :option/names ["--dry-run"]
+   :option/type :boolean
    :option/scope :route}]
 
  :cli/outcomes
@@ -510,6 +800,18 @@
    :handler/output :hara.cli.schema/result
    :handler/registry :closed}
   {:handler/id :hara.cli.handler/extension
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/identity
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/asset
+   :handler/input :hara.cli.schema/request
+   :handler/output :hara.cli.schema/result
+   :handler/registry :closed}
+  {:handler/id :hara.cli.handler/tap
    :handler/input :hara.cli.schema/request
    :handler/output :hara.cli.schema/result
    :handler/registry :closed}]}

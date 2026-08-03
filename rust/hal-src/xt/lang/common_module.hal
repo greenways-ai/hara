@@ -1,0 +1,96 @@
+(ns xt.lang.common-module
+  (:require [tahto.core :as l]
+            [tahto.core.script :as script]
+            [tahto.common.preprocess-base :as preprocess]
+            [std.lib.walk :as walk]))
+
+(def ^:dynamic *saved-module* nil)
+
+(l/script :xtalk
+  {})
+
+(defn current-module
+  "Gets a registered Tahto module by id, defaulting to the active macro module."
+  {:added "4.0"}
+  [module-id]
+  (let [module-id (if (and (list? module-id)
+                           (= (first module-id) (quote quote)))
+                    (second module-id)
+                    module-id)
+        options (preprocess/macro-opts)
+        active-id (get-in options [:module :id])
+        selected (or module-id active-id (current-namespace))
+        selected (symbol (str selected))]
+    (get (deref script/+modules+) selected)))
+
+(defn linked-natives
+  "Collects native entries from a module and its registered links."
+  {:added "4.0"}
+  ([lang]
+   (linked-natives lang (current-namespace)))
+  ([lang nss]
+   (let [initial (if (or (vector? nss) (list? nss) (set? nss))
+                   (vec nss)
+                   [nss])]
+     (loop [remaining initial seen #{} output {}]
+       (if (empty? remaining)
+         output
+         (let [module-id (symbol (str (first remaining)))
+               module (get (deref script/+modules+) module-id)]
+           (if (or (nil? module) (not (nil? (seen module-id))))
+             (recur (vec (rest remaining)) seen output)
+             (let [links (filter (fn [value]
+                                   (and (symbol? value) (not (= value (quote -)))))
+                                 (vals (or (:link module) {})))]
+               (recur (into (vec (rest remaining)) links)
+                      (conj seen module-id)
+                      (merge output (or (:native module) {})))))))))))
+
+(defn current-natives
+  "Gets the native entries of one registered module."
+  {:added "4.0"}
+  ([lang]
+   (current-natives lang (current-namespace)))
+  ([lang module-id]
+   (or (:native (current-module module-id)) {})))
+
+(defn expose-module
+  "Returns one module section with symbols and keywords stringified."
+  {:added "4.0"}
+  [key module-id]
+  (let [module (current-module module-id)
+        section (if (= key :internal)
+                  (reduce (fn [out pair]
+                            (assoc out (second pair) (first pair)))
+                          {}
+                          (seq (or (:link module) {})))
+                  (or (get module key) {}))]
+    (walk/postwalk
+     (fn [value]
+       (if (or (symbol? value) (keyword? value)) (str value) value))
+     section)))
+
+(defmacro.xt module-native
+  "returns the native map"
+  {:added "4.0"}
+  [& [module-id]]
+  (expose-module :native module-id))
+
+(defmacro.xt module-link
+  "returns the module link map"
+  {:added "4.0"}
+  [& [module-id]]
+  (expose-module :link module-id))
+
+(defmacro.xt module-internal
+  "returns the module link map"
+  {:added "4.0"}
+  [& [module-id]]
+  (expose-module :internal module-id))
+
+(defmacro.xt module-save
+  "saves module to `module/*saved-module*` var"
+  {:added "4.0"}
+  [& [module-id]]
+  (alter-var-root #'*saved-module* (fn [_] (current-module module-id)))
+  (str (get *saved-module* :id)))

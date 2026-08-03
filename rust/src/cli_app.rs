@@ -7,8 +7,7 @@
 use crate::kernel::{parse, Form};
 use std::sync::OnceLock;
 
-pub const MANIFEST_SOURCE: &str =
-    include_str!("../../specs/02-platform/000001-cli/draft/hara-cli.edn");
+pub const MANIFEST_SOURCE: &str = include_str!("../resources/hara-cli.edn");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Execution {

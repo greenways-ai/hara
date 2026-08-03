@@ -1,0 +1,38 @@
+(ns hara.cli.model)
+
+(def +outcome-exits+
+  {:hara.cli.outcome/success 0
+   :hara.cli.outcome/failed 1
+   :hara.cli.outcome/usage-error 2
+   :hara.cli.outcome/read-error 2
+   :hara.cli.outcome/resolution-error 2
+   :hara.cli.outcome/unavailable 2
+   :hara.cli.outcome/internal-error 2
+   :hara.cli.outcome/interrupted 130})
+
+(defn outcome-exit
+  [outcome]
+  (get +outcome-exits+ outcome 2))
+
+(defn request
+  [route arguments options context]
+  {:request/route route
+   :request/arguments (vec arguments)
+   :request/options options
+   :request/runtime (:runtime/id context)
+   :request/cwd (:runtime/cwd context)
+   :request/project (:runtime/project context)
+   :request/capabilities (vec (:runtime/capabilities context))})
+
+(defn result
+  ([outcome]
+   (result outcome nil []))
+  ([outcome data messages]
+   {:result/outcome outcome
+    :result/exit (outcome-exit outcome)
+    :result/data data
+    :result/messages (vec messages)}))
+
+(defn success?
+  [result]
+  (= :hara.cli.outcome/success (:result/outcome result)))

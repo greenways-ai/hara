@@ -1,0 +1,9 @@
+(ns std.string.prose
+  (:require [std.foundation.string :as string]))
+
+(defn |
+  "Joins values with newline separators."
+  {:added "3.0"}
+  [& args]
+  (string/join "
+" args))

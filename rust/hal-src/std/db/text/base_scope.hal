@@ -1,0 +1,302 @@
+;; ============================================================================
+;; std.db.text.base-scope — schema-aware graph query construction.
+;;
+;; Converts compact query vectors and scope selectors into the canonical tree
+;; consumed by std.db.text.base-graph and std.db.text.sql-graph.
+;; ============================================================================
+(ns std.db.text.base-scope
+  (:require [std.foundation.string :as string]))
+
+(def Scopes
+  {"*/min" {"-/id" true "-/key" true}
+   "*/info" {"-/info" true "-/id" true "-/key" true}
+   "*/data" {"-/info" true "-/id" true "-/data" true "-/key" true}
+   "*/default" {"-/info" true "-/id" true "-/ref" true "-/data" true "-/key" true}
+   "*/detail" {"-/detail" true "-/info" true "-/id" true "-/data" true "-/key" true}
+   "*/standard" {"-/detail" true "-/info" true "-/id" true "-/ref" true "-/data" true "-/key" true}
+   "*/all" {"-/detail" true "-/info" true "-/id" true "-/ref" true "-/data" true "-/system" true "-/key" true}
+   "*/everything" {"-/detail" true "-/info" true "-/hidden" true "-/id" true "-/ref" true "-/data" true "-/system" true "-/key" true}})
+
+(defn- compatible-get
+  [value lookup-key]
+  (cond
+    (not (map? value)) nil
+    (has? value lookup-key) (get value lookup-key)
+    (string? lookup-key) (get value (keyword lookup-key))
+    (keyword? lookup-key) (get value (name lookup-key))
+    :else nil))
+
+(defn- option
+  [value lookup-key fallback]
+  (let [found (compatible-get value lookup-key)]
+    (if (nil? found) fallback found)))
+
+(defn- arrayify
+  [value]
+  (cond
+    (nil? value) []
+    (vector? value) value
+    :else [value]))
+
+(defn- present?
+  [value]
+  (cond
+    (nil? value) false
+    (map? value) (not (empty? value))
+    (vector? value) (not (empty? value))
+    (string? value) (> (string/length value) 0)
+    :else true))
+
+(defn- deep-copy
+  [value]
+  (cond
+    (map? value)
+    (reduce (fn [out pair]
+              (assoc out (key pair) (deep-copy (val pair))))
+            {}
+            value)
+
+    (vector? value)
+    (map deep-copy value)
+
+    :else value))
+
+(defn- deep-merge
+  [left right]
+  (reduce (fn [out pair]
+            (let [entry-key (key pair)
+                  incoming (val pair)
+                  existing (get out entry-key)]
+              (assoc out entry-key
+                     (if (and (map? existing) (map? incoming))
+                       (deep-merge existing incoming)
+                       (deep-copy incoming)))))
+          (deep-copy (or left {}))
+          (or right {})))
+
+(defn merge-queries
+  "Returns the Cartesian deep merge of two query-clause collections."
+  [query-a query-b]
+  (let [left (filter present? (arrayify query-a))
+        right (filter present? (arrayify query-b))]
+    (cond
+      (empty? left) right
+      (empty? right) left
+      :else
+      (reduce (fn [out first-clause]
+                (reduce (fn [nested second-clause]
+                          (conj nested (deep-merge first-clause second-clause)))
+                        out
+                        right))
+              []
+              left))))
+
+(defn- selector-namespace
+  [value]
+  (if (string? value)
+    (let [index (string/index-of value "/")]
+      (if (< index 0) nil (string/slice value 0 index)))
+    nil))
+
+(defn- map-merge
+  [left right]
+  (reduce (fn [out pair]
+            (assoc out (key pair) (val pair)))
+          (or left {})
+          (or right {})))
+
+(defn filter-scope
+  "Expands aggregate scope selectors and preserves explicit -/ selectors."
+  [keys]
+  (let [manual (filter (fn [value]
+                         (= "-" (selector-namespace value)))
+                       keys)
+        aggregate (filter (fn [value]
+                            (= "*" (selector-namespace value)))
+                          keys)
+        initial (reduce (fn [out value] (assoc out value true)) {} manual)]
+    (reduce (fn [out selector]
+              (map-merge out (get Scopes selector {})))
+            initial
+            aggregate)))
+
+(defn filter-plain-key
+  "Converts a plain foreign-key column name such as owner_id to owner."
+  [value]
+  (if (and (string? value)
+           (nil? (selector-namespace value)))
+    (if (and (>= (string/length value) 3)
+             (string/ends-with? value "_id"))
+      (string/slice value 0 (- (string/length value) 3))
+      value)
+    nil))
+
+(defn filter-plain
+  "Returns a lookup map of explicit non-scope selectors."
+  [keys]
+  (reduce (fn [out value]
+            (let [plain (filter-plain-key value)]
+              (if plain (assoc out plain true) out)))
+          {}
+          keys))
+
+(defn get-data-columns
+  "Returns ordered schema attributes selected by scopes or plain names."
+  [schema table-name keys]
+  (let [string-keys (filter string? keys)
+        scopes (filter-scope string-keys)
+        plains (filter-plain string-keys)
+        columns (compatible-get schema table-name)]
+    (if (nil? columns)
+      (throw (ex-info "Table not in schema" {:table table-name}))
+      nil)
+    (sort-by (fn [entry] (compatible-get entry :order))
+             (filter (fn [entry]
+                       (let [scope (compatible-get entry :scope)
+                             ident (compatible-get entry :ident)]
+                         (or (and scope (= true (get scopes (str "-/" scope))))
+                             (= true (get plains ident)))))
+                     (vals columns)))))
+
+(defn get-link-standard
+  "Normalizes a compact link vector to [name [where... returning]]."
+  [link]
+  (let [link-name (first link)]
+    (if (= 1 (count link))
+      [link-name [{} ["*/data"]]]
+      (let [maps (filter map? link)
+            arrays (filter vector? link)
+            maps (if (empty? maps) [{}] maps)
+            arrays (if (empty? arrays) [["*/data"]] arrays)]
+        [link-name (vec (concat maps arrays))]))))
+
+(defn get-query-tables
+  "Collects tables reached by a nested where/query object."
+  ([schema table-name query]
+   (get-query-tables schema table-name query {}))
+  ([schema table-name query accumulator]
+   (let [table (compatible-get schema table-name)]
+     (if (nil? table)
+       accumulator
+       (reduce (fn [out pair]
+                 (let [attribute (compatible-get table (key pair))
+                       reference (compatible-get attribute :ref)
+                       linked-table (compatible-get reference :ns)
+                       value (val pair)]
+                   (if (= "ref" (compatible-get attribute :type))
+                     (if (map? value)
+                       (get-query-tables schema linked-table value out)
+                       (assoc out linked-table true))
+                     out)))
+               (assoc accumulator table-name true)
+               query)))))
+
+(defn get-link-columns
+  "Returns selected reference attributes paired with normalized link queries."
+  [schema table-name keys]
+  (let [link-vectors (filter vector? keys)
+        linked (reduce (fn [out link]
+                         (let [standard (get-link-standard link)]
+                           (assoc out (first standard) (second standard))))
+                       {}
+                       link-vectors)
+        columns (compatible-get schema table-name)]
+    (reduce (fn [out column]
+              (let [ident (compatible-get column :ident)]
+                (if (has? linked ident)
+                  (conj out [column (get linked ident)])
+                  out)))
+            []
+            (vals columns))))
+
+(defn get-linked-tables-loop
+  "Accumulates tables referenced by a returning graph."
+  [schema table-name returning accumulator]
+  (let [links (get-link-columns schema
+                                table-name
+                                (if (vector? returning) returning []))
+        initial (assoc accumulator table-name true)]
+    (reduce (fn [out link]
+              (let [attribute (first link)
+                    link-query (second link)
+                    child-returning (second link-query)
+                    reference (compatible-get attribute :ref)]
+                (get-linked-tables-loop schema
+                                        (compatible-get reference :ns)
+                                        child-returning
+                                        out)))
+            initial
+            links)))
+
+(defn get-linked-tables
+  "Returns all tables reached by a returning graph."
+  [schema table-name returning]
+  (get-linked-tables-loop schema table-name returning {}))
+
+(defn as-where-input
+  "Normalizes nil, empty and singular where clauses to a vector."
+  [input]
+  (cond
+    (not (present? input)) []
+    (vector? input) input
+    :else [input]))
+
+(defn- tagged-sql?
+  [value]
+  (and (map? value)
+       (string? (compatible-get value "::"))))
+
+(defn- plain-where?
+  [value]
+  (and (map? value)
+       (nil? (compatible-get value "::"))))
+
+(defn get-tree
+  "Builds canonical schema-aware graph IR from where and returning inputs."
+  [schema table-name where returning options]
+  (let [table-function (option options :table-fn identity)
+        column-function (option options :column-fn identity)
+        where (as-where-input where)
+        returning (if (vector? returning) returning ["*/data"])
+        custom (filter tagged-sql? returning)
+        data (get-data-columns schema table-name returning)
+        links (get-link-columns schema table-name returning)
+        child-tree
+        (fn [link]
+          (let [attribute (first link)
+                link-query (second link)
+                link-where-query (filter plain-where? link-query)
+                link-returning (last link-query)
+                link-where-returning (if (vector? link-returning)
+                                       (filter plain-where? link-returning)
+                                       [])
+                link-where (merge-queries link-where-query link-where-returning)
+                reference (compatible-get attribute :ref)
+                child-table (compatible-get reference :ns)
+                link-type (compatible-get reference :type)
+                parent-table (table-function table-name)
+                parent-id (column-function "id")
+                extra (if (= "reverse" link-type)
+                        {(compatible-get reference :rkey)
+                         ["eq" [(str parent-table "." parent-id)]]}
+                        {"id"
+                         ["eq" [(str parent-table "."
+                                     (column-function
+                                      (str (compatible-get reference :key) "_id")))]]})]
+            [(compatible-get attribute :ident)
+             link-type
+             (get-tree schema
+                       child-table
+                       (merge-queries link-where extra)
+                       link-returning
+                       options)]))]
+    [table-name
+     {"where" where
+      "data" (map (fn [entry]
+                    (let [ident (compatible-get entry :ident)]
+                      (if (= "ref" (compatible-get entry :type))
+                        (str ident "_id")
+                        ident)))
+                  data)
+      "links" (map child-tree links)
+      "custom" custom}]))

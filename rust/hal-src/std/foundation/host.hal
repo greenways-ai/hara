@@ -1,0 +1,40 @@
+;; ============================================================================
+;; std.foundation.host — portable host capability boundary.
+;;
+;; This namespace exposes the generic capability protocol used by embedders.
+;; It deliberately owns no browser, filesystem, editor, or product semantics:
+;; those belong to a host implementation (for example hara-web) and to
+;; higher-level Foundation or application libraries respectively.
+;;
+;; Domain libraries such as std.foundation.file remain the preferred API for
+;; ordinary program code. host/* is for capability discovery and explicitly
+;; declared host operations that have no narrower Foundation abstraction.
+;; ============================================================================
+(ns std.foundation.host
+  (:config {:blank true})
+  (:require [std.foundation :refer [vec]]))
+
+(defn ^{:schema [:fn [:str :str & :any] :promise]}
+  call
+  "Invokes a capability-gated host operation and returns its promise."
+  [service method & args]
+  (Host/call service method (vec args)))
+
+(defn ^{:schema [:fn [] :promise]}
+  describe
+  "Returns a promise of the host descriptor: version, capability names, scopes, and limits."
+  []
+  (Host/describe))
+
+(defn ^{:schema [:fn [] :promise]}
+  capabilities
+  "Returns a promise of the capability names granted to this session."
+  []
+  (Host/capabilities))
+
+(defn ^{:schema [:fn [:any] :promise]}
+  capability?
+  "Returns a promise of whether capability is granted to this session."
+  [capability]
+  (Host/capability? capability))
+

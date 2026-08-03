@@ -1,0 +1,114 @@
+(ns std.foundation.pretty.engine
+  (:config {:blank true})
+  (:require [std.foundation :refer [+ <= = first get keyword? list? map? nil? nth reduce rest second str string? vector?]])
+  (:require [std.foundation.string :as string]))
+
+(defn append-text
+  [state text visible]
+  {:text (str (get state :text) text)
+   :column (+ (get state :column) visible)})
+
+(declare render-node)
+
+(defn render-many
+  [documents state options mode indent]
+  (reduce (fn [output document]
+            (std.foundation.pretty.engine/render-node
+              document
+              output
+              options
+              mode
+              indent))
+          state
+          documents))
+
+(defn line-state
+  [state inline terminate mode indent]
+  (if (= mode :flat)
+    (append-text state inline (string/length inline))
+    {:text (str (get state :text)
+                terminate
+                "\n"
+                (string/repeat " " indent))
+     :column indent}))
+
+(defn render-vector
+  [document state options mode indent]
+  (let [tag (first document)
+        body (rest document)]
+    (if (= tag :text)
+      (render-many body state options mode indent)
+      (if (= tag :pass)
+        (reduce (fn [output value]
+                  (append-text output (str value) 0))
+                state
+                body)
+        (if (= tag :escaped)
+          (append-text state (or (first body) "") 1)
+          (if (= tag :span)
+            (render-many body state options mode indent)
+            (if (= tag :line)
+              (line-state state
+                          (or (first body) " ")
+                          (or (second body) "")
+                          mode
+                          indent)
+              (if (= tag :break)
+                (line-state state "" "" :broken indent)
+                (if (= tag :group)
+                  (let [width (or (get options :width) 80)
+                        trial (render-many (rest document)
+                                           state
+                                           options
+                                           :flat
+                                           indent)]
+                    (if (<= (get trial :column) width)
+                      trial
+                      (render-many (rest document)
+                                   state
+                                   options
+                                   :broken
+                                   indent)))
+                  (if (= tag :nest)
+                    (let [offset (nth document 1)
+                          children (rest (rest document))]
+                      (render-many children
+                                   state
+                                   options
+                                   mode
+                                   (+ (Numbers/long indent)
+                                      (Numbers/long offset))))
+                    (if (= tag :align)
+                      (let [offset (nth document 1)
+                            children (rest (rest document))]
+                        (render-many children
+                                     state
+                                     options
+                                     mode
+                                     (+ (get state :column) offset)))
+                      (render-many document state options mode indent))))))))))))
+
+(defn render-node
+  [document state options mode indent]
+  (if (nil? document)
+    state
+    (if (string? document)
+      (append-text state document (string/length document))
+      (if (keyword? document)
+        (if (= document :line)
+          (line-state state " " "" mode indent)
+          state)
+        (if (list? document)
+          (render-many document state options mode indent)
+          (if (vector? document)
+            (render-vector document state options mode indent)
+            (let [text (str document)]
+              (append-text state text (string/length text)))))))))
+
+(defn render
+  ([document]
+   (render document {}))
+  ([document options]
+   (if (map? options)
+     (get (render-node document {:text "" :column 0} options :broken 0) :text)
+     (throw "pretty/render expects an options map"))))

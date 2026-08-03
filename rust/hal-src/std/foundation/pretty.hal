@@ -1,0 +1,15 @@
+(ns std.foundation.pretty
+  (:config {:blank true})
+  (:require [std.foundation.pretty.engine :as engine]))
+
+(defn render
+  ([document]
+   (engine/render document {}))
+  ([document options]
+   (engine/render document options)))
+
+(defn write
+  ([document]
+   (write document {}))
+  ([document options]
+   (Printer/p (engine/render document options))))

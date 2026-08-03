@@ -171,7 +171,7 @@ pub(crate) fn test_project(options: &Options, args: &[String]) -> Result<(), Str
         if options.allow_process {
             runtime.install_native_process_provider();
         }
-        runtime.eval_native(include_str!("../../../../../lib/src/std/lib/test.hal"))?;
+        runtime.eval_native(include_str!("../../../../hal-src/std/lib/test.hal"))?;
         let evaluated = runtime.eval_native(&source)?;
         match test_results(&evaluated) {
             Ok((file_passed, file_failed)) => {

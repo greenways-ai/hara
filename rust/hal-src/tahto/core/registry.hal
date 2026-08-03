@@ -1,0 +1,288 @@
+(ns tahto.core.registry)
+
+;; Foundation-compatible runtime registry. Runtime implementations are loaded
+;; lazily from the exact [language runtime] coordinate.
+(def +registry+
+  (atom {[:js :oneshot] 'tahto.runtime.basic.impl.process-js
+         [:js :basic] 'tahto.runtime.basic.impl.process-js
+         [:python :oneshot] 'tahto.runtime.basic.impl.process-python
+         [:python :basic] 'tahto.runtime.basic.impl.process-python
+         [:lua :oneshot] 'tahto.runtime.basic.impl.process-lua
+         [:lua :basic] 'tahto.runtime.basic.impl.process-lua}))
+
+;; Foundation keeps the public [:language :default] coordinate stable. Each
+;; coordinate owns a configurable default and any number of immutable versions.
+(def +book-registry+
+  (atom {[:xtalk :default]
+         {:default-version 1
+          :versions
+          {1 {:ns 'tahto.model.v1.spec-xtalk
+              :book '+book+}}}
+
+         [:js :default]
+         {:default-version 1
+          :versions
+          {1 {:ns 'tahto.model.v1.spec-js
+              :book '+book+
+              :parent :xtalk}}}
+
+         [:python :default]
+         {:default-version 1
+          :versions
+          {1 {:ns 'tahto.model.v1.spec-python
+              :book '+book+
+              :parent :xtalk}}}
+
+         [:lua :default]
+         {:default-version 1
+          :versions
+          {1 {:ns 'tahto.model.v1.spec-lua
+              :book '+book+
+              :parent :xtalk}}}
+
+         [:postgres :default]
+         {:default-version 1
+          :versions
+          {1 {:ns 'tahto.model.v1.spec-postgres
+              :book '+book+
+              :parent :xtalk}}}}))
+
+(defn- atom-value [reference]
+  (deref (identity reference)))
+
+(defn- resolve-required [qualified]
+  (or (resolve qualified)
+      (requiring-resolve qualified)))
+
+(defn registry-list
+  "Lists registered [language runtime] coordinates."
+  []
+  (vec (keys (atom-value +registry+))))
+
+(defn registry-add!
+  "Registers one runtime implementation namespace."
+  [language runtime namespace-symbol]
+  (swap! +registry+ assoc [language runtime] namespace-symbol)
+  namespace-symbol)
+
+(defn registry-runtime-ns
+  "Returns the implementation namespace for a runtime coordinate."
+  [language runtime]
+  (get (atom-value +registry+) [language runtime]))
+
+(defn registry-runtime
+  "Loads a registered runtime implementation and returns its namespace."
+  [language runtime]
+  (let [namespace-symbol (registry-runtime-ns language runtime)]
+    (if namespace-symbol
+      (let [init-symbol (symbol (name namespace-symbol) "+init+")
+            init-var (resolve-required init-symbol)]
+        (if init-var
+          namespace-symbol
+          (throw
+           (ex-info "Registered runtime namespace has no +init+ Var"
+                    {:lang language
+                     :runtime runtime
+                     :namespace namespace-symbol}))))
+      nil)))
+
+(defn registry-book-list
+  "Lists all registered Foundation book coordinates."
+  []
+  (vec (keys (atom-value +book-registry+))))
+
+(defn- registry-book-entry
+  [language key]
+  (get (atom-value +book-registry+) [language key]))
+
+(defn registry-book-versions
+  "Lists every installed version for a Foundation book coordinate."
+  ([language]
+   (registry-book-versions language :default))
+  ([language key]
+   (let [entry (registry-book-entry language key)]
+     (if entry
+       (vec (sort (keys (get entry :versions))))
+       []))))
+
+(defn registry-book-default-version
+  "Returns the version selected by a versionless book request."
+  ([language]
+   (registry-book-default-version language :default))
+  ([language key]
+   (get (registry-book-entry language key) :default-version)))
+
+(defn registry-book-info
+  "Returns version-specific metadata for a language book.
+
+   Omitting version selects the coordinate's configured default."
+  ([language]
+   (registry-book-info language :default nil))
+  ([language key]
+   (registry-book-info language key nil))
+  ([language key version]
+   (let [entry (registry-book-entry language key)]
+     (if (nil? entry)
+       nil
+       (let [selected-version (or version (get entry :default-version))
+             info (get-in entry [:versions selected-version])]
+         (if info
+           (assoc info
+                  :language language
+                  :key key
+                  :version selected-version
+                  :default-version (get entry :default-version))
+           (throw
+            (ex-info "Book version is not registered"
+                     {:language language
+                      :key key
+                      :version selected-version
+                      :available (registry-book-versions language key)}))))))))
+
+(defn registry-book-add!
+  "Adds one immutable version beneath a stable [language key] coordinate."
+  ([language version info]
+   (registry-book-add! language :default version info))
+  ([language key version info]
+   (if (or (nil? version)
+           (not (number? version))
+           (<= version 0)
+           (nil? (get info :ns))
+           (nil? (get info :book)))
+     (throw
+      (ex-info "Invalid versioned book registration"
+               {:language language
+                :key key
+                :version version
+                :info info}))
+     (let [coordinate [language key]]
+       (swap!
+        +book-registry+
+        (fn [all]
+          (let [entry (or (get all coordinate)
+                          {:default-version version
+                           :versions {}})]
+            (if (get-in entry [:versions version])
+              (throw
+               (ex-info "Book version is already registered"
+                        {:language language
+                         :key key
+                         :version version}))
+              (let [with-version
+                    (assoc-in entry [:versions version] info)
+                    complete
+                    (if (get with-version :default-version)
+                      with-version
+                      (assoc with-version :default-version version))]
+                (assoc all coordinate complete))))))
+       (registry-book-info language key version)))))
+
+(defn registry-book-set-default!
+  "Changes versionless selection without replacing any installed version."
+  ([language version]
+   (registry-book-set-default! language :default version))
+  ([language key version]
+   (let [entry (registry-book-entry language key)]
+     (cond
+       (nil? entry)
+       (throw
+        (ex-info "Book coordinate is not registered"
+                 {:language language :key key}))
+
+       (nil? (get-in entry [:versions version]))
+       (throw
+        (ex-info "Cannot select an unregistered book version"
+                 {:language language
+                  :key key
+                  :version version
+                  :available (registry-book-versions language key)}))
+
+       :else
+       (do
+         (swap! +book-registry+
+                assoc-in
+                [[language key] :default-version]
+                version)
+         version)))))
+
+(defn registry-book-remove!
+  "Removes one version. Removing the default chooses the lowest remaining version."
+  ([language version]
+   (registry-book-remove! language :default version))
+  ([language key version]
+   (let [coordinate [language key]
+         entry (registry-book-entry language key)
+         removed (get-in entry [:versions version])]
+     (if (nil? removed)
+       (throw
+        (ex-info "Cannot remove an unregistered book version"
+                 {:language language
+                  :key key
+                  :version version
+                  :available (registry-book-versions language key)}))
+       (do
+         (swap!
+          +book-registry+
+          (fn [all]
+            (let [current (get all coordinate)
+                  remaining (dissoc (get current :versions) version)]
+              (if (empty? remaining)
+                (dissoc all coordinate)
+                (let [next-default
+                      (if (= version (get current :default-version))
+                        (first (sort (keys remaining)))
+                        (get current :default-version))]
+                  (assoc all coordinate
+                         {:default-version next-default
+                          :versions remaining}))))))
+         (assoc removed
+                :language language
+                :key key
+                :version version))))))
+
+(defn registry-book-ns
+  "Returns the namespace that owns a selected language book."
+  ([language]
+   (registry-book-ns language :default nil))
+  ([language key]
+   (registry-book-ns language key nil))
+  ([language key version]
+   (get (registry-book-info language key version) :ns)))
+
+(defn registry-book
+  "Loads a selected versioned language book using Foundation names.
+
+   Versionless calls use :default-version. Explicit calls remain pinned even
+   when the configured default later changes."
+  ([language]
+   (registry-book language :default nil))
+  ([language key]
+   (registry-book language key nil))
+  ([language key requested-version]
+   (let [{:keys [ns book version] :as info}
+         (registry-book-info language key requested-version)]
+     (if (nil? info)
+       nil
+       (let [qualified (symbol (name ns) (name book))
+             resolved (resolve-required qualified)]
+         (if resolved
+           (let [value (deref resolved)
+                 actual-version (get value :version)]
+             (if (and actual-version
+                      (not= actual-version version))
+               (throw
+                (ex-info "Registered book version does not match loaded book"
+                         {:language language
+                          :key key
+                          :requested version
+                          :loaded actual-version
+                          :namespace ns
+                          :book book}))
+               value))
+           (throw
+            (ex-info "Registered book Var is missing"
+                     {:language language
+                      :key key
+                      :version version
+                      :namespace ns
+                      :book book}))))))))

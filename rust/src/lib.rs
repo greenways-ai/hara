@@ -3172,7 +3172,7 @@ mod tests {
             return;
         };
         let fixture =
-            include_str!("../../lib/test-fixtures/std/foundation/protocol_conformance.hal");
+            include_str!("../hal-test-fixtures/std/foundation/protocol_conformance.hal");
         assert_eq!(core::FOUNDATION_PROTOCOLS.len(), 53);
         assert_eq!(
             core::FOUNDATION_PROTOCOLS
@@ -3318,7 +3318,7 @@ mod tests {
     #[test]
     fn shared_foundation_protocol_functionality_fixture_runs_in_the_native_runtime() {
         let source =
-            include_str!("../../lib/test-fixtures/std/foundation/protocol_functionality.hal");
+            include_str!("../hal-test-fixtures/std/foundation/protocol_functionality.hal");
         let Some(catalog) = repo_text(
             "specs/00-unsorted/platform-language/draft/conformance/protocol-method-cases.edn",
         ) else {

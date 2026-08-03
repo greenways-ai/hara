@@ -1,0 +1,178 @@
+;; ==========================================================================
+;; std.db.text.base-util — route, view and lookup data helpers.
+;;
+;; Native Hara port of xt.db.text.base-util. Helpers accept both keyword-keyed
+;; Hara maps and string-keyed maps arriving through xtalk or JSON boundaries.
+;; ==========================================================================
+(ns std.db.text.base-util)
+
+(defn- ^{:schema [:fn [:map :any :any] :any]}
+  compatible-field
+  "Returns a compatible-field from its keyword key or fallback string key."
+  [value keyword-key string-key]
+  (if (has? value keyword-key)
+    (get value keyword-key)
+    (get value string-key)))
+
+(defn- ^{:schema [:fn [:map :map] :map]}
+  map-merge
+  "Returns left with every entry from right associated over it."
+  [left right]
+  (reduce (fn [out entry]
+            (assoc out (key entry) (val entry)))
+          (if (nil? left) {} left)
+          (if (nil? right) {} right)))
+
+(defn- ^{:schema [:fn [:map :any] :map]}
+  route-with-type
+  "Adds type using the route's key convention unless a type already exists."
+  [route type]
+  (if (or (has? route :type)
+          (has? route "type"))
+    route
+    (assoc route
+           (if (has? route "url") "type" :type)
+           type)))
+
+(defn ^{:schema [:fn [:vector :any] :map]}
+  collect-routes
+  "Indexes routes by URL and adds the supplied route type."
+  [routes type]
+  (reduce (fn [out route]
+            (assoc out
+                   (compatible-field route :url "url")
+                   (route-with-type route type)))
+          {}
+          routes))
+
+(defn ^{:schema [:fn [:map] :map]}
+  collect-routes-object
+  "Indexes the route descriptor values in routes by URL."
+  [routes]
+  (reduce (fn [out entry]
+            (let [route (val entry)]
+              (assoc out
+                     (compatible-field route :url "url")
+                     route)))
+          {}
+          routes))
+
+(defn ^{:schema [:fn [:vector] :map]}
+  collect-views
+  "Indexes routes by their view table, type and tag."
+  [routes]
+  (reduce (fn [out route]
+            (let [view (compatible-field route :view "view")
+                  table (compatible-field view :table "table")
+                  type (compatible-field view :type "type")
+                  tag (compatible-field view :tag "tag")]
+              (assoc-in out [table type tag] route)))
+          {}
+          routes))
+
+(defn- ^{:schema [:fn [:map :map :any :any] :map]}
+  merge-existing-category
+  "Merges a view category only when it already exists on current."
+  [current incoming keyword-key string-key]
+  (cond
+    (has? current keyword-key)
+    (assoc current
+           keyword-key
+           (map-merge (get current keyword-key)
+                      (compatible-field incoming keyword-key string-key)))
+
+    (has? current string-key)
+    (assoc current
+           string-key
+           (map-merge (get current string-key)
+                      (compatible-field incoming keyword-key string-key)))
+
+    :else
+    current))
+
+(defn- ^{:schema [:fn [:map :map] :map]}
+  merge-view-entry
+  "Merges the source select and return categories of colliding view entries."
+  [current incoming]
+  (let [with-select (merge-existing-category current incoming :select "select")]
+    (merge-existing-category with-select incoming :return "return")))
+
+(defn ^{:schema [:fn [:vector :map] :map]}
+  merge-views
+  "Merges view maps into acc using the xt.db collision contract."
+  [views acc]
+  (reduce
+   (fn [out view]
+     (reduce (fn [current entry]
+               (let [table (key entry)
+                     incoming (val entry)]
+                 (if (has? current table)
+                   (assoc current
+                          table
+                          (merge-view-entry (get current table) incoming))
+                   (assoc current table incoming))))
+             out
+             view))
+   (if (nil? acc) {} acc)
+   views))
+
+(defn- ^{:schema [:fn [:any] :bool]}
+  keep-result?
+  "Returns true for result shapes retained by the source helper."
+  [value]
+  (or (number? value)
+      (string? value)
+      (and (map? value)
+           (not (empty? value)))))
+
+(defn ^{:schema [:fn [:vector :fn :fn :int] :vector]}
+  keepf-limit
+  "Maps matching values, retaining at most n supported non-empty results."
+  [values predicate function n]
+  (loop [remaining values
+         out []
+         kept 0]
+    (if (or (= kept n)
+            (= 0 (count remaining)))
+      out
+      (let [value (first remaining)
+            more (drop 1 remaining)]
+        (if (predicate value)
+          (let [result (function value)]
+            (if (keep-result? result)
+              (recur more (conj out result) (+ kept 1))
+              (recur more out kept)))
+          (recur more out kept))))))
+
+(defn ^{:schema [:fn [:any :fn] :any]}
+  lu-nested
+  "Recursively converts vectors into maps indexed by key-function."
+  [value key-function]
+  (cond
+    (nil? value)
+    nil
+
+    (map? value)
+    (reduce (fn [out entry]
+              (assoc out
+                     (key entry)
+                     (lu-nested (val entry) key-function)))
+            {}
+            value)
+
+    (vector? value)
+    (lu-nested
+     (reduce (fn [out item]
+               (assoc out (key-function item) item))
+             {}
+             value)
+     key-function)
+
+    :else
+    value))
+
+(defn ^{:schema [:fn [:any] :any]}
+  lu-map
+  "Recursively indexes vectors of records by their id compatible-field."
+  [value]
+  (lu-nested value (fn [item] (compatible-field item :id "id"))))

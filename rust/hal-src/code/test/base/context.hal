@@ -1,0 +1,29 @@
+(ns code.test.base.context)
+
+(def +context+ (atom {}))
+
+(defn new-context
+  []
+  {:eval-fact false
+   :eval-mode false
+   :eval-meta nil
+   :eval-global nil
+   :eval-check nil
+   :eval-current-ns nil
+   :run-id true
+   :registry (atom {})
+   :accumulator (atom {})
+   :errors nil
+   :results nil
+   :timeout 60000
+   :timeout-ns nil
+   :print #{:print-throw :print-failed :print-timeout :print-bulk}})
+
+(defmacro with-new-context
+  [options & body]
+  `(let [previous# (deref +context+)]
+     (try
+       (do
+         (reset! +context+ (merge (new-context) ~options))
+         ~@body)
+       (finally (reset! +context+ previous#)))))

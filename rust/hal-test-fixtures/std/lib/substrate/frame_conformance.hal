@@ -1,0 +1,14 @@
+(ns std.lib.substrate.frame-conformance
+  (:require [std.lib.substrate.frame :as frame]))
+
+(def wire (frame/frame-create :request "req-1"
+                              {:source "client/a"
+                               :target "server/b"
+                               :space "workspace/main"
+                               :action "math/add"
+                               :args [19 23]
+                               :meta {:trace "trace-1"}}))
+
+(def wire-json (frame/encode-frame-json wire))
+(def decoded-wire (frame/decode-frame-json wire-json))
+(frame/encode-frame-json decoded-wire)

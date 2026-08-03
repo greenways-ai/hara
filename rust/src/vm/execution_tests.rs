@@ -159,7 +159,7 @@ fn runtime_bytecode_defmacro_registers_and_expands() {
 
 #[test]
 fn foundation_source_compiles_to_bytecode() {
-    let source = include_str!("../../../lib/src/std/foundation.hal");
+    let source = include_str!("../../hal-src/std/foundation.hal");
     let body = source
         .split_once("(ns std.foundation)")
         .expect("foundation namespace declaration")

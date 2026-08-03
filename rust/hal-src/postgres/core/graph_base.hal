@@ -1,0 +1,155 @@
+(ns postgres.core.graph-base
+  (:config {:blank true})
+  (:require [std.foundation :refer :all]
+            [std.foundation.string :as string]
+            [tahto.common.util :as util]
+            [postgres.core.impl-base :as base]
+            [postgres.core.impl-main :as main]
+            [postgres.core.impl-update :as update]))
+
+(defn- attrs [schema key]
+  (let [entry (get schema key)] (if (vector? entry) (first entry) entry)))
+
+(defn- normalize-key [key]
+  (if (string? key)
+    (let [plain (if (string/ends-with? key "_id")
+                  (string/slice key 0 (- (string/length key) 3)) key)]
+      (keyword (util/sym-default-inverse-str plain)))
+    key))
+
+(defn- linked-prepared [link options]
+  (let [schema (:schema options)
+        table-key (keyword (name (:id link)))
+        table-schema (get-in schema [:tree table-key])
+        entry (merge link {:table-schema table-schema})]
+    [entry table-schema options]))
+
+(declare where-fn)
+
+(defn- prepare [spec]
+  (let [prepared (base/prep-table spec true {})
+        entry (first prepared)
+        options (nth prepared 2)]
+    [entry (second prepared)
+     (if (:schema entry) (assoc options :schema (:schema entry)) options)]))
+
+(defn where-pair-ref [pair where-transform attr options]
+  (let [key (first pair)
+        value (second pair)
+        ref (:ref attr)
+        direction (:type ref)
+        link (:link ref)
+        reverse-value (:rval ref)]
+    (cond
+      (= value :*) [key :*]
+      (and (= :forward direction) (not (map? value)) (not (util/hashvec? value)))
+      [key [:eq value]]
+      (and (= :forward direction) (map? value)
+           (= [:id] (vec (keys value)))
+           (not (vector? (:id value))))
+      [key [:eq (:id value)]]
+      (and (= :forward direction) (map? value)
+           (= [:id] (vec (keys value))) (vector? (:id value)))
+      [key (:id value)]
+      :else
+      (let [prepared (linked-prepared link options)
+            linked-schema (second prepared)
+            nested (if (or (map? value) (util/hashvec? value)) value {:id value})]
+        (if (= :reverse direction)
+          [:id [:in (main/t-select-raw prepared
+                                       {:returning #{reverse-value}
+                                        :where (where-transform linked-schema nested options)
+                                        :as :raw})]]
+          (let [clause (where-transform linked-schema nested options)
+                multi (or (map? value) (set? value))]
+            [key [(if multi :in :eq)
+                  (main/t-id-raw prepared
+                                 {:where clause :as :raw :single (not multi)})]]))))))
+
+(defn where-pair-fn [pair where-transform schema options]
+  (let [raw-key (first pair)
+        value (second pair)
+        key (normalize-key raw-key)
+        attr (attrs schema key)]
+    (when (nil? attr)
+      (throw (ex-info "Key not found" {:key key :allowed (keys schema)})))
+    (if (= :ref (:type attr))
+      (where-pair-ref [key value] where-transform attr options)
+      [key (if (vector? value) value [:eq value])])))
+
+(defn- transform-pairs [schema input options]
+  (vec (map (fn [pair] (where-pair-fn pair where-fn schema options)) input)))
+
+(defn- pairs-output [pairs]
+  (let [seen (reduce (fn [out pair] (conj out (first pair))) #{} pairs)]
+    (if (= (count seen) (count pairs))
+      (reduce (fn [out pair] (assoc out (first pair) (second pair))) {} pairs)
+      #{(vec (reduce (fn [out pair]
+                       (conj (conj out (first pair)) (second pair))) [] pairs))})))
+
+(defn where-fn [schema where options]
+  (cond
+    (map? where) (pairs-output (transform-pairs schema where options))
+    (util/hashvec? where)
+    (base/t-where-hashvec
+     where
+     (fn [input]
+       (pairs-output (transform-pairs schema input options))))
+    (nil? where) nil
+    :else (throw (ex-info "Entry not valid" {:schema (keys schema) :input where}))))
+
+(defn id-where-fn [spec params]
+  (let [prepared (prepare spec)
+        schema (second prepared)
+        output (where-fn schema (:where params) (nth prepared 2))]
+    [(reduce-kv (fn [out key value]
+                  (assoc out
+                         (if (= :ref (:type (attrs schema key)))
+                           (keyword (str (name key) "_id")) key)
+                         value)) {} output)]))
+
+(defn id-fn [spec params]
+  (let [prepared (prepare spec)]
+    (main/t-id-raw prepared
+                   (assoc params :where (where-fn (second prepared) (:where params)
+                                                   (nth prepared 2))))))
+
+(defn count-fn [spec params]
+  (let [prepared (prepare spec)]
+    (main/t-count-raw prepared
+                      (assoc params :where (where-fn (second prepared) (:where params)
+                                                      (nth prepared 2))))))
+
+(defn exists-fn [spec params]
+  (let [prepared (prepare spec)]
+    (main/t-exists-raw prepared
+                       (assoc params :where (where-fn (second prepared) (:where params)
+                                                       (nth prepared 2))))))
+
+(defn select-fn-raw [prepared params]
+  (main/t-select-raw prepared
+                     (assoc params :where (where-fn (second prepared) (:where params)
+                                                     (nth prepared 2)))))
+
+(defn select-fn [spec params]
+  (select-fn-raw (prepare spec) params))
+
+(defn delete-fn [spec params]
+  (let [prepared (prepare spec)]
+    (main/t-delete-raw prepared
+                       (assoc params :where (where-fn (second prepared) (:where params)
+                                                       (nth prepared 2))))))
+
+(defn update-fn [spec params]
+  (let [prepared (prepare spec)]
+    (update/t-update-raw prepared
+                         (assoc params :where (where-fn (second prepared) (:where params)
+                                                         (nth prepared 2))))))
+
+(defn modify-fn [spec params]
+  (let [prepared (prepare spec)]
+    (update/t-modify-raw prepared
+                         (assoc params :where (where-fn (second prepared) (:where params)
+                                                         (nth prepared 2))))))
+
+(def __tahto_load__ true)

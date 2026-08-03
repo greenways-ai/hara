@@ -1,0 +1,927 @@
+;; ============================================================================
+;; code.test — portable, data-first test registration and execution.
+;;
+;; The library owns test semantics but no terminal presentation. A reporter
+;; receives structured events; hosts decide whether and how to print them.
+;; ============================================================================
+(ns code.test
+  (:require [code.test.protocol :as protocol]
+            [std.lib.task :as task]))
+
+(defstruct TestRegistry [state])
+(defstruct NullReporter [value])
+(defstruct EventReporter [events])
+(defstruct FunctionClock [function])
+(defstruct FunctionTimer [timeout-function cancel-function])
+(defstruct FunctionControl [function])
+(defstruct Matcher [predicate expected])
+(defstruct ThrownValue [error])
+(defstruct TimeoutValue [milliseconds])
+
+(defn clear-namespace-state
+  [state namespace]
+  (loop [output state
+         remaining (keys state)]
+    (if (seq remaining)
+      (let [key (first remaining)]
+        (recur (if (= namespace (first key))
+                 (dissoc output key)
+                 output)
+               (rest remaining)))
+      output)))
+
+(extend-type TestRegistry protocol/ITestRegistry
+  (registry-register [registry fact]
+    (do
+      (swap! (field registry :state)
+             (fn [state]
+               (assoc state [(:namespace fact) (:name fact)] fact)))
+      fact))
+  (registry-remove [registry namespace name]
+    (let [key [namespace name]
+          found (get (deref (field registry :state)) key)]
+      (swap! (field registry :state)
+             (fn [state] (dissoc state key)))
+      found))
+  (registry-clear [registry namespace]
+    (if namespace
+      (swap! (field registry :state) clear-namespace-state namespace)
+      (reset! (field registry :state) {})))
+  (registry-facts [registry]
+    (vec (vals (deref (field registry :state)))))
+  (registry-find [registry namespace name]
+    (get (deref (field registry :state)) [namespace name])))
+
+(extend-type NullReporter protocol/ITestReporter
+  (report-event [reporter event]
+    event))
+
+(extend-type EventReporter protocol/ITestReporter
+  (report-event [reporter event]
+    (do
+      (swap! (field reporter :events)
+             (fn [events] (conj events event)))
+      event)))
+
+(extend-type FunctionClock protocol/ITestClock
+  (now-ms [clock]
+    ((field clock :function))))
+
+(extend-type FunctionTimer protocol/ITestTimer
+  (timeout-promise [timer promise milliseconds]
+    ((field timer :timeout-function) promise milliseconds))
+  (cancel-timeout [timer timeout]
+    ((field timer :cancel-function) timeout)))
+
+(extend-type FunctionControl protocol/ITestControl
+  (cancelled? [control fact]
+    ((field control :function) fact)))
+
+(extend-type Matcher protocol/IMatcher
+  (match-value [matcher actual]
+    {:pass ((field matcher :predicate) actual)
+     :actual actual
+     :expected (field matcher :expected)}))
+
+(def +registry+ (code.test/TestRegistry (atom {})))
+(def +null-reporter+ (code.test/NullReporter nil))
+(def => '=>)
+(def +listeners+ {})
+(def +global-settings+ (atom {}))
+
+(defn anything
+  [value]
+  true)
+
+(defn event-reporter
+  "Creates a reporter that records structured events in an atom."
+  ([] (code.test/EventReporter (atom [])))
+  ([events] (code.test/EventReporter events)))
+
+(defn reporter-events
+  "Returns events recorded by an event reporter."
+  [reporter]
+  (deref (field reporter :events)))
+
+(defn function-clock
+  "Adapts a host-provided zero-argument clock function."
+  [function]
+  (code.test/FunctionClock function))
+
+(defn function-timer
+  "Adapts host timeout and cancellation functions.
+
+   timeout-function receives [promise milliseconds] and returns either a
+   promise or {:promise promise :timeout handle}. A timed-out promise resolves
+   to {:test/status :timeout}; successful envelopes may use
+   {:test/status :value :value value}."
+  [timeout-function cancel-function]
+  (code.test/FunctionTimer timeout-function cancel-function))
+
+(defn function-control
+  "Adapts a host cancellation predicate receiving a fact record."
+  [function]
+  (code.test/FunctionControl function))
+
+(defn exactly
+  "Matches a value using HAL equality."
+  [expected]
+  (code.test/Matcher (fn [actual] (= actual expected)) expected))
+
+(defn satisfies
+  "Matches when predicate returns truthy."
+  [predicate]
+  (code.test/Matcher predicate :satisfies))
+
+(defn approx
+  ([expected]
+   (approx expected 0.001))
+  ([expected threshold]
+   (code.test/Matcher
+    (fn [actual]
+      (and (number? actual)
+           (< (- expected threshold) actual)
+           (< actual (+ expected threshold))))
+    expected)))
+
+(defn stores
+  [expected]
+  (code.test/Matcher
+   (fn [actual]
+     (try
+       (= expected (deref actual))
+       (catch Throwable error false)))
+   expected))
+
+(declare sequence-exact? sequence-any-order? map-contains?)
+
+(defn matcher-for
+  [expected]
+  (cond (instance? code.test/Matcher expected)
+        expected
+
+        (fn? expected)
+        (code.test/Matcher expected expected)
+
+        (map? expected)
+        (code.test/Matcher
+         (fn [actual]
+           (and (map? actual)
+                (= (count expected) (count actual))
+                (map-contains? expected actual)))
+         expected)
+
+        (or (vector? expected) (list? expected))
+        (code.test/Matcher
+         (fn [actual]
+           (and (or (vector? actual) (list? actual))
+                (sequence-exact? expected actual)))
+         expected)
+
+        (set? expected)
+        (code.test/Matcher
+         (fn [actual]
+           (and (or (set? actual) (vector? actual) (list? actual))
+                (= (count expected) (count actual))
+                (sequence-any-order? (vec expected) (vec actual))))
+         expected)
+
+        :else
+        (exactly expected)))
+
+(defn sequence-exact?
+  [expected actual]
+  (and (= (count expected) (count actual))
+       (reduce (fn [passing entry]
+                 (and passing
+                      (:pass
+                       (protocol/match-value (matcher-for (nth expected (nth entry 0)))
+                        (nth actual (nth entry 0))))))
+               true
+               (loop [index 0 output []]
+                 (if (= index (count expected))
+                   output
+                   (recur (inc index) (conj output [index])))))))
+
+(defn modifier-present?
+  [modifiers target]
+  (loop [remaining modifiers]
+    (if (seq remaining)
+      (if (= target (first remaining))
+        true
+        (recur (rest remaining)))
+      false)))
+
+(defn vector-without
+  [values index]
+  (loop [position 0 output []]
+    (if (= position (count values))
+      output
+      (recur (inc position)
+             (if (= position index)
+               output
+               (conj output (nth values position)))))))
+
+(defn sequence-any-order?
+  [expected actual]
+  (if (empty? expected)
+    true
+    (let [matcher (matcher-for (first expected))]
+      (loop [index 0]
+        (if (= index (count actual))
+          false
+          (if (and (:pass (protocol/match-value matcher (nth actual index)))
+                   (sequence-any-order? (vec (rest expected))
+                                        (vector-without actual index)))
+            true
+            (recur (inc index))))))))
+
+(defn sequence-prefix?
+  [expected actual]
+  (and (<= (count expected) (count actual))
+       (sequence-exact? expected
+                        (loop [index 0 output []]
+                          (if (= index (count expected))
+                            output
+                            (recur (inc index)
+                                   (conj output (nth actual index))))))))
+
+(defn map-contains?
+  [expected actual]
+  (and
+   (map? actual)
+   (reduce
+    (fn [passing entry]
+      (and passing
+           (:pass
+            (protocol/match-value (matcher-for (nth entry 1))
+                           (get actual (nth entry 0))))))
+    true
+    expected)))
+
+(defn contains
+  [expected & modifiers]
+  (code.test/Matcher
+   (fn [actual]
+     (if (map? expected)
+       (map-contains? expected actual)
+       (if (or (vector? expected) (list? expected) (set? expected))
+         (if (or (set? expected)
+                 (modifier-present? modifiers :in-any-order))
+           (and (<= (count expected) (count actual))
+                (sequence-any-order? (vec expected) (vec actual)))
+           (sequence-prefix? (vec expected) (vec actual)))
+         (:pass
+          (protocol/match-value (matcher-for expected) actual)))))
+   expected))
+
+(defn just
+  [expected & modifiers]
+  (code.test/Matcher
+   (fn [actual]
+     (if (map? expected)
+       (and (= (count expected) (count actual))
+            (map-contains? expected actual))
+       (and (= (count expected) (count actual))
+            (if (modifier-present? modifiers :in-any-order)
+              (sequence-any-order? (vec expected) (vec actual))
+              (sequence-exact? (vec expected) (vec actual))))))
+   expected))
+
+(defn contains-in-form
+  [expected]
+  (cond (map? expected)
+        (list (quote code.test/contains)
+              (reduce-kv (fn [output key value]
+                           (assoc output key (contains-in-form value)))
+                         {}
+                         expected))
+
+        (set? expected)
+        (list (quote code.test/contains)
+              (vec (map contains-in-form expected))
+              :in-any-order)
+
+        (vector? expected)
+        (list (quote code.test/contains)
+              (vec (map contains-in-form expected)))
+
+        :else expected))
+
+(defn just-in-form
+  [expected]
+  (cond (map? expected)
+        (list (quote code.test/just)
+              (reduce-kv (fn [output key value]
+                           (assoc output key (just-in-form value)))
+                         {}
+                         expected))
+
+        (set? expected)
+        (list (quote code.test/just)
+              (vec (map just-in-form expected))
+              :in-any-order)
+
+        (vector? expected)
+        (list (quote code.test/just)
+              (vec (map just-in-form expected)))
+
+        :else expected))
+
+(defmacro contains-in
+  [expected]
+  (contains-in-form expected))
+
+(defmacro just-in
+  [expected]
+  (just-in-form expected))
+
+(defn throws-info
+  ([] (throws))
+  ([expected] (throws)))
+
+(defn is-not
+  [expected]
+  (let [matcher (matcher-for expected)]
+    (code.test/Matcher
+     (fn [actual]
+       (not (:pass
+             (protocol/match-value matcher actual))))
+     expected)))
+
+(defn any
+  [& expected]
+  (let [matchers
+        (loop [remaining (vec expected)
+               output []]
+          (if (empty? remaining)
+            output
+            (recur (vec (rest remaining))
+                   (conj output (matcher-for (first remaining))))))]
+    (code.test/Matcher
+     (fn [actual]
+       (reduce
+        (fn [passing matcher]
+          (or passing
+              (:pass
+               (protocol/match-value matcher actual))))
+        false matchers))
+     expected)))
+
+(defn all
+  [& expected]
+  (let [matchers
+        (loop [remaining (vec expected)
+               output []]
+          (if (empty? remaining)
+            output
+            (recur (vec (rest remaining))
+                   (conj output (matcher-for (first remaining))))))]
+    (code.test/Matcher
+     (fn [actual]
+       (reduce
+        (fn [passing matcher]
+          (and passing
+               (:pass
+                (protocol/match-value matcher actual))))
+        true matchers))
+     expected)))
+
+(defn throws
+  "Matches any value thrown while evaluating an assertion."
+  []
+  (code.test/Matcher
+   (fn [actual] (instance? code.test/ThrownValue actual))
+   :throws))
+
+(defn timed-settle
+  [timer promise milliseconds]
+  (let [binding (protocol/timeout-promise timer promise milliseconds)
+        wrapped (if (map? binding) (:promise binding) binding)
+        timeout (if (map? binding) (:timeout binding) nil)
+        outcome (try
+                  (deref wrapped)
+                  (finally
+                    (if timeout
+                      (protocol/cancel-timeout timer timeout)
+                      nil)))]
+    (if (and (map? outcome) (= :timeout (:test/status outcome)))
+      (code.test/TimeoutValue milliseconds)
+      (if (and (map? outcome) (= :value (:test/status outcome)))
+        (:value outcome)
+        outcome))))
+
+(defn settle
+  "Returns an ordinary value, awaiting a promise through the optional host
+   timer capability."
+  ([value]
+   (settle value {}))
+  ([value options]
+   (if (promise? value)
+     (if (and (:timer options) (:timeout options))
+       (timed-settle (:timer options) value (:timeout options))
+       (deref value))
+     value)))
+
+(defn check
+  "Evaluates thunk and returns a structured check result."
+  ([thunk expected]
+   (check thunk expected {}))
+  ([thunk expected options]
+   (try
+     (let [actual (settle (thunk) options)]
+       (if (instance? code.test/TimeoutValue actual)
+         {:pass false
+          :status :timeout
+          :actual nil
+          :expected expected
+          :timeout (field actual :milliseconds)}
+         (if (instance? code.test/Matcher expected)
+           (protocol/match-value expected actual)
+           (if (fn? expected)
+             {:pass (if (expected actual) true false)
+              :actual actual
+              :expected expected}
+             {:pass (= actual expected)
+              :actual actual
+              :expected expected}))))
+     (catch Throwable error
+       (let [actual (code.test/ThrownValue error)]
+         (if (instance? code.test/Matcher expected)
+           (protocol/match-value expected actual)
+           {:pass false
+            :status :error
+            :actual nil
+            :expected expected
+            :error (str error)}))))))
+
+(defn register!
+  "Registers a fact in the current namespace."
+  ([name function]
+   (register! name function {}))
+  ([name function metadata]
+   (protocol/registry-register +registry+
+    {:namespace (current-namespace)
+     :name name
+     :function function
+     :meta metadata})))
+
+(defn remove-fact
+  "Removes a fact from namespace, defaulting to the current namespace."
+  ([name]
+   (remove-fact (current-namespace) name))
+  ([namespace name]
+   (protocol/registry-remove +registry+
+    namespace
+    name)))
+
+(defn purge-facts
+  "Clears facts from namespace, defaulting to the current namespace."
+  ([] (purge-facts (current-namespace)))
+  ([namespace]
+   (protocol/registry-clear +registry+
+    namespace)))
+
+(defn purge-all
+  "Clears the complete test registry."
+  []
+  (protocol/registry-clear +registry+ nil))
+
+(defn tests
+  "Returns all registered fact records."
+  []
+  (protocol/registry-facts +registry+))
+
+(defn registry
+  "Returns the registry snapshot keyed by [namespace fact-name]."
+  []
+  (deref (field +registry+ :state)))
+
+(defn get-fact
+  "Returns a fact by namespace and name."
+  ([name] (get-fact (current-namespace) name))
+  ([namespace name]
+   (protocol/registry-find +registry+
+    namespace
+    name)))
+
+(defn assertion-forms-strict
+  [forms form-meta options]
+  (loop [remaining forms
+         output []]
+    (if (= 0 (count remaining))
+      output
+      (if (< (count remaining) 3)
+        (throw (ex-info "fact assertions must be actual => expected triples"
+                        {:remaining remaining :form-meta form-meta}))
+        (let [actual (nth remaining 0)
+              arrow (nth remaining 1)
+              expected (nth remaining 2)
+              check-options (list 'merge
+                                  (list 'quote form-meta)
+                                  options
+                                  'run-options)]
+          (if (not (= arrow '=>))
+            (throw "fact expects => between actual and expected")
+            (recur
+             (vec (rest (rest (rest remaining))))
+             (conj output
+                   `(code.test/check
+                     (fn [] ~actual)
+                     ~expected
+                     ~check-options)))))))))
+
+(defn assertion-forms
+  [forms form-meta options]
+  (loop [remaining forms
+         setup []]
+    (if (= 0 (count remaining))
+      (if (= 0 (count setup))
+        []
+        (apply list (quote do) (concat setup [[]])))
+      (if (and (>= (count remaining) 3)
+               (= (nth remaining 1) (quote =>)))
+        (let [checks (assertion-forms-strict remaining form-meta options)]
+          (if (= 0 (count setup))
+            checks
+            (apply list (quote do) (concat setup [checks]))))
+        (recur (vec (rest remaining))
+               (conj setup (first remaining)))))))
+
+(defn fact-form
+  "Builds the registration form for one or more fact assertions."
+  [description body form-meta]
+  (let [forms (vec body)
+        options (if (map? (first forms)) (first forms) {})
+        assertions (if (map? (first forms)) (vec (rest forms)) forms)
+        checks (assertion-forms assertions form-meta options)
+        setup (:setup form-meta)
+        teardown (:teardown form-meta)
+        hooks (merge
+               (if setup
+                 {:before (apply list (quote fn) [] setup)}
+                 {})
+               (if teardown
+                 {:after (apply list (quote fn) [] teardown)}
+                 {}))
+        registration-options (list (quote merge)
+                                   (list (quote quote) form-meta)
+                                   options
+                                   hooks
+                                   (if (= 0 (count checks))
+                                     {:skip true}
+                                     {}))]
+    `(code.test/register!
+      ~description
+      (fn [run-options] ~checks)
+      ~registration-options)))
+
+(defmacro fact
+  "Registers one or more actual => expected assertions."
+  [description & body]
+  (fact-form description body (meta &form)))
+
+(defn selector-match?
+  [selector value]
+  (if (nil? selector)
+    true
+    (task/select-filter selector value)))
+
+(defn tag-selected?
+  [fact options]
+  (let [tags (or (:tags (:meta fact)) #{})
+        include (:include-tags options)
+        exclude (:exclude-tags options)
+        included (if include
+                   (reduce (fn [found tag]
+                             (or found (task/select-filter include tag)))
+                           false
+                           tags)
+                   true)
+        excluded (if exclude
+                   (reduce (fn [found tag]
+                             (or found (task/select-filter exclude tag)))
+                           false
+                           tags)
+                   false)]
+    (and included (not excluded))))
+
+(defn matches-selection?
+  "Returns true when a fact matches namespace, name, and tag selectors."
+  [fact options]
+  (and
+   (selector-match? (:namespace options) (:namespace fact))
+   (selector-match? (:name options) (:name fact))
+   (tag-selected? fact options)))
+
+(defn selected?
+  "Compatibility predicate: matching facts explicitly marked :skip are not
+   executable, though the runner retains them as structured skipped results."
+  [fact options]
+  (and (matches-selection? fact options)
+       (not (:skip (:meta fact)))))
+
+(defn report!
+  "Sends event to reporter and returns event."
+  [reporter event]
+  (protocol/report-event reporter event))
+
+(defn checks-pass?
+  [checks]
+  (reduce (fn [passing check-result]
+            (and passing (:pass check-result)))
+          true
+          checks))
+
+(defn checks-error?
+  [checks]
+  (reduce (fn [errored check-result]
+            (or errored (= :error (:status check-result))))
+          false
+          checks))
+
+(defn checks-timeout?
+  [checks]
+  (reduce (fn [timed-out check-result]
+            (or timed-out (= :timeout (:status check-result))))
+          false
+          checks))
+
+(defn normalize-checks
+  [value]
+  (if (vector? value)
+    value
+    (if (map? value)
+      [value]
+      [{:pass true :actual value :expected :returned}])))
+
+(defn clock-now
+  [options]
+  (if (:clock options)
+    (protocol/now-ms (:clock options))
+    nil))
+
+(defn run-hook
+  [hook options]
+  (if hook
+    (settle (hook) options)
+    nil))
+
+(defn run-hooks
+  [hooks options]
+  (reduce (fn [output hook]
+            (do (run-hook hook options) output))
+          nil
+          hooks))
+
+(defn fact-cancelled?
+  [fact options]
+  (or (:cancelled options)
+      (if (:control options)
+        (protocol/cancelled? (:control options) fact)
+        false)))
+
+(defn run-fact
+  "Runs one fact and emits start/end events."
+  ([fact reporter]
+   (run-fact fact reporter {}))
+  ([fact reporter options]
+   (let [identity {:namespace (:namespace fact)
+                   :name (:name fact)
+                   :meta (:meta fact)}
+         start (clock-now options)]
+     (report! reporter (merge {:event :fact/start} identity))
+     (let [result
+           (if (:skip (:meta fact))
+             (merge identity {:status :skipped :checks []})
+             (if (fact-cancelled? fact options)
+             (merge identity {:status :cancelled :checks []})
+             (try
+               (let [checks
+                     (try
+                       (do
+                         (run-hooks [(:before-each options)
+                                     (:before (:meta fact))]
+                                    options)
+                         (normalize-checks
+                          (settle ((:function fact) options) options)))
+                       (finally
+                         (run-hooks [(:after (:meta fact))
+                                     (:after-each options)]
+                                    options)))
+                     status (if (checks-timeout? checks)
+                              :timeout
+                              (if (checks-error? checks)
+                                :error
+                                (if (checks-pass? checks)
+                                  :passed
+                                  :failed)))]
+                 (merge identity {:status status :checks checks}))
+               (catch Throwable error
+                 (merge identity
+                        {:status :error
+                         :checks []
+                         :error (str error)})))))
+           end (clock-now options)
+           timed-result (if (and start end)
+                          (assoc result :elapsed (- end start))
+                          result)]
+       (report! reporter (merge {:event :fact/end} timed-result))
+       timed-result))))
+
+(defn result-counts
+  [results]
+  (reduce (fn [counts result]
+            (update counts (:status result) (fn [count] (inc (or count 0)))))
+          {:passed 0
+           :failed 0
+           :error 0
+           :timeout 0
+           :skipped 0
+           :cancelled 0}
+          results))
+
+(defn check-counts
+  [results]
+  (reduce
+   (fn [counts result]
+     (reduce (fn [current check-result]
+               (update current
+                       (if (:pass check-result) :passed :failed)
+                       (fn [count] (inc (or count 0)))))
+             counts
+             (:checks result)))
+   {:total 0 :passed 0 :failed 0}
+   results))
+
+(defn attach-check-total
+  [counts]
+  (assoc counts :total (+ (:passed counts) (:failed counts))))
+
+(defn failing-status?
+  [status]
+  (or (= status :failed)
+      (= status :error)
+      (= status :timeout)))
+
+(defn fact-order-key
+  [fact]
+  (str (:namespace fact) "/" (:name fact)))
+
+(defn insert-fact
+  [facts fact]
+  (loop [index 0
+         output []]
+    (if (= index (count facts))
+      (conj output fact)
+      (if (< (compare (fact-order-key fact)
+                      (fact-order-key (nth facts index)))
+             0)
+        (loop [remaining index
+               inserted (conj output fact)]
+          (if (= remaining (count facts))
+            inserted
+            (recur (inc remaining)
+                   (conj inserted (nth facts remaining)))))
+        (recur (inc index) (conj output (nth facts index)))))))
+
+(defn order-facts
+  [facts]
+  (reduce insert-fact [] facts))
+
+(defn run-facts
+  [facts reporter options]
+  (loop [index 0
+         results []
+         cancelled false]
+    (if (= index (count facts))
+      results
+      (let [result (run-fact (nth facts index)
+                             reporter
+                             (assoc options :cancelled cancelled))
+            stop (or cancelled
+                     (and (:fail-fast options)
+                          (failing-status? (:status result))))]
+        (recur (inc index) (conj results result) stop)))))
+
+(defn run-selected
+  [input options]
+  (let [reporter (or (:reporter options) +null-reporter+)
+        selected (vec
+                  (filter (fn [fact] (matches-selection? fact options))
+                          (tests)))
+        namespace (if (seq selected) (:namespace (first selected)) nil)
+        suite-options (or (get (deref +global-settings+) namespace) {})
+        options (merge suite-options options)
+        start-report (report! reporter {:event :run/start :count (count selected)})
+        results (try
+                  (do
+                    (run-hook (:before-all options) options)
+                    (run-facts selected reporter options))
+                  (finally
+                    (run-hook (:after-all options) options)))
+        counts (result-counts results)
+        checks (attach-check-total (check-counts results))
+        status (if (and (= 0 (:failed counts))
+                        (= 0 (:error counts))
+                        (= 0 (:timeout counts)))
+                 :passed
+                 :failed)
+        namespaces
+        (reduce (fn [output result]
+                  (conj output (:namespace result)))
+                #{}
+                results)
+        summary {:status status
+                 :counts counts
+                 :check-counts checks
+                 :files (count namespaces)
+                 :facts (count results)
+                 :checks (:total checks)
+                 :passed (:passed checks)
+                 :failed (:failed checks)
+                 :throw (:error counts)
+                 :timeout (:timeout counts)
+                 :results results}
+        end-report (report! reporter (merge {:event :run/end} summary))]
+    summary))
+
+(defn run-task-main
+  [package]
+  (run-selected nil (first package)))
+
+(def +runner-task+
+  (task/task :default
+             "code.test/run"
+             {:main {:fn run-task-main}}))
+
+(defn run
+  "Runs selected facts and returns a structured summary.
+
+   In-process execution is deliberately direct. The portable task descriptor is
+   retained for external task/CLI integration, but routing `run` back through a
+   Task caused recursive IFn dispatch on Rust and unresolved protocol dispatch on
+   the JVM."
+  ([] (run {}))
+  ([selector-or-options]
+   (let [options (if (map? selector-or-options)
+                   selector-or-options
+                   {:namespace selector-or-options})]
+     (run-selected nil options))))
+
+(defn run-tests
+  "Compatibility name for run."
+  ([] (run {}))
+  ([options] (run options)))
+
+(defn fact:purge [] (purge-facts))
+(defn fact:list [] (map :name (tests)))
+(defn fact:missing [] [])
+(defmacro fact:all [& body] `(do ~@body))
+(defmacro fact:get [name] `(code.test/get-fact ~name))
+(defmacro fact:exec [name]
+  `((:function (code.test/get-fact ~name)) {}))
+(defmacro fact:setup [& body] `(do ~@body))
+(defmacro fact:setup? [& body] `(do ~@body))
+(defmacro fact:teardown [& body] `(do ~@body))
+(defmacro fact:remove [name] `(code.test/remove-fact ~name))
+(defmacro fact:symbol [name] name)
+(defmacro fact:template [description & body]
+  `(code.test/fact ~description ~@body))
+(defmacro fact:global [settings]
+  (let [setup (or (:setup settings) [])
+        teardown (or (:teardown settings) [])]
+    `(swap! +global-settings+
+            assoc
+            (current-namespace)
+            {:before-all (fn [] ~@setup)
+             :after-all (fn [] ~@teardown)})))
+(defmacro fact:ns [& body] `(do ~@body))
+(defn fact:ns-load [namespace] namespace)
+
+(def run:current run)
+(def run:test run)
+(def run:load run)
+(def run:unload run)
+(def run-errored run)
+
+(defn run:interrupt [] true)
+(defn run:report
+  ([path] (run {:report path}))
+  ([path options] (run (assoc options :report path)))
+  ([path options project] (run (assoc options :report path))))
+
+(defn print-options
+  ([] (print-options :help))
+  ([options]
+   (if (= options :help)
+     #{:help :current :default :disable :all}
+     options)))
+
+(defn process-test-args
+  [arguments]
+  (task/process-ns-args (task/collapse-only arguments)))
+
+(defn -main
+  [& arguments]
+  (run (process-test-args arguments)))

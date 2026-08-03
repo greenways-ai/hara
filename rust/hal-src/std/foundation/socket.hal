@@ -1,0 +1,90 @@
+;; ============================================================================
+;; std.foundation.socket — small portable network boundary.
+;;
+;; HAL functions provide discoverable docs and schemas over std.native.Socket.
+;; The namespace is always available, but operations succeed only when the
+;; host grants network authority.
+;;
+;; Contract (specs/00-unsorted/platform-language/draft/conformance/native.edn, Socket v1):
+;;   * connect accepts host, port, a reserved options value, and an
+;;     (fn [error connection] ...) callback.
+;;   * send accepts bytes and returns the byte count.
+;;   * close is direct and releases the connection.
+;;   * listen creates a SocketServer and emits :open, :data, :close, and :error
+;;     event maps to its callback.
+;;   * events and next expose promise-backed streams for SocketServer and Socket
+;;     handles; framing and HTTP remain above this transport boundary.
+;;
+;;                         network authority
+;;                                |
+;;                +---------------+---------------+
+;;                |                               |
+;;                v                               v
+;;       connect(host, port)             listen(host, port)
+;;                |                               |
+;;                v                               v
+;;             Socket                        SocketServer
+;;                |                               |
+;;                +---------------+---------------+
+;;                                |
+;;                         events(handle)
+;;                                |
+;;                                v
+;;                         SocketStream
+;;                                |
+;;                            next(stream)
+;;                                |
+;;                                v
+;;                    Promise<socket-event>
+;;                                |
+;;                +---------------+---------------+
+;;                |               |               |
+;;              :open           :data        :close/:error
+;;
+;; HTTP and RESP framing live above this transport layer. Host threads enqueue
+;; raw events; HAL callbacks and stream consumers run on the evaluator thread.
+;; ============================================================================
+(ns std.foundation.socket
+  (:config {:blank true}))
+
+(defn ^{:schema [:fn [:str :int :map :fn] :any]}
+  connect
+  "Connects to host and port, reporting completion through callback."
+  [host port options callback]
+  (Socket/connect host port options callback))
+
+(defn ^{:schema [:fn [:str :int :map :fn] :any]}
+  listen
+  "Starts a socket server and reports lifecycle events through callback."
+  [host port options callback]
+  (Socket/listen host port options callback))
+
+(defn ^{:schema [:fn [:any] :map]}
+  endpoint
+  "Returns the bound host and port map for server."
+  [server]
+  (Socket/endpoint server))
+
+(defn ^{:schema [:fn [:any :map] :any]}
+  events
+  "Creates an event stream for a socket or server handle."
+  [handle options]
+  (Socket/events handle options))
+
+(defn ^{:schema [:fn [:any] :promise]}
+  next
+  "Returns a promise of the next event from stream."
+  [stream]
+  (Socket/next stream))
+
+(defn ^{:schema [:fn [:any :bytes] :int]}
+  send
+  "Writes contents to connection and returns the byte count."
+  [connection contents]
+  (Socket/send connection contents))
+
+(defn ^{:schema [:fn [:any] :any]}
+  close
+  "Closes a socket connection or server handle."
+  [connection]
+  (Socket/close connection))

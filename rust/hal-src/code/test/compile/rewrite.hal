@@ -1,0 +1,4 @@
+(ns code.test.compile.rewrite)
+
+(defn rewrite-list [form] form)
+(defn rewrite-nested-checks [form] form)

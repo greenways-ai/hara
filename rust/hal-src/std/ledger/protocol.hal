@@ -1,0 +1,20 @@
+;; ============================================================================
+;; std.ledger.protocol — protocols for the consensus-free ledger chain.
+;; ============================================================================
+(ns std.ledger.protocol)
+
+(defprotocol IHashable
+  (header [x])
+  (content-hash [x]))
+
+(defprotocol IReplayable
+  (replay [x prev-state]))
+
+(defprotocol IValid
+  (valid? [x]))
+
+(defprotocol IChainOps
+  (head [x])
+  (blocks [x])
+  (state [x])
+  (append [x actor timestamp source]))

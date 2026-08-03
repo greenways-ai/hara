@@ -1,0 +1,41 @@
+(ns postgres.core.impl
+  (:config {:blank true})
+  (:require [std.foundation :refer :all]
+            [postgres.core.impl-main :as main]
+            [postgres.core.impl-insert :as insert]
+            [postgres.core.impl-update :as update]))
+
+(defn t:select [spec params] (main/t-select spec (or params {})))
+
+(defn- require-where [params]
+  (when (nil? (:where params))
+    (throw (ex-info "No WHERE clause" params)))
+  params)
+
+(defn t:get-field [spec params]
+  (with-meta (main/t-select spec (merge {:single true :as :raw}
+                                        (require-where (or params {}))))
+             {:op/type :get}))
+
+(defn t:get [spec params]
+  (with-meta (main/t-select spec (merge {:single true}
+                                        (require-where (or params {}))))
+             {:op/type :get}))
+
+(defn t:id [spec params]
+  (main/t-id spec (require-where (or params {}))))
+
+(defn t:count [spec params] (main/t-count spec (or params {})))
+(defn t:exists [spec params] (main/t-exists spec (or params {})))
+(defn t:delete [spec params] (main/t-delete spec (or params {})))
+(defn t:insert [spec data params] (insert/t-insert spec data (or params {})))
+(defn t:insert! [spec data params]
+  (insert/t-insert spec data (merge {:track :ignore} (or params {}))))
+(defn t:upsert [spec data params] (insert/t-upsert spec data (or params {})))
+(defn t:update [spec params] (update/t-update spec (or params {})))
+(defn t:update! [spec params]
+  (update/t-update spec (merge {:track :ignore :as :raw} (or params {}))))
+(defn t:modify [spec params] (update/t-modify spec (or params {})))
+(defn t:fields [spec params] (main/t-fields spec (or params {})))
+
+(def __tahto_load__ true)

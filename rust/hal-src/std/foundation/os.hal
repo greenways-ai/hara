@@ -1,0 +1,69 @@
+;; ============================================================================
+;; std.foundation.os — portable host identity and process boundary.
+;;
+;; Unlike the other foundation facades, this namespace activates Vars directly
+;; from the host export catalog. The comments below are the HAL-side contract;
+;; callable metadata is owned by that catalog until native OS wrappers exist.
+;;
+;; Contract:
+;;   * platform returns :linux, :macos, :windows, or :unknown; arch is a
+;;     normalized keyword; cwd is a normalized path string; env is a
+;;     string-to-string map; getenv returns a string or nil.
+;;   * Process operations require the :process capability. argv is always a
+;;     non-empty vector of strings, passed directly to the host process API —
+;;     never interpreted as a shell command.
+;;   * Standard output and error are drained concurrently from spawn, so a
+;;     child cannot deadlock on a full pipe.
+;;   * process-stdout and process-stderr settle to the complete bytes at EOF;
+;;     process-wait settles to the integer exit code. Repeated calls observe
+;;     the same settled results. process-kill is forceful and idempotent for
+;;     an exited process.
+;;   * Outside the boundary: shell strings, inherited I/O, OS signals,
+;;     incremental stream iterators, clipboard, notifications, URL helpers.
+;;
+;; Platform contract: specs/00-unsorted/platform-language/draft/hal-langspec.edn
+;;
+;;                       std.foundation.os
+;;                              |
+;;             +----------------+----------------+
+;;             |                                 |
+;;             v                                 v
+;;       host identity                       processes
+;;   platform/arch/cwd/env                     spawn
+;;             |                                 |
+;;             v                                 v
+;;      immediate HAL data                 Process handle
+;;                                               |
+;;                    +--------------------------+--------------------------+
+;;                    |             |            |            |            |
+;;                    v             v            v            v            v
+;;                 write       close-input     stdout       stderr        wait
+;;                    |             |            |            |            |
+;;                    +-------------+------------+------------+------------+
+;;                                               |
+;;                                               v
+;;                                         Promise<result>
+;;                                               |
+;;                                      process-kill (forceful)
+;;
+;; The `:config :builtins` declaration installs these Vars directly from the
+;; host catalog. This HAL source documents their contract without wrapping or
+;; shadowing them; their runtime docstrings and schemas remain host metadata.
+;; ============================================================================
+(ns std.foundation.os
+  (:config
+   {:blank true
+    :builtins [platform
+               arch
+               cwd
+               env
+               getenv
+               spawn
+               process?
+               process-alive?
+               process-write
+               process-close-input
+               process-stdout
+               process-stderr
+               process-wait
+               process-kill]}))

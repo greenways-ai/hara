@@ -1,0 +1,182 @@
+(ns std.lib.block.grid
+  (:require [std.lib.block.type :as type]
+            [std.lib.block.base :as base]
+            [std.lib.block.construct :as construct]
+            [std.foundation.string :as string]))
+
+(def bind-length 2)
+(def indent-length 1)
+
+(defn void-block?
+  [block] (and (type/block? block) (= :void (field block :type))))
+(defn linebreak-block?
+  [block] (and (type/block? block) (= :linebreak (field block :tag))))
+(defn linespace-block?
+  [block] (and (type/block? block) (= :linespace (field block :tag))))
+(defn comment-block?
+  [block] (and (type/block? block) (= :comment (field block :tag))))
+(defn expression-block?
+  [block]
+  (and (type/block? block)
+       (or (= :token (field block :type))
+           (= :container (field block :type)))))
+
+(defn trim-left [blocks]
+  (vec (drop-while void-block? blocks)))
+
+(defn trim-right [blocks]
+  (vec (reverse (drop-while void-block? (reverse blocks)))))
+
+(defn split-lines
+  [blocks]
+  (loop [index 0
+         line []
+         output []]
+    (if (= index (count blocks))
+      (if (empty? line) output (conj output line))
+      (let [block (nth blocks index)]
+        (if (linebreak-block? block)
+          (recur (inc index) [block]
+                 (if (empty? line) output (conj output line)))
+          (recur (inc index) (conj line block) output))))))
+
+(defn remove-starting-spaces
+  [lines]
+  (vec
+   (map (fn [line]
+          (if (and (not (empty? line))
+                   (linebreak-block? (first line)))
+            (vec (concat [(first line)]
+                         (drop-while linespace-block? (rest line))))
+            line))
+        lines)))
+
+(defn adjust-comments
+  [blocks]
+  (loop [index 0
+         output []]
+    (if (= index (count blocks))
+      output
+      (let [block (nth blocks index)
+            next (if (= (inc index) (count blocks))
+                   nil
+                   (nth blocks (inc index)))]
+        (recur (inc index)
+               (if (and (comment-block? block)
+                        (not (and next (linebreak-block? next))))
+                 (conj (conj output block) (construct/newline))
+                 (conj output block)))))))
+
+(defn blank-line?
+  [line]
+  (and (not (= 0 (count line)))
+       (linebreak-block? (first line))
+       (reduce (fn [result block]
+                 (and result (void-block? block)))
+               true
+               (rest line))))
+
+(defn remove-extra-linebreaks
+  [lines]
+  (loop [index 0
+         output []]
+    (if (= index (count lines))
+      output
+      (let [line (nth lines index)
+            next-line (if (< (inc index) (count lines))
+                        (nth lines (inc index))
+                        nil)]
+        (if (and (blank-line? line)
+                 next-line
+                 (blank-line? next-line))
+          (recur (inc index) output)
+          (recur (inc index) (conj output line)))))))
+
+(defn grid-scope [scope]
+  (vec (map (fn [value] (if (number? value) (dec value) value)) scope)))
+(defn grid-rules [tag symbol parent-scope rules]
+  (if (and (= tag :list) parent-scope)
+    {:indent indent-length :bind 0 :scope (grid-scope parent-scope)}
+    (if (or (= tag :list) (= tag :fn))
+      (let [entry (get (or rules {}) symbol)]
+        {:indent (or (get entry :indent) 0)
+         :bind (or (get entry :bind) 0)
+         :scope (or (get entry :scope) [])})
+      {:indent 0 :bind 0 :scope [0]})))
+
+(defn expression-count
+  [line]
+  (count (filter expression-block? line)))
+
+(defn indent-bind
+  [lines bind]
+  (loop [index 0
+         expressions 0]
+    (if (= index (count lines))
+      (dec (count lines))
+      (let [total (+ expressions (expression-count (nth lines index)))]
+        (if (<= (inc bind) total)
+          index
+          (recur (inc index) total))))))
+
+(defn indent-lines
+  [lines anchor rule]
+  (if (= 0 (count lines))
+    []
+    (let [indent (or (get rule :indent) 0)
+          bind (or (get rule :bind) 0)
+          binding-lines (if (= bind 0) 0 (indent-bind lines bind))]
+      (loop [index 1
+             output [(first lines)]]
+        (if (= index (count lines))
+          output
+          (let [line (nth lines index)
+                newline (first line)
+                tokens (rest line)
+                extra (if (and (> bind 0) (<= index binding-lines))
+                        bind-length
+                        0)]
+            (recur
+             (inc index)
+             (conj output
+                   (vec
+                    (concat [newline
+                             (construct/spaces (+ anchor indent extra))]
+                            tokens))))))))))
+
+(defn flatten-lines
+  [lines]
+  (reduce (fn [output line] (vec (concat output line))) [] lines))
+
+(defn skip-void-index
+  [blocks index]
+  (if (and (< index (count blocks))
+           (void-block? (nth blocks index)))
+    (skip-void-index blocks (inc index))
+    index))
+
+(defn grid
+  [container anchor options]
+  (let [tag (field container :tag)
+        blocks (field container :children)
+        symbol (if (or (= 0 (count blocks))
+                       (not (type/block? (first blocks))))
+                 nil
+                 (field (first blocks) :value))
+        rule (grid-rules tag symbol
+                         (get options :scope)
+                         (get options :rules))
+        amount (+ anchor
+                  (string/length
+                   (or (get (field container :props) :start) ""))
+                  (or (get rule :indent) 0))]
+    (loop [index 0
+           output []]
+      (if (= index (count blocks))
+        (construct/container tag output)
+        (let [block (nth blocks index)]
+          (if (linebreak-block? block)
+            (recur (skip-void-index blocks (inc index))
+                   (conj (conj output block)
+                         (construct/spaces amount)))
+            (recur (inc index) (conj output block))))))))

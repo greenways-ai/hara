@@ -1,0 +1,61 @@
+(ns std.lib.task.protocol)
+
+(defprotocol ITaskDefinition
+  (task-type [task])
+  (task-name [task])
+  (task-config [task]))
+
+(defstruct TaskDefinition
+  [type name main construct arglists item result summary params])
+
+(extend-type TaskDefinition ITaskDefinition
+  (task-type [task]
+    (field task :type))
+  (task-name [task]
+    (field task :name))
+  (task-config [task]
+    {:type (field task :type)
+     :name (field task :name)
+     :main (field task :main)
+     :construct (field task :construct)
+     :arglists (field task :arglists)
+     :item (field task :item)
+     :result (field task :result)
+     :summary (field task :summary)
+     :params (field task :params)}))
+
+(defn task-config-map
+  "Returns the normalized configuration exposed by a task definition. Plain
+   maps remain valid task definitions for Foundation compatibility."
+  [task]
+  (if (map? task)
+    task
+    (merge (or (std.lib.task.protocol/task-config task) {})
+           {:type (std.lib.task.protocol/task-type task)
+            :name (std.lib.task.protocol/task-name task)})))
+
+(defn task-section
+  [task key]
+  (get (std.lib.task.protocol/task-config-map task) key))
+
+(defn task-definition
+  "Adapts any protocol-backed or map task into the field-compatible definition
+   consumed by the existing bulk execution pipeline."
+  [task]
+  (let [config (std.lib.task.protocol/task-config-map task)]
+    (std.lib.task.protocol/TaskDefinition
+     (:type config)
+     (:name config)
+     (:main config)
+     (:construct config)
+     (:arglists config)
+     (:item config)
+     (:result config)
+     (:summary config)
+     (:params config))))
+
+(defprotocol ITaskReporter
+  (report-task [reporter report]))
+
+(defprotocol ITaskClock
+  (task-now-ms [clock]))

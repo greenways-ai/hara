@@ -1,0 +1,269 @@
+;; ============================================================================
+;; std.db.text.sql-graph — recursive SQL generation from canonical graph IR.
+;; ============================================================================
+(ns std.db.text.sql-graph
+  (:require [std.db.text.base-graph :as graph]
+            [std.db.text.sql-util :as sql]
+            [std.foundation.string :as string]))
+
+(defn- compatible-get
+  [value lookup-key]
+  (cond
+    (not (map? value)) nil
+    (has? value lookup-key) (get value lookup-key)
+    (string? lookup-key) (get value (keyword lookup-key))
+    (keyword? lookup-key) (get value (name lookup-key))
+    :else nil))
+
+(defn- option
+  [options lookup-key fallback]
+  (let [found (compatible-get options lookup-key)]
+    (if (nil? found) fallback found)))
+
+(defn- key-name
+  [value]
+  (if (keyword? value) (name value) value))
+
+(defn- arrayify
+  [value]
+  (cond
+    (nil? value) []
+    (vector? value) value
+    :else [value]))
+
+(defn- indent
+  [amount]
+  (string/repeat " " amount))
+
+(defn base-query-inputs
+  [query]
+  (graph/base-query-inputs query))
+
+(defn base-format-return
+  "Formats one scalar, expression or nested return entry."
+  [input nest-function column-function]
+  (cond
+    (map? input)
+    (str (compatible-get input :expr)
+         (if (or (has? input :as) (has? input "as"))
+           (str " AS " (compatible-get input :as))
+           ""))
+
+    (vector? input)
+    (nest-function input)
+
+    (string? input)
+    (column-function input)
+
+    :else
+    (throw (ex-info "Invalid graph return input" {:input input}))))
+
+(declare select-where)
+(declare select-return)
+
+(defn- or-subqueries
+  [function clauses]
+  (str "("
+       (string/join " OR "
+                    (map (fn [clause]
+                           (str "(" (function clause) ")"))
+                         clauses))
+       ")"))
+
+(defn select-where-pair
+  "Compiles one schema-aware where key and clause."
+  [schema table-name key-value clause indent-size options where-function]
+  (let [column-function (option options :column-fn identity)
+        key-string (key-name key-value)
+        table (compatible-get schema table-name)
+        attribute (compatible-get table key-string)]
+    (if (nil? attribute)
+      (throw (ex-info "Attribute not found"
+                      {:table table-name :attribute key-string}))
+      nil)
+    (let [reference (compatible-get attribute :ref)
+          reference-type (compatible-get reference :type)
+          reference-table (compatible-get reference :ns)
+          forward
+          (fn [clause-object]
+            (str key-string "_id IN (\n"
+                 (indent indent-size)
+                 (where-function schema
+                                 reference-table
+                                 (column-function "id")
+                                 clause-object
+                                 indent-size
+                                 options)
+                 "\n"
+                 (indent (- indent-size 2))
+                 ")"))
+          reverse
+          (fn [clause-object]
+            (str "id IN (\n"
+                 (indent indent-size)
+                 (where-function schema
+                                 reference-table
+                                 (column-function
+                                  (str (compatible-get reference :rkey) "_id"))
+                                 clause-object
+                                 indent-size
+                                 options)
+                 "\n"
+                 (indent (- indent-size 2))
+                 ")"))]
+      (if (= "ref" (compatible-get attribute :type))
+        (cond
+          (= "forward" reference-type)
+          (cond
+            (map? clause) (forward clause)
+            (and (vector? clause) (map? (first clause)))
+            (or-subqueries forward clause)
+            :else
+            (sql/encode-query-segment
+             (str key-string "_id") clause column-function options))
+
+          (= "reverse" reference-type)
+          (let [normalized
+                (cond
+                  (string? clause) {:id clause}
+                  (and (vector? clause) (string? (first clause))) {:id clause}
+                  :else clause)]
+            (cond
+              (map? normalized) (reverse normalized)
+              (and (vector? normalized) (map? (first normalized)))
+              (or-subqueries reverse normalized)
+              :else
+              (throw (ex-info "Invalid reverse-reference clause"
+                              {:table table-name
+                               :attribute key-string
+                               :clause clause}))))
+
+          :else
+          (throw (ex-info "Invalid reference direction"
+                          {:table table-name
+                           :attribute key-string
+                           :reference reference})))
+        (sql/encode-query-segment key-string clause column-function options)))))
+
+(defn select-where
+  "Compiles a SELECT and recursive schema-aware WHERE expression."
+  [schema table-name return-string where-parameters indent-size options]
+  (let [table-function (option options :table-fn identity)
+        sort-keys (option options :sort-keys true)
+        where-list (arrayify where-parameters)
+        compile-clause
+        (fn [clause]
+          (let [pairs (if sort-keys
+                        (sort-by (fn [pair] (str (key pair))) clause)
+                        (vec clause))]
+            (string/join
+             " AND "
+             (map (fn [pair]
+                    (select-where-pair schema
+                                       table-name
+                                       (key pair)
+                                       (val pair)
+                                       (+ indent-size 2)
+                                       options
+                                       select-where))
+                  pairs))))
+        clauses (filter (fn [value] (> (count value) 0))
+                        (map compile-clause where-list))
+        where-string
+        (cond
+          (= 0 (count clauses)) ""
+          (= 1 (count clauses)) (first clauses)
+          :else (string/join " OR "
+                             (map (fn [value] (str "(" value ")")) clauses)))
+        base (str "SELECT " return-string
+                  " FROM " (table-function table-name))]
+    (if (> (count where-string) 0)
+      (str base "\n" (indent indent-size) "WHERE " where-string)
+      base)))
+
+(defn select-return-str
+  "Recursively compiles scalar and linked return expressions."
+  [schema params return-function indent-size options]
+  (let [column-function (option options :column-fn identity)
+        return-count-function (option options :return-count-fn (fn [] "count(*)"))
+        return-format-function (option options :return-format-fn sql/default-return-format-fn)
+        return-join-function (option options :return-join-fn
+                                     (fn [values] (string/join ", " values)))
+        return-link-function (option options :return-link-fn
+                                     (fn [value link-name]
+                                       (str "(" value ") AS " link-name)))
+        data-parameters (or (compatible-get params :data) [])
+        link-parameters (or (compatible-get params :links) [])
+        custom-parameters (or (compatible-get params :custom) [])
+        count-parameters (filter (fn [entry]
+                                   (= "sql/count" (compatible-get entry "::")))
+                                 custom-parameters)
+        sort-keys (option options :sort-keys true)]
+    (if (not (empty? count-parameters))
+      (return-count-function)
+      (let [nest-function
+            (fn [link]
+              (let [link-name (first link)
+                    link-tree (last link)
+                    linked-return (return-function schema link-tree 2 options)]
+                (return-link-function linked-return link-name)))
+            format-function
+            (fn [value]
+              (return-format-function value
+                                      nest-function
+                                      column-function
+                                      options))
+            return-data (map format-function data-parameters)
+            sorted-links (if sort-keys
+                           (sort-by first link-parameters)
+                           link-parameters)
+            return-links (map format-function sorted-links)]
+        (return-join-function (vec (concat return-data return-links)))))))
+
+(defn select-return
+  "Compiles one canonical tree recursively, applying dialect wrappers."
+  [schema tree indent-size options]
+  (let [tree (graph/select-tree schema tree options)
+        column-function (option options :column-fn identity)
+        wrapper-function (option options :wrapper-fn (fn [value nested] value))
+        table-name (first tree)
+        params (second tree)
+        where-parameters (or (compatible-get params :where) [])
+        custom-input (or (compatible-get params :custom) [])
+        custom-parameters
+        (filter (fn [entry]
+                  (= "sql/keyword" (compatible-get entry "::")))
+                (if (vector? custom-input) custom-input []))
+        return-string (select-return-str schema
+                                         params
+                                         select-return
+                                         indent-size
+                                         options)
+        return-base (select-where schema
+                                  table-name
+                                  return-string
+                                  where-parameters
+                                  2
+                                  options)
+        custom-string
+        (string/join
+         " "
+         (map (fn [entry]
+                (sql/encode-sql entry
+                                column-function
+                                options
+                                sql/encode-loop-fn))
+              custom-parameters))
+        statement (if (> (count custom-string) 0)
+                    (str return-base " " custom-string)
+                    return-base)]
+    (wrapper-function statement (if (> indent-size 0) 2 0))))
+
+(defn select-tree
+  [schema query options]
+  (graph/select-tree schema query options))
+
+(defn select
+  "Compiles a compact or canonical graph query to dialect-specific SQL."
+  [schema query options]
+  (select-return schema (select-tree schema query options) 0 options))

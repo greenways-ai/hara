@@ -1,0 +1,33 @@
+(ns std.lib.substrate.node-lifecycle-conformance
+  (:require [std.lib.substrate :as substrate]
+            [std.lib.substrate.protocol :as protocol]))
+
+(def node (substrate/node-create "node/conformance"))
+
+(protocol/attach-transport node "peer"
+               (fn [frame]
+                 (if (= :request (protocol/frame-kind frame))
+                   (protocol/receive-frame node
+                                  (substrate/node-frame :response "res-1" "main" {} nil []
+                                                        (protocol/frame-id frame)
+                                                        :ok 84 nil nil nil)
+                                  {:transport-id "peer"})
+                   (protocol/set-service node "stream"
+                                  (protocol/frame-data frame)))))
+
+(def subscription (protocol/subscribe node "main" "changed" "sub-1" {}))
+(protocol/receive-frame node subscription {:transport-id "peer"})
+(protocol/publish node "main" "changed" 42 {:id "evt-1"})
+
+(def reply (protocol/request node "main" "sum" []
+                          {:id "req-1" :transport-id "peer"}))
+
+(def cancelled-node (substrate/node-create "node/cancel"))
+(protocol/attach-transport cancelled-node "peer" (fn [frame] nil))
+(def pending (protocol/request cancelled-node "main" "wait" []
+                            {:id "req-cancel" :transport-id "peer"}))
+(protocol/cancel-request cancelled-node "req-cancel" :cancelled)
+
+[(promise/value reply)
+ (protocol/get-service node "stream")
+ (promise/state pending)]

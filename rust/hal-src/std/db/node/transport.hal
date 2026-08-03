@@ -1,0 +1,310 @@
+;; ============================================================================
+;; std.db.node.transport — message-endpoint adapters for database runtimes.
+;;
+;; An endpoint descriptor contains:
+;;   :send   (fn [message])
+;;   :listen (fn [listener])
+;;   :close  optional zero-argument cleanup function
+;;
+;; This contract can wrap browser Worker, MessagePort, SharedWorker.port or
+;; Node parentPort without placing host globals in portable HAL code.
+;; ============================================================================
+(ns std.db.node.transport
+  (:require [std.foundation.promise :as promise]
+            [std.lib.substrate :as substrate]
+            [std.lib.substrate.protocol :as protocol]))
+
+(defn- compatible-get
+  [value lookup-key]
+  (cond
+    (not (map? value)) nil
+    (has? value lookup-key) (get value lookup-key)
+    (string? lookup-key) (get value (keyword lookup-key))
+    (keyword? lookup-key) (get value (name lookup-key))
+    :else nil))
+
+(defn- wire-name
+  [value]
+  (if (keyword? value) (name value) value))
+
+(defn- wire-keyword
+  [value]
+  (if (string? value) (keyword value) value))
+
+(declare value->wire)
+(declare wire->value)
+
+(defn- map->wire
+  [value]
+  {"$hara" "map"
+   "entries"
+   (reduce (fn [out entry]
+             (conj out
+                   [(std.db.node.transport/value->wire (key entry))
+                    (std.db.node.transport/value->wire (val entry))]))
+           []
+           value)})
+
+(defn- collection->wire
+  [value]
+  (reduce (fn [out item]
+            (conj out (std.db.node.transport/value->wire item)))
+          []
+          value))
+
+(defn- collection-from-wire
+  [value]
+  (reduce (fn [out item]
+            (conj out (std.db.node.transport/wire->value item)))
+          []
+          value))
+
+(defn- map-from-wire
+  [value]
+  (reduce (fn [out entry]
+            (assoc out
+                   (std.db.node.transport/wire->value (first entry))
+                   (std.db.node.transport/wire->value (second entry))))
+          {}
+          (or (compatible-get value :entries) [])))
+
+(defn value->wire
+  "Recursively converts portable Hara values to clone-safe tagged data."
+  [value]
+  (cond
+    (keyword? value)
+    {"$hara" "keyword"
+     "namespace" (namespace value)
+     "name" (name value)}
+
+    (symbol? value)
+    {"$hara" "symbol"
+     "namespace" (namespace value)
+     "name" (name value)}
+
+    (map? value)
+    (map->wire value)
+
+    (vector? value)
+    (collection->wire value)
+
+    (set? value)
+    {"$hara" "set"
+     "items" (collection->wire value)}
+
+    :else
+    value))
+
+(defn wire->value
+  "Reconstructs portable Hara values from clone-safe tagged data."
+  [value]
+  (cond
+    (vector? value)
+    (collection-from-wire value)
+
+    (map? value)
+    (let [tag (compatible-get value "$hara")]
+      (cond
+        (= tag "keyword")
+        (let [ns-value (compatible-get value :namespace)
+              name-value (compatible-get value :name)]
+          (if ns-value
+            (keyword (str ns-value "/" name-value))
+            (keyword name-value)))
+
+        (= tag "symbol")
+        (let [ns-value (compatible-get value :namespace)
+              name-value (compatible-get value :name)]
+          (if ns-value
+            (symbol (str ns-value "/" name-value))
+            (symbol name-value)))
+
+        (= tag "map")
+        (map-from-wire value)
+
+        (= tag "set")
+        (reduce (fn [out item]
+                  (conj out (std.db.node.transport/wire->value item)))
+                #{}
+                (or (compatible-get value :items) []))
+
+        :else
+        (reduce (fn [out entry]
+                  (assoc out (key entry) (std.db.node.transport/wire->value (val entry))))
+                {}
+                value)))
+
+    :else
+    value))
+
+(defn error->wire
+  "Converts thrown values to clone-safe structured error data."
+  [error]
+  (cond
+    (nil? error)
+    nil
+
+    (map? error)
+    (std.db.node.transport/value->wire error)
+
+    (string? error)
+    {"$hara" "error" "message" error}
+
+    :else
+    (try
+      {"$hara" "error"
+       "message" (or (ex-message error) (str error))
+       "class" (str (ex-class error))}
+      (catch Throwable ignored
+        {"$hara" "error" "message" (str error)}))))
+
+(defn frame->wire
+  "Converts a Substrate frame to a structured-clone-friendly map."
+  [frame]
+  {"id" (protocol/frame-id frame)
+   "kind" (wire-name (protocol/frame-kind frame))
+   "space" (protocol/frame-space frame)
+   "meta" (std.db.node.transport/value->wire (protocol/frame-meta frame))
+   "action" (field frame :action)
+   "args" (std.db.node.transport/value->wire (field frame :args))
+   "reply_to" (field frame :reply-to)
+   "status" (wire-name (field frame :status))
+   "data" (std.db.node.transport/value->wire (protocol/frame-data frame))
+   "error" (error->wire (field frame :error))
+   "signal" (std.db.node.transport/value->wire (field frame :signal))
+   "cause" (protocol/frame-cause frame)})
+
+(defn wire->frame
+  "Reconstructs a Substrate frame from a wire map."
+  [message]
+  (substrate/node-frame
+   (wire-keyword (compatible-get message :kind))
+   (compatible-get message :id)
+   (compatible-get message :space)
+   (or (std.db.node.transport/wire->value (compatible-get message :meta)) {})
+   (compatible-get message :action)
+   (or (std.db.node.transport/wire->value (compatible-get message :args)) [])
+   (or (compatible-get message :reply-to)
+       (compatible-get message :reply_to))
+   (wire-keyword (compatible-get message :status))
+   (std.db.node.transport/wire->value (compatible-get message :data))
+   (std.db.node.transport/wire->value (compatible-get message :error))
+   (std.db.node.transport/wire->value (compatible-get message :signal))
+   (compatible-get message :cause)))
+
+(defn ready-message?
+  "Returns true for a database worker ready signal."
+  [message]
+  (= "ready" (compatible-get message :signal)))
+
+(defn- response-frame
+  [request status data error]
+  (substrate/node-frame :response
+                        (str "res-" (protocol/frame-id request))
+                        (protocol/frame-space request)
+                        {}
+                        nil
+                        []
+                        (protocol/frame-id request)
+                        status
+                        data
+                        error
+                        nil
+                        (protocol/frame-id request)))
+
+(defn- receive-endpoint-frame
+  [node transport-id send-function frame]
+  (if (= :request (protocol/frame-kind frame))
+    (try
+      (let [result (protocol/receive-frame node frame {:transport-id transport-id})]
+        (if (promise? result)
+          (promise/catch
+           (promise/then result
+                         (fn [value]
+                           (send-function
+                            (frame->wire (response-frame frame :ok value nil)))))
+           (fn [error]
+             (send-function
+              (frame->wire (response-frame frame :error nil error)))))
+          (send-function (frame->wire (response-frame frame :ok result nil)))))
+      (catch Throwable error
+        (send-function (frame->wire (response-frame frame :error nil error)))))
+    (protocol/receive-frame node frame {:transport-id transport-id})))
+
+(defn attach-endpoint
+  "Attaches an endpoint as a Substrate transport.
+
+   control-listener receives non-frame messages such as ready signals."
+  [node transport-id endpoint control-listener]
+  (let [send-function (compatible-get endpoint :send)
+        listen-function (compatible-get endpoint :listen)]
+    (when (nil? send-function)
+      (throw (ex-info "Database endpoint requires :send" {:endpoint endpoint})))
+    (when (nil? listen-function)
+      (throw (ex-info "Database endpoint requires :listen" {:endpoint endpoint})))
+    (protocol/attach-transport
+     node
+     transport-id
+     (fn [frame]
+       (send-function (frame->wire frame))))
+    (listen-function
+     (fn [message]
+       (if (compatible-get message :kind)
+         (receive-endpoint-frame node
+                                 transport-id
+                                 send-function
+                                 (wire->frame message))
+         (when control-listener
+           (control-listener message)))))
+    {:node node
+     :transport-id transport-id
+     :endpoint endpoint}))
+
+(defn message-adapter
+  "Creates matching server :boot and client :connect hooks for an endpoint."
+  [endpoint]
+  (let [send-function (compatible-get endpoint :send)
+        close-function (compatible-get endpoint :close)]
+    {:boot
+     (fn [node transport-id worker-id ready]
+       (attach-endpoint node transport-id endpoint nil)
+       (send-function ready)
+       ready)
+
+     :connect
+     (fn [node transport-id]
+       (promise/new
+        (fn [resolve reject]
+          (attach-endpoint
+           node
+           transport-id
+           endpoint
+           (fn [message]
+             (cond
+               (ready-message? message)
+               (resolve message)
+
+               (= "error" (compatible-get message :signal))
+               (reject message)
+
+               :else nil))))))
+
+     :close
+     (fn []
+       (when close-function
+         (close-function)))}))
+
+(defn sharedworker-adapter
+  "Creates a SharedWorker-compatible adapter from a MessagePort endpoint."
+  [endpoint]
+  (assoc (message-adapter endpoint) :kind :shared-worker))
+
+(defn webworker-adapter
+  "Creates a WebWorker-compatible adapter from a worker endpoint."
+  [endpoint]
+  (assoc (message-adapter endpoint) :kind :web-worker))
+
+(defn nodeworker-adapter
+  "Creates a Node worker_threads-compatible adapter from a parentPort endpoint."
+  [endpoint]
+  (assoc (message-adapter endpoint) :kind :node-worker))

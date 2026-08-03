@@ -54,7 +54,10 @@ fn declared_namespace(source: &str, path: &Path) -> String {
 
 fn main() {
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let source_root = manifest.join("../lib/src");
+    // Cargo packages cannot include files above the crate root. Keep the
+    // distributable HAL snapshot inside this crate so verification from the
+    // unpacked `.crate` archive exercises the same embedded library.
+    let source_root = manifest.join("hal-src");
     println!("cargo:rerun-if-changed={}", source_root.display());
 
     let mut paths = Vec::new();
@@ -73,20 +76,17 @@ fn main() {
         }
     }
 
-    let repository_root = manifest
-        .parent()
-        .expect("rust crate must have a repository parent")
-        .canonicalize()
-        .expect("repository root must resolve");
     let mut generated =
         String::from("pub(crate) static EMBEDDED_HAL_RESOURCES: &[(&str, &str, &str)] = &[\n");
     for (namespace, path) in resources {
         let path = path
             .canonicalize()
             .unwrap_or_else(|error| panic!("cannot resolve {}: {error}", path.display()));
-        let relative = path
-            .strip_prefix(&repository_root)
-            .expect("HAL resource must be inside the repository")
+        let relative = Path::new("lib/src")
+            .join(
+                path.strip_prefix(&source_root)
+                    .expect("HAL resource must be inside the packaged source root"),
+            )
             .to_string_lossy()
             .replace('\\', "/");
         generated.push_str(&format!(

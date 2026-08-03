@@ -1,0 +1,9 @@
+;; Canonical registry contract for portable test definitions.
+(ns std.protocol.itestregistry)
+
+(defprotocol ITestRegistry
+  (registry-register [registry fact])
+  (registry-remove [registry namespace name])
+  (registry-clear [registry namespace])
+  (registry-facts [registry])
+  (registry-find [registry namespace name]))

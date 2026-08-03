@@ -1,0 +1,144 @@
+(ns xt.lang.common-trace
+  (:require [tahto.core :as l :refer [defspec.xt]]
+            [tahto.common.preprocess-base :as preprocess]))
+
+(l/script :xtalk
+  {:require [[xt.lang.spec-base :as xt]
+             [xt.lang.common-data :as xtd]]})
+
+;;
+;; METADATA
+;;
+
+(defn meta:info-form
+  [form m]
+  (let [options (preprocess/macro-opts)
+        entry (:entry options)
+        namespace (or (:namespace entry)
+                      (:module entry)
+                      (current-namespace))
+        id (:id entry)
+        line (:line (meta form))]
+    (merge {:meta/fn (str namespace "/" id)
+            :meta/line line}
+           m)))
+
+(defn meta:info-fn
+  "the function to get meta info"
+  {:added "4.0"}
+  [& [m]]
+  (meta:info-form (preprocess/macro-form) m))
+
+(defmacro.xt meta:info
+  "macro to inject meta info"
+  {:added "4.0"}
+  [& [m]]
+  (let [info (meta:info-form (preprocess/macro-form) m)]
+    (merge {"meta/fn" (:meta/fn info)
+            "meta/line" (:meta/line info)}
+           m)))
+
+(defmacro.xt LOG!
+  "logging with meta info"
+  {:added "4.0"}
+  [& args]
+  (let [info (meta:info-form (preprocess/macro-form) nil)
+        label (:label (meta &form))
+        fn-name (:meta/fn info)
+        line (:meta/line info)]
+    (apply list
+           (quote x:print)
+           (str label " " fn-name " " line "\n\n")
+           args)))
+
+;;
+;; TRACE
+;;
+
+(defn.xt trace-log
+  "gets the current trace log"
+  {:added "4.0"}
+  []
+  (if (xt/x:global-has? TRACE)
+    (return (!:G TRACE))
+    (do (xt/x:global-set TRACE [])
+        (return (!:G TRACE)))))
+
+(defn.xt trace-log-clear
+  "resets the trace log"
+  {:added "4.0"}
+  []
+  (do (xt/x:global-set TRACE [])
+      (return (!:G TRACE))))
+
+(defn.xt trace-log-add
+  "adds an entry to the log"
+  {:added "4.0"}
+  [data tag opts]
+  (var log (-/trace-log))
+  (var m (xtd/obj-assign
+          {:tag tag
+           :data data
+           :time (xt/x:now-ms)}
+          opts))
+  (xt/x:arr-push log m)
+  (return (xt/x:len log)))
+
+(defn.xt trace-filter
+  "filters out traced entries"
+  {:added "4.0"}
+  [tag]
+  (return (xt/x:arr-filter (-/trace-log) (fn [e] (return (== tag (xt/x:get-key e "tag")))))))
+
+(defn.xt trace-last-entry
+  "gets the last entry"
+  {:added "4.0"}
+  [tag]
+  (var log (-/trace-log))
+  (if (== nil tag)
+    (return (xt/x:last log))
+    (do (var tagged (-/trace-filter tag))
+        (return (xt/x:last tagged)))))
+
+(defn.xt trace-data
+  "gets the trace data"
+  {:added "4.0"}
+  [tag]
+  (return (xt/x:arr-map (-/trace-log)
+                        (fn [e] (return (xt/x:get-key e "data"))))))
+
+(defn.xt trace-last
+  "gets the last value"
+  {:added "4.0"}
+  [tag]
+  (return (xt/x:get-key (-/trace-last-entry tag) "data")))
+
+(defmacro.xt TRACE!
+  "performs a trace call"
+  {:added "4.0"}
+  [data & [tag]]
+  (let [pos   (meta (preprocess/macro-form))
+        ns    (current-namespace)
+        opts  (assoc (select-keys pos [:line :column])
+                     :ns (str ns))]
+    (list (quote xt.lang.common-trace/trace-log-add) data (or tag (str (gensym "trace-"))) opts)))
+
+(defn.xt trace-run
+  "run helper for `RUN!` macro"
+  {:added "4.0"}
+  [f]
+  (-/trace-log-clear)
+  (f)
+  (return (-/trace-log)))
+
+(defmacro.xt RUN!
+  "runs a form, saving trace forms"
+  {:added "4.0"}
+  [& body]
+  (list (quote do)
+        (list (quote var)
+              (quote f)
+              (apply list (quote fn) [] body))
+        (list (quote return)
+              (list (quote xt.lang.common-trace/trace-run)
+                    (quote f)))))

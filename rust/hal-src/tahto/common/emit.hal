@@ -1,0 +1,614 @@
+(ns tahto.common.emit
+  (:require [std.foundation.string :as string]
+            [tahto.common.emit-helper :as helper]
+            [tahto.common.emit-preprocess :as preprocess]
+            [tahto.common.emit-rewrite :as rewrite]
+            [tahto.protocol.compiler :as compiler]))
+
+(declare emit-node emit-main default-grammar)
+
+(def ^:dynamic *indent* 0)
+(def ^:dynamic *compressed* false)
+(def ^:dynamic *emit-fn*
+  (fn [form grammar context]
+    (tahto.common.emit/emit-node form grammar context)))
+
+(defn- fail [message data]
+  (throw (ex-info message data)))
+
+(defn- common-options [grammar]
+  (merge {:start "(" :end ")" :space " " :assign "=" :sep ","
+          :statement ";" :newline "\n" :indent "  "}
+         (get-in grammar [:default :common])))
+
+(defn- option-value [value fallback]
+  (cond (nil? value) fallback
+        (map? value) (or (:as value) (:raw value) fallback)
+        :else value))
+
+(defn newline-indent []
+  (if *compressed*
+    " "
+    (str "\n" (string/repeat " " *indent*))))
+
+(defn emit-reserved-value [form grammar context]
+  (let [entry (get-in grammar [:reserved form])]
+    (if entry
+      (if (:value entry)
+        (or (:free entry) (:raw entry) (:as entry)
+            (fail "Reserved value has no emitted representation"
+                  {:form form :entry entry}))
+        (fail "Reserved operation cannot be used as a value"
+              {:form form :entry entry}))
+      nil)))
+
+(defn- replace-symbol-parts [value replacements]
+  (reduce-kv (fn [out match replacement]
+               (string/replace out (str match) replacement))
+             value
+             (or replacements {})))
+
+(defn emit-symbol [form grammar context]
+  (or (emit-reserved-value form grammar context)
+      (if (namespace form)
+        ((deref (requiring-resolve
+                 'tahto.common.emit-common/emit-symbol))
+         form grammar context)
+        (let [options (get-in grammar [:token :symbol])]
+          (replace-symbol-parts (name form) (:replace options))))))
+
+(defn- emit-string [value grammar]
+  (let [options (get-in grammar [:token :string])]
+    (cond (:custom options) ((:custom options) value grammar)
+          (= :single (:quote options)) (helper/pr-single value)
+          :else (pr-str value))))
+
+(defn emit-token [form grammar context]
+  (cond (nil? form) (str (option-value (get-in grammar [:token :nil]) "nil"))
+        (= true form) (str (option-value (get-in grammar [:token :true]) "true"))
+        (= false form) (str (option-value (get-in grammar [:token :false]) "false"))
+        (symbol? form) (emit-symbol form grammar context)
+        (keyword? form) (or (emit-reserved-value form grammar context) (name form))
+        (string? form) (emit-string form grammar)
+        :else (pr-str form)))
+
+(defn emit-array
+  ([values grammar context]
+   (emit-array values grammar context *emit-fn*))
+  ([values grammar context emit-function]
+   (map (fn [value] (emit-function value grammar context)) values)))
+
+(defn emit-free-raw [separator values grammar context]
+  (string/join (or separator " ") (emit-array values grammar context)))
+
+(defn emit-free [form entry grammar context]
+  (emit-free-raw (:sep entry) (rest form) grammar context))
+
+(defn emit-squash [form entry grammar context]
+  (emit-free-raw "" (rest form) grammar context))
+
+(defn emit-comment [form entry grammar context]
+  (let [prefix (or (:raw entry) (get-in grammar [:default :comment :prefix]) "//")
+        lines (string/split-lines (emit-free-raw " " (rest form) grammar context))]
+    (string/join (newline-indent)
+                 (map (fn [line] (str prefix " " line)) lines))))
+
+(defn emit-wrappable? [form grammar]
+  (if (list? form)
+    (let [entry (get-in grammar [:reserved (first form)])
+          mode (:emit entry)]
+      (or (:wrappable entry)
+          (reduce (fn [found candidate]
+                    (or found (= candidate mode)))
+                  false
+                  [:infix :infix* :infix- :infix-if :assign
+                   :bi :prefix :postfix :fn])))
+    false))
+
+(defn emit-wrapping [form grammar context]
+  (let [output (tahto.common.emit/emit-node form grammar context)
+        options (common-options grammar)]
+    (if (and (emit-wrappable? form grammar)
+             (not (and (string/starts-with? output (:start options))
+                       (string/ends-with? output (:end options)))))
+      (str (:start options) output (:end options))
+      output)))
+
+(defn emit-pre [raw arguments grammar context]
+  (let [arguments (vec arguments)]
+    (if (not (= 1 (count arguments)))
+      (fail "Prefix operation expects one argument" {:raw raw :arguments arguments})
+      (str raw (emit-wrapping (first arguments) grammar context)))))
+
+(defn emit-post [raw arguments grammar context]
+  (let [arguments (vec arguments)]
+    (if (not (= 1 (count arguments)))
+      (fail "Post operation expects one argument" {:raw raw :arguments arguments})
+      (str (emit-wrapping (first arguments) grammar context) raw))))
+
+(defn emit-prefix [raw arguments grammar context]
+  (let [arguments (vec arguments)]
+    (if (not (= 1 (count arguments)))
+      (fail "Prefix operation expects one argument" {:raw raw :arguments arguments})
+      (str raw (:space (common-options grammar))
+           (emit-wrapping (first arguments) grammar context)))))
+
+(defn emit-postfix [raw arguments grammar context]
+  (let [arguments (vec arguments)]
+    (if (not (= 1 (count arguments)))
+      (fail "Postfix operation expects one argument" {:raw raw :arguments arguments})
+      (str (emit-wrapping (first arguments) grammar context)
+           (:space (common-options grammar)) raw))))
+
+(defn emit-infix [raw arguments grammar context]
+  (let [arguments (vec arguments)]
+    (if (= 0 (count arguments))
+      (fail "Infix operation expects arguments" {:raw raw :arguments arguments})
+      (let [space (:space (common-options grammar))]
+        (string/join (str space raw space)
+                     (emit-array arguments grammar context emit-wrapping))))))
+
+(defn emit-infix-default [raw arguments default grammar context]
+  (let [arguments (vec arguments)]
+    (emit-infix raw
+                (if (= 1 (count arguments))
+                  (vec (concat [default] arguments))
+                  arguments)
+                grammar context)))
+
+(defn emit-infix-pre [raw arguments grammar context]
+  (let [arguments (vec arguments)]
+    (if (= 1 (count arguments))
+      (emit-pre raw arguments grammar context)
+      (emit-infix raw arguments grammar context))))
+
+(defn emit-bi [raw arguments grammar context]
+  (let [arguments (vec arguments)]
+    (if (not (= 2 (count arguments)))
+      (fail "Binary operation expects two arguments" {:raw raw :arguments arguments})
+      (emit-infix raw arguments grammar context))))
+
+(defn emit-between [raw arguments grammar context]
+  (string/join raw (emit-array arguments grammar context emit-wrapping)))
+
+(defn emit-assign [raw arguments grammar context]
+  (let [arguments (vec arguments)]
+    (if (not (= 2 (count arguments)))
+      (fail "Assignment expects two arguments" {:raw raw :arguments arguments})
+      (let [options (common-options grammar)]
+        (string/join (str (:space options) (or raw (:assign options)) (:space options))
+                     (emit-array arguments grammar context emit-wrapping))))))
+
+(defn emit-infix-if [form entry grammar context]
+  (let [arguments (vec (rest form))]
+    (if (not (= 3 (count arguments)))
+      (fail "Ternary operation expects three arguments" {:form form :entry entry})
+      (let [options (common-options grammar)
+            infix (get-in grammar [:default :infix :if])]
+        (str (emit-wrapping (nth arguments 0) grammar context)
+             (:space options) (or (:check infix) "?") (:space options)
+             (emit-wrapping (nth arguments 1) grammar context)
+             (:space options) (or (:then infix) ":") (:space options)
+             (emit-wrapping (nth arguments 2) grammar context))))))
+
+(defn emit-return [form entry grammar context]
+  (let [arguments (vec (rest form))
+        options (common-options grammar)]
+    (if (and (not (get-in grammar [:default :return :multi]))
+             (> (count arguments) 1))
+      (fail "Return operation expects zero or one argument" {:form form :entry entry})
+      (str (:raw entry)
+           (if (> (count arguments) 0) (:space options) "")
+           (string/join (str (:sep options) (:space options))
+                        (emit-array arguments grammar context))))))
+
+(defn- collection-options [grammar key defaults]
+  (merge defaults (get-in grammar [:data key])))
+
+(defn- emit-collection [values options grammar context]
+  (str (:start options)
+       (string/join (str (:sep options) (:space options))
+                    (emit-array values grammar context))
+       (:end options)))
+
+(defn emit-vector [value grammar context]
+  (emit-collection value
+                   (collection-options grammar :vector
+                                       {:start "[" :end "]" :sep "," :space " "})
+                   grammar context))
+
+(defn emit-set [value grammar context]
+  (emit-collection (sort-by pr-str value)
+                   (collection-options grammar :set
+                                       {:start "#{" :end "}" :sep "," :space " "})
+                   grammar context))
+
+(defn emit-map [value grammar context]
+  (let [options (collection-options grammar :map
+                                    {:start "{" :end "}" :sep "," :space " "})
+        entry-options (collection-options grammar :map-entry
+                                          {:assign ":" :space " "})
+        key-fn (:key-fn entry-options)
+        entries (reduce-kv
+                 (fn [out key item]
+                   (conj out (str (if key-fn
+                                    (key-fn key grammar context)
+                                    (tahto.common.emit/emit-node key grammar context))
+                                  (:space entry-options) (:assign entry-options)
+                                  (:space entry-options)
+                                  (tahto.common.emit/emit-node item grammar context))))
+                 [] value)]
+    (str (:start options)
+         (string/join (str (:sep options) (:space options)) entries)
+         (:end options))))
+
+(defn emit-data [form grammar context]
+  (cond (vector? form) (emit-vector form grammar context)
+        (map? form) (emit-map form grammar context)
+        (set? form) (emit-set form grammar context)
+        :else (fail "Unsupported data form" {:form form})))
+
+(defn emit-invoke-args [arguments grammar context]
+  (let [options (merge {:start "(" :end ")" :sep "," :space " "}
+                       (get-in grammar [:default :invoke]))]
+    (str (:start options)
+         (string/join (str (:sep options) (:space options))
+                      (emit-array arguments grammar context))
+         (:end options))))
+
+(defn emit-invoke [form entry grammar context]
+  (let [callee (first form)
+        options (common-options grammar)
+        target (cond (:raw entry) (:raw entry)
+                     (symbol? callee) (emit-symbol callee grammar context)
+                     :else (str (:start options)
+                                (tahto.common.emit/emit-node callee grammar context)
+                                (:end options)))]
+    (str target
+         (emit-invoke-args (rest form) grammar context))))
+
+(defn emit-new [form entry grammar context]
+  (let [arguments (vec (rest form))
+        constructor (first arguments)
+        options (common-options grammar)]
+    (if (nil? constructor)
+      (fail "One or more arguments required for constructor"
+            {:form form :entry entry})
+      (str (or (:raw entry) "new") (:space options)
+           (tahto.common.emit/emit-node constructor grammar context)
+           (emit-invoke-args (rest arguments) grammar context)))))
+
+(defn emit-index-entry [entry grammar context]
+  (cond (vector? entry) (str "[" (tahto.common.emit/emit-node
+                                   (first entry) grammar context) "]")
+        (keyword? entry) (str "." (name entry))
+        (symbol? entry) (str "." (emit-symbol entry grammar context))
+        (list? entry) (str (or (get-in grammar [:default :common :apply]) ".")
+                           (emit-invoke entry nil grammar context))
+        :else (str "[" (tahto.common.emit/emit-node entry grammar context) "]")))
+
+(defn emit-index [form entry grammar context]
+  (let [target-form (second form)
+        target (emit-wrapping target-form grammar context)
+        options (common-options grammar)
+        target-out (if (and (get-in grammar [:default :index :wrap-object])
+                            (or (vector? target-form)
+                                (map? target-form)
+                                (set? target-form)
+                                (string/starts-with? target "{")))
+                     (str (:start options) target (:end options))
+                     target)]
+  (str target-out
+       (string/join ""
+                    (map (fn [value] (emit-index-entry value grammar context))
+                         (drop 2 form))))))
+
+(defn- statement-output [form grammar context]
+  (let [output (tahto.common.emit/emit-node form grammar context)
+        statement (:statement (common-options grammar))]
+    (if (or (= "" statement) (= 0 (string/length output))
+            (string/ends-with? output statement)
+            (string/ends-with? output "}"))
+      output
+      (str output statement))))
+
+(defn emit-do [form entry grammar context]
+  (string/join (newline-indent)
+               (map (fn [value] (statement-output value grammar context))
+                    (rest form))))
+
+(defn- body-output [body body-options grammar context]
+  (let [common (common-options grammar)
+        previous *indent*
+        next-indent (+ previous (string/length (:indent common)))
+        output (binding [*indent* next-indent]
+                 (string/join (newline-indent)
+                              (map (fn [value]
+                                     (statement-output value grammar context))
+                                   body)))]
+    (if (= 0 (count body))
+      ""
+      (str (binding [*indent* next-indent] (newline-indent))
+           output
+           (if (= "" (:end body-options))
+             ""
+             (binding [*indent* previous] (newline-indent)))))))
+
+(defn emit-block [form entry grammar context]
+  (let [arguments (vec (rest form))
+        parameter (first arguments)
+        body (drop 1 arguments)
+        common (common-options grammar)
+        options (merge {:parameter {:start "(" :end ")"}
+                        :body {:start "{" :end "}"}}
+                       (get-in grammar [:default :block]))
+        parameter-options (merge (:parameter options)
+                                 (get-in entry [:block :parameter]))
+        body-options (merge (:body options) (get-in entry [:block :body]))
+        parameter-output (if (vector? parameter)
+                           (string/join (str (:sep common) (:space common))
+                                        (emit-array parameter grammar context))
+                           (tahto.common.emit/emit-node parameter grammar context))]
+    (str (or (get-in entry [:block :raw]) (:raw entry) (name (first form)))
+         (:space common) (:start parameter-options) parameter-output
+         (:end parameter-options)
+         (or (:space-before-body options) (:space common))
+         (:start body-options)
+         (body-output body body-options grammar context)
+         (:end body-options))))
+
+(defn- emit-function-args [arguments grammar context]
+  (let [options (merge {:start "(" :end ")" :sep "," :space " "}
+                       (get-in grammar [:default :function :args]))]
+    (str (:start options)
+         (string/join (str (:sep options) (:space options))
+                      (emit-array arguments grammar context))
+         (:end options))))
+
+(defn emit-function [form entry grammar context]
+  (let [values (vec (rest form))
+        named (symbol? (first values))
+        name-value (if named (first values) nil)
+        arguments (if named (second values) (first values))
+        body (if named (drop 2 values) (drop 1 values))
+        options (merge {:raw "function" :body {:start "{" :end "}"}}
+                       (get-in grammar [:default :function]))
+        common (common-options grammar)]
+    (str (:raw options)
+         (if name-value (str (:space common) (emit-symbol name-value grammar context)) "")
+         (emit-function-args arguments grammar context)
+         (or (:space-before-body options) (:space common))
+         (get-in options [:body :start])
+         (body-output body (:body options) grammar context)
+         (get-in options [:body :end]))))
+
+(defn emit-def [form entry grammar context]
+  (let [name-value (second form)
+        value (nth form 2)
+        common (common-options grammar)
+        raw (or (:raw entry) (get-in grammar [:define :def :raw]) "var")]
+    (str raw (if (= "" raw) "" (:space common))
+         (emit-symbol name-value grammar context)
+         (:space common) (:assign common) (:space common)
+         (tahto.common.emit/emit-node value grammar context))))
+
+(defn emit-defn [form entry grammar context]
+  (emit-function (cons 'fn (rest form)) entry grammar context))
+
+(defn emit-macro [form entry grammar context]
+  (let [macro-function (or (:macro entry) (:value/template entry))]
+    (if macro-function
+      (tahto.common.emit/emit-node (macro-function form) grammar context)
+      (fail "Macro operation has no expansion function" {:form form :entry entry}))))
+
+(defn- operation-mode [entry]
+  (or (:emit entry)
+      (cond (= :fn (:type entry)) :fn
+            (and (= :def (:type entry)) (:fn entry)) :defn
+            (= :def (:type entry)) :def
+            (= :block (:type entry)) :block
+            :else :invoke)))
+
+(defn- grouped [output grammar]
+  (let [options (common-options grammar)]
+    (str (:start options) output (:end options))))
+
+(defn- unsupported-operation [form entry grammar context]
+  (fail "Unsupported emit operation"
+        {:form form :entry entry :mode (operation-mode entry)}))
+
+(defmulti operation-handler identity)
+(defmethod operation-handler :free [mode] emit-free)
+(defmethod operation-handler :squash [mode] emit-squash)
+(defmethod operation-handler :comment [mode] emit-comment)
+(defmethod operation-handler :invoke [mode] emit-invoke)
+(defmethod operation-handler :new [mode] emit-new)
+(defmethod operation-handler :index [mode] emit-index)
+(defmethod operation-handler :do [mode] emit-do)
+(defmethod operation-handler :do* [mode] emit-do)
+(defmethod operation-handler :block [mode] emit-block)
+(defmethod operation-handler :fn [mode] emit-function)
+(defmethod operation-handler :def [mode] emit-def)
+(defmethod operation-handler :defn [mode] emit-defn)
+(defmethod operation-handler :def-assign [mode] emit-def)
+(defmethod operation-handler :macro [mode] emit-macro)
+(defmethod operation-handler :return [mode] emit-return)
+(defmethod operation-handler :quote [mode]
+  (fn [form entry grammar context]
+    (tahto.common.emit/emit-node (second form) grammar context)))
+(defmethod operation-handler :internal [mode]
+  (fn [form entry grammar context]
+    (tahto.common.emit/emit-node (second form) grammar context)))
+(defmethod operation-handler :discard [mode]
+  (fn [form entry grammar context] ""))
+(defmethod operation-handler :pre [mode]
+  (fn [form entry grammar context]
+    (emit-pre (:raw entry) (rest form) grammar context)))
+(defmethod operation-handler :post [mode]
+  (fn [form entry grammar context]
+    (emit-post (:raw entry) (rest form) grammar context)))
+(defmethod operation-handler :prefix [mode]
+  (fn [form entry grammar context]
+    (emit-prefix (:raw entry) (rest form) grammar context)))
+(defmethod operation-handler :postfix [mode]
+  (fn [form entry grammar context]
+    (emit-postfix (:raw entry) (rest form) grammar context)))
+(defmethod operation-handler :infix [mode]
+  (fn [form entry grammar context]
+    (grouped (emit-infix (:raw entry) (rest form) grammar context) grammar)))
+(defmethod operation-handler :infix* [mode]
+  (fn [form entry grammar context]
+    (grouped (emit-infix-default (:raw entry) (rest form) (:default entry)
+                                 grammar context)
+             grammar)))
+(defmethod operation-handler :infix- [mode]
+  (fn [form entry grammar context]
+    (grouped (emit-infix-pre (:raw entry) (rest form) grammar context) grammar)))
+(defmethod operation-handler :infix-if [mode]
+  (fn [form entry grammar context]
+    (grouped (emit-infix-if form entry grammar context) grammar)))
+(defmethod operation-handler :between [mode]
+  (fn [form entry grammar context]
+    (emit-between (:raw entry) (rest form) grammar context)))
+(defmethod operation-handler :bi [mode]
+  (fn [form entry grammar context]
+    (grouped (emit-bi (:raw entry) (rest form) grammar context) grammar)))
+(defmethod operation-handler :assign [mode]
+  (fn [form entry grammar context]
+    (emit-assign (:raw entry) (rest form) grammar context)))
+(defmethod operation-handler :default [mode] unsupported-operation)
+
+(defn emit-operation [form grammar context]
+  (let [entry (get-in grammar [:reserved (first form)])]
+    (if entry
+      ((tahto.common.emit/operation-handler (operation-mode entry))
+       form entry grammar context)
+      (emit-invoke form nil grammar context))))
+
+(defn emit-node [form grammar context]
+  (cond (list? form) (emit-operation form grammar context)
+        (or (vector? form) (map? form) (set? form))
+        (emit-data form grammar context)
+        :else (emit-token form grammar context)))
+
+(defn- merge-nested
+  [left right]
+  (reduce-kv (fn [output key value]
+               (let [existing (get output key)]
+                 (assoc output key
+                        (if (and (map? existing) (map? value))
+                          (merge-nested existing value)
+                          value))))
+             (or left {}) (or right {})))
+
+(defn default-grammar
+  "returns the default emitter grammar"
+  {:added "4.0"}
+  ([] (default-grammar {}))
+  ([options]
+   (merge-nested
+    (merge-nested helper/+default+
+                  {:rewrite {:canonical [rewrite/canonical-stage]}})
+    options)))
+
+(def +option-keys+
+  [:lang :entry :module :book :snapshot :layout :emit
+   :tahto/xtalk-context :tahto/provenance])
+
+(defn emit-main-loop
+  "emits one form through the Foundation common/top-level pipeline"
+  {:added "4.0"}
+  [form grammar mopts]
+  ((deref (requiring-resolve
+           'tahto.common.emit-common/emit-common-loop-bound))
+   form grammar mopts
+   (deref (requiring-resolve
+           'tahto.common.emit-top-level/+emit-lookup+))
+   (deref (requiring-resolve
+           'tahto.common.emit-top-level/emit-form))
+   (deref (resolve 'tahto.common.emit/emit-main-loop))))
+
+(defn emit-main
+  "emits one top-level form with recursive emission"
+  {:added "4.0"}
+  [form grammar mopts]
+  (binding [tahto.common.preprocess-base/*macro-opts* mopts
+            tahto.common.preprocess-base/*macro-grammar* grammar]
+    (let [output (binding [*emit-fn* emit-main-loop]
+                   (emit-main-loop form grammar mopts))
+          options (common-options grammar)]
+      (if (and (emit-wrappable? form grammar)
+               (string/starts-with? output (:start options))
+               (string/ends-with? output (:end options)))
+        (string/slice output 1 (- (string/length output) 1))
+        output))))
+
+(defn emit
+  "emits form to output string"
+  {:added "4.0"}
+  ([form selected] (emit form selected {}))
+  ([form selected context]
+   (emit-main form
+              (default-grammar (or (:grammar selected) selected))
+              context))
+  ([form grammar namespace mopts]
+   (let [mopts (select-keys mopts +option-keys+)]
+     (if (:emit grammar)
+       ((:emit grammar) form mopts)
+       (emit-main form (default-grammar grammar) mopts)))))
+
+(defmacro with:emit
+  "binds the top-level emit function to the recursive common emitter"
+  {:added "4.0"}
+  [& body]
+  `(binding [*emit-fn* emit-main-loop] ~@body))
+
+(def +steps+ [[:raw] [:input] [:staging]])
+(def +test-grammar+ (default-grammar))
+
+(defn prep-options
+  "prepares options for processing"
+  {:added "4.0"}
+  [metadata]
+  (let [lang (:lang metadata)
+        snapshot (:snapshot metadata)
+        book-value (:book metadata)
+        book (or (if (symbol? book-value)
+                   (deref (requiring-resolve book-value))
+                   book-value)
+                 (get-in snapshot [lang :book]))
+        step (or (get metadata :-)
+                 (if (or book (and lang snapshot)) :staging :input))
+        grammar-value (:grammar metadata)
+        grammar (or (if (symbol? grammar-value)
+                      (deref (requiring-resolve grammar-value))
+                      grammar-value)
+                    (:grammar book)
+                    +test-grammar+)
+        namespace (or (:namespace metadata) (current-namespace))]
+    [step grammar book namespace
+     (select-keys metadata +option-keys+)]))
+
+(defn prep-form
+  "prepares a form through raw, input, or staging"
+  {:added "4.0"}
+  [step form grammar book mopts]
+  (let [input-form (preprocess/to-input form)]
+    (cond (= step :raw) [form]
+          (= step :input) [input-form]
+          (= step :staging)
+          (let [staged (preprocess/to-staging input-form grammar
+                                              (or (:modules book) {}) mopts)
+                rewritten (rewrite/rewrite-stage :staging (nth staged 0)
+                                                  grammar
+                                                  (assoc mopts :book book))]
+            [rewritten (nth staged 1) (nth staged 2) (nth staged 3)])
+          :else (throw (ex-info "Unknown preparation step"
+                                {:step step :form form})))))
+
+(defstruct Emitter [])
+(defn emitter [] (tahto.common.emit/Emitter))
+
+(extend-type Emitter compiler/IEmitter
+  (emit-form [emitter rewritten selected context]
+    (tahto.common.emit/emit rewritten selected context)))

@@ -1,0 +1,51 @@
+(ns hara.metaspec.registry)
+
+(def registry-cell
+  ;; A function closure prevents namespace loading from introducing an extra
+  ;; Var dereference around mutable module state.
+  (let [state (atom {:metaspecs {}
+                     :checker-packages {}})]
+    (fn [] state)))
+
+(defn coordinate
+  "Returns the exact identity coordinate of a specification document."
+  [document]
+  [(:document/id document) (:document/version document)])
+
+(defn register-metaspec!
+  "Registers a metaspec by exact document ID and version."
+  [document]
+  (let [coordinate (coordinate document)]
+    (swap! (registry-cell) assoc-in [:metaspecs coordinate] document)
+    coordinate))
+
+(defn unregister-metaspec!
+  "Removes an exact metaspec coordinate."
+  [coordinate]
+  (swap! (registry-cell) update :metaspecs dissoc coordinate))
+
+(defn find-metaspec
+  "Finds a metaspec by exact [id version] coordinate."
+  [coordinate]
+  (get (:metaspecs (deref (registry-cell))) coordinate))
+
+(defn register-checker-package!
+  "Registers installed checker entrypoints for an exact package coordinate.
+
+   Entrypoints is a map from qualified symbols to HAL functions."
+  [coordinate entrypoints]
+  (swap! (registry-cell) assoc-in [:checker-packages coordinate] entrypoints)
+  coordinate)
+
+(defn unregister-checker-package!
+  "Removes an installed checker package coordinate."
+  [coordinate]
+  (swap! (registry-cell) update :checker-packages dissoc coordinate))
+
+(defn find-checker
+  "Finds a checker function in an installed exact-version package."
+  [coordinate entrypoint]
+  (if-let [entrypoints
+           (get (:checker-packages (deref (registry-cell))) coordinate)]
+    (get entrypoints entrypoint)
+    nil))

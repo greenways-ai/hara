@@ -1,0 +1,139 @@
+;; ============================================================================
+;; std.foundation.set — portable immutable set algebra.
+;;
+;; This namespace is implemented entirely in HAL so its behavior is identical
+;; in Truffle, native Rust, and Wasm runtimes.
+;;
+;;                         immutable sets
+;;                               |
+;;             +-----------------+-----------------+
+;;             |                 |                 |
+;;             v                 v                 v
+;;           union          intersection       difference
+;;        add all values    keep shared       remove values
+;;             |                 |                 |
+;;             +-----------------+-----------------+
+;;                               |
+;;                               v
+;;                        resulting set
+;;
+;;            left -------------------------- right
+;;              |                               |
+;;              +--> subset? / superset? <------+
+;;                               |
+;;                               v
+;;                       containment result
+;;
+;; `select` filters one set without changing its set identity. Internal
+;; helpers iterate explicitly so no runtime-specific set implementation leaks
+;; into the portable semantics.
+;; ============================================================================
+(ns std.foundation.set
+  (:config {:blank true})
+  (:require [std.foundation :refer [= conj dissoc iter iter-next? iter-next]]))
+
+(defn- ^{:schema [:fn [:set :any] :bool]}
+  contains-value?
+  "Returns true when values contains target."
+  [values target]
+  (let [it (iter values)]
+    (loop []
+      (if (iter-next? it)
+        (if (= target (iter-next it))
+          true
+          (recur))
+        false))))
+
+(defn- ^{:schema [:fn [:set :any] :set]}
+  add-all
+  "Conjoins every item of values into result."
+  [result values]
+  (let [it (iter values)]
+    (loop [output result]
+      (if (iter-next? it)
+        (recur (conj output (iter-next it)))
+        output))))
+
+(defn- ^{:schema [:fn [:set :any] :set]}
+  remove-all
+  "Removes every item of values from result."
+  [result values]
+  (let [it (iter values)]
+    (loop [output result]
+      (if (iter-next? it)
+        (recur (dissoc output (iter-next it)))
+        output))))
+
+(defn- ^{:schema [:fn [:set :set] :set]}
+  intersection-two
+  "Returns the values shared by left and right."
+  [left right]
+  (let [it (iter left)]
+    (loop [output #{}]
+      (if (iter-next? it)
+        (let [value (iter-next it)]
+          (recur (if (contains-value? right value)
+                   (conj output value)
+                   output)))
+        output))))
+
+(defn ^{:schema [:fn [& :set] :set]}
+  union
+  "Returns a set containing every value in sets."
+  [& sets]
+  (let [it (iter sets)]
+    (loop [result #{}]
+      (if (iter-next? it)
+        (recur (add-all result (iter-next it)))
+        result))))
+
+(defn ^{:schema [:fn [:set & :set] :set]}
+  intersection
+  "Returns the values present in every set."
+  [first-set & sets]
+  (let [it (iter sets)]
+    (loop [result first-set]
+      (if (iter-next? it)
+        (recur (intersection-two result (iter-next it)))
+        result))))
+
+(defn ^{:schema [:fn [:set & :set] :set]}
+  difference
+  "Returns values in first-set that are absent from every remaining set."
+  [first-set & sets]
+  (let [it (iter sets)]
+    (loop [result first-set]
+      (if (iter-next? it)
+        (recur (remove-all result (iter-next it)))
+        result))))
+
+(defn ^{:schema [:fn [:set :set] :bool]}
+  subset?
+  "Returns true when every value in left is present in right."
+  [left right]
+  (let [it (iter left)]
+    (loop []
+      (if (iter-next? it)
+        (if (contains-value? right (iter-next it))
+          (recur)
+          false)
+        true))))
+
+(defn ^{:schema [:fn [:set :set] :bool]}
+  superset?
+  "Returns true when every value in right is present in left."
+  [left right]
+  (subset? right left))
+
+(defn ^{:schema [:fn [:fn :set] :set]}
+  select
+  "Returns the values in values for which predicate is truthy."
+  [predicate values]
+  (let [it (iter values)]
+    (loop [result #{}]
+      (if (iter-next? it)
+        (let [value (iter-next it)]
+          (recur (if (predicate value)
+                   (conj result value)
+                   result)))
+        result))))

@@ -1,0 +1,15 @@
+(ns std.lib.substrate.protocol-conformance
+  (:require [std.lib.substrate.protocol :as protocol]))
+
+(defstruct CapabilityFixture [value])
+
+(defprotocol FixtureOps
+  (read-value [fixture])
+  (increment [fixture amount]))
+
+(extend-type CapabilityFixture FixtureOps
+  (read-value [fixture] (field fixture :value))
+  (increment [fixture amount] (+ (field fixture :value) amount)))
+
+[(read-value (CapabilityFixture 40))
+ (increment (map->CapabilityFixture {:value 40}) 2)]

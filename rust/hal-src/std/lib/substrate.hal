@@ -1,0 +1,204 @@
+;; ============================================================================
+;; std.lib.substrate — portable, atom-backed XTalk substrate core.
+;;
+;; This is intentionally an in-memory node.  Browser ports, JSON wire shapes,
+;; and Studio generation ownership are adapters above this namespace.
+;; ============================================================================
+(ns std.lib.substrate
+  (:require [std.lib.substrate.protocol :as protocol]))
+
+(defstruct SubstrateNode [id state])
+(defstruct SubstrateFrame [id kind space meta action args reply-to status data error signal cause])
+
+(defn node-create [id]
+  (std.lib.substrate/SubstrateNode id
+                 (atom {:spaces {}
+                        :services {}
+                        :handlers {}
+                        :triggers {}
+                        :pending {}
+                        :router {}
+                        :transports {}
+                        :meta {}})))
+
+(defn node-state [node] @(field node :state))
+(defn node-section [node section] (get (node-state node) section {}))
+
+(defn section-put [node section id value]
+  (swap! (field node :state)
+         (fn [state] (assoc state section (assoc (get state section {}) id value))))
+  value)
+
+(defn section-remove [node section id]
+  (let [previous (get (node-section node section) id)]
+    (do (swap! (field node :state)
+               (fn [state] (assoc state section (dissoc (get state section {}) id))))
+        previous)))
+
+(defn node-id [prefix] (str (gensym prefix)))
+(defn node-meta [meta] (if meta meta {}))
+(defn node-args [args] (if args args []))
+(defn node-space-id [space-id] (if space-id space-id "__NODE__"))
+
+(defn node-frame [kind id space meta action args reply-to status data error signal cause]
+  (std.lib.substrate/SubstrateFrame id kind (node-space-id space) meta action args reply-to status data error signal cause))
+
+(defn route-stream-loop [node transport-ids frame index]
+  (if (= index (count transport-ids))
+    frame
+    (do (protocol/send-transport node (nth transport-ids index) frame)
+        (route-stream-loop node transport-ids frame (+ index 1)))))
+
+(defn reject-pending-loop [pending request-ids reason index]
+  (if (= index (count request-ids))
+    nil
+    (let [entry (get pending (nth request-ids index))]
+      (do ((get entry :reject) reason)
+          (reject-pending-loop pending request-ids reason (+ index 1))))))
+
+(defn router-add [node transport-id frame]
+  (let [key [(protocol/frame-space frame) (field frame :signal)]]
+    (section-put node :router key
+                 (assoc (get (node-section node :router) key {}) transport-id
+                        {:id (protocol/frame-id frame)
+                         :meta (protocol/frame-meta frame)}))))
+
+(defn router-remove [node transport-id frame]
+  (let [key [(protocol/frame-space frame) (field frame :signal)]]
+    (section-put node :router key
+                 (dissoc (get (node-section node :router) key {}) transport-id))))
+
+(extend-type std.lib.substrate/SubstrateFrame protocol/IFrame
+  (frame-id [frame] (field frame :id))
+  (frame-kind [frame] (field frame :kind))
+  (frame-space [frame] (field frame :space))
+  (frame-meta [frame] (field frame :meta))
+  (frame-cause [frame] (field frame :cause))
+  (frame-data [frame] (field frame :data)))
+
+(extend-type std.lib.substrate/SubstrateNode protocol/ISubstrateSpace
+  (get-space [node space-id] (get (node-section node :spaces) (node-space-id space-id)))
+  (create-space [node space-id opts]
+    (let [space-id (node-space-id space-id)]
+      (section-put node :spaces space-id
+                   {:id space-id :state (get opts :state {}) :meta (get opts :meta {})})))
+  (ensure-space [node space-id opts]
+    (let [space (protocol/get-space node space-id)]
+      (if space space (protocol/create-space node space-id opts))))
+  (remove-space [node space-id] (section-remove node :spaces (node-space-id space-id)))
+  (list-spaces [node] (vec (keys (node-section node :spaces))))
+  (get-space-state [node space-id]
+    (get (protocol/ensure-space node space-id {}) :state))
+  (set-space-state [node space-id value]
+    (let [space (protocol/ensure-space node space-id {})]
+      (do (section-put node :spaces (node-space-id space-id) (assoc space :state value))
+          value)))
+  (update-space-state [node space-id updater]
+    (protocol/set-space-state node space-id
+                   (updater (protocol/get-space-state node space-id)))))
+
+(extend-type std.lib.substrate/SubstrateNode protocol/IService
+  (get-service [node service-id] (get (node-section node :services) service-id))
+  (set-service [node service-id service] (section-put node :services service-id service))
+  (remove-service [node service-id] (section-remove node :services service-id)))
+
+(extend-type std.lib.substrate/SubstrateNode protocol/IHandler
+  (register-handler [node action handler meta]
+    (section-put node :handlers action {:id action :fn handler :meta meta}))
+  (unregister-handler [node action] (section-remove node :handlers action))
+  (get-handler [node action] (get (node-section node :handlers) action))
+  (list-handlers [node] (vec (keys (node-section node :handlers))))
+  (register-trigger [node signal trigger meta]
+    (section-put node :triggers signal {:id signal :fn trigger :meta meta}))
+  (unregister-trigger [node signal] (section-remove node :triggers signal))
+  (get-trigger [node signal] (get (node-section node :triggers) signal))
+  (list-triggers [node] (vec (keys (node-section node :triggers)))))
+
+(extend-type std.lib.substrate/SubstrateNode protocol/ITransport
+  (attach-transport [node transport-id transport] (section-put node :transports transport-id transport))
+  (detach-transport [node transport-id] (section-remove node :transports transport-id))
+  (get-transport [node transport-id] (get (node-section node :transports) transport-id))
+  (list-transports [node] (vec (keys (node-section node :transports))))
+  (send-transport [node transport-id frame]
+    (let [transport (protocol/get-transport node transport-id)]
+      (if transport (transport frame) nil)))
+  (receive-frame [node frame context]
+    (let [kind (protocol/frame-kind frame)]
+      (if (= kind :request)
+        (protocol/receive-request node frame context)
+        (if (= kind :response)
+          (protocol/receive-response node frame)
+          (if (= kind :stream)
+            (protocol/receive-publish node frame context)
+            (if (= kind :subscribe)
+              (let [transport-id (get context :transport-id)]
+                (if transport-id (router-add node transport-id frame) frame))
+              (if (= kind :unsubscribe)
+                (let [transport-id (get context :transport-id)]
+                  (if transport-id (router-remove node transport-id frame) frame))
+                nil))))))))
+
+(extend-type std.lib.substrate/SubstrateNode protocol/IRequest
+  (request [node space-id action args meta]
+    (let [request-meta (node-meta meta)]
+      (let [frame (node-frame :request (get request-meta :id (node-id "req-")) (node-space-id space-id) request-meta action (node-args args) nil nil nil nil nil nil)]
+        (let [transport-id (get request-meta :transport-id)]
+          (if transport-id
+            (promise/new
+             (fn [resolve reject]
+               (do (section-put node :pending (protocol/frame-id frame)
+                                {:frame frame :resolve resolve :reject reject :transport-id transport-id})
+                   (protocol/send-transport node transport-id frame))))
+            (protocol/receive-request node frame {:local true}))))))
+  (receive-request [node frame context]
+    (let [entry (protocol/get-handler node (field frame :action))]
+      (if entry
+        ((get entry :fn)
+         (protocol/ensure-space node (protocol/frame-space frame) {})
+         (field frame :args)
+         frame
+         node)
+        (throw (str "handler not found - " (field frame :action))))))
+  (receive-response [node frame]
+    (let [pending (section-remove node :pending (field frame :reply-to))]
+      (if pending
+        (if (= (field frame :status) :ok)
+          (do ((get pending :resolve) (field frame :data))
+              (field frame :data))
+          (do ((get pending :reject) (field frame :error))
+              (field frame :error)))
+        nil)))
+  (cancel-request [node request-id reason]
+    (let [pending (section-remove node :pending request-id)]
+      (if pending
+        (do ((get pending :reject) reason)
+            {:id request-id :reason reason})
+        nil)))
+  (reject-pending [node reason]
+    (let [pending (node-section node :pending)]
+      (do (reject-pending-loop pending (vec (keys pending)) reason 0)
+          (swap! (field node :state) (fn [state] (assoc state :pending {})))
+          {:pending pending :reason reason}))))
+
+(extend-type std.lib.substrate/SubstrateNode protocol/IStream
+  (publish [node space-id signal data meta]
+    (let [stream-meta (node-meta meta)]
+      (let [space-id (node-space-id space-id)]
+      (let [frame (node-frame :stream (get stream-meta :id (node-id "evt-")) space-id stream-meta nil [] nil nil data nil signal (get stream-meta :cause))]
+      (do (protocol/receive-publish node frame {:local true})
+          (route-stream-loop node
+                             (protocol/list-subscriptions node space-id signal)
+                             frame
+                             0)
+          frame)))))
+  (receive-publish [node frame context]
+    (let [entry (protocol/get-trigger node (field frame :signal))]
+      (if entry ((get entry :fn) (protocol/ensure-space node (protocol/frame-space frame) {}) frame node) frame)))
+  (subscribe [node space-id signal subscription-id meta]
+    (node-frame :subscribe (if subscription-id subscription-id (node-id "sub-"))
+                (node-space-id space-id) (node-meta meta) nil [] nil nil nil nil signal nil))
+  (unsubscribe [node space-id signal subscription-id meta]
+    (node-frame :unsubscribe (if subscription-id subscription-id (node-id "sub-"))
+                (node-space-id space-id) (node-meta meta) nil [] nil nil nil nil signal nil))
+  (list-subscriptions [node space-id signal]
+    (vec (keys (get (node-section node :router) [(node-space-id space-id) signal] {})))))

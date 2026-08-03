@@ -1,0 +1,7 @@
+(ns std.native.test-runner-fail
+  (:use code.test))
+
+(fact "native runner reports a failing fact"
+  (+ 20 21) => 42)
+
+(run {:namespace "std.native.test-runner-fail"})

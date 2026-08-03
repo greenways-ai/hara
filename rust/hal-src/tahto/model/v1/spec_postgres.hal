@@ -1,0 +1,268 @@
+(ns tahto.model.v1.spec-postgres
+  (:require [std.foundation.string :as string]
+            [tahto.base.v1.grammar-spec :as spec]
+            [tahto.common.emit :as emit]
+            [tahto.common.emit-helper :as helper]
+            [tahto.common.grammar-api :as grammar]
+            [tahto.common.registry :as registry]
+            [tahto.model.v1.spec-xtalk :as xtalk]))
+
+(def +language+ :postgres)
+(def +tag+ :postgres)
+(def +version+ spec/+version+)
+
+(defn pg-string
+  "Emits a PostgreSQL string literal."
+  [value]
+  (helper/pr-single value))
+
+(defn pg-symbol
+  "Emits PostgreSQL identifiers using Foundation's dash-to-underscore rule."
+  [value grammar context]
+  (string/replace (name value) "-" "_"))
+
+(defn pg-type-name
+  [value]
+  (string/upper (string/replace (name value) "-" " ")))
+
+(defn pg-typecast
+  [form grammar context]
+  (str "(" (emit/*emit-fn* (nth form 1) grammar context) ")::"
+       (pg-type-name (nth form 2))))
+
+(defn pg-array
+  [form grammar context]
+  (str "ARRAY["
+       (string/join "," (map (fn [item]
+                                (emit/*emit-fn* item grammar context))
+                              (rest form)))
+       "]"))
+
+(defn pg-raw
+  [form grammar context]
+  (str (nth form 1)))
+
+(defn pg-tag-string
+  [value]
+  (if (nil? value) "nil" (str value)))
+
+(defn pg-throw-value
+  [value tag grammar context]
+  (str "RAISE EXCEPTION USING DETAIL = ("
+       (emit/*emit-fn* value grammar context)
+       ")::TEXT, MESSAGE = "
+       (pg-string (pg-tag-string tag))))
+
+(defn pg-map-entries
+  "Emits ordered key/value pairs as a jsonb_build_object expression."
+  [entries grammar context]
+  (str "jsonb_build_object("
+       (string/join
+        ","
+        (mapcat (fn [entry]
+                  (let [entry-value (second entry)]
+                    [(pg-string (let [key (first entry)]
+                                  (if (string? key) key (name key))))
+                     (if (keyword? entry-value)
+                       (pg-string (str entry-value))
+                       (emit/*emit-fn* entry-value grammar context))]))
+                entries))
+       ")"))
+
+(defn pg-throw
+  [form grammar context]
+  (pg-throw-value (nth form 1) (nth form 2) grammar context))
+
+(defn pg-assert
+  [form grammar context]
+  (let [check (nth form 1)
+        tag (nth form 2)
+        data (nth form 3)
+        detail-entries (if (map? data)
+                         (let [detail (merge {:status "error" :tag tag} data)]
+                           (concat [[:status (:status detail)] [:tag (:tag detail)]]
+                                   (filter (fn [entry]
+                                             (and (not= :status (first entry))
+                                                  (not= :tag (first entry))))
+                                           data)))
+                         [[:status "error"] [:tag tag] [:data data]])
+        detail-output (pg-map-entries detail-entries grammar context)]
+    (str "IF NOT (" (emit/*emit-fn* check grammar context) ") THEN\n"
+         "  RAISE EXCEPTION USING DETAIL = (" detail-output
+         ")::TEXT, MESSAGE = " (pg-string (pg-tag-string tag)) ";\n"
+         "END IF")))
+
+(defn pg-stack-diagnostics
+  [form grammar context]
+  (str "GET STACKED DIAGNOSTICS\n"
+       "  e_code := RETURNED_SQLSTATE,\n"
+       "  e_msg := MESSAGE_TEXT,\n"
+       "  e_detail := PG_EXCEPTION_DETAIL,\n"
+       "  e_hint := PG_EXCEPTION_HINT,\n"
+       "  e_context := PG_EXCEPTION_CONTEXT"))
+
+(defn pg-reduce
+  [form grammar context]
+  (let [out (nth form 1)
+        f (nth form 2)
+        type (nth form 3)
+        arr (nth form 4)]
+    (str "DECLARE e " (pg-type-name type) ";\n"
+         "BEGIN\n"
+         "  FOREACH e IN ARRAY " (emit/*emit-fn* arr grammar context) " LOOP\n"
+         "    " (emit/*emit-fn* out grammar context) " := "
+         (emit/*emit-fn* (list f out 'e) grammar context) ";\n"
+         "  END LOOP;\n"
+         "  RETURN " (emit/*emit-fn* out grammar context) ";\n"
+         "END")))
+
+(defn pg-terminated
+  [output]
+  (if (string/ends-with? output ";") output (str output ";")))
+
+(defn pg-do-plpgsql
+  [form grammar context]
+  (let [body (map (fn [item]
+                    (str "  " (pg-terminated
+                               (emit/*emit-fn* item grammar context))))
+                  (rest form))]
+    (str "DO $$\nBEGIN\n"
+         (string/join "\n" body)
+         "\nEND\n$$ LANGUAGE plpgsql")))
+
+(defn pg-map
+  "Emits host maps as jsonb_build_object expressions."
+  [value grammar context]
+  (pg-map-entries value grammar context))
+
+(defn pg-section-keyword
+  [value]
+  (let [raw (name value)]
+    (cond (= value :->) "->"
+          (= value :->>) "->>"
+          (= value :#>>) "#>>"
+          :else (string/upper (string/replace raw "-" " ")))))
+
+(defn pg-assignment-map
+  [value grammar context]
+  (string/join
+   ","
+   (map (fn [entry]
+          (str "\"" (string/replace (name (first entry)) "-" "_") "\" = "
+               (emit/*emit-fn* (second entry) grammar context)))
+        value)))
+
+(defn pg-section-item
+  [value grammar context]
+  (cond (= value \\) "\n"
+        (keyword? value) (pg-section-keyword value)
+        (map? value) (pg-assignment-map value grammar context)
+        :else (emit/*emit-fn* value grammar context)))
+
+(defn pg-section
+  "Emits SQL clause vectors while retaining JSON array values for data vectors."
+  [value grammar context]
+  (if (and (> (count value) 0)
+           (reduce (fn [found item]
+                     (or found (keyword? item)))
+                   false
+                   value))
+    (string/replace
+     (string/replace
+      (string/replace
+       (string/join " " (map (fn [item]
+                                (pg-section-item item grammar context))
+                              value))
+       " \n " "\n")
+      "\n " "\n")
+     " \n" "\n")
+    (str "jsonb_build_array("
+         (string/join "," (map (fn [item]
+                                  (emit/*emit-fn* item grammar context))
+                                value))
+         ")")))
+
+(def +grammar+
+  (grammar/definition
+   {:grammar/id +tag+
+    :grammar/version +version+
+    :grammar/release "foundation-v1"
+    :grammar/language +language+
+    :grammar/tag +tag+
+    :grammar/engine {:minimum 1 :maximum 1}
+    :grammar/parent
+    {:grammar/id xtalk/+tag+
+     :grammar/version xtalk/+version+}
+    :operators
+    {:override
+     {:eq {:symbol #{'== '=} :raw "="}
+      :not {:raw "NOT " :wrap true}
+      :or {:raw "OR" :wrap true}
+      :and {:raw "AND" :wrap true}
+      :seteq {:raw ":=" :value true}
+      :ret {:raw "RETURN"}}
+     :define
+     {:concat {:op :concat :symbol #{'||} :raw "||" :emit :infix :value true}
+      :cast {:op :cast :symbol #{'++} :emit pg-typecast}
+      :pg-array {:op :pg-array :symbol #{'pg:array} :emit pg-array}
+      :pg-raw {:op :pg-raw :symbol #{'pg:raw} :emit pg-raw}
+      :pg-throw {:op :pg-throw :symbol #{'pg:throw} :emit pg-throw}
+      :pg-assert {:op :pg-assert :symbol #{'pg:assert} :emit pg-assert}
+      :pg-stack-diagnostics {:op :pg-stack-diagnostics
+                             :symbol #{'pg:stack-diagnostics}
+                             :emit pg-stack-diagnostics}
+      :pg-reduce {:op :pg-reduce :symbol #{'pg:reduce} :emit pg-reduce}
+      :pg-do-plpgsql {:op :pg-do-plpgsql :symbol #{'pg:do-plpgsql} :emit pg-do-plpgsql}
+      :json-index {:op :json-index :symbol #{:->} :raw "->" :emit :infix :value true}
+      :json-index-text {:op :json-index-text :symbol #{:->>} :raw "->>" :emit :infix :value true}
+      :json-path-text {:op :json-path-text :symbol #{:#>>} :raw "#>>" :emit :infix :value true}}}
+    :emit
+    {:defaults
+     {:banned #{}
+      :default
+      {:comment {:prefix "--"}
+       :common {:start "(" :end ")" :space " " :assign ":=" :sep ","
+                :statement ";" :namespace "." :newline "\n" :indent 2}
+       :invoke {:start "(" :end ")" :sep "," :space ""}}
+      :token
+      {:nil "NULL"
+       :true "TRUE"
+       :false "FALSE"
+       :string {:quote :single :custom pg-string}
+       :symbol {:namespace "."
+                :emit-fn pg-symbol
+                :replace {"-" "_" "?" "p_"}}}
+      :data
+      {:vector {:custom pg-section}
+       :map {:custom pg-map}}}}}))
+
+(defn- install-source
+  [catalog source]
+  (if (registry/find catalog (grammar/source-coordinate source))
+    catalog
+    (registry/install catalog source)))
+
+(defn install
+  [catalog]
+  (install-source (xtalk/install catalog) +grammar+))
+
+(defn catalog [] (install (registry/registry)))
+
+(defn select
+  ([] (select (catalog)))
+  ([catalog]
+   (registry/resolve catalog
+                     {:grammar/id +tag+
+                      :grammar/version +version+})))
+
+(def +selection+ (select))
+
+(def +book+
+  {:lang +language+
+   :parent :xtalk
+   :version +version+
+   :coordinate (:coordinate +selection+)
+   :grammar (:grammar +selection+)
+   :selection +selection+})
+
+(def +init+ +book+)

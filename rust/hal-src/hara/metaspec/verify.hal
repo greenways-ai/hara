@@ -1,0 +1,140 @@
+(ns hara.metaspec.verify
+  (:require [hara.metaspec.lint :as lint]))
+
+(defn- member?
+  [value values]
+  (not (empty? (filter (fn [candidate] (= value candidate)) values))))
+
+(defn- child-values
+  [value path]
+  (if (map? value)
+    (vec
+     (reduce (fn [output entry]
+               (conj output
+                     [(val entry) (conj path (key entry))]))
+             []
+             value))
+    (if (vector? value)
+      (vec (map (fn [index]
+                  [(nth value index) (conj path index)])
+                (range (count value))))
+      (if (set? value)
+        (vec (map (fn [entry] [entry (conj path entry)])
+                  value))
+        []))))
+
+(defn reference-entries
+  [document]
+  (loop [pending [[document []]]
+         references []]
+    (if (empty? pending)
+      references
+      (let [pair (first pending)
+            value (first pair)
+            path (second pair)
+            local
+            (if (map? value)
+              (reduce
+               (fn [output entry]
+                 (let [key (key entry)]
+                   (if (or (= key :schema/ref)
+                           (= key :schema/items))
+                     (conj output
+                           {:reference/value (val entry)
+                            :reference/path (conj path key)})
+                     output)))
+               []
+               value)
+              [])]
+        (recur (vec (concat (rest pending)
+                            (child-values value path)))
+               (vec (concat references local)))))))
+
+(defn schema-identifiers
+  [document]
+  (vec
+   (concat
+    [(:schema/id (:meta/document-schema document))]
+    (vec
+     (map (fn [schema] (:schema/id schema))
+          (:meta/schemas document))))))
+
+(defn verify-schema-references
+  [document]
+  (let [declared (schema-identifiers document)]
+    (vec
+     (map
+      (fn [entry]
+        (lint/finding
+         :hara.metaspec.rule/schema-reference
+         :hara.metaspec/resolved-schema-references
+         (:reference/path entry)
+         (str "Unresolved schema reference: " (:reference/value entry))
+         {:action/type :declare-schema
+          :action/schema-id (:reference/value entry)
+          :action/path [:meta/schemas]}))
+      (filter
+       (fn [entry]
+         (let [value (:reference/value entry)]
+           (and (keyword? value)
+                (not (member? value declared)))))
+       (reference-entries document))))))
+
+(defn verify-cross-reference-declarations
+  [document]
+  (vec
+   (reduce
+    (fn [output index]
+      (let [reference (nth (:meta/cross-references document) index)
+            path [:meta/cross-references index]]
+        (concat
+         output
+         (if (lint/qualified-keyword? (:reference/id reference))
+           []
+           [(lint/finding
+             :hara.metaspec.rule/cross-reference
+             :hara.metaspec/resolved-cross-references
+             (conj path :reference/id)
+             "Cross-reference declaration requires a stable qualified ID"
+             {:action/type :replace-value
+              :action/path (conj path :reference/id)
+              :action/expected :qualified-keyword})])
+         (if (and (:reference/from reference)
+                  (:reference/to reference))
+           []
+           [(lint/finding
+             :hara.metaspec.rule/cross-reference
+             :hara.metaspec/resolved-cross-references
+             path
+             "Cross-reference declaration requires :reference/from and :reference/to"
+             {:action/type :complete-cross-reference
+              :action/path path})]))))
+    []
+    (range (count (:meta/cross-references document))))))
+
+(defn verify-conformance
+  [document registry]
+  (let [reference (:spec/conforms-to document)
+        spec-id (:spec/id reference)
+        own-id (:document/id document)]
+    (if (or (= spec-id own-id)
+            (get registry spec-id))
+      []
+      [(lint/finding
+        :hara.metaspec.rule/conforms-to
+        :hara.metaspec/resolved-cross-references
+        [:spec/conforms-to :spec/id]
+        (str "Unresolved conforming meta-spec: " spec-id)
+        {:action/type :register-spec
+         :action/spec-id spec-id})])))
+
+(defn verify
+  "Runs structural lint plus semantic reference verification."
+  ([document] (verify document {}))
+  ([document registry]
+   (vec
+    (concat
+     (lint/lint document)
+     (verify-schema-references document)
+     (verify-cross-reference-declarations document)
+     (verify-conformance document registry)))))

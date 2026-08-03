@@ -1,0 +1,679 @@
+;; Persistent, context-driven zipper used by the portable block editor.
+(ns std.lib.zip
+  (:config {:blank true})
+  (:require [std.foundation :refer :all :exclude [get find]]))
+
+(def +types+ (atom {}))
+
+(defn register-type
+  [type context]
+  (do
+    (swap! +types+ (fn [types] (assoc types type context)))
+    context))
+
+(defn unregister-type
+  ([type]
+   (unregister-type type nil))
+  ([type context]
+   (let [found (get-in (deref +types+) [type])]
+     (swap! +types+ (fn [types] (dissoc types type)))
+     found)))
+
+(defn check-context
+  [context]
+  (let [required [:create-container :create-element :cursor
+                  :is-container? :is-empty-container? :is-element?
+                  :list-elements :update-elements :add-element]
+        missing (vec (filter (fn [key]
+                               (nil? (get-in context [key])))
+                             required))]
+    (if (empty? missing)
+      context
+      (throw (ex-info "Missing zipper context keys" {:keys missing})))))
+
+(defn check-optional
+  [context]
+  context)
+
+(defstruct Zipper
+  [parent left right depth changed context])
+
+(def +types+ (atom {}))
+
+(defn register-type
+  [type context]
+  (do (swap! +types+ (fn [types] (assoc types type context))) context))
+
+(defn unregister-type
+  ([type] (unregister-type type nil))
+  ([type context]
+   (do (swap! +types+ (fn [types] (dissoc types type))) context)))
+
+(defn context-present?
+  [context key]
+  (not (nil? (std.foundation/get context key))))
+
+(defn check-context
+  [context]
+  (let [required [:create-container :create-element :cursor
+                  :is-container? :is-empty-container? :is-element?
+                  :list-elements :update-elements :add-element]
+        missing (vec (filter (fn [key]
+                               (not (context-present? context key)))
+                             required))]
+    (if (empty? missing)
+      context
+      (throw (ex-info "Missing zipper context keys" {:keys missing})))))
+
+(defn check-optional
+  [context]
+  context)
+
+(defn prepend
+  [value values]
+  (vec (concat [value] values)))
+
+(defn tail
+  [values]
+  (vec (drop 1 values)))
+
+(defn zipper?
+  [value]
+  (instance? std.lib.zip/Zipper value))
+
+(defn at-left-most?
+  [zip]
+  (empty? (field zip :left)))
+
+(defn at-right-most?
+  [zip]
+  (empty? (field zip :right)))
+
+(defn right-element
+  [zip]
+  (first (field zip :right)))
+
+(defn left-element
+  [zip]
+  (first (field zip :left)))
+
+(defn left-elements
+  [zip]
+  (reverse (field zip :left)))
+
+(defn right-elements
+  [zip]
+  (field zip :right))
+
+(defn current-elements
+  [zip]
+  (concat (left-elements zip) (right-elements zip)))
+
+(defn context-fn
+  [zip key]
+  (std.foundation/get (field zip :context) key))
+
+(defn is-container?
+  ([zip]
+   (is-container? zip :right))
+  ([zip side]
+   ((context-fn zip :is-container?)
+    (if (= side :left) (left-element zip) (right-element zip)))))
+
+(defn is-empty-container?
+  ([zip]
+   (is-empty-container? zip :right))
+  ([zip side]
+   ((context-fn zip :is-empty-container?)
+    (if (= side :left) (left-element zip) (right-element zip)))))
+
+(defn at-inside-most?
+  [zip]
+  (or (at-right-most? zip)
+      (not (is-container? zip))))
+
+(defn at-inside-most-left?
+  [zip]
+  (or (at-left-most? zip)
+      (not (is-container? zip :left))))
+
+(defn at-outside-most?
+  [zip]
+  (nil? (field zip :parent)))
+
+(defn zipper
+  ([root context]
+   (zipper root context {}))
+  ([root context options]
+   (let [context (check-context context)
+         wrap (or (:wrap-data context) (fn [value] value))]
+     (std.lib.zip/Zipper nil
+                         []
+                         [(wrap root)]
+                         0
+                         false
+                         (check-context context)))))
+
+(defn seq-context
+  []
+  {:cursor '|
+   :create-container (fn [] '())
+   :create-element (fn [value] value)
+   :is-container? (fn [value] (list? value))
+   :is-empty-container? (fn [value] (empty? value))
+   :is-element? (fn [value] (not (nil? value)))
+   :list-elements (fn [container] container)
+   :update-elements (fn [container elements] (apply list elements))
+   :add-element (fn [container element] (concat container [element]))})
+
+(defn vector-context
+  []
+  {:cursor '|
+   :create-container (fn [] [])
+   :create-element (fn [value] value)
+   :is-container? (fn [value] (vector? value))
+   :is-empty-container? (fn [value] (empty? value))
+   :is-element? (fn [value] (not (nil? value)))
+   :list-elements (fn [container] (apply list container))
+   :update-elements (fn [container elements] (vec elements))
+   :add-element (fn [container element] (conj container element))})
+
+(defn form-container?
+  [value]
+  (or (list? value)
+      (vector? value)
+      (map? value)
+      (set? value)))
+
+(defn form-update-elements
+  [container elements]
+  (cond
+    (list? container) (apply list elements)
+    (vector? container) (vec elements)
+    (map? container) (into {} elements)
+    (set? container) (into #{} elements)
+    :else container))
+
+(defn form-add-element
+  [container element]
+  (cond
+    (list? container) (concat container [element])
+    :else (conj container element)))
+
+(defn form-context
+  []
+  {:cursor '|
+   :create-container (fn [] '())
+   :create-element (fn [value] value)
+   :is-container? form-container?
+   :is-empty-container? (fn [value] (empty? value))
+   :is-element? (fn [value] (not (nil? value)))
+   :list-elements (fn [container] (apply list container))
+   :update-elements form-update-elements
+   :add-element form-add-element})
+
+(defn seq-zip
+  ([root] (seq-zip root {}))
+  ([root options] (zipper root (merge (seq-context) options) options)))
+
+(defn vector-zip
+  ([root] (vector-zip root {}))
+  ([root options] (zipper root (merge (vector-context) options) options)))
+
+(defn form-zip
+  ([root] (form-zip root {}))
+  ([root options] (zipper root (merge (form-context) options) options)))
+
+(defn unwrap-element
+  [zip element]
+  (let [unwrap (:unwrap-data (field zip :context))]
+    (if unwrap (unwrap element) element)))
+
+(defn get
+  ([zip] (right-element zip))
+  ([zip argument]
+   (if (= argument :left)
+     (left-element zip)
+     (if (= argument :right)
+       (right-element zip)
+       (argument (right-element zip)))))
+  ([zip function side]
+   (function (if (= side :left)
+               (left-element zip)
+               (right-element zip)))))
+
+(defn is
+  ([zip predicate] (is zip predicate :right))
+  ([zip predicate side]
+   (let [element (if (= side :left) (left-element zip) (right-element zip))]
+     (if (fn? predicate)
+       (predicate element)
+       (= predicate element)))))
+
+(defn list-child-elements
+  ([zip] (list-child-elements zip :right))
+  ([zip side]
+   (let [element (if (= side :left) (left-element zip) (right-element zip))]
+     ((context-fn zip :list-elements) element))))
+
+(defn replace-side
+  [zip side elements]
+  (if (= side :left)
+    (assoc zip :left elements)
+    (assoc zip :right elements)))
+
+(defn update-child-elements
+  ([zip elements] (update-child-elements zip elements :right))
+  ([zip elements side]
+   (let [old (if (= side :left) (left-element zip) (right-element zip))
+         updated ((context-fn zip :update-elements) old elements)
+         siblings (if (= side :left) (field zip :left) (field zip :right))]
+     (replace-side zip side (prepend updated (tail siblings))))))
+
+(defn can-step-left? [zip] (not (at-left-most? zip)))
+(defn can-step-right? [zip] (not (at-right-most? zip)))
+(defn can-step-inside? [zip] (not (at-inside-most? zip)))
+(defn can-step-inside-left? [zip] (not (at-inside-most-left? zip)))
+(defn can-step-outside? [zip] (not (at-outside-most? zip)))
+
+(defn step-left
+  ([zip]
+   (if (at-left-most? zip)
+     zip
+     (assoc (assoc zip :left (tail (field zip :left)))
+            :right
+            (prepend (left-element zip) (field zip :right)))))
+  ([zip amount]
+   (if (= amount 0)
+     zip
+     (step-left (step-left zip) (dec amount)))))
+
+(defn step-right
+  ([zip]
+   (if (at-right-most? zip)
+     zip
+     (assoc (assoc zip :left (prepend (right-element zip) (field zip :left)))
+            :right
+            (tail (field zip :right)))))
+  ([zip amount]
+   (if (= amount 0)
+     zip
+     (step-right (step-right zip) (dec amount)))))
+
+(defn step-inside
+  ([zip]
+   (if (can-step-inside? zip)
+     (std.lib.zip/Zipper zip
+                         []
+                         (vec (list-child-elements zip))
+                         (inc (field zip :depth))
+                         (field zip :changed)
+                         (field zip :context))
+     zip))
+  ([zip amount]
+   (if (= amount 0)
+     zip
+     (step-inside (step-inside zip) (dec amount)))))
+
+(defn step-inside-left
+  ([zip]
+   (if (can-step-inside-left? zip)
+     (let [element (left-element zip)
+           parent (assoc (assoc zip :left (tail (field zip :left)))
+                         :right
+                         (prepend element (field zip :right)))]
+       (std.lib.zip/Zipper parent
+                           (vec (reverse (list-child-elements zip :left)))
+                           []
+                           (inc (field zip :depth))
+                           (field zip :changed)
+                           (field zip :context)))
+     zip))
+  ([zip amount]
+   (if (= amount 0)
+     zip
+     (step-inside-left (step-inside-left zip) (dec amount)))))
+
+(defn step-outside
+  ([zip]
+   (if (at-outside-most? zip)
+     zip
+     (let [parent (field zip :parent)]
+       (if (field zip :changed)
+         (assoc
+          (update-child-elements parent (current-elements zip))
+          :changed
+          true)
+         parent))))
+  ([zip amount]
+   (if (= amount 0)
+     zip
+     (step-outside (step-outside zip) (dec amount)))))
+
+(defn step-outside-right
+  ([zip] (step-right (step-outside zip)))
+  ([zip amount]
+   (if (= amount 0)
+     zip
+     (step-outside-right (step-outside-right zip) (dec amount)))))
+
+(defn step-left-most
+  [zip]
+  (if (at-left-most? zip)
+    zip
+    (step-left-most (step-left zip))))
+
+(defn step-right-most
+  [zip]
+  (if (at-right-most? zip)
+    zip
+    (step-right-most (step-right zip))))
+
+(defn step-inside-most
+  [zip]
+  (if (at-inside-most? zip)
+    zip
+    (step-inside-most (step-inside zip))))
+
+(defn step-inside-most-left
+  [zip]
+  (if (at-inside-most-left? zip)
+    zip
+    (step-inside-most-left (step-inside-left zip))))
+
+(defn step-outside-most
+  [zip]
+  (if (at-outside-most? zip)
+    zip
+    (step-outside-most (step-outside zip))))
+
+(defn step-outside-most-right
+  [zip]
+  (step-right (step-outside-most zip)))
+
+(defn step-end
+  [zip]
+  (step-inside-most-left (step-right-most (step-outside-most zip))))
+
+(defn insert-left
+  [zip data & more]
+  (let [element ((context-fn zip :create-element) data)
+        updated (assoc (assoc zip :left (prepend element (field zip :left)))
+                       :changed
+                       true)]
+    (if (empty? more)
+      updated
+      (apply insert-left updated more))))
+
+(defn insert-right
+  [zip data & more]
+  (let [element ((context-fn zip :create-element) data)
+        updated (assoc (assoc zip :right (prepend element (field zip :right)))
+                       :changed
+                       true)]
+    (if (empty? more)
+      updated
+      (apply insert-right updated more))))
+
+(defn delete-left
+  ([zip]
+   (if (at-left-most? zip)
+     zip
+     (assoc (assoc zip :left (tail (field zip :left))) :changed true)))
+  ([zip amount]
+   (if (= amount 0)
+     zip
+     (delete-left (delete-left zip) (dec amount)))))
+
+(defn delete-right
+  ([zip]
+   (if (at-right-most? zip)
+     zip
+     (assoc (assoc zip :right (tail (field zip :right))) :changed true)))
+  ([zip amount]
+   (if (= amount 0)
+     zip
+     (delete-right (delete-right zip) (dec amount)))))
+
+(defn replace-left
+  [zip data]
+  (insert-left (delete-left zip) data))
+
+(defn replace-right
+  [zip data]
+  (insert-right (delete-right zip) data))
+
+(defn root-element
+  [zip]
+  (right-element (step-left-most (step-outside-most zip))))
+
+(defn hierarchy-collect
+  [current output]
+  (let [next-output (conj output current)]
+    (if (at-outside-most? current)
+      next-output
+      (hierarchy-collect (step-outside current) next-output))))
+
+(defn hierarchy
+  [zip]
+  (hierarchy-collect (step-outside zip) []))
+
+(defn at-end?
+  [zip]
+  (and (at-right-most? zip)
+       (every? at-right-most? (hierarchy zip))))
+
+(defn result
+  [zip]
+  (root-element zip))
+
+(defn status
+  ([zip] (status zip false))
+  ([zip no-cursor]
+   (let [marked (if no-cursor
+                  zip
+                  (insert-left zip (:cursor (field zip :context))))
+         root (step-outside-most marked)]
+     (unwrap-element zip (apply list (current-elements root))))))
+
+(defn status-string
+  [zip]
+  (pr-str (status zip)))
+
+(defn display-zipper [zip] (status-string zip))
+
+(defn display-zipper
+  [zip]
+  {:depth (field zip :depth)
+   :left (field zip :left)
+   :right (field zip :right)
+   :changed (field zip :changed)
+   :root (root-element zip)})
+
+(defn step-next-up
+  [zip]
+  (if (at-outside-most? zip)
+    nil
+    (let [parent (step-outside zip)]
+      (if (can-step-right? parent)
+        (step-right parent)
+        (step-next-up parent)))))
+
+(defn step-next
+  [zip]
+  (cond
+    (nil? zip) nil
+    (and (can-step-inside? zip)
+         (not (is-empty-container? zip)))
+    (step-inside zip)
+    (can-step-right? zip)
+    (step-right zip)
+    :else (step-next-up zip)))
+
+(defn step-prev
+  [zip]
+  (cond
+    (nil? zip) nil
+    (at-outside-most? zip) nil
+    (can-step-left? zip)
+    (let [leftward (step-left zip)]
+      (if (can-step-inside? leftward)
+        (step-inside-most-left (step-inside leftward))
+        leftward))
+    :else (step-outside zip)))
+
+(defn find
+  [zip move predicate]
+  (let [current (move zip)]
+    (cond
+      (nil? current) nil
+      (predicate (right-element current)) current
+      :else (find current move predicate))))
+
+(defn find-left [zip predicate] (find zip step-left predicate))
+(defn find-right [zip predicate] (find zip step-right predicate))
+(defn find-next [zip predicate] (find zip step-next predicate))
+(defn find-prev [zip predicate] (find zip step-prev predicate))
+
+(defn from-status
+  ([data] (from-status data vector-zip))
+  ([data zipper-function]
+   (let [zip (zipper-function data)
+         cursor (:cursor (field zip :context))
+         found (find-next zip (fn [element] (= cursor element)))]
+     (if found (delete-right found) zip))))
+
+(defn surround
+  [zip]
+  (let [context (field zip :context)
+        empty-container ((:create-container context))
+        container ((:update-elements context) empty-container (current-elements zip))]
+    (if (at-outside-most? zip)
+      (assoc (assoc (assoc zip :left []) :right [container]) :changed true)
+      (step-inside (replace-right (step-outside zip) container)))))
+
+(defn prewalk-value
+  [context function value]
+  (let [updated (function value)]
+    (if ((:is-container? context) updated)
+      ((:update-elements context)
+       updated
+       (map (fn [child] (prewalk-value context function child))
+            ((:list-elements context) updated)))
+      updated)))
+
+(defn prewalk
+  [zip function]
+  (replace-right zip
+                 (prewalk-value (field zip :context)
+                                function
+                                (right-element zip))))
+
+(defn postwalk-value
+  [context function value]
+  (if ((:is-container? context) value)
+    (function
+     ((:update-elements context)
+      value
+      (map (fn [child] (postwalk-value context function child))
+           ((:list-elements context) value))))
+    (function value)))
+
+(defn postwalk
+  [zip function]
+  (replace-right zip
+                 (postwalk-value (field zip :context)
+                                 function
+                                 (right-element zip))))
+
+(defn form-zip-wrap [form] form)
+(defn form-zip-unwrap [form] form)
+
+(defn levelwalk
+  ([zip matchers function]
+   (levelwalk zip matchers function levelwalk {}))
+  ([zip matchers function level-function options]
+   (let [predicate (first matchers)
+         updated (try
+                   (if (predicate zip) (function zip) zip)
+                   (catch Throwable error zip))]
+     (if (can-step-right? updated)
+       (let [next (step-right updated)]
+         (if (at-right-most? next)
+           next
+           (level-function next matchers function level-function options)))
+       updated))))
+
+(defn matchwalk
+  ([zip matchers function]
+   (matchwalk zip matchers function matchwalk {}))
+  ([zip matchers function match-function options]
+   (let [predicate (first matchers)
+         more (vec (rest matchers))
+         matched (try
+                   (if (predicate zip)
+                     (if (empty? more)
+                       (function zip)
+                       (if (can-step-inside? zip)
+                         (step-outside
+                          (match-function (step-inside zip)
+                                          more function
+                                          match-function options))
+                         zip))
+                     zip)
+                   (catch Throwable error zip))
+         descended (if (can-step-inside? matched)
+                     (step-outside
+                      (match-function (step-inside matched)
+                                      matchers function
+                                      match-function options))
+                     matched)]
+     (if (can-step-right? descended)
+       (let [next (step-right descended)]
+         (if (at-right-most? next)
+           next
+           (match-function next matchers function
+                           match-function options)))
+       descended))))
+
+(defn form-zip-wrap [form] form)
+(defn form-zip-unwrap [form] form)
+
+(defn levelwalk
+  ([zip matchers function]
+   (levelwalk zip matchers function levelwalk {}))
+  ([zip matchers function recurse options]
+   (let [predicate (first matchers)
+         move (or (:move-right options) step-right)
+         can-move (or (:can-move-right? options) can-step-right?)
+         updated (if (predicate zip) (function zip) zip)]
+     (if (can-move updated)
+       (recurse (move updated) matchers function recurse options)
+       updated))))
+
+(defn matchwalk-value
+  [context matchers function value]
+  (let [matched
+        (reduce (fn [passes predicate]
+                  (and passes (predicate value)))
+                true
+                matchers)
+        updated (if matched (function value) value)]
+    (if ((:is-container? context) updated)
+      ((:update-elements context)
+       updated
+       (map (fn [child]
+              (matchwalk-value context matchers function child))
+            ((:list-elements context) updated)))
+      updated)))
+
+(defn matchwalk
+  ([zip matchers function]
+   (replace-right
+    zip
+    (matchwalk-value (field zip :context)
+                     matchers
+                     function
+                     (right-element zip))))
+  ([zip matchers function recurse options]
+   (matchwalk zip matchers function)))

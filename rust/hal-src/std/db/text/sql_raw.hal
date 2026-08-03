@@ -1,0 +1,113 @@
+(ns std.db.text.sql-raw
+  (:require [std.db.text.sql-util :as sql]
+            [std.foundation.string :as string]))
+
+(defn- compatible-get
+  [value lookup-key]
+  (cond
+    (not (map? value)) nil
+    (has? value lookup-key) (get value lookup-key)
+    (string? lookup-key) (get value (keyword lookup-key))
+    (keyword? lookup-key) (get value (name lookup-key))
+    :else nil))
+
+(defn- option
+  [options option-key fallback]
+  (let [value (compatible-get options option-key)]
+    (if (nil? value) fallback value)))
+
+(defn raw-delete
+  "Encodes a DELETE statement."
+  [table-name where-parameters options]
+  (let [table-function (option options :table-fn identity)
+        where-string (if (nil? where-parameters)
+                       ""
+                       (sql/encode-query-string where-parameters "WHERE" options))
+        head (str "DELETE FROM " (table-function table-name))]
+    (str (if (> (count where-string) 0)
+           (str head " " where-string)
+           head)
+         ";")))
+
+(defn raw-insert-array
+  "Constructs statement lines shared by INSERT and UPSERT."
+  [table-name columns values options]
+  (let [table-function (option options :table-fn identity)
+        column-function (option options :column-fn identity)
+        value-lines
+        (map (fn [data]
+               (str "("
+                    (string/join ","
+                                 (map (fn [column]
+                                        (sql/encode-value
+                                         (compatible-get data column)))
+                                      columns))
+                    ")"))
+             values)]
+    [(str "INSERT INTO " (table-function table-name))
+     (str " (" (string/join ", " (map column-function columns)) ")")
+     (str " VALUES\n " (string/join ",\n " value-lines))]))
+
+(defn raw-insert
+  "Encodes an INSERT statement."
+  [table-name columns values options]
+  (str (string/join "\n"
+                    (raw-insert-array table-name columns values options))
+       ";"))
+
+(defn raw-upsert
+  "Encodes an INSERT with ON CONFLICT UPDATE."
+  [table-name id-column columns values options]
+  (let [column-function (option options :column-fn identity)
+        upsert-clause (compatible-get options :upsert-clause)
+        statement-lines (raw-insert-array table-name columns values options)
+        update-columns (filter (fn [column] (not (= column id-column))) columns)
+        assignments
+        (map (fn [column]
+               (str (column-function column)
+                    "=coalesce(\"excluded\"."
+                    (column-function column)
+                    ","
+                    (column-function column)
+                    ")"))
+             update-columns)]
+    (str (string/join "\n" statement-lines)
+         "\nON CONFLICT (" (column-function id-column) ") DO UPDATE SET\n"
+         (string/join ",\n" assignments)
+         (if (string? upsert-clause)
+           (str "\nWHERE " upsert-clause)
+           "")
+         ";")))
+
+(defn raw-update
+  "Encodes an UPDATE statement."
+  [table-name where-parameters data options]
+  (let [table-function (option options :table-fn identity)
+        where-string (if (nil? where-parameters)
+                       ""
+                       (sql/encode-query-string where-parameters "WHERE" options))
+        set-string (sql/encode-query-string data "SET" options)]
+    (str (string/join "\n "
+                      [(str "UPDATE " (table-function table-name))
+                       set-string
+                       where-string])
+         ";")))
+
+(defn raw-select
+  "Encodes a SELECT statement."
+  [table-name where-parameters return-parameters options]
+  (let [table-function (option options :table-fn identity)
+        column-function (option options :column-fn identity)
+        return-string (if (string? return-parameters)
+                        return-parameters
+                        (string/join ", "
+                                     (map column-function return-parameters)))
+        where-string (if (nil? where-parameters)
+                       ""
+                       (sql/encode-query-string where-parameters "WHERE" options))
+        lines [(str "SELECT " return-string)
+               (str " FROM " (table-function table-name))]
+        lines (if (> (count where-string) 0)
+                (conj lines where-string)
+                lines)]
+    (str (string/join "\n " lines) ";")))
