@@ -100,19 +100,19 @@
           (process-fragment-entry resolved symbol-full symbol-module symbol deps-fragment walk-fn)
           (process-code-entry resolved symbol-full symbol-module module deps))))))
 
-(defn process-standard-symbol [symbol options deps-native]
-  (let [symbol-name (name symbol)
+(defn process-standard-symbol [sym options deps-native]
+  (let [symbol-name (name sym)
         index (string/index-of symbol-name "." 0)
         module (:module options)
         local (if (<= 0 index)
                 (symbol (string/slice symbol-name 0 index))
-                symbol)
+                sym)
         import (get-in module [:native-lu local])]
     (if (and import deps-native)
       (swap! deps-native
              (fn [current]
                (assoc current import (conj (or (get current import) #{}) local)))))
-    symbol))
+    sym))
 
 (defn find-natives [entry options]
   (let [quoted (atom [])

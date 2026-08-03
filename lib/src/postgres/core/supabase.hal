@@ -1,8 +1,25 @@
 (ns postgres.core.supabase
   (:require [tahto.core :as l]
-            [std.foundation :as f]))
+            [tahto.core.script :as script]
+            [std.foundation :as f]
+            [std.foundation.json :as json]
+            [std.foundation.string :as string]))
 
 (l/script :postgres {:macro-only true})
+
+(defn- block-do-suppress [form]
+  [:do :$$
+   \\ :begin
+   \\ (list '\| form)
+   \\ :exception :when-others-then
+   \\ :end \;
+   \\ :$$ :language "plpgsql" \;])
+
+(defmacro.xt create-role [role]
+  (vec (drop-last (block-do-suppress [:create-role role \;]))))
+
+(defmacro.xt alter-role-bypassrls [role]
+  (vec (drop-last (block-do-suppress [:alter-role role :bypassrls \;]))))
 
 (defmacro.xt auth-uid [] '(auth.uid))
 (defmacro.xt auth-email [] '(auth.email))
@@ -13,6 +30,30 @@
   (list 'exists
         [:select 1 :from 'information_schema.schemata
          :where {:schema-name "auth"}]))
+
+(defmacro.xt raise [message detail & options]
+  (let [options (or (first options) {})
+        http-status (:http-status options)
+        http-headers (:http-headers options)
+        state (or (:state options) :exception)
+        status-form [:perform (list 'set-config "response.status"
+                                    (str http-status) true)]
+        headers-form [:perform (list 'set-config "response.headers"
+                                     (if http-headers (json/write http-headers) nil) true)]
+        raise-form [:raise state :using
+                    (list 'quote
+                          [(vec (list 'detail ':= (list '% detail)))
+                           (vec (list 'message ':= message))])]]
+    (cond (and http-status http-headers)
+          (list 'do status-form headers-form raise-form)
+          http-status (list 'do status-form raise-form)
+          http-headers (list 'do headers-form raise-form)
+          :else (list 'do raise-form))))
+
+(defmacro.xt show-roles []
+  [:select (list 'quote '[rolname rolsuper rolbypassrls rolcanlogin])
+   :from 'pg_roles
+   :where 'rolname :in (list 'quote '("authenticated" "service_role" "anon"))])
 
 (defmacro.xt grant-usage
   [schema & roles]
@@ -47,6 +88,26 @@
          :grant-all-on-tables-to
          (list 'quote '[anon authenticated service_role])]))
 
+(defmacro.xt grant-all [schemas & options]
+  (let [roles (or (first options) '[anon authenticated service_role])
+        access (or (second options) {})
+        usage (if (has? access :usage) (:usage access) true)
+        tables (if (has? access :tables) (:tables access) true)
+        privileges (if (has? access :privileges) (:privileges access) false)]
+    (apply list 'do
+           (mapcat (fn [schema]
+                     (filter identity
+                             [(if usage
+                                (list 'postgres.core.supabase/grant-usage
+                                      schema (list 'quote roles)))
+                              (if tables
+                                (list 'postgres.core.supabase/grant-tables
+                                      schema (list 'quote roles)))
+                              (if privileges
+                                (list 'postgres.core.supabase/grant-privileges
+                                      schema (list 'quote roles)))]))
+                   schemas))))
+
 (defn request-event [request]
   (cond (has? request "db/sync") "db/sync"
         (has? request "db/remove") "db/remove"
@@ -64,7 +125,7 @@
 (defn normalize-realtime-payload [payload]
   (let [payload (resolve-literal payload)]
     (if (map? payload)
-      (with-meta payload (assoc (meta payload) :js true))
+      (with-meta payload (assoc (or (meta payload) {}) :js true))
       payload)))
 
 (defmacro.xt realtime-send
@@ -102,8 +163,124 @@
     (and (list? form) (keyword? (first form))) (first form)
     :else (throw (ex-info "Cannot determine type" {:form form}))))
 
-(defn transform-entry-defn [body env] body)
-(defn transform-entry-deftype [body env] body)
+(defn- role-symbol [role]
+  (cond (= role :admin) 'service_role
+        (= role :auth) 'authenticated
+        (= role :anon) 'anon
+        :else role))
+
+(defmacro with-role-single [[role type] form]
+  (let [type (or type (get-form-type form))]
+    (list 'postgres.core.supabase/process-return
+          (list '!.pg
+                (list 'try
+                      [:set-local-role (role-symbol role)]
+                      (list 'let [(list type 'out) form] (list 'return 'out))
+                      (list 'catch 'others
+                            (list 'return {:code 'SQLSTATE :message 'SQLERRM})))))))
+
+(defmacro with-role [[role type] & forms]
+  (let [expanded (vec (map (fn [form]
+                             (list 'postgres.core.supabase/with-role-single
+                                   [role type] form))
+                           forms))]
+    (if (= 1 (count expanded)) (first expanded) expanded)))
+
+(defmacro with-auth-single [[user-id type] form]
+  (let [type (or type (get-form-type form))]
+    (list 'postgres.core.supabase/process-return
+          (list '!.pg
+                (list 'try
+                      [:set-local-role 'authenticated]
+                      [:perform (list 'set-config "request.jwt.claim.sub"
+                                      (list :text user-id) true)]
+                      (list 'let [(list type 'out) form] (list 'return 'out))
+                      (list 'catch 'others
+                            (list 'return {:code 'SQLSTATE :message 'SQLERRM})))))))
+
+(defmacro with-auth [[user-id type] & forms]
+  (let [expanded (vec (map (fn [form]
+                             (list 'postgres.core.supabase/with-auth-single
+                                   [user-id type] form))
+                           forms))]
+    (if (= 1 (count expanded)) (first expanded) expanded)))
+
+(defmacro with-super-single [[user-id type] form]
+  (let [type (or type (get-form-type form))]
+    (list 'postgres.core.supabase/process-return
+          (list '!.pg
+                (list 'try
+                      [:set-local-role 'authenticated]
+                      [:perform (list 'set-config "request.jwt.claim.sub" user-id true)]
+                      [:perform (list 'set-config "request.jwt.claims"
+                                      (list :text {:sub user-id
+                                                   :user_metadata {:super true}})
+                                      true)]
+                      (list 'let [(list type 'out) form] (list 'return 'out))
+                      (list 'catch 'others
+                            (list 'return {:code 'SQLSTATE :message 'SQLERRM})))))))
+
+(defmacro with-super [[user-id type] & forms]
+  (let [expanded (vec (map (fn [form]
+                             (list 'postgres.core.supabase/with-super-single
+                                   [user-id type] form))
+                           forms))]
+    (if (= 1 (count expanded)) (first expanded) expanded)))
+
+(defn- emit-transform [form]
+  (script/compile-form :postgres 'postgres.core.supabase form))
+
+(defn transform-entry-defn [body env]
+  (let [entry (:entry env)
+        api-meta (:api/meta entry)
+        grant (or (:sb/grant api-meta) (:grant api-meta))]
+    (if grant
+      (let [roles (cond (= grant :all) '[anon authenticated service_role]
+                        (= grant :auth) '[authenticated service_role]
+                        (= grant :admin) '[service_role]
+                        :else grant)
+            function-form (list '. #{(:static/schema entry)}
+                                (apply list (with-meta (:id entry) {})
+                                       (map :modifiers (:static/input entry))))]
+        (str body "\n"
+             (emit-transform
+              (list 'do
+                    [:revoke-all-on-function function-form :from-public]
+                    [:grant-execute-on-function function-form
+                     :to (list 'quote roles)]))))
+      body)))
+
+(defn- access-operations [operations]
+  (cond (vector? operations) (list 'quote (vec (map symbol operations)))
+        (= operations :all) (list 'quote '[select update delete insert])
+        (= operations :none) nil
+        :else operations))
+
+(defn transform-entry-deftype [body env]
+  (let [entry (:entry env)
+        api-meta (:api/meta entry)
+        rls (or (:sb/rls api-meta) (:rls api-meta))
+        access (or (:sb/access api-meta) (:access api-meta))]
+    (if (not (or rls access))
+      body
+      (let [table-form (list '. #{(:static/schema entry)} #{(str (:id entry))})
+            rls-str (if rls
+                      (emit-transform [:alter-table table-form
+                                       :enable-row-level-security \;]))
+            access-forms
+            (if access
+              (reduce-kv (fn [out role operations]
+                           (let [operations (access-operations operations)]
+                             (if operations
+                               (conj out [:grant operations :on-table table-form
+                                          :to (role-symbol role)])
+                               out))) [] access))
+            access-str (if (and access-forms (not (empty? access-forms)))
+                         (emit-transform (apply list 'do access-forms)))]
+        (string/join "\n"
+                     (reduce (fn [out value]
+                               (if value (conj out value) out))
+                             [] [body rls-str access-str]))))))
 
 (defn transform-entry [body env]
   (let [op-key (get-in env [:entry :op-key])]

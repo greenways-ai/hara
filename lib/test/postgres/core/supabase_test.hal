@@ -1,6 +1,7 @@
 (ns postgres.core.supabase-test
   (:require [postgres.core.supabase :as s]
-            [tahto.core.script :as script])
+            [tahto.core.script :as script]
+            [std.foundation.string :as string])
   (:use code.test))
 
 (def payload {"db/sync" {"Entry" []}})
@@ -54,3 +55,64 @@
   (s/transform-entry "BODY" {:entry {:op-key :defn}}) => "BODY"
   (s/transform-entry "BODY" {:entry {:op-key :deftype}}) => "BODY"
   (s/transform-entry "BODY" {:entry {:op-key :def}}) => "BODY")
+
+(fact "emits idempotent role setup blocks"
+  (emit '(s/create-role anon))
+  => "DO $$\nBEGIN\n CREATE ROLE anon ;\nEXCEPTION WHEN OTHERS THEN\nEND ;\n$$ LANGUAGE 'plpgsql'"
+  (emit '(s/alter-role-bypassrls service_role))
+  => "DO $$\nBEGIN\n ALTER ROLE service_role BYPASSRLS ;\nEXCEPTION WHEN OTHERS THEN\nEND ;\n$$ LANGUAGE 'plpgsql'")
+
+(fact "emits Supabase schema grants"
+  (emit '(s/grant-usage "core/fn-util"))
+  => "GRANT USAGE ON SCHEMA 'core/fn-util' TO anon,authenticated,service_role"
+  (emit '(s/grant-tables "core/fn-util"))
+  => "GRANT ALL ON ALL TABLES IN SCHEMA 'core/fn-util' TO anon,authenticated,service_role"
+  (emit '(s/grant-privileges "core/fn-util"))
+  => "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA 'core/fn-util' GRANT ALL ON TABLES TO anon,authenticated,service_role"
+  (emit '(s/revoke-execute-privileges-from-public "core/fn-util"))
+  => "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA 'core/fn-util' REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC"
+  (emit '(s/grant-public "core/fn-util"))
+  => "GRANT USAGE ON SCHEMA 'core/fn-util' TO anon,authenticated,service_role;\nGRANT ALL ON ALL TABLES IN SCHEMA 'core/fn-util' TO anon,authenticated,service_role;\nALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA 'core/fn-util' GRANT ALL ON TABLES TO anon,authenticated,service_role;")
+
+(fact "expands multi-schema grants"
+  (emit '(s/grant-all ["a" "b"]))
+  => "GRANT USAGE ON SCHEMA 'a' TO anon,authenticated,service_role;\nGRANT ALL ON ALL TABLES IN SCHEMA 'a' TO anon,authenticated,service_role;\nGRANT USAGE ON SCHEMA 'b' TO anon,authenticated,service_role;\nGRANT ALL ON ALL TABLES IN SCHEMA 'b' TO anon,authenticated,service_role;")
+
+(fact "expands role and identity execution wrappers"
+  (first (macroexpand-1 '(s/with-role-single [:admin :integer] (+ 1 2))))
+  => 'postgres.core.supabase/process-return
+  (get-in (macroexpand-1 '(s/with-role-single [:admin :integer] (+ 1 2)))
+          [1 1 1])
+  => [:set-local-role 'service_role]
+  (macroexpand-1 '(s/with-role [:anon :integer] (+ 1 2)))
+  => '(postgres.core.supabase/with-role-single [:anon :integer] (+ 1 2))
+  (macroexpand-1 '(s/with-auth ["user" :integer] (+ 1 2)))
+  => '(postgres.core.supabase/with-auth-single ["user" :integer] (+ 1 2))
+  (macroexpand-1 '(s/with-super ["user" :integer] (+ 1 2)))
+  => '(postgres.core.supabase/with-super-single ["user" :integer] (+ 1 2)))
+
+(fact "adds function grants and table RLS access"
+  (let [function-sql
+        (s/transform-entry
+         "BODY" {:entry {:op-key :defn :id 'ping :static/schema "api"
+                          :static/input [] :api/meta {:grant :auth}}})
+        table-sql
+        (s/transform-entry
+         "BODY" {:entry {:op-key :deftype :id 'Task :static/schema "api"
+                          :api/meta {:rls true
+                                     :access {:anon :none :auth :all}}}})]
+    [(string/includes? function-sql "REVOKE ALL ON FUNCTION")
+     (string/includes? function-sql "GRANT EXECUTE ON FUNCTION")
+     (string/includes? table-sql "ENABLE ROW LEVEL SECURITY")
+     (string/includes? table-sql "GRANT ")
+     (string/includes? table-sql " ON TABLE ")])
+  => [true true true true true])
+
+(fact "emits structured Supabase errors"
+  (first (macroexpand-1 '(s/raise "Hello" {:data 1}))) => 'do
+  (emit '(s/raise "Hello" {:data 1}))
+  => "RAISE EXCEPTION USING detail = jsonb_build_object('data',1),message = 'Hello';")
+
+(fact "emits Supabase role inspection"
+  (emit '(s/show-roles))
+  => "SELECT rolname,rolsuper,rolbypassrls,rolcanlogin FROM pg_roles WHERE rolname IN ('authenticated','service_role','anon')")

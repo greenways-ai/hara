@@ -122,7 +122,7 @@ public final class HaraNativeTestRunnerTest {
       {"lib/test/postgres/core/graph_test.hal", "6", "13"},
       {"lib/test/postgres/core_public_test.hal", "5", "9"},
       {"lib/test/postgres/core/system_test.hal", "2", "3"},
-      {"lib/test/postgres/core/supabase_test.hal", "8", "25"}
+      {"lib/test/postgres/core/supabase_test.hal", "15", "42"}
     };
     for (String[] suite : suites) {
       HaraNativeTestRunner.Result result =

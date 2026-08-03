@@ -5,6 +5,7 @@
             [tahto.common.preprocess-value :as value]
             [tahto.common.provenance :as provenance]
             [tahto.common.util :as util]
+            [std.foundation.string :as string]
             [std.lib.walk :as walk]))
 
 (defn- macroexpand-host-form [form options]
@@ -21,7 +22,7 @@
         options (provenance/with-provenance options {:tahto/form form :tahto/symbol symbol})
         template-assignment (assign/process-template-assignment form grammar modules options)]
     (cond (= symbol '!:template) (walk-fn (eval (second form)))
-          ('#{!:lang !:eval !:deref !:decorate} symbol)
+          (has? '#{!:lang !:eval !:deref !:decorate} symbol)
           (tahto.common.preprocess-assign/ProtectedHead form)
           (= :template (:type reserved))
           (binding [base/*macro-opts* options]
@@ -39,7 +40,8 @@
               (if reserved
                 (assign/protect-reserved-head form)
                 (let [fragment (resolve/get-fragment (first form) modules options)
-                      expanded (if (and (symbol? symbol) (namespace symbol))
+                      expanded (if (and (symbol? symbol)
+                                        (string/includes? (str symbol) "/"))
                                  (macroexpand-host-form form options)
                                  form)]
                   (cond (:template fragment)
@@ -58,12 +60,15 @@
           (to-staging-form form grammar modules options deps-fragment
                            (fn [value] (stage-form value grammar modules options deps deps-fragment deps-native)))
           (symbol? form)
-          (or (let [standalone (value/value-standalone form grammar)]
-                (if standalone (stage-form standalone grammar modules options deps deps-fragment deps-native)))
-              (if (namespace form)
-                (resolve/process-namespaced-symbol form modules options deps deps-fragment
-                                                   (fn [value] (stage-form value grammar modules options deps deps-fragment deps-native)))
-                (resolve/process-standard-symbol form options deps-native)))
+          (if (and (string/includes? (str form) ".")
+                   (not (string/includes? (str form) "/")))
+            (resolve/process-standard-symbol form options deps-native)
+            (or (let [standalone (value/value-standalone form grammar)]
+                  (if standalone (stage-form standalone grammar modules options deps deps-fragment deps-native)))
+                (if (string/includes? (str form) "/")
+                  (resolve/process-namespaced-symbol form modules options deps deps-fragment
+                                                     (fn [value] (stage-form value grammar modules options deps deps-fragment deps-native)))
+                  (resolve/process-standard-symbol form options deps-native))))
           :else form)
     (catch Throwable error
       (if (:staging/form (ex-data error))
@@ -89,10 +94,13 @@
         (and (walk/form? form) (get-in grammar [:reserved (first form)]))
         (assign/protect-reserved-head form)
         (symbol? form)
-        (or (value/value-standalone form grammar)
-            (if (namespace form)
-              (resolve/process-namespaced-symbol form modules options nil nil identity)
-              (resolve/process-standard-symbol form options nil)))
+        (if (and (string/includes? (str form) ".")
+                 (not (string/includes? (str form) "/")))
+          (resolve/process-standard-symbol form options nil)
+          (or (value/value-standalone form grammar)
+              (if (string/includes? (str form) "/")
+                (resolve/process-namespaced-symbol form modules options nil nil identity)
+                (resolve/process-standard-symbol form options nil))))
         :else form))
 
 (defn to-resolve [input grammar modules options]
