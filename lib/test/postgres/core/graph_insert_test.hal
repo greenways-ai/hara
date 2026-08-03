@@ -1,0 +1,56 @@
+(ns postgres.core.graph-insert-test
+  (:require [postgres.core.graph-insert :as insert])
+  (:use code.test))
+
+(def task-schema
+  {:id [{:type :uuid :primary true :order 0}]
+   :name [{:type :text :order 1}]
+   :cache [{:type :ref :order 2 :ref {:type :forward :ns :Cache}}]})
+(def cache-schema
+  {:id [{:type :uuid :primary true :order 0}]
+   :tasks [{:type :ref :ref {:type :reverse :ns :Task :rval :cache}
+             :cardinality :many}]})
+(def schema {:tree {:Cache cache-schema :Task task-schema}})
+(def entries
+  {:Cache {:id 'Cache :module 'demo :table-schema cache-schema}
+   :Task {:id 'Task :module 'demo :table-schema task-schema}})
+(def data '{:Cache {:id "c" :tasks [{:id ?t1 :name "one"}
+                                      {:id ?t2 :name "two"}]}})
+
+(fact "annotates graph nodes in preorder"
+  (let [output (insert/insert-walk-ids data)]
+    (:walk/id (meta output))) => 0
+  (let [output (insert/insert-walk-ids data)]
+    (:walk/id (meta (get output :Cache)))) => 1
+  (let [output (insert/insert-walk-ids data)]
+    (:walk/id (meta (get-in output [:Cache :tasks])))) => 2)
+
+(fact "generates graph dependencies"
+  (let [annotated (insert/insert-walk-ids data)]
+    (second (insert/insert-generate-graph-tree annotated)))
+  => {3 {} 4 {} 2 [3 4] 1 {:tasks 2}})
+
+(fact "associates row ids and orders dependencies"
+  (let [annotated (insert/insert-walk-ids data)
+        generated (insert/insert-generate-graph-tree annotated)]
+    (insert/insert-associate-graph-data (first generated) (second generated)))
+  => '[[3 4 2 1]
+       {3 gid_3 4 gid_4 2 gid_2 1 gid_1}
+       {?t1 3 ?t2 4 "c" 1}])
+
+(fact "generates portable graph insert blocks"
+  (list? (insert/insert-gen-sql data {} {:schema schema :entries entries})) => true
+  (:assign/fn (meta (insert/insert-gen-sql data {} {:schema schema :entries entries})))
+  => 'postgres.core.graph-insert/insert-gen-sql-assign)
+
+(fact "constructs graph inserts from direct entries"
+  (let [entry {:id 'Cache :module 'demo :table-schema cache-schema
+               :schema schema}]
+    (list? (insert/insert-fn entry {:id "c" :tasks [{:name "one"}]} {})))
+  => true)
+
+(fact "constructs assignment-aware graph output"
+  (let [form (insert/insert-gen-sql-assign data {} {:schema schema :entries entries} 'out)]
+    (= :select (first (last form)))) => true
+  (let [form (insert/insert-gen-sql-assign data {} {:schema schema :entries entries} 'out)]
+    (= 'out (last (last form)))) => true)

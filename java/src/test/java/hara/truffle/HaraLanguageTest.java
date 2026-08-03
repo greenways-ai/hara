@@ -2003,6 +2003,12 @@ public class HaraLanguageTest {
           context
               .eval(
                   HaraLanguage.ID,
+                  "(= {:tag :x} (meta (with-meta {:a 1} {:tag :x})))")
+              .asBoolean());
+      assertTrue(
+          context
+              .eval(
+                  HaraLanguage.ID,
                   "(= (meta (assoc (with-meta {:a 1} {:tag :x}) :b 2))"
                       + " (meta (apply assoc [(with-meta {:a 1} {:tag :x}) :b 2])))")
               .asBoolean());
