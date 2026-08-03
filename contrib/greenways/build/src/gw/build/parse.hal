@@ -1,5 +1,5 @@
-(ns greenways.build.parse
-  (:require [greenways.build.model :as model]))
+(ns gw.build.parse
+  (:require [gw.build.model :as model]))
 
 (defn- append-values
   [left right]

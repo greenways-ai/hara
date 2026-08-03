@@ -14,6 +14,8 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: true
+    - name: Enforce gw.* HAL namespaces
+      run: "! rg --glob '*.hal' 'greenways\\.' ."
     - name: Verify synchronized Hara UI assets
       run: |
         node scripts/sync-hara-ui.mjs

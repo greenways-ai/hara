@@ -1,6 +1,6 @@
-(ns greenways.build.graph-test
-  (:require [greenways.build.graph :as graph]
-            [greenways.build.normalize :as normalize]
+(ns gw.build.graph-test
+  (:require [gw.build.graph :as graph]
+            [gw.build.normalize :as normalize]
             [std.lib.test :as test]))
 
 (def linear

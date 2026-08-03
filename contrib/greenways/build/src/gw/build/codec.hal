@@ -1,5 +1,5 @@
-(ns greenways.build.codec
-  (:require [greenways.build.normalize :as normalize]
+(ns gw.build.codec
+  (:require [gw.build.normalize :as normalize]
             [std.foundation.edn :as edn]))
 
 (defn to-edn

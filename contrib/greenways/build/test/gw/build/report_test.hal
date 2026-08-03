@@ -1,6 +1,6 @@
-(ns greenways.build.report-test
-  (:require [greenways.build.normalize :as normalize]
-            [greenways.build.report :as report]
+(ns gw.build.report-test
+  (:require [gw.build.normalize :as normalize]
+            [gw.build.report :as report]
             [std.lib.test :as test]))
 
 (def build

@@ -1,6 +1,6 @@
-(ns greenways.build.checker-test
-  (:require [greenways.build.checker :as checker]
-            [greenways.build.normalize :as normalize]
+(ns gw.build.checker-test
+  (:require [gw.build.checker :as checker]
+            [gw.build.normalize :as normalize]
             [std.lib.test :as test]))
 
 (def identity

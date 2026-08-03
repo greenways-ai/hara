@@ -1,5 +1,5 @@
-(ns greenways.build.model-test
-  (:require [greenways.build.model :as model]
+(ns gw.build.model-test
+  (:require [gw.build.model :as model]
             [std.lib.test :as test]))
 
 (def example

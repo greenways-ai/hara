@@ -1,11 +1,11 @@
-(ns greenways.build.core
-  (:require [greenways.build.checker :as checker]
-            [greenways.build.codec :as codec]
-            [greenways.build.graph :as graph]
-            [greenways.build.model :as model]
-            [greenways.build.normalize :as normalize]
-            [greenways.build.parse :as parse]
-            [greenways.build.report :as report]))
+(ns gw.build.core
+  (:require [gw.build.checker :as checker]
+            [gw.build.codec :as codec]
+            [gw.build.graph :as graph]
+            [gw.build.model :as model]
+            [gw.build.normalize :as normalize]
+            [gw.build.parse :as parse]
+            [gw.build.report :as report]))
 
 (def build model/build)
 (def artifact model/artifact)

@@ -1,6 +1,6 @@
-(ns greenways.build.report
-  (:require [greenways.build.graph :as graph]
-            [greenways.build.model :as model]))
+(ns gw.build.report
+  (:require [gw.build.graph :as graph]
+            [gw.build.model :as model]))
 
 (def +statuses+ [:pass :fail :unknown :blocked])
 

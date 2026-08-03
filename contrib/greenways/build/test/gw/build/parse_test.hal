@@ -1,5 +1,5 @@
-(ns greenways.build.parse-test
-  (:require [greenways.build.parse :as parse]
+(ns gw.build.parse-test
+  (:require [gw.build.parse :as parse]
             [std.lib.test :as test]))
 
 (def valid

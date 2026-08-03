@@ -1,6 +1,6 @@
-(ns greenways.build.codec-test
-  (:require [greenways.build.codec :as codec]
-            [greenways.build.normalize :as normalize]
+(ns gw.build.codec-test
+  (:require [gw.build.codec :as codec]
+            [gw.build.normalize :as normalize]
             [std.lib.test :as test]))
 
 (def original

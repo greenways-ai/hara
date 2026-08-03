@@ -1,5 +1,5 @@
-(ns greenways.build.normalize-test
-  (:require [greenways.build.normalize :as normalize]
+(ns gw.build.normalize-test
+  (:require [gw.build.normalize :as normalize]
             [std.lib.test :as test]))
 
 (def input

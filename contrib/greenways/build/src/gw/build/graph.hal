@@ -1,4 +1,4 @@
-(ns greenways.build.graph)
+(ns gw.build.graph)
 
 (defn- member?
   [value values]

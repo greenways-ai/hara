@@ -1,4 +1,4 @@
-(ns greenways.build.model)
+(ns gw.build.model)
 
 (def version "0.1.0")
 

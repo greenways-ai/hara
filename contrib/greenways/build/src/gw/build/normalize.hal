@@ -1,5 +1,5 @@
-(ns greenways.build.normalize
-  (:require [greenways.build.model :as model]))
+(ns gw.build.normalize
+  (:require [gw.build.model :as model]))
 
 (defn- normalize-artifact
   [value]

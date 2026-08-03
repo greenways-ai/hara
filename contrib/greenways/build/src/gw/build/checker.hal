@@ -1,8 +1,8 @@
-(ns greenways.build.checker
-  (:require [greenways.build.codec :as codec]
-            [greenways.build.graph :as graph]
-            [greenways.build.model :as model]
-            [greenways.build.normalize :as normalize]
+(ns gw.build.checker
+  (:require [gw.build.codec :as codec]
+            [gw.build.graph :as graph]
+            [gw.build.model :as model]
+            [gw.build.normalize :as normalize]
             [std.foundation.string :as string]))
 
 (defn- member?
