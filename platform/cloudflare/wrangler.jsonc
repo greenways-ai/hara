@@ -10,12 +10,10 @@
   },
   "routes": [
     { "pattern": "id.hara-lang.org", "custom_domain": true },
-    { "pattern": "packages.hara-lang.org", "custom_domain": true },
-    { "pattern": "assets.hara-lang.org", "custom_domain": true }
+    { "pattern": "packages.hara-lang.org", "custom_domain": true }
   ],
   "r2_buckets": [
-    { "binding": "OBJECTS", "bucket_name": "hara-objects" },
-    { "binding": "ASSETS", "bucket_name": "hara-assets" }
+    { "binding": "OBJECTS", "bucket_name": "hara-objects" }
   ],
   "vars": {
     "IDENTITY_REPOSITORY": "hara-lang/hara-identity",

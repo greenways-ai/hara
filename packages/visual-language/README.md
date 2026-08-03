@@ -11,7 +11,9 @@ Consumers should pin a release tag exactly:
 ```
 
 Import `theme.css`, `motifs.css`, and `theme.js` before using the Astro
-components. Edge, Aperture, and Rack use resolution-independent CSS geometry;
-the generated contact sheet is retained only as an art-direction reference.
+components. Edge, Aperture, and Rack use faithful restored artwork with 4096px
+masters and responsive AVIF/WebP delivery assets; the original contact sheet is
+retained as the art-direction reference. Run `npm run assets:build` after a
+master changes.
 The theme script stores `system`, `light`, or `dark` in the `hara-theme` cookie
 on `hara-lang.org` and uses local storage on local hosts.

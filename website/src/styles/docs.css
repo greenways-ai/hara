@@ -2,3 +2,20 @@
 :root { --sl-color-accent-low:#d9e7ff; --sl-color-accent:#2f7cff; --sl-color-accent-high:#0c2f67; --sl-font:var(--hara-font-sans); --sl-font-mono:var(--hara-font-mono); }
 :root[data-theme="dark"] { --sl-color-accent-low:#102446; --sl-color-accent:#6ea0ff; --sl-color-accent-high:#dbe7ff; }
 .site-title { letter-spacing:-.03em; }
+/* Browser-local documentation evaluator. */
+.hara-kernel-toast { position:fixed; z-index:1000; right:1rem; bottom:1rem; display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:.65rem; min-width:270px; padding:.75rem .85rem; overflow:hidden; color:var(--sl-color-white); background:color-mix(in srgb,var(--sl-color-bg-nav) 92%,transparent); border:1px solid var(--sl-color-gray-5); border-radius:12px; box-shadow:0 18px 60px #0005; font:600 .72rem var(--hara-font-sans); backdrop-filter:blur(18px); }
+.hara-kernel-toast::after { position:absolute; left:0; bottom:0; width:var(--kernel-progress); height:2px; content:""; background:var(--hara-signal); transition:width 180ms ease; }
+.hara-kernel-toast i { width:7px; height:7px; background:var(--hara-signal); border-radius:50%; box-shadow:0 0 14px var(--hara-signal); }
+.hara-kernel-toast b { color:var(--sl-color-gray-3); font-variant-numeric:tabular-nums; }
+.hara-kernel-toast[data-state="ready"] i { background:var(--hara-success); box-shadow:none; }
+.hara-kernel-toast[data-state="error"] i { background:var(--hara-danger); box-shadow:none; }
+.hara-repl { margin:1.25rem 0; overflow:hidden; border:1px solid var(--sl-color-gray-5); border-radius:12px; background:var(--sl-color-bg-nav); box-shadow:0 14px 40px #0002; }
+.hara-repl header { display:flex; align-items:center; gap:.65rem; min-height:42px; padding:.4rem .55rem .4rem .8rem; border-bottom:1px solid var(--sl-color-gray-5); }
+.hara-repl header span { color:var(--hara-signal); font:700 .72rem var(--hara-font-mono); text-transform:uppercase; letter-spacing:.08em; }
+.hara-repl header small { flex:1; color:var(--sl-color-gray-3); font:.65rem var(--hara-font-mono); }
+.hara-repl button { min-height:30px; padding:.25rem .7rem; color:white; background:var(--hara-signal); border:0; border-radius:7px; font:700 .7rem var(--hara-font-sans); cursor:pointer; }
+.hara-repl button:disabled { opacity:.55; cursor:wait; }
+.hara-repl textarea { display:block; width:100%; min-height:74px; padding:1rem; resize:vertical; color:var(--sl-color-white); background:transparent; border:0; outline:0; font:500 .82rem/1.65 var(--hara-font-mono); tab-size:2; }
+.hara-repl output { display:block; min-height:38px; padding:.65rem 1rem; overflow-wrap:anywhere; color:var(--hara-success); background:color-mix(in srgb,var(--sl-color-bg) 80%,transparent); border-top:1px solid var(--sl-color-gray-5); font:.74rem/1.5 var(--hara-font-mono); }
+.hara-repl output[data-state="error"] { color:var(--hara-danger); }
+.hara-repl output[data-state="pending"] { color:var(--sl-color-gray-3); }

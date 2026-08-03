@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 const site = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const source = resolve(site, "../docs/docs");
 const destination = resolve(site, "src/content/docs/docs");
+const runtimeDestination = resolve(site, "public/docs-assets");
 
 function titleFor(body, file) {
   const heading = body.match(/^#\s+(.+)$/m)?.[1]?.replace(/[`*_]/g, "").trim();
@@ -60,3 +61,10 @@ async function walk(directory) {
 await rm(destination, { recursive: true, force: true });
 await mkdir(destination, { recursive: true });
 await walk(source);
+
+// Keep the documentation repository authoritative for its browser kernel while
+// publishing it at the canonical /docs route through the Astro shell.
+await rm(runtimeDestination, { recursive: true, force: true });
+await mkdir(join(runtimeDestination, "javascripts"), { recursive: true });
+await cp(resolve(source, "rust"), join(runtimeDestination, "rust"), { recursive: true });
+await cp(resolve(source, "javascripts/kernel.js"), join(runtimeDestination, "javascripts/kernel.js"));

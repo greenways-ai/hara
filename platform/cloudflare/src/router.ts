@@ -69,7 +69,7 @@ async function storedObject(request: Request, bucket: R2Bucket): Promise<Respons
 
 function discovery(): Response {
   return edn(
-    '{:tap/name "hara" :tap/identity "https://id.hara-lang.org" :tap/registry "https://packages.hara-lang.org" :tap/assets "https://assets.hara-lang.org"}\n',
+    '{:tap/name "hara" :tap/identity "https://id.hara-lang.org" :tap/registry "https://packages.hara-lang.org"}\n',
     { headers: { "cache-control": "public, max-age=3600" } },
   );
 }
@@ -87,6 +87,5 @@ export async function route(request: Request, env: Env): Promise<Response> {
     return gitDocument("packages", request, env);
   }
   if (url.hostname === "packages.hara-lang.org") return storedObject(request, env.OBJECTS);
-  if (url.hostname === "assets.hara-lang.org") return storedObject(request, env.ASSETS);
   return problem(404, "not-found", "unknown Hara platform endpoint");
 }

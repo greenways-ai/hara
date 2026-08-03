@@ -1,24 +1,42 @@
 ---
 import SiteLayout from "../layouts/SiteLayout.astro";
 import Motif from "@hara-lang/visual-language/astro/Motif.astro";
+const animationCode = `(defn scene [frame]
+  (-> frame
+      (character :pilot)
+      (move-to [420 180] :ease-out)
+      (speak "The program is the storyboard.")))
+
+(play! (timeline (scene 0) (scene 48)))`;
+const serviceCode = `(defroute GET "/orders/:id" [{:keys [id]}]
+  (let [order (orders/find id)]
+    (respond 200
+      {:order order
+       :total (orders/total order)})))`;
+const ledgerCode = `(defn transfer [chain from to amount]
+  (-> chain
+      (assert-balance from amount)
+      (debit from amount)
+      (credit to amount)
+      (commit {:kind :transfer})))`;
 ---
 <SiteLayout title="Hara — one embeddable language, many runtimes">
   <main>
     <Motif kind="edge" class="hero">
       <div class="hero-copy">
-        <p class="hara-kicker">One language · many runtimes</p>
-        <h1>A precise kernel.<br /><span>Embedded everywhere.</span></h1>
-        <p>Put programmable logic inside native applications, WebAssembly, databases, servers, editors, and devices—with immutable data and explicit host boundaries.</p>
+        <p class="hara-kicker">Small enough to disappear · fast enough to matter</p>
+        <h1>One language.<br /><span>Fit to its environment.</span></h1>
+        <p>Choose a compact bytecode VM or full whole-program compilation. Put serious programmable logic inside a browser, native application, server, editor, or device without dragging in an application platform.</p>
         <div class="actions"><a class="button primary" href="/install.sh">Get Hara</a><a class="button" href="https://playground.hara-lang.org/">Open playground</a></div>
-        <small>Active experimental runtime. See the complete benchmark methods and evidence.</small>
+        <small><strong>689 KB</strong> compressed browser VM · measured artifacts, checksums, and methods published with every benchmark</small>
       </div>
     </Motif>
 
     <section class="proof" aria-label="Hara capabilities">
-      <div><strong>Persistent values</strong><span>Structural sharing</span></div>
-      <div><strong>Native + WebAssembly</strong><span>Shared Rust core</span></div>
-      <div><strong>Explicit interop</strong><span>Capability boundaries</span></div>
-      <div><strong>Tahto</strong><span>Target languages</span></div>
+      <div><strong>689 KB</strong><span>hara-wasm-vm · gzip</span></div>
+      <div><strong>744 KB</strong><span>hara-wasm-full · gzip</span></div>
+      <div><strong>VM → full</strong><span>Choose the execution tier</span></div>
+      <div><strong>Web → native</strong><span>Keep the language</span></div>
     </section>
 
     <section class="content-section intro">
@@ -33,18 +51,41 @@ import Motif from "@hara-lang/visual-language/astro/Motif.astro";
     </section>
 
     <section class="content-section">
-      <p class="hara-kicker">Execution targets</p>
-      <h2>One program. Eight measurable artifacts.</h2>
-      <div class="runtime-list">
-        <article><b>Rust</b><h3>Native VM and full compiler</h3><p>Compact HBC4 execution or whole-function Wasm through the native runtime.</p></article>
-        <article><b>Web</b><h3>Browser VM and full compiler</h3><p>The same two execution representations delivered through WebAssembly.</p></article>
-        <article><b>Truffle</b><h3>JVM and Native Image</h3><p>Prepared HBC4 or Truffle AST execution on both Java-family hosts.</p></article>
+      <p class="hara-kicker">Four Rust-core form factors</p>
+      <h2>Take only the engine the environment needs.</h2>
+      <div class="artifact-grid">
+        <article><code>hara-rust-vm</code><b>Native · HBC4 VM</b><p>Small, predictable bytecode execution for embedding and fast startup.</p></article>
+        <article><code>hara-rust-full</code><b>Native · full compiler</b><p>The biggest and baddest tier: whole-function compilation for peak sustained work.</p></article>
+        <article><code>hara-wasm-vm</code><b>Browser · 689 KB gzip</b><p>The smallest web kernel. It powers the live documentation without a server.</p></article>
+        <article><code>hara-wasm-full</code><b>Browser · 744 KB gzip</b><p>Whole-program compilation inside a browser worker for heavier applications.</p></article>
       </div>
       <a class="text-link" href="https://benchmarks.hara-lang.org/">Compare every artifact →</a>
+    </section>
+
+    <section class="content-section code-showcase">
+      <p class="hara-kicker">Expressive by construction</p>
+      <h2>Complex applications should read like their intent.</h2>
+      <p class="lede">Hara keeps data, behavior, and host authority visible. The result is compact code you can enjoy reading—and confidently change while the system is alive.</p>
+      <div class="code-tabs" role="tablist" aria-label="Hara application examples">
+        <button class="active" data-example="animation">Animation</button><button data-example="service">Service</button><button data-example="ledger">Ledger</button>
+      </div>
+      <div class="code-stage">
+        <pre data-code="animation"><code>{animationCode}</code></pre>
+        <pre data-code="service" hidden><code>{serviceCode}</code></pre>
+        <pre data-code="ledger" hidden><code>{ledgerCode}</code></pre>
+        <aside><span>Readable systems</span><strong>Data flows forward.</strong><p>No hidden framework lifecycle. No ambient authority. Each transformation says what it changes.</p></aside>
+      </div>
     </section>
 
     <Motif kind="aperture" class="closing">
       <div><p class="hara-kicker">Documentation is now part of Hara</p><h2>Learn the language without leaving the site.</h2><a class="button primary" href="/docs/start/orientation/">Read the docs</a></div>
     </Motif>
   </main>
+  <script>
+    const buttons = document.querySelectorAll<HTMLButtonElement>("[data-example]");
+    buttons.forEach((button) => button.addEventListener("click", () => {
+      buttons.forEach((item) => item.classList.toggle("active", item === button));
+      document.querySelectorAll<HTMLElement>("[data-code]").forEach((code) => { code.hidden = code.dataset.code !== button.dataset.example; });
+    }));
+  </script>
 </SiteLayout>

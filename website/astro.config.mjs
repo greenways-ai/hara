@@ -12,6 +12,7 @@ export default defineConfig({
       title: "Hara",
       description: "A programmable kernel for building, inspecting, and changing live systems.",
       favicon: "/assets/hara-favicon.svg",
+      head: [{ tag: "script", attrs: { type: "module", src: "/assets/docs-repl.js" } }],
       customCss: ["./src/styles/docs.css"],
       social: [{ icon: "github", label: "GitHub", href: "https://github.com/hara-lang/hara" }],
       sidebar: [
