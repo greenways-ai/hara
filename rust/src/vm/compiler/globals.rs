@@ -615,13 +615,17 @@ impl Compiler {
             Form::Vector(_)
         );
         if single_arity {
+            let suspend_allowed = async_function
+                || rest_children[1..]
+                    .iter()
+                    .any(|child| self.form_may_suspend(child.form));
             self.compile_function(
                 Some(&name),
                 &rest_children[0],
                 &rest_children[1..],
                 span,
                 async_function,
-                async_function,
+                suspend_allowed,
             )?;
         } else {
             // Multi-arity: each clause is a list `(params body...)`.
@@ -645,13 +649,17 @@ impl Compiler {
                         Some(clause.span.start),
                     ));
                 }
+                let suspend_allowed = async_function
+                    || clause_children[1..]
+                        .iter()
+                        .any(|child| self.form_may_suspend(child.form));
                 self.compile_function(
                     None,
                     &clause_children[0],
                     &clause_children[1..],
                     span,
                     async_function,
-                    async_function,
+                    suspend_allowed,
                 )?;
                 count += 1;
                 if count > u8::MAX as usize {

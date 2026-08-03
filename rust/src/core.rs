@@ -702,7 +702,8 @@ impl std::fmt::Debug for RuntimeAtom {
     }
 }
 
-pub(crate) fn native_function(
+/// Builds a fixed-arity native callable for embedding-owned namespaces.
+pub fn native_function(
     name: &str,
     arity: usize,
     callback: impl Fn(Vec<Value>) -> Result<Value, String> + 'static,
@@ -2346,6 +2347,9 @@ pub type ProtocolFn = Rc<dyn Fn(&[Value]) -> Result<Value, String>>;
 #[derive(Default, Clone)]
 pub struct ProtocolRegistry {
     methods: Rc<RefCell<HashMap<(String, String), Vec<ProtocolFn>>>>,
+    extension_methods:
+        Rc<RefCell<HashMap<(String, String, String, String), ProtocolFn>>>,
+    extension_categories: Rc<RefCell<HashSet<(String, String, String)>>>,
     guest_methods: Rc<RefCell<HashMap<(String, String, String), Rc<Function>>>>,
     guest_declarations: Rc<RefCell<HashSet<(String, String)>>>,
 }
@@ -2370,6 +2374,84 @@ impl ProtocolRegistry {
             .entry((protocol, method.into()))
             .or_default()
             .push(Rc::new(function));
+    }
+
+    /// Registers a protocol implementation for one opaque extension type.
+    ///
+    /// Extension methods are kept separate from the ordinary protocol fallback
+    /// chain so collection primitives can dispatch without recursively entering
+    /// their own built-in protocol implementation.
+    pub fn register_extension<F>(
+        &mut self,
+        provider: impl Into<String>,
+        type_name: impl Into<String>,
+        protocol: impl Into<String>,
+        method: impl Into<String>,
+        function: F,
+    ) where
+        F: Fn(&[Value]) -> Result<Value, String> + 'static,
+    {
+        self.extension_methods.borrow_mut().insert(
+            (
+                provider.into(),
+                type_name.into(),
+                canonical_protocol_name(&protocol.into()),
+                method.into(),
+            ),
+            Rc::new(function),
+        );
+    }
+
+    /// Marks an opaque extension type as a logical collection category such as
+    /// `map`. Predicates can then preserve the guest-language collection model.
+    pub fn register_extension_category(
+        &mut self,
+        provider: impl Into<String>,
+        type_name: impl Into<String>,
+        category: impl Into<String>,
+    ) {
+        self.extension_categories.borrow_mut().insert((
+            provider.into(),
+            type_name.into(),
+            category.into(),
+        ));
+    }
+
+    pub fn invoke_extension(
+        &self,
+        receiver: &ExtensionValue,
+        protocol: &str,
+        method: &str,
+        arguments: &[Value],
+    ) -> Result<Value, String> {
+        let key = (
+            receiver.provider.clone(),
+            receiver.type_name.clone(),
+            canonical_protocol_name(protocol),
+            method.to_owned(),
+        );
+        self.extension_methods
+            .borrow()
+            .get(&key)
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "protocol/unsupported-receiver: extension {}/{} has no {}/{} implementation",
+                    receiver.provider, receiver.type_name, protocol, method
+                )
+            })?(arguments)
+    }
+
+    pub fn extension_has_category(
+        &self,
+        receiver: &ExtensionValue,
+        category: &str,
+    ) -> bool {
+        self.extension_categories.borrow().contains(&(
+            receiver.provider.clone(),
+            receiver.type_name.clone(),
+            category.to_owned(),
+        ))
     }
 
     pub fn register_guest(
@@ -5976,6 +6058,12 @@ fn protocol_find(arguments: &[Value]) -> Result<Value, String> {
     let collection = &arguments[0];
     let key = &arguments[1];
     match collection {
+        Value::Extension(receiver) => extension_protocol_call(
+            receiver,
+            "std.protocol.ifind/IFind",
+            "find",
+            arguments,
+        ),
         value @ (Value::Map(_) | Value::OrderedMap(_) | Value::SortedMap(_) | Value::Trie(_)) => {
             Ok(map_entries(value)
                 .unwrap()
@@ -6019,6 +6107,12 @@ fn protocol_find(arguments: &[Value]) -> Result<Value, String> {
 
 fn protocol_iter(arguments: &[Value]) -> Result<Value, String> {
     match arguments {
+        [Value::Extension(receiver)] => extension_protocol_call(
+            receiver,
+            "std.protocol.iiter/IIter",
+            "iter",
+            arguments,
+        ),
         [value]
             if matches!(
                 value,
@@ -6441,6 +6535,31 @@ fn protocol_call(protocol: &str, method: &str, arguments: &[Value]) -> Result<Va
             .cloned()
             .unwrap_or_else(ProtocolRegistry::core)
             .invoke(protocol, method, arguments)
+    })
+}
+
+fn extension_protocol_call(
+    receiver: &ExtensionValue,
+    protocol: &str,
+    method: &str,
+    arguments: &[Value],
+) -> Result<Value, String> {
+    ACTIVE_PROTOCOLS.with(|active| {
+        active
+            .borrow()
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(ProtocolRegistry::core)
+            .invoke_extension(receiver, protocol, method, arguments)
+    })
+}
+
+fn extension_has_category(receiver: &ExtensionValue, category: &str) -> bool {
+    ACTIVE_PROTOCOLS.with(|active| {
+        active
+            .borrow()
+            .as_ref()
+            .is_some_and(|registry| registry.extension_has_category(receiver, category))
     })
 }
 
@@ -7353,6 +7472,16 @@ fn byte_set(value: &Value, index: &Value, item: &Value) -> Result<Value, String>
 
 fn iterator_values(value: Value) -> Result<Vec<Value>, String> {
     match value {
+        Value::Extension(receiver) => {
+            let value = Value::Extension(receiver.clone());
+            let iterator = extension_protocol_call(
+                &receiver,
+                "std.protocol.iiter/IIter",
+                "iter",
+                std::slice::from_ref(&value),
+            )?;
+            iterator_values(iterator)
+        }
         Value::Nil => Ok(Vec::new()),
         Value::Tuple(values) => Ok(values.iter().cloned().collect()),
         Value::Vector(values) => Ok(values.iter().cloned().collect()),
@@ -7746,6 +7875,12 @@ fn collection_empty(value: Value) -> Result<Value, String> {
 
 fn collection_empty_value(value: Value) -> Result<Value, String> {
     match value {
+        Value::Extension(receiver) => extension_protocol_call(
+            &receiver,
+            "std.protocol.iempty/IEmpty",
+            "empty",
+            &[Value::Extension(receiver.clone())],
+        ),
         Value::Nil => Ok(Value::Nil),
         Value::List(_) => Ok(Value::List(PList::new())),
         Value::Cons(_) | Value::Queue(_) => Ok(Value::List(PList::new())),
@@ -7764,6 +7899,14 @@ fn collection_empty_value(value: Value) -> Result<Value, String> {
 }
 
 fn collection_count(value: &Value) -> Result<Value, String> {
+    if let Value::Extension(receiver) = value {
+        return extension_protocol_call(
+            receiver,
+            "std.protocol.icount/ICount",
+            "count",
+            std::slice::from_ref(value),
+        );
+    }
     let count = match value {
         Value::Nil => 0,
         Value::String(v) => v.chars().count(),
@@ -7819,6 +7962,12 @@ fn iterator_is_finite(value: &Value) -> bool {
 
 fn collection_get(value: &Value, key: &Value, default: Value) -> Result<Value, String> {
     match value {
+        Value::Extension(receiver) => extension_protocol_call(
+            receiver,
+            "std.protocol.ilookup/ILookup",
+            "lookup",
+            &[value.clone(), key.clone(), default],
+        ),
         Value::Nil => Ok(default),
         Value::Tuple(values) => {
             let index = value_index(key)?;
@@ -7954,6 +8103,12 @@ fn collection_nth(value: &Value, key: &Value) -> Result<Value, String> {
 
 fn collection_assoc(value: &Value, key: &Value, replacement: Value) -> Result<Value, String> {
     match value {
+        Value::Extension(receiver) => extension_protocol_call(
+            receiver,
+            "std.protocol.iassoc/IAssoc",
+            "assoc",
+            &[value.clone(), key.clone(), replacement],
+        ),
         Value::MutableCollection(collection) => {
             let mut borrowed = collection.borrow_mut();
             let mutable = borrowed
@@ -8063,6 +8218,17 @@ pub(crate) fn apply_ternary_primitive_owned(
 
 fn collection_dissoc(value: &Value, keys: &[Value]) -> Result<Value, String> {
     match value {
+        Value::Extension(_) => keys.iter().try_fold(value.clone(), |current, key| {
+            let Value::Extension(receiver) = &current else {
+                return collection_dissoc(&current, std::slice::from_ref(key));
+            };
+            extension_protocol_call(
+                receiver,
+                "std.protocol.idissoc/IDissoc",
+                "dissoc",
+                &[current.clone(), key.clone()],
+            )
+        }),
         Value::MutableCollection(collection) => {
             let mut collection_value = collection.borrow_mut();
             let mutable = collection_value
@@ -12669,13 +12835,16 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                             matches!(value, Value::List(_) | Value::Cons(_) | Value::Queue(_))
                         }
                         "vector?" => matches!(value, Value::Vector(_) | Value::Tuple(_)),
-                        "map?" => matches!(
-                            value,
+                        "map?" => match &value {
                             Value::Map(_)
-                                | Value::OrderedMap(_)
-                                | Value::SortedMap(_)
-                                | Value::Trie(_)
-                        ),
+                            | Value::OrderedMap(_)
+                            | Value::SortedMap(_)
+                            | Value::Trie(_) => true,
+                            Value::Extension(receiver) => {
+                                extension_has_category(receiver, "map")
+                            }
+                            _ => false,
+                        },
                         // Rust materializes map iteration entries as ordinary
                         // two-element vectors rather than a distinct MapEntry.
                         "map-entry?" => false,

@@ -2431,6 +2431,88 @@ mod tests {
         assert_eq!(runtime.require_resource("range").unwrap(), ":loaded");
     }
 
+    struct LazyMapExtension;
+
+    impl core::ExtensionProvider for LazyMapExtension {
+        fn name(&self) -> &str {
+            "lazy-map"
+        }
+
+        fn install(&self, protocols: &mut core::ProtocolRegistry) {
+            protocols.register_extension_category("lazy-map", "request", "map");
+            protocols.register_extension(
+                "lazy-map",
+                "request",
+                "std.protocol.ilookup/ILookup",
+                "lookup",
+                |arguments| match arguments {
+                    [core::Value::Extension(value), key, default]
+                        if value.provider == "lazy-map" && value.type_name == "request" =>
+                    {
+                        let matches = matches!(
+                            key,
+                            core::Value::Keyword(keyword) if keyword.as_str() == "value"
+                        );
+                        Ok(if matches {
+                            core::Value::Number(value.handle as i64)
+                        } else {
+                            default.clone()
+                        })
+                    }
+                    _ => Err("lazy-map/lookup expects its request extension".into()),
+                },
+            );
+            protocols.register_extension(
+                "lazy-map",
+                "request",
+                "std.protocol.icount/ICount",
+                "count",
+                |arguments| match arguments {
+                    [core::Value::Extension(value)]
+                        if value.provider == "lazy-map" && value.type_name == "request" =>
+                    {
+                        Ok(core::Value::Number(1))
+                    }
+                    _ => Err("lazy-map/count expects its request extension".into()),
+                },
+            );
+        }
+
+        fn construct(
+            &self,
+            type_name: &str,
+            arguments: &[core::Value],
+        ) -> Result<core::Value, String> {
+            let [core::Value::Number(value)] = arguments else {
+                return Err("lazy-map expects one numeric value".into());
+            };
+            if type_name != "request" || *value < 0 {
+                return Err("lazy-map/request expects a non-negative value".into());
+            }
+            Ok(core::Value::Extension(core::ExtensionValue {
+                provider: "lazy-map".into(),
+                type_name: "request".into(),
+                handle: *value as u64,
+            }))
+        }
+    }
+
+    #[test]
+    fn extension_backed_maps_dispatch_collection_primitives() {
+        let mut runtime = Runtime::new();
+        runtime.extensions.install(LazyMapExtension);
+        runtime.require_resource("lazy-map").unwrap();
+        let value = runtime
+            .extensions
+            .construct("lazy-map", "request", &[core::Value::Number(42)])
+            .unwrap();
+        runtime.env.insert("request".into(), value);
+        assert_eq!(runtime.eval_text("(:value request)").unwrap(), "42");
+        assert_eq!(runtime.eval_text("(get request :missing :fallback)").unwrap(), ":fallback");
+        assert_eq!(runtime.eval_text("(count request)").unwrap(), "1");
+        assert_eq!(runtime.eval_text("(map? request)").unwrap(), "true");
+    }
+
     #[test]
     fn runtime_routes_file_operations_through_provider_registry() {
         let mut runtime = Runtime::new();

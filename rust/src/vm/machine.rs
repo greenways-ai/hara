@@ -351,8 +351,8 @@ impl Machine {
                 match machine.run() {
                     VmOutcome::Returned(value) => Ok(value),
                     VmOutcome::Failed(error) => Err(error.message),
-                    VmOutcome::Suspended(_) => {
-                        Err("async VM function suspended across a synchronous call boundary".into())
+                    outcome @ VmOutcome::Suspended(_) => {
+                        Ok(Value::Promise(async_result_from_outcome(machine, outcome)))
                     }
                 }
             };
@@ -1358,6 +1358,11 @@ impl Machine {
 }
 
 fn async_result(mut machine: Machine) -> Promise {
+    let outcome = machine.run();
+    async_result_from_outcome(machine, outcome)
+}
+
+fn async_result_from_outcome(mut machine: Machine, outcome: VmOutcome) -> Promise {
     let scheduler = machine
         .scheduler
         .upgrade()
@@ -1379,7 +1384,6 @@ fn async_result(mut machine: Machine) -> Promise {
     result.set_cancel_hook(Rc::new(move || {
         Machine::cancel_async_result(&cancel_scheduler, cancel_identity);
     }));
-    let outcome = machine.run();
     Machine::finish_async(&scheduler, machine, result.clone(), outcome);
     result
 }

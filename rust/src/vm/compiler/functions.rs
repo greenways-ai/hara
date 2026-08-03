@@ -201,14 +201,41 @@ impl Compiler {
             ));
         }
         let async_function = metadata_flag(children[1].form, "async")?;
+        let suspend_allowed = async_function
+            || children[2..]
+                .iter()
+                .any(|child| self.form_may_suspend(child.form));
         self.compile_function(
             None,
             &children[1],
             &children[2..],
             span,
             async_function,
-            async_function,
+            suspend_allowed,
         )
+    }
+
+    /// Detects an await in one function body. This enables OpenResty-style
+    /// synchronous entry: an ordinary function remains synchronous when it
+    /// completes immediately, but its existing VM call stack may suspend when
+    /// execution actually reaches an await.
+    pub(super) fn form_may_suspend(&self, form: &Form) -> bool {
+        match crate::core::form_without_metadata(form) {
+            Form::List(values) => {
+                if matches!(values.first(), Some(Form::Symbol(name)) if self.is_coroutine_var(name, "await")) {
+                    return true;
+                }
+                values.iter().any(|value| self.form_may_suspend(value))
+            }
+            Form::Vector(values) | Form::Set(values) => {
+                values.iter().any(|value| self.form_may_suspend(value))
+            }
+            Form::Map(entries) => entries.iter().any(|(key, value)| {
+                self.form_may_suspend(key) || self.form_may_suspend(value)
+            }),
+            Form::Tagged(_, value) => self.form_may_suspend(value),
+            _ => false,
+        }
     }
 
     /// Compiles a `fn`/`defn` body into a new function context and emits
