@@ -5329,7 +5329,10 @@ pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Resu
                 return Err("std.native.Arr/get-index expects an array and index".into());
             }
             match &arguments[0] {
-                Value::Array(values) => values.borrow().get(value_index(&arguments[1])?).cloned()
+                Value::Array(values) => values
+                    .borrow()
+                    .get(value_index(&arguments[1])?)
+                    .cloned()
                     .ok_or_else(|| "array/get index out of bounds".into()),
                 _ => Err("std.native.Arr/get-index expects an array".into()),
             }
@@ -5342,7 +5345,9 @@ pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Resu
                 Value::Array(values) => {
                     let index = value_index(&arguments[1])?;
                     let mut values = values.borrow_mut();
-                    if index >= values.len() { return Err("array/set index out of bounds".into()); }
+                    if index >= values.len() {
+                        return Err("array/set index out of bounds".into());
+                    }
                     values[index] = arguments[2].clone();
                     drop(values);
                     Ok(arguments[0].clone())
@@ -5367,8 +5372,12 @@ pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Resu
             match &arguments[0] {
                 Value::Object(entries) => {
                     let key = marker_key(&arguments[1], "object")?;
-                    Ok(entries.borrow().iter().find(|(candidate, _)| candidate == &key)
-                        .map(|(_, value)| value.clone()).unwrap_or(Value::Nil))
+                    Ok(entries
+                        .borrow()
+                        .iter()
+                        .find(|(candidate, _)| candidate == &key)
+                        .map(|(_, value)| value.clone())
+                        .unwrap_or(Value::Nil))
                 }
                 _ => Err("std.native.Obj/get-key expects an object".into()),
             }
@@ -5381,7 +5390,9 @@ pub(crate) fn apply_primitive(primitive: Primitive, arguments: &[Value]) -> Resu
                 Value::Object(entries) => {
                     let key = marker_key(&arguments[1], "object")?;
                     let mut entries = entries.borrow_mut();
-                    if let Some((_, value)) = entries.iter_mut().find(|(candidate, _)| candidate == &key) {
+                    if let Some((_, value)) =
+                        entries.iter_mut().find(|(candidate, _)| candidate == &key)
+                    {
                         *value = arguments[2].clone();
                     } else {
                         entries.push((key, arguments[2].clone()));
@@ -5471,19 +5482,27 @@ pub(crate) fn apply_binary_primitive(
         Primitive::NumberPredicate => Err("number? expects one argument".into()),
         Primitive::ArrayNew => unreachable!("array constructor is variadic"),
         Primitive::ArrayGet => match left {
-            Value::Array(values) => values.borrow().get(value_index(right)?).cloned()
+            Value::Array(values) => values
+                .borrow()
+                .get(value_index(right)?)
+                .cloned()
                 .ok_or_else(|| "array/get index out of bounds".into()),
             _ => Err("std.native.Arr/get-index expects an array".into()),
         },
         Primitive::ArraySet => Err("std.native.Arr/set-index expects three arguments".into()),
         Primitive::ObjectNew => Ok(Value::Object(Rc::new(RefCell::new(vec![(
-            marker_key(left, "object")?, right.clone(),
+            marker_key(left, "object")?,
+            right.clone(),
         )])))),
         Primitive::ObjectGet => match left {
             Value::Object(entries) => {
                 let key = marker_key(right, "object")?;
-                Ok(entries.borrow().iter().find(|(candidate, _)| candidate == &key)
-                    .map(|(_, value)| value.clone()).unwrap_or(Value::Nil))
+                Ok(entries
+                    .borrow()
+                    .iter()
+                    .find(|(candidate, _)| candidate == &key)
+                    .map(|(_, value)| value.clone())
+                    .unwrap_or(Value::Nil))
             }
             _ => Err("std.native.Obj/get-key expects an object".into()),
         },
@@ -5522,7 +5541,8 @@ pub(crate) fn apply_binary_numbers(
         Primitive::ToPersistent => return Err("to-persistent expects one argument".into()),
         Primitive::NumberPredicate => return Err("number? expects one argument".into()),
         Primitive::ArrayNew => Value::Array(Rc::new(RefCell::new(vec![
-            Value::Number(left), Value::Number(right),
+            Value::Number(left),
+            Value::Number(right),
         ]))),
         Primitive::ArrayGet
         | Primitive::ArraySet
@@ -9980,9 +10000,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     let definitions = match &fs[1] {
                         Form::Vector(values) => values,
                         _ => {
-                            return Err(
-                                "letfn expects a function binding vector and a body".into(),
-                            )
+                            return Err("letfn expects a function binding vector and a body".into())
                         }
                     };
                     let captured = Rc::new(RefCell::new(env.clone()));
@@ -9991,12 +10009,12 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     for definition in definitions {
                         let Form::List(parts) = definition else {
                             return Err(
-                                "letfn definitions must be (name [arguments] body...)".into(),
+                                "letfn definitions must be (name [arguments] body...)".into()
                             );
                         };
                         if parts.len() < 3 {
                             return Err(
-                                "letfn definitions must be (name [arguments] body...)".into(),
+                                "letfn definitions must be (name [arguments] body...)".into()
                             );
                         }
                         let Form::Symbol(name) = &parts[0] else {
@@ -10050,9 +10068,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                     }
                     result
                 }
-                Form::Symbol(n)
-                    if n == "read-forms" || n == "std.native.Edn/read-forms" =>
-                {
+                Form::Symbol(n) if n == "read-forms" || n == "std.native.Edn/read-forms" => {
                     if fs.len() != 2 {
                         return Err("read-forms expects a path string".into());
                     }
@@ -10068,9 +10084,7 @@ pub fn eval(form: &Form, env: &mut HashMap<String, Value>) -> Result<Value, Stri
                         .map_err(|error| file_error("read-forms", error))?;
                     let bytes = match promise.wait_state() {
                         PromiseState::Fulfilled(Value::Bytes(bytes)) => bytes,
-                        PromiseState::Fulfilled(Value::ByteBuffer(bytes)) => {
-                            bytes.borrow().clone()
-                        }
+                        PromiseState::Fulfilled(Value::ByteBuffer(bytes)) => bytes.borrow().clone(),
                         PromiseState::Fulfilled(value) => {
                             return Err(format!(
                                 "read-forms expected file bytes, got {}",

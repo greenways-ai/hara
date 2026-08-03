@@ -3,6 +3,9 @@ const sceneButtons = [...document.querySelectorAll("[data-hero-scene]")];
 const mosaicBackdrop = document.querySelector("[data-hero-mosaic]");
 const installDialog = document.querySelector("[data-install-dialog]");
 const installCommand = "brew install hara-lang/tap/hara";
+const mosaicSeedDataUrl = "data:image/jpeg;base64,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";
+
+const mosaicSeedDataUrl64 = "data:image/jpeg;base64,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";
 
 const vertexSource = `#version 300 es
 precision highp float;
@@ -187,6 +190,7 @@ precision highp float;
 out vec4 color;
 uniform vec2 u_resolution;
 uniform float u_time;
+uniform sampler2D u_seed;
 
 float hash(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
@@ -368,7 +372,7 @@ float archedOpening(vec2 p, float width, float height) {
   return max(lower, upper);
 }
 
-void main() {
+void proceduralTemple() {
   float time = u_time * .001;
   vec2 uv = gl_FragCoord.xy / u_resolution;
   uv -= .5;
@@ -453,6 +457,88 @@ void main() {
   float vignette = smoothstep(.86, .18, length(uv * vec2(.72, 1.05)));
   scene *= .50 + .50 * vignette;
   color = vec4(pow(clamp(scene, 0.0, 1.0), vec3(.76)), 1.0);
+}
+
+vec4 seededVoronoi(vec2 uv, float time) {
+  vec2 cellId = floor(uv);
+  vec2 cellPosition = fract(uv);
+  vec2 nearestOffset = vec2(0.0);
+  vec2 nearestCell = vec2(0.0);
+  vec2 nearestSite = vec2(0.0);
+  float nearestDistance = 10.0;
+  float evolution = smoothstep(.7, 8.0, time);
+
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      vec2 neighbor = vec2(float(x), float(y));
+      vec2 seed = randomPoint(cellId + neighbor);
+      vec2 moving = .5 + .36 * sin(6.2831853 * seed + time * .34);
+      vec2 point = mix(seed, moving, evolution);
+      vec2 offset = neighbor + point - cellPosition;
+      float distanceToPoint = length(offset);
+      if (distanceToPoint < nearestDistance) {
+        nearestDistance = distanceToPoint;
+        nearestOffset = offset;
+        nearestCell = neighbor;
+        nearestSite = cellId + neighbor + point;
+      }
+    }
+  }
+
+  float edgeDistance = 10.0;
+  for (int y = -2; y <= 2; y++) {
+    for (int x = -2; x <= 2; x++) {
+      vec2 neighbor = nearestCell + vec2(float(x), float(y));
+      vec2 seed = randomPoint(cellId + neighbor);
+      vec2 moving = .5 + .36 * sin(6.2831853 * seed + time * .34);
+      vec2 point = mix(seed, moving, evolution);
+      vec2 offset = neighbor + point - cellPosition;
+      vec2 separation = offset - nearestOffset;
+      if (length(separation) > .001) {
+        edgeDistance = min(edgeDistance, dot(.5 * (nearestOffset + offset), normalize(separation)));
+      }
+    }
+  }
+  return vec4(nearestSite, edgeDistance, nearestDistance);
+}
+
+vec2 coverSeedCoordinates(vec2 uv) {
+  float canvasAspect = u_resolution.x / u_resolution.y;
+  float imageAspect = 1672.0 / 941.0;
+  if (canvasAspect < imageAspect) {
+    uv.x = (uv.x - .5) * (canvasAspect / imageAspect) + .5;
+  } else {
+    uv.y = (uv.y - .5) * (imageAspect / canvasAspect) + .5;
+  }
+  return clamp(uv, 0.0, 1.0);
+}
+
+void main() {
+  float time = u_time * .001;
+  float evolution = smoothstep(.7, 8.0, time);
+  vec2 screenUv = gl_FragCoord.xy / u_resolution;
+  float aspect = u_resolution.x / u_resolution.y;
+  vec2 gridScale = vec2(42.0 * aspect, 42.0);
+  vec4 cell = seededVoronoi(screenUv * gridScale, time);
+  vec2 siteUv = cell.xy / gridScale;
+  siteUv += evolution * .006 * vec2(
+    sin(siteUv.y * 11.0 + time * .28),
+    cos(siteUv.x * 9.0 - time * .23));
+
+  vec3 original = texture(u_seed, coverSeedCoordinates(screenUv)).rgb;
+  vec3 tessera = texture(u_seed, coverSeedCoordinates(siteUv)).rgb;
+  float identity = hash(floor(cell.xy));
+  tessera *= .82 + .24 * identity;
+  float luminance = dot(tessera, vec3(.2126, .7152, .0722));
+  tessera = mix(vec3(luminance), tessera, 1.32) * 1.08;
+  float interior = smoothstep(.028, .073, cell.z);
+  tessera = mix(vec3(.008, .010, .016), tessera, .22 + .78 * interior);
+
+  float waterBand = 1.0 - smoothstep(.35, .60, screenUv.y);
+  float shimmer = pow(.5 + .5 * sin(screenUv.x * 38.0 + screenUv.y * 71.0 + time * .72), 16.0);
+  tessera += vec3(.02, .22, .24) * shimmer * waterBand * evolution * .22;
+  vec3 scene = mix(original, tessera, evolution * .78);
+  color = vec4(pow(clamp(scene, 0.0, 1.0), vec3(.94)), 1.0);
 }`;
 
 function compile(gl, type, source) {
@@ -478,7 +564,8 @@ function programFor(gl, fragmentSource) {
   return {
     program,
     resolution: gl.getUniformLocation(program, "u_resolution"),
-    time: gl.getUniformLocation(program, "u_time")
+    time: gl.getUniformLocation(program, "u_time"),
+    seed: gl.getUniformLocation(program, "u_seed")
   };
 }
 
@@ -505,8 +592,38 @@ function startHero() {
   let activeScene = "columns";
   let frame = 0;
   let visible = true;
+  let seedReady = false;
+  let sceneStartedAt = performance.now();
+  let evolutionTimer = 0;
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const startedAt = performance.now();
+  const seedTexture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, seedTexture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([7, 13, 18, 255]));
+
+  const seedImage = new Image();
+  seedImage.decoding = "async";
+  seedImage.addEventListener("load", () => {
+    gl.bindTexture(gl.TEXTURE_2D, seedTexture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, seedImage);
+    seedReady = true;
+    if (activeScene === "mosaic") beginMosaicEvolution();
+    renderOnce();
+  });
+  seedImage.src = mosaicSeedDataUrl64;
+
+  function beginMosaicEvolution() {
+    if (!seedReady || reduceMotion.matches) return;
+    clearTimeout(evolutionTimer);
+    evolutionTimer = setTimeout(() => {
+      if (activeScene === "mosaic") mosaicBackdrop?.classList.add("is-evolving");
+    }, 850);
+  }
 
   function resize() {
     const bounds = canvas.getBoundingClientRect();
@@ -525,7 +642,13 @@ function startHero() {
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.useProgram(active.program);
     gl.uniform2f(active.resolution, canvas.width, canvas.height);
-    gl.uniform1f(active.time, reduceMotion.matches ? 0 : now - startedAt);
+    const elapsed = activeScene === "mosaic" ? now - sceneStartedAt : now - startedAt;
+    gl.uniform1f(active.time, reduceMotion.matches ? 0 : elapsed);
+    if (active.seed) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, seedTexture);
+      gl.uniform1i(active.seed, 0);
+    }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     frame = visible && !reduceMotion.matches ? requestAnimationFrame(draw) : 0;
   }
@@ -537,7 +660,11 @@ function startHero() {
 
   sceneButtons.forEach((button) => button.addEventListener("click", () => {
     activeScene = button.dataset.heroScene;
+    sceneStartedAt = performance.now();
+    clearTimeout(evolutionTimer);
+    mosaicBackdrop?.classList.remove("is-evolving");
     mosaicBackdrop?.classList.toggle("is-active", activeScene === "mosaic");
+    if (activeScene === "mosaic") beginMosaicEvolution();
     canvas.setAttribute("aria-label", activeScene === "columns"
       ? "Animated luminous Roman cathedral nave"
       : "Animated Greco-Roman bathhouse mosaic mural");

@@ -60,7 +60,12 @@
 }
 .hero-mosaic-backdrop.is-active {
   opacity: 1;
+  transition: opacity .35s ease;
   animation: mosaic-drift 18s ease-in-out infinite;
+}
+.hero-mosaic-backdrop.is-active.is-evolving {
+  opacity: .12;
+  transition: opacity 6s ease 1s;
 }
 .hero-mosaic-backdrop.is-active::after { animation: mosaic-light 10s ease-in-out infinite; }
 @keyframes mosaic-drift {
@@ -175,4 +180,5 @@
   .learn-more i { animation: none; }
   .hero-mosaic-backdrop.is-active,
   .hero-mosaic-backdrop.is-active::after { animation: none; }
+  .hero-mosaic-backdrop.is-active.is-evolving { opacity: 1; transition: none; }
 }
