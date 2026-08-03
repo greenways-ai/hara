@@ -1,0 +1,229 @@
+(ns tahto.model.v1.spec-postgres-deftype-test
+  (:use code.test)
+  (:require [tahto.core :as l]
+            [tahto.core.compile :as compile]
+            [tahto.core.script :as script]
+            [tahto.model.v2.spec-postgres :as postgres]
+            [tahto.model.v1.spec-postgres.deftype :as deftype]))
+
+(l/script :postgres
+  {:static {:application ["fixture"]
+            :all {:schema ["fixture"]}}})
+
+(def +id-fields+
+  [:id {:type :uuid
+        :primary true
+        :required true}])
+
+(deftype.pg ^{:prepend [-/+id-fields+]
+               :final true}
+  Account
+  "Ledger account."
+  [:owner {:type :text
+           :required true
+           :sql {:unique [:owner-key]
+                 :comment "Human owner."}}
+   :created-at {:type :time
+                :required true
+                :sql {:default (now)
+                      :index true}}]
+  {})
+
+(deftype.pg LedgerEntry
+  "Append-only ledger entry."
+  [:account {:type :ref
+             :primary true
+             :required true
+             :ref {:ns -/Account}
+             :sql {:cascade true
+                   :unique [:account-body]}}
+   :sequence {:type :bigint
+              :primary true
+              :required true}
+   :body-root {:type :bytea
+               :required true
+               :sql {:unique [:account-body]
+                     :index {:group :body-created
+                             :using :btree}
+                     :comment "Canonical body root."}}
+   :root-hash {:type :bytea
+               :generated (digest body-root "sha256")}
+   :created-at {:type :time
+                :required true
+                :sql {:default (now)
+                      :index {:group :body-created
+                              :using :btree}}}]
+  {:constraints {:positive-sequence (> sequence 0)}})
+
+(defn current-module
+  []
+  (symbol (str (current-namespace))))
+
+(defn registered-form
+  [id]
+  (get-in (deref script/+modules+)
+          [(current-module) :code id :form-input]))
+
+(defn account-form
+  []
+  (registered-form 'Account))
+
+(defn ledger-entry-form
+  []
+  (registered-form 'LedgerEntry))
+
+(defn module-context
+  []
+  (let [module-id (current-module)
+        modules (deref script/+modules+)]
+    {:module (get modules module-id)
+     :modules modules}))
+
+(defn formatted
+  [form]
+  (deftype/pg-deftype-format form))
+
+(defn hydrated
+  [form]
+  (deftype/pg-deftype-hydrate
+   (second (formatted form))
+   (:grammar postgres/+selection+)
+   (module-context)))
+
+(defn direct-output
+  [form]
+  (deftype/pg-deftype
+   (second (hydrated form))
+   (:grammar postgres/+selection+)
+   (module-context)))
+
+(def +account-output+
+  (str "CREATE TABLE IF NOT EXISTS \"fixture\".\"Account\" (\n"
+       "  \"id\" UUID PRIMARY KEY NOT NULL,\n"
+       "  \"owner\" TEXT NOT NULL,\n"
+       "  \"created_at\" BIGINT NOT NULL DEFAULT now(),\n"
+       "  UNIQUE (\"owner\")\n"
+       ");\n"
+       "CREATE INDEX ON \"fixture\".\"Account\" (\"created_at\");\n"
+       "COMMENT ON TABLE \"fixture\".\"Account\" IS 'Ledger account.';\n"
+       "COMMENT ON COLUMN \"fixture\".\"Account\".\"owner\" IS 'Human owner.';"))
+
+(def +ledger-entry-output+
+  (str "DROP TABLE IF EXISTS \"fixture\".\"LedgerEntry\" CASCADE;\n"
+       "CREATE TABLE IF NOT EXISTS \"fixture\".\"LedgerEntry\" (\n"
+       "  \"account_id\" UUID NOT NULL REFERENCES \"fixture\".\"Account\"(\"id\") ON DELETE CASCADE,\n"
+       "  \"sequence\" BIGINT NOT NULL,\n"
+       "  \"body_root\" BYTEA NOT NULL,\n"
+       "  \"root_hash\" BYTEA GENERATED ALWAYS AS (digest(body_root,'sha256')) STORED,\n"
+       "  \"created_at\" BIGINT NOT NULL DEFAULT now(),\n"
+       "  PRIMARY KEY (\"account_id\", \"sequence\"),\n"
+       "  UNIQUE (\"account_id\", \"body_root\"),\n"
+       "  CONSTRAINT positive_sequence CHECK (sequence > 0)\n"
+       ");\n"
+       "CREATE INDEX ON \"fixture\".\"LedgerEntry\" USING BTREE (\"body_root\", \"created_at\");\n"
+       "COMMENT ON TABLE \"fixture\".\"LedgerEntry\" IS 'Append-only ledger entry.';\n"
+       "COMMENT ON COLUMN \"fixture\".\"LedgerEntry\".\"body_root\" IS 'Canonical body root.';"))
+
+(def results
+  [(fact "selects the versioned PostgreSQL table grammar"
+     [(:version postgres/+book+)
+      (:version (l/registry-book :postgres :default nil))]
+     => [2 2])
+
+   (fact "deftype.pg registers a normalized table entry"
+     (let [entry (get-in (deref script/+modules+)
+                         [(current-module) :code 'Account])]
+       [(:id entry)
+        (:op entry)
+        (first (:form-input entry))
+        (second (:form-input entry))])
+     => ['Account 'deftype 'deftype 'Account])
+
+   (fact "the formatter retains table metadata and normalizes generated columns"
+     (let [metadata (first (formatted (ledger-entry-form)))
+           columns (into {} (:static/columns metadata))]
+       [(:static/dbtype metadata)
+        (:doc metadata)
+        (get-in columns [:root-hash :ignore])
+        (get-in columns [:root-hash :sql :generated])])
+     => [:table
+         "Append-only ledger entry."
+         true
+         '(digest body-root "sha256")])
+
+   (fact "hydration expands fragments and returns schema, primary, and reference metadata"
+     (let [account-result (hydrated (account-form))
+           account-columns (deftype/column-pairs (nth (second account-result) 2))
+           result (hydrated (ledger-entry-form))
+           metadata (first result)
+           columns (into {} (deftype/column-pairs (nth (second result) 2)))]
+       [(vec (map first account-columns))
+        (:static/schema metadata)
+        (vec (map :id (:static/schema-primary metadata)))
+        (get-in columns [:account :ref/resolved])])
+     => [[:id :owner :created-at]
+         "fixture"
+         [:account :sequence]
+         {:schema "fixture"
+          :table 'Account
+          :type :uuid
+          :column :id}])
+
+   (fact "emits a final table with grouped uniqueness, index, and comments"
+     (direct-output (account-form))
+     => +account-output+)
+
+   (fact "emits references, composite primary keys, checks, and generated columns"
+     (direct-output (ledger-entry-form))
+     => +ledger-entry-output+)
+
+   (fact "emits deterministic partition clauses from hydrated reference columns"
+     (let [result (hydrated (ledger-entry-form))
+           columns (deftype/column-pairs (nth (second result) 2))]
+       (deftype/partition-output
+        {:strategy :list :columns [:account]}
+        columns))
+     => " PARTITION BY LIST (\"account_id\")")
+
+   (fact "compile-module emits every registered table with schema hydration"
+     (let [module (current-module)
+           result (compile/compile-module
+                   {:lang :postgres
+                    :main module
+                    :layout :module
+                    :emit {:code {:label true}}})]
+       [(:output result)
+        (:diagnostics result)
+        (get-in result [:provenance :entry-order])])
+     => [(str "-- " (current-module) "/Account\n"
+              +account-output+
+              "\n\n-- " (current-module) "/LedgerEntry\n"
+              +ledger-entry-output+)
+         []
+         [(symbol (str (current-module)) "Account")
+          (symbol (str (current-module)) "LedgerEntry")]])
+
+   (fact "repeated table compilation is byte-identical"
+     (let [module (current-module)
+           options {:lang :postgres
+                    :main module
+                    :layout :module
+                    :emit {:code {:label true}}}]
+       (= (:output (compile/compile-module options))
+          (:output (compile/compile-module options))))
+     => true)
+
+   (fact "unresolved symbolic references fail instead of emitting invalid SQL"
+     (deftype/pg-deftype-hydrate
+      (second
+       (formatted
+        (list 'deftype 'Broken
+              [:id {:type :uuid :primary true}
+               :owner {:type :ref
+                       :ref {:ns (symbol "-" "Owner")}}]
+              {})))
+      (:grammar postgres/+selection+)
+      (module-context))
+     => (throws))])
+
+(pr-str (run '[tahto.model.v1.spec-postgres-deftype-test]))

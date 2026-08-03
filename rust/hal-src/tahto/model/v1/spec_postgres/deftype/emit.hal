@@ -1,0 +1,85 @@
+(ns tahto.model.v1.spec-postgres.deftype.emit
+  (:require [std.foundation.string :as string]
+            [tahto.model.v1.spec-postgres.deftype.common :refer :all]
+            [tahto.model.v1.spec-postgres.deftype.emit-column :refer :all]
+            [tahto.model.v1.spec-postgres.deftype.emit-constraints :refer :all]
+            [tahto.model.v1.spec-postgres.deftype.emit-index :refer :all]))
+
+(def emit-expression tahto.model.v1.spec-postgres.deftype.emit-column/emit-expression)
+(def ref-column-name tahto.model.v1.spec-postgres.deftype.emit-column/ref-column-name)
+(def column-name tahto.model.v1.spec-postgres.deftype.emit-column/column-name)
+(def column-token tahto.model.v1.spec-postgres.deftype.emit-column/column-token)
+(def resolved-column-type tahto.model.v1.spec-postgres.deftype.emit-column/resolved-column-type)
+(def raw-clause tahto.model.v1.spec-postgres.deftype.emit-column/raw-clause)
+(def column-constraint tahto.model.v1.spec-postgres.deftype.emit-column/column-constraint)
+(def reference-clause tahto.model.v1.spec-postgres.deftype.emit-column/reference-clause)
+(def column-output tahto.model.v1.spec-postgres.deftype.emit-column/column-output)
+
+(def composite-primary-output tahto.model.v1.spec-postgres.deftype.emit-constraints/composite-primary-output)
+(def unique-groups tahto.model.v1.spec-postgres.deftype.emit-constraints/unique-groups)
+(def unique-outputs tahto.model.v1.spec-postgres.deftype.emit-constraints/unique-outputs)
+(def foreign-group-entries tahto.model.v1.spec-postgres.deftype.emit-constraints/foreign-group-entries)
+(def foreign-output tahto.model.v1.spec-postgres.deftype.emit-constraints/foreign-output)
+(def foreign-outputs tahto.model.v1.spec-postgres.deftype.emit-constraints/foreign-outputs)
+(def table-constraint-outputs tahto.model.v1.spec-postgres.deftype.emit-constraints/table-constraint-outputs)
+(def custom-outputs tahto.model.v1.spec-postgres.deftype.emit-constraints/custom-outputs)
+(def partition-output tahto.model.v1.spec-postgres.deftype.emit-constraints/partition-output)
+
+(def index-plan tahto.model.v1.spec-postgres.deftype.emit-index/index-plan)
+(def index-outputs tahto.model.v1.spec-postgres.deftype.emit-index/index-outputs)
+(def table-comment-output tahto.model.v1.spec-postgres.deftype.emit-index/table-comment-output)
+(def column-comment-outputs tahto.model.v1.spec-postgres.deftype.emit-index/column-comment-outputs)
+(def default-partition-output tahto.model.v1.spec-postgres.deftype.emit-index/default-partition-output)
+
+(defn pg-deftype
+  "Emits DROP/CREATE, constraints, indexes, partitioning, and comments for one
+   portable PostgreSQL table declaration."
+  [form grammar context]
+  (let [symbol (second form)
+        columns (column-pairs (nth form 2))
+        params (normalize-params (nth form 3))
+        metadata (or (meta symbol) {})
+        schema (:static/schema metadata)
+        table-token (qualified-token schema symbol)
+        primary-count (count (primary-descriptors columns))
+        single-primary? (= 1 primary-count)
+        column-lines
+        (map (fn [pair]
+               (column-output (first pair) (second pair)
+                              single-primary? grammar context))
+             columns)
+        constraints
+        (vec
+         (concat
+          (if-let [primary (composite-primary-output columns)] [primary] [])
+          (unique-outputs columns)
+          (table-constraint-outputs (:constraints params) grammar context)
+          (custom-outputs (:custom params) grammar context)
+          (foreign-outputs symbol columns context)))
+        create-output
+        (str (if (:unlogged params)
+               "CREATE UNLOGGED TABLE IF NOT EXISTS "
+               "CREATE TABLE IF NOT EXISTS ")
+             table-token " (\n  "
+             (string/join ",\n  " (concat column-lines constraints))
+             "\n)"
+             (partition-output (:partition-by params) columns)
+             ";")
+        statements
+        (vec
+         (concat
+          (if (:final metadata)
+            []
+            [(str "DROP TABLE IF EXISTS " table-token " CASCADE;")])
+          [create-output]
+          (index-outputs table-token symbol columns grammar context)
+          (if-let [comment (table-comment-output table-token (:doc metadata))]
+            [comment]
+            [])
+          (column-comment-outputs table-token columns)
+          (if-let [partition (default-partition-output table-token symbol params)]
+            [partition]
+            [])))]
+    (if (:existing metadata)
+      ""
+      (string/join "\n" statements))))
