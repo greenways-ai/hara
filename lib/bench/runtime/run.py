@@ -228,7 +228,10 @@ def timed(command, env):
         rss_file = Path(handle.name)
         actual = ["/usr/bin/time", "-f", "%M", "-o", str(rss_file)] + command
     started = time.perf_counter_ns()
-    result = run(actual, env=env, timeout=180)
+    # Standard profiles deliberately repeat slower interpreter workloads for
+    # long enough to establish convergence. Ackermann on the JVM/native-image
+    # VM tiers can exceed fifteen minutes at 60 windows × 10 calls.
+    result = run(actual, env=env, timeout=1800)
     elapsed = time.perf_counter_ns() - started
     if rss_file:
         try:

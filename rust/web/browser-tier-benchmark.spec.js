@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 const standard = process.env.HARA_BENCH_PROFILE === "standard";
+test.setTimeout(standard ? 30 * 60_000 : 30_000);
 
 test("benchmark browser bytecode against browser whole-Wasm", async ({ page }) => {
   await page.goto("/rust/web/index.html");

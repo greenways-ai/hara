@@ -12,7 +12,7 @@ import catalog from "../../../lib/bench/catalog.json";
 const evidencePath = resolve("lib/bench/results/reference-v2.json");
 const languageEvidencePath = resolve("lib/bench/results/language-reference.json");
 type Measurement = { runtime:string; workload:string; prepare_ns:number; first_ns:number; steady_ns:number; throughput_per_sec:number };
-type Evidence = { measurements:Measurement[]; environment:{timestamp:string}; startup:Record<string,{p50_ns:number}>; artifacts:Record<string,{transfer_bytes:number}> };
+type Evidence = { measurements:Measurement[]; environment:{timestamp:string}; startup:Record<string,{p50_ns:number}>; artifacts:Record<string,{transfer_bytes:number}>; http_measurements?:unknown[] };
 const evidence: Evidence | null = existsSync(evidencePath) ? JSON.parse(readFileSync(evidencePath, "utf8")) : null;
 const languageEvidence = existsSync(languageEvidencePath) ? JSON.parse(readFileSync(languageEvidencePath, "utf8")) : null;
 const index = new Map<string, Measurement>((evidence?.measurements ?? []).map((row) => [`${row.runtime}/${row.workload}`, row]));
@@ -31,6 +31,7 @@ const languageRatio = (runtime:string) => geometricMean(catalog.corpus.workloads
 const formatRatio = (runtime:string) => { const ratio = languageRatio(runtime); return ratio == null ? "Pending" : `${ratio.toFixed(2)}×`; };
 const base = import.meta.env.BASE_URL;
 const basePath = base.endsWith("/") ? base : `${base}/`;
+const hasHttpEvidence = Boolean(evidence?.http_measurements?.length);
 ---
 <!doctype html>
 <html lang="en">
@@ -78,12 +79,12 @@ const basePath = base.endsWith("/") ? base : `${base}/`;
 
       <section class="tab-panel" role="tabpanel" id="http-results" aria-labelledby="tab-http" hidden>
         <header><p class="hara-kicker">Loopback HTTP/1.1 · keep-alive</p><h2>HTTP frameworks</h2><p>Hoplite, OpenResty, and the comparison servers use identical routes and payloads; results publish only after a complete standard run.</p></header>
-        <div class="detail-table"><table><thead><tr><th>Server</th><th>Routes</th><th>Worker model</th><th>Evidence</th></tr></thead><tbody>{catalog.http_competitors.map((server) => <tr><th><code>{server}</code></th><td>/hello · /json · /delay</td><td>One worker / event loop</td><td>{evidence ? "See committed evidence" : "Pending standard run"}</td></tr>)}</tbody></table></div>
+        <div class="detail-table"><table><thead><tr><th>Server</th><th>Routes</th><th>Worker model</th><th>Evidence</th></tr></thead><tbody>{catalog.http_competitors.map((server) => <tr><th><code>{server}</code></th><td>/hello · /json · /delay</td><td>One worker / event loop</td><td>{hasHttpEvidence ? "See committed evidence" : "Pending: local server binaries unavailable"}</td></tr>)}</tbody></table></div>
       </section>
 
       <section class="tab-panel methodology" role="tabpanel" id="methodology" aria-labelledby="tab-method" hidden>
         <header><p class="hara-kicker">Reproduce the numbers</p><h2>Methodology</h2></header>
-        <div class="method-grid"><article><h3>Corpus</h3><p>Sieve, Towers, Queens, heap permutation, Ackermann, Tak, Collatz, and matrix multiplication use equivalent runtime-specific source and identical expected checksums.</p></article><article><h3>Timing boundaries</h3><p>Preparation loads or compiles once. First invocation is recorded separately. Steady state uses the final converged windows and adaptive inner batching in browsers.</p></article><article><h3>Environment</h3><p>Reference evidence comes from one pinned self-hosted machine. It records CPU, OS, revisions, toolchains, browser, artifact bytes, and every raw sample.</p></article><article><h3>Publication gate</h3><p><code>python3 lib/bench/validate_evidence.py reference-v2.json</code> rejects smoke profiles, missing cells, failed checksums, vocabulary drift, and comparison tiers other than <code>hara-rust-full</code>.</p></article></div>
+        <div class="method-grid"><article><h3>Corpus</h3><p>Sieve, Towers, Queens, heap permutation, Ackermann, Tak, Collatz, and matrix multiplication use equivalent runtime-specific source and identical expected checksums.</p></article><article><h3>Timing boundaries</h3><p>Preparation, first invocation, and execution are separate for prepared tiers. The tiny browser core reports one end-to-end source-eval sample. Native Image fallback rows use a reduced sample count; exact protocols ship with the evidence.</p></article><article><h3>Environment</h3><p>Reference evidence comes from one pinned self-hosted machine. It records CPU, OS, revisions, toolchains, browser, artifact bytes, and every raw sample.</p></article><article><h3>Publication gate</h3><p><code>python3 lib/bench/validate_evidence.py reference-v2.json</code> rejects missing cells, failed checksums, vocabulary drift, and comparison tiers other than <code>hara-rust-full</code>.</p></article></div>
       </section>
     </section>
   </main>
