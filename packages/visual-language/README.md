@@ -11,5 +11,7 @@ Consumers should pin a release tag exactly:
 ```
 
 Import `theme.css`, `motifs.css`, and `theme.js` before using the Astro
-components. The theme script stores `system`, `light`, or `dark` in the
-`hara-theme` cookie on `hara-lang.org` and uses local storage on local hosts.
+components. Edge, Aperture, and Rack use resolution-independent CSS geometry;
+the generated contact sheet is retained only as an art-direction reference.
+The theme script stores `system`, `light`, or `dark` in the `hara-theme` cookie
+on `hara-lang.org` and uses local storage on local hosts.
