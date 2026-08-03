@@ -29,12 +29,13 @@ const artifactMetrics = catalog.artifacts.map((artifact) => ({ ...artifact,
 }));
 const timestamp = evidence?.environment?.timestamp ?? "A complete standard reference run has not been committed yet";
 const base = import.meta.env.BASE_URL;
+const basePath = base.endsWith("/") ? base : `${base}/`;
 ---
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><meta name="description" content="Reproducible Hara runtime, language, and HTTP benchmarks."/><link rel="canonical" href={new URL(base, Astro.site)}/><link rel="icon" href={`${base}assets/hara-favicon.svg`} type="image/svg+xml"/><title>Hara Benchmarks</title></head>
+<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><meta name="description" content="Reproducible Hara runtime, language, and HTTP benchmarks."/><link rel="canonical" href={new URL(basePath, Astro.site)}/><link rel="icon" href={`${basePath}assets/hara-favicon.svg`} type="image/svg+xml"/><title>Hara Benchmarks</title></head>
 <body>
-  <header class="site-header"><a class="brand" href="https://hara-lang.org/"><HaraMark size={26}/><span>Hara</span></a><nav><a href="https://hara-lang.org/docs/">Docs</a><a href="https://specs.hara-lang.org/">Specs</a><a href="https://github.com/hara-lang/hara">Source</a></nav><ThemeToggle/></header>
+  <header class="site-header"><a class="brand" href="https://www.hara-lang.org/"><HaraMark size={26}/><span>Hara</span></a><nav><a href="https://www.hara-lang.org/docs/">Docs</a><a href="https://specs.hara-lang.org/">Specs</a><a href="https://github.com/hara-lang/hara">Source</a></nav><ThemeToggle/></header>
   <main>
     <section class="summary hara-motif" data-motif="rack">
       <div class="summary-inner">
