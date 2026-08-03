@@ -1,0 +1,15 @@
+[package]
+name = "hara-compiler"
+version = "0.1.0"
+edition = "2021"
+license = "EPL-2.0"
+rust-version = "1.78"
+description = "Full source, HALC, bytecode and optional WASM compiler for Hara"
+
+[features]
+default = []
+full-wasm = ["hara-wasm/whole-wasm"]
+
+[dependencies]
+hara-vm = { path = "../vm-runtime" }
+hara-wasm = { path = "..", default-features = false, features = ["bytecode-vm", "halc-encoder"] }

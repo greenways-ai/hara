@@ -22,6 +22,8 @@ pub mod native_cli;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_extension;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod native_link;
+#[cfg(not(target_arch = "wasm32"))]
 mod native_process;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod package;

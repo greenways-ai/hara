@@ -2,21 +2,24 @@
 mod core;
 #[path = "../../src/hta.rs"]
 mod hta;
+#[cfg(feature = "evaluation-journal")]
+#[path = "../../src/journal.rs"]
+mod journal;
 #[path = "../../src/json.rs"]
 mod json;
 #[path = "../../src/kernel.rs"]
 mod kernel;
 #[path = "../../src/lang.rs"]
 mod lang;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../../src/native_process.rs"]
+mod native_process;
 #[path = "../../src/snapshot.rs"]
 mod snapshot;
 #[path = "../../src/task.rs"]
 mod task;
 #[cfg(feature = "bytecode-vm")]
 mod vm;
-#[cfg(feature = "evaluation-journal")]
-#[path = "../../src/journal.rs"]
-mod journal;
 
 use core::{EvalFiber, EvalFiberState, Promise, PromiseRejection, PromiseState, Value};
 use std::cell::RefCell;
@@ -91,7 +94,10 @@ enum EvaluationRequest {
         modules: Vec<Vec<u8>>,
     },
     #[cfg(feature = "bytecode-vm")]
-    Vm { task: u64, source: String },
+    Vm {
+        task: u64,
+        source: String,
+    },
 }
 
 impl EvaluationRequest {
@@ -152,10 +158,7 @@ impl Session {
                     "String" => format!("str/{method}"),
                     _ => format!("{namespace_name}/{method}"),
                 };
-                namespace.intern(
-                    *method,
-                    core::structural_function_value(dispatch_name),
-                );
+                namespace.intern(*method, core::structural_function_value(dispatch_name));
             }
         }
         let native_json = namespaces.find_or_create("std.native.Json");
@@ -1121,17 +1124,15 @@ fn dispatch(
             _ => Err("hta session/journal-eval expects session and source strings".into()),
         },
         "session/eval-bound" => match args.as_slice() {
-            [
-                Value::String(session),
-                Value::String(source),
-                Value::Vector(bindings),
-            ] => dispatch_eval_values(
-                kernel,
-                task,
-                session,
-                source,
-                Some(bindings.iter().cloned().collect()),
-            ),
+            [Value::String(session), Value::String(source), Value::Vector(bindings)] => {
+                dispatch_eval_values(
+                    kernel,
+                    task,
+                    session,
+                    source,
+                    Some(bindings.iter().cloned().collect()),
+                )
+            }
             _ => Err("hta session/eval-bound expects session, source, and binding vector".into()),
         },
         "session/complete" => match args.as_slice() {
@@ -1359,11 +1360,15 @@ fn journal_value(journal: &journal::Journal) -> Value {
         .iter()
         .map(|event| {
             let mut fields = vec![
-                    (key("event/id"), Value::Number(event.id.0 as i64)),
-                    (key("event/sequence"), Value::Number(event.sequence as i64)),
-                    (key("event/kind"), key(kind(&event.kind))),
+                (key("event/id"), Value::Number(event.id.0 as i64)),
+                (key("event/sequence"), Value::Number(event.sequence as i64)),
+                (key("event/kind"), key(kind(&event.kind))),
             ];
-            if matches!(event.kind, journal::JournalEventKind::OperationEnter | journal::JournalEventKind::OperationReturn) {
+            if matches!(
+                event.kind,
+                journal::JournalEventKind::OperationEnter
+                    | journal::JournalEventKind::OperationReturn
+            ) {
                 fields.extend([
                     (
                         key("operation/id"),
@@ -1386,24 +1391,42 @@ fn journal_value(journal: &journal::Journal) -> Value {
             }
             match event.kind {
                 journal::JournalEventKind::OperationEnter => fields.push((
-                        key("operation/arguments"),
-                        Value::Vector(event.values.iter().map(preview).collect::<Vec<_>>().into()),
-                    )),
+                    key("operation/arguments"),
+                    Value::Vector(event.values.iter().map(preview).collect::<Vec<_>>().into()),
+                )),
                 journal::JournalEventKind::OperationReturn => fields.push((
                     key("operation/result"),
                     event.values.first().map(preview).unwrap_or(Value::Nil),
                 )),
                 journal::JournalEventKind::Error => fields.push((
                     key("error/message"),
-                    event.message.clone().map(Value::String).unwrap_or(Value::Nil),
+                    event
+                        .message
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Nil),
                 )),
                 journal::JournalEventKind::JournalTruncated => fields.push((
                     key("truncation/reason"),
-                    event.message.clone().map(Value::String).unwrap_or(Value::Nil),
+                    event
+                        .message
+                        .clone()
+                        .map(Value::String)
+                        .unwrap_or(Value::Nil),
                 )),
                 journal::JournalEventKind::MacroExpand => {
-                    fields.push((key("macro/name"), event.function.clone().map(Value::String).unwrap_or(Value::Nil)));
-                    fields.push((key("macro/values"), Value::Vector(event.values.iter().map(preview).collect::<Vec<_>>().into())));
+                    fields.push((
+                        key("macro/name"),
+                        event
+                            .function
+                            .clone()
+                            .map(Value::String)
+                            .unwrap_or(Value::Nil),
+                    ));
+                    fields.push((
+                        key("macro/values"),
+                        Value::Vector(event.values.iter().map(preview).collect::<Vec<_>>().into()),
+                    ));
                 }
                 journal::JournalEventKind::EvaluationStart => {}
             }
@@ -1413,7 +1436,10 @@ fn journal_value(journal: &journal::Journal) -> Value {
     Value::Map(
         vec![
             (key("journal/schema"), Value::String(journal.schema.into())),
-            (key("journal/id"), Value::String(journal.journal_id.to_string())),
+            (
+                key("journal/id"),
+                Value::String(journal.journal_id.to_string()),
+            ),
             (key("journal/status"), key(status(&journal.status))),
             (key("journal/events"), Value::Vector(events.into())),
             (
@@ -1422,7 +1448,11 @@ fn journal_value(journal: &journal::Journal) -> Value {
             ),
             (
                 key("journal/error"),
-                journal.error.clone().map(Value::String).unwrap_or(Value::Nil),
+                journal
+                    .error
+                    .clone()
+                    .map(Value::String)
+                    .unwrap_or(Value::Nil),
             ),
         ]
         .into_iter()
@@ -2264,7 +2294,7 @@ mod tests {
                 .iter()
                 .map(|(_, methods)| methods.len())
                 .sum::<usize>(),
-            161
+            162
         );
         let mut runtime = Session::new();
         assert!(runtime.env.contains_key("edn/write"));
@@ -2495,15 +2525,13 @@ mod tests {
         runtime.start_fiber(2, "(ns user) (def local 7)").unwrap();
         assert_eq!(runtime.namespaces.current().name().as_str(), "user");
         assert_eq!(answer.deref(), Value::Number(42));
-        assert!(
-            runtime
-                .namespaces
-                .find("example.lib")
-                .unwrap()
-                .resolve(&Symbol::parse("answer"))
-                .unwrap()
-                .same_identity(&answer)
-        );
+        assert!(runtime
+            .namespaces
+            .find("example.lib")
+            .unwrap()
+            .resolve(&Symbol::parse("answer"))
+            .unwrap()
+            .same_identity(&answer));
     }
 }
 
