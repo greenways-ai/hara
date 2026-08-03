@@ -1,0 +1,77 @@
+(ns tahto.model.spec-postgres.entity-util-test
+  (:require [tahto.core :as l]
+            [tahto.model.spec-postgres.entity-util :as ut])
+  (:use code.test))
+
+(fact "constructs canonical entity identifier and reference fields"
+  (ut/type-id-v1)
+  => {:type :uuid :primary "default" :priority 0
+      :sql {:default '(postgres.core/uuid-generate-v1)}}
+  (ut/type-id-v4)
+  => {:type :uuid :primary "default" :priority 0
+      :sql {:default '(postgres.core/uuid-generate-v4)}}
+  (ut/type-ref "demo" "Task" 12)
+  => {:type :ref :required true :priority 12 :ref {:ns 'demo/Task}}
+  (ut/type-class-ref {:sql {:unique ["class"]}} 4)
+  => {:type :uuid :required true :priority 4 :sql {:unique ["class"]}})
+
+(fact "constructs formatted entity field types"
+  (get-in (ut/type-name "demo") [:sql :process])
+  => [['demo/as-upper-formatted] ['demo/as-upper-limit-length 36]]
+  (:priority (ut/type-code "demo" 18)) => 18
+  (get-in (ut/type-image "demo") [:profiles :web :type]) => "image"
+  (get-in (ut/type-color "demo") [:sql :constraint])
+  => '(demo/color-check #{"color"})
+  (get-in (ut/type-tags "demo") [:sql :default]) => "[]")
+
+(fact "normalizes portable entity references"
+  (ut/normalise-ref 'demo/Task) => 'demo/Task
+  (ut/normalise-ref {:module 'demo :id 'Task}) => 'demo/Task
+  (ut/normalise-ref 42) => nil)
+
+(fact "builds the default entity field catalog"
+  (let [fields (ut/default-fields "demo")]
+    [(count fields)
+     (get-in fields [:name :priority])
+     (get-in fields [:name :field :required])
+     (get-in fields [:is-active :field :sql :default])
+     (get-in fields [:is-archived :field :sql :default])])
+  => [18 7 true true false])
+
+(fact "returns tracking metadata and storage columns"
+  (:name (ut/get-tracking :track/data)) => "data"
+  (:disable (ut/get-tracking :track/log)) => #{:modify}
+  (ut/get-tracking :track/none) => {}
+  (ut/get-tracking-columns :track/temp)
+  => [:time-created {:type :time} :time-updated {:type :time}]
+  (count (ut/get-tracking-columns :track/record)) => 10)
+
+(fact "maps entity access levels to Supabase RLS grants"
+  (ut/get-access :none) => nil
+  (get-in (ut/get-access :access/hidden) [:sb/access])
+  => {:admin :all :auth :none :anon :none}
+  (get-in (ut/get-access :access/auth) [:sb/access])
+  => {:admin :all :auth :select :anon :select}
+  (get-in (ut/get-access :access/system) [:sb/access])
+  => {:admin :all :auth :select :anon :none})
+
+(fact "fills stable priorities without indexing non-map forms"
+  (ut/fill-priority [{:type :text} :divider {:type :uuid}] 50)
+  => [{:type :text :priority 50 :priority-index 0}
+      :divider
+      {:type :uuid :priority 50 :priority-index 1}])
+
+(fact "tracks application namespaces and addon catalogs"
+  (reset! l/script-modules
+          {'demo.module {:static {:application [:demo]}}})
+  => {'demo.module {:static {:application [:demo]}}}
+  (reset! ut/+app+ {}) => {}
+  (reset! ut/+addons+ {}) => {}
+  (ut/default-application 'demo.module) => :demo
+  (ut/init-default-ns-str :demo "demo") => {:demo "demo"}
+  (ut/default-ns-str :demo) => "demo"
+  (do (ut/init-addons {:custom {:field {:type :text} :priority 3}} :demo)
+      true)
+  => true
+  (has? (get (deref ut/+addons+) :demo) :name) => true
+  (get-in (deref ut/+addons+) [:demo :custom :priority]) => 3)
