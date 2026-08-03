@@ -1,0 +1,144 @@
+(ns postgres.typed.export.server-db
+  (:require [postgres.typed.typed-analyze :as analyze]
+            [postgres.typed.typed-common :as types]))
+
+(def +default-targets+ [:supabase-db])
+(def +default-sync-fn+ 'postgres.typed.export.server-db/db-sync-merge)
+(def +mutation-ops+ #{:insert :update :delete :upsert})
+
+(defn- collect-pg-ops*
+  [form operations]
+  (if (or (list? form) (vector? form) (set? form) (map? form))
+    (let [operation (when (list? form)
+                      (get analyze/+pg-operations+ (first form)))
+          next-operations (if operation
+                            (conj operations (:op operation))
+                            operations)]
+      (reduce (fn [out item]
+                (collect-pg-ops* item out))
+              next-operations
+              form))
+    operations))
+
+(defn collect-pg-ops
+  [form]
+  (collect-pg-ops* form #{}))
+
+(defn- mutating-operation?
+  [operations]
+  (reduce (fn [found operation]
+            (or found (has? +mutation-ops+ operation)))
+          false
+          operations))
+
+(defn- table-name
+  [value]
+  (cond (string? value) value
+        (or (keyword? value) (symbol? value)) (name value)
+        :else (str value)))
+
+(defn infer-sync-spec
+  "Infers a minimal sync generation spec for a FnDef."
+  [fn-def]
+  (let [body-meta (:body-meta fn-def)
+        sync-mode (:sync/mode body-meta)
+        sync-tables (:sync/tables body-meta)
+        inferred (analyze/cached-infer fn-def)
+        operations (collect-pg-ops (:raw-body body-meta))
+        inferred-shape (:shape inferred)
+        source-table (cond (and (= :shaped (:kind inferred))
+                                (types/jsonb-shape? inferred-shape))
+                           (:source-table inferred-shape)
+                           (types/jsonb-shape? inferred) (:source-table inferred)
+                           :else nil)
+        tables (cond (or (list? sync-tables) (vector? sync-tables) (set? sync-tables))
+                     (vec (map table-name sync-tables))
+                     (and (or (= :shaped (:kind inferred))
+                              (= :array (:kind inferred)))
+                          (:table inferred))
+                     [(table-name (:table inferred))]
+                     source-table [(table-name source-table)]
+                     :else [])
+        mutating? (boolean
+                   (and (mutating-operation? operations)
+                        (not (has? #{:manual :off} sync-mode))))
+        mode (cond (= :off sync-mode) :off
+                   (= :manual sync-mode) :manual
+                   (and mutating? (seq tables)) :auto
+                   :else :none)]
+    {:mode mode
+     :mutating? mutating?
+     :operations operations
+     :tables tables
+     :inferred inferred
+     :sync-fn (or (:sync/fn body-meta) +default-sync-fn+)
+     :confidence (if (seq tables) :high :low)}))
+
+(defn db-sync-merge
+  "Adds a default db/sync payload when the output does not already contain one."
+  [output table-names]
+  (if (or (nil? output) (has? output :db/sync) (= 0 (count table-names)))
+    output
+    (assoc output :db/sync
+           (reduce (fn [out table]
+                     (assoc out table [output]))
+                   {}
+                   table-names))))
+
+(defn supabase-db-input
+  [input]
+  (let [wrapper-sym (:wrapper-sym input)
+        fn-def (:fn-def input)
+        sync-spec (:sync-spec input)
+        inner-sym (symbol (or (:ns fn-def) "") (table-name (:name fn-def)))
+        inputs (:inputs fn-def)]
+    {'wrapper-sym wrapper-sym
+     'input (vec (reduce (fn [out arg]
+                           (conj (conj out (:type arg)) (:name arg)))
+                         []
+                         inputs))
+     'inner-sym inner-sym
+     'call-args (vec (map (fn [arg] (:name arg)) inputs))
+     'sync-fn (:sync-fn sync-spec)
+     'tables (vec (:tables sync-spec))}))
+
+(def +targets+ {:supabase-db {:suffix "-sync"}})
+
+(defn target-entry
+  [fn-def target]
+  (let [sync-spec (infer-sync-spec fn-def)
+        suffix (get-in +targets+ [target :suffix])]
+    {:target target
+     :fn-def fn-def
+     :sync-spec sync-spec
+     :emitted-sym (symbol (str (table-name (:name fn-def)) suffix))}))
+
+(defn emit-target
+  [fn-def target]
+  (let [target-meta (get +targets+ target)
+        sync-spec (infer-sync-spec fn-def)
+        mode (:mode sync-spec)]
+    (when (and target-meta (not= :off mode) (has? #{:auto :manual} mode))
+      (let [entry (target-entry fn-def target)
+            input (supabase-db-input {:wrapper-sym (:emitted-sym entry)
+                                      :fn-def fn-def
+                                      :sync-spec sync-spec})
+            invoke (concat [(get input 'inner-sym)] (get input 'call-args))
+            sync-invoke (list (get input 'sync-fn) 'out (get input 'tables))]
+        (pr-str (list 'defn.pg
+                      (get input 'wrapper-sym)
+                      (get input 'input)
+                      (list 'let ['out invoke] sync-invoke)))))))
+
+(defn emit-targets
+  ([fn-def] (emit-targets fn-def +default-targets+))
+  ([fn-def targets]
+   (reduce (fn [out target]
+             (let [value (emit-target fn-def target)]
+               (if value (assoc out target value) out)))
+           {}
+           targets)))
+
+(defn list-targets [] (keys +targets+))
+
+(def __tahto_load__ true)

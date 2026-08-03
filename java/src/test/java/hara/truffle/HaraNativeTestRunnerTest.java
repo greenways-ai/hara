@@ -118,6 +118,8 @@ public final class HaraNativeTestRunnerTest {
       {"lib/test/postgres/typed/typed_analyze_test.hal", "27", "18"},
       {"lib/test/postgres/typed/export/json_openapi_test.hal", "5", "12"},
       {"lib/test/postgres/typed/export/json_schema_test.hal", "5", "9"},
+      {"lib/test/postgres/typed/export/server_api_test.hal", "5", "6"},
+      {"lib/test/postgres/typed/export/server_db_test.hal", "8", "16"},
       {"lib/test/postgres/typed/export/ts_schema_test.hal", "4", "11"}
     };
 
