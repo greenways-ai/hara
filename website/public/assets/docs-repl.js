@@ -35,8 +35,8 @@ const fetchWithProgress = async (input, init) => {
 };
 
 const kernelPromise = createDocsKernel({
-  wasmUrl: "/docs-assets/rust/hara.wasm",
-  workerUrl: "/docs-assets/rust/hta-worker.js",
+  wasmUrl: "/runtime/hara-wasm-vm-0.1.1.wasm",
+  workerUrl: "/runtime/hta-worker.js",
   resources: {
     "studio.store": "/docs-assets/rust/studio/hal/store.hal",
     "studio.fs": "/docs-assets/rust/studio/hal/fs.hal"

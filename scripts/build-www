@@ -68,6 +68,7 @@ node -e 'process.stdout.write(`globalThis.HARA_GITHUB_OAUTH_CLIENT_ID = ${JSON.s
 cp "$ROOT/scripts/install.sh" "$OUT/install.sh"
 chmod 755 "$OUT/install.sh"
 cp "$RAW_WASM" "$OUT/runtime/hara.wasm"
+cp "$RAW_WASM" "$OUT/runtime/hara-wasm-vm-0.1.1.wasm"
 cp "$ROOT/rust/web/hta.js" \
    "$ROOT/rust/web/hta-worker.js" \
    "$ROOT/rust/web/hta-shared-worker.js" \
