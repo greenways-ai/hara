@@ -25,7 +25,7 @@
 (def results
   [(fact "the public facade delegates execute, query, and stop"
      (let [events (atom [])
-           database (lib.postgres-test/FakeDatabase events)]
+           database (FakeDatabase events)]
        [(postgres/execute database "create schema app")
         (postgres/query database "select 1")
         (postgres/stop database)
@@ -39,7 +39,7 @@
 
    (fact "transaction helpers remain backed by the same connection"
      (let [events (atom [])
-           database (lib.postgres-test/FakeDatabase events)]
+           database (FakeDatabase events)]
        [(postgres/begin database)
         (postgres/commit database)
         (postgres/rollback database)
