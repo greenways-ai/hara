@@ -1,96 +1,218 @@
 ---
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import SiteLayout from "../layouts/SiteLayout.astro";
 import Motif from "@hara-lang/visual-language/astro/Motif.astro";
-const animationCode = `(defn scene [frame]
-  (-> frame
-      (character :pilot)
-      (move-to [420 180] :ease-out)
-      (speak "The program is the storyboard.")))
 
-(play! (timeline (scene 0) (scene 48)))`;
-const serviceCode = `(defroute GET "/orders/:id" [{:keys [id]}]
-  (let [order (orders/find id)]
-    (respond 200
-      {:order order
-       :total (orders/total order)})))`;
-const ledgerCode = `(defn transfer [chain from to amount]
-  (-> chain
-      (assert-balance from amount)
-      (debit from amount)
-      (credit to amount)
-      (commit {:kind :transfer})))`;
+type LanguageMeasurement = {
+  runtime: string;
+  workload: string;
+  status: string;
+  analysis?: { steady_ns?: number };
+};
+type LanguageEvidence = {
+  environment: { timestamp: string };
+  workload_ids: string[];
+  measurements: LanguageMeasurement[];
+};
+type HttpMeasurement = {
+  server: string;
+  route: string;
+  status: string;
+  requests_per_second?: number;
+};
+type RuntimeEvidence = { http_measurements?: HttpMeasurement[] };
+
+const languageEvidencePath = fileURLToPath(
+  new URL("../../../lib/bench/results/language-reference.json", import.meta.url)
+);
+const runtimeEvidencePath = fileURLToPath(
+  new URL("../../../lib/bench/results/reference-v2.json", import.meta.url)
+);
+const languageEvidence: LanguageEvidence = JSON.parse(
+  readFileSync(languageEvidencePath, "utf8")
+);
+const runtimeEvidence: RuntimeEvidence = JSON.parse(
+  readFileSync(runtimeEvidencePath, "utf8")
+);
+const languageIndex = new Map<string, number>(
+  languageEvidence.measurements
+    .filter((row) => row.status === "ok" && row.analysis?.steady_ns != null)
+    .map((row) => [`${row.runtime}/${row.workload}`, row.analysis!.steady_ns!])
+);
+const geometricMean = (values: number[]) =>
+  values.length
+    ? Math.exp(values.reduce((sum, value) => sum + Math.log(value), 0) / values.length)
+    : null;
+const languageRatio = (runtime: string) =>
+  geometricMean(
+    languageEvidence.workload_ids.flatMap((workload) => {
+      const hara = languageIndex.get(`hara-rust-full/${workload}`);
+      const candidate = languageIndex.get(`${runtime}/${workload}`);
+      return hara && candidate ? [candidate / hara] : [];
+    })
+  );
+const formatRatio = (runtime: string) => {
+  const ratio = languageRatio(runtime);
+  return ratio == null ? "Pending" : `${ratio.toFixed(2)}×`;
+};
+const hopliteHello = runtimeEvidence.http_measurements?.find(
+  (row) =>
+    row.server === "hoplite-hara-rust-full" &&
+    row.route === "/hello" &&
+    row.status === "ok"
+);
+const hopliteRequests = hopliteHello?.requests_per_second == null
+  ? "Pending"
+  : Math.round(hopliteHello.requests_per_second).toLocaleString("en-US");
+const evidenceDate = new Date(languageEvidence.environment.timestamp).toLocaleDateString(
+  "en-AU",
+  { day: "numeric", month: "short", year: "numeric" }
+);
+
+const readCode = `(+ 19 23)
+; => 42`;
+const transformCode = `(def player
+  {:name "Nova"
+   :score 0})
+
+(assoc player :score 10)
+; => {:name "Nova" :score 10}`;
+const stateCode = `(def game
+  (atom {:turn :x
+         :moves []}))
+
+(swap! game update :moves conj [1 1])
+(deref game)`;
 ---
-<SiteLayout title="Hara — one embeddable language, many runtimes">
+<SiteLayout
+  title="Hara — simple to pick up, fast enough to keep"
+  description="A small, high-performance Lisp for learning to build software from first principles."
+>
   <main>
     <Motif kind="edge" class="hero">
       <div class="hero-copy">
-        <p class="hara-kicker">One language · three deployment modes</p>
-        <h1>One language.<br /><span>Fit to its environment.</span></h1>
-        <p>Use Hara on the JVM, embed the native Rust engine, or assemble a browser kernel from only the capabilities the application needs.</p>
-        <div class="actions"><a class="button primary" href="/install.sh">Get Hara</a><a class="button" href="https://playground.hara-lang.org/">Open playground</a></div>
-        <small>Measured artifacts, checksums, and methods are published with every benchmark.</small>
+        <p class="hara-kicker">A small language · a serious runtime</p>
+        <h1>Simple to pick up.<br /><span>Fast enough to keep.</span></h1>
+        <p>Hara is a modern Lisp for learning to build software from first principles. Start with one visible rule, work live in the browser, and keep the same language as the system grows.</p>
+        <div class="actions">
+          <a class="button primary" href="https://playground.hara-lang.org/">Try Hara</a>
+          <a class="button" href="/docs/start/orientation/">Start learning</a>
+        </div>
+        <small>Current figures below are generated from committed, checksum-verified benchmark evidence published on {evidenceDate}. <a href="/benchmarks/">Inspect the complete results.</a></small>
       </div>
     </Motif>
 
-    <section class="proof" aria-label="Hara capabilities">
-      <div><strong>Java</strong><span>JVM · Truffle · Native Image</span></div>
-      <div><strong>Native</strong><span>Rust full compilation</span></div>
-      <div><strong>Web</strong><span>Modular core → full</span></div>
-      <div><strong>One HAL</strong><span>Keep the language and values</span></div>
-    </section>
-
-    <section class="content-section intro">
-      <p class="hara-kicker">The advantage</p>
-      <h2>The language goes where the data lives.</h2>
-      <p class="lede">Embed Hara and grant a program only the operations it needs. The runtime stays small, the data stays close, and authority remains visible.</p>
-      <div class="card-grid three">
-        <article><span>01</span><h3>Fast kernel</h3><p>Prepared bytecode and whole-program compilation for native, browser, JVM, and Native Image hosts.</p></article>
-        <article><span>02</span><h3>Durable values</h3><p>Persistent maps, vectors, sets, queues, sorted collections, tries, and deterministic hashing.</p></article>
-        <article><span>03</span><h3>Controlled interop</h3><p>Files, sockets, processes, extensions, and host objects are explicit capabilities.</p></article>
-      </div>
-    </section>
-
-    <section class="content-section">
-      <p class="hara-kicker">Choose the environment</p>
-      <h2>One kernel model, fitted three ways.</h2>
-      <div class="kernel-picker">
-        <label for="kernel-mode">Kernel mode</label>
-        <select id="kernel-mode"><option value="java">Java</option><option value="native">Native</option><option value="web">Web</option></select>
-        <div class="kernel-spec" data-kernel-mode="java"><code>Java</code><h3>JVM development with Truffle optimization.</h3><p>Run as <b>hara-jvm-full</b>, then compile the application to a GraalVM Native Image for a self-contained deployment.</p><dl><div><dt>Engine</dt><dd>Truffle AST / HBC4</dd></div><div><dt>Deployment</dt><dd>JVM or Native Image</dd></div><div><dt>Best for</dt><dd>Java systems and language tooling</dd></div></dl></div>
-        <div class="kernel-spec" data-kernel-mode="native" hidden><code>Native</code><h3>The primary high-performance Rust runtime.</h3><p><b>hara-rust-full</b> prepares whole-function WebAssembly and hosts it natively. The VM tier remains available for controlled internal comparisons.</p><dl><div><dt>Engine</dt><dd>Whole-Wasm</dd></div><div><dt>Deployment</dt><dd>Native binary or library</dd></div><div><dt>Best for</dt><dd>Services, CLIs and embedded products</dd></div></dl></div>
-        <div class="kernel-spec" data-kernel-mode="web" hidden><code>Web</code><h3>Start with core; load power only when required.</h3><p><b>hara-wasm-core</b> provides interpreter sessions and every browser bridge. VM and trace load as isolated HTA providers; <b>hara-wasm-full</b> is the all-in compilation tier.</p><dl><div><dt>Small</dt><dd>Interpreter core</dd></div><div><dt>Full</dt><dd>VM + whole-Wasm compiler</dd></div><div><dt>Best for</dt><dd>Docs, tools and browser applications</dd></div></dl></div>
-      </div>
-      <a class="text-link" href="/benchmarks/">Compare every artifact →</a>
+    <section class="proof" aria-label="Current Hara benchmark evidence">
+      <div><strong>{formatRatio("python-prepared")}</strong><span>vs Python · geometric mean across 8 prepared workloads</span></div>
+      <div><strong>{formatRatio("bb-prepared")}</strong><span>vs Babashka · geometric mean across 8 prepared workloads</span></div>
+      <div><strong>{formatRatio("sbcl-prepared")}</strong><span>vs SBCL · geometric mean across 8 prepared workloads</span></div>
+      <div><strong>{hopliteRequests}</strong><span>Hoplite /hello req/s · one worker · loopback HTTP/1.1</span></div>
     </section>
 
     <section class="content-section code-showcase">
-      <p class="hara-kicker">Expressive by construction</p>
-      <h2>Complex applications should read like their intent.</h2>
-      <p class="lede">Hara keeps data, behavior, and host authority visible. The result is compact code you can enjoy reading—and confidently change while the system is alive.</p>
-      <div class="code-tabs" role="tablist" aria-label="Hara application examples">
-        <button class="active" data-example="animation">Animation</button><button data-example="service">Service</button><button data-example="ledger">Ledger</button>
+      <p class="hara-kicker">Hara is Lisp</p>
+      <h2>One shape. A great deal of range.</h2>
+      <p class="lede">The operation comes first. Parentheses hold a computation, vectors hold ordered values, and maps name facts. That small reading model continues from the first expression into a complete program.</p>
+      <div class="code-tabs" role="tablist" aria-label="Read Hara examples">
+        <button class="active" data-example="read">Read</button>
+        <button data-example="transform">Transform</button>
+        <button data-example="state">State</button>
       </div>
       <div class="code-stage">
-        <pre data-code="animation"><code>{animationCode}</code></pre>
-        <pre data-code="service" hidden><code>{serviceCode}</code></pre>
-        <pre data-code="ledger" hidden><code>{ledgerCode}</code></pre>
-        <aside><span>Readable systems</span><strong>Data flows forward.</strong><p>No hidden framework lifecycle. No ambient authority. Each transformation says what it changes.</p></aside>
+        <pre data-code="read"><code>{readCode}</code></pre>
+        <pre data-code="transform" hidden><code>{transformCode}</code></pre>
+        <pre data-code="state" hidden><code>{stateCode}</code></pre>
+        <aside>
+          <span>Four reading rules</span>
+          <strong>Operation first.</strong>
+          <p>Code remains ordinary structure: something the runtime, tools, tests, and people can inspect without translating it into a second model.</p>
+        </aside>
       </div>
+      <a class="text-link" href="/docs/learn-programming/">Learn to read Hara →</a>
+    </section>
+
+    <section class="content-section intro">
+      <p class="hara-kicker">Build from first principles</p>
+      <h2>Learn the parts beneath the frameworks.</h2>
+      <p class="lede">Values, functions, decisions, state, events, rendering, and effects are easier to understand when each one is visible. Hara lets you meet them directly, then compose them into a real application.</p>
+      <div class="card-grid three">
+        <article><span>01 · Learn</span><h3>Start with durable concepts</h3><p>Work with values, functions, persistent collections, explicit state, and host effects—not a temporary teaching notation.</p></article>
+        <article><span>02 · Inspect</span><h3>Keep the running system close</h3><p>Write a form, evaluate it, inspect the value, and change the program without turning every experiment into a rebuild.</p></article>
+        <article><span>03 · Build</span><h3>Finish a complete program</h3><p>Build Tic Tac Toe from a blank canvas, combining data, rules, state, pointer input, rendering, and a live frame loop.</p></article>
+      </div>
+      <a class="text-link" href="/docs/create/first-game/">Build the first game →</a>
+    </section>
+
+    <section class="content-section">
+      <p class="hara-kicker">The language you learn is the language you keep</p>
+      <h2>Start live. Fit the runtime later.</h2>
+      <p class="lede">The host can change without replacing the language or its values. Begin in the browser, then choose Java, native, or web deployment when the program needs it.</p>
+      <div class="kernel-picker">
+        <label for="kernel-mode">Kernel mode</label>
+        <select id="kernel-mode">
+          <option value="java">Java</option>
+          <option value="native">Native</option>
+          <option value="web">Web</option>
+        </select>
+        <div class="kernel-spec" data-kernel-mode="java">
+          <code>Java</code>
+          <h3>Work inside the JVM ecosystem.</h3>
+          <p>Run with the Truffle runtime, integrate with Java classes and tools, and target Native Image when a self-contained deployment is useful.</p>
+          <dl><div><dt>Engine</dt><dd>Truffle AST / HBC4</dd></div><div><dt>Deployment</dt><dd>JVM or Native Image</dd></div><div><dt>Best for</dt><dd>Java systems and language tooling</dd></div></dl>
+        </div>
+        <div class="kernel-spec" data-kernel-mode="native" hidden>
+          <code>Native</code>
+          <h3>Use the primary high-performance Rust runtime.</h3>
+          <p><b>hara-rust-full</b> prepares whole-function WebAssembly and hosts it natively for tools, services, local applications, and embedded products.</p>
+          <dl><div><dt>Engine</dt><dd>Whole-Wasm</dd></div><div><dt>Deployment</dt><dd>Native binary or library</dd></div><div><dt>Best for</dt><dd>Services, CLIs, and embedded products</dd></div></dl>
+        </div>
+        <div class="kernel-spec" data-kernel-mode="web" hidden>
+          <code>Web</code>
+          <h3>Run a real Hara kernel in the browser.</h3>
+          <p>Start with the interpreter core, then load VM, trace, or whole-Wasm compilation capabilities only when the application needs them.</p>
+          <dl><div><dt>Small</dt><dd>Interpreter core</dd></div><div><dt>Full</dt><dd>VM + whole-Wasm compiler</dd></div><div><dt>Best for</dt><dd>Learning, tools, and browser applications</dd></div></dl>
+        </div>
+      </div>
+      <a class="text-link" href="/benchmarks/">Compare every runtime artifact →</a>
+    </section>
+
+    <section class="content-section intro">
+      <p class="hara-kicker">Measured in the open</p>
+      <h2>Fast is a result, not a tagline.</h2>
+      <p class="lede">Hara publishes the code, environment, timing boundaries, raw samples, and expected checksums behind every reference result. The full table remains visible—including the runtimes that are faster.</p>
+      <div class="card-grid three">
+        <article><span>01 · Equivalent work</span><h3>Eight verified algorithms</h3><p>Arrays, persistent data, recursion, backtracking, branching, range processing, and matrix work share expected results across runtimes.</p></article>
+        <article><span>02 · Honest timing</span><h3>Preparation is not execution</h3><p>Startup, preparation, first invocation, warm-up, and steady-state execution are recorded separately where the runtime supports them.</p></article>
+        <article><span>03 · Reproducible</span><h3>Follow the evidence</h3><p>Machine details, toolchain versions, source revisions, commands, raw samples, and checksums are committed alongside the report.</p></article>
+      </div>
+      <a class="text-link" href="/benchmarks/">Inspect every result and method →</a>
     </section>
 
     <Motif kind="aperture" class="closing">
-      <div><p class="hara-kicker">Documentation is now part of Hara</p><h2>Learn the language without leaving the site.</h2><a class="button primary" href="/docs/start/orientation/">Read the docs</a></div>
+      <div>
+        <p class="hara-kicker">Try the language, not the pitch</p>
+        <h2>Learn how programs work. Then build one.</h2>
+        <div class="actions">
+          <a class="button primary" href="https://playground.hara-lang.org/">Try Hara</a>
+          <a class="button" href="/docs/start/orientation/">Read the first lesson</a>
+        </div>
+      </div>
     </Motif>
   </main>
   <script>
     const buttons = document.querySelectorAll<HTMLButtonElement>("[data-example]");
     buttons.forEach((button) => button.addEventListener("click", () => {
       buttons.forEach((item) => item.classList.toggle("active", item === button));
-      document.querySelectorAll<HTMLElement>("[data-code]").forEach((code) => { code.hidden = code.dataset.code !== button.dataset.example; });
+      document.querySelectorAll<HTMLElement>("[data-code]").forEach((code) => {
+        code.hidden = code.dataset.code !== button.dataset.example;
+      });
     }));
     const kernelMode = document.querySelector<HTMLSelectElement>("#kernel-mode");
-    kernelMode?.addEventListener("change", () => document.querySelectorAll<HTMLElement>("[data-kernel-mode]").forEach((panel) => {
-      panel.hidden = panel.dataset.kernelMode !== kernelMode.value;
-    }));
+    kernelMode?.addEventListener("change", () =>
+      document.querySelectorAll<HTMLElement>("[data-kernel-mode]").forEach((panel) => {
+        panel.hidden = panel.dataset.kernelMode !== kernelMode.value;
+      })
+    );
   </script>
 </SiteLayout>
