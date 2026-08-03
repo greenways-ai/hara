@@ -1,0 +1,153 @@
+(ns postgres.core.graph-query
+  (:config {:blank true})
+  (:require [std.foundation :refer :all]
+            [tahto.common.util :as util]
+            [postgres.core.graph-base :as graph]
+            [postgres.core.impl-base :as base]
+            [postgres.core.impl-main :as main]))
+
+(def +t-additional-scope+
+  {:*/linked #{:-/linked}
+   :*/all #{:-/linked}
+   :*/everything #{:-/linked}})
+
+(def ^:dynamic *top* false)
+
+(defn- attrs [schema key]
+  (let [entry (get schema key)] (if (vector? entry) (first entry) entry)))
+
+(defn table-col-token [table-sym table-key]
+  (with-meta (list '. table-sym #{(str (util/sym-default-str table-key) "_id")})
+             {:fn/value true}))
+
+(defn table-id-token [table-sym]
+  (with-meta (list '. table-sym #{"id"}) {:fn/value true}))
+
+(defn- linked-prepared [link options]
+  (let [schema (:schema options)
+        table-schema (get-in schema [:tree (keyword (name (:id link)))])]
+    [(merge link {:table-schema table-schema}) table-schema options]))
+
+(defn- intersect? [left right]
+  (reduce (fn [found key] (or found (has? right key))) false left))
+
+(defn- merge-where [schema query where options]
+  (if (nil? where)
+    (graph/where-fn schema query options)
+    (let [where-keys (reduce (fn [out key] (conj out key)) #{} (keys where))
+          query-keys (reduce (fn [out key] (conj out key)) #{} (keys query))]
+      (if (intersect? where-keys query-keys)
+        (let [query-pairs (graph/where-fn schema query options)
+              where-pairs (graph/where-fn schema where options)
+              flat (reduce-kv (fn [out key value]
+                                (conj (conj out key) value)) [] query-pairs)
+              flat (reduce-kv (fn [out key value]
+                                (conj (conj out key) value))
+                              (conj flat :and) where-pairs)]
+          #{flat})
+        (graph/where-fn schema (merge where query) options)))))
+
+(defn returning-block [entry attr where returning params query-transform options]
+  (let [ref (:ref attr)
+        link (:link ref)
+        key (keyword (name (:ident attr)))
+        output-name (util/sym-default-str (or (:name params) (name (:ident attr))))
+        table-sym (util/sym-full entry)
+        query (if (= :forward (:type ref))
+                {:id (table-col-token table-sym key)}
+                {(:rval ref) (table-id-token table-sym)})
+        prepared (linked-prepared link options)
+        linked-schema (second prepared)
+        where-clause (merge-where linked-schema query where options)
+        nested-params (merge {:where where-clause
+                              :returning (or returning :*/info)
+                              :single (if (= :forward (:type ref)) true (:unique attr))}
+                             (or params {}))]
+    (list '% [(query-transform prepared nested-params) :as #{output-name}])))
+
+(defn returning-map-markers [entry schema markers query-transform options]
+  (vec
+   (map (fn [marker]
+          (let [key (first marker)
+                second-value (second marker)
+                where (if (map? second-value) second-value {})
+                third-value (if (> (count marker) 2) (nth marker 2) nil)
+                fourth-value (if (> (count marker) 3) (nth marker 3) nil)
+                returning (if (map? second-value) third-value second-value)
+                params (if (map? second-value) fourth-value third-value)
+                attr (attrs schema key)]
+            (when (nil? attr)
+              (throw (ex-info "Not valid" {:column key :data marker})))
+            (when (not= :ref (:type attr))
+              (throw (ex-info "Column not a ref" {:column key :attrs attr})))
+            {:expr (returning-block entry (assoc attr :ident key) where returning params
+                                    query-transform options)}))
+        markers)))
+
+(defn reverse-keys [schema]
+  (reduce-kv (fn [out key entry]
+               (if (= :reverse (get-in (attrs schema key) [:ref :type]))
+                 (conj out key) out)) #{} schema))
+
+(defn- default-keys [schema]
+  (reduce-kv (fn [out key entry]
+               (let [attr (attrs schema key)]
+                 (if (and (:order attr)
+                          (not= :reverse (get-in attr [:ref :type]))
+                          (not (:ignore attr)))
+                   (conj out key) out))) #{} schema))
+
+(defn returning-all-markers [entry schema returning query-transform options]
+  (let [returning (if (keyword? returning) #{returning} returning)
+        values (or returning #{})
+        reverse (reverse-keys schema)
+        include-default (or (has? values :*/default) (has? values :*/all)
+                            (has? values :*/everything))
+        include-linked (or (has? values :*/linked) (has? values :-/linked)
+                           (has? values :*/all) (has? values :*/everything))
+        data (reduce (fn [out value]
+                       (cond
+                         (and (keyword? value) (get schema value)
+                              (not (has? reverse value))) (conj out value)
+                         :else out))
+                     (if include-default (default-keys schema) #{}) values)
+        vectors (reduce (fn [out value]
+                          (if (vector? value) (conj out value) out)) [] values)
+        vectors (if include-linked
+                  (reduce (fn [out key] (conj out [key])) vectors reverse)
+                  (reduce (fn [out key]
+                            (if (has? values key) (conj out [key]) out)) vectors reverse))
+        custom (reduce (fn [out value]
+                         (if (or (map? value) (symbol? value)) (conj out value) out))
+                       #{} values)
+        relational (returning-map-markers entry schema vectors query-transform options)]
+    (reduce (fn [out value] (conj out value))
+            (reduce (fn [out value] (conj out value)) data custom)
+            relational)))
+
+(declare query-raw-fn)
+
+(defn- nested-query [prepared params]
+  (list 'quote (list (query-raw-fn prepared params))))
+
+(defn query-raw-fn [prepared params]
+  (let [entry (first prepared)
+        schema (second prepared)
+        options (nth prepared 2)
+        where (graph/where-fn schema (:where params) options)
+        requested (:returning params)
+        returning (if (symbol? requested) requested
+                    (returning-all-markers entry schema (or requested :*/default)
+                                           nested-query options))]
+    (main/t-select-raw prepared (assoc params :where where :returning returning))))
+
+(defn query-fn [spec params]
+  (let [prepared (base/prep-table spec true {})
+        entry (first prepared)
+        options (nth prepared 2)
+        prepared (if (:schema entry)
+                   [entry (second prepared) (assoc options :schema (:schema entry))]
+                   prepared)]
+    (query-raw-fn prepared params)))
+
+(def __tahto_load__ true)
