@@ -94,6 +94,18 @@ impl LinkPlan {
         }
         output
     }
+
+    /// Generates deterministic installation statements for a composed host.
+    pub fn registration_source(&self, runtime_expression: &str) -> String {
+        let mut output = String::new();
+        for artifact in &self.artifacts {
+            let crate_name = artifact.identity.crate_name.replace('-', "_");
+            output.push_str(&format!(
+                "{runtime_expression}.install_native_module({crate_name}::module());\n"
+            ));
+        }
+        output
+    }
 }
 
 fn toml_string(value: &str) -> String {
@@ -138,6 +150,10 @@ mod tests {
         .unwrap();
         let plan = LinkPlan::new(vec![artifact]).unwrap();
         assert!(plan.cargo_dependencies().contains("adapter = { path ="));
+        assert_eq!(
+            plan.registration_source("runtime"),
+            "runtime.install_native_module(adapter::module());\n"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }

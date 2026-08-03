@@ -1,0 +1,45 @@
+(ns std.db.postgres-test
+  (:use code.test)
+  (:require [std.db :as db]
+            [std.db.postgres :as postgres]))
+
+(def connection
+  (std.db.postgres/PostgresConnection
+   7
+   :postgresql
+   :pglite
+   :embedded
+   ["sql" "transactions" "notifications" "embedded"]
+   "memory"
+   nil))
+
+(def results
+  [(fact "PostgresConnection implements the provider-neutral database contract"
+     [(db/engine connection)
+      (db/provider connection)
+      (get (db/info connection) :mode)]
+     => [:postgresql :pglite :embedded])
+
+   (fact "connection metadata contains no credential fields"
+     [(has? (db/info connection) :password)
+      (has? (db/info connection) :url)]
+     => [false false])
+
+   (fact "capabilities are stable provider data"
+     (postgres/capabilities connection)
+     => ["sql" "transactions" "notifications" "embedded"])
+
+   (fact "numeric parameters use a portable tagged map"
+     [(postgres/tagged? (postgres/numeric "12.3400"))
+      (postgres/tag-type (postgres/numeric "12.3400"))
+      (postgres/tag-value (postgres/numeric "12.3400"))]
+     => [true "numeric" "12.3400"])
+
+   (fact "array parameters carry element type and inferred dimensions"
+     (postgres/sql-array :int8 [1 2 nil])
+     => {"$postgres" "array"
+         "element" "int8"
+         "dimensions" [[1 3]]
+         "value" [1 2 nil]})])
+
+(pr-str (run '[std.db.postgres-test]))

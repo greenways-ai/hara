@@ -8,9 +8,21 @@
   :browser {:module "browser/worker.mjs" :runtime :web-worker}}
  :assets []
  :exports
- {"version" {:args [] :returns :map :async true}
+ {"describe" {:args [] :returns :map :async true}
+  "version" {:args [] :returns :map :async true}
   "open"    {:args [:map] :returns :map :async true}
   "exec"    {:args [:int :string :vector] :returns :map :async true}
   "query"   {:args [:int :string :vector] :returns :map :async true}
-  "close"   {:args [:int] :returns :boolean :async true}}
- :capabilities []}
+  "query-options" {:args [:int :string :vector :map] :returns :map :async true}
+  "close"   {:args [:int] :returns :boolean :async true}
+  "wait-ready" {:args [:map] :returns :map :async true}
+  "listen" {:args [:int :string] :returns :map :async true}
+  "notification-next" {:args [:int] :returns :map :async true}
+  "unlisten" {:args [:int] :returns :boolean :async true}
+  "notify" {:args [:int :string :string] :returns :boolean :async true}
+  "database-create" {:args [:map :string] :returns :map :async true}
+  "database-drop" {:args [:map :string] :returns :map :async true}
+  "server-start" {:args [:map] :returns :map :async true}
+  "server-stop" {:args [:map] :returns :map :async true}}
+ :capabilities [:sql :transactions :notifications :embedded
+                :numeric :arrays :tagged-decode]}

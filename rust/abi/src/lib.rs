@@ -1,14 +1,21 @@
 //! Dependency-free values and identities shared across Hara ABI boundaries.
 
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 pub const HTA_V1: &str = "hta.v1";
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Value {
+    Nil,
+    Boolean(bool),
     String(String),
     Integer(i64),
+    Float(f64),
+    Decimal(String),
     Bytes(Vec<u8>),
+    Keyword(String),
+    Vector(Vec<Value>),
     Record(RecordValue),
 }
 
@@ -27,6 +34,35 @@ impl Error {
             detail: detail.into(),
         }
     }
+}
+
+/// Opaque task identifier owned by one linked native module.
+pub type TaskId = u64;
+
+/// Observable state of an asynchronous native module call.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TaskEvent {
+    Pending,
+    Resolved(Value),
+    Rejected(Error),
+}
+
+/// Dependency-free contract implemented by publication-linked native crates.
+pub trait NativeModule: Send + Sync {
+    fn identity(&self) -> &NativeIdentity;
+    fn operations(&self) -> &[&str];
+    fn capabilities(&self) -> &[&str];
+    fn start(&self, operation: &str, arguments: Vec<Value>) -> Result<TaskId, Error>;
+    fn poll(&self, task: TaskId) -> Result<TaskEvent, Error>;
+
+    fn wait(&self, task: TaskId, timeout: Option<Duration>) -> Result<TaskEvent, Error> {
+        let _ = timeout;
+        self.poll(task)
+    }
+
+    fn cancel(&self, task: TaskId) -> Result<(), Error>;
+    fn drop_task(&self, task: TaskId);
+    fn shutdown(&self);
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -87,5 +123,18 @@ mod tests {
                 .code,
             "native-identity-invalid"
         );
+    }
+
+    #[test]
+    fn abi_values_cover_portable_database_payloads() {
+        let value = Value::Record(BTreeMap::from([
+            ("ok".into(), Value::Boolean(true)),
+            (
+                "rows".into(),
+                Value::Vector(vec![Value::Vector(vec![Value::Integer(1), Value::Nil])]),
+            ),
+            ("numeric".into(), Value::Decimal("12.50".into())),
+        ]));
+        assert!(matches!(value, Value::Record(_)));
     }
 }

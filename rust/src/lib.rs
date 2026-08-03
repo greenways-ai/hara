@@ -24,6 +24,8 @@ mod native_extension;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_link;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod native_module;
+#[cfg(not(target_arch = "wasm32"))]
 mod native_process;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod package;
@@ -179,6 +181,8 @@ pub struct Runtime {
     #[cfg(not(target_arch = "wasm32"))]
     native_host_handler:
         Option<Rc<dyn Fn(String, String, Vec<core::Value>) -> Result<core::Value, String>>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    native_modules: native_module::Registry,
     #[cfg(not(target_arch = "wasm32"))]
     extension_roots: Vec<std::path::PathBuf>,
 }
@@ -663,6 +667,8 @@ impl Runtime {
             host_handler: None,
             #[cfg(not(target_arch = "wasm32"))]
             native_host_handler: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            native_modules: native_module::Registry::default(),
             #[cfg(not(target_arch = "wasm32"))]
             extension_roots: native_extension::configured_roots(),
         }
@@ -1572,7 +1578,6 @@ pub fn eval_bytecode_native(source: &str) -> Result<String, String> {
     execute_bytecode(&compile_bytecode(source)?)
 }
 
-#[cfg(feature = "bytecode-vm")]
 impl Runtime {
     /// Installs the native host service handler used by `std.native.Host/call`.
     /// Embedders can expose process-local services without converting values
@@ -1585,6 +1590,29 @@ impl Runtime {
         self.native_host_handler = Some(handler);
     }
 
+    /// Installs a publication-linked native ABI module and exposes it through
+    /// the same promise-returning Host/call boundary used by browser embedders.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn install_native_module(
+        &mut self,
+        module: std::sync::Arc<dyn hara_abi::NativeModule>,
+    ) -> Result<(), String> {
+        self.native_modules.install(module)?;
+        let registry = self.native_modules.clone();
+        self.native_host_handler = Some(Rc::new(move |service, operation, arguments| {
+            registry.invoke(service, operation, arguments)
+        }));
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn native_module_services(&self) -> Vec<String> {
+        self.native_modules.services()
+    }
+}
+
+#[cfg(feature = "bytecode-vm")]
+impl Runtime {
     /// Compiles source against this runtime's namespace registry:
     /// std.foundation vars and anything already interned are visible to
     /// the compiler's two-phase global check (issue #223). The program
@@ -3171,8 +3199,7 @@ mod tests {
         else {
             return;
         };
-        let fixture =
-            include_str!("../hal-test-fixtures/std/foundation/protocol_conformance.hal");
+        let fixture = include_str!("../hal-test-fixtures/std/foundation/protocol_conformance.hal");
         assert_eq!(core::FOUNDATION_PROTOCOLS.len(), 53);
         assert_eq!(
             core::FOUNDATION_PROTOCOLS
@@ -3317,8 +3344,7 @@ mod tests {
 
     #[test]
     fn shared_foundation_protocol_functionality_fixture_runs_in_the_native_runtime() {
-        let source =
-            include_str!("../hal-test-fixtures/std/foundation/protocol_functionality.hal");
+        let source = include_str!("../hal-test-fixtures/std/foundation/protocol_functionality.hal");
         let Some(catalog) = repo_text(
             "specs/00-unsorted/platform-language/draft/conformance/protocol-method-cases.edn",
         ) else {

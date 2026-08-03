@@ -1,0 +1,25 @@
+[package]
+name = "hara-db-postgres"
+version = "0.1.0"
+edition = "2021"
+license = "EPL-2.0"
+rust-version = "1.78"
+description = "Optional PostgreSQL native ABI module for Hara and Hestia"
+
+[lib]
+crate-type = ["rlib"]
+
+[workspace]
+
+[dependencies]
+hara-abi = { path = "../../abi" }
+bytes = "1"
+chrono = "0.4"
+futures-util = "0.3"
+rustls = "0.23"
+rustls-native-certs = "0.8"
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+tokio-postgres = { version = "0.7.18", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
+tokio-postgres-rustls = { version = "0.14", features = ["ring"] }
+uuid = "1"

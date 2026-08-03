@@ -1,0 +1,11 @@
+{
+  "name": "@hara-lang/db-postgres",
+  "version": "0.1.0",
+  "description": "Provider-neutral PostgreSQL host-call router for Hara std.db",
+  "license": "EPL-2.0",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./index.mjs"
+  }
+}
