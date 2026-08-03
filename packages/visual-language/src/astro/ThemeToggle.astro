@@ -1,0 +1,23 @@
+---
+const { label = "Theme" } = Astro.props;
+---
+<button class="hara-theme-toggle" type="button" data-hara-theme-toggle aria-label={label}>
+  <span aria-hidden="true" data-hara-theme-icon>◐</span><span data-hara-theme-label>System</span>
+</button>
+<script>
+  import { cycleTheme, getThemePreference } from "../theme.js";
+  const sync = () => document.querySelectorAll("[data-hara-theme-toggle]").forEach((button) => {
+    const label = button.querySelector("[data-hara-theme-label]");
+    if (label) label.textContent = getThemePreference().replace(/^./, (value) => value.toUpperCase());
+  });
+  document.addEventListener("astro:page-load", sync);
+  addEventListener("hara:theme-change", sync);
+  document.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element) || !event.target.closest("[data-hara-theme-toggle]")) return;
+    cycleTheme(); sync();
+  });
+  sync();
+</script>
+<style>
+  .hara-theme-toggle { display:inline-flex; align-items:center; justify-self:end; gap:.45rem; width:max-content; min-height:36px; padding:.4rem .7rem; color:var(--hara-text); background:var(--hara-surface); border:1px solid var(--hara-line); border-radius:999px; font:600 .78rem var(--hara-font-sans); cursor:pointer; }
+</style>

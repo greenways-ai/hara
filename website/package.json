@@ -1,0 +1,25 @@
+{
+  "name": "@hara-lang/www",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
+    "prepare:docs": "node scripts/prepare-docs.mjs",
+    "check": "npm run prepare:docs && ASTRO_TELEMETRY_DISABLED=1 astro check",
+    "build": "npm run prepare:docs && ASTRO_TELEMETRY_DISABLED=1 astro check && ASTRO_TELEMETRY_DISABLED=1 astro build",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "^3.6.0",
+    "@astrojs/starlight": "^0.37.0",
+    "@hara-lang/visual-language": "file:../packages/visual-language",
+    "astro": "^5.16.0",
+    "sharp": "^0.35.3"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "typescript": "^5.9.2"
+  },
+  "engines": { "node": ">=22" }
+}

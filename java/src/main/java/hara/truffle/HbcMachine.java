@@ -468,6 +468,13 @@ public final class HbcMachine {
       case SECOND -> "second";
       case TO_MUTABLE -> "to-mutable";
       case TO_PERSISTENT -> "to-persistent";
+      case NUMBER_PREDICATE -> "number?";
+      case ARRAY_NEW -> "array";
+      case ARRAY_GET -> "std.native.Arr/get-index";
+      case ARRAY_SET -> "std.native.Arr/set-index";
+      case OBJECT_NEW -> "object";
+      case OBJECT_GET -> "std.native.Obj/get-key";
+      case OBJECT_SET -> "std.native.Obj/set-key";
     };
   }
 

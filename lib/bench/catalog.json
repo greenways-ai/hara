@@ -1,0 +1,29 @@
+{
+  "schema_version": 2,
+  "corpus": {
+    "id": "hara-algorithms-v1",
+    "source": "lib/bench/lisp-hara/general-workloads.json",
+    "workloads": [
+      "sieve-array",
+      "towers-recursive",
+      "queens-backtracking",
+      "heap-permute",
+      "ackermann-deep",
+      "tak-branching",
+      "collatz-range",
+      "matrix-multiply"
+    ]
+  },
+  "artifacts": [
+    {"id":"hara-rust-vm","family":"Rust","host":"Native","representation":"HBC4 VM","invocation":"hara eval --engine vm","summary":"Prepared HBC4 bytecode in the native Rust runtime."},
+    {"id":"hara-rust-full","family":"Rust","host":"Native","representation":"Whole-Wasm","invocation":"hara eval --engine whole-wasm","summary":"Whole-function Wasm compiled and hosted by the native Rust runtime."},
+    {"id":"hara-wasm-vm","family":"WebAssembly","host":"Browser","representation":"HBC4 VM","invocation":"@hara-lang/browser/vm","summary":"Prepared HBC4 bytecode in the browser WebAssembly runtime."},
+    {"id":"hara-wasm-full","family":"WebAssembly","host":"Browser","representation":"Whole-Wasm","invocation":"@hara-lang/browser/full","summary":"Whole-function Wasm compiled and loaded in a browser worker."},
+    {"id":"hara-truffle-vm","family":"Truffle","host":"Native Image","representation":"HBC4 VM","invocation":"hara-truffle benchmark vm","summary":"Prepared HBC4 through the Truffle Bytecode DSL in Native Image."},
+    {"id":"hara-truffle-full","family":"Truffle","host":"Native Image","representation":"Truffle AST","invocation":"hara-truffle benchmark full","summary":"Prepared Hara AST with runtime Truffle compilation in Native Image."},
+    {"id":"hara-jvm-vm","family":"Truffle","host":"JVM","representation":"HBC4 VM","invocation":"hara benchmark vm","summary":"Prepared HBC4 through the Truffle Bytecode DSL on the JVM."},
+    {"id":"hara-jvm-full","family":"Truffle","host":"JVM","representation":"Truffle AST","invocation":"hara benchmark full","summary":"Prepared Hara AST with JVMCI optimization on the JVM."}
+  ],
+  "language_competitors": ["c", "java", "python", "luajit", "sbcl", "chez", "guile", "bb"],
+  "http_competitors": ["hoplite-hara-rust-full", "openresty", "nginx", "fastify", "axum"]
+}

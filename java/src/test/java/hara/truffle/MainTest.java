@@ -372,13 +372,15 @@ public class MainTest {
             .encodeToString("(+ 19 23)".getBytes(StandardCharsets.UTF_8));
     int status =
         Main.run(
-            new String[] {"benchmark", "test", "arithmetic", source, "42", "2", "1"},
+            new String[] {"benchmark", "test", "full", "arithmetic", source, "42", "2", "1"},
             new PrintStream(output, true, StandardCharsets.UTF_8),
             new PrintStream(error, true, StandardCharsets.UTF_8));
     String json = output.toString(StandardCharsets.UTF_8);
     assertEquals(error.toString(StandardCharsets.UTF_8), 0, status);
     assertTrue(json.contains("\"runtime\":\"test\""));
     assertTrue(json.contains("\"workload\":\"arithmetic\""));
+    assertTrue(json.contains("\"representation\":\"full\""));
+    assertTrue(json.contains("\"prepare_ns\":"));
     assertTrue(json.contains("\"first_ns\":"));
     assertTrue(json.contains("\"samples_ns\":["));
     assertEquals(2, json.substring(json.indexOf('[') + 1, json.indexOf(']')).split(",").length);

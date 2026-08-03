@@ -3,10 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-if [[ -f "$ROOT/target/hara-rust-vm-vs-full-smoke.json" ]]; then
-  python3 "$ROOT/lib/bench/render-dashboard.py"
+if [[ -f "$ROOT/lib/bench/results/reference-v2.json" ]]; then
+  python3 "$ROOT/lib/bench/validate_evidence.py" "$ROOT/lib/bench/results/reference-v2.json"
 fi
 
-"$ROOT/.venv-docs/bin/mkdocs" build --strict \
-  -f "$ROOT/benchmarks/mkdocs.yml" \
-  -d "$ROOT/target/benchmarks"
+npm run build --prefix "$ROOT/benchmarks"

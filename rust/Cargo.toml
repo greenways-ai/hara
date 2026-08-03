@@ -71,4 +71,9 @@ name = "hara-bytecode-conformance-artifact"
 path = "src/bin/hara-bytecode-conformance-artifact.rs"
 required-features = ["bytecode-vm"]
 
+[[bin]]
+name = "hara-bytecode-artifact"
+path = "src/bin/hara-bytecode-artifact.rs"
+required-features = ["bytecode-vm"]
+
 [dev-dependencies]

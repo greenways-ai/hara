@@ -1,0 +1,33 @@
+{
+  "name": "@hara-lang/visual-language",
+  "version": "1.0.0",
+  "description": "Hara's precision-material visual language for Astro and framework-free sites",
+  "type": "module",
+  "license": "MIT",
+  "files": ["src", "assets", "README.md", "LICENSE"],
+  "exports": {
+    "./tokens.css": "./src/tokens.css",
+    "./theme.css": "./src/theme.css",
+    "./motifs.css": "./src/motifs.css",
+    "./theme.js": "./src/theme.js",
+    "./astro/ThemeToggle.astro": "./src/astro/ThemeToggle.astro",
+    "./astro/HaraMark.astro": "./src/astro/HaraMark.astro",
+    "./astro/Motif.astro": "./src/astro/Motif.astro",
+    "./astro/Surface.astro": "./src/astro/Surface.astro",
+    "./assets/*": "./assets/*"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "site:dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev --root site",
+    "site:build": "ASTRO_TELEMETRY_DISABLED=1 astro build --root site"
+  },
+  "peerDependencies": {
+    "astro": ">=5"
+  },
+  "peerDependenciesMeta": {
+    "astro": { "optional": true }
+  },
+  "devDependencies": {
+    "astro": "^5.16.0"
+  }
+}

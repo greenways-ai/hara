@@ -5,20 +5,20 @@ import { readFile, writeFile } from "node:fs/promises";
 
 const [output, ...specs] = process.argv.slice(2);
 if (!output || !specs.length) {
-  throw new Error("usage: build-www-harp.mjs OUTPUT.harp NAMESPACE=FILE.hir...");
+  throw new Error("usage: build-www-harp.mjs OUTPUT.harp NAMESPACE=FILE.halc...");
 }
 
 const encoder = new TextEncoder();
 const files = [];
 for (const spec of specs) {
   const separator = spec.indexOf("=");
-  if (separator < 1) throw new Error(`invalid HIR resource: ${spec}`);
+  if (separator < 1) throw new Error(`invalid HALC resource: ${spec}`);
   const namespace = spec.slice(0, separator);
   const sourcePath = spec.slice(separator + 1);
-  const path = `hir/${namespace.replaceAll(".", "/")}.hir`;
+  const path = `halc/${namespace.replaceAll(".", "/")}.halc`;
   const bytes = new Uint8Array(await readFile(sourcePath));
-  if (new TextDecoder("latin1").decode(bytes.subarray(0, 4)) !== "HIR\0") {
-    throw new Error(`${sourcePath} is not a HIR artifact`);
+  if (new TextDecoder("latin1").decode(bytes.subarray(0, 4)) !== "HALC") {
+    throw new Error(`${sourcePath} is not a HALC artifact`);
   }
   files.push({ namespace, path, bytes });
 }

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import datetime as dt
+import hashlib
 import json
 import os
 import platform
@@ -18,7 +19,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_CORPUS = ROOT / "lib/bench/runtime/workloads.json"
+DEFAULT_CORPUS = ROOT / "lib/bench/lisp-hara/general-workloads.json"
 RESULTS = ROOT / "lib/bench/results/reference.json"
 REPORT = ROOT / "website/docs/reference/runtime-benchmarks.md"
 DEFAULT_BASELINE = ROOT / "lib/bench/runtime/regression-baselines.json"
@@ -41,6 +42,8 @@ def workload_for_runtime(workload, runtime):
     only valid for the named runtimes (or its optional ``default`` entry), so
     an adapter can never silently benchmark different collection semantics.
     """
+    if "source" not in workload and "hara_source" in workload:
+        workload = {**workload, "source": workload["hara_source"]}
     sources = workload.get("sources")
     if not sources:
         return workload
@@ -66,6 +69,13 @@ def version(command):
         return text[0] if text else "unknown"
     except (OSError, subprocess.SubprocessError):
         return "unavailable"
+
+
+def java_executable():
+    configured = os.environ.get("JAVA_HOME")
+    candidates = ([Path(configured) / "bin/java"] if configured else []) + [
+        Path("/opt/homebrew/opt/openjdk/bin/java"), Path(shutil.which("java") or "")]
+    return str(next((candidate for candidate in candidates if candidate.is_file()), Path("java")))
 
 
 def classpaths():
@@ -99,6 +109,21 @@ def adapters():
         return command + [runtime, workload["id"], payload, workload["expected"],
                           str(windows), str(calls)]
 
+    def java(command, runtime, representation, workload, windows, calls):
+        source = workload["source"]
+        if representation == "vm":
+            artifact_dir = ROOT / "target/runtime-benchmark/hbc"
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            digest = hashlib.sha256(source.encode()).hexdigest()
+            artifact = artifact_dir / f"{digest}.hbc"
+            if not artifact.is_file():
+                run([str(bytecode_artifact_binary()), source.encode().hex(), str(artifact)])
+            payload = base64.urlsafe_b64encode(artifact.read_bytes()).decode().rstrip("=")
+        else:
+            payload = encoded(source)
+        return command + [runtime, representation, workload["id"], payload,
+                          workload["expected"], str(windows), str(calls)]
+
     def bytecode(binary, runtime, mode, workload, windows, calls):
         source = workload["source"].encode().hex()
         return [str(binary), mode, workload["id"], source, workload["expected"],
@@ -106,17 +131,20 @@ def adapters():
 
     return {
         "clojure": lambda w, n, c: common(
-            ["java", "-cp", clj_cp, "clojure.main", clj_script], "clojure", w, n, c),
+            [java_executable(), "-cp", clj_cp, "clojure.main", clj_script], "clojure", w, n, c),
         "bb": lambda w, n, c: common(["bb", clj_script], "bb", w, n, c),
-        "hara-truffle-jvm": lambda w, n, c: common(
-            ["java", "-cp", truffle_cp, "hara.truffle.Main", "benchmark"],
-            "hara-truffle-jvm", w, n, c),
-        "hara-truffle-native-vm": lambda w, n, c: common(
-            [str(ROOT / "target/hara-truffle-native-vm"), "benchmark"],
-            "hara-truffle-native-vm", w, n, c),
-        "hara-truffle-native-full": lambda w, n, c: common(
-            [str(ROOT / "target/hara-truffle-native-full"), "benchmark"],
-            "hara-truffle-native-full", w, n, c),
+        "hara-jvm-vm": lambda w, n, c: java(
+            [java_executable(), "-cp", truffle_cp, "hara.truffle.Main", "benchmark"],
+            "hara-jvm-vm", "vm", w, n, c),
+        "hara-jvm-full": lambda w, n, c: java(
+            [java_executable(), "-cp", truffle_cp, "hara.truffle.Main", "benchmark"],
+            "hara-jvm-full", "full", w, n, c),
+        "hara-truffle-vm": lambda w, n, c: java(
+            [str(ROOT / "target/hara-truffle-vm"), "benchmark"],
+            "hara-truffle-vm", "vm", w, n, c),
+        "hara-truffle-full": lambda w, n, c: java(
+            [str(ROOT / "target/hara-truffle-full"), "benchmark"],
+            "hara-truffle-full", "full", w, n, c),
         "hara-rust-vm": lambda w, n, c: bytecode(
             bytecode_binary("vm"), "hara-rust-vm", "runtime-registry-execute", w, n, c),
         "hara-rust-full": lambda w, n, c: bytecode(
@@ -125,8 +153,6 @@ def adapters():
             bytecode_binary("trace-checked"), "hara-rust-trace-checked", "runtime-registry-execute", w, n, c),
         "hara-rust-trace-native": lambda w, n, c: bytecode(
             bytecode_binary("trace-native"), "hara-rust-trace-native", "runtime-registry-execute", w, n, c),
-        "hara-wasm-node": lambda w, n, c: common(
-            ["node", node_script], "hara-wasm-node", w, n, c),
     }, glue
 
 
@@ -134,10 +160,14 @@ def bytecode_binary(label):
     return ROOT / "target/runtime-benchmark" / label / "release/hara-bytecode-benchmark"
 
 
+def bytecode_artifact_binary():
+    return ROOT / "target/runtime-benchmark/vm/release/hara-bytecode-artifact"
+
+
 def build(include_native, selected):
     native_variants = {
-        "hara-truffle-native-vm": ("target/hara-truffle-native-vm", "true"),
-        "hara-truffle-native-full": ("target/hara-truffle-native-full", "false"),
+        "hara-truffle-vm": ("target/hara-truffle-vm", "false"),
+        "hara-truffle-full": ("target/hara-truffle-full", "false"),
     }
     for runtime, (output, fallback) in native_variants.items():
         if include_native or runtime in selected:
@@ -145,7 +175,7 @@ def build(include_native, selected):
             env["HARA_NATIVE_OUTPUT"] = str(ROOT / output)
             env["HARA_NATIVE_USE_FALLBACK_RUNTIME"] = fallback
             run([str(ROOT / "scripts/build-truffle-native")], env=env, timeout=1200)
-    if "hara-truffle-jvm" in selected:
+    if any(runtime.startswith("hara-jvm-") for runtime in selected):
         run(["mvn", "-q", "-f", "java/pom.xml", "-Ptruffle", "-DskipTests", "compile",
              "dependency:build-classpath", "-Dmdep.outputFile=java/target/hara-runtime-classpath.txt"],
             timeout=300)
@@ -157,12 +187,12 @@ def build(include_native, selected):
         run(["cargo", "build", "--manifest-path", "rust/Cargo.toml", "--release",
              "--features", features, "--bin", "hara-bytecode-benchmark"],
             env=env, timeout=600)
-    if "hara-wasm-node" in selected and shutil.which("wasm-bindgen"):
+    if any(runtime in selected for runtime in ("hara-jvm-vm", "hara-truffle-vm")):
+        env = os.environ.copy()
+        env["CARGO_TARGET_DIR"] = str(ROOT / "target/runtime-benchmark/vm")
         run(["cargo", "build", "--manifest-path", "rust/Cargo.toml", "--release",
-             "--target", "wasm32-unknown-unknown", "--lib"], timeout=600)
-        (ROOT / "target/wasm-bindgen").mkdir(parents=True, exist_ok=True)
-        run(["wasm-bindgen", "--target", "nodejs", "--out-dir", "target/wasm-bindgen",
-             "rust/target/wasm32-unknown-unknown/release/hara_wasm.wasm"], timeout=300)
+             "--features", "bytecode-vm", "--bin", "hara-bytecode-artifact"],
+            env=env, timeout=600)
 
 
 def percentile(values, fraction):
@@ -221,14 +251,14 @@ def payload_sizes(glue):
     paths = {
         "clojure": clojure_files,
         "bb": [Path(shutil.which("bb") or "")],
-        "hara-truffle-jvm": truffle_files,
-        "hara-truffle-native-vm": [ROOT / "target/hara-truffle-native-vm"],
-        "hara-truffle-native-full": [ROOT / "target/hara-truffle-native-full"],
+        "hara-jvm-vm": truffle_files,
+        "hara-jvm-full": truffle_files,
+        "hara-truffle-vm": [ROOT / "target/hara-truffle-vm"],
+        "hara-truffle-full": [ROOT / "target/hara-truffle-full"],
         "hara-rust-vm": [bytecode_binary("vm")],
         "hara-rust-full": [bytecode_binary("whole-wasm")],
         "hara-rust-trace-checked": [bytecode_binary("trace-checked")],
         "hara-rust-trace-native": [bytecode_binary("trace-native")],
-        "hara-wasm-node": [ROOT / "rust/target/wasm32-unknown-unknown/release/hara_wasm.wasm", glue],
     }
     def size(path):
         if path.is_file(): return path.stat().st_size
@@ -304,11 +334,10 @@ def main():
     if not args.no_build:
         build(include_native=False, selected=selected)
     missing = []
-    if "hara-wasm-node" in selected and not glue.is_file():
-        missing.append("hara-wasm-node (install version-matched wasm-bindgen-cli and rebuild)")
-        selected.remove("hara-wasm-node")
     corpus_path = args.corpus if args.corpus.is_absolute() else ROOT / args.corpus
-    corpus = json.loads(corpus_path.read_text())["workloads"]
+    corpus = [({**workload, "source": workload["hara_source"]}
+               if "source" not in workload and "hara_source" in workload else workload)
+              for workload in json.loads(corpus_path.read_text())["workloads"]]
     env = os.environ.copy()
     env["HARA_WASM_GLUE"] = str(glue)
     measurements = []
@@ -347,7 +376,7 @@ def main():
                             "python": platform.python_version(),
                             "git_revision": version(["git", "rev-parse", "HEAD"]),
                             "git_dirty": bool(run(["git", "status", "--porcelain"]).stdout)},
-            "versions": {"java": version(["java", "-version"]),
+            "versions": {"java": version([java_executable(), "-version"]),
                          "clojure": "Clojure 1.12.5", "bb": version(["bb", "--version"]),
                          "rust": version(["rustc", "--version"]), "node": version(["node", "--version"]),
                          "native_image": version(["native-image", "--version"])},

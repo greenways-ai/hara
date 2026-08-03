@@ -25,6 +25,13 @@ jobs:
         run: |
           node scripts/sync-hara-ui.mjs
           node scripts/sync-hara-ui.mjs --check
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - name: Install Astro site dependencies
+        run: npm ci --prefix website
       - name: Build browser runtime and site
         if: github.ref_name == 'main'
         env:
@@ -43,7 +50,8 @@ jobs:
           tar -xf target/www-artifact/artifact.tar -C target/www
       - name: Test website scene contract
         run: |
-          node --test website/branding.test.mjs website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
+          npm test --prefix website
+          node --test website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
           test -s target/www/og-hara-ribbon.jpg
       - name: Deploy main to www.testing.hara-lang.org
         if: github.ref_name == 'main'
