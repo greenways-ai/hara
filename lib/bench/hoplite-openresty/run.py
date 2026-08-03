@@ -18,6 +18,14 @@ def run(command, **kwargs):
     kwargs.setdefault("check", True)
     return subprocess.run(command, text=True, **kwargs)
 
+def revision(path):
+    result = run(["git", "-C", str(path), "rev-parse", "HEAD"], capture_output=True)
+    return result.stdout.strip()
+
+def binary_version(binary):
+    result = run([str(binary), "-V"], capture_output=True, check=False)
+    return (result.stderr or result.stdout).splitlines()[0]
+
 def render(template, target):
     target.mkdir(parents=True, exist_ok=True)
     for name in ("logs", "client_body_temp", "proxy_temp", "fastcgi_temp", "uwsgi_temp", "scgi_temp"):
@@ -100,7 +108,12 @@ def main():
     rows += process_server("axum", [str(HERE / "axum/target/release/hara-axum-benchmark")], 18085)
     rows.append({"server": "nginx", "route": "/delay", "status": "not_applicable", "reason": "core Nginx has no application timer"})
     data = {"schema_version": 1, "generated_at": datetime.now(timezone.utc).isoformat(),
-            "environment": {"platform": platform.platform(), "machine": platform.machine()},
+            "environment": {"platform": platform.platform(), "machine": platform.machine(),
+                            "hara_revision": revision(ROOT),
+                            "hoplite_revision": revision(ROOT.parent / "hoplite"),
+                            "hoplite_server": binary_version(HOPLITE),
+                            "openresty_server": binary_version(OPENRESTY),
+                            "nginx_server": binary_version(NGINX)},
             "configuration": {"requests": REQUESTS, "concurrency": CONCURRENCY, "warmup": WARMUP, "trials": TRIALS, "workers": 1}, "measurements": rows}
     OUTPUT.parent.mkdir(parents=True, exist_ok=True); OUTPUT.write_text(json.dumps(data, indent=2) + "\n")
     OUTPUT.with_suffix(".md").write_text(markdown(data)); print(f"wrote {OUTPUT} and {OUTPUT.with_suffix('.md')}")

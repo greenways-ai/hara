@@ -16,12 +16,12 @@
     ]
   },
   "environment": {
-    "run_id": "reference-2026-08-03T155829",
-    "timestamp": "2026-08-03T15:58:29.663237+00:00",
+    "run_id": "reference-2026-08-03T223608",
+    "timestamp": "2026-08-03T22:36:08.846489+00:00",
     "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
     "machine": "arm64",
     "cpu": "arm",
-    "git_revision": "bd8d6f3c2fe791c17747c39695ab41f752875ce3",
+    "git_revision": "0491adf47d68f6e9d2ca3dae76c5de185c69468e",
     "git_dirty": true,
     "browser": "Playwright Chromium",
     "native_image": "GraalVM 25.0.3 fallback executable"
@@ -4079,7 +4079,12 @@
   "language_evidence": "lib/bench/results/language-reference.json",
   "http_environment": {
     "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
-    "machine": "arm64"
+    "machine": "arm64",
+    "hara_revision": "0491adf47d68f6e9d2ca3dae76c5de185c69468e",
+    "hoplite_revision": "798725ce87029197e3e7020c9bce679f95bb9a5c",
+    "hoplite_server": "nginx version: nginx/1.30.4",
+    "openresty_server": "nginx version: openresty/1.31.1.1",
+    "nginx_server": "nginx version: nginx/1.31.3"
   },
   "http_configuration": {
     "requests": 20000,
@@ -4093,38 +4098,38 @@
       "server": "hoplite-hara-rust-full",
       "route": "/hello",
       "status": "ok",
-      "requests_per_second": 58575.1,
-      "mean_ms": 0.546,
-      "p50_ms": 1.0,
-      "p95_ms": 1.0,
-      "p99_ms": 1.0
+      "requests_per_second": 238237.05,
+      "mean_ms": 0.134,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0
     },
     {
       "server": "hoplite-hara-rust-full",
       "route": "/json",
       "status": "ok",
-      "requests_per_second": 60294.54,
-      "mean_ms": 0.531,
-      "p50_ms": 1.0,
-      "p95_ms": 1.0,
-      "p99_ms": 1.0
+      "requests_per_second": 239750.66,
+      "mean_ms": 0.133,
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0
     },
     {
       "server": "hoplite-hara-rust-full",
       "route": "/delay",
       "status": "ok",
-      "requests_per_second": 1163.48,
-      "mean_ms": 27.504,
-      "p50_ms": 27.0,
-      "p95_ms": 29.0,
+      "requests_per_second": 1119.31,
+      "mean_ms": 28.589,
+      "p50_ms": 29.0,
+      "p95_ms": 30.0,
       "p99_ms": 30.0
     },
     {
       "server": "openresty",
       "route": "/hello",
       "status": "ok",
-      "requests_per_second": 250717.68,
-      "mean_ms": 0.128,
+      "requests_per_second": 267336.79,
+      "mean_ms": 0.12,
       "p50_ms": 0.0,
       "p95_ms": 0.0,
       "p99_ms": 0.0
@@ -4133,8 +4138,8 @@
       "server": "openresty",
       "route": "/json",
       "status": "ok",
-      "requests_per_second": 248873.85,
-      "mean_ms": 0.129,
+      "requests_per_second": 270786.23,
+      "mean_ms": 0.118,
       "p50_ms": 0.0,
       "p95_ms": 0.0,
       "p99_ms": 0.0
@@ -4143,18 +4148,18 @@
       "server": "openresty",
       "route": "/delay",
       "status": "ok",
-      "requests_per_second": 1209.6,
-      "mean_ms": 26.455,
+      "requests_per_second": 1176.69,
+      "mean_ms": 27.195,
       "p50_ms": 27.0,
-      "p95_ms": 27.0,
+      "p95_ms": 28.0,
       "p99_ms": 28.0
     },
     {
       "server": "nginx",
       "route": "/hello",
       "status": "ok",
-      "requests_per_second": 258094.49,
-      "mean_ms": 0.124,
+      "requests_per_second": 275156.15,
+      "mean_ms": 0.116,
       "p50_ms": 0.0,
       "p95_ms": 0.0,
       "p99_ms": 0.0
@@ -4163,8 +4168,8 @@
       "server": "nginx",
       "route": "/json",
       "status": "ok",
-      "requests_per_second": 276174.43,
-      "mean_ms": 0.116,
+      "requests_per_second": 278520.5,
+      "mean_ms": 0.115,
       "p50_ms": 0.0,
       "p95_ms": 0.0,
       "p99_ms": 0.0
@@ -4173,8 +4178,8 @@
       "server": "fastify",
       "route": "/hello",
       "status": "ok",
-      "requests_per_second": 110680.07,
-      "mean_ms": 0.289,
+      "requests_per_second": 81336.52,
+      "mean_ms": 0.393,
       "p50_ms": 0.0,
       "p95_ms": 0.0,
       "p99_ms": 1.0
@@ -4183,8 +4188,8 @@
       "server": "fastify",
       "route": "/json",
       "status": "ok",
-      "requests_per_second": 114131.8,
-      "mean_ms": 0.28,
+      "requests_per_second": 83359.73,
+      "mean_ms": 0.384,
       "p50_ms": 0.0,
       "p95_ms": 0.0,
       "p99_ms": 1.0
@@ -4193,17 +4198,17 @@
       "server": "fastify",
       "route": "/delay",
       "status": "ok",
-      "requests_per_second": 1187.19,
-      "mean_ms": 26.954,
-      "p50_ms": 27.0,
-      "p95_ms": 28.0,
-      "p99_ms": 29.0
+      "requests_per_second": 1138.58,
+      "mean_ms": 28.105,
+      "p50_ms": 28.0,
+      "p95_ms": 29.0,
+      "p99_ms": 30.0
     },
     {
       "server": "axum",
       "route": "/hello",
       "status": "ok",
-      "requests_per_second": 263747.86,
+      "requests_per_second": 264707.83,
       "mean_ms": 0.121,
       "p50_ms": 0.0,
       "p95_ms": 0.0,
@@ -4213,8 +4218,8 @@
       "server": "axum",
       "route": "/json",
       "status": "ok",
-      "requests_per_second": 246788.66,
-      "mean_ms": 0.13,
+      "requests_per_second": 250006.25,
+      "mean_ms": 0.128,
       "p50_ms": 0.0,
       "p95_ms": 0.0,
       "p99_ms": 0.0
@@ -4223,11 +4228,11 @@
       "server": "axum",
       "route": "/delay",
       "status": "ok",
-      "requests_per_second": 1169.45,
-      "mean_ms": 27.363,
-      "p50_ms": 27.0,
-      "p95_ms": 28.0,
-      "p99_ms": 30.0
+      "requests_per_second": 1141.57,
+      "mean_ms": 28.031,
+      "p50_ms": 28.0,
+      "p95_ms": 29.0,
+      "p99_ms": 29.0
     },
     {
       "server": "nginx",
