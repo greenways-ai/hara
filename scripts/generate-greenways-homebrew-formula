@@ -4,8 +4,19 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
+import urllib.request
 from pathlib import Path
+
+
+def sha256_url(url: str) -> str:
+    request = urllib.request.Request(url, headers={"User-Agent": "hara-release"})
+    digest = hashlib.sha256()
+    with urllib.request.urlopen(request, timeout=60) as response:
+        while chunk := response.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def main() -> None:
@@ -21,21 +32,22 @@ def main() -> None:
         parser.error("revision must be a complete lowercase commit SHA")
 
     version = args.tag[1:]
+    archive_url = f"https://github.com/hara-lang/hara/archive/{args.revision}.tar.gz"
+    archive_sha256 = sha256_url(archive_url)
+
     rendered = f'''class Hara < Formula
   desc "Symbolic programming language and portable AST kernel"
   homepage "https://www.hara-lang.org"
-  url "https://github.com/hara-lang/hara.git",
-      tag:      "{args.tag}",
-      revision: "{args.revision}"
+  url "{archive_url}"
+  version "{version}"
+  sha256 "{archive_sha256}"
   license "EPL-2.0"
   head "https://github.com/hara-lang/hara.git", branch: "main"
 
   depends_on "rust" => :build
 
   def install
-    system "cargo", "build", "--locked", "--release",
-           "--manifest-path", "rust/Cargo.toml", "--bin", "hara"
-    bin.install "rust/target/release/hara"
+    system "cargo", "install", *std_cargo_args(path: "rust")
   end
 
   test do
@@ -45,7 +57,7 @@ end
 '''
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(rendered)
+    args.output.write_text(rendered, encoding="utf-8")
 
 
 if __name__ == "__main__":
