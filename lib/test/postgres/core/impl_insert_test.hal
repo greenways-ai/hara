@@ -1,0 +1,61 @@
+(ns postgres.core.impl-insert-test
+  (:require [postgres.core.impl-insert :as insert])
+  (:use code.test))
+
+(def table-schema
+  {:id [{:type :uuid :primary true :required true :order 0}]
+   :status [{:type :enum :order 1 :enum {:ns 'demo/Status}}]
+   :name [{:type :text :order 2}]
+   :cache [{:type :ref :order 3 :ref {:type :uuid}}]
+   :ignored [{:type :text :order 4 :ignore true}]})
+
+(def prepared [{:id 'Entry :module 'demo} table-schema {}])
+(def entry {:id 'Entry :module 'demo :table-schema table-schema})
+
+(fact "constructs an insert body"
+  (insert/t-insert-form table-schema [:id :status] '("a" "open"))
+  => '[(>-< [#{"id"} #{"status"}]) :values (>-< ["a" "open"])])
+
+(fact "constructs ordered map inserts with SQL casts"
+  (insert/t-insert-map table-schema {:cache "c" :name "n" :status "open"} {} {})
+  => '[(>-< [#{"status"} #{"name"} #{"cache_id"}])
+       :values (>-< [(++ "open" demo/Status) (:text "n") (:uuid "c")])])
+
+(fact "constructs symbol inserts"
+  (insert/t-insert-symbol table-schema 'row [:name :cache] {} {})
+  => '[(>-< [#{"name"} #{"cache_id"}])
+       :values (>-< [(:text (:->> row "name"))
+                     (:uuid (coalesce (:->> row "cache_id")
+                                      (:->> (:-> row "cache") "id")))])])
+
+(fact "constructs record population"
+  (insert/t-insert-record 'demo/Entry 'row {})
+  => '[:select * :from (jsonb-populate-record (++ nil demo/Entry) row)])
+
+(fact "wraps raw and JSON inserts"
+  (insert/t-insert-raw prepared {:id "a" :name "n"} {:as :raw})
+  => '[:insert-into demo/Entry (>-< [#{"id"} #{"name"}])
+       :values (>-< [(:uuid "a") (:text "n")])]
+  (insert/t-insert entry {:id "a" :name "n"} {})
+  => '[:with j-ret :as
+       [:insert-into demo/Entry (>-< [#{"id"} #{"name"}])
+        :values (>-< [(:uuid "a") (:text "n")])
+        :returning (--- [#{"id"} #{"status"} #{"name"} #{"cache_id"}])]
+       \\ :select (to-jsonb j-ret) :from j-ret])
+
+(fact "constructs upserts with primary-key conflict defaults"
+  (insert/t-upsert-raw prepared {:id "a" :name "n"} {:as :raw})
+  => '[:insert-into demo/Entry (>-< [#{"id"} #{"name"}])
+       :values (>-< [(:uuid "a") (:text "n")])
+       :on-conflict (quote (#{"id"}))
+       :do-update :set (quote (#{"name"})) :=
+       (row (. (:- "EXCLUDED") #{"name"}))])
+
+(fact "allows explicit upsert conflict and update values"
+  (insert/t-upsert entry {:id "a" :status "open"}
+                   {:as :raw :on-conflict #{:status}
+                    :on-update {:status '(upper "open")}})
+  => '[:insert-into demo/Entry (>-< [#{"id"} #{"status"}])
+       :values (>-< [(:uuid "a") (++ "open" demo/Status)])
+       :on-conflict (quote (#{"status"}))
+       :do-update :set (quote (#{"status"})) := (row (upper "open"))])

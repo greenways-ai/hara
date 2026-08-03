@@ -1,0 +1,116 @@
+(ns postgres.core.impl-insert
+  (:config {:blank true})
+  (:require [std.foundation :refer :all]
+            [postgres.core.impl-base :as base]
+            [tahto.common.util :as util]))
+
+(defn- schema-attrs [table-schema key]
+  (let [entry (get table-schema key)]
+    (if (vector? entry) (first entry) entry)))
+
+(defn- ordered-keys [table-schema keys]
+  (sort-by (fn [key] (or (:order (schema-attrs table-schema key)) 1000000)) keys))
+
+(defn- usable-key? [table-schema key]
+  (let [attrs (schema-attrs table-schema key)]
+    (and attrs (not (:ignore attrs)) (not (nil? (:order attrs))))))
+
+(defn t-insert-form [table-schema keys values]
+  [(list '>-< (vec (map (fn [key] #{(base/t-key-fn table-schema key)}) keys)))
+   :values
+   (list '>-< (vec values))])
+
+(defn t-insert-symbol [table-schema sym columns params options]
+  (let [keys (ordered-keys table-schema
+                           (filter (fn [key] (usable-key? table-schema key))
+                                   (or columns (keys table-schema))))
+        values (map (fn [key]
+                      (base/t-val-fn table-schema key
+                                     (base/t-sym-fn table-schema key sym)
+                                     params options))
+                    keys)]
+    (t-insert-form table-schema keys values)))
+
+(defn t-insert-map [table-schema input params options]
+  (base/t-input-check table-schema input (merge {:missing false} params))
+  (let [keys (ordered-keys table-schema
+                           (filter (fn [key] (usable-key? table-schema key))
+                                   (keys input)))
+        values (map (fn [key]
+                      (base/t-val-fn table-schema key (get input key) params options))
+                    keys)]
+    (t-insert-form table-schema keys values)))
+
+(defn t-insert-record [table-sym data params]
+  [:select '* :from (list 'jsonb-populate-record (list '++ nil table-sym) data)])
+
+(defn- table-symbol [entry]
+  (or (util/sym-full entry) (:id entry)))
+
+(defn t-insert-raw [prepared data params]
+  (let [entry (first prepared)
+        table-schema (second prepared)
+        options (nth prepared 2)
+        table-sym (table-symbol entry)
+        as (get params :as :json)
+        requested (:returning params)
+        defaults (reduce (fn [out key]
+                           (let [attrs (schema-attrs table-schema key)]
+                             (if (and (:order attrs) (not (:ignore attrs)))
+                               (conj out key) out)))
+                         #{} (keys table-schema))
+        returning (base/t-returning table-schema
+                                    (or requested
+                                        (when (or (not (has? #{:record :raw} as))
+                                                  (:into params))
+                                          defaults)))
+        pair (cond (map? data) ['to-jsonb (t-insert-map table-schema data params options)]
+                   (symbol? data)
+                   (if (= :record as)
+                     ['to-jsonb (t-insert-record table-sym data params)]
+                     ['to-jsonb (t-insert-symbol table-schema data (:columns params)
+                                                 params options)])
+                   :else (throw (ex-info "Invalid data type" {:input data})))
+        form (into [:insert-into table-sym] (second pair))
+        extended (base/t-wrap-args form (:args params) {})
+        returned (base/t-wrap-returning extended returning {})
+        json (base/t-wrap-json returned as (first pair) (:into params) nil)]
+    (with-meta (base/t-wrap-into json (:into params) {}) {:op/type :insert})))
+
+(defn t-insert [spec data params]
+  (t-insert-raw (base/prep-table spec false {}) data (or params {})))
+
+(defn t-upsert-raw [prepared data params]
+  (let [table-schema (second prepared)
+        primary (reduce (fn [out key]
+                          (if (:primary (schema-attrs table-schema key)) (conj out key) out))
+                        #{} (keys table-schema))
+        data-keys (reduce (fn [out key] (conj out key)) #{}
+                          (if (map? data) (keys data) (keys table-schema)))
+        update-keys (reduce (fn [out key]
+                              (let [attrs (schema-attrs table-schema key)]
+                                (if (and (has? data-keys key)
+                                         (usable-key? table-schema key)
+                                         (not (:primary attrs)))
+                                  (conj out key) out)))
+                            [] (ordered-keys table-schema (keys table-schema)))
+        update-set (reduce (fn [out key] (conj out key)) #{} update-keys)
+        columns (second (base/t-returning table-schema update-set))
+        row (map (fn [column key]
+                   (or (get (:on-update params) key)
+                       (list '. (list :- "EXCLUDED") column)))
+                 columns update-keys)
+        conflict (list 'quote
+                       (apply list
+                              (second (base/t-returning table-schema
+                                                        (or (:on-conflict params) primary)))))
+        args (vec (concat [:on-conflict conflict :do-update :set
+                           (list 'quote (apply list columns)) :=]
+                          [(apply list 'row row)]))]
+    (with-meta (t-insert-raw prepared data (assoc params :args args))
+               {:op/type :upsert})))
+
+(defn t-upsert [spec data params]
+  (t-upsert-raw (base/prep-table spec false {}) data (or params {})))
+
+(def __tahto_load__ true)
