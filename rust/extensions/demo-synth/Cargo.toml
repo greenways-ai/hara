@@ -9,3 +9,5 @@ rust-version = "1.78"
 crate-type = ["cdylib"]
 
 [dependencies]
+
+[workspace]
