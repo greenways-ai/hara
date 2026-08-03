@@ -26,5 +26,5 @@
     {"id":"hara-jvm-full","family":"Truffle","host":"JVM","representation":"Truffle AST","invocation":"hara benchmark full","summary":"Prepared Hara AST with JVMCI optimization on the JVM."}
   ],
   "language_competitors": ["c", "java", "python", "luajit", "sbcl", "chez", "guile", "bb"],
-  "http_competitors": ["hoplite-hara-rust-full", "openresty", "nginx", "fastify", "axum"]
+  "http_competitors": ["hoplite-raw", "hoplite-request", "hoplite-request+hta", "openresty", "nginx", "fastify", "axum"]
 }

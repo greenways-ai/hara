@@ -80,6 +80,26 @@ def nginx_server(label, binary, template, port, routes):
     try: return benchmark(label, f"http://127.0.0.1:{port}", routes)
     finally: run(command + ["-s", "stop"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+def hoplite_servers():
+    label = "hoplite"
+    target = WORK / label
+    if target.exists(): shutil.rmtree(target)
+    render(HERE / "nginx.hoplite.conf.tmpl", target)
+    command = [str(HOPLITE), "-p", str(target), "-c", str(target / "nginx.conf")]
+    run(command + ["-t"], stdout=subprocess.DEVNULL)
+    run(command)
+    try:
+        rows = []
+        for mode, port in (("raw", 18081), ("request", 18086), ("request+hta", 18087)):
+            mode_rows = benchmark(f"hoplite-{mode}", f"http://127.0.0.1:{port}", ["hello", "json", "delay"])
+            for row in mode_rows:
+                row["hara_runtime"] = "hara-rust-full"
+                row["hoplite_mode"] = mode
+            rows += mode_rows
+        return rows
+    finally:
+        run(command + ["-s", "stop"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
 def process_server(label, command, port):
     process = subprocess.Popen(command, cwd=HERE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     try: return benchmark(label, f"http://127.0.0.1:{port}", ["hello", "json", "delay"])
@@ -101,7 +121,7 @@ def main():
         if not binary.is_file(): raise SystemExit(f"missing server binary: {binary}")
     if not (HERE / "node_modules/fastify").is_dir(): run(["npm", "install", "--ignore-scripts"], cwd=HERE)
     run(["cargo", "build", "--release", "--manifest-path", str(HERE / "axum/Cargo.toml")], cwd=ROOT)
-    rows = nginx_server("hoplite-hara-rust-full", HOPLITE, HERE / "nginx.hoplite.conf.tmpl", 18081, ["hello", "json", "delay"])
+    rows = hoplite_servers()
     rows += nginx_server("openresty", OPENRESTY, HERE / "nginx.openresty.conf.tmpl", 18082, ["hello", "json", "delay"])
     rows += nginx_server("nginx", NGINX, HERE / "nginx.core.conf.tmpl", 18083, ["hello", "json"])
     rows += process_server("fastify", ["node", str(HERE / "fastify.mjs")], 18084)

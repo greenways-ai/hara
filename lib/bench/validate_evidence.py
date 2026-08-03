@@ -45,9 +45,19 @@ def validate(document: dict) -> list[str]:
 
     for row in document.get("language_measurements", []):
         if row.get("hara_runtime") != "hara-rust-full": errors.append("language comparisons must use hara-rust-full")
-    for row in document.get("http_measurements", []):
-        if row.get("server", "").startswith("hoplite") and row.get("server") != "hoplite-hara-rust-full":
-            errors.append("Hoplite HTTP rows must be hoplite-hara-rust-full")
+    hoplite_servers = {"hoplite-raw", "hoplite-request", "hoplite-request+hta"}
+    http_rows = document.get("http_measurements", [])
+    http_pairs = {(row.get("server"), row.get("route")) for row in http_rows}
+    for server in sorted(hoplite_servers):
+        for route in ("/hello", "/json", "/delay"):
+            if (server, route) not in http_pairs:
+                errors.append(f"missing HTTP measurement: {server} / {route}")
+    for row in http_rows:
+        if row.get("server", "").startswith("hoplite"):
+            if row.get("server") not in hoplite_servers:
+                errors.append("Hoplite HTTP rows must use a canonical adapter mode")
+            if row.get("hara_runtime") != "hara-rust-full":
+                errors.append("Hoplite HTTP rows must use hara-rust-full")
     return errors
 
 

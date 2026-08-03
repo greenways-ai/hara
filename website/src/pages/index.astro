@@ -60,7 +60,7 @@ const formatRatio = (runtime: string) => {
 };
 const hopliteHello = runtimeEvidence.http_measurements?.find(
   (row) =>
-    row.server === "hoplite-hara-rust-full" &&
+    row.server === "hoplite-request" &&
     row.route === "/hello" &&
     row.status === "ok"
 );

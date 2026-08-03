@@ -22,7 +22,11 @@ def complete_document():
             "startup": {runtime: {"p50_ns": 1} for runtime in VALIDATOR.ARTIFACTS},
             "artifacts": {runtime: {key: 1 for key in ("base_bytes", "workload_delta_bytes", "raw_total_bytes", "transfer_bytes")} for runtime in VALIDATOR.ARTIFACTS},
             "language_measurements": [{"hara_runtime": "hara-rust-full"}],
-            "http_measurements": [{"server": "hoplite-hara-rust-full"}]}
+            "http_measurements": [
+                {"server": server, "route": route, "hara_runtime": "hara-rust-full"}
+                for server in ("hoplite-raw", "hoplite-request", "hoplite-request+hta")
+                for route in ("/hello", "/json", "/delay")
+            ]}
 
 
 class EvidenceValidationTest(unittest.TestCase):
@@ -36,6 +40,15 @@ class EvidenceValidationTest(unittest.TestCase):
         errors = VALIDATOR.validate(document)
         self.assertTrue(any("missing measurement" in error for error in errors))
         self.assertIn("language comparisons must use hara-rust-full", errors)
+
+    def test_missing_hoplite_mode_fails(self):
+        document = complete_document()
+        document["http_measurements"] = [
+            row for row in document["http_measurements"]
+            if row["server"] != "hoplite-request+hta"
+        ]
+        errors = VALIDATOR.validate(document)
+        self.assertTrue(any("missing HTTP measurement: hoplite-request+hta" in error for error in errors))
 
 
 if __name__ == "__main__": unittest.main()

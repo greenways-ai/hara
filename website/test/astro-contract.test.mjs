@@ -19,7 +19,7 @@ test("leads with the language and renders benchmark evidence from committed data
   assert.match(page, /language-reference\.json/);
   assert.match(page, /reference-v2\.json/);
   assert.match(page, /formatRatio\("python-prepared"\)/);
-  assert.match(page, /hoplite-hara-rust-full/);
+  assert.match(page, /hoplite-request/);
   assert.doesNotMatch(page, /One language\.[\s\S]*Fit to its environment\./);
 });
 

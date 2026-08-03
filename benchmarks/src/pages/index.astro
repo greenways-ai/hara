@@ -80,7 +80,7 @@ const httpRows = evidence?.http_measurements ?? [];
       </section>
 
       <section class="tab-panel" role="tabpanel" id="http-results" aria-labelledby="tab-http" hidden>
-        <header><p class="hara-kicker">Loopback HTTP/1.1 · keep-alive</p><h2>HTTP frameworks</h2><p>Hoplite, OpenResty, and the comparison servers use identical routes and payloads; results publish only after a complete standard run.</p></header>
+        <header><p class="hara-kicker">Loopback HTTP/1.1 · keep-alive</p><h2>HTTP frameworks</h2><p>Hoplite’s raw exchange, native request, and request+HTA boundaries are measured separately against OpenResty and the comparison servers, using identical routes and payloads.</p></header>
         {hasHttpEvidence ? <div class="detail-table"><table><thead><tr><th>Server / route</th><th>Requests/s</th><th>Mean</th><th>p50</th><th>p95</th><th>p99</th></tr></thead><tbody>{httpRows.map((row) => <tr><th><code>{row.server}</code><small>{row.route}</small></th>{row.status === "ok" ? <><td>{row.requests_per_second!.toFixed(1)}</td><td>{row.mean_ms!.toFixed(3)} ms</td><td>{row.p50_ms!.toFixed(1)} ms</td><td>{row.p95_ms!.toFixed(1)} ms</td><td>{row.p99_ms!.toFixed(1)} ms</td></> : <td colspan="5">Not applicable · {row.reason}</td>}</tr>)}</tbody></table></div> : <p class="summary-note">Pending: local server binaries unavailable.</p>}
       </section>
 

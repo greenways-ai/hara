@@ -12,15 +12,47 @@ http {
         listen 127.0.0.1:18081;
 
         location = /hello {
-            hoplite_content bench.hoplite.app/hello;
+            hoplite_content bench.hoplite.app/hello raw;
         }
 
         location = /json {
-            hoplite_content bench.hoplite.app/json;
+            hoplite_content bench.hoplite.app/json raw;
         }
 
         location = /delay {
-            hoplite_content bench.hoplite.app/delay;
+            hoplite_content bench.hoplite.app/delay raw;
+        }
+    }
+
+    server {
+        listen 127.0.0.1:18086;
+
+        location = /hello {
+            hoplite_content bench.hoplite.app/hello request;
+        }
+
+        location = /json {
+            hoplite_content bench.hoplite.app/json request;
+        }
+
+        location = /delay {
+            hoplite_content bench.hoplite.app/delay request;
+        }
+    }
+
+    server {
+        listen 127.0.0.1:18087;
+
+        location = /hello {
+            hoplite_content bench.hoplite.app/hello request+hta;
+        }
+
+        location = /json {
+            hoplite_content bench.hoplite.app/json request+hta;
+        }
+
+        location = /delay {
+            hoplite_content bench.hoplite.app/delay request+hta;
         }
     }
 }
