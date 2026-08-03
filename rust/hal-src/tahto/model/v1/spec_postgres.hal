@@ -4,6 +4,7 @@
             [tahto.common.emit :as emit]
             [tahto.common.emit-helper :as helper]
             [tahto.common.grammar-api :as grammar]
+            [tahto.common.grammar-spec :as grammar-spec]
             [tahto.common.registry :as registry]
             [tahto.model.v1.spec-xtalk :as xtalk]))
 
@@ -11,10 +12,20 @@
 (def +tag+ :postgres)
 (def +version+ spec/+version+)
 
+(def +defn-language-tags+
+  {:default "plpgsql"
+   :postgres "plpgsql"
+   :sql "sql"
+   :js "plv8"
+   :python "plpython3u"
+   :lua "pllua"})
+
 (defn pg-string
   "Emits a PostgreSQL string literal."
-  [value]
-  (helper/pr-single value))
+  ([value]
+   (helper/pr-single value))
+  ([value grammar]
+   (helper/pr-single value)))
 
 (defn pg-symbol
   "Emits PostgreSQL identifiers using Foundation's dash-to-underscore rule."
@@ -24,6 +35,28 @@
 (defn pg-type-name
   [value]
   (string/upper (string/replace (name value) "-" " ")))
+
+(defn pg-type-part
+  [value]
+  (cond (keyword? value) (pg-type-name value)
+        (symbol? value) (pg-type-name value)
+        (string? value) (string/upper value)
+        (and (vector? value) (= 0 (count value))) "[]"
+        (vector? value) (str "[" (string/join "," (map str value)) "]")
+        :else (str value)))
+
+(defn pg-type-output
+  [values]
+  (reduce
+   (fn [output value]
+     (let [part (pg-type-part value)]
+       (if (vector? value)
+         (str output part)
+         (if (= "" output)
+           part
+           (str output " " part)))))
+   ""
+   (or values [])))
 
 (defn pg-typecast
   [form grammar context]
@@ -182,6 +215,178 @@
                                 value))
          ")")))
 
+(defn pg-sym-meta
+  "Normalizes historical PostgreSQL function metadata."
+  [symbol]
+  (let [metadata (or (meta symbol) {})
+        return-type (or (get metadata :-) [:jsonb])
+        language (or (get metadata :static/language)
+                     (get metadata :%%)
+                     :default)
+        props (or (get metadata :static/props)
+                  (get metadata :props)
+                  [])]
+    (assoc (dissoc metadata :%% :props)
+           :- return-type
+           :static/return return-type
+           :static/language language
+           :static/props props)))
+
+(defn pg-defn-format
+  "Formats a registered defn entry and retains typed input metadata."
+  [form]
+  (let [formatted (grammar-spec/format-defn form)
+        entry-metadata (first formatted)
+        normalized (second formatted)
+        op (first normalized)
+        symbol (second normalized)
+        args (nth normalized 2)
+        body (drop 3 normalized)
+        symbol-metadata (assoc (pg-sym-meta symbol)
+                               :static/input
+                               (helper/emit-typed-args args {}))
+        next-symbol (IObjType/with-meta symbol symbol-metadata)]
+    [(merge entry-metadata symbol-metadata)
+     (apply list op next-symbol args body)]))
+
+(defn pg-module-static
+  "Hydrates declaration metadata from a portable Tahto module record."
+  [module]
+  (let [static (or (:static module) {})
+        schemas (or (get-in static [:all :schema]) [])
+        static-schema (if (> (count schemas) 0) (first schemas) nil)
+        direct-schema (:schema module)
+        direct-schema (if (or (string? direct-schema)
+                              (symbol? direct-schema)
+                              (keyword? direct-schema))
+                        direct-schema
+                        nil)
+        schema (or static-schema direct-schema)
+        application (or (:application module)
+                        (:application static))
+        output {}
+        output (if schema (assoc output :static/schema schema) output)
+        output (if application
+                 (assoc output :static/application application)
+                 output)]
+    output))
+
+(defn pg-hydrate
+  "Adds module-level PostgreSQL metadata to a formatted declaration."
+  [form grammar context]
+  (let [static (pg-module-static (:module context))
+        symbol (second form)
+        next-symbol (IObjType/with-meta symbol
+                                       (merge (or (meta symbol) {}) static))
+        next-form (apply list (first form) next-symbol (drop 2 form))]
+    [static next-form]))
+
+(defn pg-identifier-value
+  [value]
+  (cond (keyword? value) (name value)
+        (symbol? value) (name value)
+        :else (str value)))
+
+(defn pg-qualified-function
+  [symbol schema grammar context]
+  (let [function-name (pg-symbol symbol grammar context)]
+    (if schema
+      (str "\"" (pg-identifier-value schema) "\"." function-name)
+      function-name)))
+
+(defn pg-argument-output
+  [argument grammar context]
+  (let [symbol-output (pg-symbol (:symbol argument) grammar context)
+        type-output (pg-type-output (:modifiers argument))
+        default-output
+        (if (or (:force argument) (contains? argument :value))
+          (str " DEFAULT "
+               (emit/*emit-fn* (:value argument) grammar context))
+          "")]
+    (str symbol-output
+         (if (= "" type-output) "" (str " " type-output))
+         default-output)))
+
+(defn pg-argument-list
+  [args grammar context]
+  (let [arguments (helper/emit-typed-args args grammar)]
+    (if (= 0 (count arguments))
+      "()"
+      (str "(\n  "
+           (string/join
+            ",\n  "
+            (map (fn [argument]
+                   (pg-argument-output argument grammar context))
+                 arguments))
+           "\n)"))))
+
+(defn pg-indent
+  [output]
+  (str "  " (string/replace output "\n" "\n  ")))
+
+(defn pg-plpgsql-body
+  [body grammar context]
+  (let [statements
+        (map (fn [form]
+               (pg-indent
+                (pg-terminated (emit/*emit-fn* form grammar context))))
+             body)]
+    (str "BEGIN"
+         (if (= 0 (count statements))
+           ""
+           (str "\n" (string/join "\n" statements)))
+         "\nEND;")))
+
+(defn pg-sql-body
+  [body grammar context]
+  (if (= 1 (count body))
+    (let [form (first body)
+          statement (if (vector? form) form [:select form])]
+      (pg-indent
+       (pg-terminated (emit/*emit-fn* statement grammar context))))
+    (throw (ex-info "PostgreSQL SQL functions require one expression"
+                    {:body body}))))
+
+(defn pg-defn-body
+  [language body grammar context]
+  (cond (or (= language :default)
+            (= language :postgres))
+        (pg-plpgsql-body body grammar context)
+
+        (= language :sql)
+        (pg-sql-body body grammar context)
+
+        :else
+        (throw (ex-info "Portable PostgreSQL function language is unsupported"
+                        {:language language}))))
+
+(defn pg-property-output
+  [props]
+  (string/join " " (map pg-type-name (or props []))))
+
+(defn pg-defn
+  "Emits a complete CREATE OR REPLACE FUNCTION declaration."
+  [form grammar context]
+  (let [symbol (second form)
+        args (nth form 2)
+        body (drop 3 form)
+        metadata (pg-sym-meta symbol)
+        schema (get (meta symbol) :static/schema)
+        return-output (pg-type-output (:static/return metadata))
+        language (:static/language metadata)
+        language-tag (or (get +defn-language-tags+ language)
+                         (name language))
+        props-output (pg-property-output (:static/props metadata))
+        body-output (pg-defn-body language body grammar context)]
+    (str "CREATE OR REPLACE FUNCTION "
+         (pg-qualified-function symbol schema grammar context)
+         (pg-argument-list args grammar context)
+         " RETURNS " return-output " AS $$\n"
+         body-output "\n"
+         "$$ LANGUAGE '" language-tag "'"
+         (if (= "" props-output) "" (str " " props-output))
+         ";")))
+
 (def +grammar+
   (grammar/definition
    {:grammar/id +tag+
@@ -200,7 +405,11 @@
       :or {:raw "OR" :wrap true}
       :and {:raw "AND" :wrap true}
       :seteq {:raw ":=" :value true}
-      :ret {:raw "RETURN"}}
+      :ret {:raw "RETURN"}
+      :defn {:format pg-defn-format
+             :hydrate pg-hydrate
+             :emit pg-defn
+             :static/dbtype :function}}
      :define
      {:concat {:op :concat :symbol #{'||} :raw "||" :emit :infix :value true}
       :cast {:op :cast :symbol #{'++} :emit pg-typecast}
