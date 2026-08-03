@@ -118,6 +118,15 @@ To cut a release:
    binaries, publishes the GitHub release (prerelease while 0.x), and
    smoke-tests `scripts/install.sh` against it.
 
+## Publishing the Rust crates
+
+The `Publish Hara Rust crates` workflow is manually dispatched for an exact
+tag or commit. Configure its `crates-io` environment with a
+`CARGO_REGISTRY_TOKEN` secret. It publishes in dependency order:
+`hara-abi`, `hara-wasm`, `hara-vm`, then `hara-compiler`. The workflow waits
+for each package to appear in the crates.io index and uploads the resulting
+`.crate` files and `SHA256SUMS` as the `hara-rust-crates` workflow artifact.
+
 ## Conventions
 
 - Maven runs from the repo root via `-f java/pom.xml`; Surefire's working

@@ -1,0 +1,64 @@
+name: Publish Hara Rust crates
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git tag or commit to publish'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: crates-io
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.ref }}
+    - uses: dtolnay/rust-toolchain@stable
+    - name: Verify package manifests
+      run: |
+        cargo metadata --manifest-path rust/Cargo.toml --no-deps --format-version 1 >/dev/null
+        cargo package --manifest-path rust/Cargo.toml -p hara-abi
+    - name: Publish crates in dependency order
+      run: |
+        wait_for_crate() {
+          crate="$1"
+          version="$2"
+          for attempt in $(seq 1 20); do
+            if cargo info "$crate@$version" >/dev/null 2>&1; then
+              return 0
+            fi
+            sleep 15
+          done
+          echo "$crate@$version was not visible in the crates.io index" >&2
+          return 1
+        }
+
+        cargo publish --manifest-path rust/Cargo.toml -p hara-abi
+        wait_for_crate hara-abi 0.1.0
+        cargo publish --manifest-path rust/Cargo.toml -p hara-wasm
+        wait_for_crate hara-wasm 0.1.1
+        cargo publish --manifest-path rust/Cargo.toml -p hara-vm
+        wait_for_crate hara-vm 0.1.0
+        cargo publish --manifest-path rust/Cargo.toml -p hara-compiler
+    - name: Collect exact crate archives
+      run: |
+        mkdir -p dist/rust-crates
+        cp rust/target/package/hara-abi-0.1.0.crate dist/rust-crates/
+        cp rust/target/package/hara-wasm-0.1.1.crate dist/rust-crates/
+        cp rust/target/package/hara-vm-0.1.0.crate dist/rust-crates/
+        cp rust/target/package/hara-compiler-0.1.0.crate dist/rust-crates/
+        cd dist/rust-crates
+        sha256sum *.crate > SHA256SUMS
+    - uses: actions/upload-artifact@v4
+      with:
+        name: hara-rust-crates
+        path: dist/rust-crates/
+
+# Publication is manual because crates.io releases are immutable.

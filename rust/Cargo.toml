@@ -5,6 +5,9 @@ edition = "2021"
 description = "Portable browser runtime slice for Hara"
 license = "EPL-2.0"
 rust-version = "1.78"
+repository = "https://github.com/hara-lang/hara"
+homepage = "https://www.hara-lang.org"
+documentation = "https://docs.rs/hara-wasm"
 
 [workspace]
 members = [".", "abi", "compiler", "raw", "vm-runtime"]
@@ -40,7 +43,7 @@ strip = "symbols"
 [dependencies]
 wasm-bindgen = "0.2"
 sha2 = "0.10"
-hara-abi = { path = "abi" }
+hara-abi = { version = "0.1.0", path = "abi" }
 wasm-encoder = { version = "0.41.2", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

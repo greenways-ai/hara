@@ -5,5 +5,10 @@ edition = "2021"
 license = "EPL-2.0"
 rust-version = "1.78"
 description = "Dependency-free ABI model for Hara packages and embedding hosts"
+repository = "https://github.com/hara-lang/hara"
+homepage = "https://www.hara-lang.org"
+documentation = "https://docs.rs/hara-abi"
+keywords = ["hara", "abi", "plugin", "embedding"]
+categories = ["development-tools::ffi"]
 
 [dependencies]
