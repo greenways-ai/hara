@@ -35,11 +35,13 @@ const languageEvidence: LanguageEvidence = JSON.parse(
 const runtimeEvidence: RuntimeEvidence = JSON.parse(
   readFileSync(runtimeEvidencePath, "utf8")
 );
-const languageIndex = new Map<string, number>(
-  languageEvidence.measurements
-    .filter((row) => row.status === "ok" && row.analysis?.steady_ns != null)
-    .map((row) => [`${row.runtime}/${row.workload}`, row.analysis!.steady_ns!])
-);
+const languageIndex = new Map<string, number>();
+for (const row of languageEvidence.measurements) {
+  const steady = row.analysis?.steady_ns;
+  if (row.status === "ok" && steady != null) {
+    languageIndex.set(`${row.runtime}/${row.workload}`, steady);
+  }
+}
 const geometricMean = (values: number[]) =>
   values.length
     ? Math.exp(values.reduce((sum, value) => sum + Math.log(value), 0) / values.length)
