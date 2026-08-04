@@ -1,103 +1,83 @@
 ---
-import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import ThemeToggle from "@hara-lang/visual-language/astro/ThemeToggle.astro";
-import HaraMark from "@hara-lang/visual-language/astro/HaraMark.astro";
 import "@hara-lang/visual-language/theme.css";
 import "@hara-lang/visual-language/motifs.css";
 import "../styles/site.css";
 import "@hara-lang/visual-language/theme.js";
-import catalog from "../../../lib/bench/catalog.json";
+import SiteHeader from "../components/SiteHeader.astro";
+import LanguagePanel from "../components/LanguagePanel.astro";
+import RuntimePanel from "../components/RuntimePanel.astro";
+import HttpPanel from "../components/HttpPanel.astro";
+import RuntimeReference from "../components/RuntimeReference.astro";
+import { comparisonRows, evidenceDate, workloads } from "../lib/benchmark-data";
 
-const evidencePath = fileURLToPath(new URL("../../../lib/bench/results/reference-v2.json", import.meta.url));
-const languageEvidencePath = fileURLToPath(new URL("../../../lib/bench/results/language-reference.json", import.meta.url));
-type Measurement = { runtime:string; workload:string; prepare_ns:number; first_ns:number; steady_ns:number; throughput_per_sec:number };
-type HttpMeasurement = { server:string; route:string; status:string; requests_per_second?:number; mean_ms?:number; p50_ms?:number; p95_ms?:number; p99_ms?:number; reason?:string };
-type Evidence = { measurements:Measurement[]; environment:{timestamp:string}; startup:Record<string,{p50_ns:number}>; artifacts:Record<string,{transfer_bytes:number}>; http_measurements?:HttpMeasurement[] };
-const evidence: Evidence | null = existsSync(evidencePath) ? JSON.parse(readFileSync(evidencePath, "utf8")) : null;
-const languageEvidence = existsSync(languageEvidencePath) ? JSON.parse(readFileSync(languageEvidencePath, "utf8")) : null;
-const index = new Map<string, Measurement>((evidence?.measurements ?? []).map((row) => [`${row.runtime}/${row.workload}`, row]));
-const formatTime = (ns:number | null | undefined) => ns == null ? "Pending" : ns < 1e6 ? `${(ns / 1e3).toFixed(1)} µs` : `${(ns / 1e6).toFixed(2)} ms`;
-const geometricMean = (values:number[]) => values.length ? Math.exp(values.reduce((sum, value) => sum + Math.log(value), 0) / values.length) : null;
-const timestamp = evidence?.environment?.timestamp ?? "A complete standard reference run has not been committed yet";
-type LanguageMeasurement = { runtime:string; workload:string; status:string; analysis?:{steady_ns?:number} };
-const languageRows: LanguageMeasurement[] = languageEvidence?.measurements ?? [];
-const languageIndex = new Map<string, number>(languageRows.filter((row) => row.status === "ok" && row.analysis?.steady_ns != null).map((row) => [`${row.runtime}/${row.workload}`, row.analysis!.steady_ns!]));
-const languageRuntimes: string[] = languageEvidence?.runtime_order ?? ["hara-rust-full", ...catalog.language_competitors.map((name) => `${name}-prepared`)];
-const languageRatio = (runtime:string) => geometricMean(catalog.corpus.workloads.flatMap((workload) => {
-  const hara = languageIndex.get(`hara-rust-full/${workload}`);
-  const candidate = languageIndex.get(`${runtime}/${workload}`);
-  return hara && candidate ? [candidate / hara] : [];
-}));
-const formatRatio = (runtime:string) => { const ratio = languageRatio(runtime); return ratio == null ? "Pending" : `${ratio.toFixed(2)}×`; };
 const base = import.meta.env.BASE_URL;
 const basePath = base.endsWith("/") ? base : `${base}/`;
-const hasHttpEvidence = Boolean(evidence?.http_measurements?.length);
-const httpRows = evidence?.http_measurements ?? [];
+const pageUrl = new URL(basePath, Astro.site);
 ---
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><meta name="description" content="Reproducible Hara runtime, language, and HTTP benchmarks."/><link rel="canonical" href={new URL(basePath, Astro.site)}/><link rel="icon" href={`${basePath}assets/hara-favicon.svg`} type="image/svg+xml"/><title>Hara Benchmarks</title></head>
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width" /><meta name="description" content="Reproducible Hara runtime, language, and HTTP benchmarks." /><link rel="canonical" href={pageUrl} /><link rel="icon" href={`${basePath}assets/hara-favicon.svg`} type="image/svg+xml" /><title>Hara Benchmarks</title></head>
 <body>
-  <header class="site-header"><a class="brand" href="https://www.hara-lang.org/"><HaraMark size={26}/><span>Hara</span></a><nav><a href="https://www.hara-lang.org/docs/">Docs</a><a href="https://specs.hara-lang.org/">Specs</a><a href="https://github.com/hara-lang/hara">Source</a></nav><ThemeToggle/></header>
+  <SiteHeader />
   <main>
-    <section class="summary hara-motif" data-motif="rack">
-      <div class="summary-inner">
-        <p class="hara-kicker">Reproducible performance evidence</p>
-        <h1>Hara benchmarks</h1>
-        <p class="lede">Start with Hara against established languages, then inspect the Java, native, and modular web engines behind it.</p>
-        <div class="evidence-line"><span class:list={["evidence-dot", { ready: languageEvidence }]}></span><span>{languageEvidence?.environment?.timestamp ?? timestamp}</span></div>
-        <div class="summary-table-wrap">
-          <table class="summary-table"><thead><tr><th>Mode</th><th>Primary runtime</th><th>Deployment</th><th>Purpose</th></tr></thead><tbody>
-            <tr><th>Java</th><td><code>hara-jvm-full</code></td><td>JVM · Native Image</td><td>Java systems and language tooling</td></tr>
-            <tr><th>Native</th><td><code>hara-rust-full</code></td><td>Native binary or library</td><td>Primary high-performance runtime</td></tr>
-            <tr><th>Web</th><td><code>hara-wasm-core</code> → <code>full</code></td><td>Browser worker</td><td>Modular core or full compilation</td></tr>
-          </tbody></table>
-        </div>
-        <p class="summary-note">External comparisons use only <code>hara-rust-full</code>. Internal VM tiers are evidence, not additional product choices.</p>
-      </div>
-    </section>
-
+    <section class="summary hara-motif" data-motif="rack"><div class="summary-inner"><p class="hara-kicker">Reproducible performance evidence</p><h1>Hara benchmarks</h1><p class="lede">Start with the language shootout: where Hara leads, where it trails, and the exact workloads behind every comparison.</p><div class="evidence-line"><span class="evidence-dot ready"></span><span>Published {evidenceDate}</span><span aria-hidden="true">·</span><span>{workloads.length} workloads</span><span aria-hidden="true">·</span><span>{comparisonRows.length} comparison languages</span></div></div></section>
     <section class="results-shell">
-      <div class="tabs" role="tablist" aria-label="Benchmark sections">
-        <button role="tab" aria-selected="true" aria-controls="language-shootout" id="tab-languages">Language comparison</button>
-        <button role="tab" aria-selected="false" aria-controls="hara-artifacts" id="tab-hara" tabindex="-1">Hara internals</button>
-        <button role="tab" aria-selected="false" aria-controls="http-results" id="tab-http" tabindex="-1">HTTP</button>
-        <button role="tab" aria-selected="false" aria-controls="methodology" id="tab-method" tabindex="-1">Methodology</button>
-      </div>
-
-      <section class="tab-panel" role="tabpanel" id="hara-artifacts" aria-labelledby="tab-hara" hidden>
-        <header><p class="hara-kicker">Nine artifacts · eight algorithms</p><h2>Prepared execution results</h2><p>Preparation, first invocation, steady state, and throughput are separate measurements. Every published cell is checksum verified.</p></header>
-        {evidence ? <div class="detail-table"><table><thead><tr><th>Artifact / workload</th><th>Prepare</th><th>First</th><th>Steady</th><th>Calls/s</th></tr></thead><tbody>
-        {catalog.artifacts.flatMap((artifact) => catalog.corpus.workloads.map((workload) => { const row = index.get(`${artifact.id}/${workload}`); return <tr><th><code>{artifact.id}</code><small>{workload}</small></th><td>{formatTime(row?.prepare_ns)}</td><td>{formatTime(row?.first_ns)}</td><td>{formatTime(row?.steady_ns)}</td><td>{row?.throughput_per_sec == null ? "Pending" : row.throughput_per_sec.toFixed(1)}</td></tr>; }))}
-        </tbody></table></div> : <p class="summary-note">The cross-language standard run is published first. The nine-runtime reference run remains gated until every native-image and browser cell can be produced on one pinned host.</p>}
-        <div class="artifact-specs">{catalog.artifacts.map((artifact) => <article><code>{artifact.id}</code><b>{artifact.host} · {artifact.representation}</b><p>{artifact.summary}</p><small>{artifact.invocation}</small></article>)}</div>
-      </section>
-
-      <section class="tab-panel" role="tabpanel" id="language-shootout" aria-labelledby="tab-languages">
-        <header><p class="hara-kicker">One Hara tier</p><h2>Language shootout</h2><p>Every competitor is compared with <code>hara-rust-full</code>, Hara’s highest-performance native tier, over the same eight algorithms.</p></header>
-        <div class="detail-table"><table><thead><tr><th>Runtime</th>{catalog.corpus.workloads.map((workload) => <th>{workload}</th>)}<th>vs Hara</th></tr></thead><tbody>{languageRuntimes.map((runtime) => <tr><th><code>{runtime}</code></th>{catalog.corpus.workloads.map((workload) => <td>{formatTime(languageIndex.get(`${runtime}/${workload}`))}</td>)}<td>{formatRatio(runtime)}</td></tr>)}</tbody></table></div>
-      </section>
-
-      <section class="tab-panel" role="tabpanel" id="http-results" aria-labelledby="tab-http" hidden>
-        <header><p class="hara-kicker">Loopback HTTP/1.1 · keep-alive</p><h2>HTTP frameworks</h2><p>Hoplite’s raw exchange, native request, and request+HTA boundaries are measured separately against OpenResty and the comparison servers, using identical routes and payloads.</p></header>
-        {hasHttpEvidence ? <div class="detail-table"><table><thead><tr><th>Server / route</th><th>Requests/s</th><th>Mean</th><th>p50</th><th>p95</th><th>p99</th></tr></thead><tbody>{httpRows.map((row) => <tr><th><code>{row.server}</code><small>{row.route}</small></th>{row.status === "ok" ? <><td>{row.requests_per_second!.toFixed(1)}</td><td>{row.mean_ms!.toFixed(3)} ms</td><td>{row.p50_ms!.toFixed(1)} ms</td><td>{row.p95_ms!.toFixed(1)} ms</td><td>{row.p99_ms!.toFixed(1)} ms</td></> : <td colspan="5">Not applicable · {row.reason}</td>}</tr>)}</tbody></table></div> : <p class="summary-note">Pending: local server binaries unavailable.</p>}
-      </section>
-
-      <section class="tab-panel methodology" role="tabpanel" id="methodology" aria-labelledby="tab-method" hidden>
-        <header><p class="hara-kicker">Reproduce the numbers</p><h2>Methodology</h2></header>
-        <div class="method-grid"><article><h3>Corpus</h3><p>Sieve, Towers, Queens, heap permutation, Ackermann, Tak, Collatz, and matrix multiplication use equivalent runtime-specific source and identical expected checksums.</p></article><article><h3>Timing boundaries</h3><p>Preparation, first invocation, and execution are separate for prepared tiers. The tiny browser core reports one end-to-end source-eval sample. Native Image fallback rows use a reduced sample count; exact protocols ship with the evidence.</p></article><article><h3>Environment</h3><p>Reference evidence comes from one pinned self-hosted machine. It records CPU, OS, revisions, toolchains, browser, artifact bytes, and every raw sample.</p></article><article><h3>Publication gate</h3><p><code>python3 lib/bench/validate_evidence.py reference-v2.json</code> rejects missing cells, failed checksums, vocabulary drift, and comparison tiers other than <code>hara-rust-full</code>.</p></article></div>
-      </section>
+      <div class="tabs" role="tablist" aria-label="Benchmark sections"><button role="tab" aria-selected="true" aria-controls="language-shootout" id="tab-languages">Language shootout</button><button role="tab" aria-selected="false" aria-controls="hara-artifacts" id="tab-hara" tabindex="-1">Hara runtimes</button><button role="tab" aria-selected="false" aria-controls="http-results" id="tab-http" tabindex="-1">HTTP</button></div>
+      <LanguagePanel /><RuntimePanel /><HttpPanel />
     </section>
+    <RuntimeReference />
   </main>
   <footer><span>Hara benchmark evidence</span><a href="https://github.com/hara-lang/hara/tree/main/lib/bench">Methods and raw data</a></footer>
   <script>
     const tabs = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
-    const activate = (tab:HTMLButtonElement, focus = true) => {
-      for (const item of tabs) { const active = item === tab; item.setAttribute("aria-selected", String(active)); item.tabIndex = active ? 0 : -1; const controls = item.getAttribute("aria-controls"); if (controls) document.getElementById(controls)?.toggleAttribute("hidden", !active); }
-      if (focus) tab.focus(); history.replaceState(null, "", `#${tab.getAttribute("aria-controls")}`);
+    const activate = (tab: HTMLButtonElement, focus = true) => {
+      tabs.forEach((item) => {
+        const active = item === tab;
+        item.setAttribute("aria-selected", String(active));
+        item.tabIndex = active ? 0 : -1;
+        const panel = item.getAttribute("aria-controls");
+        if (panel) document.getElementById(panel)?.toggleAttribute("hidden", !active);
+      });
+      if (focus) tab.focus();
+      history.replaceState(null, "", `#${tab.getAttribute("aria-controls")}`);
     };
-    tabs.forEach((tab, index) => { tab.addEventListener("click", () => activate(tab)); tab.addEventListener("keydown", (event) => { if (!['ArrowLeft','ArrowRight'].includes(event.key)) return; event.preventDefault(); const offset = event.key === 'ArrowRight' ? 1 : -1; activate(tabs[(index + offset + tabs.length) % tabs.length]); }); });
-    const initial = tabs.find((tab) => `#${tab.getAttribute("aria-controls")}` === location.hash); if (initial) activate(initial, false);
+    tabs.forEach((tab, index) => {
+      tab.addEventListener("click", () => activate(tab));
+      tab.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+        event.preventDefault();
+        activate(tabs[(index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length]);
+      });
+    });
+    const initialTab = tabs.find((tab) => `#${tab.getAttribute("aria-controls")}` === location.hash);
+    if (initialTab) activate(initialTab, false);
+
+    const formatNs = (value: number) => {
+      if (!Number.isFinite(value)) return "Pending";
+      return value < 1_000 ? `${value.toFixed(1)} ns` : value < 1_000_000 ? `${(value / 1_000).toFixed(1)} µs` : `${(value / 1_000_000).toFixed(2)} ms`;
+    };
+    const detail = document.querySelector<HTMLElement>("[data-matrix-detail]");
+    const cells = [...document.querySelectorAll<HTMLButtonElement>("[data-comparison-cell]")];
+    const selectCell = (cell: HTMLButtonElement) => {
+      cells.forEach((item) => item.setAttribute("aria-pressed", String(item === cell)));
+      if (!detail) return;
+      const competitor = cell.dataset.runtimeLabel ?? "Competitor";
+      detail.querySelector<HTMLElement>("[data-detail-title]")!.textContent = `Hara vs ${competitor}`;
+      detail.querySelector<HTMLElement>("[data-detail-runtime-label]")!.textContent = competitor;
+      detail.querySelector<HTMLElement>("[data-detail-result]")!.textContent = cell.dataset.result ?? "Pending";
+      if (cell.dataset.kind === "overall") {
+        detail.querySelector<HTMLElement>("[data-detail-summary]")!.textContent = `All workloads. Hara wins ${cell.dataset.haraWins}; ${competitor} wins ${cell.dataset.competitorWins}.`;
+        detail.querySelector<HTMLElement>("[data-detail-hara]")!.textContent = "1.00× baseline";
+        detail.querySelector<HTMLElement>("[data-detail-runtime]")!.textContent = `${Number(cell.dataset.ratio).toFixed(2)}× Hara time`;
+      } else {
+        detail.querySelector<HTMLElement>("[data-detail-summary]")!.textContent = `${cell.dataset.workloadLabel}: ${cell.dataset.workloadSummary}`;
+        detail.querySelector<HTMLElement>("[data-detail-hara]")!.textContent = formatNs(Number(cell.dataset.haraNs));
+        detail.querySelector<HTMLElement>("[data-detail-runtime]")!.textContent = formatNs(Number(cell.dataset.runtimeNs));
+      }
+    };
+    cells.forEach((cell) => cell.addEventListener("click", () => selectCell(cell)));
+    const initialCell = cells.find((cell) => cell.dataset.initial === "true") ?? cells[0];
+    if (initialCell) selectCell(initialCell);
   </script>
-</body></html>
+</body>
+</html>
