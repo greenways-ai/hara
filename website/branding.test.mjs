@@ -7,7 +7,7 @@ const websiteFile = (name) => readFile(new URL(name, import.meta.url), "utf8");
 test("the main site presents Hara as an embeddable multi-runtime language", async () => {
   const source = await websiteFile("index.html");
 
-  assert.match(source, /<title>Hara — one embeddable language, many runtimes<\/title>/);
+  assert.match(source, /<title>Hara — A programmable kernel\. Embedded everywhere\.<\/title>/);
   assert.match(source, /A programmable kernel/);
   assert.match(source, /ONE LANGUAGE · MANY RUNTIMES/);
   assert.match(source, /Use WASM like a library/);
@@ -32,7 +32,7 @@ test("the v1 showcase remains available with root-relative assets", async () => 
   const source = await websiteFile("v1.html");
 
   assert.match(source, /<base href="\.\.\/">/);
-  assert.match(source, /A Programmable Kernel for the Agentic Age\./);
+  assert.match(source, /A programmable kernel\. Embedded everywhere\./);
   assert.match(source, /src="\.\/app\.js/);
 });
 
