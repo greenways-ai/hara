@@ -64,3 +64,17 @@ test("publishes the interactive syllabus controller and styles with docs", async
   assert.match(prepare, /stylesheets\/syllabus\.css/);
   assert.match(prepare, /mkdir\(join\(runtimeDestination, "stylesheets"\)/);
 });
+
+test("hydrates Tic Tac Toe stages as REPL-attached canvas outputs", async () => {
+  const repl = await readFile(new URL("../public/assets/docs-repl.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles/docs.css", import.meta.url), "utf8");
+  assert.match(repl, /data-hara-canvas-stage/);
+  assert.match(repl, /compileAnonymousDocument/);
+  assert.match(repl, /registerCanvas\(runtime\)/);
+  assert.match(repl, /waitForFirstRender/);
+  assert.match(repl, /runner\.button\.click\(\)/);
+  assert.match(repl, /"studio\.draw": "\/runtime\/studio\/hal\/draw\.hal"/);
+  assert.match(styles, /\.hara-canvas-stage \.hara-repl/);
+  assert.match(styles, /\.hara-live-canvas/);
+  assert.match(styles, /aspect-ratio:4 \/ 3/);
+});
