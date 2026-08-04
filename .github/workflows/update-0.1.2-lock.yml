@@ -1,0 +1,41 @@
+name: Refresh Hara 0.1.2 lockfile
+
+on:
+  push:
+    branches: [agent/hara-0.1.2-release]
+    paths:
+      - .github/workflows/update-0.1.2-lock.yml
+      - rust/Cargo.toml
+      - rust/raw/Cargo.toml
+      - rust/compiler/Cargo.toml
+      - rust/vm-runtime/Cargo.toml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hara-0.1.2-lock
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/hara-0.1.2-release
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Resolve the workspace and refresh Cargo.lock
+        run: cargo metadata --manifest-path rust/Cargo.toml --format-version 1 >/dev/null
+      - name: Commit the generated lockfile
+        shell: bash
+        run: |
+          if git diff --quiet -- rust/Cargo.lock; then
+            echo "Cargo.lock is already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rust/Cargo.lock
+          git commit -m "Refresh Cargo lock for 0.1.2"
+          git push origin HEAD:agent/hara-0.1.2-release
