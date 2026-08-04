@@ -8,8 +8,10 @@ export function repositoryRequest(kind: RepositoryKind, ref: string, env: Env): 
   if (ref !== "main" && !COMMIT.test(ref)) throw new Error("ref must be main or a 40-character commit");
   const repository = kind === "identity" ? env.IDENTITY_REPOSITORY : env.PACKAGES_REPOSITORY;
   const path = kind === "identity" ? "identity.edn" : "registry.edn";
-  return new Request(`https://api.github.com/repos/${repository}/contents/${path}?ref=${ref}`, {
-    headers: { accept: "application/vnd.github.raw+json", "user-agent": "hara-platform" },
+  // raw.githubusercontent.com is CDN-fronted; the api.github.com contents
+  // endpoint rate-limits shared Worker egress IPs and 502s in practice.
+  return new Request(`https://raw.githubusercontent.com/${repository}/${ref}/${path}`, {
+    headers: { "user-agent": "hara-platform" },
   });
 }
 
