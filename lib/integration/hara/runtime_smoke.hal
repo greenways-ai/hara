@@ -1,47 +1,148 @@
 (ns hara.runtime-smoke
-  (:require [tahto.common.emit :as emit]
+  (:require [std.foundation.os :as os]
+            [std.foundation.string :as string]
+            [tahto.common.emit :as emit]
             [tahto.core :as tahto]
+            [tahto.core.eval :as evaluation]
             [tahto.model.v1.spec-js :as spec-js]
-            [tahto.model.v1.spec-python :as spec-python]))
+            [tahto.model.v1.spec-python :as spec-python]
+            [tahto.runtime.basic.transport-node :as transport-node]))
 
-(def js-source
+(defn collect-process-output
+  [pending]
+  (try
+    (string/decode-utf8 (evaluation/await pending 1000))
+    (catch Throwable error
+      (str "<unavailable: " (or (ex-message error) (str error)) ">"))))
+
+(defn eval-persistent!
+  [runtime source]
+  (try
+    (tahto/rt-raw-eval runtime source)
+    (catch Throwable error
+      (let [transport (get runtime :transport)
+            transport-state (transport-node/state transport)
+            child (get transport-state :process)
+            alive-before-stop (if child (os/process-alive? child) false)
+            _ (tahto/rt-stop runtime)
+            stdout (if child
+                     (collect-process-output (os/process-stdout child))
+                     nil)
+            stderr (if child
+                     (collect-process-output (os/process-stderr child))
+                     nil)]
+        (throw
+         (ex-info
+          "Persistent runtime evaluation failed"
+          {:source source
+           :alive-before-stop alive-before-stop
+           :transport-state transport-state
+           :stdout stdout
+           :stderr stderr
+           :cause-data (ex-data error)}
+          error))))))
+
+(def js-command-source
   (emit/emit '(console.log (+ 19 23))
              (spec-js/select)))
 
-(def python-source
+(def python-command-source
   (emit/emit '(print (+ 19 23))
              (spec-python/select)))
 
+(def js-expression-source
+  (emit/emit '(+ 19 23)
+             (spec-js/select)))
+
+(def python-expression-source
+  (emit/emit '(+ 19 23)
+             (spec-python/select)))
+
+(println "tahto runtime smoke: creating oneshot runtimes")
+
 (def js-oneshot (tahto/rt-create :js :oneshot))
 (def python-oneshot (tahto/rt-create :python :oneshot))
-(def js-basic (tahto/rt-start (tahto/rt-create :js :basic)))
-(def python-basic (tahto/rt-start (tahto/rt-create :python :basic)))
 
-(def js-oneshot-output (tahto/rt-raw-eval js-oneshot js-source))
-(def python-oneshot-output (tahto/rt-raw-eval python-oneshot python-source))
-(def js-basic-output (tahto/rt-raw-eval js-basic js-source))
-(def python-basic-output (tahto/rt-raw-eval python-basic python-source))
+(println "tahto runtime smoke: evaluating JavaScript oneshot")
+(def js-oneshot-output (tahto/rt-raw-eval js-oneshot js-command-source))
+(println "tahto runtime smoke: JavaScript oneshot complete")
+
+(println "tahto runtime smoke: evaluating Python oneshot")
+(def python-oneshot-output
+  (tahto/rt-raw-eval python-oneshot python-command-source))
+(println "tahto runtime smoke: Python oneshot complete")
+
+(println "tahto runtime smoke: starting JavaScript persistent runtime")
+(def js-basic (tahto/rt-start (tahto/rt-create :js :basic)))
+(def js-basic-transport (get-in js-basic [:process :transport]))
+
+(println (str "tahto runtime smoke: JavaScript source: " js-expression-source))
+(println "tahto runtime smoke: evaluating JavaScript persistent runtime")
+(def js-basic-output (eval-persistent! js-basic js-expression-source))
+(println "tahto runtime smoke: JavaScript persistent runtime complete")
+
+(tahto/rt-stop js-basic)
+(def js-basic-state (deref (get js-basic :state)))
+(println "tahto runtime smoke: JavaScript persistent runtime stopped")
+
+(println "tahto runtime smoke: starting Python persistent runtime")
+(def python-basic (tahto/rt-start (tahto/rt-create :python :basic)))
+(def python-basic-transport (get-in python-basic [:process :transport]))
+
+(println (str "tahto runtime smoke: Python source: " python-expression-source))
+(println "tahto runtime smoke: evaluating Python persistent runtime")
+(def python-basic-output
+  (eval-persistent! python-basic python-expression-source))
+(println "tahto runtime smoke: Python persistent runtime complete")
+
+(tahto/rt-stop python-basic)
+(def python-basic-state (deref (get python-basic :state)))
+(println "tahto runtime smoke: Python persistent runtime stopped")
+
+(def expected-js-basic
+  {:type "data"
+   :return "number"
+   :value 42})
+
+(def expected-python-basic
+  {:type "data"
+   :return "int"
+   :value 42})
 
 (if (and (= "42" js-oneshot-output)
          (= "42" python-oneshot-output)
-         (= "42" js-basic-output)
-         (= "42" python-basic-output)
+         (= expected-js-basic js-basic-output)
+         (= expected-python-basic python-basic-output)
          (= {:js 1 :python 1} (:versions tahto/+bootstrap+))
          (= 1 (tahto/registry-book-default-version :js))
          (= [1] (tahto/registry-book-versions :python))
-         (= :oneshot-bootstrap (get-in js-basic [:process :transport]))
-         (= :oneshot-bootstrap (get-in python-basic [:process :transport])))
+         (= :process-socket js-basic-transport)
+         (= :process-socket python-basic-transport)
+         (= :stopped (get js-basic-state :status))
+         (= :stopped (get python-basic-state :status)))
   {:status :passed
    :bootstrap tahto/+bootstrap+
    :oneshot {:js js-oneshot-output
              :python python-oneshot-output}
    :basic {:js js-basic-output
            :python python-basic-output
-           :transport :oneshot-bootstrap}}
+           :transport :process-socket
+           :state {:js js-basic-state
+                   :python python-basic-state}}}
   (throw
    (ex-info "Tahto basic runtime bootstrap smoke failed"
             {:bootstrap tahto/+bootstrap+
+             :sources {:js-command js-command-source
+                       :python-command python-command-source
+                       :js-expression js-expression-source
+                       :python-expression python-expression-source}
              :oneshot {:js js-oneshot-output
                        :python python-oneshot-output}
              :basic {:js js-basic-output
-                     :python python-basic-output}})))
+                     :python python-basic-output
+                     :expected {:js expected-js-basic
+                                :python expected-python-basic}
+                     :transport {:js js-basic-transport
+                                 :python python-basic-transport}
+                     :state {:js js-basic-state
+                             :python python-basic-state}}})))
