@@ -43,6 +43,7 @@ export default defineConfig({
             { label: "Choose a learning path", slug: "docs/learn" },
             { label: "First Contact", slug: "docs/learn/first-contact" },
             { label: "Protocols for Builders", slug: "docs/learn/protocols" },
+            { label: "Collection Protocols", slug: "docs/learn/protocols/collections" },
             { label: "Protocol Atlas", slug: "docs/learn/protocols/atlas" }
           ]
         },
