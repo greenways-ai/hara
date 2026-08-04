@@ -14,7 +14,7 @@
 
   (get-in (registry/registry-book :postgres :default nil)
           [:selection :coordinate :grammar/version])
-  => 1)
+  => 6)
 
 (fact "preserves the Foundation builtin template contract"
   (builtin/pg-tmpl 'hello)

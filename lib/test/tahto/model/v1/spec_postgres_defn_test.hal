@@ -1,0 +1,122 @@
+(ns tahto.model.v1.spec-postgres-defn-test
+  (:use code.test)
+  (:require [tahto.core :as l]
+            [tahto.core.compile :as compile]
+            [tahto.core.script :as script]
+            [tahto.model.v1.spec-postgres :as postgres]))
+
+(l/script :postgres
+  {:static {:application ["fixture"]
+            :all {:schema ["fixture"]}}})
+
+(defn.pg sales-tax
+  {:- [:real]
+   :props [:immutable :parallel-safe]}
+  [:real subtotal :real fraction := 0.06]
+  (return (* fraction subtotal)))
+
+(defn current-module
+  []
+  (symbol (str (current-namespace))))
+
+(defn sales-tax-form
+  []
+  (list 'defn
+        'sales-tax
+        {:- [:real]
+         :props [:immutable :parallel-safe]}
+        (vector :real 'subtotal :real 'fraction := 0.06)
+        (list 'return (list '* 'fraction 'subtotal))))
+
+(defn sql-one-form
+  []
+  (list 'defn
+        'one
+        {:- [:integer]
+         :%% :sql}
+        []
+        1))
+
+(defn direct-output
+  [form]
+  (let [formatted (postgres/pg-defn-format form)
+        normalized (second formatted)]
+    (postgres/pg-defn normalized
+                      (:grammar postgres/+selection+)
+                      {})))
+
+(def +sales-tax-output+
+  (str "CREATE OR REPLACE FUNCTION sales_tax(\n"
+       "  subtotal REAL,\n"
+       "  fraction REAL DEFAULT 0.06\n"
+       ") RETURNS REAL AS $$\n"
+       "BEGIN\n"
+       "  RETURN fraction * subtotal;\n"
+       "END;\n"
+       "$$ LANGUAGE 'plpgsql' IMMUTABLE PARALLEL SAFE;"))
+
+(def +qualified-sales-tax-output+
+  (str "CREATE OR REPLACE FUNCTION \"fixture\".sales_tax(\n"
+       "  subtotal REAL,\n"
+       "  fraction REAL DEFAULT 0.06\n"
+       ") RETURNS REAL AS $$\n"
+       "BEGIN\n"
+       "  RETURN fraction * subtotal;\n"
+       "END;\n"
+       "$$ LANGUAGE 'plpgsql' IMMUTABLE PARALLEL SAFE;"))
+
+(def results
+  [(fact "defn.pg registers a normalized code entry"
+     (let [entry (get-in (deref script/+modules+)
+                         [(current-module) :code 'sales-tax])]
+       [(:id entry)
+        (:op entry)
+        (first (:form-input entry))
+        (second (:form-input entry))])
+     => ['sales-tax 'defn 'defn 'sales-tax])
+
+   (fact "the PostgreSQL formatter retains return, language, properties, and typed inputs"
+     (let [formatted (postgres/pg-defn-format (sales-tax-form))
+           metadata (first formatted)]
+       [(:static/return metadata)
+        (:static/language metadata)
+        (:static/props metadata)
+        (vec (map (fn [argument]
+                    [(:symbol argument)
+                     (:modifiers argument)
+                     (:value argument)])
+                  (:static/input metadata)))])
+     => [[:real]
+         :default
+         [:immutable :parallel-safe]
+         [['subtotal [:real] nil]
+          ['fraction [:real] 0.06]]])
+
+   (fact "emits the historical PL/pgSQL function shape directly"
+     (direct-output (sales-tax-form))
+     => +sales-tax-output+)
+
+   (fact "selects SQL function emission from :%% metadata"
+     (direct-output (sql-one-form))
+     => (str "CREATE OR REPLACE FUNCTION one() RETURNS INTEGER AS $$\n"
+             "  SELECT 1;\n"
+             "$$ LANGUAGE 'sql';"))
+
+   (fact "compile-module hydrates the module schema and emits the registered entry"
+     (let [module (current-module)
+           result (compile/compile-module
+                   {:lang :postgres
+                    :main module
+                    :layout :module
+                    :emit {:code {:label true}}})]
+       [(:output result)
+        (:diagnostics result)
+        (get-in result [:provenance :module-order])
+        (get-in result [:provenance :entry-order])])
+     => [(str "-- " (current-module) "/sales-tax\n"
+              +qualified-sales-tax-output+)
+         []
+         [(current-module)]
+         [(symbol (str (current-module)) "sales-tax")]])])
+
+(pr-str (run '[tahto.model.v1.spec-postgres-defn-test]))
