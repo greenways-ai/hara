@@ -49,6 +49,14 @@ fi
 grep -Fq 'src/legacy/large.rs grew to 8 lines; recorded legacy maximum is 7' "$tmp/growth.out"
 write_lines "$root/src/legacy/large.rs" 7
 
+write_lines "$root/src/legacy/large.rs" 5
+if run_check >"$tmp/resolved.out" 2>&1; then
+  echo "expected resolved legacy debt to leave the baseline" >&2
+  exit 1
+fi
+grep -Fq 'Resolved line baseline entry: src/legacy/large.rs now has 5 lines; remove it from the baseline' "$tmp/resolved.out"
+write_lines "$root/src/legacy/large.rs" 7
+
 write_lines "$root/src/new-large.rs" 6
 if run_check >"$tmp/new.out" 2>&1; then
   echo "expected a new oversized module to fail" >&2
