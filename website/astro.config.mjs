@@ -21,6 +21,7 @@ export default defineConfig({
       favicon: "/assets/hara-favicon.svg",
       head: [
         { tag: "link", attrs: { rel: "stylesheet", href: "/docs-assets/stylesheets/syllabus.css" } },
+        { tag: "link", attrs: { rel: "stylesheet", href: "/docs-assets/live/style.css" } },
         { tag: "script", attrs: { type: "module", src: "/assets/docs-repl.js" } },
         { tag: "script", attrs: { type: "module", src: "/docs-assets/javascripts/syllabus.js" } },
         { tag: "meta", attrs: { property: "og:site_name", content: "Hara / Docs" } },

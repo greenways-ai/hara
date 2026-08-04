@@ -67,7 +67,27 @@
 .hara-repl-details-panel dd { min-width:0; margin:0; overflow-wrap:anywhere; color:var(--hara-muted); font:500 .62rem/1.45 var(--hara-font-mono); }
 .hara-repl button { min-height:30px; padding:.25rem .7rem; color:white; background:var(--hara-signal); border:0; border-radius:7px; font:700 .7rem var(--hara-font-sans); cursor:pointer; }
 .hara-repl button:disabled { opacity:.55; cursor:wait; }
-.hara-repl textarea { display:block; width:100%; min-height:74px; padding:1rem; resize:vertical; color:var(--sl-color-white); background:transparent; border:0; outline:0; font:500 .82rem/1.65 var(--hara-font-mono); tab-size:2; }
+/* Editor surface: syntax-highlight overlay under a transparent textarea,
+   same pattern as @hara-lang/live. */
+.hara-repl-editor { position:relative; overflow:hidden; }
+.hara-repl-editor .code-highlight,
+.hara-repl-editor .code-highlight code,
+.hara-repl-editor textarea { margin:0; font:500 .82rem/1.65 var(--hara-font-mono); tab-size:2; white-space:pre; overflow-wrap:normal; }
+.hara-repl-editor .code-highlight code,
+.hara-repl-editor textarea { display:block; padding:1rem; }
+.hara-repl-editor .code-highlight { position:absolute; inset:0; overflow:hidden; color:var(--sl-color-white); pointer-events:none; }
+.hara-repl-editor textarea { position:relative; width:100%; min-height:74px; resize:vertical; overflow:auto; color:transparent; caret-color:var(--hara-signal); background:transparent; border:0; outline:0; }
+.hara-repl-editor textarea::selection { background:color-mix(in srgb,var(--hara-signal) 28%,transparent); }
+.hara-repl-editor .code-highlight .comment { color:var(--hara-faint); }
+.hara-repl-editor .code-highlight .string { color:#ffd479; }
+.hara-repl-editor .code-highlight .keyword { color:var(--hara-signal); }
+.hara-repl-editor .code-highlight .paren-0 { color:#41f5e4; }
+.hara-repl-editor .code-highlight .paren-1 { color:#ff2e88; }
+.hara-repl-editor .code-highlight .paren-2 { color:#ffd479; }
+.hara-repl-editor .code-highlight .paren-3 { color:#8af579; }
+.hara-repl-editor .code-highlight .paren-4 { color:#7da7ff; }
+.hara-repl-editor .code-highlight .paren-5 { color:#d18aff; }
+.hara-repl-editor .code-highlight .unmatched { color:var(--hara-danger); text-decoration:underline wavy; }
 .hara-repl output { display:block; min-height:38px; padding:.65rem 1rem; overflow-wrap:anywhere; color:var(--hara-success); background:color-mix(in srgb,var(--sl-color-bg) 80%,transparent); border-top:1px solid var(--sl-color-gray-5); border-radius:0 0 11px 11px; font:.74rem/1.5 var(--hara-font-mono); }
 .hara-repl output[hidden] { display:none; }
 .hara-repl output[data-state="error"] { color:var(--hara-danger); }
@@ -102,3 +122,7 @@
   .hara-live-canvas { min-height:0; max-height:none; aspect-ratio:4 / 3; }
   .hara-board-annotations,.hara-canvas-command-cards { grid-template-columns:1fr; }
 }
+
+/* Embedded live cards (<div data-hara-live="...">), styled by
+   /docs-assets/live/style.css and bridged onto the docs theme tokens. */
+.hara-live-card { --hara-live-accent:var(--hara-signal); --hara-live-border:var(--sl-color-gray-5); --hara-live-mono-font:var(--hara-font-mono); margin:1.25rem 0; }
