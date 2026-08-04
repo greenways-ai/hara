@@ -74,9 +74,9 @@ for url in ${NETLIFY_HEALTH_URLS:-}; do
   for attempt in {1..20}; do
     if curl --fail --silent --show-error --location --max-time 20 "$url" >"$page" \
       && grep -q 'property="og:image"' "$page" \
-      && grep -q 'property="og:image:width" content="3840"' "$page"; then
+      && grep -q 'property="og:image:width" content="1200"' "$page"; then
       healthy=true
-      echo "Verified 3840px OG metadata at ${url}."
+      echo "Verified 1200px OG metadata at ${url}."
       break
     fi
     if [[ "$attempt" -lt 20 ]]; then
