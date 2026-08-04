@@ -26,7 +26,7 @@ test("uses the compact ecosystem navigation and sign-in button", async () => {
 
 test("leads with the language and renders benchmark evidence from committed data", async () => {
   const page = await readFile(new URL("../src/pages/index.astro", import.meta.url), "utf8");
-  assert.match(page, /Simple to pick up\.[\s\S]*Fast enough to keep\./);
+  assert.match(page, /Start simple\.[\s\S]*Build forever\./);
   assert.match(page, /Hara is Lisp/);
   assert.match(page, /language-reference\.json/);
   assert.match(page, /reference-v2\.json/);
