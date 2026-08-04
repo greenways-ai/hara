@@ -1,8 +1,49 @@
 ---
-import { hasHttpEvidence, httpRows } from "../lib/benchmark-data";
+import {
+  comparisonResult,
+  formatRps,
+  hasHttpEvidence,
+  httpBaseline,
+  httpIndex,
+  httpRatioFor,
+  httpRoutes,
+  httpServers
+} from "../lib/benchmark-data";
+const baselineLabel = httpBaseline;
 ---
 <section class="tab-panel" role="tabpanel" id="http-results" aria-labelledby="tab-http" hidden>
   <header><p class="hara-kicker">Loopback HTTP/1.1 · keep-alive</p><h2>HTTP frameworks</h2><p>Hoplite’s raw exchange, native request, and request+HTA boundaries are measured separately against OpenResty and the comparison servers.</p></header>
-  {hasHttpEvidence ? <div class="detail-table"><table><thead><tr><th>Server / route</th><th>Requests/s</th><th>Mean</th><th>p50</th><th>p95</th><th>p99</th></tr></thead><tbody>{httpRows.map((row) => <tr><th><code>{row.server}</code><small>{row.route}</small></th>{row.status === "ok" ? <><td>{row.requests_per_second!.toFixed(1)}</td><td>{row.mean_ms!.toFixed(3)} ms</td><td>{row.p50_ms!.toFixed(1)} ms</td><td>{row.p95_ms!.toFixed(1)} ms</td><td>{row.p99_ms!.toFixed(1)} ms</td></> : <td colspan="5">Not applicable · {row.reason}</td>}</tr>)}</tbody></table></div> : <p class="summary-note">Pending: local server binaries unavailable.</p>}
+  {hasHttpEvidence ? <section class="comparison-results" aria-labelledby="http-matrix-title">
+    <header class="section-heading">
+      <div><p class="hara-kicker">Benchmark results</p><h3 id="http-matrix-title">HTTP exchange matrix</h3><p>Each cell states the {baselineLabel} advantage or deficit in requests per second. Select a cell to inspect latency.</p></div>
+      <div class="matrix-legend" aria-label="Matrix legend"><span class="legend-ahead">Hara ahead</span><span class="legend-behind">Hara behind</span></div>
+    </header>
+    <div class="matrix-stage">
+      <div class="matrix-scroll" tabindex="0" aria-label="Scrollable HTTP server comparison matrix">
+        <table class="comparison-matrix">
+          <thead><tr><th scope="col">Server</th>{httpRoutes.map((route) => <th scope="col">{route}</th>)}</tr></thead>
+          <tbody>
+            <tr class="hara-baseline"><th scope="row"><strong>{baselineLabel}</strong><code>baseline</code></th>{httpRoutes.map(() => <td><span class="baseline-cell"><strong>1.00×</strong><span>baseline</span></span></td>)}</tr>
+            {httpServers.filter((server) => server !== httpBaseline).map((server) => <tr>
+              <th scope="row"><strong>{server}</strong><code>{server.startsWith("hoplite") ? "hara" : "external"}</code></th>
+              {httpRoutes.map((route) => {
+                const row = httpIndex.get(`${server}/${route}`);
+                if (!row || row.status !== "ok") {
+                  return <td><span class="baseline-cell"><strong>—</strong><span>{row?.reason ?? "pending"}</span></span></td>;
+                }
+                const baseline = httpIndex.get(`${httpBaseline}/${route}`);
+                const result = comparisonResult(httpRatioFor(server, route));
+                return <td><button class:list={["matrix-cell", result.status]} type="button" data-comparison-cell data-kind="http" data-runtime-label={server} data-workload-label={route} data-ratio={httpRatioFor(server, route)} data-result={result.text} data-rps={formatRps(row.requests_per_second)} data-baseline-rps={formatRps(baseline?.requests_per_second)} data-mean-ms={row.mean_ms!.toFixed(3)} data-p95-ms={row.p95_ms!.toFixed(1)} aria-pressed="false"><strong>{result.value}</strong><span>{result.label}</span></button></td>;
+              })}
+            </tr>)}
+          </tbody>
+        </table>
+      </div>
+      <aside class="matrix-detail" data-matrix-detail aria-live="polite">
+        <p class="hara-kicker">Selected exchange</p><h4 data-detail-title>Select a result</h4><p data-detail-summary>Choose a cell to inspect the exchange.</p>
+        <dl><div><dt data-detail-label-a>Server</dt><dd data-detail-hara>—</dd></div><div><dt data-detail-runtime-label>Baseline</dt><dd data-detail-runtime>—</dd></div><div><dt>Result</dt><dd data-detail-result>—</dd></div></dl>
+      </aside>
+    </div>
+  </section> : <p class="summary-note">Pending: local server binaries unavailable.</p>}
   <section class="result-explanation compact" aria-labelledby="http-explanation-title"><header><p class="hara-kicker">What just happened</p><h3 id="http-explanation-title">One route contract, several request boundaries.</h3></header><div class="method-grid"><article><h4>Same host</h4><p>Servers run on one pinned machine over loopback.</p></article><article><h4>Same transport</h4><p>HTTP/1.1 keep-alive and identical payloads are used.</p></article><article><h4>Separate Hara layers</h4><p>Raw exchange, request construction, and HTA conversion stay independent.</p></article><article><h4>Latency stays visible</h4><p>Mean and percentile values accompany throughput.</p></article></div></section>
 </section>

@@ -144,9 +144,30 @@ export const comparisonResult = (ratio: number | null) => {
 };
 export const formatTime = (ns: number | null | undefined) =>
   ns == null ? "Pending" : ns < 1e6 ? `${(ns / 1e3).toFixed(1)} µs` : `${(ns / 1e6).toFixed(2)} ms`;
+export const formatRps = (value: number | null | undefined) =>
+  value == null ? "Pending" : value >= 1e3 ? `${(value / 1e3).toFixed(1)}k` : value.toFixed(1);
 export const languageTime = (runtime: string, workload: string) => languageIndex.get(`${runtime}/${workload}`);
 export const httpRows = evidence?.http_measurements ?? [];
 export const hasHttpEvidence = httpRows.length > 0;
+export const httpRoutes = [...new Set(httpRows.map((row) => row.route))];
+export const httpServers = [...new Set(httpRows.map((row) => row.server))];
+export const httpIndex = new Map<string, HttpMeasurement>(
+  httpRows.map((row) => [`${row.server}/${row.route}`, row])
+);
+export const httpBaseline = "hoplite-raw";
+export const httpRatioFor = (server: string, route: string) => {
+  const baseline = httpIndex.get(`${httpBaseline}/${route}`);
+  const candidate = httpIndex.get(`${server}/${route}`);
+  return baseline?.requests_per_second && candidate?.requests_per_second
+    ? baseline.requests_per_second / candidate.requests_per_second
+    : null;
+};
+export const runtimeBaseline = haraRuntime;
+export const steadyRatioFor = (artifact: string, workload: string) => {
+  const baseline = runtimeIndex.get(`${runtimeBaseline}/${workload}`);
+  const candidate = runtimeIndex.get(`${artifact}/${workload}`);
+  return baseline && candidate ? candidate.steady_ns / baseline.steady_ns : null;
+};
 const timestamp = languageEvidence?.environment?.timestamp ?? evidence?.environment?.timestamp;
 export const evidenceDate = timestamp && !Number.isNaN(Date.parse(timestamp))
   ? new Intl.DateTimeFormat("en-AU", {
