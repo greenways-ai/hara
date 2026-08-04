@@ -11,6 +11,7 @@ on:
       - 'scripts/build-www'
       - 'scripts/write-kernel-manifest.mjs'
       - 'scripts/sync-hara-ui.mjs'
+      - '.github/scripts/reconcile-netlify-domain.sh'
       - '.github/workflows/pages-www.yml'
   workflow_dispatch:
 
@@ -53,26 +54,27 @@ jobs:
         run: |
           npm test --prefix website
           node --test website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
-          test -s target/www/og-hara-ribbon.jpg
+          test -s target/www/og-hara.jpg
       - name: Deploy prod to www.testing.hara-lang.org
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
+      - name: Reconcile the testing domain
+        run: bash .github/scripts/reconcile-netlify-domain.sh
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
+          NETLIFY_CUSTOM_DOMAIN: www.testing.hara-lang.org
       - name: Deploy production to www.hara-lang.org
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
-      - name: Correct the production domain
-        continue-on-error: true
-        run: |
-          curl --fail-with-body --silent --show-error \
-            --request PATCH \
-            --header "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
-            --header "Content-Type: application/json" \
-            --data '{"custom_domain":"www.hara-lang.org"}' \
-            "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}"
+      - name: Reconcile the production domains
+        run: bash .github/scripts/reconcile-netlify-domain.sh
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
+          NETLIFY_CUSTOM_DOMAIN: www.hara-lang.org
+          NETLIFY_DOMAIN_ALIASES: hara-lang.org docs.hara-lang.org
