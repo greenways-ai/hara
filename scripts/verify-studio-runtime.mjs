@@ -21,6 +21,7 @@ const required = [
   "rust/studio/program-host.js",
   "rust/studio/program-worker.js",
   "rust/studio/session-router.js",
+  "rust/studio/supersonic.js",
   "rust/studio/ui.js",
   "rust/studio/studio.css",
   "rust/ui/tokens.css",
@@ -32,6 +33,7 @@ const required = [
   "rust/studio/hal/graph.hal",
   "rust/studio/hal/program.hal",
   "rust/studio/hal/session.hal",
+  "rust/studio/hal/supersonic.hal",
   "rust/std/lib/substrate.hal",
   "rust/std/lib/substrate/frame.hal",
   "rust/std/lib/substrate/protocol.hal",
@@ -45,7 +47,9 @@ const required = [
   "examples/music/hara-amp.js",
   "examples/music/runtime/hara.wasm",
   "examples/music/runtime/host/broker.js",
-  "examples/music/runtime/host/services.js"
+  "examples/music/runtime/host/services.js",
+  "examples/music/runtime/studio/supersonic.js",
+  "examples/music/runtime/studio/hal/supersonic.hal"
 ];
 
 for (const path of required) await access(join(root, path));
