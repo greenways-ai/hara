@@ -20,24 +20,33 @@
   (emit/emit '(+ 19 23)
              (spec-python/select)))
 
-(println "tahto runtime smoke: creating runtimes")
+(println "tahto runtime smoke: creating oneshot runtimes")
 
 (def js-oneshot (tahto/rt-create :js :oneshot))
 (def python-oneshot (tahto/rt-create :python :oneshot))
+
+(println "tahto runtime smoke: evaluating JavaScript oneshot")
+(def js-oneshot-output (tahto/rt-raw-eval js-oneshot js-command-source))
+(println "tahto runtime smoke: JavaScript oneshot complete")
+
+(println "tahto runtime smoke: evaluating Python oneshot")
+(def python-oneshot-output
+  (tahto/rt-raw-eval python-oneshot python-command-source))
+(println "tahto runtime smoke: Python oneshot complete")
+
+(println "tahto runtime smoke: starting persistent runtimes")
+
 (def js-basic (tahto/rt-start (tahto/rt-create :js :basic)))
 (def python-basic (tahto/rt-start (tahto/rt-create :python :basic)))
 
-(println "tahto runtime smoke: evaluating oneshot runtimes")
-
-(def js-oneshot-output (tahto/rt-raw-eval js-oneshot js-command-source))
-(def python-oneshot-output
-  (tahto/rt-raw-eval python-oneshot python-command-source))
-
-(println "tahto runtime smoke: evaluating persistent runtimes")
-
+(println "tahto runtime smoke: evaluating JavaScript persistent runtime")
 (def js-basic-output (tahto/rt-raw-eval js-basic js-expression-source))
+(println "tahto runtime smoke: JavaScript persistent runtime complete")
+
+(println "tahto runtime smoke: evaluating Python persistent runtime")
 (def python-basic-output
   (tahto/rt-raw-eval python-basic python-expression-source))
+(println "tahto runtime smoke: Python persistent runtime complete")
 
 (def js-basic-transport (get-in js-basic [:process :transport]))
 (def python-basic-transport (get-in python-basic [:process :transport]))
