@@ -63,9 +63,13 @@ await rm(destination, { recursive: true, force: true });
 await mkdir(destination, { recursive: true });
 await walk(source);
 
-// Keep the documentation repository authoritative for its browser kernel while
-// publishing it at the canonical /docs route through the Astro shell.
+// Keep the documentation repository authoritative for its browser kernel and
+// interactive course assets while publishing them through the canonical Astro
+// shell at /docs.
 await rm(runtimeDestination, { recursive: true, force: true });
 await mkdir(join(runtimeDestination, "javascripts"), { recursive: true });
+await mkdir(join(runtimeDestination, "stylesheets"), { recursive: true });
 await cp(resolve(source, "rust"), join(runtimeDestination, "rust"), { recursive: true });
 await cp(resolve(source, "javascripts/kernel.js"), join(runtimeDestination, "javascripts/kernel.js"));
+await cp(resolve(source, "javascripts/syllabus.js"), join(runtimeDestination, "javascripts/syllabus.js"));
+await cp(resolve(source, "stylesheets/syllabus.css"), join(runtimeDestination, "stylesheets/syllabus.css"));
