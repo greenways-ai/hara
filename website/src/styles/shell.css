@@ -1,0 +1,54 @@
+/* Shared public-site shell additions. Loaded after site.css so the navigation
+   remains useful instead of disappearing as soon as the viewport narrows. */
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: .42rem;
+}
+
+.sign-in {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: .42rem .7rem;
+  color: var(--hara-text);
+  background: var(--hara-surface);
+  border: 1px solid var(--hara-line);
+  border-radius: 999px;
+  font-size: .78rem;
+  font-weight: 620;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.sign-in:hover { background: var(--hara-surface-raised); }
+
+@media (max-width: 760px) {
+  .site-header {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: .45rem;
+    padding-inline: 14px;
+  }
+  .brand span { display: none; }
+  .site-header nav {
+    display: flex;
+    justify-content: flex-start;
+    gap: .25rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .site-header nav::-webkit-scrollbar { display: none; }
+  .site-header nav a {
+    min-height: 34px;
+    padding: .45rem .55rem;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .site-header nav a:hover { background: var(--hara-surface-raised); }
+  .sign-in { min-height: 34px; padding-inline: .55rem; }
+}
+
+@media (max-width: 560px) {
+  .site-header .hara-theme-toggle { min-height: 34px; padding-inline: .55rem; }
+  .site-header .hara-theme-toggle [data-hara-theme-label] { display: none; }
+}
