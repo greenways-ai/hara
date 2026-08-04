@@ -17,15 +17,25 @@ The package system also carries extension packages described by
 
 ## Current implementation
 
-The initial Rust implementation exposes deterministic local commands:
+The Rust CLI exposes deterministic local archives and content-addressed
+installation, plus signed publication requests against a trusted tap:
 
 ```text
 hara package check
 hara package build
 hara package inspect
+hara package install
+hara package publish --tap hara --dry-run
 ```
 
-Remote resolution and publication require the registry and identity clients.
+`code.deploy` composes these commands for multi-package repositories through
+`std.lib.task`; it owns selection, dependency ordering, reporting, and runner
+injection while leaving package validation, archive creation, installation,
+signing, and publication to the CLI.
+
+Remote dependency resolution remains under implementation. Publication already
+requires a trusted registry profile, an identity policy, and a valid signed
+source tag; `--dry-run` performs the verification without submitting a request.
 Extensions continue to incubate in-tree under
 [`rust/extensions/`](../rust/extensions/) — e.g. `ledger-noir` and
 `crypto-hash-sha256` — and reference packages live under

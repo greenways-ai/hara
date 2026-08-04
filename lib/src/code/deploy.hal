@@ -1,0 +1,188 @@
+;; Multi-package deployment is orchestration, not a second package
+;; implementation. The hara package CLI remains the authority for project
+;; validation, deterministic HARP archives, local installation, signing, and
+;; registry publication. This namespace gives those operations the same
+;; data-first std.lib.task shape used by Foundation's code.tool.maven.
+(ns code.deploy
+  (:require [code.deploy.runtime :as runtime]
+            [std.lib.task :as task]))
+
+(def +operations+
+  {:check "check"
+   :package "build"
+   :build "build"
+   :install "install"
+   :deploy "publish"
+   :publish "publish"})
+
+(defn operation-name
+  [operation]
+  (or (get +operations+ operation)
+      (throw
+       (ex-info "Unsupported Hara package operation"
+                {:operation operation
+                 :supported (vec (sort (keys +operations+)))}))))
+
+(defn package-root
+  "Returns a package root from a catalog entry. Catalog values may be a path
+   string or a map containing :path or :root."
+  [entry]
+  (let [root (cond
+               (string? entry) entry
+               (map? entry) (or (:path entry) (:root entry))
+               :else nil)]
+    (if (and (string? root) (not (empty? root)))
+      root
+      (throw
+       (ex-info "Deploy package requires a path"
+                {:package entry})))))
+
+(defn- option-string
+  [value]
+  (if (or (keyword? value) (symbol? value))
+    (name value)
+    (str value)))
+
+(defn package-command
+  "Builds the shell-free argv for one hara package operation."
+  ([operation root]
+   (package-command operation root {}))
+  ([operation root options]
+   (let [executable (or (:executable options) "hara")
+         command (operation-name operation)
+         extra (vec (or (:arguments options) []))]
+     (if (= command "publish")
+       (vec
+        (concat [executable "package" command
+                 "--tap" (option-string (or (:tap options) :hara))]
+                (if (:dry-run options) ["--dry-run"] [])
+                extra
+                [root]))
+       (vec
+        (concat [executable "package" command root]
+                (if (and (= command "build") (:output options))
+                  ["--output" (str (:output options))]
+                  [])
+                extra))))))
+
+(defn package-entry
+  [input lookup]
+  (if (has? lookup input)
+    (get lookup input)
+    input))
+
+(defn package-dependencies
+  [entry]
+  (vec (if (map? entry) (or (:depends entry) []) [])))
+
+(defn undeclared-dependencies
+  [lookup]
+  (reduce
+   (fn [missing package]
+     (reduce
+      (fn [missing dependency]
+        (if (has? lookup dependency)
+          missing
+          (conj missing {:package dependency :required-by package})))
+      missing
+      (package-dependencies (get lookup package))))
+   []
+   (sort (keys lookup))))
+
+(defn dependencies-ready?
+  [entry completed]
+  (reduce
+   (fn [ready dependency]
+     (and
+      ready
+      (reduce (fn [matched value]
+                (or matched (= value dependency)))
+              false
+              completed)))
+   true
+   (package-dependencies entry)))
+
+(defn ordered-packages
+  "Returns catalog keys in stable dependency order. A package entry may use
+   :depends to name other catalog keys that must be processed first."
+  [lookup]
+  (let [missing (undeclared-dependencies lookup)]
+    (if (seq missing)
+      (throw
+       (ex-info "Deploy package dependency is not declared"
+                (first missing)))
+      (loop [remaining (vec (sort (keys lookup)))
+             completed []]
+        (if (empty? remaining)
+          completed
+          (let [ready (first
+                       (filter
+                        (fn [package]
+                          (dependencies-ready? (get lookup package)
+                                               completed))
+                        remaining))]
+            (if (nil? ready)
+              (throw
+               (ex-info "Deploy package dependency cycle"
+                        {:packages remaining}))
+              (recur
+               (vec (filter (fn [package] (not (= package ready)))
+                            remaining))
+               (conj completed ready)))))))))
+
+(defn run-operation
+  "Runs one package task input through an injected runner or the local process
+   runner. Injecting :runner keeps task selection and aggregation testable
+   without process authority."
+  [operation input params lookup env]
+  (let [entry (package-entry input lookup)
+        root (package-root entry)
+        entry-options (if (map? entry) (or (:options entry) {}) {})
+        options (merge env entry-options params)
+        runner (or (:runner options) runtime/run)
+        argv (package-command operation root options)
+        process-options (or (:process-options options) {})
+        result (runner argv process-options)
+        result (if (promise? result) (deref result) result)]
+    (merge {:package input
+            :root root
+            :operation operation}
+           (if (map? result) result {:value result}))))
+
+(defn- package-lookup
+  [task options]
+  (or (:packages options) {}))
+
+(def +task-config+
+  {:construct
+   {:input (fn [task] :list)
+    :env (fn [options] options)
+    :lookup package-lookup}
+   :item
+   {:list (fn [lookup env]
+            (ordered-packages lookup))
+    :display (fn [entry]
+               [(:operation entry) (:root entry)])}
+   :params
+   {:return :all
+    :package :records
+    :print {:item false :result false :summary false}}})
+
+(defn deploy-task
+  [operation]
+  (task/task
+   (keyword (str "deploy." (name operation)))
+   (name operation)
+   (merge
+    +task-config+
+    {:main
+     {:argcount 4
+      :fn (fn [input params lookup env]
+            (run-operation operation input params lookup env))}})))
+
+(def check (deploy-task :check))
+(def package (deploy-task :package))
+(def build (deploy-task :build))
+(def install (deploy-task :install))
+(def deploy (deploy-task :deploy))
+(def publish (deploy-task :publish))
