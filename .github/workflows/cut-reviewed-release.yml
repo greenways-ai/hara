@@ -1,0 +1,268 @@
+name: Cut reviewed Hara release
+run-name: Reviewed Hara release cut · ${{ inputs.manifest || github.sha }}
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/releases/*.json
+      - .github/workflows/cut-reviewed-release.yml
+      - .github/workflows/release.yml
+      - scripts/release-cut.mjs
+      - scripts/release-cut.test.mjs
+  push:
+    branches: [main]
+    paths:
+      - .github/releases/*.json
+      - .github/workflows/cut-reviewed-release.yml
+      - .github/workflows/release.yml
+      - scripts/release-cut.mjs
+      - scripts/release-cut.test.mjs
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: Reviewed release manifest path
+        required: true
+        default: .github/releases/v0.1.2.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reviewed-release-${{ inputs.manifest || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      manifest: ${{ steps.release.outputs.manifest }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      commit: ${{ steps.release.outputs.commit }}
+      workflow: ${{ steps.release.outputs.workflow }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test release-cut parsing
+        run: node --test scripts/release-cut.test.mjs
+
+      - name: Resolve the one reviewed manifest in this change
+        id: release
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_MANIFEST: ${{ inputs.manifest }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE: ${{ github.event.before }}
+          PUSH_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            MANIFEST="$INPUT_MANIFEST"
+          else
+            if [ "$EVENT_NAME" = pull_request ]; then
+              BASE="$PR_BASE"
+              HEAD="$PR_HEAD"
+            else
+              BASE="$PUSH_BASE"
+              HEAD="$PUSH_HEAD"
+            fi
+            if [ -z "$BASE" ] || [[ "$BASE" =~ ^0+$ ]]; then
+              mapfile -t MANIFESTS < <(git show --pretty= --name-only "$HEAD" -- '.github/releases/*.json' | sort -u)
+            else
+              mapfile -t MANIFESTS < <(git diff --name-only "$BASE" "$HEAD" -- '.github/releases/*.json' | sort -u)
+            fi
+            [ "${#MANIFESTS[@]}" -eq 1 ] || {
+              printf 'release cut must change exactly one manifest; found %s\n' "${#MANIFESTS[@]}" >&2
+              printf '  %s\n' "${MANIFESTS[@]}" >&2
+              exit 1
+            }
+            MANIFEST="${MANIFESTS[0]}"
+          fi
+          [ -f "$MANIFEST" ] || { echo "release manifest not found: $MANIFEST" >&2; exit 1; }
+          echo "manifest=$MANIFEST" >> "$GITHUB_OUTPUT"
+          node scripts/release-cut.mjs github-output "$MANIFEST" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the immutable target and release source
+        shell: bash
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+          COMMIT: ${{ steps.release.outputs.commit }}
+          WORKFLOW: ${{ steps.release.outputs.workflow }}
+        run: |
+          set -euo pipefail
+          git fetch --force origin main
+          git fetch --force --tags origin
+          git cat-file -e "${COMMIT}^{commit}"
+          git merge-base --is-ancestor "$COMMIT" origin/main || {
+            echo "$COMMIT is not an ancestor of current main" >&2
+            exit 1
+          }
+          CRATE_VERSION=$(git show "$COMMIT:rust/Cargo.toml" | sed -n 's/^version = "\(.*\)"/\1/p' | head -n 1)
+          [ "$CRATE_VERSION" = "$VERSION" ] || {
+            echo "manifest version $VERSION does not match target crate version $CRATE_VERSION" >&2
+            exit 1
+          }
+          git cat-file -e "$COMMIT:.github/workflows/$WORKFLOW"
+          TARGET="$RUNNER_TEMP/hara-release-$VERSION"
+          git worktree add --detach "$TARGET" "$COMMIT"
+          node "$TARGET/scripts/check-release-version.mjs" "$VERSION"
+          git worktree remove "$TARGET"
+
+          if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            TAG_COMMIT=$(git rev-parse "refs/tags/${TAG}^{commit}")
+            [ "$TAG_COMMIT" = "$COMMIT" ] || {
+              echo "existing $TAG points to $TAG_COMMIT rather than reviewed $COMMIT" >&2
+              exit 1
+            }
+          fi
+
+  cut:
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: github-release
+    permissions:
+      actions: write
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.validate.outputs.tag }}
+      VERSION: ${{ needs.validate.outputs.version }}
+      COMMIT: ${{ needs.validate.outputs.commit }}
+      RELEASE_WORKFLOW: ${{ needs.validate.outputs.workflow }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Create the immutable reviewed tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+          if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            TAG_COMMIT=$(git rev-parse "refs/tags/${TAG}^{commit}")
+            [ "$TAG_COMMIT" = "$COMMIT" ] || {
+              echo "refusing to move $TAG from $TAG_COMMIT to $COMMIT" >&2
+              exit 1
+            }
+            echo "$TAG already points to the reviewed commit"
+          else
+            git config user.name "hara release bot"
+            git config user.email "actions@users.noreply.github.com"
+            git tag --annotate "$TAG" "$COMMIT" --message "hara $TAG"
+            git push origin "refs/tags/$TAG"
+          fi
+
+      - name: Start or join the explicit release workflow
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          TITLE="Release hara $TAG"
+          RUN_ID=$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow "$RELEASE_WORKFLOW" \
+            --event workflow_dispatch \
+            --limit 30 \
+            --json databaseId,displayTitle,status \
+            --jq ".[] | select(.displayTitle == \"$TITLE\" and .status != \"completed\") | .databaseId" \
+            | head -n 1)
+
+          if [ -z "$RUN_ID" ]; then
+            gh workflow run "$RELEASE_WORKFLOW" \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref main \
+              --field tag="$TAG"
+            for _ in $(seq 1 45); do
+              RUN_ID=$(gh run list \
+                --repo "$GITHUB_REPOSITORY" \
+                --workflow "$RELEASE_WORKFLOW" \
+                --event workflow_dispatch \
+                --limit 30 \
+                --json databaseId,displayTitle \
+                --jq ".[] | select(.displayTitle == \"$TITLE\") | .databaseId" \
+                | head -n 1)
+              [ -n "$RUN_ID" ] && break
+              sleep 2
+            done
+          fi
+          [ -n "$RUN_ID" ] || { echo "unable to find release workflow for $TAG" >&2; exit 1; }
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "Watching release run $RUN_ID"
+          gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status
+
+      - name: Verify public release assets and Supersonic payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQUIRED=(
+            "hara-rust-$TAG-x86_64-unknown-linux-gnu.tar.gz"
+            "hara-rust-$TAG-x86_64-apple-darwin.tar.gz"
+            "hara-rust-$TAG-aarch64-apple-darwin.tar.gz"
+            "hara-truffle-$TAG-x86_64-unknown-linux-gnu.tar.gz"
+            "hara-truffle-$TAG-x86_64-apple-darwin.tar.gz"
+            "hara-truffle-$TAG-aarch64-apple-darwin.tar.gz"
+            "hara-studio-runtime-$VERSION.tar.gz"
+            "hara-studio-runtime-$VERSION.tar.gz.sha256"
+            "SHA256SUMS"
+          )
+          mapfile -t ASSETS < <(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          for required in "${REQUIRED[@]}"; do
+            printf '%s\n' "${ASSETS[@]}" | grep -Fxq "$required" || {
+              echo "release is missing $required" >&2
+              exit 1
+            }
+          done
+
+          OUT="$RUNNER_TEMP/hara-release-assets"
+          mkdir -p "$OUT"
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$OUT" \
+            --pattern "hara-studio-runtime-$VERSION.tar.gz" \
+            --pattern "hara-studio-runtime-$VERSION.tar.gz.sha256"
+          ARCHIVE="$OUT/hara-studio-runtime-$VERSION.tar.gz"
+          CHECKSUM="$ARCHIVE.sha256"
+          EXPECTED=$(awk 'NF {print $1; exit}' "$CHECKSUM")
+          ACTUAL=$(sha256sum "$ARCHIVE" | cut -d ' ' -f 1)
+          [ "$ACTUAL" = "$EXPECTED" ] || {
+            echo "Studio runtime checksum mismatch: $ACTUAL != $EXPECTED" >&2
+            exit 1
+          }
+          LISTING="$RUNNER_TEMP/hara-studio-runtime-$VERSION.files"
+          tar -tzf "$ARCHIVE" | sed 's#^\./##' > "$LISTING"
+          for path in \
+            rust/studio/supersonic.js \
+            rust/studio/hal/supersonic.hal \
+            examples/music/runtime/studio/supersonic.js \
+            examples/music/runtime/studio/hal/supersonic.hal; do
+            grep -Fxq "$path" "$LISTING" || {
+              echo "Studio runtime is missing $path" >&2
+              exit 1
+            }
+          done
+
+      - name: Publish release summary
+        shell: bash
+        run: |
+          {
+            echo "## Hara $TAG released"
+            echo
+            echo "- Reviewed commit: \`$COMMIT\`"
+            echo "- Release workflow: [run ${{ steps.release.outputs.run_id }}](https://github.com/$GITHUB_REPOSITORY/actions/runs/${{ steps.release.outputs.run_id }})"
+            echo "- Studio runtime SHA-256 and four Supersonic package paths verified"
+            echo "- Next: run the Playground **Prepare Hara runtime update** workflow with version \`$VERSION\`"
+          } >> "$GITHUB_STEP_SUMMARY"
