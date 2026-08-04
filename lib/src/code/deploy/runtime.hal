@@ -1,0 +1,33 @@
+(ns code.deploy.runtime
+  (:require [std.foundation.os :as os]
+            [std.foundation.promise :as promise]
+            [std.foundation.string :as string]))
+
+(defn- start-process
+  [argv options]
+  (if (empty? options)
+    (os/spawn argv)
+    (os/spawn argv options)))
+
+(defn run
+  "Runs one argv vector through the capability-gated process boundary.
+
+   The command is never interpreted by a shell. The returned map is ordinary
+   HAL data so code.deploy tasks can report, aggregate, and test it."
+  ([argv]
+   (run argv {}))
+  ([argv options]
+   (let [process (start-process argv options)
+         values (deref
+                 (promise/all
+                  [(os/process-stdout process)
+                   (os/process-stderr process)
+                   (os/process-wait process)]))
+         result {:command argv
+                 :exit (nth values 2)
+                 :stdout (string/decode-utf8 (nth values 0))
+                 :stderr (string/decode-utf8 (nth values 1))}]
+     (if (= 0 (:exit result))
+       result
+       (throw
+        (ex-info "Hara package command failed" result))))))

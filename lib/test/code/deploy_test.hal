@@ -1,0 +1,67 @@
+(ns code.deploy-test
+  (:require [code.deploy :as deploy]
+            [std.lib.task :as task]
+            [std.lib.test :as test]))
+
+(def +packages+
+  {'greenways/hodos-core {:path "packages/core"}
+   'greenways/hodos-authoring
+   {:path "packages/addon-authoring"
+    :depends ['greenways/hodos-core]
+    :options {:output "target/hodos-authoring.harp"}}})
+
+(def results
+  [(test/check
+    "package commands preserve each CLI operation's argument order"
+    [(deploy/package-command
+      :package "packages/core"
+      {:executable "./hara" :output "target/core.harp"})
+     (deploy/package-command
+      :deploy "packages/core"
+      {:executable "./hara" :tap :hara :dry-run true})]
+    [["./hara" "package" "build" "packages/core"
+      "--output" "target/core.harp"]
+     ["./hara" "package" "publish" "--tap" "hara"
+      "--dry-run" "packages/core"]])
+   (test/check
+    "deployment tasks select package catalogs and use an injected runner"
+    (let [commands (atom [])
+          runner (fn [argv options]
+                   (do
+                     (swap! commands conj argv)
+                     {:command argv :exit 0 :stdout "ok" :stderr ""}))
+          output (task/invoke
+                  deploy/package
+                  :all
+                  {:packages +packages+
+                   :executable "./hara"
+                   :runner runner
+                   :return :all
+                   :package :records})]
+      [(deref commands)
+       (get-in output [:summary :items])
+       (get-in output [:summary :errors])
+       (vec (sort (keys (:results output))))])
+    [[ ["./hara" "package" "build" "packages/core"]
+       ["./hara" "package" "build" "packages/addon-authoring"
+        "--output" "target/hodos-authoring.harp"]]
+     2
+     0
+     '[greenways/hodos-authoring greenways/hodos-core]])
+   (test/check
+    "package catalogs reject dependency cycles"
+    (try
+      (do
+        (deploy/ordered-packages
+         {'a {:path "a" :depends ['b]}
+          'b {:path "b" :depends ['a]}})
+        false)
+      (catch Throwable error true))
+    true)
+   (test/check
+    "package catalog entries normalize to roots"
+    [(deploy/package-root "packages/core")
+     (deploy/package-root {:root "packages/addon-authoring"})]
+    ["packages/core" "packages/addon-authoring"])])
+
+(test/print-results results)

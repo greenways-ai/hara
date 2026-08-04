@@ -133,6 +133,36 @@ cd extensions/hara-chrome && npm ci && npm run build       # Chrome extension
 cd docs && mkdocs build -f mkdocs.yml                      # docs site
 ```
 
+## Package workspaces
+
+The native CLI is authoritative for deterministic HARP package operations:
+
+```shell
+hara package check packages/core
+hara package build packages/core
+hara package install packages/core
+hara package publish --tap hara --dry-run packages/core
+```
+
+Repositories containing several packages can use `code.deploy`. It wraps the
+same CLI operations in `std.lib.task`, accepts a data catalog with `:path`,
+`:depends`, and per-package `:options`, and processes packages in stable
+dependency order. Its process boundary passes argv directly and never invokes a
+shell. `:runner` may be injected for tests or remote execution.
+
+```clojure
+(require '[code.deploy :as deploy])
+
+(def packages
+  {'example/core {:path "packages/core"}
+   'example/addon {:path "packages/addon"
+                   :depends ['example/core]}})
+
+(deploy/check :all {:packages packages})
+(deploy/package :all {:packages packages})
+(deploy/publish :all {:packages packages :tap :hara :dry-run true})
+```
+
 ## Cloud development environment
 
 The repository includes a Dev Container definition for GitHub Codespaces and

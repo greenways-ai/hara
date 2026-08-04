@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="4096" viewBox="0 0 4096 4096">
+  <rect width="4096" height="4096" fill="#050608"/>
+  
+  <defs>
+    <filter id="brush" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.0016 0.42" numOctaves="3" seed="57" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.9 0"/>
+    </filter>
+    <filter id="glow" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="26"/>
+    </filter>
+    <filter id="glowWide" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="60"/>
+    </filter>
+    <radialGradient id="vignette" cx=".5" cy=".46" r=".78">
+      <stop offset=".55" stop-color="rgba(0,0,0,0)"/>
+      <stop offset="1" stop-color="rgba(0,0,0,.5)"/>
+    </radialGradient>
+    <linearGradient id="plateSweep" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4a525d"/>
+      <stop offset=".45" stop-color="#262b33"/>
+      <stop offset="1" stop-color="#101318"/>
+    </linearGradient>
+  </defs>
+  <path d="M -160 3960 C 1450 2760, 2310 2620, 2380 2000 C 2450 1350, 3050 620, 4360 -120 L 4400 -200 L -200 -200 L -160 3960 Z" fill="#262b33"/><path d="M -160 3960 C 1450 2760, 2310 2620, 2380 2000 C 2450 1350, 3050 620, 4360 -120 L 4400 -200 L -200 -200 L -160 3960 Z" fill="url(#plateSweep)" opacity=".7"/>
+  <path d="M 4360 -120 C 3050 620, 2450 1350, 2380 2000 C 2310 2620, 1450 2760, -160 3960 L 4400 4400 L -200 4400 L -200 3960 Z" fill="#101318"/><path d="M 4360 -120 C 3050 620, 2450 1350, 2380 2000 C 2310 2620, 1450 2760, -160 3960 L 4400 4400 L -200 4400 L -200 3960 Z" fill="url(#plateSweep)" opacity=".3"/>
+  <g transform="translate(-50 -90)"><path d="M 4360 -120 C 3050 620, 2450 1350, 2380 2000 C 2310 2620, 1450 2760, -160 3960" fill="none" stroke="rgba(235,240,248,.07)" stroke-width="8"/></g>
+  <g transform="translate(-116 -210)"><path d="M 4360 -120 C 3050 620, 2450 1350, 2380 2000 C 2310 2620, 1450 2760, -160 3960" fill="none" stroke="rgba(235,240,248,.07)" stroke-width="6"/></g>
+  <g transform="translate(-209 -380)"><path d="M 4360 -120 C 3050 620, 2450 1350, 2380 2000 C 2310 2620, 1450 2760, -160 3960" fill="none" stroke="rgba(235,240,248,.07)" stroke-width="5"/></g>
+  <g transform="translate(61 110)"><path d="M 4360 -120 C 3050 620, 2450 1350, 2380 2000 C 2310 2620, 1450 2760, -160 3960" fill="none" stroke="rgba(235,240,248,.07)" stroke-width="7"/></g>
+  <g transform="translate(138 250)"><path d="M 4360 -120 C 3050 620, 2450 1350, 2380 2000 C 2310 2620, 1450 2760, -160 3960" fill="none" stroke="rgba(235,240,248,.07)" stroke-width="5"/></g>
+  <g transform="translate(237 430)"><path d="M 4360 -120 C 3050 620, 2450 1350, 2380 2000 C 2310 2620, 1450 2760, -160 3960" fill="none" stroke="rgba(235,240,248,.07)" stroke-width="4"/></g>
+  
+    <path d="M 4360 -120 C 3050 620, 2450 1350, 2380 2000 C 2310 2620, 1450 2760, -160 3960" fill="none" stroke="#6fb1ff" stroke-width="60" opacity=".55" filter="url(#glow)"/>
+    <path d="M 4360 -120 C 3050 620, 2450 1350, 2380 2000 C 2310 2620, 1450 2760, -160 3960" fill="none" stroke="#6fb1ff" stroke-width="9" opacity=".95"/>
+    <path d="M 4360 -120 C 3050 620, 2450 1350, 2380 2000 C 2310 2620, 1450 2760, -160 3960" fill="none" stroke="#bfe0ff" stroke-width="3"/>
+  <rect width="4096" height="4096" filter="url(#brush)" opacity=".16" style="mix-blend-mode:overlay"/>
+  <rect width="4096" height="4096" fill="url(#vignette)"/>
+</svg>

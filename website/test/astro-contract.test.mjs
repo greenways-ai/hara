@@ -11,15 +11,15 @@ test("publishes docs below /docs and uses the visual package", async () => {
   assert.match(layout, /@hara-lang\/visual-language/);
   assert.doesNotMatch(layout, /docs\.hara-lang\.org/);
   assert.match(layout, /og-hara\.jpg/);
-  assert.match(layout, /og:image:width" content="3840"/);
-  assert.match(layout, /og:image:height" content="2016"/);
+  assert.match(layout, /og:image:width" content="1200"/);
+  assert.match(layout, /og:image:height" content="630"/);
 });
 
 test("publishes the dedicated maximum-resolution documentation card", async () => {
   const config = await readFile(new URL("../astro.config.mjs", import.meta.url), "utf8");
   assert.match(config, /og-hara-docs\.jpg/);
-  assert.match(config, /og:image:width", content: "3840"/);
-  assert.match(config, /og:image:height", content: "2016"/);
+  assert.match(config, /og:image:width", content: "1200"/);
+  assert.match(config, /og:image:height", content: "630"/);
 });
 
 test("uses the compact ecosystem navigation and sign-in button", async () => {

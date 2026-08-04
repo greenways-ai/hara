@@ -1,35 +1,35 @@
 (ns tahto.model.v1.spec-postgres.deftype.emit
   (:require [std.foundation.string :as string]
             [tahto.model.v1.spec-postgres.deftype.common :refer :all]
-            [tahto.model.v1.spec-postgres.deftype.emit-column :refer :all]
-            [tahto.model.v1.spec-postgres.deftype.emit-constraints :refer :all]
-            [tahto.model.v1.spec-postgres.deftype.emit-index :refer :all]))
+            [tahto.model.v1.spec-postgres.deftype.emit-column :as column]
+            [tahto.model.v1.spec-postgres.deftype.emit-constraints :as constraints]
+            [tahto.model.v1.spec-postgres.deftype.emit-index :as index]))
 
-(def emit-expression tahto.model.v1.spec-postgres.deftype.emit-column/emit-expression)
-(def ref-column-name tahto.model.v1.spec-postgres.deftype.emit-column/ref-column-name)
-(def column-name tahto.model.v1.spec-postgres.deftype.emit-column/column-name)
-(def column-token tahto.model.v1.spec-postgres.deftype.emit-column/column-token)
-(def resolved-column-type tahto.model.v1.spec-postgres.deftype.emit-column/resolved-column-type)
-(def raw-clause tahto.model.v1.spec-postgres.deftype.emit-column/raw-clause)
-(def column-constraint tahto.model.v1.spec-postgres.deftype.emit-column/column-constraint)
-(def reference-clause tahto.model.v1.spec-postgres.deftype.emit-column/reference-clause)
-(def column-output tahto.model.v1.spec-postgres.deftype.emit-column/column-output)
+(def emit-expression column/emit-expression)
+(def ref-column-name column/ref-column-name)
+(def column-name column/column-name)
+(def column-token column/column-token)
+(def resolved-column-type column/resolved-column-type)
+(def raw-clause column/raw-clause)
+(def column-constraint column/column-constraint)
+(def reference-clause column/reference-clause)
+(def column-output column/column-output)
 
-(def composite-primary-output tahto.model.v1.spec-postgres.deftype.emit-constraints/composite-primary-output)
-(def unique-groups tahto.model.v1.spec-postgres.deftype.emit-constraints/unique-groups)
-(def unique-outputs tahto.model.v1.spec-postgres.deftype.emit-constraints/unique-outputs)
-(def foreign-group-entries tahto.model.v1.spec-postgres.deftype.emit-constraints/foreign-group-entries)
-(def foreign-output tahto.model.v1.spec-postgres.deftype.emit-constraints/foreign-output)
-(def foreign-outputs tahto.model.v1.spec-postgres.deftype.emit-constraints/foreign-outputs)
-(def table-constraint-outputs tahto.model.v1.spec-postgres.deftype.emit-constraints/table-constraint-outputs)
-(def custom-outputs tahto.model.v1.spec-postgres.deftype.emit-constraints/custom-outputs)
-(def partition-output tahto.model.v1.spec-postgres.deftype.emit-constraints/partition-output)
+(def composite-primary-output constraints/composite-primary-output)
+(def unique-groups constraints/unique-groups)
+(def unique-outputs constraints/unique-outputs)
+(def foreign-group-entries constraints/foreign-group-entries)
+(def foreign-output constraints/foreign-output)
+(def foreign-outputs constraints/foreign-outputs)
+(def table-constraint-outputs constraints/table-constraint-outputs)
+(def custom-outputs constraints/custom-outputs)
+(def partition-output constraints/partition-output)
 
-(def index-plan tahto.model.v1.spec-postgres.deftype.emit-index/index-plan)
-(def index-outputs tahto.model.v1.spec-postgres.deftype.emit-index/index-outputs)
-(def table-comment-output tahto.model.v1.spec-postgres.deftype.emit-index/table-comment-output)
-(def column-comment-outputs tahto.model.v1.spec-postgres.deftype.emit-index/column-comment-outputs)
-(def default-partition-output tahto.model.v1.spec-postgres.deftype.emit-index/default-partition-output)
+(def index-plan index/index-plan)
+(def index-outputs index/index-outputs)
+(def table-comment-output index/table-comment-output)
+(def column-comment-outputs index/column-comment-outputs)
+(def default-partition-output index/default-partition-output)
 
 (defn pg-deftype
   "Emits DROP/CREATE, constraints, indexes, partitioning, and comments for one
