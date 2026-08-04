@@ -22,25 +22,62 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+          fetch-depth: 0
+
+      - name: Detect core changes
+        id: scope
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "run_core=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          if git diff --quiet "$base" "$head" -- \
+            .github/workflows/core-ci.yml \
+            rust \
+            java \
+            lib \
+            contrib \
+            specs \
+            scripts/run-lib-tests; then
+            echo "run_core=false" >> "$GITHUB_OUTPUT"
+            echo "No core runtime changes detected."
+          else
+            echo "run_core=true" >> "$GITHUB_OUTPUT"
+            echo "Core runtime changes detected."
+          fi
 
       - name: Enforce gw.* HAL namespaces
-        run: "! rg --glob '*.hal' 'greenways\\.' ."
+        if: steps.scope.outputs.run_core == 'true'
+        shell: bash
+        run: |
+          if grep -R --exclude-dir=.git --include='*.hal' -n 'greenways\.' .; then
+            echo "HAL namespaces must use gw.* rather than greenways.*" >&2
+            exit 1
+          fi
 
       - name: Set up Rust
+        if: steps.scope.outputs.run_core == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
 
       - name: Check Rust module layout
+        if: steps.scope.outputs.run_core == 'true'
         run: bash rust/scripts/check-layout.sh
 
       - name: Check Rust
+        if: steps.scope.outputs.run_core == 'true'
         run: |
           cargo clippy --manifest-path rust/Cargo.toml --all-targets
           cargo test --manifest-path rust/Cargo.toml
           cargo test --manifest-path rust/raw/Cargo.toml
 
       - name: Set up JDK 21
+        if: steps.scope.outputs.run_core == 'true'
         uses: actions/setup-java@v4
         with:
           java-version: '21'
@@ -49,7 +86,9 @@ jobs:
           cache-dependency-path: java/pom.xml
 
       - name: Build and test Java runtime
+        if: steps.scope.outputs.run_core == 'true'
         run: mvn -B -Ptruffle package --file java/pom.xml
 
       - name: Run library HAL tests
+        if: steps.scope.outputs.run_core == 'true'
         run: ./scripts/run-lib-tests
