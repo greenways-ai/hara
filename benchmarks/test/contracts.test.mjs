@@ -47,6 +47,11 @@ test("uses the shared Hara navigation and sign-in button", () => {
   assert.ok(header.includes('href="https://id.hara-lang.org/">Sign in</a>'));
   assert.doesNotMatch(source, /api\/session|auth\/github|return_to/);
 });
+test("uses a dedicated maximum-resolution benchmark social card", () => {
+  assert.match(page, /og-hara-benchmarks\.jpg/);
+  assert.match(page, /og:image:width" content="3840"/);
+  assert.match(page, /og:image:height" content="2016"/);
+});
 test("external comparisons use only the native full Hara tier", () => {
   assert.match(data, /haraRuntime = "hara-rust-full"/);
   assert.match(language, /Every external row is compared only with/);
