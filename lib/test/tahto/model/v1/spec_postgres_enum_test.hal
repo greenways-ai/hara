@@ -1,0 +1,161 @@
+(ns tahto.model.v1.spec-postgres-enum-test
+  (:use code.test)
+  (:require [tahto.core :as l]
+            [tahto.core.compile :as compile]
+            [tahto.core.script :as script]
+            [tahto.model.v5.spec-postgres :as postgres]
+            [tahto.model.v1.spec-postgres.enum :as enum]))
+
+(l/script :postgres
+  {:static {:application ["fixture"]
+            :all {:schema ["fixture"]}}})
+
+(defenum.pg LedgerStatus
+  "Stable ledger states."
+  [:pending :accepted "needs'review" rejected])
+
+(deftype.pg ^{:final true}
+  LedgerRecord
+  [:id {:type :uuid :primary true :required true}
+   :status {:type :enum
+            :required true
+            :enum {:ns -/LedgerStatus}}]
+  {})
+
+(defn current-module []
+  (symbol (str (current-namespace))))
+
+(defn index-of
+  [values target]
+  (loop [index 0
+         remaining (vec values)]
+    (if (= 0 (count remaining))
+      -1
+      (if (= target (first remaining))
+        index
+        (recur (+ index 1)
+               (vec (rest remaining)))))))
+
+(defn module-context []
+  (let [module-id (current-module)
+        modules (deref script/+modules+)]
+    {:module (get modules module-id)
+     :modules modules}))
+
+(defn enum-form []
+  (get-in (deref script/+modules+)
+          [(current-module) :code 'LedgerStatus :form-input]))
+
+(defn formatted []
+  (enum/pg-enum-format (enum-form)))
+
+(defn hydrated []
+  (enum/pg-enum-hydrate
+   (second (formatted))
+   (:grammar postgres/+selection+)
+   (module-context)))
+
+(def +enum-output+
+  (str "DO $$\n"
+       "BEGIN\n"
+       "  CREATE TYPE \"fixture\".\"LedgerStatus\" AS ENUM ('pending', 'accepted', 'needs''review', 'rejected');\n"
+       "EXCEPTION\n"
+       "  WHEN OTHERS THEN\n"
+       "    NULL;\n"
+       "END;\n"
+       "$$ LANGUAGE plpgsql;"))
+
+(def results
+  [(fact "selects PostgreSQL v5"
+     [(:version postgres/+book+)
+      (:version (l/registry-book :postgres :default nil))]
+     => [5 5])
+
+   (fact "defenum.pg registers a code entry"
+     (let [entry (get-in (deref script/+modules+)
+                         [(current-module) :code 'LedgerStatus])]
+       [(:op entry) (:op-key entry) (:section entry)])
+     => ['defenum :defenum :code])
+
+   (fact "formatting retains documentation and enum metadata"
+     (let [metadata (first (formatted))]
+       [(:doc metadata) (:static/dbtype metadata)])
+     => ["Stable ledger states." :enum])
+
+   (fact "hydration installs the exact schema coordinate"
+     (let [metadata (first (hydrated))]
+       [(:static/schema metadata) (:static/dbtype metadata)])
+     => ["fixture" :enum])
+
+   (fact "emits a loadable suppress-on-existing enum declaration"
+     (enum/pg-enum (second (hydrated))
+                   (:grammar postgres/+selection+)
+                   (module-context))
+     => +enum-output+)
+
+   (fact "supports deterministic injected evaluation for historical !:eval values"
+     (let [form (list 'defenum
+                      (IObjType/with-meta 'Dynamic
+                                          {:static/schema "fixture"})
+                      '(!:eval (source-values)))]
+       (enum/pg-enum form
+                     (:grammar postgres/+selection+)
+                     {:tahto/eval-literal
+                      (fn [form]
+                        (if (= form '(source-values))
+                          [:a :b]
+                          []))}))
+     => (str "DO $$\nBEGIN\n"
+             "  CREATE TYPE \"fixture\".\"Dynamic\" AS ENUM ('a', 'b');\n"
+             "EXCEPTION\n  WHEN OTHERS THEN\n    NULL;\nEND;\n"
+             "$$ LANGUAGE plpgsql;"))
+
+   (fact "historical !:eval fails without an explicit capability"
+     (enum/pg-enum
+      (list 'defenum
+            (IObjType/with-meta 'Dynamic {:static/schema "fixture"})
+            '(!:eval (source-values)))
+      (:grammar postgres/+selection+)
+      {})
+     => (throws))
+
+   (fact "deftype hydration resolves the enum entry"
+     (let [result (compile/compile-module
+                   {:lang :postgres
+                    :main (current-module)
+                    :layout :module})
+           table-symbol (symbol (str (current-module)) "LedgerRecord")
+           table-entry (first (filter (fn [candidate]
+                                        (= table-symbol (:symbol candidate)))
+                                      (:entries result)))]
+       [(:output table-entry) (:diagnostics result)])
+     => [(str "CREATE TABLE IF NOT EXISTS \"fixture\".\"LedgerRecord\" (\n"
+              "  \"id\" UUID PRIMARY KEY NOT NULL,\n"
+              "  \"status\" \"fixture\".\"LedgerStatus\" NOT NULL\n"
+              ");")
+         []])
+
+   (fact "compile-module preserves exact enum output and orders it before its table"
+     (let [result (compile/compile-module
+                   {:lang :postgres
+                    :main (current-module)
+                    :layout :module})
+           enum-symbol (symbol (str (current-module)) "LedgerStatus")
+           enum-entry (first (filter (fn [candidate]
+                                       (= enum-symbol (:symbol candidate)))
+                                     (:entries result)))
+           order (get-in result [:provenance :entry-order])]
+       [(:output enum-entry)
+        (< (index-of order enum-symbol)
+           (index-of order (symbol (str (current-module)) "LedgerRecord")))])
+     => [+enum-output+ true])
+
+   (fact "repeated enum compilation is byte-identical"
+     (let [options {:lang :postgres
+                    :main (current-module)
+                    :layout :module}]
+       (= (:output (compile/compile-module options))
+          (:output (compile/compile-module options))))
+     => true)])
+
+(pr-str (run '[tahto.model.v1.spec-postgres-enum-test]))
