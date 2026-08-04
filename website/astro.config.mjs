@@ -44,6 +44,7 @@ export default defineConfig({
             { label: "First Contact", slug: "docs/learn/first-contact" },
             { label: "Protocols for Builders", slug: "docs/learn/protocols" },
             { label: "Collection Protocols", slug: "docs/learn/protocols/collections" },
+            { label: "State and Lifecycle Protocols", slug: "docs/learn/protocols/state-lifecycle" },
             { label: "Protocol Atlas", slug: "docs/learn/protocols/atlas" }
           ]
         },
