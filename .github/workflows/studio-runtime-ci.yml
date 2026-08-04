@@ -13,6 +13,7 @@ on:
       - scripts/build-www
       - scripts/check-release-version.mjs
       - scripts/verify-studio-runtime.mjs
+      - scripts/write-kernel-manifest.mjs
       - rust/Cargo.toml
       - rust/Cargo.lock
       - rust/compiler/Cargo.toml
@@ -48,6 +49,7 @@ on:
       - scripts/build-www
       - scripts/check-release-version.mjs
       - scripts/verify-studio-runtime.mjs
+      - scripts/write-kernel-manifest.mjs
       - rust/Cargo.toml
       - rust/Cargo.lock
       - rust/compiler/Cargo.toml
@@ -97,6 +99,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Check packaging script syntax
+        run: |
+          bash -n scripts/build-studio-runtime scripts/build-www
+          node --check scripts/check-release-version.mjs
+          node --check scripts/write-kernel-manifest.mjs
 
       - name: Verify release version surfaces
         shell: bash
