@@ -1,4 +1,5 @@
 name: Release hara CLI
+run-name: Release hara ${{ inputs.tag || github.ref_name }}
 
 on:
   push:
@@ -6,11 +7,15 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to rebuild/release (e.g. v0.1.0)'
+        description: 'Existing tag to rebuild/release (e.g. v0.1.2)'
         required: true
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
 
 jobs:
   guard:
@@ -217,7 +222,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || needs.guard.outputs.tag }}
+        ref: ${{ needs.guard.outputs.tag }}
     - uses: actions/checkout@v4
       with:
         repository: hara-lang/homebrew-tap
@@ -253,7 +258,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || needs.guard.outputs.tag }}
+        ref: ${{ needs.guard.outputs.tag }}
     - name: Render Greenways source formula
       run: |
         python3 scripts/generate-greenways-homebrew-formula \
