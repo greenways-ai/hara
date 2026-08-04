@@ -1,0 +1,113 @@
+name: Studio runtime archive CI
+
+on:
+  pull_request:
+    branches: [main, prod]
+    paths:
+      - .github/workflows/studio-runtime-ci.yml
+      - scripts/build-studio-runtime
+      - scripts/build-hara-wasm-raw
+      - scripts/verify-studio-runtime.mjs
+      - rust/Cargo.toml
+      - rust/Cargo.lock
+      - rust/raw/**
+      - rust/src/**
+      - rust/web/hta.js
+      - rust/web/hta-worker.js
+      - rust/web/hta-shared-worker.js
+      - rust/web/host/**
+      - rust/web/studio/**
+      - rust/web/ui/**
+      - contrib/greenways/supersonic/**
+      - lib/src/std/foundation.hal
+      - lib/src/std/lib/substrate.hal
+      - lib/src/std/lib/substrate/**
+      - website/examples/**
+      - website/hara-amp.html
+      - website/hara-amp.css
+      - website/hara-amp.js
+      - website/assets/wasm/**
+      - website/assets/hara-amp/**
+      - website/vendor/hara-ui/**
+  push:
+    branches: [main, prod]
+    paths:
+      - .github/workflows/studio-runtime-ci.yml
+      - scripts/build-studio-runtime
+      - scripts/build-hara-wasm-raw
+      - scripts/verify-studio-runtime.mjs
+      - rust/Cargo.toml
+      - rust/Cargo.lock
+      - rust/raw/**
+      - rust/src/**
+      - rust/web/hta.js
+      - rust/web/hta-worker.js
+      - rust/web/hta-shared-worker.js
+      - rust/web/host/**
+      - rust/web/studio/**
+      - rust/web/ui/**
+      - contrib/greenways/supersonic/**
+      - lib/src/std/foundation.hal
+      - lib/src/std/lib/substrate.hal
+      - lib/src/std/lib/substrate/**
+      - website/examples/**
+      - website/hara-amp.html
+      - website/hara-amp.css
+      - website/hara-amp.js
+      - website/assets/wasm/**
+      - website/assets/hara-amp/**
+      - website/vendor/hara-ui/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-runtime-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build and verify Studio runtime archive
+        run: scripts/build-studio-runtime ci
+
+      - name: Verify archive checksum and Supersonic payload
+        shell: bash
+        run: |
+          ARCHIVE="$GITHUB_WORKSPACE/target/studio-runtime/hara-studio-runtime-ci.tar.gz"
+          CHECKSUM="$ARCHIVE.sha256"
+          RAW_LISTING="$RUNNER_TEMP/hara-studio-runtime-files.raw"
+          LISTING="$RUNNER_TEMP/hara-studio-runtime-files.txt"
+          test -s "$ARCHIVE"
+          test -s "$CHECKSUM"
+          sha256sum -c "$CHECKSUM"
+          tar -tzf "$ARCHIVE" > "$RAW_LISTING"
+          sed 's#^\./##' "$RAW_LISTING" > "$LISTING"
+          grep -Fxq 'rust/studio/supersonic.js' "$LISTING"
+          grep -Fxq 'rust/studio/hal/supersonic.hal' "$LISTING"
+          grep -Fxq 'examples/music/runtime/studio/supersonic.js' "$LISTING"
+          grep -Fxq 'examples/music/runtime/studio/hal/supersonic.hal' "$LISTING"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hara-studio-runtime-${{ github.sha }}
+          path: |
+            target/studio-runtime/hara-studio-runtime-ci.tar.gz
+            target/studio-runtime/hara-studio-runtime-ci.tar.gz.sha256
+          retention-days: 7
