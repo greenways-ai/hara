@@ -92,13 +92,17 @@ jobs:
         run: |
           ARCHIVE="$GITHUB_WORKSPACE/target/studio-runtime/hara-studio-runtime-ci.tar.gz"
           CHECKSUM="$ARCHIVE.sha256"
+          RAW_LISTING="$RUNNER_TEMP/hara-studio-runtime-files.raw"
+          LISTING="$RUNNER_TEMP/hara-studio-runtime-files.txt"
           test -s "$ARCHIVE"
           test -s "$CHECKSUM"
           sha256sum -c "$CHECKSUM"
-          tar -tzf "$ARCHIVE" | grep -q '^\./rust/studio/supersonic.js$'
-          tar -tzf "$ARCHIVE" | grep -q '^\./rust/studio/hal/supersonic.hal$'
-          tar -tzf "$ARCHIVE" | grep -q '^\./examples/music/runtime/studio/supersonic.js$'
-          tar -tzf "$ARCHIVE" | grep -q '^\./examples/music/runtime/studio/hal/supersonic.hal$'
+          tar -tzf "$ARCHIVE" > "$RAW_LISTING"
+          sed 's#^\./##' "$RAW_LISTING" > "$LISTING"
+          grep -Fxq 'rust/studio/supersonic.js' "$LISTING"
+          grep -Fxq 'rust/studio/hal/supersonic.hal' "$LISTING"
+          grep -Fxq 'examples/music/runtime/studio/supersonic.js' "$LISTING"
+          grep -Fxq 'examples/music/runtime/studio/hal/supersonic.hal' "$LISTING"
 
       - uses: actions/upload-artifact@v4
         with:
