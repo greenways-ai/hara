@@ -1,12 +1,27 @@
 name: Collection protocol test slices
 
 on:
-  push:
   pull_request:
+    branches: [main]
+    paths:
+      - 'java/src/main/java/hara/lang/data/**'
+      - 'java/src/main/java/hara/lang/protocol/**'
+      - 'java/src/main/java/hara/kernel/builtin/**'
+      - 'java/src/main/java/hara/truffle/**'
+      - 'java/src/test/java/hara/lang/data/**'
+      - 'java/src/test/java/hara/lang/protocol/**'
+      - 'java/src/test/java/hara/kernel/builtin/**'
+      - 'java/src/test/java/hara/truffle/**'
+      - 'java/pom.xml'
+      - '.github/workflows/collection-protocol-slices.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: collection-slices-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   collection-slice:

@@ -16,6 +16,42 @@
         (macroexpand-1 form))
       (catch Throwable _ form))))
 
+(defn- record-fragment-dependency!
+  [fragment deps-fragment]
+  (if deps-fragment
+    (swap! deps-fragment conj (util/sym-full fragment)))
+  fragment)
+
+(defn- value-fragment?
+  [fragment]
+  (and fragment
+       (not (:template fragment))
+       (contains? fragment :form)))
+
+(defn- expand-fragment-call
+  [fragment form deps-fragment walk-fn]
+  (record-fragment-dependency! fragment deps-fragment)
+  (let [replacement (:form fragment)
+        args (vec (rest form))]
+    (cond
+      (symbol? replacement)
+      (walk-fn (apply list replacement args))
+
+      (= 0 (count args))
+      (walk-fn replacement)
+
+      :else
+      (throw
+       (ex-info "Value fragment cannot accept call arguments"
+                {:fragment (util/sym-full fragment)
+                 :replacement replacement
+                 :arguments args})))))
+
+(defn- expand-fragment-symbol
+  [fragment deps-fragment walk-fn]
+  (record-fragment-dependency! fragment deps-fragment)
+  (walk-fn (:form fragment)))
+
 (defn to-staging-form [form grammar modules options deps-fragment walk-fn]
   (let [symbol (first form)
         reserved (get-in grammar [:reserved symbol])
@@ -45,30 +81,52 @@
                                  (macroexpand-host-form form options)
                                  form)]
                   (cond (:template fragment)
-                        (do (if deps-fragment (swap! deps-fragment conj (util/sym-full fragment)))
+                        (do (record-fragment-dependency! fragment deps-fragment)
                             (binding [base/*macro-form* form base/*macro-opts* options]
                               (walk-fn (apply (:template fragment) (rest form)))))
+
+                        (value-fragment? fragment)
+                        (expand-fragment-call fragment form deps-fragment walk-fn)
 
                         (not= form expanded)
                         (walk-fn expanded)
 
                         :else form))))))))
 
+(declare stage-form)
+
+(defn- stage-symbol
+  [form grammar modules options deps deps-fragment deps-native]
+  (if (and (string/includes? (str form) ".")
+           (not (string/includes? (str form) "/")))
+    (resolve/process-standard-symbol form options deps-native)
+    (or (let [standalone (value/value-standalone form grammar)]
+          (if standalone
+            (stage-form standalone grammar modules options deps deps-fragment deps-native)))
+        (if (string/includes? (str form) "/")
+          (let [fragment (resolve/get-fragment form modules options)]
+            (if (value-fragment? fragment)
+              (expand-fragment-symbol
+               fragment deps-fragment
+               (fn [replacement]
+                 (stage-form replacement grammar modules options
+                             deps deps-fragment deps-native)))
+              (resolve/process-namespaced-symbol
+               form modules options deps deps-fragment
+               (fn [replacement]
+                 (stage-form replacement grammar modules options
+                             deps deps-fragment deps-native)))))
+          (resolve/process-standard-symbol form options deps-native)))))
+
 (defn- stage-form [form grammar modules options deps deps-fragment deps-native]
   (try
     (cond (walk/form? form)
           (to-staging-form form grammar modules options deps-fragment
-                           (fn [value] (stage-form value grammar modules options deps deps-fragment deps-native)))
+                           (fn [replacement]
+                             (stage-form replacement grammar modules options
+                                         deps deps-fragment deps-native)))
           (symbol? form)
-          (if (and (string/includes? (str form) ".")
-                   (not (string/includes? (str form) "/")))
-            (resolve/process-standard-symbol form options deps-native)
-            (or (let [standalone (value/value-standalone form grammar)]
-                  (if standalone (stage-form standalone grammar modules options deps deps-fragment deps-native)))
-                (if (string/includes? (str form) "/")
-                  (resolve/process-namespaced-symbol form modules options deps deps-fragment
-                                                     (fn [value] (stage-form value grammar modules options deps deps-fragment deps-native)))
-                  (resolve/process-standard-symbol form options deps-native))))
+          (stage-symbol form grammar modules options deps deps-fragment deps-native)
           :else form)
     (catch Throwable error
       (if (:staging/form (ex-data error))
@@ -80,12 +138,15 @@
 
 (defn to-staging [input grammar modules options]
   (let [deps (atom #{}) deps-fragment (atom #{}) deps-native (atom {})
-          result (walk/prewalk (fn [form] (stage-form form grammar modules options deps deps-fragment deps-native)) input)
-          result (walk/postwalk (fn [form]
-                                  (if (assign/protected-head? form)
-                                    (assign/unwrap-protected-head form)
-                                    form))
-                                result)]
+        result (walk/prewalk (fn [form]
+                               (stage-form form grammar modules options
+                                           deps deps-fragment deps-native))
+                             input)
+        result (walk/postwalk (fn [form]
+                                (if (assign/protected-head? form)
+                                  (assign/unwrap-protected-head form)
+                                  form))
+                              result)]
       [result (deref deps) (deref deps-fragment) (deref deps-native)]))
 
 (defn- resolve-form [form grammar modules options]
@@ -99,7 +160,11 @@
           (resolve/process-standard-symbol form options nil)
           (or (value/value-standalone form grammar)
               (if (string/includes? (str form) "/")
-                (resolve/process-namespaced-symbol form modules options nil nil identity)
+                (let [fragment (resolve/get-fragment form modules options)]
+                  (if (value-fragment? fragment)
+                    (:form fragment)
+                    (resolve/process-namespaced-symbol
+                     form modules options nil nil identity)))
                 (resolve/process-standard-symbol form options nil))))
         :else form))
 

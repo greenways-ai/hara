@@ -2,6 +2,7 @@ name: std.db Graph Compiler
 
 on:
   pull_request:
+    branches: [main]
     paths:
       - "lib/src/std/db/text/base_scope.hal"
       - "lib/src/std/db/text/base_graph.hal"

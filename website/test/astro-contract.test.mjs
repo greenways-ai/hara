@@ -12,6 +12,18 @@ test("publishes docs below /docs and uses the visual package", async () => {
   assert.doesNotMatch(layout, /docs\.hara-lang\.org/);
 });
 
+test("uses the compact ecosystem navigation and sign-in button", async () => {
+  const layout = await readFile(new URL("../src/layouts/SiteLayout.astro", import.meta.url), "utf8");
+  const shell = await readFile(new URL("../src/styles/shell.css", import.meta.url), "utf8");
+  assert.match(layout, /Benchmarks[\s\S]*Docs[\s\S]*Specs/);
+  assert.doesNotMatch(layout, />Source<\/a>/);
+  assert.match(layout, /https:\/\/specs\.hara-lang\.org\//);
+  assert.ok(layout.includes('href="https://id.hara-lang.org/">Sign in</a>'));
+  assert.doesNotMatch(layout, /api\/session|auth\/github|return_to/);
+  assert.match(shell, /grid-template-columns: auto minmax\(0, 1fr\) auto/);
+  assert.doesNotMatch(shell, /nav\s*\{[^}]*display:\s*none/);
+});
+
 test("leads with the language and renders benchmark evidence from committed data", async () => {
   const page = await readFile(new URL("../src/pages/index.astro", import.meta.url), "utf8");
   assert.match(page, /Simple to pick up\.[\s\S]*Fast enough to keep\./);
