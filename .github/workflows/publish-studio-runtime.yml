@@ -6,7 +6,7 @@ on:
       tag:
         description: Existing Hara release tag to receive the Studio runtime
         required: true
-        default: v0.1.0
+        default: v0.1.2
 
 permissions:
   contents: write
