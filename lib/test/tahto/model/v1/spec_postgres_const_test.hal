@@ -1,0 +1,300 @@
+(ns tahto.model.v1.spec-postgres-const-test
+  (:use code.test)
+  (:require [postgres.core.impl-insert :as insert]
+            [tahto.core :as l]
+            [tahto.core.compile :as compile]
+            [tahto.core.script :as script]
+            [tahto.model.v6.spec-postgres :as postgres]
+            [tahto.model.v1.spec-postgres.const :as const]))
+
+(l/script :postgres
+  {:static {:application ["fixture"]
+            :all {:schema ["fixture"]}}})
+
+(defenum.pg AccountStatus
+  [:active :disabled])
+
+(deftype.pg ^{:final true}
+  Operation
+  [:id {:type :uuid :primary true :required true}
+   :time {:type :bigint :required true}]
+  {})
+
+(deftype.pg ^{:final true}
+  Account
+  [:id {:type :uuid :primary true :required true}
+   :status {:type :enum
+            :required true
+            :enum {:ns -/AccountStatus}}
+   :name {:type :text :required true}]
+  {})
+
+(deftype.pg ^{:final true
+               :track {:in {:create {:created-op :id
+                                     :time-created :time}
+                            :modify {:updated-op :id
+                                     :time-updated :time}}}}
+  TrackedRecord
+  [:id {:type :uuid :primary true :required true}
+   :value {:type :text :required true}
+   :created-op {:type :uuid :required true}
+   :updated-op {:type :uuid :required true}
+   :time-created {:type :bigint :required true}
+   :time-updated {:type :bigint :required true}]
+  {})
+
+(defconst.pg RootAccount
+  [-/Account]
+  {:id "account-root"
+   :status :active
+   :name "Root"})
+
+(defconst.pg SeedOperation
+  [-/Operation]
+  {:id "op-1"
+   :time 1000})
+
+(defconst.pg ^{:track (jsonb-build-object "id" "op-direct" "time" 2000)}
+  DirectTracked
+  [-/TrackedRecord]
+  {:id "record-direct"
+   :value "direct"})
+
+(defconst.pg ^{:track -/SeedOperation}
+  LinkedTracked
+  [-/TrackedRecord]
+  {:id "record-linked"
+   :value "linked"})
+
+(defn current-module []
+  (symbol (str (current-namespace))))
+
+(defn index-of
+  [values target]
+  (loop [index 0
+         remaining (vec values)]
+    (if (= 0 (count remaining))
+      -1
+      (if (= target (first remaining))
+        index
+        (recur (+ index 1)
+               (vec (rest remaining)))))))
+
+(defn module-context []
+  (let [module-id (current-module)
+        modules (deref script/+modules+)]
+    {:module (get modules module-id)
+     :modules modules}))
+
+(defn entry-form [id]
+  (get-in (deref script/+modules+)
+          [(current-module) :code id :form-input]))
+
+(defn formatted [id]
+  (const/pg-const-format (entry-form id)))
+
+(defn hydrated [id]
+  (const/pg-const-hydrate
+   (second (formatted id))
+   (:grammar postgres/+selection+)
+   (module-context)))
+
+(defn direct-output [id]
+  (const/pg-const
+   (second (hydrated id))
+   (:grammar postgres/+selection+)
+   (module-context)))
+
+(def +root-account-output+
+  (str "DO $$\n"
+       "BEGIN\n"
+       "  INSERT INTO \"fixture\".\"Account\" (\"id\", \"status\", \"name\")\n"
+       "  VALUES (('account-root')::UUID, ('active')::\"fixture\".\"AccountStatus\", ('Root')::TEXT)\n"
+       "  ON CONFLICT (\"id\")\n"
+       "  DO UPDATE SET\n"
+       "      \"status\" = EXCLUDED.\"status\",\n"
+       "      \"name\" = EXCLUDED.\"name\";\n"
+       "END;\n"
+       "$$ LANGUAGE plpgsql;"))
+
+(def +direct-tracked-output+
+  (str "DO $$\n"
+       "DECLARE\n"
+       "  o_track JSONB;\n"
+       "BEGIN\n"
+       "  o_track := jsonb_build_object('id','op-direct','time',2000);\n"
+       "  INSERT INTO \"fixture\".\"TrackedRecord\" (\"id\", \"value\", \"created_op\", \"updated_op\", \"time_created\", \"time_updated\")\n"
+       "  VALUES (('record-direct')::UUID, ('direct')::TEXT, (o_track ->> 'id')::UUID, (o_track ->> 'id')::UUID, (o_track ->> 'time')::BIGINT, (o_track ->> 'time')::BIGINT)\n"
+       "  ON CONFLICT (\"id\")\n"
+       "  DO UPDATE SET\n"
+       "      \"value\" = EXCLUDED.\"value\",\n"
+       "      \"updated_op\" = EXCLUDED.\"updated_op\",\n"
+       "      \"time_updated\" = EXCLUDED.\"time_updated\";\n"
+       "END;\n"
+       "$$ LANGUAGE plpgsql;"))
+
+(def +linked-tracked-output+
+  (str "DO $$\n"
+       "DECLARE\n"
+       "  o_track JSONB;\n"
+       "BEGIN\n"
+       "  o_track := (SELECT to_jsonb(t) FROM \"fixture\".\"Operation\" AS t WHERE t.\"id\" = ('op-1')::UUID LIMIT 1);\n"
+       "  INSERT INTO \"fixture\".\"TrackedRecord\" (\"id\", \"value\", \"created_op\", \"updated_op\", \"time_created\", \"time_updated\")\n"
+       "  VALUES (('record-linked')::UUID, ('linked')::TEXT, (o_track ->> 'id')::UUID, (o_track ->> 'id')::UUID, (o_track ->> 'time')::BIGINT, (o_track ->> 'time')::BIGINT)\n"
+       "  ON CONFLICT (\"id\")\n"
+       "  DO UPDATE SET\n"
+       "      \"value\" = EXCLUDED.\"value\",\n"
+       "      \"updated_op\" = EXCLUDED.\"updated_op\",\n"
+       "      \"time_updated\" = EXCLUDED.\"time_updated\";\n"
+       "END;\n"
+       "$$ LANGUAGE plpgsql;"))
+
+(def results
+  [(fact "selects PostgreSQL v6"
+     [(:version postgres/+book+)
+      (:version (l/registry-book :postgres :default nil))]
+     => [6 6])
+
+   (fact "defconst.pg registers a table-backed code entry"
+     (let [entry (get-in (deref script/+modules+)
+                         [(current-module) :code 'RootAccount])]
+       [(:op entry) (:op-key entry) (:section entry)])
+     => ['defconst :defconst :code])
+
+   (fact "formatting retains constant metadata and table binding"
+     (let [result (formatted 'RootAccount)
+           metadata (first result)
+           form (second result)]
+       [(:static/dbtype metadata)
+        (nth form 2)
+        (nth form 3)])
+     => [:const
+         [(symbol "-" "Account")]
+         {:id "account-root" :status :active :name "Root"}])
+
+   (fact "hydration builds table coordinates and a canonical DML upsert form"
+     (let [metadata (first (hydrated 'RootAccount))
+           form (:static/form metadata)]
+       [(:static/table-coordinate metadata)
+        (first form)
+        (contains? (:static/table-schema metadata) :status)])
+     => [{:schema "fixture" :table 'Account}
+         :insert-into
+         true])
+
+   (fact "emits enum-aware deterministic upsert SQL"
+     (direct-output 'RootAccount)
+     => +root-account-output+)
+
+   (fact "the DML helper emits DO NOTHING when no update column remains"
+     (insert/t-upsert-raw
+      [{:id 'Only :module 'fixture}
+       {:id {:type :uuid :primary true :required true :order 0}}
+       {}]
+      {:id "a"}
+      {:as :raw})
+     => '[:insert-into fixture/Only
+          (>-< [#{"id"}])
+          :values (>-< [(:uuid "a")])
+          :on-conflict (quote (#{"id"}))
+          :do-nothing])
+
+   (fact "tracked tables require explicit constant tracker metadata"
+     (const/pg-const-hydrate
+      (second
+       (const/pg-const-format
+        '(defconst MissingTracker
+           [-/TrackedRecord]
+           {:id "missing" :value "missing"})))
+      (:grammar postgres/+selection+)
+      (module-context))
+     => (throws))
+
+   (fact "direct tracker forms insert creation fields but update only modification fields"
+     (let [metadata (first (hydrated 'DirectTracked))]
+       [(direct-output 'DirectTracked)
+        (:static/exclude-update metadata)])
+     => [+direct-tracked-output+
+         #{:created-op :time-created}])
+
+   (fact "linked tracker constants become one deterministic lookup"
+     (let [metadata (first (hydrated 'LinkedTracked))]
+       [(direct-output 'LinkedTracked)
+        (:static/track metadata)])
+     => [+linked-tracked-output+
+         {:id 'SeedOperation
+          :module (current-module)
+          :section :code
+          :lang :postgres}])
+
+   (fact "compile-module orders tables and tracker constants before dependent constants"
+     (let [result (compile/compile-module
+                   {:lang :postgres
+                    :main (current-module)
+                    :layout :module})
+           order (get-in result [:provenance :entry-order])
+           module (str (current-module))
+           operation (symbol module "Operation")
+           seed (symbol module "SeedOperation")
+           linked (symbol module "LinkedTracked")
+           account (symbol module "Account")
+           root (symbol module "RootAccount")]
+       [(< (index-of order operation) (index-of order seed))
+        (< (index-of order seed) (index-of order linked))
+        (< (index-of order account) (index-of order root))
+        (:diagnostics result)])
+     => [true true true []])
+
+   (fact "compiled constant entry output equals the direct golden"
+     (let [result (compile/compile-module
+                   {:lang :postgres
+                    :main (current-module)
+                    :layout :module})
+           target (symbol (str (current-module)) "RootAccount")
+           entry (first (filter (fn [candidate]
+                                  (= target (:symbol candidate)))
+                                (:entries result)))]
+       (:output entry))
+     => +root-account-output+)
+
+   (fact "historical !:eval data uses an explicit deterministic capability"
+     (let [form (second
+                 (const/pg-const-format
+                  '(defconst DynamicAccount
+                     [-/Account]
+                     (!:eval (source-account)))))
+           result (const/pg-const-hydrate
+                   form
+                   (:grammar postgres/+selection+)
+                   (assoc (module-context)
+                          :tahto/eval-literal
+                          (fn [source]
+                            (if (= source '(source-account))
+                              {:id "dynamic"
+                               :status :disabled
+                               :name "Dynamic"}
+                              {}))))
+           metadata (first result)]
+       (:static/data metadata))
+     => {:id "dynamic" :status :disabled :name "Dynamic"})
+
+   (fact "historical !:eval data fails without an explicit capability"
+     (const/pg-const-hydrate
+      (second
+       (const/pg-const-format
+        '(defconst DynamicAccount
+           [-/Account]
+           (!:eval (source-account)))))
+      (:grammar postgres/+selection+)
+      (module-context))
+     => (throws))
+
+   (fact "repeated table-backed constant compilation is byte-identical"
+     (let [options {:lang :postgres
+                    :main (current-module)
+                    :layout :module}]
+       (= (:output (compile/compile-module options))
+          (:output (compile/compile-module options))))
+     => true)])
+
+(pr-str (run '[tahto.model.v1.spec-postgres-const-test]))
