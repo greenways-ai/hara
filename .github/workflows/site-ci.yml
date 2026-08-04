@@ -1,0 +1,42 @@
+name: Site CI
+
+on:
+  pull_request:
+    paths:
+      - "website/**"
+      - "benchmarks/**"
+      - "lib/bench/**"
+      - "packages/visual-language/**"
+      - ".github/workflows/site-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            website/package-lock.json
+            benchmarks/package-lock.json
+      - name: Install site dependencies
+        run: |
+          npm ci --prefix website
+          npm ci --prefix benchmarks
+      - name: Validate benchmark publication
+        run: |
+          npm test --prefix benchmarks
+          npm run build --prefix benchmarks
+      - name: Validate main Hara site
+        run: |
+          npm test --prefix website
+          npm run build --prefix website
