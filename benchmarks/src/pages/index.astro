@@ -50,7 +50,11 @@ const socialImage = new URL(`${basePath}og-hara-benchmarks.jpg`, Astro.site);
     </section>
     <RuntimeReference />
   </main>
-  <footer><span>Hara benchmark evidence</span><a href="https://github.com/hara-lang/hara/tree/main/lib/bench">Methods and raw data</a></footer>
+  <footer>
+    <span>Hara benchmark evidence</span>
+    <a href="https://github.com/hara-lang/hara/tree/main/lib/bench">Methods and raw data</a>
+    <span><a href="https://opensource.greenways.ai/open-source/">A Greenways Open Source Project</a> · <a href="https://github.com/hara-lang/hara/blob/main/LICENSE">EPL-2.0</a></span>
+  </footer>
   <script>
     const tabs = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
     const activate = (tab: HTMLButtonElement, focus = true) => {
