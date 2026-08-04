@@ -43,6 +43,48 @@ test("reuses one session promise for repeated evaluations", async () => {
   assert.deepEqual(calls, [[descriptor.id, { filesystem: descriptor.filesystem }]]);
 });
 
+test("closes and replaces a named session exactly once during reset", async () => {
+  const created = [];
+  const closed = [];
+  const kernel = {
+    async createSession(id, options) {
+      const generation = created.length + 1;
+      created.push([id, options, generation]);
+      return {
+        id,
+        generation,
+        async close() {
+          closed.push(generation);
+        }
+      };
+    }
+  };
+  const registry = createDocsSessionRegistry(Promise.resolve(kernel));
+  const descriptor = describeDocsSession({
+    scope: "group",
+    groupName: "lesson",
+    pagePath: "/docs/learn/first-contact/"
+  });
+
+  const first = await registry.get(descriptor);
+  assert.equal(registry.revision(descriptor), 0);
+
+  const firstReset = registry.reset(descriptor);
+  const repeatedReset = registry.reset(descriptor);
+  assert.strictEqual(firstReset, repeatedReset);
+
+  const replacement = await firstReset;
+  assert.notStrictEqual(first, replacement);
+  assert.equal(replacement.generation, 2);
+  assert.deepEqual(closed, [1]);
+  assert.equal(registry.revision(descriptor), 1);
+  assert.strictEqual(await registry.get(descriptor), replacement);
+  assert.deepEqual(created, [
+    [descriptor.id, { filesystem: descriptor.filesystem }, 1],
+    [descriptor.id, { filesystem: descriptor.filesystem }, 2]
+  ]);
+});
+
 test("shares global and named group sessions but not isolated sessions", () => {
   const firstGlobal = describeDocsSession({ scope: "global", pagePath: "/docs/start/", sequence: 1 });
   const secondGlobal = describeDocsSession({ scope: "global", pagePath: "/docs/start/", sequence: 2 });
@@ -97,4 +139,17 @@ test("shows the user-facing scope and keeps the runtime in details", async () =>
   assert.match(state, /label: "isolated"/);
   assert.match(state, /label: "global"/);
   assert.match(state, /label: `group \$\{normalizedGroup\}`/);
+});
+
+test("resets every runner in a named lesson group without accepting stale output", async () => {
+  const repl = await readFile(new URL("../public/assets/docs-repl.js", import.meta.url), "utf8");
+  const state = await readFile(new URL("../public/assets/docs-repl-state.js", import.meta.url), "utf8");
+  assert.match(repl, /hara:reset-session/);
+  assert.match(repl, /sessions\.reset\(descriptor\)/);
+  assert.match(repl, /hara:session-reset/);
+  assert.match(repl, /currentOperation !== operation/);
+  assert.match(repl, /matching\.forEach\(\(runner\) => runner\.beginReset\(\)\)/);
+  assert.match(state, /reset\(descriptor\)/);
+  assert.match(state, /await session\.close\?\.\(\)/);
+  assert.match(state, /revision\(descriptor\)/);
 });
