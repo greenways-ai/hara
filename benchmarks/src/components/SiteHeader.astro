@@ -1,0 +1,16 @@
+---
+import ThemeToggle from "@hara-lang/visual-language/astro/ThemeToggle.astro";
+import HaraMark from "@hara-lang/visual-language/astro/HaraMark.astro";
+---
+<header class="site-header">
+  <a class="brand" href="https://www.hara-lang.org/"><HaraMark size={26} /><span>Hara</span></a>
+  <nav aria-label="Primary navigation">
+    <span aria-current="page" aria-disabled="true">Benchmarks</span>
+    <a href="https://www.hara-lang.org/docs/">Docs</a>
+    <a href="https://specs.hara-lang.org/">Specs</a>
+  </nav>
+  <div class="header-actions">
+    <a class="sign-in" href="https://id.hara-lang.org/">Sign in</a>
+    <ThemeToggle />
+  </div>
+</header>
