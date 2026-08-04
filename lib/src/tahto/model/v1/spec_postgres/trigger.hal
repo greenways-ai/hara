@@ -77,18 +77,21 @@
     (throw (ex-info "Unsupported PostgreSQL trigger table coordinate"
                     {:target target}))))
 
+(defn- execute-index-step
+  [values index]
+  (if (>= index (count values))
+    nil
+    (let [value (nth values index)
+          next-value (if (< (+ index 1) (count values))
+                       (nth values (+ index 1))
+                       nil)]
+      (cond (= value :execute-function) index
+            (and (= value :execute) (= next-value :function)) index
+            :else (execute-index-step values (+ index 1))))))
+
 (defn- execute-index
   [values]
-  (loop [index 0]
-    (if (>= index (count values))
-      nil
-      (let [value (nth values index)
-            next-value (if (< (+ index 1) (count values))
-                         (nth values (+ index 1))
-                         nil)]
-        (cond (= value :execute-function) index
-              (and (= value :execute) (= next-value :function)) index
-              :else (recur (+ index 1)))))))
+  (execute-index-step values 0))
 
 (defn trigger-execute-form
   "Returns the function call carried by a historical trigger body."
@@ -199,52 +202,65 @@
         (string? value) (emit/*emit-fn* value grammar context)
         :else (emit/*emit-fn* value grammar context)))
 
+(defn- vector-body-tokens
+  [values index output resolved-function grammar context]
+  (if (>= index (count values))
+    output
+    (let [value (nth values index)
+          next-value (if (< (+ index 1) (count values))
+                       (nth values (+ index 1))
+                       nil)]
+      (cond
+        (= value :execute-function)
+        (if next-value
+          (vector-body-tokens
+           values
+           (+ index 2)
+           (conj output
+                 "EXECUTE FUNCTION"
+                 (function-call-output next-value
+                                       resolved-function
+                                       grammar context))
+           resolved-function grammar context)
+          (throw (ex-info "EXECUTE FUNCTION requires a target"
+                          {:body values})))
+
+        (and (= value :execute) (= next-value :function))
+        (let [call-index (+ index 2)
+              call (if (< call-index (count values))
+                     (nth values call-index)
+                     nil)]
+          (if call
+            (vector-body-tokens
+             values
+             (+ index 3)
+             (conj output
+                   "EXECUTE FUNCTION"
+                   (function-call-output call
+                                         resolved-function
+                                         grammar context))
+             resolved-function grammar context)
+            (throw (ex-info "EXECUTE FUNCTION requires a target"
+                            {:body values}))))
+
+        :else
+        (vector-body-tokens
+         values
+         (+ index 1)
+         (conj output
+               (generic-trigger-token value grammar context))
+         resolved-function grammar context)))))
+
 (defn vector-body-output
   [body resolved-function grammar context]
-  (let [values (vec body)]
-    (loop [index 0
-           output []]
-      (if (>= index (count values))
-        (string/replace
-         (string/replace
-          (string/join " " output)
-          " \n " "\n")
-         "\n " "\n")
-        (let [value (nth values index)
-              next-value (if (< (+ index 1) (count values))
-                           (nth values (+ index 1))
-                           nil)]
-          (cond
-            (= value :execute-function)
-            (if next-value
-              (recur (+ index 2)
-                     (conj output
-                           "EXECUTE FUNCTION"
-                           (function-call-output next-value
-                                                 resolved-function
-                                                 grammar context)))
-              (throw (ex-info "EXECUTE FUNCTION requires a target"
-                              {:body body})))
-
-            (and (= value :execute) (= next-value :function))
-            (let [call-index (+ index 2)
-                  call (if (< call-index (count values))
-                         (nth values call-index)
-                         nil)]
-              (if call
-                (recur (+ index 3)
-                       (conj output
-                             "EXECUTE FUNCTION"
-                             (function-call-output call
-                                                   resolved-function
-                                                   grammar context)))
-                (throw (ex-info "EXECUTE FUNCTION requires a target"
-                                {:body body}))))
-
-            :else
-            (recur (+ index 1)
-                   (conj output
-                         (generic-trigger-token value grammar context)))))))))
+  (let [values (vec body)
+        output (vector-body-tokens values 0 []
+                                   resolved-function grammar context)]
+    (string/replace
+     (string/replace
+      (string/join " " output)
+      " \n " "\n")
+     "\n " "\n")))
 
 (defn map-body-output
   [body resolved-function grammar context]
