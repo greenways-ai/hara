@@ -28,7 +28,7 @@ baseline_allows_modrs() {
   grep -Fqx "modrs $relative" "$baseline"
 }
 
-# Validate the baseline itself and require stale debt entries to be removed.
+# Validate the baseline itself and require stale or resolved debt entries to be removed.
 while read -r kind relative limit extra; do
   [[ -z "${kind:-}" || "$kind" == \#* ]] && continue
   case "$kind" in
@@ -44,6 +44,12 @@ while read -r kind relative limit extra; do
       fi
       if [[ ! -f "$root/$relative" ]]; then
         echo "Stale line baseline entry: $relative" >&2
+        failed=1
+        continue
+      fi
+      current_lines="$(wc -l < "$root/$relative")"
+      if (( current_lines <= maximum_lines )); then
+        echo "Resolved line baseline entry: $relative now has $current_lines lines; remove it from the baseline" >&2
         failed=1
       fi
       ;;
