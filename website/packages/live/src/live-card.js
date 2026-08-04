@@ -3,6 +3,7 @@ import {
   barfForward,
   insertIndent,
   killToFormEnd,
+  localFormAt,
   slurpForward,
   structuralAlign
 } from "./editor.js";
@@ -10,13 +11,52 @@ import { highlightHara } from "./highlight.js";
 import { createLiveKernel } from "./kernel.js";
 import { LIVE_SNIPPETS } from "./snippets.js";
 
-/** Print an evaluated kernel value the way the docs REPL does. */
-export const print = (value) => {
-  if (value === null) return "nil";
+const objectType = (value) => value?.constructor?.name ?? "";
+
+/** Print a decoded HTA value as readable Hara data. */
+export const print = (value, ancestors = new Set()) => {
+  if (value === null || value === undefined) return "nil";
   if (typeof value === "string") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(print).join(" ")}]`;
-  if (value instanceof Map) return `{${[...value].map(([key, item]) => `${print(key)} ${print(item)}`).join(" ")}}`;
-  return String(value);
+  if (["number", "bigint", "boolean"].includes(typeof value)) return String(value);
+
+  const type = objectType(value);
+  if (type === "HtaKeyword") return `:${value.name}`;
+  if (type === "HtaSymbol") return value.name;
+  if (type === "HtaVar") return `#'${print(value.symbol, ancestors)}`;
+  if (type === "HtaHandle") return String(value);
+
+  if (typeof value === "object") {
+    if (ancestors.has(value)) return "#<cycle>";
+    ancestors.add(value);
+  }
+
+  let rendered;
+  if (type === "HtaAtom") {
+    rendered = `#atom <${print(value.value, ancestors)}>`;
+  } else if (type === "HtaArray") {
+    rendered = `(array${value.values?.length ? ` ${value.values.map((item) => print(item, ancestors)).join(" ")}` : ""})`;
+  } else if (type === "HtaObject") {
+    const entries = value.entries ?? [];
+    rendered = `(object${entries.length ? ` ${entries.map(([key, item]) => `${JSON.stringify(key)} ${print(item, ancestors)}`).join(" ")}` : ""})`;
+  } else if (value instanceof Uint8Array) {
+    rendered = `#bytes[${[...value].join(" ")}]`;
+  } else if (Array.isArray(value)) {
+    rendered = `[${value.map((item) => print(item, ancestors)).join(" ")}]`;
+  } else if (value instanceof Set) {
+    rendered = `#{${[...value].map((item) => print(item, ancestors)).join(" ")}}`;
+  } else if (value instanceof Map) {
+    rendered = `{${[...value].map(([key, item]) => `${print(key, ancestors)} ${print(item, ancestors)}`).join(" ")}}`;
+  } else if (typeof value === "object") {
+    const custom = value.toString?.();
+    rendered = custom && custom !== "[object Object]"
+      ? custom
+      : `#js {${Object.entries(value).map(([key, item]) => `${JSON.stringify(key)} ${print(item, ancestors)}`).join(" ")}}`;
+  } else {
+    rendered = String(value);
+  }
+
+  if (typeof value === "object") ancestors.delete(value);
+  return rendered;
 };
 
 const errorMessage = (error) => String(error?.message ?? error).replace(/^Error: /, "");
@@ -176,27 +216,48 @@ function createCanvasController(card, { runtimeBase }) {
   };
 }
 
-/**
- * @typedef {import("./snippets.js").LiveSnippet} LiveSnippet
- */
+function trimmedSelection(editor) {
+  const { value, selectionStart: start, selectionEnd: end } = editor;
+  if (start === end) return null;
+  const selected = value.slice(start, end);
+  const leading = selected.match(/^\s*/)?.[0].length ?? 0;
+  const trailing = selected.match(/\s*$/)?.[0].length ?? 0;
+  const from = start + leading;
+  const to = end - trailing;
+  return from < to ? { source: value.slice(from, to), start: from, end: to } : null;
+}
+
+/** Prefer the complete expression beginning on a tapped line, then local form. */
+function formAtEditor(editor, preferLine = false) {
+  const selected = trimmedSelection(editor);
+  if (selected) return selected;
+
+  const { value, selectionStart: caret } = editor;
+  if (preferLine) {
+    const lineStart = value.lastIndexOf("\n", Math.max(0, caret - 1)) + 1;
+    const first = lineStart + (value.slice(lineStart).match(/^\s*/)?.[0].length ?? 0);
+    const lineForm = localFormAt(value, first);
+    if (lineForm?.start === first && lineForm.end >= caret) return lineForm;
+  }
+  return localFormAt(value, caret);
+}
 
 /**
  * Mount an embeddable Hara live-coding card into `root`.
  *
  * @param {HTMLElement} root element the card is appended to
  * @param {object} [options]
- * @param {LiveSnippet[]} [options.snippets] registry entries to offer as tabs
+ * @param {LiveSnippet[]} [options.snippets] registry entries offered as examples
  * @param {string | null} [options.activeSnippet] id of the initially selected snippet
  * @param {object | Promise<object> | null} [options.kernel] kernel facade (or
- *   promise); when omitted, the shared kernel is lazily booted via
- *   createLiveKernel on first Run
+ *   promise); when omitted, the shared kernel is lazily booted on first Eval/Run
  * @param {string} [options.runtimeBase] base URL for /runtime assets (broker, canvas-runtime)
  * @param {string} [options.docsAssetsBase] base URL for docs-assets
  * @param {string | null} [options.kernelModuleUrl] passed to createLiveKernel
  * @param {Function | null} [options.createKernel] passed to createLiveKernel
  * @param {Function | null} [options.fetchAsset] passed to createLiveKernel
  * @param {string} [options.playgroundUrl] target of the "Open in Playground" link
- * @returns {{ destroy: () => void, run: () => Promise<void> }}
+ * @returns {{ destroy: () => void, eval: () => Promise<void>, run: () => Promise<void> }}
  */
 export function mountLiveCard(root, {
   snippets = LIVE_SNIPPETS,
@@ -214,33 +275,32 @@ export function mountLiveCard(root, {
   card.dataset.connectionState = "idle";
   card.innerHTML = `
     <header class="hara-live-card-header">
-      <span class="hara-live-card-brand">Hara</span>
-      <div class="hara-live-card-tabs" role="tablist" aria-label="Hara demos"></div>
-      <span class="hara-live-card-status">
+      <span class="hara-live-card-status" title="Kernel status">
         <i class="hara-live-card-connection" aria-hidden="true"></i>
         <small data-live-connection-label>Idle</small>
       </span>
+      <button type="button" class="hara-live-card-eval" data-live-eval>Eval</button>
+      <button type="button" class="hara-live-card-run" data-live-run>Run</button>
+      <label class="hara-live-card-examples">
+        <span class="hara-live-card-sr-only">Example</span>
+        <select data-live-example aria-label="Example"></select>
+      </label>
       <a class="hara-live-card-playground" target="_blank" rel="noopener">Open in Playground</a>
     </header>
     <div class="hara-live-card-editor">
       <pre class="code-highlight" aria-hidden="true"><code></code></pre>
       <textarea spellcheck="false" wrap="off" aria-label="Hara source editor"></textarea>
     </div>
-    <div class="hara-live-card-toolbar">
-      <button type="button" class="hara-live-card-run" data-live-run>Run</button>
-      <button type="button" class="hara-live-card-reset" data-live-reset>Reset</button>
-      <span class="hara-live-card-hint">Ctrl/Cmd+Enter to run</span>
-    </div>
     <output class="hara-live-card-output" aria-live="polite" hidden></output>`;
   root.append(card);
 
-  const tabs = card.querySelector(".hara-live-card-tabs");
+  const exampleSelect = card.querySelector("[data-live-example]");
   const playgroundLink = card.querySelector(".hara-live-card-playground");
   const highlight = card.querySelector(".code-highlight");
   const highlightContent = highlight.querySelector("code");
   const editor = card.querySelector("textarea");
+  const evalButton = card.querySelector("[data-live-eval]");
   const runButton = card.querySelector("[data-live-run]");
-  const resetButton = card.querySelector("[data-live-reset]");
   const output = card.querySelector(".hara-live-card-output");
   const connectionLabel = card.querySelector("[data-live-connection-label]");
   playgroundLink.href = playgroundUrl;
@@ -253,13 +313,23 @@ export function mountLiveCard(root, {
   const sessionId = `live-${Math.random().toString(36).slice(2)}`;
   let kernelPromise = kernel ? Promise.resolve(kernel) : null;
   let sessionPromise = null;
+  let evalRange = null;
   let operation = 0;
   let destroyed = false;
+  let lastTouchEvaluation = 0;
 
   const setConnection = (state, error = null) => {
     card.dataset.connectionState = state;
     const label = CONNECTION_TEXT[state] ?? state;
     connectionLabel.textContent = error ? `${label}: ${errorMessage(error)}` : label;
+    card.querySelector(".hara-live-card-status")
+      .setAttribute("aria-label", error ? `${label}: ${errorMessage(error)}` : `Kernel ${label}`);
+  };
+
+  const setControlsDisabled = (disabled) => {
+    evalButton.disabled = disabled;
+    runButton.disabled = disabled;
+    exampleSelect.disabled = disabled;
   };
 
   const bootKernel = () => {
@@ -300,109 +370,105 @@ export function mountLiveCard(root, {
   };
 
   const syncHighlight = () => {
-    highlightContent.innerHTML = highlightHara(editor.value);
+    highlightContent.innerHTML = highlightHara(editor.value, { evalRange });
     highlightContent.style.transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`;
   };
 
   const syncOutputMode = () => {
-    const isCanvas = active?.kind === "canvas";
     output.hidden = true;
     delete output.dataset.state;
+    delete output.dataset.mode;
     output.textContent = "";
-    if (isCanvas) canvas.show();
+    if (active?.kind === "canvas") canvas.show();
     else canvas.hide();
   };
+
+  for (const snippet of snippets) {
+    const option = document.createElement("option");
+    option.value = snippet.id;
+    option.textContent = snippet.title;
+    option.selected = snippet === active;
+    exampleSelect.append(option);
+  }
 
   const selectSnippet = (id) => {
     const next = byId.get(id);
     if (!next || next === active) return;
+    operation += 1;
     active = next;
+    evalRange = null;
     editor.value = next.source;
-    for (const tab of tabs.querySelectorAll("button")) {
-      const selected = tab.dataset.snippetId === next.id;
-      tab.setAttribute("aria-selected", String(selected));
-    }
+    exampleSelect.value = next.id;
     syncHighlight();
     syncOutputMode();
   };
 
-  for (const snippet of snippets) {
-    const tab = document.createElement("button");
-    tab.type = "button";
-    tab.setAttribute("role", "tab");
-    tab.dataset.snippetId = snippet.id;
-    tab.textContent = snippet.title;
-    tab.setAttribute("aria-selected", String(snippet === active));
-    tab.addEventListener("click", () => selectSnippet(snippet.id));
-    tabs.append(tab);
-  }
-
-  const run = async () => {
-    if (!active) return;
+  const evaluate = async ({ source, mode, range = null }) => {
+    if (!active || !source?.trim()) return;
     const currentOperation = ++operation;
-    runButton.disabled = true;
-    output.hidden = active.kind === "canvas";
-    if (active.kind !== "canvas") {
+    const canvasRun = mode === "run" && active.kind === "canvas";
+    evalRange = range;
+    syncHighlight();
+    setControlsDisabled(true);
+    output.hidden = canvasRun;
+    if (!canvasRun) {
       output.dataset.state = "pending";
+      output.dataset.mode = mode;
       output.textContent = "Evaluating…";
     }
+
     let session = null;
     try {
       session = await connect();
       if (currentOperation !== operation || destroyed) return;
       setConnection("busy");
-      const result = active.kind === "canvas"
-        ? await canvas.evaluate(session, editor.value)
-        : await session.eval(editor.value);
+      const result = canvasRun
+        ? await canvas.evaluate(session, source)
+        : await session.eval(source);
       if (currentOperation !== operation || destroyed) return;
       setConnection("ready");
-      if (active.kind !== "canvas") {
+      if (!canvasRun) {
+        output.hidden = false;
         output.dataset.state = "ready";
         output.textContent = result.label ?? print(result.value);
       }
     } catch (error) {
       if (currentOperation !== operation || destroyed) return;
       if (session) setConnection("ready");
-      if (active.kind !== "canvas") {
-        output.dataset.state = "error";
-        output.textContent = errorMessage(error);
-      }
+      output.hidden = false;
+      output.dataset.state = "error";
+      output.textContent = errorMessage(error);
     } finally {
-      if (currentOperation === operation) runButton.disabled = false;
+      if (currentOperation === operation && !destroyed) setControlsDisabled(false);
     }
   };
 
-  const reset = async () => {
-    operation += 1;
-    runButton.disabled = true;
-    if (active) {
-      editor.value = active.source;
-      syncHighlight();
+  const evalCurrent = async ({ preferLine = false } = {}) => {
+    const form = formAtEditor(editor, preferLine);
+    if (!form?.source) {
+      output.hidden = false;
+      output.dataset.state = "error";
+      output.dataset.mode = "eval";
+      output.textContent = "Tap inside a form or select source to evaluate.";
+      return;
     }
-    syncOutputMode();
-    const stale = sessionPromise;
-    sessionPromise = null;
-    if (stale) {
-      try {
-        const session = await stale;
-        await session.close?.();
-      } catch (_) {
-        // A failed or already-closed session must not prevent recovery.
-      }
-    }
-    if (!destroyed) {
-      setConnection("idle");
-      runButton.disabled = false;
-    }
+    await evaluate({ source: form.source, mode: "eval", range: form });
   };
 
-  // Editor wiring — the same Paredit keyhandling pattern as the workbench
-  // (website/app.js), minus completion/undo/prefix features.
+  const run = () => evaluate({ source: editor.value, mode: "run", range: null });
+
+  // Structural editing and evaluation shortcuts.
   editor.addEventListener("keydown", (event) => {
     const modifier = event.metaKey || event.ctrlKey;
     if (modifier && event.key === "Enter") {
       event.preventDefault();
       run();
+      return;
+    }
+    if ((event.altKey && event.key === "Enter") ||
+        (event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "e")) {
+      event.preventDefault();
+      evalCurrent();
       return;
     }
     if (event.ctrlKey && !event.metaKey && !event.altKey &&
@@ -428,16 +494,38 @@ export function mountLiveCard(root, {
       else structuralAlign(editor);
     }
   });
-  editor.addEventListener("input", syncHighlight);
+
+  editor.addEventListener("input", () => {
+    evalRange = null;
+    syncHighlight();
+  });
   editor.addEventListener("scroll", syncHighlight);
+  editor.addEventListener("select", () => {
+    const form = formAtEditor(editor, true);
+    evalRange = form ? { start: form.start, end: form.end } : null;
+    syncHighlight();
+  });
+
+  // InstaREPL-style mobile interaction: a direct touch evaluates the complete
+  // expression beginning on that line. Text selections are left untouched.
+  editor.addEventListener("pointerup", (event) => {
+    if (event.pointerType !== "touch" || editor.selectionStart !== editor.selectionEnd) return;
+    const now = Date.now();
+    if (now - lastTouchEvaluation < 350) return;
+    lastTouchEvaluation = now;
+    setTimeout(() => evalCurrent({ preferLine: true }), 0);
+  });
+
+  evalButton.addEventListener("click", () => evalCurrent({ preferLine: true }));
   runButton.addEventListener("click", run);
-  resetButton.addEventListener("click", reset);
+  exampleSelect.addEventListener("change", () => selectSnippet(exampleSelect.value));
 
   if (active) editor.value = active.source;
   syncHighlight();
   syncOutputMode();
 
   return {
+    eval: evalCurrent,
     run,
     destroy() {
       if (destroyed) return;
@@ -446,9 +534,7 @@ export function mountLiveCard(root, {
       canvas.close();
       const stale = sessionPromise;
       sessionPromise = null;
-      if (stale) {
-        stale.then((session) => session.close?.()).catch(() => {});
-      }
+      if (stale) stale.then((session) => session.close?.()).catch(() => {});
       card.remove();
     }
   };
