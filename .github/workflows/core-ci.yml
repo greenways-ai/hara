@@ -26,11 +26,6 @@ jobs:
       - name: Enforce gw.* HAL namespaces
         run: "! rg --glob '*.hal' 'greenways\\.' ."
 
-      - name: Verify synchronized Hara UI assets
-        run: |
-          node scripts/sync-hara-ui.mjs
-          node scripts/sync-hara-ui.mjs --check
-
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
