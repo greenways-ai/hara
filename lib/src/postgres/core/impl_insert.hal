@@ -82,31 +82,41 @@
 
 (defn t-upsert-raw [prepared data params]
   (let [table-schema (second prepared)
-        primary (reduce (fn [out key]
-                          (if (:primary (schema-attrs table-schema key)) (conj out key) out))
-                        #{} (keys table-schema))
+        primary (vec
+                 (filter (fn [key]
+                           (:primary (schema-attrs table-schema key)))
+                         (ordered-keys table-schema (keys table-schema))))
         data-keys (reduce (fn [out key] (conj out key)) #{}
                           (if (map? data) (keys data) (keys table-schema)))
+        excluded-update (set (or (:exclude-update params) #{}))
         update-keys (reduce (fn [out key]
                               (let [attrs (schema-attrs table-schema key)]
                                 (if (and (has? data-keys key)
                                          (usable-key? table-schema key)
-                                         (not (:primary attrs)))
+                                         (not (:primary attrs))
+                                         (not (has? excluded-update key)))
                                   (conj out key) out)))
                             [] (ordered-keys table-schema (keys table-schema)))
-        update-set (reduce (fn [out key] (conj out key)) #{} update-keys)
-        columns (second (base/t-returning table-schema update-set))
+        columns (base/t-returning-cols table-schema
+                                       update-keys
+                                       base/t-key-attrs-fn)
         row (map (fn [column key]
                    (or (get (:on-update params) key)
                        (list '. (list :- "EXCLUDED") column)))
                  columns update-keys)
-        conflict (list 'quote
-                       (apply list
-                              (second (base/t-returning table-schema
-                                                        (or (:on-conflict params) primary)))))
-        args (vec (concat [:on-conflict conflict :do-update :set
-                           (list 'quote (apply list columns)) :=]
-                          [(apply list 'row row)]))]
+        requested-conflict (or (:on-conflict params) primary)
+        conflict-keys (if (set? requested-conflict)
+                        (ordered-keys table-schema requested-conflict)
+                        requested-conflict)
+        conflict-columns (base/t-returning-cols table-schema
+                                                conflict-keys
+                                                base/t-key-attrs-fn)
+        conflict (list 'quote (apply list conflict-columns))
+        args (if (= 0 (count update-keys))
+               [:on-conflict conflict :do-nothing]
+               (vec (concat [:on-conflict conflict :do-update :set
+                             (list 'quote (apply list columns)) :=]
+                            [(apply list 'row row)])))]
     (with-meta (t-insert-raw prepared data (assoc params :args args))
                {:op/type :upsert})))
 

@@ -10,7 +10,7 @@
             [tahto.core.script :as script]
             [tahto.core.script-fragment]
             [tahto.core.runtime :as runtime]
-            [tahto.model.v5.spec-postgres]
+            [tahto.model.v6.spec-postgres]
             [tahto.runtime.basic :as basic]))
 
 (def book-entry entry/book-entry)
@@ -95,6 +95,9 @@
      '(defmacro defenum.pg [symbol & body]
         (list 'tahto.core.script/register-code!
               (list 'quote (apply list 'defenum symbol body))))
+     '(defmacro defconst.pg [symbol & body]
+        (list 'tahto.core.script/register-code!
+              (list 'quote (apply list 'defconst symbol body))))
      '(defmacro defgen.xt [symbol & body]
         (list 'tahto.core.script/register-code!
               (list 'quote (apply list 'defgen symbol body))))
@@ -158,6 +161,9 @@
      '(defmacro defenum.pg [symbol & body]
         (list 'tahto.core.script/register-code!
               (list 'quote (apply list 'defenum symbol body))))
+     '(defmacro defconst.pg [symbol & body]
+        (list 'tahto.core.script/register-code!
+              (list 'quote (apply list 'defconst symbol body))))
      '(defmacro defgen.xt [symbol & body]
         (list 'tahto.core.script/register-code!
               (list 'quote (apply list 'defgen symbol body))))
