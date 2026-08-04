@@ -57,6 +57,14 @@ const socialImage = new URL(image, Astro.site);
       </div>
     </header>
     <slot />
-    <footer class="site-footer"><span>Hara</span><p>Start simple. Build forever.</p><a href="https://www.greenways.ai/">Built by Greenways</a></footer>
+    <footer class="site-footer">
+      <span>Hara</span>
+      <p>Start simple. Build forever.</p>
+      <p>
+        <a href="https://opensource.greenways.ai/open-source/">A Greenways Open Source Project</a>
+        <span aria-hidden="true">·</span>
+        <a href="https://github.com/hara-lang/hara/blob/main/LICENSE">EPL-2.0</a>
+      </p>
+    </footer>
   </body>
 </html>
