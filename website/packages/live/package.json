@@ -1,0 +1,23 @@
+{
+  "name": "@hara-lang/live",
+  "version": "0.1.0",
+  "description": "Embeddable Hara live-coding card: Paredit editor, WASM kernel evaluation, console and canvas output",
+  "license": "EPL-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/live-card.js",
+    "./editor": "./src/editor.js",
+    "./kernel": "./src/kernel.js",
+    "./snippets": "./src/snippets.js",
+    "./style.css": "./src/style.css"
+  },
+  "files": [
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

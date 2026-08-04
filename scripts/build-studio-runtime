@@ -45,6 +45,10 @@ cp "$ROOT"/rust/web/host/*.js "$STAGE/rust/host/"
 cp "$ROOT"/rust/web/studio/*.js "$ROOT/rust/web/studio/studio.css" "$STAGE/rust/studio/"
 cp "$ROOT"/rust/web/studio/capabilities/*.js "$STAGE/rust/studio/capabilities/"
 cp "$ROOT"/rust/web/studio/hal/*.hal "$STAGE/rust/studio/hal/"
+cp "$ROOT/contrib/greenways/supersonic/src/js/supersonic.js" \
+   "$STAGE/rust/studio/supersonic.js"
+cp "$ROOT/contrib/greenways/supersonic/src/hal/gw/audio/supersonic.hal" \
+   "$STAGE/rust/studio/hal/supersonic.hal"
 cp "$ROOT/lib/src/std/lib/substrate.hal" "$STAGE/rust/studio/hal/substrate.hal"
 cp "$ROOT/lib/src/std/lib/substrate/frame.hal" "$STAGE/rust/studio/hal/substrate-frame.hal"
 cp "$ROOT/lib/src/std/lib/substrate/protocol.hal" "$STAGE/rust/studio/hal/substrate-protocol.hal"
@@ -76,6 +80,10 @@ cp "$ROOT"/rust/web/host/*.js "$STAGE/examples/music/runtime/host/"
 cp "$ROOT"/rust/web/studio/*.js "$STAGE/examples/music/runtime/studio/"
 cp "$ROOT"/rust/web/studio/capabilities/*.js "$STAGE/examples/music/runtime/studio/capabilities/"
 cp "$ROOT"/rust/web/studio/hal/*.hal "$STAGE/examples/music/runtime/studio/hal/"
+cp "$ROOT/contrib/greenways/supersonic/src/js/supersonic.js" \
+   "$STAGE/examples/music/runtime/studio/supersonic.js"
+cp "$ROOT/contrib/greenways/supersonic/src/hal/gw/audio/supersonic.hal" \
+   "$STAGE/examples/music/runtime/studio/hal/supersonic.hal"
 cp "$ROOT/lib/src/std/lib/substrate.hal" "$STAGE/examples/music/runtime/std/lib/substrate.hal"
 cp "$ROOT/lib/src/std/lib/substrate/frame.hal" "$ROOT/lib/src/std/lib/substrate/protocol.hal" \
    "$STAGE/examples/music/runtime/std/lib/substrate/"

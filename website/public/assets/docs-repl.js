@@ -1,16 +1,24 @@
-import { createDocsKernel } from "/docs-assets/javascripts/kernel.js";
+import {
+  applyParedit,
+  barfForward,
+  insertIndent,
+  killToFormEnd,
+  slurpForward,
+  structuralAlign
+} from "/docs-assets/live/editor.js";
+import { highlightHara } from "/docs-assets/live/highlight.js";
+import { createLiveKernel } from "/docs-assets/live/kernel.js";
+import { mountLiveCard, print } from "/docs-assets/live/live-card.js";
+import { getLiveSnippet } from "/docs-assets/live/snippets.js";
 import {
   createDocsSessionRegistry,
   describeDocsSession
 } from "./docs-repl-state.js";
 
-const print = (value) => {
-  if (value === null) return "nil";
-  if (typeof value === "string") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(print).join(" ")}]`;
-  if (value instanceof Map) return `{${[...value].map(([key, item]) => `${print(key)} ${print(item)}`).join(" ")}}`;
-  return String(value);
-};
+// The editor, highlight, kernel boot, and print helper come from the
+// @hara-lang/live package (packages/live/src), copied to /docs-assets/live/
+// by scripts/prepare-docs.mjs. Session registry, REPL cell chrome, canvas
+// stages, and the kernel progress toast stay local to the docs.
 
 function createKernelProgress() {
   const toast = document.createElement("div");
@@ -20,60 +28,18 @@ function createKernelProgress() {
   toast.innerHTML = `<i></i><span>Preparing Hara kernel</span><b>0%</b>`;
   document.body.append(toast);
 
-  let loaded = 0;
-  let expected = 0;
-  const report = (message) => {
-    const percent = expected ? Math.min(99, Math.round(loaded / expected * 100)) : 0;
-    toast.querySelector("span").textContent = message;
-    toast.querySelector("b").textContent = `${percent}%`;
-    toast.style.setProperty("--kernel-progress", `${percent}%`);
-  };
-
   return {
     toast,
-    async fetch(input, init) {
-      const response = await fetch(input, init);
-      const total = Number(response.headers.get("content-length")) || 0;
-      expected += total;
-      if (!response.body) return response;
-      const reader = response.body.getReader();
-      const stream = new ReadableStream({
-        async pull(controller) {
-          const { done, value } = await reader.read();
-          if (done) { controller.close(); return; }
-          loaded += value.byteLength;
-          report("Loading Hara kernel");
-          controller.enqueue(value);
-        }
-      });
-      return new Response(stream, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers
-      });
+    report(message, percent = 0) {
+      toast.querySelector("span").textContent = message;
+      toast.querySelector("b").textContent = `${percent}%`;
+      toast.style.setProperty("--kernel-progress", `${percent}%`);
     }
   };
 }
 
 function createKernelPromise(progress) {
-  return fetch("/runtime/kernel-manifest.json")
-    .then(async (response) => {
-      if (!response.ok) throw new Error(`kernel manifest: ${response.status}`);
-      const manifest = await response.json();
-      return createDocsKernel({
-        wasmUrl: manifest.variants.core.url,
-        workerUrl: "/runtime/hta-worker.js",
-        manifest,
-        resources: {
-          "studio.store": "/docs-assets/rust/studio/hal/store.hal",
-          "studio.fs": "/docs-assets/rust/studio/hal/fs.hal",
-          "studio.node": "/runtime/studio/hal/node.hal",
-          "studio.draw": "/runtime/studio/hal/draw.hal",
-          "std.lib.substrate.frame": "/runtime/std/lib/substrate/frame.hal"
-        },
-        fetchAsset: progress.fetch
-      });
-    })
+  return createLiveKernel({ onProgress: progress.report })
     .then((kernel) => {
       progress.toast.remove();
       document.dispatchEvent(new CustomEvent("hara:kernel-ready", {
@@ -123,10 +89,14 @@ function installRepl(frame, descriptor, sessions, { evaluate = null, source: sup
       </details>
       <button type="button">Run</button>
     </header>
-    <textarea spellcheck="false"></textarea>
+    <div class="hara-repl-editor">
+      <pre class="code-highlight" aria-hidden="true"><code></code></pre>
+      <textarea spellcheck="false"></textarea>
+    </div>
     <output hidden aria-live="polite"></output>`;
 
   const editor = cell.querySelector("textarea");
+  const highlightContent = cell.querySelector(".code-highlight > code");
   const output = cell.querySelector("output");
   const button = cell.querySelector("button");
   const details = cell.querySelector(".hara-repl-details");
@@ -138,6 +108,12 @@ function installRepl(frame, descriptor, sessions, { evaluate = null, source: sup
   editor.value = source;
   editor.rows = Math.min(24, Math.max(2, source.split("\n").length));
   frame.replaceWith(cell);
+
+  const syncHighlight = () => {
+    highlightContent.innerHTML = highlightHara(editor.value);
+    highlightContent.style.transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`;
+  };
+  syncHighlight();
 
   const connectionText = {
     loading: "Connecting",
@@ -208,11 +184,37 @@ function installRepl(frame, descriptor, sessions, { evaluate = null, source: sup
   });
 
   editor.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+    const modifier = event.metaKey || event.ctrlKey;
+    if (event.key === "Enter" && modifier) {
       event.preventDefault();
       button.click();
+      return;
+    }
+    if (event.ctrlKey && !event.metaKey && !event.altKey &&
+        event.key.toLowerCase() === "k" && killToFormEnd(editor)) {
+      event.preventDefault();
+      return;
+    }
+    if (event.ctrlKey && !event.metaKey && !event.altKey) {
+      const structuralEdit = event.key === "ArrowRight" ? slurpForward : event.key === "ArrowLeft" ? barfForward : null;
+      if (structuralEdit?.(editor)) {
+        event.preventDefault();
+        return;
+      }
+    }
+    if (!event.metaKey && !event.ctrlKey && !event.altKey &&
+        applyParedit(editor, event.key)) {
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      if (event.shiftKey) insertIndent(editor, true);
+      else structuralAlign(editor);
     }
   });
+  editor.addEventListener("input", syncHighlight);
+  editor.addEventListener("scroll", syncHighlight);
 
   return {
     descriptor,
@@ -410,6 +412,7 @@ if (frames.length > 0 || canvasStages.length > 0) {
     controller.loadSource(runner.editor.value).then((source) => {
       runner.editor.value = source;
       runner.editor.rows = Math.min(28, Math.max(5, source.split("\n").length));
+      runner.editor.dispatchEvent(new Event("input", { bubbles: true }));
       runner.button.click();
     }).catch((error) => controller.setStatus(errorMessage(error), "error"));
   }
@@ -434,4 +437,16 @@ if (frames.length > 0 || canvasStages.length > 0) {
       matching.forEach((runner) => runner.failReset(error));
     }
   });
+}
+
+// Live cards embedded via <div data-hara-live="first-eval,collections">.
+// They lazy-boot the same shared kernel (createLiveKernel caches per page)
+// on first Run, so no WASM is fetched unless a visitor runs a snippet.
+for (const mount of document.querySelectorAll("main [data-hara-live]")) {
+  const selected = String(mount.dataset.haraLive ?? "")
+    .split(",")
+    .map((id) => getLiveSnippet(id.trim()))
+    .filter(Boolean);
+  if (!selected.length) continue;
+  mountLiveCard(mount, { snippets: selected, activeSnippet: selected[0].id });
 }

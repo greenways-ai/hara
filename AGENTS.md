@@ -16,6 +16,12 @@ component map and `website/docs/development.md` for the developer guide.
   `std.foundation`, the `talo.*` compiler port, and the `std.ledger.*`
   consensus-free executable-chain experiments.
 - `extensions/` — `hara-chrome`, `hara-vscode`, `hara-emacs`, `hara-lsp` (planned)
+- `platform/cloudflare/` — read-only Cloudflare worker serving
+  `id.hara-lang.org` and `packages.hara-lang.org` (identity policy, package
+  registry, R2 objects). Verify with `npm run types && npm run check && npm test`
+  in that directory; deployed by `.github/workflows/deploy-cloudflare.yml`
+  (needs the `cloudflare` GitHub environment with `CLOUDFLARE_API_TOKEN` /
+  `CLOUDFLARE_ACCOUNT_ID`).
 - `website/` — the published site, content included: `website/docs/` is the
   mkdocs docs_dir; infra (mkdocs.yml, overrides/, landing page) alongside.
   Apps and books join the site as monorepo sub-sites (see below).

@@ -48,11 +48,13 @@ test("leads with the language and renders benchmark evidence from committed data
 test("keeps the three runtime modes after the learning path", async () => {
   const page = await readFile(new URL("../src/pages/index.astro", import.meta.url), "utf8");
   const repl = await readFile(new URL("../public/assets/docs-repl.js", import.meta.url), "utf8");
+  const liveKernel = await readFile(new URL("../packages/live/src/kernel.js", import.meta.url), "utf8");
   const prepare = await readFile(new URL("../scripts/prepare-docs.mjs", import.meta.url), "utf8");
   assert.match(page, /id="kernel-mode"/);
   assert.match(page, /Java[\s\S]*Native[\s\S]*Web/);
   assert.doesNotMatch(page, /compressed browser VM/);
-  assert.match(repl, /manifest\.variants\.core\.url/);
+  assert.match(repl, /\/docs-assets\/live\/kernel\.js/);
+  assert.match(liveKernel, /manifest\.variants\.core\.url/);
   assert.match(repl, /data-hara-eval/);
   assert.match(prepare, /clojure\$1/);
 });
@@ -77,13 +79,14 @@ test("publishes the interactive syllabus controller and styles with docs", async
 
 test("hydrates Tic Tac Toe stages as REPL-attached canvas outputs", async () => {
   const repl = await readFile(new URL("../public/assets/docs-repl.js", import.meta.url), "utf8");
+  const liveKernel = await readFile(new URL("../packages/live/src/kernel.js", import.meta.url), "utf8");
   const styles = await readFile(new URL("../src/styles/docs.css", import.meta.url), "utf8");
   assert.match(repl, /data-hara-canvas-stage/);
   assert.match(repl, /compileAnonymousDocument/);
   assert.match(repl, /registerCanvas\(runtime\)/);
   assert.match(repl, /waitForFirstRender/);
   assert.match(repl, /runner\.button\.click\(\)/);
-  assert.match(repl, /"studio\.draw": "\/runtime\/studio\/hal\/draw\.hal"/);
+  assert.match(liveKernel, /"studio\.draw": `\$\{runtimeBase\}\/studio\/hal\/draw\.hal`/);
   assert.match(styles, /\.hara-canvas-stage \.hara-repl/);
   assert.match(styles, /\.hara-live-canvas/);
   assert.match(styles, /aspect-ratio:4 \/ 3/);

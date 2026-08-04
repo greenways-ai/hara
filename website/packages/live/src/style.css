@@ -1,0 +1,306 @@
+/* @hara-lang/live — live-coding card styles.
+   Everything is scoped under .hara-live-card; theme via the custom
+   properties below. Defaults are dark. */
+
+.hara-live-card {
+  --hara-live-bg: #060b14;
+  --hara-live-panel: #0a1220;
+  --hara-live-ink: #dff4ff;
+  --hara-live-muted: #9ab3c7;
+  --hara-live-accent: #41f5e4;
+  --hara-live-accent-2: #ff2e88;
+  --hara-live-border: #1c2c40;
+  --hara-live-error: #ff5470;
+  --hara-live-mono-font: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--hara-live-bg);
+  color: var(--hara-live-ink);
+  border: 1px solid var(--hara-live-border);
+  border-radius: 10px;
+  overflow: hidden;
+  font-family: var(--hara-live-mono-font);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.hara-live-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--hara-live-panel);
+  border-bottom: 1px solid var(--hara-live-border);
+  flex-wrap: wrap;
+}
+
+.hara-live-card-brand {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--hara-live-accent);
+}
+
+.hara-live-card-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.hara-live-card-tabs button {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  color: var(--hara-live-muted);
+  background: transparent;
+  border: 1px solid var(--hara-live-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.hara-live-card-tabs button:hover {
+  color: var(--hara-live-ink);
+  border-color: var(--hara-live-accent);
+}
+
+.hara-live-card-tabs button[aria-selected="true"] {
+  color: var(--hara-live-bg);
+  background: var(--hara-live-accent);
+  border-color: var(--hara-live-accent);
+}
+
+.hara-live-card-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--hara-live-muted);
+  font-size: 12px;
+}
+
+.hara-live-card-connection {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--hara-live-muted);
+}
+
+.hara-live-card[data-connection-state="loading"] .hara-live-card-connection,
+.hara-live-card[data-connection-state="busy"] .hara-live-card-connection {
+  background: var(--hara-live-accent);
+  animation: hara-live-pulse 1s ease-in-out infinite;
+}
+
+.hara-live-card[data-connection-state="ready"] .hara-live-card-connection {
+  background: var(--hara-live-accent);
+}
+
+.hara-live-card[data-connection-state="error"] .hara-live-card-connection {
+  background: var(--hara-live-error);
+}
+
+@keyframes hara-live-pulse {
+  50% { opacity: 0.35; }
+}
+
+.hara-live-card-playground {
+  font-size: 12px;
+  color: var(--hara-live-accent);
+  text-decoration: none;
+  border: 1px solid var(--hara-live-border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.hara-live-card-playground:hover {
+  border-color: var(--hara-live-accent);
+}
+
+/* Editor surface: highlight overlay under a transparent textarea,
+   same pattern as the workbench (website/v1.html .editor-surface). */
+.hara-live-card-editor {
+  position: relative;
+  min-height: 160px;
+  overflow: hidden;
+}
+
+.hara-live-card-editor .code-highlight,
+.hara-live-card-editor .code-highlight code,
+.hara-live-card-editor textarea {
+  margin: 0;
+  font-family: var(--hara-live-mono-font);
+  font-size: 13px;
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.hara-live-card-editor .code-highlight code,
+.hara-live-card-editor textarea {
+  display: block;
+  padding: 12px 14px;
+}
+
+.hara-live-card-editor .code-highlight {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--hara-live-ink);
+}
+
+.hara-live-card-editor textarea {
+  position: relative;
+  width: 100%;
+  min-height: 160px;
+  box-sizing: border-box;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--hara-live-accent);
+  border: 0;
+  outline: none;
+  resize: vertical;
+  overflow: auto;
+}
+
+.hara-live-card-editor textarea::selection {
+  background: color-mix(in srgb, var(--hara-live-accent) 28%, transparent);
+}
+
+/* Highlight token colors (classes emitted by highlightHara). */
+.hara-live-card .code-highlight .comment { color: #5b7086; }
+.hara-live-card .code-highlight .string { color: #ffd479; }
+.hara-live-card .code-highlight .keyword { color: var(--hara-live-accent-2); }
+.hara-live-card .code-highlight .paren-0 { color: #41f5e4; }
+.hara-live-card .code-highlight .paren-1 { color: #ff2e88; }
+.hara-live-card .code-highlight .paren-2 { color: #ffd479; }
+.hara-live-card .code-highlight .paren-3 { color: #8af579; }
+.hara-live-card .code-highlight .paren-4 { color: #7da7ff; }
+.hara-live-card .code-highlight .paren-5 { color: #d18aff; }
+.hara-live-card .code-highlight .unmatched { color: var(--hara-live-error); text-decoration: underline wavy; }
+.hara-live-card .code-highlight .eval-target { background: color-mix(in srgb, var(--hara-live-accent) 18%, transparent); }
+
+.hara-live-card-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--hara-live-border);
+  background: var(--hara-live-panel);
+}
+
+.hara-live-card-toolbar button {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 4px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.hara-live-card-run {
+  color: var(--hara-live-bg);
+  background: var(--hara-live-accent);
+  border: 1px solid var(--hara-live-accent);
+}
+
+.hara-live-card-run:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.hara-live-card-reset {
+  color: var(--hara-live-muted);
+  background: transparent;
+  border: 1px solid var(--hara-live-border);
+}
+
+.hara-live-card-reset:hover {
+  color: var(--hara-live-ink);
+  border-color: var(--hara-live-muted);
+}
+
+.hara-live-card-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--hara-live-muted);
+}
+
+.hara-live-card-output {
+  padding: 10px 14px;
+  border-top: 1px solid var(--hara-live-border);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  color: var(--hara-live-ink);
+  min-height: 1.5em;
+}
+
+.hara-live-card-output[data-state="pending"] { color: var(--hara-live-muted); }
+.hara-live-card-output[data-state="error"] { color: var(--hara-live-error); }
+
+/* Canvas panel */
+.hara-live-card-canvas-panel {
+  border-top: 1px solid var(--hara-live-border);
+}
+
+.hara-live-card-canvas-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--hara-live-muted);
+  background: var(--hara-live-panel);
+}
+
+.hara-live-card-canvas-meta output[data-state="ready"] { color: var(--hara-live-accent); }
+.hara-live-card-canvas-meta output[data-state="error"] { color: var(--hara-live-error); }
+
+.hara-live-card-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 960 / 600;
+  background: #02050b;
+  outline: none;
+}
+
+/* Kernel progress toast, scoped to the card. */
+.hara-live-card-toast {
+  position: absolute;
+  right: 12px;
+  bottom: 52px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--hara-live-ink);
+  background: var(--hara-live-panel);
+  border: 1px solid var(--hara-live-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 2;
+}
+
+.hara-live-card-toast i {
+  width: 72px;
+  height: 4px;
+  border-radius: 2px;
+  background:
+    linear-gradient(var(--hara-live-accent), var(--hara-live-accent)) 0 0 /
+    var(--kernel-progress, 0%) 100% no-repeat,
+    var(--hara-live-border);
+}
+
+.hara-live-card-toast[data-state="error"] {
+  color: var(--hara-live-error);
+  border-color: var(--hara-live-error);
+}

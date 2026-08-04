@@ -73,3 +73,8 @@ await cp(resolve(source, "rust"), join(runtimeDestination, "rust"), { recursive:
 await cp(resolve(source, "javascripts/kernel.js"), join(runtimeDestination, "javascripts/kernel.js"));
 await cp(resolve(source, "javascripts/syllabus.js"), join(runtimeDestination, "javascripts/syllabus.js"));
 await cp(resolve(source, "stylesheets/syllabus.css"), join(runtimeDestination, "stylesheets/syllabus.css"));
+
+// Publish the @hara-lang/live package sources as static assets. Files under
+// public/ are served verbatim (no bundler), so docs-repl.js imports these
+// copies at /docs-assets/live/; packages/live/src remains authoritative.
+await cp(resolve(site, "packages/live/src"), join(runtimeDestination, "live"), { recursive: true });
