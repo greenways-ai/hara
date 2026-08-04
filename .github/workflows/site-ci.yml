@@ -5,9 +5,12 @@ on:
     paths:
       - "website/**"
       - "benchmarks/**"
-      - "lib/bench/**"
+      - "rust/**"
+      - "lib/**"
+      - "scripts/build-www"
       - "packages/visual-language/**"
       - ".github/workflows/site-ci.yml"
+      - ".github/workflows/pages-www.yml"
 
 permissions:
   contents: read
@@ -42,3 +45,9 @@ jobs:
         run: |
           npm test --prefix website
           npm run build --prefix website
+      - name: Validate assembled production site
+        run: |
+          rustup target add wasm32-unknown-unknown
+          bash scripts/build-www
+          test -s target/www/benchmarks/index.html
+          test -s target/www/og-hara-ribbon.jpg
