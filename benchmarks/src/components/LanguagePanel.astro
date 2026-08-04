@@ -1,0 +1,95 @@
+---
+import {
+  closestRow,
+  comparisonResult,
+  comparisonRows,
+  competitorLeadingRows,
+  evidenceDate,
+  haraLeadingRows,
+  haraRuntime,
+  languageTime,
+  maxLeadRow,
+  ratioFor,
+  sweptRows,
+  workloadMeta,
+  workloads
+} from "../lib/benchmark-data";
+const trailingNames = competitorLeadingRows.map((row) => row.label).join(", ");
+---
+<section class="tab-panel language-panel" role="tabpanel" id="language-shootout" aria-labelledby="tab-languages">
+  <section class="language-overview" aria-labelledby="language-overview-title">
+    <div>
+      <p class="hara-kicker">Overview</p>
+      <h2 id="language-overview-title">Hara leads {haraLeadingRows.length} of {comparisonRows.length} languages overall.</h2>
+      <p>The overview uses a geometric mean across eight checksum-verified algorithms. Every comparison fixes Hara to <code>{haraRuntime}</code>; the matrix exposes every workload behind the headline.</p>
+    </div>
+    <dl class="overview-metrics">
+      <div><dt>Overall field</dt><dd>{haraLeadingRows.length}/{comparisonRows.length}</dd><span>languages slower than Hara</span></div>
+      <div><dt>Complete sweeps</dt><dd>{sweptRows.length}</dd><span>languages beaten on all workloads</span></div>
+      <div><dt>Largest lead</dt><dd>{maxLeadRow ? comparisonResult(maxLeadRow.overallRatio).value : "—"}</dd><span>{maxLeadRow ? `over ${maxLeadRow.label}` : "pending"}</span></div>
+      <div><dt>Closest match</dt><dd>{closestRow ? comparisonResult(closestRow.overallRatio).value : "—"}</dd><span>{closestRow ? `against ${closestRow.label}` : "pending"}</span></div>
+    </dl>
+  </section>
+
+  <section class="top-insights" aria-labelledby="top-insights-title">
+    <header><p class="hara-kicker">Top insights</p><h3 id="top-insights-title">The result before the raw numbers.</h3></header>
+    <div class="insight-grid">
+      <article><span>01</span><strong>Hara is already competitive across the field.</strong><p>It leads {haraLeadingRows.length} languages overall in the committed reference run published {evidenceDate}.</p></article>
+      <article><span>02</span><strong>{maxLeadRow ? `${maxLeadRow.label} is Hara’s widest overall lead.` : "The widest lead is pending."}</strong><p>{maxLeadRow ? `${comparisonResult(maxLeadRow.overallRatio).text}, with Hara winning ${maxLeadRow.haraWins} of ${workloads.length} workloads.` : "No complete comparison is available yet."}</p></article>
+      <article><span>03</span><strong>{closestRow ? `${closestRow.label} is the closest overall contest.` : "The closest result is pending."}</strong><p>{closestRow ? `${comparisonResult(closestRow.overallRatio).text}; select its cells to see where that balance comes from.` : "No complete comparison is available yet."}</p></article>
+    </div>
+  </section>
+
+  <section class="comparison-results" aria-labelledby="comparison-matrix-title">
+    <header class="section-heading">
+      <div><p class="hara-kicker">Benchmark results</p><h3 id="comparison-matrix-title">Hara comparison matrix</h3><p>Each cell states Hara’s advantage or deficit. Select an overall result or a workload to inspect the two timings.</p></div>
+      <div class="matrix-legend" aria-label="Matrix legend"><span class="legend-ahead">Hara ahead</span><span class="legend-behind">Hara behind</span></div>
+    </header>
+    <div class="matrix-stage">
+      <div class="matrix-scroll" tabindex="0" aria-label="Scrollable Hara language comparison matrix">
+        <table class="comparison-matrix">
+          <thead><tr><th scope="col">Runtime</th><th scope="col">Overall</th>{workloads.map((workload) => <th scope="col">{workloadMeta[workload]?.label ?? workload}</th>)}</tr></thead>
+          <tbody>
+            <tr class="hara-baseline"><th scope="row"><strong>Hara</strong><code>{haraRuntime}</code></th><td><span class="baseline-cell"><strong>1.00×</strong><span>baseline</span></span></td>{workloads.map(() => <td><span class="baseline-cell"><strong>1.00×</strong><span>baseline</span></span></td>)}</tr>
+            {comparisonRows.map((row) => {
+              const overall = comparisonResult(row.overallRatio);
+              return <tr>
+                <th scope="row"><strong>{row.label}</strong><code>{row.runtime}</code></th>
+                <td><button class:list={["matrix-cell", overall.status]} type="button" data-comparison-cell data-kind="overall" data-runtime-label={row.label} data-workload-label="All eight workloads" data-ratio={row.overallRatio} data-result={overall.text} data-hara-wins={row.haraWins} data-competitor-wins={row.competitorWins} data-initial={row.runtime === "python-prepared" ? "true" : undefined} aria-pressed="false"><strong>{overall.value}</strong><span>{overall.label}</span></button></td>
+                {workloads.map((workload) => {
+                  const ratio = ratioFor(row.runtime, workload);
+                  const result = comparisonResult(ratio);
+                  return <td><button class:list={["matrix-cell", result.status]} type="button" data-comparison-cell data-kind="workload" data-runtime-label={row.label} data-workload-label={workloadMeta[workload]?.label ?? workload} data-workload-summary={workloadMeta[workload]?.summary} data-result={result.text} data-hara-ns={languageTime(haraRuntime, workload)} data-runtime-ns={languageTime(row.runtime, workload)} aria-pressed="false"><strong>{result.value}</strong><span>{result.label}</span></button></td>;
+                })}
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+      <aside class="matrix-detail" data-matrix-detail aria-live="polite">
+        <p class="hara-kicker">Selected comparison</p><h4 data-detail-title>Select a result</h4><p data-detail-summary>Choose an overall or workload cell to inspect the evidence.</p>
+        <dl><div><dt>Hara</dt><dd data-detail-hara>—</dd></div><div><dt data-detail-runtime-label>Competitor</dt><dd data-detail-runtime>—</dd></div><div><dt>Result</dt><dd data-detail-result>—</dd></div></dl>
+      </aside>
+    </div>
+  </section>
+
+  <section class="result-explanation" aria-labelledby="language-explanation-title">
+    <header><p class="hara-kicker">What just happened</p><h3 id="language-explanation-title">How to read the result</h3></header>
+    <div class="method-grid">
+      <article><span>01</span><h4>Equivalent work</h4><p>Every language runs the same algorithms and must produce the same expected checksum.</p></article>
+      <article><span>02</span><h4>Prepared execution</h4><p>The shootout compares converged prepared calls, not process startup or source preparation.</p></article>
+      <article><span>03</span><h4>One Hara baseline</h4><p>Every external row is compared only with <code>{haraRuntime}</code>.</p></article>
+      <article><span>04</span><h4>Geometric mean</h4><p>The overall result combines workloads without allowing the longest one to dominate.</p></article>
+    </div>
+    <p class="evidence-source">Host details, toolchain versions, raw samples, checksums, and validation commands are committed with the evidence. <a href="https://github.com/hara-lang/hara/tree/main/lib/bench">Inspect the source.</a></p>
+  </section>
+
+  <section class="hara-insights" aria-labelledby="hara-insights-title">
+    <header><p class="hara-kicker">Hara insights</p><h3 id="hara-insights-title">What this evidence says about Hara now.</h3></header>
+    <div class="insight-grid">
+      <article><span>Position</span><strong>Hara sits between interpreter-oriented systems and the strongest native/JIT baselines.</strong><p>The field view matters more than a single showcase comparison: {haraLeadingRows.length} overall leads and {competitorLeadingRows.length} remaining deficits are visible together.</p></article>
+      <article><span>Consistency</span><strong>{sweptRows.length} complete sweeps show where the advantage is broad.</strong><p>The workload cells distinguish sustained strength from a geometric mean produced by one outlier.</p></article>
+      <article><span>Next pressure</span><strong>{trailingNames || "No competitor currently leads overall."}</strong><p>Those rows define the clearest optimization targets; select them to locate the exact recursion, branching, or numeric-loop gaps.</p></article>
+    </div>
+  </section>
+</section>
