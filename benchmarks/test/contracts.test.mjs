@@ -49,8 +49,8 @@ test("uses the shared Hara navigation and sign-in button", () => {
 });
 test("uses a dedicated maximum-resolution benchmark social card", () => {
   assert.match(page, /og-hara-benchmarks\.jpg/);
-  assert.match(page, /og:image:width" content="3840"/);
-  assert.match(page, /og:image:height" content="2016"/);
+  assert.match(page, /og:image:width" content="1200"/);
+  assert.match(page, /og:image:height" content="630"/);
 });
 test("external comparisons use only the native full Hara tier", () => {
   assert.match(data, /haraRuntime = "hara-rust-full"/);
