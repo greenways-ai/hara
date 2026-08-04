@@ -1,0 +1,14 @@
+---
+import { catalog, evidence, formatTime, runtimeIndex, workloadMeta, workloads } from "../lib/benchmark-data";
+---
+<section class="tab-panel" role="tabpanel" id="hara-artifacts" aria-labelledby="tab-hara" hidden>
+  <header><p class="hara-kicker">Nine measured artifacts · one language</p><h2>Hara runtimes</h2><p>Preparation, first invocation, steady state, and throughput remain separate so deployment and execution costs are not blurred together.</p></header>
+  {evidence ? <div class="detail-table"><table><thead><tr><th>Artifact / workload</th><th>Prepare</th><th>First</th><th>Steady</th><th>Calls/s</th></tr></thead><tbody>
+    {catalog.artifacts.flatMap((artifact) => workloads.map((workload) => {
+      const row = runtimeIndex.get(`${artifact.id}/${workload}`);
+      return <tr><th><code>{artifact.id}</code><small>{workloadMeta[workload]?.label ?? workload}</small></th><td>{formatTime(row?.prepare_ns)}</td><td>{formatTime(row?.first_ns)}</td><td>{formatTime(row?.steady_ns)}</td><td>{row?.throughput_per_sec == null ? "Pending" : row.throughput_per_sec.toFixed(1)}</td></tr>;
+    }))}
+  </tbody></table></div> : <p class="summary-note">The nine-runtime reference run remains gated until every native-image and browser cell can be produced on one pinned host.</p>}
+  <section class="result-explanation compact" aria-labelledby="runtime-explanation-title"><header><p class="hara-kicker">What just happened</p><h3 id="runtime-explanation-title">Four boundaries, not one vague speed number.</h3></header><div class="method-grid"><article><h4>Prepare</h4><p>Load or compile the representation once.</p></article><article><h4>First</h4><p>Execute the first prepared invocation.</p></article><article><h4>Steady</h4><p>Use the converged prepared-call window.</p></article><article><h4>Calls/s</h4><p>Invert steady timing into throughput.</p></article></div></section>
+  <div class="artifact-specs">{catalog.artifacts.map((artifact) => <article><code>{artifact.id}</code><b>{artifact.host} · {artifact.representation}</b><p>{artifact.summary}</p><small>{artifact.invocation}</small></article>)}</div>
+</section>
