@@ -86,4 +86,4 @@ jobs:
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
           NETLIFY_CUSTOM_DOMAIN: www.hara-lang.org
           NETLIFY_DOMAIN_ALIASES: hara-lang.org docs.hara-lang.org
-          NETLIFY_HEALTH_URLS: https://www.hara-lang.org/ https://www.hara-lang.org/docs/ https://www.hara-lang.org/benchmarks/ https://docs.hara-lang.org/
+          NETLIFY_HEALTH_URLS: https://www.hara-lang.org/ https://www.hara-lang.org/docs/ https://www.hara-lang.org/benchmarks/
