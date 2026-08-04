@@ -34,32 +34,32 @@
   (tahto/rt-raw-eval python-oneshot python-command-source))
 (println "tahto runtime smoke: Python oneshot complete")
 
-(println "tahto runtime smoke: starting persistent runtimes")
-
+(println "tahto runtime smoke: starting JavaScript persistent runtime")
 (def js-basic (tahto/rt-start (tahto/rt-create :js :basic)))
-(def python-basic (tahto/rt-start (tahto/rt-create :python :basic)))
+(def js-basic-transport (get-in js-basic [:process :transport]))
 
+(println (str "tahto runtime smoke: JavaScript source: " js-expression-source))
 (println "tahto runtime smoke: evaluating JavaScript persistent runtime")
 (def js-basic-output (tahto/rt-raw-eval js-basic js-expression-source))
 (println "tahto runtime smoke: JavaScript persistent runtime complete")
 
+(tahto/rt-stop js-basic)
+(def js-basic-state (deref (get js-basic :state)))
+(println "tahto runtime smoke: JavaScript persistent runtime stopped")
+
+(println "tahto runtime smoke: starting Python persistent runtime")
+(def python-basic (tahto/rt-start (tahto/rt-create :python :basic)))
+(def python-basic-transport (get-in python-basic [:process :transport]))
+
+(println (str "tahto runtime smoke: Python source: " python-expression-source))
 (println "tahto runtime smoke: evaluating Python persistent runtime")
 (def python-basic-output
   (tahto/rt-raw-eval python-basic python-expression-source))
 (println "tahto runtime smoke: Python persistent runtime complete")
 
-(def js-basic-transport (get-in js-basic [:process :transport]))
-(def python-basic-transport (get-in python-basic [:process :transport]))
-
-(println "tahto runtime smoke: stopping persistent runtimes")
-
-(tahto/rt-stop js-basic)
 (tahto/rt-stop python-basic)
-
-(def js-basic-state (deref (get js-basic :state)))
 (def python-basic-state (deref (get python-basic :state)))
-
-(println "tahto runtime smoke: persistent runtimes stopped")
+(println "tahto runtime smoke: Python persistent runtime stopped")
 
 (def expected-js-basic
   {:type "data"
