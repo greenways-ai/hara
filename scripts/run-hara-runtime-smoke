@@ -7,5 +7,5 @@ cd "$REPO_ROOT"
 "$REPO_ROOT/hara" run \
   "$REPO_ROOT/lib/integration/hara/tahto_bootstrap_probe.hal"
 
-"$REPO_ROOT/hara" --allow-process run \
+"$REPO_ROOT/hara" --allow-net --allow-process run \
   "$REPO_ROOT/lib/integration/hara/runtime_smoke.hal"
