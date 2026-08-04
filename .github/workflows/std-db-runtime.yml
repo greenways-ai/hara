@@ -2,6 +2,7 @@ name: std.db Runtime
 
 on:
   pull_request:
+    branches: [main]
     paths:
       - "lib/src/std/db.hal"
       - "lib/src/std/db/protocol.hal"

@@ -8,12 +8,20 @@ on:
       - 'scripts/sync-rust-hal-src'
       - '.github/workflows/hal-source-mirror.yml'
   pull_request:
+    branches: [main]
     paths:
       - 'lib/src/**/*.hal'
       - 'rust/hal-src/**/*.hal'
       - 'scripts/sync-rust-hal-src'
       - '.github/workflows/hal-source-mirror.yml'
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hal-source-mirror-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:

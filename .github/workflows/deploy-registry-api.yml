@@ -2,14 +2,19 @@ name: Deploy Hara registry API
 
 on:
   push:
-    branches: [main]
+    branches: [prod]
     paths: [registry-api/**, .github/workflows/deploy-registry-api.yml]
   pull_request:
+    branches: [main]
     paths: [registry-api/**, .github/workflows/deploy-registry-api.yml]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: registry-api-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   deploy:

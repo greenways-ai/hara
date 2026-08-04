@@ -1,0 +1,60 @@
+name: Core CI
+
+on:
+  pull_request:
+    branches: [main, prod]
+  push:
+    branches: [main, prod]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Enforce gw.* HAL namespaces
+        run: "! rg --glob '*.hal' 'greenways\\.' ."
+
+      - name: Verify synchronized Hara UI assets
+        run: |
+          node scripts/sync-hara-ui.mjs
+          node scripts/sync-hara-ui.mjs --check
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Check Rust module layout
+        run: bash rust/scripts/check-layout.sh
+
+      - name: Check Rust
+        run: |
+          cargo clippy --manifest-path rust/Cargo.toml --all-targets
+          cargo test --manifest-path rust/Cargo.toml
+          cargo test --manifest-path rust/raw/Cargo.toml
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+          cache-dependency-path: java/pom.xml
+
+      - name: Build and test Java runtime
+        run: mvn -B -Ptruffle package --file java/pom.xml
+
+      - name: Run library HAL tests
+        run: ./scripts/run-lib-tests

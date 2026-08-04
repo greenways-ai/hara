@@ -1,11 +1,6 @@
 name: Publish Studio runtime
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/publish-studio-runtime.yml
-      - .github/studio-runtime-release.json
   workflow_dispatch:
     inputs:
       tag:
@@ -19,6 +14,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: github-release
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

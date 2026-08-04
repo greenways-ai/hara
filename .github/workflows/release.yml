@@ -141,6 +141,7 @@ jobs:
   release:
     needs: [guard, build, build-truffle, build-studio-runtime]
     runs-on: ubuntu-latest
+    environment: github-release
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}

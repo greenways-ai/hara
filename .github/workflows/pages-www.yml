@@ -2,7 +2,15 @@ name: Deploy www.hara-lang.org
 
 on:
   push:
-    branches: [main]
+    branches: [prod]
+    paths:
+      - 'website/**'
+      - 'benchmarks/**'
+      - 'rust/**'
+      - 'lib/**'
+      - 'scripts/build-www'
+      - 'scripts/sync-hara-ui.mjs'
+      - '.github/workflows/pages-www.yml'
   workflow_dispatch:
 
 permissions:
@@ -10,8 +18,8 @@ permissions:
   actions: read
 
 concurrency:
-  group: "netlify-www-${{ github.ref_name }}"
-  cancel-in-progress: false
+  group: netlify-www-prod
+  cancel-in-progress: true
 
 jobs:
   deploy:
@@ -45,13 +53,13 @@ jobs:
           npm test --prefix website
           node --test website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
           test -s target/www/og-hara-ribbon.jpg
-      - name: Deploy main to www.testing.hara-lang.org
-        run: npx --yes netlify-cli deploy --prod --dir target/www --message "main ${GITHUB_SHA}"
+      - name: Deploy prod to www.testing.hara-lang.org
+        run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
       - name: Deploy production to www.hara-lang.org
-        run: npx --yes netlify-cli deploy --prod --dir target/www --message "main ${GITHUB_SHA}"
+        run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
