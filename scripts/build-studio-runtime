@@ -2,11 +2,24 @@
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-VERSION=${1:-$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/rust/Cargo.toml" | head -n 1)}
+CRATE_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/rust/Cargo.toml" | head -n 1)
+VERSION=${1:-$CRATE_VERSION}
 OUT=${HARA_STUDIO_RUNTIME_OUT:-"$ROOT/target/studio-runtime"}
 RAW_WASM="$ROOT/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm"
 STAGE="$OUT/hara-studio-runtime-$VERSION"
 ARCHIVE="$OUT/hara-studio-runtime-$VERSION.tar.gz"
+
+if [ -z "$CRATE_VERSION" ]; then
+  echo "unable to read the Hara runtime version from rust/Cargo.toml" >&2
+  exit 1
+fi
+if [ "$VERSION" != "ci" ]; then
+  if [ "$VERSION" != "$CRATE_VERSION" ]; then
+    echo "Studio runtime version $VERSION does not match rust/Cargo.toml $CRATE_VERSION" >&2
+    exit 1
+  fi
+  node "$ROOT/scripts/check-release-version.mjs" "$VERSION"
+fi
 
 if [ ! -f "$RAW_WASM" ]; then
   "$ROOT/scripts/build-hara-wasm-raw"

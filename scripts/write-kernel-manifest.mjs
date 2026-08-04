@@ -3,8 +3,10 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-const [directoryArgument, version = "0.1.1"] = process.argv.slice(2);
-if (!directoryArgument) throw new Error("usage: write-kernel-manifest.mjs DIRECTORY VERSION");
+const [directoryArgument, version] = process.argv.slice(2);
+if (!directoryArgument || !version) {
+  throw new Error("usage: write-kernel-manifest.mjs DIRECTORY VERSION");
+}
 const directory = resolve(directoryArgument);
 const variants = {
   core: { file: `hara-wasm-core-${version}.wasm`, features: ["interpreter", "hta", "sessions", "host-bridges"] },
