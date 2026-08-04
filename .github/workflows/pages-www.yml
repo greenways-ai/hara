@@ -65,7 +65,7 @@ jobs:
             --request PATCH \
             --header "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
             --header "Content-Type: application/json" \
-            --data '{"custom_domain":"www.hara-lang.org","force_ssl":true}' \
+            --data '{"custom_domain":"www.hara-lang.org"}' \
             "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
