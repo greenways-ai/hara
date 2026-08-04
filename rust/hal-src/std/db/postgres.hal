@@ -1,0 +1,160 @@
+;; ============================================================================
+;; std.db.postgres — provider-neutral PostgreSQL connector.
+;;
+;; The selected host owns database handles and authority. Native Hestia hosts
+;; can install the linked Rust provider; browser hosts can install PGlite or a
+;; remote Hestia transport under the same `std.db.postgres` service identity.
+;; ============================================================================
+(ns std.db.postgres
+  (:require [std.db.protocol :as protocol]
+            [std.foundation.host :as host]
+            [std.foundation.promise :as promise]))
+
+(def SERVICE "std.db.postgres")
+
+(defstruct PostgresConnection
+  [id engine provider mode capabilities storage endpoint])
+
+(defstruct PostgresSubscription
+  [id connection channel])
+
+(defn- inferred-array-dimensions
+  [values]
+  (loop [dimensions []
+         current values]
+    (if (vector? current)
+      (recur (conj dimensions [1 (count current)])
+             (first current))
+      dimensions)))
+
+(defn numeric
+  "Tags an exact PostgreSQL NUMERIC parameter without requiring a new ABI type."
+  [value]
+  {"$postgres" "numeric"
+   "value" value})
+
+(defn sql-array
+  "Tags a PostgreSQL ARRAY parameter with its element type and dimensions."
+  ([element-type values]
+   (sql-array element-type values (inferred-array-dimensions values)))
+  ([element-type values dimensions]
+   {"$postgres" "array"
+    "element" (if (keyword? element-type) (name element-type) element-type)
+    "dimensions" dimensions
+    "value" values}))
+
+(defn tagged?
+  "Returns true for a portable PostgreSQL tagged value."
+  [value]
+  (and (map? value)
+       (or (= "numeric" (get value "$postgres"))
+           (= "array" (get value "$postgres")))))
+
+(defn tag-type [value] (get value "$postgres"))
+(defn tag-value [value] (get value "value"))
+
+(defn- descriptor-field [descriptor keyword-key string-key]
+  (if (has? descriptor keyword-key)
+    (get descriptor keyword-key)
+    (get descriptor string-key)))
+
+(defn- connection [descriptor]
+  (std.db.postgres/PostgresConnection
+   (descriptor-field descriptor :id "id")
+   :postgresql
+   (keyword (descriptor-field descriptor :provider "provider"))
+   (keyword (descriptor-field descriptor :mode "mode"))
+   (descriptor-field descriptor :capabilities "capabilities")
+   (descriptor-field descriptor :storage "storage")
+   (descriptor-field descriptor :endpoint "endpoint")))
+
+(defn- subscription [value descriptor]
+  (std.db.postgres/PostgresSubscription
+   (descriptor-field descriptor :id "id")
+   value
+   (descriptor-field descriptor :channel "channel")))
+
+(extend-type PostgresConnection protocol/IDatabase
+  (db-engine [_] :postgresql)
+  (db-provider [value] (field value :provider))
+  (db-info [value]
+    {:id (field value :id)
+     :engine :postgresql
+     :provider (field value :provider)
+     :mode (field value :mode)
+     :capabilities (field value :capabilities)
+     :storage (field value :storage)
+     :endpoint (field value :endpoint)})
+  (db-exec [value sql parameters]
+    (host/call SERVICE "exec" (field value :id) sql parameters))
+  (db-query [value sql parameters]
+    (host/call SERVICE "query" (field value :id) sql parameters))
+  (db-close [value]
+    (host/call SERVICE "close" (field value :id))))
+
+(defn describe
+  "Returns the installed PostgreSQL provider descriptor and capabilities."
+  []
+  (host/call SERVICE "describe"))
+
+(defn open
+  "Opens a PostgreSQL connection using host provider auto-selection."
+  ([] (open {}))
+  ([options]
+   (promise/then (host/call SERVICE "open" options) connection)))
+
+(defn capabilities
+  "Returns the capabilities reported for a connection."
+  [value]
+  (field value :capabilities))
+
+(defn version
+  "Returns a promise resolving to the selected PostgreSQL engine version."
+  [value]
+  (host/call SERVICE "version" (field value :id)))
+
+(defn exec
+  ([value sql] (exec value sql []))
+  ([value sql parameters] (protocol/db-exec value sql parameters)))
+
+(defn query
+  ([value sql] (query value sql []))
+  ([value sql parameters] (protocol/db-query value sql parameters))
+  ([value sql parameters options]
+   (host/call SERVICE "query" (field value :id) sql parameters options)))
+
+(defn close [value] (protocol/db-close value))
+(defn begin [value] (exec value "begin"))
+(defn commit [value] (exec value "commit"))
+(defn rollback [value] (exec value "rollback"))
+
+(defn wait-ready [options]
+  (host/call SERVICE "wait-ready" options))
+
+(defn database-create [options database]
+  (host/call SERVICE "database-create" options database))
+
+(defn database-drop [options database]
+  (host/call SERVICE "database-drop" options database))
+
+(defn server-start [options]
+  (host/call SERVICE "server-start" options))
+
+(defn server-stop [server]
+  (host/call SERVICE "server-stop" server))
+
+(defn listen [value channel]
+  (promise/then
+   (host/call SERVICE "listen" (field value :id) channel)
+   (fn [descriptor] (subscription value descriptor))))
+
+(defn next-notification [value]
+  (host/call SERVICE "notification-next" (field value :id)))
+
+(defn unlisten [value]
+  (host/call SERVICE "unlisten" (field value :id)))
+
+(defn notify
+  ([value channel] (notify value channel ""))
+  ([value channel payload]
+   (host/call SERVICE "notify" (field value :id) channel payload)))
