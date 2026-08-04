@@ -75,3 +75,30 @@
 @media (prefers-reduced-motion:reduce) {
   .hara-repl-connection { animation:none !important; }
 }
+
+/* A tutorial canvas is a session-scoped output surface attached directly to
+   its REPL. The stage stays usable at phone widths without an iframe. */
+.hara-canvas-stage { margin:1.35rem 0 2.35rem; }
+.hara-canvas-stage .hara-repl { margin-bottom:0; border-radius:12px 12px 0 0; }
+.hara-live-canvas-panel { overflow:hidden; border:1px solid var(--hara-line); border-top:0; border-radius:0 0 12px 12px; background:#03070d; box-shadow:0 18px 44px #0003; }
+.hara-live-canvas-meta { display:flex; justify-content:space-between; gap:1rem; padding:.55rem .8rem; color:var(--hara-signal); border-bottom:1px solid color-mix(in srgb,var(--hara-signal) 32%,transparent); font:700 .64rem var(--hara-font-mono); letter-spacing:.08em; }
+.hara-live-canvas-meta output { margin-left:auto; color:var(--hara-faint); font:inherit; text-align:right; }
+.hara-live-canvas-meta output[data-state="ready"] { color:var(--hara-success); }
+.hara-live-canvas-meta output[data-state="error"] { color:var(--hara-danger); }
+.hara-live-canvas { display:block; width:100%; min-height:18rem; max-height:34rem; aspect-ratio:16 / 9; touch-action:none; background:#03070d; cursor:crosshair; }
+.hara-board-annotations { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1px; margin:-1.25rem 0 2.4rem; border:1px solid var(--hara-line); background:var(--hara-line); }
+.hara-board-annotations section { padding:.85rem 1rem; background:var(--hara-surface-raised); }
+.hara-board-annotations b { color:var(--hara-signal); font:700 .68rem var(--hara-font-mono); letter-spacing:.1em; }
+.hara-board-annotations p,.hara-board-annotations ol { margin:.6rem 0 0; color:var(--hara-muted); font-size:.8rem; }
+.hara-canvas-command-cards { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px; margin:1.4rem 0 2.1rem; border:1px solid var(--hara-line); background:var(--hara-line); }
+.hara-canvas-command-cards section { min-height:8.4rem; padding:.8rem; background:var(--hara-surface-raised); }
+.hara-canvas-command-cards b { display:block; margin-bottom:.48rem; color:var(--hara-signal); font:700 .76rem var(--hara-font-mono); }
+.hara-canvas-command-cards code { display:block; overflow-x:auto; padding:.3rem; font:.62rem/1.35 var(--hara-font-mono); white-space:nowrap; }
+.hara-canvas-command-cards p { margin:.58rem 0 0; color:var(--hara-muted); font-size:.75rem; }
+
+@media (max-width:720px) {
+  .hara-live-canvas-meta { align-items:flex-start; flex-direction:column; gap:.3rem; }
+  .hara-live-canvas-meta output { margin-left:0; text-align:left; }
+  .hara-live-canvas { min-height:0; max-height:none; aspect-ratio:4 / 3; }
+  .hara-board-annotations,.hara-canvas-command-cards { grid-template-columns:1fr; }
+}
