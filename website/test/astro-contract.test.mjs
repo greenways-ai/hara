@@ -50,6 +50,17 @@ test("keeps the three runtime modes after the learning path", async () => {
 test("orders the embedded docs around a first learning journey", async () => {
   const config = await readFile(new URL("../astro.config.mjs", import.meta.url), "utf8");
   assert.match(config, /Start here[\s\S]*Why Hara\?[\s\S]*Read Hara and build from scratch[\s\S]*Try Hara in the browser[\s\S]*Build Tic Tac Toe[\s\S]*Choose your setup/);
+  assert.match(config, /Interactive courses[\s\S]*Choose a learning path[\s\S]*First Contact[\s\S]*Protocols for Builders[\s\S]*Protocol Atlas/);
   assert.match(config, /Hara language course/);
   assert.match(config, /Guides & reference/);
+});
+
+test("publishes the interactive syllabus controller and styles with docs", async () => {
+  const config = await readFile(new URL("../astro.config.mjs", import.meta.url), "utf8");
+  const prepare = await readFile(new URL("../scripts/prepare-docs.mjs", import.meta.url), "utf8");
+  assert.match(config, /\/docs-assets\/stylesheets\/syllabus\.css/);
+  assert.match(config, /\/docs-assets\/javascripts\/syllabus\.js/);
+  assert.match(prepare, /javascripts\/syllabus\.js/);
+  assert.match(prepare, /stylesheets\/syllabus\.css/);
+  assert.match(prepare, /mkdir\(join\(runtimeDestination, "stylesheets"\)/);
 });
