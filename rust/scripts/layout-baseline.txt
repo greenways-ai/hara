@@ -1,0 +1,23 @@
+# Existing layout debt on main. New files still use the 700-line ceiling.
+# Existing files may shrink freely, but may not grow beyond these recorded sizes.
+lines src/jit/native.rs 778
+lines src/kernel/generated.rs 748
+lines src/kernel/halc.rs 1065
+lines src/lang/data/conformance_tests.rs 903
+lines src/lang/data/list.rs 857
+lines src/lang/data/map.rs 1192
+lines src/lang/data/sorted_map.rs 1238
+lines src/lang/data/vector.rs 1409
+lines src/project.rs 728
+lines src/vm/artifact.rs 977
+lines src/vm/compiler.rs 1351
+lines src/vm/compiler/globals.rs 714
+lines src/vm/execution_tests.rs 1215
+lines src/vm/machine.rs 1488
+lines src/vm/tests.rs 720
+lines src/whole_wasm/codegen.rs 1438
+lines src/whole_wasm/ir.rs 1490
+lines src/whole_wasm/ssa.rs 889
+
+# Legacy module path to remove when the hash package is split.
+modrs src/lang/hash/mod.rs
