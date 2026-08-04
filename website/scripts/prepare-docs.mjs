@@ -47,7 +47,9 @@ async function walk(directory) {
     body = normalizeMkDocsFrontmatter(body);
     // Shiki does not yet ship a Hara grammar. Clojure is the closest reader
     // grammar and preserves useful highlighting until the dedicated grammar lands.
-    body = body.replace(/^```(?:hara|hal)(\s+eval)?\s*$/gm, "```clojure$1");
+    // Preserve evaluator scope metadata such as `eval global` and
+    // `eval group=lesson` while changing only the fence language.
+    body = body.replace(/^```(?:hara|hal)(?=\s|$)([^\r\n]*)$/gm, "```clojure$1");
     if (!hasTitle(body)) body = `---\ntitle: ${JSON.stringify(titleFor(body, entry.name))}\n---\n\n${body}`;
     const frontmatterEnd = body.indexOf("\n---", 4) + 4;
     const afterFrontmatter = body.slice(frontmatterEnd).replace(/^\s*#\s+[^\n]+\n+/, "\n");
