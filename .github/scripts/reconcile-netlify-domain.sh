@@ -67,3 +67,25 @@ while read -r domain; do
 done < <(printf '%s\n' "$NETLIFY_CUSTOM_DOMAIN" ${NETLIFY_DOMAIN_ALIASES:-})
 
 echo "Netlify now routes ${NETLIFY_CUSTOM_DOMAIN}."
+
+for url in ${NETLIFY_HEALTH_URLS:-}; do
+  page="$(mktemp)"
+  healthy=false
+  for attempt in {1..20}; do
+    if curl --fail --silent --show-error --location --max-time 20 "$url" >"$page" \
+      && grep -q 'property="og:image"' "$page" \
+      && grep -q 'property="og:image:width" content="3840"' "$page"; then
+      healthy=true
+      echo "Verified 3840px OG metadata at ${url}."
+      break
+    fi
+    if [[ "$attempt" -lt 20 ]]; then
+      echo "Waiting for ${url} to become healthy."
+      sleep 15
+    fi
+  done
+  if [[ "$healthy" != true ]]; then
+    echo "${url} did not publish the expected OG metadata." >&2
+    exit 1
+  fi
+done

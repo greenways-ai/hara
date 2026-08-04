@@ -13,6 +13,9 @@ on:
       - 'scripts/sync-hara-ui.mjs'
       - '.github/scripts/reconcile-netlify-domain.sh'
       - '.github/workflows/pages-www.yml'
+  pull_request:
+    branches: [prod]
+    types: [closed]
   workflow_dispatch:
 
 permissions:
@@ -25,6 +28,10 @@ concurrency:
 
 jobs:
   deploy:
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.title, '[deploy]'))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -66,6 +73,7 @@ jobs:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
           NETLIFY_CUSTOM_DOMAIN: www.testing.hara-lang.org
+          NETLIFY_HEALTH_URLS: https://www.testing.hara-lang.org/
       - name: Deploy production to www.hara-lang.org
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
@@ -78,3 +86,4 @@ jobs:
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
           NETLIFY_CUSTOM_DOMAIN: www.hara-lang.org
           NETLIFY_DOMAIN_ALIASES: hara-lang.org docs.hara-lang.org
+          NETLIFY_HEALTH_URLS: https://www.hara-lang.org/ https://www.hara-lang.org/docs/ https://www.hara-lang.org/benchmarks/ https://docs.hara-lang.org/
