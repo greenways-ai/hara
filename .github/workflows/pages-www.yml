@@ -11,6 +11,15 @@ on:
       - 'scripts/build-www'
       - 'scripts/sync-hara-ui.mjs'
       - '.github/workflows/pages-www.yml'
+  pull_request:
+    paths:
+      - 'website/**'
+      - 'benchmarks/**'
+      - 'rust/**'
+      - 'lib/**'
+      - 'scripts/build-www'
+      - 'scripts/sync-hara-ui.mjs'
+      - '.github/workflows/pages-www.yml'
   workflow_dispatch:
 
 permissions:
@@ -18,11 +27,11 @@ permissions:
   actions: read
 
 concurrency:
-  group: netlify-www-prod
+  group: netlify-www-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  validate-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -37,7 +46,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: website/package-lock.json
+          cache-dependency-path: |
+            website/package-lock.json
+            benchmarks/package-lock.json
       - name: Install Astro site dependencies
         run: |
           npm ci --prefix website
@@ -51,14 +62,17 @@ jobs:
       - name: Test website scene contract
         run: |
           npm test --prefix website
+          npm test --prefix benchmarks
           node --test website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
           test -s target/www/og-hara-ribbon.jpg
       - name: Deploy prod to www.testing.hara-lang.org
+        if: github.ref == 'refs/heads/prod'
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
       - name: Deploy production to www.hara-lang.org
+        if: github.ref == 'refs/heads/prod'
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
