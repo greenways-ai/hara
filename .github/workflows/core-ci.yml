@@ -36,7 +36,6 @@ jobs:
           base="${{ github.event.pull_request.base.sha }}"
           head="${{ github.event.pull_request.head.sha }}"
           if git diff --quiet "$base" "$head" -- \
-            .github/workflows/core-ci.yml \
             rust \
             java \
             lib \
