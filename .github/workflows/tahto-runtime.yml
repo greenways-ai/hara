@@ -40,6 +40,11 @@ jobs:
           cache: maven
           cache-dependency-path: java/pom.xml
       - name: Build Hara Truffle runtime
-        run: mvn -B -Ptruffle -DskipTests package --file java/pom.xml
+        run: |
+          if ! mvn -B -Ptruffle -DskipTests package --file java/pom.xml > /tmp/hara-build.log 2>&1; then
+            cat /tmp/hara-build.log
+            exit 1
+          fi
+          tail -n 8 /tmp/hara-build.log
       - name: Execute emitted JavaScript and Python
         run: bash scripts/run-hara-runtime-smoke
