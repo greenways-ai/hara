@@ -28,13 +28,33 @@ jobs:
         id: scope
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+          event="${{ github.event_name }}"
+          case "$event" in
+            pull_request)
+              base="${{ github.event.pull_request.base.sha }}"
+              head="${{ github.event.pull_request.head.sha }}"
+              ;;
+            push)
+              base="${{ github.event.before }}"
+              head="${{ github.sha }}"
+              ;;
+            *)
+              echo "run_core=true" >> "$GITHUB_OUTPUT"
+              echo "Running core validation for $event."
+              exit 0
+              ;;
+          esac
+
+          # A newly created branch has an all-zero `before` SHA. There is no
+          # reliable comparison range in that case, so keep the conservative
+          # behaviour and run the full core suite.
+          if [[ -z "$base" || "$base" =~ ^0+$ ]] || \
+             ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
             echo "run_core=true" >> "$GITHUB_OUTPUT"
+            echo "No valid base commit; running core validation."
             exit 0
           fi
 
-          base="${{ github.event.pull_request.base.sha }}"
-          head="${{ github.event.pull_request.head.sha }}"
           if git diff --quiet "$base" "$head" -- \
             rust \
             java \
