@@ -89,9 +89,9 @@ function createKernelPromise(progress) {
 
 function installRepl(frame, descriptor, sessions) {
   const code = frame.querySelector("pre > code");
-  if (!code) return;
+  if (!code) return null;
   const pre = code.parentElement;
-  if (!pre || pre.closest(".hara-repl")) return;
+  if (!pre || pre.closest(".hara-repl")) return null;
   const source = frame.dataset.haraSource
     ? decodeURIComponent(frame.dataset.haraSource)
     : code.textContent.replace(/\n$/, "");
@@ -99,6 +99,8 @@ function installRepl(frame, descriptor, sessions) {
   const cell = document.createElement("section");
   cell.className = "hara-repl";
   cell.dataset.connectionState = "loading";
+  cell.dataset.haraSessionId = descriptor.id;
+  if (descriptor.groupName) cell.dataset.haraSessionGroup = descriptor.groupName;
   cell.innerHTML = `
     <header>
       <span class="hara-repl-brand">Hara</span>
@@ -148,15 +150,26 @@ function installRepl(frame, descriptor, sessions) {
   };
 
   let connectedSession = null;
+  let connectedRevision = -1;
+  let connectionGeneration = 0;
+  let operation = 0;
+
   const connect = async () => {
-    if (connectedSession) return connectedSession;
+    const desiredRevision = sessions.revision(descriptor);
+    if (connectedSession && connectedRevision === desiredRevision) return connectedSession;
+
+    const generation = connectionGeneration;
     setConnection("loading");
     try {
-      connectedSession = await sessions.get(descriptor);
-      setConnection("ready");
-      return connectedSession;
+      const session = await sessions.get(descriptor);
+      if (generation === connectionGeneration) {
+        connectedSession = session;
+        connectedRevision = sessions.revision(descriptor);
+        setConnection("ready");
+      }
+      return session;
     } catch (error) {
-      setConnection("error", error);
+      if (generation === connectionGeneration) setConnection("error", error);
       throw error;
     }
   };
@@ -164,6 +177,7 @@ function installRepl(frame, descriptor, sessions) {
   connect().catch(() => {});
 
   button.addEventListener("click", async () => {
+    const currentOperation = ++operation;
     button.disabled = true;
     output.hidden = false;
     output.dataset.state = "pending";
@@ -171,17 +185,20 @@ function installRepl(frame, descriptor, sessions) {
     let session = null;
     try {
       session = await connect();
+      if (currentOperation !== operation) return;
       setConnection("busy");
       const result = await session.eval(editor.value);
+      if (currentOperation !== operation) return;
       setConnection("ready");
       output.dataset.state = "ready";
       output.textContent = result.label ?? print(result.value);
     } catch (error) {
+      if (currentOperation !== operation) return;
       if (session) setConnection("ready");
       output.dataset.state = "error";
       output.textContent = String(error?.message ?? error);
     } finally {
-      button.disabled = false;
+      if (currentOperation === operation) button.disabled = false;
     }
   });
 
@@ -191,6 +208,33 @@ function installRepl(frame, descriptor, sessions) {
       button.click();
     }
   });
+
+  return {
+    descriptor,
+    beginReset() {
+      operation += 1;
+      connectionGeneration += 1;
+      connectedSession = null;
+      connectedRevision = -1;
+      button.disabled = true;
+      output.hidden = true;
+      output.textContent = "";
+      delete output.dataset.state;
+      setConnection("loading");
+    },
+    finishReset(session) {
+      connectedSession = session;
+      connectedRevision = sessions.revision(descriptor);
+      button.disabled = false;
+      setConnection("ready");
+    },
+    failReset(error) {
+      connectedSession = null;
+      connectedRevision = -1;
+      button.disabled = false;
+      setConnection("error", error);
+    }
+  };
 }
 
 const frames = [...document.querySelectorAll("main [data-hara-eval]")];
@@ -198,13 +242,34 @@ if (frames.length > 0) {
   const progress = createKernelProgress();
   const kernelPromise = createKernelPromise(progress);
   const sessions = createDocsSessionRegistry(kernelPromise);
-  frames.forEach((frame, index) => {
+  const runners = frames.map((frame, index) => {
     const descriptor = describeDocsSession({
       scope: frame.dataset.haraScope,
       groupName: frame.dataset.haraGroup,
       pagePath: location.pathname,
       sequence: index + 1
     });
-    installRepl(frame, descriptor, sessions);
+    return installRepl(frame, descriptor, sessions);
+  }).filter(Boolean);
+
+  document.addEventListener("hara:reset-session", async (event) => {
+    const groupName = String(event.detail?.groupName ?? "").trim();
+    if (!groupName) return;
+
+    const matching = runners.filter(({ descriptor }) =>
+      descriptor.scope === "group" && descriptor.groupName === groupName);
+    if (!matching.length) return;
+
+    const descriptor = matching[0].descriptor;
+    matching.forEach((runner) => runner.beginReset());
+    try {
+      const session = await sessions.reset(descriptor);
+      matching.forEach((runner) => runner.finishReset(session));
+      document.dispatchEvent(new CustomEvent("hara:session-reset", {
+        detail: { groupName, sessionId: descriptor.id }
+      }));
+    } catch (error) {
+      matching.forEach((runner) => runner.failReset(error));
+    }
   });
 }
