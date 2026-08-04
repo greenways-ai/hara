@@ -66,7 +66,10 @@ function createKernelPromise(progress) {
         manifest,
         resources: {
           "studio.store": "/docs-assets/rust/studio/hal/store.hal",
-          "studio.fs": "/docs-assets/rust/studio/hal/fs.hal"
+          "studio.fs": "/docs-assets/rust/studio/hal/fs.hal",
+          "studio.node": "/runtime/studio/hal/node.hal",
+          "studio.draw": "/runtime/studio/hal/draw.hal",
+          "std.lib.substrate.frame": "/runtime/std/lib/substrate/frame.hal"
         },
         fetchAsset: progress.fetch
       });
@@ -87,14 +90,14 @@ function createKernelPromise(progress) {
     });
 }
 
-function installRepl(frame, descriptor, sessions) {
+function installRepl(frame, descriptor, sessions, { evaluate = null, source: suppliedSource = null } = {}) {
   const code = frame.querySelector("pre > code");
   if (!code) return null;
   const pre = code.parentElement;
   if (!pre || pre.closest(".hara-repl")) return null;
-  const source = frame.dataset.haraSource
+  const source = suppliedSource ?? (frame.dataset.haraSource
     ? decodeURIComponent(frame.dataset.haraSource)
-    : code.textContent.replace(/\n$/, "");
+    : code.textContent.replace(/\n$/, ""));
 
   const cell = document.createElement("section");
   cell.className = "hara-repl";
@@ -187,7 +190,9 @@ function installRepl(frame, descriptor, sessions) {
       session = await connect();
       if (currentOperation !== operation) return;
       setConnection("busy");
-      const result = await session.eval(editor.value);
+      const result = evaluate
+        ? await evaluate(session, editor.value)
+        : await session.eval(editor.value);
       if (currentOperation !== operation) return;
       setConnection("ready");
       output.dataset.state = "ready";
@@ -211,6 +216,12 @@ function installRepl(frame, descriptor, sessions) {
 
   return {
     descriptor,
+    cell,
+    editor,
+    button,
+    output,
+    connect,
+    setConnection,
     beginReset() {
       operation += 1;
       connectionGeneration += 1;
@@ -237,8 +248,138 @@ function installRepl(frame, descriptor, sessions) {
   };
 }
 
+const localPointer = (event, canvas) => {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    type: "pointer",
+    phase: event.type === "pointerup" ? "up" : event.type === "pointermove" ? "move" : "down",
+    x: Math.round(event.clientX - rect.left),
+    y: Math.round(event.clientY - rect.top),
+    button: event.button ?? 0,
+    pointer: event.pointerType ?? "mouse"
+  };
+};
+
+const errorMessage = (error) => String(error?.message ?? error).replace(/^Error: /, "");
+
+function createCanvasController(stage) {
+  const canvas = document.createElement("canvas");
+  canvas.className = "hara-live-canvas";
+  canvas.width = 960;
+  canvas.height = 600;
+  canvas.tabIndex = 0;
+  canvas.setAttribute("aria-label", "Live Hara canvas output");
+
+  const panel = document.createElement("section");
+  panel.className = "hara-live-canvas-panel";
+  panel.innerHTML = `
+    <div class="hara-live-canvas-meta">
+      <span>ISOLATED · CANVAS/2D</span>
+      <output aria-live="polite">Waiting to run</output>
+    </div>`;
+  panel.append(canvas);
+
+  const status = panel.querySelector("output");
+  const canvasId = "canvas/background";
+  let runtime = null;
+  let compileAnonymousDocument = null;
+  let unregisterCanvas = null;
+  let generation = 0;
+  let activeNode = null;
+  let closed = false;
+
+  const setStatus = (text, state = "") => {
+    status.textContent = text;
+    status.dataset.state = state;
+  };
+
+  const ensureRuntime = async (session) => {
+    if (!runtime) {
+      const [broker, canvasModule] = await Promise.all([
+        import("/runtime/studio/broker.js"),
+        import("/runtime/studio/canvas-runtime.js")
+      ]);
+      compileAnonymousDocument = broker.compileAnonymousDocument;
+      runtime = new canvasModule.CanvasRuntime({
+        capabilities: ["canvas/2d"],
+        onDiagnostic: (error) => setStatus(errorMessage(error), "error")
+      });
+      runtime.register(canvasId, canvas);
+    }
+    unregisterCanvas ??= session.registerCanvas(runtime);
+  };
+
+  for (const type of ["pointerdown", "pointermove", "pointerup"]) {
+    canvas.addEventListener(type, (event) => {
+      if (type === "pointerdown") canvas.setPointerCapture?.(event.pointerId);
+      runtime?.pushEvent(localPointer(event, canvas));
+    });
+  }
+
+  const evaluate = async (session, source) => {
+    if (closed) throw new Error("canvas stage is closed");
+    const currentGeneration = ++generation;
+    const nodeId = `docs-tictactoe-${stage.dataset.haraCanvasStage}-${currentGeneration}`;
+    setStatus("Starting canvas", "loading");
+    await ensureRuntime(session);
+    runtime.stage(nodeId, canvasId);
+    try {
+      const document = compileAnonymousDocument(source, {
+        documentId: `${location.pathname}/canvas-${stage.dataset.haraCanvasStage}`,
+        nodeId
+      });
+      const taskId = await session.evalRaw(document.source);
+      const rendered = runtime.waitForFirstRender(nodeId, canvasId, 5000);
+      session.evalRaw(`(studio.node/run-task ${JSON.stringify(taskId)})`)
+        .catch((error) => setStatus(errorMessage(error), "error"));
+      await rendered;
+      if (currentGeneration !== generation) {
+        runtime.discard(nodeId, canvasId);
+        return { value: null, label: "Canvas superseded" };
+      }
+      runtime.commit(nodeId, canvasId);
+      activeNode = nodeId;
+      setStatus("Live · first frame rendered", "ready");
+      return { value: null, label: "Canvas live" };
+    } catch (error) {
+      runtime.discard(nodeId, canvasId);
+      setStatus(errorMessage(error), "error");
+      throw error;
+    }
+  };
+
+  const loadSource = async (fallback) => {
+    const program = stage.dataset.haraCanvasProgram;
+    if (!program) return fallback;
+    const response = await fetch(new URL(program, document.baseURI));
+    if (!response.ok) throw new Error(`unable to load tutorial source (${response.status})`);
+    return response.text();
+  };
+
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    generation += 1;
+    if (activeNode) runtime?.release(activeNode, canvasId);
+    unregisterCanvas?.();
+    runtime?.close();
+  };
+  window.addEventListener("pagehide", close, { once: true });
+
+  return {
+    evaluate,
+    loadSource,
+    mount(cell) {
+      cell.classList.add("hara-canvas-repl");
+      cell.after(panel);
+    },
+    setStatus
+  };
+}
+
 const frames = [...document.querySelectorAll("main [data-hara-eval]")];
-if (frames.length > 0) {
+const canvasStages = [...document.querySelectorAll("main [data-hara-canvas-stage]")];
+if (frames.length > 0 || canvasStages.length > 0) {
   const progress = createKernelProgress();
   const kernelPromise = createKernelPromise(progress);
   const sessions = createDocsSessionRegistry(kernelPromise);
@@ -251,6 +392,27 @@ if (frames.length > 0) {
     });
     return installRepl(frame, descriptor, sessions);
   }).filter(Boolean);
+
+  for (const [index, stage] of canvasStages.entries()) {
+    const frame = stage.querySelector(".expressive-code, .highlight, pre");
+    if (!frame) continue;
+    const controller = createCanvasController(stage);
+    const descriptor = describeDocsSession({
+      pagePath: `${location.pathname}/canvas`,
+      sequence: index + 1
+    });
+    const runner = installRepl(frame, descriptor, sessions, {
+      evaluate: controller.evaluate
+    });
+    if (!runner) continue;
+    runners.push(runner);
+    controller.mount(runner.cell);
+    controller.loadSource(runner.editor.value).then((source) => {
+      runner.editor.value = source;
+      runner.editor.rows = Math.min(28, Math.max(5, source.split("\n").length));
+      runner.button.click();
+    }).catch((error) => controller.setStatus(errorMessage(error), "error"));
+  }
 
   document.addEventListener("hara:reset-session", async (event) => {
     const groupName = String(event.detail?.groupName ?? "").trim();
