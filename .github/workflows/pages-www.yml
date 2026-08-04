@@ -53,7 +53,7 @@ jobs:
         run: |
           npm test --prefix website
           node --test website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
-          test -s target/www/og-hara-ribbon.jpg
+          test -s target/www/og-hara.jpg
       - name: Deploy prod to www.testing.hara-lang.org
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
