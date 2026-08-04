@@ -59,7 +59,13 @@ jobs:
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
+      - name: Deploy production to www.hara-lang.org
+        run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
       - name: Correct the production domain
+        continue-on-error: true
         run: |
           curl --fail-with-body --silent --show-error \
             --request PATCH \
@@ -67,11 +73,6 @@ jobs:
             --header "Content-Type: application/json" \
             --data '{"custom_domain":"www.hara-lang.org","force_ssl":true}' \
             "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}"
-        env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
-      - name: Deploy production to www.hara-lang.org
-        run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
