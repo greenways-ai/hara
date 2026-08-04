@@ -9,7 +9,7 @@ import "@hara-lang/visual-language/theme.js";
 
 const {
   title = "Hara",
-  description = "A programmable kernel. Embedded everywhere.",
+  description = "A small, high-performance Lisp for learning to build software from first principles.",
   image = "/og-hara-ribbon.jpg"
 } = Astro.props;
 const imageUrl = new URL(image, Astro.site);
@@ -30,12 +30,12 @@ const imageUrl = new URL(image, Astro.site);
     <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Hara — A programmable kernel. Embedded everywhere." />
+    <meta property="og:image:alt" content="Hara — Start simple. Build forever." />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={imageUrl} />
-    <meta name="twitter:image:alt" content="Hara — A programmable kernel. Embedded everywhere." />
+    <meta name="twitter:image:alt" content="Hara — Start simple. Build forever." />
     <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />
     <link rel="icon" href="/assets/hara-favicon.svg" type="image/svg+xml" />
     <title>{title}</title>
@@ -54,6 +54,6 @@ const imageUrl = new URL(image, Astro.site);
       </div>
     </header>
     <slot />
-    <footer class="site-footer"><span>Hara</span><p>Simple to pick up. Fast enough to keep.</p><a href="https://www.greenways.ai/">Built by Greenways</a></footer>
+    <footer class="site-footer"><span>Hara</span><p>Start simple. Build forever.</p><a href="https://www.greenways.ai/">Built by Greenways</a></footer>
   </body>
 </html>
