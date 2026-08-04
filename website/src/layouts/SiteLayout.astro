@@ -4,6 +4,7 @@ import HaraMark from "@hara-lang/visual-language/astro/HaraMark.astro";
 import "@hara-lang/visual-language/theme.css";
 import "@hara-lang/visual-language/motifs.css";
 import "../styles/site.css";
+import "../styles/shell.css";
 import "@hara-lang/visual-language/theme.js";
 
 const {
@@ -26,12 +27,14 @@ const {
     <header class="site-header">
       <a class="brand" href="/"><HaraMark size={27} /><span>Hara</span></a>
       <nav aria-label="Primary">
-        <a href="/docs/start/orientation/">Docs</a>
         <a href="/benchmarks/">Benchmarks</a>
+        <a href="/docs/start/orientation/">Docs</a>
         <a href="https://specs.hara-lang.org/">Specs</a>
-        <a href="https://github.com/hara-lang/hara">Source</a>
       </nav>
-      <ThemeToggle />
+      <div class="header-actions">
+        <a class="sign-in" href="https://id.hara-lang.org/">Sign in</a>
+        <ThemeToggle />
+      </div>
     </header>
     <slot />
     <footer class="site-footer"><span>Hara</span><p>Simple to pick up. Fast enough to keep.</p><a href="https://www.greenways.ai/">Built by Greenways</a></footer>
