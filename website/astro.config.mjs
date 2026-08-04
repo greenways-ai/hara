@@ -19,7 +19,11 @@ export default defineConfig({
       },
       description: "A small, high-performance Lisp for learning to build software from first principles.",
       favicon: "/assets/hara-favicon.svg",
-      head: [{ tag: "script", attrs: { type: "module", src: "/assets/docs-repl.js" } }],
+      head: [
+        { tag: "link", attrs: { rel: "stylesheet", href: "/docs-assets/stylesheets/syllabus.css" } },
+        { tag: "script", attrs: { type: "module", src: "/assets/docs-repl.js" } },
+        { tag: "script", attrs: { type: "module", src: "/docs-assets/javascripts/syllabus.js" } }
+      ],
       customCss: ["./src/styles/docs.css"],
       social: [{ icon: "github", label: "GitHub", href: "https://github.com/hara-lang/hara" }],
       sidebar: [
@@ -31,6 +35,15 @@ export default defineConfig({
             { label: "03 — Try Hara in the browser", slug: "docs/getting-started/playground" },
             { label: "04 — Build Tic Tac Toe", slug: "docs/create/first-game" },
             { label: "05 — Choose your setup", slug: "docs/getting-started" }
+          ]
+        },
+        {
+          label: "Interactive courses",
+          items: [
+            { label: "Choose a learning path", slug: "docs/learn" },
+            { label: "First Contact", slug: "docs/learn/first-contact" },
+            { label: "Protocols for Builders", slug: "docs/learn/protocols" },
+            { label: "Protocol Atlas", slug: "docs/learn/protocols/atlas" }
           ]
         },
         {
