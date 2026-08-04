@@ -45,8 +45,8 @@ const socialImage = "https://www.hara-lang.org/og-hara-ribbon.jpg";
   <main>
     <section class="summary hara-motif" data-motif="rack"><div class="summary-inner"><p class="hara-kicker">Reproducible performance evidence</p><h1>Hara benchmarks</h1><p class="lede">Start with the language shootout: where Hara leads, where it trails, and the exact workloads behind every comparison.</p><div class="evidence-line"><span class="evidence-dot ready"></span><span>Published {evidenceDate}</span><span aria-hidden="true">·</span><span>{workloads.length} workloads</span><span aria-hidden="true">·</span><span>{comparisonRows.length} comparison languages</span></div></div></section>
     <section class="results-shell">
-      <div class="tabs" role="tablist" aria-label="Benchmark sections"><button role="tab" aria-selected="true" aria-controls="language-shootout" id="tab-languages">Language shootout</button><button role="tab" aria-selected="false" aria-controls="hara-artifacts" id="tab-hara" tabindex="-1">Hara runtimes</button><button role="tab" aria-selected="false" aria-controls="http-results" id="tab-http" tabindex="-1">HTTP</button></div>
-      <LanguagePanel /><RuntimePanel /><HttpPanel />
+      <div class="tabs" role="tablist" aria-label="Benchmark sections"><button role="tab" aria-selected="true" aria-controls="language-shootout" id="tab-languages">Language shootout</button><button role="tab" aria-selected="false" aria-controls="http-results" id="tab-http" tabindex="-1">HTTP</button><button role="tab" aria-selected="false" aria-controls="hara-artifacts" id="tab-hara" tabindex="-1">Hara runtimes</button></div>
+      <LanguagePanel /><HttpPanel /><RuntimePanel />
     </section>
     <RuntimeReference />
   </main>
@@ -79,10 +79,11 @@ const socialImage = "https://www.hara-lang.org/og-hara-ribbon.jpg";
       if (!Number.isFinite(value)) return "Pending";
       return value < 1_000 ? `${value.toFixed(1)} ns` : value < 1_000_000 ? `${(value / 1_000).toFixed(1)} µs` : `${(value / 1_000_000).toFixed(2)} ms`;
     };
-    const detail = document.querySelector<HTMLElement>("[data-matrix-detail]");
     const cells = [...document.querySelectorAll<HTMLButtonElement>("[data-comparison-cell]")];
     const selectCell = (cell: HTMLButtonElement) => {
-      cells.forEach((item) => item.setAttribute("aria-pressed", String(item === cell)));
+      const stage = cell.closest(".matrix-stage");
+      const detail = stage?.querySelector<HTMLElement>("[data-matrix-detail]");
+      stage?.querySelectorAll("[data-comparison-cell]").forEach((item) => item.setAttribute("aria-pressed", String(item === cell)));
       if (!detail) return;
       const competitor = cell.dataset.runtimeLabel ?? "Competitor";
       detail.querySelector<HTMLElement>("[data-detail-title]")!.textContent = `Hara vs ${competitor}`;
@@ -92,6 +93,20 @@ const socialImage = "https://www.hara-lang.org/og-hara-ribbon.jpg";
         detail.querySelector<HTMLElement>("[data-detail-summary]")!.textContent = `All workloads. Hara wins ${cell.dataset.haraWins}; ${competitor} wins ${cell.dataset.competitorWins}.`;
         detail.querySelector<HTMLElement>("[data-detail-hara]")!.textContent = "1.00× baseline";
         detail.querySelector<HTMLElement>("[data-detail-runtime]")!.textContent = `${Number(cell.dataset.ratio).toFixed(2)}× Hara time`;
+      } else if (cell.dataset.kind === "http") {
+        detail.querySelector<HTMLElement>("[data-detail-title]")!.textContent = `hoplite-raw vs ${competitor}`;
+        detail.querySelector<HTMLElement>("[data-detail-label-a]")!.textContent = competitor;
+        detail.querySelector<HTMLElement>("[data-detail-runtime-label]")!.textContent = "hoplite-raw baseline";
+        detail.querySelector<HTMLElement>("[data-detail-summary]")!.textContent = `${cell.dataset.workloadLabel} · mean ${cell.dataset.meanMs} ms · p95 ${cell.dataset.p95Ms} ms`;
+        detail.querySelector<HTMLElement>("[data-detail-hara]")!.textContent = `${cell.dataset.rps} req/s`;
+        detail.querySelector<HTMLElement>("[data-detail-runtime]")!.textContent = `${cell.dataset.baselineRps} req/s`;
+      } else if (cell.dataset.kind === "runtime") {
+        detail.querySelector<HTMLElement>("[data-detail-title]")!.textContent = `${competitor} vs hara-rust-full`;
+        detail.querySelector<HTMLElement>("[data-detail-label-a]")!.textContent = competitor;
+        detail.querySelector<HTMLElement>("[data-detail-runtime-label]")!.textContent = "hara-rust-full baseline";
+        detail.querySelector<HTMLElement>("[data-detail-summary]")!.textContent = `${cell.dataset.workloadLabel}: prepare ${cell.dataset.prepare} · first ${cell.dataset.first} · ${cell.dataset.throughput} calls/s`;
+        detail.querySelector<HTMLElement>("[data-detail-hara]")!.textContent = cell.dataset.steady ?? "—";
+        detail.querySelector<HTMLElement>("[data-detail-runtime]")!.textContent = cell.dataset.baselineSteady ?? "—";
       } else {
         detail.querySelector<HTMLElement>("[data-detail-summary]")!.textContent = `${cell.dataset.workloadLabel}: ${cell.dataset.workloadSummary}`;
         detail.querySelector<HTMLElement>("[data-detail-hara]")!.textContent = formatNs(Number(cell.dataset.haraNs));
@@ -99,8 +114,11 @@ const socialImage = "https://www.hara-lang.org/og-hara-ribbon.jpg";
       }
     };
     cells.forEach((cell) => cell.addEventListener("click", () => selectCell(cell)));
-    const initialCell = cells.find((cell) => cell.dataset.initial === "true") ?? cells[0];
-    if (initialCell) selectCell(initialCell);
+    document.querySelectorAll(".matrix-stage").forEach((stage) => {
+      const stageCells = [...stage.querySelectorAll<HTMLButtonElement>("[data-comparison-cell]")];
+      const initialCell = stageCells.find((cell) => cell.dataset.initial === "true") ?? stageCells[0];
+      if (initialCell) selectCell(initialCell);
+    });
   </script>
 </body>
 </html>
