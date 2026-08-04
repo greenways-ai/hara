@@ -1,8 +1,46 @@
 (ns hara.runtime-smoke
-  (:require [tahto.common.emit :as emit]
+  (:require [std.foundation.os :as os]
+            [std.foundation.string :as string]
+            [tahto.common.emit :as emit]
             [tahto.core :as tahto]
+            [tahto.core.eval :as evaluation]
             [tahto.model.v1.spec-js :as spec-js]
-            [tahto.model.v1.spec-python :as spec-python]))
+            [tahto.model.v1.spec-python :as spec-python]
+            [tahto.runtime.basic.transport-node :as transport-node]))
+
+(defn collect-process-output
+  [pending]
+  (try
+    (string/decode-utf8 (evaluation/await pending 1000))
+    (catch Throwable error
+      (str "<unavailable: " (or (ex-message error) (str error)) ">"))))
+
+(defn eval-persistent!
+  [runtime source]
+  (try
+    (tahto/rt-raw-eval runtime source)
+    (catch Throwable error
+      (let [transport (get runtime :transport)
+            transport-state (transport-node/state transport)
+            child (get transport-state :process)
+            alive-before-stop (if child (os/process-alive? child) false)
+            _ (tahto/rt-stop runtime)
+            stdout (if child
+                     (collect-process-output (os/process-stdout child))
+                     nil)
+            stderr (if child
+                     (collect-process-output (os/process-stderr child))
+                     nil)]
+        (throw
+         (ex-info
+          "Persistent runtime evaluation failed"
+          {:source source
+           :alive-before-stop alive-before-stop
+           :transport-state transport-state
+           :stdout stdout
+           :stderr stderr
+           :cause-data (ex-data error)}
+          error))))))
 
 (def js-command-source
   (emit/emit '(console.log (+ 19 23))
@@ -40,7 +78,7 @@
 
 (println (str "tahto runtime smoke: JavaScript source: " js-expression-source))
 (println "tahto runtime smoke: evaluating JavaScript persistent runtime")
-(def js-basic-output (tahto/rt-raw-eval js-basic js-expression-source))
+(def js-basic-output (eval-persistent! js-basic js-expression-source))
 (println "tahto runtime smoke: JavaScript persistent runtime complete")
 
 (tahto/rt-stop js-basic)
@@ -54,7 +92,7 @@
 (println (str "tahto runtime smoke: Python source: " python-expression-source))
 (println "tahto runtime smoke: evaluating Python persistent runtime")
 (def python-basic-output
-  (tahto/rt-raw-eval python-basic python-expression-source))
+  (eval-persistent! python-basic python-expression-source))
 (println "tahto runtime smoke: Python persistent runtime complete")
 
 (tahto/rt-stop python-basic)
