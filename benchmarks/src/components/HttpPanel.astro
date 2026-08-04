@@ -1,0 +1,8 @@
+---
+import { hasHttpEvidence, httpRows } from "../lib/benchmark-data";
+---
+<section class="tab-panel" role="tabpanel" id="http-results" aria-labelledby="tab-http" hidden>
+  <header><p class="hara-kicker">Loopback HTTP/1.1 · keep-alive</p><h2>HTTP frameworks</h2><p>Hoplite’s raw exchange, native request, and request+HTA boundaries are measured separately against OpenResty and the comparison servers.</p></header>
+  {hasHttpEvidence ? <div class="detail-table"><table><thead><tr><th>Server / route</th><th>Requests/s</th><th>Mean</th><th>p50</th><th>p95</th><th>p99</th></tr></thead><tbody>{httpRows.map((row) => <tr><th><code>{row.server}</code><small>{row.route}</small></th>{row.status === "ok" ? <><td>{row.requests_per_second!.toFixed(1)}</td><td>{row.mean_ms!.toFixed(3)} ms</td><td>{row.p50_ms!.toFixed(1)} ms</td><td>{row.p95_ms!.toFixed(1)} ms</td><td>{row.p99_ms!.toFixed(1)} ms</td></> : <td colspan="5">Not applicable · {row.reason}</td>}</tr>)}</tbody></table></div> : <p class="summary-note">Pending: local server binaries unavailable.</p>}
+  <section class="result-explanation compact" aria-labelledby="http-explanation-title"><header><p class="hara-kicker">What just happened</p><h3 id="http-explanation-title">One route contract, several request boundaries.</h3></header><div class="method-grid"><article><h4>Same host</h4><p>Servers run on one pinned machine over loopback.</p></article><article><h4>Same transport</h4><p>HTTP/1.1 keep-alive and identical payloads are used.</p></article><article><h4>Separate Hara layers</h4><p>Raw exchange, request construction, and HTA conversion stay independent.</p></article><article><h4>Latency stays visible</h4><p>Mean and percentile values accompany throughput.</p></article></div></section>
+</section>
