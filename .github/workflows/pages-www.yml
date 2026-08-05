@@ -9,6 +9,8 @@ on:
       - 'rust/**'
       - 'lib/**'
       - 'scripts/build-www'
+      - 'scripts/fetch-benchmark-site'
+      - 'scripts/verify-benchmark-site.py'
       - 'scripts/write-kernel-manifest.mjs'
       - 'scripts/sync-hara-ui.mjs'
       - '.github/scripts/reconcile-netlify-domain.sh'
@@ -74,6 +76,8 @@ jobs:
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
           NETLIFY_CUSTOM_DOMAIN: www.testing.hara-lang.org
           NETLIFY_HEALTH_URLS: https://www.testing.hara-lang.org/
+      - name: Verify testing benchmark dashboard
+        run: python3 scripts/verify-benchmark-site.py https://www.testing.hara-lang.org/benchmarks/
       - name: Deploy production to www.hara-lang.org
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
@@ -87,3 +91,5 @@ jobs:
           NETLIFY_CUSTOM_DOMAIN: www.hara-lang.org
           NETLIFY_DOMAIN_ALIASES: hara-lang.org docs.hara-lang.org
           NETLIFY_HEALTH_URLS: https://www.hara-lang.org/ https://www.hara-lang.org/docs/ https://www.hara-lang.org/benchmarks/
+      - name: Verify production benchmark dashboard
+        run: python3 scripts/verify-benchmark-site.py https://www.hara-lang.org/benchmarks/
