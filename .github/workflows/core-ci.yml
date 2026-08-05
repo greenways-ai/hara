@@ -55,8 +55,13 @@ jobs:
             exit 0
           fi
 
+          # Browser and Studio assets live under rust/web for packaging, but
+          # they are not Cargo or JVM core inputs. Their dedicated Studio and
+          # Site workflows build and validate them, so do not make pre-existing
+          # native runtime failures block an otherwise isolated web change.
           if git diff --quiet "$base" "$head" -- \
             rust \
+            ':(exclude)rust/web' \
             java \
             lib \
             contrib \

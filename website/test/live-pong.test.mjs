@@ -4,6 +4,7 @@ import test from "node:test";
 
 const pongUrl = new URL("../sources/pong.hal", import.meta.url);
 const homepageUrl = new URL("../src/pages/index.astro", import.meta.url);
+const nodeHalUrl = new URL("../../rust/web/studio/hal/node.hal", import.meta.url);
 
 function assertBalanced(source) {
   const stack = [];
@@ -37,13 +38,22 @@ test("homepage Pong uses the canonical editable source", async () => {
   assert.doesNotMatch(homepage, /getLiveSnippet\("canvas-pong"\)/);
 });
 
-test("Pong sequences dependent let bindings before starting its frame loop", async () => {
+test("Pong keeps namespace setup locally evaluable and sequences its frame loop", async () => {
   const source = await readFile(pongUrl, "utf8");
   assertBalanced(source);
-  assert.match(source, /^\(ns\+/);
+  assert.match(source, /^\(ns\+\)\n\n\(require \[studio\.draw :as draw\]\)/);
+  assert.doesNotMatch(source, /\(ns\+[\s\S]*?:require \[studio\.draw/);
   assert.match(source, /\(let \[delta[\s\S]*?\]\n    \(let \[step/);
   assert.match(source, /\(let \[tracked[\s\S]*?\]\n    \(let \[moved/);
   assert.match(source, /\(let \[frame[\s\S]*?\]\n        \(let \[width/);
   assert.match(source, /\(node\/start/);
   assert.doesNotMatch(source, /\(loop \[state \(initial-state\) tick/);
+});
+
+test("studio node task and handler registries are dereferenced exactly once", async () => {
+  const source = await readFile(nodeHalUrl, "utf8");
+  assert.match(source, /\(let \[entry \(deref \*active-task\*\)\]/);
+  assert.match(source, /find-handler \(deref \*handlers\*\)/);
+  assert.doesNotMatch(source, /\(deref \(deref \*active-task\*\)\)/);
+  assert.doesNotMatch(source, /\(deref \(deref \*handlers\*\)\)/);
 });
