@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { print } from "../src/live-card.js";
+import { print, waitForCanvasFirstFrame } from "../src/live-card.js";
 
 class HtaKeyword { constructor(name) { this.name = name; } }
 class HtaSymbol { constructor(name) { this.name = name; } }
@@ -34,13 +34,36 @@ test("guards against cyclic host values", () => {
   assert.equal(print(value), "[#<cycle>]");
 });
 
-test("live card exposes the compact Eval/Run/example header and touch eval", async () => {
+test("canvas startup reports the real task error before a generic timeout", async () => {
+  const failure = new Error("unresolved symbol in Pong");
+  await assert.rejects(
+    waitForCanvasFirstFrame(new Promise(() => {}), Promise.reject(failure)),
+    /unresolved symbol in Pong/
+  );
+});
+
+test("canvas startup rejects tasks that stop without drawing", async () => {
+  await assert.rejects(
+    waitForCanvasFirstFrame(new Promise(() => {}), Promise.resolve(null)),
+    /stopped before rendering its first frame/
+  );
+});
+
+test("live card exposes tabs, desktop/mobile InstaREPL, and resizers", async () => {
   const source = await readFile(new URL("../src/live-card.js", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
   assert.match(source, /data-live-eval/);
   assert.match(source, /data-live-run/);
-  assert.match(source, /data-live-example/);
-  assert.match(source, /pointerType !== "touch"/);
+  assert.match(source, /role="tablist"/);
+  assert.match(source, /role", "tab"/);
+  assert.match(source, /pointerdown/);
+  assert.match(source, /pointerType !== "touch" && event\.button !== 0/);
+  assert.match(source, /createVerticalResizer\(editorSurface/);
+  assert.match(source, /createVerticalResizer\(panel/);
+  assert.match(source, /waitForCanvasFirstFrame\(rendered, task\)/);
   assert.match(source, /Open in Playground/);
-  assert.doesNotMatch(source, /hara-live-card-brand/);
-  assert.doesNotMatch(source, /data-live-reset/);
+  assert.match(styles, /\.hara-live-card-tabs/);
+  assert.match(styles, /\.hara-live-card-resizer/);
+  assert.doesNotMatch(source, /data-live-example/);
+  assert.doesNotMatch(source, /<select/);
 });
