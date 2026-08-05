@@ -1,0 +1,247 @@
+/* Homepage interaction refinements.
+   These rules deliberately sit after @hara-lang/live so the public landing
+   can use a full-width tab strip without changing documentation embeds. */
+
+/* Live examples: examples are the top edge of the embed, controls sit below. */
+.code-stage-card .hara-live-card-header,
+.live-stage .hara-live-card-header {
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 0 12px 9px;
+}
+
+.code-stage-card .hara-live-card-tabs,
+.live-stage .hara-live-card-tabs {
+  order: -1;
+  width: calc(100% + 24px);
+  min-height: 43px;
+  flex: 0 0 calc(100% + 24px);
+  align-items: stretch;
+  gap: 0;
+  margin: 0 -12px 1px;
+  padding: 0 12px;
+  overflow-x: auto;
+  background: color-mix(in srgb, var(--hara-live-panel) 82%, var(--hara-live-bg));
+  border-bottom: 1px solid var(--hara-live-border);
+  scrollbar-width: none;
+}
+
+.code-stage-card .hara-live-card-tabs::-webkit-scrollbar,
+.live-stage .hara-live-card-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.code-stage-card .hara-live-card-tabs button,
+.live-stage .hara-live-card-tabs button {
+  position: relative;
+  min-height: 43px;
+  padding: 0 15px;
+  color: var(--hara-live-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font-weight: 650;
+  letter-spacing: .015em;
+}
+
+.code-stage-card .hara-live-card-tabs button:hover:not(:disabled),
+.code-stage-card .hara-live-card-tabs button:focus-visible,
+.live-stage .hara-live-card-tabs button:hover:not(:disabled),
+.live-stage .hara-live-card-tabs button:focus-visible {
+  color: var(--hara-live-ink);
+  background: color-mix(in srgb, var(--hara-live-accent) 7%, transparent);
+  outline: none;
+}
+
+.code-stage-card .hara-live-card-tabs button[aria-selected="true"],
+.live-stage .hara-live-card-tabs button[aria-selected="true"] {
+  color: var(--hara-live-ink);
+  background: color-mix(in srgb, var(--hara-live-accent) 9%, transparent);
+  border: 0;
+}
+
+.code-stage-card .hara-live-card-tabs button[aria-selected="true"]::after,
+.live-stage .hara-live-card-tabs button[aria-selected="true"]::after {
+  position: absolute;
+  right: 11px;
+  bottom: 0;
+  left: 11px;
+  height: 2px;
+  content: "";
+  background: var(--hara-live-accent);
+  border-radius: 2px 2px 0 0;
+}
+
+.code-stage-card .hara-live-card-status,
+.live-stage .hara-live-card-status {
+  margin-top: 1px;
+}
+
+.code-stage-card .hara-live-card-playground,
+.live-stage .hara-live-card-playground {
+  margin-left: auto;
+}
+
+/* Kernel boot is already represented by the connection dot and label. */
+.code-stage-card .hara-live-card-toast,
+.live-stage .hara-live-card-toast {
+  display: none !important;
+}
+
+/* Keep the draggable affordance, but avoid a heavy full-width bar. */
+.code-stage-card .hara-live-card-resizer,
+.live-stage .hara-live-card-resizer {
+  background: color-mix(in srgb, var(--hara-live-panel) 90%, transparent);
+  border-top-color: color-mix(in srgb, var(--hara-live-border) 56%, transparent);
+}
+
+.code-stage-card .hara-live-card-editor textarea,
+.live-stage .hara-live-card-editor textarea {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--hara-live-muted) 55%, transparent) transparent;
+}
+
+/* Runtime choice: a real tablist rather than a form select. */
+.kernel-picker {
+  grid-template-columns: minmax(210px, .31fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 2rem;
+}
+
+.kernel-mode-nav {
+  grid-column: 1;
+  grid-row: 1;
+  display: grid;
+  align-content: start;
+  gap: .9rem;
+  min-width: 0;
+}
+
+.kernel-mode-label {
+  color: var(--hara-muted);
+  font-size: .76rem;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.kernel-mode-tabs {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  background: var(--hara-line);
+  border: 1px solid var(--hara-line);
+  border-radius: var(--hara-radius-md);
+}
+
+.kernel-mode-tab {
+  position: relative;
+  display: grid;
+  gap: .24rem;
+  min-height: 70px;
+  align-content: center;
+  padding: .9rem 1rem .9rem 1.18rem;
+  color: var(--hara-muted);
+  text-align: left;
+  background: var(--hara-bg);
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.kernel-mode-tab::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  content: "";
+  background: transparent;
+}
+
+.kernel-mode-tab strong {
+  color: inherit;
+  font-size: .98rem;
+  font-weight: 720;
+}
+
+.kernel-mode-tab small {
+  color: var(--hara-faint);
+  font-size: .68rem;
+  letter-spacing: .035em;
+}
+
+.kernel-mode-tab:hover,
+.kernel-mode-tab:focus-visible {
+  color: var(--hara-text);
+  background: var(--hara-surface-raised);
+  outline: none;
+}
+
+.kernel-mode-tab:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--hara-signal) 55%, transparent);
+}
+
+.kernel-mode-tab[aria-selected="true"] {
+  color: var(--hara-text);
+  background: color-mix(in srgb, var(--hara-signal) 7%, var(--hara-surface-raised));
+}
+
+.kernel-mode-tab[aria-selected="true"]::before {
+  background: var(--hara-signal);
+}
+
+.kernel-mode-tab[aria-selected="true"] strong {
+  color: var(--hara-signal);
+}
+
+.kernel-spec {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .code-stage-card .hara-live-card-header,
+  .live-stage .hara-live-card-header {
+    padding-inline: 8px;
+  }
+
+  .code-stage-card .hara-live-card-tabs,
+  .live-stage .hara-live-card-tabs {
+    width: calc(100% + 16px);
+    flex-basis: calc(100% + 16px);
+    margin-inline: -8px;
+    padding-inline: 7px;
+  }
+
+  .kernel-picker {
+    grid-template-columns: 1fr;
+    gap: 1.35rem;
+  }
+
+  .kernel-mode-nav,
+  .kernel-spec {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .kernel-mode-tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .kernel-mode-tab {
+    min-height: 54px;
+    justify-items: center;
+    padding: .7rem .4rem;
+    text-align: center;
+  }
+
+  .kernel-mode-tab::before {
+    inset: auto 10px 0;
+    width: auto;
+    height: 3px;
+  }
+
+  .kernel-mode-tab small {
+    display: none;
+  }
+}
