@@ -1,1 +1,8 @@
 https://docs.hara-lang.org/* https://www.hara-lang.org/docs/:splat 301!
+
+# The canonical benchmark observatory owns the live comparison data.
+# Proxy it under the main Hara site so both public URLs always show the same
+# verified build without copying benchmark evidence into this repository.
+/benchmarks https://benchmarks.hara-lang.org/ 200!
+/benchmarks/ https://benchmarks.hara-lang.org/ 200!
+/benchmarks/* https://benchmarks.hara-lang.org/:splat 200!
