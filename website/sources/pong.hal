@@ -31,15 +31,15 @@
           :vy 5}})
 
 (defn track-paddle [position target speed]
-  (let [delta (- target (+ position (/ paddle-width 2)))
-        step (clamp delta (- 0 speed) speed)]
-    (clamp (+ position step) 0 (- game-width paddle-width))))
+  (let [delta (- target (+ position (/ paddle-width 2)))]
+    (let [step (clamp delta (- 0 speed) speed)]
+      (clamp (+ position step) 0 (- game-width paddle-width)))))
 
 (defn update-paddles [state]
-  (let [ball-x (get (get state :ball) :x)
-        top-x (track-paddle (get state :top-x) ball-x paddle-speed)
-        bottom-x (track-paddle (get state :bottom-x) ball-x paddle-speed)]
-    (assoc (assoc state :top-x top-x) :bottom-x bottom-x)))
+  (let [ball-x (get (get state :ball) :x)]
+    (let [top-x (track-paddle (get state :top-x) ball-x paddle-speed)
+          bottom-x (track-paddle (get state :bottom-x) ball-x paddle-speed)]
+      (assoc (assoc state :top-x top-x) :bottom-x bottom-x))))
 
 (defn advance-ball [ball]
   (assoc
@@ -101,12 +101,12 @@
         ball))))
 
 (defn update-state [state]
-  (let [tracked (update-paddles state)
-        moved (advance-ball (get tracked :ball))
-        side-bounced (bounce-side-walls moved)
-        paddle-bounced
-        (bounce-paddles side-bounced (get tracked :top-x) (get tracked :bottom-x))]
-    (assoc tracked :ball (bounce-screen-walls paddle-bounced))))
+  (let [tracked (update-paddles state)]
+    (let [moved (advance-ball (get tracked :ball))]
+      (let [side-bounced (bounce-side-walls moved)]
+        (let [paddle-bounced
+              (bounce-paddles side-bounced (get tracked :top-x) (get tracked :bottom-x))]
+          (assoc tracked :ball (bounce-screen-walls paddle-bounced)))))))
 
 (defn viewport [width height]
   {:width width :height height :left 0 :top 0})
@@ -152,34 +152,34 @@
       result)))
 
 (defn draw-pong-game [state width height]
-  (let [view (viewport width height)
-        field (field-commands view)
-        top
-        (paddle-commands
-          view {:x (get state :top-x) :y top-y} "#ff2e88")
-        bottom
-        (paddle-commands
-          view {:x (get state :bottom-x) :y bottom-y} "#41f5e4")]
-    (let [with-top (append-commands field top)
-          with-bottom (append-commands with-top bottom)
-          with-ball
-          (append-commands with-bottom (ball-commands view (get state :ball)))]
-      (conj
-        with-ball
-        [:text "PONG.HAL // AUTOPLAY" 18 (- height 18) "#9ab3c7" 12 0.84]))))
+  (let [view (viewport width height)]
+    (let [field (field-commands view)
+          top
+          (paddle-commands
+            view {:x (get state :top-x) :y top-y} "#ff2e88")
+          bottom
+          (paddle-commands
+            view {:x (get state :bottom-x) :y bottom-y} "#41f5e4")]
+      (let [with-top (append-commands field top)]
+        (let [with-bottom (append-commands with-top bottom)]
+          (let [with-ball
+                (append-commands with-bottom (ball-commands view (get state :ball)))]
+            (conj
+              with-ball
+              [:text "PONG.HAL // AUTOPLAY" 18 (- height 18) "#9ab3c7" 12 0.84])))))))
 
 (node/start
   (fn []
-    (loop [state (initial-state) tick 0]
-      (let [frame (co/await (draw/next-frame "canvas/background"))
-            width (get frame "canvas/width")
-            height (get frame "canvas/height")
-            next-state (if (= (mod tick 2) 0) (update-state state) state)]
-        (do
-          (co/await
-            (draw/render
-              "canvas/background"
-              {:type :canvas-2d
-               :background "#02050b"
-               :commands (draw-pong-game next-state width height)}))
-          (recur next-state (inc tick)))))))
+    (loop [state (initial-state)]
+      (let [frame (co/await (draw/next-frame "canvas/background"))]
+        (let [width (get frame "canvas/width")
+              height (get frame "canvas/height")
+              next-state (update-state state)]
+          (do
+            (co/await
+              (draw/render
+                "canvas/background"
+                {:type :canvas-2d
+                 :background "#02050b"
+                 :commands (draw-pong-game next-state width height)}))
+            (recur next-state)))))))
