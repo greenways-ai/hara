@@ -2,7 +2,7 @@
   "name": "@hara-lang/hta",
   "version": "0.1.0",
   "description": "HTA codecs, browser hosts, and provider transports for Hara",
-  "license": "EPL-2.0",
+  "license": "Apache-2.0",
   "type": "module",
   "repository": {
     "type": "git",

@@ -13,8 +13,8 @@
 	<url>https://www.hara-lang.org/</url>
 	<licenses>
 		<license>
-			<name>Eclipse Public License 2.0</name>
-			<url>https://www.eclipse.org/legal/epl-2.0/</url>
+			<name>Apache License 2.0</name>
+			<url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
 			<distribution>repo</distribution>
 		</license>
 	</licenses>

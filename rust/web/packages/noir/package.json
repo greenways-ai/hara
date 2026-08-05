@@ -2,7 +2,7 @@
   "name": "@hara-lang/noir",
   "version": "0.1.0",
   "description": "Noir compile, prove, and verify adapter for Hara providers",
-  "license": "EPL-2.0",
+  "license": "Apache-2.0",
   "type": "module",
   "exports": {
     ".": "./index.js"
