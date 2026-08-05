@@ -50,8 +50,10 @@ test("keeps the three runtime modes after the learning path", async () => {
   const repl = await readFile(new URL("../public/assets/docs-repl.js", import.meta.url), "utf8");
   const liveKernel = await readFile(new URL("../packages/live/src/kernel.js", import.meta.url), "utf8");
   const prepare = await readFile(new URL("../scripts/prepare-docs.mjs", import.meta.url), "utf8");
-  assert.match(page, /id="kernel-mode"/);
-  assert.match(page, /Java[\s\S]*Native[\s\S]*Web/);
+  assert.match(page, /class="kernel-mode-tabs" role="tablist"/);
+  assert.equal((page.match(/role="tab" data-kernel-tab=/g) ?? []).length, 3);
+  assert.match(page, /data-kernel-tab="java"[\s\S]*data-kernel-tab="native"[\s\S]*data-kernel-tab="web"/);
+  assert.doesNotMatch(page, /<select id="kernel-mode"/);
   assert.doesNotMatch(page, /compressed browser VM/);
   assert.match(repl, /\/docs-assets\/live\/kernel\.js/);
   assert.match(liveKernel, /manifest\.variants\.core\.url/);
