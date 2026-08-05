@@ -28,7 +28,10 @@
       id)))
 
 (defn run-task [id]
-  (let [entry (deref (deref *active-task*))]
+  ;; Referring to *active-task* yields the atom itself. Dereference it once to
+  ;; obtain [task-id callback]; a second deref incorrectly treats that vector
+  ;; as a reference and prevents every canvas generation from starting.
+  (let [entry (deref *active-task*)]
     (if (= id (nth entry 0))
       ((nth entry 1))
       (throw (str "unknown node task " id)))))
@@ -45,7 +48,7 @@
   ([signal value]
    (emit signal value {}))
   ([signal value meta]
-   (host/call "node" "emit-frame" (require-node)
+   (host/call "node" "emit-frame" (require-node) signal
               (frame/frame-create :stream (frame/frame-id "evt-")
                                   {:source (require-node)
                                    :signal signal
@@ -76,7 +79,7 @@
         (find-handler entries handler-id (+ index 1))))))
 
 (defn invoke-handler [handler-id args frame]
-  (let [handler (find-handler (deref (deref *handlers*)) handler-id 0)]
+  (let [handler (find-handler (deref *handlers*) handler-id 0)]
     (if handler
       (handler args)
       (throw (str "unknown node handler " handler-id)))))
