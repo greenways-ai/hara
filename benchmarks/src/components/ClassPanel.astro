@@ -1,0 +1,72 @@
+---
+import {
+  classEvidenceDate,
+  classGroups,
+  classStatusFor,
+  classTime,
+  comparisonResult,
+  haraClassRuntime,
+  ratioForClass,
+  workloadMeta,
+  workloads
+} from "../lib/benchmark-data";
+---
+<section class="tab-panel class-panel" role="tabpanel" id="class-comparison" aria-labelledby="tab-class">
+  <section class="language-overview" aria-labelledby="class-overview-title">
+    <div>
+      <p class="hara-kicker">Overview</p>
+      <h2 id="class-overview-title">Best in its own class.</h2>
+      <p>Hara is measured first against dynamic runtimes with adaptive compilation. Lisp implementations form a second family view. C, Java and Python remain visible as reference ceilings — not as peers. Every ratio compares against <code>{haraClassRuntime}</code> from the same verified run published {classEvidenceDate}.</p>
+    </div>
+  </section>
+
+  {classGroups.map((group) => (
+    <section class="comparison-results" aria-labelledby={`class-${group.id}-title`}>
+      <header class="section-heading">
+        <div><p class="hara-kicker">{group.title}</p><h3 id={`class-${group.id}-title`}>{group.title} comparison matrix</h3><p>{group.summary}</p></div>
+        <div class="matrix-legend" aria-label="Matrix legend"><span class="legend-ahead">Hara ahead</span><span class="legend-behind">Hara behind</span></div>
+      </header>
+      <div class="matrix-stage">
+        <div class="matrix-scroll" tabindex="0" aria-label={`Scrollable Hara ${group.title} comparison matrix`}>
+          <table class="comparison-matrix">
+            <thead><tr><th scope="col">Runtime</th><th scope="col">Overall</th>{workloads.map((workload) => <th scope="col">{workloadMeta[workload]?.label ?? workload}</th>)}</tr></thead>
+            <tbody>
+              <tr class="hara-baseline"><th scope="row"><strong>Hara</strong><code>{haraClassRuntime}</code></th><td><span class="baseline-cell"><strong>1.00×</strong><span>baseline</span></span></td>{workloads.map((workload) => (
+                classStatusFor(haraClassRuntime, workload) === "ok"
+                  ? <td><span class="baseline-cell"><strong>1.00×</strong><span>baseline</span></span></td>
+                  : <td><span class="baseline-cell"><strong>—</strong><span>n/a</span></span></td>
+              ))}</tr>
+              {group.rows.map((row) => {
+                const overall = comparisonResult(row.overallRatio);
+                return <tr>
+                  <th scope="row"><strong>{row.label}</strong><code>{row.runtime}</code></th>
+                  <td><button class:list={["matrix-cell", overall.status]} type="button" data-comparison-cell data-kind="overall" data-runtime-label={row.label} data-workload-label="All eight workloads" data-ratio={row.overallRatio} data-result={overall.text} data-hara-wins={row.haraWins} data-competitor-wins={row.competitorWins} aria-pressed="false"><strong>{overall.value}</strong><span>{overall.label}</span></button></td>
+                  {workloads.map((workload) => {
+                    const ratio = ratioForClass(row.runtime, workload);
+                    const result = comparisonResult(ratio);
+                    return <td><button class:list={["matrix-cell", result.status]} type="button" data-comparison-cell data-kind="workload" data-runtime-label={row.label} data-workload-label={workloadMeta[workload]?.label ?? workload} data-workload-summary={workloadMeta[workload]?.summary} data-result={result.text} data-hara-ns={classTime(haraClassRuntime, workload)} data-runtime-ns={classTime(row.runtime, workload)} aria-pressed="false"><strong>{result.value}</strong><span>{result.label}</span></button></td>;
+                  })}
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+        <aside class="matrix-detail" data-matrix-detail aria-live="polite">
+          <p class="hara-kicker">Selected comparison</p><h4 data-detail-title>Select a result</h4><p data-detail-summary>Choose an overall or workload cell to inspect the evidence.</p>
+          <dl><div><dt data-detail-label-a>Hara</dt><dd data-detail-hara>—</dd></div><div><dt data-detail-runtime-label>Competitor</dt><dd data-detail-runtime>—</dd></div><div><dt>Result</dt><dd data-detail-result>—</dd></div></dl>
+        </aside>
+      </div>
+    </section>
+  ))}
+
+  <section class="result-explanation" aria-labelledby="class-explanation-title">
+    <header><p class="hara-kicker">What just happened</p><h3 id="class-explanation-title">How to read the result</h3></header>
+    <div class="method-grid">
+      <article><span>01</span><h4>Equivalent work</h4><p>Every language runs the same algorithms and must produce the same expected checksum.</p></article>
+      <article><span>02</span><h4>Prepared execution</h4><p>The comparison uses converged prepared calls, not process startup or source preparation.</p></article>
+      <article><span>03</span><h4>One run, one baseline</h4><p>Every row is compared only with <code>{haraClassRuntime}</code> captured in the same environment.</p></article>
+      <article><span>04</span><h4>Geometric mean</h4><p>The overall result combines workloads without allowing the longest one to dominate.</p></article>
+    </div>
+    <p class="evidence-source">Evidence imported from the verified hara-benchmarks run published {classEvidenceDate}. <a href="https://github.com/hara-lang/hara/tree/main/lib/bench">Inspect the source.</a></p>
+  </section>
+</section>

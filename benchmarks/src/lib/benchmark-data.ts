@@ -56,7 +56,13 @@ const languageEvidence: LanguageEvidence | null = existsSync(languageEvidencePat
   ? JSON.parse(readFileSync(languageEvidencePath, "utf8"))
   : null;
 
+const classEvidencePath = fileURLToPath(new URL("../../../lib/bench/results/class-reference.json", import.meta.url));
+const classEvidence: LanguageEvidence | null = existsSync(classEvidencePath)
+  ? JSON.parse(readFileSync(classEvidencePath, "utf8"))
+  : null;
+
 export const haraRuntime = "hara-rust-full";
+export const haraClassRuntime = "hara-rust-whole-wasm-prepared";
 export const workloads = catalog.corpus.workloads;
 export const runtimeLabels: Record<string, string> = {
   "hara-rust-full": "Hara",
@@ -67,7 +73,12 @@ export const runtimeLabels: Record<string, string> = {
   "python-prepared": "Python",
   "c-prepared": "C",
   "java-prepared": "Java",
-  "luajit-prepared": "LuaJIT"
+  "luajit-prepared": "LuaJIT",
+  "pypy-prepared": "PyPy",
+  "node-prepared": "Node",
+  "ruby-yjit-prepared": "Ruby (YJIT)",
+  "clojure-prepared": "Clojure",
+  "hara-rust-whole-wasm-prepared": "Hara"
 };
 export const workloadMeta: Record<string, { label: string; summary: string }> = {
   "sieve-array": { label: "Sieve", summary: "Integer loops and mutable array traversal." },
@@ -132,6 +143,77 @@ export const closestRow = comparisonRows.reduce<ComparisonRow | null>((best, row
   if (!best) return row;
   return Math.abs(Math.log(row.overallRatio)) < Math.abs(Math.log(best.overallRatio)) ? row : best;
 }, null);
+
+const classIndex = new Map<string, number>(
+  (classEvidence?.measurements ?? [])
+    .filter((row) => row.status === "ok" && row.analysis?.steady_ns != null)
+    .map((row) => [`${row.runtime}/${row.workload}`, row.analysis!.steady_ns!])
+);
+const classStatusIndex = new Map<string, string>(
+  (classEvidence?.measurements ?? []).map((row) => [`${row.runtime}/${row.workload}`, row.status])
+);
+export const classStatusFor = (runtime: string, workload: string) =>
+  classStatusIndex.get(`${runtime}/${workload}`) ?? "pending";
+export const ratioForClass = (runtime: string, workload: string) => {
+  const hara = classIndex.get(`${haraClassRuntime}/${workload}`);
+  const candidate = classIndex.get(`${runtime}/${workload}`);
+  return hara && candidate ? candidate / hara : null;
+};
+export const classTime = (runtime: string, workload: string) => classIndex.get(`${runtime}/${workload}`);
+const buildClassRows = (runtimes: string[]): ComparisonRow[] =>
+  runtimes
+    .flatMap((runtime) => {
+      const overallRatio = geometricMean(workloads.flatMap((workload) => {
+        const ratio = ratioForClass(runtime, workload);
+        return ratio == null ? [] : [ratio];
+      }));
+      if (overallRatio == null) return [];
+      const haraWins = workloads.filter((workload) => (ratioForClass(runtime, workload) ?? 0) > 1).length;
+      const competitorWins = workloads.filter((workload) => {
+        const ratio = ratioForClass(runtime, workload);
+        return ratio != null && ratio < 1;
+      }).length;
+      return [{
+        runtime,
+        label: runtimeLabels[runtime] ?? runtime.replace(/-prepared$/, ""),
+        overallRatio,
+        haraWins,
+        competitorWins
+      }];
+    })
+    .sort((left, right) => right.overallRatio - left.overallRatio);
+export type ClassGroup = { id: string; title: string; summary: string; rows: ComparisonRow[] };
+export const classGroups: ClassGroup[] = [
+  {
+    id: "class",
+    title: "Best in class",
+    summary: "Hara measured first against dynamic runtimes with adaptive compilation — its own class.",
+    rows: buildClassRows(catalog.class_competitors.map((name) => `${name}-prepared`))
+  },
+  {
+    id: "lisp",
+    title: "Lisp family",
+    summary: "Common Lisp, Scheme and Clojure-derived runtimes, grouped separately from the dynamic-JIT claim.",
+    rows: buildClassRows(catalog.lisp_competitors.map((name) => `${name}-prepared`))
+  },
+  {
+    id: "references",
+    title: "Reference ceilings",
+    summary: "C, Java and Python remain essential context as differently coloured reference ceilings, not peers.",
+    rows: buildClassRows(catalog.reference_competitors.map((name) => `${name}-prepared`))
+  }
+].filter((group) => group.rows.length > 0);
+const classTimestamp = classEvidence?.environment?.timestamp;
+export const classEvidenceDate = classTimestamp && !Number.isNaN(Date.parse(classTimestamp))
+  ? new Intl.DateTimeFormat("en-AU", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short"
+    }).format(new Date(classTimestamp))
+  : "reference run pending";
 
 export const comparisonResult = (ratio: number | null) => {
   if (ratio == null) return { value: "—", status: "pending", label: "pending", text: "Pending" };
