@@ -5,16 +5,13 @@ import { PONG_SOURCE } from "./pong.js";
  * Each entry: { id, title, kind: "console" | "canvas", source }.
  */
 
-const FIRST_EVAL = `(+ 19 23)
-; => 42`;
+const FIRST_EVAL = `(+ 19 23)`;
 
 const COLLECTIONS = `(def scores [4 8 15 16 23 42])
 
 (map (fn [score] (* score 2)) scores)
-; => [8 16 30 32 46 84]
 
-(filter (fn [score] (> score 10)) scores)
-; => [15 16 23 42]`;
+(filter (fn [score] (> score 10)) scores)`;
 
 // Reused from the hara-lang.org landing (website/src/pages/index.astro).
 const STATE = `(def game
