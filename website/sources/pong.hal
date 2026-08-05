@@ -1,5 +1,5 @@
-(ns+
-  (:require [studio.draw :as draw]))
+(ns+)
+(require [studio.draw :as draw])
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; Pong ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Full-screen autonomous Pong. Both horizontal paddles track the ball while
