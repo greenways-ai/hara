@@ -212,7 +212,7 @@ implementation work still in progress.
 
 ## License
 
-Hara-owned source code is available under the [Eclipse Public License 2.0](LICENSE).
+Hara-owned source code is available under the [Apache License 2.0](LICENSE).
 Some directories contain separately licensed or provenance-sensitive material; see
 [the license inventory](LICENSES/README.md). Run `bash scripts/check-licenses` to
 validate the repository's license metadata and documented exceptions.
