@@ -28,7 +28,7 @@
       id)))
 
 (defn run-task [id]
-  (let [entry (deref (deref *active-task*))]
+  (let [entry (deref *active-task*)]
     (if (= id (nth entry 0))
       ((nth entry 1))
       (throw (str "unknown node task " id)))))
@@ -76,7 +76,7 @@
         (find-handler entries handler-id (+ index 1))))))
 
 (defn invoke-handler [handler-id args frame]
-  (let [handler (find-handler (deref (deref *handlers*)) handler-id 0)]
+  (let [handler (find-handler (deref *handlers*) handler-id 0)]
     (if handler
       (handler args)
       (throw (str "unknown node handler " handler-id)))))
