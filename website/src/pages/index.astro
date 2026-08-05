@@ -184,7 +184,7 @@ const evidenceDate = new Date(languageEvidence.environment.timestamp).toLocaleDa
   </main>
   <script>
     import { mountLiveCard } from "@hara-lang/live";
-    import { getLiveSnippet } from "@hara-lang/live/snippets";
+    import pongSource from "../../sources/pong.hal?raw";
     import "@hara-lang/live/style.css";
 
     // The three reading examples keep their original landing-page text; the
@@ -211,9 +211,11 @@ const evidenceDate = new Date(languageEvidence.environment.timestamp).toLocaleDa
     }
 
     const canvasMount = document.querySelector<HTMLElement>("[data-live-canvas]");
-    const pong = getLiveSnippet("canvas-pong");
-    if (canvasMount && pong) {
-      mountLiveCard(canvasMount, { snippets: [pong], activeSnippet: pong.id });
+    if (canvasMount) {
+      mountLiveCard(canvasMount, {
+        snippets: [{ id: "canvas-pong", title: "Pong", kind: "canvas", source: pongSource }],
+        activeSnippet: "canvas-pong"
+      });
     }
 
     const kernelMode = document.querySelector<HTMLSelectElement>("#kernel-mode");
