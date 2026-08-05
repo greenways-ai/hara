@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import SiteLayout from "../layouts/SiteLayout.astro";
 import Motif from "@hara-lang/visual-language/astro/Motif.astro";
+import "@hara-lang/live/style.css";
+import "../styles/home-interactions.css";
 
 type LanguageMeasurement = {
   runtime: string;
@@ -131,25 +133,74 @@ const evidenceDate = new Date(languageEvidence.environment.timestamp).toLocaleDa
       <h2>Start live. Fit the runtime later.</h2>
       <p class="lede">The host can change without replacing the language or its values. Begin in the browser, then choose Java, native, or web deployment when the program needs it.</p>
       <div class="kernel-picker">
-        <label for="kernel-mode">Kernel mode</label>
-        <select id="kernel-mode">
-          <option value="java">Java</option>
-          <option value="native">Native</option>
-          <option value="web">Web</option>
-        </select>
-        <div class="kernel-spec" data-kernel-mode="java">
+        <div class="kernel-mode-nav">
+          <span class="kernel-mode-label">Kernel mode</span>
+          <div class="kernel-mode-tabs" role="tablist" aria-label="Kernel mode">
+            <button
+              class="kernel-mode-tab"
+              type="button"
+              role="tab"
+              id="kernel-tab-java"
+              data-kernel-tab="java"
+              aria-selected="true"
+              aria-controls="kernel-panel-java"
+              tabindex="0"
+            ><strong>Java</strong><small>JVM / Truffle</small></button>
+            <button
+              class="kernel-mode-tab"
+              type="button"
+              role="tab"
+              id="kernel-tab-native"
+              data-kernel-tab="native"
+              aria-selected="false"
+              aria-controls="kernel-panel-native"
+              tabindex="-1"
+            ><strong>Native</strong><small>Rust / Whole-Wasm</small></button>
+            <button
+              class="kernel-mode-tab"
+              type="button"
+              role="tab"
+              id="kernel-tab-web"
+              data-kernel-tab="web"
+              aria-selected="false"
+              aria-controls="kernel-panel-web"
+              tabindex="-1"
+            ><strong>Web</strong><small>Browser / WASM</small></button>
+          </div>
+        </div>
+        <div
+          class="kernel-spec"
+          id="kernel-panel-java"
+          role="tabpanel"
+          aria-labelledby="kernel-tab-java"
+          data-kernel-mode="java"
+        >
           <code>Java</code>
           <h3>Work inside the JVM ecosystem.</h3>
           <p>Run with the Truffle runtime, integrate with Java classes and tools, and target Native Image when a self-contained deployment is useful.</p>
           <dl><div><dt>Engine</dt><dd>Truffle AST / HBC4</dd></div><div><dt>Deployment</dt><dd>JVM or Native Image</dd></div><div><dt>Best for</dt><dd>Java systems and language tooling</dd></div></dl>
         </div>
-        <div class="kernel-spec" data-kernel-mode="native" hidden>
+        <div
+          class="kernel-spec"
+          id="kernel-panel-native"
+          role="tabpanel"
+          aria-labelledby="kernel-tab-native"
+          data-kernel-mode="native"
+          hidden
+        >
           <code>Native</code>
           <h3>Use the primary high-performance Rust runtime.</h3>
           <p><b>hara-rust-full</b> prepares whole-function WebAssembly and hosts it natively for tools, services, local applications, and embedded products.</p>
           <dl><div><dt>Engine</dt><dd>Whole-Wasm</dd></div><div><dt>Deployment</dt><dd>Native binary or library</dd></div><div><dt>Best for</dt><dd>Services, CLIs, and embedded products</dd></div></dl>
         </div>
-        <div class="kernel-spec" data-kernel-mode="web" hidden>
+        <div
+          class="kernel-spec"
+          id="kernel-panel-web"
+          role="tabpanel"
+          aria-labelledby="kernel-tab-web"
+          data-kernel-mode="web"
+          hidden
+        >
           <code>Web</code>
           <h3>Run a real Hara kernel in the browser.</h3>
           <p>Start with the interpreter core, then load VM, trace, or whole-Wasm compilation capabilities only when the application needs them.</p>
@@ -185,19 +236,16 @@ const evidenceDate = new Date(languageEvidence.environment.timestamp).toLocaleDa
   <script>
     import { mountLiveCard } from "@hara-lang/live";
     import pongSource from "../../sources/pong.hal?raw";
-    import "@hara-lang/live/style.css";
 
     // The three reading examples keep their original landing-page text; the
     // static <pre> tabs are replaced by an editable, runnable live card.
     const learnSnippets = [
-      { id: "read", title: "Read", kind: "console" as const, source: `(+ 19 23)
-; => 42` },
+      { id: "read", title: "Read", kind: "console" as const, source: `(+ 19 23)` },
       { id: "transform", title: "Transform", kind: "console" as const, source: `(def player
   {:name "Nova"
    :score 0})
 
-(assoc player :score 10)
-; => {:name "Nova" :score 10}` },
+(assoc player :score 10)` },
       { id: "state", title: "State", kind: "console" as const, source: `(def game
   (atom {:turn :x
          :moves []}))
@@ -218,11 +266,34 @@ const evidenceDate = new Date(languageEvidence.environment.timestamp).toLocaleDa
       });
     }
 
-    const kernelMode = document.querySelector<HTMLSelectElement>("#kernel-mode");
-    kernelMode?.addEventListener("change", () =>
+    const kernelTabs = [...document.querySelectorAll<HTMLButtonElement>("[data-kernel-tab]")];
+    const kernelTablist = document.querySelector<HTMLElement>(".kernel-mode-tabs");
+    const selectKernelMode = (mode: string, focus = false) => {
+      for (const tab of kernelTabs) {
+        const selected = tab.dataset.kernelTab === mode;
+        tab.setAttribute("aria-selected", String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+        if (selected && focus) tab.focus();
+      }
       document.querySelectorAll<HTMLElement>("[data-kernel-mode]").forEach((panel) => {
-        panel.hidden = panel.dataset.kernelMode !== kernelMode.value;
-      })
-    );
+        panel.hidden = panel.dataset.kernelMode !== mode;
+      });
+    };
+    for (const tab of kernelTabs) {
+      tab.addEventListener("click", () => selectKernelMode(tab.dataset.kernelTab ?? "java"));
+    }
+    kernelTablist?.addEventListener("keydown", (event) => {
+      if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const current = Math.max(0, kernelTabs.findIndex((tab) => tab === document.activeElement));
+      const forward = event.key === "ArrowDown" || event.key === "ArrowRight";
+      const nextIndex = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? kernelTabs.length - 1
+          : (current + (forward ? 1 : -1) + kernelTabs.length) % kernelTabs.length;
+      const next = kernelTabs[nextIndex];
+      if (next) selectKernelMode(next.dataset.kernelTab ?? "java", true);
+    });
   </script>
 </SiteLayout>
