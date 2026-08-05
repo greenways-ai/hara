@@ -48,7 +48,7 @@
   ([signal value]
    (emit signal value {}))
   ([signal value meta]
-   (host/call "node" "emit-frame" (require-node) signal
+   (host/call "node" "emit-frame" (require-node)
               (frame/frame-create :stream (frame/frame-id "evt-")
                                   {:source (require-node)
                                    :signal signal
