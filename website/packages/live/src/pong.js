@@ -2,8 +2,8 @@
  * Browser-module copy of website/sources/pong.hal.
  * Kept byte-for-byte in sync by website/packages/live/test/snippets.test.mjs.
  */
-export const PONG_SOURCE = `(ns+
-  (:require [studio.draw :as draw]))
+export const PONG_SOURCE = `(ns+)
+(require [studio.draw :as draw])
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; Pong ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Full-screen autonomous Pong. Both horizontal paddles track the ball while
