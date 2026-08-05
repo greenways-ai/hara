@@ -37,10 +37,16 @@ test("homepage Pong uses the canonical editable source", async () => {
   assert.doesNotMatch(homepage, /getLiveSnippet\("canvas-pong"\)/);
 });
 
+test("Pong keeps its namespace header separate from an evaluable draw require", async () => {
+  const source = await readFile(pongUrl, "utf8");
+  assert.match(source, /^\(ns\+\)\n\(require \[studio\.draw :as draw\]\)/);
+  assert.doesNotMatch(source, /\(:require \[studio\.draw :as draw\]\)/);
+});
+
 test("Pong sequences dependent let bindings before starting its frame loop", async () => {
   const source = await readFile(pongUrl, "utf8");
   assertBalanced(source);
-  assert.match(source, /^\(ns\+/);
+  assert.match(source, /^\(ns\+\)/);
   assert.match(source, /\(let \[delta[\s\S]*?\]\n    \(let \[step/);
   assert.match(source, /\(let \[tracked[\s\S]*?\]\n    \(let \[moved/);
   assert.match(source, /\(let \[frame[\s\S]*?\]\n        \(let \[width/);
