@@ -16,11 +16,11 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  background: var(--hara-live-bg);
+  overflow: hidden;
   color: var(--hara-live-ink);
+  background: var(--hara-live-bg);
   border: 1px solid var(--hara-live-border);
   border-radius: 10px;
-  overflow: hidden;
   font-family: var(--hara-live-mono-font);
   font-size: 14px;
   line-height: 1.5;
@@ -33,19 +33,6 @@
   padding: 8px 12px;
   background: var(--hara-live-panel);
   border-bottom: 1px solid var(--hara-live-border);
-  flex-wrap: wrap;
-}
-
-.hara-live-card-sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
 }
 
 .hara-live-card-status {
@@ -55,14 +42,15 @@
   min-width: 88px;
   color: var(--hara-live-muted);
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .hara-live-card-connection {
   width: 8px;
   height: 8px;
   flex: 0 0 auto;
-  border-radius: 50%;
   background: var(--hara-live-muted);
+  border-radius: 50%;
 }
 
 .hara-live-card[data-connection-state="loading"] .hara-live-card-connection,
@@ -84,26 +72,24 @@
 }
 
 .hara-live-card-header button,
-.hara-live-card-examples select,
 .hara-live-card-playground {
   min-height: 30px;
   box-sizing: border-box;
+  border-radius: 6px;
   font: inherit;
   font-size: 12px;
-  border-radius: 6px;
 }
 
-.hara-live-card-header button {
+.hara-live-card-header > button {
   padding: 4px 13px;
   font-weight: 650;
   letter-spacing: 0.04em;
   cursor: pointer;
 }
 
-.hara-live-card-header button:disabled,
-.hara-live-card-examples select:disabled {
-  opacity: 0.5;
+.hara-live-card-header button:disabled {
   cursor: wait;
+  opacity: 0.5;
 }
 
 .hara-live-card-eval {
@@ -112,8 +98,10 @@
   border: 1px solid var(--hara-live-border);
 }
 
-.hara-live-card-eval:hover {
+.hara-live-card-eval:hover:not(:disabled),
+.hara-live-card-eval:focus-visible {
   border-color: var(--hara-live-muted);
+  outline: none;
 }
 
 .hara-live-card-run {
@@ -122,46 +110,73 @@
   border: 1px solid var(--hara-live-accent);
 }
 
-.hara-live-card-examples {
-  position: relative;
-  display: inline-flex;
+.hara-live-card-run:hover:not(:disabled),
+.hara-live-card-run:focus-visible {
+  filter: brightness(1.08);
+  outline: none;
 }
 
-.hara-live-card-examples select {
-  max-width: 180px;
-  padding: 4px 30px 4px 10px;
-  color: var(--hara-live-ink);
-  background: var(--hara-live-bg);
+.hara-live-card-tabs {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  overscroll-behavior-inline: contain;
+}
+
+.hara-live-card-tabs button {
+  min-height: 30px;
+  flex: 0 0 auto;
+  padding: 4px 11px;
+  color: var(--hara-live-muted);
+  background: transparent;
   border: 1px solid var(--hara-live-border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
   cursor: pointer;
 }
 
-.hara-live-card-examples select:hover,
-.hara-live-card-examples select:focus-visible {
+.hara-live-card-tabs button:hover:not(:disabled),
+.hara-live-card-tabs button:focus-visible {
+  color: var(--hara-live-ink);
   border-color: var(--hara-live-accent);
   outline: none;
+}
+
+.hara-live-card-tabs button[aria-selected="true"] {
+  color: var(--hara-live-bg);
+  background: var(--hara-live-accent);
+  border-color: var(--hara-live-accent);
 }
 
 .hara-live-card-playground {
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
   margin-left: auto;
   padding: 4px 10px;
   color: var(--hara-live-accent);
   text-decoration: none;
-  border: 1px solid var(--hara-live-border);
   white-space: nowrap;
+  border: 1px solid var(--hara-live-border);
 }
 
-.hara-live-card-playground:hover {
+.hara-live-card-playground:hover,
+.hara-live-card-playground:focus-visible {
   border-color: var(--hara-live-accent);
+  outline: none;
 }
 
 /* Editor surface: highlight overlay under a transparent textarea,
    same pattern as the workbench (website/v1.html .editor-surface). */
 .hara-live-card-editor {
   position: relative;
-  min-height: 160px;
+  height: 230px;
+  min-height: 150px;
+  max-height: 80vh;
   overflow: hidden;
 }
 
@@ -185,28 +200,33 @@
 
 .hara-live-card-editor .code-highlight {
   position: absolute;
-  inset: 0;
+  inset: 0 0 12px;
   overflow: hidden;
-  pointer-events: none;
   color: var(--hara-live-ink);
+  pointer-events: none;
 }
 
 .hara-live-card-editor textarea {
-  position: relative;
+  position: absolute;
+  inset: 0 0 12px;
   width: 100%;
-  min-height: 160px;
+  height: calc(100% - 12px);
   box-sizing: border-box;
-  background: transparent;
+  overflow: auto;
   color: transparent;
   caret-color: var(--hara-live-accent);
+  background: transparent;
   border: 0;
   outline: none;
-  resize: vertical;
-  overflow: auto;
+  resize: none;
 }
 
 .hara-live-card-editor textarea::selection {
   background: color-mix(in srgb, var(--hara-live-accent) 28%, transparent);
+}
+
+.hara-live-card[data-instarepl="true"] .hara-live-card-editor textarea {
+  touch-action: pan-y;
 }
 
 /* Highlight token colors (classes emitted by highlightHara). */
@@ -227,19 +247,54 @@
   background: color-mix(in srgb, var(--hara-live-accent) 18%, transparent);
 }
 
+.hara-live-card-resizer {
+  position: absolute;
+  z-index: 4;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 12px;
+  cursor: ns-resize;
+  touch-action: none;
+  background:
+    linear-gradient(90deg, transparent, var(--hara-live-border) 35%, var(--hara-live-border) 65%, transparent)
+    center / 52px 1px no-repeat,
+    var(--hara-live-panel);
+  border-top: 1px solid color-mix(in srgb, var(--hara-live-border) 72%, transparent);
+}
+
+.hara-live-card-resizer::after {
+  position: absolute;
+  top: 3px;
+  left: calc(50% - 12px);
+  width: 24px;
+  height: 4px;
+  content: "";
+  border-top: 1px solid var(--hara-live-muted);
+  border-bottom: 1px solid var(--hara-live-muted);
+  opacity: 0.55;
+}
+
+.hara-live-card-resizer:hover,
+.hara-live-card-resizer:focus-visible,
+[data-resizing="true"] > .hara-live-card-resizer {
+  background-color: color-mix(in srgb, var(--hara-live-accent) 8%, var(--hara-live-panel));
+  outline: none;
+}
+
 .hara-live-card-output {
   min-height: 1.5em;
   padding: 10px 14px;
+  color: var(--hara-live-ink);
   border-top: 1px solid var(--hara-live-border);
+  font-size: 13px;
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 13px;
-  color: var(--hara-live-ink);
 }
 
 .hara-live-card-output[data-mode="eval"]::before {
-  content: "=> ";
   color: var(--hara-live-accent);
+  content: "=> ";
 }
 
 .hara-live-card-output[data-state="pending"] { color: var(--hara-live-muted); }
@@ -248,7 +303,20 @@
 
 /* Canvas panel */
 .hara-live-card-canvas-panel {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: min(500px, 52vh);
+  min-height: 220px;
+  max-height: 80vh;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding-bottom: 12px;
   border-top: 1px solid var(--hara-live-border);
+}
+
+.hara-live-card-canvas-panel[hidden] {
+  display: none;
 }
 
 .hara-live-card-canvas-meta {
@@ -256,10 +324,10 @@
   justify-content: space-between;
   gap: 12px;
   padding: 6px 12px;
-  font-size: 11px;
-  letter-spacing: 0.06em;
   color: var(--hara-live-muted);
   background: var(--hara-live-panel);
+  font-size: 11px;
+  letter-spacing: 0.06em;
 }
 
 .hara-live-card-canvas-meta output[data-state="ready"] { color: var(--hara-live-accent); }
@@ -268,8 +336,8 @@
 .hara-live-card-canvas {
   display: block;
   width: 100%;
-  height: auto;
-  aspect-ratio: 960 / 600;
+  height: 100%;
+  min-height: 0;
   background: #02050b;
   outline: none;
 }
@@ -277,29 +345,29 @@
 /* Kernel progress toast, scoped to the card. */
 .hara-live-card-toast {
   position: absolute;
+  z-index: 5;
   right: 12px;
   bottom: 12px;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  font-size: 12px;
   color: var(--hara-live-ink);
   background: var(--hara-live-panel);
   border: 1px solid var(--hara-live-border);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  z-index: 2;
+  font-size: 12px;
 }
 
 .hara-live-card-toast i {
   width: 72px;
   height: 4px;
-  border-radius: 2px;
   background:
     linear-gradient(var(--hara-live-accent), var(--hara-live-accent)) 0 0 /
     var(--kernel-progress, 0%) 100% no-repeat,
     var(--hara-live-border);
+  border-radius: 2px;
 }
 
 .hara-live-card-toast[data-state="error"] {
@@ -307,8 +375,9 @@
   border-color: var(--hara-live-error);
 }
 
-@media (max-width: 640px) {
+@media (max-width: 760px) {
   .hara-live-card-header {
+    flex-wrap: wrap;
     gap: 6px;
     padding: 7px 8px;
   }
@@ -325,25 +394,31 @@
     clip: rect(0, 0, 0, 0);
   }
 
-  .hara-live-card-header button {
+  .hara-live-card-header > button {
     padding-inline: 11px;
   }
 
-  .hara-live-card-examples {
-    flex: 1 1 120px;
-  }
-
-  .hara-live-card-examples select {
-    width: 100%;
-    max-width: none;
-  }
-
   .hara-live-card-playground {
-    margin-left: 0;
+    margin-left: auto;
   }
 
-  .hara-live-card-editor,
-  .hara-live-card-editor textarea {
-    min-height: 190px;
+  .hara-live-card-tabs {
+    order: 10;
+    width: 100%;
+    flex-basis: 100%;
+    padding-top: 2px;
   }
+
+  .hara-live-card-editor {
+    height: 210px;
+    min-height: 170px;
+  }
+
+  .hara-live-card-canvas-panel {
+    height: min(420px, 58vh);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hara-live-card-connection { animation: none !important; }
 }
