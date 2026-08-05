@@ -3,8 +3,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const catalog = JSON.parse(await readFile(new URL("../../lib/bench/catalog.json", import.meta.url)));
+const classEvidence = JSON.parse(await readFile(new URL("../../lib/bench/results/class-reference.json", import.meta.url)));
 const page = await readFile(new URL("../src/pages/index.astro", import.meta.url), "utf8");
 const language = await readFile(new URL("../src/components/LanguagePanel.astro", import.meta.url), "utf8");
+const classPanel = await readFile(new URL("../src/components/ClassPanel.astro", import.meta.url), "utf8");
 const reference = await readFile(new URL("../src/components/RuntimeReference.astro", import.meta.url), "utf8");
 const header = await readFile(new URL("../src/components/SiteHeader.astro", import.meta.url), "utf8");
 const data = await readFile(new URL("../src/lib/benchmark-data.ts", import.meta.url), "utf8");
@@ -14,10 +16,30 @@ const indexOf = (value) => { const index = language.indexOf(value); assert.notEq
 test("uses the nine canonical internal artifacts", () => {
   assert.deepEqual(catalog.artifacts.map(({ id }) => id), ["hara-wasm-core","hara-rust-vm","hara-rust-full","hara-wasm-vm","hara-wasm-full","hara-truffle-vm","hara-truffle-full","hara-jvm-vm","hara-jvm-full"]);
 });
-test("opens on a three-tab language-first presentation", () => {
-  assert.equal((page.match(/<button role="tab"/g) ?? []).length, 3);
-  assert.match(page, /aria-selected="true" aria-controls="language-shootout"/);
+test("opens on a four-tab class-first presentation", () => {
+  assert.equal((page.match(/<button role="tab"/g) ?? []).length, 4);
+  assert.match(page, /aria-selected="true" aria-controls="class-comparison"/);
   assert.doesNotMatch(source, /aria-controls="methodology"|id="methodology"/);
+});
+test("serves best-in-class, lisp family and reference groups from the verified class run", () => {
+  assert.deepEqual(catalog.class_competitors, ["luajit", "pypy", "node", "ruby-yjit"]);
+  assert.deepEqual(catalog.lisp_competitors, ["sbcl", "chez", "guile", "bb", "clojure"]);
+  assert.match(page, /ClassPanel/);
+  assert.match(classPanel, /id="class-comparison"/);
+  assert.match(classPanel, /data-comparison-cell/);
+  assert.match(classPanel, /data-matrix-detail/);
+  assert.match(data, /haraClassRuntime = "hara-rust-whole-wasm-prepared"/);
+  assert.ok(classEvidence.runtime_order.includes("pypy-prepared"));
+  assert.ok(classEvidence.runtime_order.includes("node-prepared"));
+  assert.ok(classEvidence.runtime_order.includes("ruby-yjit-prepared"));
+  assert.ok(classEvidence.runtime_order.includes("clojure-prepared"));
+  const workloads = catalog.corpus.workloads;
+  const covered = new Set(classEvidence.measurements.map((row) => `${row.runtime}/${row.workload}`));
+  for (const runtime of classEvidence.runtime_order) {
+    for (const workload of workloads) {
+      assert.ok(covered.has(`${runtime}/${workload}`), `missing class evidence for ${runtime}/${workload}`);
+    }
+  }
 });
 test("puts overview and insights before the drill-down matrix", () => {
   const overview = indexOf("Overview");

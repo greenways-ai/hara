@@ -4,6 +4,7 @@ import "@hara-lang/visual-language/motifs.css";
 import "../styles/site.css";
 import "@hara-lang/visual-language/theme.js";
 import SiteHeader from "../components/SiteHeader.astro";
+import ClassPanel from "../components/ClassPanel.astro";
 import LanguagePanel from "../components/LanguagePanel.astro";
 import RuntimePanel from "../components/RuntimePanel.astro";
 import HttpPanel from "../components/HttpPanel.astro";
@@ -43,10 +44,10 @@ const socialImage = new URL(`${basePath}og-hara-benchmarks.jpg`, Astro.site);
 <body>
   <SiteHeader />
   <main>
-    <section class="summary hara-motif" data-motif="rack"><div class="summary-inner"><p class="hara-kicker">Reproducible performance evidence</p><h1>Hara benchmarks</h1><p class="lede">Start with the language shootout: where Hara leads, where it trails, and the exact workloads behind every comparison.</p><div class="evidence-line"><span class="evidence-dot ready"></span><span>Published {evidenceDate}</span><span aria-hidden="true">·</span><span>{workloads.length} workloads</span><span aria-hidden="true">·</span><span>{comparisonRows.length} comparison languages</span></div></div></section>
+    <section class="summary hara-motif" data-motif="rack"><div class="summary-inner"><p class="hara-kicker">Reproducible performance evidence</p><h1>Hara benchmarks</h1><p class="lede">Start with best in class: Hara against dynamic-JIT peers, then the Lisp family, HTTP frameworks, and the exact workloads behind every comparison.</p><div class="evidence-line"><span class="evidence-dot ready"></span><span>Published {evidenceDate}</span><span aria-hidden="true">·</span><span>{workloads.length} workloads</span><span aria-hidden="true">·</span><span>{comparisonRows.length} comparison languages</span></div></div></section>
     <section class="results-shell">
-      <div class="tabs" role="tablist" aria-label="Benchmark sections"><button role="tab" aria-selected="true" aria-controls="language-shootout" id="tab-languages">Language shootout</button><button role="tab" aria-selected="false" aria-controls="http-results" id="tab-http" tabindex="-1">HTTP</button><button role="tab" aria-selected="false" aria-controls="hara-artifacts" id="tab-hara" tabindex="-1">Hara runtimes</button></div>
-      <LanguagePanel /><HttpPanel /><RuntimePanel />
+      <div class="tabs" role="tablist" aria-label="Benchmark sections"><button role="tab" aria-selected="true" aria-controls="class-comparison" id="tab-class">Best in class</button><button role="tab" aria-selected="false" aria-controls="language-shootout" id="tab-languages" tabindex="-1">Language shootout</button><button role="tab" aria-selected="false" aria-controls="http-results" id="tab-http" tabindex="-1">HTTP</button><button role="tab" aria-selected="false" aria-controls="hara-artifacts" id="tab-hara" tabindex="-1">Hara runtimes</button></div>
+      <ClassPanel /><LanguagePanel /><HttpPanel /><RuntimePanel />
     </section>
     <RuntimeReference />
   </main>
