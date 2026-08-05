@@ -1,4 +1,8 @@
-(ns+
+/**
+ * Browser-module copy of website/sources/pong.hal.
+ * Kept byte-for-byte in sync by website/packages/live/test/snippets.test.mjs.
+ */
+export const PONG_SOURCE = `(ns+
   (:require [studio.draw :as draw]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; Pong ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -183,3 +187,4 @@
                  :background "#02050b"
                  :commands (draw-pong-game next-state width height)}))
             (recur next-state)))))))
+`;

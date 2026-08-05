@@ -61,6 +61,16 @@ export const print = (value, ancestors = new Set()) => {
 
 const errorMessage = (error) => String(error?.message ?? error).replace(/^Error: /, "");
 
+/** Prefer an actual canvas-task failure over a generic first-frame timeout. */
+export async function waitForCanvasFirstFrame(rendered, task) {
+  return Promise.race([
+    rendered,
+    task.then(() => {
+      throw new Error("canvas task stopped before rendering its first frame");
+    })
+  ]);
+}
+
 const CONNECTION_TEXT = {
   idle: "Idle",
   loading: "Connecting",
@@ -68,6 +78,9 @@ const CONNECTION_TEXT = {
   busy: "Evaluating",
   error: "Unavailable"
 };
+
+const clamp = (value, minimum, maximum) =>
+  Math.min(maximum, Math.max(minimum, value));
 
 /** Kernel progress toast, scoped to the card instead of document.body. */
 function createCardToast(card) {
@@ -93,6 +106,77 @@ function createCardToast(card) {
     },
     remove() { toast.remove(); }
   };
+}
+
+/** Touch- and keyboard-accessible vertical resize handle. */
+function createVerticalResizer(target, {
+  label,
+  initialHeight,
+  minimumHeight,
+  maximumHeight = () => Math.max(minimumHeight, Math.round((globalThis.innerHeight || 900) * 0.8)),
+  onResize = () => {}
+}) {
+  const handle = document.createElement("div");
+  handle.className = "hara-live-card-resizer";
+  handle.tabIndex = 0;
+  handle.setAttribute("role", "separator");
+  handle.setAttribute("aria-label", label);
+  handle.setAttribute("aria-orientation", "horizontal");
+  target.append(handle);
+
+  let activePointer = null;
+  let startY = 0;
+  let startHeight = 0;
+
+  const maximum = () => typeof maximumHeight === "function" ? maximumHeight() : maximumHeight;
+  const setHeight = (height) => {
+    const resolved = Math.round(clamp(height, minimumHeight, Math.max(minimumHeight, maximum())));
+    target.style.height = `${resolved}px`;
+    handle.setAttribute("aria-valuemin", String(minimumHeight));
+    handle.setAttribute("aria-valuemax", String(Math.round(maximum())));
+    handle.setAttribute("aria-valuenow", String(resolved));
+    onResize(resolved);
+    return resolved;
+  };
+
+  const finish = (event) => {
+    if (activePointer === null || (event && event.pointerId !== activePointer)) return;
+    try { handle.releasePointerCapture?.(activePointer); } catch (_) { /* already released */ }
+    activePointer = null;
+    delete target.dataset.resizing;
+  };
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.pointerType !== "touch" && event.button !== 0) return;
+    event.preventDefault();
+    activePointer = event.pointerId;
+    startY = event.clientY;
+    startHeight = target.getBoundingClientRect().height;
+    target.dataset.resizing = "true";
+    handle.setPointerCapture?.(event.pointerId);
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (event.pointerId !== activePointer) return;
+    event.preventDefault();
+    setHeight(startHeight + event.clientY - startY);
+  });
+  handle.addEventListener("pointerup", finish);
+  handle.addEventListener("pointercancel", finish);
+  handle.addEventListener("lostpointercapture", finish);
+  handle.addEventListener("keydown", (event) => {
+    if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const current = target.getBoundingClientRect().height;
+    const step = event.shiftKey ? 48 : 16;
+    if (event.key === "ArrowUp") setHeight(current - step);
+    else if (event.key === "ArrowDown") setHeight(current + step);
+    else if (event.key === "Home") setHeight(minimumHeight);
+    else setHeight(maximum());
+  });
+  handle.addEventListener("dblclick", () => setHeight(initialHeight));
+
+  setHeight(initialHeight);
+  return { handle, setHeight, destroy: () => handle.remove() };
 }
 
 const localPointer = (event, canvas) => {
@@ -144,6 +228,13 @@ function createCanvasController(card, { runtimeBase }) {
     status.dataset.state = state;
   };
 
+  const canvasResizer = createVerticalResizer(panel, {
+    label: "Resize canvas",
+    initialHeight: Math.min(500, Math.max(300, Math.round((globalThis.innerHeight || 800) * 0.52))),
+    minimumHeight: 220,
+    onResize: () => runtime?.resize(canvas)
+  });
+
   const ensureRuntime = async (session) => {
     if (!runtime) {
       const [broker, canvasModule] = await Promise.all([
@@ -156,6 +247,7 @@ function createCanvasController(card, { runtimeBase }) {
         onDiagnostic: (error) => setStatus(errorMessage(error), "error")
       });
       runtime.register(canvasId, canvas);
+      runtime.resize(canvas);
     }
     unregisterCanvas ??= session.registerCanvas(runtime);
   };
@@ -180,10 +272,13 @@ function createCanvasController(card, { runtimeBase }) {
         nodeId
       });
       const taskId = await session.evalRaw(document.source);
-      const rendered = runtime.waitForFirstRender(nodeId, canvasId, 5000);
-      session.evalRaw(`(studio.node/run-task ${JSON.stringify(taskId)})`)
-        .catch((error) => setStatus(errorMessage(error), "error"));
-      await rendered;
+      if (typeof taskId !== "string" || !taskId.startsWith("task-")) {
+        throw new Error(`canvas program did not start a node task: ${print(taskId)}`);
+      }
+      const rendered = runtime.waitForFirstRender(nodeId, canvasId, 8000);
+      const task = session.evalRaw(`(studio.node/run-task ${JSON.stringify(taskId)})`);
+      task.catch((error) => setStatus(errorMessage(error), "error"));
+      await waitForCanvasFirstFrame(rendered, task);
       if (currentGeneration !== generation) {
         runtime.discard(nodeId, canvasId);
         return { value: null, label: "Canvas superseded" };
@@ -211,6 +306,7 @@ function createCanvasController(card, { runtimeBase }) {
       if (activeNode) runtime?.release(activeNode, canvasId);
       unregisterCanvas?.();
       runtime?.close();
+      canvasResizer.destroy();
       panel.remove();
     }
   };
@@ -227,7 +323,7 @@ function trimmedSelection(editor) {
   return from < to ? { source: value.slice(from, to), start: from, end: to } : null;
 }
 
-/** Prefer the complete expression beginning on a tapped line, then local form. */
+/** Prefer the complete expression beginning on a clicked line, then local form. */
 function formAtEditor(editor, preferLine = false) {
   const selected = trimmedSelection(editor);
   if (selected) return selected;
@@ -273,6 +369,7 @@ export function mountLiveCard(root, {
   const card = document.createElement("section");
   card.className = "hara-live-card";
   card.dataset.connectionState = "idle";
+  card.dataset.instarepl = "true";
   card.innerHTML = `
     <header class="hara-live-card-header">
       <span class="hara-live-card-status" title="Kernel status">
@@ -281,10 +378,7 @@ export function mountLiveCard(root, {
       </span>
       <button type="button" class="hara-live-card-eval" data-live-eval>Eval</button>
       <button type="button" class="hara-live-card-run" data-live-run>Run</button>
-      <label class="hara-live-card-examples">
-        <span class="hara-live-card-sr-only">Example</span>
-        <select data-live-example aria-label="Example"></select>
-      </label>
+      <div class="hara-live-card-tabs" role="tablist" aria-label="Examples"></div>
       <a class="hara-live-card-playground" target="_blank" rel="noopener">Open in Playground</a>
     </header>
     <div class="hara-live-card-editor">
@@ -294,8 +388,9 @@ export function mountLiveCard(root, {
     <output class="hara-live-card-output" aria-live="polite" hidden></output>`;
   root.append(card);
 
-  const exampleSelect = card.querySelector("[data-live-example]");
+  const tabs = card.querySelector(".hara-live-card-tabs");
   const playgroundLink = card.querySelector(".hara-live-card-playground");
+  const editorSurface = card.querySelector(".hara-live-card-editor");
   const highlight = card.querySelector(".code-highlight");
   const highlightContent = highlight.querySelector("code");
   const editor = card.querySelector("textarea");
@@ -316,7 +411,8 @@ export function mountLiveCard(root, {
   let evalRange = null;
   let operation = 0;
   let destroyed = false;
-  let lastTouchEvaluation = 0;
+  let pointerGesture = null;
+  let lastPointerEvaluation = 0;
 
   const setConnection = (state, error = null) => {
     card.dataset.connectionState = state;
@@ -326,10 +422,11 @@ export function mountLiveCard(root, {
       .setAttribute("aria-label", error ? `${label}: ${errorMessage(error)}` : `Kernel ${label}`);
   };
 
+  const tabButtons = () => [...tabs.querySelectorAll("button")];
   const setControlsDisabled = (disabled) => {
     evalButton.disabled = disabled;
     runButton.disabled = disabled;
-    exampleSelect.disabled = disabled;
+    for (const tab of tabButtons()) tab.disabled = disabled;
   };
 
   const bootKernel = () => {
@@ -374,6 +471,17 @@ export function mountLiveCard(root, {
     highlightContent.style.transform = `translate(${-editor.scrollLeft}px, ${-editor.scrollTop}px)`;
   };
 
+  const editorResizer = createVerticalResizer(editorSurface, {
+    label: "Resize editor",
+    initialHeight: 230,
+    minimumHeight: 150,
+    onResize: syncHighlight
+  });
+  const resizeObserver = typeof ResizeObserver === "function"
+    ? new ResizeObserver(syncHighlight)
+    : null;
+  resizeObserver?.observe(editorSurface);
+
   const syncOutputMode = () => {
     output.hidden = true;
     delete output.dataset.state;
@@ -383,25 +491,48 @@ export function mountLiveCard(root, {
     else canvas.hide();
   };
 
+  const selectSnippet = (id, { focus = false } = {}) => {
+    const next = byId.get(id);
+    if (!next) return;
+    if (next !== active) {
+      operation += 1;
+      active = next;
+      evalRange = null;
+      editor.value = next.source;
+      syncHighlight();
+      syncOutputMode();
+    }
+    for (const tab of tabButtons()) {
+      const selected = tab.dataset.snippetId === next.id;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      if (selected && focus) tab.focus();
+    }
+  };
+
   for (const snippet of snippets) {
-    const option = document.createElement("option");
-    option.value = snippet.id;
-    option.textContent = snippet.title;
-    option.selected = snippet === active;
-    exampleSelect.append(option);
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.setAttribute("role", "tab");
+    tab.dataset.snippetId = snippet.id;
+    tab.textContent = snippet.title;
+    tab.setAttribute("aria-selected", String(snippet === active));
+    tab.tabIndex = snippet === active ? 0 : -1;
+    tab.addEventListener("click", () => selectSnippet(snippet.id));
+    tabs.append(tab);
   }
 
-  const selectSnippet = (id) => {
-    const next = byId.get(id);
-    if (!next || next === active) return;
-    operation += 1;
-    active = next;
-    evalRange = null;
-    editor.value = next.source;
-    exampleSelect.value = next.id;
-    syncHighlight();
-    syncOutputMode();
-  };
+  tabs.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const buttons = tabButtons();
+    if (!buttons.length) return;
+    event.preventDefault();
+    const current = Math.max(0, buttons.indexOf(document.activeElement));
+    const nextIndex = event.key === "Home" ? 0
+      : event.key === "End" ? buttons.length - 1
+      : (current + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
+    selectSnippet(buttons[nextIndex].dataset.snippetId, { focus: true });
+  });
 
   const evaluate = async ({ source, mode, range = null }) => {
     if (!active || !source?.trim()) return;
@@ -449,7 +580,7 @@ export function mountLiveCard(root, {
       output.hidden = false;
       output.dataset.state = "error";
       output.dataset.mode = "eval";
-      output.textContent = "Tap inside a form or select source to evaluate.";
+      output.textContent = "Click or tap inside a form, or select source to evaluate.";
       return;
     }
     await evaluate({ source: form.source, mode: "eval", range: form });
@@ -506,21 +637,35 @@ export function mountLiveCard(root, {
     syncHighlight();
   });
 
-  // InstaREPL-style mobile interaction: a direct touch evaluates the complete
-  // expression beginning on that line. Text selections are left untouched.
+  // InstaREPL interaction: a primary click or tap evaluates the complete form
+  // beginning on that line. Dragging and text selections remain ordinary edits.
+  editor.addEventListener("pointerdown", (event) => {
+    if (!event.isPrimary || (event.pointerType !== "touch" && event.button !== 0)) return;
+    pointerGesture = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      start: editor.selectionStart,
+      end: editor.selectionEnd
+    };
+  });
   editor.addEventListener("pointerup", (event) => {
-    if (event.pointerType !== "touch" || editor.selectionStart !== editor.selectionEnd) return;
+    const gesture = pointerGesture;
+    pointerGesture = null;
+    if (!gesture || gesture.id !== event.pointerId || editor.selectionStart !== editor.selectionEnd) return;
+    if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 8) return;
     const now = Date.now();
-    if (now - lastTouchEvaluation < 350) return;
-    lastTouchEvaluation = now;
+    if (now - lastPointerEvaluation < 280) return;
+    lastPointerEvaluation = now;
     setTimeout(() => evalCurrent({ preferLine: true }), 0);
   });
+  editor.addEventListener("pointercancel", () => { pointerGesture = null; });
 
   evalButton.addEventListener("click", () => evalCurrent({ preferLine: true }));
   runButton.addEventListener("click", run);
-  exampleSelect.addEventListener("change", () => selectSnippet(exampleSelect.value));
 
   if (active) editor.value = active.source;
+  selectSnippet(active?.id ?? "");
   syncHighlight();
   syncOutputMode();
 
@@ -531,6 +676,8 @@ export function mountLiveCard(root, {
       if (destroyed) return;
       destroyed = true;
       operation += 1;
+      resizeObserver?.disconnect();
+      editorResizer.destroy();
       canvas.close();
       const stale = sessionPromise;
       sessionPromise = null;
