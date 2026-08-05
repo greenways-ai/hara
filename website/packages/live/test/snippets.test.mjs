@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { LIVE_SNIPPETS, getLiveSnippet } from "../src/snippets.js";
+import { PONG_SOURCE } from "../src/pong.js";
 
 const KINDS = new Set(["console", "canvas"]);
 
@@ -37,6 +39,19 @@ test("canvas snippets follow the docs canvas-stage contract", () => {
     assert.ok(snippet.source.includes("(node/start"),
       `${snippet.id}: must start a node task`);
   }
+});
+
+test("bundled Pong exactly mirrors the canonical homepage source", async () => {
+  const canonical = await readFile(new URL("../../../sources/pong.hal", import.meta.url), "utf8");
+  assert.equal(PONG_SOURCE, canonical);
+  assert.equal(getLiveSnippet("canvas-pong")?.source, canonical);
+});
+
+test("examples sequence dependent local bindings", () => {
+  assert.match(PONG_SOURCE, /\(let \[delta[\s\S]*?\]\n    \(let \[step/);
+  const tictactoe = getLiveSnippet("tictactoe-move")?.source ?? "";
+  assert.match(tictactoe, /\(let \[new-board[\s\S]*?\]\n        \(let \[line/);
+  assert.match(tictactoe, /\(let \[line[\s\S]*?\]\n          \(let \[is-winner/);
 });
 
 test("getLiveSnippet returns null for unknown ids", () => {
