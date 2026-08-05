@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "check": "ASTRO_TELEMETRY_DISABLED=1 astro check",
-    "build": "bash ../scripts/fetch-benchmark-site",
+    "build": "ASTRO_TELEMETRY_DISABLED=1 astro check && ASTRO_TELEMETRY_DISABLED=1 astro build",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
