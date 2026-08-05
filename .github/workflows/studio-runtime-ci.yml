@@ -4,14 +4,22 @@ on:
   pull_request:
     branches: [main, prod]
     paths:
+      - .github/studio-runtime-release.json
+      - .github/workflows/publish-rust-crates.yml
+      - .github/workflows/publish-studio-runtime.yml
       - .github/workflows/studio-runtime-ci.yml
       - scripts/build-studio-runtime
       - scripts/build-hara-wasm-raw
+      - scripts/build-www
+      - scripts/check-release-version.mjs
       - scripts/verify-studio-runtime.mjs
+      - scripts/write-kernel-manifest.mjs
       - rust/Cargo.toml
       - rust/Cargo.lock
+      - rust/compiler/Cargo.toml
       - rust/raw/**
       - rust/src/**
+      - rust/vm-runtime/Cargo.toml
       - rust/web/hta.js
       - rust/web/hta-worker.js
       - rust/web/hta-shared-worker.js
@@ -32,14 +40,22 @@ on:
   push:
     branches: [main, prod]
     paths:
+      - .github/studio-runtime-release.json
+      - .github/workflows/publish-rust-crates.yml
+      - .github/workflows/publish-studio-runtime.yml
       - .github/workflows/studio-runtime-ci.yml
       - scripts/build-studio-runtime
       - scripts/build-hara-wasm-raw
+      - scripts/build-www
+      - scripts/check-release-version.mjs
       - scripts/verify-studio-runtime.mjs
+      - scripts/write-kernel-manifest.mjs
       - rust/Cargo.toml
       - rust/Cargo.lock
+      - rust/compiler/Cargo.toml
       - rust/raw/**
       - rust/src/**
+      - rust/vm-runtime/Cargo.toml
       - rust/web/hta.js
       - rust/web/hta-worker.js
       - rust/web/hta-shared-worker.js
@@ -83,6 +99,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Check packaging script syntax
+        run: |
+          bash -n scripts/build-studio-runtime scripts/build-www
+          node --check scripts/check-release-version.mjs
+          node --check scripts/write-kernel-manifest.mjs
+
+      - name: Verify release version surfaces
+        shell: bash
+        run: |
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -n 1)
+          node scripts/check-release-version.mjs "$VERSION"
 
       - name: Build and verify Studio runtime archive
         run: scripts/build-studio-runtime ci

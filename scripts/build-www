@@ -7,6 +7,11 @@ OUT="$ROOT/target/www"
 RAW_DIR="$ROOT/rust/raw/target/wasm32-unknown-unknown/browser-release"
 HALC_OUT="$ROOT/target/www-halc"
 HARA_COMPILER="$ROOT/rust/target/debug/hara"
+RUNTIME_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/rust/Cargo.toml" | head -n 1)
+if [ -z "$RUNTIME_VERSION" ]; then
+  echo "unable to read the Hara runtime version from rust/Cargo.toml" >&2
+  exit 1
+fi
 
 npm run build --prefix "$ROOT/website"
 HARA_BENCHMARK_BASE=/benchmarks npm run build --prefix "$ROOT/benchmarks"
@@ -68,10 +73,10 @@ node -e 'process.stdout.write(`globalThis.HARA_GITHUB_OAUTH_CLIENT_ID = ${JSON.s
 cp "$ROOT/scripts/install.sh" "$OUT/install.sh"
 chmod 755 "$OUT/install.sh"
 cp "$RAW_DIR/hara-wasm-core.wasm" "$OUT/runtime/hara.wasm"
-cp "$RAW_DIR/hara-wasm-core.wasm" "$OUT/runtime/hara-wasm-core-0.1.1.wasm"
-cp "$RAW_DIR/hara-wasm-vm.wasm" "$OUT/runtime/hara-wasm-vm-0.1.1.wasm"
-cp "$RAW_DIR/hara-wasm-trace.wasm" "$OUT/runtime/hara-wasm-trace-0.1.1.wasm"
-node "$ROOT/scripts/write-kernel-manifest.mjs" "$OUT/runtime" 0.1.1
+cp "$RAW_DIR/hara-wasm-core.wasm" "$OUT/runtime/hara-wasm-core-$RUNTIME_VERSION.wasm"
+cp "$RAW_DIR/hara-wasm-vm.wasm" "$OUT/runtime/hara-wasm-vm-$RUNTIME_VERSION.wasm"
+cp "$RAW_DIR/hara-wasm-trace.wasm" "$OUT/runtime/hara-wasm-trace-$RUNTIME_VERSION.wasm"
+node "$ROOT/scripts/write-kernel-manifest.mjs" "$OUT/runtime" "$RUNTIME_VERSION"
 cp "$ROOT/rust/web/hta.js" \
    "$ROOT/rust/web/hta-worker.js" \
    "$ROOT/rust/web/hta-shared-worker.js" \
@@ -133,7 +138,7 @@ cp "$ROOT/website/examples/hara-amp/src/amp.hal" "$OUT/examples/hara-amp/src/"
 cp "$ROOT/website/examples/hara-animation/project.edn" \
    "$ROOT/website/examples/hara-animation/workspace.edn" \
    "$OUT/examples/hara-animation/"
-cp "$ROOT/website/examples/hara-animation/src/animation.hal" "$OUT/examples/hara-animation/src/"
+cp "$ROOT/website/examples/hara-animation/src/animation.hal" "$OUT/examples/hara-animation/"
 mkdir -p "$OUT/examples/studio-backgrounds"
 cp "$ROOT/website/examples/studio-backgrounds/project.edn" \
    "$ROOT/website/examples/studio-backgrounds/workspace.edn" \

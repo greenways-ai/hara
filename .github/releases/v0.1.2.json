@@ -1,0 +1,7 @@
+{
+  "schema": "hara-release-cut/v1",
+  "tag": "v0.1.2",
+  "version": "0.1.2",
+  "commit": "08322990fd1a26e3a004e7bf3459f45a25158311",
+  "workflow": "release.yml"
+}

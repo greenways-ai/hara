@@ -43,7 +43,7 @@ jobs:
         cargo publish --manifest-path rust/Cargo.toml -p hara-abi
         wait_for_crate hara-abi 0.1.0
         cargo publish --manifest-path rust/Cargo.toml -p hara-wasm
-        wait_for_crate hara-wasm 0.1.1
+        wait_for_crate hara-wasm 0.1.2
         cargo publish --manifest-path rust/Cargo.toml -p hara-vm
         wait_for_crate hara-vm 0.1.0
         cargo publish --manifest-path rust/Cargo.toml -p hara-compiler
@@ -51,7 +51,7 @@ jobs:
       run: |
         mkdir -p dist/rust-crates
         cp rust/target/package/hara-abi-0.1.0.crate dist/rust-crates/
-        cp rust/target/package/hara-wasm-0.1.1.crate dist/rust-crates/
+        cp rust/target/package/hara-wasm-0.1.2.crate dist/rust-crates/
         cp rust/target/package/hara-vm-0.1.0.crate dist/rust-crates/
         cp rust/target/package/hara-compiler-0.1.0.crate dist/rust-crates/
         cd dist/rust-crates

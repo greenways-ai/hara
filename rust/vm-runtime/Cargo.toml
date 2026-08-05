@@ -12,4 +12,4 @@ keywords = ["hara", "virtual-machine", "bytecode", "runtime"]
 categories = ["compilers", "virtualization"]
 
 [dependencies]
-hara-wasm = { version = "0.1.1", path = "..", default-features = false, features = ["bytecode-vm"] }
+hara-wasm = { version = "0.1.2", path = "..", default-features = false, features = ["bytecode-vm"] }
