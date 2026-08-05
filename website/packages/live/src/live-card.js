@@ -81,6 +81,23 @@ export function cancelEvaluation(task) {
   }
 }
 
+/**
+ * Run after a textarea's click/default action has committed its new caret.
+ * Mobile browsers may expose the previous selection during pointerup.
+ */
+export function afterCaretPlacement(callback, {
+  requestFrame = globalThis.requestAnimationFrame?.bind(globalThis),
+  setTimer = globalThis.setTimeout?.bind(globalThis)
+} = {}) {
+  let cancelled = false;
+  const run = () => {
+    if (!cancelled) callback();
+  };
+  if (typeof requestFrame === "function") requestFrame(run);
+  else setTimer?.(run, 0);
+  return () => { cancelled = true; };
+}
+
 const CONNECTION_TEXT = {
   idle: "Idle",
   loading: "Connecting",
@@ -498,6 +515,8 @@ export function mountLiveCard(root, {
   let operation = 0;
   let destroyed = false;
   let pointerGesture = null;
+  let pendingPointerEvaluation = false;
+  let cancelPendingPointerEvaluation = null;
   let lastPointerEvaluation = 0;
 
   const setConnection = (state, error = null) => {
@@ -753,29 +772,46 @@ export function mountLiveCard(root, {
     syncHighlight();
   });
 
-  // InstaREPL interaction: a primary click or tap evaluates the complete form
-  // beginning on that line. Dragging and text selections remain ordinary edits.
+  // InstaREPL interaction: pointerup only records a direct tap. Evaluation is
+  // deferred until click/default handling has committed the new textarea caret.
+  // This avoids evaluating the previous cursor position on Android and iOS.
   editor.addEventListener("pointerdown", (event) => {
     if (!event.isPrimary || (event.pointerType !== "touch" && event.button !== 0)) return;
+    cancelPendingPointerEvaluation?.();
+    cancelPendingPointerEvaluation = null;
+    pendingPointerEvaluation = false;
     pointerGesture = {
       id: event.pointerId,
       x: event.clientX,
-      y: event.clientY,
-      start: editor.selectionStart,
-      end: editor.selectionEnd
+      y: event.clientY
     };
   });
   editor.addEventListener("pointerup", (event) => {
     const gesture = pointerGesture;
     pointerGesture = null;
-    if (!gesture || gesture.id !== event.pointerId || editor.selectionStart !== editor.selectionEnd) return;
+    if (!gesture || gesture.id !== event.pointerId) return;
     if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 8) return;
-    const now = Date.now();
-    if (now - lastPointerEvaluation < 280) return;
-    lastPointerEvaluation = now;
-    setTimeout(() => evalCurrent({ preferLine: true }), 0);
+    pendingPointerEvaluation = true;
   });
-  editor.addEventListener("pointercancel", () => { pointerGesture = null; });
+  editor.addEventListener("click", () => {
+    if (!pendingPointerEvaluation) return;
+    pendingPointerEvaluation = false;
+    cancelPendingPointerEvaluation?.();
+    cancelPendingPointerEvaluation = afterCaretPlacement(() => {
+      cancelPendingPointerEvaluation = null;
+      if (destroyed || editor.selectionStart !== editor.selectionEnd) return;
+      const now = Date.now();
+      if (now - lastPointerEvaluation < 280) return;
+      lastPointerEvaluation = now;
+      evalCurrent({ preferLine: true });
+    });
+  });
+  editor.addEventListener("pointercancel", () => {
+    pointerGesture = null;
+    pendingPointerEvaluation = false;
+    cancelPendingPointerEvaluation?.();
+    cancelPendingPointerEvaluation = null;
+  });
 
   evalButton.addEventListener("click", () => evalCurrent({ preferLine: true }));
   runButton.addEventListener("click", runOrStop);
@@ -795,6 +831,8 @@ export function mountLiveCard(root, {
       if (destroyed) return;
       destroyed = true;
       operation += 1;
+      cancelPendingPointerEvaluation?.();
+      cancelPendingPointerEvaluation = null;
       resizeObserver?.disconnect();
       editorResizer.destroy();
       canvas.close();
