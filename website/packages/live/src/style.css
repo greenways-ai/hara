@@ -26,16 +26,22 @@
   line-height: 1.5;
 }
 
+/* Example selection is the top edge of the embed. Runtime controls live in a
+   separate row underneath so tabs never compete with Eval/Run for width. */
 .hara-live-card-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 0 8px;
+  padding: 0 12px 8px;
   background: var(--hara-live-panel);
   border-bottom: 1px solid var(--hara-live-border);
 }
 
 .hara-live-card-status {
+  grid-column: 1;
+  grid-row: 2;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -81,6 +87,7 @@
 }
 
 .hara-live-card-header > button {
+  grid-row: 2;
   padding: 4px 13px;
   font-weight: 650;
   letter-spacing: 0.04em;
@@ -93,6 +100,7 @@
 }
 
 .hara-live-card-eval {
+  grid-column: 2;
   color: var(--hara-live-ink);
   background: transparent;
   border: 1px solid var(--hara-live-border);
@@ -105,6 +113,7 @@
 }
 
 .hara-live-card-run {
+  grid-column: 3;
   color: var(--hara-live-bg);
   background: var(--hara-live-accent);
   border: 1px solid var(--hara-live-accent);
@@ -117,23 +126,33 @@
 }
 
 .hara-live-card-tabs {
+  grid-column: 1 / -1;
+  grid-row: 1;
   display: flex;
   min-width: 0;
-  flex: 1 1 auto;
-  gap: 4px;
+  gap: 2px;
+  margin: 0 -12px 8px;
+  padding: 8px 12px 0;
   overflow-x: auto;
-  scrollbar-width: thin;
+  background: color-mix(in srgb, var(--hara-live-panel) 82%, var(--hara-live-bg));
+  border-bottom: 1px solid var(--hara-live-border);
+  scrollbar-width: none;
   overscroll-behavior-inline: contain;
 }
 
+.hara-live-card-tabs::-webkit-scrollbar {
+  display: none;
+}
+
 .hara-live-card-tabs button {
-  min-height: 30px;
+  min-height: 34px;
   flex: 0 0 auto;
-  padding: 4px 11px;
+  padding: 5px 13px 7px;
   color: var(--hara-live-muted);
   background: transparent;
-  border: 1px solid var(--hara-live-border);
-  border-radius: 6px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 7px 7px 0 0;
   font: inherit;
   font-size: 12px;
   cursor: pointer;
@@ -142,21 +161,22 @@
 .hara-live-card-tabs button:hover:not(:disabled),
 .hara-live-card-tabs button:focus-visible {
   color: var(--hara-live-ink);
-  border-color: var(--hara-live-accent);
+  background: color-mix(in srgb, var(--hara-live-accent) 7%, transparent);
   outline: none;
 }
 
 .hara-live-card-tabs button[aria-selected="true"] {
-  color: var(--hara-live-bg);
-  background: var(--hara-live-accent);
-  border-color: var(--hara-live-accent);
+  color: var(--hara-live-ink);
+  background: var(--hara-live-bg);
+  border-bottom-color: var(--hara-live-accent);
 }
 
 .hara-live-card-playground {
+  grid-column: 5;
+  grid-row: 2;
   display: inline-flex;
   align-items: center;
-  flex: 0 0 auto;
-  margin-left: auto;
+  justify-self: end;
   padding: 4px 10px;
   color: var(--hara-live-accent);
   text-decoration: none;
@@ -342,44 +362,22 @@
   outline: none;
 }
 
-/* Kernel progress toast, scoped to the card. */
+/* Kernel progress is intentionally represented only by the connection dot.
+   An overlay obscures the editor/canvas and is especially disruptive on phones. */
 .hara-live-card-toast {
-  position: absolute;
-  z-index: 5;
-  right: 12px;
-  bottom: 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  color: var(--hara-live-ink);
-  background: var(--hara-live-panel);
-  border: 1px solid var(--hara-live-border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  font-size: 12px;
-}
-
-.hara-live-card-toast i {
-  width: 72px;
-  height: 4px;
-  background:
-    linear-gradient(var(--hara-live-accent), var(--hara-live-accent)) 0 0 /
-    var(--kernel-progress, 0%) 100% no-repeat,
-    var(--hara-live-border);
-  border-radius: 2px;
-}
-
-.hara-live-card-toast[data-state="error"] {
-  color: var(--hara-live-error);
-  border-color: var(--hara-live-error);
+  display: none !important;
 }
 
 @media (max-width: 760px) {
   .hara-live-card-header {
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 7px 8px;
+    grid-template-columns: auto auto auto minmax(0, 1fr);
+    gap: 0 6px;
+    padding: 0 8px 7px;
+  }
+
+  .hara-live-card-tabs {
+    margin-inline: -8px;
+    padding-inline: 8px;
   }
 
   .hara-live-card-status {
@@ -399,14 +397,8 @@
   }
 
   .hara-live-card-playground {
-    margin-left: auto;
-  }
-
-  .hara-live-card-tabs {
-    order: 10;
-    width: 100%;
-    flex-basis: 100%;
-    padding-top: 2px;
+    grid-column: 4;
+    padding-inline: 8px;
   }
 
   .hara-live-card-editor {
@@ -419,6 +411,13 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .hara-live-card-connection { animation: none !important; }
+@media (max-width: 430px) {
+  .hara-live-card-header {
+    grid-template-columns: auto auto auto minmax(0, 1fr);
+  }
+
+  .hara-live-card-playground {
+    font-size: 10px;
+    letter-spacing: -0.01em;
+  }
 }
