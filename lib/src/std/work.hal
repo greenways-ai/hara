@@ -1,0 +1,184 @@
+(ns std.work
+  (:require [std.work.protocol :as protocol]
+            [std.work.runtime :as runtime]))
+
+
+(defn work-spec
+  [work]
+  (runtime/work-spec-map work))
+
+(defn definition
+  [spec]
+  (runtime/work-value spec))
+
+(defn pure
+  [id-or-options function]
+  (let [options (if (map? id-or-options)
+                  id-or-options
+                  {:id id-or-options})]
+    (definition
+     (merge options
+            {:op :pure
+             :fn function}))))
+
+(defn step
+  [id-or-options function]
+  (let [options (if (map? id-or-options)
+                  id-or-options
+                  {:id id-or-options})]
+    (definition
+     (merge options
+            {:op :step
+             :fn function}))))
+
+(defn chain
+  ([children]
+   (chain {} children))
+  ([options children]
+   (definition
+    (merge options
+           {:op :chain
+            :children (vec children)}))))
+
+(defn each
+  ([child]
+   (each {} child))
+  ([options child]
+   (definition
+    (merge options
+           {:op :each
+            :work child}))))
+
+(defn filter
+  ([predicate]
+   (filter {} predicate))
+  ([options predicate]
+   (definition
+    (merge options
+           {:op :filter
+            :work predicate}))))
+
+(defn fold
+  ([initial reducer]
+   (fold {} initial reducer))
+  ([options initial reducer]
+   (definition
+    (merge options
+           {:op :fold
+            :initial initial
+            :work reducer}))))
+
+(defn all
+  ([children]
+   (all {} children))
+  ([options children]
+   (definition
+    (merge options
+           {:op :all
+            :children (vec children)}))))
+
+(defn choose
+  ([selector choices]
+   (choose {} selector choices))
+  ([options selector choices]
+   (definition
+    (merge options
+           {:op :choose
+            :selector selector
+            :choices choices}))))
+
+(defn batch
+  ([stages]
+   (batch {} stages))
+  ([options stages]
+   (definition
+    (merge options stages {:op :batch}))))
+
+(def memory-backend runtime/memory-backend)
+(def local-runtime runtime/local-runtime)
+(def durable-runtime runtime/durable-runtime)
+(def observer runtime/observer)
+(def recording-observer runtime/recording-observer)
+(def observer-events runtime/observer-events)
+(def with-handler runtime/with-handler)
+(def handler-operations runtime/handler-operations)
+(def checkpoint-key runtime/checkpoint-key)
+(def manifest-values runtime/manifest-values)
+
+(defn register
+  ([runtime work]
+   (register runtime work {}))
+  ([runtime work options]
+   (runtime/register-work runtime work options)))
+
+(defn start
+  ([runtime work input]
+   (start runtime work input {}))
+  ([runtime work input options]
+   (protocol/-start runtime work input options)))
+
+(defn status
+  [runtime reference]
+  (protocol/-query runtime reference {:query :status}))
+
+(defn result
+  [runtime reference]
+  (protocol/-query runtime reference {:query :result}))
+
+(defn error
+  [runtime reference]
+  (protocol/-query runtime reference {:query :error}))
+
+(defn run-record
+  [runtime reference]
+  (protocol/-query runtime reference {:query :run}))
+
+(defn history
+  [runtime reference]
+  (protocol/-query runtime reference {:query :history}))
+
+(defn checkpoints
+  [runtime reference]
+  (protocol/-query runtime reference {:query :checkpoints}))
+
+(defn list-runs
+  ([runtime]
+   (list-runs runtime {}))
+  ([runtime query]
+   (protocol/-query runtime nil {:query :runs
+                                 :where query})))
+
+(defn run
+  ([runtime work input]
+   (run runtime work input {}))
+  ([runtime work input options]
+   (let [reference (start runtime work input options)
+         status (status runtime reference)]
+     (if (= :completed status)
+       (result runtime reference)
+       (throw
+        (ex-info "Work run did not complete"
+                 {:run/id (runtime/reference-id reference)
+                  :status status
+                  :error (error runtime reference)}))))))
+
+(defn cancel
+  ([runtime reference]
+   (cancel runtime reference {}))
+  ([runtime reference options]
+   (protocol/-command runtime reference :cancel options)))
+
+(defn resume
+  ([runtime reference]
+   (resume runtime reference {}))
+  ([runtime reference options]
+   (protocol/-command runtime reference :resume options)))
+
+(defn fork
+  ([runtime reference checkpoint]
+   (fork runtime reference checkpoint {}))
+  ([runtime reference checkpoint options]
+   (protocol/-command runtime
+                      reference
+                      :fork
+                      (assoc options :checkpoint checkpoint))))

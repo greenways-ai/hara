@@ -1,0 +1,319 @@
+(ns std.work-test
+  (:require [std.lib.test :as test]
+            [std.lib.task :as task]
+            [std.work :as work]
+            [std.work.protocol :as protocol]))
+
+(defn event-count
+  [events event]
+  (reduce
+   (fn [total record]
+     (if (= event (:event record))
+       (inc total)
+       total))
+   0
+   events))
+
+(task/deftask double-task
+  {:template :default
+   :main {:fn (fn [value] (* 2 value))}})
+
+(def local-observer (work/recording-observer))
+(def local-runtime
+  (work/local-runtime {:observer local-observer}))
+
+(def local-pipeline
+  (work/chain
+   {:id :local-pipeline}
+   [(work/pure :increment
+      (fn [value context] (inc value)))
+    (work/step :double
+      (fn [value context] (* 2 value)))
+    (work/pure :shape
+      (fn [value context]
+        {:value value
+         :path (:node/path context)}))]))
+
+(def custom-runtime
+  (work/with-handler
+   (work/local-runtime)
+   :echo
+   (fn [execute runtime frame spec input]
+     {:echo input
+      :node (:id spec)})))
+
+(def prepare-count (atom 0))
+(def replay-count (atom 0))
+(def finish-count (atom 0))
+(def durable-observer (work/recording-observer))
+(def durable-backend (work/memory-backend))
+(def recovery-runtime-before
+  (work/durable-runtime
+   {:backend durable-backend
+    :observer durable-observer
+    :runtime-version 1
+    :schema-version 1}))
+
+(def recovery-work
+  (work/chain
+   {:id :recovery-work
+    :version 1}
+   [(work/step :prepare
+      (fn [value context]
+        (swap! prepare-count inc)
+        (inc value)))
+    (work/pure :replay-shape
+      (fn [value context]
+        (swap! replay-count inc)
+        (* 2 value)))
+    (work/step
+      {:id :finish
+       :retry {:maximum 1}}
+      (fn [value context]
+        (let [attempt (swap! finish-count inc)]
+          (if (= attempt 1)
+            (throw (ex-info "interrupted before checkpoint" {}))
+            (+ value 3)))))]))
+
+(def recovery-reference
+  (work/start recovery-runtime-before
+              recovery-work
+              2
+              {:id "recovery-1"}))
+
+(def recovery-status-before
+  (work/status recovery-runtime-before recovery-reference))
+
+;; A replacement runtime can recover from the shared backend after the pinned
+;; work definition is made available again.
+(def recovery-runtime-after
+  (work/durable-runtime
+   {:backend durable-backend
+    :observer durable-observer
+    :runtime-version 1
+    :schema-version 1}))
+
+(def recovery-registration
+  (work/register recovery-runtime-after recovery-work))
+
+(def recovery-reference-after
+  (work/resume recovery-runtime-after recovery-reference))
+
+(def recovery-history
+  (work/history recovery-runtime-after recovery-reference))
+
+(def recovery-checkpoints
+  (work/checkpoints recovery-runtime-after recovery-reference))
+
+(def recovery-record
+  (work/run-record recovery-runtime-after recovery-reference))
+
+(def fork-reference
+  (work/fork recovery-runtime-after
+             recovery-reference
+             :finish
+             {:id "recovery-fork"}))
+
+(def list-count (atom 0))
+(def filter-count (atom 0))
+(def manage-count (atom 0))
+(def framework-count (atom 0))
+(def summary-count (atom 0))
+(def batch-runtime (work/durable-runtime))
+
+(def maintenance-work
+  (work/batch
+   {:id :code-maintenance-v1
+    :version 1}
+   {:list
+    (work/step :list-code-units
+      (fn [project context]
+        (swap! list-count inc)
+        [{:item/id 'code.manage
+          :item/value {:name 'code.manage}}
+         {:item/id 'code.framework
+          :item/value {:name 'code.framework}}]))
+
+    :filter
+    (work/pure :selected-code-unit?
+      (fn [subject context]
+        (swap! filter-count inc)
+        true))
+
+    :process
+    (work/step
+      {:id :inspect-code-unit
+       :retry {:maximum 1}}
+      (fn [subject context]
+        (if (= 'code.manage (:name subject))
+          (do
+            (swap! manage-count inc)
+            {:name (:name subject)
+             :status :ok})
+          (let [attempt (swap! framework-count inc)]
+            (if (= attempt 1)
+              (throw (ex-info "inspection worker interrupted" {}))
+              {:name (:name subject)
+               :status :ok})))))
+
+    :summarise
+    (work/pure :summarise-findings
+      (fn [batch context]
+        (swap! summary-count inc)
+        {:processed (count (:results batch))
+         :ids (vec (map (fn [item] (:item/id item))
+                        (:results batch)))}))}))
+
+(def batch-reference
+  (work/start batch-runtime
+              maintenance-work
+              {:project "hara"}
+              {:id "batch-1"}))
+
+(def batch-status-before
+  (work/status batch-runtime batch-reference))
+
+(def batch-reference-after
+  (work/resume batch-runtime batch-reference))
+
+(def batch-result
+  (work/result batch-runtime batch-reference))
+
+(def batch-history
+  (work/history batch-runtime batch-reference))
+
+(def batch-checkpoints
+  (work/checkpoints batch-runtime batch-reference))
+
+(def same-batch-reference
+  (work/start batch-runtime
+              maintenance-work
+              {:project "hara"}
+              {:id "batch-1"}))
+
+(def invalid-runtime (work/durable-runtime))
+(def invalid-work
+  (work/batch
+   {:id :invalid-batch}
+   {:list
+    (work/step :list
+      (fn [input context] [1 2]))
+    :process
+    (work/step :process
+      (fn [input context] input))}))
+
+(def invalid-reference
+  (work/start invalid-runtime
+              invalid-work
+              nil
+              {:id "invalid-1"}))
+
+(def results
+  [(test/check
+    "local work composes pure and checkpoint-capable leaves"
+    [(work/run local-runtime local-pipeline 3)
+     (event-count (work/observer-events local-observer)
+                  :work/step-completed)]
+    [{:value 8
+      :path [:chain 2 :shape]}
+     1])
+
+   (test/check
+    "node handlers extend runtimes without another protocol"
+    (work/run custom-runtime
+              (work/definition {:op :echo :id :custom})
+              7)
+    {:echo 7 :node :custom})
+
+   (test/check
+    "existing std.lib.task values are step work"
+    [(get (work/work-spec double-task) :op)
+     (get (work/work-spec double-task) :id)
+     (work/run (work/local-runtime) double-task 4)]
+    [:step 'double-task 8])
+
+   (test/check
+    "durable recovery replays checkpoints and reruns pure work"
+    [recovery-status-before
+     (work/status recovery-runtime-after recovery-reference-after)
+     (work/result recovery-runtime-after recovery-reference-after)
+     [(deref prepare-count)
+      (deref replay-count)
+      (deref finish-count)]
+     (count recovery-checkpoints)
+     (event-count recovery-history :work/step-replayed)
+     [(:run/work-root recovery-record)
+      (:run/work-version recovery-record)
+      (:run/runtime-version recovery-record)
+      (:run/schema-version recovery-record)]]
+    [:failed
+     :completed
+     9
+     [1 2 2]
+     2
+     1
+     [:recovery-work 1 1 1]])
+
+   (test/check
+    "fork copies checkpoints before the selected boundary"
+    [(work/status recovery-runtime-after fork-reference)
+     (work/result recovery-runtime-after fork-reference)
+     [(deref prepare-count)
+      (deref replay-count)
+      (deref finish-count)]
+     (event-count (work/history recovery-runtime-after fork-reference)
+                  :work/step-replayed)]
+    [:completed
+     9
+     [1 3 3]
+     1])
+
+   (test/check
+    "batch recovery uses stable item identities"
+    [batch-status-before
+     (work/status batch-runtime batch-reference-after)
+     (:summary batch-result)
+     [(deref list-count)
+      (deref filter-count)
+      (deref manage-count)
+      (deref framework-count)
+      (deref summary-count)]
+     (count batch-checkpoints)
+     (event-count batch-history :work/step-replayed)]
+    [:failed
+     :completed
+     {:processed 2
+      :ids ['code.manage 'code.framework]}
+     [1 4 1 2 1]
+     3
+     2])
+
+   (test/check
+    "idempotent starts return the existing run"
+    [(work/status batch-runtime same-batch-reference)
+     [(deref list-count)
+      (deref manage-count)
+      (deref framework-count)]]
+    [:completed [1 1 2]])
+
+   (test/check-error
+    "run identities reject incompatible input"
+    (work/start batch-runtime
+                maintenance-work
+                {:project "other"}
+                {:id "batch-1"}))
+
+   (test/check
+    "durable collection work rejects positional item identity"
+    [(work/status invalid-runtime invalid-reference)
+     (count (work/checkpoints invalid-runtime invalid-reference))]
+    [:failed 1])
+
+   (test/check
+    "only three public extension protocols are required"
+    [(not (nil? protocol/IWork))
+     (not (nil? protocol/IWorkRuntime))
+     (not (nil? protocol/IWorkObserver))]
+    [true true true])])
+
+(test/print-results results)

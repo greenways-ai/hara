@@ -1,0 +1,319 @@
+(ns std.work.runtime.handler
+  (:require [std.work.runtime.base :as base]
+            [std.work.runtime.frame :as frame]))
+
+(defn run-pure
+  [execute runtime frame spec input]
+  ((:fn spec) input (frame/leaf-context (frame/leaf-frame frame spec))))
+
+(defn retry-allowed?
+  [retry error]
+  (let [predicate (:retry? retry)]
+    (if predicate
+      (if (predicate error) true false)
+      true)))
+
+(defn step-attempt
+  [runtime frame spec input attempt maximum]
+  (try
+    (let [context (assoc (frame/leaf-context frame) :attempt attempt)]
+      [((:fn spec) input context) attempt])
+    (catch Throwable error
+      (if (and (< attempt maximum)
+               (retry-allowed? (or (:retry spec) {}) error))
+        (do
+          (frame/emit! runtime frame :work/step-retry
+                 {:step/id (:id spec)
+                  :attempt attempt
+                  :next-attempt (inc attempt)})
+          (step-attempt runtime frame spec input (inc attempt) maximum))
+        (do
+          (frame/emit! runtime frame :work/step-failed
+                 {:step/id (:id spec)
+                  :attempt attempt
+                  :error (str error)})
+          (throw error))))))
+
+(defn assert-step-identity!
+  [runtime spec]
+  (if (and (base/durable? runtime)
+           (nil? (:id spec)))
+    (throw
+     (ex-info "Durable step work requires a stable :id"
+              {:operation (:op spec)})))
+  spec)
+
+(defn run-step
+  [execute runtime frame spec input]
+  (let [_ (assert-step-identity! runtime spec)
+        frame (frame/leaf-frame frame spec)
+        key (frame/checkpoint-key frame)
+        checkpoint
+        (if (base/durable? runtime)
+          (base/backend-call (base/runtime-backend runtime) :load-checkpoint key)
+          nil)]
+    (if (= :completed (:checkpoint/status checkpoint))
+      (do
+        (frame/emit! runtime frame :work/step-replayed
+               {:step/id (:id spec)
+                :checkpoint/key key})
+        (:checkpoint/result checkpoint))
+      (let [retry (or (:retry spec) {})
+            maximum (or (:maximum retry) 1)
+            _ (frame/emit! runtime frame :work/step-started
+                     {:step/id (:id spec)
+                      :checkpoint/key key})
+            [result attempts]
+            (step-attempt runtime frame spec input 1 maximum)]
+        (if (base/durable? runtime)
+          (base/backend-call
+           (base/runtime-backend runtime)
+           :commit-checkpoint
+           {:checkpoint/run (:run/id frame)
+            :checkpoint/key key
+            :checkpoint/work-root (:work/root frame)
+            :checkpoint/node-path (:node/path frame)
+            :checkpoint/item-id (:item/id frame)
+            :checkpoint/status :completed
+            :checkpoint/input input
+            :checkpoint/result result
+            :checkpoint/attempts attempts}))
+        (frame/emit! runtime frame :work/step-completed
+               {:step/id (:id spec)
+                :checkpoint/key key
+                :attempts attempts})
+        result))))
+
+(defn run-chain
+  [execute runtime frame spec input]
+  (let [children (vec (:children spec))]
+    (loop [index 0
+           value input]
+      (if (= index (count children))
+        value
+        (let [child (nth children index)
+              child-spec (base/work-spec-map child)
+              child-frame (frame/child-frame frame :chain index child-spec)]
+          (recur (inc index)
+                 (execute runtime child-frame child value)))))))
+
+(defn run-each
+  [execute runtime frame spec input]
+  (let [manifest (frame/normalise-manifest runtime spec input)
+        child (:work spec)
+        child-spec (base/work-spec-map child)
+        base-frame (frame/child-frame frame :each child-spec)]
+    (loop [index 0
+           output []]
+      (if (= index (count manifest))
+        output
+        (let [item (nth manifest index)
+              item-id (:item/id item)
+              value (execute runtime
+                             (frame/item-frame base-frame item-id)
+                             child
+                             (:item/value item))]
+          (recur (inc index)
+                 (conj output
+                       {:item/id item-id
+                        :item/value value})))))))
+
+(defn run-filter
+  [execute runtime frame spec input]
+  (let [manifest (frame/normalise-manifest runtime spec input)
+        predicate (:work spec)
+        predicate-spec (base/work-spec-map predicate)
+        base-frame (frame/child-frame frame :filter predicate-spec)]
+    (loop [index 0
+           output []]
+      (if (= index (count manifest))
+        output
+        (let [item (nth manifest index)
+              selected
+              (execute runtime
+                       (frame/item-frame base-frame (:item/id item))
+                       predicate
+                       (:item/value item))]
+          (recur (inc index)
+                 (if selected
+                   (conj output item)
+                   output)))))))
+
+(defn run-fold
+  [execute runtime frame spec input]
+  (let [manifest (frame/normalise-manifest runtime spec input)
+        reducer (:work spec)
+        reducer-spec (base/work-spec-map reducer)
+        base-frame (frame/child-frame frame :fold reducer-spec)]
+    (loop [index 0
+           accumulator (:initial spec)]
+      (if (= index (count manifest))
+        accumulator
+        (let [item (nth manifest index)
+              next-value
+              (execute runtime
+                       (frame/item-frame base-frame (:item/id item))
+                       reducer
+                       {:acc accumulator
+                        :item/id (:item/id item)
+                        :item/value (:item/value item)})]
+          (recur (inc index) next-value))))))
+
+(defn run-all
+  [execute runtime frame spec input]
+  (let [children (vec (:children spec))]
+    (loop [index 0
+           output []]
+      (if (= index (count children))
+        output
+        (let [child (nth children index)
+              child-spec (base/work-spec-map child)
+              child-frame (frame/child-frame frame :all index child-spec)]
+          (recur (inc index)
+                 (conj output
+                       (execute runtime child-frame child input))))))))
+
+(defn run-choose
+  [execute runtime frame spec input]
+  (let [selector (:selector spec)
+        selector-spec (base/work-spec-map selector)
+        selected
+        (execute runtime
+                 (frame/child-frame frame :choose :selector selector-spec)
+                 selector
+                 input)
+        choice (get (:choices spec) selected)]
+    (if choice
+      (let [choice-spec (base/work-spec-map choice)]
+        (execute runtime
+                 (frame/child-frame frame :choose selected choice-spec)
+                 choice
+                 input))
+      (throw
+       (ex-info "Work choice does not exist"
+                {:selected selected
+                 :choices (keys (:choices spec))})))))
+
+(defn run-batch-filter
+  [execute runtime frame filter-work manifest]
+  (if (nil? filter-work)
+    manifest
+    (let [filter-spec (base/work-spec-map filter-work)
+          base-frame (frame/child-frame frame :batch :filter filter-spec)]
+      (loop [index 0
+             output []]
+        (if (= index (count manifest))
+          output
+          (let [item (nth manifest index)
+                selected
+                (execute runtime
+                         (frame/item-frame base-frame (:item/id item))
+                         filter-work
+                         (:item/value item))]
+            (recur (inc index)
+                   (if selected
+                     (conj output item)
+                     output))))))))
+
+(defn run-batch-process
+  [execute runtime frame process-work manifest]
+  (let [process-spec (base/work-spec-map process-work)
+        base-frame (frame/child-frame frame :batch :process process-spec)]
+    (loop [index 0
+           output []]
+      (if (= index (count manifest))
+        output
+        (let [item (nth manifest index)
+              result
+              (execute runtime
+                       (frame/item-frame base-frame (:item/id item))
+                       process-work
+                       (:item/value item))]
+          (recur (inc index)
+                 (conj output
+                       {:item/id (:item/id item)
+                        :item/value result})))))))
+
+(defn required-stage
+  [spec stage]
+  (let [work (get spec stage)]
+    (if (nil? work)
+      (throw
+       (ex-info "Batch work requires a stage"
+                {:stage stage
+                 :work/id (:id spec)}))
+      work)))
+
+(defn run-batch
+  [execute runtime frame spec input]
+  (let [list-work (required-stage spec :list)
+        list-spec (base/work-spec-map list-work)
+        list-frame
+        (frame/child-frame frame :batch :list list-spec)
+        listed (execute runtime list-frame list-work input)
+        manifest (frame/normalise-manifest runtime spec listed)
+        selected
+        (run-batch-filter execute runtime frame (:filter spec) manifest)
+        process-work (required-stage spec :process)
+        processed
+        (run-batch-process execute runtime frame process-work selected)
+        summary-input
+        {:items selected
+         :results processed}
+        summarise-work (:summarise spec)
+        summary
+        (if summarise-work
+          (let [summary-spec (base/work-spec-map summarise-work)
+                summary-frame
+                (frame/child-frame frame :batch :summarise summary-spec)]
+            (execute runtime
+                     summary-frame
+                     summarise-work
+                     summary-input))
+          summary-input)]
+    {:items selected
+     :results processed
+     :summary summary}))
+
+(def default-handlers
+  {:pure run-pure
+   :step run-step
+   :chain run-chain
+   :each run-each
+   :filter run-filter
+   :fold run-fold
+   :all run-all
+   :choose run-choose
+   :batch run-batch})
+
+(defn execute-node
+  [runtime frame work input]
+  (frame/assert-running! runtime frame)
+  (let [spec (base/work-spec-map work)
+        operation (:op spec)
+        handler (get (base/runtime-handlers runtime) operation)]
+    (if (nil? handler)
+      (throw
+       (ex-info "Work operation is not installed"
+                {:operation operation
+                 :node/path (:node/path frame)}))
+      (do
+        (frame/emit! runtime frame :work/node-started
+               {:operation operation
+                :node/id (:id spec)})
+        (try
+          (let [result (handler execute-node runtime frame spec input)]
+            (frame/emit! runtime frame :work/node-completed
+                   {:operation operation
+                    :node/id (:id spec)})
+            result)
+          (catch Throwable error
+            (frame/emit! runtime frame :work/node-failed
+                   {:operation operation
+                    :node/id (:id spec)
+                    :error (str error)})
+            (throw error)))))))
+
+;; ---------------------------------------------------------------------------
+;; Run lifecycle
+;; ---------------------------------------------------------------------------
