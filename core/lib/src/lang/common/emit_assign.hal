@@ -1,0 +1,253 @@
+(ns lang.common.emit-assign
+  (:require [std.foundation.string :as string]
+            [std.lib.walk :as walk]
+            [lang.common.emit-block :as block]
+            [lang.common.emit-common :as common]
+            [lang.common.emit-data :as data]
+            [lang.common.emit-fn :as function]
+            [lang.common.emit-helper :as helper]
+            [lang.common.emit-template :as template]
+            [lang.common.util :as util]))
+
+(def +assign-types+
+  #{:assign/inline :assign/template :assign/fn})
+
+(defn- replace-form
+  [replacements form]
+  (let [replacement (get replacements form)]
+    (if replacement
+      replacement
+      (cond (list? form)
+            (apply list (map (fn [value] (replace-form replacements value)) form))
+            (vector? form)
+            (vec (map (fn [value] (replace-form replacements value)) form))
+            (map? form)
+            (reduce-kv (fn [output key value]
+                         (assoc output
+                                (replace-form replacements key)
+                                (replace-form replacements value)))
+                       {} form)
+            :else form))))
+
+(defn- return-value
+  [body]
+  (reduce (fn [found form]
+            (if (and (list? form) (= 'return (first form)))
+              (second form)
+              found))
+          nil body))
+
+(defn- remove-return
+  [body]
+  (reduce (fn [output form]
+            (if (and (list? form) (= 'return (first form)))
+              output
+              (conj output form)))
+          [] body))
+
+(defn emit-def-assign-inline
+  "assigns an inline function form directly"
+  {:added "4.0"}
+  [sym input-form grammar mopts]
+  (let [link (first input-form)
+        input (vec (rest input-form))
+        pair (util/sym-pair link)
+        book (or (:book mopts)
+                 (get-in mopts [:snapshot (:lang mopts) :book]))
+        raw-entry (get-in book [:modules (first pair) :code (second pair)])
+        entry (if raw-entry
+                (template/materialize-code-entry
+                 book raw-entry
+                 {:lang (:lang mopts)
+                  :module (or (:module mopts)
+                              (get-in book [:modules (first pair)]))})
+                nil)]
+    (if (nil? entry)
+      (throw (ex-info "Cannot find inline entry"
+                      {:lang (:lang mopts) :input link}))
+      (if (not (empty? (:deps entry)))
+        (throw (ex-info "Inline cannot have additional dependencies"
+                        {:lang (:lang mopts) :input link :deps (:deps entry)}))
+      (let [definition (vec (:form entry))
+            args (nth definition 2)
+            return-ref (atom nil)
+            body (walk/postwalk
+                  (fn [form]
+                    (if (list? form)
+                      (if (= 'return (first form))
+                        (if (deref return-ref)
+                          (throw (ex-info "Inline cannot have multiple returns"
+                                          {:input (deref return-ref)}))
+                          (do (reset! return-ref (second form)) '<RETURN>))
+                        (apply list
+                               (reduce (fn [output value]
+                                         (if (= value '<RETURN>)
+                                           output
+                                           (conj output value)))
+                                       [] form)))
+                      form))
+                  (drop 3 definition))
+            body (reduce (fn [output form]
+                           (if (= form '<RETURN>)
+                             output
+                             (conj output form)))
+                         [] body)
+            returned (deref return-ref)
+            _ (if (or (list? returned) (vector? returned)
+                      (map? returned) (set? returned))
+                (throw (ex-info "Return should be a token" {:input returned}))
+                true)
+            assign-ref (atom nil)
+            _ (walk/postwalk
+               (fn [form]
+                 (if (and (list? form) (= 'var (first form)))
+                   (let [declared (first (filter symbol? (rest form)))]
+                     (if (not (= returned declared))
+                       (throw (ex-info "Inlined with unaccounted for declarations"
+                                       {:link link :form body}))
+                       (reset! assign-ref declared)))
+                   nil)
+                 form)
+               body)
+            assign-symbol (deref assign-ref)
+            replacements (reduce (fn [output index]
+                                   (assoc output (nth args index) (nth input index)))
+                                 {}
+                                 (range 0 (count args)))
+            replacements (if (and (symbol? returned) assign-symbol)
+                           (assoc replacements returned sym)
+                           replacements)
+            rewritten (replace-form replacements body)]
+        (if (and (symbol? returned) assign-symbol)
+          (apply list 'do* rewritten)
+          (apply list 'do*
+                 (concat rewritten
+                         [(list 'var sym :=
+                                (if (symbol? returned)
+                                  (get replacements returned)
+                                  returned))]))))))))
+
+(defn assign-options
+  "gets assignment options from metadata and reserved macro entries"
+  {:added "4.1"}
+  [value grammar]
+  (let [metadata-options (select-keys (or (meta value) {}) +assign-types+)
+        reserved (if (and (list? value) (symbol? (first value)))
+                   (get-in grammar [:reserved (first value)])
+                   nil)
+        reserved-options (if (= :macro (:emit reserved))
+                           (select-keys reserved +assign-types+)
+                           {})]
+    (merge reserved-options metadata-options)))
+
+(defn assign-value
+  "prepares an assignment override payload"
+  {:added "4.1"}
+  [symbol value grammar mopts]
+  (let [options (assign-options value grammar)
+        assign-fn (:assign/fn options)
+        template (:assign/template options)
+        inline (:assign/inline options)
+        reserved (if (and (list? value) (symbol? (first value)))
+                   (get-in grammar [:reserved (first value)])
+                   nil)
+        expanded (if (and (= :macro (:emit reserved))
+                          (or assign-fn template inline))
+                   ((:macro reserved) value)
+                   value)]
+    (cond assign-fn [:raw (assign-fn symbol)]
+          template [:template (replace-form {template symbol} expanded)]
+          inline [:inline (emit-def-assign-inline symbol expanded grammar mopts)]
+          :else nil)))
+
+(defn- modifier-output [modifier grammar mopts]
+  (cond (keyword? modifier) (name modifier)
+        (vector? modifier) ""
+        :else (common/emit-common-loop modifier grammar mopts)))
+
+(defn- emit-input-default
+  [argument assign grammar mopts]
+  (let [modifiers (:modifiers argument)
+        type-values (or (:type argument) [])
+        prefix (reduce (fn [output value]
+                         (if (vector? value) output (conj output value)))
+                       [] modifiers)
+        prefix (reduce (fn [output value] (conj output value))
+                       prefix type-values)
+        prefix-output (reduce (fn [output value]
+                                (let [emitted (modifier-output value grammar mopts)]
+                                  (if (= "" emitted)
+                                    output
+                                    (conj output emitted))))
+                              [] prefix)
+        symbol-output (if (:symbol argument)
+                        (common/emit-common-loop (:symbol argument) grammar mopts)
+                        "")
+        array-output (reduce (fn [output value]
+                               (if (vector? value)
+                                 (str output "["
+                                      (if (= 0 (count value))
+                                        ""
+                                        (common/emit-common-loop (first value) grammar mopts))
+                                      "]")
+                                 output))
+                             "" modifiers)
+        declaration (string/join " " (conj prefix-output symbol-output))]
+    (str declaration array-output
+         (if (or (:force argument) (not (nil? (:value argument))))
+           (str " " assign " "
+                (common/emit-common-loop (:value argument) grammar mopts))
+           ""))))
+
+(defn emit-def-assign
+  "emits a declaration expression"
+  {:added "3.0"}
+  [key props form grammar mopts]
+  (let [options (helper/get-options grammar [:default :define])
+        arguments (helper/emit-typed-args
+                   (rest form) grammar
+                   {:shorthand (get-in grammar [:define :shorthand])})
+        outputs (loop [index 0
+                       output []]
+                  (if (= index (count arguments))
+                    output
+                    (let [argument (nth arguments index)
+                          custom (assign-value (:symbol argument)
+                                               (:value argument)
+                                               grammar mopts)]
+                      (recur (+ index 1)
+                             (conj output
+                                   (if custom
+                                     (common/*emit-fn* (second custom) grammar mopts)
+                                     (function/emit-input-default
+                                      argument (:assign options)
+                                      grammar mopts)))))))
+        raw (:raw props)]
+    (str (if (and raw (not (= "" raw)))
+           (str raw (:space options))
+           "")
+         (string/join (str (:sep options) (:space options)) outputs))))
+
+(defn test-assign-loop
+  "emits assignment forms without recursive installation"
+  {:added "4.0" :adopt true}
+  [form grammar mopts]
+  (common/emit-common-loop
+   form grammar mopts
+   (assoc common/+emit-lookup+
+          :data data/emit-data
+          :block block/emit-block)
+   (fn [key form grammar mopts]
+     (if (= key :fn)
+       (function/emit-fn :function form grammar mopts)
+       (common/emit-op key form grammar mopts
+                       {:def-assign emit-def-assign
+                        :quote data/emit-quote
+                        :table data/emit-table})))))
+
+(defn test-assign-emit
+  "emits assignment forms recursively"
+  {:added "4.0"}
+  [form grammar mopts]
+  (binding [common/*emit-fn* test-assign-loop]
+    (test-assign-loop form grammar mopts)))

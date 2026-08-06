@@ -1,0 +1,16 @@
+(ns lang.core-test
+  (:use code.test)
+  (:require [std.lib.walk :as walk]
+            [lang.core :as tahto]))
+
+(fact "prewalk replaces nested values"
+  (walk/prewalk-replace {'a 'x} '(a (a b)))
+  => '(x (x b)))
+
+(fact "resolves namespaced code symbols"
+  (tahto/to-resolve '(u/add 1 2) nil
+                    {'L.core {:code {'add {:id 'add :op 'defn}}}}
+                    {:module {:id 'L.current :link '{u L.core}}})
+  => '(L.core/add 1 2))
+
+(run {:namespace "lang.core-test"})

@@ -1,5 +1,5 @@
 (ns postgres.core.system
-  (:require [tahto.core :as l]
+  (:require [lang.core :as l]
             [std.foundation :as f]))
 
 (l/script :postgres)

@@ -5,7 +5,7 @@
 
 (fact "canonicalizes legacy runtime PostgreSQL symbols"
   (resolve/canonical-fn-sym 'rt.postgres.foo/bar)
-  => 'tahto.runtime.postgres.foo/bar
+  => 'lang.runtime.postgres.foo/bar
   (resolve/canonical-fn-sym 'rt.postgres/one) => 'rt.postgres/one
   (resolve/canonical-fn-sym 'other.namespace/foo) => 'other.namespace/foo
   (resolve/canonical-fn-sym 'plain) => 'plain

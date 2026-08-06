@@ -1,0 +1,94 @@
+(ns lang.model.v1.spec-postgres.enum
+  (:require [std.foundation.string :as string]
+            [lang.common.grammar-spec :as grammar-spec]
+            [lang.model.v1.spec-postgres.deftype.common :as table]))
+
+(defn enum-metadata
+  [symbol definition-metadata]
+  (merge (or (meta symbol) {})
+         definition-metadata
+         {:static/dbtype :enum}))
+
+(defn pg-enum-format
+  "Formats a PostgreSQL enum declaration and preserves documentation metadata."
+  [form]
+  (let [formatted (grammar-spec/format-defn form)
+        definition-metadata (first formatted)
+        normalized (second formatted)
+        op (first normalized)
+        symbol (second normalized)
+        body (vec (drop 2 normalized))
+        _ (if (not (= 1 (count body)))
+            (throw (ex-info "PostgreSQL enum requires one value expression"
+                            {:form form
+                             :body body})))
+        metadata (enum-metadata symbol definition-metadata)
+        next-symbol (IObjType/with-meta symbol metadata)]
+    [metadata
+     (list op next-symbol (first body))]))
+
+(defn pg-enum-hydrate
+  "Hydrates the schema coordinate without evaluating host expressions."
+  [form grammar context]
+  (let [op (first form)
+        symbol (second form)
+        values (nth form 2)
+        static (table/module-static (:module context))
+        metadata (merge (or (meta symbol) {})
+                        static
+                        {:static/dbtype :enum})
+        next-symbol (IObjType/with-meta symbol metadata)]
+    [(select-keys metadata
+                  [:static/dbtype :static/schema :static/application])
+     (list op next-symbol values)]))
+
+(defn enum-literal
+  [value]
+  (cond (keyword? value) (name value)
+        (symbol? value) (name value)
+        (string? value) value
+        :else (str value)))
+
+(defn resolve-values
+  "Resolves concrete enum values. Historical !:eval forms require an explicit,
+   deterministic literal evaluator capability."
+  [values context]
+  (if (and (list? values) (= '!:eval (first values)))
+    (let [evaluator (or (:tahto/eval-literal context)
+                        (:eval-literal context))]
+      (if evaluator
+        (let [resolved (evaluator (second values))]
+          (if (sequential? resolved)
+            (vec resolved)
+            (throw (ex-info "PostgreSQL enum evaluator returned a non-sequence"
+                            {:value resolved
+                             :form values}))))
+        (throw (ex-info "PostgreSQL enum !:eval requires :tahto/eval-literal"
+                        {:form values}))))
+    (if (sequential? values)
+      (vec values)
+      (throw (ex-info "PostgreSQL enum values must be sequential"
+                      {:values values})))))
+
+(defn quote-enum-value
+  [value]
+  (str "'" (string/replace (enum-literal value) "'" "''") "'"))
+
+(defn pg-enum
+  "Emits a deterministic, loadable PostgreSQL enum declaration."
+  [form grammar context]
+  (let [symbol (second form)
+        values (resolve-values (nth form 2) context)
+        metadata (or (meta symbol) {})
+        type-token (table/qualified-token (:static/schema metadata) symbol)
+        values-output (string/join ", " (map quote-enum-value values))]
+    (if (:existing metadata)
+      ""
+      (str "DO $$\n"
+           "BEGIN\n"
+           "  CREATE TYPE " type-token " AS ENUM (" values-output ");\n"
+           "EXCEPTION\n"
+           "  WHEN OTHERS THEN\n"
+           "    NULL;\n"
+           "END;\n"
+           "$$ LANGUAGE plpgsql;"))))

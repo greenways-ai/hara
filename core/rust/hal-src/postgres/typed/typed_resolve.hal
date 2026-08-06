@@ -3,7 +3,7 @@
             [postgres.typed.typed-common :as types]))
 
 (def +legacy-prefix+ "rt.postgres.")
-(def +canonical-prefix+ "tahto.runtime.postgres.")
+(def +canonical-prefix+ "lang.runtime.postgres.")
 
 (defn canonical-fn-sym
   [sym]

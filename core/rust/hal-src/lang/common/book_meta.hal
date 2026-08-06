@@ -1,0 +1,49 @@
+(ns lang.common.book-meta)
+
+(defn- filter-values
+  [m]
+  (reduce-kv (fn [out key value]
+               (if value
+                 (assoc out key value)
+                 out))
+             {}
+             m))
+
+(defn- book-meta-string
+  [m]
+  (str "#book.meta "
+       " "
+       (vec (keys (filter-values m)))))
+
+(defstruct BookMeta [bootstrap
+                     module-import
+                     module-export
+                     module-link
+                     has-module
+                     setup-module
+                     teardows-module
+                     has-ptr
+                     setup-ptr
+                     teardown-ptr])
+
+(defn book-meta?
+  "checks if object is a book meta"
+  {:added "4.0"}
+  [x]
+  (instance? BookMeta x))
+
+(defn book-meta
+  "creates a book meta"
+  {:added "4.0"}
+  [{:keys [bootstrap
+           module-import
+           module-export
+           module-link
+           has-module
+           setup-module
+           teardows-module
+           has-ptr
+           setup-ptr
+           teardown-ptr]
+    :as m}]
+  (map->BookMeta m))

@@ -4,7 +4,7 @@
             [postgres.typed.typed-analyze :as analyze]
             [postgres.typed.typed-common :as types]
             [postgres.typed.typed-parse :as parse]
-            [tahto.runtime.postgres.base.application :as app])
+            [lang.runtime.postgres.base.application :as app])
   (:use code.test))
 
 (defn fixture-registry []

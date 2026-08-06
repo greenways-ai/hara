@@ -1,0 +1,130 @@
+(ns lang.common.preprocess-resolve
+  (:require [lang.common.preprocess-base :as base]
+            [lang.common.util :as util]
+            [std.foundation.string :as string]
+            [std.lib.walk :as walk]))
+
+(defn- fail [message data]
+  (throw (ex-info message data)))
+
+(defn get-fragment
+  [symbol modules options]
+  (if (and (symbol? symbol) (namespace symbol))
+    (let [[symbol-ns symbol-id] (util/sym-pair symbol)
+          module (:module options)
+          module-id (:id module)
+          symbol-module (or (if (= symbol-ns module-id) module-id)
+                            (get (:link module) symbol-ns)
+                            (first (filter (fn [value] (= value symbol-ns))
+                                           (vals (:link module))))
+                            symbol-ns)
+          fragment (get-in modules [symbol-module :fragment symbol-id])
+          code-entry (get-in modules [symbol-module :code symbol-id])]
+      (or fragment
+          (if (and code-entry (= :defrun (:op-key code-entry)))
+            (apply list 'do (drop 2 (:form code-entry))))))))
+
+(defn process-namespaced-resolve
+  [symbol modules options]
+  (let [[symbol-ns symbol-id] (util/sym-pair symbol)
+        module (:module options)
+        symbol-module (or (if (= '- symbol-ns) (:id module))
+                          (get (:link module) symbol-ns)
+                          (if (get modules symbol-ns) symbol-ns))]
+    (if symbol-module
+      [symbol-module symbol-id (util/sym-full symbol-module symbol-id)]
+      (fail "Cannot resolve module" {:input symbol
+                                     :current module
+                                     :modules (keys modules)}))))
+
+(defn- resolve-module-entry [symbol-module symbol-id modules options]
+  (or (let [entry (get-in modules [symbol-module :code symbol-id])]
+        (if entry [:code entry]))
+      (let [entry (get-in modules [symbol-module :fragment symbol-id])]
+        (if entry [:fragment entry]))
+      (let [entry (get-in modules [symbol-module :header symbol-id])]
+        (if entry [:header entry]))
+      (fail "Upstream not found"
+            {:entry (util/sym-full symbol-module symbol-id)
+             :options (select-keys options [:lang :module])})))
+
+(defn- process-code-entry [entry symbol-full symbol-module module deps]
+  (if (and (get (:suppress module) symbol-module)
+           (not (= 'defglobal (:op entry))))
+    (fail "Suppressed module - macros only"
+          {:symbol [symbol-module (:id entry)]
+           :module (dissoc module :code :fragment)}))
+  (if (and deps (not (= 'defrun (:op entry))))
+    (swap! deps conj symbol-full))
+  symbol-full)
+
+(defn- fragment-template-args [form template]
+  (let [template-arglists (:arglists (meta template))
+        body (vec (drop 2 form))
+        body (if (string? (first body)) (vec (rest body)) body)
+        body (if (map? (first body)) (vec (rest body)) body)
+        args (first body)
+        arglist (or (first template-arglists)
+                    (if (vector? args) args
+                        (if (and (list? args) (vector? (first args)))
+                          (first args))))]
+    (if arglist
+      (vec arglist)
+      (fail "Unable to derive standalone fragment args" {:form form}))))
+
+(defn- process-fragment-entry [entry symbol-full symbol-module symbol deps walk-fn]
+  (if deps
+    (swap! deps conj symbol-full))
+  (let [template (:template entry)
+        standalone (:standalone entry)
+        form (:form entry)]
+    (cond (not template) form
+          (not standalone) (fail "Pure templates are not allowed in body"
+                                 {:module symbol-module :id (:id entry) :form symbol})
+          (or (walk/form? standalone) (symbol? standalone)) (walk-fn standalone)
+          :else (let [args (fragment-template-args form template)]
+                  (walk-fn (list 'fn args
+                                 (list 'return (apply template args))))))))
+
+(defn process-namespaced-symbol
+  [symbol modules options deps deps-fragment walk-fn]
+  (let [walk-fn (or walk-fn identity)
+        [symbol-module symbol-id symbol-full]
+        (process-namespaced-resolve symbol modules options)
+        module (:module options)
+        entry (:entry options)]
+    (if (and (= symbol-module (:id module)) (= symbol-id (:id entry)))
+      symbol-full
+      (let [[kind resolved] (resolve-module-entry symbol-module symbol-id modules options)]
+        (if (= :fragment kind)
+          (process-fragment-entry resolved symbol-full symbol-module symbol deps-fragment walk-fn)
+          (process-code-entry resolved symbol-full symbol-module module deps))))))
+
+(defn process-standard-symbol [sym options deps-native]
+  (let [symbol-name (name sym)
+        index (string/index-of symbol-name "." 0)
+        module (:module options)
+        local (if (<= 0 index)
+                (symbol (string/slice symbol-name 0 index))
+                sym)
+        import (get-in module [:native-lu local])]
+    (if (and import deps-native)
+      (swap! deps-native
+             (fn [current]
+               (assoc current import (conj (or (get current import) #{}) local)))))
+    sym))
+
+(defn find-natives [entry options]
+  (let [quoted (atom [])
+        natives (atom {})]
+    (walk/postwalk (fn [form]
+                     (if (and (walk/form? form) (= 'quote (first form)))
+                       (swap! quoted conj (second form)))
+                     form)
+                   (:form entry))
+    (walk/postwalk (fn [form]
+                     (if (symbol? form)
+                       (process-standard-symbol form options natives))
+                     form)
+                   (deref quoted))
+    (deref natives)))

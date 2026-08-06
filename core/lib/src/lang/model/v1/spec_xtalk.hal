@@ -1,0 +1,73 @@
+(ns lang.model.v1.spec-xtalk
+  (:require [lang.base.v1.grammar-spec :as spec]
+            [lang.common.emit-helper :as helper]
+            [lang.common.grammar-api :as grammar]
+            [lang.common.registry :as registry]))
+
+(def +language+ :xtalk)
+(def +tag+ :xtalk)
+(def +version+ spec/+version+)
+
+(def +template+
+  (grammar/emit-template
+   {:template/id +tag+
+    :template/version +version+
+    :template/value helper/+default+}))
+
+(def +profile+
+  (grammar/profile
+   {:profile/id +tag+
+    :profile/version +version+
+    :profile/operators spec/+features+}))
+
+(def +grammar+
+  (grammar/definition
+   {:grammar/id +tag+
+    :grammar/version +version+
+    :grammar/release "foundation-v1"
+    :grammar/language +language+
+    :grammar/tag +tag+
+    :grammar/engine {:minimum 1 :maximum 1}
+    :grammar/emit-template
+    {:template/id +tag+
+     :template/version +version+}
+    :grammar/profiles
+    [{:profile/id +tag+
+      :profile/version +version+}]}))
+
+(defn- install-source
+  [catalog source]
+  (if (registry/find catalog (grammar/source-coordinate source))
+    catalog
+    (registry/install catalog source)))
+
+(defn install
+  "Installs the versioned XTalk/common model sources."
+  [catalog]
+  (let [catalog (install-source catalog +template+)
+        catalog (install-source catalog +profile+)]
+    (install-source catalog +grammar+)))
+
+(defn catalog
+  []
+  (install (registry/registry)))
+
+(defn select
+  ([]
+   (select (catalog)))
+  ([catalog]
+   (registry/resolve catalog
+                     {:grammar/id +tag+
+                      :grammar/version +version+})))
+
+(def +selection+ (select))
+
+(def +book+
+  {:lang +language+
+   :parent nil
+   :version +version+
+   :coordinate (:coordinate +selection+)
+   :grammar (:grammar +selection+)
+   :selection +selection+})
+
+(def +init+ +book+)

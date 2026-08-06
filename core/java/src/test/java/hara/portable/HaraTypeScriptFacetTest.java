@@ -14,7 +14,7 @@ public final class HaraTypeScriptFacetTest {
   public void runsTypeScriptDeclarationFacetSuite() throws Exception {
     HaraNativeTestRunner.Result result =
         HaraNativeTestRunner.runFile(
-            ROOT, ROOT.resolve("lib/test/tahto/model/v1/spec_js/ts_test.hal"));
+            ROOT, ROOT.resolve("lib/test/lang/model/v1/spec_js/ts_test.hal"));
 
     assertTrue(result.failureMessage(), result.passed());
     assertEquals(8, result.facts());

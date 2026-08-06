@@ -1,0 +1,157 @@
+(ns lang.core.runtime-test
+  (:use code.test)
+  (:require [lang.core.registry :as registry]
+            [lang.core.runtime :as runtime]
+            [lang.runtime.basic :as basic]))
+
+(def boot (runtime/bootstrap!))
+(def pinned-boot
+  (runtime/bootstrap! {:versions {:js 1
+                                  :python 1
+                                  :lua 1}}))
+
+(def js-book (registry/registry-book :js))
+(def js-book-v1 (registry/registry-book :js :default 1))
+(def python-book (registry/registry-book :python))
+(def lua-book (registry/registry-book :lua))
+(def js-oneshot (runtime/rt-create :js :oneshot))
+(def python-oneshot (runtime/rt-create :python :oneshot))
+(def lua-oneshot (runtime/rt-create :lua :oneshot))
+(def js-verify (runtime/rt-create :js :verify))
+(def python-verify (runtime/rt-create :python :verify))
+(def lua-verify (runtime/rt-create :lua :verify))
+(def js-basic (runtime/rt-create :js :basic))
+(def created-basic js-basic)
+
+;; Exercise coexistence and configurable defaults without claiming a real V2
+;; grammar. Metadata can coexist before the corresponding book is loaded.
+(def preview-info
+  {:ns 'lang.model.v1.spec-js
+   :book '+book+
+   :parent :xtalk})
+
+(def preview-v1
+  (registry/registry-book-add! :js :preview 1 preview-info))
+(def preview-v2
+  (registry/registry-book-add! :js :preview 2 preview-info))
+(def preview-versions
+  (registry/registry-book-versions :js :preview))
+(def preview-default-before
+  (registry/registry-book-default-version :js :preview))
+(def preview-default-change
+  (registry/registry-book-set-default! :js :preview 2))
+(def preview-default-after
+  (registry/registry-book-default-version :js :preview))
+(def preview-selected-info
+  (registry/registry-book-info :js :preview))
+(def preview-removed-v2
+  (registry/registry-book-remove! :js :preview 2))
+(def preview-removed-v1
+  (registry/registry-book-remove! :js :preview 1))
+
+(fact "bootstrap installs Foundation language names"
+  [(boolean (runtime/language-info :js))
+   (boolean (runtime/language-info :python))
+   (boolean (runtime/language-info :lua))]
+  => [true true true])
+
+(fact "bootstrap records the selected version per language"
+  [(:versions boot)
+   (:versions pinned-boot)
+   (:version (runtime/language-info :js))
+   (:version (runtime/language-info :python))
+   (:version (runtime/language-info :lua))]
+  => [{:js 1 :python 1 :lua 1}
+      {:js 1 :python 1 :lua 1}
+      1
+      1
+      1])
+
+(fact "target process modules install oneshot, verify, and basic runtime types"
+  [(runtime/runtime-installed? :js :oneshot)
+   (runtime/runtime-installed? :js :verify)
+   (runtime/runtime-installed? :js :basic)
+   (runtime/runtime-installed? :python :oneshot)
+   (runtime/runtime-installed? :python :verify)
+   (runtime/runtime-installed? :python :basic)
+   (runtime/runtime-installed? :lua :oneshot)
+   (runtime/runtime-installed? :lua :verify)
+   (runtime/runtime-installed? :lua :basic)]
+  => [true true true true true true true true true])
+
+(fact "book registry preserves Foundation language and grammar tags"
+  [[(:lang js-book)
+    (:parent js-book)
+    (:tag (:grammar js-book))]
+   [(:lang python-book)
+    (:parent python-book)
+    (:tag (:grammar python-book))]
+   [(:lang lua-book)
+    (:parent lua-book)
+    (:tag (:grammar lua-book))]]
+  => [[:js :xtalk :js]
+      [:python :xtalk :py]
+      [:lua :xtalk :lua]])
+
+(fact "versionless and explicitly pinned book selection agree"
+  [(registry/registry-book-default-version :js)
+   (registry/registry-book-versions :js)
+   (= (:fingerprint (:selection js-book))
+      (:fingerprint (:selection js-book-v1)))]
+  => [1 [1] true])
+
+(fact "book coordinates support coexisting versions and configurable defaults"
+  [preview-versions
+   preview-default-before
+   preview-default-change
+   preview-default-after
+   (:version preview-selected-info)]
+  => [[1 2] 1 2 2 2])
+
+(fact "books contain materialized selections ready for compilation"
+  [(get-in js-book [:coordinate :grammar/version])
+   (get-in python-book [:coordinate :grammar/version])
+   (get-in lua-book [:coordinate :grammar/version])
+   (boolean (:selection js-book))
+   (boolean (:selection python-book))
+   (boolean (:selection lua-book))]
+  => [1 1 1 true true true])
+
+(fact "oneshot constructors use Foundation program defaults"
+  [[(:lang js-oneshot) (:runtime js-oneshot)
+    (:program js-oneshot) (:exec js-oneshot)]
+   [(:lang python-oneshot) (:runtime python-oneshot)
+    (:program python-oneshot) (:exec python-oneshot)]
+   [(:lang lua-oneshot) (:runtime lua-oneshot)
+    (:program lua-oneshot) (:exec lua-oneshot)]]
+  => [[:js :oneshot :nodejs ["node" "-e"]]
+      [:python :oneshot :cpython ["python3" "-c"]]
+      [:lua :oneshot :lua ["lua" "-e"]]])
+
+(fact "verify constructors use non-executing stdin syntax checkers"
+  [[(:lang js-verify) (:runtime js-verify)
+    (:program js-verify) (:exec js-verify)
+    (get-in js-verify [:process :transport])]
+   [(:lang python-verify) (:runtime python-verify)
+    (:program python-verify) (:exec python-verify)
+    (get-in python-verify [:process :transport])]
+   [(:lang lua-verify) (:runtime lua-verify)
+    (:program lua-verify) (:exec lua-verify)
+    (get-in lua-verify [:process :transport])]]
+  => [[:js :verify :nodejs
+       ["node" "--input-type=module" "--check" "-"]
+       :process-stdin]
+      [:python :verify :cpython
+       ["python3" "-c" "import sys; compile(sys.stdin.read(), '<hara>', 'exec')"]
+       :process-stdin]
+      [:lua :verify :lua
+       ["lua" "-e" "local loader=loadstring or load; assert(loader(io.read('*a'), '@<hara>'))"]
+       :process-stdin]])
+
+(fact "basic runtime has explicit bootstrap transport and lifecycle"
+  [(get-in created-basic [:process :transport])
+   (get-in created-basic [:process :persistent])
+   (:status (basic/basic-state created-basic))]
+  => [:process-socket true :created])
+
+(run {:namespace "lang.core.runtime-test"})

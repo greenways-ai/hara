@@ -1,0 +1,181 @@
+(ns lang.model.v1.spec-postgres.deftype.emit-constraints
+  (:require [std.foundation.string :as string]
+            [lang.model.v1.spec-postgres.deftype.common :refer :all]
+            [lang.model.v1.spec-postgres.deftype.emit-column :refer :all]
+            [lang.model.v1.spec-postgres.deftype.hydrate :refer [resolve-reference]]))
+
+(defn composite-primary-output
+  [columns]
+  (let [primary-columns
+        (vec
+         (keep (fn [pair]
+                 (let [column (first pair)
+                       attributes (second pair)]
+                   (if (:primary attributes)
+                     (column-token column attributes)
+                     nil)))
+               columns))]
+    (if (> (count primary-columns) 1)
+      (str "PRIMARY KEY (" (string/join ", " primary-columns) ")")
+      nil)))
+
+(defn- add-group-column
+  [groups group column]
+  (update groups group
+          (fn [columns]
+            (conj (vec (or columns [])) column))))
+
+(defn unique-groups
+  [columns]
+  (reduce
+   (fn [groups pair]
+     (let [column (first pair)
+           attributes (second pair)
+           value (get-in attributes [:sql :unique])
+           groups-value (cond (vector? value) value
+                              value [value]
+                              :else [])]
+       (reduce (fn [current group]
+                 (add-group-column current group
+                                   (column-token column attributes)))
+               groups
+               groups-value)))
+   {}
+   columns))
+
+(defn unique-outputs
+  [columns]
+  (vec
+   (map (fn [entry]
+          (str "UNIQUE (" (string/join ", " (second entry)) ")"))
+        (sort-by (fn [entry] (str (first entry)))
+                 (unique-groups columns)))))
+
+(defn foreign-group-entries
+  [columns context]
+  (reduce
+   (fn [groups pair]
+     (let [column (first pair)
+           attributes (second pair)
+           reference (:ref attributes)
+           resolved (:ref/resolved attributes)
+           groups
+           (if (and (= :ref (:type attributes))
+                    (:group reference))
+             (update groups (:group reference)
+                     (fn [entries]
+                       (conj (vec (or entries []))
+                             {:local (column-token column attributes)
+                              :remote (quote-identifier
+                                       (snake-name (or (:column reference) :id)))
+                              :target resolved
+                              :cascade (get-in attributes [:sql :cascade])})))
+             groups)
+           foreign (:foreign attributes)]
+       (reduce
+        (fn [current foreign-entry]
+          (let [group (first foreign-entry)
+                foreign-spec (second foreign-entry)
+                target (resolve-reference foreign-spec context)]
+            (update current group
+                    (fn [entries]
+                      (conj (vec (or entries []))
+                            {:local (column-token column attributes)
+                             :remote (quote-identifier
+                                      (snake-name (:column foreign-spec)))
+                             :target target
+                             :cascade (get-in attributes [:sql :cascade])})))))
+        groups
+        (sort-by (fn [entry] (str (first entry)))
+                 (or foreign {})))))
+   {}
+   columns))
+
+(defn foreign-output
+  [table entry]
+  (let [group (first entry)
+        values (second entry)
+        sample (first values)
+        target (:target sample)
+        _ (reduce
+           (fn [_ value]
+             (let [candidate (:target value)]
+               (if (or (not (= (:schema target) (:schema candidate)))
+                       (not (= (:table target) (:table candidate))))
+                 (throw
+                  (ex-info
+                   "Grouped PostgreSQL foreign keys must share one target table"
+                   {:table table
+                    :group group
+                    :target target
+                    :candidate candidate}))
+                 nil)))
+           nil
+           values)
+        local-columns (map :local values)
+        remote-columns (map :remote values)
+        cascade? (reduce (fn [found value]
+                           (or found (:cascade value)))
+                         false
+                         values)]
+    (str "CONSTRAINT fk_" (snake-name table) "_" (snake-name group)
+         " FOREIGN KEY (" (string/join ", " local-columns) ")"
+         " REFERENCES " (qualified-token (:schema target) (:table target))
+         "(" (string/join ", " remote-columns) ")"
+         (if cascade? " ON DELETE CASCADE" ""))))
+
+(defn foreign-outputs
+  [table columns context]
+  (vec
+   (map (fn [entry] (foreign-output table entry))
+        (sort-by (fn [entry] (str (first entry)))
+                 (foreign-group-entries columns context)))))
+
+(defn table-constraint-outputs
+  [constraints grammar context]
+  (vec
+   (map (fn [entry]
+          (str "CONSTRAINT " (snake-name (first entry))
+               " CHECK (" (emit-expression (second entry) grammar context) ")"))
+        (sort-by (fn [entry] (str (first entry)))
+                 (or constraints {})))))
+
+(defn custom-outputs
+  [values grammar context]
+  (vec
+   (map (fn [value]
+          (raw-clause value grammar context))
+        (or values []))))
+
+(defn partition-output
+  [partition columns]
+  (if partition
+    (let [method (if (map? partition)
+                   (:strategy partition)
+                   (first partition))
+          values (if (map? partition)
+                   (:columns partition)
+                   (rest partition))
+          column-map (into {} columns)
+          names
+          (map (fn [value]
+                 (let [_ (if (and (set? value)
+                                      (not (= 1 (count value))))
+                           (throw
+                            (ex-info
+                             "Portable PostgreSQL raw partition columns require one identifier"
+                             {:value value})))
+                       column (if (set? value) (first value) value)
+                       attributes (get column-map column)]
+                   (if (and (nil? attributes) (not (set? value)))
+                     (throw (ex-info "PostgreSQL partition column is missing"
+                                     {:column column
+                                      :available (keys column-map)}))
+                     (if attributes
+                       (column-token column attributes)
+                       (quote-identifier (snake-name column))))))
+               values)]
+      (str " PARTITION BY "
+           (string/upper (name method))
+           " (" (string/join ", " names) ")"))
+    ""))

@@ -1,6 +1,6 @@
 (ns postgres.core.impl-main
   (:require [postgres.core.impl-base :as base]
-            [tahto.common.util :as util]))
+            [lang.common.util :as util]))
 
 (defn- collection-value? [value]
   (or (list? value) (vector? value) (set? value) (map? value)))

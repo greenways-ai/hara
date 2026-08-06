@@ -1,7 +1,7 @@
 (ns xt.lang.common-module
-  (:require [tahto.core :as l]
-            [tahto.core.script :as script]
-            [tahto.common.preprocess-base :as preprocess]
+  (:require [lang.core :as l]
+            [lang.core.script :as script]
+            [lang.common.preprocess-base :as preprocess]
             [std.lib.walk :as walk]))
 
 (def ^:dynamic *saved-module* nil)

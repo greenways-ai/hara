@@ -1,0 +1,32 @@
+(ns lang.common.preprocess-base)
+
+(def ^:dynamic *macro-form* nil)
+(def ^:dynamic *macro-grammar* nil)
+(def ^:dynamic *macro-opts* nil)
+(def ^:dynamic *macro-splice* nil)
+(def ^:dynamic *macro-skip-deps* false)
+
+(defn macro-form
+  "gets the current macro form"
+  {:added "4.0"}
+  []
+  *macro-form*)
+
+(defn macro-opts
+  "gets current macro-opts"
+  {:added "4.0"}
+  []
+  *macro-opts*)
+
+(defn macro-grammar
+  "gets the current grammar"
+  {:added "4.0"}
+  []
+  *macro-grammar*)
+
+(defmacro with:macro-opts
+  "bind macro opts"
+  {:added "4.0"}
+  [binding & body]
+  `(binding [lang.common.preprocess-base/*macro-opts* (first ~binding)]
+     ~@body))

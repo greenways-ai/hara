@@ -1,0 +1,409 @@
+(ns lang.model.v1.spec-js.ts
+  (:require [std.foundation.string :as string]
+            [lang.typed.xtalk-parse :as xtalk-parse]))
+
+(def +facet+
+  {:facet/id :typescript
+   :facet/version 1
+   :facet/parent {:grammar/id :js
+                  :grammar/variant :default
+                  :grammar/version 1}
+   :facet/output :declaration-sidecar
+   :facet/extension "d.ts"})
+
+(def +ts-ident-start-chars+
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$")
+
+(def +ts-ident-rest-chars+
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$0123456789")
+
+(def +digits+ "0123456789")
+
+(declare emit-ts-type)
+
+(defn valid-ts-ident?
+  [s]
+  (and (string? s)
+       (< 0 (string/length s))
+       (string/includes? +ts-ident-start-chars+
+                         (string/char-at s 0))
+       (loop [index 1]
+         (if (>= index (string/length s))
+           true
+           (if (string/includes? +ts-ident-rest-chars+
+                                 (string/char-at s index))
+             (recur (+ index 1))
+             false)))))
+
+(defn sanitize-ts-ident
+  [value]
+  (let [source (str value)
+        mapped
+        (loop [index 0
+               out ""]
+          (if (>= index (string/length source))
+            out
+            (let [ch (string/char-at source index)]
+              (recur (+ index 1)
+                     (str out
+                          (if (string/includes? +ts-ident-rest-chars+ ch)
+                            ch
+                            "_"))))))
+        mapped (if (string/blank? mapped) "_" mapped)]
+    (if (string/includes? +digits+ (string/char-at mapped 0))
+      (str "_" mapped)
+      mapped)))
+
+(defn named-ts-ident
+  [type-name current-ns]
+  (cond
+    (symbol? type-name)
+    (if-let [type-ns (some-> type-name namespace symbol)]
+      (if (= current-ns type-ns)
+        (sanitize-ts-ident (name type-name))
+        (sanitize-ts-ident
+         (str (namespace type-name) "_" (name type-name))))
+      (sanitize-ts-ident (name type-name)))
+
+    (string? type-name)
+    (sanitize-ts-ident type-name)
+
+    :else
+    "unknown"))
+
+(defn export-ts-ident
+  [decl-name]
+  (sanitize-ts-ident decl-name))
+
+(defn ns->module-path
+  [ns-sym]
+  (str "./"
+       (-> (str ns-sym)
+           (string/replace "." "/")
+           (string/replace "-" "_"))))
+
+(defn quoted-prop
+  [s]
+  (str "\"" s "\""))
+
+(defn prop-ident
+  [s]
+  (if (valid-ts-ident? s)
+    s
+    (quoted-prop s)))
+
+(defn unwrap-maybe
+  [type]
+  (if (= :maybe (:kind type))
+    (:item type)
+    type))
+
+(defn emit-record-fields
+  [fields current-ns]
+  (->> fields
+       (map (fn [{:keys [name type optional?]}]
+              (str "  "
+                   (prop-ident name)
+                   (when optional? "?")
+                   ": "
+                   (emit-ts-type
+                    (if optional?
+                      (unwrap-maybe type)
+                      type)
+                    current-ns)
+                   ";")))
+       (string/join "\n")))
+
+(defn emit-open-record
+  [open current-ns]
+  (when open
+    (str "  [key: "
+         (emit-ts-type (:key open) current-ns)
+         "]: "
+         (emit-ts-type (:value open) current-ns)
+         ";")))
+
+(defn emit-ts-type
+  [type current-ns]
+  (case (:kind type)
+    :primitive
+    (case (:name type)
+      :xt/str "string"
+      :xt/bool "boolean"
+      :xt/int "number"
+      :xt/num "number"
+      :xt/kw "string"
+      :xt/nil "null"
+      :xt/any "any"
+      :xt/unknown "unknown"
+      :xt/obj "Record<string, unknown>"
+      :xt/fn "(...args: unknown[]) => unknown"
+      "unknown")
+
+    :keyword
+    "string"
+
+    :named
+    (named-ts-ident (:name type) current-ns)
+
+    :maybe
+    (str (emit-ts-type (:item type) current-ns)
+         " | null")
+
+    :union
+    (string/join " | "
+                 (map #(emit-ts-type % current-ns)
+                      (:types type)))
+
+    :intersection
+    (string/join " & "
+                 (map #(emit-ts-type % current-ns)
+                      (:types type)))
+
+    :tuple
+    (str "["
+         (string/join ", "
+                      (map #(emit-ts-type % current-ns)
+                           (:types type)))
+         "]")
+
+    :array
+    (str "Array<"
+         (emit-ts-type (:item type) current-ns)
+         ">")
+
+    :dict
+    (str "Record<"
+         (emit-ts-type (:key type) current-ns)
+         ", "
+         (emit-ts-type (:value type) current-ns)
+         ">")
+
+    :record
+    (let [lines
+          (cond-> [(emit-record-fields (:fields type) current-ns)]
+            (:open type)
+            (conj (emit-open-record (:open type) current-ns)))]
+      (str "{\n"
+           (string/join "\n"
+                        (remove string/blank? lines))
+           "\n}"))
+
+    :fn
+    (str "("
+         (->> (:inputs type)
+              (map-indexed
+               (fn [index input]
+                 (str "arg" index ": "
+                      (emit-ts-type input current-ns))))
+              (string/join ", "))
+         ") => "
+         (emit-ts-type (:output type) current-ns))
+
+    :apply
+    (str (named-ts-ident (:target type) current-ns)
+         "<"
+         (string/join ", "
+                      (map #(emit-ts-type % current-ns)
+                           (:args type)))
+         ">")
+
+    "unknown"))
+
+(defn collect-type-refs
+  [type]
+  (case (:kind type)
+    :named
+    (if (symbol? (:name type))
+      #{(:name type)}
+      #{})
+
+    :maybe
+    (collect-type-refs (:item type))
+
+    :union
+    (into #{} (mapcat collect-type-refs) (:types type))
+
+    :intersection
+    (into #{} (mapcat collect-type-refs) (:types type))
+
+    :tuple
+    (into #{} (mapcat collect-type-refs) (:types type))
+
+    :array
+    (collect-type-refs (:item type))
+
+    :dict
+    (into (collect-type-refs (:key type))
+          (collect-type-refs (:value type)))
+
+    :record
+    (let [field-refs
+          (into #{}
+                (mapcat (comp collect-type-refs :type))
+                (:fields type))
+          open-refs
+          (if-let [open (:open type)]
+            (into (collect-type-refs (:key open))
+                  (collect-type-refs (:value open)))
+            #{})]
+      (into field-refs open-refs))
+
+    :fn
+    (into (into #{}
+                (mapcat collect-type-refs)
+                (:inputs type))
+          (collect-type-refs (:output type)))
+
+    :apply
+    (let [target-refs
+          (if (symbol? (:target type))
+            #{(:target type)}
+            #{})
+          arg-refs
+          (into #{}
+                (mapcat collect-type-refs)
+                (:args type))]
+      (into target-refs arg-refs))
+
+    #{}))
+
+(defn fn-type
+  [fn-def]
+  {:kind :fn
+   :inputs (mapv :type (:inputs fn-def))
+   :output (:output fn-def)})
+
+(defn analysis-import-groups
+  [{:keys [ns specs functions values]}]
+  (let [spec-refs (mapcat (comp collect-type-refs :type) specs)
+        fn-refs (mapcat (fn [fn-def]
+                          (collect-type-refs (fn-type fn-def)))
+                        functions)
+        value-refs (mapcat (comp collect-type-refs :type) values)
+        all-refs (concat spec-refs fn-refs value-refs)]
+    (->> all-refs
+         set
+         (remove #(= ns (some-> % namespace symbol)))
+         (group-by #(some-> % namespace symbol))
+         (remove (comp nil? key))
+         (sort-by (comp str key)))))
+
+(defn emit-import-item
+  [sym current-ns]
+  (let [export-name (export-ts-ident (name sym))
+        local-name (named-ts-ident sym current-ns)]
+    (if (= export-name local-name)
+      export-name
+      (str export-name " as " local-name))))
+
+(defn emit-import-declaration
+  [current-ns [import-ns refs]]
+  (str "import type { "
+       (->> refs
+            (sort-by name)
+            (map #(emit-import-item % current-ns))
+            (string/join ", "))
+       " } from \""
+       (ns->module-path import-ns)
+       "\";"))
+
+(defn emit-imports
+  [analysis]
+  (let [current-ns (:ns analysis)]
+    (->> (analysis-import-groups analysis)
+         (map #(emit-import-declaration current-ns %))
+         (string/join "\n"))))
+
+(defn emit-spec-declaration
+  [spec]
+  (let [current-ns (some-> spec :ns symbol)
+        type (:type spec)
+        output-name (export-ts-ident (:name spec))]
+    (if (= :record (:kind type))
+      (str "export interface " output-name " "
+           (emit-ts-type type current-ns))
+      (str "export type " output-name
+           " = "
+           (emit-ts-type type current-ns)
+           ";"))))
+
+(defn emit-function-arg
+  [arg current-ns]
+  (str (sanitize-ts-ident (:name arg))
+       ": "
+       (emit-ts-type (:type arg) current-ns)))
+
+(defn emit-function-declaration
+  [fn-def]
+  (let [current-ns (some-> fn-def :ns symbol)]
+    (str "export type "
+         (export-ts-ident (:name fn-def))
+         " = ("
+         (->> (:inputs fn-def)
+              (map-indexed
+               (fn [index input]
+                 (str "arg" index ": "
+                      (emit-ts-type (:type input) current-ns))))
+              (string/join ", "))
+         ") => "
+         (emit-ts-type (:output fn-def) current-ns)
+         ";")))
+
+(defn emit-value-declaration
+  [value-def]
+  (let [current-ns (some-> value-def :ns symbol)]
+    (str "export declare const "
+         (export-ts-ident (:name value-def))
+         ": "
+         (emit-ts-type (:type value-def) current-ns)
+         ";")))
+
+(defn emitted-specs
+  [{:keys [specs functions values]}]
+  (let [fn-names (set (map :name functions))
+        value-names (set (map :name values))]
+    (remove
+     (fn [spec]
+       (let [kind (get-in spec [:type :kind])
+             spec-name (:name spec)]
+         (or (and (= :fn kind)
+                  (contains? fn-names spec-name))
+             (and (not= :fn kind)
+                  (contains? value-names spec-name)))))
+     specs)))
+
+(defn emit-analysis-declarations
+  [{:keys [functions values] :as analysis}]
+  (->> (concat
+        (when-let [imports (not-empty (emit-imports analysis))]
+          [imports])
+        (map emit-spec-declaration (emitted-specs analysis))
+        (map emit-function-declaration functions)
+        (map emit-value-declaration values))
+       (string/join "\n\n")))
+
+(defn declaration-output-path
+  [output]
+  (let [slash-index (string/last-index-of output "/")
+        dot-index (string/last-index-of output ".")]
+    (if (> dot-index slash-index)
+      (str (string/slice output 0 dot-index)
+           ".d.ts")
+      (str output ".d.ts"))))
+
+(defn module-dts-artifact
+  [{:keys [main runtime-output]}]
+  {:facet +facet+
+   :output (declaration-output-path runtime-output)
+   :body (-> main
+             xtalk-parse/analyze-module
+             emit-analysis-declarations)})
+
+(defn emit-module-declarations
+  [ns-sym]
+  (-> ns-sym
+      xtalk-parse/analyze-module
+      emit-analysis-declarations))
+
+(def emit-namespace-declarations emit-module-declarations)

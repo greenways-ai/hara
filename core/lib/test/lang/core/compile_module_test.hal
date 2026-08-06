@@ -1,0 +1,234 @@
+(ns lang.core.compile-module-test
+  (:use code.test)
+  (:require [lang.core.compile :as compile]
+            [lang.core.script :as script]))
+
+(defn fixture-entry
+  [id output dependencies priority line]
+  {:id id
+   :form-input (list 'def id output)
+   :fixture/output output
+   :fixture/dependencies dependencies
+   :priority priority
+   :line line})
+
+(defn fixture-module
+  [id requires code schema]
+  {:id id
+   :lang :postgres
+   :require requires
+   :link {'- id}
+   :code code
+   :fragment {}
+   :schema schema
+   :static {:fixture true}
+   :source {:fixture (str id)}})
+
+(defn fixture-compiler
+  [options modules module entry]
+  (if (:fixture/error entry)
+    (throw (ex-info "fixture compiler rejected entry"
+                    {:entry (:id entry)}))
+    {:output (:fixture/output entry)
+     :dependencies
+     {:code (set (or (:fixture/dependencies entry) []))
+      :fragment #{}
+      :native #{}}
+     :diagnostics []
+     :provenance
+     {:fixture (:id entry)
+      :lang (:lang options)
+      :module (:id module)}}))
+
+(defn install-modules!
+  [modules]
+  (reset! script/+modules+ modules)
+  (reset! script/+loaded-modules+ {})
+  modules)
+
+(defn diagnostic-codes
+  [result]
+  (vec (map :code (:diagnostics result))))
+
+(defn compile-fixture
+  [options]
+  (binding [compile/*entry-compiler* fixture-compiler]
+    (compile/compile-module options)))
+
+(def results
+  [(fact "compile-module loads the graph and emits every entry deterministically"
+     (let [modules
+           {'demo.base
+            (fixture-module
+             'demo.base
+             [(vector 'demo.dep :as 'dep)]
+             {'a (fixture-entry 'a "CREATE A;" ['demo.dep/z] 10 20)
+              'b (fixture-entry 'b "CREATE B;" ['demo.dep/z] 1 30)}
+             {:base {:version 1}})
+            'demo.dep
+            (fixture-module
+             'demo.dep
+             []
+             {'z (fixture-entry 'z "CREATE Z;" [] 0 10)}
+             {:dependency {:version 1}})}
+           calls (atom [])
+           _ (reset! script/+modules+ {})
+           _ (reset! script/+loaded-modules+ {})
+           options {:lang :postgres
+                    :main 'demo.base
+                    :layout :module
+                    :emit {:code {:label true}}}
+           compiled
+           (binding [script/*module-loader*
+                     (fn [sentinel]
+                       (let [module-id (symbol (namespace sentinel))]
+                         (swap! calls conj sentinel)
+                         (swap! script/+modules+
+                                assoc
+                                module-id
+                                (get modules module-id))
+                         sentinel))
+                     compile/*entry-compiler* fixture-compiler]
+             [(compile/compile-module options)
+              (compile/compile-module options)])
+           first-result (first compiled)
+           second-result (second compiled)]
+       [(= first-result second-result)
+        (vec (map :id (:modules first-result)))
+        (get-in first-result [:provenance :entry-order])
+        (:output first-result)
+        (diagnostic-codes first-result)
+        (deref calls)])
+     => [true
+         ['demo.dep 'demo.base]
+         ['demo.dep/z 'demo.base/b 'demo.base/a]
+         (str "-- demo.dep/z\nCREATE Z;\n\n"
+              "-- demo.base/b\nCREATE B;\n\n"
+              "-- demo.base/a\nCREATE A;")
+         []
+         ['demo.base/__tahto_load__
+          'demo.dep/__tahto_load__]])
+
+   (fact "missing code dependencies produce a stable diagnostic"
+     (let [modules
+           {'demo.root
+            (fixture-module
+             'demo.root
+             []
+             {'a (fixture-entry 'a "A" ['demo.root/missing] 0 1)}
+             {})}
+           _ (install-modules! modules)
+           result
+           (compile-fixture
+            {:lang :postgres
+             :main 'demo.root
+             :layout :module})]
+       [(diagnostic-codes result)
+        (get-in result [:diagnostics 0 :data])])
+     => [[:tahto/missing-entry]
+         {:entry 'demo.root/a
+          :dependency 'demo.root/missing}])
+
+   (fact "module dependency cycles are deterministic and non-destructive"
+     (let [modules
+           {'demo.a
+            (fixture-module
+             'demo.a
+             ['demo.b]
+             {'a (fixture-entry 'a "A" [] 0 1)}
+             {})
+            'demo.b
+            (fixture-module
+             'demo.b
+             ['demo.a]
+             {'b (fixture-entry 'b "B" [] 0 1)}
+             {})}
+           _ (install-modules! modules)
+           result
+           (compile-fixture
+            {:lang :postgres
+             :main 'demo.a
+             :layout :module})]
+       [(get-in result [:provenance :module-order])
+        (diagnostic-codes result)
+        (get-in result [:diagnostics 0 :data :modules])])
+     => [['demo.a 'demo.b]
+         [:tahto/module-cycle]
+         ['demo.a 'demo.b]])
+
+   (fact "conflicting schema definitions name both modules"
+     (let [modules
+           {'demo.base
+            (fixture-module
+             'demo.base
+             ['demo.dep]
+             {'base (fixture-entry 'base "BASE" [] 0 1)}
+             {:ledger {:version 2}})
+            'demo.dep
+            (fixture-module
+             'demo.dep
+             []
+             {'dep (fixture-entry 'dep "DEP" [] 0 1)}
+             {:ledger {:version 1}})}
+           _ (install-modules! modules)
+           result
+           (compile-fixture
+            {:lang :postgres
+             :main 'demo.base
+             :layout :module})]
+       [(diagnostic-codes result)
+        (get-in result [:diagnostics 0 :data])])
+     => [[:tahto/conflicting-schema]
+         {:schema :ledger
+          :module 'demo.base
+          :previous-module 'demo.dep}])
+
+   (fact "entry dependency cycles return stable output ordering and diagnostics"
+     (let [modules
+           {'demo.root
+            (fixture-module
+             'demo.root
+             []
+             {'a (fixture-entry 'a "A" ['demo.root/b] 2 20)
+              'b (fixture-entry 'b "B" ['demo.root/a] 1 10)}
+             {})}
+           _ (install-modules! modules)
+           result
+           (compile-fixture
+            {:lang :postgres
+             :main 'demo.root
+             :layout :module})]
+       [(get-in result [:provenance :entry-order])
+        (diagnostic-codes result)
+        (get-in result [:diagnostics 0 :data :entries])])
+     => [['demo.root/b 'demo.root/a]
+         [:tahto/entry-cycle]
+         ['demo.root/b 'demo.root/a]])
+
+   (fact "unsupported entries stay represented and do not write output"
+     (let [bad-entry
+           (assoc (fixture-entry 'bad "BAD" [] 0 1)
+                  :fixture/error true)
+           modules
+           {'demo.root
+            (fixture-module
+             'demo.root
+             []
+             {'bad bad-entry}
+             {})}
+           _ (install-modules! modules)
+           result
+           (compile-fixture
+            {:lang :postgres
+             :main 'demo.root
+             :layout :module})]
+       [(:output result)
+        (vec (map :symbol (:entries result)))
+        (vec (map :output (:entries result)))
+        (diagnostic-codes result)])
+     => [""
+         ['demo.root/bad]
+         [nil]
+         [:tahto/unsupported-form]])])
+
+(pr-str (run '[lang.core.compile-module-test]))

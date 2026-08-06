@@ -1,0 +1,401 @@
+(ns lang.common.grammar
+  (:require [lang.common.grammar-macro :as grammar-macro]
+            [lang.common.grammar-spec :as spec]
+            [lang.common.grammar-xtalk-system :as xtalk-system]
+            [std.foundation.string :as string]))
+
+(defn key-member?
+  [value key]
+  (reduce (fn [found entry]
+            (or found (= key (first entry))))
+          false
+          value))
+
+(defn gen-ops
+  "Generates an ordered description of operator table Vars."
+  [namespace-symbol shortcut]
+  (loop [result []
+         entries (vec (ns-publics namespace-symbol))]
+    (if (= 0 (count entries))
+      result
+      (let [entry (first entries)
+            key (first entry)
+            key-name (name key)
+            next-result
+            (if (string/starts-with? key-name "+op-")
+              (conj result
+                    [(keyword
+                      (string/slice key-name
+                                        4
+                                        (- (string/length key-name) 1)))
+                     (symbol shortcut key-name)])
+              result)]
+        (recur next-result (vec (drop 1 entries)))))))
+
+(defn normalize-op-entry
+  "Normalizes defaults shared by macro and hard-link operators."
+  [entry]
+  (let [control (get-in entry [:block :control])
+        control-order (if (vector? control) (vec (map first control)) nil)
+        entry (if (vector? control)
+                (assoc-in entry [:block :control]
+                          (reduce (fn [out pair]
+                                    (assoc out (first pair) (second pair)))
+                                  {}
+                                  control))
+                entry)
+        entry (if control-order
+                (assoc-in entry [:block :control-order] control-order)
+                entry)
+        macro-entry
+        (if (and (= :macro (:emit entry))
+                 (not (key-member? entry :value/template))
+                 (:macro entry))
+          (assoc entry :value/template (:macro entry))
+          entry)
+        standalone-entry
+        (if (and (= :macro (:emit macro-entry))
+                 (:macro macro-entry)
+                 (not (key-member? macro-entry :value/standalone)))
+          (assoc macro-entry :value/standalone true)
+          macro-entry)]
+    (if (and (= :hard-link (:emit standalone-entry))
+             (symbol? (:raw standalone-entry))
+             (not (key-member? standalone-entry :value/standalone)))
+      (assoc standalone-entry
+             :value/standalone
+             (:raw standalone-entry))
+      standalone-entry)))
+
+(defn entries-by-op
+  [entries]
+  (reduce (fn [result entry]
+            (assoc result
+                   (:op entry)
+                   (normalize-op-entry entry)))
+          {}
+          entries))
+
+(defn collect-ops
+  "Collects ordered operator categories into a persistent lookup."
+  [categories]
+  (reduce (fn [result category]
+            (assoc result
+                   (first category)
+                   (entries-by-op (second category))))
+          {}
+          categories))
+
+(def +optional-categories+ #{:functional-core})
+
+(def +op-categories+
+  (vec
+   (concat
+    [[:builtin spec/+op-builtin+]
+     [:builtin-global spec/+op-builtin-global+]
+     [:builtin-module spec/+op-builtin-module+]
+     [:builtin-helper spec/+op-builtin-helper+]
+     [:free-control spec/+op-free-control+]
+     [:free-literal spec/+op-free-literal+]
+     [:math spec/+op-math+]
+     [:compare spec/+op-compare+]
+     [:logic spec/+op-logic+]
+     [:counter spec/+op-counter+]
+     [:return spec/+op-return+]
+     [:throw spec/+op-throw+]
+     [:await spec/+op-await+]
+     [:async spec/+op-async+]
+     [:data-table spec/+op-data-table+]
+     [:data-shortcuts spec/+op-data-shortcuts+]
+     [:data-range spec/+op-data-range+]
+     [:vars spec/+op-vars+]
+     [:bit spec/+op-bit+]
+     [:pointer spec/+op-pointer+]
+     [:fn spec/+op-fn+]
+     [:block spec/+op-block+]
+     [:control-base spec/+op-control-base+]
+     [:control-general spec/+op-control-general+]
+     [:control-try-catch spec/+op-control-try-catch+]
+     [:top-base spec/+op-top-base+]
+     [:top-global spec/+op-top-global+]
+     [:class spec/+op-class+]
+     [:for spec/+op-for+]
+     [:coroutine spec/+op-coroutine+]
+     [:prototype spec/+op-prototype+]
+     [:functional-core spec/+op-functional-core+]
+     [:macro grammar-macro/+op-macro+]
+     [:macro-arrow grammar-macro/+op-macro-arrow+]
+     [:macro-let grammar-macro/+op-macro-let+]
+     [:macro-xor grammar-macro/+op-macro-xor+]
+     [:macro-case grammar-macro/+op-macro-case+]
+     [:macro-forange grammar-macro/+op-macro-forange+]]
+    xtalk-system/+xtalk-profiles+)))
+
+(def +op-order+ (vec (map first +op-categories+)))
+(def +op-all+ (collect-ops +op-categories+))
+
+(defn ops-list
+  "Lists all operator categories in grammar order."
+  []
+  (seq +op-order+))
+
+(defn ops-symbols
+  "Returns symbols grouped by operator category."
+  []
+  (map (fn [category]
+         [category
+          (mapcat (fn [entry] (:symbol (second entry)))
+                  (get +op-all+ category))])
+       +op-order+))
+
+(defn symbol-summary
+  [entries]
+  (reduce (fn [result pair]
+            (assoc result
+                   (first pair)
+                   (:symbol (second pair))))
+          {}
+          entries))
+
+(defn ops-summary
+  "Returns operator symbols for selected categories."
+  [& categories]
+  (let [selected
+        (if (= 0 (count categories))
+          +op-order+
+          (if (and (= 1 (count categories))
+                   (vector? (first categories)))
+            (first categories)
+            categories))]
+    (vec
+     (map (fn [category]
+            [category
+             (symbol-summary (get +op-all+ category))])
+          selected))))
+
+(defn ops-detail
+  "Returns the operator lookup for a category."
+  [category]
+  (get +op-all+ category))
+
+(defn default-lookup
+  "Removes optional categories from an operator lookup."
+  [lookup]
+  (reduce dissoc lookup +optional-categories+))
+
+(defn merge-lookups
+  [lookups]
+  (reduce merge {} lookups))
+
+(defn parse-build-options
+  [options]
+  (loop [result {:lookup +op-all+}
+         remaining (vec options)]
+    (if (= 0 (count remaining))
+      result
+      (recur (assoc result
+                    (first remaining)
+                    (second remaining))
+             (vec (drop 2 remaining))))))
+
+(defn select-category
+  [lookup selection]
+  (let [category (first selection)
+        mode (second selection)
+        entries (first (drop 2 selection))
+        all (get lookup category)]
+    (if (= :include mode)
+      (select-keys all entries)
+      (reduce dissoc all entries))))
+
+(defn build
+  "Selects the required operators for a grammar."
+  ([]
+   (merge-lookups (vals (default-lookup +op-all+))))
+  ([& options]
+   (let [parsed (parse-build-options options)
+         lookup (:lookup parsed)
+         include (:include parsed)
+         exclude (:exclude parsed)
+         lookup-default (default-lookup lookup)
+         selected
+         (cond include
+               (reduce (fn [result selection]
+                         (if (vector? selection)
+                           (assoc result
+                                  (first selection)
+                                  (select-category lookup selection))
+                           (assoc result selection
+                                  (get lookup selection))))
+                       {}
+                       include)
+
+               exclude
+               (reduce (fn [result selection]
+                         (if (vector? selection)
+                           (assoc result
+                                  (first selection)
+                                  (select-category lookup selection))
+                           (dissoc result selection)))
+                       lookup-default
+                       exclude)
+
+               :else lookup-default)]
+     (merge-lookups (vals selected)))))
+
+(def +minimum-categories+
+  [:builtin
+   :builtin-module
+   :builtin-helper
+   :free-control
+   :free-literal
+   :math
+   :compare
+   :logic
+   :return
+   :vars
+   :fn
+   :data-table
+   :control-base
+   :control-general
+   :top-base
+   :top-global
+   :macro])
+
+(defn build-min
+  "Builds the minimum operator set for a language."
+  [& categories]
+  (build :include
+         (vec (concat +minimum-categories+
+                      (if (= 1 (count categories))
+                        (first categories)
+                        categories)))))
+
+(defn build-xtalk
+  "Builds the complete xtalk operator set."
+  []
+  (build :include xtalk-system/+xtalk-profile-order+))
+
+(defn missing-keys
+  [required available]
+  (loop [result #{}
+         entries (vec required)]
+    (if (= 0 (count entries))
+      result
+      (let [key (first (first entries))]
+        (recur (if (key-member? available key)
+                 result
+                 (conj result key))
+               (vec (drop 1 entries)))))))
+
+(defn nested-merge-entry
+  [current replacement]
+  (normalize-op-entry (merge current replacement)))
+
+(defn build:override
+  "Overrides existing operators."
+  [built replacements]
+  (let [missing (missing-keys replacements built)]
+    (if (> (count missing) 0)
+      (throw
+       (ex-info "Keys not in original map"
+                {:keys missing}))
+      (reduce (fn [result pair]
+                (let [key (first pair)]
+                  (assoc result key
+                         (nested-merge-entry
+                          (get result key)
+                          (second pair)))))
+              built
+              replacements))))
+
+(defn build:extend
+  "Adds operators not already present."
+  [built additions]
+  (let [existing
+        (reduce (fn [keys pair]
+                  (if (key-member? built (first pair))
+                    (conj keys (first pair))
+                    keys))
+                #{}
+                additions)]
+    (if (> (count existing) 0)
+      (throw
+       (ex-info "Keys in original map"
+                {:keys existing}))
+      (reduce (fn [result pair]
+                (assoc result
+                       (first pair)
+                       (normalize-op-entry (second pair))))
+              built
+              additions))))
+
+(defn to-reserved
+  "Converts an operator map to a symbol lookup."
+  [built]
+  (reduce (fn [result pair]
+            (let [entry (second pair)]
+              (reduce (fn [reserved symbol]
+                        (assoc reserved symbol entry))
+                      result
+                      (:symbol entry))))
+          {}
+          built))
+
+(defn ops-of-type
+  [reserved type]
+  (loop [ops #{}
+         entries (vec reserved)]
+    (if (= 0 (count entries))
+      ops
+      (let [entry (second (first entries))]
+        (recur (if (= type (:type entry))
+                 (conj ops (:op entry))
+                 ops)
+               (vec (drop 1 entries)))))))
+
+(defn grammar-structure
+  "Returns block, definition, and function operator sets."
+  [reserved]
+  {:block (ops-of-type reserved :block)
+   :def (ops-of-type reserved :def)
+   :fn (ops-of-type reserved :fn)})
+
+(defn grammar-sections
+  "Returns grammar sections."
+  [reserved]
+  (reduce (fn [sections pair]
+            (let [section (:section (second pair))]
+              (if section
+                (conj sections section)
+                sections)))
+          #{}
+          reserved))
+
+(defn grammar-macros
+  "Returns definition-style macro operators."
+  [reserved]
+  (reduce (fn [macros pair]
+            (let [entry (second pair)]
+              (if (= :def (:type entry))
+                (conj macros (:op entry))
+                macros)))
+          #{}
+          reserved))
+
+(defn grammar?
+  "Returns true for a constructed Polis grammar."
+  [value]
+  (and (map? value)
+       (= :polis/grammar (:polis/type value))))
+
+(defn grammar
+  "Constructs a grammar."
+  [tag reserved template]
+  (merge template
+         {:polis/type :polis/grammar
+          :tag tag
+          :reserved reserved
+          :sections (grammar-sections reserved)
+          :macros (grammar-macros reserved)
+          :structure (grammar-structure reserved)}))

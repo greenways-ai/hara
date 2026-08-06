@@ -1,0 +1,85 @@
+(ns lang.model.v1.spec-postgres.deftype.emit
+  (:require [std.foundation.string :as string]
+            [lang.model.v1.spec-postgres.deftype.common :refer :all]
+            [lang.model.v1.spec-postgres.deftype.emit-column :as column]
+            [lang.model.v1.spec-postgres.deftype.emit-constraints :as constraints]
+            [lang.model.v1.spec-postgres.deftype.emit-index :as index]))
+
+(def emit-expression column/emit-expression)
+(def ref-column-name column/ref-column-name)
+(def column-name column/column-name)
+(def column-token column/column-token)
+(def resolved-column-type column/resolved-column-type)
+(def raw-clause column/raw-clause)
+(def column-constraint column/column-constraint)
+(def reference-clause column/reference-clause)
+(def column-output column/column-output)
+
+(def composite-primary-output constraints/composite-primary-output)
+(def unique-groups constraints/unique-groups)
+(def unique-outputs constraints/unique-outputs)
+(def foreign-group-entries constraints/foreign-group-entries)
+(def foreign-output constraints/foreign-output)
+(def foreign-outputs constraints/foreign-outputs)
+(def table-constraint-outputs constraints/table-constraint-outputs)
+(def custom-outputs constraints/custom-outputs)
+(def partition-output constraints/partition-output)
+
+(def index-plan index/index-plan)
+(def index-outputs index/index-outputs)
+(def table-comment-output index/table-comment-output)
+(def column-comment-outputs index/column-comment-outputs)
+(def default-partition-output index/default-partition-output)
+
+(defn pg-deftype
+  "Emits DROP/CREATE, constraints, indexes, partitioning, and comments for one
+   portable PostgreSQL table declaration."
+  [form grammar context]
+  (let [symbol (second form)
+        columns (column-pairs (nth form 2))
+        params (normalize-params (nth form 3))
+        metadata (or (meta symbol) {})
+        schema (:static/schema metadata)
+        table-token (qualified-token schema symbol)
+        primary-count (count (primary-descriptors columns))
+        single-primary? (= 1 primary-count)
+        column-lines
+        (map (fn [pair]
+               (column-output (first pair) (second pair)
+                              single-primary? grammar context))
+             columns)
+        constraints
+        (vec
+         (concat
+          (if-let [primary (composite-primary-output columns)] [primary] [])
+          (unique-outputs columns)
+          (table-constraint-outputs (:constraints params) grammar context)
+          (custom-outputs (:custom params) grammar context)
+          (foreign-outputs symbol columns context)))
+        create-output
+        (str (if (:unlogged params)
+               "CREATE UNLOGGED TABLE IF NOT EXISTS "
+               "CREATE TABLE IF NOT EXISTS ")
+             table-token " (\n  "
+             (string/join ",\n  " (concat column-lines constraints))
+             "\n)"
+             (partition-output (:partition-by params) columns)
+             ";")
+        statements
+        (vec
+         (concat
+          (if (:final metadata)
+            []
+            [(str "DROP TABLE IF EXISTS " table-token " CASCADE;")])
+          [create-output]
+          (index-outputs table-token symbol columns grammar context)
+          (if-let [comment (table-comment-output table-token (:doc metadata))]
+            [comment]
+            [])
+          (column-comment-outputs table-token columns)
+          (if-let [partition (default-partition-output table-token symbol params)]
+            [partition]
+            [])))]
+    (if (:existing metadata)
+      ""
+      (string/join "\n" statements))))

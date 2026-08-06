@@ -1,0 +1,281 @@
+(ns lang.common.emit-block
+  (:require [std.foundation.string :as string]
+            [lang.common.emit-common :as common]))
+
+(defn- member? [values target]
+  (reduce (fn [found value] (or found (= value target))) false values))
+
+(defn- merge-nested
+  [left right]
+  (reduce-kv (fn [output key value]
+               (let [existing (get output key)]
+                 (assoc output key
+                        (if (and (map? existing) (map? value))
+                          (merge-nested existing value)
+                          value))))
+             (or left {}) (or right {})))
+
+(defn emit-statement
+  "emits a statement according to its grammar type"
+  {:added "3.0"}
+  [form grammar mopts]
+  (let [classification (common/form-key form grammar)
+        type (second classification)
+        output (common/*emit-fn* form grammar mopts)
+        statement (get-in grammar [:default :common :statement])]
+    (if (or (= type :block) (= type :free) (= type :fn) (= type :def))
+      output
+      (str output statement))))
+
+(defn emit-do
+  "emits a do block"
+  {:added "3.0"}
+  [args grammar mopts]
+  (let [spacing (or (get-in grammar [:default :common :line-spacing]) 1)
+        separator (apply str (repeat spacing (common/newline-indent)))
+        outputs (reduce (fn [result form]
+                          (let [output (emit-statement form grammar mopts)]
+                            (if (= "" output) result (conj result output))))
+                        [] args)]
+    (string/join separator outputs)))
+
+(defn emit-do*
+  "emits a do block without its final statement terminator"
+  {:added "3.0"}
+  [args grammar mopts]
+  (let [output (emit-do args grammar mopts)
+        statement (get-in grammar [:default :common :statement])]
+    (if (and statement (string/ends-with? output statement))
+      (string/slice output 0 (- (string/length output)
+                                (string/length statement)))
+      output)))
+
+(defn block-options
+  "merges common, default, grammar, and local block options"
+  {:added "3.0"}
+  [key block segment grammar]
+  (merge (get-in grammar [:default :common])
+         (get-in grammar [:default :block segment])
+         (get-in grammar [:block key segment])
+         (get block segment)))
+
+(defn emit-block-body
+  "emits a block body"
+  {:added "3.0"}
+  [key block args grammar mopts]
+  (let [options (block-options key block :body grammar)
+        increment (or (get-in grammar [:default :common :indent]) 2)]
+    (str (:start options)
+         (binding [common/*indent* (+ common/*indent* increment)]
+           (str (common/newline-indent) (emit-do args grammar mopts)))
+         (if (:append options) "" (common/newline-indent))
+         (:end options))))
+
+(defn parse-params
+  "parses block parameters"
+  {:added "3.0"}
+  [params]
+  (if (vector? params)
+    (if (reduce (fn [found value] (or found (vector? value))) false params)
+      (map (fn [value] [:statement (if (vector? value) value [value])]) params)
+      [:statement params])
+    [:raw params]))
+
+(defn- parameter-groups [args]
+  (loop [remaining (vec args)
+         current []
+         output []]
+    (if (= 0 (count remaining))
+      (if (= 0 (count current)) output (conj output current))
+      (let [value (first remaining)]
+        (if (keyword? value)
+          (recur (vec (rest remaining)) [value]
+                 (if (= 0 (count current)) output (conj output current)))
+          (recur (vec (rest remaining)) (conj current value) output))))))
+
+(defn emit-params-statement
+  "emits block statement parameters"
+  {:added "3.0"}
+  [key block args grammar mopts]
+  (let [options (block-options key block :parameter grammar)
+        outputs (map (fn [group]
+                       (let [head (first group)
+                             keyword-head (keyword? head)
+                             values (if keyword-head (rest group) group)
+                             emitted (string/join
+                                      (str (:sep options) (:space options))
+                                      (common/emit-array values grammar mopts))]
+                         (if keyword-head
+                           (str (string/replace (name head) "-" " ")
+                                (:space options) emitted)
+                           emitted)))
+                     (parameter-groups args))]
+    (string/join (:space options) outputs)))
+
+(defn emit-params
+  "constructs block parameters"
+  {:added "3.0"}
+  [key block params grammar mopts]
+  (let [parsed (parse-params params)
+        options (block-options key block :parameter grammar)
+        kind (first parsed)
+        value (second parsed)
+        output (cond (= kind :raw) (common/*emit-fn* value grammar mopts)
+                     (and (= kind :statement)
+                          (vector? value)
+                          (not (vector? (first value))))
+                     (emit-params-statement key block value grammar mopts)
+                     :else
+                     (string/join
+                      (str (:statement options) (:space options))
+                      (map (fn [entry]
+                             (emit-params-statement key block (second entry)
+                                                    grammar mopts))
+                           parsed)))]
+    (str (:start options) output (:end options))))
+
+(defn emit-block-control
+  "emits one control block"
+  {:added "3.0"}
+  [control-key control-block options form grammar mopts]
+  (let [main (or (:main control-block) #{:parameter :body})
+        args (vec (rest form))
+        has-parameter (member? main :parameter)
+        params (if has-parameter (first args) nil)
+        body (if has-parameter (vec (rest args)) args)
+        merged (merge-nested control-block options)]
+    (str (or (:raw options) (first form))
+         (if has-parameter
+           (emit-params control-key merged params grammar mopts) "")
+         (if (member? main :body)
+           (emit-block-body control-key merged body grammar mopts) ""))))
+
+(defn emit-block-controls
+  "emits configured control blocks"
+  {:added "3.0"}
+  [key block control control-args grammar mopts]
+  (let [merged-block (merge (get-in grammar [:default :block]) block)
+        separator (if (:append merged-block) " " (common/newline-indent))
+        main (:main merged-block)
+        control-order (or (:control-order block) (vec (keys (or control {}))))
+        outputs (reduce
+                 (fn [result control-key]
+                   (let [control-block (get control control-key)]
+                   (let [forms (or (get control-args control-key) [])
+                         _ (if (and (:required control-block) (= 0 (count forms)))
+                             (throw (ex-info "Form is required in body"
+                                             {:main key :control control-key}))
+                             true)
+                         options (merge (get-in grammar [:default :block])
+                                        (get-in grammar [:block key :control :default])
+                                        (get-in grammar [:block key :control control-key]))]
+                     (reduce (fn [inner form]
+                               (conj inner (emit-block-control control-key control-block
+                                                               options form grammar mopts)))
+                             result forms))))
+                 [] control-order)]
+    (str (if (or (= 0 (count outputs))
+                 (nil? main)
+                 (= 0 (count main)))
+           "" separator)
+         (string/join separator outputs))))
+
+(defn emit-block-setup
+  "separates a block's main arguments and controls"
+  {:added "4.0"}
+  [key block form grammar mopts]
+  (let [main (or (:main block) #{:parameter :body})
+        args (vec (rest form))
+        params (if (member? main :parameter) (first args) nil)
+        body (if (member? main :parameter) (vec (rest args)) args)
+        controls (or (:control block) {})
+        control-args (reduce (fn [output value]
+                               (if (and (list? value)
+                                        (get controls (keyword (name (first value)))))
+                                 (update output (keyword (name (first value)))
+                                         (fn [forms] (conj (or forms []) value)))
+                                 output))
+                             {} body)
+        plain (reduce (fn [output value]
+                        (if (and (list? value)
+                                 (get controls (keyword (name (first value)))))
+                          output
+                          (conj output value)))
+                      [] body)]
+    [(or (get-in grammar [:block key :raw]) (:raw block) (first form))
+     params plain control-args (get-in grammar [:block key :wrap])]))
+
+(defn emit-block-standard
+  "emits a generic block"
+  {:added "3.0"}
+  [key block form grammar mopts]
+  (let [setup (emit-block-setup key block form grammar mopts)
+        raw (nth setup 0)
+        params (nth setup 1)
+        args (nth setup 2)
+        controls (nth setup 3)
+        wrap (nth setup 4)
+        main (or (:main block) #{:parameter :body})]
+    (str (or (:start wrap) "")
+         raw
+         (if (member? main :parameter) (emit-params key block params grammar mopts) "")
+         (if (member? main :body) (emit-block-body key block args grammar mopts) "")
+         (emit-block-controls key block (:control block) controls grammar mopts)
+         (if (and wrap (not (:append wrap))) (common/newline-indent) "")
+         (or (:end wrap) ""))))
+
+(defn emit-block-inner
+  "emits an inner block"
+  {:added "4.0"}
+  [key block form grammar mopts]
+  (let [setup (emit-block-setup key block form grammar mopts)
+        raw (nth setup 0)
+        params (nth setup 1)
+        controls (nth setup 3)
+        wrap (nth setup 4)
+        main (or (:main block) #{:parameter :body})
+        body-options (block-options key block :body grammar)
+        increment (or (get-in grammar [:default :common :indent]) 2)
+        control-output
+        (binding [common/*indent* (+ common/*indent* increment)]
+          (string/trim-right
+           (emit-block-controls key block (:control block) controls grammar mopts)))]
+    (str (or (:start wrap) "")
+         raw
+         (if (member? main :parameter)
+           (emit-params key block params grammar mopts) "")
+         (:start body-options)
+         control-output
+         (common/newline-indent)
+         (:end body-options)
+         (if (and wrap (not (:append wrap))) (common/newline-indent) "")
+         (or (:end wrap) ""))))
+
+(defn emit-block
+  "emits a block operation"
+  {:added "3.0"}
+  [key form grammar mopts]
+  (let [entry (get-in grammar [:reserved (first form)])
+        mode (:emit entry)]
+    (cond (= mode :do) (emit-do (rest form) grammar mopts)
+          (= mode :do*) (emit-do* (rest form) grammar mopts)
+          (= mode :macro) (common/emit-macro key form grammar mopts)
+          (= mode :inner) (emit-block-inner key (:block entry) form grammar mopts)
+          (fn? mode) (mode form grammar mopts)
+          :else (emit-block-standard key (:block entry) form grammar mopts))))
+
+(defn test-block-loop
+  "emits with blocks"
+  {:added "4.0"}
+  [form grammar mopts]
+  (common/emit-common-loop
+   form grammar mopts
+   (assoc common/+emit-lookup+ :block emit-block)
+   common/emit-op))
+
+(defn test-block-emit
+  "emit with blocks"
+  {:added "4.0"}
+  [form grammar mopts]
+  (binding [common/*emit-fn* test-block-loop]
+    (test-block-loop form grammar mopts)))

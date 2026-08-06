@@ -1,0 +1,94 @@
+(ns lang.runtime.basic.type-verify
+  (:require [std.foundation.os :as os]
+            [std.foundation.promise :as promise]
+            [std.foundation.string :as string]))
+
+(defn- process-options
+  [runtime]
+  (let [cwd (get-in runtime [:process :cwd])
+        env (get-in runtime [:process :env])
+        selected (if cwd {:cwd cwd} {})]
+    (if env
+      (assoc selected :env env)
+      selected)))
+
+(defn- start-checker
+  [runtime]
+  (let [argv (get runtime :exec)
+        selected (process-options runtime)]
+    (if (empty? selected)
+      (os/spawn argv)
+      (os/spawn argv selected))))
+
+(defn- kill-quietly
+  [process]
+  (try
+    (os/process-kill process)
+    (catch Throwable _ nil)))
+
+(defn checker-result
+  "Builds the structured result returned by a syntax checker."
+  [runtime values]
+  {:phase :verify
+   :lang (get runtime :lang)
+   :runtime (get runtime :runtime)
+   :program (get runtime :program)
+   :command (get runtime :exec)
+   :exit (nth values 2)
+   :stdout (string/decode-utf8 (nth values 0))
+   :stderr (string/decode-utf8 (nth values 1))})
+
+(defn verify-result
+  "Returns source after a successful check or throws a structured verify error."
+  [runtime source result]
+  (if (= 0 (get result :exit))
+    source
+    (throw
+     (ex-info
+      "Target source verification failed"
+      (assoc result
+             :generated-fragment source
+             :grammar-coordinate (get runtime :grammar-coordinate)
+             :grammar-version (get runtime :grammar-version))))))
+
+(defn verify-execute
+  "Checks source through the runtime's stdin-based verifier.
+
+   This is the portable Hara replacement for Foundation's temporary-file
+   verifier. It needs only the :process capability and cannot leave source
+   files behind after a failed check."
+  [runtime source]
+  (let [process (start-checker runtime)]
+    (try
+      (os/process-write process (string/encode-utf8 source))
+      (os/process-close-input process)
+      (let [values
+            (deref
+             (promise/all
+              [(os/process-stdout process)
+               (os/process-stderr process)
+               (os/process-wait process)]))]
+        (checker-result runtime values))
+      (catch Throwable error
+        (kill-quietly process)
+        (throw
+         (ex-info
+          "Target source verifier could not complete"
+          {:phase :verify
+           :lang (get runtime :lang)
+           :runtime (get runtime :runtime)
+           :program (get runtime :program)
+           :command (get runtime :exec)
+           :generated-fragment source
+           :cause-data (ex-data error)}
+          error))))))
+
+(defn verify-source
+  "Checks emitted target source without executing it."
+  [runtime source]
+  (verify-result runtime source (verify-execute runtime source)))
+
+(defn raw-eval-verify
+  "Runtime raw evaluator for the Foundation :verify coordinate."
+  [runtime source]
+  (verify-source runtime source))

@@ -36,21 +36,41 @@ core/rust/hal-src/tahto -> core/rust/hal-src/lang
 
 ## Generated migration
 
-`packaging/scripts/migrate-tahto-to-lang` performs the change atomically:
+`packaging/scripts/migrate-tahto-to-lang` performed the change atomically:
 
-1. moves the production and test trees;
-2. rewrites namespace declarations, requires, qualified Vars, quoted registry
+1. moved the production and test trees;
+2. rewrote namespace declarations, requires, qualified Vars, quoted registry
    symbols, dynamic resolver targets, and generated-source expectations;
-3. renames Hara-owned workflow and parity artifacts;
-4. renames Hara Java tests whose class names contain `Tahto`;
-5. regenerates `core/rust/hal-src` from the canonical source roots;
-6. adds a permanent guard against live `tahto.*` code references;
-7. runs source-layout, mirror, namespace, and whitespace checks.
+3. renamed Hara-owned workflow and parity artifacts;
+4. renamed Hara Java tests whose class names contain `Tahto`;
+5. regenerated `core/rust/hal-src` from the canonical source roots;
+6. added a permanent guard against live `tahto.*` code references;
+7. ran source-layout, mirror, namespace, and whitespace checks.
 
-The bootstrap workflow creates a dedicated generated branch and pull request,
-then removes the one-shot workflow and migration script from that generated
-branch. The final repository therefore contains only the resulting structure
-and permanent validation guards.
+The one-shot generator and its bootstrap/validation workflows are removed from
+the generated branch. `lang-runtime.yml` replaces `tahto-runtime.yml` through a
+connector-authored follow-up commit because the repository-scoped Actions token
+cannot create or rename workflow files.
+
+## Generated result
+
+The migration branch contains three dependency-complete commits:
+
+1. the generated compiler/runtime namespace cut;
+2. the workflow rename and one-shot workflow removal;
+3. this completion record, which also triggers the full pull-request checks.
+
+Static generation evidence:
+
+```text
+88 packaged Rust HAL snapshots moved
+380 text files rewritten
+314 production namespaces validated
+169 test namespaces validated
+canonical-to-Rust mirror synchronized
+no live tahto.* code namespace detected
+git diff --check passed
+```
 
 ## Acceptance
 

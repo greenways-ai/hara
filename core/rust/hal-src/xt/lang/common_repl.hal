@@ -1,6 +1,6 @@
 (ns xt.lang.common-repl
   (:config {:blank true})
-  (:require [tahto.core :as l]
+  (:require [lang.core :as l]
             [xt.lang.common-notify :as notify]
             [std.foundation :refer :all :exclude [do if fn quote try print]]))
 

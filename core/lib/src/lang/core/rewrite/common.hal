@@ -1,0 +1,12 @@
+(ns lang.core.rewrite.common)
+
+(defn with-form-meta
+  [source out]
+  (if (or (list? out) (vector? out) (set? out) (map? out))
+    (with-meta out (meta source))
+    out))
+
+(defn stable-symbol
+  "returns a deterministic generated symbol for a source form"
+  [prefix form]
+  (gensym prefix))

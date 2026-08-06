@@ -1,13 +1,13 @@
 (ns hara.runtime-smoke
   (:require [std.foundation.os :as os]
             [std.foundation.string :as string]
-            [tahto.common.emit :as emit]
-            [tahto.core :as tahto]
-            [tahto.core.eval :as evaluation]
-            [tahto.model.v1.spec-js :as spec-js]
-            [tahto.model.v1.spec-python :as spec-python]
-            [tahto.model.v1.spec-lua :as spec-lua]
-            [tahto.runtime.basic.transport-node :as transport-node]))
+            [lang.common.emit :as emit]
+            [lang.core :as tahto]
+            [lang.core.eval :as evaluation]
+            [lang.model.v1.spec-js :as spec-js]
+            [lang.model.v1.spec-python :as spec-python]
+            [lang.model.v1.spec-lua :as spec-lua]
+            [lang.runtime.basic.transport-node :as transport-node]))
 
 (defn collect-process-output
   [pending]

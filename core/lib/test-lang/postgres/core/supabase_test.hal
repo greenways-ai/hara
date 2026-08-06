@@ -1,6 +1,6 @@
 (ns postgres.core.supabase-test
   (:require [postgres.core.supabase :as s]
-            [tahto.core.script :as script]
+            [lang.core.script :as script]
             [std.foundation.string :as string])
   (:use code.test))
 

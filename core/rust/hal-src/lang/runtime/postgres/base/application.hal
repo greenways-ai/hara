@@ -1,0 +1,28 @@
+(ns lang.runtime.postgres.base.application)
+
+(def ^:dynamic *applications* (atom {}))
+
+(defn app-list [] (keys @*applications*))
+
+(defn app
+  ([] @*applications*)
+  ([name] (get @*applications* name)))
+
+(defn app-clear [name]
+  (let [current (get @*applications* name)]
+    (swap! *applications* dissoc name)
+    current))
+
+(defn app-schema [name]
+  (:schema (get @*applications* name)))
+
+(defn app-typed [name]
+  (:typed (get @*applications* name)))
+
+(defn register-app!
+  "Registers an application payload for portable runtime consumers."
+  [name application]
+  (swap! *applications* assoc name application)
+  application)
+
+(def __tahto_load__ true)

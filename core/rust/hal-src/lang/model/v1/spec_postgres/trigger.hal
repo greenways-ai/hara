@@ -1,0 +1,316 @@
+(ns lang.model.v1.spec-postgres.trigger
+  (:require [std.foundation.string :as string]
+            [lang.common.emit :as emit]
+            [lang.common.grammar-spec :as grammar-spec]
+            [lang.model.v1.spec-postgres :as postgres]
+            [lang.model.v1.spec-postgres.deftype.common :as table]))
+
+(defn trigger-metadata
+  [symbol definition-metadata]
+  (let [metadata (or (meta symbol) {})
+        prefix-value (or (:static/return metadata)
+                         (get metadata :-)
+                         [])
+        prefix (cond (nil? prefix-value) []
+                     (sequential? prefix-value) (vec prefix-value)
+                     :else [prefix-value])]
+    (merge metadata
+           definition-metadata
+           {:static/dbtype :trigger
+            :static/return prefix})))
+
+(defn pg-trigger-format
+  "Formats a historical deftrigger form while retaining its prefix clause."
+  [form]
+  (let [formatted (grammar-spec/format-defn form)
+        definition-metadata (first formatted)
+        normalized (second formatted)
+        op (first normalized)
+        symbol (second normalized)
+        table-binding (nth normalized 2)
+        body (if (> (count normalized) 3) (nth normalized 3) [])
+        _ (if (or (not (vector? table-binding))
+                  (not (= 1 (count table-binding))))
+            (throw
+             (ex-info "PostgreSQL trigger requires exactly one table binding"
+                      {:form form
+                       :table-binding table-binding})))
+        metadata (trigger-metadata symbol definition-metadata)
+        next-symbol (IObjType/with-meta symbol metadata)]
+    [metadata
+     (list op next-symbol table-binding body)]))
+
+(defn- table-entry
+  [target context]
+  (let [link (table/target-link target context)
+        entry (if link (table/linked-entry context link) nil)
+        form (if entry (table/linked-entry-form entry) nil)]
+    (if (and entry form (= 'deftype (first form)))
+      [link entry]
+      nil)))
+
+(defn resolve-trigger-table
+  "Resolves a trigger table from an explicit coordinate or portable module link."
+  [target context]
+  (cond
+    (map? target)
+    (let [schema (:schema target)
+          table-id (or (:table target) (:id target))]
+      (if table-id
+        {:schema schema :table table-id}
+        (throw (ex-info "Explicit trigger table coordinate has no table"
+                        {:target target}))))
+
+    (and (vector? target) (= 2 (count target)))
+    {:schema (first target) :table (second target)}
+
+    (symbol? target)
+    (if-let [resolved (table-entry target context)]
+      (let [link (first resolved)
+            entry (second resolved)]
+        {:schema (table/linked-entry-schema context link entry)
+         :table (:id entry)})
+      (throw (ex-info "Portable PostgreSQL trigger table is unresolved"
+                      {:target target})))
+
+    :else
+    (throw (ex-info "Unsupported PostgreSQL trigger table coordinate"
+                    {:target target}))))
+
+(defn- execute-index-step
+  [values index]
+  (if (>= index (count values))
+    nil
+    (let [value (nth values index)
+          next-value (if (< (+ index 1) (count values))
+                       (nth values (+ index 1))
+                       nil)]
+      (cond (= value :execute-function) index
+            (and (= value :execute) (= next-value :function)) index
+            :else (execute-index-step values (+ index 1))))))
+
+(defn- execute-index
+  [values]
+  (execute-index-step values 0))
+
+(defn trigger-execute-form
+  "Returns the function call carried by a historical trigger body."
+  [body]
+  (cond
+    (map? body)
+    (:execute-function body)
+
+    (or (vector? body) (sequential? body))
+    (let [values (vec body)
+          index (execute-index values)]
+      (if (nil? index)
+        nil
+        (if (= :execute-function (nth values index))
+          (if (< (+ index 1) (count values))
+            (nth values (+ index 1))
+            nil)
+          (if (< (+ index 2) (count values))
+            (nth values (+ index 2))
+            nil))))
+
+    :else nil))
+
+(defn resolve-trigger-function
+  "Resolves the EXECUTE FUNCTION target and retains explicit call arguments."
+  [call context]
+  (let [target (cond (list? call) (first call)
+                     (symbol? call) call
+                     :else nil)
+        args (if (list? call) (vec (rest call)) [])
+        link (if target (table/target-link target context) nil)
+        entry (if link (table/linked-entry context link) nil)
+        form (if entry (table/linked-entry-form entry) nil)]
+    (if (and entry form (= 'defn (first form)))
+      {:schema (table/linked-entry-schema context link entry)
+       :function (:id entry)
+       :args args}
+      (throw (ex-info "Portable PostgreSQL trigger function is unresolved"
+                      {:call call
+                       :target target})))))
+
+(defn pg-trigger-hydrate
+  "Hydrates trigger table and function coordinates without filesystem or host
+   registry writes."
+  [form grammar context]
+  (let [op (first form)
+        symbol (second form)
+        table-binding (nth form 2)
+        body (nth form 3)
+        resolved-table (resolve-trigger-table (first table-binding) context)
+        execute-form (trigger-execute-form body)
+        resolved-function (if execute-form
+                            (resolve-trigger-function execute-form context)
+                            nil)
+        static (table/module-static (:module context))
+        metadata (merge (or (meta symbol) {})
+                        static
+                        {:static/dbtype :trigger
+                         :static/trigger-table resolved-table})
+        metadata (if resolved-function
+                   (assoc metadata :static/trigger-function resolved-function)
+                   metadata)
+        next-symbol (IObjType/with-meta symbol metadata)
+        hydration (select-keys metadata
+                               [:static/dbtype
+                                :static/schema
+                                :static/application
+                                :static/return
+                                :static/trigger-table
+                                :static/trigger-function])]
+    [hydration
+     (list op next-symbol table-binding body)]))
+
+(defn trigger-word
+  [value]
+  (cond (keyword? value)
+        (string/upper (string/replace (name value) "-" " "))
+
+        (symbol? value)
+        (string/upper (string/replace (name value) "-" " "))
+
+        (string? value) value
+        :else (str value)))
+
+(defn trigger-prefix-output
+  [values]
+  (string/join " " (map trigger-word (or values []))))
+
+(defn function-call-output
+  [call resolved grammar context]
+  (let [args (or (:args resolved)
+                 (if (list? call) (vec (rest call)) []))
+        function-token
+        (postgres/pg-qualified-function (:function resolved)
+                                        (:schema resolved)
+                                        grammar context)]
+    (str function-token
+         "("
+         (string/join "," (map (fn [arg]
+                                  (emit/*emit-fn* arg grammar context))
+                                args))
+         ")")))
+
+(defn generic-trigger-token
+  [value grammar context]
+  (cond (= value \\) "\n"
+        (keyword? value) (trigger-word value)
+        (string? value) (emit/*emit-fn* value grammar context)
+        :else (emit/*emit-fn* value grammar context)))
+
+(defn- vector-body-tokens
+  [values index output resolved-function grammar context]
+  (if (>= index (count values))
+    output
+    (let [value (nth values index)
+          next-value (if (< (+ index 1) (count values))
+                       (nth values (+ index 1))
+                       nil)]
+      (cond
+        (= value :execute-function)
+        (if next-value
+          (vector-body-tokens
+           values
+           (+ index 2)
+           (conj output
+                 "EXECUTE FUNCTION"
+                 (function-call-output next-value
+                                       resolved-function
+                                       grammar context))
+           resolved-function grammar context)
+          (throw (ex-info "EXECUTE FUNCTION requires a target"
+                          {:body values})))
+
+        (and (= value :execute) (= next-value :function))
+        (let [call-index (+ index 2)
+              call (if (< call-index (count values))
+                     (nth values call-index)
+                     nil)]
+          (if call
+            (vector-body-tokens
+             values
+             (+ index 3)
+             (conj output
+                   "EXECUTE FUNCTION"
+                   (function-call-output call
+                                         resolved-function
+                                         grammar context))
+             resolved-function grammar context)
+            (throw (ex-info "EXECUTE FUNCTION requires a target"
+                            {:body values}))))
+
+        :else
+        (vector-body-tokens
+         values
+         (+ index 1)
+         (conj output
+               (generic-trigger-token value grammar context))
+         resolved-function grammar context)))))
+
+(defn vector-body-output
+  [body resolved-function grammar context]
+  (let [values (vec body)
+        output (vector-body-tokens values 0 []
+                                   resolved-function grammar context)]
+    (string/replace
+     (string/replace
+      (string/join " " output)
+      " \n " "\n")
+     "\n " "\n")))
+
+(defn map-body-output
+  [body resolved-function grammar context]
+  (let [for-each (:for-each body)
+        when-form (:when body)
+        call (:execute-function body)
+        sections
+        (concat
+         (if for-each
+           [(str "FOR EACH " (trigger-word for-each))]
+           [])
+         (if when-form
+           [(str "WHEN (" (emit/*emit-fn* when-form grammar context) ")")]
+           [])
+         (if call
+           [(str "EXECUTE FUNCTION "
+                 (function-call-output call resolved-function grammar context))]
+           []))]
+    (string/join "\n" sections)))
+
+(defn trigger-body-output
+  [body resolved-function grammar context]
+  (cond (map? body)
+        (map-body-output body resolved-function grammar context)
+
+        (or (vector? body) (sequential? body))
+        (if (= 0 (count body))
+          ""
+          (vector-body-output body resolved-function grammar context))
+
+        (nil? body) ""
+        :else (generic-trigger-token body grammar context)))
+
+(defn pg-trigger
+  "Emits deterministic DROP TRIGGER and CREATE TRIGGER statements."
+  [form grammar context]
+  (let [symbol (second form)
+        body (nth form 3)
+        metadata (or (meta symbol) {})
+        name-output (postgres/pg-symbol symbol grammar context)
+        table-coordinate (:static/trigger-table metadata)
+        function-coordinate (:static/trigger-function metadata)
+        table-output (table/qualified-token (:schema table-coordinate)
+                                            (:table table-coordinate))
+        prefix-output (trigger-prefix-output (:static/return metadata))
+        body-output (trigger-body-output body function-coordinate grammar context)]
+    (str "DROP TRIGGER IF EXISTS " name-output
+         " ON " table-output ";\n"
+         "CREATE TRIGGER " name-output
+         (if (= "" prefix-output) "" (str " " prefix-output))
+         " ON " table-output
+         (if (= "" body-output) "" (str "\n" body-output))
+         ";")))

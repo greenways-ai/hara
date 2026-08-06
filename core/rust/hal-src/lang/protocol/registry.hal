@@ -1,0 +1,14 @@
+(ns lang.protocol.registry)
+
+(defprotocol IGrammarCatalog
+  (find-source [catalog coordinate])
+  (list-sources [catalog query])
+  (available-versions [catalog grammar-id]))
+
+(defprotocol IGrammarRegistry
+  (install-source [registry source])
+  (replace-source [registry source])
+  (remove-source [registry coordinate]))
+
+(defprotocol IGrammarResolver
+  (resolve-grammar [resolver request]))

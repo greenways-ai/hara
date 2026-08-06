@@ -1,0 +1,708 @@
+(ns lang.common.emit-common
+  (:require [std.foundation.string :as string]
+            [lang.common.emit :as emit]
+            [lang.common.emit-helper :as helper]
+            [lang.common.util :as util]))
+
+(def ^:dynamic *explode* nil)
+(def ^:dynamic *trace* nil)
+(def ^:dynamic *indent* 0)
+(def ^:dynamic *compressed* false)
+(def ^:dynamic *multiline* false)
+(def ^:dynamic *max-len* 60)
+(def ^:dynamic *emit-internal* false)
+(def ^:dynamic *emit-fn* helper/default-emit-fn)
+
+(defmacro with:explode
+  "form to control `explode` option"
+  {:added "4.0"}
+  [& body]
+  `(binding [*explode* true] ~@body))
+
+(defmacro with-trace
+  "form to control `trace` option"
+  {:added "4.0"}
+  [& body]
+  `(binding [*trace* true] ~@body))
+
+(defmacro with-compressed
+  "formats without newlines and indents"
+  {:added "3.0"}
+  [& body]
+  `(binding [*compressed* true] ~@body))
+
+(defmacro with-indent
+  "adds indentation levels"
+  {:added "3.0"}
+  [increments & body]
+  `(binding [*indent* (+ *indent* (or (first ~increments) 2))]
+     ~@body))
+
+(defn- with-emitter
+  [f]
+  (binding [emit/*indent* *indent*
+            emit/*compressed* *compressed*
+            emit/*emit-fn* *emit-fn*]
+    (f)))
+
+(defn newline-indent
+  "returns a newline with indent"
+  {:added "3.0"}
+  []
+  (with-emitter (fn [] (emit/newline-indent))))
+
+(defn emit-reserved-value
+  "emits a reserved value"
+  {:added "4.0"}
+  [form grammar mopts]
+  (with-emitter
+   (fn [] (emit/emit-reserved-value form grammar mopts))))
+
+(defn emit-free-raw
+  "emits free values"
+  {:added "4.0"}
+  [sep args grammar mopts]
+  (with-emitter
+   (fn [] (emit/emit-free-raw sep args grammar mopts))))
+
+(defn emit-free
+  "emits a free form"
+  {:added "4.0"}
+  [sep form grammar mopts]
+  (with-emitter
+   (fn [] (emit/emit-free-raw sep (rest form) grammar mopts))))
+
+(defn emit-comment
+  "emits a comment"
+  {:added "4.0"}
+  [raw form grammar mopts]
+  (with-emitter
+   (fn []
+     (emit/emit-comment form {:raw raw} grammar mopts))))
+
+(defn emit-indent
+  "emits an indented form"
+  {:added "4.0"}
+  [_ form grammar mopts]
+  (emit-comment " " form grammar mopts))
+
+(defn emit-macro
+  "expands and emits a grammar macro"
+  {:added "4.0"}
+  [_ form grammar mopts]
+  (let [entry (get-in grammar [:reserved (first form)])
+        macro-fn (or (:macro entry) (:value/template entry))]
+    (if macro-fn
+      (*emit-fn* (macro-fn form) grammar mopts)
+      (throw (ex-info "Macro operation has no expansion function"
+                      {:form form :entry entry})))))
+
+(defn emit-array
+  "returns an array of emitted strings"
+  {:added "4.0"}
+  ([array grammar mopts]
+   (emit-array array grammar mopts *emit-fn*))
+  ([array grammar mopts emit-fn]
+   (emit/emit-array array grammar mopts emit-fn)))
+
+(defn emit-wrappable?
+  "checks whether a form must be wrapped when nested"
+  {:added "4.0"}
+  [form grammar]
+  (emit/emit-wrappable? form grammar))
+
+(defn emit-squash
+  "emits a squashed representation"
+  {:added "4.0"}
+  [_ form grammar mopts]
+  (emit-free-raw "" (rest form) grammar mopts))
+
+(defn emit-wrapping
+  "emits a potentially wrapped form"
+  {:added "4.0"}
+  [form grammar mopts]
+  (let [output (*emit-fn* form grammar mopts)
+        options (get-in grammar [:default :common])]
+    (if (emit-wrappable? form grammar)
+      (str (:start options) output (:end options))
+      output)))
+
+(defn wrapped-str
+  "wraps a string using the grammar path's start and end options"
+  {:added "3.0"}
+  [inner path grammar]
+  (let [options (helper/get-options grammar path)]
+    (str (:start options) inner (:end options))))
+
+(defn emit-unit
+  "emits a unit"
+  {:added "4.0"}
+  [props form grammar mopts]
+  (let [value (or (second form) (:default props))
+        transform (:transform props)]
+    (*emit-fn* (if transform (transform (:raw props)) value)
+               grammar mopts)))
+
+(defn emit-internal
+  "emits the value within an internal form"
+  {:added "4.0"}
+  [form grammar mopts]
+  (*emit-fn* (second form) grammar mopts))
+
+(defn emit-internal-str
+  "emits internal strings without quoting"
+  {:added "4.0"}
+  [form grammar mopts]
+  (let [value (second form)]
+    (binding [*emit-internal* true]
+      (if (vector? value)
+        (string/join "\n" (map (fn [item] (*emit-fn* item grammar mopts)) value))
+        (*emit-fn* value grammar mopts)))))
+
+(defn emit-pre
+  "emits a string before one argument"
+  {:added "3.0"}
+  [raw args grammar mopts]
+  (if (not (= 1 (count args)))
+    (throw (ex-info "Single argument required" {:raw raw :arguments args}))
+    (str raw (emit-wrapping (first args) grammar mopts))))
+
+(defn emit-post
+  "emits a string after one argument"
+  {:added "3.0"}
+  [raw args grammar mopts]
+  (if (not (= 1 (count args)))
+    (throw (ex-info "Single argument required" {:raw raw :arguments args}))
+    (str (emit-wrapping (first args) grammar mopts) raw)))
+
+(defn emit-prefix
+  "emits a spaced prefix operation"
+  {:added "4.0"}
+  [raw args grammar mopts]
+  (if (not (= 1 (count args)))
+    (throw (ex-info "Single argument required" {:raw raw :arguments args}))
+    (str raw (get-in grammar [:default :common :space])
+         (emit-wrapping (first args) grammar mopts))))
+
+(defn emit-postfix
+  "emits a spaced postfix operation"
+  {:added "4.0"}
+  [raw args grammar mopts]
+  (if (not (= 1 (count args)))
+    (throw (ex-info "Single argument required" {:raw raw :arguments args}))
+    (str (emit-wrapping (first args) grammar mopts)
+         (get-in grammar [:default :common :space]) raw)))
+
+(defn emit-infix
+  "emits infix operations"
+  {:added "3.0"}
+  [raw args grammar mopts]
+  (if (= 0 (count args))
+    (throw (ex-info "One or more arguments required" {:raw raw}))
+    (let [space (get-in grammar [:default :common :space])]
+      (string/join (str space raw space)
+                   (emit-array args grammar mopts emit-wrapping)))))
+
+(defn emit-infix-default
+  "emits infix with a default left value"
+  {:added "3.0"}
+  [raw args default grammar mopts]
+  (emit-infix raw
+              (if (= 1 (count args)) (vec (concat [default] args)) args)
+              grammar mopts))
+
+(defn emit-infix-pre
+  "emits unary prefix or multi-argument infix"
+  {:added "3.0"}
+  [raw args grammar mopts]
+  (if (= 1 (count args))
+    (emit-pre raw args grammar mopts)
+    (emit-infix raw args grammar mopts)))
+
+(defn emit-infix-if-single
+  "emits one ternary expression"
+  {:added "4.0"}
+  [form grammar mopts]
+  (with-emitter
+   (fn [] (emit/emit-infix-if form nil grammar mopts))))
+
+(defn- drop-last-value [values]
+  (vec (take (- (count values) 1) values)))
+
+(defn emit-infix-if
+  "emits one or more ternary branches"
+  {:added "3.0"}
+  [form grammar mopts]
+  (let [forms (vec (rest form))]
+    (if (<= (count forms) 3)
+      (emit-infix-if-single
+       (if (= 2 (count forms))
+         (list :? (nth forms 0) (nth forms 1) nil)
+         (list :? (nth forms 0) (nth forms 1)
+               (if (= :else (nth forms 2)) (nth forms 3) (nth forms 2))))
+       grammar mopts)
+      (let [pairs (vec (partition 2 forms))
+            final-pair (last pairs)]
+        (if (not (= :else (first final-pair)))
+          (throw (ex-info "ternary cond has to end with :else"
+                          {:form final-pair}))
+          (emit-infix-if-single
+           (reduce (fn [acc pair]
+                     (list :? (first pair) (second pair) acc))
+                   (second final-pair)
+                   (reverse (drop-last-value pairs)))
+           grammar mopts))))))
+
+(defn emit-between
+  "emits the raw string between elements"
+  {:added "3.0"}
+  [raw args grammar mopts]
+  (string/join raw (emit-array args grammar mopts emit-wrapping)))
+
+(defn emit-bi
+  "emits an infix operation with exactly two arguments"
+  {:added "3.0"}
+  [raw args grammar mopts]
+  (if (not (= 2 (count args)))
+    (throw (ex-info "Two arguments required" {:raw raw :arguments args}))
+    (emit-infix raw args grammar mopts)))
+
+(defn emit-assign
+  "emits an assignment expression"
+  {:added "3.0"}
+  [raw args grammar mopts]
+  (if (not (= 2 (count args)))
+    (throw (ex-info "Two assignment arguments required" {:arguments args}))
+    (let [space (get-in grammar [:default :common :space])
+          assign (or raw (get-in grammar [:default :common :assign]))]
+      (string/join (str space assign space)
+                   (emit-array args grammar mopts emit-wrapping)))))
+
+(defn emit-return-do
+  "adds a return operation to the last value of a do form"
+  {:added "4.0"}
+  [arg grammar mopts]
+  (let [values (vec arg)
+        output (concat (drop-last-value values)
+                       [(list 'return (last values))])]
+    (*emit-fn* (apply list output) grammar mopts)))
+
+(defn emit-return-base
+  "emits the base return representation"
+  {:added "4.0"}
+  [raw args grammar mopts]
+  (let [multi (get-in grammar [:default :return :multi])
+        values (vec args)]
+    (if (and (not multi) (> (count values) 1))
+      (throw (ex-info "One or zero arguments for return"
+                      {:raw raw :arguments values}))
+      (with-emitter
+       (fn [] (emit/emit-return (apply list (concat ['return] values))
+                                {:raw raw} grammar mopts))))))
+
+(defn emit-return
+  "emits a return operation"
+  {:added "3.0"}
+  [raw args grammar mopts]
+  (let [value (first args)]
+    (cond (and (list? value) (= 'return (first value)))
+          (emit-return raw (rest value) grammar mopts)
+
+          (and (list? value)
+               (or (= 'do (first value)) (= 'do* (first value))))
+          (emit-return-do value grammar mopts)
+
+          :else (emit-return-base raw args grammar mopts))))
+
+(defn emit-with-global
+  "emits a global symbol through the configured transform"
+  {:added "4.0"}
+  [_ form grammar mopts]
+  (let [token (second form)
+        transform (get-in grammar [:token :symbol :global])]
+    (if transform
+      (*emit-fn* (transform token grammar mopts) grammar mopts)
+      (apply str (helper/emit-symbol-full token (namespace token) grammar)))))
+
+(defn emit-symbol-classify
+  "classifies a qualified symbol against module options"
+  {:added "3.0"}
+  [sym mopts]
+  (let [module (:module mopts)
+        entry (:entry mopts)
+        book (:book mopts)
+        sym-ns (util/sym-module sym)
+        sym-id (util/sym-id sym)]
+    (if (nil? sym-ns)
+      [:unknown nil]
+      (let [alias (get (:alias module) sym-ns)]
+        (if alias
+          [:alias alias]
+          (let [link-ns (or (if (get (:internal module) sym-ns) sym-ns nil)
+                            (if (or (= (:id module) sym-ns)
+                                    (= (:module entry) sym-ns))
+                              sym-ns nil)
+                            (get (:link module) sym-ns))
+                target-ns (or link-ns sym-ns)
+                external (get-in book [:modules target-ns])]
+            (cond (= :defglobal (get-in external [:code sym-id :op-key]))
+                  [:global target-ns]
+                  (or (= (:id module) target-ns)
+                      (= (:module entry) target-ns))
+                  [:self target-ns]
+                  :else [:link target-ns])))))))
+
+(defn emit-symbol-standard
+  "emits a symbol using Foundation module and replacement rules"
+  {:added "3.0"}
+  [sym grammar mopts]
+  (let [classification (emit-symbol-classify sym mopts)
+        kind (first classification)
+        target-ns (second classification)
+        options (get-in grammar [:token :symbol])
+        link-fn (:link-fn options)
+        separator (or (get-in grammar [:default :common :namespace]) ".")
+        layout (:layout mopts)
+        module (:module mopts)
+        module-symbol (fn [value]
+                        (str (or (get (:internal module) target-ns)
+                                 (namespace value))
+                             separator
+                             (name value)))
+        link-symbol (fn [value]
+                      (cond (= layout :flat) (name value)
+                            (= layout :module)
+                            (if (= target-ns (:id module))
+                              (name value)
+                              (module-symbol value))
+                            :else (module-symbol value)))
+        base (cond (= kind :alias) (str target-ns separator (name sym))
+                   (= kind :global)
+                   (emit-with-global nil
+                                     [nil (symbol (str target-ns) (name sym))]
+                                     grammar mopts)
+                   (= kind :unknown)
+                   (if target-ns
+                     (throw (ex-info "Unknown namespace"
+                                     {:lang (:lang mopts)
+                                      :namespace target-ns
+                                      :input sym
+                                      :layout layout
+                                      :classify classification}))
+                     (name sym))
+                   link-fn (*emit-fn* (link-fn sym mopts) grammar mopts)
+                   (or (= layout :full) (= layout :host))
+                   (helper/emit-symbol-full sym target-ns grammar)
+                   (= kind :self) (name sym)
+                   (= kind :link) (link-symbol sym))]
+    (if (or (= kind :global) link-fn)
+      base
+      (reduce-kv (fn [out match replacement]
+                   (string/replace out (str match) replacement))
+                 base
+                 (or (:replace options) {})))))
+
+(defn emit-symbol
+  "emits a symbol"
+  {:added "4.0"}
+  [form grammar mopts]
+  (let [custom (get-in grammar [:token :symbol :emit-fn])]
+    (if custom
+      (custom form grammar mopts)
+      (emit-symbol-standard form grammar mopts))))
+
+(defn emit-token
+  "emits a token selected by its Foundation token key"
+  {:added "3.0"}
+  [token-key form grammar mopts]
+  (let [configured (if (= token-key :boolean)
+                     (or (get-in grammar [:token :boolean])
+                         (get-in grammar [:token (if form :true :false)]))
+                     (get-in grammar [:token token-key]))
+        options (if (map? configured) configured {})
+        custom (:custom options)
+        emit-fn (:emit options)
+        as (if (map? configured) (:as options) configured)]
+    (cond (and (= token-key :string) *emit-internal*) form
+          (and (= token-key :string) (= :single (:quote options)))
+          (helper/pr-single form)
+          (= token-key :symbol) (emit-symbol form grammar mopts)
+          custom (custom form)
+          as (if (fn? as) (as form) as)
+          emit-fn (emit-fn form grammar mopts)
+          :else (pr-str form))))
+
+(defn emit-with-decorate
+  "emits the decorated form"
+  {:added "4.0"}
+  [_ form grammar mopts]
+  (*emit-fn* (nth form 2) grammar mopts))
+
+(defn emit-with-uuid
+  "emits a portable unique identifier"
+  {:added "4.0"}
+  [_ form grammar mopts]
+  (str (gensym "uuid-")))
+
+(defn emit-with-rand
+  "emits a portable generated number"
+  {:added "4.0"}
+  [_ form grammar mopts]
+  (*emit-fn* (if (= :int (second form)) 1 0.5) grammar mopts))
+
+(defn- first-keyword-index
+  [args]
+  (loop [index 0
+         values (vec args)]
+    (if (= index (count values))
+      -1
+      (if (keyword? (nth values index))
+        index
+        (recur (+ index 1) values)))))
+
+(defn invoke-kw-parse
+  "separates positional and keyword arguments"
+  {:added "3.0"}
+  [args]
+  (let [values (vec args)
+        index (first-keyword-index values)]
+    (if (< index 0)
+      [values []]
+      [(take index values)
+       (partition 2 (drop index values))])))
+
+(defn emit-invoke-kw-pair
+  "emits one keyword argument pair"
+  {:added "3.0"}
+  [pair grammar mopts]
+  (let [options (helper/get-options grammar [:default :invoke])
+        key (first pair)
+        value (second pair)]
+    (str (util/sym-default-str (name key))
+         (:assign options)
+         (*emit-fn* value grammar mopts))))
+
+(defn emit-invoke-args
+  "returns emitted positional and keyword arguments"
+  {:added "3.0"}
+  [args grammar mopts]
+  (let [parsed (invoke-kw-parse args)
+        positional (first parsed)
+        keyword-args (second parsed)]
+    (concat (emit-array positional grammar mopts)
+            (map (fn [pair]
+                   (emit-invoke-kw-pair pair grammar mopts))
+                 keyword-args))))
+
+(defn emit-invoke-layout
+  "lays out emitted invocation arguments"
+  {:added "4.0"}
+  [str-array grammar mopts]
+  (let [options (helper/get-options grammar [:default :invoke])]
+    (wrapped-str
+     (string/join (str (:sep options) (:space options)) str-array)
+     [:default :invoke]
+     grammar)))
+
+(defn emit-invoke-raw
+  "emits a reserved invocation"
+  {:added "3.0"}
+  [raw args grammar mopts]
+  (str raw (emit-invoke-layout (emit-invoke-args args grammar mopts)
+                               grammar mopts)))
+
+(defn emit-invoke-static
+  "emits a namespaced static invocation"
+  {:added "3.0"}
+  [form grammar mopts]
+  (let [sym (first form)
+        separator (:static (helper/get-options grammar [:default :invoke]))]
+    (emit-invoke-raw (str (namespace sym) separator (name sym))
+                     (rest form) grammar mopts)))
+
+(defn emit-invoke-typecast
+  "emits a typecast expression"
+  {:added "3.0"}
+  [form grammar mopts]
+  (let [options (helper/get-options grammar [:default :invoke])
+        values (vec form)
+        target (last values)
+        casts (map name (drop-last-value values))]
+    (str (:start options)
+         (:start options)
+         (string/join " " casts)
+         (:end options)
+         (*emit-fn* target grammar mopts)
+         (:end options))))
+
+(defn emit-invoke
+  "emits a general invocation"
+  {:added "3.0"}
+  [_ form grammar mopts]
+  (let [sym (first form)
+        custom (get-in grammar [:default :invoke :custom])
+        keyword-fn (get-in grammar [:default :invoke :keyword-fn])]
+    (cond custom (custom form grammar mopts)
+          (and (keyword? sym) keyword-fn) (keyword-fn form grammar mopts)
+          (and (keyword? sym) (namespace sym))
+          (emit-invoke-static form grammar mopts)
+          (keyword? sym) (emit-invoke-typecast form grammar mopts)
+          :else
+          (let [target (*emit-fn* sym grammar mopts)
+                options (get-in grammar [:default :common])
+                target (if (symbol? sym)
+                         target
+                         (str (:start options) target (:end options)))]
+            (emit-invoke-raw target (rest form) grammar mopts)))))
+
+(defn emit-new
+  "emits a constructor invocation"
+  {:added "3.0"}
+  [raw args grammar mopts]
+  (let [sym (first args)
+        target (if (keyword? sym) (name sym) sym)]
+    (if (nil? sym)
+      (throw (ex-info "One or more arguments required for constructor"
+                      {:raw raw :arguments args}))
+      (str raw " "
+           (*emit-fn* target grammar mopts)
+           (emit-invoke-layout
+            (emit-invoke-args (rest args) grammar mopts)
+            grammar mopts)))))
+
+(defn emit-class-static-invoke
+  "emits a static field or method access"
+  {:added "4.0"}
+  [raw args grammar mopts]
+  (let [sym (first args)
+        field (second args)
+        separator (or raw (:static (helper/get-options grammar [:default :invoke])))]
+    (if (keyword? field)
+      (str sym separator (name field))
+      (emit-invoke-raw (str sym separator field)
+                       (drop 2 args) grammar mopts))))
+
+(defn emit-index-entry
+  "emits one index or member-access entry"
+  {:added "3.0"}
+  [entry grammar mopts]
+  (with-emitter
+   (fn [] (emit/emit-index-entry entry grammar mopts))))
+
+(defn emit-index
+  "emits an indexed expression"
+  {:added "3.0"}
+  [_ args grammar mopts]
+  (with-emitter
+   (fn [] (emit/emit-index (apply list (concat ['.] args)) nil grammar mopts))))
+
+(defn emit-op
+  "dispatches a reserved common operation"
+  {:added "3.0"}
+  ([key form grammar mopts]
+   (emit-op key form grammar mopts {}))
+  ([key form grammar mopts expansion]
+   (let [entry (get-in grammar [:reserved (first form)])
+         mode (:emit entry)
+         raw (:raw entry)
+         args (vec (rest form))
+         custom (get expansion mode)]
+     (cond (= mode :discard) ""
+           (= mode :free) (emit-free (:sep entry) form grammar mopts)
+           (= mode :squash) (emit-squash key form grammar mopts)
+           (= mode :comment) (emit-comment raw form grammar mopts)
+           (= mode :indent) (emit-indent key form grammar mopts)
+           (= mode :token) raw
+           (= mode :alias) (*emit-fn* (apply list (concat [raw] args)) grammar mopts)
+           (= mode :unit) (emit-unit entry form grammar mopts)
+           (= mode :internal) (emit-internal form grammar mopts)
+           (= mode :internal-str) (emit-internal-str form grammar mopts)
+           (= mode :pre) (emit-pre raw args grammar mopts)
+           (= mode :post) (emit-post raw args grammar mopts)
+           (= mode :prefix) (emit-prefix raw args grammar mopts)
+           (= mode :postfix) (emit-postfix raw args grammar mopts)
+           (= mode :infix) (emit-infix raw args grammar mopts)
+           (= mode :infix-) (emit-infix-pre raw args grammar mopts)
+           (= mode :infix*) (emit-infix-default raw args (:default entry) grammar mopts)
+           (= mode :infix-if) (emit-infix-if form grammar mopts)
+           (= mode :bi) (emit-bi raw args grammar mopts)
+           (= mode :between) (emit-between raw args grammar mopts)
+           (= mode :assign) (emit-assign raw args grammar mopts)
+           (= mode :invoke) (emit-invoke-raw raw args grammar mopts)
+           (= mode :new) (emit-new raw args grammar mopts)
+           (= mode :static-invoke) (emit-class-static-invoke raw args grammar mopts)
+           (= mode :index) (emit-index raw args grammar mopts)
+           (= mode :return) (emit-return raw args grammar mopts)
+           (or (= mode :macro) (= mode :template))
+           (emit-macro key form grammar mopts)
+           (or (= mode :hard-link) (= mode :alias))
+           (*emit-fn* (apply list (concat [raw] args)) grammar mopts)
+           (= mode :with-global) (emit-with-global key form grammar mopts)
+           (= mode :with-decorate) (emit-with-decorate key form grammar mopts)
+           (= mode :with-uuid) (emit-with-uuid key form grammar mopts)
+           (= mode :with-rand) (emit-with-rand key form grammar mopts)
+           (= mode :throw)
+           (throw (ex-info "Not allowed as op" {:symbol (first form) :form form}))
+           custom (custom key entry form grammar mopts)
+           :else (throw (ex-info "No matching emit clause"
+                                 {:emit mode :key key :form form :entry entry}))))))
+
+(defn form-key
+  "returns the grammar key and type associated with a form"
+  {:added "3.0"}
+  [form grammar]
+  (let [base (helper/form-key-base form)
+        classified (if (vector? base)
+                     base
+                     (let [entry (get-in grammar [:reserved (first form)])]
+                       (if entry
+                         [(:op entry) (or (:type entry) :statement)]
+                         [:invoke :invoke])))
+        key (first classified)]
+    (if (reduce (fn [found banned-key]
+                  (or found (= banned-key key)))
+                false
+                (or (:banned grammar) #{}))
+      (throw (ex-info "Disallowed in form"
+                      {:form form :key key :type (second classified)}))
+      classified)))
+
+(def +emit-lookup+
+  {:token emit-token
+   :invoke emit-invoke
+   :macro emit-macro})
+
+(defn emit-common-loop
+  "emits one form without installing recursive common emission"
+  {:added "4.0"}
+  ([form grammar mopts]
+   (emit-common-loop form grammar mopts +emit-lookup+ emit-op))
+  ([form grammar mopts fn-lookup fn-default]
+   (let [classification (form-key form grammar)
+         key (first classification)
+         type (second classification)
+         checked (if (> (count classification) 2)
+                   (nth classification 2)
+                   nil)
+         output-fn (or (get fn-lookup type) fn-default)]
+     (if checked
+       (or (emit-reserved-value form grammar mopts)
+           (output-fn key form grammar mopts))
+       (output-fn key form grammar mopts)))))
+
+(defn emit-common-loop-bound
+  "Emits through a supplied top-level dispatch table and recursive emitter.
+
+   This is the cycle-free boundary used by lang.common.emit: emit-common may
+   retain the low-level compatibility engine while the public emitter routes
+   recursively through the file-by-file Foundation pipeline."
+  [form grammar mopts fn-lookup fn-default recursive-emit]
+  (binding [*emit-fn* recursive-emit]
+    (emit-common-loop form grammar mopts fn-lookup fn-default)))
+
+(defn emit-common
+  "emits one form using common emission recursively"
+  {:added "4.0"}
+  [form grammar mopts]
+  (binding [*emit-fn* emit-common-loop]
+    (emit-common-loop form grammar mopts)))

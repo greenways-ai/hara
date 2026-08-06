@@ -18,7 +18,7 @@ component map.
     and `postgres.*` libraries live under `core/lib/src-lang` with tests in
     `core/lib/test-lang`. Examples are in `core/lib/examples/` and benchmarks
     in `core/lib/bench/`. Notable namespaces include `std.foundation`, the
-    `tahto.*` compiler port, and the `std.ledger.*` consensus-free
+    `lang.*` compiler port, and the `std.ledger.*` consensus-free
     executable-chain experiments.
   - `core/spec/` — parity specifications and substrate tests for core language
     targets.

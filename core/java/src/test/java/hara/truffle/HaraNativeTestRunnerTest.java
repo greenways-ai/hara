@@ -193,7 +193,7 @@ public final class HaraNativeTestRunnerTest {
   public void runsPortablePostgresEntityUtilities() throws Exception {
     HaraNativeTestRunner.Result result =
         HaraNativeTestRunner.runFile(
-            ROOT, ROOT.resolve("lib/test/tahto/model/spec_postgres/entity_util_test.hal"));
+            ROOT, ROOT.resolve("lib/test/lang/model/spec_postgres/entity_util_test.hal"));
 
     assertTrue(result.failureMessage(), result.passed());
     assertEquals(8, result.facts());

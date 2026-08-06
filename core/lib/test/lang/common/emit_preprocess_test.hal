@@ -1,0 +1,21 @@
+(ns lang.common.emit-preprocess-test
+  (:use code.test)
+  (:require [lang.common.emit-preprocess :as preprocess]
+            [lang.common.emit-rewrite :as rewrite]))
+
+(fact "preprocess façade preserves input forms"
+  (preprocess/to-input '(+ 1 2))
+  => '(+ 1 2))
+
+(fact "rewrite stages apply configured transforms in order"
+  (rewrite/rewrite-stage
+   :staging 1
+   {:rewrite {:staging [(fn [value context] (+ value 1))
+                        (fn [value context] (* value 2))]}}
+   {})
+  => 4
+
+  (rewrite/stage-transforms {} :staging)
+  => [])
+
+(run {:namespace "lang.common.emit-preprocess-test"})

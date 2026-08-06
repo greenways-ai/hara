@@ -1,6 +1,6 @@
 (ns xt.lang.spec-primitive
   (:config {:blank true})
-  (:require [tahto.core :as l :refer [defspec.xt]]
+  (:require [lang.core :as l :refer [defspec.xt]]
             [std.foundation :refer :all :exclude [do if fn quote try * + - / < <= == > >= await break mod not= return -> ->>
                                                    and case comment cond doto for let letfn not or when while]]))
 

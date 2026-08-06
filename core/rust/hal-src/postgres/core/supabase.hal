@@ -1,6 +1,6 @@
 (ns postgres.core.supabase
-  (:require [tahto.core :as l]
-            [tahto.core.script :as script]
+  (:require [lang.core :as l]
+            [lang.core.script :as script]
             [std.foundation :as f]
             [std.foundation.json :as json]
             [std.foundation.string :as string]))

@@ -1,0 +1,715 @@
+(ns lang.model.v1.spec-js
+  (:require [lang.base.v1.grammar-spec :as spec]
+            [lang.common.grammar-api :as grammar]
+            [lang.common.registry :as registry]
+            [lang.model.v1.spec-xtalk :as xtalk]))
+
+(def +language+ :js)
+(def +tag+ :js)
+(def +version+ spec/+version+)
+
+(defn js-math-quot
+  [form]
+  (list 'Math.floor (list '/ (nth form 1) (nth form 2))))
+
+(defn js-array-is-array
+  [value]
+  (list '. 'Array (list 'isArray value)))
+
+(defn js-json-stringify
+  [value]
+  (list '. 'JSON (list 'stringify value)))
+
+(defn js-async-run
+  [form]
+  (let [thunk (nth form 1)]
+    (list (quote .)
+          (list (quote .) (quote Promise) (list (quote resolve)))
+          (list (quote then) thunk))))
+
+(defn js-prototype-create
+  [form]
+  (let [m (nth form 1)]
+    (list (quote do)
+          (list (quote var) (quote out) {})
+          (list (quote for:object) [[(quote k) (quote f)] m]
+                (list (quote if) (list (quote x:is-function?) (quote f))
+                      (list := (list (quote .) (quote out) [(quote k)])
+                            (list (quote fn) [(quote a) (quote b) (quote c) (quote d)]
+                                  (list (quote return)
+                                        (list (quote f) (quote this)
+                                              (quote a) (quote b)
+                                              (quote c) (quote d)))))
+                      (list := (list (quote .) (quote out) [(quote k)])
+                            (quote f))))
+          (list (quote return) (quote out)))))
+
+(defn js-prototype-method
+  [form]
+  (let [obj (nth form 1)
+        key (nth form 2)
+        value (list (quote x:get-key) obj key nil)]
+    (list
+     (list (quote fn) [(quote method)]
+           (list (quote if) (list (quote x:is-function?) (quote method))
+                 (list (quote return)
+                       (list (quote fn) [(quote self) (quote a) (quote b) (quote c) (quote d)]
+                             (list (quote return)
+                                   (list (quote .) (quote method)
+                                         (list (quote call) (quote self)
+                                               (quote a) (quote b) (quote c) (quote d))))))
+                 (list (quote return) (quote method))))
+     value)))
+
+(defn js-x-construct [form]
+  (list (quote .) (quote Reflect)
+        (list (quote construct) (nth form 1) (nth form 2))))
+
+(defn js-promise
+  [form]
+  (let [thunk (nth form 1)]
+    (list (quote .)
+          (list (quote .) (quote Promise) (list (quote resolve)))
+          (list (quote then) thunk))))
+
+(defn js-promise-then
+  [form]
+  (list (quote .) (nth form 1)
+        (list (quote then) (nth form 2))))
+
+(defn js-promise-new [form]
+  (list (quote new) (quote Promise) (nth form 1)))
+
+(defn js-promise-all [form]
+  (list (quote .) (quote Promise) (list (quote all) (nth form 1))))
+
+(defn js-promise-catch [form]
+  (list (quote .) (nth form 1) (list (quote catch) (nth form 2))))
+
+(defn js-promise-finally [form]
+  (list (quote .) (nth form 1) (list (quote finally) (nth form 2))))
+
+(defn js-promise-native [form]
+  (list (quote instanceof) (nth form 1) (quote Promise)))
+
+(defn js-type-native
+  [form]
+  (let [value (nth form 1)]
+    (list 'do
+          (list 'when (list '== value nil)
+                (list 'return nil))
+          (list 'var 'native-type ':= (list 'typeof value))
+          (list 'if (list '== 'native-type "object")
+                (list 'if (js-array-is-array value)
+                      (list 'return "array")
+                      (list 'return "object"))
+                (list 'return 'native-type)))))
+
+(defn js-ex-native
+  [form]
+  (let [error (nth form 1)]
+    (list (quote instanceof) error (quote Error))))
+
+(defn js-ex-new
+  [form]
+  (let [message (nth form 1)
+        has-data (> (count form) 2)]
+    (if has-data
+      (list (quote Object.assign)
+            (list (quote new) (quote Error) message)
+            {"data" (nth form 2)})
+      (list (quote new) (quote Error) message))))
+
+(defn js-ex-message
+  [form]
+  (let [error (nth form 1)]
+    (list :? (js-ex-native (list (quote x:ex-native?) error))
+          (list (quote .) error ["message"]) nil)))
+
+(defn js-ex-data
+  [form]
+  (let [error (nth form 1)]
+    (list :? (js-ex-native (list (quote x:ex-native?) error))
+          (list (quote .) error ["data"]) nil)))
+
+(defn js-typeof-predicate
+  [expected form]
+  (list '== expected (list 'typeof (nth form 1))))
+
+(defn js-is-object
+  [form]
+  (let [value (nth form 1)]
+    (list 'and
+          (list 'not= nil value)
+          (list '== "object" (list 'typeof value))
+          (list 'not (js-array-is-array value)))))
+
+(defn js-apply
+  [form]
+  (list (nth form 1) (list ':.. (nth form 2))))
+
+(defn js-return-encode
+  [form]
+  (let [out (nth form 1)
+        id (nth form 2)
+        key (nth form 3)]
+    (list 'do
+          (list 'var 'type-fn
+                (list 'fn ['value]
+                      (js-type-native (list 'x:type-native 'value))))
+          (list 'var 'return-type (list 'type-fn out))
+          (list 'return
+                (js-json-stringify
+                 {:id id
+                  :key key
+                  :type "data"
+                  :return 'return-type
+                  :value out})))))
+
+(defn js-return-wrap
+  [form]
+  (let [f (nth form 1)
+        encode-fn (nth form 2)]
+    (list 'try
+          (list 'var 'out ':= (list f))
+          (list 'return (list encode-fn 'out))
+          (list 'catch 'error
+                (list 'return
+                      (js-json-stringify
+                       {:type "error"
+                        :value {:message (list '. 'error ["message"])
+                                :stack (list '. 'error ["stack"])}}))))))
+
+(defn js-return-eval
+  [form]
+  (let [source (nth form 1)
+        wrap-fn (nth form 2)]
+    (list 'return
+          (list wrap-fn
+                (list 'fn []
+                      (list 'return (list 'eval source)))))))
+(defn js-var [form]
+  (let [decl (nth form 1)
+        args (vec (drop 2 form))]
+    (if (= 0 (count args))
+      (list (quote var*) :let decl)
+      (list (quote var*) :let decl := (last args)))))
+
+(defn js-for-index [form]
+  (let [binding-form (second form)
+        i (first binding-form)
+        range-form (vec (second binding-form))
+        start (nth range-form 0)
+        stop (nth range-form 1)
+        step (if (> (count range-form) 2) (nth range-form 2) 1)
+        sign (if (and (number? step) (pos? step)) (quote <) (quote >))
+        body (vec (drop 2 form))]
+    (apply list (quote for)
+           [(list (quote var*) :let i := start)
+            (list sign i stop)
+            (list := i (list (quote +) i step))]
+           body)))
+
+(defn js-for-object
+  [form]
+  (let [binding-form (second form)
+        pair (first binding-form)
+        object (second binding-form)
+        k (first pair)
+        v (second pair)
+        body (vec (drop 2 form))
+        selection (cond (= k (quote _)) [v (quote Object.values)]
+                        (= v (quote _)) [k (quote Object.keys)]
+                        :else [pair (quote Object.entries)])
+        binding (first selection)
+        method (second selection)]
+    (apply list (quote for)
+           [(list (quote var*) :let binding) :of (list method object)]
+           body)))
+
+(defn js-for-array
+  [form]
+  (let [binding-form (second form)
+        e (first binding-form)
+        arr (second binding-form)
+        body (vec (drop 2 form))]
+    (if (vector? e)
+      (let [i (first e)
+            v (second e)
+            params [(list (quote var*) :let i := 0)
+                    (list (quote <) i (list (quote .) arr (quote length)))
+                    (list :++ i)]
+            statements (into [(list (quote var*) :let v
+                                    (list (quote .) arr [i]))]
+                             body)]
+        (apply list (quote for) params statements))
+      (apply list (quote for)
+             [(list (quote var*) :let e) :of (list (quote %) arr)]
+             body))))
+
+(defn js-for-iter
+  [form]
+  (let [binding-form (second form)
+        e (first binding-form)
+        it (second binding-form)
+        body (vec (drop 2 form))]
+    (apply list (quote for)
+           [(list (quote var*) :let e) :of (list (quote %) it)]
+           body)))
+
+(defn js-x-str-comp [form]
+  (list (quote >) 0
+        (list (quote .) (nth form 1)
+              (list (quote localeCompare) (nth form 2)))))
+
+(defn js-x-len [form]
+  (list (quote .) (nth form 1) (quote length)))
+
+(defn js-x-cat [form]
+  (apply list (quote +) (vec (drop 1 form))))
+
+(defn js-x-unpack [form]
+  (list :.. (nth form 1)))
+
+(defn js-x-has-key [form]
+  (let [obj (nth form 1)
+        key (nth form 2)]
+    (if (> (count form) 3)
+      (list (quote ==) (nth form 3)
+            (list (quote x:get-key) obj key nil))
+      (list (quote not=) nil (list (quote .) obj [key])))))
+
+(defn js-x-lu-get [form]
+  (let [lookup (nth form 1)
+        key (nth form 2)]
+    (list :?
+          (list (quote .) lookup (list (quote has) key))
+          (list (quote .) lookup (list (quote get) key))
+          nil)))
+
+(defn js-x-lu-set [form]
+  (list (quote .) (nth form 1)
+        (list (quote set) (nth form 2) (nth form 3))))
+
+(defn js-x-lu-del [form]
+  (list (quote .) (nth form 1) (list (quote delete) (nth form 2))))
+
+(defn js-x-obj-keys [form]
+  (list (quote Object.keys) (nth form 1)))
+
+(defn js-x-obj-clone [form]
+  (list (quote Object.assign) {} (nth form 1)))
+
+(defn js-x-arr-method [method form]
+  (list (quote .) (nth form 1)
+        (apply list method (vec (drop 2 form)))))
+
+(defn js-x-arr-clone [form]
+  (list (quote .) (nth form 1) (list (quote slice))))
+
+(defn js-string-method [method form]
+  (list (quote .) (nth form 1)
+        (apply list method (vec (drop 2 form)))))
+
+(defn js-x-str-char [form]
+  (js-string-method (quote charCodeAt) form))
+
+(defn js-x-str-split [form]
+  (js-string-method (quote split) form))
+
+(defn js-x-str-join [form]
+  (list (quote .) (nth form 2)
+        (list (quote join) (nth form 1))))
+
+(defn js-x-str-index-of [form]
+  (js-string-method (quote indexOf) form))
+
+(defn js-x-str-substring [form]
+  (js-string-method (quote substring) form))
+
+(defn js-x-str-to-upper [form]
+  (js-string-method (quote toUpperCase) form))
+
+(defn js-x-str-to-lower [form]
+  (js-string-method (quote toLowerCase) form))
+
+(defn js-x-str-to-fixed [form]
+  (js-string-method (quote toFixed) form))
+
+(defn js-x-str-replace [form]
+  (let [s (nth form 1)
+        token (nth form 2)
+        replacement (nth form 3)]
+    (list (quote .) s
+          (list (quote replace)
+                (list (quote RegExp) token "g")
+                replacement))))
+
+(defn js-x-str-trim [form]
+  (js-string-method (quote trim) form))
+
+(defn js-x-str-trim-left [form]
+  (js-string-method (quote trimLeft) form))
+
+(defn js-x-str-trim-right [form]
+  (js-string-method (quote trimRight) form))
+
+(defn js-x-str-pad-left [form]
+  (js-string-method (quote padStart) form))
+
+(defn js-x-str-pad-right [form]
+  (js-string-method (quote padEnd) form))
+
+(defn js-x-str-starts-with [form]
+  (js-string-method (quote startsWith) form))
+
+(defn js-x-str-ends-with [form]
+  (js-string-method (quote endsWith) form))
+
+(defn js-x-bytes-new [form]
+  (list (quote .) (quote Uint8Array)
+        (list (quote from) (nth form 1))))
+
+(defn js-x-bytes-set [form]
+  (let [value (nth form 1)
+        idx (nth form 2)
+        byte (nth form 3)]
+    (list (list (quote fn) []
+                (list (quote x:set-idx) value idx byte)
+                (list (quote return) value)))))
+
+(defn js-x-bytes-copy [form]
+  (list (quote .) (quote Uint8Array)
+        (list (quote from) (nth form 1))))
+
+(defn js-x-bytes-slice [form]
+  (let [value (nth form 1)
+        start (nth form 2)
+        args (if (> (count form) 3)
+               [start (nth form 3)]
+               [start])]
+    (list (quote .) value (apply list (quote slice) args))))
+
+(defn js-x-bytes-u8 [form]
+  (list (quote b:&) (nth form 1) 255))
+
+(defn js-x-bytes-s8 [form]
+  (let [value (nth form 1)]
+    (list :? (list (quote >) value 127)
+          (list (quote -) value 256)
+          value)))
+
+(defn js-x-str-encode [form]
+  (list (quote .) (list (quote new) (quote TextEncoder))
+        (list (quote encode) (nth form 1))))
+
+(defn js-x-str-decode [form]
+  (list (quote .) (list (quote new) (quote TextDecoder))
+        (list (quote decode) (nth form 1))))
+
+(defn js-x-bit-not [form]
+  (list (quote b:xor) (nth form 1) -1))
+
+(defn js-x-pwd [_form]
+  (list (quote or)
+        (list (quote .) (quote process) (quote env) ["PWD"])
+        (list (quote .) (quote process) (list (quote cwd)))))
+
+(defn js-x-shell [form]
+  (let [command (nth form 1)
+        root (nth form 2)
+        callback (nth form 3)]
+    (list (quote new) (quote Promise)
+          (list (quote fn) [(quote resolve)]
+                (list (quote .) (list (quote require) "child_process")
+                      (list (quote exec) command {:cwd root}
+                            (list (quote fn) [(quote err) (quote stdout) (quote stderr)]
+                                  (list (quote if) (quote err)
+                                        (list (quote return)
+                                              (list (quote resolve)
+                                                    (list callback
+                                                          {:code (list (quote .) (quote err) ["code"])
+                                                           :err (quote stderr)
+                                                           :out (quote stdout)} nil)))
+                                        (list (quote return)
+                                              (list (quote resolve)
+                                                    (list callback nil (quote stdout))))))))))))
+
+(defn js-x-file-resolve [form]
+  (list (quote .) (list (quote require) "path")
+        (list (quote resolve) (nth form 1) (nth form 2))))
+
+(defn js-x-file-read [form]
+  (list (quote .)
+        (list (quote .) (list (quote require) "fs") ["promises"])
+        (list (quote readFile) (nth form 1))))
+
+(defn js-x-file-write [form]
+  (list (quote .)
+        (list (quote .) (list (quote require) "fs") ["promises"])
+        (list (quote writeFile) (nth form 1) (nth form 2))))
+
+(defn js-x-iter-from-obj [form]
+  (list (list (quote .)
+              (list (quote Object.entries) (nth form 1))
+              [(quote Symbol.iterator)])))
+
+(defn js-x-iter-from-arr [form]
+  (list (list (quote .) (nth form 1) [(quote Symbol.iterator)])))
+
+(defn js-x-iter-from [form]
+  (js-x-iter-from-arr form))
+
+(defn js-x-iter-eq [form]
+  (let [it0 (nth form 1)
+        it1 (nth form 2)
+        eq-fn (nth form 3)]
+    (list (quote do)
+          (list (quote for:iter) [(quote x0) it0]
+                (list (quote var) (quote r1)
+                      (list (quote .) it1 (list (quote next))))
+                (list (quote cond)
+                      (list (quote .) (quote r1) (quote done))
+                      (list (quote return) false)
+                      (list (quote not)
+                            (list eq-fn (quote x0)
+                                  (list (quote .) (quote r1) (quote value))))
+                      (list (quote return) false)))
+          (list (quote return)
+                (list (quote .) it1 (list (quote next)) (quote done))))))
+
+(defn js-x-iter-next [form]
+  (list (quote .) (nth form 1) (list (quote next))))
+
+(defn js-x-iter-has [form]
+  (list (quote not=) nil
+        (list (quote .) (nth form 1) [(quote Symbol.iterator)])))
+
+(defn js-x-iter-native [form]
+  (list (quote ==) "function"
+        (list (quote typeof)
+              (list (quote .) (nth form 1) ["next"]))))
+
+(def +grammar+
+  (grammar/definition
+   {:grammar/id +tag+
+    :grammar/version +version+
+    :grammar/release "foundation-v1"
+    :grammar/language +language+
+    :grammar/tag +tag+
+    :grammar/engine {:minimum 1 :maximum 1}
+    :grammar/parent
+    {:grammar/id xtalk/+tag+
+     :grammar/version xtalk/+version+}
+    :operators
+    {:override
+     {:with-global {:value true :raw "globalThis"}
+      :x-print {:raw "console.log" :emit :invoke}
+      :pow {:raw "Math.pow" :emit :invoke}
+      :var {:symbol #{'var*} :raw ""}
+      :for-object {:macro js-for-object :emit :macro}
+      :for-array {:macro js-for-array :emit :macro}
+      :for-iter {:macro js-for-iter :emit :macro}
+      :for-index {:macro js-for-index :emit :macro}
+      :prototype-get {:raw "Object.getPrototypeOf" :emit :invoke}
+      :prototype-set {:raw "Object.setPrototypeOf" :emit :invoke}
+      :prototype-create {:macro js-prototype-create :emit :macro :op-spec {:allow-blocks true}}
+      :prototype-method {:macro js-prototype-method :emit :macro}
+      :prototype-tostring {:default "toString" :emit :unit}
+      :x-async-run {:macro js-async-run :emit :macro}
+      :x-promise {:macro js-promise :emit :macro}
+      :x-promise-new {:macro js-promise-new :emit :macro}
+      :x-promise-all {:macro js-promise-all :emit :macro}
+      :x-promise-then {:macro js-promise-then :emit :macro}
+      :x-promise-catch {:macro js-promise-catch :emit :macro}
+      :x-promise-finally {:macro js-promise-finally :emit :macro}
+      :x-promise-native? {:macro js-promise-native :emit :macro}
+      :x-type-native {:macro js-type-native :emit :macro}
+      :x-del {:raw "delete" :emit :prefix}
+      :x-str-comp {:macro js-x-str-comp :emit :macro}
+      :x-str-char {:macro js-x-str-char :emit :macro}
+      :x-str-split {:macro js-x-str-split :emit :macro}
+      :x-str-join {:macro js-x-str-join :emit :macro}
+      :x-str-index-of {:macro js-x-str-index-of :emit :macro}
+      :x-str-substring {:macro js-x-str-substring :emit :macro}
+      :x-str-to-upper {:macro js-x-str-to-upper :emit :macro}
+      :x-str-to-lower {:macro js-x-str-to-lower :emit :macro}
+      :x-str-to-fixed {:macro js-x-str-to-fixed :emit :macro}
+      :x-str-replace {:macro js-x-str-replace :emit :macro}
+      :x-str-trim {:macro js-x-str-trim :emit :macro}
+      :x-str-trim-left {:macro js-x-str-trim-left :emit :macro}
+      :x-str-trim-right {:macro js-x-str-trim-right :emit :macro}
+      :x-str-pad-left {:macro js-x-str-pad-left :emit :macro}
+      :x-str-pad-right {:macro js-x-str-pad-right :emit :macro}
+      :x-str-starts-with {:macro js-x-str-starts-with :emit :macro}
+      :x-str-ends-with {:macro js-x-str-ends-with :emit :macro}
+      :x-bytes-new {:macro js-x-bytes-new :emit :macro}
+      :x-bytes-set {:macro js-x-bytes-set :emit :macro :op-spec {:allow-blocks true}}
+      :x-bytes-copy {:macro js-x-bytes-copy :emit :macro}
+      :x-bytes-slice {:macro js-x-bytes-slice :emit :macro}
+      :x-bytes-u8 {:macro js-x-bytes-u8 :emit :macro}
+      :x-bytes-s8 {:macro js-x-bytes-s8 :emit :macro}
+      :x-str-encode {:macro js-x-str-encode :emit :macro}
+      :x-str-decode {:macro js-x-str-decode :emit :macro}
+      :x-bit-not {:macro js-x-bit-not :emit :macro}
+      :x-eval {:raw "eval" :emit :invoke}
+      :x-construct {:macro js-x-construct :emit :macro}
+      :x-pwd {:macro js-x-pwd :emit :macro}
+      :x-shell {:macro js-x-shell :emit :macro :op-spec {:allow-blocks true}}
+      :x-file-resolve {:macro js-x-file-resolve :emit :macro}
+      :x-file-read {:macro js-x-file-read :emit :macro}
+      :x-file-write {:macro js-x-file-write :emit :macro}
+      :x-len {:macro js-x-len :emit :macro}
+      :x-cat {:macro js-x-cat :emit :macro}
+      :x-err {:raw "throw" :emit :prefix}
+      :x-ex-native? {:macro js-ex-native :emit :macro}
+      :x-ex-new {:macro js-ex-new :emit :macro}
+      :x-ex-message {:macro js-ex-message :emit :macro}
+      :x-ex-data {:macro js-ex-data :emit :macro}
+      :x-now-ms {:raw "Date.now" :emit :invoke}
+      :x-unpack {:macro js-x-unpack :emit :macro}
+      :x-iter-from-obj {:macro js-x-iter-from-obj :emit :macro}
+      :x-iter-from-arr {:macro js-x-iter-from-arr :emit :macro}
+      :x-iter-from {:macro js-x-iter-from :emit :macro}
+      :x-iter-eq {:macro js-x-iter-eq :emit :macro :op-spec {:allow-blocks true}}
+      :x-iter-null {:default (quote ((. [] [Symbol.iterator]))) :emit :unit}
+      :x-iter-next {:macro js-x-iter-next :emit :macro}
+      :x-iter-has? {:macro js-x-iter-has :emit :macro}
+      :x-iter-native? {:macro js-x-iter-native :emit :macro}
+      :x-random {:raw "Math.random" :emit :invoke}
+      :x-has-key? {:macro js-x-has-key :emit :macro}
+      :x-lu-create {:default (list (quote new) (quote Map)) :emit :unit}
+      :x-lu-get {:macro js-x-lu-get :emit :macro}
+      :x-lu-set {:macro js-x-lu-set :emit :macro}
+      :x-lu-del {:macro js-x-lu-del :emit :macro}
+      :x-obj-keys {:macro js-x-obj-keys :emit :macro}
+      :x-obj-clone {:macro js-x-obj-clone :emit :macro}
+      :x-arr-clone {:macro js-x-arr-clone :emit :macro}
+      :x-arr-push {:macro (fn [form] (js-x-arr-method (quote push) form)) :emit :macro}
+      :x-arr-pop {:macro (fn [form] (js-x-arr-method (quote pop) form)) :emit :macro}
+      :x-arr-push-first {:macro (fn [form] (js-x-arr-method (quote unshift) form)) :emit :macro}
+      :x-arr-pop-first {:macro (fn [form] (js-x-arr-method (quote shift) form)) :emit :macro}
+      :x-arr-remove {:macro (fn [form] (list (quote .) (nth form 1) (list (quote splice) (nth form 2) 1))) :emit :macro}
+      :x-arr-insert {:macro (fn [form] (list (quote .) (nth form 1) (list (quote splice) (nth form 2) 0 (nth form 3)))) :emit :macro}
+      :x-arr-map {:macro (fn [form] (js-x-arr-method (quote map) form)) :emit :macro}
+      :x-arr-foldl {:macro (fn [form] (js-x-arr-method (quote reduce) form)) :emit :macro}
+      :x-arr-foldr {:macro (fn [form] (js-x-arr-method (quote reduceRight) form)) :emit :macro}
+      :x-to-string {:raw "String" :emit :invoke}
+      :x-to-number {:raw "Number" :emit :invoke}
+      :x-is-string? {:macro (fn [form] (js-typeof-predicate "string" form)) :emit :macro}
+      :x-is-number? {:macro (fn [form] (js-typeof-predicate "number" form)) :emit :macro}
+      :x-is-integer? {:raw "Number.isInteger" :emit :invoke}
+      :x-is-boolean? {:macro (fn [form] (js-typeof-predicate "boolean" form)) :emit :macro}
+      :x-is-function? {:macro (fn [form] (js-typeof-predicate "function" form)) :emit :macro}
+      :x-is-object? {:macro js-is-object :emit :macro}
+      :x-is-array? {:raw "Array.isArray" :emit :invoke}
+      :x-apply {:macro js-apply :emit :macro}
+      :x-json-encode {:raw "JSON.stringify" :emit :invoke}
+      :x-json-decode {:raw "JSON.parse" :emit :invoke}
+      :x-return-encode {:macro js-return-encode :emit :macro}
+      :x-return-wrap {:macro js-return-wrap :emit :macro}
+      :x-return-eval {:macro js-return-eval :emit :macro}
+      :x-m-abs {:raw "Math.abs" :emit :invoke}
+      :x-m-acos {:raw "Math.acos" :emit :invoke}
+      :x-m-asin {:raw "Math.asin" :emit :invoke}
+      :x-m-atan {:raw "Math.atan" :emit :invoke}
+      :x-m-ceil {:raw "Math.ceil" :emit :invoke}
+      :x-m-cos {:raw "Math.cos" :emit :invoke}
+      :x-m-cosh {:raw "Math.cosh" :emit :invoke}
+      :x-m-exp {:raw "Math.exp" :emit :invoke}
+      :x-m-floor {:raw "Math.floor" :emit :invoke}
+      :x-m-loge {:raw "Math.log" :emit :invoke}
+      :x-m-log10 {:raw "Math.log10" :emit :invoke}
+      :x-m-max {:raw "Math.max" :emit :invoke}
+      :x-m-min {:raw "Math.min" :emit :invoke}
+      :x-m-mod {:raw "%" :emit :infix}
+      :x-m-pow {:raw "Math.pow" :emit :invoke}
+      :x-m-quot {:macro js-math-quot :emit :macro}
+      :x-m-sin {:raw "Math.sin" :emit :invoke}
+      :x-m-sinh {:raw "Math.sinh" :emit :invoke}
+      :x-m-sqrt {:raw "Math.sqrt" :emit :invoke}
+      :x-m-tan {:raw "Math.tan" :emit :invoke}
+      :x-m-tanh {:raw "Math.tanh" :emit :invoke}}
+     :define
+     {:var-let {:op :var-let :symbol #{'var} :macro js-var :emit :macro}
+      :typeof {:op :typeof :symbol #{'typeof} :raw "typeof" :emit :prefix}
+      :instof {:op :instof :symbol #{'instanceof} :raw "instanceof" :emit :infix}}}
+    :emit
+    {:defaults
+     {:allow {:assign #{:symbol :vector :set :map}}
+      :default
+      {:comment {:prefix "//"}
+       :common {:start "("
+                :end ")"
+                :space " "
+                :assign "="
+                :sep ","
+                :statement ";"
+                :namespace "."
+                :newline "\n"
+                :indent 2}
+       :invoke {:start "(" :end ")" :sep "," :space " "}
+       :block {:parameter {:start "(" :end ")"}
+               :body {:start "{" :end "}"}
+               :space-before-body " "}
+       :function {:raw "function"
+                  :space ""
+                  :args {:start "(" :end ")" :sep "," :space ""}
+                  :body {:start "{" :end "}"}
+                  :space-before-body " "}}
+      :token
+      {:nil "null"
+       :true "true"
+       :false "false"
+       :string {:quote :double}
+       :symbol {:namespace "."
+                :replace {"-" "_"
+                          "?" "_p"
+                          "!" "_bang"}}}
+      :data
+      {:vector {:start "[" :end "]" :sep "," :space " "}
+       :set {:start "new Set([" :end "])" :sep "," :space " "}
+       :map {:start "{" :end "}" :sep "," :space " "}
+       :map-entry {:assign ":" :space " "}}
+      :function {:defgen {:raw "function*"}}
+      :define
+      {:defglobal {:raw ""}
+       :def {:raw "const"}
+       :declare {:raw "let"}}
+      :block {:for {:parameter {:sep ";"}}}}}}))
+(defn- install-source
+  [catalog source]
+  (if (registry/find catalog (grammar/source-coordinate source))
+    catalog
+    (registry/install catalog source)))
+
+(defn install
+  "Installs the Foundation-named JavaScript V1 model."
+  [catalog]
+  (install-source (xtalk/install catalog) +grammar+))
+
+(defn catalog
+  []
+  (install (registry/registry)))
+
+(defn select
+  "Resolves JavaScript language :js using grammar tag :js."
+  ([]
+   (select (catalog)))
+  ([catalog]
+   (registry/resolve catalog
+                     {:grammar/id +tag+
+                      :grammar/version +version+})))
+
+(def +selection+ (select))
+
+(def +book+
+  {:lang +language+
+   :parent :xtalk
+   :version +version+
+   :coordinate (:coordinate +selection+)
+   :grammar (:grammar +selection+)
+   :selection +selection+})
+
+
+(def +init+ +book+)

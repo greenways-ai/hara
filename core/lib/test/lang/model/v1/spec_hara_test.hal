@@ -1,0 +1,105 @@
+(ns lang.model.v1.spec-hara-test
+  (:use code.test)
+  (:require [lang.model.v1.spec-hara :as hara]))
+
+^{:refer lang.model.v1.spec-hara/select :added "4.1"}
+(fact "Hara is a versioned child grammar of XTalk"
+  [hara/+language+
+   hara/+tag+
+   (:coordinate hara/+selection+)
+   (:provenance hara/+selection+)
+   (:parent hara/+book+)]
+  => [:hara
+      :hara
+      {:grammar/id :hara
+       :grammar/variant :default
+       :grammar/version 1}
+      [[:emit-template :xtalk 1]
+       [:profile :xtalk 1]
+       [:grammar :xtalk 1]
+       [:grammar :hara 1]]
+      :xtalk])
+
+^{:refer lang.model.v1.spec-hara/compile :added "4.1"}
+(fact "compiles pure XTalk expressions into Hara source"
+  [(read-string (hara/compile '(+ 19 23)))
+   (read-string (hara/compile '(== (+ 1 1) 2)))
+   (read-string (hara/compile '(:? true "yes" "no")))]
+  => ['(+ 19 23)
+      '(= (+ 1 1) 2)
+      '(if true "yes" "no")])
+
+^{:refer lang.model.v1.spec-hara/emit :added "4.1"}
+(fact "models mutable XTalk locals with scoped Hara atoms"
+  (read-string
+   (hara/emit
+    '(do
+       (var value := 1)
+       (:= value (+ value 2))
+       value)))
+  => '(let [value (atom 1)]
+        (do
+          (reset! value (+ (deref value) 2))
+          (deref value))))
+
+^{:refer lang.model.v1.spec-hara/emit :added "4.1"}
+(fact "uses atoms only for rebinding while native Arr owns collection mutation"
+  (read-string
+   (hara/emit
+    '(do
+       (var values := [1 2])
+       (x:arr-push values 3)
+       (x:set-idx values 0 9)
+       values)))
+  => '(let [values (atom (lang.runtime.standard/arr-new 1 2))]
+        (do
+          (lang.runtime.standard/arr-push! (deref values) 3)
+          (do
+            (lang.runtime.standard/arr-set! (deref values) 0 9)
+            (deref values)))))
+
+^{:refer lang.model.v1.spec-hara/emit :added "4.1"}
+(fact "maps XTalk collection literals and operations through the standard native facade"
+  [(read-string (hara/emit '[1 2]))
+   (read-string (hara/emit '{"value" 1}))
+   (read-string (hara/emit '(x:get-idx [1 2] 0)))
+   (read-string (hara/emit '(x:set-key {"value" 1} "value" 2)))
+   (read-string (hara/emit '(x:obj-pairs {"value" 1})))]
+  => ['(lang.runtime.standard/arr-new 1 2)
+      '(lang.runtime.standard/obj-new "value" 1)
+      '(lang.runtime.standard/arr-get
+        (lang.runtime.standard/arr-new 1 2)
+        0)
+      '(lang.runtime.standard/obj-set!
+        (lang.runtime.standard/obj-new "value" 1)
+        "value"
+        2)
+      '(lang.runtime.standard/obj-pairs
+        (lang.runtime.standard/obj-new "value" 1))])
+
+^{:refer lang.model.v1.spec-hara.emit/flatten-symbol :added "4.1"}
+(fact "flattens staged module references to legal Hara Vars"
+  (read-string
+   (hara/emit
+    '(demo.math/add 1 2)
+    {:modules {'demo.math {:id 'demo.math}}}))
+  => '(demo_math__add 1 2))
+
+^{:refer lang.model.v1.spec-hara/compile-result :added "4.1"}
+(fact "retains explicit compiler phases and Hara grammar provenance"
+  (let [result (hara/compile-result '(x:len [1 2 3]))]
+    [(:output result)
+     (get-in result [:grammar :coordinate])
+     (mapv :phase (get-in result [:provenance :events]))])
+  => ["(count (lang.runtime.standard/arr-new 1 2 3))"
+      {:grammar/id :hara
+       :grammar/variant :default
+       :grammar/version 1}
+      [:normalize
+       :stage
+       :rewrite/canonical
+       :infer
+       :lint
+       :rewrite/target
+       :rewrite/staging
+       :emit]])

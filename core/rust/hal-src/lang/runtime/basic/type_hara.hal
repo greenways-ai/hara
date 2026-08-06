@@ -1,0 +1,195 @@
+(ns lang.runtime.basic.type-hara
+  (:require [std.foundation.promise :as promise]
+            [std.foundation.string :as string]
+            [std.protocol.icontexteval :as context-eval]
+            [lang.core.eval :as evaluation]
+            [lang.model.v1.spec-hara :as hara]
+            [lang.runtime.standard]))
+
+(defstruct RuntimeHaraBasic
+  [id lang runtime target namespace compiler book state profile timeout])
+
+(defn- default-id
+  [language]
+  (keyword (str (name language) ".hara-basic")))
+
+(defn- default-namespace
+  [id]
+  (symbol
+   (str "lang.xtalk.session."
+        (-> (name id)
+            (string/replace "-" "_")
+            (string/replace "." "_")))))
+
+(defn rt-hara-basic:create
+  "Creates an in-process Hara runtime for XTalk or explicit Hara source."
+  [options]
+  (let [lang (or (get options :lang) :xtalk)
+        runtime (or (get options :runtime) :basic)
+        id (or (get options :id) (default-id lang))
+        namespace (or (get options :namespace)
+                      (default-namespace id))
+        timeout (or (get options :timeout) 2000)]
+    (lang.runtime.basic.type-hara/RuntimeHaraBasic
+     id
+     lang
+     runtime
+     :hara
+     namespace
+     (hara/compiler)
+     hara/+book+
+     (atom {:status :created
+            :target :hara
+            :namespace namespace
+            :evaluations 0})
+     {:input []
+      :source []
+      :response []}
+     timeout)))
+
+(defn hara-basic-state
+  [runtime]
+  (deref (get runtime :state)))
+
+(defn start-hara-basic
+  [runtime]
+  (swap! (get runtime :state)
+         assoc
+         :status :started
+         :target :hara
+         :namespace (get runtime :namespace))
+  runtime)
+
+(defn stop-hara-basic
+  [runtime]
+  (swap! (get runtime :state)
+         assoc
+         :status :stopped)
+  runtime)
+
+(defn compile-request
+  "Compiles an XTalk form through the Hara child grammar. Strings are already Hara source."
+  [runtime request options]
+  (if (string? request)
+    {:output request
+     :grammar (:selection (get runtime :book))
+     :dependencies {:code #{} :fragment #{} :native {}}}
+    (let [context
+          (merge options
+                 {:lang :hara
+                  :book (get runtime :book)})]
+      (lang.common.compiler/compile
+       (get runtime :compiler)
+       request
+       (:selection (get runtime :book))
+       context))))
+
+(defn wrap-source
+  "Wraps one or more emitted Hara forms in a single readable expression."
+  [source]
+  (str "(do\n" source "\n)"))
+
+(defn evaluate-source
+  "Evaluates Hara source in the runtime's persistent Hara namespace."
+  [runtime source]
+  (eval-in-ns
+   (get runtime :namespace)
+   [(read-string (wrap-source source))]))
+
+(defn- record-success!
+  [runtime source result compiled?]
+  (swap! (get runtime :state)
+         (fn [state]
+           (-> state
+               (assoc :status :started
+                      :last-source source
+                      :last-result result
+                      :last-compiled? compiled?)
+               (update :evaluations (fn [value]
+                                      (+ (or value 0) 1)))
+               (dissoc :last-error))))
+  result)
+
+(defn- record-error!
+  [runtime source error]
+  (swap! (get runtime :state)
+         assoc
+         :status :started
+         :last-source source
+         :last-error {:message (ex-message error)
+                      :data (ex-data error)})
+  error)
+
+(defn eval-hara-basic
+  "Promise-first XTalk evaluation through the Hara grammar and kernel."
+  ([runtime request]
+   (eval-hara-basic runtime request {}))
+  ([runtime request options]
+   (if (not= :started (get (hara-basic-state runtime) :status))
+     (throw
+      (ex-info "Hara basic runtime is not started"
+               {:id (get runtime :id)
+                :lang (get runtime :lang)
+                :state (hara-basic-state runtime)}))
+     (promise/run
+      (fn []
+        (let [compiled (compile-request runtime request options)
+              source (:output compiled)]
+          (try
+            (record-success!
+             runtime
+             source
+             (evaluate-source runtime source)
+             (not (string? request)))
+            (catch Throwable error
+              (record-error! runtime source error)
+              (throw error)))))))))
+
+(defn eval-raw-hara-basic
+  "Promise-first evaluation of already-emitted Hara source."
+  ([runtime source]
+   (eval-raw-hara-basic runtime source {}))
+  ([runtime source options]
+   (eval-hara-basic runtime source (assoc options :raw true))))
+
+(defn raw-eval-hara-basic
+  "Blocking compatibility adapter for emitted Hara source."
+  [runtime source]
+  (evaluation/await
+   (eval-raw-hara-basic runtime source {})
+   (get runtime :timeout)))
+
+(defn rt-hara-basic
+  "Creates and starts an in-process Hara-backed XTalk runtime."
+  [options]
+  (start-hara-basic (rt-hara-basic:create options)))
+
+(extend-type RuntimeHaraBasic context-eval/IContextEval
+  (evaluate [runtime request options]
+    (eval-hara-basic runtime request options))
+  (evaluate-raw [runtime request options]
+    (eval-raw-hara-basic runtime request options)))
+
+(extend-type RuntimeHaraBasic IContext
+  (call [runtime source]
+    (raw-eval-hara-basic runtime source)))
+
+(extend-type RuntimeHaraBasic IComponent
+  (props [runtime]
+    {:state {:get (fn [] (hara-basic-state runtime))}
+     :namespace {:get (fn [] (get runtime :namespace))}
+     :target {:get (fn [] :hara)}})
+  (status [runtime]
+    (get (hara-basic-state runtime) :status))
+  (started? [runtime]
+    (= :started (get (hara-basic-state runtime) :status)))
+  (stopped? [runtime]
+    (= :stopped (get (hara-basic-state runtime) :status)))
+  (start [runtime]
+    (start-hara-basic runtime))
+  (stop [runtime]
+    (stop-hara-basic runtime))
+  (kill [runtime]
+    (stop-hara-basic runtime))
+  (remote? [runtime]
+    false))

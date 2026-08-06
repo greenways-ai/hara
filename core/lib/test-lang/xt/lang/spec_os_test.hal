@@ -1,7 +1,7 @@
 (ns xt.lang.spec-os-test
   (:use code.test)
   (:require [std.foundation.string :as string]
-            [tahto.core :as l]
+            [lang.core :as l]
             [xt.lang.common-notify :as notify]))
 
 (defn project-file? [value]

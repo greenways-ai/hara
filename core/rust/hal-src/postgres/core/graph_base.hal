@@ -2,7 +2,7 @@
   (:config {:blank true})
   (:require [std.foundation :refer :all]
             [std.foundation.string :as string]
-            [tahto.common.util :as util]
+            [lang.common.util :as util]
             [postgres.core.impl-base :as base]
             [postgres.core.impl-main :as main]
             [postgres.core.impl-update :as update]))

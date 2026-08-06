@@ -1,0 +1,122 @@
+(ns lang.runtime.basic.type-common
+  (:require [lang.common.grammar-api :as grammar]
+            [lang.core.registry :as registry]))
+
+(def *context-options* (atom {}))
+(def *program-options* (atom {}))
+
+(defn- atom-value [reference]
+  (deref (identity reference)))
+
+(def +valid-contexts+
+  #{:oneshot :basic :interactive :websocket :remote-port :remote-ws :verify})
+
+(defn get-context-options
+  ([] (atom-value *context-options*))
+  ([language] (get (atom-value *context-options*) language))
+  ([language context] (get-in (atom-value *context-options*) [language context]))
+  ([language context program]
+   (get-in (atom-value *context-options*) [language context program])))
+
+(defn put-context-options
+  [coordinate value]
+  (let [language (first coordinate)
+        context (second coordinate)
+        current (get-in (atom-value *context-options*) [language context])
+        next (grammar/deep-merge current value)]
+    (swap! *context-options* assoc-in [language context] next)
+    next))
+
+(defn set-context-options
+  [coordinate value]
+  (let [language (nth coordinate 0)
+        context (nth coordinate 1)
+        program (nth coordinate 2)]
+    (swap! *context-options* assoc-in [language context program] value)
+    value))
+
+(defn get-program-options
+  ([] (atom-value *program-options*))
+  ([language] (get (atom-value *program-options*) language)))
+
+(defn put-program-options
+  [language value]
+  (let [current (get (atom-value *program-options*) language)
+        next (grammar/deep-merge current value)]
+    (swap! *program-options* assoc language next)
+    next))
+
+(defn available-runtimes
+  [language]
+  (reduce (fn [out coordinate]
+            (if (= language (first coordinate))
+              (conj out (second coordinate))
+              out))
+          []
+          (keys (atom-value registry/+registry+))))
+
+(defn valid-context!
+  [context]
+  (if (+valid-contexts+ context)
+    context
+    (throw
+     (ex-info "Invalid runtime context"
+              {:runtime context
+               :valid +valid-contexts+}))))
+
+(defn require-runtime!
+  "Loads the runtime implementation registered by lang.core.registry."
+  [language context]
+  (valid-context! context)
+  (or (registry/registry-runtime language context)
+      (throw
+       (ex-info "Runtime not installed"
+                {:lang language
+                 :runtime context
+                 :available (available-runtimes language)}))))
+
+(defn get-program-default
+  [language context program]
+  (require-runtime! language context)
+  (let [all (get-program-options language)]
+    (or program
+        (get-in all [:default context])
+        (throw
+         (ex-info "No program found for runtime"
+                  {:lang language
+                   :runtime context
+                   :available (keys (get all :env))})))))
+
+(defn get-program-flags
+  [language program]
+  (get-in (get-program-options language) [:env program :flags]))
+
+(defn get-program-exec
+  [language context program]
+  (require-runtime! language context)
+  (let [all (get-program-options language)
+        environment (get-in all [:env program])
+        executable (get environment :exec)
+        arguments (get-in environment [:flags context])]
+    (if arguments
+      (vec (concat [executable] arguments))
+      (throw
+       (ex-info "Program does not support runtime"
+                {:lang language
+                 :runtime context
+                 :program program})))))
+
+(defn get-options
+  [language context program]
+  (require-runtime! language context)
+  (let [context-options (get-in (atom-value *context-options*) [language context])
+        program-options (get-in (atom-value *program-options*) [language :env program])]
+    (if context-options
+      (grammar/deep-merge
+       (grammar/deep-merge (get context-options :default) program-options)
+       (get context-options program))
+      (throw
+       (ex-info "Runtime configuration not installed"
+                {:lang language
+                 :runtime context
+                 :available (available-runtimes language)})))))

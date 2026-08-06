@@ -1,0 +1,114 @@
+(ns lang.common.emit-special
+  (:require [std.foundation.string :as string]
+            [lang.common.emit-common :as common]
+            [lang.common.emit-data :as data]
+            [lang.common.emit-helper :as helper]
+            [lang.common.preprocess-input :as input]
+            [lang.common.preprocess-staging :as staging]))
+
+(defn- allowed-op? [allow op]
+  (if (nil? allow)
+    true
+    (reduce (fn [found candidate] (or found (= candidate op)))
+            false allow)))
+
+(defn emit-with-module-all-ids
+  "returns allowed code ids for a snapshot module"
+  {:added "4.0"}
+  [snapshot lang module-id allow]
+  (let [book (or (get-in snapshot [lang :book]) (get snapshot lang))
+        module (get-in book [:modules module-id])]
+    (if (nil? module)
+      (throw (ex-info "Module not found"
+                      {:lang lang :module module-id}))
+      (let [entries (sort-by (fn [entry]
+                               [(or (:priority entry) 0)
+                                (or (:time entry) 0)
+                                (or (:line entry) 0)])
+                             (vals (:code module)))]
+        (reduce (fn [output entry]
+                  (if (allowed-op? allow (:op entry))
+                    (conj output (:id entry))
+                    output))
+                [] entries)))))
+
+(defn emit-with-module
+  "emits an allowed module as a table"
+  {:added "4.0"}
+  [key props form grammar mopts]
+  (let [lang (or (second form) (:lang mopts))
+        module-id (or (nth form 2) (get-in mopts [:module :id]))
+        options (helper/get-options grammar [:default :module])
+        token-replacements (or (get-in grammar [:token :symbol :replace]) {})
+        key-fn (or (:key-fn options) identity)
+        ids (emit-with-module-all-ids (:snapshot mopts) lang module-id (:allow options))
+        pairs (map (fn [id]
+                     (let [raw (reduce-kv
+                                (fn [output from to]
+                                  (string/replace output (str from) to))
+                                (name id) token-replacements)]
+                       [(key-fn raw)
+                        (symbol (name module-id) (name id))]))
+                   ids)]
+    (data/emit-table nil nil (apply list (concat ['tab] pairs)) grammar mopts)))
+
+(defn emit-with-preprocess
+  "stages and emits a form"
+  {:added "4.0"}
+  [form grammar mopts]
+  (let [prepared (input/to-input form)
+        staged (staging/to-staging prepared grammar
+                                   (or (get-in mopts [:book :modules]) {})
+                                   mopts)]
+    (common/*emit-fn* (first staged) grammar mopts)))
+
+(defn emit-with-eval
+  "marks host evaluation as an explicit unavailable capability"
+  {:added "4.0"}
+  [key props form grammar mopts]
+  (throw (ex-info "Host eval is not available in portable Hara emission"
+                  {:form form :capability :host/eval})))
+
+(defn emit-with-deref
+  "marks host Var dereference as an unavailable capability"
+  {:added "4.0"}
+  [key props form grammar mopts]
+  (throw (ex-info "Host Var dereference is not available in portable Hara emission"
+                  {:form form :capability :host/var-deref})))
+
+(defn emit-with-lang
+  "emits a form with a language book selected from the snapshot"
+  {:added "4.0"}
+  [key props form grammar mopts]
+  (let [options (second form)
+        lang (:lang options)
+        book (or (get-in (:snapshot mopts) [lang :book])
+                 (get (:snapshot mopts) lang))]
+    (if (nil? book)
+      (throw (ex-info "Language not found"
+                      {:lang lang :available (keys (:snapshot mopts))}))
+      (emit-with-preprocess (nth form 2) (:grammar book)
+                            (merge mopts options {:book book})))))
+
+(defn test-special-loop
+  "test step for special ops"
+  {:added "4.0"}
+  [form grammar mopts]
+  (common/emit-common-loop
+   form grammar mopts
+   (assoc common/+emit-lookup+ :data data/emit-data)
+   (fn [key form grammar mopts]
+     (common/emit-op key form grammar mopts
+                     {:quote data/emit-quote
+                      :table data/emit-table
+                      :with-module emit-with-module
+                      :with-lang emit-with-lang
+                      :with-eval emit-with-eval
+                      :with-deref emit-with-deref}))))
+
+(defn test-special-emit
+  "test function for special ops"
+  {:added "4.0"}
+  [form grammar mopts]
+  (binding [common/*emit-fn* test-special-loop]
+    (test-special-loop form grammar mopts)))

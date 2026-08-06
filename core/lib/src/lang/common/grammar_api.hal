@@ -1,0 +1,600 @@
+(ns lang.common.grammar-api
+  (:require [lang.common.grammar :as common]
+            [lang.protocol.registry :as registry]
+            [std.foundation.string :as string]))
+
+(def engine-version 1)
+
+(defn- fail
+  [message data]
+  (throw (ex-info message data)))
+
+(defn- require-fields
+  [source fields]
+  (reduce (fn [out field]
+            (if (nil? (get source field))
+              (fail "Missing grammar source field"
+                    {:field field :source source})
+              out))
+          source
+          fields))
+
+(defn- source
+  [kind id version value]
+  (if (or (nil? id)
+          (not (number? version))
+          (<= version 0))
+    (fail "Invalid grammar source identity"
+          {:kind kind :id id :version version})
+    (assoc value
+           :source/kind kind
+           :source/id id
+           :source/version version)))
+
+(defn profile
+  "Declares a reusable, versioned operator profile."
+  [value]
+  (source :profile
+          (:profile/id value)
+          (:profile/version value)
+          (require-fields value
+                          [:profile/id
+                           :profile/version
+                           :profile/operators])))
+
+(defn emit-template
+  "Declares a reusable, versioned emitter grammar template."
+  [value]
+  (source :emit-template
+          (:template/id value)
+          (:template/version value)
+          (require-fields value
+                          [:template/id
+                           :template/version
+                           :template/value])))
+
+(defn definition
+  "Declares a versioned target grammar."
+  [value]
+  (source :grammar
+          (:grammar/id value)
+          (:grammar/version value)
+          (require-fields value
+                          [:grammar/id
+                           :grammar/version
+                           :grammar/release])))
+
+(defn source-coordinate
+  "Returns the exact registry coordinate of a declared source."
+  [value]
+  [(:source/kind value)
+   (:source/id value)
+   (:source/version value)])
+
+(defn deep-merge
+  "Recursively merges nested grammar option maps."
+  [left right]
+  (reduce-kv (fn [out key value]
+               (let [current (get out key)]
+                 (assoc out key
+                        (if (and (map? current)
+                                 (map? value))
+                          (deep-merge current value)
+                          value))))
+             (or left {})
+             (or right {})))
+
+(defn apply-operators
+  "Applies checked exclude, override, and define operations."
+  [current spec]
+  (let [excluded (reduce dissoc current (or (:exclude spec) #{}))
+        overridden (if (:override spec)
+                     (common/build:override excluded (:override spec))
+                     excluded)]
+    (if (:define spec)
+      (common/build:extend overridden (:define spec))
+      overridden)))
+
+(defn- key-present?
+  [m key]
+  (reduce (fn [found current]
+            (or found (= key current)))
+          false
+          (keys m)))
+
+(defn- path-present?
+  [m path]
+  (if (= 0 (count path))
+    true
+    (and (map? m)
+         (key-present? m (first path))
+         (path-present? (get m (first path))
+                        (vec (drop 1 path))))))
+
+(defn- resolve-hook
+  [hook]
+  (let [resolved (if (and (symbol? hook)
+                          (namespace hook))
+                   (resolve hook))]
+    (if resolved
+      (deref resolved)
+      (fail "Unable to resolve grammar hook" {:hook hook}))))
+
+(defn- apply-hook-mode
+  [template hooks mode]
+  (reduce-kv
+   (fn [out path hook]
+     (let [present (path-present? out path)]
+       (cond (and (= mode :override) (not present))
+             (fail "Grammar hook override path is missing"
+                   {:path path})
+
+             (and (= mode :define) present)
+             (fail "Grammar hook definition path exists"
+                   {:path path})
+
+             :else
+             (assoc-in out path (resolve-hook hook)))))
+   template
+   (or hooks {})))
+
+(defn apply-emit
+  "Applies nested emitter options and checked hook paths."
+  [template emit]
+  (let [merged (deep-merge template (:defaults emit))
+        overridden (apply-hook-mode merged
+                                    (get-in emit [:hooks :override])
+                                    :override)]
+    (apply-hook-mode overridden
+                     (get-in emit [:hooks :define])
+                     :define)))
+
+(defn- member?
+  [values value]
+  (reduce (fn [found current]
+            (or found (= value current)))
+          false
+          values))
+
+(defn- phase-plan
+  [current change]
+  (cond (nil? change)
+        (vec (or current []))
+
+        (:replace change)
+        (vec (:replace change))
+
+        :else
+        (vec (concat (or current [])
+                     (or (:append change) [])))))
+
+(defn merge-rewrite
+  "Applies append-or-replace changes to named rewrite phases."
+  [current changes]
+  (reduce-kv (fn [out phase change]
+               (assoc out phase
+                      (phase-plan (get out phase) change)))
+             (or current {})
+             (or changes {})))
+
+(defn- customization-value
+  [value qualified simple]
+  (or (get value qualified)
+      (get value simple)
+      {}))
+
+(defn- apply-operator-section
+  [state value context]
+  (assoc state
+         :operators
+         (apply-operators (:operators state) value)))
+
+(defn- apply-emit-section
+  [state value context]
+  (assoc state
+         :template
+         (apply-emit (:template state) value)))
+
+(defn- apply-rewrite-section
+  [state value context]
+  (assoc state
+         :rewrite
+         (merge-rewrite (:rewrite state) value)))
+
+(defn- apply-declared-extension
+  [state value context]
+  (assoc-in state
+            [:extensions (:section context)]
+            value))
+
+(defn- unsupported-section
+  [state value context]
+  (fail "Unknown grammar customization section"
+        {:section (:section context)
+         :value value
+         :context context}))
+
+(defmulti section-handler identity)
+
+(defmethod section-handler :operators
+  [section]
+  apply-operator-section)
+
+(defmethod section-handler :emit
+  [section]
+  apply-emit-section)
+
+(defmethod section-handler :rewrite
+  [section]
+  apply-rewrite-section)
+
+(defmethod section-handler :inference
+  [section]
+  apply-declared-extension)
+
+(defmethod section-handler :lint
+  [section]
+  apply-declared-extension)
+
+(defmethod section-handler :default
+  [section]
+  unsupported-section)
+
+(defn apply-section
+  "Applies one extensible grammar customization section."
+  [state section value context]
+  (let [handler (lang.common.grammar-api/section-handler section)]
+    (handler state
+             value
+             (assoc context :section section))))
+
+(defn- apply-extension-sections
+  [state entries context]
+  (reduce
+   (fn [out entry]
+     (if (not (= 2 (count entry)))
+       (fail "Invalid grammar customization section"
+             {:entry entry
+              :context context})
+       (apply-section out
+                      (first entry)
+                      (second entry)
+                      context)))
+   state
+   (or entries [])))
+
+(defn apply-customization
+  "Applies the shared operator, emitter, and rewrite vocabulary."
+  ([state customization]
+   (apply-customization state customization {}))
+  ([state customization context]
+   (let [operators
+         (customization-value customization
+                              :grammar/operators
+                              :operators)
+         emit
+         (customization-value customization
+                              :grammar/emit
+                              :emit)
+         rewrite
+         (customization-value customization
+                              :grammar/rewrite
+                              :rewrite)
+         core
+         (apply-section
+          (apply-section
+           (apply-section state :operators operators context)
+           :emit emit context)
+          :rewrite rewrite context)]
+     (apply-extension-sections
+      core
+      (:grammar/sections customization)
+      context))))
+
+(defn- apply-template-source
+  [state source context]
+  (assoc
+   (assoc state :template (:template/value source))
+   :provenance
+   (conj (:provenance state)
+         (source-coordinate source))))
+
+(defn- apply-profile-source
+  [state source context]
+  (let [next-state
+        (apply-customization
+         state
+         {:operators
+          {:define (:profile/operators source)}}
+         context)]
+    (assoc next-state
+           :provenance
+           (conj (:provenance state)
+                 (source-coordinate source)))))
+
+(defn- unsupported-source
+  [state source context]
+  (fail "Unsupported grammar source kind"
+        {:source (source-coordinate source)
+         :context context}))
+
+(defmulti source-handler
+  (fn [source] (:source/kind source)))
+
+(defmethod source-handler :emit-template
+  [source]
+  apply-template-source)
+
+(defmethod source-handler :profile
+  [source]
+  apply-profile-source)
+
+(defmethod source-handler :default
+  [source]
+  unsupported-source)
+
+(defn apply-source
+  "Applies one extensible registry source to materialization state."
+  [state source context]
+  (let [handler (lang.common.grammar-api/source-handler source)]
+    (handler state source context)))
+
+(defn- expand-facets
+  [facets requested]
+  (loop [selected #{}
+         pending (vec requested)]
+    (if (= 0 (count pending))
+      selected
+      (let [facet-id (first pending)
+            facet (get facets facet-id)]
+        (if (nil? facet)
+          (fail "Unknown grammar facet" {:facet facet-id})
+          (recur
+           (conj selected facet-id)
+           (vec
+            (concat
+             (drop 1 pending)
+             (filter (fn [required]
+                       (not (member? selected required)))
+                     (or (:requires facet) #{}))))))))))
+
+(defn- order-facets
+  [facets order selected]
+  (let [ordered
+        (vec
+         (filter (fn [facet-id]
+                   (member? selected facet-id))
+                 order))]
+    (if (not (= (count ordered) (count selected)))
+      (fail "Selected grammar facet is missing from facet order"
+            {:selected selected :order order})
+      (do
+        (reduce
+         (fn [_ facet-id]
+           (let [conflicts (:conflicts (get facets facet-id))
+                 conflict
+                 (first
+                  (filter (fn [candidate]
+                            (member? selected candidate))
+                          conflicts))]
+             (if conflict
+               (fail "Conflicting grammar facets"
+                     {:facet facet-id :conflict conflict})
+               nil)))
+         nil
+         ordered)
+        ordered))))
+
+(defn selected-facets
+  "Expands, validates, and deterministically orders requested facets."
+  [definition requested]
+  (let [facets (or (:grammar/facets definition) {})
+        selected (expand-facets facets (or requested []))]
+    (order-facets facets
+                  (or (:grammar/facet-order definition) [])
+                  selected)))
+
+(defn- apply-facets
+  [state source facets]
+  (loop [out state
+         remaining (vec facets)]
+    (if (= 0 (count remaining))
+      out
+      (recur
+       (apply-customization
+        out
+        (get-in source
+                [:grammar/facets (first remaining)])
+        {:source (source-coordinate source)
+         :facet (first remaining)})
+       (vec (drop 1 remaining))))))
+
+(defn- unsigned-byte
+  [value]
+  (if (< value 0) (+ value 256) value))
+
+(defn fingerprint
+  "Returns a deterministic fingerprint for normalized grammar source data."
+  [value]
+  (let [bytes (vec (string/encode-utf8 (pr-str value)))]
+    (loop [index 0
+           hash 5381]
+      (if (= index (count bytes))
+        (str "djb2:" hash)
+        (let [byte (unsigned-byte (nth bytes index))]
+          (recur (inc index)
+                 (mod (+ (* 33 hash) byte)
+                      4294967296)))))))
+
+(defn- require-source
+  [catalog coordinate]
+  (let [value
+        (registry/find-source catalog coordinate)]
+    (if value
+      value
+      (fail "Grammar source not found"
+            {:coordinate coordinate}))))
+
+(defn- strip-derived
+  [grammar]
+  (reduce dissoc
+          grammar
+          [:operators
+           :reserved
+           :sections
+           :macros
+           :structure
+           :polis/type
+           :tag]))
+
+(defn- resolve-rewrite
+  [plan]
+  (reduce-kv
+   (fn [out phase hooks]
+     (assoc out phase
+            (vec (map resolve-hook hooks))))
+   {}
+   plan))
+
+(defn- ensure-engine-compatible
+  [source]
+  (let [contract (:grammar/engine source)
+        minimum (:minimum contract)
+        maximum (:maximum contract)]
+    (if (or (and minimum (> minimum engine-version))
+            (and maximum (< maximum engine-version)))
+      (fail "Grammar source is incompatible with Tahto engine"
+            {:contract contract :engine engine-version})
+      source)))
+
+(defn- initial-state
+  [parent]
+  {:operators (or (get-in parent [:grammar :operators]) {})
+   :template (if parent
+               (strip-derived (:grammar parent))
+               {})
+   :rewrite (or (:rewrite/source parent) {})
+   :extensions (or (:extensions parent) {})
+   :provenance (vec (or (:provenance parent) []))})
+
+(defn- apply-template
+  [catalog state source context]
+  (let [ref (:grammar/emit-template source)]
+    (if ref
+      (apply-source
+       state
+       (require-source
+        catalog
+        [:emit-template
+         (:template/id ref)
+         (:template/version ref)])
+       context)
+      state)))
+
+(defn- apply-profiles
+  [catalog state source context]
+  (loop [out state
+         refs (vec (or (:grammar/profiles source) []))]
+    (if (= 0 (count refs))
+      out
+      (let [ref (first refs)
+            profile-source
+            (require-source
+             catalog
+             [:profile
+              (:profile/id ref)
+              (:profile/version ref)])]
+        (recur
+         (apply-source out profile-source context)
+         (vec (drop 1 refs)))))))
+
+(defn- materialization-identity
+  [source facets]
+  {:grammar/id (:grammar/id source)
+   :grammar/version (:grammar/version source)
+   :grammar/release (:grammar/release source)
+   :grammar/facets facets})
+
+(defn- finalize-materialization
+  [source state facets]
+  (let [coordinate (materialization-identity source facets)
+        provenance
+        (vec
+         (concat
+          (:provenance state)
+          [(source-coordinate source)]
+          (map (fn [facet-id] {:facet facet-id})
+               facets)))
+        built
+        (common/grammar
+         (:grammar/id source)
+         (common/to-reserved (:operators state))
+         (:template state))
+        built (assoc built :operators (:operators state))]
+    {:coordinate coordinate
+     :grammar built
+     :rewrite (resolve-rewrite (:rewrite state))
+     :rewrite/source (:rewrite state)
+     :extensions (:extensions state)
+     :fingerprint
+     (fingerprint
+      {:coordinate coordinate
+       :provenance provenance
+       :definition source})
+     :provenance provenance}))
+
+(declare materialize*)
+
+(defn- materialize*
+  [catalog source request stack]
+  (let [coordinate (source-coordinate source)]
+    (if (member? stack coordinate)
+      (fail "Cyclic grammar parent"
+            {:coordinate coordinate :stack stack})
+      (let [source (ensure-engine-compatible source)
+            parent-ref (:grammar/parent source)
+            parent-source
+            (if parent-ref
+              (require-source
+               catalog
+               [:grammar
+                (:grammar/id parent-ref)
+                (:grammar/version parent-ref)]))
+            parent
+            (if parent-source
+              (materialize*
+               catalog
+               parent-source
+               {:grammar/facets []}
+               (conj stack coordinate)))
+            context {:source coordinate
+                     :request request}
+            initial (initial-state parent)
+            templated
+            (apply-template catalog initial source context)
+            profiled
+            (apply-profiles catalog templated source context)
+            customized
+            (apply-customization profiled source context)
+            facets (selected-facets source (:grammar/facets request))
+            faceted (apply-facets customized source facets)
+            result
+            (finalize-materialization source faceted facets)]
+        result))))
+
+(defn materialize
+  "Materializes a declared grammar through an IGrammarCatalog."
+  [catalog source request]
+  (if (not (= :grammar (:source/kind source)))
+    (fail "Only grammar definitions can be materialized"
+          {:source source})
+    (let [request-id (:grammar/id request)
+          request-version (:grammar/version request)]
+      (if (or (nil? request-id)
+              (nil? request-version)
+              (not (= request-id (:grammar/id source)))
+              (not (= request-version (:grammar/version source))))
+        (fail "Grammar request does not match source"
+              {:request request
+               :source (source-coordinate source)})
+        (materialize* catalog source request [])))))
