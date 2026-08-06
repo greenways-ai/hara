@@ -110,8 +110,8 @@
 
  :tests
  [{:path "lib/test/tahto/model/v1/spec_hara_test.hal"
-   :facts 12
-   :checks 12
+   :facts 13
+   :checks 13
    :coverage [:grammar :lowering :mutation :control :loops :errors]}
   {:path "lib/test/tahto/model/v1/spec_hara_dependency_test.hal"
    :facts 1

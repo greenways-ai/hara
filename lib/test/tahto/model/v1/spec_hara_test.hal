@@ -126,3 +126,11 @@
 (fact "compiles an ordinary portable function call through the Hara target hook"
   (:output (compiler/compile instance '(gcd 54 24) selected))
   => "(gcd 54 24)")
+
+^{:refer tahto.model.v1.spec-hara.emit/canonical-op :added "4.1"}
+(fact "normalizes linked XTalk operation symbols before target mapping"
+  [(hara-emit/canonical-op 'x:m-mod)
+   (hara-emit/canonical-op 'xt.lang.spec-base/x:m-mod)
+   (hara-emit/lower-top '(xt.lang.spec-base/x:m-mod 5 2) {})]
+  => ['x:m-mod 'x:m-mod '(mod 5 2)])
+

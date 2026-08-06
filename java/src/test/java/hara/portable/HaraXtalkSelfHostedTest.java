@@ -17,9 +17,9 @@ public final class HaraXtalkSelfHostedTest {
             ROOT, ROOT.resolve("lib/test/tahto/model/v1/spec_hara_test.hal"));
 
     assertTrue(result.failureMessage(), result.passed());
-    assertEquals(12, result.facts());
-    assertEquals(12, result.checks());
-    assertEquals(12, result.passedChecks());
+    assertEquals(13, result.facts());
+    assertEquals(13, result.checks());
+    assertEquals(13, result.passedChecks());
     assertEquals(0, result.failedChecks());
     assertEquals(0, result.errors());
     assertEquals(0, result.timeouts());

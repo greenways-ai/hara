@@ -67,9 +67,10 @@
 (defn canonical-op
   [operation]
   (if (symbol? operation)
-    (let [operation-name (name operation)]
-      (if (string/starts-with? operation-name "x:")
-        (symbol operation-name)
+    (let [operation-source (str operation)
+          operation-index (string/index-of operation-source "x:" 0)]
+      (if (<= 0 operation-index)
+        (symbol (string/slice operation-source operation-index))
         operation))
     operation))
 
