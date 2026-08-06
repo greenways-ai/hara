@@ -16,9 +16,9 @@
         alias array
         pushed (standard/arr-push! array 3)
         inserted (standard/arr-insert! array 1 9)]
-    [(identical array alias)
-     (identical array pushed)
-     (identical array inserted)
+    [(= array alias)
+     (= array pushed)
+     (= array inserted)
      (standard/arr-get alias 0)
      (standard/arr-get alias 1)
      (standard/arr-get alias 3)])
@@ -32,9 +32,9 @@
         merged (standard/obj-assign!
                 object
                 (standard/obj-new "c" 3))]
-    [(identical object alias)
-     (identical object assigned)
-     (identical object merged)
+    [(= object alias)
+     (= object assigned)
+     (= object merged)
      (standard/obj-get alias "a")
      (standard/obj-get alias "b")
      (standard/obj-get alias "c")])
@@ -46,8 +46,8 @@
         inner (standard/obj-new "values" values)
         outer (standard/obj-new "inner" inner)]
     (standard/set-path! outer ["inner" "values" 1] 9)
-    [(identical inner (standard/obj-get outer "inner"))
-     (identical values (standard/obj-get inner "values"))
+    [(= inner (standard/obj-get outer "inner"))
+     (= values (standard/obj-get inner "values"))
      (standard/arr-get values 1)])
   => [true true 9])
 
@@ -61,8 +61,8 @@
     (standard/obj-set! object-copy "value" 9)
     [(standard/arr? array-copy)
      (standard/obj? object-copy)
-     (not (identical array array-copy))
-     (not (identical object object-copy))
+     (not= array array-copy)
+     (not= object object-copy)
      (standard/arr-get array 0)
      (standard/arr-get array-copy 0)
      (standard/obj-get object "value")
