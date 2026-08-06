@@ -12,6 +12,7 @@ on:
       - 'scripts/install-www-redirects'
       - 'scripts/write-kernel-manifest.mjs'
       - 'scripts/sync-hara-ui.mjs'
+      - '.github/scripts/verify-benchmark-observatory.sh'
       - '.github/workflows/pages-www.yml'
   workflow_dispatch:
 
@@ -63,6 +64,8 @@ jobs:
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
+      - name: Verify the testing benchmark observatory
+        run: bash .github/scripts/verify-benchmark-observatory.sh https://www.testing.hara-lang.org/benchmarks/
       - name: Deploy production to www.hara-lang.org
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
@@ -80,3 +83,5 @@ jobs:
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
+      - name: Verify the production benchmark observatory
+        run: bash .github/scripts/verify-benchmark-observatory.sh https://www.hara-lang.org/benchmarks/
