@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OUT="${1:-$ROOT/target/www}"
+
+mkdir -p "$OUT"
+cat > "$OUT/_redirects" <<'EOF'
+# The benchmark observatory is published independently by hara-lang/hara-benchmarks.
+# Keep the public URL canonical on www.hara-lang.org while proxying that live bundle.
+/benchmarks https://benchmarks.hara-lang.org/ 200!
+/benchmarks/ https://benchmarks.hara-lang.org/ 200!
+/benchmarks/* https://benchmarks.hara-lang.org/:splat 200!
+EOF
+
+grep -Fq '/benchmarks/* https://benchmarks.hara-lang.org/:splat 200!' "$OUT/_redirects"
