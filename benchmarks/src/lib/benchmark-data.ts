@@ -71,11 +71,12 @@ export const runtimeLabels: Record<string, string> = {
   "guile-prepared": "Guile",
   "bb-prepared": "Babashka",
   "python-prepared": "Python",
+  "rust-prepared": "Rust",
   "c-prepared": "C",
   "java-prepared": "Java",
   "luajit-prepared": "LuaJIT",
   "pypy-prepared": "PyPy",
-  "node-prepared": "Node",
+  "node-prepared": "Node.js / V8",
   "ruby-yjit-prepared": "Ruby (YJIT)",
   "clojure-prepared": "Clojure",
   "hara-rust-whole-wasm-prepared": "Hara"
@@ -199,7 +200,7 @@ export const classGroups: ClassGroup[] = [
   {
     id: "references",
     title: "Reference ceilings",
-    summary: "C, Java and Python remain essential context as differently coloured reference ceilings, not peers.",
+    summary: "Rust, C, Java and Python remain essential context as differently coloured reference ceilings, not peers.",
     rows: buildClassRows(catalog.reference_competitors.map((name) => `${name}-prepared`))
   }
 ].filter((group) => group.rows.length > 0);

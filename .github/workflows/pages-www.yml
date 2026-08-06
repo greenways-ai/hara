@@ -12,34 +12,27 @@ on:
       - 'scripts/install-benchmark-site'
       - 'scripts/write-kernel-manifest.mjs'
       - 'scripts/sync-hara-ui.mjs'
-      - '.github/scripts/reconcile-netlify-domain.sh'
       - '.github/scripts/verify-benchmark-observatory.sh'
       - '.github/workflows/pages-www.yml'
-  pull_request:
-    branches: [prod]
-    types: [closed]
   workflow_dispatch:
 
 permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: netlify-www-prod
+  cancel-in-progress: true
+
 jobs:
   deploy:
-    if: >-
-      github.event_name != 'pull_request' ||
-      (github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.title, '[deploy]'))
-    concurrency:
-      group: netlify-www-prod
-      cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: true
-      - name: Checkout validated benchmark observatory
+      - name: Checkout validated benchmark evidence
         uses: actions/checkout@v4
         with:
           repository: hara-lang/hara-benchmarks
@@ -59,14 +52,15 @@ jobs:
         run: |
           npm ci --prefix website
           npm ci --prefix benchmarks
-      - name: Build browser runtime and site
+      - name: Build browser runtime and Astro sites
         env:
           HARA_GITHUB_OAUTH_CLIENT_ID: ${{ vars.HARA_GITHUB_OAUTH_CLIENT_ID }}
         run: |
           rustup target add wasm32-unknown-unknown
+          bash scripts/install-benchmark-site prepare
           bash scripts/build-www
-          bash scripts/install-benchmark-site
-      - name: Test website scene contract
+          bash scripts/install-benchmark-site publish
+      - name: Test website scene and Astro benchmark contracts
         run: |
           npm test --prefix website
           node --test website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
@@ -74,8 +68,10 @@ jobs:
           test -s target/www/benchmarks/index.html
           test -s target/www/benchmarks/data/catalog.json
           test -s target/www/benchmarks/data/runs.json
-          grep -F '<title>Hara Performance Observatory</title>' target/www/benchmarks/index.html
-          grep -F 'Language shootout' target/www/benchmarks/index.html
+          grep -F '<title>Hara Benchmarks</title>' target/www/benchmarks/index.html
+          grep -F 'id="class-comparison"' target/www/benchmarks/index.html
+          grep -F 'id="language-shootout"' target/www/benchmarks/index.html
+          grep -F 'rust-prepared' target/www/benchmarks/index.html
           grep -F '"rust"' target/www/benchmarks/data/catalog.json
           grep -F '"runtime":"rust-prepared"' target/www/benchmarks/data/runs.json
       - name: Deploy prod to www.testing.hara-lang.org
@@ -83,27 +79,24 @@ jobs:
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
-      - name: Reconcile the testing domain
-        run: bash .github/scripts/reconcile-netlify-domain.sh
-        env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
-          NETLIFY_CUSTOM_DOMAIN: www.testing.hara-lang.org
-          NETLIFY_HEALTH_URLS: https://www.testing.hara-lang.org/
-      - name: Verify the testing benchmark observatory
+      - name: Verify the testing Astro benchmark site
         run: bash .github/scripts/verify-benchmark-observatory.sh https://www.testing.hara-lang.org/benchmarks/
       - name: Deploy production to www.hara-lang.org
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
-      - name: Reconcile the production domains
-        run: bash .github/scripts/reconcile-netlify-domain.sh
+      - name: Correct the production domain
+        continue-on-error: true
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request PATCH \
+            --header "Authorization: Bearer ${NETLIFY_AUTH_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data '{"custom_domain":"www.hara-lang.org","force_ssl":true}' \
+            "https://api.netlify.com/api/v1/sites/${NETLIFY_SITE_ID}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
-          NETLIFY_CUSTOM_DOMAIN: www.hara-lang.org
-          NETLIFY_DOMAIN_ALIASES: hara-lang.org docs.hara-lang.org
-          NETLIFY_HEALTH_URLS: https://www.hara-lang.org/ https://www.hara-lang.org/docs/
-      - name: Verify the production benchmark observatory
+      - name: Verify the production Astro benchmark site
         run: bash .github/scripts/verify-benchmark-observatory.sh https://www.hara-lang.org/benchmarks/
