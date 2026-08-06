@@ -41,7 +41,7 @@ public final class HaraNativeTestRunnerTest {
   public void runsPortableFoundationXtalkCommonMathSuite() throws Exception {
     HaraNativeTestRunner.Result result =
         HaraNativeTestRunner.runFile(
-            ROOT, ROOT.resolve("lib/test/xt/lang/common_math_test.hal"));
+            ROOT, ROOT.resolve("lib/test-lang/xt/lang/common_math_test.hal"));
 
     assertTrue(result.failureMessage(), result.passed());
     assertEquals(29, result.facts());
@@ -56,7 +56,7 @@ public final class HaraNativeTestRunnerTest {
   public void runsPortableFoundationXtalkCommonLibSuite() throws Exception {
     HaraNativeTestRunner.Result result =
         HaraNativeTestRunner.runFile(
-            ROOT, ROOT.resolve("lib/test/xt/lang/common_lib_test.hal"));
+            ROOT, ROOT.resolve("lib/test-lang/xt/lang/common_lib_test.hal"));
 
     assertTrue(result.failureMessage(), result.passed());
     assertEquals(39, result.facts());
@@ -84,7 +84,8 @@ public final class HaraNativeTestRunnerTest {
             .split(",");
     for (String file : files) {
       HaraNativeTestRunner.Result result =
-          HaraNativeTestRunner.runFile(ROOT, ROOT.resolve("lib/test/xt/lang/" + file));
+          HaraNativeTestRunner.runFile(
+              ROOT, ROOT.resolve("lib/test-lang/xt/lang/" + file));
       assertTrue(result.failureMessage(), result.passed());
       assertEquals(0, result.failedChecks());
       assertEquals(0, result.errors());
@@ -95,7 +96,8 @@ public final class HaraNativeTestRunnerTest {
   @Test
   public void runsPortablePostgresCoreCompilerSlice() throws Exception {
     HaraNativeTestRunner.Result result =
-        HaraNativeTestRunner.runFile(ROOT, ROOT.resolve("lib/test/postgres/core_test.hal"));
+        HaraNativeTestRunner.runFile(
+            ROOT, ROOT.resolve("lib/test-lang/postgres/core_test.hal"));
 
     assertTrue(result.failureMessage(), result.passed());
     assertEquals(12, result.facts());
@@ -123,20 +125,20 @@ public final class HaraNativeTestRunnerTest {
   @Test
   public void runsPortablePostgresCoreImplBase() throws Exception {
     String[][] suites = {
-      {"lib/test/postgres/core/impl_base_test.hal", "15", "31"},
-      {"lib/test/postgres/core/impl_main_test.hal", "8", "14"},
-      {"lib/test/postgres/core/impl_insert_test.hal", "7", "8"},
-      {"lib/test/postgres/core/impl_update_test.hal", "7", "8"},
-      {"lib/test/postgres/core/impl_test.hal", "4", "8"},
-      {"lib/test/postgres/core/graph_walk_test.hal", "4", "6"},
-      {"lib/test/postgres/core/graph_base_test.hal", "5", "9"},
-      {"lib/test/postgres/core/graph_query_test.hal", "7", "12"},
-      {"lib/test/postgres/core/graph_insert_test.hal", "6", "10"},
-      {"lib/test/postgres/core/graph_view_test.hal", "7", "11"},
-      {"lib/test/postgres/core/graph_test.hal", "6", "13"},
-      {"lib/test/postgres/core_public_test.hal", "5", "9"},
-      {"lib/test/postgres/core/system_test.hal", "2", "3"},
-      {"lib/test/postgres/core/supabase_test.hal", "15", "42"}
+      {"lib/test-lang/postgres/core/impl_base_test.hal", "15", "31"},
+      {"lib/test-lang/postgres/core/impl_main_test.hal", "8", "14"},
+      {"lib/test-lang/postgres/core/impl_insert_test.hal", "7", "8"},
+      {"lib/test-lang/postgres/core/impl_update_test.hal", "7", "8"},
+      {"lib/test-lang/postgres/core/impl_test.hal", "4", "8"},
+      {"lib/test-lang/postgres/core/graph_walk_test.hal", "4", "6"},
+      {"lib/test-lang/postgres/core/graph_base_test.hal", "5", "9"},
+      {"lib/test-lang/postgres/core/graph_query_test.hal", "7", "12"},
+      {"lib/test-lang/postgres/core/graph_insert_test.hal", "6", "10"},
+      {"lib/test-lang/postgres/core/graph_view_test.hal", "7", "11"},
+      {"lib/test-lang/postgres/core/graph_test.hal", "6", "13"},
+      {"lib/test-lang/postgres/core_public_test.hal", "5", "9"},
+      {"lib/test-lang/postgres/core/system_test.hal", "2", "3"},
+      {"lib/test-lang/postgres/core/supabase_test.hal", "15", "42"}
     };
     for (String[] suite : suites) {
       HaraNativeTestRunner.Result result =
@@ -156,19 +158,19 @@ public final class HaraNativeTestRunnerTest {
   @Test
   public void runsPortablePostgresTypedFoundation() throws Exception {
     String[][] suites = {
-      {"lib/test/postgres/typed_test.hal", "8", "9"},
-      {"lib/test/postgres/typed/typed_common_test.hal", "11", "37"},
-      {"lib/test/postgres/typed/typed_shape_test.hal", "7", "11"},
-      {"lib/test/postgres/typed/typed_resolve_test.hal", "6", "16"},
-      {"lib/test/postgres/typed/typed_jsonb_test.hal", "12", "30"},
-      {"lib/test/postgres/typed/typed_infer_test.hal", "10", "15"},
-      {"lib/test/postgres/typed/typed_parse_test.hal", "11", "24"},
-      {"lib/test/postgres/typed/typed_analyze_test.hal", "27", "18"},
-      {"lib/test/postgres/typed/export/json_openapi_test.hal", "5", "12"},
-      {"lib/test/postgres/typed/export/json_schema_test.hal", "5", "9"},
-      {"lib/test/postgres/typed/export/server_api_test.hal", "5", "6"},
-      {"lib/test/postgres/typed/export/server_db_test.hal", "8", "16"},
-      {"lib/test/postgres/typed/export/ts_schema_test.hal", "4", "11"}
+      {"lib/test-lang/postgres/typed_test.hal", "8", "9"},
+      {"lib/test-lang/postgres/typed/typed_common_test.hal", "11", "37"},
+      {"lib/test-lang/postgres/typed/typed_shape_test.hal", "7", "11"},
+      {"lib/test-lang/postgres/typed/typed_resolve_test.hal", "6", "16"},
+      {"lib/test-lang/postgres/typed/typed_jsonb_test.hal", "12", "30"},
+      {"lib/test-lang/postgres/typed/typed_infer_test.hal", "10", "15"},
+      {"lib/test-lang/postgres/typed/typed_parse_test.hal", "11", "24"},
+      {"lib/test-lang/postgres/typed/typed_analyze_test.hal", "27", "18"},
+      {"lib/test-lang/postgres/typed/export/json_openapi_test.hal", "5", "12"},
+      {"lib/test-lang/postgres/typed/export/json_schema_test.hal", "5", "9"},
+      {"lib/test-lang/postgres/typed/export/server_api_test.hal", "5", "6"},
+      {"lib/test-lang/postgres/typed/export/server_db_test.hal", "8", "16"},
+      {"lib/test-lang/postgres/typed/export/ts_schema_test.hal", "4", "11"}
     };
 
     for (String[] suite : suites) {

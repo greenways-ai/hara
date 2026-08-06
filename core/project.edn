@@ -2,8 +2,8 @@
  :hara/version "1.0.0"
  :project/id hara.lang
  :project/version "0.1.0"
- :project/source-paths ["lib/src"]
- :project/test-paths ["lib/test" "rust/web"]
+ :project/source-paths ["lib/src" "lib/src-lang"]
+ :project/test-paths ["lib/test" "lib/test-lang" "rust/web"]
  :project/extension-paths ["rust/extensions" "../extensions"]
  :project/main std.foundation
  :project/capabilities

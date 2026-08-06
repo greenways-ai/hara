@@ -1,0 +1,40 @@
+name: Language source layout
+
+on:
+  push:
+    paths:
+      - 'core/lib/src/**'
+      - 'core/lib/src-lang/**'
+      - 'core/lib/test/**'
+      - 'core/lib/test-lang/**'
+      - 'core/project.edn'
+      - 'core/lib/project.hal'
+      - 'packaging/scripts/check-language-source-layout'
+      - '.github/workflows/language-source-layout.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'core/lib/src/**'
+      - 'core/lib/src-lang/**'
+      - 'core/lib/test/**'
+      - 'core/lib/test-lang/**'
+      - 'core/project.edn'
+      - 'core/lib/project.hal'
+      - 'packaging/scripts/check-language-source-layout'
+      - '.github/workflows/language-source-layout.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: language-source-layout-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate source roots, namespaces, and duplicates
+        run: python3 packaging/scripts/check-language-source-layout

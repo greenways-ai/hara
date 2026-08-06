@@ -13,7 +13,8 @@ public final class HaraPortableNetTest {
   @Test
   public void runsPortableFoundationHttpUtilSuite() throws Exception {
     HaraNativeTestRunner.Result result =
-        HaraNativeTestRunner.runFile(ROOT, ROOT.resolve("lib/test/xt/net/http_util_test.hal"));
+        HaraNativeTestRunner.runFile(
+            ROOT, ROOT.resolve("lib/test-lang/xt/net/http_util_test.hal"));
 
     assertTrue(result.failureMessage(), result.passed());
     assertEquals(6, result.facts());

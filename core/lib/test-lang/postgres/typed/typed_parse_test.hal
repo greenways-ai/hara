@@ -4,8 +4,8 @@
   (:use code.test))
 
 (fact "reads all forms from portable HAL source"
-  (vector? (parse/read-forms "lib/src/postgres/typed/typed_common.hal")) => true
-  (> (count (parse/read-forms "lib/src/postgres/typed/typed_common.hal")) 1) => true)
+  (vector? (parse/read-forms "lib/src-lang/postgres/typed/typed_common.hal")) => true
+  (> (count (parse/read-forms "lib/src-lang/postgres/typed/typed_common.hal")) 1) => true)
 
 (fact "identifies PostgreSQL definition forms"
   (parse/deftype? '(deftype.pg User [:id {:type :uuid}])) => true
@@ -101,7 +101,7 @@
 
 (fact "analyzes portable source files and namespaces"
   (let [analysis (parse/analyze-file
-                  "lib/src/postgres/typed/typed_common.hal")]
+                  "lib/src-lang/postgres/typed/typed_common.hal")]
     (has? analysis :tables) => true
     (has? analysis :enums) => true
     (has? analysis :functions) => true)

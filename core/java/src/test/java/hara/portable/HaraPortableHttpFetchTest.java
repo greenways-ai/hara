@@ -13,7 +13,8 @@ public final class HaraPortableHttpFetchTest {
   @Test
   public void runsPortableFoundationHttpFetchSuite() throws Exception {
     HaraNativeTestRunner.Result result =
-        HaraNativeTestRunner.runFile(ROOT, ROOT.resolve("lib/test/xt/net/http_fetch_test.hal"));
+        HaraNativeTestRunner.runFile(
+            ROOT, ROOT.resolve("lib/test-lang/xt/net/http_fetch_test.hal"));
 
     assertTrue(result.failureMessage(), result.passed());
     assertEquals(7, result.facts());
