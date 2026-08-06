@@ -19,13 +19,13 @@
             child (get collection head)]
         (if (nil? child)
           collection
-          (assoc collection head (-/del-path child tail)))))))
+          (assoc collection head (del-path child tail)))))))
 
 (defn del-path!
   "Deletes a path from a mutable XTalk reference and returns the previous value."
   [reference path]
   (let [previous (get-in (deref reference) path)]
-    (swap! reference -/del-path path)
+    (swap! reference del-path path)
     previous))
 
 (defn obj-assign!
