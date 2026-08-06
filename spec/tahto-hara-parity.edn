@@ -1,0 +1,94 @@
+{:reference
+ {:repository "zcaudate-xyz/foundation-base"
+  :commit "f909a44ad504cc6c9f44248d59ec3148261a48d7"
+  :xtalk-grammar "src/tahto/model/spec_xtalk.clj"
+  :xtalk-runtime "src/tahto/runtime/basic/impl/process_xtalk.clj"}
+
+ :target
+ {:grammar "lib/src/tahto/model/v1/spec_hara.hal"
+  :emitter "lib/src/tahto/model/v1/spec_hara/emit.hal"
+  :runtime "lib/src/tahto/runtime/basic/type_hara.hal"
+  :registration "lib/src/tahto/runtime/basic/impl/process_xtalk.hal"
+  :mutation-support "lib/src/tahto/runtime/hara.hal"}
+
+ :architecture
+ {:xtalk
+  "The target-neutral parent grammar and public semantic runtime coordinate."
+  :hara
+  "The concrete child grammar and in-process execution target."
+  :coordinates
+  {[:xtalk :basic] :canonical
+   [:hara :basic] :explicit-alias}
+  :transport :in-process
+  :child-process false
+  :wire-protocol false}
+
+ :grammar
+ {:coordinate {:grammar/id :hara
+               :grammar/variant :default
+               :grammar/version 1}
+  :parent {:grammar/id :xtalk
+           :grammar/version 1}
+  :emission :hara-source
+  :module-symbols :flattened-vars
+  :mutable-locals :hara-atoms
+  :returns :tagged-local-unwind}
+
+ :runtime
+ {:state :persistent-hara-namespace
+  :semantic-input "XTalk AST compiled through the :hara grammar"
+  :raw-input "Already-emitted Hara source"
+  :result "Native Hara value"
+  :lifecycle [:created :started :stopped]
+  :state-fields
+  [:status :target :namespace :evaluations :last-source :last-result
+   :last-compiled? :last-error]}
+
+ :ported-surface
+ {:control
+  [:do :if :when :cond :br* :while :for:index :for:array :for:object
+   :for:iter :try :catch :finally :return]
+  :definitions [:fn :defn :def :defglobal]
+  :mutation
+  [:var := :+= :-= :*= :++ :-- x:set-key x:set-idx x:del-key
+   x:obj-assign x:arr-push x:arr-pop x:arr-push-first
+   x:arr-pop-first x:arr-remove x:arr-insert x:arr-reverse]
+  :data
+  [:vectors :maps :sets :module-symbols :member-index]
+  :portable-operations
+  [:type-predicates :arrays :objects :strings :json :math :bits :apply]}
+
+ :intentional-differences
+ [{:foundation "The historical :xtalk runtime executes emitted Scheme through Chez."
+   :hara "The :xtalk :basic runtime compiles to Hara and evaluates inside the current Hara kernel."
+   :reason "Self-hosting removes the external process, socket, and JSON result envelope."}
+  {:foundation "Mutable target variables use native JavaScript/Python/Lua mutation."
+   :hara "Mutable lexical variables and parameters are represented by Hara atoms."
+   :reason "Hara bindings are immutable while XTalk var and collection operations are mutable."}
+  {:foundation "Target return statements are native control flow."
+   :hara "Function-local return uses a tagged exception caught at the function boundary."
+   :reason "Preserves early-return semantics without adding a new Hara special form."}]
+
+ :deferred
+ [:break-and-continue-unwind
+  :generator-yield
+  :native-construction-parity
+  :filesystem-and-shell-capabilities
+  :iterator-object-protocol-parity
+  :complete-promise-operation-parity
+  :full-xt-lang-corpus]
+
+ :tests
+ [{:path "lib/test/tahto/model/v1/spec_hara_test.hal"
+   :facts 6}
+  {:path "lib/test/tahto/runtime/basic/impl/process_xtalk_test.hal"
+   :facts 6}]
+
+ :acceptance
+ ["The :hara grammar resolves as a versioned child of :xtalk."
+  "The :xtalk :basic coordinate launches no process and owns no transport."
+  "Raw Hara definitions persist within a runtime namespace."
+  "Separate runtime namespaces isolate their persistent Vars."
+  "Semantic XTalk input compiles and returns native Hara values."
+  "Mutable locals, arrays, and early return execute through the self-hosted path."
+  "Canonical HAL sources and Rust packaged snapshots are identical."]}
