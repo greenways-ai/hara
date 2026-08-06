@@ -1,0 +1,27 @@
+package hara.portable;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
+import hara.truffle.HaraNativeTestRunner;
+import java.nio.file.Path;
+import org.junit.Test;
+
+public final class HaraPortableMcpNodeTest {
+  private static final Path ROOT = Path.of(".").toAbsolutePath().normalize();
+
+  @Test
+  public void runsPortableFoundationMcpNodeSuite() throws Exception {
+    HaraNativeTestRunner.Result result =
+        HaraNativeTestRunner.runFile(
+            ROOT, ROOT.resolve("lib/test/xt/mcp/node/kernel_base_test.hal"));
+
+    assertTrue(result.failureMessage(), result.passed());
+    assertEquals(4, result.facts());
+    assertEquals(4, result.checks());
+    assertEquals(4, result.passedChecks());
+    assertEquals(0, result.failedChecks());
+    assertEquals(0, result.errors());
+    assertEquals(0, result.timeouts());
+  }
+}

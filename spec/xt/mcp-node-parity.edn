@@ -1,0 +1,72 @@
+{:reference
+ {:repository "zcaudate-xyz/foundation-base"
+  :commit "f909a44ad504cc6c9f44248d59ec3148261a48d7"
+  :source-root "src-lang/xt/mcp/node"
+  :test "test-lang/xt/mcp/node/kernel_base_test.clj"}
+
+ :target
+ {:source-root "lib/src/xt/mcp/node"
+  :test "lib/test/xt/mcp/node/kernel_base_test.hal"
+  :rust-snapshot "rust/hal-src/xt/mcp/node"}
+
+ :dependencies
+ [{:namespace xt.mcp.base
+   :status :ported
+   :source "src-lang/xt/mcp/base.clj"
+   :target "lib/src/xt/mcp/base.hal"}
+  {:namespace xt.substrate
+   :status :ported
+   :source "src-lang/xt/substrate.clj"
+   :target "lib/src/xt/substrate.hal"}
+  {:namespace xt.substrate.transport-memory
+   :status :pending
+   :source "src-lang/xt/substrate/transport_memory.clj"
+   :target "lib/src/xt/substrate/transport_memory.hal"
+   :reason "Required only by the retained remote proxy integration fact; port separately with its full transport behavior suite."}]
+
+ :mappings
+ [{:source "src-lang/xt/mcp/node/client_base.clj"
+   :source-sha "1cf4b613fbef793ebd1623ca07e0c107408c9ba5"
+   :target "lib/src/xt/mcp/node/client_base.hal"
+   :status :ported}
+  {:source "src-lang/xt/mcp/node/kernel_base.clj"
+   :source-sha "95f62f84b7064e646bf66b98dab9aa9ee31c5333"
+   :target "lib/src/xt/mcp/node/kernel_base.hal"
+   :status :ported}
+  {:source "src-lang/xt/mcp/node/proxy_base.clj"
+   :source-sha "61868d7dd89e3eae2e128cdecd66b537b4cfbafb"
+   :target "lib/src/xt/mcp/node/proxy_base.hal"
+   :status :ported}
+  {:source "src-lang/xt/mcp/node/proxy_util.clj"
+   :source-sha "5eeaec5ab71a27b11a1e594a471b5ec05dbfb922"
+   :target "lib/src/xt/mcp/node/proxy_util.hal"
+   :status :ported}
+  {:source "src-lang/xt/mcp/node/runtime.clj"
+   :source-sha "5685174ff5d74748d15d6ef3dd6b314f79246b3a"
+   :target "lib/src/xt/mcp/node/runtime.hal"
+   :status :ported}]
+
+ :test-slices
+ [{:name :mcp-node-local
+   :source "test-lang/xt/mcp/node/kernel_base_test.clj"
+   :source-sha "37a6dc262ebc4271a071613cea73df41bde09b94"
+   :target "lib/test/xt/mcp/node/kernel_base_test.hal"
+   :target-sha "a077d5e0be5834c93df4c3ebc92a2cf065d83320"
+   :facts 4
+   :checks 4
+   :runtime :js
+   :coverage
+   ["named service and tool registration"
+    "initialize, initialized, tools/list, and tools/call"
+    "protocol errors versus tool execution errors"
+    "client-side proxy handler installation"]}
+  {:name :mcp-node-remote-proxy
+   :source "test-lang/xt/mcp/node/kernel_base_test.clj"
+   :status :pending
+   :reason "The fifth Foundation fact requires xt.substrate.transport-memory and will land with that transport port."}]
+
+ :acceptance
+ ["Every Foundation MCP node source is byte-identical in the portable HAL tree and Rust snapshot."
+  "The local MCP client API drives the same server registry and session lifecycle as the Foundation reference."
+  "Proxy handler installation remains distinct from server service installation."
+  "The omitted remote proxy fact is explicit and dependency-bound rather than silently dropped."]}
