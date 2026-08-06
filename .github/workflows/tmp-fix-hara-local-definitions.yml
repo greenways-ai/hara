@@ -1,0 +1,110 @@
+name: Temporary Hara local definition repair
+
+on:
+  push:
+    branches:
+      - agent/tahto-hara-self-host
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/tahto-hara-self-host
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Emit local names inside explicit Hara namespaces
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          old_defn = '''(defn lower-defn
+            [form environment context]
+            (let [symbol (second form)
+                  [arguments body] (declaration-body form context)
+                  [hara-arguments hara-body]
+                  (function-body arguments body environment context)]
+              (list 'defn
+                    (qualify-top-symbol symbol context)
+                    hara-arguments
+                    hara-body)))'''
+
+          new_defn = '''(defn lower-defn
+            [form environment context]
+            (let [symbol-value (second form)
+                  [arguments body] (declaration-body form context)
+                  [hara-arguments hara-body]
+                  (function-body arguments body environment context)]
+              (list 'defn
+                    (symbol (name symbol-value))
+                    hara-arguments
+                    hara-body)))'''
+
+          old_def = '''(defn lower-def
+            [form environment context]
+            (let [items (vec form)
+                  symbol (second items)
+                  value (if (> (count items) 2)
+                          (nth items (- (count items) 1))
+                          nil)]
+              (list 'def
+                    (qualify-top-symbol symbol context)
+                    (lower-expr value environment))))'''
+
+          new_def = '''(defn lower-def
+            [form environment context]
+            (let [items (vec form)
+                  symbol-value (second items)
+                  value (if (> (count items) 2)
+                          (nth items (- (count items) 1))
+                          nil)]
+              (list 'def
+                    (symbol (name symbol-value))
+                    (lower-expr value environment))))'''
+
+          paths = [
+              Path('lib/src/tahto/model/v1/spec_hara/emit.hal'),
+              Path('rust/hal-src/tahto/model/v1/spec_hara/emit.hal'),
+          ]
+          for path in paths:
+              text = path.read_text()
+              if text.count(old_defn) != 1 or text.count(old_def) != 1:
+                  raise SystemExit(f'{path}: expected definition blocks once')
+              path.write_text(text.replace(old_defn, new_defn).replace(old_def, new_def))
+
+          test_path = Path('lib/test/tahto/model/v1/spec_hara_dependency_test.hal')
+          test = test_path.read_text()
+          test = test.replace(
+              '(:require [tahto.common.compiler :as compiler]',
+              '(:require [std.foundation.string :as string]\n            [tahto.common.compiler :as compiler]')
+          old_fact = '''(fact "compiles a registered canonical XTalk dependency entry through Hara"
+            entry-result
+            => {:status :ok
+                :output (:output entry-result)
+                :dependencies (:dependencies entry-result)
+                :stages (:stages entry-result)})'''
+          new_fact = '''(fact "compiles a registered canonical XTalk dependency entry through Hara"
+            [(get entry-result :status)
+             (string/starts-with? (get entry-result :output)
+                                  "(ns xt.lang.common-math)\\n(defn gcd ")
+             (string/includes? (get entry-result :output)
+                               "xt.lang.common-math/gcd")]
+            => [:ok true true])'''
+          if test.count(old_fact) != 1:
+              raise SystemExit('dependency fact marker not found')
+          test_path.write_text(test.replace(old_fact, new_fact))
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            lib/src/tahto/model/v1/spec_hara/emit.hal \
+            rust/hal-src/tahto/model/v1/spec_hara/emit.hal \
+            lib/test/tahto/model/v1/spec_hara_dependency_test.hal
+          git commit -m "Emit local definitions inside Hara module namespaces"
+          git push origin HEAD:agent/tahto-hara-self-host
