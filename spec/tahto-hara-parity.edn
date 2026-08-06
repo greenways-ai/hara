@@ -9,7 +9,9 @@
   :emitter "lib/src/tahto/model/v1/spec_hara/emit.hal"
   :runtime "lib/src/tahto/runtime/basic/type_hara.hal"
   :registration "lib/src/tahto/runtime/basic/impl/process_xtalk.hal"
-  :mutation-support "lib/src/tahto/runtime/hara.hal"}
+  :collection-facade "lib/src/tahto/runtime/hara.hal"
+  :native-arr "std.native.Arr"
+  :native-obj "std.native.Obj"}
 
  :architecture
  {:xtalk
@@ -21,7 +23,8 @@
    [:hara :basic] :explicit-alias}
   :transport :in-process
   :child-process false
-  :wire-protocol false}
+  :wire-protocol false
+  :collection-ownership :hara-runtime}
 
  :grammar
  {:coordinate {:grammar/id :hara
@@ -31,7 +34,8 @@
            :grammar/version 1}
   :emission :hara-source
   :module-symbols :flattened-vars
-  :mutable-locals :hara-atoms
+  :mutable-bindings :hara-atoms
+  :mutable-collections [:std.native.Arr :std.native.Obj]
   :returns :tagged-local-unwind}
 
  :runtime
@@ -39,10 +43,32 @@
   :semantic-input "XTalk AST compiled through the :hara grammar"
   :raw-input "Already-emitted Hara source"
   :result "Native Hara value"
+  :collection-values [:std.native.Arr :std.native.Obj]
+  :collection-mutation :identity-preserving
   :lifecycle [:created :started :stopped]
   :state-fields
   [:status :target :namespace :evaluations :last-source :last-result
    :last-compiled? :last-error]}
+
+ :collection-facade
+ {:principle
+  "tahto.runtime.hara adapts XTalk names and return conventions only; storage and mutation belong to std.native.Arr and std.native.Obj."
+  :construction
+  {:vector-literal :std.native.Arr/new
+   :map-literal :std.native.Obj/new
+   :boundary-conversion :recursive}
+  :array
+  {:direct [:new :instance? :get-index :set-index]
+   :marker
+   [:push-first :push-last :pop-first :pop-last :insert :remove
+    :clone :map :filter :fold-left :fold-right]}
+  :object
+  {:direct [:new :instance? :get-key :set-key :has-key? :delete-key]
+   :marker [:assign :clone :keys :vals :pairs]}
+  :identity
+  ["Mutation is visible through aliases."
+   "Nested native objects retain identity during deep assignment."
+   "Cloning is the explicit operation that creates a distinct native value."]}
 
  :ported-surface
  {:control
@@ -54,7 +80,7 @@
    x:obj-assign x:arr-push x:arr-pop x:arr-push-first
    x:arr-pop-first x:arr-remove x:arr-insert x:arr-reverse]
   :data
-  [:vectors :maps :sets :module-symbols :member-index]
+  [:std.native.Arr :std.native.Obj :sets :module-symbols :member-index]
   :portable-operations
   [:type-predicates :arrays :objects :strings :json :math :bits :apply]}
 
@@ -62,9 +88,11 @@
  [{:foundation "The historical :xtalk runtime executes emitted Scheme through Chez."
    :hara "The :xtalk :basic runtime compiles to Hara and evaluates inside the current Hara kernel."
    :reason "Self-hosting removes the external process, socket, and JSON result envelope."}
-  {:foundation "Mutable target variables use native JavaScript/Python/Lua mutation."
-   :hara "Mutable lexical variables and parameters are represented by Hara atoms."
-   :reason "Hara bindings are immutable while XTalk var and collection operations are mutable."}
+  {:foundation "Mutable target variables and collections use the target runtime's identity model."
+   :hara "Scalar rebinding is represented by Hara atoms; array and object values are std.native.Arr and std.native.Obj and mutate in place."
+   :reason "The atom models a mutable binding cell, not collection storage. Native collections preserve identity and alias visibility."
+   :supersedes
+   "The initial merged implementation rebuilt persistent vectors/maps inside atoms and is intentionally replaced by this native facade."}
   {:foundation "Target return statements are native control flow."
    :hara "Function-local return uses a tagged exception caught at the function boundary."
    :reason "Preserves early-return semantics without adding a new Hara special form."}]
@@ -72,23 +100,30 @@
  :deferred
  [:break-and-continue-unwind
   :generator-yield
-  :native-construction-parity
   :filesystem-and-shell-capabilities
   :iterator-object-protocol-parity
   :complete-promise-operation-parity
   :full-xt-lang-corpus]
 
  :tests
- [{:path "lib/test/tahto/model/v1/spec_hara_test.hal"
-   :facts 6}
+ [{:path "lib/test/tahto/runtime/hara_test.hal"
+   :facts 6
+   :coverage
+   [:native-construction :alias-identity :nested-identity :boundary-conversion
+    :native-clones]}
+  {:path "lib/test/tahto/model/v1/spec_hara_test.hal"
+   :facts 8
+   :coverage [:native-literals :native-reads :native-predicates :provenance]}
   {:path "lib/test/tahto/runtime/basic/impl/process_xtalk_test.hal"
-   :facts 6}]
+   :facts 6
+   :coverage [:native-runtime-results :lifecycle :namespace-isolation]}]
 
  :acceptance
  ["The :hara grammar resolves as a versioned child of :xtalk."
   "The :xtalk :basic coordinate launches no process and owns no transport."
-  "Raw Hara definitions persist within a runtime namespace."
-  "Separate runtime namespaces isolate their persistent Vars."
-  "Semantic XTalk input compiles and returns native Hara values."
-  "Mutable locals, arrays, and early return execute through the self-hosted path."
+  "XTalk vector and map literals are created as std.native.Arr and std.native.Obj."
+  "Array and object mutation preserves native identity and is visible through aliases."
+  "Nested native object identity survives deep assignment."
+  "Persistent vectors/maps are accepted only as boundary inputs and recursively converted once."
+  "Semantic XTalk input returns native Hara collection values."
   "Canonical HAL sources and Rust packaged snapshots are identical."]}
