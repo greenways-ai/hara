@@ -1,0 +1,276 @@
+(ns tahto.typed.xtalk-common
+  (:require [std.foundation.string :as string]))
+
+(def +primitive-types+
+  #{:xt/any
+    :xt/unknown
+    :xt/nil
+    :xt/bool
+    :xt/int
+    :xt/num
+    :xt/str
+    :xt/kw
+    :xt/fn
+    :xt/obj})
+
+(def +unknown-type+ {:kind :primitive :name :xt/unknown})
+(def +nil-type+     {:kind :primitive :name :xt/nil})
+(def +bool-type+    {:kind :primitive :name :xt/bool})
+(def +int-type+     {:kind :primitive :name :xt/int})
+(def +num-type+     {:kind :primitive :name :xt/num})
+(def +str-type+     {:kind :primitive :name :xt/str})
+(def +kw-type+      {:kind :primitive :name :xt/kw})
+
+(declare normalize-type)
+
+(defn primitive-type
+  [kw]
+  {:kind :primitive :name kw})
+
+(defn snake-case-string
+  [s]
+  (string/replace s "-" "_"))
+
+(defn maybe-type
+  [type]
+  {:kind :maybe :item type})
+
+(defn union-type
+  [types]
+  (let [flat (->> types
+                  (mapcat (fn [type]
+                            (if (= :union (:kind type))
+                              (:types type)
+                              [type])))
+                  (remove nil?)
+                  distinct
+                  vec)]
+    (cond
+      (empty? flat) +unknown-type+
+      (= 1 (count flat)) (first flat)
+      :else {:kind :union :types flat})))
+
+(defn type-key
+  [ns-sym type-name]
+  (if ns-sym
+    (symbol (str ns-sym) (name type-name))
+    (symbol (name type-name))))
+
+(defn field-key
+  [field]
+  (cond
+    (keyword? field)
+    (if-let [field-ns (namespace field)]
+      (str (snake-case-string field-ns)
+           "/"
+           (snake-case-string (name field)))
+      (snake-case-string (name field)))
+
+    (symbol? field)
+    (if-let [field-ns (namespace field)]
+      (str (snake-case-string field-ns)
+           "/"
+           (snake-case-string (name field)))
+      (snake-case-string (name field)))
+
+    (string? field)
+    (snake-case-string field)
+
+    :else
+    (throw (ex-info "Invalid record field key"
+                    {:field field}))))
+
+(def +uppercase-letters+ "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+(defn likely-type-symbol?
+  [sym]
+  (let [name-str (name sym)]
+    (boolean
+     (or (namespace sym)
+         (and (< 0 (string/length name-str))
+              (string/includes? +uppercase-letters+
+                                (string/char-at name-str 0)))))))
+
+(defn resolve-type-symbol
+  [sym {:keys [ns aliases]}]
+  (cond
+    (not (symbol? sym))
+    sym
+
+    (namespace sym)
+    (if-let [alias-ns (get aliases (symbol (namespace sym)))]
+      (symbol (str alias-ns) (name sym))
+      sym)
+
+    ns
+    (symbol (str ns) (name sym))
+
+    :else
+    sym))
+
+(defn normalize-record-field
+  [[field-name field-type] ctx]
+  (let [type (normalize-type field-type ctx)]
+    {:name (field-key field-name)
+     :type type
+     :optional? (= :maybe (:kind type))}))
+
+(defn normalize-apply-target
+  [target ctx]
+  (if (symbol? target)
+    (resolve-type-symbol target ctx)
+    target))
+
+(defn normalize-type
+  [form ctx]
+  (cond
+    (nil? form)
+    +nil-type+
+
+    (keyword? form)
+    (if (= :xt/self form)
+      (or (:self ctx) +unknown-type+)
+      (if (contains? +primitive-types+ form)
+        (primitive-type form)
+        {:kind :keyword :name form}))
+
+    (symbol? form)
+    {:kind :named :name (resolve-type-symbol form ctx)}
+
+    (string? form)
+    {:kind :named :name form}
+
+    (vector? form)
+    (let [[op & args] form]
+      (case op
+        :maybe
+        {:kind :maybe
+         :item (normalize-type (first args) ctx)}
+
+        :xt/maybe
+        {:kind :maybe
+         :item (normalize-type (first args) ctx)}
+
+        :or
+        {:kind :union
+         :types (mapv #(normalize-type % ctx) args)}
+
+        :xt/or
+        {:kind :union
+         :types (mapv #(normalize-type % ctx) args)}
+
+        :and
+        {:kind :intersection
+         :types (mapv #(normalize-type % ctx) args)}
+
+        :xt/and
+        {:kind :intersection
+         :types (mapv #(normalize-type % ctx) args)}
+
+        :tuple
+        {:kind :tuple
+         :types (mapv #(normalize-type % ctx) args)}
+
+        :xt/tuple
+        {:kind :tuple
+         :types (mapv #(normalize-type % ctx) args)}
+
+        :array
+        {:kind :array
+         :item (normalize-type (first args) ctx)}
+
+        :xt/array
+        {:kind :array
+         :item (normalize-type (first args) ctx)}
+
+        :dict
+        {:kind :dict
+         :key (normalize-type (first args) ctx)
+         :value (normalize-type (second args) ctx)}
+
+        :xt/dict
+        {:kind :dict
+         :key (normalize-type (first args) ctx)
+         :value (normalize-type (second args) ctx)}
+
+        :record
+        {:kind :record
+         :fields (mapv #(normalize-record-field % ctx) args)}
+
+        :xt/record
+        {:kind :record
+         :fields (mapv #(normalize-record-field % ctx) args)}
+
+        :fn
+        {:kind :fn
+         :inputs (mapv #(normalize-type % ctx) (first args))
+         :output (normalize-type (second args) ctx)}
+
+        :xt/fn
+        {:kind :fn
+         :inputs (mapv #(normalize-type % ctx) (first args))
+         :output (normalize-type (second args) ctx)}
+
+        :>
+        {:kind :apply
+         :target (normalize-apply-target (first args) ctx)
+         :args (mapv #(normalize-type % ctx) (rest args))}
+
+        :xt/apply
+        {:kind :apply
+         :target (normalize-apply-target (first args) ctx)
+         :args (mapv #(normalize-type % ctx) (rest args))}
+
+        {:kind :tuple
+         :types (mapv #(normalize-type % ctx) form)}))
+
+    :else
+    (throw (ex-info "Unsupported type form"
+                    {:form form
+                     :context ctx}))))
+
+(defn normalize-return-meta
+  [ret ctx]
+  (let [body (if (and (vector? ret)
+                      (= 1 (count ret)))
+               (first ret)
+               ret)]
+    (normalize-type body ctx)))
+
+(defn make-spec-def
+  [ns-sym type-name type spec-meta]
+  {:ns (some-> ns-sym str)
+   :name (name type-name)
+   :type type
+   :spec-meta spec-meta})
+
+(defn make-arg
+  [arg-name type modifiers]
+  {:name arg-name
+   :type type
+   :modifiers (vec modifiers)})
+
+(defn make-fn-def
+  [ns-sym fn-name inputs output body-meta raw-body spec]
+  {:ns (some-> ns-sym str)
+   :name (name fn-name)
+   :inputs (vec inputs)
+   :output output
+   :body-meta body-meta
+   :raw-body (vec raw-body)
+   :spec spec})
+
+(defn make-value-def
+  [ns-sym value-name type body-meta raw-value spec]
+  {:ns (some-> ns-sym str)
+   :name (name value-name)
+   :type type
+   :body-meta body-meta
+   :raw-value raw-value
+   :spec spec})
+
+(defn fn-type
+  [fn-def]
+  {:kind :fn
+   :inputs (mapv :type (:inputs fn-def))
+   :output (:output fn-def)})

@@ -1,0 +1,31 @@
+(ns tahto.model.v1.spec-js.ts-fixture
+  (:require [tahto.core :as l]))
+
+(l/script :xtalk
+  {:require [[tahto.model.v1.spec-js.ts-shared-fixture :as shared]]})
+
+(defspec.xt User
+  [:xt/record
+   ["id" :xt/str]
+   ["display-name" [:xt/maybe :xt/str]]])
+
+(defspec.xt UserMap
+  [:xt/dict :xt/str User])
+
+(defspec.xt TokenBox
+  [:xt/record
+   ["token" shared/Token]])
+
+(defspec.xt find-user
+  [:fn [UserMap :xt/str]
+   [:xt/maybe User]])
+
+(defn.xt find-user
+  [users id]
+  (return nil))
+
+(defspec.xt DEFAULT-USER
+  User)
+
+(def.xt DEFAULT-USER
+  {:id "anonymous"})
