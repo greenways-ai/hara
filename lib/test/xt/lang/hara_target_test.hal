@@ -1,0 +1,49 @@
+(ns xt.lang.hara-target-test
+  (:use code.test)
+  (:require [tahto.core :as l]
+            [tahto.model.v1.spec-hara :as hara]))
+
+(l/script- :hara
+  {:runtime :basic
+   :require [[xt.lang.common-math :as xtm]]})
+
+(fact:global
+ {:setup [(l/rt:restart)]
+  :teardown [(l/rt:stop)]})
+
+^{:refer xt.lang.common-math/gcd :added "4.1"}
+(fact "runs recursive canonical XTalk through the self-hosted Hara target"
+  (hara/!.hara
+   [(xtm/gcd 54 24)
+    (xtm/gcd 10 0)
+    (xtm/lcm 4 6)
+    (xtm/lcm 3 7)])
+  => [6 10 12 21])
+
+^{:refer xt.lang.common-math/mod-pos :added "4.1"}
+(fact "runs canonical mutable locals and ternary expressions"
+  (hara/!.hara
+   [(xtm/mod-pos -1 5)
+    (xtm/mod-pos 6 5)
+    (xtm/mod-offset 9 1 10)
+    (xtm/mod-offset 1 9 10)
+    (xtm/mod-offset 2 4 10)])
+  => [4 1 2 -2 2])
+
+^{:refer xt.lang.common-math/sign :added "4.1"}
+(fact "returns through nested canonical branches"
+  (hara/!.hara
+   [(xtm/sign -10)
+    (xtm/sign 0)
+    (xtm/sign 10)
+    (xtm/clamp 0 10 -3)
+    (xtm/clamp 0 10 7)
+    (xtm/clamp 0 10 12)])
+  => [-1 0 1 0 7 10])
+
+^{:refer xt.lang.common-math/mix :added "4.1"}
+(fact "keeps ordinary portable arithmetic on the native Hara evaluator"
+  (hara/!.hara
+   [(xtm/mix 0 10 0.5)
+    (xtm/mix 10 20 0.25)])
+  => [5 12.5])

@@ -1,0 +1,92 @@
+(ns tahto.runtime.basic.type-hara-test
+  (:use code.test)
+  (:require [tahto.core :as l]
+            [tahto.runtime.basic.type-hara :as hara]))
+
+^{:refer tahto.runtime.basic.type-hara/rt-hara:create :added "4.1"}
+(fact "creates an in-process basic runtime without a transport or process"
+  (let [runtime (l/rt-create :hara :basic)]
+    [(:lang runtime)
+     (:runtime runtime)
+     (:program runtime)
+     (:target runtime)
+     (:profile runtime)
+     (:transport runtime)
+     (hara/hara-state runtime)])
+  => [:hara
+      :basic
+      :hara-self
+      :hara
+      {:input [] :source [] :response []}
+      nil
+      {:status :created
+       :target :hara
+       :evaluations 0}])
+
+^{:refer tahto.runtime.basic.type-hara/raw-eval-hara :added "4.1"}
+(fact "evaluates Hara source directly inside the current kernel"
+  (let [runtime (l/rt-start (l/rt-create :hara :basic))]
+    (try
+      [(l/rt-raw-eval runtime "(+ 19 23)")
+       (get (hara/hara-state runtime) :evaluations)]
+      (finally
+        (l/rt-stop runtime))))
+  => [42 1])
+
+^{:refer tahto.runtime.basic.type-hara/raw-eval-hara :added "4.1"}
+(fact "preserves namespace state across basic evaluations"
+  (let [runtime (l/rt-start (l/rt-create :hara :basic))]
+    (try
+      (l/rt-raw-eval runtime
+                     "(def self-hosted-runtime-value 40)\n(+ self-hosted-runtime-value 1)")
+      [(l/rt-raw-eval runtime "(+ self-hosted-runtime-value 2)")
+       (get (hara/hara-state runtime) :evaluations)]
+      (finally
+        (l/rt-stop runtime))))
+  => [42 2])
+
+^{:refer tahto.runtime.basic.impl.runtime-hara/+xtalk-basic+ :added "4.1"}
+(fact "exposes the requested xtalk basic compatibility coordinate"
+  (let [runtime (l/rt-start (l/rt-create :xtalk :basic))]
+    (try
+      [(:lang runtime)
+       (:target runtime)
+       (l/rt-raw-eval runtime "(* 6 7)")]
+      (finally
+        (l/rt-stop runtime))))
+  => [:xtalk :hara 42])
+
+^{:refer tahto.runtime.basic.type-hara/eval-source-now :added "4.1"}
+(fact "reports execution failures with the self-hosted runtime identity"
+  (let [runtime (l/rt-start (l/rt-create :hara :basic))]
+    (try
+      (l/rt-raw-eval runtime "(missing-self-hosted-function 1)")
+      nil
+      (catch Throwable error
+        (let [data (ex-data error)]
+          [(ex-message error)
+           (get data :phase)
+           (get data :lang)
+           (get data :target)
+           (get data :runtime)
+           (get data :program)
+           (get data :source)]))
+      (finally
+        (l/rt-stop runtime))))
+  => ["Self-hosted XTalk evaluation failed"
+      :execute
+      :hara
+      :hara
+      :basic
+      :hara-self
+      "(missing-self-hosted-function 1)"])
+
+^{:refer tahto.runtime.basic.type-hara/stop-hara :added "4.1"}
+(fact "retains lifecycle state and evaluation count after stop"
+  (let [runtime (l/rt-start (l/rt-create :hara :basic))]
+    (l/rt-raw-eval runtime "42")
+    (l/rt-stop runtime)
+    (hara/hara-state runtime))
+  => {:status :stopped
+      :target :hara
+      :evaluations 1})

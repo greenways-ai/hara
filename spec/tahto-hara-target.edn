@@ -1,0 +1,129 @@
+{:reference
+ {:repository "zcaudate-xyz/foundation-base"
+  :commit "f909a44ad504cc6c9f44248d59ec3148261a48d7"
+  :abstract-grammar
+  {:path "src/tahto/model/spec_xtalk.clj"
+   :sha "525aad08077c40e0a7adcfeab994d2aaf76b1bf8"}
+  :legacy-runtime
+  {:path "src/tahto/runtime/basic/impl/process_xtalk.clj"
+   :sha "7dc299ba322946475492cbcceff265841651328a"
+   :program :chez
+   :runtime-types [:oneshot :verify]}}
+
+ :target
+ {:abstract-grammar "lib/src/tahto/model/v1/spec_xtalk.hal"
+  :concrete-grammar "lib/src/tahto/model/v1/spec_hara.hal"
+  :lowerer "lib/src/tahto/model/v1/spec_hara/emit.hal"
+  :runtime "lib/src/tahto/runtime/basic/type_hara.hal"
+  :runtime-registration "lib/src/tahto/runtime/basic/impl/runtime_hara.hal"
+  :support "lib/src/tahto/runtime/hara_support.hal"}
+
+ :architecture
+ {:xtalk
+  "Abstract portable operation grammar and parent for concrete targets."
+  :hara
+  "Concrete XTalk target that lowers canonical forms to Hara source."
+  :runtime
+  "Persistent in-process Hara evaluator with normal Tahto lifecycle interfaces."
+  :compatibility-coordinate
+  "[:xtalk :basic] evaluates concrete Hara source through the same runtime; ordinary XTalk compilation selects the :hara book."}
+
+ :coordinates
+ {:grammar {:grammar/id :hara
+            :grammar/version 1
+            :grammar/parent {:grammar/id :xtalk
+                             :grammar/version 1}}
+  :books [[:xtalk :default 1]
+          [:hara :default 1]]
+  :runtimes [[:hara :basic]
+             [:xtalk :basic]]}
+
+ :runtime-properties
+ {:program :hara-self
+  :target :hara
+  :persistent true
+  :in-process true
+  :transport nil
+  :requires []
+  :does-not-require [:process :socket :file :network :container]
+  :state [:status :target :evaluations]
+  :interfaces [:tahto-runtime :context-eval :context :component]}
+
+ :lowering
+ {:strategy
+  "Target rewrite converts canonical XTalk to one Hara AST, then emits it through the existing -%%- raw-source operation."
+  :mutation
+  "Mutable XTalk locals and arguments become lexically scoped Hara volatile cells; reads are dereferenced and writes use vreset!/vswap!."
+  :return-and-break
+  "Private exception control signals preserve non-local return and nearest-loop break semantics."
+  :module-state
+  "Top-level dependency definitions are qualified by their registered module and persist in the current Hara kernel."}
+
+ :supported-first-slice
+ [:literals
+  :vectors
+  :sets
+  :maps
+  :arithmetic
+  :numeric-comparisons
+  :boolean-control
+  :def
+  :defn
+  :fn
+  :mutable-locals
+  :mutable-arguments
+  :return
+  :break
+  :if
+  :cond
+  :canonical-branch
+  :for
+  :while
+  :try-catch-finally
+  :structural-get
+  :structural-set
+  :structural-delete
+  :array-push-pop-insert-remove
+  :array-map-fold
+  :strings
+  :json
+  :basic-math]
+
+ :explicitly-deferred
+ [{:area :async-promises
+   :reason "Requires a deliberate Hara promise/control model rather than synchronous deref substitution."}
+  {:area :prototype-and-class
+   :reason "Host prototype mutation has no direct persistent Hara equivalent."}
+  {:area :host-side-effects
+   :operations [:x-eval :x-shell :x-file-read :x-file-write :x-pwd]
+   :reason "Capabilities and sandboxing must be explicit before these are enabled."}
+  {:area :bytes-and-native-memory
+   :reason "Portable byte semantics need a dedicated lowering slice."}
+  {:area :advanced-math
+   :operations [:acos :asin :atan :cos :cosh :exp :loge :log10
+                :pow :sin :sinh :sqrt :tan :tanh]
+   :reason "Add through a host-neutral math namespace rather than JVM interop."}
+  {:area :full-iterator-parity
+   :reason "Current slice covers canonical loops but not the complete iterator protocol."}]
+
+ :tests
+ [{:path "lib/test/tahto/model/v1/spec_hara_test.hal"
+   :facts 8
+   :checks 8
+   :coverage [:grammar :lowering :mutation :control :loops :errors]}
+  {:path "lib/test/tahto/runtime/basic/type_hara_test.hal"
+   :facts 6
+   :checks 6
+   :coverage [:creation :lifecycle :persistence :xtalk-alias :diagnostics]}
+  {:path "lib/test/xt/lang/hara_target_test.hal"
+   :facts 4
+   :checks 4
+   :coverage [:canonical-common-math :dependencies :recursion :mutation :branches]}]
+
+ :acceptance
+ ["The :hara grammar resolves beneath the versioned :xtalk grammar."
+  "[:hara :basic] and [:xtalk :basic] use the current Hara kernel and no external process."
+  "Multiple evaluations share namespace state until the runtime is stopped."
+  "Canonical xt.lang.common-math dependencies compile and execute through :hara."
+  "Unsupported target-sensitive operations fail with structured compile diagnostics."
+  "Canonical and Rust-packaged HAL sources remain identical."]}

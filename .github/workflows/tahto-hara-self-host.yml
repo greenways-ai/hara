@@ -1,0 +1,50 @@
+name: Self-hosted Hara XTalk target
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lib/src/tahto/model/v1/spec_hara.hal'
+      - 'lib/src/tahto/model/v1/spec_hara/**'
+      - 'lib/src/tahto/runtime/hara_support.hal'
+      - 'lib/src/tahto/runtime/basic.hal'
+      - 'lib/src/tahto/runtime/basic/type_hara.hal'
+      - 'lib/src/tahto/runtime/basic/impl/runtime_hara.hal'
+      - 'rust/hal-src/tahto/model/v1/spec_hara.hal'
+      - 'rust/hal-src/tahto/model/v1/spec_hara/**'
+      - 'rust/hal-src/tahto/runtime/hara_support.hal'
+      - 'rust/hal-src/tahto/runtime/basic.hal'
+      - 'rust/hal-src/tahto/runtime/basic/type_hara.hal'
+      - 'rust/hal-src/tahto/runtime/basic/impl/runtime_hara.hal'
+      - 'lib/test/tahto/model/v1/spec_hara_test.hal'
+      - 'lib/test/tahto/runtime/basic/type_hara_test.hal'
+      - 'lib/test/xt/lang/hara_target_test.hal'
+      - 'java/src/test/java/hara/portable/HaraXtalkSelfHostedTest.java'
+      - '.github/workflows/tahto-hara-self-host.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tahto-hara-self-host-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  self-hosted-target:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+          cache-dependency-path: java/pom.xml
+      - name: Run Hara target and self-hosted runtime suites
+        run: >-
+          mvn -B -Ptruffle
+          -Dtest=hara.portable.HaraXtalkSelfHostedTest
+          test --file java/pom.xml
