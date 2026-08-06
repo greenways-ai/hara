@@ -261,29 +261,33 @@
                   (lower-expr current environment)
                   (lower-body remaining environment))))))))
 
+(defn lower-args-step
+  [out remaining context]
+  (if (empty? remaining)
+    out
+    (let [argument (first remaining)]
+      (cond
+        (symbol? argument)
+        (lower-args-step (conj out argument)
+                         (vec (rest remaining))
+                         context)
+
+        (and (list? argument)
+             (= :.. (first argument))
+             (= 2 (count argument))
+             (symbol? (second argument)))
+        (if (= 1 (count remaining))
+          (conj out '& (second argument))
+          (fail "Rest arguments must be final for the Hara target"
+                remaining context))
+
+        :else
+        (fail "The Hara target currently requires symbol function arguments"
+              argument context)))))
+
 (defn lower-args
   [arguments context]
-  (loop [out []
-         remaining (vec arguments)]
-    (if (empty? remaining)
-      out
-      (let [argument (first remaining)]
-        (cond
-          (symbol? argument)
-          (recur (conj out argument) (vec (rest remaining)))
-
-          (and (list? argument)
-               (= :.. (first argument))
-               (= 2 (count argument))
-               (symbol? (second argument)))
-          (if (= 1 (count remaining))
-            (conj out '& (second argument))
-            (fail "Rest arguments must be final for the Hara target"
-                  arguments context))
-
-          :else
-          (fail "The Hara target currently requires symbol function arguments"
-                argument context))))))
+  (lower-args-step [] (vec arguments) context))
 
 (defn argument-symbols
   [arguments]
@@ -319,19 +323,21 @@
      (list 'tahto.runtime.hara-support/with-return
            (list 'fn [] lowered))]))
 
+(defn declaration-body-step
+  [remaining form context]
+  (cond
+    (empty? remaining)
+    (fail "Function declaration has no argument vector" form context)
+
+    (vector? (first remaining))
+    [(first remaining) (vec (rest remaining))]
+
+    :else
+    (declaration-body-step (vec (rest remaining)) form context)))
+
 (defn declaration-body
   [form context]
-  (let [items (vec (drop 2 form))]
-    (loop [remaining items]
-      (cond
-        (empty? remaining)
-        (fail "Function declaration has no argument vector" form context)
-
-        (vector? (first remaining))
-        [(first remaining) (vec (rest remaining))]
-
-        :else
-        (recur (vec (rest remaining)))))))
+  (declaration-body-step (vec (drop 2 form)) form context))
 
 (defn lower-defn
   [form environment context]
