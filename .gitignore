@@ -62,9 +62,10 @@ parse_jacoco.py
 # local worktrees
 .worktrees/
 
-# generated wasm-bindgen runtime for the site (scripts/build-hara-wasm-web;
-# the deployed site gets a fresh copy from pages.yml)
-website/docs/rust/pkg/
+# External sibling repositories checked out here during builds
+website/
+hara-specs
+# Legacy hara-world extension moved to workspace/website/hara-world
 extensions/hara-world/runtime/
 site-build/
 core/rust/target/debug

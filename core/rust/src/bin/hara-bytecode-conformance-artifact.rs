@@ -13,11 +13,11 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let command = env::args().nth(1).unwrap_or_else(|| "check".into());
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .to_path_buf();
-    let corpus_path = root.join("specs/01-lang/010-bytecode/draft/conformance/bytecode-vm.edn");
+    let corpus_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .map(|root| root.join("hara-specs").join("01-lang/010-bytecode/draft/conformance/bytecode-vm.edn"))
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| "cannot locate bytecode-vm conformance corpus")?;
     let asset_path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/bytecode-conformance.hcc");
     let corpus = fs::read_to_string(&corpus_path).map_err(|error| error.to_string())?;

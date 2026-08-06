@@ -294,7 +294,7 @@ fn callable_var_namespace_cases_match_shared_spec() {
     }
 
     let manifest = crate::kernel::parse_forms(include_str!(
-        "../../../specs/00-unsorted/platform-language/draft/conformance/modules.edn"
+        "../../../../../hara-specs/00-unsorted/platform-language/draft/conformance/modules.edn"
     ))
     .expect("module conformance corpus parses")
     .remove(0);
@@ -355,7 +355,7 @@ fn callable_var_namespace_cases_match_shared_spec() {
 }
 
 /// Namespace- and arity-dependent cases from the normative L0 corpus
-/// (`specs/00-unsorted/platform-language/draft/conformance/l0.edn`),
+/// (`hara-specs/00-unsorted/platform-language/draft/conformance/l0.edn`),
 /// deferred by milestones 2-3 until globals existed (issue #223).
 #[test]
 fn l0_namespace_corpus_cases_match() {
@@ -381,7 +381,7 @@ fn l0_namespace_corpus_cases_match() {
         "function/multiple-arities",
     ];
     let manifest = crate::kernel::parse_forms(include_str!(
-        "../../../specs/00-unsorted/platform-language/draft/conformance/l0.edn"
+        "../../../../../hara-specs/00-unsorted/platform-language/draft/conformance/l0.edn"
     ))
     .expect("L0 conformance corpus parses")
     .remove(0);

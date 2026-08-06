@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import "fake-indexeddb/auto";
 
-import { WorkspaceRepository, kernelName, templateFiles, workspaceTemplates } from "../../website/workspaces.js";
+import { WorkspaceRepository, kernelName, templateFiles, workspaceTemplates } from "../../../website/hara-www/workspaces.js";
 
 test("all workspace templates seed project, workspace, and source files", () => {
   assert.deepEqual(workspaceTemplates.map(({ id }) => id), ["blank", "canvas", "music", "3d", "graphs"]);

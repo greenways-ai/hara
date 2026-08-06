@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 PACKAGE="$ROOT/core/rust/web/packages/browser"
 GENERATED="$PACKAGE/src/wasm"
 VARIANT=${1:-all}

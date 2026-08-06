@@ -18,13 +18,17 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        submodules: true
+        fetch-depth: 0
+
+    - name: Checkout hara-specs
+      uses: actions/checkout@v4
+      with:
+        repository: hara-lang/hara-specs
+        path: hara-specs
+        fetch-depth: 1
+
     - name: Enforce gw.* HAL namespaces
       run: "! rg --glob '*.hal' 'greenways\\.' ."
-    - name: Verify synchronized Hara UI assets
-      run: |
-        node packaging/scripts/sync-hara-ui.mjs
-        node packaging/scripts/sync-hara-ui.mjs --check
     - name: Set up Rust WASM toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -50,7 +54,7 @@ jobs:
     - name: Run native tracing JIT tests
       run: "cargo test --manifest-path core/rust/Cargo.toml --features native-jit jit:: --lib"
     - name: Verify generated parity corpus
-      run: ./packaging/scripts/generate-wasm-truffle-parity && git diff --exit-code -- ../hara-specs/00-unsorted/platform-language/draft/conformance/parity/wasm-truffle.edn
+      run: ./packaging/scripts/generate-wasm-truffle-parity && git diff --exit-code -- hara-specs/00-unsorted/platform-language/draft/conformance/parity/wasm-truffle.edn
     - name: Build raw Rust WASM extension artifact
       run: ./packaging/scripts/build-hara-wasm-raw
     - name: Build browser and WASI Rust runtime artifacts
@@ -152,7 +156,15 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        submodules: true
+        fetch-depth: 0
+
+    - name: Checkout hara-specs
+      uses: actions/checkout@v4
+      with:
+        repository: hara-lang/hara-specs
+        path: hara-specs
+        fetch-depth: 1
+
     - name: Set up Rust WASM toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -207,7 +219,15 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        submodules: true
+        fetch-depth: 0
+
+    - name: Checkout hara-specs
+      uses: actions/checkout@v4
+      with:
+        repository: hara-lang/hara-specs
+        path: hara-specs
+        fetch-depth: 1
+
     - name: Set up Rust WASM toolchain
       uses: dtolnay/rust-toolchain@stable
       with:

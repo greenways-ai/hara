@@ -404,11 +404,18 @@ mod spec_tests {
 
     #[test]
     fn greenways_buildspec_validates_against_artifact_metaspec() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        let metaspec_path =
-            repository.join("specs/00-unsorted/artifact/metaspec/artifact-metaspec.edn");
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let metaspec_path = repository
+            .parent()
+            .unwrap()
+            .join("hara-specs")
+            .join("00-unsorted/artifact/metaspec/artifact-metaspec.edn");
         if !metaspec_path.is_file() {
-            eprintln!("skipping: specs submodule not initialized");
+            eprintln!("skipping: hara-specs sibling repo not present");
             return;
         }
         let document_path =
@@ -484,12 +491,17 @@ mod spec_tests {
 
     #[test]
     fn greenways_contribution_envelopes_verify_offline() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        if !repository
-            .join("specs/00-unsorted/artifact/metaspec")
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        let specs_root = repository.parent().unwrap().join("hara-specs");
+        if !specs_root
+            .join("00-unsorted/artifact/metaspec")
             .is_dir()
         {
-            eprintln!("skipping: specs submodule not initialized");
+            eprintln!("skipping: hara-specs sibling repo not present");
             return;
         }
         for path in [
@@ -502,7 +514,7 @@ mod spec_tests {
                 read_spec_document(&fs::read_to_string(root.join("CONTRIBUTION.edn")).unwrap())
                     .unwrap();
             assert!(
-                check_contribution(&envelope, &root, repository).is_empty(),
+                check_contribution(&envelope, &root, &specs_root).is_empty(),
                 "{path} did not verify"
             );
         }

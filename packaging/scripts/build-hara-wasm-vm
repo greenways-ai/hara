@@ -2,8 +2,8 @@
 # Size-optimized browser package with the persistent bytecode VM enabled.
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
-OUT_DIR="$ROOT/../../website/hara-www/docs/rust/vm-pkg"
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+OUT_DIR="$ROOT/website/hara-www/docs/rust/vm-pkg"
 
 "$ROOT/packaging/scripts/cargo-wasm-build" \
   --manifest-path "$ROOT/core/rust/Cargo.toml" \

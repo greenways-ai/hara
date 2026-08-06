@@ -29,7 +29,7 @@ and archive:
 
 - [`core/java/`](core/java/) — the Java/Truffle runtime (Maven project, CLI, native-image).
 - [`core/rust/`](core/rust/) — the Rust/embedding runtime: native CLI, wasm builds, web
-  loader, and in-tree wasm extensions (`core/rust/extensions/`).
+  loader, and in-tree wasm extensions ([`core/rust/extensions/`](core/rust/extensions/)).
 - [`core/lib/`](core/lib/) — hara-language source and workloads: the std foundation and
   Talo compiler port (`core/lib/src`, `core/lib/test`), demo projects
   ([`core/lib/examples/`](core/lib/examples/)), and benchmark suites
@@ -37,13 +37,14 @@ and archive:
 - [`core/spec/`](core/spec/) — parity specifications and substrate tests for core
   language targets.
 - [`packaging/scripts/`](packaging/scripts/) — repo-level build/benchmark scripts.
-- `website/hara-www/` — the landing page for `www.hara-lang.org`
-  ([`hara-lang/hara-www`](https://github.com/hara-lang/hara-www)).
-- `extensions/` — editor and browser apps (`hara-chrome`, `hara-vscode`,
-  `hara-emacs`, `hara-lsp`) ([`hara-lang/hara-extensions`](https://github.com/hara-lang/hara-extensions)).
-- `technology/hara-specs/` — normative specs: prose (`.md`), machine-checked corpora,
-  and spec-shaped data ([`hara-lang/hara-specs`](https://github.com/hara-lang/hara-specs)).
-- `technology/hara-archive/` — legacy material kept for history
+- `../website/hara-www/` — the landing page for `www.hara-lang.org`
+  ([`hara-lang/hara-www`](https://github.com/hara-lang/hara-www)), checked out next to this repo for builds.
+- `../../extensions/` — editor and browser apps (`hara-emacs`, `hara-lsp`, `hara-vscode`)
+  ([`hara-lang/hara-extensions`](https://github.com/hara-lang/hara-extensions)); the Chrome extension lives in
+  [`../../application/greenways-os/extension/hara-chrome`](../../application/greenways-os/extension/hara-chrome).
+- `../hara-specs/` — normative specs: prose (`.md`), machine-checked corpora,
+  and spec-shaped data ([`hara-lang/hara-specs`](https://github.com/hara-lang/hara-specs)), checked out next to this repo.
+- `../hara-archive/` — legacy material kept for history
   ([`hara-lang/hara-archive`](https://github.com/hara-lang/hara-archive)).
 - [`contrib/`](contrib/) — independently owned artifact formats developed with
   Hara's metaspec and verifier. Greenways formats live under
@@ -56,11 +57,7 @@ and archive:
 
 ## Start here
 
-- [User guide](docs/docs/user-guide.md) — install, run, evaluate, use the REPL, and write Hara.
-- [Namespaces and modules](docs/docs/namespaces.md) — organize projects, require code, and control aliases.
-- [Namespace catalog](docs/docs/reference/namespaces.md) — discover every shipped namespace family.
-- [Developer guide](docs/docs/development.md) — build, test, debug, and contribute.
-- [Java API and Javadocs](docs/docs/javadocs.md) — public entry points and generated API docs.
+- [Hara website docs](../website/hara-www/docs/) — user guides, reference, and published documentation.
 - [HAL meta-spec](../hara-specs/01-lang/000-metaspec/draft/README.md) — the self-describing contract for metaspec documents.
 - [HAL language draft](../hara-specs/01-lang/001-language/draft/README.md) — the small EDN-oriented data and reader contract.
 - [Planning archive](../hara-specs/99-archive/planning/README.md) — earlier runtime, extension, interop, and tooling designs.
@@ -98,7 +95,7 @@ mvn -f core/java/pom.xml -Ptruffle package
 The `hara` command starts the JLine REPL in the shared `ROOT` session and exposes that same
 session through RESP on `127.0.0.1:1311`. Use `--offline` to start without the listener,
 `headless` for a listener without terminal UI, and `remote HOST:PORT` for a client connection. The CLI also supports `run <file>`, `stdin`, and `help`. For a native-image build, see the
-[developer guide](../hara-docs/docs/docs/development.md); native mode intentionally removes dynamic JVM services.
+[developer guide](../website/hara-www/docs/development/); native mode intentionally removes dynamic JVM services.
 
 The Makefile also mirrors the main repository and CI workflows:
 
@@ -127,7 +124,7 @@ Per-component builds:
 
 ```shell
 cargo test --manifest-path core/rust/Cargo.toml                 # Rust runtime
-cd ../../extensions/hara-chrome && npm ci && npm run build           # Chrome extension
+cd ../../application/greenways-os/extension/hara-chrome && npm ci && npm run build  # Chrome extension
 ```
 
 ## Package workspaces
@@ -165,8 +162,8 @@ shell. `:runner` may be injected for tests or remote execution.
 The repository includes a Dev Container definition for GitHub Codespaces and
 VS Code's **Dev Containers: Reopen in Container** command. On first creation it
 installs JDK 21 with Maven, Node.js 22, stable Rust with the browser and WASI
-targets, Python documentation tooling, the core Git submodules, and the web
-test dependencies. No host toolchain setup is required.
+targets, Python documentation tooling, and the web test dependencies. No host
+toolchain setup is required.
 
 The setup is reproducible from the repository root:
 
@@ -189,17 +186,16 @@ reference only; it is not the current language guide.
 
 ## Cloning this workspace
 
-Because several sections are Git submodules, clone with:
+This repository no longer uses Git submodules. Some build and test targets expect
+sibling repositories next to this one:
 
 ```shell
-git clone --recurse-submodules https://github.com/hara-lang/hara.git
+git clone https://github.com/hara-lang/hara.git
+git clone https://github.com/hara-lang/hara-specs.git
+git clone https://github.com/hara-lang/hara-www.git
 ```
 
-Or, after a normal clone, run:
-
-```shell
-git submodule update --init --recursive
-```
+CI workflows check out `hara-lang/hara-www` automatically when they need it.
 
 ## Status
 

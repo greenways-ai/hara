@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import init, { Runtime } from "../../website/docs/rust/pkg/hara_wasm.js";
+import init, { Runtime } from "../../../website/hara-www/docs/rust/pkg/hara_wasm.js";
 
 const moduleBytes = await readFile(
-  new URL("../../website/docs/rust/pkg/hara_wasm_bg.wasm", import.meta.url),
+  new URL("../../../website/hara-www/docs/rust/pkg/hara_wasm_bg.wasm", import.meta.url),
 );
 await init({ module_or_path: moduleBytes });
 

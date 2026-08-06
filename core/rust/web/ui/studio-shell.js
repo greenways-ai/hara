@@ -1,1 +1,1 @@
-export { createStudioShell } from "../../../website/vendor/hara-ui/studio-shell.js";
+export { createStudioShell } from "../../../../website/hara-www/vendor/hara-ui/studio-shell.js";

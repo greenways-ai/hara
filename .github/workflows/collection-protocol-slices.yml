@@ -54,7 +54,14 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
         with:
-          submodules: true
+          fetch-depth: 0
+
+      - name: Checkout hara-specs
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara-specs
+          path: hara-specs
+          fetch-depth: 1
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4

@@ -1554,7 +1554,7 @@ public class HaraLanguageTest {
   @Test
   public void exposesTheSharedProtocolInventoryFromFoundation() throws Exception {
     String contract =
-        Files.readString(Path.of("specs/00-unsorted/platform-language/draft/conformance/protocols.edn"));
+        Files.readString(Path.of("../hara-specs/00-unsorted/platform-language/draft/conformance/protocols.edn"));
     Matcher names = Pattern.compile(":name\\s+(I[A-Za-z]+)").matcher(contract);
     Set<String> protocols = new LinkedHashSet<>();
     while (names.find()) {
@@ -1677,7 +1677,7 @@ public class HaraLanguageTest {
             Path.of("lib/test-fixtures/std/foundation/protocol_functionality.hal"));
     String catalog =
         Files.readString(
-            Path.of("specs/00-unsorted/platform-language/draft/conformance/protocol-method-cases.edn"));
+            Path.of("../hara-specs/00-unsorted/platform-language/draft/conformance/protocol-method-cases.edn"));
     assertEquals(88, catalog.split("\\{:protocol ", -1).length - 1);
     Matcher methodVars =
         Pattern.compile(

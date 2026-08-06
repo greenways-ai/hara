@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { downloadWorkspace, GitHubDeviceAuth, GistPublisher, workspaceBundle, zipWorkspace } from "../../website/publishing.js";
+import { downloadWorkspace, GitHubDeviceAuth, GistPublisher, workspaceBundle, zipWorkspace } from "../../../website/hara-www/publishing.js";
 
 const repository = {
   get: async () => ({ id: "demo", name: "Demo", template: "canvas" }),

@@ -9,7 +9,7 @@ import { defaultBootstrap } from "./studio/boot.js";
 import { createHostServices } from "./studio/host-services.js";
 import { NodeRuntime } from "./studio/node-runtime.js";
 import { SessionRouter } from "./studio/session-router.js";
-import { normalizeCreative } from "../../website/creative.js";
+import { normalizeCreative } from "../../../website/hara-www/creative.js";
 
 // Real-wasm integration tests for the studio hara libraries
 // (rust/web/studio/hal/*.hal): store/boot and canonical file behaviour is asserted by

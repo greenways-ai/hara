@@ -30,7 +30,7 @@ import org.junit.Test;
  */
 public class HaraModuleConformanceTest {
   private static final Path CORPUS =
-      Path.of("specs/00-unsorted/platform-language/draft/conformance/modules.edn");
+      Path.of("../hara-specs/00-unsorted/platform-language/draft/conformance/modules.edn");
 
   @Test
   public void executesNamespaceLoadingTransactionAndReloadScenarios()

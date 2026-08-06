@@ -17,7 +17,7 @@ RUST_RELEASE := rust/target/release/hara
 WASM_RAW := rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm
 WEB_DIR := rust/web
 CHROME_DIR := ../../application/greenways-os/extension/hara-chrome
-DOCS_CONFIG := docs/mkdocs.yml
+HARA_WWW_DIR := ../website/hara-www
 
 .PHONY: help all build-all check-all test-all clean \
         java java-offline java-headless java-build java-test java-conformance \
@@ -165,8 +165,8 @@ chrome-build: ## Build the Chrome extension
 chrome-test: ## Test the Chrome extension
 	$(NPM) --prefix $(CHROME_DIR) test
 
-docs-build: ## Build documentation with strict link and nav checks
-	$(MKDOCS) build --strict -f $(DOCS_CONFIG)
+docs-build: ## Build the hara-www documentation site
+	npm run build --prefix $(HARA_WWW_DIR)
 
 www-build: ## Build the complete website and runtime payload
 	../packaging/scripts/build-www

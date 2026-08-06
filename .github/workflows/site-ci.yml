@@ -3,7 +3,6 @@ name: Site CI
 on:
   pull_request:
     paths:
-      - "website/**"
       - "benchmarks/**"
       - "core/lib/bench/**"
       - "packages/visual-language/**"
@@ -25,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          fetch-depth: 0
       - name: Checkout validated benchmark evidence
         uses: actions/checkout@v4
         with:
@@ -33,16 +32,22 @@ jobs:
           ref: benchmark-site
           path: .benchmark-site
           fetch-depth: 1
+      - name: Checkout hara-www
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara-www
+          path: website/hara-www
+          fetch-depth: 1
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: |
-            website/package-lock.json
+            website/hara-www/package-lock.json
             benchmarks/package-lock.json
       - name: Install site dependencies
         run: |
-          npm ci --prefix website
+          npm ci --prefix website/hara-www
           npm ci --prefix benchmarks
       - name: Prepare canonical evidence for Astro
         run: bash packaging/scripts/install-benchmark-site prepare
@@ -57,5 +62,5 @@ jobs:
           grep -F 'rust-prepared' core/target/benchmarks/index.html
       - name: Validate main Hara site
         run: |
-          npm test --prefix website
-          npm run build --prefix website
+          npm test --prefix website/hara-www
+          npm run build --prefix website/hara-www

@@ -64,7 +64,7 @@ Expected result:
 ```
 
 The REPL supports multiline forms, persistent history, symbol and Java completion, and inline
-documentation. See [`docs/user-guide.md`](../hara-docs/docs/docs/user-guide.md) and the
+documentation. See the [Hara website docs](../website/hara-www/docs/) and the
 [archived REPL planning document](../hara-specs/99-archive/planning/tooling/repl.md).
 
 ## 5. Run a file or stdin
@@ -82,5 +82,5 @@ mvn -q -f core/java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraL0ConformanceTest 
 ```
 
 For contributor workflows, test slices, native-image builds, and troubleshooting, read the
-[developer guide](../hara-docs/docs/docs/development.md). To build a multi-file project, continue with
-[Namespaces and modules](../hara-docs/docs/docs/namespaces.md).
+[developer guide](../website/hara-www/docs/development/). To build a multi-file project, continue with
+the [module reference](../website/hara-www/docs/).

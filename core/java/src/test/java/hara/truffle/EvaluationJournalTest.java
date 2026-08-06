@@ -15,7 +15,7 @@ public class EvaluationJournalTest {
     String corpus =
         Files.readString(
             Path.of(
-                "specs/00-unsorted/diagnostics/draft/conformance/evaluation-journal.edn"));
+                "../hara-specs/00-unsorted/diagnostics/draft/conformance/evaluation-journal.edn"));
     assertEquals(1, HaraLanguage.readAll(corpus, "evaluation-journal.edn").length);
 
     try (Context context = context()) {

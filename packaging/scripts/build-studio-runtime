@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 CRATE_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/core/rust/Cargo.toml" | head -n 1)
 VERSION=${1:-$CRATE_VERSION}
 OUT=${HARA_STUDIO_RUNTIME_OUT:-"$ROOT/core/target/studio-runtime"}
@@ -49,10 +49,10 @@ mkdir -p "$STAGE/rust/host" "$STAGE/rust/packages/hta" \
          "$STAGE/assets/artwork"
 
 cp "$RAW_WASM" "$STAGE/rust/hara.wasm"
-cp "$ROOT/../../website/hara-www/vendor/hara-ui/tokens.css" \
-   "$ROOT/../../website/hara-www/vendor/hara-ui/components.css" \
-   "$ROOT/../../website/hara-www/vendor/hara-ui/studio.css" \
-   "$ROOT/../../website/hara-www/vendor/hara-ui/studio-shell.js" \
+cp "$ROOT/website/hara-www/vendor/hara-ui/tokens.css" \
+   "$ROOT/website/hara-www/vendor/hara-ui/components.css" \
+   "$ROOT/website/hara-www/vendor/hara-ui/studio.css" \
+   "$ROOT/website/hara-www/vendor/hara-ui/studio-shell.js" \
    "$STAGE/rust/ui/"
 cp "$ROOT/core/rust/web/hta.js" "$ROOT/core/rust/web/hta-worker.js" "$ROOT/core/rust/web/hta-shared-worker.js" \
    "$STAGE/rust/"
@@ -75,22 +75,22 @@ cp "$ROOT/core/lib/src/std/lib/substrate/frame.hal" \
    "$ROOT/core/lib/src/std/lib/substrate/protocol.hal" \
    "$STAGE/rust/std/lib/substrate/"
 
-cp "$ROOT/../../website/hara-www/examples/index.json" "$STAGE/examples/index.json"
-cp "$ROOT/../../website/hara-www/examples/starter/project.edn" "$ROOT/../../website/hara-www/examples/starter/workspace.edn" \
+cp "$ROOT/website/hara-www/examples/index.json" "$STAGE/examples/index.json"
+cp "$ROOT/website/hara-www/examples/starter/project.edn" "$ROOT/website/hara-www/examples/starter/workspace.edn" \
    "$STAGE/examples/starter/"
-cp "$ROOT/../../website/hara-www/examples/starter/src/main.hal" "$STAGE/examples/starter/src/"
+cp "$ROOT/website/hara-www/examples/starter/src/main.hal" "$STAGE/examples/starter/src/"
 
-cp "$ROOT/../../website/hara-www/examples/browser-game/project.edn" "$ROOT/../../website/hara-www/examples/browser-game/workspace.edn" \
+cp "$ROOT/website/hara-www/examples/browser-game/project.edn" "$ROOT/website/hara-www/examples/browser-game/workspace.edn" \
    "$STAGE/examples/game/"
-cp "$ROOT/../../website/hara-www/sources/tron.hal" "$STAGE/examples/game/src/tron.hal"
+cp "$ROOT/website/hara-www/sources/tron.hal" "$STAGE/examples/game/src/tron.hal"
 
-cp "$ROOT/../../website/hara-www/examples/hara-amp/project.edn" "$ROOT/../../website/hara-www/examples/hara-amp/workspace.edn" \
+cp "$ROOT/website/hara-www/examples/hara-amp/project.edn" "$ROOT/website/hara-www/examples/hara-amp/workspace.edn" \
    "$STAGE/examples/music/"
-cp "$ROOT/../../website/hara-www/examples/hara-amp/src/main.hal" \
-   "$ROOT/../../website/hara-www/examples/hara-amp/src/visualizer.hal" \
-   "$ROOT/../../website/hara-www/examples/hara-amp/src/amp.hal" \
+cp "$ROOT/website/hara-www/examples/hara-amp/src/main.hal" \
+   "$ROOT/website/hara-www/examples/hara-amp/src/visualizer.hal" \
+   "$ROOT/website/hara-www/examples/hara-amp/src/amp.hal" \
    "$STAGE/examples/music/src/"
-cp "$ROOT/../../website/hara-www/hara-amp.html" "$ROOT/../../website/hara-www/hara-amp.css" "$ROOT/../../website/hara-www/hara-amp.js" \
+cp "$ROOT/website/hara-www/hara-amp.html" "$ROOT/website/hara-www/hara-amp.css" "$ROOT/website/hara-www/hara-amp.js" \
    "$STAGE/examples/music/"
 cp "$RAW_WASM" "$STAGE/examples/music/runtime/hara.wasm"
 cp "$ROOT/core/rust/web/hta.js" "$ROOT/core/rust/web/hta-worker.js" "$ROOT/core/rust/web/hta-shared-worker.js" \
@@ -107,19 +107,19 @@ cp "$ROOT/contrib/greenways/supersonic/src/hal/gw/audio/supersonic.hal" \
 cp "$ROOT/core/lib/src/std/lib/substrate.hal" "$STAGE/examples/music/runtime/std/lib/substrate.hal"
 cp "$ROOT/core/lib/src/std/lib/substrate/frame.hal" "$ROOT/core/lib/src/std/lib/substrate/protocol.hal" \
    "$STAGE/examples/music/runtime/std/lib/substrate/"
-cp "$ROOT/../../website/hara-www/examples/hara-amp/src/amp.hal" \
+cp "$ROOT/website/hara-www/examples/hara-amp/src/amp.hal" \
    "$STAGE/examples/music/examples/hara-amp/src/"
-cp "$ROOT/../../website/hara-www/assets/wasm/demo-synth.wasm" "$ROOT/../../website/hara-www/assets/wasm/demo-fft.wasm" \
+cp "$ROOT/website/hara-www/assets/wasm/demo-synth.wasm" "$ROOT/website/hara-www/assets/wasm/demo-fft.wasm" \
    "$STAGE/assets/wasm/"
-cp "$ROOT/../../website/hara-www/assets/wasm/demo-synth.wasm" "$ROOT/../../website/hara-www/assets/wasm/demo-fft.wasm" \
+cp "$ROOT/website/hara-www/assets/wasm/demo-synth.wasm" "$ROOT/website/hara-www/assets/wasm/demo-fft.wasm" \
    "$STAGE/examples/music/assets/wasm/"
-cp "$ROOT/../../website/hara-www/assets/hara-amp/hara-amp-artwork-original.png" \
-   "$ROOT/../../website/hara-www/assets/hara-amp/hara-amp-emblem.png" \
-   "$ROOT/../../website/hara-www/assets/hara-amp/hara-emblem.svg" \
+cp "$ROOT/website/hara-www/assets/hara-amp/hara-amp-artwork-original.png" \
+   "$ROOT/website/hara-www/assets/hara-amp/hara-amp-emblem.png" \
+   "$ROOT/website/hara-www/assets/hara-amp/hara-emblem.svg" \
    "$STAGE/assets/artwork/"
-cp "$ROOT/../../website/hara-www/assets/hara-amp/hara-amp-artwork-original.png" \
-   "$ROOT/../../website/hara-www/assets/hara-amp/hara-amp-emblem.png" \
-   "$ROOT/../../website/hara-www/assets/hara-amp/hara-emblem.svg" \
+cp "$ROOT/website/hara-www/assets/hara-amp/hara-amp-artwork-original.png" \
+   "$ROOT/website/hara-www/assets/hara-amp/hara-amp-emblem.png" \
+   "$ROOT/website/hara-www/assets/hara-amp/hara-emblem.svg" \
    "$STAGE/examples/music/assets/hara-amp/"
 
 node "$ROOT/packaging/scripts/verify-studio-runtime.mjs" "$STAGE"

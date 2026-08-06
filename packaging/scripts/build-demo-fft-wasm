@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 MANIFEST="$ROOT/core/rust/extensions/demo-fft/Cargo.toml"
-OUT_DIR="$ROOT/../../website/hara-www/assets/wasm"
+OUT_DIR="$ROOT/website/hara-www/assets/wasm"
 
 "$ROOT/packaging/scripts/cargo-wasm-build" \
   --manifest-path "$MANIFEST" --target wasm32-unknown-unknown --release

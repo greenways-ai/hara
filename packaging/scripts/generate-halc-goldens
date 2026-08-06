@@ -1,9 +1,9 @@
 #!/bin/sh
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-SOURCE="$ROOT/../hara-specs/01-lang/009-halc/draft/conformance/complete.hal"
-GOLDEN="$ROOT/../hara-specs/01-lang/009-halc/draft/conformance/golden"
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+SOURCE="$ROOT/hara-specs/01-lang/009-halc/draft/conformance/complete.hal"
+GOLDEN="$ROOT/hara-specs/01-lang/009-halc/draft/conformance/golden"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/hara-halc.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT HUP INT TERM
 

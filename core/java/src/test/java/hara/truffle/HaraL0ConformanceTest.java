@@ -27,7 +27,7 @@ public class HaraL0ConformanceTest {
   @SuppressWarnings({"rawtypes", "unchecked"})
   @Test
   public void executesEveryJvmL0CorpusCase() throws Exception {
-    String source = Files.readString(Path.of("specs/00-unsorted/platform-language/draft/conformance/l0.edn"));
+    String source = Files.readString(Path.of("../hara-specs/00-unsorted/platform-language/draft/conformance/l0.edn"));
     IMapType manifest = (IMapType) Parser.LispReader.readString(source, null);
     ILinearType<?> cases = (ILinearType<?>) manifest.lookup(key("cases"));
     assertTrue(cases.count() > 0);

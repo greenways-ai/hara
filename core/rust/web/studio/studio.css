@@ -6,7 +6,7 @@
    block itself.
 
    Consumers:
-   - website: website/docs/stylesheets/hara.css `@import`s this file (deployed
+   - hara-www: docs/stylesheets/hara.css `@import`s this file (deployed
      at /rust/studio/studio.css by .github/workflows/pages.yml), so the site
      keeps using these tokens/primitives for its other pages too.
    - hara-chrome: apps/hara-chrome/scripts/sync-runtime.mjs copies this file

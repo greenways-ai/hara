@@ -2112,12 +2112,15 @@ mod tests {
     fn repo_text(relative: &str) -> Option<String> {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
+            .join("..")
+            .join("..")
+            .join("hara-specs")
             .join(relative);
         match std::fs::read_to_string(&path) {
             Ok(content) => Some(content),
             Err(_) => {
                 eprintln!(
-                    "skipping: {} is unavailable (specs/docs submodule not initialized)",
+                    "skipping: {} is unavailable (hara-specs sibling repo not present)",
                     path.display()
                 );
                 None
@@ -2135,7 +2138,7 @@ mod tests {
                 })
         }
 
-        let corpus = repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn")
+        let corpus = repo_text("00-unsorted/platform-language/draft/conformance/modules.edn")
             .expect("specs submodule must be initialized for module conformance tests");
         let manifest = kernel::parse_forms(&corpus)
             .expect("module conformance corpus must parse")
@@ -2185,7 +2188,7 @@ mod tests {
                 })
         }
 
-        let corpus = repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn")
+        let corpus = repo_text("00-unsorted/platform-language/draft/conformance/modules.edn")
             .expect("specs submodule must be initialized for module conformance tests");
         let manifest = kernel::parse_forms(&corpus)
             .expect("module conformance corpus must parse")
@@ -2214,7 +2217,7 @@ mod tests {
                 })
         }
 
-        let document_source = repo_text("specs/00-unsorted/runtime/draft/host-runtime.edn")
+        let document_source = repo_text("00-unsorted/runtime/draft/host-runtime.edn")
             .expect("specs submodule must be initialized for host runtime conformance tests");
         let document = kernel::parse_forms(&document_source)
             .expect("Host runtime specification must parse")
@@ -3277,7 +3280,7 @@ mod tests {
     fn foundation_protocols_are_canonical_and_method_names_reject_bangs() {
         let mut runtime = Runtime::new();
         let Some(contract) =
-            repo_text("specs/00-unsorted/platform-language/draft/conformance/protocols.edn")
+            repo_text("00-unsorted/platform-language/draft/conformance/protocols.edn")
         else {
             return;
         };
@@ -3428,7 +3431,7 @@ mod tests {
     fn shared_foundation_protocol_functionality_fixture_runs_in_the_native_runtime() {
         let source = include_str!("../hal-test-fixtures/std/foundation/protocol_functionality.hal");
         let Some(catalog) = repo_text(
-            "specs/00-unsorted/platform-language/draft/conformance/protocol-method-cases.edn",
+            "00-unsorted/platform-language/draft/conformance/protocol-method-cases.edn",
         ) else {
             return;
         };
@@ -3879,7 +3882,7 @@ mod tests {
         }
 
         let Some(contract_source) =
-            repo_text("specs/00-unsorted/platform-language/draft/conformance/native.edn")
+            repo_text("00-unsorted/platform-language/draft/conformance/native.edn")
         else {
             return;
         };
@@ -6000,7 +6003,7 @@ mod tests {
         }
 
         let Some(corpus) =
-            repo_text("specs/00-unsorted/platform-language/draft/conformance/l0.edn")
+            repo_text("00-unsorted/platform-language/draft/conformance/l0.edn")
         else {
             return;
         };
@@ -6100,7 +6103,7 @@ mod tests {
         }
 
         let Some(corpus) =
-            repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn")
+            repo_text("00-unsorted/platform-language/draft/conformance/modules.edn")
         else {
             return;
         };
@@ -6268,7 +6271,7 @@ mod tests {
 
     #[test]
     fn issue_134_lazy_namespace_state_is_non_forcing_and_failure_is_sticky() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        if repo_text("00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
         {
             return;
         }
@@ -6457,7 +6460,7 @@ mod tests {
 
     #[test]
     fn issue_134_dependency_order_cycles_and_canonical_cache_are_transactional() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        if repo_text("00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
         {
             return;
         }
@@ -6584,7 +6587,7 @@ mod tests {
 
     #[test]
     fn issue_134_with_ns_uses_target_globals_and_restores_the_caller() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        if repo_text("00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
         {
             return;
         }
@@ -6630,7 +6633,7 @@ mod tests {
 
     #[test]
     fn issue_134_facade_vars_copy_roots_and_metadata_without_sharing_identity() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        if repo_text("00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
         {
             return;
         }
@@ -6679,7 +6682,7 @@ mod tests {
 
     #[test]
     fn issue_134_aliases_and_refers_share_live_var_identity() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        if repo_text("00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
         {
             return;
         }
@@ -6730,7 +6733,7 @@ mod tests {
 
     #[test]
     fn issue_134_macro_reload_only_changes_new_compilations() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        if repo_text("00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
         {
             return;
         }
@@ -6769,7 +6772,7 @@ mod tests {
 
     #[test]
     fn issue_134_session_namespace_module_and_macro_state_is_isolated() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        if repo_text("00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
         {
             return;
         }
@@ -6819,7 +6822,7 @@ mod tests {
 
     #[test]
     fn issue_134_source_and_hir_have_value_metadata_and_error_parity() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        if repo_text("00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
         {
             return;
         }
@@ -6877,7 +6880,7 @@ mod tests {
 
     #[test]
     fn issue_134_runtime_profile_declares_deterministic_resource_precedence() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        if repo_text("00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
         {
             return;
         }
@@ -6914,7 +6917,7 @@ mod tests {
 
     #[test]
     fn issue_134_sessions_unwind_bindings_and_transfer_only_immutable_data() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        if repo_text("00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
         {
             return;
         }
@@ -6994,7 +6997,7 @@ mod tests {
 
     #[test]
     fn issue_134_retained_repl_state_survives_errors_and_multiline_forms() {
-        if repo_text("specs/00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
+        if repo_text("00-unsorted/platform-language/draft/conformance/modules.edn").is_none()
         {
             return;
         }
@@ -7033,7 +7036,7 @@ mod tests {
 
     #[test]
     fn issue_134_host_facades_are_loaded_session_local_and_non_transferable() {
-        if repo_text("specs/00-unsorted/runtime/draft/host-runtime.edn").is_none() {
+        if repo_text("00-unsorted/runtime/draft/host-runtime.edn").is_none() {
             return;
         }
         for id in [

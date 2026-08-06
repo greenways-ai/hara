@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 MANIFEST="$ROOT/core/rust/extensions/crypto-hash-sha256/Cargo.toml"
 
 cargo build --manifest-path "$MANIFEST" --target wasm32-unknown-unknown --release

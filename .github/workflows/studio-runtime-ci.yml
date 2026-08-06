@@ -31,13 +31,6 @@ on:
       - core/lib/src/std/foundation.hal
       - core/lib/src/std/lib/substrate.hal
       - core/lib/src/std/lib/substrate/**
-      - website/examples/**
-      - website/hara-amp.html
-      - website/hara-amp.css
-      - website/hara-amp.js
-      - website/assets/wasm/**
-      - website/assets/hara-amp/**
-      - website/vendor/hara-ui/**
   push:
     branches: [main, prod]
     paths:
@@ -68,13 +61,6 @@ on:
       - core/lib/src/std/foundation.hal
       - core/lib/src/std/lib/substrate.hal
       - core/lib/src/std/lib/substrate/**
-      - website/examples/**
-      - website/hara-amp.html
-      - website/hara-amp.css
-      - website/hara-amp.js
-      - website/assets/wasm/**
-      - website/assets/hara-amp/**
-      - website/vendor/hara-ui/**
   workflow_dispatch:
 
 permissions:
@@ -91,8 +77,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
           fetch-depth: 0
+
+      - name: Checkout hara-www
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara-www
+          path: website/hara-www
+          fetch-depth: 1
 
       - uses: dtolnay/rust-toolchain@stable
         with:

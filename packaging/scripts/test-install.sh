@@ -8,7 +8,7 @@
 # Usage:  sh scripts/test-install.sh
 set -eu
 
-REPO_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+REPO_ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 INSTALL_SH="$REPO_ROOT/packaging/scripts/install.sh"
 WORK="$REPO_ROOT/.tmp/install-test"
 case "$(uname -s)/$(uname -m)" in

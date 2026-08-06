@@ -5,8 +5,8 @@
 # /rust/pkg/ paths the deployed site has.
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
-OUT_DIR="$ROOT/../../website/hara-www/docs/rust/pkg"
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+OUT_DIR="$ROOT/website/hara-www/docs/rust/pkg"
 
 "$ROOT/packaging/scripts/cargo-wasm-build" \
   --manifest-path "$ROOT/core/rust/Cargo.toml" --target wasm32-unknown-unknown --release --lib

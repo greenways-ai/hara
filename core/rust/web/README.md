@@ -35,8 +35,8 @@ assets. The pages deploy copies the runtime-facing pieces under
   - `ui.js` — `mountStudio`, a framework-free studio UI (file tree, editor,
     REPL, space/kernel switchers); styling in `studio.css`.
 
-  Mounted by the website studio page (`website/overrides/studio.html`) and
-  the hara-chrome DevTools panel.
+  Mounted by the hara-www studio page (`overrides/studio.html`) and
+  the greenways-os DevTools panel.
 
 ## Test
 

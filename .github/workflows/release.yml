@@ -104,7 +104,7 @@ jobs:
     - uses: actions/checkout@v4
       with:
         ref: ${{ needs.guard.outputs.tag }}
-        submodules: true
+        fetch-depth: 0
     - uses: graalvm/setup-graalvm@v1
       with:
         distribution: graalvm-community
@@ -129,7 +129,15 @@ jobs:
     - uses: actions/checkout@v4
       with:
         ref: ${{ needs.guard.outputs.tag }}
-        submodules: recursive
+        fetch-depth: 0
+
+    - name: Checkout hara-www
+      uses: actions/checkout@v4
+      with:
+        repository: hara-lang/hara-www
+        path: website/hara-www
+        fetch-depth: 1
+
     - uses: dtolnay/rust-toolchain@stable
       with:
         targets: wasm32-unknown-unknown

@@ -120,11 +120,21 @@ fn check_contribution_command(args: &[String]) -> Result<(), String> {
         .unwrap_or_else(|error| exit_error(&format!("{}: {error}", envelope_path.display()), 2));
     let repository_root = find_repository_root(contribution_root).unwrap_or_else(|| {
         exit_error(
-            "cannot locate repository root containing specs/ and contrib/",
+            "cannot locate Hara repository root containing contrib/ and core/",
             2,
         )
     });
-    let findings = check_contribution(&envelope, contribution_root, &repository_root);
+    let specs_root = repository_root
+        .parent()
+        .map(|parent| parent.join("hara-specs"))
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| {
+            exit_error(
+                "cannot locate hara-specs sibling repository",
+                2,
+            )
+        });
+    let findings = check_contribution(&envelope, contribution_root, &specs_root);
     let report = contribution_report(&envelope, &findings);
     match format {
         SpecFormat::Edn => println!("{report}"),
@@ -140,7 +150,8 @@ fn check_contribution_command(args: &[String]) -> Result<(), String> {
 fn find_repository_root(path: &Path) -> Option<PathBuf> {
     let absolute = path.canonicalize().ok()?;
     absolute.ancestors().find_map(|candidate| {
-        (candidate.join("specs").is_dir() && candidate.join("contrib").is_dir())
+        (candidate.join("contrib").is_dir()
+            && (candidate.join("core").is_dir() || candidate.join("packaging").is_dir()))
             .then(|| candidate.to_path_buf())
     })
 }
@@ -148,7 +159,7 @@ fn find_repository_root(path: &Path) -> Option<PathBuf> {
 pub(crate) fn check_contribution(
     envelope: &Form,
     contribution_root: &Path,
-    repository_root: &Path,
+    specs_root: &Path,
 ) -> Vec<SpecFinding> {
     let mut findings = Vec::new();
     for key in [
@@ -229,7 +240,7 @@ pub(crate) fn check_contribution(
             spec,
             index,
             contribution_root,
-            repository_root,
+            specs_root,
             &mut findings,
         );
     }
@@ -289,7 +300,7 @@ fn check_contribution_spec(
     spec: &Form,
     index: usize,
     contribution_root: &Path,
-    repository_root: &Path,
+    specs_root: &Path,
     findings: &mut Vec<SpecFinding>,
 ) {
     let path_prefix = vec![keyword("contribution/specs"), Form::Number(index as i64)];
@@ -412,7 +423,8 @@ fn check_contribution_spec(
         ));
         return;
     }
-    let metaspec_path = repository_root.join(metaspec_path);
+    let metaspec_path =
+        specs_root.join(metaspec_path.strip_prefix("specs/").unwrap_or(&metaspec_path));
     let metaspec_source = match fs::read_to_string(&metaspec_path) {
         Ok(source) => source,
         Err(error) => {
