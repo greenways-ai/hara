@@ -39,6 +39,7 @@ jobs:
       - name: Remove one-shot bootstrap machinery
         run: |
           git rm .github/workflows/bootstrap-lang-namespace-migration.yml
+          git rm .github/workflows/validate-lang-namespace-migration.yml
           git rm packaging/scripts/migrate-tahto-to-lang
 
       - name: Commit and push generated migration
