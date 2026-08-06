@@ -1,0 +1,52 @@
+(ns tahto.model.v1.spec-hara-dependency-test
+  (:use code.test)
+  (:require [tahto.common.compiler :as compiler]
+            [tahto.core.script :as script]
+            [tahto.model.v1.spec-hara :as hara]
+            [xt.lang.common-math]))
+
+(def selected (hara/select))
+(def instance (compiler/compiler))
+(def modules (deref script/+modules+))
+(def math-module (get modules 'xt.lang.common-math))
+(def gcd-entry (get-in math-module [:code 'gcd]))
+
+(def entry-result
+  (try
+    (let [compiled
+          (compiler/compile-entry
+           instance
+           gcd-entry
+           selected
+           {:book (assoc hara/+book+ :modules modules)
+            :modules modules
+            :module math-module
+            :entry gcd-entry
+            :lang :hara
+            :layout :flat})]
+      {:status :ok
+       :output (:output compiled)
+       :dependencies (:dependencies compiled)
+       :stages (:stages compiled)})
+    (catch Throwable error
+      {:status :error
+       :message (ex-message error)
+       :data (select-keys
+              (ex-data error)
+              [:tahto/phase
+               :tahto/form
+               :tahto/hook
+               :tahto/entry
+               :tahto/cause-class
+               :tahto/cause-message
+               :tahto/cause-data
+               :tahto/provenance
+               :tahto/provenance-stack])})))
+
+^{:refer tahto.common.compiler/compile-entry :added "4.1"}
+(fact "compiles a registered canonical XTalk dependency entry through Hara"
+  entry-result
+  => {:status :ok
+      :output (:output entry-result)
+      :dependencies (:dependencies entry-result)
+      :stages (:stages entry-result)})
