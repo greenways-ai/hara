@@ -6,6 +6,7 @@
             [tahto.core.eval :as evaluation]
             [tahto.model.v1.spec-js :as spec-js]
             [tahto.model.v1.spec-python :as spec-python]
+            [tahto.model.v1.spec-lua :as spec-lua]
             [tahto.runtime.basic.transport-node :as transport-node]))
 
 (defn collect-process-output
@@ -50,6 +51,10 @@
   (emit/emit '(print (+ 19 23))
              (spec-python/select)))
 
+(def lua-command-source
+  (emit/emit '(print (+ 19 23))
+             (spec-lua/select)))
+
 (def js-expression-source
   (emit/emit '(+ 19 23)
              (spec-js/select)))
@@ -58,10 +63,42 @@
   (emit/emit '(+ 19 23)
              (spec-python/select)))
 
-(println "tahto runtime smoke: creating oneshot runtimes")
+(println "tahto runtime smoke: creating oneshot and verify runtimes")
 
 (def js-oneshot (tahto/rt-create :js :oneshot))
 (def python-oneshot (tahto/rt-create :python :oneshot))
+(def lua-oneshot (tahto/rt-create :lua :oneshot))
+(def js-verify (tahto/rt-create :js :verify))
+(def python-verify (tahto/rt-create :python :verify))
+(def lua-verify (tahto/rt-create :lua :verify))
+
+(println "tahto runtime smoke: verifying emitted JavaScript, Python, and Lua")
+(def js-verified-source (tahto/rt-raw-eval js-verify js-command-source))
+(def python-verified-source
+  (tahto/rt-raw-eval python-verify python-command-source))
+(def lua-verified-source (tahto/rt-raw-eval lua-verify lua-command-source))
+
+;; A verifier must parse but never execute these valid programs.
+(def js-nonexecuting-source
+  "throw new Error('verification executed JavaScript');")
+(def python-nonexecuting-source
+  "raise RuntimeError('verification executed Python')")
+(def lua-nonexecuting-source
+  "error('verification executed Lua')")
+
+(def js-nonexecuting-result
+  (tahto/rt-raw-eval js-verify js-nonexecuting-source))
+(def python-nonexecuting-result
+  (tahto/rt-raw-eval python-verify python-nonexecuting-source))
+(def lua-nonexecuting-result
+  (tahto/rt-raw-eval lua-verify lua-nonexecuting-source))
+
+(def js-verify-error
+  (try
+    (tahto/rt-raw-eval js-verify "function {")
+    nil
+    (catch Throwable error
+      (ex-data error))))
 
 (println "tahto runtime smoke: evaluating JavaScript oneshot")
 (def js-oneshot-output (tahto/rt-raw-eval js-oneshot js-command-source))
@@ -71,6 +108,11 @@
 (def python-oneshot-output
   (tahto/rt-raw-eval python-oneshot python-command-source))
 (println "tahto runtime smoke: Python oneshot complete")
+
+(println "tahto runtime smoke: evaluating Lua oneshot")
+(def lua-oneshot-output
+  (tahto/rt-raw-eval lua-oneshot lua-command-source))
+(println "tahto runtime smoke: Lua oneshot complete")
 
 (println "tahto runtime smoke: starting JavaScript persistent runtime")
 (def js-basic (tahto/rt-start (tahto/rt-create :js :basic)))
@@ -109,35 +151,61 @@
    :return "int"
    :value 42})
 
-(if (and (= "42" js-oneshot-output)
+(if (and (= js-command-source js-verified-source)
+         (= python-command-source python-verified-source)
+         (= lua-command-source lua-verified-source)
+         (= js-nonexecuting-source js-nonexecuting-result)
+         (= python-nonexecuting-source python-nonexecuting-result)
+         (= lua-nonexecuting-source lua-nonexecuting-result)
+         (= :verify (get js-verify-error :phase))
+         (= :js (get js-verify-error :lang))
+         (= :verify (get js-verify-error :runtime))
+         (not= 0 (get js-verify-error :exit))
+         (= "42" js-oneshot-output)
          (= "42" python-oneshot-output)
+         (= "42" lua-oneshot-output)
          (= expected-js-basic js-basic-output)
          (= expected-python-basic python-basic-output)
-         (= {:js 1 :python 1} (:versions tahto/+bootstrap+))
+         (= {:js 1 :python 1 :lua 1} (:versions tahto/+bootstrap+))
          (= 1 (tahto/registry-book-default-version :js))
          (= [1] (tahto/registry-book-versions :python))
+         (= [1] (tahto/registry-book-versions :lua))
          (= :process-socket js-basic-transport)
          (= :process-socket python-basic-transport)
          (= :stopped (get js-basic-state :status))
          (= :stopped (get python-basic-state :status)))
   {:status :passed
    :bootstrap tahto/+bootstrap+
+   :verify {:js js-verified-source
+            :python python-verified-source
+            :lua lua-verified-source
+            :invalid-js js-verify-error}
    :oneshot {:js js-oneshot-output
-             :python python-oneshot-output}
+             :python python-oneshot-output
+             :lua lua-oneshot-output}
    :basic {:js js-basic-output
            :python python-basic-output
            :transport :process-socket
            :state {:js js-basic-state
                    :python python-basic-state}}}
   (throw
-   (ex-info "Tahto basic runtime bootstrap smoke failed"
+   (ex-info "Tahto runtime bootstrap smoke failed"
             {:bootstrap tahto/+bootstrap+
              :sources {:js-command js-command-source
                        :python-command python-command-source
+                       :lua-command lua-command-source
                        :js-expression js-expression-source
                        :python-expression python-expression-source}
+             :verify {:js js-verified-source
+                      :python python-verified-source
+                      :lua lua-verified-source
+                      :nonexecuting {:js js-nonexecuting-result
+                                     :python python-nonexecuting-result
+                                     :lua lua-nonexecuting-result}
+                      :invalid-js js-verify-error}
              :oneshot {:js js-oneshot-output
-                       :python python-oneshot-output}
+                       :python python-oneshot-output
+                       :lua lua-oneshot-output}
              :basic {:js js-basic-output
                      :python python-basic-output
                      :expected {:js expected-js-basic

@@ -2,17 +2,20 @@
   (:require [tahto.core.runtime :as runtime]
             [tahto.runtime.basic.type-basic :as basic]
             [tahto.runtime.basic.type-common :as common]
-            [tahto.runtime.basic.type-oneshot :as oneshot]))
+            [tahto.runtime.basic.type-oneshot :as oneshot]
+            [tahto.runtime.basic.type-verify :as verify]))
 
 (def +program-init+
   (common/put-program-options
    :js
    {:default {:oneshot :nodejs
+              :verify :nodejs
               :basic :nodejs}
     :env {:nodejs
           {:exec "node"
            :extension "js"
            :flags {:oneshot ["-e"]
+                   :verify ["--input-type=module" "--check" "-"]
                    :basic ["-e"]}}}}))
 
 (def +js-oneshot-config+
@@ -21,6 +24,14 @@
    {:main {}
     :emit {}
     :json :full}))
+
+(def +js-verify-config+
+  (common/set-context-options
+   [:js :verify :default]
+   {:main {}
+    :emit {}
+    :json false
+    :transport :process-stdin}))
 
 (def +js-basic-config+
   (common/set-context-options
@@ -38,6 +49,13 @@
     :instance {:create oneshot/rt-oneshot:create
                :raw-eval oneshot/raw-eval-oneshot}}))
 
+(def +js-verify+
+  (runtime/install-type!
+   :js :verify
+   {:type :tahto/rt.verify
+    :instance {:create oneshot/rt-oneshot:create
+               :raw-eval verify/raw-eval-verify}}))
+
 (def +js-basic+
   (runtime/install-type!
    :js :basic
@@ -52,4 +70,5 @@
   {:lang :js
    :program +program-init+
    :oneshot +js-oneshot+
+   :verify +js-verify+
    :basic +js-basic+})

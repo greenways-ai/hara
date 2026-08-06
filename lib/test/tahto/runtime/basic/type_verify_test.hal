@@ -1,0 +1,69 @@
+(ns tahto.runtime.basic.type-verify-test
+  (:use code.test)
+  (:require [std.foundation.string :as string]
+            [tahto.runtime.basic.type-verify :as verify]))
+
+(def runtime
+  {:lang :lua
+   :runtime :verify
+   :program :lua
+   :exec ["lua" "-e" "checker"]
+   :grammar-coordinate [:lua :default]
+   :grammar-version 1})
+
+^{:refer tahto.runtime.basic.type-verify/checker-result :added "4.1"}
+(fact "builds a phase-specific checker result"
+  (verify/checker-result
+   runtime
+   [(string/encode-utf8 "out")
+    (string/encode-utf8 "err")
+    3])
+  => {:phase :verify
+      :lang :lua
+      :runtime :verify
+      :program :lua
+      :command ["lua" "-e" "checker"]
+      :exit 3
+      :stdout "out"
+      :stderr "err"})
+
+^{:refer tahto.runtime.basic.type-verify/verify-result :added "4.1"}
+(fact "returns verified source unchanged"
+  (verify/verify-result runtime "return 42" {:exit 0})
+  => "return 42")
+
+^{:refer tahto.runtime.basic.type-verify/verify-result :added "4.1"}
+(fact "reports invalid source with runtime and grammar provenance"
+  (try
+    (verify/verify-result
+     runtime
+     "function {"
+     {:phase :verify
+      :lang :lua
+      :runtime :verify
+      :program :lua
+      :command ["lua" "-e" "checker"]
+      :exit 1
+      :stdout ""
+      :stderr "syntax error"})
+    nil
+    (catch Throwable error
+      (let [data (ex-data error)]
+        [(ex-message error)
+         (get data :phase)
+         (get data :lang)
+         (get data :runtime)
+         (get data :program)
+         (get data :grammar-coordinate)
+         (get data :grammar-version)
+         (get data :generated-fragment)
+         (get data :stderr)])))
+  => ["Target source verification failed"
+      :verify
+      :lua
+      :verify
+      :lua
+      [:lua :default]
+      1
+      "function {"
+      "syntax error"])

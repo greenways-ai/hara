@@ -1,4 +1,4 @@
-name: Tahto JS and Python runtime
+name: Tahto JS, Python, and Lua runtime
 
 on:
   pull_request:
@@ -6,6 +6,8 @@ on:
     paths:
       - 'lib/src/tahto/**'
       - 'lib/src/hara/runtime.hal'
+      - 'rust/hal-src/tahto/**'
+      - 'rust/hal-src/hara/runtime.hal'
       - 'lib/test/tahto/**'
       - 'lib/test/hara/runtime_test.hal'
       - 'lib/integration/hara/runtime_smoke.hal'
@@ -33,6 +35,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install Lua 5.4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+          lua -v
       - uses: actions/setup-java@v4
         with:
           java-version: '21'
@@ -41,5 +48,5 @@ jobs:
           cache-dependency-path: java/pom.xml
       - name: Build Hara Truffle runtime
         run: mvn -B -Ptruffle -DskipTests package --file java/pom.xml
-      - name: Execute emitted JavaScript and Python
+      - name: Execute emitted JavaScript, Python, and Lua
         run: bash scripts/run-hara-runtime-smoke

@@ -2,25 +2,38 @@
   (:use code.test)
   (:require [tahto.common.emit :as emit]
             [tahto.model.v1.spec-js :as spec-js]
-            [tahto.model.v1.spec-python :as spec-python]))
+            [tahto.model.v1.spec-python :as spec-python]
+            [tahto.model.v1.spec-lua :as spec-lua]
+            [tahto.model.v1.spec-postgres :as spec-postgres]))
 
 (def js (spec-js/select))
 (def py (spec-python/select))
+(def lua (spec-lua/select))
+(def pg (spec-postgres/select))
 
-(fact "JavaScript keeps the Foundation language and grammar tag"
-  [spec-js/+language+ spec-js/+tag+
-   (get-in js [:coordinate :grammar/id])
-   (get-in js [:grammar :tag])]
-  => [:js :js :js :js])
-
-(fact "Python keeps the Foundation language and grammar tag"
-  [spec-python/+language+ spec-python/+tag+
-   (get-in py [:coordinate :grammar/id])
-   (get-in py [:grammar :tag])]
-  => [:python :py :py :py])
+(fact "target models keep their Foundation language and grammar tags"
+  [[spec-js/+language+ spec-js/+tag+
+    (get-in js [:coordinate :grammar/id])
+    (get-in js [:grammar :tag])]
+   [spec-python/+language+ spec-python/+tag+
+    (get-in py [:coordinate :grammar/id])
+    (get-in py [:grammar :tag])]
+   [spec-lua/+language+ spec-lua/+tag+
+    (get-in lua [:coordinate :grammar/id])
+    (get-in lua [:grammar :tag])]
+   [spec-postgres/+language+ spec-postgres/+tag+
+    (get-in pg [:coordinate :grammar/id])
+    (get-in pg [:grammar :tag])]]
+  => [[:js :js :js :js]
+      [:python :py :py :py]
+      [:lua :lua :lua :lua]
+      [:postgres :postgres :postgres :postgres]])
 
 (fact "target models inherit the versioned XTalk/common model"
-  [(:provenance js) (:provenance py)]
+  [(:provenance js)
+   (:provenance py)
+   (:provenance lua)
+   (:provenance pg)]
   => [[[:emit-template :xtalk 1]
        [:profile :xtalk 1]
        [:grammar :xtalk 1]
@@ -28,22 +41,43 @@
       [[:emit-template :xtalk 1]
        [:profile :xtalk 1]
        [:grammar :xtalk 1]
-       [:grammar :py 1]]])
+       [:grammar :py 1]]
+      [[:emit-template :xtalk 1]
+       [:profile :xtalk 1]
+       [:grammar :xtalk 1]
+       [:grammar :lua 1]]
+      [[:emit-template :xtalk 1]
+       [:profile :xtalk 1]
+       [:grammar :xtalk 1]
+       [:grammar :postgres 1]]])
 
-(fact "target grammars emit executable forms"
+(fact "dynamic target grammars emit executable forms"
   [(emit/emit '(console.log (+ 19 23)) js)
    (emit/emit '(print (+ 19 23)) py)
+   (emit/emit '(print (+ 19 23)) lua)
    (emit/emit '(defn add [x y] (return (+ x y))) js)
    (emit/emit '(defn add [x y] (return (+ x y))) py)]
   => ["console.log(19 + 23)"
+      "print(19 + 23)"
       "print(19 + 23)"
       "function add(x,y){\n  return x + y;\n}"
       "def add(x,y):\n    return x + y\n"])
 
 (fact "target literals differ by language"
   [(emit/emit nil js) (emit/emit true js)
-   (emit/emit nil py) (emit/emit true py)]
-  => ["null" "true" "None" "True"])
+   (emit/emit nil py) (emit/emit true py)
+   (emit/emit nil lua) (emit/emit true lua)
+   (emit/emit nil pg) (emit/emit true pg)]
+  => ["null" "true"
+      "None" "True"
+      "nil" "true"
+      "NULL" "TRUE"])
+
+(fact "PostgreSQL retains SQL equality while JavaScript retains strict equality"
+  [(emit/emit '(== 1 1) js)
+   (emit/emit '(== 1 1) pg)]
+  => ["1 === 1"
+      "1 = 1"])
 
 (fact "Python block controls separate their keyword from the condition"
   (emit/emit '(cond (< v min)
