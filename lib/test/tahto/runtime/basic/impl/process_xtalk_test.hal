@@ -1,0 +1,145 @@
+(ns tahto.runtime.basic.impl.process-xtalk-test
+  (:use code.test)
+  (:require [tahto.core.eval :as evaluation]
+            [tahto.core.registry :as registry]
+            [tahto.core.runtime :as runtime]
+            [tahto.runtime.basic.type-hara :as hara-basic]))
+
+(defn await
+  [value]
+  (evaluation/await value 2000))
+
+^{:refer tahto.core.runtime/rt-create :added "4.1"}
+(fact "registers one in-process implementation at the XTalk and Hara coordinates"
+  [(registry/registry-runtime-ns :xtalk :basic)
+   (registry/registry-runtime-ns :hara :basic)
+   (:type (runtime/runtime-spec :xtalk :basic))
+   (:type (runtime/runtime-spec :hara :basic))]
+  => ['tahto.runtime.basic.impl.process-xtalk
+      'tahto.runtime.basic.impl.process-xtalk
+      :tahto/rt.hara-basic
+      :tahto/rt.hara-basic])
+
+^{:refer tahto.runtime.basic.type-hara/raw-eval-hara-basic :added "4.1"}
+(fact "persists Hara Vars inside one runtime namespace without a child process"
+  (let [instance
+        (runtime/rt-start
+         (runtime/rt-create
+          :xtalk :basic
+          {:id :xtalk-persistent-test
+           :namespace 'tahto.xtalk.test.persistent}))
+        defined (runtime/rt-raw-eval instance "(def counter 1)")
+        incremented
+        (runtime/rt-raw-eval instance
+                             "(set! counter (+ counter 1))")
+        observed (runtime/rt-raw-eval instance "counter")
+        state (hara-basic/hara-basic-state instance)
+        stopped (runtime/rt-stop instance)]
+    [defined
+     incremented
+     observed
+     (:evaluations state)
+     (:target state)
+     (:status (hara-basic/hara-basic-state stopped))
+     (get instance :transport)])
+  => [1 2 2 3 :hara :stopped nil])
+
+^{:refer tahto.runtime.basic.type-hara/eval-hara-basic :added "4.1"}
+(fact "compiles XTalk forms through the Hara grammar before evaluation"
+  (let [instance
+        (runtime/rt-start
+         (runtime/rt-create
+          :xtalk :basic
+          {:id :xtalk-semantic-test
+           :namespace 'tahto.xtalk.test.semantic}))
+        arithmetic (await (runtime/rt-eval instance '(+ 19 23)))
+        mutable-array
+        (await
+         (runtime/rt-eval
+          instance
+          '(do
+             (var values := [1 2])
+             (x:arr-push values 3)
+             (x:set-idx values 0 9)
+             values)))
+        early-return
+        (await
+         (runtime/rt-eval
+          instance
+          '((fn [value]
+              (when (> value 0)
+                (return value))
+              (return 0))
+            7)))
+        state (hara-basic/hara-basic-state instance)]
+    (runtime/rt-stop instance)
+    [arithmetic
+     mutable-array
+     early-return
+     (:evaluations state)
+     (:last-compiled? state)])
+  => [42 [9 2 3] 7 3 true])
+
+^{:refer tahto.runtime.basic.type-hara/rt-hara-basic:create :added "4.1"}
+(fact "isolates persistent Vars by runtime namespace"
+  (let [left
+        (runtime/rt-start
+         (runtime/rt-create
+          :xtalk :basic
+          {:id :xtalk-left
+           :namespace 'tahto.xtalk.test.left}))
+        right
+        (runtime/rt-start
+         (runtime/rt-create
+          :xtalk :basic
+          {:id :xtalk-right
+           :namespace 'tahto.xtalk.test.right}))]
+    (runtime/rt-raw-eval left "(def value 11)")
+    (runtime/rt-raw-eval right "(def value 29)")
+    (let [result [(runtime/rt-raw-eval left "value")
+                  (runtime/rt-raw-eval right "value")]]
+      (runtime/rt-stop left)
+      (runtime/rt-stop right)
+      result))
+  => [11 29])
+
+^{:refer tahto.core.runtime/rt-create :added "4.1"}
+(fact "provides the explicit Hara alias over the same grammar and evaluator"
+  (let [instance
+        (runtime/rt-start
+         (runtime/rt-create
+          :hara :basic
+          {:id :hara-basic-alias
+           :namespace 'tahto.xtalk.test.hara_alias}))
+        result (await (runtime/rt-eval instance '(x:cat "hara" "-" "xtalk")))
+        descriptor [(get instance :lang)
+                    (get instance :target)
+                    (get-in instance [:book :coordinate])]]
+    (runtime/rt-stop instance)
+    [result descriptor])
+  => ["hara-xtalk"
+      [:hara
+       :hara
+       {:grammar/id :hara
+        :grammar/variant :default
+        :grammar/version 1}]])
+
+^{:refer tahto.runtime.basic.type-hara/stop-hara-basic :added "4.1"}
+(fact "rejects evaluation after the runtime is stopped"
+  (let [instance
+        (runtime/rt-start
+         (runtime/rt-create
+          :xtalk :basic
+          {:id :xtalk-stopped-test
+           :namespace 'tahto.xtalk.test.stopped}))]
+    (runtime/rt-stop instance)
+    (try
+      (runtime/rt-eval instance '(+ 1 2))
+      nil
+      (catch Throwable error
+        [(ex-message error)
+         (get (ex-data error) :lang)
+         (get-in (ex-data error) [:state :status])]))))
+  => ["Hara basic runtime is not started"
+      :xtalk
+      :stopped])

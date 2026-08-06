@@ -1,0 +1,762 @@
+(ns tahto.model.v1.spec-hara.emit
+  (:require [std.foundation.string :as string]))
+
+(declare lower lower-body)
+
+(def +not-handled+ :tahto.hara/not-handled)
+
+(defn form
+  [values]
+  (apply list values))
+
+(defn sanitize-symbol-name
+  [value]
+  (-> (str value)
+      (string/replace "/" "__")
+      (string/replace "." "_")
+      (string/replace "-" "_")
+      (string/replace ":" "_")
+      (string/replace "?" "_p")
+      (string/replace "!" "_bang")
+      (string/replace "*" "_star")))
+
+(defn flatten-symbol
+  "Flattens a staged module symbol into one legal Hara Var symbol."
+  [value]
+  (symbol (sanitize-symbol-name value)))
+
+(defn module-symbol?
+  [value context]
+  (and (symbol? value)
+       (namespace value)
+       (get (:modules context)
+            (symbol (namespace value)))))
+
+(defn mutable-symbol?
+  [value context]
+  (and (symbol? value)
+       (contains? (or (:mutable context) #{}) value)))
+
+(defn lower-symbol
+  [value context]
+  (cond
+    (mutable-symbol? value context)
+    (list 'deref value)
+
+    (module-symbol? value context)
+    (flatten-symbol value)
+
+    :else value))
+
+(defn definition-symbol
+  [value context]
+  (let [module-id (get-in context [:module :id])]
+    (if (and module-id (:entry context))
+      (flatten-symbol (symbol (str module-id) (name value)))
+      (if (namespace value)
+        (flatten-symbol value)
+        value))))
+
+(defn lower-vector
+  [value context]
+  (mapv #(lower % context) value))
+
+(defn lower-map
+  [value context]
+  (reduce-kv
+   (fn [out key item]
+     (assoc out (lower key context)
+                (lower item context)))
+   {}
+   value))
+
+(defn lower-set
+  [value context]
+  (reduce (fn [out item]
+            (conj out (lower item context)))
+          #{}
+          value))
+
+(defn return-form?
+  [value]
+  (and (list? value)
+       (= 'return (first value))))
+
+(defn var-form?
+  [value]
+  (and (list? value)
+       (= 'var (first value))))
+
+(defn var-declaration
+  [value]
+  (let [name (second value)
+        remaining (vec (drop 2 value))
+        initializer
+        (cond
+          (= 0 (count remaining)) nil
+          (= := (first remaining)) (second remaining)
+          :else (last remaining))]
+    [name initializer]))
+
+(defn add-mutable
+  [context symbols]
+  (assoc context
+         :mutable
+         (reduce conj (or (:mutable context) #{}) symbols)))
+
+(defn lower-body
+  "Lowers a sequence while turning XTalk var declarations into scoped atoms."
+  [body context]
+  (let [body (vec body)]
+    (if (= 0 (count body))
+      nil
+      (let [current (first body)
+            remaining (vec (drop 1 body))]
+        (if (var-form? current)
+          (let [[name initializer] (var-declaration current)
+                next-context (add-mutable context [name])]
+            (list 'let
+                  [name (list 'atom (lower initializer context))]
+                  (lower-body remaining next-context)))
+          (let [current-output (lower current context)]
+            (if (= 0 (count remaining))
+              current-output
+              (list 'do
+                    current-output
+                    (lower-body remaining context)))))))))
+
+(defn rest-arg-form?
+  [value]
+  (and (list? value)
+       (= 2 (count value))
+       (= :.. (first value))
+       (symbol? (second value))))
+
+(defn normalize-args
+  [args]
+  (loop [out []
+         remaining (vec args)]
+    (if (= 0 (count remaining))
+      out
+      (let [current (first remaining)
+            more (vec (drop 1 remaining))]
+        (cond
+          (rest-arg-form? current)
+          (recur (conj out '& (second current)) more)
+
+          (keyword? current)
+          (recur out more)
+
+          (and (list? current)
+               (= 2 (count current))
+               (symbol? (second current)))
+          (recur (conj out (second current)) more)
+
+          :else
+          (recur (conj out current) more))))))
+
+(defn simple-arg-symbols
+  [args]
+  (reduce (fn [out value]
+            (if (and (symbol? value)
+                     (not= '& value))
+              (conj out value)
+              out))
+          []
+          args))
+
+(defn return-catch
+  [body]
+  (list
+   'try
+   body
+   (list 'catch 'Throwable '__tahto_return_error
+         (list 'let
+               ['__tahto_return_data
+                (list 'ex-data '__tahto_return_error)]
+               (list 'if
+                     (list '= true
+                           (list 'get '__tahto_return_data
+                                 :tahto.hara/return))
+                     (list 'get '__tahto_return_data :value)
+                     (list 'throw '__tahto_return_error))))))
+
+(defn lower-function-body
+  [args body context]
+  (let [arg-symbols (simple-arg-symbols args)
+        function-context
+        (-> context
+            (assoc :function? true)
+            (add-mutable arg-symbols))
+        lowered (return-catch (lower-body body function-context))
+        bindings
+        (reduce (fn [out arg]
+                  (conj out arg (list 'atom arg)))
+                []
+                arg-symbols)]
+    (if (= 0 (count bindings))
+      lowered
+      (list 'let bindings lowered))))
+
+(defn lower-fn
+  [value context]
+  (let [items (vec (rest value))
+        named? (and (> (count items) 1)
+                    (symbol? (first items))
+                    (vector? (second items)))
+        name (if named? (first items) nil)
+        args-index (if named? 1 0)
+        args (normalize-args (nth items args-index))
+        body (drop (+ args-index 1) items)
+        output (lower-function-body args body context)]
+    (if named?
+      (list 'fn name args output)
+      (list 'fn args output))))
+
+(defn drop-declaration-preamble
+  [items]
+  (let [items (if (string? (first items))
+                (vec (drop 1 items))
+                (vec items))]
+    (if (map? (first items))
+      (vec (drop 1 items))
+      items)))
+
+(defn lower-defn
+  [value context]
+  (let [name (definition-symbol (second value) context)
+        items (drop-declaration-preamble (drop 2 value))
+        args (normalize-args (first items))
+        body (drop 1 items)]
+    (list 'defn name args
+          (lower-function-body args body context))))
+
+(defn lower-def
+  [value context]
+  (let [name (definition-symbol (second value) context)
+        items (drop-declaration-preamble (drop 2 value))]
+    (list 'def name (lower (first items) context))))
+
+(defn lower-return
+  [value context]
+  (let [result (if (> (count value) 1)
+                 (lower (second value) context)
+                 nil)]
+    (if (:function? context)
+      (list 'throw
+            (list 'ex-info
+                  "XTalk function return"
+                  {:tahto.hara/return true
+                   :value result}))
+      result)))
+
+(defn indexed-target
+  [target]
+  (if (and (list? target)
+           (= '. (first target))
+           (> (count target) 2)
+           (every? (fn [step]
+                     (and (vector? step)
+                          (= 1 (count step))))
+                   (drop 2 target)))
+    {:root (second target)
+     :path (mapv first (drop 2 target))}
+    nil))
+
+(defn global-reference-call
+  [root helper arguments context]
+  (let [target (lower-symbol root (assoc context :mutable #{}))
+        lowered-arguments (mapv #(lower % context) arguments)]
+    (list 'let
+          ['__tahto_reference (list 'atom target)
+           '__tahto_result
+           (form (concat [helper '__tahto_reference]
+                         lowered-arguments))]
+          (list 'set! target (list 'deref '__tahto_reference))
+          '__tahto_result)))
+
+(defn mutation-call
+  [root helper arguments context]
+  (if (not (symbol? root))
+    (throw
+     (ex-info "Hara target requires a symbol-rooted mutable value"
+              {:root root
+               :helper helper
+               :tahto/error-code :tahto.hara/unsupported-mutation}))
+    (if (mutable-symbol? root context)
+      (form (concat [helper root]
+                    (map #(lower % context) arguments)))
+      (global-reference-call root helper arguments context))))
+
+(defn lower-assignment
+  [target value context]
+  (cond
+    (symbol? target)
+    (if (mutable-symbol? target context)
+      (list 'reset! target (lower value context))
+      (list 'set! (lower-symbol target (assoc context :mutable #{}))
+            (lower value context)))
+
+    (indexed-target target)
+    (let [{:keys [root path]} (indexed-target target)]
+      (mutation-call root
+                     'tahto.runtime.hara/set-path!
+                     [(mapv #(lower % context) path)
+                      value]
+                     context))
+
+    :else
+    (throw
+     (ex-info "Unsupported Hara assignment target"
+              {:target target
+               :tahto/error-code :tahto.hara/unsupported-assignment}))))
+
+(defn lower-index
+  [value context]
+  (form
+   (concat ['. (lower (second value) context)]
+           (map (fn [step]
+                  (cond
+                    (vector? step) (mapv #(lower % context) step)
+                    (list? step) (lower step context)
+                    :else step))
+                (drop 2 value)))))
+
+(defn lower-branch
+  [value context]
+  (let [clauses (vec (rest value))
+        pairs
+        (reduce
+         (fn [out clause]
+           (let [kind (first clause)]
+             (cond
+               (or (= 'if kind) (= 'elseif kind))
+               (conj out
+                     (lower (second clause) context)
+                     (lower-body (drop 2 clause) context))
+
+               (= 'else kind)
+               (conj out :else
+                     (lower-body (rest clause) context))
+
+               :else
+               (throw
+                (ex-info "Invalid XTalk branch clause"
+                         {:clause clause})))))
+         []
+         clauses)]
+    (form (concat ['cond] pairs))))
+
+(defn lower-try-clause
+  [clause context]
+  (let [kind (first clause)]
+    (cond
+      (= 'catch kind)
+      (if (and (> (count clause) 2)
+               (symbol? (second clause))
+               (symbol? (nth clause 2)))
+        (form (concat ['catch
+                       (second clause)
+                       (nth clause 2)]
+                      [(lower-body (drop 3 clause) context)]))
+        (form (concat ['catch 'Throwable (second clause)]
+                      [(lower-body (drop 2 clause) context)])))
+
+      (= 'finally kind)
+      (list 'finally (lower-body (rest clause) context))
+
+      :else
+      (lower clause context))))
+
+(defn lower-try
+  [value context]
+  (form (concat ['try]
+                (map #(if (and (list? %)
+                               (or (= 'catch (first %))
+                                   (= 'finally (first %))))
+                        (lower-try-clause % context)
+                        (lower % context))
+                     (rest value)))))
+
+(defn lower-while
+  [value context]
+  (let [condition (second value)
+        body (drop 2 value)]
+    (list 'loop []
+          (list 'if
+                (lower condition context)
+                (list 'do
+                      (lower-body body context)
+                      (list 'recur))
+                nil))))
+
+(defn lower-for-index
+  [value context]
+  (let [binding (second value)
+        index (first binding)
+        range (vec (second binding))
+        start (nth range 0)
+        stop (nth range 1)
+        step (if (> (count range) 2) (nth range 2) 1)
+        compare (if (and (number? step) (neg? step)) '> '<)
+        body (drop 2 value)]
+    (list 'loop [index (lower start context)]
+          (list 'if
+                (list compare index (lower stop context))
+                (list 'do
+                      (lower-body body context)
+                      (list 'recur
+                            (list '+ index (lower step context))))
+                nil))))
+
+(defn lower-for-array
+  [value context]
+  (let [binding (second value)
+        binding-value (first binding)
+        collection (lower (second binding) context)
+        body (drop 2 value)]
+    (if (vector? binding-value)
+      (let [index (first binding-value)
+            item (second binding-value)]
+        (list 'loop [index 0]
+              (list 'if
+                    (list '< index (list 'count collection))
+                    (list 'let [item (list 'nth collection index)]
+                          (lower-body body context)
+                          (list 'recur (list '+ index 1)))
+                    nil)))
+      (list 'reduce
+            (list 'fn ['__tahto_ignore binding-value]
+                  (lower-body body context)
+                  nil)
+            nil
+            collection))))
+
+(defn lower-for-object
+  [value context]
+  (let [binding (second value)
+        pair (first binding)
+        collection (lower (second binding) context)
+        body (drop 2 value)]
+    (list 'reduce
+          (list 'fn ['__tahto_ignore pair]
+                (lower-body body context)
+                nil)
+          nil
+          collection)))
+
+(defn lower-for-iter
+  [value context]
+  (lower-for-array value context))
+
+(defn lower-x-call
+  [value context]
+  (let [operation (first value)
+        operation-name (if (symbol? operation) (name operation) "")
+        arguments (vec (rest value))
+        argument (fn [index] (nth arguments index))
+        lowered #(lower % context)]
+    (if (or (not (symbol? operation))
+            (namespace operation)
+            (not (string/starts-with? operation-name "x:")))
+      +not-handled+
+      (case operation-name
+        "x:cat" (form (concat ['str] (map lowered arguments)))
+        "x:len" (list 'count (lowered (argument 0)))
+        "x:nil?" (list 'nil? (lowered (argument 0)))
+        "x:not-nil?" (list 'not (list 'nil? (lowered (argument 0))))
+        "x:err" (list 'throw (list 'ex-info (lowered (argument 0)) {}))
+        "x:ex" (list 'ex-info
+                     (lowered (argument 0))
+                     (if (> (count arguments) 1)
+                       (lowered (argument 1))
+                       {}))
+        "x:ex-new" (list 'ex-info
+                         (lowered (argument 0))
+                         (if (> (count arguments) 1)
+                           (lowered (argument 1))
+                           {}))
+        "x:ex-native?" (list 'instance? 'Throwable (lowered (argument 0)))
+        "x:ex-message" (list 'ex-message (lowered (argument 0)))
+        "x:ex-data" (list 'ex-data (lowered (argument 0)))
+        "x:type-native" (list 'type (lowered (argument 0)))
+        "x:get-key" (if (> (count arguments) 2)
+                       (list 'let ['__tahto_value
+                                   (list 'get
+                                         (lowered (argument 0))
+                                         (lowered (argument 1)))]
+                             (list 'if (list 'nil? '__tahto_value)
+                                   (lowered (argument 2))
+                                   '__tahto_value))
+                       (list 'get
+                             (lowered (argument 0))
+                             (lowered (argument 1))))
+        "x:set-key" (lower-assignment
+                     (list '. (argument 0) [(argument 1)])
+                     (argument 2)
+                     context)
+        "x:del-key" (mutation-call
+                     (argument 0)
+                     'tahto.runtime.hara/del-path!
+                     [[(argument 1)]]
+                     context)
+        "x:get-idx" (list 'nth
+                           (lowered (argument 0))
+                           (lowered (argument 1)))
+        "x:set-idx" (lower-assignment
+                     (list '. (argument 0) [(argument 1)])
+                     (argument 2)
+                     context)
+        "x:has-key?" (let [check (if (> (count arguments) 2)
+                                    (argument 2)
+                                    nil)
+                           found (list 'has?
+                                       (lowered (argument 0))
+                                       (lowered (argument 1)))]
+                       (if (> (count arguments) 2)
+                         (list '= (lowered check) found)
+                         found))
+        "x:obj-keys" (list 'vec (list 'keys (lowered (argument 0))))
+        "x:obj-vals" (list 'vec (list 'vals (lowered (argument 0))))
+        "x:obj-clone" (list 'into {} (lowered (argument 0)))
+        "x:obj-assign" (mutation-call
+                        (argument 0)
+                        'tahto.runtime.hara/obj-assign!
+                        (drop 1 arguments)
+                        context)
+        "x:arr-clone" (list 'vec (lowered (argument 0)))
+        "x:arr-push" (mutation-call
+                      (argument 0)
+                      'tahto.runtime.hara/arr-push!
+                      (drop 1 arguments)
+                      context)
+        "x:arr-pop" (mutation-call
+                     (argument 0)
+                     'tahto.runtime.hara/arr-pop!
+                     []
+                     context)
+        "x:arr-push-first" (mutation-call
+                            (argument 0)
+                            'tahto.runtime.hara/arr-push-first!
+                            (drop 1 arguments)
+                            context)
+        "x:arr-pop-first" (mutation-call
+                           (argument 0)
+                           'tahto.runtime.hara/arr-pop-first!
+                           []
+                           context)
+        "x:arr-remove" (mutation-call
+                        (argument 0)
+                        'tahto.runtime.hara/arr-remove!
+                        [(argument 1)]
+                        context)
+        "x:arr-insert" (mutation-call
+                        (argument 0)
+                        'tahto.runtime.hara/arr-insert!
+                        [(argument 1) (argument 2)]
+                        context)
+        "x:arr-reverse" (mutation-call
+                         (argument 0)
+                         'tahto.runtime.hara/arr-reverse!
+                         []
+                         context)
+        "x:arr-map" (list 'map
+                          (lowered (argument 1))
+                          (lowered (argument 0)))
+        "x:arr-filter" (list 'filter
+                             (lowered (argument 1))
+                             (lowered (argument 0)))
+        "x:arr-foldl" (list 'reduce
+                            (lowered (argument 1))
+                            (if (> (count arguments) 2)
+                              (lowered (argument 2))
+                              nil)
+                            (lowered (argument 0)))
+        "x:arr-some" (list 'any?
+                           (lowered (argument 1))
+                           (lowered (argument 0)))
+        "x:arr-every" (list 'every?
+                            (lowered (argument 1))
+                            (lowered (argument 0)))
+        "x:to-string" (list 'str (lowered (argument 0)))
+        "x:to-number" (list 'double (lowered (argument 0)))
+        "x:is-string?" (list 'string? (lowered (argument 0)))
+        "x:is-number?" (list 'number? (lowered (argument 0)))
+        "x:is-integer?" (list 'integer? (lowered (argument 0)))
+        "x:is-boolean?" (list 'boolean? (lowered (argument 0)))
+        "x:is-function?" (list 'fn? (lowered (argument 0)))
+        "x:is-object?" (list 'map? (lowered (argument 0)))
+        "x:is-array?" (list 'vector? (lowered (argument 0)))
+        "x:apply" (list 'apply
+                        (lowered (argument 0))
+                        (lowered (argument 1)))
+        "x:json-encode" (list 'std.foundation.json/write
+                              (lowered (argument 0)))
+        "x:json-decode" (list 'std.foundation.json/read
+                              (lowered (argument 0)))
+        "x:str-join" (list 'std.foundation.string/join
+                           (lowered (argument 0))
+                           (lowered (argument 1)))
+        "x:str-split" (list 'std.foundation.string/split
+                            (lowered (argument 0))
+                            (lowered (argument 1)))
+        "x:str-index-of" (list 'std.foundation.string/index-of
+                               (lowered (argument 0))
+                               (lowered (argument 1)))
+        "x:str-substring" (form
+                           (concat ['std.foundation.string/slice
+                                    (lowered (argument 0))]
+                                   (map lowered (drop 1 arguments))))
+        "x:str-to-upper" (list 'std.foundation.string/upper
+                               (lowered (argument 0)))
+        "x:str-to-lower" (list 'std.foundation.string/lower
+                               (lowered (argument 0)))
+        "x:str-trim" (list 'std.foundation.string/trim
+                           (lowered (argument 0)))
+        "x:str-trim-left" (list 'std.foundation.string/trim-left
+                                (lowered (argument 0)))
+        "x:str-trim-right" (list 'std.foundation.string/trim-right
+                                 (lowered (argument 0)))
+        "x:str-starts-with" (list 'std.foundation.string/starts-with?
+                                  (lowered (argument 0))
+                                  (lowered (argument 1)))
+        "x:str-ends-with" (list 'std.foundation.string/ends-with?
+                                (lowered (argument 0))
+                                (lowered (argument 1)))
+        "x:str-replace" (list 'std.foundation.string/replace
+                              (lowered (argument 0))
+                              (lowered (argument 1))
+                              (lowered (argument 2)))
+        "x:str-to-fixed" (list 'std.foundation.string/to-fixed
+                               (lowered (argument 0))
+                               (lowered (argument 1)))
+        "x:m-abs" (list 'abs (lowered (argument 0)))
+        "x:m-acos" (list 'acos (lowered (argument 0)))
+        "x:m-asin" (list 'asin (lowered (argument 0)))
+        "x:m-atan" (list 'atan (lowered (argument 0)))
+        "x:m-ceil" (list 'ceil (lowered (argument 0)))
+        "x:m-cos" (list 'cos (lowered (argument 0)))
+        "x:m-cosh" (list 'cosh (lowered (argument 0)))
+        "x:m-exp" (list 'exp (lowered (argument 0)))
+        "x:m-floor" (list 'floor (lowered (argument 0)))
+        "x:m-pow" (list 'pow
+                         (lowered (argument 0))
+                         (lowered (argument 1)))
+        "x:m-sin" (list 'sin (lowered (argument 0)))
+        "x:m-sinh" (list 'sinh (lowered (argument 0)))
+        "x:m-sqrt" (list 'sqrt (lowered (argument 0)))
+        "x:m-tan" (list 'tan (lowered (argument 0)))
+        "x:m-tanh" (list 'tanh (lowered (argument 0)))
+        "x:m-mod" (list 'mod
+                         (lowered (argument 0))
+                         (lowered (argument 1)))
+        "x:m-quot" (list 'floor
+                          (list '/
+                                (lowered (argument 0))
+                                (lowered (argument 1))))
+        "x:bit-not" (list 'bit-not (lowered (argument 0)))
+        "x:eval" (list 'eval (list 'read-string (lowered (argument 0))))
+        +not-handled+))))
+
+(defn lower-list
+  [value context]
+  (let [operation (first value)
+        x-output (lower-x-call value context)]
+    (if (not= +not-handled+ x-output)
+      x-output
+      (cond
+        (= 'quote operation) value
+        (= '% operation) (lower (second value) context)
+        (= 'do operation) (lower-body (rest value) context)
+        (= 'do* operation) (lower-body (rest value) context)
+        (= 'block operation) (lower-body (drop 2 value) context)
+        (= 'fn operation) (lower-fn value context)
+        (= 'defn operation) (lower-defn value context)
+        (= 'defn- operation) (lower-defn value context)
+        (= 'defgen operation) (lower-defn (cons 'defn (rest value)) context)
+        (= 'def operation) (lower-def value context)
+        (= 'defglobal operation) (lower-def (cons 'def (rest value)) context)
+        (= 'return operation) (lower-return value context)
+        (= := operation) (lower-assignment (second value) (nth value 2) context)
+        (= :+= operation) (lower-assignment
+                           (second value)
+                           (list '+ (second value) (nth value 2))
+                           context)
+        (= :-= operation) (lower-assignment
+                           (second value)
+                           (list '- (second value) (nth value 2))
+                           context)
+        (= :*= operation) (lower-assignment
+                           (second value)
+                           (list '* (second value) (nth value 2))
+                           context)
+        (= :++ operation) (lower-assignment
+                           (second value)
+                           (list '+ (second value) 1)
+                           context)
+        (= :-- operation) (lower-assignment
+                           (second value)
+                           (list '- (second value) 1)
+                           context)
+        (= :? operation) (list 'if
+                               (lower (second value) context)
+                               (lower (nth value 2) context)
+                               (lower (nth value 3) context))
+        (= '== operation) (form (concat ['=] (map #(lower % context) (rest value))))
+        (= 'pow operation) (form (concat ['pow] (map #(lower % context) (rest value))))
+        (= 'b:& operation) (form (concat ['bit-and] (map #(lower % context) (rest value))))
+        (= 'b:| operation) (form (concat ['bit-or] (map #(lower % context) (rest value))))
+        (= 'b:xor operation) (form (concat ['bit-xor] (map #(lower % context) (rest value))))
+        (= 'b:<< operation) (form (concat ['bit-shift-left] (map #(lower % context) (rest value))))
+        (= 'b:>> operation) (form (concat ['bit-shift-right] (map #(lower % context) (rest value))))
+        (= '. operation) (lower-index value context)
+        (= 'br* operation) (lower-branch value context)
+        (= 'try operation) (lower-try value context)
+        (= 'while operation) (lower-while value context)
+        (= 'for:index operation) (lower-for-index value context)
+        (= 'for:array operation) (lower-for-array value context)
+        (= 'for:object operation) (lower-for-object value context)
+        (= 'for:iter operation) (lower-for-iter value context)
+        (= 'await operation) (list 'deref (lower (second value) context))
+        (= 'async operation) (list 'std.foundation.promise/run
+                                  (list 'fn []
+                                        (lower-body (rest value) context)))
+        (= 'new operation) (form (concat ['new]
+                                         (map #(lower % context) (rest value))))
+        (= 'var operation)
+        (throw
+         (ex-info "XTalk var must occur within a body"
+                  {:form value
+                   :tahto/error-code :tahto.hara/unscoped-var}))
+        (and (symbol? operation)
+             (not (namespace operation))
+             (string/starts-with? (name operation) "x:"))
+        (throw
+         (ex-info "XTalk operation is not implemented by the Hara target"
+                  {:operation operation
+                   :form value
+                   :tahto/error-code :tahto.hara/unsupported-operation}))
+        :else
+        (form (concat [(lower operation context)]
+                      (map #(lower % context) (rest value))))))))
+
+(defn lower
+  "Lowers one staged XTalk form into executable Hara AST."
+  [value context]
+  (cond
+    (list? value) (lower-list value context)
+    (vector? value) (lower-vector value context)
+    (map? value) (lower-map value context)
+    (set? value) (lower-set value context)
+    (symbol? value) (lower-symbol value context)
+    :else value))
+
+(defn emit-form
+  "Emits staged XTalk as one Hara source form."
+  [value context]
+  (pr-str
+   (lower value
+          (merge {:mutable #{}
+                  :function? false
+                  :modules {}}
+                 context))))

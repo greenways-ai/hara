@@ -8,7 +8,9 @@
          [:python :oneshot] 'tahto.runtime.basic.impl.process-python
          [:python :basic] 'tahto.runtime.basic.impl.process-python
          [:lua :oneshot] 'tahto.runtime.basic.impl.process-lua
-         [:lua :basic] 'tahto.runtime.basic.impl.process-lua}))
+         [:lua :basic] 'tahto.runtime.basic.impl.process-lua
+         [:xtalk :basic] 'tahto.runtime.basic.impl.process-xtalk
+         [:hara :basic] 'tahto.runtime.basic.impl.process-xtalk}))
 
 ;; Foundation keeps the public [:language :default] coordinate stable. Each
 ;; coordinate owns a configurable default and any number of immutable versions.
@@ -18,6 +20,13 @@
           :versions
           {1 {:ns 'tahto.model.v1.spec-xtalk
               :book '+book+}}}
+
+         [:hara :default]
+         {:default-version 1
+          :versions
+          {1 {:ns 'tahto.model.v1.spec-hara
+              :book '+book+
+              :parent :xtalk}}}
 
          [:js :default]
          {:default-version 1

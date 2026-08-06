@@ -1,0 +1,86 @@
+(ns tahto.model.v1.spec-hara-test
+  (:use code.test)
+  (:require [tahto.model.v1.spec-hara :as hara]))
+
+^{:refer tahto.model.v1.spec-hara/select :added "4.1"}
+(fact "Hara is a versioned child grammar of XTalk"
+  [hara/+language+
+   hara/+tag+
+   (:coordinate hara/+selection+)
+   (:provenance hara/+selection+)
+   (:parent hara/+book+)]
+  => [:hara
+      :hara
+      {:grammar/id :hara
+       :grammar/variant :default
+       :grammar/version 1}
+      [[:emit-template :xtalk 1]
+       [:profile :xtalk 1]
+       [:grammar :xtalk 1]
+       [:grammar :hara 1]]
+      :xtalk])
+
+^{:refer tahto.model.v1.spec-hara/compile :added "4.1"}
+(fact "compiles pure XTalk expressions into Hara source"
+  [(read-string (hara/compile '(+ 19 23)))
+   (read-string (hara/compile '(== (+ 1 1) 2)))
+   (read-string (hara/compile '(:? true "yes" "no")))]
+  => ['(+ 19 23)
+      '(= (+ 1 1) 2)
+      '(if true "yes" "no")])
+
+^{:refer tahto.model.v1.spec-hara/emit :added "4.1"}
+(fact "models mutable XTalk locals with scoped Hara atoms"
+  (read-string
+   (hara/emit
+    '(do
+       (var value := 1)
+       (:= value (+ value 2))
+       value)))
+  => '(let [value (atom 1)]
+        (do
+          (reset! value (+ (deref value) 2))
+          (deref value))))
+
+^{:refer tahto.model.v1.spec-hara/emit :added "4.1"}
+(fact "lowers mutable arrays onto the Hara runtime helpers"
+  (read-string
+   (hara/emit
+    '(do
+       (var values := [1 2])
+       (x:arr-push values 3)
+       (x:set-idx values 0 9)
+       values)))
+  => '(let [values (atom [1 2])]
+        (do
+          (tahto.runtime.hara/arr-push! values 3)
+          (do
+            (tahto.runtime.hara/set-path! values [0] 9)
+            (deref values)))))
+
+^{:refer tahto.model.v1.spec-hara.emit/flatten-symbol :added "4.1"}
+(fact "flattens staged module references to legal Hara Vars"
+  (read-string
+   (hara/emit
+    '(demo.math/add 1 2)
+    {:modules {'demo.math {:id 'demo.math}}}))
+  => '(demo_math__add 1 2))
+
+^{:refer tahto.model.v1.spec-hara/compile-result :added "4.1"}
+(fact "retains explicit compiler phases and Hara grammar provenance"
+  (let [result (hara/compile-result '(x:len [1 2 3]))]
+    [(:output result)
+     (get-in result [:grammar :coordinate])
+     (mapv :phase (get-in result [:provenance :events]))])
+  => ["(count [1 2 3])"
+      {:grammar/id :hara
+       :grammar/variant :default
+       :grammar/version 1}
+      [:normalize
+       :stage
+       :rewrite/canonical
+       :infer
+       :lint
+       :rewrite/target
+       :rewrite/staging
+       :emit]])
