@@ -1,0 +1,54 @@
+{:reference
+ {:repository "zcaudate-xyz/foundation-base"
+  :commit "f909a44ad504cc6c9f44248d59ec3148261a48d7"
+  :source "src-lang/xt/net/http_fetch.clj"
+  :source-sha "ed794cebe1bd740db6e5bf827ce46b1cc281feb2"
+  :test "test-lang/xt/net/http_fetch_test.clj"
+  :test-sha "c181754fc10599a4cded4cda10461fbb2eef8f3c"}
+
+ :target
+ {:source "lib/src/xt/net/http_fetch.hal"
+  :rust-snapshot "rust/hal-src/xt/net/http_fetch.hal"
+  :test "lib/test/xt/net/http_fetch_test.hal"
+  :test-sha "e23cb401642d7e58f169d6f3868c8d4236733d07"}
+
+ :dependencies
+ [{:namespace xt.net.http-util
+   :status :ported
+   :target "lib/src/xt/net/http_util.hal"}
+  {:namespace xt.lang.common-protocol
+   :status :ported
+   :target "lib/src/xt/lang/common_protocol.hal"}
+  {:namespace xt.lang.spec-promise
+   :status :ported
+   :target "lib/src/xt/lang/spec_promise.hal"}]
+
+ :source-status
+ {:status :ported
+  :difference nil
+  :note "The production module is byte-identical to the pinned Foundation source."}
+
+ :test-slices
+ [{:name :portable-fetch-composition
+   :status :ported-with-expanded-targets
+   :facts 7
+   :checks 21
+   :targets [:js :lua :python]
+   :coverage
+   ["explicit and default-derived URL construction"
+    "default and request header merging"
+    "prepared-input handler wrapping"
+    "middleware composition order"
+    "promise response normalisation"
+    "normalising handler wrappers"
+    "combined preparation, middleware, and normalisation"]}
+  {:name :live-http-adapter
+   :status :deferred
+   :source-fact "dispatches request through the wrapped fetch client"
+   :reason "The Foundation fact starts a local Supabase stack and uses target-specific js/dart/ruby fetch adapters. Live network execution and each target adapter belong in their runtime integration suites rather than the portable composition corpus."}]
+
+ :acceptance
+ ["The IHttpClient protocol and middleware composition source remain byte-identical to Foundation."
+  "The deterministic composition surface passes on JavaScript, Lua, and Python."
+  "Response decoding uses the already-ported shared HTTP envelope."
+  "Live network and target-adapter omissions are explicit rather than silently skipped."]}
