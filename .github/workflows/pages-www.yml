@@ -9,7 +9,7 @@ on:
       - 'rust/**'
       - 'lib/**'
       - 'scripts/build-www'
-      - 'scripts/install-www-redirects'
+      - 'scripts/install-benchmark-site'
       - 'scripts/write-kernel-manifest.mjs'
       - 'scripts/sync-hara-ui.mjs'
       - '.github/scripts/reconcile-netlify-domain.sh'
@@ -39,6 +39,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
+      - name: Checkout validated benchmark observatory
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara-benchmarks
+          ref: benchmark-site
+          path: .benchmark-site
+          fetch-depth: 1
       - name: Verify synchronized Hara UI assets
         run: |
           node scripts/sync-hara-ui.mjs
@@ -58,14 +65,19 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           bash scripts/build-www
-          bash scripts/install-www-redirects
+          bash scripts/install-benchmark-site
       - name: Test website scene contract
         run: |
           npm test --prefix website
           node --test website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
           test -s target/www/og-hara.jpg
-          test -s target/www/_redirects
-          grep -F '/benchmarks/* https://benchmarks.hara-lang.org/:splat 200!' target/www/_redirects
+          test -s target/www/benchmarks/index.html
+          test -s target/www/benchmarks/data/catalog.json
+          test -s target/www/benchmarks/data/runs.json
+          grep -F '<title>Hara Performance Observatory</title>' target/www/benchmarks/index.html
+          grep -F 'Language shootout' target/www/benchmarks/index.html
+          grep -F '"rust"' target/www/benchmarks/data/catalog.json
+          grep -F '"runtime":"rust-prepared"' target/www/benchmarks/data/runs.json
       - name: Deploy prod to www.testing.hara-lang.org
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
