@@ -10,6 +10,7 @@ on:
       - 'core/rust/hal-src/hara/runtime.hal'
       - 'core/lib/test/lang/**'
       - 'core/lib/test/hara/runtime_test.hal'
+      - 'core/lib/integration/hara/lang_bootstrap_probe.hal'
       - 'core/lib/integration/hara/runtime_smoke.hal'
       - 'packaging/scripts/run-hara-runtime-smoke'
       - '.github/workflows/lang-runtime.yml'
