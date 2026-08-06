@@ -14,7 +14,7 @@ public final class HaraPortableMcpNodeTest {
   public void runsPortableFoundationMemoryTransportSuite() throws Exception {
     HaraNativeTestRunner.Result result =
         HaraNativeTestRunner.runFile(
-            ROOT, ROOT.resolve("lib/test/xt/substrate/transport_memory_test.hal"));
+            ROOT, ROOT.resolve("lib/test-lang/xt/substrate/transport_memory_test.hal"));
 
     assertTrue(result.failureMessage(), result.passed());
     assertEquals(13, result.facts());
@@ -29,7 +29,7 @@ public final class HaraPortableMcpNodeTest {
   public void runsPortableFoundationMcpNodeSuite() throws Exception {
     HaraNativeTestRunner.Result result =
         HaraNativeTestRunner.runFile(
-            ROOT, ROOT.resolve("lib/test/xt/mcp/node/kernel_base_test.hal"));
+            ROOT, ROOT.resolve("lib/test-lang/xt/mcp/node/kernel_base_test.hal"));
 
     assertTrue(result.failureMessage(), result.passed());
     assertEquals(5, result.facts());
