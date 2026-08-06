@@ -1,0 +1,83 @@
+(ns tahto.runtime.hara-test
+  (:use code.test)
+  (:require [tahto.runtime.hara :as hara]))
+
+^{:refer tahto.runtime.hara/arr-new :added "4.1"}
+(fact "constructs runtime-owned native arrays and objects"
+  (let [array (hara/arr-new 1 2)
+        object (hara/obj-new "a" 1)]
+    [(std.native.Arr/instance? array)
+     (std.native.Obj/instance? object)
+     (hara/arr? array)
+     (hara/obj? object)
+     (hara/arr-get array 1)
+     (hara/obj-get object "a")])
+  => [true true true true 2 1])
+
+^{:refer tahto.runtime.hara/arr-push! :added "4.1"}
+(fact "mutates an aliased native array without replacing its identity"
+  (let [array (hara/arr-new 1 2)
+        alias array
+        reference (atom array)
+        pushed (hara/arr-push! reference 3)
+        removed (hara/arr-remove! reference 1)]
+    [(identical array (deref reference))
+     (identical alias (deref reference))
+     pushed
+     (hara/arr-get alias 0)
+     (hara/arr-get alias 1)
+     (hara/arr? removed)
+     (hara/arr-get removed 0)])
+  => [true true 3 1 3 true 2])
+
+^{:refer tahto.runtime.hara/set-path! :added "4.1"}
+(fact "mutates an aliased native object without replacing its identity"
+  (let [object (hara/obj-new "a" 1)
+        alias object
+        reference (atom object)
+        assigned (hara/set-path! reference ["a"] 2)
+        previous (hara/del-path! reference ["a"])]
+    [(identical object (deref reference))
+     (identical alias (deref reference))
+     assigned
+     previous
+     (hara/obj-has? alias "a")])
+  => [true true 2 2 false])
+
+^{:refer tahto.runtime.hara/set-path! :added "4.1"}
+(fact "preserves nested native object identity during deep mutation"
+  (let [inner (hara/obj-new "value" 1)
+        outer (hara/obj-new "inner" inner)
+        reference (atom outer)]
+    (hara/set-path! reference ["inner" "value"] 9)
+    [(identical outer (deref reference))
+     (identical inner (hara/obj-get outer "inner"))
+     (hara/obj-get inner "value")])
+  => [true true 9])
+
+^{:refer tahto.runtime.hara/native-value :added "4.1"}
+(fact "recursively converts portable boundary values to native collections"
+  (let [converted (hara/native-value [{"items" [1 2]}])
+        object (hara/arr-get converted 0)
+        nested (hara/obj-get object "items")]
+    [(hara/arr? converted)
+     (hara/obj? object)
+     (hara/arr? nested)
+     (hara/arr-get nested 1)])
+  => [true true true 2])
+
+^{:refer tahto.runtime.hara/arr-clone :added "4.1"}
+(fact "keeps native clones distinct while retaining native collection types"
+  (let [array (hara/arr-new 1 2)
+        array-clone (hara/arr-clone array)
+        object (hara/obj-new "a" 1)
+        object-clone (hara/obj-clone object)]
+    (hara/arr-set! array 0 9)
+    (hara/obj-set! object "a" 2)
+    [(hara/arr? array-clone)
+     (hara/obj? object-clone)
+     (identical array array-clone)
+     (identical object object-clone)
+     (hara/arr-get array-clone 0)
+     (hara/obj-get object-clone "a")])
+  => [true true false false 1 1])
