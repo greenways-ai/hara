@@ -1,0 +1,107 @@
+(ns lang.model.v1.spec-postgres.deftype.emit-column
+  (:require [std.foundation.string :as string]
+            [lang.common.emit :as emit]
+            [lang.model.v1.spec-postgres.deftype.common :refer :all]))
+
+(defn emit-expression
+  [value grammar context]
+  (cond
+    (and (map? value) (contains? value :raw))
+    (str (:raw value))
+
+    :else
+    (emit/*emit-fn* value grammar context)))
+
+(defn ref-column-name
+  [column reference]
+  (or (:raw reference)
+      (str (snake-name column) "_id")))
+
+(defn column-name
+  [column attributes]
+  (if (= :ref (:type attributes))
+    (ref-column-name column (:ref attributes))
+    (snake-name column)))
+
+(defn column-token
+  [column attributes]
+  (quote-identifier (column-name column attributes)))
+
+(defn resolved-column-type
+  [attributes]
+  (cond
+    (= :ref (:type attributes))
+    (pg-type-output (get-in attributes [:ref/resolved :type]))
+
+    (= :enum (:type attributes))
+    (let [enum (:enum/resolved attributes)]
+      (qualified-token (:schema enum) (:id enum)))
+
+    :else
+    (pg-type-output (:type attributes))))
+
+(defn- raw-clause-item
+  [value grammar context]
+  (cond (keyword? value)
+        (string/upper (string/replace (name value) "-" " "))
+        (string? value) value
+        :else (emit-expression value grammar context)))
+
+(defn raw-clause
+  [value grammar context]
+  (cond (nil? value) ""
+        (vector? value)
+        (string/join " " (map (fn [item]
+                                 (raw-clause-item item grammar context))
+                               value))
+        (sequential? value)
+        (string/join " " (map (fn [item]
+                                 (raw-clause-item item grammar context))
+                               value))
+        :else (raw-clause-item value grammar context)))
+
+(defn column-constraint
+  [constraint grammar context]
+  (cond
+    (nil? constraint) ""
+
+    (map? constraint)
+    (str " CONSTRAINT " (snake-name (:name constraint))
+         " CHECK (" (emit-expression (:check constraint) grammar context) ")")
+
+    :else
+    (str " CHECK (" (emit-expression constraint grammar context) ")")))
+
+(defn reference-clause
+  [attributes]
+  (let [reference (:ref/resolved attributes)]
+    (str " REFERENCES "
+         (qualified-token (:schema reference) (:table reference))
+         "(" (quote-identifier (snake-name (:column reference))) ")"
+         (if (get-in attributes [:sql :cascade])
+           " ON DELETE CASCADE"
+           ""))))
+
+(defn column-output
+  [column attributes single-primary? grammar context]
+  (let [sql (or (:sql attributes) {})
+        primary? (and single-primary? (:primary attributes))
+        inline-reference? (and (= :ref (:type attributes))
+                               (nil? (get-in attributes [:ref :group])))
+        raw-output (raw-clause (:raw sql) grammar context)]
+    (str (column-token column attributes)
+         " " (resolved-column-type attributes)
+         (if primary? " PRIMARY KEY" "")
+         (if (:required attributes) " NOT NULL" "")
+         (if (:unique attributes) " UNIQUE" "")
+         (if (contains? sql :default)
+           (str " DEFAULT " (emit-expression (:default sql) grammar context))
+           "")
+         (if (:generated sql)
+           (str " GENERATED ALWAYS AS ("
+                (emit-expression (:generated sql) grammar context)
+                ") STORED")
+           "")
+         (if inline-reference? (reference-clause attributes) "")
+         (column-constraint (:constraint sql) grammar context)
+         (if (= "" raw-output) "" (str " " raw-output)))))

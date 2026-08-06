@@ -1,0 +1,133 @@
+(ns lang.common.preprocess-assign
+  (:require [lang.common.emit-helper :as helper]
+            [lang.common.grammar-spec :as spec]
+            [lang.common.preprocess-base :as base]
+            [lang.common.preprocess-value :as value]
+            [lang.common.util :as util]
+            [std.foundation.string :as string]
+            [std.lib.walk :as walk]))
+
+(defstruct ProtectedHead [value])
+
+(defn protected-head? [value]
+  (instance? lang.common.preprocess-assign/ProtectedHead value))
+(defn unwrap-protected-head [value] (:value value))
+
+(defn- fail [message data] (throw (ex-info message data)))
+
+(defn process-inline-assignment
+  ([form modules options] (process-inline-assignment form modules options nil))
+  ([form modules options unwrapped]
+   (let [[bind-form declaration] (if (= :inline (last form))
+                                   [(nth form (- (count form) 2)) (drop-last 2 form)]
+                                   (if (:inline (meta (last form)))
+                                     [(last form) (butlast form)]))
+         _ (if bind-form true (fail "Not a valid inline assignment form" {:form form}))
+         f (first bind-form)
+         args (rest bind-form)
+         pair (util/sym-pair f)
+         symbol-ns (first pair)
+         symbol-id (second pair)
+         module (:module options)
+         resolved-module (or (if (= '- symbol-ns) (:id module))
+                             (get (:link module) symbol-ns)
+                             (if (get modules symbol-ns) symbol-ns))]
+     (if (not resolved-module)
+       (fail "Cannot resolve module" {:input f :current module :modules (keys modules)}))
+     (if (not (get-in modules [resolved-module :code symbol-id]))
+       (fail "Code entry not found" {:input f :form form}))
+     (apply list
+            (concat declaration
+             [(with-meta (apply list
+                          (concat [(if unwrapped
+                                     (util/sym-full resolved-module symbol-id)
+                                     (lang.common.preprocess-assign/ProtectedHead
+                                      (util/sym-full resolved-module symbol-id)))]
+                                  args))
+                         (assoc (meta bind-form) :assign/inline true))])))))
+
+(def +tail-block-heads+ '#{do do* do:> when when-not let let*})
+
+(defn- rebuild-form [form head items]
+  (with-meta (apply list head items) (meta form)))
+
+(defn rewrite-tail-return [form target]
+  (let [form (if (walk/form? form) (spec/as-list form) form)]
+   (cond (not (walk/form? form)) (list := target form)
+        (= 'return (first form)) (list := target (second form))
+        (+tail-block-heads+ (first form))
+        (let [head (first form) items (vec (rest form))]
+          (if (or (= 'let head) (= 'let* head))
+            (let [bindings (first items) body (rest items)]
+              (rebuild-form form head
+                            (concat [bindings] (butlast body)
+                                    [(rewrite-tail-return (last body) target)])))
+            (rebuild-form form head
+                          (concat (butlast items)
+                                  [(rewrite-tail-return (last items) target)]))))
+        (or (= 'if (first form)) (= 'if-not (first form)))
+        (rebuild-form form (first form)
+                      [(second form)
+                       (rewrite-tail-return (nth form 2) target)
+                       (rewrite-tail-return (nth form 3) target)])
+        :else (list := target form))))
+
+(defn- assignment-target [form grammar]
+  (let [mode (get-in grammar [:reserved (first form) :emit])]
+    (cond (= mode :assign)
+          (let [target (second form) value (nth form 2)]
+            (if value {:declare? false :target target :value value}))
+
+          (= mode :def-assign)
+          (let [args (helper/emit-typed-args
+                      (rest form) grammar
+                      {:shorthand (get-in grammar [:define :shorthand])})]
+            (if (= 1 (count args))
+              (let [arg (first args)]
+                (if (:value arg)
+                  {:declare? true :target (:symbol arg) :value (:value arg)}))))
+
+          :else nil)))
+
+(defn process-template-assignment
+  ([form grammar options] (process-template-assignment form grammar nil options))
+  ([form grammar modules options]
+   (let [entry (get-in grammar [:reserved (first form)])
+         expanded (if (and (= :macro (:emit entry)) (:macro entry)
+                           (let [op (:op entry)]
+                             (and op (string/starts-with? (name op) "var-"))))
+                    (binding [base/*macro-form* form
+                              base/*macro-grammar* grammar
+                              base/*macro-opts* options]
+                      (let [output ((:macro entry) form)
+                            output (if (walk/form? output) (spec/as-list output) output)]
+                        (if (assignment-target output grammar)
+                          (with-meta output (merge (meta form) (meta output))))) )
+                    form)
+         target (assignment-target expanded grammar)
+         expanded (if target
+                    (let [resolved (value/resolve-block-form (:value target) grammar modules options)]
+                      (if resolved
+                        (let [output (walk/prewalk-replace {(:value target) resolved} expanded)]
+                          (if (walk/form? output) (spec/as-list output) output))
+                        expanded))
+                    expanded)
+         target (assignment-target expanded grammar)]
+     (if target
+       (let [value-form (value/expand-value-block (:value target) grammar modules options)
+             value-form (if (walk/form? value-form) (spec/as-list value-form) value-form)]
+         (if value-form
+           (let [rewritten (rewrite-tail-return value-form (:target target))]
+             (with-meta (if (:declare? target)
+                          (list 'do
+                                (with-meta (apply list (concat (butlast expanded) [nil])) (meta expanded))
+                                rewritten)
+                          rewritten)
+                        (assoc (or (meta rewritten) {}) :assign/template-default true)))))))))
+
+(defn protect-reserved-head [form]
+  (with-meta
+   (apply list
+          (lang.common.preprocess-assign/ProtectedHead (first form))
+          (rest form))
+   (meta form)))

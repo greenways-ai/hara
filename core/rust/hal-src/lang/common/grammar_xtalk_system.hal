@@ -1,0 +1,428 @@
+(ns lang.common.grammar-xtalk-system
+  (:require [lang.common.grammar-xtalk :as xtalk]))
+
+(def +xtalk-area-order+
+  [:xtalk-common
+   :xtalk-fn
+   :xtalk-impl
+   :xtalk-link
+   :xtalk-runtime])
+
+(def +xtalk-area->entries+
+  {:xtalk-common [xtalk/+xt-common-basic+
+                  xtalk/+xt-common-index+
+                  xtalk/+xt-common-number+
+                  xtalk/+xt-common-nil+
+                  xtalk/+xt-common-primitives+
+                  xtalk/+xt-common-lu+
+                  xtalk/+xt-common-object+
+                  xtalk/+xt-common-array+
+                  xtalk/+xt-common-print+
+                  xtalk/+xt-common-string+
+                  xtalk/+xt-common-bytes+
+                  xtalk/+xt-common-math+]
+   :xtalk-fn [xtalk/+xt-functional-base+
+              xtalk/+xt-functional-invoke+
+              xtalk/+xt-functional-return+
+              xtalk/+xt-functional-array+
+              xtalk/+xt-functional-iter+]
+   :xtalk-impl [xtalk/+xt-lang-global+
+                xtalk/+xt-lang-bit+
+                xtalk/+xt-lang-throw+
+                xtalk/+xt-lang-unpack+
+                xtalk/+xt-lang-random+
+                xtalk/+xt-lang-time+
+                xtalk/+xt-lang-json+]
+   :xtalk-link [xtalk/+xt-socket+
+                xtalk/+xt-notify-http+]
+   :xtalk-runtime [xtalk/+xt-runtime-promise+
+                   xtalk/+xt-runtime-shell+
+                   xtalk/+xt-runtime-file+]})
+
+(def +xtalk-area->surface+
+  {:xtalk-common {:area :common
+                  :profile :xtalk-common}
+   :xtalk-fn {:area :functional
+              :profile :xtalk-functional}
+   :xtalk-impl {:area :language-specific
+                :profile :xtalk-language-specific}
+   :xtalk-link {:area :hara.lang-link-specific
+                :profile :xtalk-hara.lang-link-specific}
+   :xtalk-runtime {:area :runtime-specific
+                   :profile :xtalk-runtime-specific}})
+
+(def +xtalk-profile-order+
+  (vec
+   (map (fn [area]
+          (:profile (get +xtalk-area->surface+ area)))
+        +xtalk-area-order+)))
+
+(def +xtalk-areas+
+  (vec
+   (map (fn [area]
+          (:area (get +xtalk-area->surface+ area)))
+        +xtalk-area-order+)))
+
+(def +xtalk-profiles+
+  (vec
+   (map (fn [area]
+          [(:profile (get +xtalk-area->surface+ area))
+           (vec
+            (mapcat (fn [entries] entries)
+                    (get +xtalk-area->entries+ area)))])
+        +xtalk-area-order+)))
+
+(def +xtalk-area->profiles+
+  (reduce (fn [result area]
+            (let [surface (get +xtalk-area->surface+ area)]
+              (assoc result
+                     (:area surface)
+                     [(:profile surface)])))
+          {}
+          +xtalk-area-order+))
+
+(defn xtalk-entry?
+  "Returns true when a value is an xtalk grammar entry."
+  [entry]
+  (and (map? entry)
+       (keyword? (:op entry))))
+
+(def +xtalk-profile->ops+
+  (reduce (fn [result pair]
+            (let [profile (first pair)
+                  entries (second pair)
+                  ops (reduce (fn [values entry]
+                                (if (xtalk-entry? entry)
+                                  (conj values (:op entry))
+                                  values))
+                              #{}
+                              entries)]
+              (assoc result profile ops)))
+          {}
+          +xtalk-profiles+))
+
+(def +xtalk-op->entry+
+  (reduce (fn [result pair]
+            (reduce (fn [entries entry]
+                      (if (xtalk-entry? entry)
+                        (assoc entries (:op entry) entry)
+                        entries))
+                    result
+                    (second pair)))
+          {}
+          +xtalk-profiles+))
+
+(def +xtalk-op-entry+ +xtalk-op->entry+)
+
+(def +xtalk-symbol->op+
+  (reduce (fn [result pair]
+            (let [op (first pair)
+                  entry (second pair)]
+              (reduce (fn [symbols value]
+                        (assoc symbols value op))
+                      result
+                      (:symbol entry))))
+          {}
+          +xtalk-op->entry+))
+
+(def +xtalk-op->profiles+
+  (reduce (fn [result pair]
+            (let [profile (first pair)
+                  ops (second pair)]
+              (reduce (fn [profiles op]
+                        (assoc profiles
+                               op
+                               (conj (get profiles op #{})
+                                     profile)))
+                      result
+                      ops)))
+          {}
+          +xtalk-profile->ops+))
+
+(def +xtalk-op-profiles+ +xtalk-op->profiles+)
+
+(def +xtalk-ops+
+  (vec
+   (reduce (fn [result pair]
+             (reduce conj result (second pair)))
+           #{}
+           +xtalk-profile->ops+)))
+
+(def +xtalk-library->profiles+
+  {'xtalk.lib.db.check #{:xtalk-common}
+   'xtalk.lib.db.sql #{:xtalk-common
+                      :xtalk-runtime-specific}
+   'xtalk.lib.db.call #{:xtalk-common
+                       :xtalk-functional
+                       :xtalk-runtime-specific}})
+
+(defn xtalk-profiles
+  "Returns xtalk profiles in grammar order."
+  []
+  +xtalk-profile-order+)
+
+(defn xtalk-areas
+  "Returns xtalk implementation areas in declaration order."
+  []
+  +xtalk-areas+)
+
+(defn xtalk-area-profiles
+  "Returns xtalk profiles grouped by implementation area."
+  [area]
+  (get +xtalk-area->profiles+ area []))
+
+(defn xtalk-profile-ops
+  "Returns ops declared under an xtalk grammar profile."
+  [profile]
+  (get +xtalk-profile->ops+ profile #{}))
+
+(defn xtalk-op-profiles
+  "Returns the xtalk grammar profiles that declare an op."
+  [op]
+  (get +xtalk-op->profiles+ op #{}))
+
+(defn xtalk-op-entry
+  "Returns the xtalk grammar entry for an op."
+  [op]
+  (get +xtalk-op->entry+ op))
+
+(defn xtalk-symbol-op
+  "Returns the xtalk op for a symbol."
+  [value]
+  (get +xtalk-symbol->op+ value))
+
+(defn xtalk-symbol-entry
+  "Returns the xtalk grammar entry for a symbol."
+  [value]
+  (let [op (xtalk-symbol-op value)]
+    (if op (xtalk-op-entry op) nil)))
+
+(defn xtalk-op-requires
+  "Returns the direct required xtalk ops for an op."
+  [op]
+  (or (:requires (xtalk-op-entry op)) #{}))
+
+(defn set-union
+  [left right]
+  (reduce conj left right))
+
+(defn member?
+  [collection value]
+  (reduce (fn [found item]
+            (or found
+                (= value
+                   (if (map? collection)
+                     (first item)
+                     item))))
+          false
+          collection))
+
+(defn set-subset?
+  [left right]
+  (every? (fn [value] (member? right value)) left))
+
+(defn xtalk-op-closure
+  "Returns transitive required xtalk ops, including the op."
+  [op]
+  (loop [seen #{}
+         pending (if op [op] [])]
+    (if (= 0 (count pending))
+      seen
+      (let [current (first pending)
+            remaining (vec (drop 1 pending))]
+        (if (member? seen current)
+          (recur seen remaining)
+          (recur
+           (conj seen current)
+           (vec
+            (concat remaining
+                    (filter (fn [required]
+                              (not (member? seen required)))
+                            (xtalk-op-requires current))))))))))
+
+(defn xtalk-ops-profiles
+  "Returns the combined profile set for a collection of ops."
+  [ops]
+  (reduce (fn [profiles op]
+            (set-union profiles (xtalk-op-profiles op)))
+          #{}
+          ops))
+
+(defn reserved-entry-for
+  [reserved abstract-entry]
+  (loop [symbols (vec (:symbol abstract-entry))]
+    (if (= 0 (count symbols))
+      nil
+      (let [entry (get reserved (first symbols))]
+        (if entry
+          entry
+          (recur (vec (drop 1 symbols))))))))
+
+(defn xtalk-op-polyfill-symbol
+  "Returns the hard-link helper symbol for an xtalk op."
+  ([op]
+   (xtalk-op-polyfill-symbol op nil))
+  ([op grammar]
+   (let [reserved (or (:reserved grammar) grammar)
+         abstract-entry (xtalk-op-entry op)
+         reserved-entry (if reserved
+                          (reserved-entry-for reserved abstract-entry)
+                          nil)
+         entry (merge abstract-entry reserved-entry)
+         emit (:emit entry)
+         raw (:raw entry)]
+     (if (and (= :hard-link emit)
+              (symbol? raw)
+              (namespace raw))
+       raw
+       nil))))
+
+(defn xtalk-ops-polyfill-symbols
+  "Returns hard-link helper symbols referenced by xtalk ops."
+  ([ops]
+   (xtalk-ops-polyfill-symbols ops nil))
+  ([ops grammar]
+   (loop [symbols #{}
+          remaining (vec ops)]
+     (if (= 0 (count remaining))
+       symbols
+       (let [value
+             (xtalk-op-polyfill-symbol (first remaining) grammar)]
+         (recur (if value (conj symbols value) symbols)
+                (vec (drop 1 remaining))))))))
+
+(defn xtalk-ops-polyfill-modules
+  "Returns helper module namespaces referenced by xtalk ops."
+  ([ops]
+   (xtalk-ops-polyfill-modules ops nil))
+  ([ops grammar]
+   (reduce (fn [modules value]
+             (let [module (namespace value)]
+               (if module
+                 (conj modules (symbol module))
+                 modules)))
+           #{}
+           (xtalk-ops-polyfill-symbols ops grammar))))
+
+(defn scalar?
+  [value]
+  (or (nil? value)
+      (symbol? value)
+      (keyword? value)
+      (string? value)
+      (number? value)
+      (= true value)
+      (= false value)))
+
+(defn scan-node
+  [state input reserved]
+  (loop [result state
+         pending [input]]
+    (if (= 0 (count pending))
+      result
+      (let [current (first pending)
+            remaining (vec (drop 1 pending))]
+        (if (scalar? current)
+          (recur result remaining)
+          (let [form-value
+                (and (not (map? current))
+                     (not (vector? current))
+                     (not (set? current))
+                     (> (count current) 0)
+                     (symbol? (first current)))
+                head (if form-value (first current) nil)
+                op (if head (xtalk-symbol-op head) nil)
+                with-op
+                (if op
+                  (assoc
+                   (assoc result
+                          :symbols
+                          (conj (:symbols result) head))
+                   :ops
+                   (set-union (:ops result)
+                              (xtalk-op-closure op)))
+                  result)
+                reserved-entry
+                (if (and reserved head) (get reserved head) nil)
+                next-result
+                (if (= :hard-link (:emit reserved-entry))
+                  (assoc with-op :template? true)
+                  with-op)
+                children
+                (if (map? current)
+                  (reduce (fn [values pair]
+                            (conj (conj values (first pair))
+                                  (second pair)))
+                          []
+                          current)
+                  (vec current))]
+            (recur next-result
+                   (vec (concat children remaining)))))))))
+
+(defn scan-xtalk
+  "Scans a form for xtalk usage, polyfills, and restaging."
+  ([input]
+   (scan-xtalk input nil))
+  ([input grammar]
+   (let [reserved (or (:reserved grammar) grammar)
+         scanned (scan-node {:ops #{}
+                             :symbols #{}}
+                            input
+                            reserved)
+         ops (:ops scanned)
+         result {:ops ops
+                 :symbols (:symbols scanned)
+                 :profiles (xtalk-ops-profiles ops)
+                 :polyfill-modules
+                 (xtalk-ops-polyfill-modules ops reserved)}]
+     (if (:template? scanned)
+       (assoc result :template? true)
+       result))))
+
+(defn xtalk-grammar-supported-ops
+  "Returns xtalk ops supported by a grammar reserved map."
+  [grammar]
+  (let [reserved (or (:reserved grammar) grammar)]
+    (reduce (fn [ops pair]
+              (let [op (:op (second pair))]
+                (if (member? +xtalk-op->profiles+ op)
+                  (conj ops op)
+                  ops)))
+            #{}
+            reserved)))
+
+(defn xtalk-grammar-supported-profiles
+  "Returns xtalk profiles fully supported by a grammar."
+  [grammar]
+  (let [supported (xtalk-grammar-supported-ops grammar)]
+    (vec
+     (filter (fn [profile]
+               (set-subset? (xtalk-profile-ops profile)
+                            supported))
+             +xtalk-profile-order+))))
+
+(defn xtalk-grammar-missing-profiles
+  "Returns required profiles not fully supported by a grammar."
+  [grammar required-profiles]
+  (let [supported
+        (reduce conj #{}
+                (xtalk-grammar-supported-profiles grammar))]
+    (reduce (fn [missing profile]
+              (if (member? supported profile)
+                missing
+                (conj missing profile)))
+            #{}
+            required-profiles)))
+
+(defn xtalk-library-profiles
+  "Returns upfront profiles required by an xtalk library."
+  [namespace-symbol]
+  (get +xtalk-library->profiles+ namespace-symbol #{}))
+
+(defn xtalk-unclassified-ops
+  "Returns xtalk ops not covered by declared profiles."
+  []
+  (vec
+   (filter (fn [op]
+             (not (member? +xtalk-op->profiles+ op)))
+           +xtalk-ops+)))

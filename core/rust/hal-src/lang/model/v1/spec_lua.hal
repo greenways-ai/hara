@@ -1,0 +1,834 @@
+(ns lang.model.v1.spec-lua
+  (:require [std.foundation.string :as string]
+            [lang.base.v1.grammar-spec :as spec]
+            [lang.common.emit-common :as common]
+            [lang.common.emit-data :as data]
+            [lang.common.grammar-api :as grammar]
+            [lang.common.registry :as registry]
+            [lang.model.v1.spec-lua.rewrite :as rewrite]
+            [lang.model.v1.spec-xtalk :as xtalk]))
+
+(def +language+ :lua)
+(def +tag+ :lua)
+(def +version+ spec/+version+)
+
+(defn lua-string
+  [value _grammar]
+  (let [escaped0 (string/replace value "\\" "\\\\")
+        escaped1 (string/replace escaped0 "'" "\\'")
+        escaped2 (string/replace escaped1 "\n" "\\n")
+        escaped3 (string/replace escaped2 "\r" "\\r")
+        escaped4 (string/replace escaped3 "\t" "\\t")]
+    (str "'" escaped4 "'")))
+
+(defn lua-map-key
+  [key grammar mopts]
+  (cond (string? key)
+        (str "[" (lua-string key grammar) "]")
+        (keyword? key)
+        (str "[" (lua-string (name key) grammar) "]")
+        :else
+        (str "[" (common/*emit-fn* key grammar mopts) "]")))
+
+(defn lua-vector
+  [arr grammar mopts]
+  (str "setmetatable("
+       (data/emit-coll :vector arr grammar mopts)
+       ", cjson.array_mt)"))
+
+(defn lua-math-quot
+  [form]
+  (list 'math.floor (list '/ (nth form 1) (nth form 2))))
+
+(defn lua-throw
+  [form]
+  (list (quote error) (nth form 1) 0))
+
+(defn lua-async-run
+  [form]
+  (let [thunk (nth form 1)]
+    (list (list (quote fn) []
+                (list (quote return) (list thunk))))))
+
+(defn lua-prototype-create
+  [form]
+  (let [m (nth form 1)]
+    (list
+     (list (quote fn) [(quote mt)]
+           (list := (list (quote .) (quote mt) (quote __index)) (quote mt))
+           (list (quote return) (quote mt)))
+     m)))
+
+(defn lua-prototype-method
+  [form]
+  (let [obj (nth form 1)
+        key (nth form 2)
+        direct (list (quote x:get-key) obj key nil)]
+    (list :? (list (quote not=) nil direct)
+          direct
+          (list (quote x:get-key) (list (quote proto:get) obj) key nil))))
+
+(defn lua-x-eval [form]
+  (list (list (quote loadstring)
+              (list (quote cat) "return " (nth form 1)))))
+
+(defn lua-x-construct [form]
+  (list (nth form 1) (list (quote unpack) (nth form 2))))
+
+(defn lua-type-native
+  [form]
+  (let [value (nth form 1)
+        array-mt (list '. 'cjson ["array_mt"])
+        first-value (list '. value [1])]
+    (list 'do
+          (list 'var 'native-type (list 'type value))
+          (list 'if (list '== 'native-type "table")
+                (list 'if
+                      (list 'or
+                            (list '== (list 'getmetatable value) array-mt)
+                            (list 'not= nil first-value))
+                      (list 'return "array")
+                      (list 'return "object"))
+                (list 'return 'native-type)))))
+
+(defn lua-ex-native
+  [form]
+  (let [error (nth form 1)]
+    (list (quote and)
+          (list (quote ==) "table" (list (quote type) error))
+          (list (quote ==) "xt.exception"
+                (list (quote .) error ["__type__"])))))
+
+(defn lua-ex-new
+  [form]
+  (let [message (nth form 1)
+        data (if (> (count form) 2) (nth form 2) nil)]
+    (list (list (quote fn) []
+                (list (quote return)
+                      {"__type__" "xt.exception"
+                       "message" message
+                       "data" data})))))
+
+(defn lua-ex-message
+  [form]
+  (let [error (nth form 1)]
+    (list :? (lua-ex-native (list (quote x:ex-native?) error))
+          (list (quote .) error ["message"]) nil)))
+
+(defn lua-ex-data
+  [form]
+  (let [error (nth form 1)]
+    (list :? (lua-ex-native (list (quote x:ex-native?) error))
+          (list (quote .) error ["data"]) nil)))
+
+(defn lua-type-predicate
+  [expected form]
+  (list '== expected (list 'type (nth form 1))))
+
+(defn lua-is-integer
+  [form]
+  (list '== 0 (list 'mod (nth form 1) 1)))
+
+(defn lua-is-object
+  [form]
+  (let [value (nth form 1)
+        array-mt (list '. 'cjson ["array_mt"])
+        first-value (list '. value [1])]
+    (list 'and
+          (list '== "table" (list 'type value))
+          (list 'not= (list 'getmetatable value) array-mt)
+          (list '== nil first-value))))
+
+(defn lua-is-array
+  [form]
+  (let [value (nth form 1)
+        array-mt (list '. 'cjson ["array_mt"])
+        first-value (list '. value [1])]
+    (list 'and
+          (list '== "table" (list 'type value))
+          (list 'or
+                (list '== (list 'getmetatable value) array-mt)
+                (list 'not= nil first-value)))))
+
+(defn lua-apply
+  [form]
+  (list (nth form 1) (list 'unpack (nth form 2))))
+
+(defn lua-json-encode
+  [value]
+  (list (quote x:json-encode) value))
+(defn lua-return-encode
+  [form]
+  (let [out (nth form 1)
+        id (nth form 2)
+        key (nth form 3)]
+    (list 'do
+          (list 'var 'type-fn
+                (list 'fn ['value]
+                      (lua-type-native (list 'x:type-native 'value))))
+          (list 'var 'return-type (list 'type-fn out))
+          (list 'return
+                (lua-json-encode
+                 {:id id
+                  :key key
+                  :type "data"
+                  :return 'return-type
+                  :value out})))))
+
+(defn lua-return-wrap
+  [form]
+  (let [f (nth form 1)
+        encode-fn (nth form 2)]
+    (list 'do
+          (list 'var 'out)
+          (list 'var
+                (list 'quote (list 'ok 'error))
+                (list 'pcall
+                      (list 'fn []
+                            (list ':= 'out (list f)))))
+          (list 'if 'error
+                (list 'return
+                      (lua-json-encode {:type "error" :value 'error}))
+                (list 'return (list encode-fn 'out))))))
+
+(defn lua-return-eval
+  [form]
+  (let [source (nth form 1)
+        wrap-fn (nth form 2)]
+    (list 'return
+          (list wrap-fn
+                (list 'fn []
+                      (list 'var 'load-fn (list 'or 'loadstring 'load))
+                      (list 'var
+                            (list 'quote (list 'compiled 'error))
+                            (list 'load-fn source))
+                      (list 'if 'error
+                            (list 'error 'error)
+                            (list 'return (list 'compiled))))))))
+
+(defn lua-var [form]
+  (let [decl (nth form 1)
+        args (vec (drop 2 form))]
+    (if (= 0 (count args))
+      (list (quote var*) :local decl)
+      (let [bound (last args)]
+        (cond (and (list? bound) (= (quote fn) (first bound)))
+              (apply list (concat [(quote defn) decl] (rest bound)))
+
+              (vector? decl)
+              (list (quote var*) :local (list (quote quote) decl)
+                    := (list (quote unpack) bound))
+
+              (set? decl)
+              (apply list
+                     (concat [(quote do)]
+                             (map (fn [sym]
+                                    (list (quote var*) :local sym :=
+                                          (list (quote .) bound [(name sym)])))
+                                  decl)))
+
+              :else
+              (list (quote var*) :local decl := bound))))))
+
+(defn lua-for-object
+  [form]
+  (let [binding-form (second form)
+        pair (first binding-form)
+        object (second binding-form)
+        body (vec (drop 2 form))]
+    (apply list (quote for)
+           [pair :in (list (quote pairs) object)]
+           body)))
+
+(defn lua-for-array
+  [form]
+  (let [binding-form (second form)
+        e (first binding-form)
+        arr (second binding-form)
+        body (vec (drop 2 form))
+        pair (if (vector? e) e [(quote _) e])]
+    (apply list (quote for)
+           [pair :in (list (quote ipairs) arr)]
+           body)))
+
+(defn lua-for-iter
+  [form]
+  (let [binding-form (second form)
+        e (first binding-form)
+        it (second binding-form)
+        body (vec (drop 2 form))]
+    (apply list (quote for) [e :in it] body)))
+
+(defn lua-for-index
+  [form]
+  (let [binding-form (second form)
+        i (first binding-form)
+        range-form (vec (second binding-form))
+        start (nth range-form 0)
+        end (nth range-form 1)
+        range-output (if (> (count range-form) 2)
+                       [start end (nth range-form 2)]
+                       [start end])
+        body (vec (drop 2 form))]
+    (apply list (quote for)
+           [i := (list (quote quote) range-output)]
+           body)))
+
+(defn lua-assign-by [op form]
+  (let [target (nth form 1)
+        value (nth form 2)]
+    (list := target (list op target value))))
+
+(defn lua-x-del [form]
+  (list := (nth form 1) nil))
+
+(defn lua-x-str-comp [form]
+  (list (quote <) (nth form 1) (nth form 2)))
+
+(defn lua-x-cat [form]
+  (apply list (quote cat) (vec (drop 1 form))))
+
+(defn lua-x-len [form]
+  (list (quote len) (nth form 1)))
+
+(defn lua-x-apply [form]
+  (list (nth form 1) (list (quote unpack) (nth form 2))))
+
+(defn lua-x-has-key [form]
+  (let [obj (nth form 1)
+        key (nth form 2)]
+    (if (> (count form) 3)
+      (list (quote ==) (nth form 3)
+            (list (quote x:get-key) obj key nil))
+      (list (quote not=) nil (list (quote .) obj [key])))))
+
+(defn lua-x-lu-create [form]
+  (list (quote setmetatable) {} {"__mode" "k"}))
+
+(defn lua-x-lu-get [form]
+  (list (quote .) (nth form 1)
+        [(list (quote tostring) (nth form 2))]))
+
+(defn lua-x-lu-set [form]
+  (list :=
+        (list (quote .) (nth form 1)
+              [(list (quote tostring) (nth form 2))])
+        (nth form 3)))
+
+(defn lua-x-lu-del [form]
+  (list :=
+        (list (quote .) (nth form 1)
+              [(list (quote tostring) (nth form 2))])
+        nil))
+
+(defn lua-x-arr-push-first [form]
+  (list (quote table.insert) (nth form 1) 1 (nth form 2)))
+
+(defn lua-x-arr-pop-first [form]
+  (list (quote table.remove) (nth form 1) 1))
+
+(defn lua-x-arr-remove [form]
+  (list (quote table.remove) (nth form 1)
+        (list (quote x:offset) (nth form 2))))
+
+(defn lua-x-arr-insert [form]
+  (list (quote table.insert) (nth form 1) (nth form 2) (nth form 3)))
+
+(defn lua-x-str-split [form]
+  (let [s (nth form 1)
+        token (nth form 2)]
+    (list
+     (list (quote fn) [(quote source) (quote token)]
+           (list (quote var) (quote out) {})
+           (list (quote string.gsub)
+                 (quote source)
+                 (list (quote string.format) "([^%s]+)" (quote token))
+                 (list (quote fn) [(quote c)]
+                       (list (quote table.insert) (quote out) (quote c))))
+           (list (quote return) (quote out)))
+     s token)))
+
+(defn lua-x-str-join [form]
+  (list (quote table.concat) (nth form 2) (nth form 1)))
+
+(defn lua-x-str-index-of [form]
+  (list (quote or)
+        (list (quote string.find) (nth form 1) (nth form 2))
+        -1))
+
+(defn lua-x-str-to-fixed [form]
+  (list (quote string.format)
+        (list (quote cat) "%." (nth form 2) "f")
+        (nth form 1)))
+
+(defn lua-x-str-replace [form]
+  (list (quote string.gsub)
+        (nth form 1) (nth form 2) (nth form 3)))
+
+(defn lua-x-str-trim [form]
+  (list (quote string.gsub) (nth form 1) "^%s*(.-)%s*$" "%1"))
+
+(defn lua-x-str-trim-left [form]
+  (list (quote string.gsub) (nth form 1) "^%s*" ""))
+
+(defn lua-x-str-trim-right [form]
+  (list (quote string.gsub) (nth form 1) "^(%s*.-)%s*$" "%1"))
+
+(defn lua-x-bytes-new [form]
+  [(list (quote unpack) (nth form 1))])
+
+(defn lua-x-bytes-get [form]
+  (list (quote x:get-idx) (nth form 1)
+        (list (quote x:offset) (nth form 2))))
+
+(defn lua-x-bytes-set [form]
+  (list (quote rawset) (nth form 1)
+        (list (quote x:offset) (nth form 2))
+        (nth form 3)))
+
+(defn lua-x-bytes-copy [form]
+  [(list (quote unpack) (nth form 1))])
+
+(defn lua-x-bytes-slice [form]
+  (let [value (nth form 1)
+        start (list (quote x:offset) (nth form 2))
+        args (if (> (count form) 3)
+               [value start (nth form 3)]
+               [value start])]
+    [(apply list (quote unpack) args)]))
+
+(defn lua-x-bytes-u8 [form]
+  (list (quote mod) (nth form 1) 256))
+
+(defn lua-x-bytes-s8 [form]
+  (let [value (nth form 1)]
+    (list :? (list (quote >) value 127)
+          (list (quote -) value 256)
+          value)))
+
+(defn lua-x-str-encode [form]
+  (let [value (nth form 1)]
+    (list (list (quote fn) [(quote s)]
+                (list (quote var) (quote out) [])
+                (list (quote string.gsub) (quote s) "."
+                      (list (quote fn) [(quote c)]
+                            (list (quote table.insert) (quote out)
+                                  (list (quote string.byte) (quote c)))))
+                (list (quote return) (quote out)))
+          value)))
+
+(defn lua-x-str-decode [form]
+  (list (quote string.char)
+        (list (quote x:unpack) (nth form 1))))
+
+(defn lua-x-bit-not [form]
+  (list (quote -) -1 (nth form 1)))
+
+(defn lua-x-bit-binary [kind form]
+  (let [condition (cond (= kind :and)
+                        (list (quote and)
+                              (list (quote ==) (quote abit) 1)
+                              (list (quote ==) (quote bbit) 1))
+                        (= kind :or)
+                        (list (quote or)
+                              (list (quote ==) (quote abit) 1)
+                              (list (quote ==) (quote bbit) 1))
+                        :else
+                        (list (quote not=) (quote abit) (quote bbit)))]
+    (list
+     (list (quote fn) [(quote left) (quote right)]
+           (list (quote var) (quote a) (list (quote mod) (quote left) 4294967296))
+           (list (quote var) (quote b) (list (quote mod) (quote right) 4294967296))
+           (list (quote var) (quote out) 0)
+           (list (quote var) (quote bit-value) 1)
+           (list (quote var) (quote i) 0)
+           (list (quote while) (list (quote <) (quote i) 32)
+                 (list (quote var) (quote abit) (list (quote mod) (quote a) 2))
+                 (list (quote var) (quote bbit) (list (quote mod) (quote b) 2))
+                 (list (quote when) condition
+                       (list := (quote out)
+                             (list (quote +) (quote out) (quote bit-value))))
+                 (list := (quote a) (list (quote math.floor) (list (quote /) (quote a) 2)))
+                 (list := (quote b) (list (quote math.floor) (list (quote /) (quote b) 2)))
+                 (list := (quote bit-value) (list (quote *) (quote bit-value) 2))
+                 (list := (quote i) (list (quote +) (quote i) 1)))
+           (list (quote return)
+                 (list :? (list (quote >=) (quote out) 2147483648)
+                       (list (quote -) (quote out) 4294967296)
+                       (quote out))))
+     (nth form 1) (nth form 2))))
+
+(defn lua-x-bit-lshift [form]
+  (let [value (list (quote mod)
+                    (list (quote *) (nth form 1)
+                          (list (quote math.pow) 2 (nth form 2)))
+                    4294967296)]
+    (list :? (list (quote >=) value 2147483648)
+          (list (quote -) value 4294967296)
+          value)))
+
+(defn lua-x-bit-rshift [form]
+  (list (quote math.floor)
+        (list (quote /) (nth form 1)
+              (list (quote math.pow) 2 (nth form 2)))))
+
+(defn lua-x-pwd [_form]
+  (list (quote os.getenv) "PWD"))
+
+(defn lua-x-shell [form]
+  (let [source (nth form 1)
+        root (nth form 2)
+        callback (nth form 3)]
+    (list (quote do*)
+          (list (quote var) (quote command)
+                (list :? root
+                      (list (quote cat) "cd " root " && " source)
+                      source))
+          (list (quote var) (list (quote quote) [(quote ok) (quote handle)])
+                (list (quote pcall)
+                      (list (quote fn) []
+                            (list (quote return)
+                                  (list (quote .) (quote io) (list (quote popen) (quote command)))))))
+          (list (quote if) (list (quote not) (quote ok))
+                (list (quote return) (list callback (quote handle) nil))
+                (list (quote do*)
+                      (list (quote var) (quote res)
+                            (list (quote handle:read) "*a"))
+                      (list (quote var) (list (quote quote) [(quote closed) (quote reason) (quote code)])
+                            (list (quote handle:close)))
+                      (list (quote if) (quote closed)
+                            (list (quote return) (list callback nil (quote res)))
+                            (list (quote return)
+                                  (list callback
+                                        {:err (quote reason)
+                                         :code (quote code)
+                                         :out (quote res)} nil))))))))
+
+(defn lua-x-file-resolve [form]
+  (let [root (nth form 1)
+        path (nth form 2)]
+    (list :?
+          (list (quote or)
+                (list (quote ==) nil root)
+                (list (quote ==) "/"
+                      (list (quote string.sub) path 1 1)))
+          path
+          (list (quote cat) root "/" path))))
+
+(defn lua-x-file-read [form]
+  (let [filename (nth form 1)]
+    (list (list (quote fn) []
+                (list (quote var) (list (quote quote) [(quote handle) (quote err)])
+                      (list (quote .) (quote io) (list (quote open) filename "rb")))
+                (list (quote if) (quote err)
+                      (list (quote return)
+                            {"::" "xt.promise" "status" "rejected" "error" (quote err)}))
+                (list (quote var) (quote out)
+                      (list (quote handle:read) "*a"))
+                (list (quote handle:close))
+                (list (quote return)
+                      {"::" "xt.promise" "status" "resolved"
+                       "value" (list (quote x:str-encode) (quote out))})))))
+
+(defn lua-x-file-write [form]
+  (let [filename (nth form 1)
+        content (nth form 2)]
+    (list (list (quote fn) []
+                (list (quote var) (list (quote quote) [(quote handle) (quote err)])
+                      (list (quote .) (quote io) (list (quote open) filename "wb")))
+                (list (quote if) (quote err)
+                      (list (quote return)
+                            {"::" "xt.promise" "status" "rejected" "error" (quote err)}))
+                (list (quote var) (list (quote quote) [(quote out) (quote write-err)])
+                      (list (quote handle:write)
+                            (list (quote x:str-decode) content)))
+                (list (quote handle:close))
+                (list (quote if) (quote write-err)
+                      (list (quote return)
+                            {"::" "xt.promise" "status" "rejected"
+                             "error" (quote write-err)}))
+                (list (quote return)
+                      {"::" "xt.promise" "status" "resolved" "value" nil})))))
+
+(defn lua-yield [form]
+  (list (quote coroutine.yield) (nth form 1)))
+
+(defn lua-defgen [form]
+  (let [sym (nth form 1)
+        args (nth form 2)
+        body (vec (drop 3 form))]
+    (list (quote defn) sym args
+          (list (quote return)
+                (list (quote coroutine.wrap)
+                      (apply list (quote fn) [] body))))))
+
+(defn lua-x-iter-from-obj [form]
+  (let [obj (nth form 1)]
+    (list (quote coroutine.wrap)
+          (list (quote fn) []
+                (list (quote for:object) [[(quote k) (quote v)] obj]
+                      (list (quote coroutine.yield)
+                            [(quote k) (quote v)]))))))
+
+(defn lua-x-iter-from-arr [form]
+  (let [arr (nth form 1)]
+    (list (quote coroutine.wrap)
+          (list (quote fn) []
+                (list (quote for:array) [(quote v) arr]
+                      (list (quote coroutine.yield) (quote v)))))))
+
+(defn lua-x-iter-from [form]
+  (let [obj (nth form 1)]
+    (list (quote coroutine.wrap)
+          (list (quote fn) []
+                (list (quote for:iter)
+                      [(quote e) (list (quote .) obj ["iterator"])]
+                      (list (quote coroutine.yield) (quote e)))))))
+
+(defn lua-x-iter-eq [form]
+  (let [it0 (nth form 1)
+        it1 (nth form 2)
+        eq-fn (nth form 3)]
+    (list (quote do)
+          (list (quote for:iter) [(quote x0) it0]
+                (list (quote var) (quote x1) (list it1))
+                (list (quote when)
+                      (list (quote not)
+                            (list eq-fn (quote x0) (quote x1)))
+                      (list (quote return) false)))
+          (list (quote return) (list (quote ==) nil (list it1))))))
+
+(defn lua-x-iter-next [form]
+  (list (nth form 1)))
+
+(defn lua-x-iter-has [form]
+  (let [obj (nth form 1)]
+    (list (quote and)
+          (list (quote ==) "table" (list (quote type) obj))
+          (list (quote ==) "function"
+                (list (quote type) (list (quote .) obj ["iterator"]))))))
+
+(defn lua-x-iter-native [form]
+  (list (quote ==) "function"
+        (list (quote type) (nth form 1))))
+
+(def +grammar+
+  (grammar/definition
+   {:grammar/id +tag+
+    :grammar/version +version+
+    :grammar/release "foundation-v1"
+    :grammar/language +language+
+    :grammar/tag +tag+
+    :grammar/engine {:minimum 1 :maximum 1}
+    :grammar/parent
+    {:grammar/id xtalk/+tag+
+     :grammar/version xtalk/+version+}
+    :operators
+    {:override
+     {:with-global {:value true :raw "_G"}
+      :x-print {:raw "print" :emit :invoke}
+      :pow {:raw "^"}
+      :not {:raw "not " :emit :prefix}
+      :and {:raw "and"}
+      :or {:raw "or"}
+      :neq {:raw "~="}
+      :incby {:macro (fn [form] (lua-assign-by (quote +) form)) :emit :macro}
+      :decby {:macro (fn [form] (lua-assign-by (quote -) form)) :emit :macro}
+      :mulby {:macro (fn [form] (lua-assign-by (quote *) form)) :emit :macro}
+      :throw {:macro lua-throw :emit :macro}
+      :index {:emit :index :wrap-object true}
+      :var {:symbol #{'var*} :raw ""}
+      :for-object {:macro lua-for-object :emit :macro}
+      :for-array {:macro lua-for-array :emit :macro}
+      :for-iter {:macro lua-for-iter :emit :macro}
+      :for-index {:macro lua-for-index :emit :macro}
+      :prototype-get {:raw "getmetatable" :emit :invoke}
+      :prototype-set {:raw "setmetatable" :emit :invoke}
+      :prototype-create {:macro lua-prototype-create :emit :macro}
+      :prototype-method {:macro lua-prototype-method :emit :macro}
+      :prototype-tostring {:default "__tostring" :emit :unit}
+      :defgen {:macro lua-defgen :emit :macro}
+      :yield {:macro lua-yield :emit :macro}
+      :x-type-native {:macro lua-type-native :emit :macro}
+      :x-async-run {:macro lua-async-run :emit :macro}
+      :x-del {:macro lua-x-del :emit :macro}
+      :x-str-comp {:macro lua-x-str-comp :emit :macro}
+      :x-str-char {:raw "string.byte" :emit :invoke}
+      :x-str-split {:macro lua-x-str-split :emit :macro}
+      :x-str-join {:macro lua-x-str-join :emit :macro}
+      :x-str-index-of {:macro lua-x-str-index-of :emit :macro :wrappable true}
+      :x-str-substring {:raw "string.sub" :emit :invoke}
+      :x-str-to-upper {:raw "string.upper" :emit :invoke}
+      :x-str-to-lower {:raw "string.lower" :emit :invoke}
+      :x-str-to-fixed {:macro lua-x-str-to-fixed :emit :macro}
+      :x-str-replace {:macro lua-x-str-replace :emit :macro}
+      :x-str-trim {:macro lua-x-str-trim :emit :macro}
+      :x-str-trim-left {:macro lua-x-str-trim-left :emit :macro}
+      :x-str-trim-right {:macro lua-x-str-trim-right :emit :macro}
+      :x-bytes-new {:macro lua-x-bytes-new :emit :macro :type :template}
+      :x-bytes-get {:macro lua-x-bytes-get :emit :macro}
+      :x-bytes-set {:macro lua-x-bytes-set :emit :macro}
+      :x-bytes-copy {:macro lua-x-bytes-copy :emit :macro :type :template}
+      :x-bytes-slice {:macro lua-x-bytes-slice :emit :macro :type :template}
+      :x-bytes-u8 {:macro lua-x-bytes-u8 :emit :macro}
+      :x-bytes-s8 {:macro lua-x-bytes-s8 :emit :macro}
+      :x-str-encode {:macro lua-x-str-encode :emit :macro}
+      :x-str-decode {:macro lua-x-str-decode :emit :macro}
+      :x-bit-not {:macro lua-x-bit-not :emit :macro}
+      :x-bit-and {:macro (fn [form] (lua-x-bit-binary :and form)) :emit :macro}
+      :x-bit-or {:macro (fn [form] (lua-x-bit-binary :or form)) :emit :macro}
+      :x-bit-xor {:macro (fn [form] (lua-x-bit-binary :xor form)) :emit :macro}
+      :x-bit-lshift {:macro lua-x-bit-lshift :emit :macro}
+      :x-bit-rshift {:macro lua-x-bit-rshift :emit :macro}
+      :x-eval {:macro lua-x-eval :emit :macro}
+      :x-construct {:macro lua-x-construct :emit :macro}
+      :x-pwd {:macro lua-x-pwd :emit :macro}
+      :x-shell {:macro lua-x-shell :emit :macro :op-spec {:allow-blocks true}}
+      :x-file-resolve {:macro lua-x-file-resolve :emit :macro}
+      :x-file-read {:macro lua-x-file-read :emit :macro}
+      :x-file-write {:macro lua-x-file-write :emit :macro}
+      :x-len {:macro lua-x-len :emit :macro}
+      :x-cat {:macro lua-x-cat :emit :macro}
+      :x-err {:raw "error" :emit :invoke}
+      :x-ex-native? {:macro lua-ex-native :emit :macro}
+      :x-ex-new {:macro lua-ex-new :emit :macro}
+      :x-ex-message {:macro lua-ex-message :emit :macro}
+      :x-ex-data {:macro lua-ex-data :emit :macro}
+      :x-now-ms {:default (quote (math.floor (* 1000 (os.clock)))) :emit :unit}
+      :x-unpack {:raw "unpack" :emit :invoke}
+      :x-iter-from-obj {:macro lua-x-iter-from-obj :emit :macro}
+      :x-iter-from-arr {:macro lua-x-iter-from-arr :emit :macro}
+      :x-iter-from {:macro lua-x-iter-from :emit :macro}
+      :x-iter-eq {:macro lua-x-iter-eq :emit :macro :op-spec {:allow-blocks true}}
+      :x-iter-null {:default (quote (coroutine.wrap (fn []))) :emit :unit}
+      :x-iter-next {:macro lua-x-iter-next :emit :macro}
+      :x-iter-has? {:macro lua-x-iter-has :emit :macro}
+      :x-iter-native? {:macro lua-x-iter-native :emit :macro}
+      :x-random {:raw "math.random" :emit :invoke}
+      :x-has-key? {:macro lua-x-has-key :emit :macro}
+      :x-lu-create {:macro lua-x-lu-create :emit :macro}
+      :x-lu-get {:macro lua-x-lu-get :emit :macro}
+      :x-lu-set {:macro lua-x-lu-set :emit :macro}
+      :x-lu-del {:macro lua-x-lu-del :emit :macro}
+      :x-arr-push {:raw "table.insert" :emit :invoke}
+      :x-arr-pop {:raw "table.remove" :emit :invoke}
+      :x-arr-push-first {:macro lua-x-arr-push-first :emit :macro}
+      :x-arr-pop-first {:macro lua-x-arr-pop-first :emit :macro}
+      :x-arr-remove {:macro lua-x-arr-remove :emit :macro}
+      :x-arr-insert {:macro lua-x-arr-insert :emit :macro}
+      :x-to-string {:raw "tostring" :emit :invoke}
+      :x-to-number {:raw "tonumber" :emit :invoke}
+      :x-is-string? {:macro (fn [form] (lua-type-predicate "string" form)) :emit :macro}
+      :x-is-number? {:macro (fn [form] (lua-type-predicate "number" form)) :emit :macro}
+      :x-is-integer? {:macro lua-is-integer :emit :macro}
+      :x-is-boolean? {:macro (fn [form] (lua-type-predicate "boolean" form)) :emit :macro}
+      :x-is-function? {:macro (fn [form] (lua-type-predicate "function" form)) :emit :macro}
+      :x-is-object? {:macro lua-is-object :emit :macro}
+      :x-is-array? {:macro lua-is-array :emit :macro}
+      :x-apply {:macro lua-apply :emit :macro}
+      :x-json-encode {:raw "cjson.encode" :emit :invoke}
+      :x-json-decode {:raw "cjson.decode" :emit :invoke}
+      :x-return-encode {:macro lua-return-encode :emit :macro}
+      :x-return-wrap {:macro lua-return-wrap :emit :macro}
+      :x-return-eval {:macro lua-return-eval :emit :macro}
+      :x-m-abs {:raw "math.abs" :emit :invoke}
+      :x-m-acos {:raw "math.acos" :emit :invoke}
+      :x-m-asin {:raw "math.asin" :emit :invoke}
+      :x-m-atan {:raw "math.atan" :emit :invoke}
+      :x-m-ceil {:raw "math.ceil" :emit :invoke}
+      :x-m-cos {:raw "math.cos" :emit :invoke}
+      :x-m-cosh {:raw "math.cosh" :emit :invoke}
+      :x-m-exp {:raw "math.exp" :emit :invoke}
+      :x-m-floor {:raw "math.floor" :emit :invoke}
+      :x-m-loge {:raw "math.log" :emit :invoke}
+      :x-m-log10 {:raw "math.log10" :emit :invoke}
+      :x-m-max {:raw "math.max" :emit :invoke}
+      :x-m-min {:raw "math.min" :emit :invoke}
+      :x-m-mod {:raw "%" :emit :infix}
+      :x-m-pow {:raw "math.pow" :emit :invoke}
+      :x-m-quot {:macro lua-math-quot :emit :macro}
+      :x-m-sin {:raw "math.sin" :emit :invoke}
+      :x-m-sinh {:raw "math.sinh" :emit :invoke}
+      :x-m-sqrt {:raw "math.sqrt" :emit :invoke}
+      :x-m-tan {:raw "math.tan" :emit :invoke}
+      :x-m-tanh {:raw "math.tanh" :emit :invoke}}
+     :define
+     {:local {:op :local :symbol #{'local 'var} :macro lua-var :emit :macro}
+      :native-type {:op :native-type :symbol #{'type} :raw "type" :emit :invoke}
+      :cat {:op :cat :symbol #{'cat} :raw ".." :emit :infix}
+      :len {:op :len :symbol #{'len} :raw "#" :emit :prefix}}}
+    :rewrite {:staging {:append [(quote lang.model.v1.spec-lua.rewrite/lua-rewrite-stage)]}}
+    :emit
+    {:defaults
+     {:allow {:assign #{:symbol :quote}}
+      :default
+      {:comment {:prefix "--"}
+       :index {:offset 1 :end-inclusive true :wrap-object true}
+       :common {:apply ":"
+                :start "("
+                :end ")"
+                :space " "
+                :assign "="
+                :sep ","
+                :statement ""
+                :namespace "."
+                :newline "\n"
+                :indent 2}
+       :invoke {:start "(" :end ")" :sep "," :space " "}
+       :infix {:if {:check "and" :then "or"}}
+       :block {:parameter {:start " " :end " "}
+               :body {:start "" :end ""}
+               :space-before-body ""}
+       :function {:raw "function"
+                  :space ""
+                  :args {:start "(" :end ")" :sep "," :space ""}
+                  :body {:start "" :end "end"}
+                  :space-before-body " "}}
+      :token
+      {:nil "nil"
+       :true "true"
+       :false "false"
+       :string {:quote :single :custom lua-string}
+       :symbol {:namespace "."
+                :replace {"-" "_"
+                          "?" "_p"
+                          "!" "_bang"}}}
+      :data
+      {:tuple {:start "" :end "" :sep "," :space ""}
+       :vector {:start "{" :end "}" :sep "," :space " " :custom lua-vector}
+       :set {:start "{" :end "}" :sep "," :space " "}
+       :map {:start "{" :end "}" :sep "," :space " "}
+       :map-entry {:assign "=" :space " " :key-fn lua-map-key}}
+      :define
+      {:defglobal {:raw ""}
+       :def {:raw "local"}
+       :declare {:raw "local"}}
+      :function {:defn {:raw "local function"}}
+      :block
+      {:for {:body {:start "do" :end "end"}}
+       :while {:body {:start "do" :end "end"}}
+       :branch {:wrap {:start "" :end "end"}
+                :control {:default {:parameter {:start " " :end " then"}
+                                    :body {:append true}}
+                          :if {:raw "if"}
+                          :elseif {:raw "elseif"}
+                          :else {:raw "else"}}}}}}}))
+
+(defn- install-source
+  [catalog source]
+  (if (registry/find catalog (grammar/source-coordinate source))
+    catalog
+    (registry/install catalog source)))
+
+(defn install [catalog] (install-source (xtalk/install catalog) +grammar+))
+(defn catalog [] (install (registry/registry)))
+(defn select
+  ([] (select (catalog)))
+  ([catalog]
+   (registry/resolve catalog {:grammar/id +tag+ :grammar/version +version+})))
+
+(def +selection+ (select))
+(def +book+ {:lang +language+ :parent :xtalk :version +version+
+             :coordinate (:coordinate +selection+)
+             :grammar (:grammar +selection+) :selection +selection+})
+(def +init+ +book+)

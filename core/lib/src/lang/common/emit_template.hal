@@ -1,0 +1,107 @@
+(ns lang.common.emit-template
+  (:require [lang.common.emit-preprocess :as preprocess]
+            [lang.common.emit-rewrite :as rewrite]
+            [lang.common.grammar-xtalk-system :as xtalk-system]))
+
+(def +code-state-keys+
+  [:form :deps :deps-fragment :deps-native
+   :xtalk-ops :xtalk-profiles :polyfill-modules])
+
+(def ^:dynamic *computing-entries* #{})
+
+(defn- member? [values target]
+  (reduce (fn [found value] (or found (= value target))) false values))
+
+(defn entry-reserved
+  "gets the reserved grammar entry for a code entry"
+  {:added "4.1"}
+  [grammar entry]
+  (get-in grammar [:reserved (:op entry)]))
+
+(defn code-state-computing?
+  "returns true when an entry is currently being staged"
+  {:added "4.1"}
+  [entry]
+  (member? *computing-entries*
+           [(:lang entry) (:module entry) (:id entry)]))
+
+(defn create-code-state
+  "hydrates, stages, rewrites, and scans a code entry"
+  {:added "4.1"}
+  ([entry reserved grammar modules]
+   (create-code-state entry reserved grammar modules {}))
+  ([entry reserved grammar modules mopts]
+   (let [key [(:lang entry) (:module entry) (:id entry)]]
+     (if (member? *computing-entries* key)
+       (throw (ex-info "Recursive code-state computation"
+                       {:entry key :stack (vec *computing-entries*)}))
+       (binding [*computing-entries* (conj *computing-entries* key)]
+         (let [module (or (:module mopts) (get modules (:module entry)))
+               context (merge {:module module :entry entry} mopts)
+               hydrate (:hydrate reserved)
+               hydrated (if hydrate
+                          (hydrate (:form-input entry) grammar context)
+                          [nil (:form-input entry)])
+               hmeta (first hydrated)
+               staged (preprocess/to-staging (second hydrated) grammar modules context)
+               form (rewrite/rewrite-stage :staging (nth staged 0) grammar context)
+               scan (xtalk-system/scan-xtalk form grammar)
+               deps (reduce conj (or (nth staged 1) #{})
+                            (xtalk-system/xtalk-ops-polyfill-symbols
+                             (:ops scan) grammar))]
+           {:hmeta hmeta
+            :form form
+            :deps deps
+            :deps-fragment (nth staged 2)
+            :deps-native (nth staged 3)
+            :xtalk-ops (:ops scan)
+            :xtalk-profiles (:profiles scan)
+            :polyfill-modules (:polyfill-modules scan)}))))))
+
+(defn cached-code-state
+  "returns a language-specific cached code state"
+  {:added "4.1"}
+  ([entry reserved grammar modules]
+   (cached-code-state entry reserved grammar modules {}))
+  ([entry reserved grammar modules mopts]
+   (let [lang (or (:lang mopts) (:lang entry))
+         cache (:static/code.cache entry)]
+     (if (and cache lang)
+       (let [current (deref cache)
+             existing (get current lang)]
+         (if existing
+           existing
+           (let [computed (create-code-state entry reserved grammar modules mopts)]
+             (swap! cache (fn [values] (assoc values lang computed)))
+             computed)))
+       (create-code-state entry reserved grammar modules mopts)))))
+
+(defn materialize-code-entry
+  "materializes a code entry for a target language"
+  {:added "4.1"}
+  ([book entry]
+   (materialize-code-entry book entry {}))
+  ([book entry mopts]
+   (let [grammar (:grammar book)
+         modules (:modules book)
+         reserved (entry-reserved grammar entry)
+         context (merge {:lang (or (:lang mopts) (:lang book))
+                         :module (or (:module mopts)
+                                     (get modules (:module entry)))}
+                        mopts)]
+     (if (and reserved modules)
+       (let [state (cached-code-state entry reserved grammar modules context)
+             materialized (merge entry (dissoc state :hmeta) (:hmeta state))
+             hook (:hydrate-hook reserved)]
+         (if hook (or (hook materialized) materialized) materialized))
+       entry))))
+
+(defn cached-entry-deps
+  "returns current staged dependencies for an entry"
+  {:added "4.1"}
+  [book entry]
+  (:deps (cached-code-state entry
+                            (entry-reserved (:grammar book) entry)
+                            (:grammar book)
+                            (:modules book)
+                            {:lang (:lang book)})))

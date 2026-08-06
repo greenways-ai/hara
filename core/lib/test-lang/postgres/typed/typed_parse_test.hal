@@ -24,7 +24,7 @@
   => "gw_seed"
   (parse/parse-schema '(script :postgres {})) => nil
   (parse/extract-aliases '[[postgres.core :as pg]
-                           [tahto.runtime.util :refer [foo]]])
+                           [lang.runtime.util :refer [foo]]])
   => '{pg postgres.core}
   (parse/parse-aliases '(script :postgres {:require [[postgres.core :as pg]]}))
   => '{pg postgres.core})

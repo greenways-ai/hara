@@ -1,0 +1,417 @@
+(ns lang.common.emit-helper
+  (:require [lang.common.util :as util]
+            [std.foundation.string :as string]))
+
+(defn default-emit-fn
+  "the default emit function"
+  {:added "4.0"}
+  [form grammar mopts]
+  (pr-str form))
+
+(defn pr-single
+  "prints a single quoted string"
+  {:added "3.0"}
+  [s]
+  (let [escaped0 (string/replace s "\\" "\\\\")
+        escaped1 (string/replace escaped0 "'" "\\'")
+        escaped2 (string/replace escaped1 "\n" "\\n")
+        escaped3 (string/replace escaped2 "\r" "\\r")
+        escaped4 (string/replace escaped3 "\t" "\\t")]
+    (str "'" escaped4 "'")))
+
+(def +sym-replace+
+  {\- "_"
+   \* "__"
+   \? "p"
+   \! "f"
+   \= "_eq"
+   \< "_lt"
+   \> "_gt"})
+
+(def +default+
+  {:type :std/algol
+   :banned #{:set :keyword}
+   :allow {:assign #{:symbol}}
+   :highlight '#{return break set= br}
+   :default
+   {:modifier {:vector-last true}
+    :comment {:prefix "//" :suffix ""}
+    :common {:start "("
+             :end ")"
+             :space " "
+             :assign "="
+             :statement ";"
+             :range ":"
+             :sep ","
+             :namespace "."
+             :namespace-full "____"
+             :access "."
+             :static "."
+             :apply "."
+             :line-spacing 1}
+    :symbol {:full {:replace {\. "_"}
+                    :sep "_"}
+             :global identity}
+    :index {:start "[" :end "]"
+            :offset 0 :end-inclusive false}
+    :invoke {:space ""}
+    :macro {:statement ""}
+    :block {:statement ""
+            :parameter {:start "(" :end ")"}
+            :body {:start "{" :end "}"}}
+    :typehint {:enabled false :assign "->" :space " " :after false}
+    :function {:raw "function"
+               :args {:start "(" :end ")" :space ""}
+               :body {:start "{" :end "}"}}
+    :module {:key-fn #'util/sym-default-str
+             :allow '#{defn def defgen defclass defabstract}}}
+   :token {:string {:quote nil}
+           :symbol {:replace +sym-replace+}}
+   :data {:map {:start "{" :end "}" :space ""}
+          :map-entry {:start "" :end "" :assign ":" :space "" :keyword :string}
+          :vector {:start "[" :end "]" :space ""}
+          :tuple {:start "(" :end ")" :space "" :tighten true}
+          :free {:start "" :end "" :space ""}}
+   :block {:branch {:control {:elseif {:raw "else if"}}}
+           :switch {:control {:default {:parameter {:start " " :end ""}
+                                        :body {:start ":" :end ""}}}}}
+   :define {:defglobal {:raw "global"}
+            :def {:raw "def"}}})
+
+(defn get-option
+  "gets either the path option or the default one"
+  {:added "3.0"}
+  [grammar path option]
+  (or (get-in grammar (vec (concat path [option])))
+      (get-in grammar [:default :common option])))
+
+(defn get-options
+  "gets the path option merged with defaults"
+  {:added "3.0"}
+  [grammar path]
+  (merge (get-in grammar [:default :common])
+         (get-in grammar path)))
+
+(defn form-key-base
+  "gets the key for a form
+
+   (form-key-base :a)
+   => [:keyword :token true]
+
+   (form-key-base ())
+   => :expression"
+  {:added "4.0"}
+  [form]
+  (cond (char? form) [:char :token true]
+        (keyword? form) [:keyword :token true]
+        (symbol? form) [:symbol :token true]
+        (list? form) :expression
+        (number? form) [:number :token]
+        (boolean? form) [:boolean :token]
+        (regexp? form) [:regex :token]
+        (string? form) [:string :token]
+        (nil? form) [:nil :token]
+        (uuid? form) [:uuid :token]
+        (map? form) [:map :data]
+        (map-entry? form) [:map-entry :data]
+        (vector? form) [:vector :data]
+        (set? form) [:set :data]
+        :else
+        (throw
+         (ex-info "Not Valid"
+                  {:input form
+                   :type (type form)}))))
+
+(defn basic-typed-args
+  "typed args without grammar checks
+
+   (map (juxt meta identity)
+         (basic-typed-args '(:int i, :const :int j)))
+   => '[[{:- [:int]} i]
+        [{:- [:const :int]} j]]"
+  {:added "4.0"}
+  [args]
+  (loop [modifiers []
+         all []
+         remaining (vec args)]
+    (if (= 0 (count remaining))
+      all
+      (let [current (first remaining)]
+        (if (symbol? current)
+          (recur []
+                 (conj all
+                       (IObjType/with-meta
+                        current
+                        {:- modifiers}))
+                 (vec (drop 1 remaining)))
+          (recur (conj modifiers current)
+                 all
+                 (vec (drop 1 remaining))))))))
+
+(defn rest-arg-form?
+  "checks for the canonical xtalk rest argument form `(:.. args)`"
+  {:added "4.1"}
+  [form]
+  (and (list? form)
+       (= 2 (count form))
+       (= :.. (first form))
+       (symbol? (second form))))
+
+(defn rest-arg-symbol
+  "returns the symbol bound by a canonical xtalk rest argument form"
+  {:added "4.1"}
+  [form]
+  (if (rest-arg-form? form)
+    (second form)
+    nil))
+
+(defn- key-member?
+  [values key]
+  (reduce (fn [found value]
+            (or found (= key value)))
+          false
+          values))
+
+(defn- index-of-value
+  [values target]
+  (loop [index 0
+         remaining (vec values)]
+    (if (= 0 (count remaining))
+      -1
+      (if (= target (first remaining))
+        index
+        (recur (+ index 1)
+               (vec (drop 1 remaining)))))))
+
+(defn- drop-last-one
+  [values]
+  (apply list (vec (take (- (count values) 1) values))))
+
+(defn emit-typed-allowed-args
+  "allowed declared args other than symbols"
+  {:added "4.0"}
+  [state grammar]
+  (let [all (first state)
+        current (second state)
+        modifiers (:modifiers current)
+        argument (last modifiers)
+        allowed (get-option grammar [:allow] :assign)
+        key (first (if (vector? (form-key-base argument))
+                     (form-key-base argument)
+                     [(form-key-base argument)]))]
+    (if (key-member? allowed key)
+      [all
+       (assoc current
+              :symbol argument
+              :modifiers (vec (drop-last-one modifiers))
+              :assign true)]
+      (throw
+       (ex-info "Cannot assign to non symbol"
+                {:curr current :all all})))))
+
+(defn- emit-typed-args-loop
+  [grammar shorthand all current remaining]
+  (if (= 0 (count remaining))
+    (if (:symbol current)
+      (conj all current)
+      all)
+    (let [value (first remaining)
+          more (vec (drop 1 remaining))]
+      (cond
+             (= := value)
+             (if (:symbol current)
+               (emit-typed-args-loop
+                grammar shorthand all
+                (assoc current :assign true :force true)
+                more)
+               (let [allowed (emit-typed-allowed-args [all current] grammar)]
+                 (emit-typed-args-loop
+                  grammar shorthand
+                  (first allowed)
+                  (assoc (second allowed) :force true)
+                  more)))
+
+             (= :% value)
+             (if (:symbol current)
+               (emit-typed-args-loop
+                grammar shorthand
+                (conj all current)
+                {:modifiers [(first more)]}
+                (vec (drop 1 more)))
+               (emit-typed-args-loop
+                grammar shorthand all
+                (assoc current
+                       :modifiers
+                       (conj (:modifiers current)
+                             (first more)))
+                (vec (drop 1 more))))
+
+             (:assign current)
+             (emit-typed-args-loop
+              grammar shorthand
+              (conj all (assoc current :value value))
+              {:modifiers []}
+              more)
+
+             (rest-arg-form? value)
+             (let [next-all (if (:symbol current)
+                              (conj all current)
+                              all)]
+               (if (or (> (count more) 0)
+                       (and (not (:symbol current))
+                            (> (count (:modifiers current)) 0)))
+                 (throw
+                  (ex-info "Rest argument must be the final declared argument"
+                           {:input value
+                            :args remaining
+                            :curr current}))
+                 (emit-typed-args-loop
+                  grammar shorthand next-all
+                  {:modifiers []
+                   :symbol (rest-arg-symbol value)
+                   :rest true}
+                  more)))
+
+             (and (not (:symbol current))
+                  (list? value)
+                  (not (= -1 (index-of-value value :=))))
+             (let [parts (vec (filter (fn [item] (not (= := item))) value))]
+               (emit-typed-args-loop
+                grammar shorthand
+                (conj all
+                      (assoc current
+                             :symbol (first parts)
+                             :value (second parts)))
+                {:modifiers []}
+                more))
+
+             (or (and (symbol? value)
+                      (not (and shorthand
+                                (:symbol current)
+                                (= 0 (count more)))))
+                 (and (set? value)
+                      (:set (get-in grammar [:allow :assign])))
+                 (and (map? value)
+                      (:map (get-in grammar [:allow :assign])))
+                 (and (vector? value)
+                      (:vector (get-in grammar [:allow :assign])))
+                 (and (list? value)
+                      (= 'quote (first value))
+                      (:quote (get-in grammar [:allow :assign])))
+                 (and (list? value)
+                      (= := (first value))))
+             (if (:symbol current)
+               (emit-typed-args-loop
+                grammar shorthand
+                (conj all current)
+                {:modifiers [] :symbol value}
+                more)
+               (emit-typed-args-loop
+                grammar shorthand all
+                (assoc current :symbol value)
+                more))
+
+             (and (list? value)
+                  (keyword? (first value)))
+             (if (:symbol current)
+               (emit-typed-args-loop
+                grammar shorthand
+                (conj all current)
+                {:type (drop-last-one value)
+                 :symbol (last value)}
+                more)
+               (emit-typed-args-loop
+                grammar shorthand all
+                (assoc current
+                       :type (drop-last-one value)
+                       :symbol (last value))
+                more))
+
+             (and shorthand
+                  (:symbol current)
+                  (= 0 (count more))
+                  (or (vector? value)
+                      (map? value)
+                      (set? value)))
+             (emit-typed-args-loop
+              grammar shorthand
+              (conj all (assoc current :value value))
+              {:modifiers []}
+              more)
+
+             (or (keyword? value) (vector? value))
+             (if (:symbol current)
+               (emit-typed-args-loop
+                grammar shorthand
+                (conj all current)
+                {:modifiers [value]}
+                more)
+               (emit-typed-args-loop
+                grammar shorthand all
+                (assoc current
+                       :modifiers
+                       (conj (:modifiers current) value))
+                more))
+
+             (:symbol current)
+             (emit-typed-args-loop
+              grammar shorthand
+              (conj all (assoc current :value value))
+              {:modifiers []}
+              more)
+
+             :else
+             (throw
+              (ex-info "Not a valid input"
+                       {:input value
+                        :all all
+                        :curr current}))))))
+
+(defn emit-typed-args
+  "create types args from declarationns"
+  {:added "3.0"}
+  ([args grammar]
+   (emit-typed-args args grammar nil))
+  ([args grammar options]
+   (emit-typed-args-loop grammar
+                         (:shorthand options)
+                         []
+                         {:modifiers []}
+                         (vec args))))
+
+(defn- replace-symbol-parts
+  [value replacements]
+  (reduce (fn [result pair]
+            (string/replace result
+                            (str (first pair))
+                            (second pair)))
+          value
+          replacements))
+
+(defn emit-symbol-full
+  "emits a full symbol"
+  {:added "4.0"}
+  [sym ns grammar]
+  (let [common-options (get-in grammar [:default :common])
+        symbol-options (get-in grammar [:default :symbol :full])
+        token-options (get-in grammar [:token :symbol])
+        symbol-string (if ns
+                        (str ns
+                             (:namespace-full common-options)
+                             (name sym))
+                        (name sym))
+        namespaced (string/replace
+                    symbol-string
+                    "."
+                    (or (:namespace-sep common-options) "_"))]
+    (replace-symbol-parts
+     namespaced
+     (merge (:replace symbol-options)
+            (:replace token-options)))))
+
+(defn emit-type-record
+  "formats to standard"
+  {:added "4.0"}
+  [argument]
+  {:symbol (util/sym-default-str (:symbol argument))
+   :type (name (first (:modifiers argument)))})

@@ -1,0 +1,48 @@
+(ns lang.common.emit-data-test
+  (:use code.test)
+  (:require [lang.common.emit-common :as common]
+            [lang.common.emit-data :as data]
+            [lang.common.emit-helper :as helper]))
+
+(fact "emits Foundation map keys and entries"
+  (binding [common/*emit-fn* common/emit-common-loop]
+    [(data/default-map-key 'hello helper/+default+ {})
+     (data/emit-map-key :hello helper/+default+ {})
+     (data/emit-map-entry [:hello "world"] helper/+default+ {})])
+  => ["hello" "\"hello\"" "\"hello\":\"world\""])
+
+(fact "classifies single and multiline arrays"
+  (data/emit-singleline-array? ["1" "2" "3"]) => true
+  (data/emit-singleline-array? ["1" "\n2" "3"]) => false
+  (data/emit-maybe-multibody ["1" "2"] "hello") => "2hello"
+  (data/emit-maybe-multibody ["1" "2"] "\nhello") => "1  \n  hello")
+
+(fact "lays out and emits collections"
+  (binding [common/*emit-fn* common/emit-common-loop]
+    [(data/emit-coll-layout :vector 2 ["1" "2" "3"] helper/+default+ {})
+     (data/emit-coll :vector [1 2 3] helper/+default+ {})
+     (data/emit-coll :custom [1 2 3]
+                     (assoc-in helper/+default+ [:data :custom]
+                               {:start "<" :end ">" :space ""}) {})])
+  => ["[1,2,3]" "[1,2,3]" "<1,2,3>"])
+
+(fact "emits quoted and table data"
+  (binding [common/*emit-fn* common/emit-common-loop]
+    [(data/emit-quote nil nil ''(1 2 3) helper/+default+ {})
+     (data/emit-table nil nil '(tab :a 1 :b 2) helper/+default+ {})])
+  => ["(1,2,3)" "{\"a\":1,\"b\":2}"])
+
+(fact "groups table entries"
+  (data/emit-table-group [:a 1 :b 2 :c :d])
+  => [[:a 1] [:b 2] 'c 'd])
+
+(fact "orders Foundation spread map entries at the collection edges"
+  (binding [common/*emit-fn* common/emit-common-loop]
+    (data/emit-coll :map {:.. 3 :a 2 :# 1} helper/+default+ {}))
+  => "{\"#\":1,\"a\":2,\"..\":3}")
+
+(fact "the Foundation data test emitter installs recursive dispatch"
+  (data/test-data-emit [1 '(identity 2)] helper/+default+ {})
+  => "[1,identity(2)]")
+
+(run {:namespace "lang.common.emit-data-test"})

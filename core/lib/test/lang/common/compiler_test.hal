@@ -1,0 +1,270 @@
+(ns lang.common.compiler-test
+  (:use code.test)
+  (:require [lang.common.compiler :as compiler]
+            [lang.common.grammar-api :as grammar]
+            [lang.common.registry :as registry]
+            [lang.protocol.compiler :as protocol]))
+
+(defn rewrite-canonical
+  [form context]
+  (if (= form '(+ 1 2))
+    '(+ 2 2)
+    form))
+
+(defn rewrite-target
+  [form context]
+  (if (= form '(+ 2 2))
+    '(+ 2 3)
+    form))
+
+(defn rewrite-staging
+  [form context]
+  (if (= form '(+ 2 3))
+    '(+ 3 3)
+    form))
+
+(defstruct InspectingInferencer [])
+
+(extend-type InspectingInferencer protocol/IInferencer
+  (infer-form [inferencer canonical selected context]
+    {:observed canonical}))
+
+(defstruct WarningLinter [])
+
+(extend-type WarningLinter protocol/ILinter
+  (lint-form [linter canonical inference selected context]
+    [{:level :warning
+      :code :demo/lint
+      :message "demonstration warning"
+      :form canonical
+      :inference inference}]))
+
+(def template
+  (grammar/emit-template
+   {:template/id :js-default
+    :template/version 1
+    :template/value
+    {:token {:nil "null"}}}))
+
+(def grammar-v1
+  (grammar/definition
+   {:grammar/id :js
+    :grammar/version 1
+    :grammar/release "v1"
+    :grammar/emit-template
+    {:template/id :js-default
+     :template/version 1}
+    :operators
+    {:define
+     {:add {:op :add
+            :symbol #{'+}
+            :type :operator
+            :emit :infix
+            :raw "+"}}}}))
+
+(def grammar-v2
+  (grammar/definition
+   {:grammar/id :js
+    :grammar/version 2
+    :grammar/release "v2"
+    :grammar/emit-template
+    {:template/id :js-default
+     :template/version 1}
+    :operators
+    {:define
+     {:add {:op :add
+            :symbol #{'+}
+            :type :operator
+            :emit :infix
+            :raw "plus"}}}
+    :grammar/rewrite
+    {:canonical {:append ['lang.common.compiler-test/rewrite-canonical]}
+     :target {:append ['lang.common.compiler-test/rewrite-target]}
+     :staging {:append ['lang.common.compiler-test/rewrite-staging]}}
+    :grammar/facets
+    {:jsx
+     {:operators
+      {:override {:add {:raw "jsx-plus"}}}}}
+    :grammar/facet-order [:jsx]}))
+
+(def catalog
+  (registry/install
+   (registry/install
+    (registry/install
+     (registry/registry)
+     template)
+    grammar-v1)
+   grammar-v2))
+
+(def selected-v1
+  (registry/resolve catalog {:grammar/id :js :grammar/version 1}))
+
+(def selected-v2
+  (registry/resolve catalog {:grammar/id :js :grammar/version 2}))
+
+(def selected-jsx
+  (registry/resolve catalog
+                    {:grammar/id :js
+                     :grammar/version 2
+                     :grammar/facets [:jsx]}))
+
+(def instance
+  (compiler/compiler
+   {:inferencer (InspectingInferencer)
+    :linter (WarningLinter)}))
+
+(def compiled-v1
+  (compiler/compile instance '(+ 1 2) selected-v1))
+
+(def compiled-v2
+  (compiler/compile
+   instance '(+ 1 2) selected-v2
+   {:tahto/actor :build/runner
+    :tahto/source :source/input-1
+    :tahto/work :artifact/output-1}))
+
+(def compiled-jsx
+  (compiler/compile instance '(+ 1 2) selected-jsx))
+
+(def published (atom []))
+
+(defn entry-format
+  [form]
+  [{:formatted true} form])
+
+(defn entry-hydrate
+  [form built context]
+  {:metadata {:static/schema-seed {:tree {:Task {:id [{:type :uuid}]}}}}
+   :form form
+   :contributions [{:kind :postgres/schema
+                    :table :Task}]})
+
+(defn entry-publish
+  [entry]
+  (swap! published conj (:id entry))
+  {:accepted (:id entry)})
+
+(def selected-entry
+  (let [formatted (assoc-in selected-v1
+                            [:grammar :reserved '+ :format]
+                            entry-format)
+        hydrated (assoc-in formatted
+                           [:grammar :reserved '+ :hydrate]
+                           entry-hydrate)]
+    (assoc-in hydrated
+              [:grammar :reserved '+ :hydrate-hook]
+              entry-publish)))
+
+(def entry-result
+  (compiler/compile-entry
+   (compiler/compiler)
+   {:op '+
+    :id 'Task
+    :module 'demo.schema
+    :form-raw '(+ 1 2)}
+   selected-entry))
+
+(defstruct FailingLinter [])
+
+(extend-type FailingLinter protocol/ILinter
+  (lint-form [linter canonical inference selected context]
+    (throw (ex-info "lint exploded" {:probe true}))))
+
+(defn captured-lint-error
+  []
+  (try
+    (compiler/compile
+     (compiler/compiler {:linter (FailingLinter)})
+     '(+ 1 2)
+     selected-v1
+     {:tahto/module 'demo.core})
+    nil
+    (catch Throwable error
+      (ex-data error))))
+
+(fact "caller resolves explicit grammar versions before compilation"
+  [(:output compiled-v1) (:output compiled-v2)]
+  => ["1 + 2" "3 plus 3"])
+
+(fact "compiler applies grammar facets after explicit resolution"
+  (:output compiled-jsx)
+  => "3 jsx-plus 3")
+
+(fact "the default compiler stager resolves module dependencies"
+  (protocol/stage-form
+   (compiler/grammar-stager)
+   '(call u/value)
+   {:grammar {}}
+   {:modules {'demo {:id 'demo
+                     :code {'value {:id 'value :op 'def}}}}
+    :module {:id 'current :link {'u 'demo}}})
+  => {:form '(call demo/value)
+      :dependencies {:code '#{demo/value}
+                     :fragment #{}
+                     :native {}}})
+
+(fact "compiler exposes ordered rewrite and analysis stages"
+  [(get-in compiled-v2 [:stages :normalized])
+   (get-in compiled-v2 [:stages :staged])
+   (get-in compiled-v2 [:stages :canonical])
+   (get-in compiled-v2 [:stages :target])
+   (get-in compiled-v2 [:stages :staging])
+   (:inference compiled-v2)
+   (map (fn [event] (:phase event))
+        (get-in compiled-v2 [:provenance :events]))]
+  => ['(+ 1 2)
+      '(+ 1 2)
+      '(+ 2 2)
+      '(+ 2 3)
+      '(+ 3 3)
+      {:observed '(+ 2 2)}
+      [:normalize :stage :rewrite/canonical :infer :lint
+       :rewrite/target :rewrite/staging :emit]])
+
+(fact "worklog preserves explicit attribution without inferring it"
+  [(get-in compiled-v2 [:provenance :tahto/actor])
+   (get-in compiled-v2 [:provenance :tahto/source])
+   (get-in compiled-v2 [:provenance :tahto/work])
+   (map (fn [event] (:index event))
+        (get-in compiled-v2 [:provenance :events]))
+   (map (fn [event] (:tahto/actor event))
+        (get-in compiled-v2 [:provenance :events]))]
+  => [:build/runner
+      :source/input-1
+      :artifact/output-1
+      [0 1 2 3 4 5 6 7]
+      [:build/runner :build/runner :build/runner :build/runner
+       :build/runner :build/runner :build/runner :build/runner]])
+
+(fact "entry hydration returns schema contributions without publishing"
+  [(get-in entry-result [:entry :formatted])
+   (get-in entry-result [:entry :static/schema-seed :tree :Task :id 0 :type])
+   (:contributions entry-result)
+   (IDeref/deref published)]
+  => [true :uuid [{:kind :postgres/schema :table :Task}] []])
+
+(fact "entry publication is an explicit post-compile operation"
+  [(get-in (compiler/publish
+            (compiler/grammar-entry-publisher selected-entry)
+            entry-result)
+           [:value :accepted])
+   (IDeref/deref published)]
+  => ['Task ['Task]])
+
+(fact "fatal phase errors retain stable context and causes"
+  (let [data (captured-lint-error)]
+    [(:tahto/phase data)
+     (:tahto/error-code data)
+     (:probe data)
+     (:tahto/module data)
+     (:tahto/grammar-coordinate data)
+     (map (fn [frame] (:tahto/phase frame))
+          (:tahto/provenance-stack data))])
+  => [:lint
+      :tahto/error-lint
+      true
+      'demo.core
+      (:coordinate selected-v1)
+      [:lint]])
+
+(run {:namespace "lang.common.compiler-test"})

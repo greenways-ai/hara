@@ -1,6 +1,6 @@
 (ns xt.lang.common-math
   (:config {:blank true})
-  (:require [tahto.core :as l :refer [defspec.xt]]
+  (:require [lang.core :as l :refer [defspec.xt]]
             [std.foundation :refer :all :exclude [do if fn quote try mod round abs max min quot]]))
 
 (l/script :xtalk

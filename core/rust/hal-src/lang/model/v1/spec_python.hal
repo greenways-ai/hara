@@ -1,0 +1,840 @@
+(ns lang.model.v1.spec-python
+  (:require [lang.base.v1.grammar-spec :as spec]
+            [lang.common.emit-data :as data]
+            [lang.common.grammar-api :as grammar]
+            [lang.common.registry :as registry]
+            [lang.model.v1.spec-xtalk :as xtalk]
+            [lang.model.v1.spec-python.rewrite :as rewrite]
+            [std.lib.walk :as walk]))
+
+(def +language+ :python)
+(def +tag+ :py)
+(def +version+ spec/+version+)
+
+(defn python-async-run
+  [form]
+  (let [thunk (nth form 1)]
+    (list (list (quote fn) []
+                (list (quote return) (list thunk))))))
+
+(defn python-prototype-create [form]
+  (nth form 1))
+
+(defn python-prototype-get [form]
+  (list (quote x:get-key) (nth form 1) "_xt_proto" nil))
+
+(defn python-prototype-set [form]
+  (let [obj (nth form 1)
+        prototype (nth form 2)]
+    (list (quote or)
+          (list (quote .) obj (list (quote __setitem__) "_xt_proto" prototype))
+          obj)))
+
+(defn python-prototype-method [form]
+  (let [obj (nth form 1)
+        key (nth form 2)
+        direct (list (quote x:get-key) obj key nil)
+        prototype (list (quote or) (list (quote proto:get) obj) {})]
+    (list :? (list (quote not=) nil direct)
+          direct
+          (list (quote x:get-key) prototype key nil))))
+
+(defn python-x-eval [form]
+  (list (quote eval) (nth form 1)))
+
+(defn python-x-construct [form]
+  (list (nth form 1) (list :* (nth form 2))))
+
+(defn python-lambda-assignment
+  [body]
+  (let [tag (first body)]
+    (if (or (= tag :=) (= tag :+=) (= tag :-=) (= tag :*=))
+      (let [target (second body)
+            value (nth body 2)
+            op (cond (= tag :+=) (quote +)
+                     (= tag :-=) (quote -)
+                     (= tag :*=) (quote *)
+                     :else nil)]
+        (if (and (list? target)
+                 (= (quote .) (first target))
+                 (vector? (nth target 2))
+                 (= 1 (count (nth target 2))))
+          (let [obj (second target)
+                key (first (nth target 2))
+                assigned (if op (list op target value) value)]
+            (list (quote .) obj
+                  (list (quote __setitem__) key assigned)))
+          body))
+      body)))
+
+(defn python-lambda-body
+  [body]
+  (let [body (if (and (sequential? body)
+                      (= (quote return) (first body)))
+               (second body)
+               body)
+        body (if (list? body)
+               (python-lambda-assignment body)
+               body)]
+    (if (or (string? body)
+            (keyword? body)
+            (nil? body))
+      (list (quote quote) body)
+      body)))
+
+(defn python-fn
+  [form]
+  (let [args (vec (drop 1 form))
+        args (if (symbol? (first args)) (vec (rest args)) args)
+        fargs (first args)
+        body (vec (rest args))
+        body (if (and (= 1 (count body))
+                      (list? (first body))
+                      (= (quote do) (first (first body))))
+               (vec (rest (first body)))
+               body)
+        expressions (vec (map python-lambda-body body))
+        expression (if (= 1 (count expressions))
+                     (first expressions)
+                     (list (quote .) expressions [-1]))
+        fargs (if (= 0 (count fargs))
+                [(list :* (quote __args))]
+                fargs)]
+    (apply list (quote :-) (quote lambda)
+           (concat [(list (quote quote) fargs) (symbol ":")]
+                   [expression]))))
+
+(defn python-var
+  [form]
+  (let [sym (nth form 1)
+        args (vec (drop 2 form))
+        bound (last args)]
+    (cond (and (walk/form? bound) (= (quote fn) (first bound)))
+          (apply list (concat [(quote fn.inner) sym] (rest bound)))
+
+          (vector? sym)
+          (list (quote var.inner) (list (quote quote) sym) := bound)
+
+          (set? sym)
+          (apply list
+                 (concat [(quote do)]
+                         (map (fn [entry]
+                                (list (quote var.inner) entry :=
+                                      (list (quote .) bound
+                                            (list (quote get) (name entry)))))
+                              sym)))
+
+          :else
+          (list (quote var.inner) sym := bound))))
+
+(defn python-dot [form]
+  (let [obj (nth form 1)
+        props (vec (drop 2 form))]
+    (if (and (= 1 (count props))
+             (vector? (first props))
+             (= 1 (count (first props))))
+      (list (quote index*) obj (first props))
+      (apply list (concat [(quote index*) obj] props)))))
+
+(defn python-get-key
+  [form]
+  (let [obj (nth form 1)
+        key (nth form 2)
+        default (if (> (count form) 3) (nth form 3) nil)]
+    (if (> (count form) 3)
+      (list '. obj (list 'get key default))
+      (list '. obj (list 'get key)))))
+
+(defn python-ex-native
+  [form]
+  (list (quote isinstance) (nth form 1) (quote BaseException)))
+
+(defn python-ex-new
+  [form]
+  (let [message (nth form 1)]
+    (if (> (count form) 2)
+      (list (quote Exception) message (nth form 2))
+      (list (quote Exception) message))))
+
+(defn python-ex-message
+  [form]
+  (let [error (nth form 1)
+        args (list (quote .) error (quote args))]
+    (list :? (python-ex-native (list (quote x:ex-native?) error))
+          (list :? (list (quote >) (list (quote len) args) 0)
+                (list (quote .) args [0]) nil)
+          nil)))
+
+(defn python-ex-data
+  [form]
+  (let [error (nth form 1)
+        args (list (quote .) error (quote args))]
+    (list :? (python-ex-native (list (quote x:ex-native?) error))
+          (list :? (list (quote >) (list (quote len) args) 1)
+                (list (quote .) args [1]) nil)
+          nil)))
+
+(defn python-type-native
+  [form]
+  (let [value (nth form 1)]
+    (list 'cond
+          (list 'isinstance value (list 'quote (list 'dict)))
+          (list 'return "object")
+          (list 'isinstance value (list 'quote (list 'list)))
+          (list 'return "array")
+          (list 'callable value)
+          (list 'return "function")
+          (python-type-predicate 'bool (list nil value))
+          (list 'return "boolean")
+          (list 'isinstance value (list 'quote (list 'int 'float)))
+          (list 'return "number")
+          (list 'isinstance value (list 'quote (list 'str)))
+          (list 'return "string")
+          :else
+          (list 'return (list 'str (list 'type value))))))
+
+(defn python-type-predicate
+  [target form]
+  (list 'isinstance (nth form 1) target))
+
+(defn python-apply
+  [form]
+  (list (nth form 1) (list ':* (nth form 2))))
+
+(defn python-json-encode
+  [form]
+  (list '. (list '__import__ "json") (list 'dumps (nth form 1))))
+
+(defn python-json-decode
+  [form]
+  (list '. (list '__import__ "json") (list 'loads (nth form 1))))
+
+(defn python-type-native-expression
+  [value]
+  (list (quote :?)
+        (list (quote isinstance) value (list (quote quote) (list (quote dict))))
+        "object"
+        (list (quote :?)
+              (list (quote isinstance) value (list (quote quote) (list (quote list))))
+              "array"
+              (list (quote :?)
+                    (list (quote callable) value)
+                    "function"
+                    (list (quote :?)
+                          (list (quote ==) (quote bool) (list (quote type) value))
+                          "boolean"
+                          (list (quote :?)
+                                (list (quote isinstance) value
+                                      (list (quote quote) (list (quote int) (quote float))))
+                                "number"
+                                (list (quote :?)
+                                      (list (quote isinstance) value
+                                            (list (quote quote) (list (quote str))))
+                                      "string"
+                                      (list (quote str) (list (quote type) value)))))))))
+
+(defn python-return-encode
+  [form]
+  (let [out (nth form 1)
+        id (nth form 2)
+        key (nth form 3)]
+    (list 'do
+          (list 'var 'return-type (python-type-native-expression out))
+          (list 'return
+                (python-json-encode
+                 (list 'x:json-encode
+                       {:id id
+                        :key key
+                        :type "data"
+                        :return 'return-type
+                        :value out}))))))
+
+(defn python-return-wrap
+  [form]
+  (let [f (nth form 1)
+        encode-fn (nth form 2)]
+    (list 'do
+          (list 'try
+                (list ':= 'out (list f))
+                (list 'catch ['Exception :as 'error]
+                      (list 'return
+                            (python-json-encode
+                             (list 'x:json-encode
+                                   {:type "error"
+                                    :value (list 'str 'error)})))))
+          (list 'return (list encode-fn 'out nil nil)))))
+
+(defn python-return-eval
+  [form]
+  (let [source (nth form 1)
+        wrap-fn (nth form 2)]
+    (list 'do
+          (list 'fn 'thunk []
+                (list 'var 'scope (list 'globals))
+                (list 'exec source 'scope 'scope)
+                (list 'return (list '. 'scope (list 'get "OUT"))))
+          (list 'return (list wrap-fn 'thunk)))))
+
+(defn python-loop-body
+  [form]
+  (let [body (vec (drop 2 form))]
+    (if (= 0 (count body)) [(quote pass)] body)))
+
+(defn python-for-object
+  [form]
+  (let [binding-form (second form)
+        pair (first binding-form)
+        object (second binding-form)
+        k (first pair)
+        v (second pair)
+        selection (cond (= k (quote _)) [v (quote values)]
+                        (= v (quote _)) [k (quote keys)]
+                        :else [pair (quote items)])
+        binding (first selection)
+        method (second selection)]
+    (apply list (quote for)
+           [binding :in (list (quote .) object (list method))]
+           (python-loop-body form))))
+
+(defn python-for-array
+  [form]
+  (let [binding-form (second form)
+        e (first binding-form)
+        arr (second binding-form)
+        body (python-loop-body form)]
+    (if (vector? e)
+      (let [i (first e)
+            v (second e)]
+        (apply list (quote for)
+               [i :in (list (quote range) (list (quote len) arr))]
+               (into [(list (quote var) v
+                            (list (quote .) arr [i]))]
+                     body)))
+      (apply list (quote for) [e :in arr] body))))
+
+(defn python-for-iter
+  [form]
+  (let [binding-form (second form)
+        e (first binding-form)
+        it (second binding-form)]
+    (apply list (quote for) [e :in it] (python-loop-body form))))
+
+(defn python-for-index
+  [form]
+  (let [binding-form (second form)
+        i (first binding-form)
+        range-form (second binding-form)
+        range-args (vec (filter (fn [value] (not (nil? value))) range-form))]
+    (apply list (quote for)
+           [i :in (apply list (quote range) range-args)]
+           (python-loop-body form))))
+
+(defn python-x-del [form]
+  (let [target (nth form 1)]
+    (if (and (list? target)
+             (= (quote .) (first target))
+             (vector? (nth target 2)))
+      (list (quote index*) (nth target 1)
+            (list (quote pop) (first (nth target 2)) nil))
+      (list (quote del) target))))
+
+(defn python-x-set-key [form]
+  (let [obj (nth form 1)
+        key (nth form 2)
+        value (nth form 3)]
+    (list (quote or)
+          (list (quote index*) obj (list (quote __setitem__) key value))
+          obj)))
+
+(defn python-x-unpack [form]
+  (list :* (nth form 1)))
+
+(defn python-x-str-comp [form]
+  (list (quote <) (nth form 1) (nth form 2)))
+
+(defn python-x-cat [form]
+  (apply list (quote +) (vec (drop 1 form))))
+
+(defn python-x-has-key [form]
+  (let [obj (nth form 1)
+        key (nth form 2)]
+    (if (> (count form) 3)
+      (list (quote ==) (nth form 3)
+            (list (quote x:get-key) obj key nil))
+      (list (quote not=) nil
+            (list (quote .) obj (list (quote get) key))))))
+
+(defn python-x-lu-get [form]
+  (list (quote .) (nth form 1)
+        (list (quote get) (list (quote id) (nth form 2)))))
+
+(defn python-x-lu-set [form]
+  (list :=
+        (list (quote .) (nth form 1)
+              [(list (quote id) (nth form 2))])
+        (nth form 3)))
+
+(defn python-x-lu-del [form]
+  (list (quote .) (nth form 1)
+        (list (quote pop) (list (quote id) (nth form 2)) nil)))
+
+(defn python-x-lu-eq [form]
+  (list (quote ==)
+        (list (quote id) (nth form 1))
+        (list (quote id) (nth form 2))))
+
+(defn python-x-obj-keys [form]
+  (list (quote list)
+        (list (quote .) (nth form 1) (list (quote keys)))))
+
+(defn python-x-obj-clone [form]
+  (list (quote .) (nth form 1) (list (quote copy))))
+
+(defn python-x-arr-method [method form]
+  (list (quote .) (nth form 1)
+        (apply list method (vec (drop 2 form)))))
+
+(defn python-x-arr-clone [form]
+  (list (quote list) (nth form 1)))
+
+(defn python-x-arr-insert [form]
+  (list (quote .) (nth form 1)
+        (list (quote insert) (nth form 2) (nth form 3))))
+
+(defn python-x-arr-remove [form]
+  (list (quote .) (nth form 1)
+        (list (quote pop) (nth form 2))))
+
+(defn python-string-method [method form]
+  (list (quote .) (nth form 1)
+        (apply list method (vec (drop 2 form)))))
+
+(defn python-x-str-char [form]
+  (list (quote ord)
+        (list (quote .) (nth form 1) [(nth form 2)])))
+
+(defn python-x-str-split [form]
+  (python-string-method (quote split) form))
+
+(defn python-x-str-join [form]
+  (list (quote .) (nth form 1)
+        (list (quote join) (nth form 2))))
+
+(defn python-x-str-index-of [form]
+  (let [s (nth form 1)
+        token (nth form 2)
+        start (if (> (count form) 3) (nth form 3) 0)]
+    (list (quote .) s (list (quote find) token start))))
+
+(defn python-x-str-substring [form]
+  (let [s (nth form 1)
+        start (nth form 2)
+        end (if (> (count form) 3) (nth form 3) nil)]
+    (list (quote .) s [(list (quote slice) start end)])))
+
+(defn python-x-str-to-upper [form]
+  (python-string-method (quote upper) form))
+
+(defn python-x-str-to-lower [form]
+  (python-string-method (quote lower) form))
+
+(defn python-x-str-to-fixed [form]
+  (let [num (nth form 1)
+        digits (nth form 2)]
+    (list (quote .)
+          (list (quote x:cat) "{:." (list (quote str) digits) "f}")
+          (list (quote format) num))))
+
+(defn python-x-str-replace [form]
+  (python-string-method (quote replace) form))
+
+(defn python-x-str-trim [form]
+  (python-string-method (quote strip) form))
+
+(defn python-x-str-trim-left [form]
+  (python-string-method (quote lstrip) form))
+
+(defn python-x-str-trim-right [form]
+  (python-string-method (quote rstrip) form))
+
+(defn python-x-str-pad-left [form]
+  (python-string-method (quote rjust) form))
+
+(defn python-x-str-pad-right [form]
+  (python-string-method (quote ljust) form))
+
+(defn python-x-bytes-new [form]
+  (list (quote bytearray) (nth form 1)))
+
+(defn python-x-bytes-set [form]
+  (let [value (nth form 1)
+        idx (nth form 2)
+        byte (nth form 3)]
+    (list (quote or)
+          (list (quote .) (list (quote __import__) "operator")
+                (list (quote setitem) value idx byte))
+          value)))
+
+(defn python-x-bytes-copy [form]
+  (list (quote bytearray) (nth form 1)))
+
+(defn python-x-bytes-slice [form]
+  (let [value (nth form 1)
+        start (nth form 2)
+        end (if (> (count form) 3) (nth form 3) nil)]
+    (list (quote .) value
+          [(list (quote .) (list (quote __import__) "builtins")
+                 (list (quote slice) start end))])))
+
+(defn python-x-bytes-u8 [form]
+  (list (quote b:&) (nth form 1) 255))
+
+(defn python-x-bytes-s8 [form]
+  (let [value (nth form 1)]
+    (list :? (list (quote >) value 127)
+          (list (quote -) value 256)
+          value)))
+
+(defn python-x-str-encode [form]
+  (list (quote bytearray)
+        (list (quote .) (nth form 1)
+              (list (quote encode) "utf-8"))))
+
+(defn python-x-str-decode [form]
+  (list (quote .) (list (quote bytes) (nth form 1))
+        (list (quote decode) "utf-8")))
+
+(defn python-x-bit-not [form]
+  (list (quote b:xor) (nth form 1) -1))
+
+(defn python-x-pwd [_form]
+  (list (quote or)
+        (list (quote .) (list (quote __import__) "os")
+              (quote environ) (list (quote get) "PWD"))
+        (list (quote .) (list (quote __import__) "os")
+              (list (quote getcwd)))))
+
+(defn python-x-shell [form]
+  (let [source (nth form 1)
+        root (nth form 2)
+        callback (nth form 3)]
+    (list (quote do)
+          (list (quote try)
+                (list (quote var) (quote command)
+                      (list :? root
+                            (list (quote x:cat) "cd " root " && " source)
+                            source))
+                (list (quote var) (quote out)
+                      (list (quote .)
+                            (list (quote .)
+                                  (list (quote __import__) "os")
+                                  (list (quote popen) (quote command)))
+                            (list (quote read))))
+                (list (quote return)
+                      (list callback nil (quote out)))
+                (list (quote catch) [(quote Exception) :as (quote error)]
+                      (list (quote return)
+                            (list callback (quote error) nil)))))))
+
+(defn python-x-file-resolve [form]
+  (let [root (nth form 1)
+        path (nth form 2)
+        os (list (quote __import__) "os")]
+    (list (quote .) os (quote path)
+          (list (quote abspath)
+                (list (quote .) os (quote path)
+                      (list (quote join) root path))))))
+
+(defn python-x-file-read [form]
+  (let [filename (nth form 1)]
+    (list (list (quote fn) []
+                (list (quote return)
+                      {"::" "xt.promise" "status" "resolved"
+                       "value" (list (quote bytearray)
+                                     (list (quote .)
+                                           (list (quote .)
+                                                 (list (quote __import__) "pathlib")
+                                                 (list (quote Path) filename))
+                                           (list (quote read_bytes))))})))))
+
+(defn python-x-file-write [form]
+  (let [filename (nth form 1)
+        content (nth form 2)]
+    (list (list (quote fn) []
+                (list (quote .)
+                      (list (quote .)
+                            (list (quote __import__) "pathlib")
+                            (list (quote Path) filename))
+                      (list (quote write_bytes)
+                            (list (quote bytes) content)))
+                (list (quote return)
+                      {"::" "xt.promise" "status" "resolved" "value" nil})))))
+
+(defn python-builtin-iter [value]
+  (list (quote .)
+        (list (quote __import__) "builtins")
+        (list (quote iter) value)))
+
+(defn python-x-iter-from-obj [form]
+  (python-builtin-iter
+   (list (quote .) (nth form 1) (list (quote items)))))
+
+(defn python-x-iter-from-arr [form]
+  (python-builtin-iter (nth form 1)))
+
+(defn python-x-iter-from [form]
+  (python-x-iter-from-arr form))
+
+(defn python-x-iter-eq [form]
+  (let [it0 (nth form 1)
+        it1 (nth form 2)
+        eq-fn (nth form 3)]
+    (list (quote do)
+          (list (quote for:iter) [(quote x0) it0]
+                (list (quote try)
+                      (list (quote var) (quote x1)
+                            (list (quote next) it1))
+                      (list (quote if)
+                            (list (quote not)
+                                  (list eq-fn (quote x0) (quote x1)))
+                            (list (quote return) false))
+                      (list (quote catch) [(quote StopIteration)]
+                            (list (quote return) false))))
+          (list (quote try)
+                (list (quote next) it1)
+                (list (quote return) false)
+                (list (quote catch) [(quote StopIteration)]
+                      (list (quote return) true))))))
+
+(defn python-x-iter-next [form]
+  (list (quote next) (nth form 1)))
+
+(defn python-x-iter-has [form]
+  (list (quote hasattr) (nth form 1) "__iter__"))
+
+(defn python-x-iter-native [form]
+  (list (quote hasattr) (nth form 1) "__next__"))
+
+(def +grammar+
+  (grammar/definition
+   {:grammar/id +tag+
+    :grammar/version +version+
+    :grammar/release "foundation-v1"
+    :grammar/language +language+
+    :grammar/tag +tag+
+    :grammar/engine {:minimum 1 :maximum 1}
+    :grammar/parent
+    {:grammar/id xtalk/+tag+
+     :grammar/version xtalk/+version+}
+    :operators
+    {:override
+     {:with-global {:value true :raw "globals()"}
+      :x-print {:raw "print" :emit :invoke}
+      :pow {:raw "**"}
+      :and {:raw "and"}
+      :or {:raw "or"}
+      :not {:raw "not" :emit :prefix}
+      :throw {:raw "raise" :emit :prefix}
+      :index {:macro python-dot :emit :macro}
+      :x-get-key {:macro python-get-key :emit :macro}
+      :x-set-key {:macro python-x-set-key :emit :macro}
+      :var {:macro python-var :emit :macro}
+      :fn {:macro python-fn :emit :macro}
+      :for-object {:macro python-for-object :emit :macro}
+      :for-array {:macro python-for-array :emit :macro}
+      :for-iter {:macro python-for-iter :emit :macro}
+      :for-index {:macro python-for-index :emit :macro}
+      :prototype-get {:macro python-prototype-get :emit :macro}
+      :prototype-set {:macro python-prototype-set :emit :macro}
+      :prototype-create {:macro python-prototype-create :emit :macro}
+      :prototype-method {:macro python-prototype-method :emit :macro}
+      :prototype-tostring {:default "__str__" :emit :unit}
+      :x-type-native {:macro python-type-native :emit :macro}
+      :x-async-run {:macro python-async-run :emit :macro}
+      :x-del {:macro python-x-del :emit :macro}
+      :x-unpack {:macro python-x-unpack :emit :macro}
+      :x-iter-from-obj {:macro python-x-iter-from-obj :emit :macro}
+      :x-iter-from-arr {:macro python-x-iter-from-arr :emit :macro}
+      :x-iter-from {:macro python-x-iter-from :emit :macro}
+      :x-iter-eq {:macro python-x-iter-eq :emit :macro :op-spec {:allow-blocks true}}
+      :x-iter-null {:default (quote (. (__import__ "builtins") (iter []))) :emit :unit}
+      :x-iter-next {:macro python-x-iter-next :emit :macro}
+      :x-iter-has? {:macro python-x-iter-has :emit :macro}
+      :x-iter-native? {:macro python-x-iter-native :emit :macro}
+      :x-str-comp {:macro python-x-str-comp :emit :macro}
+      :x-str-char {:macro python-x-str-char :emit :macro}
+      :x-str-split {:macro python-x-str-split :emit :macro}
+      :x-str-join {:macro python-x-str-join :emit :macro}
+      :x-str-index-of {:macro python-x-str-index-of :emit :macro}
+      :x-str-substring {:macro python-x-str-substring :emit :macro}
+      :x-str-to-upper {:macro python-x-str-to-upper :emit :macro}
+      :x-str-to-lower {:macro python-x-str-to-lower :emit :macro}
+      :x-str-to-fixed {:macro python-x-str-to-fixed :emit :macro}
+      :x-str-replace {:macro python-x-str-replace :emit :macro}
+      :x-str-trim {:macro python-x-str-trim :emit :macro}
+      :x-str-trim-left {:macro python-x-str-trim-left :emit :macro}
+      :x-str-trim-right {:macro python-x-str-trim-right :emit :macro}
+      :x-str-pad-left {:macro python-x-str-pad-left :emit :macro}
+      :x-str-pad-right {:macro python-x-str-pad-right :emit :macro}
+      :x-bytes-new {:macro python-x-bytes-new :emit :macro}
+      :x-bytes-set {:macro python-x-bytes-set :emit :macro}
+      :x-bytes-copy {:macro python-x-bytes-copy :emit :macro}
+      :x-bytes-slice {:macro python-x-bytes-slice :emit :macro}
+      :x-bytes-u8 {:macro python-x-bytes-u8 :emit :macro}
+      :x-bytes-s8 {:macro python-x-bytes-s8 :emit :macro}
+      :x-str-encode {:macro python-x-str-encode :emit :macro}
+      :x-str-decode {:macro python-x-str-decode :emit :macro}
+      :x-bit-not {:macro python-x-bit-not :emit :macro}
+      :x-eval {:macro python-x-eval :emit :macro}
+      :x-construct {:macro python-x-construct :emit :macro}
+      :x-pwd {:macro python-x-pwd :emit :macro}
+      :x-shell {:macro python-x-shell :emit :macro :op-spec {:allow-blocks true}}
+      :x-file-resolve {:macro python-x-file-resolve :emit :macro}
+      :x-file-read {:macro python-x-file-read :emit :macro}
+      :x-file-write {:macro python-x-file-write :emit :macro}
+      :x-len {:raw "len" :emit :invoke}
+      :x-cat {:macro python-x-cat :emit :macro}
+      :x-err {:macro (fn [form] (list (quote throw) (list (quote Exception) (nth form 1)))) :emit :macro}
+      :x-ex-native? {:macro python-ex-native :emit :macro}
+      :x-ex-new {:macro python-ex-new :emit :macro}
+      :x-ex-message {:macro python-ex-message :emit :macro}
+      :x-ex-data {:macro python-ex-data :emit :macro}
+      :x-now-ms {:default (quote (round (* 1000 (. (__import__ "time") (time))))) :emit :unit}
+      :x-random {:macro (fn [form] (list (quote .) (list (quote __import__) "random") (list (quote random)))) :emit :macro}
+      :x-has-key? {:macro python-x-has-key :emit :macro}
+      :x-lu-create {:default {} :emit :unit}
+      :x-lu-eq {:macro python-x-lu-eq :emit :macro}
+      :x-lu-get {:macro python-x-lu-get :emit :macro}
+      :x-lu-set {:macro python-x-lu-set :emit :macro}
+      :x-lu-del {:macro python-x-lu-del :emit :macro}
+      :x-obj-keys {:macro python-x-obj-keys :emit :macro}
+      :x-obj-clone {:macro python-x-obj-clone :emit :macro}
+      :x-arr-clone {:macro python-x-arr-clone :emit :macro}
+      :x-arr-push {:macro (fn [form] (python-x-arr-method (quote append) form)) :emit :macro}
+      :x-arr-pop {:macro (fn [form] (python-x-arr-method (quote pop) form)) :emit :macro}
+      :x-arr-push-first {:macro (fn [form] (list (quote .) (nth form 1) (list (quote insert) 0 (nth form 2)))) :emit :macro}
+      :x-arr-pop-first {:macro (fn [form] (list (quote .) (nth form 1) (list (quote pop) 0))) :emit :macro}
+      :x-arr-remove {:macro python-x-arr-remove :emit :macro}
+      :x-arr-insert {:macro python-x-arr-insert :emit :macro}
+      :x-to-string {:raw "str" :emit :invoke}
+      :x-to-number {:raw "float" :emit :invoke}
+      :x-is-string? {:macro (fn [form] (python-type-predicate 'str form)) :emit :macro}
+      :x-is-number? {:macro (fn [form] (python-type-predicate (list 'quote (list 'int 'float)) form)) :emit :macro}
+      :x-is-integer? {:macro (fn [form] (python-type-predicate (list 'quote (list 'int)) form)) :emit :macro}
+      :x-is-boolean? {:macro (fn [form] (python-type-predicate 'bool form)) :emit :macro}
+      :x-is-function? {:macro (fn [form] (list 'callable (nth form 1))) :emit :macro}
+      :x-is-object? {:macro (fn [form] (python-type-predicate 'dict form)) :emit :macro}
+      :x-is-array? {:macro (fn [form] (python-type-predicate 'list form)) :emit :macro}
+      :x-apply {:macro python-apply :emit :macro}
+      :x-json-encode {:macro python-json-encode :emit :macro}
+      :x-json-decode {:macro python-json-decode :emit :macro}
+      :x-return-encode {:macro python-return-encode :emit :macro}
+      :x-return-wrap {:macro python-return-wrap :emit :macro}
+      :x-return-eval {:macro python-return-eval :emit :macro}
+      :x-m-abs {:raw "abs" :emit :invoke}
+      :x-m-acos {:raw "math.acos" :emit :invoke}
+      :x-m-asin {:raw "math.asin" :emit :invoke}
+      :x-m-atan {:raw "math.atan" :emit :invoke}
+      :x-m-ceil {:raw "math.ceil" :emit :invoke}
+      :x-m-cos {:raw "math.cos" :emit :invoke}
+      :x-m-cosh {:raw "math.cosh" :emit :invoke}
+      :x-m-exp {:raw "math.exp" :emit :invoke}
+      :x-m-floor {:raw "math.floor" :emit :invoke}
+      :x-m-loge {:raw "math.log" :emit :invoke}
+      :x-m-log10 {:raw "math.log10" :emit :invoke}
+      :x-m-max {:raw "max" :emit :invoke}
+      :x-m-min {:raw "min" :emit :invoke}
+      :x-m-mod {:raw "%" :emit :infix}
+      :x-m-pow {:raw "pow" :emit :invoke}
+      :x-m-quot {:raw "//" :emit :infix}
+      :x-m-sin {:raw "math.sin" :emit :invoke}
+      :x-m-sinh {:raw "math.sinh" :emit :invoke}
+      :x-m-sqrt {:raw "math.sqrt" :emit :invoke}
+      :x-m-tan {:raw "math.tan" :emit :invoke}
+      :x-m-tanh {:raw "math.tanh" :emit :invoke}}
+     :define
+     {:delete {:op :delete :symbol #{'del} :raw "del" :emit :prefix}
+      :native-type {:op :native-type :symbol #{'type} :raw "type" :emit :invoke}
+      :index-native {:op :index-native :symbol #{'index*} :raw "." :emit :index}}}
+    :rewrite {:staging {:append [(quote lang.model.v1.spec-python.rewrite/python-rewrite-stage)]}}
+    :emit
+    {:defaults
+     {:allow {:assign #{:symbol :quote}}
+     :default
+      {:comment {:prefix "#"}
+       :common {:start "("
+                :end ")"
+                :space " "
+                :assign "="
+                :sep ","
+                :statement ""
+                :namespace "."
+                :newline "\n"
+                :indent 4}
+       :invoke {:start "(" :end ")" :sep "," :space " "}
+       :infix {:if {:check "and" :then "or"}}
+       :block {:parameter {:start " " :end ""}
+               :body {:start ":" :end ""}
+               :space-before-body ""}
+       :function {:raw "def"
+                  :space ""
+                  :args {:start "(" :end ")" :sep "," :space ""}
+                  :body {:start ":" :end ""}
+                  :space-before-body ""}}
+      :token
+      {:nil "None"
+       :true "True"
+       :false "False"
+       :string {:quote :double}
+       :symbol {:namespace "."
+                :replace {"-" "_"
+                          "?" "_p"
+                          "!" "_bang"}}}
+      :data
+      {:vector {:start "[" :end "]" :sep "," :space " "}
+       :set {:start "{" :end "}" :sep "," :space " "}
+       :map {:start "{" :end "}" :sep "," :space " "}
+       :map-entry {:assign ":" :space " " :key-fn data/default-map-key}}
+      :define
+      {:defglobal {:raw ""}
+       :def {:raw ""}}
+      :block
+      {:try {:control {:catch {:raw "except"
+                               :args {:start "" :end ":" :space ""}}}}
+      :branch {:control {:elseif {:raw "elif"}}}}}}}))
+
+(defn- install-source
+  [catalog source]
+  (if (registry/find catalog (grammar/source-coordinate source))
+    catalog
+    (registry/install catalog source)))
+
+(defn install
+  "Installs the Foundation-named Python V1 model."
+  [catalog]
+  (install-source (xtalk/install catalog) +grammar+))
+
+(defn catalog
+  []
+  (install (registry/registry)))
+
+(defn select
+  "Resolves Python language :python using grammar tag :py."
+  ([]
+   (select (catalog)))
+  ([catalog]
+   (registry/resolve catalog
+                     {:grammar/id +tag+
+                      :grammar/version +version+})))
+
+(def +selection+ (select))
+
+(def +book+
+  {:lang +language+
+   :parent :xtalk
+   :version +version+
+   :coordinate (:coordinate +selection+)
+   :grammar (:grammar +selection+)
+   :selection +selection+})
+
+(def +init+ +book+)

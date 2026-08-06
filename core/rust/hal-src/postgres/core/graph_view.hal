@@ -2,7 +2,7 @@
   (:config {:blank true})
   (:require [std.foundation :as foundation :refer :all :exclude [resolve]]
             [std.foundation.string :as string]
-            [tahto.common.util :as util]
+            [lang.common.util :as util]
             [postgres.core.graph-base :as graph]
             [postgres.core.graph-query :as query]))
 

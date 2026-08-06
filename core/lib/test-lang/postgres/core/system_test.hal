@@ -1,6 +1,6 @@
 (ns postgres.core.system-test
   (:require [postgres.core.system :as sys]
-            [tahto.core.script :as script])
+            [lang.core.script :as script])
   (:use code.test))
 
 (defn emit [form]

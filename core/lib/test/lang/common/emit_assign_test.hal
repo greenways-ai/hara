@@ -1,0 +1,81 @@
+(ns lang.common.emit-assign-test
+  (:use code.test)
+  (:require [lang.common.emit-assign :as assign]
+            [lang.common.emit-common :as common]
+            [lang.common.emit-helper :as helper]))
+
+(fact "gets assignment options from metadata and macros"
+  (assign/assign-options
+   (with-meta '(hello 1) {:assign/template 'meta-sym})
+   {:reserved {'hello {:emit :macro
+                       :assign/template 'reserved-sym
+                       :assign/inline 'x.core/identity-fn}}})
+  => '{:assign/template meta-sym
+       :assign/inline x.core/identity-fn}
+
+  (assign/assign-options '(identity 1) helper/+default+)
+  => {})
+
+(fact "inlines a dependency-free code entry"
+  (let [book {:modules
+              {'x.core
+               {:id 'x.core
+                :code
+                {'complex-fn
+                 {:id 'complex-fn
+                  :lang :x
+                  :module 'x.core
+                  :form '(defn complex-fn [x]
+                           (var a := 1)
+                           (:= a (+ a x))
+                           (return a))
+                  :deps #{}}}}}}]
+    (assign/emit-def-assign-inline
+     'j '(x.core/complex-fn (1)) helper/+default+
+     {:lang :x :book book}))
+  => '(do* (var j := 1)
+           (:= j (+ j (1)))))
+
+(fact "prepares function and template assignment overrides"
+  (assign/assign-value
+   'a
+   '(assignable 1)
+   {:reserved {'assignable {:emit :macro
+                            :macro (fn [form] form)
+                            :assign/fn (fn [symbol]
+                                         (list symbol :as [1 2 3]))}}}
+   {})
+  => [:raw '(a :as [1 2 3])]
+
+  (assign/assign-value
+   'a
+   (with-meta '(sym :as [1 2 3]) {:assign/template 'sym})
+   helper/+default+ {})
+  => [:template '(a :as [1 2 3])])
+
+(fact "emits typed declaration expressions"
+  (binding [common/*emit-fn* assign/test-assign-loop]
+    [(assign/emit-def-assign
+      :def-assign {:raw "var"}
+      '(var :int i := 9 :const :int j := 10)
+      helper/+default+ {})
+     (assign/emit-def-assign
+      :def-assign {:raw "var"}
+      '(var out [])
+      (assoc-in helper/+default+ [:define :shorthand] true) {})])
+  => ["var int i = 9, const int j = 10"
+      "var out = []"])
+
+(fact "the Foundation assignment test emitter installs recursive dispatch"
+  (assign/test-assign-emit
+   '(var out [])
+   (assoc-in
+    (assoc helper/+default+
+           :reserved {'var {:op :def-assign
+                            :emit :def-assign
+                            :raw "var"}})
+    [:define :shorthand] true)
+   {})
+  => "var out = []")
+
+(run {:namespace "lang.common.emit-assign-test"})

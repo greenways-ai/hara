@@ -1,5 +1,5 @@
 (ns xt.lang.common-notify
-  (:require [tahto.core.script :as script]
+  (:require [lang.core.script :as script]
             [std.lib.walk :as walk]))
 
 (def ^:dynamic *override-id* nil)

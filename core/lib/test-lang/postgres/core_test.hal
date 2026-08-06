@@ -1,8 +1,8 @@
 (ns postgres.core-test
   (:require [postgres.core :as pg]
             [postgres.core.builtin :as builtin]
-            [tahto.core.registry :as registry]
-            [tahto.core.script :as script])
+            [lang.core.registry :as registry]
+            [lang.core.script :as script])
   (:use code.test))
 
 (defn emit [form]

@@ -1,0 +1,31 @@
+(ns lang.common.emit-preprocess
+  (:require [lang.common.preprocess-assign :as assign]
+            [lang.common.preprocess-base :as base]
+            [lang.common.preprocess-input :as input]
+            [lang.common.preprocess-resolve :as resolve]
+            [lang.common.preprocess-staging :as staging]
+            [lang.common.preprocess-value :as value]))
+
+(defn macro-opts [] base/*macro-opts*)
+(defn macro-grammar [] base/*macro-grammar*)
+
+(defmacro with:macro-opts [options grammar & body]
+  `(binding [lang.common.preprocess-base/*macro-opts* ~options
+             lang.common.preprocess-base/*macro-grammar* ~grammar]
+     ~@body))
+
+(def to-input-form input/to-input-form)
+(def to-input input/to-input)
+(def eval-template-forms input/eval-template-forms)
+(def value-template-args value/value-template-args)
+(def value-standalone value/value-standalone)
+(def process-namespaced-resolve resolve/process-namespaced-resolve)
+(def process-namespaced-symbol resolve/process-namespaced-symbol)
+(def get-fragment resolve/get-fragment)
+(def process-standard-symbol resolve/process-standard-symbol)
+(def find-natives resolve/find-natives)
+(def process-inline-assignment assign/process-inline-assignment)
+(def protect-reserved-head assign/protect-reserved-head)
+(def to-staging-form staging/to-staging-form)
+(def to-staging staging/to-staging)
+(def to-resolve staging/to-resolve)

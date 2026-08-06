@@ -1,4 +1,0 @@
-(ns tahto.protocol.runtime)
-
-(defprotocol IEvalTransport
-  (exchange [transport request options]))

@@ -1,0 +1,32 @@
+(ns lang.runtime.basic
+  (:require [lang.core.registry :as registry]
+            [lang.runtime.basic.type-basic :as basic]
+            [lang.runtime.basic.type-oneshot :as oneshot]
+            [lang.runtime.basic.type-verify :as verify]))
+
+;; Verification is implemented by the same process modules as oneshot/basic.
+;; Register the additional coordinates without eagerly loading target modules.
+(def +verify-registry+
+  [(registry/registry-add! :js :verify
+                           'lang.runtime.basic.impl.process-js)
+   (registry/registry-add! :python :verify
+                           'lang.runtime.basic.impl.process-python)
+   (registry/registry-add! :lua :verify
+                           'lang.runtime.basic.impl.process-lua)])
+
+(def rt-basic basic/rt-basic)
+(def rt-basic:create basic/rt-basic:create)
+(def rt-basic-port (fn [runtime] (get-in runtime [:process :port])))
+(def start-basic basic/start-basic)
+(def stop-basic basic/stop-basic)
+(def raw-eval-basic basic/raw-eval-basic)
+(def basic-state basic/basic-state)
+
+(def rt-oneshot oneshot/rt-oneshot)
+(def rt-oneshot:create oneshot/rt-oneshot:create)
+(def raw-eval-oneshot oneshot/raw-eval-oneshot)
+
+(def verify-execute verify/verify-execute)
+(def verify-result verify/verify-result)
+(def verify-source verify/verify-source)
+(def raw-eval-verify verify/raw-eval-verify)

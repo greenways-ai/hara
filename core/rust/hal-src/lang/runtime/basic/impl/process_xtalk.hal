@@ -1,0 +1,31 @@
+(ns lang.runtime.basic.impl.process-xtalk
+  (:require [lang.core.runtime :as runtime]
+            [lang.runtime.basic.type-hara :as hara-basic]))
+
+(def +xtalk-basic+
+  (runtime/install-type!
+   :xtalk :basic
+   {:type :tahto/rt.hara-basic
+    :config {:target :hara
+             :transport :in-process}
+    :instance {:create hara-basic/rt-hara-basic:create
+               :start hara-basic/start-hara-basic
+               :stop hara-basic/stop-hara-basic
+               :raw-eval hara-basic/raw-eval-hara-basic}}))
+
+(def +hara-basic+
+  (runtime/install-type!
+   :hara :basic
+   {:type :tahto/rt.hara-basic
+    :config {:target :hara
+             :transport :in-process}
+    :instance {:create hara-basic/rt-hara-basic:create
+               :start hara-basic/start-hara-basic
+               :stop hara-basic/stop-hara-basic
+               :raw-eval hara-basic/raw-eval-hara-basic}}))
+
+(def +init+
+  {:lang :xtalk
+   :target :hara
+   :xtalk-basic +xtalk-basic+
+   :hara-basic +hara-basic+})

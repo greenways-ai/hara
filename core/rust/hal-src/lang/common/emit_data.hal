@@ -1,0 +1,215 @@
+(ns lang.common.emit-data
+  (:require [std.foundation.string :as string]
+            [lang.common.emit-common :as common]
+            [lang.common.emit-helper :as helper]
+            [lang.common.util :as util]))
+
+(defn- multiline? [value]
+  (> (count (string/split-lines value)) 1))
+
+(defn- spaces [amount]
+  (string/repeat " " amount))
+
+(defn- indent-lines [value amount]
+  (let [padding (spaces amount)]
+    (string/join "\n"
+                 (map (fn [line] (str padding line))
+                      (string/split-lines value)))))
+
+(defn- indent-rest [value amount]
+  (let [lines (vec (string/split-lines value))
+        padding (spaces amount)]
+    (if (= 0 (count lines))
+      value
+      (string/join "\n"
+                   (concat [(first lines)]
+                           (map (fn [line] (str padding line))
+                                (rest lines)))))))
+
+(defn default-map-key
+  "emits a default map key"
+  {:added "4.0"}
+  [key grammar mopts]
+  (common/*emit-fn* (if (keyword? key)
+                      (util/sym-default-str key)
+                      key)
+                    grammar mopts))
+
+(defn emit-map-key
+  "emits a map key"
+  {:added "4.0"}
+  [form grammar mopts]
+  (if (keyword? form)
+    (let [convert (or (get-in grammar [:data :map-entry :keyword]) :string)
+          token (cond (= convert :symbol) (symbol (name form))
+                      (= convert :string) (name form)
+                      :else form)]
+      (common/*emit-fn* token grammar mopts))
+    (common/*emit-fn* form grammar mopts)))
+
+(defn emit-map-entry
+  "emits a map entry"
+  {:added "3.0"}
+  [entry grammar mopts]
+  (let [options (helper/get-options grammar [:data :map-entry])
+        key-fn (or (:key-fn options) emit-map-key)
+        value-fn (or (:val-fn options) common/*emit-fn*)
+        value-output (value-fn (second entry) grammar mopts)
+        value-output (if (multiline? value-output)
+                       (indent-rest value-output 2)
+                       value-output)]
+    (str (:start options)
+         (key-fn (first entry) grammar mopts)
+         (:assign options) (:space options)
+         value-output
+         (:end options))))
+
+(defn emit-singleline-array?
+  "checks that all emitted values fit on one line"
+  {:added "4.0"}
+  [body-array]
+  (and (reduce (fn [single value]
+                 (and single (not (multiline? value))))
+               true body-array)
+       (not common/*multiline*)
+       (< (reduce (fn [total value] (+ total (string/length value))) 0 body-array)
+          common/*max-len*)))
+
+(defn emit-maybe-multibody
+  "chooses and indents a multiline body prefix"
+  {:added "4.0"}
+  ([prefixes body]
+   (emit-maybe-multibody prefixes body nil))
+  ([prefixes body indent]
+   (if (multiline? body)
+     (str (first prefixes)
+          (indent-lines body (or indent (+ 2 common/*indent*))))
+     (str (second prefixes) body))))
+
+(defn emit-coll-layout
+  "constructs a collection from emitted values"
+  {:added "4.0"}
+  [key indent str-array grammar mopts]
+  (let [options (helper/get-options grammar [:data key])
+        separator (:sep options)]
+    (if (emit-singleline-array? str-array)
+      (common/wrapped-str (string/join separator str-array) [:data key] grammar)
+      (if (:tighten options)
+        (indent-lines
+         (common/wrapped-str
+          (string/join (str separator "\n  ") str-array)
+          [:data key] grammar)
+         indent)
+        (common/wrapped-str
+         (str "\n"
+              (indent-lines
+               (str "  "
+                    (string/join (str separator "\n  ") str-array)
+                    "\n")
+               indent))
+         [:data key] grammar)))))
+
+(defn emit-coll
+  "emits a collection"
+  {:added "3.0"}
+  ([key form grammar mopts]
+   (emit-coll key form grammar mopts common/*emit-fn*))
+  ([key form grammar mopts emit-fn]
+   (let [indent common/*indent*
+         values (if (map? form)
+                  (sort-by (fn [entry]
+                             (let [map-key (first entry)]
+                               (cond (= map-key :#) -1
+                                     (= map-key :..) 1
+                                     :else 0)))
+                           (seq form))
+                  form)
+         outputs (binding [common/*indent* 0]
+                   (if (map? form)
+                     (vec (map (fn [entry]
+                                 (emit-map-entry entry grammar mopts))
+                               values))
+                     (common/emit-array values grammar mopts emit-fn)))]
+     (emit-coll-layout key indent outputs grammar mopts))))
+
+(defn emit-data-standard
+  "emits either a custom representation or the default collection"
+  {:added "4.0"}
+  [key form grammar mopts]
+  (let [custom (get-in grammar [:data key :custom])]
+    (if custom
+      (custom form grammar mopts)
+      (emit-coll key form grammar mopts))))
+
+(defn emit-data
+  "emits a data form"
+  {:added "3.0"}
+  [key form grammar mopts]
+  (let [emit-fn (get-in grammar [:data key :emit])]
+    (cond emit-fn (emit-fn form grammar mopts)
+          (= key :map-entry) (emit-map-entry form grammar mopts)
+          :else (emit-data-standard key form grammar mopts))))
+
+(defn emit-quote
+  "emits quoted structures"
+  {:added "4.0"}
+  [key props form grammar mopts]
+  (let [args (vec (rest form))]
+    (if (= 1 (count args))
+      (let [value (first args)]
+        (cond (vector? value) (emit-data :free value grammar mopts)
+              (list? value) (emit-data :tuple value grammar mopts)
+              :else (emit-data :tuple [value] grammar mopts)))
+      (emit-data :tuple args grammar mopts))))
+
+(defn- table-key? [value]
+  (or (keyword? value)
+      (and (list? value) (= :% (first value)))))
+
+(defn emit-table-group
+  "groups table keys with optional values"
+  {:added "4.0"}
+  [args]
+  (loop [remaining (vec args)
+         output []]
+    (if (= 0 (count remaining))
+      output
+      (let [value (first remaining)]
+        (if (table-key? value)
+          (if (or (= 1 (count remaining))
+                  (table-key? (second remaining)))
+            (recur (vec (rest remaining))
+                   (conj output (symbol (name value))))
+            (recur (vec (drop 2 remaining))
+                   (conj output [value (second remaining)])))
+          (recur (vec (rest remaining)) (conj output value)))))))
+
+(defn emit-table
+  "emits a table literal"
+  {:added "4.0"}
+  [key props form grammar mopts]
+  (let [values (emit-table-group (rest form))
+        outputs (binding [common/*indent* 0]
+                  (vec (map (fn [value]
+                              (if (vector? value)
+                                (emit-map-entry value grammar mopts)
+                                (common/*emit-fn* value grammar mopts)))
+                            values)))]
+    (emit-coll-layout :map common/*indent* outputs grammar mopts)))
+
+(defn test-data-loop
+  "emits data structures through the common emitter"
+  {:added "4.0" :adopt true}
+  [form grammar mopts]
+  (common/emit-common-loop
+   form grammar mopts
+   (assoc common/+emit-lookup+ :data emit-data)
+   (fn [key form grammar mopts]
+     (common/emit-op key form grammar mopts
+                     {:quote emit-quote
+                      :table emit-table}))))
+
+(defn test-data-emit
+  [form grammar mopts]
+  (binding [common/*emit-fn* test-data-loop]
+    (test-data-loop form grammar mopts)))

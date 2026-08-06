@@ -1,0 +1,34 @@
+(ns lang.protocol.compiler)
+
+(defprotocol INormalizer
+  (normalize-form [normalizer raw context]))
+
+(defprotocol IEntryFormatter
+  (format-entry [formatter entry selected context]))
+
+(defprotocol IEntryHydrator
+  (hydrate-entry [hydrator entry input selected context]))
+
+(defprotocol IStager
+  (stage-form [stager input selected context]))
+
+(defprotocol IInferencer
+  (infer-form [inferencer canonical selected context]))
+
+(defprotocol ILinter
+  (lint-form [linter canonical inference selected context]))
+
+(defprotocol IRewriter
+  (rewrite-form [rewriter phase form selected context]))
+
+(defprotocol IEmitter
+  (emit-form [emitter rewritten selected context]))
+
+(defprotocol ICompiler
+  (compile-form [compiler raw selected context]))
+
+(defprotocol IEntryCompiler
+  (compile-entry [compiler entry selected context]))
+
+(defprotocol IEntryPublisher
+  (publish-entry [publisher entry contributions context]))

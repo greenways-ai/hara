@@ -1,0 +1,89 @@
+(ns lang.common.util
+  (:require [lang.common.provenance :as provenance]
+            [std.foundation.string :as string]))
+
+(defn sym-id
+  "Gets the unqualified symbol id."
+  [id]
+  (symbol (name id)))
+
+(defn sym-module
+  "Gets the symbol namespace as a symbol."
+  [id]
+  (let [module (namespace id)]
+    (if module (symbol module) nil)))
+
+(defn sym-pair
+  "Returns the module and unqualified id of a symbol."
+  [id]
+  [(sym-module id)
+   (symbol (name id))])
+
+(defn sym-full
+  "Creates a fully-qualified symbol."
+  ([entry]
+   (let [module (:module entry)
+         id (:id entry)]
+     (if (and module id)
+       (sym-full module id)
+       nil)))
+  ([module id]
+   (symbol (name module) (name id))))
+
+(defn sym-default-str
+  "Converts a symbol-like value to its default target spelling."
+  [sym]
+  (string/replace (if (string? sym) sym (name sym)) "-" "_"))
+
+(defn sym-default-inverse-str
+  "Converts a default target spelling back to Hara spelling."
+  [sym]
+  (string/replace (if (string? sym) sym (name sym)) "_" "-"))
+
+(defn hashvec?
+  "Returns true for a set containing exactly one vector."
+  [value]
+  (and (set? value)
+       (= 1 (count value))
+       (vector? (first value))))
+
+(defn doublevec?
+  "Returns true for a vector containing exactly one vector."
+  [value]
+  (and (vector? value)
+       (= 1 (count value))
+       (vector? (first value))))
+
+(defn lang-context
+  "Creates the context key for a language."
+  [lang]
+  (if lang
+    (keyword (str "lang/" (name lang)))
+    (throw (ex-info "No Lang Input" {:input lang}))))
+
+(defn module-id
+  "Gets the module id from a module symbol or descriptor."
+  [module]
+  (if (map? module)
+    (:id module)
+    module))
+
+(defn entry-summary
+  "Returns a concise summary for an entry."
+  [entry]
+  (let [summary (select-keys entry
+                             [:lang :module :namespace :id
+                              :section :line :op :op-key])]
+    (if (and (:module entry) (:id entry))
+      (assoc summary :symbol (sym-full entry))
+      summary)))
+
+(defn error-with-context
+  "Wraps an exception with Polis generation context."
+  [message data throwable]
+  (provenance/error-with-provenance message data throwable))
+
+(defn throw-with-context
+  "Throws an exception wrapped with Polis generation context."
+  [message data throwable]
+  (provenance/throw-with-provenance message data throwable))

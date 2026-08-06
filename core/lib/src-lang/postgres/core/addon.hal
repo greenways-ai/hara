@@ -1,5 +1,5 @@
 (ns postgres.core.addon
-  (:require [tahto.core :as l]
+  (:require [lang.core :as l]
             [std.foundation :exclude [case name assert]]))
 
 (l/script :postgres)

@@ -1,0 +1,84 @@
+(ns lang.model.v5.spec-postgres
+  (:require [lang.common.grammar-api :as grammar]
+            [lang.common.registry :as registry]
+            [lang.core.registry :as core-registry]
+            [lang.model.v4.spec-postgres :as postgres-v4]
+            [lang.model.v1.spec-postgres.enum :as enum]))
+
+(def +language+ :postgres)
+(def +tag+ :postgres)
+(def +version+ 5)
+
+(def +grammar+
+  (grammar/definition
+   {:grammar/id +tag+
+    :grammar/version +version+
+    :grammar/release "foundation-v5-defenum"
+    :grammar/language +language+
+    :grammar/tag +tag+
+    :grammar/engine {:minimum 1 :maximum 1}
+    :grammar/parent
+    {:grammar/id postgres-v4/+tag+
+     :grammar/version postgres-v4/+version+}
+    :operators
+    {:define
+     {:defenum
+      {:op :defenum
+       :symbol #{'defenum}
+       :type :def
+       :section :code
+       :format enum/pg-enum-format
+       :hydrate enum/pg-enum-hydrate
+       :emit enum/pg-enum
+       :static/dbtype :enum}}}}))
+
+(defn- install-source
+  [catalog source]
+  (if (registry/find catalog (grammar/source-coordinate source))
+    catalog
+    (registry/install catalog source)))
+
+(defn install
+  [catalog]
+  (install-source (postgres-v4/install catalog) +grammar+))
+
+(defn catalog []
+  (install (registry/registry)))
+
+(defn select
+  ([] (select (catalog)))
+  ([catalog]
+   (registry/resolve catalog
+                     {:grammar/id +tag+
+                      :grammar/version +version+})))
+
+(def +selection+ (select))
+
+(def +book+
+  {:lang +language+
+   :parent :postgres
+   :version +version+
+   :coordinate (:coordinate +selection+)
+   :grammar (:grammar +selection+)
+   :selection +selection+})
+
+(defn- version-installed?
+  [version]
+  (reduce (fn [found candidate]
+            (or found (= version candidate)))
+          false
+          (core-registry/registry-book-versions :postgres :default)))
+
+(def +registration+
+  (do
+    (if (not (version-installed? +version+))
+      (core-registry/registry-book-add!
+       :postgres :default +version+
+       {:ns 'lang.model.v5.spec-postgres
+        :book '+book+
+        :parent :postgres}))
+    (core-registry/registry-book-set-default!
+     :postgres :default +version+)
+    +version+))
+
+(def +init+ +book+)

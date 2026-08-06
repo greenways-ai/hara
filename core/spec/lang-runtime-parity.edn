@@ -1,0 +1,77 @@
+{:reference
+ {:repository "zcaudate-xyz/foundation-base"
+  :commit "f909a44ad504cc6c9f44248d59ec3148261a48d7"
+  :verify-source "src/tahto/runtime/basic/type_verify.clj"
+  :verify-source-sha "f9cf61db820091fb5e09087a6c9579d985944199"}
+
+ :target
+ {:verify-source "lib/src/lang/runtime/basic/type_verify.hal"
+  :verify-source-sha "98adc5dc942d37e0a01d406ebedd0f9fe0875c61"
+  :host-runtime "lib/src/hara/runtime.hal"
+  :runtime-smoke "lib/integration/hara/runtime_smoke.hal"}
+
+ :adaptations
+ [{:id :verify-stdin
+   :foundation :temporary-file
+   :hara :process-stdin
+   :reason
+   "Hara can stream UTF-8 source directly into target syntax checkers. This removes the temporary-file and :file capability requirement while retaining non-executing verification and structured failures."}
+  {:id :lua-host-runtime
+   :foundation :lua-program-adapter
+   :hara :shared-hara-runtime
+   :reason
+   "The previously registered Lua oneshot coordinate now has a host descriptor and executable command path."}]
+
+ :models
+ {:xtalk :ported
+  :js :ported
+  :python :ported
+  :lua :ported
+  :postgres :ported}
+
+ :runtime-matrix
+ {:js {:oneshot :executable
+       :verify :executable
+       :basic :executable}
+  :python {:oneshot :executable
+           :verify :executable
+           :basic :executable}
+  :lua {:oneshot :executable
+        :verify :executable
+        :basic :existing}}
+
+ :verification
+ {:transport :process-stdin
+  :requires [:process]
+  :does-not-require [:file]
+  :checkers
+  {:js ["node" "--input-type=module" "--check" "-"]
+   :python ["python3" "-c"
+            "import sys; compile(sys.stdin.read(), '<hara>', 'exec')"]
+   :lua ["lua" "-e"
+         "local loader=loadstring or load; assert(loader(io.read('*a'), '@<hara>'))"]}
+  :diagnostic-fields
+  [:phase :lang :runtime :program :command :exit :stdout :stderr
+   :generated-fragment :grammar-coordinate :grammar-version]}
+
+ :tests
+ [{:path "lib/test/hara/runtime_test.hal"
+   :coverage [:lua-descriptor :lua-command]}
+  {:path "lib/test/lang/core/runtime_test.hal"
+   :coverage [:lua-oneshot :verify-coordinates :checker-commands]}
+  {:path "lib/test/lang/runtime/basic/type_verify_test.hal"
+   :coverage [:result-decoding :success :structured-failure]}
+  {:path "lib/test/lang/model/target_models_test.hal"
+   :coverage [:js :python :lua :postgres]}
+  {:path "lib/integration/hara/runtime_smoke.hal"
+   :coverage
+   [:js-verify :python-verify :lua-verify
+    :verification-does-not-execute
+    :invalid-source-diagnostic
+    :lua-oneshot]}]
+
+ :next
+ [:typescript-facet
+  :dart-model
+  :dart-verify
+  :dart-oneshot]}

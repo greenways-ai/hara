@@ -1,0 +1,87 @@
+(ns lang.common.preprocess-value
+  (:require [lang.common.preprocess-base :as base]
+            [lang.common.preprocess-resolve :as resolve]
+            [std.lib.walk :as walk]))
+
+(declare resolve-block-form)
+
+(defn value-block-entry [form grammar]
+  (if (walk/form? form)
+    (let [entry (get-in grammar [:reserved (first form)])]
+      (if (and (= :macro (:emit entry))
+               (get-in entry [:op-spec :allow-blocks])
+               (:macro entry))
+        entry))))
+
+(defn expand-value-block
+  ([form grammar options] (expand-value-block form grammar nil options))
+  ([form grammar modules options]
+   (let [resolved (resolve-block-form form grammar modules options)]
+     (if resolved
+       (let [macro (:macro (value-block-entry resolved grammar))]
+         (binding [base/*macro-form* resolved
+                   base/*macro-grammar* grammar
+                   base/*macro-opts* options]
+           (let [expanded (macro resolved)]
+             (with-meta expanded (merge (meta resolved) (meta expanded))))))))))
+
+(defn resolve-block-form
+  ([form grammar options] (resolve-block-form form grammar nil options))
+  ([form grammar modules options]
+   (cond (value-block-entry form grammar) form
+         (and modules (walk/form? form) (symbol? (first form))
+              (namespace (first form)))
+         (let [fragment (resolve/get-fragment (first form) modules options)]
+           (if (and fragment (:template fragment))
+             (binding [base/*macro-form* form
+                       base/*macro-grammar* grammar
+                       base/*macro-opts* options]
+               (let [expanded (apply (:template fragment) (rest form))
+                     expanded (with-meta expanded (merge (meta form) (meta expanded)))]
+                 (if (not (= form expanded))
+                   (resolve-block-form expanded grammar modules options))))))
+         :else nil)))
+
+(defn value-template-args
+  ([template] (value-template-args nil template))
+  ([arglists template]
+   (let [lists (or arglists (:arglists (meta template)))
+         args (first lists)
+         args (if (vector? (first args)) (first args) args)]
+     (vec (if arglists args (rest args))))))
+
+(defn value-standalone [symbol grammar]
+  (let [entry (get-in grammar [:reserved symbol])
+        template (or (:value/template entry)
+                     (if (= :macro (:emit entry)) (:macro entry)))
+        standalone (:value/standalone entry)
+        block? (and (= :macro (:emit entry)) (get-in entry [:op-spec :allow-blocks]))
+        self-return? (= :xt/self (get-in entry [:op-spec :type 2]))]
+    (cond (or (walk/form? standalone) (symbol? standalone)) standalone
+          (and (= true standalone) template)
+          (let [args (value-template-args (get-in entry [:op-spec :arglists]) template)
+                body (template (apply list nil args))]
+            (if self-return?
+              (list 'fn args body (list 'return (first args)))
+              (list 'fn args (if block? body (list 'return body))))))))
+
+(defn process-value-form
+  ([form grammar options] (process-value-form form grammar nil options))
+  ([form grammar modules options]
+   (let [items (vec form)]
+     (cond (and (= 'return (first items)) (= 2 (count items)))
+           (expand-value-block (second items) grammar modules options)
+           :else
+           (let [head (first items)
+                 args (vec (rest items))
+                 rewritten (vec (map (fn [arg]
+                                       (let [block (resolve-block-form arg grammar modules options)]
+                                         (if block
+                                           (with-meta (apply list
+                                                             (value-standalone (first block) grammar)
+                                                             (rest block))
+                                                      (meta arg))
+                                           arg)))
+                                     args))]
+             (if (not (= rewritten args))
+               (with-meta (apply list head rewritten) (meta form))))))))

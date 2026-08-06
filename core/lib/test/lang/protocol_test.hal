@@ -1,0 +1,114 @@
+(ns lang.protocol-test
+  (:use code.test)
+  (:require [lang.protocol.compiler :as compiler]
+            [lang.protocol.registry :as registry]))
+
+(defstruct ProtocolFixture [tag])
+
+(extend-type ProtocolFixture compiler/INormalizer
+  (normalize-form [fixture raw context]
+    [(:tag fixture) :normalize raw context]))
+
+(extend-type ProtocolFixture compiler/IEntryFormatter
+  (format-entry [fixture entry selected context]
+    [(:tag fixture) :format entry selected context]))
+
+(extend-type ProtocolFixture compiler/IEntryHydrator
+  (hydrate-entry [fixture entry input selected context]
+    [(:tag fixture) :hydrate entry input selected context]))
+
+(extend-type ProtocolFixture compiler/IStager
+  (stage-form [fixture input selected context]
+    [(:tag fixture) :stage input selected context]))
+
+(extend-type ProtocolFixture compiler/IInferencer
+  (infer-form [fixture canonical selected context]
+    {:tag (:tag fixture) :form canonical}))
+
+(extend-type ProtocolFixture compiler/ILinter
+  (lint-form [fixture canonical inference selected context]
+    [{:tag (:tag fixture) :form canonical :inference inference}]))
+
+(extend-type ProtocolFixture compiler/IRewriter
+  (rewrite-form [fixture phase form selected context]
+    [(:tag fixture) :rewrite phase form selected context]))
+
+(extend-type ProtocolFixture compiler/IEmitter
+  (emit-form [fixture rewritten selected context]
+    [(:tag fixture) :emit rewritten selected context]))
+
+(extend-type ProtocolFixture compiler/ICompiler
+  (compile-form [fixture raw selected context]
+    [(:tag fixture) :compile raw selected context]))
+
+(extend-type ProtocolFixture compiler/IEntryCompiler
+  (compile-entry [fixture entry selected context]
+    [(:tag fixture) :compile-entry entry selected context]))
+
+(extend-type ProtocolFixture compiler/IEntryPublisher
+  (publish-entry [fixture entry contributions context]
+    [(:tag fixture) :publish entry contributions context]))
+
+(extend-type ProtocolFixture registry/IGrammarCatalog
+  (find-source [fixture coordinate]
+    [(:tag fixture) :find coordinate])
+  (list-sources [fixture query]
+    [(:tag fixture) :list query])
+  (available-versions [fixture grammar-id]
+    [(:tag fixture) :versions grammar-id]))
+
+(extend-type ProtocolFixture registry/IGrammarRegistry
+  (install-source [fixture descriptor]
+    [(:tag fixture) :register descriptor])
+  (replace-source [fixture descriptor]
+    [(:tag fixture) :replace descriptor])
+  (remove-source [fixture coordinate]
+    [(:tag fixture) :remove coordinate]))
+
+(extend-type ProtocolFixture registry/IGrammarResolver
+  (resolve-grammar [fixture request]
+    [(:tag fixture) :resolve request]))
+
+(def fixture (ProtocolFixture :fixture))
+(def selected {:coordinate {:grammar/id :js :grammar/version 1}})
+
+(fact "compiler phase protocols dispatch independently"
+  [(compiler/normalize-form fixture '(+ 1 2) {})
+   (compiler/format-entry fixture {:op 'def} selected {})
+   (compiler/hydrate-entry fixture {:op 'def} '(def a 1) selected {})
+   (compiler/stage-form fixture '(+ 1 2) selected {})
+   (compiler/rewrite-form fixture :canonical '(+ 1 2) selected {})
+   (compiler/emit-form fixture '(+ 1 2) selected {})]
+  => [[:fixture :normalize '(+ 1 2) {}]
+      [:fixture :format {:op 'def} selected {}]
+      [:fixture :hydrate {:op 'def} '(def a 1) selected {}]
+      [:fixture :stage '(+ 1 2) selected {}]
+      [:fixture :rewrite :canonical '(+ 1 2) selected {}]
+      [:fixture :emit '(+ 1 2) selected {}]])
+
+(fact "compiler entry points require an explicit selection"
+  [(compiler/compile-form fixture '(+ 1 2) selected {:mode :form})
+   (compiler/compile-entry fixture {:op 'def} selected {:mode :entry})
+   (compiler/publish-entry fixture {:id 'a} [{:kind :schema}] {:mode :commit})]
+  => [[:fixture :compile '(+ 1 2) selected {:mode :form}]
+      [:fixture :compile-entry {:op 'def} selected {:mode :entry}]
+      [:fixture :publish {:id 'a} [{:kind :schema}] {:mode :commit}]])
+
+(fact "analysis protocols keep inference separate from diagnostics"
+  (let [inference (compiler/infer-form fixture '(+ 1 2) selected {})]
+    [inference
+     (compiler/lint-form fixture '(+ 1 2) inference selected {})])
+  => [{:tag :fixture :form '(+ 1 2)}
+      [{:tag :fixture
+        :form '(+ 1 2)
+        :inference {:tag :fixture :form '(+ 1 2)}}]])
+
+(fact "registry protocols separate catalog, mutation, and resolution"
+  [(registry/find-source fixture [:grammar :js 1])
+   (registry/install-source fixture {:grammar/id :js})
+   (registry/resolve-grammar fixture {:grammar/id :js :grammar/version 1})]
+  => [[:fixture :find [:grammar :js 1]]
+      [:fixture :register {:grammar/id :js}]
+      [:fixture :resolve {:grammar/id :js :grammar/version 1}]])
+
+(run {:namespace "lang.protocol-test"})

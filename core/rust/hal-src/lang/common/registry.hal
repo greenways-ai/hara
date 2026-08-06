@@ -1,0 +1,113 @@
+(ns lang.common.registry
+  (:require [std.foundation :exclude [find list remove resolve]]
+            [lang.common.grammar-api :as grammar]
+            [lang.protocol.registry :as protocol]))
+
+(defstruct GrammarRegistry [sources])
+
+(defn registry
+  "Creates an empty immutable grammar registry."
+  []
+  (lang.common.registry/GrammarRegistry {}))
+
+(defn- query-match?
+  [source query]
+  (reduce-kv (fn [matches key value]
+               (and matches (= value (get source key))))
+             true
+             (or query {})))
+
+(extend-type GrammarRegistry protocol/IGrammarCatalog
+  (find-source [registry coordinate]
+    (get (:sources registry) coordinate))
+
+  (list-sources [registry query]
+    (vec
+     (filter (fn [source]
+               (query-match? source query))
+             (vals (:sources registry)))))
+
+  (available-versions [registry grammar-id]
+    (vec
+     (sort
+      (map :source/version
+           (filter (fn [source]
+                     (and (= :grammar (:source/kind source))
+                          (= grammar-id (:source/id source))))
+                   (vals (:sources registry))))))))
+
+(extend-type GrammarRegistry protocol/IGrammarRegistry
+  (install-source [registry source]
+    (let [coordinate (grammar/source-coordinate source)]
+      (if (get (:sources registry) coordinate)
+        (throw
+         (ex-info "Grammar source coordinate already installed"
+                  {:coordinate coordinate}))
+        (lang.common.registry/GrammarRegistry
+         (assoc (:sources registry) coordinate source)))))
+
+  (replace-source [registry source]
+    (let [coordinate (grammar/source-coordinate source)]
+      (if (get (:sources registry) coordinate)
+        (lang.common.registry/GrammarRegistry
+         (assoc (:sources registry) coordinate source))
+        (throw
+         (ex-info "Cannot replace missing grammar source"
+                  {:coordinate coordinate})))))
+
+  (remove-source [registry coordinate]
+    (if (get (:sources registry) coordinate)
+      (lang.common.registry/GrammarRegistry
+       (dissoc (:sources registry) coordinate))
+      (throw
+       (ex-info "Cannot remove missing grammar source"
+                {:coordinate coordinate})))))
+
+(extend-type GrammarRegistry protocol/IGrammarResolver
+  (resolve-grammar [registry request]
+    (let [grammar-id (:grammar/id request)
+          version (:grammar/version request)]
+      (if (or (nil? grammar-id)
+              (nil? version))
+        (throw
+         (ex-info
+          "Grammar resolution requires an explicit id and version"
+          {:request request}))
+        (let [source
+              (protocol/find-source registry
+                             [:grammar grammar-id version])]
+          (if source
+            (grammar/materialize registry source request)
+            (throw
+             (ex-info "Grammar definition not found"
+                      {:request request}))))))))
+
+(defn install
+  [registry source]
+  (protocol/install-source registry source))
+
+(defn replace
+  [registry source]
+  (protocol/replace-source registry source))
+
+(defn remove
+  [registry coordinate]
+  (protocol/remove-source registry coordinate))
+
+(defn find
+  [registry coordinate]
+  (protocol/find-source registry coordinate))
+
+(defn list
+  ([registry]
+   (list registry {}))
+  ([registry query]
+   (protocol/list-sources registry query)))
+
+(defn versions
+  [registry grammar-id]
+  (protocol/available-versions registry grammar-id))
+
+(defn resolve
+  [registry request]
+  (protocol/resolve-grammar registry request))

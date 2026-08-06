@@ -1,0 +1,137 @@
+(ns lang.common.preprocess-input
+  (:require [lang.common.preprocess-base :as preprocess-base]
+            [lang.common.util :as util]
+            [std.foundation :as foundation]
+            [std.foundation.string :as string]
+            [std.lib.walk :as walk]))
+
+(defn to-input-form
+  "processes a form"
+  {:added "4.0"}
+  [x]
+  (let [tag (first x)
+        input (second x)
+        more (drop 2 x)]
+    (cond
+      (list? tag)
+      (cond
+        (= 'deref (first tag))
+        (let [token (second tag)]
+          (cond
+            (= token '!)
+            (list '!:template input)
+
+            (and (symbol? token)
+                 (string/starts-with? (str token) "."))
+            (apply list
+                   '!:lang
+                   {:lang (keyword
+                           (string/slice (str token) 1))}
+                   input
+                   more)
+
+            (and (list? token)
+                 (= 'var (first token)))
+            (let [resolved (resolve (second token))]
+              (list '!:eval
+                    (apply list
+                           (list 'var
+                                 (if resolved
+                                   (foundation/var-sym resolved)
+                                   (throw
+                                    (ex-info "Var not found"
+                                             {:input (second token)}))))
+                           (if input
+                             (cons input more)
+                             more))))
+
+            :else
+            (apply list
+                   '!:decorate
+                   (vec (rest tag))
+                   input
+                   more)))
+
+        (= 'unquote (first tag))
+        (throw (ex-info "Not supported" {:input x})))
+
+      (= 'deref tag)
+      (if (and (list? input)
+               (= 'var (first input)))
+        (let [resolved (resolve (second input))]
+          (list '!:deref
+                (list 'var
+                      (if resolved
+                        (foundation/var-sym resolved)
+                        (throw
+                         (ex-info "Var not found"
+                                  {:input (second input)}))))))
+        (list '!:eval input)))))
+
+(defn to-input
+  "converts a form to input (extracting deref forms)"
+  {:added "4.0"}
+  [raw]
+  (let [splice? (fn [child]
+                  (and (list? child)
+                       (= (first child) '(unquote !))))]
+    (walk/prewalk
+     (fn [x]
+       (or
+        (cond
+          (and preprocess-base/*macro-splice*
+               (or (vector? x) (list? x))
+               (reduce (fn [found child]
+                         (or found (splice? child)))
+                       false
+                       x))
+          (with-meta
+            (reduce
+             (fn [acc child]
+               (if (splice? child)
+                 (apply conj acc (eval (second child)))
+                 (conj acc child)))
+             (empty x)
+             x)
+            (meta x))
+
+          (list? x)
+          (to-input-form x))
+        x))
+     raw)))
+
+(defn eval-template-forms
+  "eagerly resolves persisted host-evaluable forms in form-input"
+  {:added "4.1"}
+  [form]
+  (letfn [(template-evaluable? [expression]
+            (let [blocked (atom false)]
+              (walk/prewalk
+               (fn [x]
+                 (if (and (symbol? x)
+                          (nil? (namespace x))
+                          (not (special-symbol? x))
+                          (not (resolve x)))
+                   (reset! blocked true))
+                 x)
+               expression)
+              (not (deref blocked))))
+          (persisted-eval? [x]
+            (and (list? x)
+                 (= '!:eval (first x))
+                 (not (list? (second x)))
+                 (template-evaluable? (second x))))]
+    (walk/postwalk
+     (fn [x]
+       (cond
+         (and (list? x)
+              (= '!:template (first x))
+              (template-evaluable? (second x)))
+         (eval-template-forms (eval (second x)))
+
+         (persisted-eval? x)
+         (eval-template-forms (eval (second x)))
+
+         :else
+         x))
+     form)))

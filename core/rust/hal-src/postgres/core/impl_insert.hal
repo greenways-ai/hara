@@ -2,7 +2,7 @@
   (:config {:blank true})
   (:require [std.foundation :refer :all]
             [postgres.core.impl-base :as base]
-            [tahto.common.util :as util]))
+            [lang.common.util :as util]))
 
 (defn- schema-attrs [table-schema key]
   (let [entry (get table-schema key)]

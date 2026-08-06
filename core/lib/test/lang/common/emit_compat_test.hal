@@ -1,0 +1,30 @@
+(ns lang.common.emit-compat-test
+  (:use code.test)
+  (:require [lang.common.emit :as emit]
+            [lang.common.emit-helper :as helper]))
+
+(def operator-grammar
+  (assoc helper/+default+
+         :reserved
+         {'+ {:op :add :emit :infix :raw "+"}
+          '- {:op :sub :emit :infix- :raw "-"}
+          'not {:op :not :emit :pre :raw "!"}
+          := {:op :assign :emit :assign :raw "="}
+          '. {:op :index :emit :index}
+          'return {:op :return :emit :return :raw "return"}}))
+
+(fact "common helpers retain Foundation behavior"
+  (emit/emit-infix "|" '[x y z] helper/+default+ {}) => "x | y | z"
+  (emit/emit '(- x) operator-grammar) => "-x"
+  (emit/emit '(+ 1 (+ 2 3)) operator-grammar) => "1 + (2 + 3)"
+  (emit/emit '(:= x 1) operator-grammar) => "x = 1")
+
+(fact "calls, indexing, data, and returns retain compatibility"
+  (emit/emit '(print (+ 19 23)) operator-grammar) => "print(19 + 23)"
+  (emit/emit '(. user ["name"]) operator-grammar) => "user[\"name\"]"
+  [(emit/emit [1 2 3] helper/+default+)
+   (emit/emit {:answer 42} helper/+default+)]
+  => ["[1,2,3]" "{\"answer\":42}"]
+  (emit/emit '(return (+ 20 22)) operator-grammar) => "return 20 + 22")
+
+(run {:namespace "lang.common.emit-compat-test"})

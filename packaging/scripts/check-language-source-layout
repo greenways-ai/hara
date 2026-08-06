@@ -12,6 +12,8 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parents[2]
 
 LANGUAGE_ROOTS = {
+    Path("core/lib/src/lang"): "lang",
+    Path("core/lib/test/lang"): "lang",
     Path("core/lib/src-lang/xt"): "xt",
     Path("core/lib/src-lang/postgres"): "postgres",
     Path("core/lib/test-lang/xt"): "xt",
@@ -28,6 +30,8 @@ TEST_ROOTS = (
 )
 
 LEGACY_ROOTS = (
+    Path("core/lib/src/tahto"),
+    Path("core/lib/test/tahto"),
     Path("core/lib/src/xt"),
     Path("core/lib/src/postgres"),
     Path("core/lib/test/xt"),

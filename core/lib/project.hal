@@ -1,3 +1,3 @@
-(defproject tahto
+(defproject lang
   {:source-paths ["src" "src-lang"]
    :test-paths ["test" "test-lang"]})

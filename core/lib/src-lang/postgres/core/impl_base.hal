@@ -1,7 +1,7 @@
 (ns postgres.core.impl-base
   (:config {:blank true})
   (:require [std.foundation :as foundation :refer :all :exclude [resolve]]
-            [tahto.common.util :as util]))
+            [lang.common.util :as util]))
 
 (def ^:dynamic *skip-checks* false)
 

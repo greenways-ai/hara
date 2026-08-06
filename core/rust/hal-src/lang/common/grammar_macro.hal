@@ -1,0 +1,259 @@
+(ns lang.common.grammar-macro
+  (:require [lang.common.grammar-spec :as spec]))
+
+(defn form
+  "Builds a persistent Hara list used as generated source."
+  [values]
+  (spec/as-list values))
+
+(defn all-but-last
+  [values]
+  (let [items (vec values)
+        amount (count items)]
+    (if (> amount 0)
+      (vec (take (- amount 1) items))
+      [])))
+
+(defn tf-macroexpand
+  "Macroexpands the current form once."
+  [input]
+  (let [items (vec input)
+        operation (first items)
+        initial (nth items 1)
+        steps (drop 2 items)]
+    (cond (= operation '->)
+          (reduce (fn [result step]
+                    (let [step-items (vec step)]
+                      (form
+                       (concat [(first step-items) result]
+                               (drop 1 step-items)))))
+                  initial
+                  steps)
+
+          (= operation '->>)
+          (reduce (fn [result step]
+                    (form (concat (vec step) [result])))
+                  initial
+                  steps)
+
+          :else input)))
+
+(defn tf-when
+  "Transforms `when` to a branch form."
+  [input]
+  (let [items (vec input)
+        check (nth items 1)
+        body (drop 2 items)]
+    (form ['br*
+           (form (concat ['if check] body))])))
+
+(defn tf-if
+  "Transforms `if` to a branch form."
+  [input]
+  (let [items (vec input)
+        check (nth items 1)
+        then (nth items 2)
+        else (if (> (count items) 3) (nth items 3) nil)
+        branches (if (nil? else)
+                   [(form ['if check then])]
+                   [(form ['if check then])
+                    (form ['else else])])]
+    (form (concat ['br*] branches))))
+
+(defn tf-cond
+  "Transforms `cond` to a branch form."
+  [input]
+  (let [items (vec (drop 1 input))
+        pairs (vec (partition 2 items))
+        final-pair (last pairs)
+        has-else (and final-pair (= :else (first final-pair)))
+        conditional-pairs (if has-else (all-but-last pairs) pairs)
+        first-pair (first conditional-pairs)
+        remaining-pairs (drop 1 conditional-pairs)
+        branches (vec
+                  (concat
+                   [(form ['if (first first-pair) (second first-pair)])]
+                   (map (fn [pair]
+                          (form ['elseif (first pair) (second pair)]))
+                        remaining-pairs)
+                   (if has-else
+                     [(form ['else (second final-pair)])]
+                     [])))]
+    (form (concat ['br*] branches))))
+
+(defn tf-let-bind
+  "Converts a `let` form to target-language statements."
+  [input]
+  (let [items (vec input)
+        bindings (nth items 1)
+        body (drop 2 items)
+        pairs (vec (partition 2 bindings))
+        statements
+        (map (fn [pair]
+               (let [sym (first pair)
+                     value (second pair)]
+                 (if (= '_ sym)
+                   value
+                   (form ['var sym ':= value]))))
+             pairs)]
+    (form (concat ['do*] statements body))))
+
+(defn tf-case
+  "Transforms a case statement to its switch representation."
+  [input]
+  (let [items (vec input)
+        value (nth items 1)
+        options (drop 2 items)
+        groups (vec (partition-all 2 options))
+        final-group (last groups)
+        has-default (= 1 (count final-group))
+        cases (if has-default (all-but-last groups) groups)
+        case-forms
+        (map (fn [pair]
+               (form ['case [(first pair)] (second pair)]))
+             cases)
+        default-forms
+        (if has-default
+          [(form ['default (first final-group)])]
+          [])]
+    (form
+     (concat ['switch [value]]
+             case-forms
+             default-forms))))
+
+(defn tf-lambda-arrow
+  "Generalized lambda transformation."
+  [input]
+  (let [more (vec (drop 1 input))
+        normalized (if (= 1 (count more))
+                     [[] (first more)]
+                     more)
+        args (first normalized)
+        expressions (vec (drop 1 normalized))
+        final-expression (last expressions)
+        body (all-but-last expressions)
+        returned
+        (if (and (not (nil? final-expression))
+                 (not (symbol? final-expression))
+                 (= 'return (first final-expression)))
+          [final-expression]
+          [(form ['return final-expression])])]
+    (form (concat ['fn args] body returned))))
+
+(defn tf-tcond
+  "Transforms a ternary cond."
+  [input]
+  (let [pairs (vec
+               (map vec
+                    (partition 2 (drop 1 input))))
+        final-pair (last pairs)]
+    (if (not (= :else (first final-pair)))
+      (throw (ex-info "ternary cond has to end with :else"
+                      {:form final-pair}))
+      (reduce (fn [result pair]
+                (form [:? (first pair) [(second pair) result]]))
+              (second final-pair)
+              (reverse (all-but-last pairs))))))
+
+(defn tf-xor
+  "Transforms xor into boolean-normalized equality."
+  [input]
+  (let [items (vec input)
+        a (nth items 1)
+        b (nth items 2)]
+    (form ['==
+           (form ['not (form ['not a])])
+           (form ['not (form ['not b])])])))
+
+(defn tf-doto
+  "Basic transformation for `doto` syntax."
+  [input]
+  (let [items (vec input)
+        sym (nth items 1)
+        source-forms (drop 2 items)
+        transformed
+        (map (fn [source]
+               (form
+                (concat [(first source) sym]
+                        (drop 1 source))))
+             source-forms)]
+    (form (concat ['do] transformed))))
+
+(defn tf-do-arrow
+  "Transforms a `do:>` form to an immediately invoked function."
+  [input]
+  (let [body (drop 1 input)]
+    (form [(form (concat ['fn []] body))])))
+
+(defn tf-forange
+  "Creates the portable `forange` representation."
+  [input]
+  (let [items (vec input)
+        binding (vec (nth items 1))
+        body (drop 2 items)
+        first-value (nth binding 0)
+        typed (keyword? first-value)
+        types (if typed [first-value] [])
+        sym (if typed (nth binding 1) first-value)
+        size (if typed (nth binding 2) (nth binding 1))
+        params (if typed
+                 (if (> (count binding) 3) (nth binding 3) nil)
+                 (if (> (count binding) 2) (nth binding 2) nil))
+        range (if (vector? size) size [0 size])
+        start (nth range 0)
+        end (nth range 1)
+        raw-step (if (> (count range) 2) (nth range 2) nil)
+        step (or raw-step 1)
+        negative (and (number? step) (neg? step))
+        sign (if negative '- '+)
+        amount (if negative (- step) step)
+        declaration (form (concat ['var] types [sym start]))
+        condition (form ['< sym end])
+        increment (form [':= sym (form [sign sym amount])])
+        iteration (vec
+                   (concat [increment]
+                           (if params params [])))]
+    (form
+     (concat ['for [declaration condition iteration]]
+             body))))
+
+(def +op-macro+
+  [{:op :tfirst :symbol #{'->} :emit :macro
+    :macro #'tf-macroexpand :type :template}
+   {:op :tlast :symbol #{'->>} :emit :macro
+    :macro #'tf-macroexpand :type :template}
+   {:op :doto :symbol #{'doto} :emit :macro
+    :macro #'tf-doto :type :block}
+   {:op :if :symbol #{'if} :emit :macro
+    :macro #'tf-if :type :block}
+   {:op :cond :symbol #{'cond} :emit :macro
+    :macro #'tf-cond :type :block}
+   {:op :when :symbol #{'when} :emit :macro
+    :macro #'tf-when :type :block}])
+
+(def +op-macro-arrow+
+  [{:op :dofn :symbol #{'do:>} :emit :macro
+    :macro #'tf-do-arrow :type :template}
+   {:op :fn-arrow :symbol #{'fn:>} :emit :macro
+    :macro #'tf-lambda-arrow :type :template}])
+
+(def +op-macro-let+
+  [{:op :let-bind :symbol #{'let} :emit :macro
+    :macro #'tf-let-bind :type :block}])
+
+(def +op-macro-xor+
+  [{:op :txor :symbol #{'xor} :emit :macro :macro #'tf-xor}])
+
+(def +op-macro-case+
+  [{:op :switch :symbol #{'switch} :emit :inner
+    :type :block
+    :block {:main #{:parameter :body}
+            :control [[:case {:required true
+                              :main #{:parameter :body}}]
+                      [:default {:main #{:body}}]]}}
+   {:op :case :symbol #{'case} :emit :macro
+    :macro #'tf-case :type :block}])
+
+(def +op-macro-forange+
+  [{:op :forange :symbol #{'forange} :style/indent 1
+    :emit :macro :macro #'tf-forange :type :block}])

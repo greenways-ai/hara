@@ -1,0 +1,82 @@
+(ns lang.common.book-entry
+  (:require [lang.common.util :as ut]))
+
+(defn- filter-values
+  [m]
+  (reduce-kv (fn [out key value]
+               (if value
+                 (assoc out key value)
+                 out))
+             {}
+             m))
+
+(defn- book-entry-string
+  [{:keys [id lang module section display] :as entry}]
+  (if (= display :symbol)
+    (str "E:" (ut/sym-full module id))
+    (str "#book.entry " [lang section (ut/sym-full module id)]
+         (if (= display :brief)
+           ""
+           (str " "
+                (filter-values
+                 (dissoc entry
+                         :section
+                         :id
+                         :module
+                         :declared
+                         :form-input
+                         :template
+                         :standalone
+                         :line
+                         :time
+                         :priority
+                         :display)))))))
+
+(defstruct BookEntry [lang
+                      id
+                      module
+                      section
+                      declared
+                      form
+                      form-input
+                      deps
+                      deps-fragment
+                      deps-native
+                      xtalk-ops
+                      xtalk-profiles
+                      polyfill-modules
+                      namespace
+                      template
+                      standalone
+                      line
+                      time
+                      priority
+                      display])
+
+(defn book-entry?
+  "checks if object is a book entry"
+  {:added "4.0"}
+  [x]
+  (instance? BookEntry x))
+
+(defn book-entry
+  "creates a book entry"
+  {:added "4.0"}
+  [{:keys [lang
+           id
+           module
+           section
+           form
+           form-input
+           deps
+           deps-native
+           xtalk-ops
+           xtalk-profiles
+           polyfill-modules
+           namespace
+           template
+           standalone
+           declared]
+    :as m}]
+  (map->BookEntry (merge {:display :default}
+                         m)))

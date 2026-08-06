@@ -1,0 +1,102 @@
+(ns lang.base.v1.grammar-spec
+  (:require [lang.common.grammar :as grammar]
+            [lang.common.grammar-macro :as grammar-macro]
+            [lang.common.grammar-spec :as spec]))
+
+(def +version+ 1)
+
+;; Foundation-compatible operator names.  V1 snapshots the common grammar
+;; surface once, so target models extend it instead of redefining it.
+(def +op-builtin+ spec/+op-builtin+)
+(def +op-builtin-global+ spec/+op-builtin-global+)
+(def +op-builtin-module+ spec/+op-builtin-module+)
+(def +op-builtin-helper+ spec/+op-builtin-helper+)
+(def +op-free-control+ spec/+op-free-control+)
+(def +op-free-literal+ spec/+op-free-literal+)
+(def +op-math+ spec/+op-math+)
+(def +op-compare+ spec/+op-compare+)
+(def +op-logic+ spec/+op-logic+)
+(def +op-counter+ spec/+op-counter+)
+(def +op-return+ spec/+op-return+)
+(def +op-throw+ spec/+op-throw+)
+(def +op-await+ spec/+op-await+)
+(def +op-async+ spec/+op-async+)
+(def +op-data-table+ spec/+op-data-table+)
+(def +op-data-shortcuts+ spec/+op-data-shortcuts+)
+(def +op-data-range+ spec/+op-data-range+)
+(def +op-vars+ spec/+op-vars+)
+(def +op-bit+ spec/+op-bit+)
+(def +op-pointer+ spec/+op-pointer+)
+(def +op-fn+ spec/+op-fn+)
+(def +op-block+ spec/+op-block+)
+(def +op-control-base+ spec/+op-control-base+)
+(def +op-control-general+ spec/+op-control-general+)
+(def +op-control-try-catch+ spec/+op-control-try-catch+)
+(def +op-top-base+ spec/+op-top-base+)
+(def +op-top-global+ spec/+op-top-global+)
+(def +op-class+ spec/+op-class+)
+(def +op-for+ spec/+op-for+)
+(def +op-coroutine+ spec/+op-coroutine+)
+(def +op-prototype+ spec/+op-prototype+)
+(def +op-functional-core+ spec/+op-functional-core+)
+(def +op-macro+ grammar-macro/+op-macro+)
+(def +op-macro-arrow+ grammar-macro/+op-macro-arrow+)
+(def +op-macro-let+ grammar-macro/+op-macro-let+)
+(def +op-macro-xor+ grammar-macro/+op-macro-xor+)
+(def +op-macro-case+ grammar-macro/+op-macro-case+)
+(def +op-macro-forange+ grammar-macro/+op-macro-forange+)
+
+(def +op-categories+
+  [+op-builtin+
+   +op-builtin-global+
+   +op-builtin-module+
+   +op-builtin-helper+
+   +op-free-control+
+   +op-free-literal+
+   +op-math+
+   +op-compare+
+   +op-logic+
+   +op-counter+
+   +op-return+
+   +op-throw+
+   +op-await+
+   +op-async+
+   +op-data-table+
+   +op-data-shortcuts+
+   +op-data-range+
+   +op-vars+
+   +op-bit+
+   +op-pointer+
+   +op-fn+
+   +op-block+
+   +op-control-base+
+   +op-control-general+
+   +op-control-try-catch+
+   +op-top-base+
+   +op-top-global+
+   +op-class+
+   +op-for+
+   +op-coroutine+
+   +op-prototype+
+   +op-functional-core+
+   +op-macro+
+   +op-macro-arrow+
+   +op-macro-let+
+   +op-macro-xor+
+   +op-macro-case+
+   +op-macro-forange+])
+
+(defn- entries-by-op
+  [entries]
+  (reduce (fn [out entry]
+            (assoc out (:op entry) entry))
+          {}
+          entries))
+
+(def +features+
+  (merge
+  (reduce (fn [out entries]
+            (merge out (entries-by-op entries)))
+          {}
+          +op-categories+)
+   (grammar/build-xtalk)))

@@ -1,0 +1,203 @@
+(ns lang.core
+  (:require [lang.common.book-entry :as entry]
+            [lang.common.book-meta :as meta]
+            [lang.common.grammar :as grammar]
+            [lang.common.preprocess-input :as input]
+            [lang.common.preprocess-resolve :as resolve]
+            [lang.common.preprocess-staging :as staging]
+            [lang.common.preprocess-value :as value]
+            [lang.core.registry :as registry]
+            [lang.core.script :as script]
+            [lang.core.script-fragment]
+            [lang.core.runtime :as runtime]
+            [lang.model.v6.spec-postgres]
+            [lang.runtime.basic :as basic]))
+
+(def book-entry entry/book-entry)
+(def book-entry? entry/book-entry?)
+(def book-meta meta/book-meta)
+(def book-meta? meta/book-meta?)
+(def grammar grammar/grammar)
+(def grammar-build grammar/build)
+(def grammar-to-reserved grammar/to-reserved)
+(def to-input input/to-input)
+(def to-input-form input/to-input-form)
+(def to-resolve staging/to-resolve)
+(def to-staging staging/to-staging)
+(def get-fragment resolve/get-fragment)
+(def value-standalone value/value-standalone)
+(def host-name name)
+
+(defn rt:restart [] (script/restart!))
+(defn rt:stop [] (script/stop!))
+(def script-modules script/+modules+)
+(def script-specs script/+specs+)
+
+;; Foundation-compatible runtime/bootstrap entry points.
+(def bootstrap! runtime/bootstrap!)
+(def install-lang! runtime/install-lang!)
+(def select-lang-version! runtime/select-lang-version!)
+(def install-type! runtime/install-type!)
+(def rt-create runtime/rt-create)
+(def rt-start runtime/rt-start)
+(def rt-stop runtime/rt-stop)
+(def rt-raw-eval runtime/rt-raw-eval)
+(def runtime-spec runtime/runtime-spec)
+
+;; Foundation book coordinates with explicit and configurable version selection.
+(def registry-book registry/registry-book)
+(def registry-book-info registry/registry-book-info)
+(def registry-book-versions registry/registry-book-versions)
+(def registry-book-default-version registry/registry-book-default-version)
+(def registry-book-add! registry/registry-book-add!)
+(def registry-book-remove! registry/registry-book-remove!)
+(def registry-book-set-default! registry/registry-book-set-default!)
+
+(def rt-basic basic/rt-basic)
+(def rt-basic:create basic/rt-basic:create)
+(def rt-oneshot basic/rt-oneshot)
+(def rt-oneshot:create basic/rt-oneshot:create)
+
+;; Loading lang.core installs each language's configured default book and the
+;; first local runtimes. No target process is started during bootstrap.
+(def +bootstrap+ (bootstrap!))
+(defmacro script [lang & options]
+  (let [config (if (seq options) (first options) {})]
+    (list
+     'do
+     (list 'lang.core.script/setup!
+           (list 'quote lang)
+           (list 'quote config)
+           false)
+     '(defmacro def.xt [symbol value]
+        (list 'lang.core.script/register-code!
+              (list 'quote (list 'def symbol value))))
+     '(defmacro defglobal.xt [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'defglobal symbol body))))
+     '(defmacro defn.xt [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'defn symbol body))))
+     '(defmacro defn.pg [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'defn symbol body))))
+     '(defmacro deftype.pg [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'deftype symbol body))))
+     '(defmacro deftrigger.pg [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'deftrigger symbol body))))
+     '(defmacro def$.pg [symbol value]
+        (list 'lang.core.script-fragment/register-value!
+              (list 'quote symbol)
+              (list 'quote value)
+              (list 'quote (or (meta symbol) {}))))
+     '(defmacro defenum.pg [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'defenum symbol body))))
+     '(defmacro defconst.pg [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'defconst symbol body))))
+     '(defmacro defgen.xt [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'defgen symbol body))))
+     '(defmacro defmacro.xt [id & body]
+        (let [form (apply list 'defmacro id body)
+              qualified (symbol (str (:ns &env)) (lang.core/host-name id))]
+          (list 'do
+                form
+                (list 'lang.core.script/register-fragment!
+                      (list 'quote form)
+                      (list 'fn '[& args]
+                            (list 'macroexpand-1
+                                  (list 'apply
+                                        'list
+                                        (list 'quote qualified)
+                                        'args))))))))))
+(defmacro defspec.xt [symbol & body]
+  (let [docstring (if (string? (first body)) (first body) nil)
+        remaining (if docstring (rest body) body)
+        attributes (if (map? (first remaining)) (first remaining) {})
+        remaining (if (map? (first remaining)) (rest remaining) remaining)
+        type-form (first remaining)
+        metadata (merge (meta symbol)
+                        attributes
+                        (if docstring {:docstring docstring} {}))]
+    (list 'lang.core.script/register-spec!
+          (list 'quote symbol)
+          (list 'quote type-form)
+          (list 'quote metadata))))
+(defmacro script- [lang & options]
+  (let [config (if (seq options) (first options) {})]
+    (list
+     'do
+     (list 'lang.core.script/setup!
+           (list 'quote lang)
+           (list 'quote config)
+           true)
+     '(defmacro def.xt [symbol value]
+        (list 'lang.core.script/register-code!
+              (list 'quote (list 'def symbol value))))
+     '(defmacro defglobal.xt [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'defglobal symbol body))))
+     '(defmacro defn.xt [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'defn symbol body))))
+     '(defmacro defn.pg [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'defn symbol body))))
+     '(defmacro deftype.pg [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'deftype symbol body))))
+     '(defmacro deftrigger.pg [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'deftrigger symbol body))))
+     '(defmacro def$.pg [symbol value]
+        (list 'lang.core.script-fragment/register-value!
+              (list 'quote symbol)
+              (list 'quote value)
+              (list 'quote (or (meta symbol) {}))))
+     '(defmacro defenum.pg [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'defenum symbol body))))
+     '(defmacro defconst.pg [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'defconst symbol body))))
+     '(defmacro defgen.xt [symbol & body]
+        (list 'lang.core.script/register-code!
+              (list 'quote (apply list 'defgen symbol body))))
+     '(defmacro defmacro.xt [id & body]
+        (let [form (apply list 'defmacro id body)
+              qualified (symbol (str (:ns &env)) (lang.core/host-name id))]
+          (list 'do
+                form
+                (list 'lang.core.script/register-fragment!
+                      (list 'quote form)
+                      (list 'fn '[& args]
+                            (list 'macroexpand-1
+                                  (list 'apply
+                                        'list
+                                        (list 'quote qualified)
+                                        'args)))))))
+     '(defmacro !.js [& body]
+        (list 'lang.core.script/eval-form!
+              :js
+              (list 'quote
+                    (if (= 1 (count body))
+                      (first body)
+                      (apply list 'do body)))))
+     '(defmacro !.lua [& body]
+        (list 'lang.core.script/eval-form!
+              :lua
+              (list 'quote
+                    (if (= 1 (count body))
+                      (first body)
+                      (apply list 'do body)))))
+     '(defmacro !.py [& body]
+        (list 'lang.core.script/eval-form!
+              :python
+              (list 'quote
+                    (if (= 1 (count body))
+                      (first body)
+                      (apply list 'do body))))))))
