@@ -7,6 +7,7 @@ name: Bootstrap lang namespace migration
 # Synchronize marker: execute the fixed generator from this bounded PR.
 # Ready-state synchronize marker: schedule the fixed generator now.
 # Workflow-token marker: restore workflows before the bot push.
+# Token-safe bounded trigger: generate the review branch from ef66d5f.
 # The pull_request event below is restricted to disposable trigger branches.
 on:
   push:
