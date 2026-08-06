@@ -6,9 +6,15 @@
 (defstruct RuntimeHaraBasic
   [id lang runtime program target state profile timeout])
 
+(def +home-namespace+ 'user)
+
 (defn- default-id
   [language]
   (keyword (str (name language) ".basic")))
+
+(defn- select-home-namespace!
+  []
+  (eval (list 'ns +home-namespace+)))
 
 (defn rt-hara:create
   "Creates an in-process Hara runtime for the concrete :hara target.
@@ -27,6 +33,7 @@
      :hara
      (atom {:status :created
             :target :hara
+            :home-namespace +home-namespace+
             :evaluations 0})
      {:input [] :source [] :response []}
      timeout)))
@@ -41,6 +48,7 @@
 
 (defn start-hara
   [runtime]
+  (select-home-namespace!)
   (swap! (get runtime :state)
          assoc
          :status :started)
@@ -48,6 +56,7 @@
 
 (defn stop-hara
   [runtime]
+  (select-home-namespace!)
   (swap! (get runtime :state)
          assoc
          :status :stopped)
@@ -60,7 +69,11 @@
     source))
 
 (defn eval-source-now
-  "Evaluates concrete Hara source inside the current Hara kernel instance."
+  "Evaluates concrete Hara source inside the current Hara kernel instance.
+
+   Each call begins and ends in the runtime home namespace. Compiled target
+   source may enter explicit module namespaces without leaking that state into
+   the caller or the next evaluation."
   [runtime source]
   (if (not= :started (get (hara-state runtime) :status))
     (throw
@@ -71,24 +84,29 @@
                :runtime (get runtime :runtime)
                :program (get runtime :program)
                :state (hara-state runtime)}))
-    (try
-      (let [result (eval (source-form source))]
-        (swap! (get runtime :state)
-               update
-               :evaluations
-               (fn [amount] (+ (or amount 0) 1)))
-        result)
-      (catch Throwable error
-        (throw
-         (ex-info "Self-hosted XTalk evaluation failed"
-                  {:phase :execute
-                   :lang (get runtime :lang)
-                   :target (get runtime :target)
-                   :runtime (get runtime :runtime)
-                   :program (get runtime :program)
-                   :source source
-                   :cause-data (ex-data error)}
-                  error))))))
+    (do
+      (select-home-namespace!)
+      (try
+        (let [result (eval (source-form source))]
+          (swap! (get runtime :state)
+                 update
+                 :evaluations
+                 (fn [amount] (+ (or amount 0) 1)))
+          result)
+        (catch Throwable error
+          (throw
+           (ex-info "Self-hosted XTalk evaluation failed"
+                    {:phase :execute
+                     :lang (get runtime :lang)
+                     :target (get runtime :target)
+                     :runtime (get runtime :runtime)
+                     :program (get runtime :program)
+                     :cause-message (ex-message error)
+                     :cause-data (ex-data error)
+                     :source source}
+                    error)))
+        (finally
+          (select-home-namespace!))))))
 
 (defn- rejected
   [error]
