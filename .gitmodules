@@ -7,3 +7,6 @@
 [submodule "website"]
 	path = website
 	url = git@github.com:hara-lang/hara-www.git
+[submodule "specs"]
+	path = specs
+	url = git@github.com:hara-lang/hara-specs.git
