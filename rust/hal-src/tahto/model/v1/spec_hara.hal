@@ -1,0 +1,105 @@
+(ns tahto.model.v1.spec-hara
+  (:require [tahto.base.v1.grammar-spec :as spec]
+            [tahto.common.compiler :as common-compiler]
+            [tahto.common.grammar-api :as grammar]
+            [tahto.common.registry :as registry]
+            [tahto.model.v1.spec-hara.emit :as hara-emit]
+            [tahto.model.v1.spec-xtalk :as xtalk]
+            [tahto.protocol.compiler :as protocol]))
+
+(def +language+ :hara)
+(def +tag+ :hara)
+(def +version+ spec/+version+)
+
+(def +grammar+
+  (grammar/definition
+   {:grammar/id +tag+
+    :grammar/version +version+
+    :grammar/release "hara-v1"
+    :grammar/language +language+
+    :grammar/tag +tag+
+    :grammar/engine {:minimum 1 :maximum 1}
+    :grammar/parent
+    {:grammar/id xtalk/+tag+
+     :grammar/version xtalk/+version+}}))
+
+(defn- install-source
+  [catalog source]
+  (if (registry/find catalog (grammar/source-coordinate source))
+    catalog
+    (registry/install catalog source)))
+
+(defn install
+  "Installs the XTalk parent and Hara target grammar."
+  [catalog]
+  (install-source (xtalk/install catalog) +grammar+))
+
+(defn catalog
+  []
+  (install (registry/registry)))
+
+(defn select
+  "Resolves the Hara child grammar of XTalk."
+  ([]
+   (select (catalog)))
+  ([catalog]
+   (registry/resolve catalog
+                     {:grammar/id +tag+
+                      :grammar/version +version+})))
+
+(def +selection+ (select))
+
+(defstruct HaraEmitter [])
+
+(extend-type HaraEmitter protocol/IEmitter
+  (emit-form [emitter rewritten selected context]
+    (hara-emit/emit-form
+     rewritten
+     (assoc context
+            :tahto/grammar-coordinate (:coordinate selected)
+            :tahto/grammar-fingerprint (:fingerprint selected)))))
+
+(defn emitter
+  []
+  (tahto.model.v1.spec-hara/HaraEmitter))
+
+(defn compiler
+  "Creates a compiler whose final emission phase produces Hara source."
+  []
+  (common-compiler/compiler {:emitter (emitter)}))
+
+(defn compile-result
+  "Compiles one XTalk form through the Hara grammar and returns all phases."
+  ([form]
+   (compile-result form {}))
+  ([form context]
+   (common-compiler/compile
+    (compiler)
+    form
+    +selection+
+    (assoc context :lang :hara))))
+
+(defn compile
+  "Compiles one XTalk form into executable Hara source."
+  ([form]
+   (compile form {}))
+  ([form context]
+   (:output (compile-result form context))))
+
+(defn emit
+  "Directly lowers an already staged XTalk form into Hara source."
+  ([form]
+   (emit form {}))
+  ([form context]
+   (hara-emit/emit-form form context)))
+
+(def +book+
+  {:lang +language+
+   :parent :xtalk
+   :version +version+
+   :coordinate (:coordinate +selection+)
+   :grammar (:grammar +selection+)
+   :selection +selection+
+   :compiler compiler})
+
+(def +init+ +book+)
