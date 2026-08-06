@@ -111,3 +111,11 @@ test("live card exposes tabs, InstaREPL, resizers, interrupt and reset", async (
   assert.doesNotMatch(source, /data-live-example/);
   assert.doesNotMatch(source, /<select/);
 });
+
+test("demo tabs own the top row and kernel progress never overlays the card", async () => {
+  const styles = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
+  assert.match(styles, /\.hara-live-card-header\s*\{[\s\S]*grid-template-rows:\s*auto auto/);
+  assert.match(styles, /\.hara-live-card-tabs\s*\{[\s\S]*grid-row:\s*1/);
+  assert.match(styles, /\.hara-live-card-tabs::-webkit-scrollbar\s*\{\s*display:\s*none/);
+  assert.match(styles, /\.hara-live-card-toast\s*\{\s*display:\s*none !important/);
+});
