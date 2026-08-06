@@ -3,6 +3,9 @@ name: Bootstrap lang namespace migration
 # Invocation marker: run the atomic namespace migration from this main push.
 # Pull-request invocation marker: recover the generated HARA-1 branch.
 # Active-workflow push marker: generate the review branch now.
+# Fixed-cleanup pull-request marker: generate the review branch now.
+# Synchronize marker: execute the fixed generator from this bounded PR.
+# Ready-state synchronize marker: schedule the fixed generator now.
 # The pull_request event below is restricted to disposable trigger branches.
 on:
   push:
