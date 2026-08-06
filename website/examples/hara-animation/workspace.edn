@@ -1,4 +1,0 @@
-{:hara/type :workspace
- :hara/version "1.0.0"
- :workspace/name "Hara Animation Pipeline"
- :workspace/open-files ["src/animation.hal"]}

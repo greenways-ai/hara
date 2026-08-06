@@ -1,15 +1,6 @@
 [submodule "archive"]
 	path = archive
 	url = git@github.com:hara-lang/hara-archive.git
-[submodule "docs"]
-	path = docs
-	url = git@github.com:hara-lang/hara-docs.git
 [submodule "extensions"]
 	path = extensions
 	url = git@github.com:hara-lang/hara-extensions.git
-[submodule "specs"]
-	path = specs
-	url = git@github.com:hara-lang/hara-specs.git
-[submodule "website/vendor/hara-ui"]
-	path = website/vendor/hara-ui
-	url = git@github.com:hara-lang/hara-ui.git

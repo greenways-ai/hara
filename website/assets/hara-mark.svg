@@ -1,5 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <defs><linearGradient id="ribbon" x1="92" y1="68" x2="420" y2="444" gradientUnits="userSpaceOnUse"><stop stop-color="#42F5D7"/><stop offset=".47" stop-color="#16B8EE"/><stop offset="1" stop-color="#B52AF9"/></linearGradient></defs>
-  <path d="M104 72v112l304 180v76L104 260" stroke="url(#ribbon)" stroke-width="36" stroke-linejoin="miter"/>
-  <path d="M408 72v112L104 364v76l304-180" stroke="url(#ribbon)" stroke-width="36" stroke-linejoin="miter"/>
-</svg>
