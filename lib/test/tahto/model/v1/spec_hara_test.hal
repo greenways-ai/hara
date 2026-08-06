@@ -109,7 +109,7 @@
 ^{:refer tahto.model.v1.spec-hara/select :added "4.1"}
 (fact "resolves exactly one callable target rewrite hook"
   [(count (get-in selected [:rewrite :target]))
-   (mapv fn? (get-in selected [:rewrite :target]))]
+   (into [] (map fn? (get-in selected [:rewrite :target])))]
   => [1 [true]])
 
 ^{:refer tahto.model.v1.spec-hara.emit/lower-top :added "4.1"}
@@ -126,4 +126,3 @@
 (fact "compiles an ordinary portable function call through the Hara target hook"
   (:output (compiler/compile instance '(gcd 54 24) selected))
   => "(gcd 54 24)")
-
