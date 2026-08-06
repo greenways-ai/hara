@@ -253,7 +253,7 @@
                        :mutable
                        (conj (or (get environment :mutable) #{}) symbol))]
             (list 'let
-                  [symbol (list 'volatile init)]
+                  [symbol (list 'atom init)]
                   (lower-body remaining next-environment)))
           (if (empty? remaining)
             (lower-expr current environment)
@@ -313,7 +313,7 @@
         bindings
         (into []
               (mapcat (fn [symbol]
-                        [symbol (list 'volatile symbol)])
+                        [symbol (list 'atom symbol)])
                       (sort-by str mutable-arguments)))
         lowered
         (if (empty? bindings)
@@ -436,8 +436,8 @@
                             :else nil)]
         (if (nil? path)
           (if binary-op
-            (list 'vswap! base binary-op lowered-value)
-            (list 'vreset! base lowered-value))
+            (list 'swap! base binary-op lowered-value)
+            (list 'reset! base lowered-value))
           (let [current (list 'get-in (list 'deref base) path)
                 replacement (if binary-op
                               (list binary-op current lowered-value)
@@ -445,7 +445,7 @@
             (list 'let
                   ['__hara_value replacement]
                   (list 'do
-                        (list 'vreset!
+                        (list 'reset!
                               base
                               (list 'tahto.runtime.hara-support/assoc-path
                                     (list 'deref base)
@@ -460,7 +460,7 @@
             (not (mutable-symbol? environment base)))
       (fail "Deletion requires a mutable structural path"
             target context)
-      (list 'vreset!
+      (list 'reset!
             base
             (list 'tahto.runtime.hara-support/dissoc-path
                   (list 'deref base)
@@ -510,7 +510,7 @@
             loop-body (lower-body body next-environment)
             loop-step (lower-body iteration-forms next-environment)]
         (list 'let
-              [symbol (list 'volatile (lower-expr init-value environment))]
+              [symbol (list 'atom (lower-expr init-value environment))]
               (list 'tahto.runtime.hara-support/with-break
                     (list 'fn []
                           (list 'loop []

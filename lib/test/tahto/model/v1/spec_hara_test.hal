@@ -37,9 +37,9 @@
 ^{:refer tahto.model.v1.spec-hara.emit/rewrite-hara-source :added "4.1"}
 (fact "emits parseable Hara source through the normal Tahto compiler"
   (read-string (:output mutable-compiled))
-  => '(let [out (volatile 1)]
+  => '(let [out (atom 1)]
         (do
-          (vreset! out (+ (deref out) 2))
+          (reset! out (+ (deref out) 2))
           (deref out))))
 
 ^{:refer tahto.model.v1.spec-hara.emit/lower-top :added "4.1"}
@@ -102,6 +102,28 @@
 (fact "uses the existing raw internal-string emitter rather than a second emitter stack"
   (let [target (get-in mutable-compiled [:stages :target])]
     [(first target)
-     (string/includes? (second target) "volatile")
+     (string/includes? (second target) "atom")
      (= (second target) (:output mutable-compiled))])
   => ['-%%- true true])
+
+^{:refer tahto.model.v1.spec-hara/select :added "4.1"}
+(fact "resolves exactly one callable target rewrite hook"
+  [(count (get-in selected [:rewrite :target]))
+   (mapv fn? (get-in selected [:rewrite :target]))]
+  => [1 [true]])
+
+^{:refer tahto.model.v1.spec-hara.emit/lower-top :added "4.1"}
+(fact "rebuilds portable function calls as Hara call data"
+  (hara-emit/lower-top '(gcd 54 24) {})
+  => '(gcd 54 24))
+
+^{:refer tahto.model.v1.spec-hara.emit/rewrite-hara-source :added "4.1"}
+(fact "wraps portable function calls in the raw Hara source operation"
+  (hara-emit/rewrite-hara-source '(gcd 54 24) {})
+  => '(-%%- "(gcd 54 24)"))
+
+^{:refer tahto.common.compiler/compile :added "4.1"}
+(fact "compiles an ordinary portable function call through the Hara target hook"
+  (:output (compiler/compile instance '(gcd 54 24) selected))
+  => "(gcd 54 24)")
+

@@ -53,7 +53,7 @@
  {:strategy
   "Target rewrite converts canonical XTalk to one Hara AST, then emits it through the existing -%%- raw-source operation."
   :mutation
-  "Mutable XTalk locals and arguments become lexically scoped Hara volatile cells; reads are dereferenced and writes use vreset!/vswap!."
+  "Mutable XTalk locals and arguments become lexically scoped Hara atom cells; reads are dereferenced and writes use reset!/swap!."
   :return-and-break
   "Private exception control signals preserve non-local return and nearest-loop break semantics."
   :module-state
@@ -108,8 +108,8 @@
 
  :tests
  [{:path "lib/test/tahto/model/v1/spec_hara_test.hal"
-   :facts 8
-   :checks 8
+   :facts 12
+   :checks 12
    :coverage [:grammar :lowering :mutation :control :loops :errors]}
   {:path "lib/test/tahto/runtime/basic/type_hara_test.hal"
    :facts 6
