@@ -9,6 +9,7 @@ on:
       - 'rust/**'
       - 'lib/**'
       - 'scripts/build-www'
+      - 'scripts/install-www-redirects'
       - 'scripts/write-kernel-manifest.mjs'
       - 'scripts/sync-hara-ui.mjs'
       - '.github/scripts/reconcile-netlify-domain.sh'
@@ -56,11 +57,14 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           bash scripts/build-www
+          bash scripts/install-www-redirects
       - name: Test website scene contract
         run: |
           npm test --prefix website
           node --test website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
           test -s target/www/og-hara.jpg
+          test -s target/www/_redirects
+          grep -F '/benchmarks/* https://benchmarks.hara-lang.org/:splat 200!' target/www/_redirects
       - name: Deploy prod to www.testing.hara-lang.org
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
