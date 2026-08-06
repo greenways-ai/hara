@@ -2,7 +2,7 @@ name: Deploy www.hara-lang.org
 
 on:
   push:
-    branches: [prod]
+    branches: [main, prod]
     paths:
       - 'website/**'
       - 'benchmarks/**'
@@ -21,7 +21,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: netlify-www-prod
+  group: netlify-www-${{ github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -74,19 +74,21 @@ jobs:
           grep -F 'rust-prepared' target/www/benchmarks/index.html
           grep -F '"rust"' target/www/benchmarks/data/catalog.json
           grep -F '"runtime":"rust-prepared"' target/www/benchmarks/data/runs.json
-      - name: Deploy prod to www.testing.hara-lang.org
-        run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
+      - name: Deploy candidate to www.testing.hara-lang.org
+        run: npx --yes netlify-cli deploy --prod --dir target/www --message "${GITHUB_REF_NAME} ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
       - name: Verify the testing Astro benchmark site
         run: bash .github/scripts/verify-benchmark-observatory.sh https://www.testing.hara-lang.org/benchmarks/
-      - name: Deploy production to www.hara-lang.org
+      - name: Deploy prod to www.hara-lang.org
+        if: github.ref_name == 'prod'
         run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
       - name: Correct the production domain
+        if: github.ref_name == 'prod'
         continue-on-error: true
         run: |
           curl --fail-with-body --silent --show-error \
@@ -99,4 +101,5 @@ jobs:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}
       - name: Verify the production Astro benchmark site
+        if: github.ref_name == 'prod'
         run: bash .github/scripts/verify-benchmark-observatory.sh https://www.hara-lang.org/benchmarks/
