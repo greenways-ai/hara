@@ -30,13 +30,15 @@ if [ -e "$STAGE" ]; then
   echo "refusing to replace existing staging directory: $STAGE" >&2
   exit 1
 fi
-mkdir -p "$STAGE/rust/host" "$STAGE/rust/studio/hal" "$STAGE/rust/studio/capabilities" "$STAGE/rust/ui" \
+mkdir -p "$STAGE/rust/host" "$STAGE/rust/packages/hta" \
+         "$STAGE/rust/studio/hal" "$STAGE/rust/studio/capabilities" "$STAGE/rust/ui" \
          "$STAGE/rust/std/lib/substrate" \
          "$STAGE/examples/starter/src" \
          "$STAGE/examples/game/src" \
          "$STAGE/examples/music/src" \
          "$STAGE/examples/music/runtime" \
          "$STAGE/examples/music/runtime/host" \
+         "$STAGE/examples/music/runtime/packages/hta" \
          "$STAGE/examples/music/runtime/studio/hal" \
          "$STAGE/examples/music/runtime/studio/capabilities" \
          "$STAGE/examples/music/runtime/std/lib/substrate" \
@@ -54,6 +56,9 @@ cp "$ROOT/website/vendor/hara-ui/tokens.css" \
    "$STAGE/rust/ui/"
 cp "$ROOT/rust/web/hta.js" "$ROOT/rust/web/hta-worker.js" "$ROOT/rust/web/hta-shared-worker.js" \
    "$STAGE/rust/"
+# The public wrappers above use relative imports into packages/hta. Package the
+# complete browser module so the archive remains executable after extraction.
+cp "$ROOT"/rust/web/packages/hta/* "$STAGE/rust/packages/hta/"
 cp "$ROOT"/rust/web/host/*.js "$STAGE/rust/host/"
 cp "$ROOT"/rust/web/studio/*.js "$ROOT/rust/web/studio/studio.css" "$STAGE/rust/studio/"
 cp "$ROOT"/rust/web/studio/capabilities/*.js "$STAGE/rust/studio/capabilities/"
@@ -88,7 +93,9 @@ cp "$ROOT/website/examples/hara-amp/src/main.hal" \
 cp "$ROOT/website/hara-amp.html" "$ROOT/website/hara-amp.css" "$ROOT/website/hara-amp.js" \
    "$STAGE/examples/music/"
 cp "$RAW_WASM" "$STAGE/examples/music/runtime/hara.wasm"
-cp "$ROOT/rust/web/hta.js" "$ROOT/rust/web/hta-worker.js" "$STAGE/examples/music/runtime/"
+cp "$ROOT/rust/web/hta.js" "$ROOT/rust/web/hta-worker.js" "$ROOT/rust/web/hta-shared-worker.js" \
+   "$STAGE/examples/music/runtime/"
+cp "$ROOT"/rust/web/packages/hta/* "$STAGE/examples/music/runtime/packages/hta/"
 cp "$ROOT"/rust/web/host/*.js "$STAGE/examples/music/runtime/host/"
 cp "$ROOT"/rust/web/studio/*.js "$STAGE/examples/music/runtime/studio/"
 cp "$ROOT"/rust/web/studio/capabilities/*.js "$STAGE/examples/music/runtime/studio/capabilities/"
