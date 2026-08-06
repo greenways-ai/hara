@@ -1,5 +1,6 @@
 name: Bootstrap lang namespace migration
 
+# The pull_request event below is restricted to the temporary trigger branch.
 on:
   push:
     branches: [main]
