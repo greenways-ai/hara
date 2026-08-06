@@ -860,7 +860,13 @@
                     :context context}))
 
 (defn rewrite-hara-source
-  "Lowers canonical XTalk to one raw Hara source form before common emission."
+  "Lowers canonical XTalk to raw Hara source with an explicit module boundary."
   [form context]
-  (list '-%%-
-        (pr-str (lower-top form context))))
+  (let [source (pr-str (lower-top form context))
+        module (context-module context)]
+    (list '-%%-
+          (if module
+            (str (pr-str (list 'ns module))
+                 "\n"
+                 source)
+            source))))

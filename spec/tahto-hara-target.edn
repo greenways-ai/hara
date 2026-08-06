@@ -57,7 +57,7 @@
   :return-and-break
   "Private exception control signals preserve non-local return and nearest-loop break semantics."
   :module-state
-  "Top-level dependency definitions are qualified by their registered module and persist in the current Hara kernel."}
+  "Every compiled entry or root expression emits an explicit Hara ns boundary; top-level definitions are also qualified by their registered module and persist in the current kernel."}
 
  :supported-first-slice
  [:literals
