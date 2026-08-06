@@ -1,0 +1,94 @@
+name: Temporary Hara cell and target diagnostics
+
+on:
+  push:
+    branches:
+      - agent/tahto-hara-self-host
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/tahto-hara-self-host
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Use Hara atoms and add target diagnostics
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          emitter_paths = [
+              Path('lib/src/tahto/model/v1/spec_hara/emit.hal'),
+              Path('rust/hal-src/tahto/model/v1/spec_hara/emit.hal'),
+          ]
+          for path in emitter_paths:
+              text = path.read_text()
+              text = text.replace("(list 'volatile ", "(list 'atom ")
+              text = text.replace("'vreset!", "'reset!")
+              text = text.replace("'vswap!", "'swap!")
+              if "'volatile" in text or "'vreset!" in text or "'vswap!" in text:
+                  raise SystemExit(f'{path}: old cell operation remains')
+              path.write_text(text)
+
+          test_path = Path('lib/test/tahto/model/v1/spec_hara_test.hal')
+          test = test_path.read_text()
+          test = test.replace("(volatile 1)", "(atom 1)")
+          test = test.replace("(vreset! out", "(reset! out")
+          test = test.replace('"volatile"', '"atom"')
+          diagnostic_facts = r'''
+
+          ^{:refer tahto.model.v1.spec-hara/select :added "4.1"}
+          (fact "resolves exactly one callable target rewrite hook"
+            [(count (get-in selected [:rewrite :target]))
+             (mapv fn? (get-in selected [:rewrite :target]))]
+            => [1 [true]])
+
+          ^{:refer tahto.model.v1.spec-hara.emit/lower-top :added "4.1"}
+          (fact "rebuilds portable function calls as Hara call data"
+            (hara-emit/lower-top '(gcd 54 24) {})
+            => '(gcd 54 24))
+
+          ^{:refer tahto.model.v1.spec-hara.emit/rewrite-hara-source :added "4.1"}
+          (fact "wraps portable function calls in the raw Hara source operation"
+            (hara-emit/rewrite-hara-source '(gcd 54 24) {})
+            => '(-%%- "(gcd 54 24)"))
+
+          ^{:refer tahto.common.compiler/compile :added "4.1"}
+          (fact "compiles an ordinary portable function call through the Hara target hook"
+            (:output (compiler/compile instance '(gcd 54 24) selected))
+            => "(gcd 54 24)")
+          '''
+          if 'resolves exactly one callable target rewrite hook' not in test:
+              test = test.rstrip() + diagnostic_facts + '\n'
+          test_path.write_text(test)
+
+          java_path = Path('java/src/test/java/hara/portable/HaraXtalkSelfHostedTest.java')
+          java = java_path.read_text().replace('assertEquals(8,', 'assertEquals(12,')
+          java_path.write_text(java)
+
+          manifest_path = Path('spec/tahto-hara-target.edn')
+          manifest = manifest_path.read_text()
+          manifest = manifest.replace(
+              'Mutable XTalk locals and arguments become lexically scoped Hara volatile cells; reads are dereferenced and writes use vreset!/vswap!.',
+              'Mutable XTalk locals and arguments become lexically scoped Hara atom cells; reads are dereferenced and writes use reset!/swap!.'
+          )
+          manifest = manifest.replace(':facts 8\n   :checks 8', ':facts 12\n   :checks 12')
+          manifest_path.write_text(manifest)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            lib/src/tahto/model/v1/spec_hara/emit.hal \
+            rust/hal-src/tahto/model/v1/spec_hara/emit.hal \
+            lib/test/tahto/model/v1/spec_hara_test.hal \
+            java/src/test/java/hara/portable/HaraXtalkSelfHostedTest.java \
+            spec/tahto-hara-target.edn
+          git commit -m "Use Hara atoms and isolate target call lowering"
+          git push origin HEAD:agent/tahto-hara-self-host
