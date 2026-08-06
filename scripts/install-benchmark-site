@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SOURCE="${1:-$ROOT/.benchmark-site}"
+OUT="${2:-$ROOT/target/www}"
+DEST="$OUT/benchmarks"
+
+for required in \
+  index.html \
+  app.js \
+  shootout.js \
+  styles.css \
+  shootout.css \
+  data/catalog.json \
+  data/runs.json; do
+  if [[ ! -s "$SOURCE/$required" ]]; then
+    echo "benchmark bundle is missing $required at $SOURCE" >&2
+    exit 1
+  fi
+done
+
+rm -rf "$DEST"
+mkdir -p "$DEST"
+rsync -a \
+  --exclude '.git' \
+  --exclude 'CNAME' \
+  "$SOURCE/" "$DEST/"
+
+python3 - "$DEST/index.html" "$DEST/data/catalog.json" "$DEST/data/runs.json" <<'PY'
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+index_path, catalog_path, runs_path = map(Path, sys.argv[1:])
+html = index_path.read_text(encoding="utf-8")
+html = html.replace(
+    "https://benchmarks.hara-lang.org/",
+    "https://www.hara-lang.org/benchmarks/",
+)
+index_path.write_text(html, encoding="utf-8")
+
+if "<title>Hara Performance Observatory</title>" not in html:
+    raise SystemExit("benchmark bundle has the wrong document title")
+if "Language shootout" not in html:
+    raise SystemExit("benchmark bundle has no language shootout")
+
+catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+rust = catalog.get("runtime_catalog", {}).get("runtimes", {}).get("rust")
+if not rust or rust.get("status") != "measured":
+    raise SystemExit("benchmark catalog has no measured Rust runtime")
+
+runs = json.loads(runs_path.read_text(encoding="utf-8")).get("runs", [])
+rust_rows = [
+    row
+    for run in runs
+    for row in run.get("measurements", [])
+    if row.get("runtime") == "rust-prepared"
+    and row.get("status") == "ok"
+    and row.get("steady_state", {}).get("samples_ns")
+]
+shared = {row.get("workload") for row in rust_rows if row.get("workload")}
+if len(shared) < 6:
+    raise SystemExit(
+        f"benchmark bundle has only {len(shared)} verified Rust workloads"
+    )
+
+print(
+    f"Installed Hara Performance Observatory with "
+    f"{len(shared)} verified Rust workloads at {index_path.parent}"
+)
+PY
