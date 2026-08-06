@@ -1,0 +1,167 @@
+(ns tahto.runtime.standard)
+
+;; XTalk arrays and objects are Hara native values. This namespace only maps
+;; the portable operation names and the few return conventions that differ.
+
+(defn arr-new
+  [& values]
+  (apply std.native.Arr/new values))
+
+(defn arr?
+  [value]
+  (std.native.Arr/instance? value))
+
+(defn arr-get
+  ([array index]
+   (std.native.Arr/get-index array index))
+  ([array index default]
+   (if (and (>= index 0)
+            (< index (count array)))
+     (std.native.Arr/get-index array index)
+     default)))
+
+(defn arr-set!
+  [array index value]
+  (std.native.Arr/set-index array index value))
+
+(defn arr-clone
+  [array]
+  (. array (clone)))
+
+(defn arr-push!
+  [array value]
+  (. array (push-last value)))
+
+(defn arr-pop!
+  [array]
+  (. array (pop-last)))
+
+(defn arr-push-first!
+  [array value]
+  (. array (push-first value)))
+
+(defn arr-pop-first!
+  [array]
+  (. array (pop-first)))
+
+(defn arr-insert!
+  [array index value]
+  (. array (insert index value)))
+
+(defn arr-remove!
+  [array index]
+  (. array (remove index)))
+
+(defn arr-slice
+  ([array start]
+   (. array (slice start)))
+  ([array start end]
+   (. array (slice start end))))
+
+(defn arr-reverse!
+  [array]
+  (loop [left 0
+         right (- (count array) 1)]
+    (if (< left right)
+      (let [left-value (std.native.Arr/get-index array left)
+            right-value (std.native.Arr/get-index array right)]
+        (do
+          (std.native.Arr/set-index array left right-value)
+          (std.native.Arr/set-index array right left-value)
+          (recur (+ left 1) (- right 1))))
+      array)))
+
+(defn arr-map
+  [array function]
+  (. array (map function)))
+
+(defn arr-filter
+  [array predicate]
+  (. array (filter predicate)))
+
+(defn arr-fold-left
+  [array function initial]
+  (. array (fold-left function initial)))
+
+(defn arr-fold-right
+  [array function initial]
+  (. array (fold-right function initial)))
+
+(defn obj-new
+  [& entries]
+  (apply std.native.Obj/new entries))
+
+(defn obj?
+  [value]
+  (std.native.Obj/instance? value))
+
+(defn obj-get
+  ([object key]
+   (std.native.Obj/get-key object key))
+  ([object key default]
+   (if (std.native.Obj/has-key? object key)
+     (std.native.Obj/get-key object key)
+     default)))
+
+(defn obj-set!
+  [object key value]
+  (std.native.Obj/set-key object key value))
+
+(defn obj-has?
+  [object key]
+  (std.native.Obj/has-key? object key))
+
+(defn obj-delete!
+  [object key]
+  (std.native.Obj/delete-key object key))
+
+(defn obj-clone
+  [object]
+  (. object (clone)))
+
+(defn obj-assign!
+  [object source]
+  (. object (assign source)))
+
+(defn obj-keys
+  [object]
+  (. object (keys)))
+
+(defn obj-vals
+  [object]
+  (. object (vals)))
+
+(defn obj-pairs
+  [object]
+  (. object (pairs)))
+
+(defn entry-get
+  [container key]
+  (if (arr? container)
+    (arr-get container key)
+    (obj-get container key)))
+
+(defn entry-set!
+  [container key value]
+  (if (arr? container)
+    (arr-set! container key value)
+    (obj-set! container key value)))
+
+(defn set-path!
+  "Mutates an existing native Obj/Arr path and returns the assigned value."
+  [root path value]
+  (let [path (vec path)]
+    (if (= 0 (count path))
+      (throw
+       (ex-info "XTalk path assignment requires at least one key"
+                {:tahto/error-code :tahto.standard/empty-path}))
+      (let [key (first path)]
+        (if (= 1 (count path))
+          (do
+            (entry-set! root key value)
+            value)
+          (do
+            (set-path! (entry-get root key)
+                       (vec (drop 1 path))
+                       value)
+            value))))))
