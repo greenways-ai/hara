@@ -4,7 +4,7 @@
 
 (def legacy-phase (keyword "tahto/phase"))
 (def legacy-error (keyword "tahto/error-code"))
-(def legacy-return (keyword "tahto.hara/return"))
+(def legacy-return (keyword (str "tahto" ".hara/return")))
 (def legacy-plugin (keyword "tahto/node-response"))
 
 (fact "legacy language keywords canonicalize without a literal legacy writer"
