@@ -234,7 +234,7 @@ mod tests {
     #[test]
     fn shared_conformance_corpus_is_readable_by_the_rust_runtime() {
         let source = include_str!(
-            "../../../../hara-specs/00-unsorted/diagnostics/draft/conformance/evaluation-journal.edn"
+            "../../../../hara-specs-registry/00-unsorted/diagnostics/draft/conformance/evaluation-journal.edn"
         );
         let forms = crate::kernel::parse_forms(source).unwrap();
         assert_eq!(forms.len(), 1);

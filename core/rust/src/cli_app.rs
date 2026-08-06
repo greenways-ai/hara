@@ -286,13 +286,13 @@ mod tests {
             .join("..")
             .join("..")
             .join("..")
-            .join("hara-specs")
+            .join("hara-specs-registry")
             .join(relative);
         match std::fs::read_to_string(&path) {
             Ok(content) => Some(content),
             Err(_) => {
                 eprintln!(
-                    "skipping: {} is unavailable (hara-specs sibling repo not present)",
+                    "skipping: {} is unavailable (hara-specs-registry sibling repo not present)",
                     path.display()
                 );
                 None
@@ -307,7 +307,7 @@ mod tests {
         };
         assert_eq!(
             submodule, MANIFEST_SOURCE,
-            "rust/resources/hara-cli.edn is stale; refresh it from hara-specs/00-unsorted/cli/draft/hara-cli.edn"
+            "rust/resources/hara-cli.edn is stale; refresh it from hara-specs-registry/00-unsorted/cli/draft/hara-cli.edn"
         );
     }
 
@@ -376,7 +376,7 @@ mod tests {
     #[test]
     fn shared_outcome_conformance_cases_pass() {
         let document = parse(include_str!(
-            "../../../../hara-specs/02-platform/000001-cli/draft/conformance/outcomes.edn"
+            "../../../../hara-specs-registry/02-platform/000001-cli/draft/conformance/outcomes.edn"
         ))
         .unwrap();
         for case in vector(map_get(&document, "conformance/cases").unwrap()).unwrap() {
@@ -403,7 +403,7 @@ mod tests {
     #[test]
     fn shared_route_conformance_cases_pass() {
         let document = parse(include_str!(
-            "../../../../hara-specs/02-platform/000001-cli/draft/conformance/routes.edn"
+            "../../../../hara-specs-registry/02-platform/000001-cli/draft/conformance/routes.edn"
         ))
         .unwrap();
         for case in vector(map_get(&document, "conformance/cases").unwrap()).unwrap() {

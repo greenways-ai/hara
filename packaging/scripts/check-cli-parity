@@ -31,7 +31,7 @@ truffle_help="$(HARA_RUNTIME=truffle "$CLI" --help)" \
 [[ "$rust_help" != *"compile-hir"* && "$truffle_help" != *"compile-hir"* ]] \
   || fail "developer routes leaked into public help"
 
-METASPEC="$ROOT/../hara-specs/00-unsorted/artifact/metaspec/artifact-metaspec.edn"
+METASPEC="$ROOT/../hara-specs-registry/00-unsorted/artifact/metaspec/artifact-metaspec.edn"
 rust_spec="$(
   HARA_RUNTIME=rust HARA_NATIVE="$RUST" "$CLI" \
     spec lint "$METASPEC" --format edn

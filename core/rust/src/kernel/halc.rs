@@ -1044,10 +1044,10 @@ mod tests {
     #[test]
     fn shared_cross_runtime_goldens_decode() {
         let complete = include_bytes!(
-            "../../../../../hara-specs/01-lang/009-halc/draft/conformance/golden/complete.halc"
+            "../../../../../hara-specs-registry/01-lang/009-halc/draft/conformance/golden/complete.halc"
         );
         let legacy = include_bytes!(
-            "../../../../../hara-specs/01-lang/009-halc/draft/conformance/golden/legacy-v1.hir"
+            "../../../../../hara-specs-registry/01-lang/009-halc/draft/conformance/golden/legacy-v1.hir"
         );
         let current = decode_halc(complete).unwrap();
         assert_eq!(current.origin, HalcOrigin::Halc);

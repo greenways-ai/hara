@@ -11,13 +11,13 @@ import org.junit.Test;
 
 public class HaraMetaspecConformsTest {
   private static final Path ROOT =
-      Path.of("../hara-specs/01-lang/000-metaspec/draft/metaspec-metaspec.edn");
+      Path.of("../hara-specs-registry/01-lang/000-metaspec/draft/metaspec-metaspec.edn");
   private static final Path LANGUAGE =
-      Path.of("../hara-specs/01-lang/001-language/metaspec/language-metaspec.edn");
+      Path.of("../hara-specs-registry/01-lang/001-language/metaspec/language-metaspec.edn");
   private static final Path LANGUAGE_SPEC =
-      Path.of("../hara-specs/01-lang/001-language/draft/hal-langspec.edn");
+      Path.of("../hara-specs-registry/01-lang/001-language/draft/hal-langspec.edn");
   private static final Path ARTIFACT =
-      Path.of("../hara-specs/00-unsorted/artifact/metaspec/artifact-metaspec.edn");
+      Path.of("../hara-specs-registry/00-unsorted/artifact/metaspec/artifact-metaspec.edn");
 
   @Test
   public void rootChecksItselfAndSpecializedMetaspecs() throws Exception {

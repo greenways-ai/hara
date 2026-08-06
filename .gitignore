@@ -64,7 +64,7 @@ parse_jacoco.py
 
 # External sibling repositories checked out here during builds
 website/
-hara-specs
+hara-specs-registry
 # Legacy hara-world extension moved to workspace/website/hara-world
 extensions/hara-world/runtime/
 site-build/

@@ -238,7 +238,7 @@ public class HalcArtifactTest {
   public void goldenBytesLockThePortableFormat() {
     // One form per opcode (0-17). Any change to the byte layout, the opcode
     // numbering, or the canonical collection ordering must update this golden
-    // value and ../hara-specs/01-lang/009-halc/draft/halc-format.md together.
+    // value and ../hara-specs-registry/01-lang/009-halc/draft/halc-format.md together.
     Object[] forms =
         new Object[] {
           null,
@@ -388,7 +388,7 @@ public class HalcArtifactTest {
 
   @Test
   public void sharedCrossRuntimeGoldensDecode() throws Exception {
-    Path root = Path.of("../hara-specs/01-lang/009-halc/draft/conformance/golden");
+    Path root = Path.of("../hara-specs-registry/01-lang/009-halc/draft/conformance/golden");
     HalcArtifact.Module current = HalcArtifact.decode(Files.readAllBytes(root.resolve("complete.halc")));
     assertEquals(HalcArtifact.Origin.HALC, current.origin);
     assertEquals("halc.conformance.complete", current.namespace);

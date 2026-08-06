@@ -20,12 +20,11 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Checkout hara-specs
+    - name: Checkout hara-specs-registry
       uses: actions/checkout@v4
       with:
-        repository: hara-lang/hara-specs
-        path: hara-specs
-        ref: 3012cbe74edd92b24783f1968a55dcf612c05364
+        repository: hara-lang/hara-specs-registry
+        path: hara-specs-registry
         fetch-depth: 1
 
     - name: Enforce gw.* HAL namespaces
@@ -55,7 +54,7 @@ jobs:
     - name: Run native tracing JIT tests
       run: "cargo test --manifest-path core/rust/Cargo.toml --features native-jit jit:: --lib"
     - name: Verify generated parity corpus
-      run: ./packaging/scripts/generate-wasm-truffle-parity && git diff --exit-code -- hara-specs/00-unsorted/platform-language/draft/conformance/parity/wasm-truffle.edn
+      run: ./packaging/scripts/generate-wasm-truffle-parity && git diff --exit-code -- hara-specs-registry/00-unsorted/platform-language/draft/conformance/parity/wasm-truffle.edn
     - name: Build raw Rust WASM extension artifact
       run: ./packaging/scripts/build-hara-wasm-raw
     - name: Build browser and WASI Rust runtime artifacts
@@ -159,12 +158,11 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Checkout hara-specs
+    - name: Checkout hara-specs-registry
       uses: actions/checkout@v4
       with:
-        repository: hara-lang/hara-specs
-        path: hara-specs
-        ref: 3012cbe74edd92b24783f1968a55dcf612c05364
+        repository: hara-lang/hara-specs-registry
+        path: hara-specs-registry
         fetch-depth: 1
 
     - name: Set up Rust WASM toolchain
@@ -223,12 +221,11 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Checkout hara-specs
+    - name: Checkout hara-specs-registry
       uses: actions/checkout@v4
       with:
-        repository: hara-lang/hara-specs
-        path: hara-specs
-        ref: 3012cbe74edd92b24783f1968a55dcf612c05364
+        repository: hara-lang/hara-specs-registry
+        path: hara-specs-registry
         fetch-depth: 1
 
     - name: Set up Rust WASM toolchain

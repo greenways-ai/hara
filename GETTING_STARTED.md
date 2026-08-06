@@ -65,7 +65,7 @@ Expected result:
 
 The REPL supports multiline forms, persistent history, symbol and Java completion, and inline
 documentation. See the [Hara website docs](../website/hara-www/docs/) and the
-[archived REPL planning document](../hara-specs/99-archive/planning/tooling/repl.md).
+[archived REPL planning document](../hara-specs-registry/99-archive/planning/tooling/repl.md).
 
 ## 5. Run a file or stdin
 

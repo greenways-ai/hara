@@ -24,7 +24,7 @@ import org.junit.Test;
 /** Keeps the closed std.native inventory and its direct method surface aligned with the spec. */
 public class NativeMethodParityTest {
   private static final Path CONTRACT =
-      Path.of("../hara-specs/00-unsorted/platform-language/draft/conformance/native.edn");
+      Path.of("../hara-specs-registry/00-unsorted/platform-language/draft/conformance/native.edn");
   private static final Path FIXTURE =
       Path.of("lib/test-fixtures/std/foundation/native_method_conformance.hal");
 

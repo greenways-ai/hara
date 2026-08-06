@@ -8,9 +8,11 @@ license:
 
 | Location | License or status | Handling |
 | --- | --- | --- |
-| `hara-specs/vendor/hara-ui/` | MIT | Synchronized snapshot from `hara-lang/hara-ui`; keep its included `LICENSE` file. |
+| `website/hara-www/vendor/hara-ui/` | MIT | Synchronized snapshot from `hara-lang/hara-ui`; keep its included `LICENSE` file. |
+| `website/hara-code/vendor/hara-ui/` | MIT | Synchronized snapshot from `hara-lang/hara-ui`; keep its included `LICENSE` file. |
+| `website/hara-specs/vendor/hara-ui/` | MIT | Synchronized snapshot from `hara-lang/hara-ui`; keep its included `LICENSE` file. |
 | `application/greenways-os/extension/hara-chrome/ui/hara-ui/` | MIT | Synced snapshot from `hara-lang/hara-ui`; keep the included `LICENSE` file and do not rewrite its manifest metadata. |
-| External repositories (`hara-archive`, `hara-specs`, `hara-www`, `greenways-os`) | Independent repositories | Consult the license in each repository; the root license does not change it. |
+| External repositories (`hara-archive`, `hara-specs-registry`, `hara-specs`, `hara-www`, `hara-code`, `greenways-os`) | Independent repositories | Consult the license in each repository; the root license does not change it. |
 | `hara-www/sources/ants.hal` | Copyright Rich Hickey; all rights reserved | Do not treat as Apache-2.0. Confirm permission or replace before redistribution. |
 | `hara-www/sources/{universe-within,sunlit-landscape,plasma-storm}.hal` | CC BY-NC-SA 3.0 | Keep the existing notice; do not include in an Apache-2.0 distribution. |
 

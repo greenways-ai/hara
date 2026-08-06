@@ -42,8 +42,8 @@ and archive:
 - `../../extensions/` — editor and browser apps (`hara-emacs`, `hara-lsp`, `hara-vscode`)
   ([`hara-lang/hara-extensions`](https://github.com/hara-lang/hara-extensions)); the Chrome extension lives in
   [`../../application/greenways-os/extension/hara-chrome`](../../application/greenways-os/extension/hara-chrome).
-- `../hara-specs/` — normative specs: prose (`.md`), machine-checked corpora,
-  and spec-shaped data ([`hara-lang/hara-specs`](https://github.com/hara-lang/hara-specs)), checked out next to this repo.
+- `../hara-specs-registry/` — normative specs: prose (`.md`), machine-checked corpora,
+  and spec-shaped data ([`hara-lang/hara-specs-registry`](https://github.com/hara-lang/hara-specs-registry)), checked out next to this repo.
 - `../hara-archive/` — legacy material kept for history
   ([`hara-lang/hara-archive`](https://github.com/hara-lang/hara-archive)).
 - [`contrib/`](contrib/) — independently owned artifact formats developed with
@@ -58,9 +58,9 @@ and archive:
 ## Start here
 
 - [Hara website docs](../website/hara-www/docs/) — user guides, reference, and published documentation.
-- [HAL meta-spec](../hara-specs/01-lang/000-metaspec/draft/README.md) — the self-describing contract for metaspec documents.
-- [HAL language draft](../hara-specs/01-lang/001-language/draft/README.md) — the small EDN-oriented data and reader contract.
-- [Planning archive](../hara-specs/99-archive/planning/README.md) — earlier runtime, extension, interop, and tooling designs.
+- [HAL meta-spec](../hara-specs-registry/01-lang/000-metaspec/draft/README.md) — the self-describing contract for metaspec documents.
+- [HAL language draft](../hara-specs-registry/01-lang/001-language/draft/README.md) — the small EDN-oriented data and reader contract.
+- [Planning archive](../hara-specs-registry/99-archive/planning/README.md) — earlier runtime, extension, interop, and tooling designs.
 - [Hara for Emacs](../../extensions/hara-emacs/README.md) — project-aware evaluation, sessions, completion, docs,
   and a RESP-backed REPL.
 
@@ -191,11 +191,7 @@ sibling repositories next to this one:
 
 ```shell
 git clone https://github.com/hara-lang/hara.git
-# Pinned to the last commit that still contains the local conformance corpus.
-git init hara-specs
-git -C hara-specs remote add origin https://github.com/hara-lang/hara-specs.git
-git -C hara-specs fetch --depth 1 origin 3012cbe74edd92b24783f1968a55dcf612c05364
-git -C hara-specs checkout 3012cbe74edd92b24783f1968a55dcf612c05364
+git clone --depth 1 https://github.com/hara-lang/hara-specs-registry.git hara-specs-registry
 git clone https://github.com/hara-lang/hara-www.git
 ```
 

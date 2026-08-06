@@ -15,7 +15,7 @@ import org.graalvm.polyglot.Context;
 /** Emits per-case cold and warm timings for the Rust-WASM/Truffle parity corpus. */
 public final class HaraWasmTruffleParityBenchmark {
   private static final Path CORPUS =
-      Path.of("../hara-specs/00-unsorted/platform-language/draft/conformance/parity/wasm-truffle.edn");
+      Path.of("../hara-specs-registry/00-unsorted/platform-language/draft/conformance/parity/wasm-truffle.edn");
   private static final Path ARTIFACT =
       Path.of("rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm");
   private static final String NAMESPACE = "test.rust.parity";

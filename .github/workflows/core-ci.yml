@@ -23,12 +23,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Checkout hara-specs
+      - name: Checkout hara-specs-registry
         uses: actions/checkout@v4
         with:
-          repository: hara-lang/hara-specs
-          path: hara-specs
-          ref: 3012cbe74edd92b24783f1968a55dcf612c05364
+          repository: hara-lang/hara-specs-registry
+          path: hara-specs-registry
           fetch-depth: 1
 
       - name: Detect core changes
@@ -72,7 +71,7 @@ jobs:
             core/java \
             core/lib \
             contrib \
-            hara-specs \
+            hara-specs-registry \
             packaging/scripts/run-lib-tests; then
             echo "run_core=false" >> "$GITHUB_OUTPUT"
             echo "No core runtime changes detected."

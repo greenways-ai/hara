@@ -137,7 +137,7 @@
 	<build>
 		<resources>
 			<resource>
-				<directory>${project.basedir}/../../hara-specs</directory>
+				<directory>${project.basedir}/../../hara-specs-registry</directory>
 				<includes>
 					<include>00-unsorted/platform-language/draft/conformance/l0.edn</include>
 					<include>00-unsorted/platform-language/draft/conformance/modules.edn</include>

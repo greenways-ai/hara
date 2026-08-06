@@ -295,11 +295,11 @@ fn matches_java_symbol_and_number_macro_termination() {
 fn shared_reader_corpus_matches_canonical_forms_and_errors() {
     let Some(path) = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
-        .map(|root| root.join("hara-specs").join("01-lang/001-language/draft/conformance/reader.edn"))
+        .map(|root| root.join("hara-specs-registry").join("01-lang/001-language/draft/conformance/reader.edn"))
         .find(|candidate| candidate.is_file())
     else {
         eprintln!(
-            "skipping: hara-specs/01-lang/001-language/draft/conformance/reader.edn unavailable (hara-specs sibling repo not present)"
+            "skipping: hara-specs-registry/01-lang/001-language/draft/conformance/reader.edn unavailable (hara-specs-registry sibling repo not present)"
         );
         return;
     };

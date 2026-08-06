@@ -19,9 +19,9 @@ import org.junit.Test;
 public class DocumentationContractTest {
   private static final List<Path> ACTIVE_SPECIFICATIONS =
       List.of(
-          Path.of("../hara-specs/01-lang/000-metaspec/draft/metaspec-metaspec.edn"),
-          Path.of("../hara-specs/01-lang/001-language/metaspec/language-metaspec.edn"),
-          Path.of("../hara-specs/01-lang/001-language/draft/hal-langspec.edn"));
+          Path.of("../hara-specs-registry/01-lang/000-metaspec/draft/metaspec-metaspec.edn"),
+          Path.of("../hara-specs-registry/01-lang/001-language/metaspec/language-metaspec.edn"),
+          Path.of("../hara-specs-registry/01-lang/001-language/draft/hal-langspec.edn"));
 
   private static void assumeSpecsSubmodule() {
     assumeTrue(

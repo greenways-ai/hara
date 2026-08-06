@@ -126,11 +126,11 @@ fn check_contribution_command(args: &[String]) -> Result<(), String> {
     });
     let specs_root = repository_root
         .parent()
-        .map(|parent| parent.join("hara-specs"))
+        .map(|parent| parent.join("hara-specs-registry"))
         .filter(|path| path.is_dir())
         .unwrap_or_else(|| {
             exit_error(
-                "cannot locate hara-specs sibling repository",
+                "cannot locate hara-specs-registry sibling repository",
                 2,
             )
         });

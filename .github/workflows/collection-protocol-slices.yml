@@ -56,12 +56,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Checkout hara-specs
+      - name: Checkout hara-specs-registry
         uses: actions/checkout@v4
         with:
-          repository: hara-lang/hara-specs
-          path: hara-specs
-          ref: 3012cbe74edd92b24783f1968a55dcf612c05364
+          repository: hara-lang/hara-specs-registry
+          path: hara-specs-registry
           fetch-depth: 1
 
       - name: Set up JDK 21

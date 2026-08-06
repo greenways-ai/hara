@@ -412,10 +412,10 @@ mod spec_tests {
         let metaspec_path = repository
             .parent()
             .unwrap()
-            .join("hara-specs")
+            .join("hara-specs-registry")
             .join("00-unsorted/artifact/metaspec/artifact-metaspec.edn");
         if !metaspec_path.is_file() {
-            eprintln!("skipping: hara-specs sibling repo not present");
+            eprintln!("skipping: hara-specs-registry sibling repo not present");
             return;
         }
         let document_path =
@@ -496,12 +496,12 @@ mod spec_tests {
             .unwrap()
             .parent()
             .unwrap();
-        let specs_root = repository.parent().unwrap().join("hara-specs");
+        let specs_root = repository.parent().unwrap().join("hara-specs-registry");
         if !specs_root
             .join("00-unsorted/artifact/metaspec")
             .is_dir()
         {
-            eprintln!("skipping: hara-specs sibling repo not present");
+            eprintln!("skipping: hara-specs-registry sibling repo not present");
             return;
         }
         for path in [

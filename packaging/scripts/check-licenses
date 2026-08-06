@@ -26,7 +26,7 @@ require_text LICENSE 'Apache License'
 require_text LICENSES/README.md 'License inventory'
 require_text ../website/hara-www/vendor/hara-ui/LICENSE 'MIT License'
 require_text ../website/hara-code/vendor/hara-ui/LICENSE 'MIT License'
-require_text ../hara-specs/vendor/hara-ui/LICENSE 'MIT License'
+require_text ../website/hara-specs/vendor/hara-ui/LICENSE 'MIT License'
 require_text ../application/greenways-os/extension/hara-chrome/ui/hara-ui/LICENSE 'MIT License'
 
 while IFS= read -r -d '' manifest; do
