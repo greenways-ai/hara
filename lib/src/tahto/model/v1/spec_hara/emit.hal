@@ -81,11 +81,11 @@
         (if (map? module) (get module :id) module))))
 
 (defn qualify-top-symbol
-  [symbol context]
+  [symbol-value context]
   (let [module (context-module context)]
-    (if (or (namespace symbol) (nil? module))
-      symbol
-      (symbol (str module) (name symbol)))))
+    (if (or (namespace symbol-value) (nil? module))
+      symbol-value
+      (symbol (str module) (name symbol-value)))))
 
 (defn path-target
   [target]
