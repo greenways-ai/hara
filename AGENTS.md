@@ -13,10 +13,13 @@ component map.
     holds the browser loaders plus the shared studio environment
     (`core/rust/web/studio/`, mounted by the hara-www studio page and the
     greenways-os DevTools panel).
-  - `core/lib/` — hara-language sources (`core/lib/src`, `core/lib/test`),
-    examples (`core/lib/examples/`), benchmarks (`core/lib/bench/`). Notable
-    namespaces: `std.foundation`, the `talo.*` compiler port, and the
-    `std.ledger.*` consensus-free executable-chain experiments.
+  - `core/lib/` — Hara-language sources. Compiler, runtime, and host libraries
+    live under `core/lib/src` with tests in `core/lib/test`; portable `xt.*`
+    and `postgres.*` libraries live under `core/lib/src-lang` with tests in
+    `core/lib/test-lang`. Examples are in `core/lib/examples/` and benchmarks
+    in `core/lib/bench/`. Notable namespaces include `std.foundation`, the
+    `tahto.*` compiler port, and the `std.ledger.*` consensus-free
+    executable-chain experiments.
   - `core/spec/` — parity specifications and substrate tests for core language
     targets.
 - `packaging/scripts/` — repo-level build, release, benchmark, and site scripts.
@@ -144,10 +147,10 @@ for each package to appear in the crates.io index and uploads the resulting
 - Website content lives in `hara-lang/hara-www`; check it out at
   `../website/hara-www/` next to this repo (CI workflows check it out at
   `website/hara-www/` inside this repo).
-- The JVM runtime embeds `core/lib/src/**/*.hal` (std foundation) as classpath
-  resources via `core/java/pom.xml`; the Rust runtime embeds
-  `core/lib/src/std/foundation.hal` via `include_str!` in
-  `core/rust/src/lib.rs`.
+- The JVM runtime embeds `core/lib/src/**/*.hal` and
+  `core/lib/src-lang/**/*.hal` as classpath resources via `core/java/pom.xml`.
+  The Rust runtime packages the same canonical roots through the generated
+  `core/rust/hal-src` snapshot.
 - `core/target/` is CI scratch/build artifacts; Maven output is
   `core/java/target/`. Both are gitignored.
 - The pages deploy (`.github/workflows/pages-www.yml`) ships the `website/hara-www/`
