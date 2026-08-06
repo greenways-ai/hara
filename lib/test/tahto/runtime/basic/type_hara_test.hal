@@ -21,7 +21,7 @@
       nil
       {:status :created
        :target :hara
-       :home-namespace 'user
+       :home-namespace 'tahto.runtime.basic.type-hara-test
        :evaluations 0}])
 
 ^{:refer tahto.runtime.basic.type-hara/raw-eval-hara :added "4.1"}
@@ -107,5 +107,5 @@
     (hara/hara-state runtime))
   => {:status :stopped
       :target :hara
-      :home-namespace 'user
+      :home-namespace 'tahto.runtime.basic.type-hara-test
       :evaluations 1})
