@@ -26,5 +26,6 @@ jobs:
       - name: Run focused self-hosted target suite
         run: >-
           mvn -B -Ptruffle
+          -Dexec.skip=true
           -Dtest=hara.portable.HaraXtalkSelfHostedTest
           test --file java/pom.xml
