@@ -10,10 +10,15 @@ mod artifact;
 #[cfg(target_arch = "wasm32")]
 #[path = "whole_wasm/browser.rs"]
 mod browser;
+#[path = "whole_wasm/call_boundary.rs"]
+mod call_boundary;
 #[path = "whole_wasm/codegen.rs"]
 mod codegen;
 #[path = "whole_wasm/handles.rs"]
 mod handles;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "whole_wasm/hta_boundary.rs"]
+mod hta_boundary;
 #[path = "whole_wasm/ir.rs"]
 mod ir;
 #[path = "whole_wasm/reps.rs"]
@@ -214,3 +219,7 @@ mod tests {
         assert_eq!(module(source).call_entry_i64(), Ok(7));
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "whole_wasm/value_tests.rs"]
+mod value_tests;
