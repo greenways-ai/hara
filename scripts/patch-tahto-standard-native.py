@@ -179,14 +179,14 @@ for path in EMITTERS:
     )
 
     text = text.replace(
-        '        "x:is-object?" (list \'map? (lowered (argument 0)))',
-        """        \"x:is-object?\" (list 'tahto.runtime.standard/obj?
-                             (lowered (argument 0)))""",
+        '''        "x:is-object?" (list 'map? (lowered (argument 0)))''',
+        '''        "x:is-object?" (list 'tahto.runtime.standard/obj?
+                             (lowered (argument 0)))''',
     )
     text = text.replace(
-        '        "x:is-array?" (list \'vector? (lowered (argument 0)))',
-        """        \"x:is-array?\" (list 'tahto.runtime.standard/arr?
-                            (lowered (argument 0)))""",
+        '''        "x:is-array?" (list 'vector? (lowered (argument 0)))''',
+        '''        "x:is-array?" (list 'tahto.runtime.standard/arr?
+                            (lowered (argument 0)))''',
     )
 
     if "tahto.runtime.hara" in text:
