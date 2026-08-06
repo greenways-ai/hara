@@ -30,7 +30,7 @@
       '(if true "yes" "no")])
 
 ^{:refer tahto.model.v1.spec-hara/emit :added "4.1"}
-(fact "models mutable XTalk locals with scoped Hara atoms"
+(fact "models mutable scalar XTalk locals with scoped Hara atoms"
   (read-string
    (hara/emit
     '(do
@@ -43,7 +43,7 @@
           (deref value))))
 
 ^{:refer tahto.model.v1.spec-hara/emit :added "4.1"}
-(fact "lowers mutable arrays onto the Hara runtime helpers"
+(fact "creates mutable arrays through the std.native Arr facade"
   (read-string
    (hara/emit
     '(do
@@ -51,12 +51,40 @@
        (x:arr-push values 3)
        (x:set-idx values 0 9)
        values)))
-  => '(let [values (atom [1 2])]
+  => '(let [values (atom (tahto.runtime.hara/arr-new 1 2))]
         (do
           (tahto.runtime.hara/arr-push! values 3)
           (do
             (tahto.runtime.hara/set-path! values [0] 9)
             (deref values)))))
+
+^{:refer tahto.model.v1.spec-hara.emit/lower :added "4.1"}
+(fact "creates nested XTalk array and object literals as native values"
+  [(read-string (hara/emit '[1 {"name" "hara"}]))
+   (read-string (hara/emit '{"items" [1 2]}))]
+  => ['(tahto.runtime.hara/arr-new
+        1
+        (tahto.runtime.hara/obj-new "name" "hara"))
+      '(tahto.runtime.hara/obj-new
+        "items"
+        (tahto.runtime.hara/arr-new 1 2))])
+
+^{:refer tahto.model.v1.spec-hara.emit/lower-x-call :added "4.1"}
+(fact "routes collection reads and predicates through the native facade"
+  [(read-string (hara/emit '(x:get-key {"name" "hara"} "name")))
+   (read-string (hara/emit '(x:get-idx [3 4] 1)))
+   (read-string (hara/emit '(x:is-object? {"name" "hara"})))
+   (read-string (hara/emit '(x:is-array? [3 4])))]
+  => ['(tahto.runtime.hara/obj-get
+        (tahto.runtime.hara/obj-new "name" "hara")
+        "name")
+      '(tahto.runtime.hara/arr-get
+        (tahto.runtime.hara/arr-new 3 4)
+        1)
+      '(tahto.runtime.hara/obj?
+        (tahto.runtime.hara/obj-new "name" "hara"))
+      '(tahto.runtime.hara/arr?
+        (tahto.runtime.hara/arr-new 3 4))])
 
 ^{:refer tahto.model.v1.spec-hara.emit/flatten-symbol :added "4.1"}
 (fact "flattens staged module references to legal Hara Vars"
@@ -72,7 +100,7 @@
     [(:output result)
      (get-in result [:grammar :coordinate])
      (mapv :phase (get-in result [:provenance :events]))])
-  => ["(count [1 2 3])"
+  => ["(count (tahto.runtime.hara/arr-new 1 2 3))"
       {:grammar/id :hara
        :grammar/variant :default
        :grammar/version 1}
