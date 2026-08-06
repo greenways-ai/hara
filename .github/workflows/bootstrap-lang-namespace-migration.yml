@@ -1,0 +1,99 @@
+name: Bootstrap lang namespace migration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/bootstrap-lang-namespace-migration.yml'
+      - 'packaging/scripts/migrate-tahto-to-lang'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bootstrap-lang-namespace-migration
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    if: github.repository == 'hara-lang/hara'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure migration branch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git switch -C agent/lang-namespace-migration
+
+      - name: Perform and validate the hard namespace cut
+        run: python3 packaging/scripts/migrate-tahto-to-lang
+
+      - name: Remove one-shot bootstrap machinery
+        run: |
+          git rm .github/workflows/bootstrap-lang-namespace-migration.yml
+          git rm packaging/scripts/migrate-tahto-to-lang
+
+      - name: Commit and push generated migration
+        run: |
+          git add -A
+          git commit -m "Rename Tahto compiler namespaces to lang"
+          git push --force origin HEAD:agent/lang-namespace-migration
+
+      - name: Open or update the generated pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > /tmp/lang-pr-body.md <<'EOF'
+          ## Summary
+
+          This is the generated hard namespace cut following the merged
+          `src-lang` / `test-lang` source-root migration.
+
+          ```text
+          tahto.* -> lang.*
+          ```
+
+          The production, test, and packaged Rust trees move from `tahto` to
+          `lang`; executable references, dynamic registry symbols, generated
+          source expectations, Java test names, workflows, and Hara-owned
+          parity artifacts are rewritten atomically.
+
+          ## Compatibility boundary
+
+          - no forwarding `tahto.*` namespaces
+          - no changes to `xt.*` or `postgres.*` namespace names
+          - no changes to serialized `:tahto/*` data vocabulary in this PR
+          - historical upstream `src/tahto/...` references remain historical
+            source paths
+
+          ## Generated validation
+
+          - canonical `src` / `src-lang` layout and duplicate-namespace guard
+          - no-live-`tahto.*` code namespace guard
+          - canonical-to-Rust HAL mirror regeneration and drift check
+          - `git diff --check`
+
+          The PR remains draft for the full JVM, Rust, HALC, WASM, and portable
+          language integration suites.
+          EOF
+
+          if gh pr view agent/lang-namespace-migration >/dev/null 2>&1; then
+            gh pr edit agent/lang-namespace-migration \
+              --title "Rename Tahto compiler namespaces to lang" \
+              --body-file /tmp/lang-pr-body.md
+          else
+            gh pr create \
+              --base main \
+              --head agent/lang-namespace-migration \
+              --draft \
+              --title "Rename Tahto compiler namespaces to lang" \
+              --body-file /tmp/lang-pr-body.md
+          fi
