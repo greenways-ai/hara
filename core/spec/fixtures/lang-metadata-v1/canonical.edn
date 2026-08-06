@@ -1,0 +1,10 @@
+{:lang/phase :lint
+ :lang/error-code :lang/error-lint
+ :lang/grammar-coordinate [:js 1]
+ :lang/provenance
+ {:lang/module demo.core
+  :lang/line 42}
+ :profile [[:lang/node-response 1]]
+ :runtime {:type :lang/rt.basic}
+ :target {:error/type :lang/target}
+ :hara-return {:lang.hara/return true}}
