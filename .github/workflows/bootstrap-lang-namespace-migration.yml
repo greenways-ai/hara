@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/workflows/bootstrap-lang-namespace-migration.yml'
       - 'packaging/scripts/migrate-tahto-to-lang'
+  issue_comment:
+    types: [created]
   workflow_dispatch:
 
 permissions:
@@ -18,7 +20,11 @@ concurrency:
 
 jobs:
   generate:
-    if: github.repository == 'hara-lang/hara'
+    if: >-
+      github.repository == 'hara-lang/hara' &&
+      (github.event_name != 'issue_comment' ||
+       (github.event.issue.pull_request &&
+        github.event.comment.body == '/run-lang-namespace-migration'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,28 +33,46 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Skip after the generated pull request exists
+        id: guard
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh pr view agent/lang-namespace-migration \
+              --json state --jq '.state' 2>/dev/null | grep -qx OPEN; then
+            echo 'skip=true' >> "$GITHUB_OUTPUT"
+            echo 'Generated migration pull request is already open.'
+          else
+            echo 'skip=false' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Configure migration branch
+        if: steps.guard.outputs.skip != 'true'
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git switch -C agent/lang-namespace-migration
 
       - name: Perform and validate the hard namespace cut
+        if: steps.guard.outputs.skip != 'true'
         run: python3 packaging/scripts/migrate-tahto-to-lang
 
       - name: Remove one-shot bootstrap machinery
+        if: steps.guard.outputs.skip != 'true'
         run: |
           git rm .github/workflows/bootstrap-lang-namespace-migration.yml
           git rm .github/workflows/validate-lang-namespace-migration.yml
           git rm packaging/scripts/migrate-tahto-to-lang
 
       - name: Commit and push generated migration
+        if: steps.guard.outputs.skip != 'true'
         run: |
           git add -A
           git commit -m "Rename Tahto compiler namespaces to lang"
           git push --force origin HEAD:agent/lang-namespace-migration
 
-      - name: Open or update the generated pull request
+      - name: Open the generated pull request
+        if: steps.guard.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -86,15 +110,9 @@ jobs:
           language integration suites.
           EOF
 
-          if gh pr view agent/lang-namespace-migration >/dev/null 2>&1; then
-            gh pr edit agent/lang-namespace-migration \
-              --title "Rename Tahto compiler namespaces to lang" \
-              --body-file /tmp/lang-pr-body.md
-          else
-            gh pr create \
-              --base main \
-              --head agent/lang-namespace-migration \
-              --draft \
-              --title "Rename Tahto compiler namespaces to lang" \
-              --body-file /tmp/lang-pr-body.md
-          fi
+          gh pr create \
+            --base main \
+            --head agent/lang-namespace-migration \
+            --draft \
+            --title "Rename Tahto compiler namespaces to lang" \
+            --body-file /tmp/lang-pr-body.md
