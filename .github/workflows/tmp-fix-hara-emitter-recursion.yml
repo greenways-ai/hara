@@ -1,0 +1,105 @@
+name: Temporary Hara emitter recursion fix
+
+on:
+  push:
+    branches:
+      - agent/tahto-hara-self-host
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/tahto-hara-self-host
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Replace lowerer implementation recur with ordinary recursion
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          paths = [
+              Path('lib/src/tahto/model/v1/spec_hara/emit.hal'),
+              Path('rust/hal-src/tahto/model/v1/spec_hara/emit.hal'),
+          ]
+
+          lower_args = '''(defn lower-args-step
+            [out remaining context]
+            (if (empty? remaining)
+              out
+              (let [argument (first remaining)]
+                (cond
+                  (symbol? argument)
+                  (lower-args-step (conj out argument)
+                                   (vec (rest remaining))
+                                   context)
+
+                  (and (list? argument)
+                       (= :.. (first argument))
+                       (= 2 (count argument))
+                       (symbol? (second argument)))
+                  (if (= 1 (count remaining))
+                    (conj out '& (second argument))
+                    (fail "Rest arguments must be final for the Hara target"
+                          remaining context))
+
+                  :else
+                  (fail "The Hara target currently requires symbol function arguments"
+                        argument context)))))
+
+          (defn lower-args
+            [arguments context]
+            (lower-args-step [] (vec arguments) context))
+
+          '''
+
+          declaration_body = '''(defn declaration-body-step
+            [remaining form context]
+            (cond
+              (empty? remaining)
+              (fail "Function declaration has no argument vector" form context)
+
+              (vector? (first remaining))
+              [(first remaining) (vec (rest remaining))]
+
+              :else
+              (declaration-body-step (vec (rest remaining)) form context)))
+
+          (defn declaration-body
+            [form context]
+            (declaration-body-step (vec (drop 2 form)) form context))
+
+          '''
+
+          for path in paths:
+              text = path.read_text()
+              text, count_args = re.subn(
+                  r'\(defn lower-args\n.*?\n\(defn argument-symbols',
+                  lower_args + '(defn argument-symbols',
+                  text,
+                  count=1,
+                  flags=re.S,
+              )
+              text, count_decl = re.subn(
+                  r'\(defn declaration-body\n.*?\n\(defn lower-defn',
+                  declaration_body + '(defn lower-defn',
+                  text,
+                  count=1,
+                  flags=re.S,
+              )
+              if count_args != 1 or count_decl != 1:
+                  raise SystemExit(f'{path}: replacement counts {count_args}, {count_decl}')
+              path.write_text(text)
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add lib/src/tahto/model/v1/spec_hara/emit.hal rust/hal-src/tahto/model/v1/spec_hara/emit.hal
+          git commit -m "Fix Hara lowerer implementation recursion"
+          git push origin HEAD:agent/tahto-hara-self-host
