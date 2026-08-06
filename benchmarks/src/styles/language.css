@@ -46,6 +46,28 @@
 .matrix-detail dl div { display:grid; grid-template-columns:1fr auto; gap:1rem; padding:.75rem 0; border-top:1px solid var(--hara-line); }
 .matrix-detail dt { color:var(--hara-muted); font-size:.75rem; }
 .matrix-detail dd { margin:0; font:650 .78rem var(--hara-font-mono); text-align:right; }
+.http-route-label { display:none; }
 @media(max-width:1120px){.language-overview{grid-template-columns:1fr}.matrix-stage{grid-template-columns:1fr}.matrix-detail{position:static;min-height:0}}
 @media(max-width:820px){.language-panel{gap:90px}.insight-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.overview-metrics,.insight-grid{grid-template-columns:1fr}.overview-metrics>div{min-height:145px}.section-heading{align-items:start;flex-direction:column}.matrix-legend{justify-content:start}}
+@media(max-width:700px){
+  .http-matrix-stage{gap:.75rem}
+  .http-matrix-scroll{max-width:none;overflow:visible;border:0;border-radius:0;background:transparent;box-shadow:none}
+  .http-comparison-matrix{display:block;width:100%;min-width:0}
+  .http-comparison-matrix thead{display:none}
+  .http-comparison-matrix tbody{display:grid;gap:.75rem}
+  .http-comparison-matrix tbody tr{display:grid;width:100%;overflow:hidden;border:1px solid var(--hara-line);border-radius:var(--hara-radius-md);background:var(--hara-surface-solid);box-shadow:var(--hara-shadow)}
+  .http-comparison-matrix th,.http-comparison-matrix td{border-right:0;border-bottom:0}
+  .http-comparison-matrix tbody tr>*:not(:first-child){border-top:1px solid var(--hara-line)}
+  .http-comparison-matrix tbody th{position:static;left:auto;z-index:auto;display:flex;align-items:baseline;justify-content:space-between;gap:1rem;min-width:0;padding:.85rem .95rem;background:var(--hara-bg-clean)}
+  .http-comparison-matrix tbody th strong{min-width:0;line-height:1.25;overflow-wrap:anywhere}
+  .http-comparison-matrix tbody th code{flex:0 0 auto;margin:0;text-align:right}
+  .http-comparison-matrix td{display:grid;grid-template-columns:minmax(0,1fr) minmax(102px,auto);align-items:stretch;min-width:0;padding:0}
+  .http-route-label{display:block;align-self:center;min-width:0;padding:.72rem .9rem;color:var(--hara-muted);font:650 .72rem var(--hara-font-mono);line-height:1.35;overflow-wrap:anywhere}
+  .http-comparison-matrix .matrix-cell,.http-comparison-matrix .baseline-cell{width:auto;min-width:102px;min-height:54px;padding:.62rem .78rem;border-left:1px solid var(--hara-line);justify-items:end;text-align:right}
+  .http-comparison-matrix .matrix-cell span,.http-comparison-matrix .baseline-cell span{max-width:9rem;text-align:right;overflow-wrap:anywhere}
+  .http-panel .matrix-detail{padding:1rem}
+  .http-panel .matrix-detail h4{font-size:clamp(1.1rem,6vw,1.35rem);overflow-wrap:anywhere}
+  .http-panel .matrix-detail dl div{grid-template-columns:minmax(0,1fr) minmax(0,auto)}
+  .http-panel .matrix-detail dd{max-width:58vw;overflow-wrap:anywhere}
+}
