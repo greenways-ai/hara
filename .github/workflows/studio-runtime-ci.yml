@@ -23,6 +23,7 @@ on:
       - rust/web/hta.js
       - rust/web/hta-worker.js
       - rust/web/hta-shared-worker.js
+      - rust/web/packages/hta/**
       - rust/web/host/**
       - rust/web/studio/**
       - rust/web/ui/**
@@ -59,6 +60,7 @@ on:
       - rust/web/hta.js
       - rust/web/hta-worker.js
       - rust/web/hta-shared-worker.js
+      - rust/web/packages/hta/**
       - rust/web/host/**
       - rust/web/studio/**
       - rust/web/ui/**
@@ -115,7 +117,7 @@ jobs:
       - name: Build and verify Studio runtime archive
         run: scripts/build-studio-runtime ci
 
-      - name: Verify archive checksum and Supersonic payload
+      - name: Verify archive checksum and browser payload
         shell: bash
         run: |
           ARCHIVE="$GITHUB_WORKSPACE/target/studio-runtime/hara-studio-runtime-ci.tar.gz"
@@ -127,8 +129,14 @@ jobs:
           sha256sum -c "$CHECKSUM"
           tar -tzf "$ARCHIVE" > "$RAW_LISTING"
           sed 's#^\./##' "$RAW_LISTING" > "$LISTING"
+          grep -Fxq 'rust/packages/hta/index.js' "$LISTING"
+          grep -Fxq 'rust/packages/hta/worker.js' "$LISTING"
+          grep -Fxq 'rust/packages/hta/shared-worker.js' "$LISTING"
           grep -Fxq 'rust/studio/supersonic.js' "$LISTING"
           grep -Fxq 'rust/studio/hal/supersonic.hal' "$LISTING"
+          grep -Fxq 'examples/music/runtime/packages/hta/index.js' "$LISTING"
+          grep -Fxq 'examples/music/runtime/packages/hta/worker.js' "$LISTING"
+          grep -Fxq 'examples/music/runtime/packages/hta/shared-worker.js' "$LISTING"
           grep -Fxq 'examples/music/runtime/studio/supersonic.js' "$LISTING"
           grep -Fxq 'examples/music/runtime/studio/hal/supersonic.hal' "$LISTING"
 
