@@ -1,8 +1,9 @@
-package hara.truffle;
+package hara.portable;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import hara.truffle.HaraNativeTestRunner;
 import java.nio.file.Path;
 import org.junit.Test;
 
