@@ -7,24 +7,27 @@ base="${base%/}"
 page="$(mktemp)"
 catalog="$(mktemp)"
 runs="$(mktemp)"
-trap 'rm -f "$page" "$catalog" "$runs"' EXIT
+headers="$(mktemp)"
+trap 'rm -f "$page" "$catalog" "$runs" "$headers"' EXIT
 
 healthy=false
 for attempt in {1..20}; do
   if curl --fail --silent --show-error --location --max-time 20 \
-      -H 'Cache-Control: no-cache' "$base/" >"$page" \
+      --dump-header "$headers" "$base/" >"$page" \
     && curl --fail --silent --show-error --location --max-time 20 \
-      -H 'Cache-Control: no-cache' "$base/data/catalog.json" >"$catalog" \
+      "$base/data/catalog.json" >"$catalog" \
     && curl --fail --silent --show-error --location --max-time 20 \
-      -H 'Cache-Control: no-cache' "$base/data/runs.json" >"$runs" \
+      "$base/data/runs.json" >"$runs" \
     && grep -Fq '<title>Hara Benchmarks</title>' "$page" \
     && grep -Fq 'id="class-comparison"' "$page" \
     && grep -Fq 'id="language-shootout"' "$page" \
     && grep -Fq 'rust-prepared' "$page" \
+    && ! grep -Fq 'Hara Performance Observatory' "$page" \
+    && grep -Fiq 'cache-control: no-store' "$headers" \
     && grep -Fq '"rust"' "$catalog" \
     && grep -Fq '"runtime":"rust-prepared"' "$runs"; then
     healthy=true
-    echo "Verified the Rust-enabled Astro benchmark site and canonical evidence at ${base}/."
+    echo "Verified the uncached Rust-enabled Astro benchmark site and canonical evidence at ${base}/."
     break
   fi
   if [[ "$attempt" -lt 20 ]]; then
@@ -34,6 +37,10 @@ for attempt in {1..20}; do
 done
 
 if [[ "$healthy" != true ]]; then
-  echo "${base}/ did not expose the Rust-enabled Astro benchmark site and evidence." >&2
+  echo "${base}/ did not expose the uncached Rust-enabled Astro benchmark site and evidence." >&2
+  echo "Response markers:" >&2
+  grep -E '<title>|Hara Performance Observatory|class-comparison|language-shootout' "$page" | head -n 12 >&2 || true
+  echo "Response headers:" >&2
+  sed -n '1,30p' "$headers" >&2 || true
   exit 1
 fi

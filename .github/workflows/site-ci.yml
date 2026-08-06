@@ -8,6 +8,7 @@ on:
       - "lib/bench/**"
       - "packages/visual-language/**"
       - "scripts/install-benchmark-site"
+      - "scripts/install-www-redirects"
       - ".github/scripts/verify-benchmark-observatory.sh"
       - ".github/workflows/site-ci.yml"
       - ".github/workflows/pages-www.yml"
@@ -55,7 +56,16 @@ jobs:
           grep -F 'id="class-comparison"' target/benchmarks/index.html
           grep -F 'id="language-shootout"' target/benchmarks/index.html
           grep -F 'rust-prepared' target/benchmarks/index.html
-      - name: Validate main Hara site
+      - name: Validate main Hara site and local benchmark routing
         run: |
           npm test --prefix website
           npm run build --prefix website
+          rm -rf target/www
+          cp -R target/www-astro target/www
+          mkdir -p target/www/benchmarks
+          cp -R target/benchmarks/. target/www/benchmarks/
+          bash scripts/install-www-redirects target/www
+          test -s target/www/_headers
+          grep -F '/benchmarks/*' target/www/_headers
+          ! grep -Eq '(^[[:space:]]*/benchmarks|benchmarks\.hara-lang\.org)' target/www/_redirects
+          grep -F '<title>Hara Benchmarks</title>' target/www/benchmarks/index.html
