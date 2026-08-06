@@ -7,11 +7,13 @@ const classEvidence = JSON.parse(await readFile(new URL("../../lib/bench/results
 const page = await readFile(new URL("../src/pages/index.astro", import.meta.url), "utf8");
 const language = await readFile(new URL("../src/components/LanguagePanel.astro", import.meta.url), "utf8");
 const classPanel = await readFile(new URL("../src/components/ClassPanel.astro", import.meta.url), "utf8");
+const http = await readFile(new URL("../src/components/HttpPanel.astro", import.meta.url), "utf8");
 const reference = await readFile(new URL("../src/components/RuntimeReference.astro", import.meta.url), "utf8");
 const header = await readFile(new URL("../src/components/SiteHeader.astro", import.meta.url), "utf8");
 const data = await readFile(new URL("../src/lib/benchmark-data.ts", import.meta.url), "utf8");
+const languageStyles = await readFile(new URL("../src/styles/language.css", import.meta.url), "utf8");
 const installer = await readFile(new URL("../../scripts/install-benchmark-site", import.meta.url), "utf8");
-const source = [page, language, classPanel, reference, header, data].join("\n");
+const source = [page, language, classPanel, http, reference, header, data].join("\n");
 const indexOf = (value) => { const index = language.indexOf(value); assert.notEqual(index, -1, `Expected language panel to contain ${value}`); return index; };
 
 test("uses the nine canonical internal artifacts", () => {
@@ -58,6 +60,17 @@ test("keeps Astro as renderer while synchronizing canonical benchmark data", () 
   assert.match(installer, /Published canonical benchmark data alongside the Astro site/);
   assert.doesNotMatch(installer, /rm -rf "\$DEST"/);
   assert.doesNotMatch(installer, /app\.js|shootout\.js|styles\.css|shootout\.css/);
+});
+test("turns the HTTP matrix into route-labelled server cards on mobile", () => {
+  assert.ok(http.includes('class="tab-panel http-panel"'));
+  assert.ok(http.includes('class="matrix-scroll http-matrix-scroll"'));
+  assert.ok(http.includes('class="comparison-matrix http-comparison-matrix"'));
+  assert.ok((http.match(/class="http-route-label"/g) ?? []).length >= 3);
+  assert.ok(http.includes('aria-label={`${server}, ${route}: ${result.text}`}'));
+  assert.ok(languageStyles.includes(".http-route-label { display:none; }"));
+  assert.ok(languageStyles.includes(".http-matrix-scroll{max-width:none;overflow:visible"));
+  assert.ok(languageStyles.includes(".http-comparison-matrix tbody{display:grid;gap:.75rem}"));
+  assert.ok(languageStyles.includes(".http-comparison-matrix tbody tr{display:grid;width:100%"));
 });
 test("puts overview and insights before the drill-down matrix", () => {
   const overview = indexOf("Overview");
