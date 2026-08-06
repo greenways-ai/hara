@@ -74,7 +74,7 @@ await cp(resolve(source, "javascripts/kernel.js"), join(runtimeDestination, "jav
 await cp(resolve(source, "javascripts/syllabus.js"), join(runtimeDestination, "javascripts/syllabus.js"));
 await cp(resolve(source, "stylesheets/syllabus.css"), join(runtimeDestination, "stylesheets/syllabus.css"));
 
-// Publish the @hara-lang/live package sources as static assets. Files under
-// public/ are served verbatim (no bundler), so docs-repl.js imports these
-// copies at /docs-assets/live/; packages/live/src remains authoritative.
+// Publish @hara-lang/live from the pinned hara-ui submodule as static assets.
+// website/packages/live is a compatibility symlink to that package; files
+// under public/ are served verbatim for the documentation REPL adapter.
 await cp(resolve(site, "packages/live/src"), join(runtimeDestination, "live"), { recursive: true });
