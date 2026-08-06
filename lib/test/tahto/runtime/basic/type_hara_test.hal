@@ -21,6 +21,7 @@
       nil
       {:status :created
        :target :hara
+       :home-namespace 'user
        :evaluations 0}])
 
 ^{:refer tahto.runtime.basic.type-hara/raw-eval-hara :added "4.1"}
@@ -70,6 +71,7 @@
            (get data :target)
            (get data :runtime)
            (get data :program)
+           (string? (get data :cause-message))
            (get data :source)]))
       (finally
         (l/rt-stop runtime))))
@@ -79,7 +81,23 @@
       :hara
       :basic
       :hara-self
+      true
       "(missing-self-hosted-function 1)"])
+
+^{:refer tahto.runtime.basic.type-hara/eval-source-now :added "4.1"}
+(fact "restores the home namespace after failed module evaluation"
+  (let [runtime (l/rt-start (l/rt-create :hara :basic))]
+    (try
+      (l/rt-raw-eval runtime "(def self-hosted-home-value 40)")
+      (try
+        (l/rt-raw-eval runtime
+                       "(ns self-hosted.failed-module)\n(missing-self-hosted-function 1)")
+        (catch Throwable _ nil))
+      [(l/rt-raw-eval runtime "(+ self-hosted-home-value 2)")
+       (get (hara/hara-state runtime) :evaluations)]
+      (finally
+        (l/rt-stop runtime))))
+  => [42 2])
 
 ^{:refer tahto.runtime.basic.type-hara/stop-hara :added "4.1"}
 (fact "retains lifecycle state and evaluation count after stop"
@@ -89,4 +107,5 @@
     (hara/hara-state runtime))
   => {:status :stopped
       :target :hara
+      :home-namespace 'user
       :evaluations 1})
