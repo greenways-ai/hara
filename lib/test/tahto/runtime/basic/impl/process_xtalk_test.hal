@@ -3,7 +3,8 @@
   (:require [tahto.core.eval :as evaluation]
             [tahto.core.registry :as registry]
             [tahto.core.runtime :as runtime]
-            [tahto.runtime.basic.type-hara :as hara-basic]))
+            [tahto.runtime.basic.type-hara :as hara-basic]
+            [tahto.runtime.standard :as standard]))
 
 (defn await
   [value]
@@ -45,7 +46,7 @@
   => [1 2 2 3 :hara :stopped nil])
 
 ^{:refer tahto.runtime.basic.type-hara/eval-hara-basic :added "4.1"}
-(fact "compiles XTalk forms through the Hara grammar before evaluation"
+(fact "compiles XTalk forms into native Hara arrays and objects"
   (let [instance
         (runtime/rt-start
          (runtime/rt-create
@@ -62,6 +63,14 @@
              (x:arr-push values 3)
              (x:set-idx values 0 9)
              values)))
+        mutable-object
+        (await
+         (runtime/rt-eval
+          instance
+          '(do
+             (var value := {"a" 1})
+             (x:set-key value "b" 2)
+             value)))
         early-return
         (await
          (runtime/rt-eval
@@ -74,11 +83,17 @@
         state (hara-basic/hara-basic-state instance)]
     (runtime/rt-stop instance)
     [arithmetic
-     mutable-array
+     (standard/arr? mutable-array)
+     [(standard/arr-get mutable-array 0)
+      (standard/arr-get mutable-array 1)
+      (standard/arr-get mutable-array 2)]
+     (standard/obj? mutable-object)
+     [(standard/obj-get mutable-object "a")
+      (standard/obj-get mutable-object "b")]
      early-return
      (:evaluations state)
      (:last-compiled? state)])
-  => [42 [9 2 3] 7 3 true])
+  => [42 true [9 2 3] true [1 2] 7 4 true])
 
 ^{:refer tahto.runtime.basic.type-hara/rt-hara-basic:create :added "4.1"}
 (fact "isolates persistent Vars by runtime namespace"
