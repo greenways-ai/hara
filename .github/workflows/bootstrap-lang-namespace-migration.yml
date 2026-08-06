@@ -6,6 +6,7 @@ name: Bootstrap lang namespace migration
 # Fixed-cleanup pull-request marker: generate the review branch now.
 # Synchronize marker: execute the fixed generator from this bounded PR.
 # Ready-state synchronize marker: schedule the fixed generator now.
+# Workflow-token marker: restore workflows before the bot push.
 # The pull_request event below is restricted to disposable trigger branches.
 on:
   push:
@@ -72,13 +73,12 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         run: python3 packaging/scripts/migrate-tahto-to-lang
 
-      - name: Remove one-shot bootstrap machinery
+      - name: Restore workflows for the token-safe generated push
         if: steps.guard.outputs.skip != 'true'
         run: |
-          git rm -f --ignore-unmatch -- \
-            .github/workflows/bootstrap-lang-namespace-migration.yml \
-            .github/workflows/validate-lang-namespace-migration.yml \
-            packaging/scripts/migrate-tahto-to-lang
+          git restore --source=origin/main --staged --worktree -- .github/workflows
+          git clean -fd -- .github/workflows
+          git rm -f --ignore-unmatch -- packaging/scripts/migrate-tahto-to-lang
 
       - name: Commit and push generated migration
         if: steps.guard.outputs.skip != 'true'
@@ -104,8 +104,10 @@ jobs:
 
           The production, test, and packaged Rust trees move from `tahto` to
           `lang`; executable references, dynamic registry symbols, generated
-          source expectations, Java test names, workflows, and Hara-owned
-          parity artifacts are rewritten atomically.
+          source expectations, Java test names, and Hara-owned parity artifacts
+          are rewritten atomically. Workflow-file rewrites are applied as a
+          connector follow-up because GitHub's workflow token cannot modify
+          `.github/workflows/*`.
 
           ## Compatibility boundary
 
@@ -122,8 +124,8 @@ jobs:
           - canonical-to-Rust HAL mirror regeneration and drift check
           - `git diff --check`
 
-          The PR remains draft for the full JVM, Rust, HALC, WASM, and portable
-          language integration suites.
+          The PR remains draft for the full JVM, Rust, HALC, WASM, portable
+          language integration, and workflow-path suites.
           EOF
 
           gh pr create \
