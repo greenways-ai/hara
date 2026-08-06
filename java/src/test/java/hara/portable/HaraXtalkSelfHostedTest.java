@@ -26,6 +26,21 @@ public final class HaraXtalkSelfHostedTest {
   }
 
   @Test
+  public void runsRegisteredDependencyEntrySuite() throws Exception {
+    HaraNativeTestRunner.Result result =
+        HaraNativeTestRunner.runFile(
+            ROOT, ROOT.resolve("lib/test/tahto/model/v1/spec_hara_dependency_test.hal"));
+
+    assertTrue(result.failureMessage(), result.passed());
+    assertEquals(1, result.facts());
+    assertEquals(1, result.checks());
+    assertEquals(1, result.passedChecks());
+    assertEquals(0, result.failedChecks());
+    assertEquals(0, result.errors());
+    assertEquals(0, result.timeouts());
+  }
+
+  @Test
   public void runsSelfHostedRuntimeSuite() throws Exception {
     HaraNativeTestRunner.Result result =
         HaraNativeTestRunner.runFile(
