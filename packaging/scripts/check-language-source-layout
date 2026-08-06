@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""Validate the split language-oriented source and test roots."""
+
+from __future__ import annotations
+
+import re
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+
+REPOSITORY = Path(__file__).resolve().parents[2]
+
+LANGUAGE_ROOTS = {
+    Path("core/lib/src-lang/xt"): "xt",
+    Path("core/lib/src-lang/postgres"): "postgres",
+    Path("core/lib/test-lang/xt"): "xt",
+    Path("core/lib/test-lang/postgres"): "postgres",
+}
+
+PRODUCTION_ROOTS = (
+    Path("core/lib/src"),
+    Path("core/lib/src-lang"),
+)
+TEST_ROOTS = (
+    Path("core/lib/test"),
+    Path("core/lib/test-lang"),
+)
+
+LEGACY_ROOTS = (
+    Path("core/lib/src/xt"),
+    Path("core/lib/src/postgres"),
+    Path("core/lib/test/xt"),
+    Path("core/lib/test/postgres"),
+)
+
+NAMESPACE_PATTERN = re.compile(r"^\s*\(ns\+?\s+([^\s\)]+)", re.MULTILINE)
+
+
+def editor_artifact(path: Path) -> bool:
+    name = path.name
+    return name.startswith(".#") or (name.startswith("#") and name.endswith("#"))
+
+
+def namespace_of(path: Path) -> str | None:
+    source = path.read_text(encoding="utf-8")
+    match = NAMESPACE_PATTERN.search(source)
+    return match.group(1) if match else None
+
+
+def namespace_path(namespace: str, family: str) -> Path:
+    prefix = f"{family}."
+    if not namespace.startswith(prefix):
+        raise ValueError(f"{namespace} does not begin with {prefix}")
+    relative = namespace[len(prefix) :]
+    return Path(*relative.replace("-", "_").split(".")).with_suffix(".hal")
+
+
+def collect_namespaces(roots: tuple[Path, ...]) -> dict[str, list[Path]]:
+    namespaces: dict[str, list[Path]] = defaultdict(list)
+    for relative_root in roots:
+        root = REPOSITORY / relative_root
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*.hal")):
+            if not path.is_file() or editor_artifact(path):
+                continue
+            namespace = namespace_of(path)
+            if namespace:
+                namespaces[namespace].append(path.relative_to(REPOSITORY))
+    return namespaces
+
+
+def main() -> int:
+    errors: list[str] = []
+
+    for relative in LEGACY_ROOTS:
+        if (REPOSITORY / relative).exists():
+            errors.append(f"legacy language root still exists: {relative}")
+
+    for relative_root, family in LANGUAGE_ROOTS.items():
+        root = REPOSITORY / relative_root
+        if not root.is_dir():
+            errors.append(f"required language root is missing: {relative_root}")
+            continue
+
+        for path in sorted(root.rglob("*.hal")):
+            if not path.is_file() or editor_artifact(path):
+                continue
+            namespace = namespace_of(path)
+            display = path.relative_to(REPOSITORY)
+            if namespace is None:
+                errors.append(f"missing namespace declaration: {display}")
+                continue
+            try:
+                expected = namespace_path(namespace, family)
+            except ValueError as error:
+                errors.append(f"{display}: {error}")
+                continue
+            actual = path.relative_to(root)
+            if actual != expected:
+                errors.append(
+                    f"namespace/path mismatch: {namespace} is {actual}; "
+                    f"expected {expected} under {relative_root}"
+                )
+
+    for label, roots in (("production", PRODUCTION_ROOTS), ("test", TEST_ROOTS)):
+        namespaces = collect_namespaces(roots)
+        for namespace, paths in sorted(namespaces.items()):
+            if len(paths) > 1:
+                errors.append(
+                    f"duplicate {label} namespace {namespace}: "
+                    + ", ".join(str(path) for path in paths)
+                )
+
+    if errors:
+        for error in errors:
+            print(error, file=sys.stderr)
+        return 1
+
+    production_count = len(collect_namespaces(PRODUCTION_ROOTS))
+    test_count = len(collect_namespaces(TEST_ROOTS))
+    print(
+        "language source layout is consistent: "
+        f"{production_count} production namespaces and {test_count} test namespaces"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
