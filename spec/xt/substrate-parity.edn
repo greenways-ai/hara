@@ -57,6 +57,10 @@
    :source-sha "dd6711f093df4805693d33b12f6680fccf86568d"
    :target "lib/src/xt/substrate/base_util_handlers.hal"
    :status :ported}
+  {:source "src-lang/xt/substrate/transport_memory.clj"
+   :source-sha "9b6c33789a3bbe0c80c7dbdb75012bc6cc2b552a"
+   :target "lib/src/xt/substrate/transport_memory.hal"
+   :status :ported}
   {:source "src-lang/xt/substrate.clj"
    :source-sha "4822eefa4e1026ebf8c614fc9e1c5d050a7272af"
    :target "lib/src/xt/substrate.hal"
@@ -96,11 +100,24 @@
     "pending remote response settlement"
     "stream trigger dispatch"
     "transport start/stop and router registration"
-    "subscribed publish routing"]}]
+    "subscribed publish routing"]}
+  {:name :memory-transport
+   :test "lib/test/xt/substrate/transport_memory_test.hal"
+   :facts 13
+   :checks 19
+   :compile-targets [:js :lua :python]
+   :async-runtime :js
+   :coverage
+   ["JSON frame wire round trips"
+    "text endpoint adaptation"
+    "pair and arbitrary network routing"
+    "endpoint start/stop lifecycle"
+    "linked node request round trip"]}]
 
  :acceptance
  ["Every retained Foundation source has a target path and a synchronized Rust snapshot."
   "Every obsolete source records a reason rather than disappearing from the migration inventory."
   "Source blobs remain byte-identical to the pinned Foundation source wherever no portability adaptation is required."
   "The deterministic and lifecycle slices pass through JavaScript, Lua, and Python Tahto runtimes."
+  "The in-memory transport preserves the Foundation text-wire and linked-node behavior."
   "The target-emitted runtime remains independent from host-side std.substrate implementation objects."]}
