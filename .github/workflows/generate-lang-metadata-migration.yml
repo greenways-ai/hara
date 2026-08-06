@@ -10,6 +10,7 @@ on:
       - 'core/spec/fixtures/lang-metadata-v1/**'
       - 'packaging/scripts/check-no-tahto-language-metadata'
       - 'packaging/scripts/migrate-tahto-metadata-to-lang'
+      - 'packaging/scripts/run-lang-metadata-migration'
       - 'plans/lang-metadata-migration.md'
       - '.github/workflows/generate-lang-metadata-migration.yml'
       - '.github/workflows/language-source-layout.yml'
@@ -39,10 +40,11 @@ jobs:
       - name: Validate generator syntax
         run: |
           python3 -m py_compile packaging/scripts/migrate-tahto-metadata-to-lang
+          python3 -m py_compile packaging/scripts/run-lang-metadata-migration
           python3 -m py_compile packaging/scripts/check-no-tahto-language-metadata
 
       - name: Generate and validate HARA-2
-        run: python3 packaging/scripts/migrate-tahto-metadata-to-lang
+        run: python3 packaging/scripts/run-lang-metadata-migration
 
       - name: Commit generated migration when required
         run: |
