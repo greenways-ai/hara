@@ -5,51 +5,51 @@
   :test "test-lang/xt/mcp/node/kernel_base_test.clj"}
 
  :target
- {:source-root "lib/src/xt/mcp/node"
-  :test "lib/test/xt/mcp/node/kernel_base_test.hal"
+ {:source-root "lib/src-lang/xt/mcp/node"
+  :test "lib/test-lang/xt/mcp/node/kernel_base_test.hal"
   :rust-snapshot "rust/hal-src/xt/mcp/node"}
 
  :dependencies
  [{:namespace xt.mcp.base
    :status :ported
    :source "src-lang/xt/mcp/base.clj"
-   :target "lib/src/xt/mcp/base.hal"}
+   :target "lib/src-lang/xt/mcp/base.hal"}
   {:namespace xt.substrate
    :status :ported
    :source "src-lang/xt/substrate.clj"
-   :target "lib/src/xt/substrate.hal"}
+   :target "lib/src-lang/xt/substrate.hal"}
   {:namespace xt.substrate.transport-memory
    :status :ported-with-this-slice
    :source "src-lang/xt/substrate/transport_memory.clj"
-   :target "lib/src/xt/substrate/transport_memory.hal"}]
+   :target "lib/src-lang/xt/substrate/transport_memory.hal"}]
 
  :mappings
  [{:source "src-lang/xt/mcp/node/client_base.clj"
    :source-sha "1cf4b613fbef793ebd1623ca07e0c107408c9ba5"
-   :target "lib/src/xt/mcp/node/client_base.hal"
+   :target "lib/src-lang/xt/mcp/node/client_base.hal"
    :status :ported}
   {:source "src-lang/xt/mcp/node/kernel_base.clj"
    :source-sha "95f62f84b7064e646bf66b98dab9aa9ee31c5333"
-   :target "lib/src/xt/mcp/node/kernel_base.hal"
+   :target "lib/src-lang/xt/mcp/node/kernel_base.hal"
    :status :ported}
   {:source "src-lang/xt/mcp/node/proxy_base.clj"
    :source-sha "61868d7dd89e3eae2e128cdecd66b537b4cfbafb"
-   :target "lib/src/xt/mcp/node/proxy_base.hal"
+   :target "lib/src-lang/xt/mcp/node/proxy_base.hal"
    :status :ported}
   {:source "src-lang/xt/mcp/node/proxy_util.clj"
    :source-sha "5eeaec5ab71a27b11a1e594a471b5ec05dbfb922"
-   :target "lib/src/xt/mcp/node/proxy_util.hal"
+   :target "lib/src-lang/xt/mcp/node/proxy_util.hal"
    :status :ported}
   {:source "src-lang/xt/mcp/node/runtime.clj"
    :source-sha "5685174ff5d74748d15d6ef3dd6b314f79246b3a"
-   :target "lib/src/xt/mcp/node/runtime.hal"
+   :target "lib/src-lang/xt/mcp/node/runtime.hal"
    :status :ported}]
 
  :test-slices
  [{:name :memory-transport
    :source "test-lang/xt/substrate/transport_memory_test.clj"
    :source-sha "fbcc9e249907f9bb33196e7059608d2969e6dd64"
-   :target "lib/test/xt/substrate/transport_memory_test.hal"
+   :target "lib/test-lang/xt/substrate/transport_memory_test.hal"
    :facts 13
    :checks 19
    :compile-targets [:js :lua :python]
@@ -57,7 +57,7 @@
   {:name :mcp-node
    :source "test-lang/xt/mcp/node/kernel_base_test.clj"
    :source-sha "37a6dc262ebc4271a071613cea73df41bde09b94"
-   :target "lib/test/xt/mcp/node/kernel_base_test.hal"
+   :target "lib/test-lang/xt/mcp/node/kernel_base_test.hal"
    :facts 5
    :checks 5
    :runtime :js
