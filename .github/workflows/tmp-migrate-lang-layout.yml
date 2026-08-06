@@ -1,0 +1,540 @@
+name: Temporary language layout migration
+
+on:
+  push:
+    branches:
+      - agent/lang-layout-migration
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/lang-layout-migration
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Migrate source roots and namespaces
+        run: |
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import os
+          import re
+          import shutil
+          from pathlib import Path
+
+          ROOT = Path.cwd()
+          CORE = ROOT / "core"
+          LIB = CORE / "lib"
+
+          def move_path(source: str, target: str) -> None:
+              src = ROOT / source
+              dst = ROOT / target
+              if not src.exists():
+                  raise SystemExit(f"required migration source is missing: {source}")
+              if dst.exists():
+                  raise SystemExit(f"migration target already exists: {target}")
+              dst.parent.mkdir(parents=True, exist_ok=True)
+              shutil.move(str(src), str(dst))
+              print(f"moved {source} -> {target}")
+
+          # Keep compiler/runtime infrastructure in the normal source root.
+          move_path("core/lib/src/tahto", "core/lib/src/lang")
+          move_path("core/lib/test/tahto", "core/lib/test/lang")
+
+          # Match foundation-base's language-oriented source split.
+          move_path("core/lib/src/xt", "core/lib/src-lang/xt")
+          move_path("core/lib/src/postgres", "core/lib/src-lang/postgres")
+          move_path("core/lib/test/xt", "core/lib/test-lang/xt")
+          move_path("core/lib/test/postgres", "core/lib/test-lang/postgres")
+
+          def rename_file(path: Path, old: str = "tahto", new: str = "lang") -> None:
+              if old not in path.name:
+                  return
+              target = path.with_name(path.name.replace(old, new))
+              if target.exists():
+                  raise SystemExit(f"cannot rename {path}: target exists: {target}")
+              path.rename(target)
+              print(f"renamed {path.relative_to(ROOT)} -> {target.relative_to(ROOT)}")
+
+          # Rename Hara-owned operational artifacts, but retain historical
+          # upstream source paths such as foundation-base/src/tahto/...
+          for directory in [
+              ROOT / ".github" / "workflows",
+              CORE / "spec",
+              LIB,
+          ]:
+              if directory.exists():
+                  for path in sorted(directory.rglob("*"), key=lambda value: len(value.parts), reverse=True):
+                      if path.is_file() and "tahto" in path.name:
+                          rename_file(path)
+
+          path_replacements = [
+              ("core/rust/hal-src/postgres", "core/rust/hal-src/src-lang/postgres"),
+              ("core/rust/hal-src/tahto", "core/rust/hal-src/src/lang"),
+              ("core/rust/hal-src/xt", "core/rust/hal-src/src-lang/xt"),
+              ("rust/hal-src/postgres", "rust/hal-src/src-lang/postgres"),
+              ("rust/hal-src/tahto", "rust/hal-src/src/lang"),
+              ("rust/hal-src/xt", "rust/hal-src/src-lang/xt"),
+              ("core/lib/src/postgres", "core/lib/src-lang/postgres"),
+              ("core/lib/test/postgres", "core/lib/test-lang/postgres"),
+              ("core/lib/src/tahto", "core/lib/src/lang"),
+              ("core/lib/test/tahto", "core/lib/test/lang"),
+              ("core/lib/src/xt", "core/lib/src-lang/xt"),
+              ("core/lib/test/xt", "core/lib/test-lang/xt"),
+              ("lib/src/postgres", "lib/src-lang/postgres"),
+              ("lib/test/postgres", "lib/test-lang/postgres"),
+              ("lib/src/tahto", "lib/src/lang"),
+              ("lib/test/tahto", "lib/test/lang"),
+              ("lib/src/xt", "lib/src-lang/xt"),
+              ("lib/test/xt", "lib/test-lang/xt"),
+              ("tahto-runtime.yml", "lang-runtime.yml"),
+              ("tahto-port.edn", "lang-port.edn"),
+              ("tahto-runtime-parity.edn", "lang-runtime-parity.edn"),
+              ("tahto-hara-parity.edn", "lang-hara-parity.edn"),
+              ("tahto-typescript-parity.edn", "lang-typescript-parity.edn"),
+          ]
+
+          skip_directories = {
+              ".git", ".gradle", ".idea", ".next", ".netlify", ".turbo",
+              "build", "coverage", "dist", "node_modules", "target", "vendor",
+          }
+          binary_suffixes = {
+              ".7z", ".a", ".avif", ".bin", ".class", ".dll", ".dylib",
+              ".gif", ".gz", ".ico", ".jar", ".jpeg", ".jpg", ".lockb",
+              ".o", ".pdf", ".png", ".so", ".tar", ".ttf", ".wasm",
+              ".webp", ".woff", ".woff2", ".zip",
+          }
+
+          def text_file(path: Path) -> bool:
+              if any(part in skip_directories for part in path.parts):
+                  return False
+              if path.suffix.lower() in binary_suffixes:
+                  return False
+              return path.is_file()
+
+          changed_text_files = 0
+          for path in ROOT.rglob("*"):
+              if not text_file(path):
+                  continue
+              try:
+                  original = path.read_text(encoding="utf-8")
+              except (UnicodeDecodeError, OSError):
+                  continue
+              updated = original
+              for old, new in path_replacements:
+                  updated = updated.replace(old, new)
+
+              # Code namespaces and dynamic namespace symbols are a hard cut.
+              # Namespaced data keywords such as :tahto/error-code intentionally
+              # remain for a later schema migration.
+              updated = updated.replace("tahto.", "lang.")
+              updated = updated.replace("tahto-runtime", "lang-runtime")
+              updated = updated.replace("tahto_port", "lang_port")
+              updated = updated.replace("(defproject tahto", "(defproject lang")
+
+              if updated != original:
+                  path.write_text(updated, encoding="utf-8")
+                  changed_text_files += 1
+
+          print(f"rewrote {changed_text_files} text files")
+
+          # Project roots.
+          project_edn = CORE / "project.edn"
+          text = project_edn.read_text()
+          text = text.replace(
+              ':project/source-paths ["lib/src"]',
+              ':project/source-paths ["lib/src" "lib/src-lang"]',
+          )
+          text = text.replace(
+              ':project/test-paths ["lib/test" "rust/web"]',
+              ':project/test-paths ["lib/test" "lib/test-lang" "rust/web"]',
+          )
+          project_edn.write_text(text)
+
+          (LIB / "project.hal").write_text(
+              '(defproject lang\n'
+              '  {:source-paths ["src" "src-lang"]\n'
+              '   :test-paths ["test" "test-lang"]})\n'
+          )
+
+          # JVM packaging: both language source roots must be copied to the
+          # same classpath namespace root.
+          pom = CORE / "java" / "pom.xml"
+          text = pom.read_text()
+          source_resource = '''\t\t\t<resource>\n\t\t\t\t<directory>${project.basedir}/../lib/src</directory>\n\t\t\t\t<includes>\n\t\t\t\t\t<include>**/*.hal</include>\n\t\t\t\t</includes>\n\t\t\t</resource>'''
+          source_lang_resource = '''\t\t\t<resource>\n\t\t\t\t<directory>${project.basedir}/../lib/src-lang</directory>\n\t\t\t\t<includes>\n\t\t\t\t\t<include>**/*.hal</include>\n\t\t\t\t</includes>\n\t\t\t</resource>'''
+          if source_lang_resource not in text:
+              if source_resource not in text:
+                  raise SystemExit("cannot find core/lib/src Maven resource block")
+              text = text.replace(source_resource, source_resource + "\n" + source_lang_resource)
+
+          test_resource = '''\t\t\t<testResource>\n\t\t\t\t<directory>${project.basedir}/../lib/test</directory>\n\t\t\t\t<includes>\n\t\t\t\t\t<include>**/*.hal</include>\n\t\t\t\t</includes>\n\t\t\t</testResource>'''
+          test_lang_resource = '''\t\t\t<testResource>\n\t\t\t\t<directory>${project.basedir}/../lib/test-lang</directory>\n\t\t\t\t<includes>\n\t\t\t\t\t<include>**/*.hal</include>\n\t\t\t\t</includes>\n\t\t\t</testResource>'''
+          if test_lang_resource not in text:
+              if test_resource not in text:
+                  raise SystemExit("cannot find core/lib/test Maven resource block")
+              text = text.replace(test_resource, test_resource + "\n" + test_lang_resource)
+          pom.write_text(text)
+
+          # Root-preserving canonical-to-Rust mirror.
+          sync_script = ROOT / "packaging" / "scripts" / "sync-rust-hal-src"
+          sync_script.write_text(r'''#!/usr/bin/env python3
+          """Synchronize packaged Rust HAL snapshots from canonical source roots."""
+
+          from __future__ import annotations
+
+          import argparse
+          import shutil
+          import sys
+          from pathlib import Path
+
+          REPOSITORY = Path(__file__).resolve().parents[2]
+          CORE = REPOSITORY / "core"
+          SOURCE_ROOTS = {
+              Path("src"): CORE / "lib" / "src",
+              Path("src-lang"): CORE / "lib" / "src-lang",
+          }
+          MIRROR_ROOT = CORE / "rust" / "hal-src"
+
+          def editor_artifact(path: Path) -> bool:
+              name = path.name
+              return name.startswith(".#") or (name.startswith("#") and name.endswith("#"))
+
+          def collect_sources() -> dict[Path, bytes]:
+              files: dict[Path, bytes] = {}
+              for root_name, root in SOURCE_ROOTS.items():
+                  if not root.is_dir():
+                      continue
+                  for path in sorted(root.rglob("*.hal")):
+                      if path.is_file() and not editor_artifact(path):
+                          relative = root_name / path.relative_to(root)
+                          files[relative] = path.read_bytes()
+              return files
+
+          def collect_mirror() -> dict[Path, bytes]:
+              if not MIRROR_ROOT.is_dir():
+                  return {}
+              files: dict[Path, bytes] = {}
+              for path in sorted(MIRROR_ROOT.rglob("*.hal")):
+                  if path.is_file() and not editor_artifact(path):
+                      files[path.relative_to(MIRROR_ROOT)] = path.read_bytes()
+              return files
+
+          def classify(source: dict[Path, bytes], mirror: dict[Path, bytes]):
+              source_paths = set(source)
+              mirror_paths = set(mirror)
+              missing = sorted(source_paths - mirror_paths)
+              stale = sorted(mirror_paths - source_paths)
+              changed = sorted(
+                  path for path in source_paths & mirror_paths
+                  if source[path] != mirror[path]
+              )
+              return missing, stale, changed
+
+          def display(paths: list[Path], label: str) -> None:
+              for path in paths:
+                  print(f"{label}: {path.as_posix()}", file=sys.stderr)
+
+          def prune_empty_directories(root: Path) -> None:
+              if not root.exists():
+                  return
+              directories = sorted(
+                  (path for path in root.rglob("*") if path.is_dir()),
+                  key=lambda path: len(path.parts),
+                  reverse=True,
+              )
+              for directory in directories:
+                  try:
+                      directory.rmdir()
+                  except OSError:
+                      pass
+
+          def check() -> int:
+              source = collect_sources()
+              mirror = collect_mirror()
+              missing, stale, changed = classify(source, mirror)
+              display(missing, "missing from core/rust/hal-src")
+              display(stale, "stale in core/rust/hal-src")
+              display(changed, "different in core/rust/hal-src")
+              if missing or stale or changed:
+                  print(
+                      "core/rust/hal-src is not synchronized; "
+                      "run packaging/scripts/sync-rust-hal-src",
+                      file=sys.stderr,
+                  )
+                  return 1
+              print(f"core/rust/hal-src matches {len(source)} canonical HAL sources")
+              return 0
+
+          def synchronize() -> int:
+              source = collect_sources()
+              mirror = collect_mirror()
+              missing, stale, changed = classify(source, mirror)
+              MIRROR_ROOT.mkdir(parents=True, exist_ok=True)
+              for path in stale:
+                  (MIRROR_ROOT / path).unlink()
+              for path in missing + changed:
+                  target = MIRROR_ROOT / path
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_bytes(source[path])
+              prune_empty_directories(MIRROR_ROOT)
+              print(
+                  "synchronized core/rust/hal-src: "
+                  f"{len(missing)} added, {len(changed)} updated, "
+                  f"{len(stale)} removed"
+              )
+              return 0
+
+          def main() -> int:
+              parser = argparse.ArgumentParser(
+                  description="Synchronize Rust HAL snapshots from core/lib roots"
+              )
+              parser.add_argument(
+                  "--check", action="store_true",
+                  help="report drift without changing files",
+              )
+              arguments = parser.parse_args()
+              missing_roots = [
+                  root for root in SOURCE_ROOTS.values() if not root.is_dir()
+              ]
+              if missing_roots:
+                  parser.error(
+                      "canonical source directories are missing: "
+                      + ", ".join(str(path) for path in missing_roots)
+                  )
+              return check() if arguments.check else synchronize()
+
+          if __name__ == "__main__":
+              raise SystemExit(main())
+          '''.replace("          ", ""))
+          sync_script.chmod(0o755)
+
+          # Preserve canonical src/src-lang provenance in embedded resource paths.
+          build_rs = CORE / "rust" / "build.rs"
+          text = build_rs.read_text()
+          old = '''        let relative = Path::new("lib/src")
+              .join(
+                  path.strip_prefix(&source_root)
+                      .expect("HAL resource must be inside the packaged source root"),
+              )'''
+          new = '''        let relative = Path::new("lib")
+              .join(
+                  path.strip_prefix(&source_root)
+                      .expect("HAL resource must be inside the packaged source root"),
+              )'''
+          if old not in text:
+              raise SystemExit("cannot find Rust embedded HAL relative-path block")
+          build_rs.write_text(text.replace(old, new))
+
+          # Portable test discovery across both test roots.
+          test_runner = ROOT / "packaging" / "scripts" / "run-lib-tests"
+          test_runner.write_text(r'''#!/usr/bin/env bash
+          set -euo pipefail
+
+          REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+          cd "$REPO_ROOT"
+
+          collect_root() {
+              local root="$1"
+              if [ -d "$root" ]; then
+                  find "$root" -name '*.hal' \
+                      ! -path 'core/lib/test/std/lib/test.hal' \
+                      -print
+              fi
+          }
+
+          collect_files() {
+              if [ "$#" -eq 0 ]; then
+                  collect_root core/lib/test
+                  collect_root core/lib/test-lang
+                  return
+              fi
+
+              local target
+              for target in "$@"; do
+                  if [ -d "$target" ]; then
+                      find "$target" -name '*.hal' \
+                          ! -path 'core/lib/test/std/lib/test.hal' -print
+                  elif [ -f "$target" ]; then
+                      if [ "$target" != 'core/lib/test/std/lib/test.hal' ]; then
+                          printf '%s\n' "$target"
+                      fi
+                  else
+                      echo "Test target not found: $target" >&2
+                      return 2
+                  fi
+              done
+          }
+
+          mapfile -t TEST_FILES < <(collect_files "$@" | sort -u)
+          if [ "${#TEST_FILES[@]}" -eq 0 ]; then
+              echo "No library test files selected" >&2
+              exit 2
+          fi
+
+          exec cargo run --quiet \
+              --manifest-path "$REPO_ROOT/core/rust/Cargo.toml" \
+              --bin hara-test -- \
+              --root "$REPO_ROOT" \
+              "${TEST_FILES[@]}"
+          '''.replace("          ", ""))
+          test_runner.chmod(0o755)
+
+          # Permanent layout/namespace guard.
+          layout_checker = ROOT / "packaging" / "scripts" / "check-lang-layout"
+          layout_checker.write_text(r'''#!/usr/bin/env python3
+          from __future__ import annotations
+
+          import re
+          import sys
+          from collections import defaultdict
+          from pathlib import Path
+
+          REPOSITORY = Path(__file__).resolve().parents[2]
+          RULES = {
+              Path("core/lib/src/lang"): "lang.",
+              Path("core/lib/src-lang/xt"): "xt.",
+              Path("core/lib/src-lang/postgres"): "postgres.",
+              Path("core/lib/test/lang"): "lang.",
+              Path("core/lib/test-lang/xt"): "xt.",
+              Path("core/lib/test-lang/postgres"): "postgres.",
+          }
+          FORBIDDEN = [
+              Path("core/lib/src/tahto"),
+              Path("core/lib/test/tahto"),
+              Path("core/lib/src/xt"),
+              Path("core/lib/test/xt"),
+              Path("core/lib/src/postgres"),
+              Path("core/lib/test/postgres"),
+          ]
+          NS_PATTERN = re.compile(r"^\s*\(ns\+?\s+([^\s\)]+)", re.MULTILINE)
+
+          errors: list[str] = []
+          namespaces: dict[str, list[Path]] = defaultdict(list)
+
+          for path in FORBIDDEN:
+              if (REPOSITORY / path).exists():
+                  errors.append(f"legacy source root still exists: {path}")
+
+          for relative_root, prefix in RULES.items():
+              root = REPOSITORY / relative_root
+              if not root.is_dir():
+                  errors.append(f"required source root is missing: {relative_root}")
+                  continue
+              for path in sorted(root.rglob("*.hal")):
+                  source = path.read_text(encoding="utf-8")
+                  match = NS_PATTERN.search(source)
+                  if not match:
+                      errors.append(f"missing namespace declaration: {path.relative_to(REPOSITORY)}")
+                      continue
+                  namespace = match.group(1)
+                  namespaces[namespace].append(path.relative_to(REPOSITORY))
+                  if not namespace.startswith(prefix):
+                      errors.append(
+                          f"namespace {namespace} is outside {prefix} at "
+                          f"{path.relative_to(REPOSITORY)}"
+                      )
+                  expected = Path(*namespace.replace("-", "_").split(".")).with_suffix(".hal")
+                  actual = path.relative_to(root)
+                  if expected != actual:
+                      errors.append(
+                          f"namespace/path mismatch: {namespace} -> {actual}; "
+                          f"expected {expected}"
+                      )
+                  if "tahto." in source:
+                      errors.append(f"live tahto.* reference remains in {path.relative_to(REPOSITORY)}")
+
+          for namespace, paths in sorted(namespaces.items()):
+              if len(paths) > 1:
+                  errors.append(
+                      f"duplicate namespace {namespace}: "
+                      + ", ".join(str(path) for path in paths)
+                  )
+
+          if errors:
+              for error in errors:
+                  print(error, file=sys.stderr)
+              raise SystemExit(1)
+
+          print(
+              f"language layout is consistent: {len(namespaces)} namespaces "
+              f"across {len(RULES)} roots"
+          )
+          '''.replace("          ", ""))
+          layout_checker.chmod(0o755)
+
+          # Update mirror workflow and add a dedicated layout gate.
+          mirror_workflow = ROOT / ".github" / "workflows" / "hal-source-mirror.yml"
+          if mirror_workflow.exists():
+              text = mirror_workflow.read_text()
+              text = text.replace(
+                  "      - 'core/lib/src/**/*.hal'\n",
+                  "      - 'core/lib/src/**/*.hal'\n      - 'core/lib/src-lang/**/*.hal'\n",
+              )
+              text = text.replace(
+                  "Verify core/rust/hal-src matches canonical core/lib/src",
+                  "Verify core/rust/hal-src matches canonical core/lib source roots",
+              )
+              mirror_workflow.write_text(text)
+
+          layout_workflow = ROOT / ".github" / "workflows" / "lang-layout.yml"
+          layout_workflow.write_text('''name: Language source layout\n\n'
+          'on:\n'
+          '  push:\n'
+          '    paths:\n'
+          "      - 'core/lib/src/lang/**'\n"
+          "      - 'core/lib/src-lang/**'\n"
+          "      - 'core/lib/test/lang/**'\n"
+          "      - 'core/lib/test-lang/**'\n"
+          "      - 'core/project.edn'\n"
+          "      - 'core/lib/project.hal'\n"
+          "      - 'packaging/scripts/check-lang-layout'\n"
+          "      - '.github/workflows/lang-layout.yml'\n"
+          '  pull_request:\n'
+          '    branches: [main]\n'
+          '    paths:\n'
+          "      - 'core/lib/src/lang/**'\n"
+          "      - 'core/lib/src-lang/**'\n"
+          "      - 'core/lib/test/lang/**'\n"
+          "      - 'core/lib/test-lang/**'\n"
+          "      - 'core/project.edn'\n"
+          "      - 'core/lib/project.hal'\n"
+          "      - 'packaging/scripts/check-lang-layout'\n"
+          "      - '.github/workflows/lang-layout.yml'\n"
+          '  workflow_dispatch:\n\n'
+          'permissions:\n'
+          '  contents: read\n\n'
+          'jobs:\n'
+          '  check:\n'
+          '    runs-on: ubuntu-latest\n'
+          '    steps:\n'
+          '      - uses: actions/checkout@v4\n'
+          '      - name: Check source roots and namespace placement\n'
+          '        run: python3 packaging/scripts/check-lang-layout\n'
+          )
+
+          # Regenerate the complete packaged mirror after all moves and rewrites.
+          old_mirror = CORE / "rust" / "hal-src"
+          if old_mirror.exists():
+              shutil.rmtree(old_mirror)
+          PY
+
+          python3 packaging/scripts/sync-rust-hal-src
+          python3 packaging/scripts/check-lang-layout
+          python3 packaging/scripts/sync-rust-hal-src --check
+          git diff --check
+
+      - name: Commit migration
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Rename Tahto namespaces and split language sources"
+          git push origin HEAD:agent/lang-layout-migration
