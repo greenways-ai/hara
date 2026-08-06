@@ -1,0 +1,88 @@
+{:reference
+ {:repository "zcaudate-xyz/foundation-base"
+  :commit "f909a44ad504cc6c9f44248d59ec3148261a48d7"
+  :event-root "src-lang/xt/event"
+  :substrate-root "src-lang/xt/substrate"
+  :facade "src-lang/xt/substrate.clj"}
+
+ :target
+ {:event-root "lib/src/xt/event"
+  :substrate-root "lib/src/xt/substrate"
+  :facade "lib/src/xt/substrate.hal"
+  :rust-snapshot "rust/hal-src/xt"
+  :host-runtime "std.substrate"}
+
+ :architecture
+ {:std.substrate
+  "Portable host-side node runtime for JVM, Rust, and browser/wasm."
+  :xt.substrate
+  "Target-emitted XTalk node runtime for JavaScript, Lua, Python, and later target profiles."
+  :rule
+  "The two layers share Foundation behaviour but do not delegate target-emitted code back into the host runtime."}
+
+ :mappings
+ [{:source "src-lang/xt/event/base_listener.clj"
+   :source-sha "eeeacb71d32529ef947559ba862d14a8793b9daf"
+   :target "lib/src/xt/event/base_listener.hal"
+   :status :ported}
+  {:source "src-lang/xt/substrate/base_frame.clj"
+   :source-sha "28a05f31526f2f9e35aff4ceabd4bb2a6ef1be6a"
+   :target "lib/src/xt/substrate/base_frame.hal"
+   :status :ported}
+  {:source "src-lang/xt/substrate/base_space.clj"
+   :source-sha "36f24ec70de9ec21c6eefec76a1dab3b35462cf7"
+   :target "lib/src/xt/substrate/base_space.hal"
+   :status :ported}
+  {:source "src-lang/xt/substrate/base_router.clj"
+   :source-sha "36db7fa45413b6b0d7a8d644f1651bc6a38ec3b2"
+   :target "lib/src/xt/substrate/base_router.hal"
+   :status :ported}
+  {:source "src-lang/xt/substrate/base_json.clj"
+   :source-sha "2215d4569cc44afabe393649a26f34c5786129d0"
+   :target "lib/src/xt/substrate/base_json.hal"
+   :status :ported}
+  {:source "src-lang/xt/substrate/base_request.clj"
+   :source-sha "41b308db15be405fec9f90039cdb55cc4ca52d75"
+   :target "lib/src/xt/substrate/base_request.hal"
+   :status :pending}
+  {:source "src-lang/xt/substrate/base_pubsub.clj"
+   :source-sha "7673a03f40d72ced72a64eb45b06c681d740d7b0"
+   :target "lib/src/xt/substrate/base_pubsub.hal"
+   :status :pending}
+  {:source "src-lang/xt/substrate/base_util.clj"
+   :source-sha "03f5d6d1291b7060193a29ec1440cf16d0400261"
+   :target "lib/src/xt/substrate/base_util.hal"
+   :status :pending}
+  {:source "src-lang/xt/substrate/base_util_handlers.clj"
+   :source-sha "dd6711f093df4805693d33b12f6680fccf86568d"
+   :target "lib/src/xt/substrate/base_util_handlers.hal"
+   :status :pending}
+  {:source "src-lang/xt/substrate.clj"
+   :target "lib/src/xt/substrate.hal"
+   :status :pending}
+  {:source "src-lang/xt/substrate/page_core.clj"
+   :status :obsolete
+   :reason "React-era page model wrapper; product UI state belongs above the portable node runtime."}
+  {:source "src-lang/xt/substrate/page_proxy.clj"
+   :status :obsolete
+   :reason "React-era page proxy wrapper; replaced by explicit application adapters."}
+  {:source "src-lang/xt/substrate/view.clj"
+   :status :obsolete
+   :reason "UI view DSL is not part of the target-neutral substrate transport contract."}]
+
+ :current-slice
+ {:name :deterministic-core
+  :targets [:js :lua :python]
+  :test "lib/test/xt/substrate/core_test.hal"
+  :coverage
+  ["listener callback data/time/meta"
+   "request, response, and stream frame construction"
+   "space lifecycle and state updates"
+   "connection subscription pruning"
+   "JSON frame validation and error normalization"]}
+
+ :acceptance
+ ["Every retained Foundation source has a target path and a synchronized Rust snapshot."
+  "Every obsolete source records a reason rather than disappearing from the migration inventory."
+  "Source blobs remain byte-identical to the pinned Foundation source wherever no portability adaptation is required."
+  "The deterministic core passes through JavaScript, Lua, and Python Tahto runtimes before promise-heavy lifecycle modules land."]}
