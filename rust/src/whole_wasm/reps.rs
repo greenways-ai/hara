@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::core::{Primitive, Value};
+use crate::kernel::{FunctionSchema, SchemaType};
 use crate::vm::{FunctionId, FunctionPrototype, Instruction, Program};
 
 use super::ir::Rep;
@@ -26,26 +27,29 @@ pub(crate) fn analyze_function(
     let native_collection = function_native_collection_parameter(function);
     let scalar_kernel = function_is_scalar_kernel(function);
     for parameter in 0..usize::from(function.arity) {
-        entry.locals[parameter] = if parameter == 0 {
-            native_collection.unwrap_or_else(|| {
-                if scalar_kernel || program.function_has_i64_parameters(function_id) {
-                    Rep::I64
-                } else if function_uses_tagged_collections(function) {
-                    Rep::TaggedRef
-                } else {
-                    Rep::TruthyHandle
-                }
-            })
-        } else if scalar_kernel
-            || native_collection == Some(Rep::ArrayRef)
-            || program.function_has_i64_parameters(function_id)
-        {
-            Rep::I64
-        } else if function_uses_tagged_collections(function) {
-            Rep::TaggedRef
-        } else {
-            Rep::TruthyHandle
-        };
+        entry.locals[parameter] =
+            if let Some(rep) = declared_parameter_rep(program, function_id, function, parameter) {
+                rep
+            } else if parameter == 0 {
+                native_collection.unwrap_or_else(|| {
+                    if scalar_kernel || program.function_has_i64_parameters(function_id) {
+                        Rep::I64
+                    } else if function_uses_tagged_collections(function) {
+                        Rep::TaggedRef
+                    } else {
+                        Rep::TruthyHandle
+                    }
+                })
+            } else if scalar_kernel
+                || native_collection == Some(Rep::ArrayRef)
+                || program.function_has_i64_parameters(function_id)
+            {
+                Rep::I64
+            } else if function_uses_tagged_collections(function) {
+                Rep::TaggedRef
+            } else {
+                Rep::TruthyHandle
+            };
     }
     let mut states = vec![None; function.code.len()];
     states[0] = Some(entry);
@@ -82,6 +86,44 @@ pub(crate) fn analyze_function(
             })
         })
         .collect()
+}
+
+fn declared_function_arity<'a>(
+    program: &'a Program,
+    function_id: FunctionId,
+    function: &FunctionPrototype,
+) -> Option<&'a FunctionSchema> {
+    let SchemaType::Function(arities) = program.function_schema(function_id)? else {
+        return None;
+    };
+    arities.iter().find(|arity| {
+        arity.fixed.len() == usize::from(function.arity)
+            && arity.rest.is_some() == function.variadic
+    })
+}
+
+pub(super) fn declared_parameter_rep(
+    program: &Program,
+    function_id: FunctionId,
+    function: &FunctionPrototype,
+    parameter: usize,
+) -> Option<Rep> {
+    let arity = declared_function_arity(program, function_id, function)?;
+    arity.fixed.get(parameter).map(schema_rep)
+}
+
+pub(super) fn declared_result_rep(program: &Program, function_id: FunctionId) -> Option<Rep> {
+    let function = program.functions.get(usize::from(function_id))?;
+    let arity = declared_function_arity(program, function_id, function)?;
+    Some(schema_rep(&arity.output))
+}
+
+fn schema_rep(schema: &SchemaType) -> Rep {
+    match schema {
+        SchemaType::Primitive(name) if name == "int" => Rep::I64,
+        SchemaType::Primitive(name) if name == "bool" || name == "nil" => Rep::Bool,
+        _ => Rep::TruthyHandle,
+    }
 }
 
 fn function_is_scalar_kernel(function: &FunctionPrototype) -> bool {
@@ -207,10 +249,12 @@ fn transfer(
             ];
             state.stack.push(primitive_rep(*op, &arguments));
         }
-        Instruction::CallStatic { argc, .. } => {
+        Instruction::CallStatic { argc, prototype } => {
             let start = state.stack.len() - usize::from(*argc);
             state.stack.truncate(start);
-            state.stack.push(Rep::I64);
+            state
+                .stack
+                .push(declared_result_rep(program, *prototype).unwrap_or(Rep::I64));
         }
         Instruction::Closure {
             prototype,
@@ -224,8 +268,14 @@ fn transfer(
         }
         Instruction::Call { argc } => {
             let start = state.stack.len() - usize::from(*argc) - 1;
+            let result = match state.stack.get(start) {
+                Some(Rep::FunctionRef(prototype)) => {
+                    declared_result_rep(program, *prototype).unwrap_or(Rep::I64)
+                }
+                _ => Rep::I64,
+            };
             state.stack.truncate(start);
-            state.stack.push(Rep::I64);
+            state.stack.push(result);
         }
         Instruction::BuildVector(count) => {
             let start = state.stack.len() - usize::from(*count);
