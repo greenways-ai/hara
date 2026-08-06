@@ -1,104 +1,322 @@
 (ns tahto.runtime.hara)
 
-(defn set-path!
-  "Associates value into a mutable XTalk reference and returns value."
-  [reference path value]
-  (swap! reference assoc-in path value)
+(declare native-value)
+
+(defn arr?
+  "Checks for the runtime-owned mutable Hara array type."
+  [value]
+  (std.native.Arr/instance? value))
+
+(defn obj?
+  "Checks for the runtime-owned mutable Hara object type."
+  [value]
+  (std.native.Obj/instance? value))
+
+(defn arr-new
+  "Creates a runtime-owned mutable array, recursively converting nested data."
+  [& values]
+  (reduce
+   (fn [array value]
+     (do
+       (. array (push-last (native-value value)))
+       array))
+   (std.native.Arr/new)
+   values))
+
+(defn obj-new
+  "Creates a runtime-owned mutable object from alternating key/value pairs."
+  [& pairs]
+  (let [amount (count pairs)]
+    (when (not= 0 (mod amount 2))
+      (throw
+       (ex-info "Hara native object construction requires key/value pairs"
+                {:pairs pairs
+                 :count amount})))
+    (let [object (std.native.Obj/new)]
+      (loop [index 0]
+        (if (< index amount)
+          (do
+            (std.native.Obj/set-key
+             object
+             (nth pairs index)
+             (native-value (nth pairs (+ index 1))))
+            (recur (+ index 2)))
+          object)))))
+
+(defn native-value
+  "Recursively converts portable vector/map values to std.native Arr/Obj values."
+  [value]
+  (cond
+    (arr? value)
+    value
+
+    (obj? value)
+    value
+
+    (vector? value)
+    (reduce
+     (fn [array item]
+       (do
+         (. array (push-last (native-value item)))
+         array))
+     (std.native.Arr/new)
+     value)
+
+    (map? value)
+    (reduce
+     (fn [object key]
+       (do
+         (std.native.Obj/set-key object key (native-value (get value key)))
+         object))
+     (std.native.Obj/new)
+     (keys value))
+
+    :else
+    value))
+
+(defn arr-get
+  [array index]
+  (std.native.Arr/get-index array index))
+
+(defn arr-set!
+  "Mutates one native array slot and returns the assigned value."
+  [array index value]
+  (std.native.Arr/set-index array index (native-value value))
   value)
 
-(defn del-path
-  "Returns collection without the value at path."
+(defn arr-clone
+  [array]
+  (. array (clone)))
+
+(defn arr-map
+  [array function]
+  (. array (map function)))
+
+(defn arr-filter
+  [array function]
+  (. array (filter function)))
+
+(defn arr-fold-left
+  [array function initial]
+  (. array (fold-left function initial)))
+
+(defn arr-fold-right
+  [array function initial]
+  (. array (fold-right function initial)))
+
+(defn obj-get
+  ([object key]
+   (std.native.Obj/get-key object key))
+  ([object key not-found]
+   (if (std.native.Obj/has-key? object key)
+     (std.native.Obj/get-key object key)
+     not-found)))
+
+(defn obj-set!
+  "Mutates one native object key and returns the assigned value."
+  [object key value]
+  (std.native.Obj/set-key object key (native-value value))
+  value)
+
+(defn obj-has?
+  [object key]
+  (std.native.Obj/has-key? object key))
+
+(defn obj-delete!
+  "Deletes one native object key and returns its previous value."
+  [object key]
+  (std.native.Obj/delete-key object key))
+
+(defn obj-keys
+  [object]
+  (. object (keys)))
+
+(defn obj-vals
+  [object]
+  (. object (vals)))
+
+(defn obj-pairs
+  [object]
+  (. object (pairs)))
+
+(defn obj-clone
+  [object]
+  (. object (clone)))
+
+(defn native-get
+  [collection key]
+  (cond
+    (arr? collection) (arr-get collection key)
+    (obj? collection) (obj-get collection key)
+    :else
+    (throw
+     (ex-info "XTalk structural access requires a native Arr or Obj"
+              {:collection collection
+               :key key}))))
+
+(defn native-set!
+  [collection key value]
+  (cond
+    (arr? collection) (arr-set! collection key value)
+    (obj? collection) (obj-set! collection key value)
+    :else
+    (throw
+     (ex-info "XTalk structural assignment requires a native Arr or Obj"
+              {:collection collection
+               :key key
+               :value value}))))
+
+(defn native-delete!
+  [collection key]
+  (cond
+    (arr? collection) (. collection (remove key))
+    (obj? collection) (obj-delete! collection key)
+    :else
+    (throw
+     (ex-info "XTalk structural deletion requires a native Arr or Obj"
+              {:collection collection
+               :key key}))))
+
+(defn ensure-native!
+  "Ensures a mutable local reference contains a native Arr/Obj when applicable."
+  [reference]
+  (let [current (deref reference)
+        converted (native-value current)]
+    (when (not (identical current converted))
+      (reset! reference converted))
+    converted))
+
+(defn child-container
+  [next-key]
+  (if (integer? next-key)
+    (arr-new)
+    (obj-new)))
+
+(defn set-path-value!
+  [collection path value]
+  (let [key (first path)
+        remaining (vec (rest path))]
+    (if (empty? remaining)
+      (native-set! collection key value)
+      (let [current (native-get collection key)
+            converted (if (nil? current)
+                        (child-container (first remaining))
+                        (native-value current))]
+        (when (or (nil? current)
+                  (not (identical current converted)))
+          (native-set! collection key converted))
+        (set-path-value! converted remaining value)))))
+
+(defn set-path!
+  "Mutates a nested native Arr/Obj path and returns the assigned value."
+  [reference path value]
+  (if (empty? path)
+    (let [converted (native-value value)]
+      (reset! reference converted)
+      value)
+    (set-path-value! (ensure-native! reference)
+                     (vec path)
+                     value)))
+
+(defn del-path-value!
   [collection path]
-  (let [path (vec path)]
-    (cond
-      (= 0 (count path)) nil
-      (= 1 (count path)) (dissoc collection (first path))
-      :else
-      (let [head (first path)
-            tail (vec (drop 1 path))
-            child (get collection head)]
-        (if (nil? child)
-          collection
-          (assoc collection head (del-path child tail)))))))
+  (let [key (first path)
+        remaining (vec (rest path))]
+    (if (empty? remaining)
+      (native-delete! collection key)
+      (let [child (native-get collection key)]
+        (when (not (nil? child))
+          (del-path-value! child remaining))))))
 
 (defn del-path!
-  "Deletes a path from a mutable XTalk reference and returns the previous value."
+  "Deletes a nested native Arr/Obj path and returns the previous value."
   [reference path]
-  (let [previous (get-in (deref reference) path)]
-    (swap! reference del-path path)
-    previous))
+  (if (empty? path)
+    (let [previous (deref reference)]
+      (reset! reference nil)
+      previous)
+    (del-path-value! (ensure-native! reference) (vec path))))
 
 (defn obj-assign!
-  "Merges source maps into a mutable XTalk object and returns the new object."
+  "Assigns native object sources in place and preserves object identity."
   [reference & sources]
-  (let [next (reduce merge (deref reference) sources)]
-    (reset! reference next)
-    next))
+  (let [object (ensure-native! reference)]
+    (when (not (obj? object))
+      (throw
+       (ex-info "XTalk object assignment requires a native Obj"
+                {:value object})))
+    (reduce
+     (fn [target source]
+       (do
+         (. target (assign (native-value source)))
+         target))
+     object
+     sources)))
 
 (defn arr-push!
-  "Appends values to a mutable XTalk array and returns its new length."
+  "Appends values to a native array and returns its new length."
   [reference & values]
-  (let [next (reduce conj (vec (deref reference)) values)]
-    (reset! reference next)
-    (count next)))
+  (let [array (ensure-native! reference)]
+    (reduce
+     (fn [target value]
+       (do
+         (. target (push-last (native-value value)))
+         target))
+     array
+     values)
+    (count array)))
 
 (defn arr-pop!
-  "Removes and returns the last value of a mutable XTalk array."
+  "Removes and returns the last value of a native array."
   [reference]
-  (let [current (vec (deref reference))
-        amount (count current)]
-    (if (= 0 amount)
-      nil
-      (let [value (last current)
-            next (vec (take (- amount 1) current))]
-        (reset! reference next)
-        value))))
+  (. (ensure-native! reference) (pop-last)))
 
 (defn arr-push-first!
-  "Prepends values to a mutable XTalk array and returns its new length."
+  "Prepends values to a native array and returns its new length."
   [reference & values]
-  (let [next (vec (concat values (deref reference)))]
-    (reset! reference next)
-    (count next)))
+  (let [array (ensure-native! reference)]
+    (reduce
+     (fn [target value]
+       (do
+         (. target (push-first (native-value value)))
+         target))
+     array
+     (reverse values))
+    (count array)))
 
 (defn arr-pop-first!
-  "Removes and returns the first value of a mutable XTalk array."
+  "Removes and returns the first value of a native array."
   [reference]
-  (let [current (vec (deref reference))]
-    (if (= 0 (count current))
-      nil
-      (let [value (first current)
-            next (vec (drop 1 current))]
-        (reset! reference next)
-        value))))
+  (. (ensure-native! reference) (pop-first)))
 
 (defn arr-remove!
-  "Removes one value at index and returns a vector containing the removed value."
+  "Removes one native array value and returns it in a native splice-result array."
   [reference index]
-  (let [current (vec (deref reference))
-        amount (count current)]
+  (let [array (ensure-native! reference)
+        amount (count array)]
     (if (or (< index 0) (>= index amount))
-      []
-      (let [value (nth current index)
-            next (vec (concat (take index current)
-                              (drop (+ index 1) current)))]
-        (reset! reference next)
-        [value]))))
+      (arr-new)
+      (arr-new (. array (remove index))))))
 
 (defn arr-insert!
-  "Inserts value at index and returns an empty splice-result vector."
+  "Inserts a native array value and returns an empty native splice-result array."
   [reference index value]
-  (let [current (vec (deref reference))
-        bounded (max 0 (min index (count current)))
-        next (vec (concat (take bounded current)
-                          [value]
-                          (drop bounded current)))]
-    (reset! reference next)
-    []))
+  (let [array (ensure-native! reference)
+        bounded (max 0 (min index (count array)))]
+    (. array (insert bounded (native-value value)))
+    (arr-new)))
 
 (defn arr-reverse!
-  "Reverses a mutable XTalk array and returns the new array."
+  "Reverses a native array in place and preserves identity."
   [reference]
-  (let [next (vec (reverse (deref reference)))]
-    (reset! reference next)
-    next))
+  (let [array (ensure-native! reference)
+        amount (count array)]
+    (loop [left 0
+           right (- amount 1)]
+      (when (< left right)
+        (let [left-value (arr-get array left)
+              right-value (arr-get array right)]
+          (arr-set! array left right-value)
+          (arr-set! array right left-value)
+          (recur (+ left 1) (- right 1)))))
+    array))
