@@ -13,7 +13,8 @@ public final class HaraPortableMcpTest {
   @Test
   public void runsPortableFoundationMcpBaseSuite() throws Exception {
     HaraNativeTestRunner.Result result =
-        HaraNativeTestRunner.runFile(ROOT, ROOT.resolve("lib/test/xt/mcp/base_test.hal"));
+        HaraNativeTestRunner.runFile(
+            ROOT, ROOT.resolve("lib/test-lang/xt/mcp/base_test.hal"));
 
     assertTrue(result.failureMessage(), result.passed());
     assertEquals(5, result.facts());
