@@ -6,25 +6,30 @@
 (defstruct RuntimeHaraBasic
   [id lang runtime program target state profile timeout])
 
-(def +home-namespace+ 'user)
-
 (defn- default-id
   [language]
   (keyword (str (name language) ".basic")))
 
-(defn- select-home-namespace!
+(defn- current-namespace-symbol
   []
-  (eval (list 'ns +home-namespace+)))
+  (symbol (str (current-namespace))))
+
+(defn- select-home-namespace!
+  [runtime]
+  (let [home-namespace (get (hara-state runtime) :home-namespace)]
+    (eval (list 'ns home-namespace))))
 
 (defn rt-hara:create
   "Creates an in-process Hara runtime for the concrete :hara target.
 
    The :xtalk language coordinate is accepted as a compatibility alias, but
-   source presented to this runtime is always concrete Hara source."
+   source presented to this runtime is always concrete Hara source. The caller
+   namespace is captured as the persistent session home."
   [options]
   (let [language (or (get options :lang) :hara)
         runtime (or (get options :runtime) :basic)
-        timeout (or (get options :timeout) 2000)]
+        timeout (or (get options :timeout) 2000)
+        home-namespace (current-namespace-symbol)]
     (tahto.runtime.basic.type-hara/RuntimeHaraBasic
      (or (get options :id) (default-id language))
      language
@@ -33,7 +38,7 @@
      :hara
      (atom {:status :created
             :target :hara
-            :home-namespace +home-namespace+
+            :home-namespace home-namespace
             :evaluations 0})
      {:input [] :source [] :response []}
      timeout)))
@@ -48,7 +53,7 @@
 
 (defn start-hara
   [runtime]
-  (select-home-namespace!)
+  (select-home-namespace! runtime)
   (swap! (get runtime :state)
          assoc
          :status :started)
@@ -56,7 +61,7 @@
 
 (defn stop-hara
   [runtime]
-  (select-home-namespace!)
+  (select-home-namespace! runtime)
   (swap! (get runtime :state)
          assoc
          :status :stopped)
@@ -71,9 +76,9 @@
 (defn eval-source-now
   "Evaluates concrete Hara source inside the current Hara kernel instance.
 
-   Each call begins and ends in the runtime home namespace. Compiled target
-   source may enter explicit module namespaces without leaking that state into
-   the caller or the next evaluation."
+   Each call begins and ends in the namespace captured when the runtime was
+   created. Compiled target source may enter explicit module namespaces without
+   leaking that state into script lookup, teardown, or the next evaluation."
   [runtime source]
   (if (not= :started (get (hara-state runtime) :status))
     (throw
@@ -85,7 +90,7 @@
                :program (get runtime :program)
                :state (hara-state runtime)}))
     (do
-      (select-home-namespace!)
+      (select-home-namespace! runtime)
       (try
         (let [result (eval (source-form source))]
           (swap! (get runtime :state)
@@ -106,7 +111,7 @@
                      :source source}
                     error)))
         (finally
-          (select-home-namespace!))))))
+          (select-home-namespace! runtime))))))
 
 (defn- rejected
   [error]
