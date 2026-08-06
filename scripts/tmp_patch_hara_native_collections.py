@@ -5,13 +5,13 @@ PATHS = [
     Path("rust/hal-src/tahto/model/v1/spec_hara/emit.hal"),
 ]
 
-OLD = """        \"x:is-array?\" (list 'tahto.runtime.hara/arr?
+OLD = '''        "x:is-array?" (list 'tahto.runtime.hara/arr?
                             (lowered (argument 0)))))
-        \"x:apply\""" 
+        "x:apply"'''
 
-NEW = """        \"x:is-array?\" (list 'tahto.runtime.hara/arr?
+NEW = '''        "x:is-array?" (list 'tahto.runtime.hara/arr?
                             (lowered (argument 0)))
-        \"x:apply\""" 
+        "x:apply"'''
 
 for path in PATHS:
     text = path.read_text()
