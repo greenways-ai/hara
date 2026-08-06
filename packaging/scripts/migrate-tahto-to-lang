@@ -12,7 +12,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 
@@ -62,6 +61,10 @@ SKIP_DIRECTORIES = {
     "node_modules",
     "target",
     "vendor",
+}
+
+PRESERVE_TEXT_FILES = {
+    Path("plans/lang-namespace-migration.md"),
 }
 
 BINARY_SUFFIXES = {
@@ -162,6 +165,8 @@ def candidate_text_file(path: Path) -> bool:
     if not path.is_file():
         return False
     relative = path.relative_to(REPOSITORY)
+    if relative in PRESERVE_TEXT_FILES:
+        return False
     if any(part in SKIP_DIRECTORIES for part in relative.parts):
         return False
     if path.suffix.lower() in BINARY_SUFFIXES:
@@ -184,6 +189,7 @@ def rewrite_text(path: Path) -> bool:
     # same dotted prefix. :tahto/* data keywords are unaffected by this match.
     updated = NAMESPACE_PATTERN.sub("lang.", updated)
     updated = updated.replace("(defproject tahto", "(defproject lang")
+    updated = updated.replace("HaraTahto", "HaraLang")
 
     # Hara-owned workflow and migration labels. Do not globally replace prose
     # uses of the historical proper name.
@@ -192,8 +198,10 @@ def rewrite_text(path: Path) -> bool:
         updated = updated.replace("Tahto", "Lang")
         updated = updated.replace("tahto-runtime", "lang-runtime")
     if relative == Path("core/lib/lang-port.edn"):
-        updated = updated.replace(":migration/id :foundation-base/tahto-to-hara",
-                                  ":migration/id :foundation-base/lang-to-hara")
+        updated = updated.replace(
+            ":migration/id :foundation-base/tahto-to-hara",
+            ":migration/id :foundation-base/lang-to-hara",
+        )
 
     if updated == original:
         return False
@@ -213,18 +221,20 @@ def rewrite_repository() -> int:
 def update_layout_guard() -> None:
     path = REPOSITORY / "packaging" / "scripts" / "check-language-source-layout"
     source = path.read_text(encoding="utf-8")
-    source = source.replace(
-        'LANGUAGE_ROOTS = {\n',
-        'LANGUAGE_ROOTS = {\n'
-        '    Path("core/lib/src/lang"): "lang",\n'
-        '    Path("core/lib/test/lang"): "lang",\n',
-    )
-    source = source.replace(
-        'LEGACY_ROOTS = (\n',
-        'LEGACY_ROOTS = (\n'
-        '    Path("core/lib/src/tahto"),\n'
-        '    Path("core/lib/test/tahto"),\n',
-    )
+    if 'Path("core/lib/src/lang"): "lang"' not in source:
+        source = source.replace(
+            "LANGUAGE_ROOTS = {\n",
+            "LANGUAGE_ROOTS = {\n"
+            '    Path("core/lib/src/lang"): "lang",\n'
+            '    Path("core/lib/test/lang"): "lang",\n',
+        )
+    if 'Path("core/lib/src/tahto")' not in source:
+        source = source.replace(
+            "LEGACY_ROOTS = (\n",
+            "LEGACY_ROOTS = (\n"
+            '    Path("core/lib/src/tahto"),\n'
+            '    Path("core/lib/test/tahto"),\n',
+        )
     path.write_text(source, encoding="utf-8")
 
 
@@ -232,7 +242,7 @@ def write_namespace_guard() -> None:
     path = REPOSITORY / "packaging" / "scripts" / "check-no-tahto-namespaces"
     path.write_text(
         '''#!/usr/bin/env python3
-"""Reject live tahto.* code references after the lang.* hard cut."""
+"""Reject live legacy dotted compiler namespace references."""
 
 from __future__ import annotations
 
@@ -269,7 +279,7 @@ for relative_root in CODE_ROOTS:
             continue
         for match in PATTERN.finditer(source):
             line = source.count("\\n", 0, match.start()) + 1
-            errors.append(f"live tahto.* reference: {relative}:{line}")
+            errors.append(f"legacy dotted namespace reference: {relative}:{line}")
 
 for legacy in (Path("core/lib/src/tahto"), Path("core/lib/test/tahto")):
     if (REPOSITORY / legacy).exists():
@@ -284,7 +294,7 @@ if errors:
         print(error, file=sys.stderr)
     raise SystemExit(1)
 
-print("no live tahto.* code namespaces remain")
+print("no live legacy dotted compiler namespaces remain")
 ''',
         encoding="utf-8",
     )
@@ -294,18 +304,25 @@ print("no live tahto.* code namespaces remain")
 def update_layout_workflow() -> None:
     path = REPOSITORY / ".github" / "workflows" / "language-source-layout.yml"
     source = path.read_text(encoding="utf-8")
-    marker = "      - name: Validate source roots, namespaces, and duplicates\n        run: python3 packaging/scripts/check-language-source-layout\n"
-    addition = marker + "      - name: Reject legacy Tahto code namespaces\n        run: python3 packaging/scripts/check-no-tahto-namespaces\n"
-    if "check-no-tahto-namespaces" not in source:
-        if marker not in source:
-            raise RuntimeError("language source layout workflow marker is missing")
-        source = source.replace(marker, addition)
-    if "packaging/scripts/check-no-tahto-namespaces" not in source:
+    path_filter = "      - 'packaging/scripts/check-no-tahto-namespaces'\n"
+    if path_filter not in source:
         source = source.replace(
             "      - 'packaging/scripts/check-language-source-layout'\n",
             "      - 'packaging/scripts/check-language-source-layout'\n"
-            "      - 'packaging/scripts/check-no-tahto-namespaces'\n",
+            + path_filter,
         )
+    marker = (
+        "      - name: Validate source roots, namespaces, and duplicates\n"
+        "        run: python3 packaging/scripts/check-language-source-layout\n"
+    )
+    addition = marker + (
+        "      - name: Reject legacy compiler code namespaces\n"
+        "        run: python3 packaging/scripts/check-no-tahto-namespaces\n"
+    )
+    if "run: python3 packaging/scripts/check-no-tahto-namespaces" not in source:
+        if marker not in source:
+            raise RuntimeError("language source layout workflow marker is missing")
+        source = source.replace(marker, addition)
     path.write_text(source, encoding="utf-8")
 
 
@@ -331,11 +348,11 @@ def migrate(validate_changes: bool) -> None:
     rename_java_tahto_tests()
     rewrite_repository()
     update_project_name()
+    # These files intentionally contain the legacy spelling in guard patterns
+    # and are written only after the repository-wide replacement pass.
     update_layout_guard()
     write_namespace_guard()
     update_layout_workflow()
-    # Re-run text rewriting for the generated/updated guard and workflow.
-    rewrite_repository()
     if validate_changes:
         validate()
 
