@@ -1,0 +1,425 @@
+(ns xt.net.http-fetch-test
+  (:use code.test)
+  (:require [tahto.core :as l]
+            [xt.lang.common-notify :as notify]))
+
+^{:seedgen/root {:all true, :langs [:js :lua :python]}}
+(l/script- :js
+  {:runtime :basic
+   :require [[xt.net.http-fetch :as fetch]
+             [xt.lang.common-repl :as repl]
+             [xt.lang.spec-base :as xt]
+             [xt.lang.spec-promise :as promise]]})
+
+(l/script- :lua
+  {:runtime :basic
+   :require [[xt.net.http-fetch :as fetch]
+             [xt.lang.common-repl :as repl]
+             [xt.lang.spec-base :as xt]
+             [xt.lang.spec-promise :as promise]
+             [xt.lang.common-promise]]})
+
+(l/script- :python
+  {:runtime :basic
+   :require [[xt.net.http-fetch :as fetch]
+             [xt.lang.common-repl :as repl]
+             [xt.lang.spec-base :as xt]
+             [xt.lang.spec-promise :as promise]
+             [xt.lang.common-promise]]})
+
+(fact:global
+ {:setup [(l/rt:restart)]
+  :teardown [(l/rt:stop)]})
+
+^{:refer xt.net.http-fetch/prepare-url :added "4.1"}
+(fact "prepares explicit and default-derived request URLs"
+
+  (!.js
+    [(fetch/prepare-url
+      {:defaults {:secured true
+                  :host "api.example.com"
+                  :port 443
+                  :basepath "/v1"}}
+      {:path "/health"})
+     (fetch/prepare-url {:defaults {}} {:url "https://override.example/test"})])
+  => ["https://api.example.com:443/v1/health"
+      "https://override.example/test"]
+
+  (!.lua
+    [(fetch/prepare-url
+      {:defaults {:secured true
+                  :host "api.example.com"
+                  :port 443
+                  :basepath "/v1"}}
+      {:path "/health"})
+     (fetch/prepare-url {:defaults {}} {:url "https://override.example/test"})])
+  => ["https://api.example.com:443/v1/health"
+      "https://override.example/test"]
+
+  (!.py
+    [(fetch/prepare-url
+      {:defaults {:secured true
+                  :host "api.example.com"
+                  :port 443
+                  :basepath "/v1"}}
+      {:path "/health"})
+     (fetch/prepare-url {:defaults {}} {:url "https://override.example/test"})])
+  => ["https://api.example.com:443/v1/health"
+      "https://override.example/test"])
+
+^{:refer xt.net.http-fetch/prepare-input :added "4.1"}
+(fact "merges default and request headers while preserving body values"
+
+  (!.js
+    (fetch/prepare-input
+     {:defaults {:secured false
+                 :host "127.0.0.1"
+                 :port 55121
+                 :headers {"apikey" "TOKEN"
+                           "Content-Type" "application/json"}
+                 :basepath "/auth/v1"}}
+     {:path "/sign-in"
+      :method "POST"
+      :headers {"x-request" "one"}
+      :body {"email" "a@example.com"}}))
+  => {"url" "http://127.0.0.1:55121/auth/v1/sign-in"
+      "method" "POST"
+      "headers" {"apikey" "TOKEN"
+                 "Content-Type" "application/json"
+                 "x-request" "one"}
+      "body" {"email" "a@example.com"}}
+
+  (!.lua
+    (fetch/prepare-input
+     {:defaults {:secured false
+                 :host "127.0.0.1"
+                 :port 55121
+                 :headers {"apikey" "TOKEN"
+                           "Content-Type" "application/json"}
+                 :basepath "/auth/v1"}}
+     {:path "/sign-in"
+      :method "POST"
+      :headers {"x-request" "one"}
+      :body {"email" "a@example.com"}}))
+  => {"url" "http://127.0.0.1:55121/auth/v1/sign-in"
+      "method" "POST"
+      "headers" {"apikey" "TOKEN"
+                 "Content-Type" "application/json"
+                 "x-request" "one"}
+      "body" {"email" "a@example.com"}}
+
+  (!.py
+    (fetch/prepare-input
+     {:defaults {:secured false
+                 :host "127.0.0.1"
+                 :port 55121
+                 :headers {"apikey" "TOKEN"
+                           "Content-Type" "application/json"}
+                 :basepath "/auth/v1"}}
+     {:path "/sign-in"
+      :method "POST"
+      :headers {"x-request" "one"}
+      :body {"email" "a@example.com"}}))
+  => {"url" "http://127.0.0.1:55121/auth/v1/sign-in"
+      "method" "POST"
+      "headers" {"apikey" "TOKEN"
+                 "Content-Type" "application/json"
+                 "x-request" "one"}
+      "body" {"email" "a@example.com"}})
+
+^{:refer xt.net.http-fetch/wrap-prepare-input :added "4.1"}
+(fact "wraps a raw handler so it receives prepared input"
+
+  (!.js
+    ((fetch/wrap-prepare-input
+      (fn [client input]
+        (return input)))
+     {:defaults {:secured false
+                 :host "127.0.0.1"
+                 :port 55121
+                 :headers {"apikey" "TOKEN"}
+                 :basepath "/auth/v1"}}
+     {:path "/sign-in"
+      :headers {"Content-Type" "application/json"}}))
+  => {"url" "http://127.0.0.1:55121/auth/v1/sign-in"
+      "method" "GET"
+      "headers" {"apikey" "TOKEN"
+                 "Content-Type" "application/json"}}
+
+  (!.lua
+    ((fetch/wrap-prepare-input
+      (fn [client input]
+        (return input)))
+     {:defaults {:secured false
+                 :host "127.0.0.1"
+                 :port 55121
+                 :headers {"apikey" "TOKEN"}
+                 :basepath "/auth/v1"}}
+     {:path "/sign-in"
+      :headers {"Content-Type" "application/json"}}))
+  => {"url" "http://127.0.0.1:55121/auth/v1/sign-in"
+      "method" "GET"
+      "headers" {"apikey" "TOKEN"
+                 "Content-Type" "application/json"}}
+
+  (!.py
+    ((fetch/wrap-prepare-input
+      (fn [client input]
+        (return input)))
+     {:defaults {:secured false
+                 :host "127.0.0.1"
+                 :port 55121
+                 :headers {"apikey" "TOKEN"}
+                 :basepath "/auth/v1"}}
+     {:path "/sign-in"
+      :headers {"Content-Type" "application/json"}}))
+  => {"url" "http://127.0.0.1:55121/auth/v1/sign-in"
+      "method" "GET"
+      "headers" {"apikey" "TOKEN"
+                 "Content-Type" "application/json"}})
+
+^{:refer xt.net.http-fetch/prepare-middleware :added "4.1"}
+(fact "composes middleware wrappers around a handler in declaration order"
+
+  (!.js
+    ((fetch/prepare-middleware
+      {:middleware [(fn [handler]
+                      (return (fn [client input]
+                                (return (xt/x:cat "A:" (handler client input))))))
+                    (fn [handler]
+                      (return (fn [client input]
+                                (return (xt/x:cat "B:" (handler client input))))))]}
+      (fn [client input]
+        (return "X")))
+     {} {}))
+  => "B:A:X"
+
+  (!.lua
+    ((fetch/prepare-middleware
+      {:middleware [(fn [handler]
+                      (return (fn [client input]
+                                (return (xt/x:cat "A:" (handler client input))))))
+                    (fn [handler]
+                      (return (fn [client input]
+                                (return (xt/x:cat "B:" (handler client input))))))]}
+      (fn [client input]
+        (return "X")))
+     {} {}))
+  => "B:A:X"
+
+  (!.py
+    ((fetch/prepare-middleware
+      {:middleware [(fn [handler]
+                      (return (fn [client input]
+                                (return (xt/x:cat "A:" (handler client input))))))
+                    (fn [handler]
+                      (return (fn [client input]
+                                (return (xt/x:cat "B:" (handler client input))))))]}
+      (fn [client input]
+        (return "X")))
+     {} {}))
+  => "B:A:X")
+
+^{:refer xt.net.http-fetch/then-normalise :added "4.1"}
+(fact "normalises promised response envelopes"
+
+  (notify/wait-on :js
+    (-> (promise/x:promise-run
+         {"status" 200
+          "headers" {"content-type" "application/json"}
+          "body" "{\"id\":\"ord-1\"}"
+          "error" nil})
+        (fetch/then-normalise)
+        (promise/x:promise-then
+         (fn [out]
+           (repl/notify out)))))
+  => {"status" 200
+      "headers" {"content-type" "application/json"}
+      "body" {"id" "ord-1"}
+      "error" nil}
+
+  (notify/wait-on :lua
+    (-> (promise/x:promise-run
+         {"status" 200
+          "headers" {"content-type" "application/json"}
+          "body" "{\"id\":\"ord-1\"}"
+          "error" nil})
+        (fetch/then-normalise)
+        (promise/x:promise-then
+         (fn [out]
+           (repl/notify out)))))
+  => {"status" 200
+      "headers" {"content-type" "application/json"}
+      "body" {"id" "ord-1"}
+      "error" nil}
+
+  (notify/wait-on :python
+    (-> (promise/x:promise-run
+         {"status" 200
+          "headers" {"content-type" "application/json"}
+          "body" "{\"id\":\"ord-1\"}"
+          "error" nil})
+        (fetch/then-normalise)
+        (promise/x:promise-then
+         (fn [out]
+           (repl/notify out)))))
+  => {"status" 200
+      "headers" {"content-type" "application/json"}
+      "body" {"id" "ord-1"}
+      "error" nil})
+
+^{:refer xt.net.http-fetch/wrap-normalise :added "4.1"}
+(fact "wraps raw handlers so their response promises are normalised"
+
+  (notify/wait-on :js
+    (-> ((fetch/wrap-normalise
+          (fn [client input]
+            (return (promise/x:promise-run
+                     {"status" 201
+                      "headers" {}
+                      "body" "{\"ok\":true}"
+                      "error" nil}))))
+         {} {})
+        (promise/x:promise-then
+         (fn [out]
+           (repl/notify out)))))
+  => {"status" 201
+      "headers" {}
+      "body" {"ok" true}
+      "error" nil}
+
+  (notify/wait-on :lua
+    (-> ((fetch/wrap-normalise
+          (fn [client input]
+            (return (promise/x:promise-run
+                     {"status" 201
+                      "headers" {}
+                      "body" "{\"ok\":true}"
+                      "error" nil}))))
+         {} {})
+        (promise/x:promise-then
+         (fn [out]
+           (repl/notify out)))))
+  => {"status" 201
+      "headers" {}
+      "body" {"ok" true}
+      "error" nil}
+
+  (notify/wait-on :python
+    (-> ((fetch/wrap-normalise
+          (fn [client input]
+            (return (promise/x:promise-run
+                     {"status" 201
+                      "headers" {}
+                      "body" "{\"ok\":true}"
+                      "error" nil}))))
+         {} {})
+        (promise/x:promise-then
+         (fn [out]
+           (repl/notify out)))))
+  => {"status" 201
+      "headers" {}
+      "body" {"ok" true}
+      "error" nil})
+
+^{:refer xt.net.http-fetch/prepare-handler :added "4.1"}
+(fact "prepares raw handlers with input preparation, middleware, and normalisation"
+
+  (notify/wait-on :js
+    (var client
+         {:defaults {:secured true
+                     :host "api.example.com"
+                     :port 443
+                     :basepath "/v1"}
+          :middleware [(fn [handler]
+                         (return
+                          (fn [current input]
+                            (xt/x:set-key input "seen" true)
+                            (return (handler current input)))))]})
+    (-> ((fetch/prepare-handler
+          client
+          (fn [current input]
+            (return
+             (promise/x:promise-run
+              {"status" 200
+               "headers" {}
+               "body" (xt/x:json-encode
+                       {"url" (. input ["url"])
+                        "seen" (. input ["seen"])})
+               "error" nil}))))
+         client
+         {:path "/health"})
+        (promise/x:promise-then
+         (fn [out]
+           (repl/notify out)))))
+  => {"status" 200
+      "headers" {}
+      "body" {"url" "https://api.example.com:443/v1/health"
+              "seen" true}
+      "error" nil}
+
+  (notify/wait-on :lua
+    (var client
+         {:defaults {:secured true
+                     :host "api.example.com"
+                     :port 443
+                     :basepath "/v1"}
+          :middleware [(fn [handler]
+                         (return
+                          (fn [current input]
+                            (xt/x:set-key input "seen" true)
+                            (return (handler current input)))))]})
+    (-> ((fetch/prepare-handler
+          client
+          (fn [current input]
+            (return
+             (promise/x:promise-run
+              {"status" 200
+               "headers" {}
+               "body" (xt/x:json-encode
+                       {"url" (. input ["url"])
+                        "seen" (. input ["seen"])})
+               "error" nil}))))
+         client
+         {:path "/health"})
+        (promise/x:promise-then
+         (fn [out]
+           (repl/notify out)))))
+  => {"status" 200
+      "headers" {}
+      "body" {"url" "https://api.example.com:443/v1/health"
+              "seen" true}
+      "error" nil}
+
+  (notify/wait-on :python
+    (var client
+         {:defaults {:secured true
+                     :host "api.example.com"
+                     :port 443
+                     :basepath "/v1"}
+          :middleware [(fn [handler]
+                         (return
+                          (fn [current input]
+                            (xt/x:set-key input "seen" true)
+                            (return (handler current input)))))]})
+    (-> ((fetch/prepare-handler
+          client
+          (fn [current input]
+            (return
+             (promise/x:promise-run
+              {"status" 200
+               "headers" {}
+               "body" (xt/x:json-encode
+                       {"url" (. input ["url"])
+                        "seen" (. input ["seen"])})
+               "error" nil}))))
+         client
+         {:path "/health"})
+        (promise/x:promise-then
+         (fn [out]
+           (repl/notify out)))))
+  => {"status" 200
+      "headers" {}
+      "body" {"url" "https://api.example.com:443/v1/health"
+              "seen" true}
+      "error" nil})
