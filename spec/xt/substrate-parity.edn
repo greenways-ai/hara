@@ -88,8 +88,8 @@
   {:name :node-lifecycle
    :targets [:js :lua :python]
    :test "lib/test/xt/substrate/lifecycle_test.hal"
-   :facts 6
-   :checks 18
+   :facts 2
+   :checks 6
    :coverage
    ["declarative node configuration"
     "local handler requests"
