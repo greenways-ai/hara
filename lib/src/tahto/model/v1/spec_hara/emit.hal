@@ -341,12 +341,12 @@
 
 (defn lower-defn
   [form environment context]
-  (let [symbol (second form)
+  (let [symbol-value (second form)
         [arguments body] (declaration-body form context)
         [hara-arguments hara-body]
         (function-body arguments body environment context)]
     (list 'defn
-          (qualify-top-symbol symbol context)
+          (symbol (name symbol-value))
           hara-arguments
           hara-body)))
 
@@ -365,12 +365,12 @@
 (defn lower-def
   [form environment context]
   (let [items (vec form)
-        symbol (second items)
+        symbol-value (second items)
         value (if (> (count items) 2)
                 (nth items (- (count items) 1))
                 nil)]
     (list 'def
-          (qualify-top-symbol symbol context)
+          (symbol (name symbol-value))
           (lower-expr value environment))))
 
 (defn lower-branches

@@ -1,6 +1,7 @@
 (ns tahto.model.v1.spec-hara-dependency-test
   (:use code.test)
-  (:require [tahto.common.compiler :as compiler]
+  (:require [std.foundation.string :as string]
+            [tahto.common.compiler :as compiler]
             [tahto.core.script :as script]
             [tahto.model.v1.spec-hara :as hara]
             [xt.lang.common-math]))
@@ -45,8 +46,9 @@
 
 ^{:refer tahto.common.compiler/compile-entry :added "4.1"}
 (fact "compiles a registered canonical XTalk dependency entry through Hara"
-  entry-result
-  => {:status :ok
-      :output (:output entry-result)
-      :dependencies (:dependencies entry-result)
-      :stages (:stages entry-result)})
+  [(get entry-result :status)
+   (string/starts-with? (get entry-result :output)
+                        "(ns xt.lang.common-math)\n(defn gcd ")
+   (string/includes? (get entry-result :output)
+                     "xt.lang.common-math/gcd")]
+  => [:ok true true])
