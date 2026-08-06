@@ -9,13 +9,15 @@
   :emitter "lib/src/tahto/model/v1/spec_hara/emit.hal"
   :runtime "lib/src/tahto/runtime/basic/type_hara.hal"
   :registration "lib/src/tahto/runtime/basic/impl/process_xtalk.hal"
-  :mutation-support "lib/src/tahto/runtime/hara.hal"}
+  :standard-facade "lib/src/tahto/runtime/standard.hal"}
 
  :architecture
  {:xtalk
   "The target-neutral parent grammar and public semantic runtime coordinate."
   :hara
   "The concrete child grammar and in-process execution target."
+  :standard
+  "A thin XTalk-to-Hara naming facade over existing std.native types and methods."
   :coordinates
   {[:xtalk :basic] :canonical
    [:hara :basic] :explicit-alias}
@@ -31,7 +33,9 @@
            :grammar/version 1}
   :emission :hara-source
   :module-symbols :flattened-vars
-  :mutable-locals :hara-atoms
+  :mutable-bindings :hara-atoms
+  :array-values :std.native.Arr
+  :object-values :std.native.Obj
   :returns :tagged-local-unwind}
 
  :runtime
@@ -44,6 +48,18 @@
   [:status :target :namespace :evaluations :last-source :last-result
    :last-compiled? :last-error]}
 
+ :collection-model
+ {:array-storage :std.native.Arr
+  :object-storage :std.native.Obj
+  :array-identity :native
+  :object-identity :native
+  :literal-lowering {:vector :std.native.Arr/new
+                     :map :std.native.Obj/new}
+  :facade-policy
+  "Map XTalk names and return conventions onto std.native operations; do not implement a parallel collection model."
+  :semantic-glue
+  [:defaulted-read :nested-path-dispatch :in-place-reverse]}
+
  :ported-surface
  {:control
   [:do :if :when :cond :br* :while :for:index :for:array :for:object
@@ -54,7 +70,7 @@
    x:obj-assign x:arr-push x:arr-pop x:arr-push-first
    x:arr-pop-first x:arr-remove x:arr-insert x:arr-reverse]
   :data
-  [:vectors :maps :sets :module-symbols :member-index]
+  [:std.native.Arr :std.native.Obj :sets :module-symbols :member-index]
   :portable-operations
   [:type-predicates :arrays :objects :strings :json :math :bits :apply]}
 
@@ -62,9 +78,9 @@
  [{:foundation "The historical :xtalk runtime executes emitted Scheme through Chez."
    :hara "The :xtalk :basic runtime compiles to Hara and evaluates inside the current Hara kernel."
    :reason "Self-hosting removes the external process, socket, and JSON result envelope."}
-  {:foundation "Mutable target variables use native JavaScript/Python/Lua mutation."
-   :hara "Mutable lexical variables and parameters are represented by Hara atoms."
-   :reason "Hara bindings are immutable while XTalk var and collection operations are mutable."}
+  {:foundation "Mutable target languages permit both binding reassignment and native collection mutation."
+   :hara "Rebindable lexical variables use atoms, while arrays and objects remain direct std.native.Arr and std.native.Obj values."
+   :reason "Hara bindings are immutable, but its native collection types already provide the XTalk mutation model one-for-one."}
   {:foundation "Target return statements are native control flow."
    :hara "Function-local return uses a tagged exception caught at the function boundary."
    :reason "Preserves early-return semantics without adding a new Hara special form."}]
@@ -72,7 +88,6 @@
  :deferred
  [:break-and-continue-unwind
   :generator-yield
-  :native-construction-parity
   :filesystem-and-shell-capabilities
   :iterator-object-protocol-parity
   :complete-promise-operation-parity
@@ -80,6 +95,8 @@
 
  :tests
  [{:path "lib/test/tahto/model/v1/spec_hara_test.hal"
+   :facts 7}
+  {:path "lib/test/tahto/runtime/standard_test.hal"
    :facts 6}
   {:path "lib/test/tahto/runtime/basic/impl/process_xtalk_test.hal"
    :facts 6}]
@@ -89,6 +106,7 @@
   "The :xtalk :basic coordinate launches no process and owns no transport."
   "Raw Hara definitions persist within a runtime namespace."
   "Separate runtime namespaces isolate their persistent Vars."
-  "Semantic XTalk input compiles and returns native Hara values."
-  "Mutable locals, arrays, and early return execute through the self-hosted path."
+  "XTalk vector and map literals produce std.native.Arr and std.native.Obj."
+  "Collection mutations preserve native identity and XTalk return contracts."
+  "tahto.runtime.standard contains naming and semantic glue, not collection storage."
   "Canonical HAL sources and Rust packaged snapshots are identical."]}

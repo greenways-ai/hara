@@ -4,7 +4,7 @@
             [std.protocol.icontexteval :as context-eval]
             [tahto.core.eval :as evaluation]
             [tahto.model.v1.spec-hara :as hara]
-            [tahto.runtime.hara]))
+            [tahto.runtime.standard]))
 
 (defstruct RuntimeHaraBasic
   [id lang runtime target namespace compiler book state profile timeout])

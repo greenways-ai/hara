@@ -56,7 +56,45 @@ impl NativeModule {
         &self.artifact
     }
 
+    /// Calls a whole-Wasm function whose arguments and result use the dynamic
+    /// Hara value-handle ABI. Values remain owned by this prepared call and
+    /// cross the Wasm boundary without serialisation.
+    pub fn call_value(
+        &mut self,
+        function: FunctionId,
+        arguments: &[Value],
+    ) -> Result<Value, String> {
+        self.store.data_mut().handles.begin_call();
+        let mut encoded = Vec::with_capacity(arguments.len());
+        for argument in arguments {
+            encoded.push(
+                self.store
+                    .data_mut()
+                    .handles
+                    .insert(argument.clone())?
+                    .to_abi(),
+            );
+        }
+        let result = self.call_prepared_i64(function, &encoded)?;
+        self.store.data().handles.get(Handle::from_abi(result))
+    }
+
+    /// Calls the zero-arity entry through the dynamic Hara value-handle ABI.
+    pub fn call_entry_value(&mut self) -> Result<Value, String> {
+        let entry = self.artifact.program.entry;
+        self.call_value(entry, &[])
+    }
+
     pub fn call_i64(&mut self, function: FunctionId, arguments: &[i64]) -> Result<i64, String> {
+        self.store.data_mut().handles.begin_call();
+        self.call_prepared_i64(function, arguments)
+    }
+
+    fn call_prepared_i64(
+        &mut self,
+        function: FunctionId,
+        arguments: &[i64],
+    ) -> Result<i64, String> {
         let (_, arity) = self
             .artifact
             .functions
@@ -68,7 +106,6 @@ impl NativeModule {
                 arguments.len()
             ));
         }
-        self.store.data_mut().handles.begin_call();
         let error = self
             .instance
             .get_global(&mut self.store, "hara_error")

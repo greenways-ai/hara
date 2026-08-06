@@ -679,38 +679,29 @@ fn lower_function(
                     });
                 }
                 Instruction::CallStatic { prototype, argc } => {
-                    let target = program
-                        .functions
-                        .get(usize::from(*prototype))
-                        .ok_or_else(|| unsupported(id, ip, "call target"))?;
-                    if target.async_function
-                        || target.variadic
-                        || target.capture_count != 0
-                        || target.arity != u16::from(*argc)
-                    {
-                        return Err(unsupported(id, ip, "static call shape"));
-                    }
-                    let base = height - usize::from(*argc);
-                    operations.push(MirOp::CallStatic {
-                        destination: stack(base)?,
-                        function: *prototype,
-                        arguments: (0..usize::from(*argc))
-                            .map(|index| stack(base + index))
-                            .collect::<Result<Vec<_>, _>>()?,
-                    });
+                    super::call_boundary::lower_static(
+                        &mut operations,
+                        program,
+                        &representations[ip].stack,
+                        stack_base,
+                        height,
+                        *prototype,
+                        *argc,
+                        id,
+                        ip,
+                    )?;
                 }
                 Instruction::Call { argc } => {
-                    let base = height - usize::from(*argc) - 1;
-                    let Rep::FunctionRef(prototype) = representations[ip].stack[base] else {
-                        return Err(unsupported(id, ip, "dynamic call target"));
-                    };
-                    operations.push(MirOp::CallStatic {
-                        destination: stack(base)?,
-                        function: prototype,
-                        arguments: (0..usize::from(*argc))
-                            .map(|offset| stack(base + 1 + offset))
-                            .collect::<Result<Vec<_>, _>>()?,
-                    });
+                    super::call_boundary::lower_dynamic(
+                        &mut operations,
+                        program,
+                        &representations[ip].stack,
+                        stack_base,
+                        height,
+                        *argc,
+                        id,
+                        ip,
+                    )?;
                 }
                 Instruction::Jump(target) => {
                     let target_rep = representations[*target as usize].stack.last().copied();
@@ -752,19 +743,16 @@ fn lower_function(
                     });
                 }
                 Instruction::Return => {
-                    if representations[ip].stack.last() == Some(&Rep::TruthyHandle) {
-                        operations.push(MirOp::UnboxI64 {
-                            destination: stack(height - 1)?,
-                            source: stack(height - 1)?,
-                        });
-                    }
-                    if representations[ip].stack.last() == Some(&Rep::TaggedRef) {
-                        operations.push(MirOp::TaggedUnboxI64 {
-                            destination: stack(height - 1)?,
-                            source: stack(height - 1)?,
-                        });
-                    }
-                    terminator = Some(MirTerminator::Return(stack(height - 1)?));
+                    let value = super::call_boundary::lower_return(
+                        &mut operations,
+                        program,
+                        &representations[ip].stack,
+                        stack_base,
+                        height,
+                        id,
+                        ip,
+                    )?;
+                    terminator = Some(MirTerminator::Return(value));
                 }
                 other => return Err(unsupported(id, ip, &other.to_string())),
             }
