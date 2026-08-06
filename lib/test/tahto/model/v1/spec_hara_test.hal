@@ -43,7 +43,7 @@
           (deref value))))
 
 ^{:refer tahto.model.v1.spec-hara/emit :added "4.1"}
-(fact "lowers mutable arrays onto the Hara runtime helpers"
+(fact "uses atoms only for rebinding while native Arr owns collection mutation"
   (read-string
    (hara/emit
     '(do
@@ -51,12 +51,31 @@
        (x:arr-push values 3)
        (x:set-idx values 0 9)
        values)))
-  => '(let [values (atom [1 2])]
+  => '(let [values (atom (tahto.runtime.standard/arr-new 1 2))]
         (do
-          (tahto.runtime.hara/arr-push! values 3)
+          (tahto.runtime.standard/arr-push! (deref values) 3)
           (do
-            (tahto.runtime.hara/set-path! values [0] 9)
+            (tahto.runtime.standard/arr-set! (deref values) 0 9)
             (deref values)))))
+
+^{:refer tahto.model.v1.spec-hara/emit :added "4.1"}
+(fact "maps XTalk collection literals and operations through the standard native facade"
+  [(read-string (hara/emit '[1 2]))
+   (read-string (hara/emit '{"value" 1}))
+   (read-string (hara/emit '(x:get-idx [1 2] 0)))
+   (read-string (hara/emit '(x:set-key {"value" 1} "value" 2)))
+   (read-string (hara/emit '(x:obj-pairs {"value" 1})))]
+  => ['(tahto.runtime.standard/arr-new 1 2)
+      '(tahto.runtime.standard/obj-new "value" 1)
+      '(tahto.runtime.standard/arr-get
+        (tahto.runtime.standard/arr-new 1 2)
+        0)
+      '(tahto.runtime.standard/obj-set!
+        (tahto.runtime.standard/obj-new "value" 1)
+        "value"
+        2)
+      '(tahto.runtime.standard/obj-pairs
+        (tahto.runtime.standard/obj-new "value" 1))])
 
 ^{:refer tahto.model.v1.spec-hara.emit/flatten-symbol :added "4.1"}
 (fact "flattens staged module references to legal Hara Vars"
@@ -72,7 +91,7 @@
     [(:output result)
      (get-in result [:grammar :coordinate])
      (mapv :phase (get-in result [:provenance :events]))])
-  => ["(count [1 2 3])"
+  => ["(count (tahto.runtime.standard/arr-new 1 2 3))"
       {:grammar/id :hara
        :grammar/variant :default
        :grammar/version 1}
