@@ -25,9 +25,9 @@
     {"id":"hara-jvm-vm","family":"Truffle","host":"JVM","representation":"HBC4 VM","invocation":"hara benchmark vm","summary":"Prepared HBC4 through the Truffle Bytecode DSL on the JVM."},
     {"id":"hara-jvm-full","family":"Truffle","host":"JVM","representation":"Truffle AST","invocation":"hara benchmark full","summary":"Prepared Hara AST with JVMCI optimization on the JVM."}
   ],
-  "language_competitors": ["c", "java", "python", "luajit", "sbcl", "chez", "guile", "bb"],
-  "class_competitors": ["luajit", "pypy", "node", "ruby-yjit"],
+  "language_competitors": ["luajit", "pypy", "node", "ruby-yjit", "clojure", "sbcl", "chez", "guile", "bb", "rust", "c", "java", "python"],
+  "class_competitors": ["luajit", "pypy", "node", "ruby-yjit", "clojure"],
   "lisp_competitors": ["sbcl", "chez", "guile", "bb", "clojure"],
-  "reference_competitors": ["c", "java", "python"],
+  "reference_competitors": ["rust", "c", "java", "python"],
   "http_competitors": ["hoplite-raw", "hoplite-request", "hoplite-request+hta", "openresty", "nginx", "fastify", "axum"]
 }
