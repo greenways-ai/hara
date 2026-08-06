@@ -140,7 +140,9 @@ for each package to appear in the crates.io index and uploads the resulting
 - Maven runs from the repo root via `-f core/java/pom.xml`; Surefire's working
   directory is the repo root, so tests use repo-relative paths. Conformance
   corpora formerly under `specs/` now live in the `hara-lang/hara-specs` repo;
-  check it out at `../hara-specs/` next to this repo.
+  check it out at `../hara-specs/` next to this repo. The corpus was removed
+  from `hara-specs` main after commit `3012cbe`, so pin local checkouts and CI
+  to that commit until `technology/hara` consumes the new specs service.
 - Website content lives in `hara-lang/hara-www`; check it out at
   `../website/hara-www/` next to this repo (CI workflows check it out at
   `website/hara-www/` inside this repo).

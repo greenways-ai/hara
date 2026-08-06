@@ -191,7 +191,11 @@ sibling repositories next to this one:
 
 ```shell
 git clone https://github.com/hara-lang/hara.git
-git clone https://github.com/hara-lang/hara-specs.git
+# Pinned to the last commit that still contains the local conformance corpus.
+git init hara-specs
+git -C hara-specs remote add origin https://github.com/hara-lang/hara-specs.git
+git -C hara-specs fetch --depth 1 origin 3012cbe74edd92b24783f1968a55dcf612c05364
+git -C hara-specs checkout 3012cbe74edd92b24783f1968a55dcf612c05364
 git clone https://github.com/hara-lang/hara-www.git
 ```
 

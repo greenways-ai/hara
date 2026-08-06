@@ -25,6 +25,7 @@ jobs:
       with:
         repository: hara-lang/hara-specs
         path: hara-specs
+        ref: 3012cbe74edd92b24783f1968a55dcf612c05364
         fetch-depth: 1
 
     - name: Enforce gw.* HAL namespaces
@@ -163,6 +164,7 @@ jobs:
       with:
         repository: hara-lang/hara-specs
         path: hara-specs
+        ref: 3012cbe74edd92b24783f1968a55dcf612c05364
         fetch-depth: 1
 
     - name: Set up Rust WASM toolchain
@@ -226,6 +228,7 @@ jobs:
       with:
         repository: hara-lang/hara-specs
         path: hara-specs
+        ref: 3012cbe74edd92b24783f1968a55dcf612c05364
         fetch-depth: 1
 
     - name: Set up Rust WASM toolchain
