@@ -219,121 +219,121 @@
                (ex-info "Fork checkpoint selector is ambiguous"
                         {:checkpoint selected}))
               (recur (inc index) checkpoint))
-            (recur (ilÈ[™^
-HX]Ú
-JJJJJJB‚ŠY›ˆÛÜKXÚXÚÜÚ[ËX™Y›Ü™HBˆÜ[[YHÛÝ\˜ÙKZY\™Ù]ZYÙ[XÝYBˆ
-]ØÚXÚÜÚ[Âˆ
-˜\ÙKØ˜XÚÙ[™XØ[
-˜\ÙKÜ[[YKX˜XÚÙ[™[[YJH›\ÝXÚXÚÜÚ[ÈÛÝ\˜ÙKZY
-BˆÙ[XÝY\™XÛÜ™
-Ù[XÝYXÚXÚÜÚ[ÚXÚÜÚ[ÈÙ[XÝY
-Bˆ™Y›Ü™Bˆ
-YˆÙ[XÝY\™XÛÜ™ˆ
-˜ÚXÚÜÚ[ÜÙ\]Y[˜ÙHÙ[XÝY\™XÛÜ™
-Bˆ
-WBˆ
-Yˆ
-[™Ù[XÝY
-š[ÈÙ[XÝY\™XÛÜ™
-JBˆ
-›ÝÂˆ
-^Z[™›È‘›ÜšÈÚXÚÜÚ[Ù\È›Ý^\Ý‚ˆÎœ[‹ÚYÛÝ\˜ÙKZYˆ˜ÚXÚÜÚ[Ù[XÝYJJJBˆ
-™YXÙBˆ
-›ˆØÛÜYYÚXÚÜÚ[Bˆ
-Yˆ
-
-˜ÚXÚÜÚ[ÜÙ\]Y[˜ÙHÚXÚÜÚ[
-H™Y›Ü™JBˆ
-]ÛÛZÙ^H
-™XÈ
-˜ÚXÚÜÚ[ÚÙ^HÚXÚÜÚ[
-JBˆ™]ËZÙ^H
-\ÜÛØÈÛZÙ^H\™Ù]ZY
-BˆÛÛ™Bˆ
-\ÜÛØÈÚXÚÜÚ[ˆ˜ÚXÚÜÚ[Ü[ˆ\™Ù]ZYˆ˜ÚXÚÜÚ[ÚÙ^H™]ËZÙ^JWBˆ
-˜\ÙKØ˜XÚÙ[™XØ[
-˜\ÙKÜ[[YKX˜XÚÙ[™[[YJBˆ˜ÛÛ[Z]XÚXÚÜÚ[ˆÛÛ™JBˆ
-[˜ÈÛÜYY
-JBˆÛÜYY
-JBˆˆÚXÚÜÚ[ÊJJB‚ŠY›ˆ›ÜšË\[‚ˆÜ[[YH™Y™\™[˜ÙHÜ[Ûœ×Bˆ
-]ÛÜ[ÛœÈ
-ÜˆÜ[ÛœÈßJBˆÛÝ\˜ÙKZY
-˜\ÙKÜ™Y™\™[˜ÙKZY™Y™\™[˜ÙJBˆÛÝ\˜ÙBˆ
-˜\ÙKØ˜XÚÙ[™XØ[
-˜\ÙKÜ[[YKX˜XÚÙ[™[[YJH›ØY\[ˆÛÝ\˜ÙKZY
-WBˆ
-Yˆ
-š[ÈÛÝ\˜ÙJBˆ
-›ÝÈ
-^Z[™›È•ÛÜšÈ[ˆÙ\È›Ý^\ÝˆÎœ[‹ÚYÛÝ\˜ÙKZYJJBˆ
-]ÚY
-Üˆ
-šYÜ[ÛœÊBˆ
-˜\ÙKØ˜XÚÙ[™XØ[
-˜\ÙKÜ[[YKX˜XÚÙ[™[[YJH›™^\[‹ZY
-JBˆÛÜšÂˆ
-˜\ÙKÜ™\ÛÛ™KYYš[š][Ûˆ[[YBˆ
-œ[‹ÝÛÜšË\›ÛÝÛÝ\˜ÙJBˆ
-œ[‹ÝÛÜšË]™\œÚ[ÛˆÛÝ\˜ÙJJBˆ›ÜšË[Ü[ÛœÂˆ
-Y\™ÙH
-Üˆ
-œ[‹ÛÜ[ÛœÈÛÝ\˜ÙJHßJBˆÜ[ÛœÂˆÎÛÜšË\›ÛÝ
-œ[‹ÝÛÜšË\›ÛÝÛÝ\˜ÙJBˆÛÜšË]™\œÚ[Ûˆ
-œ[‹ÝÛÜšË]™\œÚ[ÛˆÛÝ\˜ÙJ_JBˆ›ÜÜÙYˆÎœ[‹ÚYYˆœ[‹ÝÛÜšË\›ÛÝ
-œ[‹ÝÛÜšË\›ÛÝÛÝ\˜ÙJBˆœ[‹ÝÛÜšË]™\œÚ[Ûˆ
-œ[‹ÝÛÜšË]™\œÚ[ÛˆÛÝ\˜ÙJBˆœ[‹Ü[[YK]™\œÚ[Ûˆ
-˜\ÙKÜ[[YKXÛÙK]™\œÚ[Ûˆ[[YJBˆœ[‹ÜØÚ[XK]™\œÚ[Ûˆ
-˜\ÙKÜ[[YK\ØÚ[XK]™\œÚ[Ûˆ[[YJBˆœ[‹ÜÝ]\È˜Ü™X]Yˆœ[‹Ú[œ]
-œ[‹Ú[œ]ÛÝ\˜ÙJBˆœ[‹Ü™\Ý[š[ˆœ[‹Ù\œ›Üˆš[ˆœ[‹ÛÜ[ÛœÈ›ÜšË[Ü[ÛœÂˆœ[‹Ù›ÜšÙYYœ›ÛHÛÝ\˜ÙKZYˆœ[‹Ù›ÜšËXÚXÚÜÚ[
-˜ÚXÚÜÚ[Ü[ÛœÊBˆœ[‹Ø]šX]\Âˆ
-Y\™ÙH
-œ[‹Ø]šX]\ÈÛÝ\˜ÙJBˆ
-Üˆ
-˜]šX]\ÈÜ[ÛœÊHßJJ_Bˆ^\Ý[™Âˆ
-˜\ÙKØ˜XÚÙ[™XØ[
-˜\ÙKÜ[[YKX˜XÚÙ[™[[YJH›ØY\[ˆY
-WBˆ
-Yˆ
-š[ÈÛÜšÊBˆ
-›ÝÂˆ
-^Z[™›È”[›™YÛÜšÈYš[š][Ûˆ\È›Ý]˜Z[X›H‚ˆÎÛÜšËÜ›ÛÝ
-œ[‹ÝÛÜšË\›ÛÝÛÝ\˜ÙJBˆÛÜšËÝ™\œÚ[Ûˆ
-œ[‹ÝÛÜšË]™\œÚ[ÛˆÛÝ\˜ÙJ_JJJBˆ
-Yˆ^\Ý[™Âˆ
-Yˆ
-[™
-˜\ÙKØÛÛ\]X›K\[È^\Ý[™È›ÜÜÙY
-Bˆ
-HÛÝ\˜ÙKZY
-œ[‹Ù›ÜšÙYYœ›ÛH^\Ý[™ÊJBˆ
-H
-˜ÚXÚÜÚ[Ü[ÛœÊBˆ
-œ[‹Ù›ÜšËXÚXÚÜÚ[^\Ý[™ÊJJBˆ
-˜\ÙKÝÛÜšË\™Y™\™[˜ÙHY
-Bˆ
-›ÝÂˆ
-^Z[™›È‘›ÜšÈ[ˆY[]HÛÛ™›XÝÈÚ]^\Ý[™È›ÜšÈ‚ˆÎœ[‹ÚYYˆœÛÝ\˜ÙHÛÝ\˜ÙKZYˆ˜ÚXÚÜÚ[
-˜ÚXÚÜÚ[Ü[ÛœÊ_JJJBˆ
-]Ü[‚ˆ
-˜\ÙKØ˜XÚÙ[™XØ[
-˜\ÙKÜ[[YKX˜XÚÙ[™[[YJBˆ˜Ü™X]K\[‚ˆ›ÜÜÙY
-WBˆ
-ÛÜKXÚXÚÜÚ[ËX™Y›Ü™HH[[YBˆÛÝ\˜ÙKZYˆYˆ
-˜ÚXÚÜÚ[Ü[ÛœÊJBˆ
-^XÝ]K\[ˆH[[YBˆ[‚ˆÛÜšÂˆ›ÜšË[Ü[ÛœÊJJJJJJB‚ŠY›ˆÛÛ[X[™\[‚ˆÜ[[YH™Y™\™[˜ÙHÛÛ[X[™Ü[Ûœ×Bˆ
-ÛÛ™ˆ
-HÛÛ[X[™˜Ø[˜Ù[
-H
-Ø[˜Ù[\[ˆ[[YH™Y™\™[˜ÙHÜ[ÛœÊBˆ
-HÛÛ[X[™œ™\Ý[YJH
-™\Ý[YK\[ˆ[[YH™Y™\™[˜ÙHÜ[ÛœÊBˆ
-HÛÛ[X[™™›ÜšÊH
-›ÜšË\[ˆ[[YH™Y™\™[˜ÙHÜ[ÛœÊBˆ™[ÙBˆ
-›ÝÂˆ
-^Z[™›È•ÛÜšÈ[[YHÛÛ[X[™\È›ÝÝ\ÜY‚ˆÎ˜ÛÛ[X[™ÛÛ[X[™JJJJB‚Š^[™]\HÝÛÜšËœ[[YK˜˜\ÙKÔ[[YH›ÝØÛÛÒUÛÜšÔ[[YBˆ
-\Ý\Ü[[YHÛÜšÈ[œ]Ü[Ûœ×Bˆ
-Ý\\[ˆ[[YHÛÜšÈ[œ]Ü[ÛœÊJBˆ
-\]Y\žHÜ[[YH™Y™\™[˜ÙHÜ[Ûœ×Bˆ
-]Y\žK\[ˆ[[YH™Y™\™[˜ÙHÜ[ÛœÊJBˆ
-XÛÛ[X[™Ü[[YH™Y™\™[˜ÙHÛÛ[X[™Ü[Ûœ×Bˆ
-ÛÛ[X[™\[ˆ[[YH™Y™\™[˜ÙHÛÛ[X[™Ü[ÛœÊJJB‚
+            (recur (inc index) match)))))))
+
+(defn copy-checkpoints-before!
+  [runtime source-id target-id selected]
+  (let [checkpoints
+        (base/backend-call (base/runtime-backend runtime) :list-checkpoints source-id)
+        selected-record (selected-checkpoint checkpoints selected)
+        before
+        (if selected-record
+          (:checkpoint/sequence selected-record)
+          0)]
+    (if (and selected (nil? selected-record))
+      (throw
+       (ex-info "Fork checkpoint does not exist"
+                {:run/id source-id
+                 :checkpoint selected})))
+    (reduce
+     (fn [copied checkpoint]
+       (if (< (:checkpoint/sequence checkpoint) before)
+         (let [old-key (vec (:checkpoint/key checkpoint))
+               new-key (assoc old-key 0 target-id)
+               clone
+               (assoc checkpoint
+                      :checkpoint/run target-id
+                      :checkpoint/key new-key)]
+           (base/backend-call (base/runtime-backend runtime)
+                         :commit-checkpoint
+                         clone)
+           (inc copied))
+         copied))
+     0
+     checkpoints)))
+
+(defn fork-run
+  [runtime reference options]
+  (let [options (or options {})
+        source-id (base/reference-id reference)
+        source
+        (base/backend-call (base/runtime-backend runtime) :load-run source-id)]
+    (if (nil? source)
+      (throw (ex-info "Work run does not exist" {:run/id source-id}))
+      (let [id (or (:id options)
+                   (base/backend-call (base/runtime-backend runtime) :next-run-id))
+            work
+            (base/resolve-definition runtime
+                                (:run/work-root source)
+                                (:run/work-version source))
+            fork-options
+            (merge (or (:run/options source) {})
+                   options
+                   {:work-root (:run/work-root source)
+                    :work-version (:run/work-version source)})
+            proposed
+            {:run/id id
+             :run/work-root (:run/work-root source)
+             :run/work-version (:run/work-version source)
+             :run/runtime-version (base/runtime-code-version runtime)
+             :run/schema-version (base/runtime-schema-version runtime)
+             :run/status :created
+             :run/input (:run/input source)
+             :run/result nil
+             :run/error nil
+             :run/options fork-options
+             :run/forked-from source-id
+             :run/fork-checkpoint (:checkpoint options)
+             :run/attributes
+             (merge (:run/attributes source)
+                    (or (:attributes options) {}))}
+            existing
+            (base/backend-call (base/runtime-backend runtime) :load-run id)]
+        (if (nil? work)
+          (throw
+           (ex-info "Pinned work definition is not available"
+                    {:work/root (:run/work-root source)
+                     :work/version (:run/work-version source)})))
+        (if existing
+          (if (and (base/compatible-run? existing proposed)
+                   (= source-id (:run/forked-from existing))
+                   (= (:checkpoint options)
+                      (:run/fork-checkpoint existing)))
+            (base/work-reference id)
+            (throw
+             (ex-info "Fork run identity conflicts with existing fork"
+                      {:run/id id
+                       :source source-id
+                       :checkpoint (:checkpoint options)})))
+          (let [run
+                (base/backend-call (base/runtime-backend runtime)
+                              :create-run
+                              proposed)]
+            (copy-checkpoints-before! runtime
+                                      source-id
+                                      id
+                                      (:checkpoint options))
+            (execute-run! runtime
+                          run
+                          work
+                          fork-options)))))))
+
+(defn command-run
+  [runtime reference command options]
+  (cond
+    (= command :cancel) (cancel-run runtime reference options)
+    (= command :resume) (resume-run runtime reference options)
+    (= command :fork) (fork-run runtime reference options)
+    :else
+    (throw
+     (ex-info "Work runtime command is not supported"
+              {:command command}))))
+
+(extend-type std.work.runtime.base/Runtime protocol/IWorkRuntime
+  (-start [runtime work input options]
+    (start-run runtime work input options))
+  (-query [runtime reference options]
+    (query-run runtime reference options))
+  (-command [runtime reference command options]
+    (command-run runtime reference command options)))
+

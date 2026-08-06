@@ -151,11 +151,16 @@
              (ex-info "Work manifest contains duplicate :item/id"
                       {:item/id (:item/id item)
                        :index index}))
-            (recur (il»[ô^
-Bà
-€€öà›]]][JJJJJJJJBÇäYõàX[öYô\›]ò[Y\¬à€X[öYô\›Bà
-ôX»
-X\
-õà⁄][WH
-ö][K›ò[YH][JJHX[öYô\›
-JJBÇéŒ»KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKBéŒ»õŸH[ô\ú¬éŒ¬éŒ»H[ô\àôXŸZ]ô\»HôX›\ú⁄]ôH^X›]Hù[ò›[€àö\ú›à‹[€ò[éŒ»ÿ\Xö[]Y\»ÿ[à\ôYõ‹ôHYô]»‹\ò][€ú»⁄]›]Y[ô»õ›ÿ€€ÀÇéŒ»KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKB
+            (recur (inc index)
+                   (conj output item))))))))
+
+(defn manifest-values
+  [manifest]
+  (vec (map (fn [item] (:item/value item)) manifest)))
+
+;; ---------------------------------------------------------------------------
+;; Node handlers
+;;
+;; A handler receives the recursive execute function first. Optional
+;; capabilities can therefore add new operations without adding protocols.
+;; ---------------------------------------------------------------------------
