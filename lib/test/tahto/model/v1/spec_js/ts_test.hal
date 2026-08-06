@@ -1,0 +1,123 @@
+(ns tahto.model.v1.spec-js.ts-test
+  (:use code.test)
+  (:require [std.foundation.string :as string]
+            [tahto.model.v1.spec-js.ts :as ts]
+            [tahto.model.v1.spec-js.ts-fixture]
+            [tahto.typed.xtalk-common :as types]
+            [tahto.typed.xtalk-parse :as parse]))
+
+(def fixture-ns 'tahto.model.v1.spec-js.ts-fixture)
+(def shared-ns 'tahto.model.v1.spec-js.ts-shared-fixture)
+(def analysis (parse/analyze-module fixture-ns))
+(def declarations (ts/emit-analysis-declarations analysis))
+
+^{:refer tahto.typed.xtalk-common/normalize-type :added "4.1"}
+(fact "normalizes portable XTalk type forms with module aliases"
+  (types/normalize-type
+   [:xt/record
+    ["display-name" [:xt/maybe :xt/str]]
+    ["token" 'shared/Token]]
+   {:ns fixture-ns
+    :aliases {'shared shared-ns}})
+  => {:kind :record
+      :fields
+      [{:name "display_name"
+        :type {:kind :maybe
+               :item {:kind :primitive :name :xt/str}}
+        :optional? true}
+       {:name "token"
+        :type {:kind :named
+               :name 'tahto.model.v1.spec-js.ts-shared-fixture/Token}
+        :optional? false}]})
+
+^{:refer tahto.typed.xtalk-parse/analyze-module :added "4.1"}
+(fact "analyzes defspec.xt and registered code without reading source files"
+  [(mapv :name (:specs analysis))
+   (mapv :name (:functions analysis))
+   (mapv :name (:values analysis))
+   (mapv :type (:inputs (first (:functions analysis))))
+   (:output (first (:functions analysis)))]
+  => [["DEFAULT-USER" "TokenBox" "User" "UserMap" "find-user"]
+      ["find-user"]
+      ["DEFAULT-USER"]
+      [{:kind :named
+        :name 'tahto.model.v1.spec-js.ts-fixture/UserMap}
+       {:kind :primitive :name :xt/str}]
+      {:kind :maybe
+       :item {:kind :named
+              :name 'tahto.model.v1.spec-js.ts-fixture/User}}])
+
+^{:refer tahto.model.v1.spec-js.ts/valid-ts-ident? :added "4.1"}
+(fact "validates and sanitizes TypeScript identifiers"
+  [(ts/valid-ts-ident? "hello")
+   (ts/valid-ts-ident? "$value_2")
+   (ts/valid-ts-ident? "123hello")
+   (ts/valid-ts-ident? "hello-world")
+   (ts/sanitize-ts-ident "123hello-world")]
+  => [true true false false "_123hello_world"])
+
+^{:refer tahto.model.v1.spec-js.ts/emit-ts-type :added "4.1"}
+(fact "emits TypeScript primitives, collections, functions, and records"
+  [(ts/emit-ts-type {:kind :array
+                     :item {:kind :primitive :name :xt/str}}
+                    fixture-ns)
+   (ts/emit-ts-type {:kind :dict
+                     :key {:kind :primitive :name :xt/str}
+                     :value {:kind :primitive :name :xt/num}}
+                    fixture-ns)
+   (ts/emit-ts-type {:kind :fn
+                     :inputs [{:kind :primitive :name :xt/str}]
+                     :output {:kind :primitive :name :xt/bool}}
+                    fixture-ns)]
+  => ["Array<string>"
+      "Record<string, number>"
+      "(arg0: string) => boolean"])
+
+^{:refer tahto.model.v1.spec-js.ts/emit-imports :added "4.1"}
+(fact "groups external type references into deterministic type-only imports"
+  (ts/emit-imports analysis)
+  => (str "import type { Token as "
+          "tahto_model_v1_spec_js_ts_shared_fixture_Token } "
+          "from \"./tahto/model/v1/spec_js/ts_shared_fixture\";"))
+
+^{:refer tahto.model.v1.spec-js.ts/emitted-specs :added "4.1"}
+(fact "does not duplicate same-name callable and value specifications"
+  [(mapv :name (ts/emitted-specs analysis))
+   (count (filter #(string/includes? % "export type find_user =")
+                  (string/split-lines declarations)))
+   (count (filter #(string/includes? % "export declare const DEFAULT_USER")
+                  (string/split-lines declarations)))]
+  => [["TokenBox" "User" "UserMap"] 1 1])
+
+^{:refer tahto.model.v1.spec-js.ts/emit-module-declarations :added "4.1"}
+(fact "emits declaration sidecars from Hara's in-memory script registry"
+  (ts/emit-module-declarations fixture-ns)
+  => (str
+      "import type { Token as tahto_model_v1_spec_js_ts_shared_fixture_Token } "
+      "from \"./tahto/model/v1/spec_js/ts_shared_fixture\";\n\n"
+      "export interface TokenBox {\n"
+      "  token: tahto_model_v1_spec_js_ts_shared_fixture_Token;\n"
+      "}\n\n"
+      "export interface User {\n"
+      "  id: string;\n"
+      "  display_name?: string;\n"
+      "}\n\n"
+      "export type UserMap = Record<string, User>;\n\n"
+      "export type find_user = (arg0: UserMap, arg1: string) => User | null;\n\n"
+      "export declare const DEFAULT_USER: User;"))
+
+^{:refer tahto.model.v1.spec-js.ts/module-dts-artifact :added "4.1"}
+(fact "builds a versioned TypeScript declaration artifact beside JavaScript"
+  (select-keys
+   (ts/module-dts-artifact
+    {:main fixture-ns
+     :runtime-output "dist/ts_fixture.bundle.js"})
+   [:facet :output])
+  => {:facet {:facet/id :typescript
+              :facet/version 1
+              :facet/parent {:grammar/id :js
+                             :grammar/variant :default
+                             :grammar/version 1}
+              :facet/output :declaration-sidecar
+              :facet/extension "d.ts"}
+      :output "dist/ts_fixture.bundle.d.ts"})

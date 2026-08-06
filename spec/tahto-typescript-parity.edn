@@ -1,0 +1,70 @@
+{:reference
+ {:repository "zcaudate-xyz/foundation-base"
+  :commit "f909a44ad504cc6c9f44248d59ec3148261a48d7"
+  :typescript-emitter
+  {:path "src/tahto/model/spec_js/ts.clj"
+   :sha "ca785fd78d39022b66fe6552cbbca76bbb75b362"}
+  :typed-common
+  {:path "src/tahto/typed/xtalk_common.clj"
+   :sha "6696832e4ffae222ffea9696065bf1b32f9c1668"}
+  :typed-parser
+  {:path "src/tahto/typed/xtalk_parse.clj"
+   :sha "675f592ba45cd3258e8eb99d02e562e946ae179d"}}
+
+ :target
+ {:typescript-emitter "lib/src/tahto/model/v1/spec_js/ts.hal"
+  :typed-common "lib/src/tahto/typed/xtalk_common.hal"
+  :typed-parser "lib/src/tahto/typed/xtalk_parse.hal"
+  :test "lib/test/tahto/model/v1/spec_js/ts_test.hal"}
+
+ :coordinate
+ {:facet/id :typescript
+  :facet/version 1
+  :facet/parent {:grammar/id :js
+                 :grammar/variant :default
+                 :grammar/version 1}
+  :facet/output :declaration-sidecar
+  :facet/extension "d.ts"}
+
+ :adaptations
+ [{:id :registry-analysis
+   :foundation "Reads and parses JVM project/source files."
+   :hara "Analyzes defspec.xt and code entries already registered by tahto.core.script."
+   :reason
+   "Canonical HAL module state is authoritative and available on both JVM and Rust hosts; declaration generation must not depend on Clojure tools.reader, code.project, or java.io."}
+  {:id :plain-analysis-data
+   :foundation "Uses JVM defrecord values for typed declarations."
+   :hara "Uses immutable maps with the same public keys."
+   :reason
+   "The TypeScript emitter consumes structural data, so records would add a host-specific identity without behavioral value."}
+  {:id :identifier-portability
+   :foundation "Uses regular expressions for TypeScript identifier checks."
+   :hara "Uses portable string inspection."
+   :reason
+   "Keeps the declaration facet executable on both native Hara hosts without introducing a regex-runtime dependency."}]
+
+ :coverage
+ {:types
+  [:primitive :named :maybe :union :intersection :tuple :array :dict
+   :record :function :application]
+  :declarations
+  [:interface :type-alias :function-type :declared-value]
+  :module
+  [:type-only-imports :namespace-alias-resolution :d-ts-sidecar]
+  :analysis
+  [:defspec.xt :defn.xt :def.xt :same-name-spec-attachment]}
+
+ :boundary
+ {:included "TypeScript declaration generation for JavaScript modules."
+  :deferred
+  ["TypeScript executable-source emission beyond JavaScript"
+   "tsc process/runtime adapter"
+   "JSX, HTML, and QML facets"
+   "whole-project declaration graph writing"]}
+
+ :acceptance
+ ["Declaration output is deterministic for registered modules."
+  "Same-name callable and value specifications are not duplicated."
+  "Cross-namespace named types emit type-only imports with stable aliases."
+  "The facet records its JavaScript parent grammar coordinate and version."
+  "Canonical source and Rust packaged snapshots remain identical."]}

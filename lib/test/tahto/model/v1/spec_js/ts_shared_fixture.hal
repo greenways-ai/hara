@@ -1,0 +1,7 @@
+(ns tahto.model.v1.spec-js.ts-shared-fixture
+  (:require [tahto.core :as l]))
+
+(l/script :xtalk)
+
+(defspec.xt Token
+  :xt/str)
