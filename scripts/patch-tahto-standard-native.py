@@ -84,92 +84,92 @@ for path in EMITTERS:
         f"{path}: lower-for-object",
     )
 
-    native_operations = """        \"x:get-key\" (form
+    native_operations = '''        "x:get-key" (form
                      (concat ['tahto.runtime.standard/obj-get]
                              (map lowered arguments)))
-        \"x:set-key\" (list 'tahto.runtime.standard/obj-set!
+        "x:set-key" (list 'tahto.runtime.standard/obj-set!
                           (lowered (argument 0))
                           (lowered (argument 1))
                           (lowered (argument 2)))
-        \"x:del-key\" (list 'tahto.runtime.standard/obj-delete!
+        "x:del-key" (list 'tahto.runtime.standard/obj-delete!
                           (lowered (argument 0))
                           (lowered (argument 1)))
-        \"x:get-idx\" (form
+        "x:get-idx" (form
                      (concat ['tahto.runtime.standard/arr-get]
                              (map lowered arguments)))
-        \"x:set-idx\" (list 'tahto.runtime.standard/arr-set!
+        "x:set-idx" (list 'tahto.runtime.standard/arr-set!
                           (lowered (argument 0))
                           (lowered (argument 1))
                           (lowered (argument 2)))
-        \"x:has-key?\" (let [found
+        "x:has-key?" (let [found
                           (list 'tahto.runtime.standard/obj-has?
                                 (lowered (argument 0))
                                 (lowered (argument 1)))]
                       (if (> (count arguments) 2)
                         (list '= (lowered (argument 2)) found)
                         found))
-        \"x:copy-key\" (list 'tahto.runtime.standard/obj-set!
+        "x:copy-key" (list 'tahto.runtime.standard/obj-set!
                            (lowered (argument 0))
                            (lowered (argument 2))
                            (list 'tahto.runtime.standard/obj-get
                                  (lowered (argument 1))
                                  (lowered (argument 2))))
-        \"x:obj-keys\" (list 'tahto.runtime.standard/obj-keys
+        "x:obj-keys" (list 'tahto.runtime.standard/obj-keys
                            (lowered (argument 0)))
-        \"x:obj-vals\" (list 'tahto.runtime.standard/obj-vals
+        "x:obj-vals" (list 'tahto.runtime.standard/obj-vals
                            (lowered (argument 0)))
-        \"x:obj-pairs\" (list 'tahto.runtime.standard/obj-pairs
+        "x:obj-pairs" (list 'tahto.runtime.standard/obj-pairs
                             (lowered (argument 0)))
-        \"x:obj-clone\" (list 'tahto.runtime.standard/obj-clone
+        "x:obj-clone" (list 'tahto.runtime.standard/obj-clone
                             (lowered (argument 0)))
-        \"x:obj-assign\" (list 'tahto.runtime.standard/obj-assign!
+        "x:obj-assign" (list 'tahto.runtime.standard/obj-assign!
                              (lowered (argument 0))
                              (lowered (argument 1)))
-        \"x:arr-clone\" (list 'tahto.runtime.standard/arr-clone
+        "x:arr-clone" (list 'tahto.runtime.standard/arr-clone
                             (lowered (argument 0)))
-        \"x:arr-push\" (list 'tahto.runtime.standard/arr-push!
+        "x:arr-push" (list 'tahto.runtime.standard/arr-push!
                            (lowered (argument 0))
                            (lowered (argument 1)))
-        \"x:arr-pop\" (list 'tahto.runtime.standard/arr-pop!
+        "x:arr-pop" (list 'tahto.runtime.standard/arr-pop!
                           (lowered (argument 0)))
-        \"x:arr-push-first\" (list 'tahto.runtime.standard/arr-push-first!
+        "x:arr-push-first" (list 'tahto.runtime.standard/arr-push-first!
                                  (lowered (argument 0))
                                  (lowered (argument 1)))
-        \"x:arr-pop-first\" (list 'tahto.runtime.standard/arr-pop-first!
+        "x:arr-pop-first" (list 'tahto.runtime.standard/arr-pop-first!
                                 (lowered (argument 0)))
-        \"x:arr-remove\" (list 'tahto.runtime.standard/arr-remove!
+        "x:arr-remove" (list 'tahto.runtime.standard/arr-remove!
                              (lowered (argument 0))
                              (lowered (argument 1)))
-        \"x:arr-insert\" (list 'tahto.runtime.standard/arr-insert!
+        "x:arr-insert" (list 'tahto.runtime.standard/arr-insert!
                              (lowered (argument 0))
                              (lowered (argument 1))
                              (lowered (argument 2)))
-        \"x:arr-slice\" (form
+        "x:arr-slice" (form
                        (concat ['tahto.runtime.standard/arr-slice]
                                (map lowered arguments)))
-        \"x:arr-reverse\" (list 'tahto.runtime.standard/arr-reverse!
+        "x:arr-reverse" (list 'tahto.runtime.standard/arr-reverse!
                               (lowered (argument 0)))
-        \"x:arr-map\" (list 'tahto.runtime.standard/arr-map
+        "x:arr-map" (list 'tahto.runtime.standard/arr-map
                           (lowered (argument 0))
                           (lowered (argument 1)))
-        \"x:arr-filter\" (list 'tahto.runtime.standard/arr-filter
+        "x:arr-filter" (list 'tahto.runtime.standard/arr-filter
                              (lowered (argument 0))
                              (lowered (argument 1)))
-        \"x:arr-foldl\" (list 'tahto.runtime.standard/arr-fold-left
+        "x:arr-foldl" (list 'tahto.runtime.standard/arr-fold-left
                             (lowered (argument 0))
                             (lowered (argument 1))
                             (lowered (argument 2)))
-        \"x:arr-foldr\" (list 'tahto.runtime.standard/arr-fold-right
+        "x:arr-foldr" (list 'tahto.runtime.standard/arr-fold-right
                             (lowered (argument 0))
                             (lowered (argument 1))
                             (lowered (argument 2)))
-        \"x:arr-some\" (list 'any?
+        "x:arr-some" (list 'any?
                            (lowered (argument 1))
                            (lowered (argument 0)))
-        \"x:arr-every\" (list 'every?
+        "x:arr-every" (list 'every?
                             (lowered (argument 1))
                             (lowered (argument 0)))
-        \"x:to-string\""" 
+        "x:to-string"'''
 
     text = replace_once(
         text,
