@@ -1,5 +1,6 @@
 name: Bootstrap lang namespace migration
 
+# Invocation marker: generate the atomic lang namespace migration.
 # The pull_request event below is restricted to disposable trigger branches.
 on:
   push:
