@@ -250,41 +250,41 @@ jobs:
         git commit -m "hara ${{ needs.guard.outputs.tag }}"
         git push
 
-  publish-greenways-homebrew:
-    needs: [guard, release, smoke-install, smoke-public-linux-install]
+  publish-source-formula:
+    needs: [guard]
     runs-on: ubuntu-latest
     env:
-      TAP_TOKEN: ${{ secrets.GREENWAYS_HOMEBREW_TAP_TOKEN }}
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
     - uses: actions/checkout@v4
       with:
         ref: ${{ needs.guard.outputs.tag }}
-    - name: Render Greenways source formula
+    - name: Render source formula
       run: |
         python3 scripts/generate-greenways-homebrew-formula \
           "${{ needs.guard.outputs.tag }}" \
           "${{ needs.guard.outputs.revision }}" \
-          target/greenways-homebrew/Formula/hara.rb
-        ruby -c target/greenways-homebrew/Formula/hara.rb
+          target/source-homebrew/Formula/hara.rb
+        ruby -c target/source-homebrew/Formula/hara.rb
     - uses: actions/upload-artifact@v4
       with:
-        name: greenways-homebrew-formula
-        path: target/greenways-homebrew/Formula/hara.rb
-    - name: Update Greenways Homebrew tap
+        name: source-homebrew-formula
+        path: target/source-homebrew/Formula/hara.rb
+    - name: Update Hara Homebrew tap
       if: ${{ env.TAP_TOKEN != '' }}
       env:
         GH_TOKEN: ${{ env.TAP_TOKEN }}
       run: |
-        git clone "https://x-access-token:${GH_TOKEN}@github.com/greenways-ai/homebrew-tap.git" greenways-homebrew-tap
-        mkdir -p greenways-homebrew-tap/Formula
-        cp target/greenways-homebrew/Formula/hara.rb greenways-homebrew-tap/Formula/hara.rb
-        git -C greenways-homebrew-tap diff --check
-        if test -z "$(git -C greenways-homebrew-tap status --porcelain -- Formula/hara.rb)"; then
-          echo "Greenways tap already contains ${{ needs.guard.outputs.tag }}"
+        git clone "https://x-access-token:${GH_TOKEN}@github.com/hara-lang/homebrew-tap.git" hara-homebrew-tap
+        mkdir -p hara-homebrew-tap/Formula
+        cp target/source-homebrew/Formula/hara.rb hara-homebrew-tap/Formula/hara.rb
+        git -C hara-homebrew-tap diff --check
+        if test -z "$(git -C hara-homebrew-tap status --porcelain -- Formula/hara.rb)"; then
+          echo "Hara tap already contains ${{ needs.guard.outputs.tag }}"
           exit 0
         fi
-        git -C greenways-homebrew-tap config user.name "hara release bot"
-        git -C greenways-homebrew-tap config user.email "actions@users.noreply.github.com"
-        git -C greenways-homebrew-tap add Formula/hara.rb
-        git -C greenways-homebrew-tap commit -m "hara ${{ needs.guard.outputs.tag }}"
-        git -C greenways-homebrew-tap push
+        git -C hara-homebrew-tap config user.name "hara release bot"
+        git -C hara-homebrew-tap config user.email "actions@users.noreply.github.com"
+        git -C hara-homebrew-tap add Formula/hara.rb
+        git -C hara-homebrew-tap commit -m "hara ${{ needs.guard.outputs.tag }}"
+        git -C hara-homebrew-tap push

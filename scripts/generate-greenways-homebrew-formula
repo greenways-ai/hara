@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the source-built Hara formula for the Greenways ecosystem tap."""
+"""Render the source-built Hara formula for the hara-lang Homebrew tap."""
 
 from __future__ import annotations
 
