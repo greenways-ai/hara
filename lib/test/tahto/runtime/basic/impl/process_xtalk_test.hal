@@ -45,7 +45,7 @@
   => [1 2 2 3 :hara :stopped nil])
 
 ^{:refer tahto.runtime.basic.type-hara/eval-hara-basic :added "4.1"}
-(fact "compiles XTalk forms through the Hara grammar before evaluation"
+(fact "compiles XTalk collections to native Hara values before evaluation"
   (let [instance
         (runtime/rt-start
          (runtime/rt-create
@@ -62,6 +62,14 @@
              (x:arr-push values 3)
              (x:set-idx values 0 9)
              values)))
+        mutable-object
+        (await
+         (runtime/rt-eval
+          instance
+          '(do
+             (var state := {"count" 1})
+             (x:set-key state "count" 2)
+             state)))
         early-return
         (await
          (runtime/rt-eval
@@ -74,11 +82,16 @@
         state (hara-basic/hara-basic-state instance)]
     (runtime/rt-stop instance)
     [arithmetic
-     mutable-array
+     (std.native.Arr/instance? mutable-array)
+     (std.native.Arr/get-index mutable-array 0)
+     (std.native.Arr/get-index mutable-array 1)
+     (std.native.Arr/get-index mutable-array 2)
+     (std.native.Obj/instance? mutable-object)
+     (std.native.Obj/get-key mutable-object "count")
      early-return
      (:evaluations state)
      (:last-compiled? state)])
-  => [42 [9 2 3] 7 3 true])
+  => [42 true 9 2 3 true 2 7 4 true])
 
 ^{:refer tahto.runtime.basic.type-hara/rt-hara-basic:create :added "4.1"}
 (fact "isolates persistent Vars by runtime namespace"
