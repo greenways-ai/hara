@@ -1,7 +1,14 @@
 name: Bootstrap lang namespace migration
 
+# The pull_request event below is restricted to disposable trigger branches.
 on:
   push:
+    branches: [main]
+    paths:
+      - '.github/workflows/bootstrap-lang-namespace-migration.yml'
+      - 'packaging/scripts/migrate-tahto-to-lang'
+  pull_request:
+    types: [opened, synchronize, reopened]
     branches: [main]
     paths:
       - '.github/workflows/bootstrap-lang-namespace-migration.yml'
@@ -24,7 +31,9 @@ jobs:
       github.repository == 'hara-lang/hara' &&
       (github.event_name != 'issue_comment' ||
        (github.event.issue.pull_request &&
-        github.event.comment.body == '/run-lang-namespace-migration'))
+        github.event.comment.body == '/run-lang-namespace-migration')) &&
+      (github.event_name != 'pull_request' ||
+       startsWith(github.head_ref, 'agent/lang-namespace-migration-pr-trigger'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
