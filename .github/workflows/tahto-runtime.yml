@@ -4,14 +4,14 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'lib/src/tahto/**'
-      - 'lib/src/hara/runtime.hal'
-      - 'rust/hal-src/tahto/**'
-      - 'rust/hal-src/hara/runtime.hal'
-      - 'lib/test/tahto/**'
-      - 'lib/test/hara/runtime_test.hal'
-      - 'lib/integration/hara/runtime_smoke.hal'
-      - 'scripts/run-hara-runtime-smoke'
+      - 'core/lib/src/tahto/**'
+      - 'core/lib/src/hara/runtime.hal'
+      - 'core/rust/hal-src/tahto/**'
+      - 'core/rust/hal-src/hara/runtime.hal'
+      - 'core/lib/test/tahto/**'
+      - 'core/lib/test/hara/runtime_test.hal'
+      - 'core/lib/integration/hara/runtime_smoke.hal'
+      - 'packaging/scripts/run-hara-runtime-smoke'
       - '.github/workflows/tahto-runtime.yml'
   workflow_dispatch:
 
@@ -45,8 +45,8 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
           cache: maven
-          cache-dependency-path: java/pom.xml
+          cache-dependency-path: core/java/pom.xml
       - name: Build Hara Truffle runtime
-        run: mvn -B -Ptruffle -DskipTests package --file java/pom.xml
+        run: mvn -B -Ptruffle -DskipTests package --file core/java/pom.xml
       - name: Execute emitted JavaScript, Python, and Lua
-        run: bash scripts/run-hara-runtime-smoke
+        run: bash packaging/scripts/run-hara-runtime-smoke

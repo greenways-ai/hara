@@ -1,8 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
-MANIFEST="$ROOT/rust/extensions/crypto-hash-sha256/Cargo.toml"
-
-cargo build --manifest-path "$MANIFEST" --target wasm32-unknown-unknown --release
-echo "Built $ROOT/rust/extensions/crypto-hash-sha256/target/wasm32-unknown-unknown/release/hara_crypto_hash_sha256.wasm"

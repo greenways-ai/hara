@@ -55,18 +55,18 @@ jobs:
             exit 0
           fi
 
-          # Browser and Studio assets live under rust/web for packaging, but
+          # Browser and Studio assets live under core/rust/web for packaging, but
           # they are not Cargo or JVM core inputs. Their dedicated Studio and
           # Site workflows build and validate them, so do not make pre-existing
           # native runtime failures block an otherwise isolated web change.
           if git diff --quiet "$base" "$head" -- \
-            rust \
-            ':(exclude)rust/web' \
-            java \
-            lib \
+            core/rust \
+            ':(exclude)core/rust/web' \
+            core/java \
+            core/lib \
             contrib \
             specs \
-            scripts/run-lib-tests; then
+            packaging/scripts/run-lib-tests; then
             echo "run_core=false" >> "$GITHUB_OUTPUT"
             echo "No core runtime changes detected."
           else
@@ -92,15 +92,15 @@ jobs:
       - name: Check Rust module layout
         if: steps.scope.outputs.run_core == 'true'
         run: |
-          bash rust/scripts/check-layout.test.sh
-          bash rust/scripts/check-layout.sh
+          bash core/rust/scripts/check-layout.test.sh
+          bash core/rust/scripts/check-layout.sh
 
       - name: Check Rust
         if: steps.scope.outputs.run_core == 'true'
         run: |
-          cargo clippy --manifest-path rust/Cargo.toml --all-targets
-          cargo test --manifest-path rust/Cargo.toml
-          cargo test --manifest-path rust/raw/Cargo.toml
+          cargo clippy --manifest-path core/rust/Cargo.toml --all-targets
+          cargo test --manifest-path core/rust/Cargo.toml
+          cargo test --manifest-path core/rust/raw/Cargo.toml
 
       - name: Set up JDK 21
         if: steps.scope.outputs.run_core == 'true'
@@ -109,12 +109,12 @@ jobs:
           java-version: '21'
           distribution: temurin
           cache: maven
-          cache-dependency-path: java/pom.xml
+          cache-dependency-path: core/java/pom.xml
 
       - name: Build and test Java runtime
         if: steps.scope.outputs.run_core == 'true'
-        run: mvn -B -Ptruffle package --file java/pom.xml
+        run: mvn -B -Ptruffle package --file core/java/pom.xml
 
       - name: Run library HAL tests
         if: steps.scope.outputs.run_core == 'true'
-        run: ./scripts/run-lib-tests
+        run: ./packaging/scripts/run-lib-tests

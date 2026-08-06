@@ -1,0 +1,12 @@
+{:hara/type :project
+ :hara/version "1.0.0"
+ :project/id hara.lang
+ :project/version "0.1.0"
+ :project/source-paths ["lib/src"]
+ :project/test-paths ["lib/test" "rust/web"]
+ :project/extension-paths ["rust/extensions" "../extensions"]
+ :project/main std.foundation
+ :project/capabilities
+ #{:studio/node-send
+   :files/local-read
+   :files/local-write}}

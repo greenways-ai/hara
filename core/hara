@@ -1,0 +1,46 @@
+#!/bin/bash
+
+# Resolve the directory where this script is located.
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+HARA_RUNTIME="${HARA_RUNTIME:-truffle}"
+
+if [[ "$HARA_RUNTIME" == "rust" ]]; then
+    HARA_NATIVE="${HARA_NATIVE:-$SCRIPT_DIR/rust/target/release/hara}"
+    if [[ ! -x "$HARA_NATIVE" ]]; then
+        echo "Hara Rust runtime not found: $HARA_NATIVE" >&2
+        echo "Build it once with: cargo build --manifest-path $SCRIPT_DIR/rust/Cargo.toml --release --bin hara" >&2
+        exit 2
+    fi
+    exec "$HARA_NATIVE" "$@"
+elif [[ "$HARA_RUNTIME" != "truffle" ]]; then
+    echo "Unknown HARA_RUNTIME: $HARA_RUNTIME (expected rust or truffle)" >&2
+    exit 2
+fi
+
+HARA_RUNTIME_JAR="${HARA_RUNTIME_JAR:-$SCRIPT_DIR/java/target/hara-truffle.jar}"
+HARA_JAVA="${HARA_JAVA:-}"
+
+if [[ ! -r "$HARA_RUNTIME_JAR" ]]; then
+    echo "Hara runtime JAR not found: $HARA_RUNTIME_JAR" >&2
+    echo "Build it once with: mvn -f \"$SCRIPT_DIR/java/pom.xml\" -Ptruffle -DskipTests package" >&2
+    exit 2
+fi
+
+if [[ -z "$HARA_JAVA" && -n "${JAVA_HOME:-}" && -x "$JAVA_HOME/bin/java" ]]; then
+    HARA_JAVA="$JAVA_HOME/bin/java"
+elif [[ -z "$HARA_JAVA" ]] && java -version >/dev/null 2>&1; then
+    HARA_JAVA="$(command -v java)"
+elif [[ -z "$HARA_JAVA" ]] && command -v brew >/dev/null 2>&1; then
+    BREW_JAVA="$(brew --prefix openjdk 2>/dev/null)/bin/java"
+    if [[ -x "$BREW_JAVA" ]]; then
+        HARA_JAVA="$BREW_JAVA"
+    fi
+fi
+
+if [[ -z "$HARA_JAVA" || ! -x "$HARA_JAVA" ]]; then
+    echo "Java runtime not found. Set HARA_JAVA or JAVA_HOME." >&2
+    exit 2
+fi
+
+exec "$HARA_JAVA" -jar "$HARA_RUNTIME_JAR" "$@"

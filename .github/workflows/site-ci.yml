@@ -5,9 +5,9 @@ on:
     paths:
       - "website/**"
       - "benchmarks/**"
-      - "lib/bench/**"
+      - "core/lib/bench/**"
       - "packages/visual-language/**"
-      - "scripts/install-benchmark-site"
+      - "packaging/scripts/install-benchmark-site"
       - ".github/scripts/verify-benchmark-observatory.sh"
       - ".github/workflows/site-ci.yml"
       - ".github/workflows/pages-www.yml"
@@ -45,16 +45,16 @@ jobs:
           npm ci --prefix website
           npm ci --prefix benchmarks
       - name: Prepare canonical evidence for Astro
-        run: bash scripts/install-benchmark-site prepare
+        run: bash packaging/scripts/install-benchmark-site prepare
       - name: Validate benchmark publication
         run: |
           npm test --prefix benchmarks
           npm run build --prefix benchmarks
-          test -s target/benchmarks/index.html
-          grep -F '<title>Hara Benchmarks</title>' target/benchmarks/index.html
-          grep -F 'id="class-comparison"' target/benchmarks/index.html
-          grep -F 'id="language-shootout"' target/benchmarks/index.html
-          grep -F 'rust-prepared' target/benchmarks/index.html
+          test -s core/target/benchmarks/index.html
+          grep -F '<title>Hara Benchmarks</title>' core/target/benchmarks/index.html
+          grep -F 'id="class-comparison"' core/target/benchmarks/index.html
+          grep -F 'id="language-shootout"' core/target/benchmarks/index.html
+          grep -F 'rust-prepared' core/target/benchmarks/index.html
       - name: Validate main Hara site
         run: |
           npm test --prefix website

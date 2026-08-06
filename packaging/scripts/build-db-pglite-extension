@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WEB="$REPO_ROOT/core/rust/web"
+EXTENSION="$REPO_ROOT/core/rust/extensions/std-db-pglite"
+
+if [ ! -x "$WEB/node_modules/.bin/vite" ]; then
+  (cd "$WEB" && npm ci)
+fi
+
+(
+  cd "$EXTENSION"
+  npm install --ignore-scripts --no-audit --no-fund
+)
+
+(
+  cd "$WEB"
+  ./node_modules/.bin/vite build --config vite.pglite-node.config.js
+  ./node_modules/.bin/vite build --config vite.pglite-browser.config.js
+  node --test pglite-provider.test.mjs
+  node package-pglite-extension.mjs
+)

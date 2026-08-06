@@ -122,10 +122,10 @@
 * The `hara.kernel.Cmd` functional interface (`Object apply(Foundation f, List<Object> args)`) defines the contract for control plane commands.
 * Inner static helper classes within `hara.lang.data` interfaces are consistently named `S`.
 * `hara.lang.data.OrderedMap` and `hara.lang.data.OrderedSet` use an amortized compaction strategy during `dissoc` to prevent memory leaks. Compaction, which rebuilds the backing vector and map, is triggered when the vector size exceeds 32 and is more than double the number of active elements.
-* `std.lang` (in `archive/src-reference/`) aims to produce readable code and support existing tooling (like source maps), avoiding complex optimizations.
+* `std.lang` (in `../hara-archive/src-reference/`) aims to produce readable code and support existing tooling (like source maps), avoiding complex optimizations.
 * `std.make` supports writing `SourceNode` objects to disk, automatically creating V3 Source Map JSON files.
 * User prefers public Java methods to follow standard camelCase naming conventions, without special prefixes like underscores (e.g., `type()` instead of `_type()`).
-* The main source code is located in `java/src/main/java/` and the test code is in `java/src/test/java/`.
+* The main source code is located in `core/java/src/main/java/` and the test code is in `core/java/src/test/java/`.
 * Avoid making out-of-scope changes, such as updating project-level configurations (e.g., Java version in pom.xml), when the task is focused on a specific feature or bug fix.
 * `hara.lang.service.Http` provides an HTTP gateway using `com.sun.net.httpserver`, exposing `/eval` and `/session` endpoints to support external tooling and the Runtime Development Environment (RDE).
 * `hara.kernel.base.Parser` (formerly `Read`) now delegates character reading to `hara.kernel.base.Reader` instead of using its own `LineNumberingReader`.
@@ -145,7 +145,7 @@
 * To force Maven to update dependencies from remote repositories, ignoring local caches of resolution failures, use the `-U` flag (e.g., `mvn compile -U`).
 * The build environment uses a modern JDK (21+) that no longer includes the `javah` tool, making older JNI-related Maven plugins like `nar-maven-plugin` incompatible.
 * The project implements modularity using isolated `RT.Loader` (URLClassLoader) instances for each runtime and `hara.kernel.maven.Maven` for dynamic dependency injection, rather than using the OSGi framework.
-* Significant functionality from the reference Clojure implementation (`archive/src-reference/`) is missing in the Java port, including `std.fs`, `std.concurrent`, `std.math`, `std.string`, and `std.image`.
+* Significant functionality from the reference Clojure implementation (`../hara-archive/src-reference/`) is missing in the Java port, including `std.fs`, `std.concurrent`, `std.math`, `std.string`, and `std.image`.
 * New top-level commands are added to the system by registering an implementation of the `hara.kernel.Cmd` functional interface into the `hara.kernel.Foundation` registry, rather than extending an enum.
 * The `Foundation` service manages runtime sessions via the `SESSION` command. `NEW` accepts an optional memory limit. `INFO` returns a map of session statistics (name, path count, class count, alias count).
 * The `hara.lang.data.List` API provides a `popFirst()` method to get the list without its first element; it does not have a `next()` method for this purpose.
@@ -200,7 +200,7 @@
 * The persistent (`Standard`) data structures are immutable. Modifying operations, such as `popFirst()` on `List.Standard`, return a new instance of the collection, leaving the original unchanged.
 * When implementing subprocess execution (`sh`), standard output and standard error must be read concurrently (e.g., via `CompletableFuture`) to avoid deadlocks.
 * In the custom language defined in this project, symbols used as map keys are evaluated. For literal keys, `Keyword` objects should be used as they evaluate to themselves.
-* The project uses the `jacoco-maven-plugin` (version 0.8.12) for test coverage, configured to generate reports during the `test` phase at `java/target/site/jacoco/index.html`.
+* The project uses the `jacoco-maven-plugin` (version 0.8.12) for test coverage, configured to generate reports during the `test` phase at `core/java/target/site/jacoco/index.html`.
 * `hara.kernel.Foundation` supports an overloaded constructor to configure the persistent store filename.
 * File path manipulation requires robust error handling, such as checking for null parent directories before creating them to avoid `NullPointerException`s.
 * The `hara.lang.base.G.display` utility handles object formatting for the REPL. It renders `Throwable` as `#error "msg"` and falls back to `toString()` for generic objects.
@@ -211,14 +211,14 @@
 * `hara.compiler.HotspotFn` wraps interpreted functions created by the `fn` macro. It triggers JIT compilation using `hara.compiler.Compiler` after a configurable execution threshold (default 5).
 * The `ctl` function in `hara.kernel.base.Builtin` provides Lisp access to `Foundation` commands, communicating via the `I.Context` interface to maintain classloader isolation.
 * Shell primitives (`sh`, `slurp`, `spit`) are located in `hara.kernel.base.IO` and must be explicitly registered in `hara.kernel.base.Env.loadStatic()` to be available in the runtime.
-* The GitHub Actions CI workflow (`.github/workflows/main.yml`) utilizes `v4` versions of `checkout`, `setup-java`, and `upload-artifact`. It sets up JDK 21 (Temurin), executes `mvn -B package -f java/pom.xml`, and uploads the Jacoco coverage report from `java/target/site/jacoco/`.
+* The GitHub Actions CI workflow (`.github/workflows/main.yml`) utilizes `v4` versions of `checkout`, `setup-java`, and `upload-artifact`. It sets up JDK 21 (Temurin), executes `mvn -B package -f core/java/pom.xml`, and uploads the Jacoco coverage report from `core/java/target/site/jacoco/`.
 * The project integrates Hyperledger Besu (EVM) and ClauDB (Redis) as programmable services managed by `hara.kernel.Foundation` via `BESU` and `REDIS` commands.
-* The project contains both Java source code (`java/src/main/java/`) and reference Clojure source code (`archive/src-reference/`) that is used as a blueprint for porting functionality to Java.
+* The project contains both Java source code (`core/java/src/main/java/`) and reference Clojure source code (`../hara-archive/src-reference/`) that is used as a blueprint for porting functionality to Java.
 * The `hara.lang.base.I.Pair` interface uses the `getValue()` method to retrieve the value, not `_2()`.
 * The default TCP port for the `hara.kernel.Foundation` server is defined as 4164.
 * The `RT.Instance` class enforces memory limits during the `eval` loop using a periodic sampling strategy (checking every 1000th operation) to minimize overhead. It isolates calculation by excluding the `_root` and `_loader` fields in `Graph.sizeOf` and catches `OutOfMemoryError` to prevent JVM-wide crashes, rethrowing them as `hara.lang.base.Ex.Runtime`.
 * The `hara.kernel.command.Core` command execution logic uses `Ex.Sneaky(e)` to propagate exceptions, avoiding explicit wrapping of `CompilerException` in a `RuntimeException`.
-* The repository contains C/C++ source code in the `archive/c/` directory, including the `simdjson` library.
+* The repository contains C/C++ source code in the `../hara-archive/c/` directory, including the `simdjson` library.
 * The packages `hara.lang.base.Std` and `hara.lang.base.Data` have been deprecated and removed. Core data interfaces (e.g., `IStringType`, `IMapType`) are now in `hara.data.types`, and concrete structural types (`Cons`, `Seq`, `Tuple`) are in `hara.lang.data`.
 * The `Max` and `Min` interfaces, formerly nested within `hara.lang.base.primitive.Num`, are now top-level interfaces in `hara.lang.base.primitive`.
 * The user prefers using interfaces as namespaces to group related nested types, constants, and static utility methods. The refactoring of `hara.lib.block.Block` serves as a template for this pattern.

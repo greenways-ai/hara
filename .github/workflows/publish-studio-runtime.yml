@@ -29,9 +29,9 @@ jobs:
           TAG="${{ inputs.tag }}"
           if [ -z "$TAG" ]; then TAG=$(node -p 'require("./.github/studio-runtime-release.json").tag'); fi
           VERSION="${TAG#v}"
-          CRATE_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -n 1)
+          CRATE_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' core/rust/Cargo.toml | head -n 1)
           [ "$VERSION" = "$CRATE_VERSION" ] || {
-            echo "tag $TAG does not match rust/Cargo.toml $CRATE_VERSION" >&2
+            echo "tag $TAG does not match core/rust/Cargo.toml $CRATE_VERSION" >&2
             exit 1
           }
           git fetch --tags origin
@@ -40,15 +40,15 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Build and verify Studio runtime
-        run: scripts/build-studio-runtime "${{ steps.release.outputs.version }}"
+        run: packaging/scripts/build-studio-runtime "${{ steps.release.outputs.version }}"
       - name: Create or update release runtime assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.release.outputs.tag }}"
           VERSION="${{ steps.release.outputs.version }}"
-          ASSETS=(target/studio-runtime/hara-studio-runtime-$VERSION.tar.gz \
-                  target/studio-runtime/hara-studio-runtime-$VERSION.tar.gz.sha256)
+          ASSETS=(core/target/studio-runtime/hara-studio-runtime-$VERSION.tar.gz \
+                  core/target/studio-runtime/hara-studio-runtime-$VERSION.tar.gz.sha256)
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${ASSETS[@]}" --clobber
           else

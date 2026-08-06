@@ -4,23 +4,23 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "lib/src/std/db/text/base_scope.hal"
-      - "lib/src/std/db/text/base_graph.hal"
-      - "lib/src/std/db/text/sql_graph.hal"
-      - "lib/src/std/db/text/base_tree.hal"
-      - "lib/src/std/db/text/sql_tree.hal"
-      - "lib/src/std/db/text/sql_view.hal"
-      - "lib/src/std/db/text/sql_call.hal"
-      - "lib/src/std/db/text/sql_util.hal"
-      - "lib/src/std/db/text/base_check.hal"
-      - "lib/test/std/db/text/base_scope_test.hal"
-      - "lib/test/std/db/text/base_graph_test.hal"
-      - "lib/test/std/db/text/sql_graph_test.hal"
-      - "lib/test/std/db/text/base_tree_test.hal"
-      - "lib/test/std/db/text/sql_tree_test.hal"
-      - "lib/test/std/db/text/sql_view_test.hal"
-      - "lib/test/std/db/text/sql_call_test.hal"
-      - "java/src/test/java/hara/truffle/HaraDbGraphTest.java"
+      - "core/lib/src/std/db/text/base_scope.hal"
+      - "core/lib/src/std/db/text/base_graph.hal"
+      - "core/lib/src/std/db/text/sql_graph.hal"
+      - "core/lib/src/std/db/text/base_tree.hal"
+      - "core/lib/src/std/db/text/sql_tree.hal"
+      - "core/lib/src/std/db/text/sql_view.hal"
+      - "core/lib/src/std/db/text/sql_call.hal"
+      - "core/lib/src/std/db/text/sql_util.hal"
+      - "core/lib/src/std/db/text/base_check.hal"
+      - "core/lib/test/std/db/text/base_scope_test.hal"
+      - "core/lib/test/std/db/text/base_graph_test.hal"
+      - "core/lib/test/std/db/text/sql_graph_test.hal"
+      - "core/lib/test/std/db/text/base_tree_test.hal"
+      - "core/lib/test/std/db/text/sql_tree_test.hal"
+      - "core/lib/test/std/db/text/sql_view_test.hal"
+      - "core/lib/test/std/db/text/sql_call_test.hal"
+      - "core/java/src/test/java/hara/truffle/HaraDbGraphTest.java"
       - ".github/workflows/std-db-graph.yml"
   workflow_dispatch:
 
@@ -40,4 +40,4 @@ jobs:
           java-version: 21
           cache: maven
       - name: Execute graph compiler fixtures through Hara
-        run: mvn -B -f java/pom.xml -Ptruffle -DfailIfNoTests=true -Dtest=hara.truffle.HaraDbGraphTest test
+        run: mvn -B -f core/java/pom.xml -Ptruffle -DfailIfNoTests=true -Dtest=hara.truffle.HaraDbGraphTest test

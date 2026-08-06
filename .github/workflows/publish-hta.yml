@@ -21,24 +21,24 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
           cache: npm
-          cache-dependency-path: rust/web/package-lock.json
+          cache-dependency-path: core/rust/web/package-lock.json
 
       - name: Verify tag and package version
         if: github.ref_type == 'tag'
         run: |
-          VERSION=$(node -p "require('./rust/web/packages/hta/package.json').version")
+          VERSION=$(node -p "require('./core/rust/web/packages/hta/package.json').version")
           test "${GITHUB_REF_NAME}" = "hta-v${VERSION}"
 
       - name: Install workspace dependencies
-        run: npm ci --prefix rust/web
+        run: npm ci --prefix core/rust/web
 
       - name: Test package source and packed consumer
         run: |
-          npm --prefix rust/web run test:hta
-          npm --prefix rust/web run test:hta:pack
+          npm --prefix core/rust/web run test:hta
+          npm --prefix core/rust/web run test:hta:pack
 
       - name: Publish or verify existing package
-        working-directory: rust/web
+        working-directory: core/rust/web
         run: |
           VERSION=$(node -p "require('./packages/hta/package.json').version")
           LOCAL_INTEGRITY=$(npm pack --dry-run --json --workspace @hara-lang/hta | node -e "let source=''; process.stdin.on('data', chunk => source += chunk); process.stdin.on('end', () => process.stdout.write(JSON.parse(source)[0].integrity))")

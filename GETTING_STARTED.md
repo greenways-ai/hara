@@ -37,15 +37,15 @@ mvn -version
 ## 2. Build the Truffle runtime
 
 ```shell
-mvn -f java/pom.xml -Ptruffle package
+mvn -f core/java/pom.xml -Ptruffle package
 ```
 
-This produces `java/target/hara-truffle.jar`.
+This produces `core/java/target/hara-truffle.jar`.
 
 ## 3. Evaluate a form
 
 ```shell
-./hara eval '(let [x 19] (+ x 23))'
+./core/hara eval '(let [x 19] (+ x 23))'
 ```
 
 Expected result:
@@ -57,30 +57,30 @@ Expected result:
 ## 4. Start the REPL
 
 ```shell
-./hara
+./core/hara
 
 # ROOT REPL without a RESP listener
-./hara --offline
+./core/hara --offline
 ```
 
 The REPL supports multiline forms, persistent history, symbol and Java completion, and inline
-documentation. See [`docs/user-guide.md`](website/docs/user-guide.md) and the
-[archived REPL planning document](specs/99-archive/planning/tooling/repl.md).
+documentation. See [`docs/user-guide.md`](../hara-docs/docs/docs/user-guide.md) and the
+[archived REPL planning document](../hara-specs/99-archive/planning/tooling/repl.md).
 
 ## 5. Run a file or stdin
 
 ```shell
-./hara run lib/examples/hello.hal
-./hara stdin < lib/examples/hello.hal
+./core/hara run core/lib/examples/hello.hal
+./core/hara stdin < core/lib/examples/hello.hal
 ```
 
 ## 6. Run tests
 
 ```shell
-mvn -q -f java/pom.xml test
-mvn -q -f java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraL0ConformanceTest test
+mvn -q -f core/java/pom.xml test
+mvn -q -f core/java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraL0ConformanceTest test
 ```
 
 For contributor workflows, test slices, native-image builds, and troubleshooting, read the
-[developer guide](website/docs/development.md). To build a multi-file project, continue with
-[Namespaces and modules](website/docs/namespaces.md).
+[developer guide](../hara-docs/docs/docs/development.md). To build a multi-file project, continue with
+[Namespaces and modules](../hara-docs/docs/docs/namespaces.md).

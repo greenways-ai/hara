@@ -22,39 +22,37 @@ Truffle parser / AST
 
 ## Repository layout
 
-This repository (`hara-lang/hara`) is the workspace. It keeps the language
-runtime (`java/`, `rust/`, `lib/`), the landing-page website (`website/`), and
-several Git submodules at the root:
+This repository (`hara-lang/hara`) is the language runtime. It keeps the
+actual code under `core/` and packaging scripts under `packaging/`. Sibling
+repos in the workspace provide the website, editor/browser extensions, specs,
+and archive:
 
-- [`java/`](java/) — the Java/Truffle runtime (Maven project, CLI, native-image).
-- [`rust/`](rust/) — the Rust/embedding runtime: native CLI, wasm builds, web
-  loader, and in-tree wasm extensions (`rust/extensions/`).
-- [`lib/`](lib/) — hara-language source and workloads: the std foundation and
-  Talo compiler port (`lib/src`, `lib/test`), demo projects
-  ([`lib/examples/`](lib/examples/)), and benchmark suites
-  ([`lib/bench/`](lib/bench/)).
-- [`website/`](website/) — the landing page for `www.hara-lang.org`.
-- [`docs/`](docs/) — published documentation site (Material for MkDocs). Lives
-  in the [`hara-lang/hara-docs`](https://github.com/hara-lang/hara-docs)
-  submodule.
-- [`extensions/`](extensions/) — editor and browser apps (`hara-chrome`,
-  `hara-vscode`, `hara-emacs`, `hara-world`, planned `hara-lsp`). Lives in the
-  [`hara-lang/hara-extensions`](https://github.com/hara-lang/hara-extensions)
-  submodule.
-- [`specs/`](specs/) — normative specs: prose (`.md`), machine-checked corpora,
-  and spec-shaped data. Lives in the
-  [`hara-lang/hara-specs`](https://github.com/hara-lang/hara-specs) submodule.
+- [`core/java/`](core/java/) — the Java/Truffle runtime (Maven project, CLI, native-image).
+- [`core/rust/`](core/rust/) — the Rust/embedding runtime: native CLI, wasm builds, web
+  loader, and in-tree wasm extensions (`core/rust/extensions/`).
+- [`core/lib/`](core/lib/) — hara-language source and workloads: the std foundation and
+  Talo compiler port (`core/lib/src`, `core/lib/test`), demo projects
+  ([`core/lib/examples/`](core/lib/examples/)), and benchmark suites
+  ([`core/lib/bench/`](core/lib/bench/)).
+- [`core/spec/`](core/spec/) — parity specifications and substrate tests for core
+  language targets.
+- [`packaging/scripts/`](packaging/scripts/) — repo-level build/benchmark scripts.
+- `website/hara-www/` — the landing page for `www.hara-lang.org`
+  ([`hara-lang/hara-www`](https://github.com/hara-lang/hara-www)).
+- `extensions/` — editor and browser apps (`hara-chrome`, `hara-vscode`,
+  `hara-emacs`, `hara-lsp`) ([`hara-lang/hara-extensions`](https://github.com/hara-lang/hara-extensions)).
+- `technology/hara-specs/` — normative specs: prose (`.md`), machine-checked corpora,
+  and spec-shaped data ([`hara-lang/hara-specs`](https://github.com/hara-lang/hara-specs)).
+- `technology/hara-archive/` — legacy material kept for history
+  ([`hara-lang/hara-archive`](https://github.com/hara-lang/hara-archive)).
 - [`contrib/`](contrib/) — independently owned artifact formats developed with
   Hara's metaspec and verifier. Greenways formats live under
   `contrib/greenways/`.
-- [`archive/`](archive/) — legacy material kept for history. Lives in the
-  [`hara-lang/hara-archive`](https://github.com/hara-lang/hara-archive)
-  submodule.
 - [`notes/`](notes/) — working documents (not published): design notes and
   `notes/superpowers/` plans/specs.
 - [`books/`](books/) — planned book series (*The Little Book of HAL*).
-- [`registry/`](registry/) — planned hara wasm extension registry.
-- [`scripts/`](scripts/) — repo-level build/benchmark scripts.
+- [`registry-api/`](registry-api/) — planned hara wasm extension registry API.
+- [`benchmarks/`](benchmarks/) — runtime benchmark suites and generated site data.
 
 ## Start here
 
@@ -63,10 +61,10 @@ several Git submodules at the root:
 - [Namespace catalog](docs/docs/reference/namespaces.md) — discover every shipped namespace family.
 - [Developer guide](docs/docs/development.md) — build, test, debug, and contribute.
 - [Java API and Javadocs](docs/docs/javadocs.md) — public entry points and generated API docs.
-- [HAL meta-spec](specs/01-lang/000-metaspec/draft/README.md) — the self-describing contract for metaspec documents.
-- [HAL language draft](specs/01-lang/001-language/draft/README.md) — the small EDN-oriented data and reader contract.
-- [Planning archive](specs/99-archive/planning/README.md) — earlier runtime, extension, interop, and tooling designs.
-- [Hara for Emacs](extensions/hara-emacs/README.md) — project-aware evaluation, sessions, completion, docs,
+- [HAL meta-spec](../hara-specs/01-lang/000-metaspec/draft/README.md) — the self-describing contract for metaspec documents.
+- [HAL language draft](../hara-specs/01-lang/001-language/draft/README.md) — the small EDN-oriented data and reader contract.
+- [Planning archive](../hara-specs/99-archive/planning/README.md) — earlier runtime, extension, interop, and tooling designs.
+- [Hara for Emacs](../../extensions/hara-emacs/README.md) — project-aware evaluation, sessions, completion, docs,
   and a RESP-backed REPL.
 
 ## Quick start
@@ -92,30 +90,30 @@ Hara source so the same formula works across macOS and Linux architectures.
 To build the Truffle runtime from source, install JDK 21 and Maven:
 
 ```shell
-mvn -f java/pom.xml -Ptruffle package
-./hara eval '(+ 19 23)'
-./hara
+mvn -f core/java/pom.xml -Ptruffle package
+./core/hara eval '(+ 19 23)'
+./core/hara
 ```
 
 The `hara` command starts the JLine REPL in the shared `ROOT` session and exposes that same
 session through RESP on `127.0.0.1:1311`. Use `--offline` to start without the listener,
 `headless` for a listener without terminal UI, and `remote HOST:PORT` for a client connection. The CLI also supports `run <file>`, `stdin`, and `help`. For a native-image build, see the
-[developer guide](docs/docs/development.md); native mode intentionally removes dynamic JVM services.
+[developer guide](../hara-docs/docs/docs/development.md); native mode intentionally removes dynamic JVM services.
 
 The Makefile also mirrors the main repository and CI workflows:
 
 ```shell
-make java-test java-conformance
-make rust-test rust-raw-test rust-layout
-make lib-test
+make -C core java-test java-conformance
+make -C core rust-test rust-raw-test rust-layout
+make -C core lib-test
 
-make wasm-web
-make hta-test
-make studio-test
+make -C core wasm-web
+make -C core hta-test
+make -C core studio-test
 
-make chrome-build chrome-test
-make docs-build
-make www-build
+make -C core chrome-build chrome-test
+make -C core docs-build
+make -C core www-build
 ```
 
 Run `make web-install` or `make chrome-install` before the corresponding Node
@@ -128,9 +126,8 @@ through `ARGS`.
 Per-component builds:
 
 ```shell
-cargo test --manifest-path rust/Cargo.toml                 # Rust runtime
-cd extensions/hara-chrome && npm ci && npm run build       # Chrome extension
-cd docs && mkdocs build -f mkdocs.yml                      # docs site
+cargo test --manifest-path core/rust/Cargo.toml                 # Rust runtime
+cd ../../extensions/hara-chrome && npm ci && npm run build           # Chrome extension
 ```
 
 ## Package workspaces
@@ -187,7 +184,7 @@ classpath access, files, and sockets are explicit capabilities or provider servi
 core portable to future runtimes such as WASM hosts.
 
 The old interpreter/Foundation/TCP architecture is retained as
-[`archive/legacy-docs/README.legacy.md`](archive/legacy-docs/README.legacy.md) for historical
+[`../hara-archive/legacy-docs/README.legacy.md`](../hara-archive/legacy-docs/README.legacy.md) for historical
 reference only; it is not the current language guide.
 
 ## Cloning this workspace
@@ -214,5 +211,5 @@ implementation work still in progress.
 
 Hara-owned source code is available under the [Apache License 2.0](LICENSE).
 Some directories contain separately licensed or provenance-sensitive material; see
-[the license inventory](LICENSES/README.md). Run `bash scripts/check-licenses` to
+[the license inventory](LICENSES/README.md). Run `bash packaging/scripts/check-licenses` to
 validate the repository's license metadata and documented exceptions.

@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+SOURCE='(loop [i 0 acc 0] (if (< i 5000) (recur (+ i 1) (+ acc i)) acc))'
+HEX=$(printf %s "$SOURCE" | od -An -tx1 | tr -d ' \n')
+
+cargo build -q --release --manifest-path "$ROOT/core/rust/Cargo.toml" \
+  --features tracing-jit --bin hara-bytecode-benchmark
+"$ROOT/core/rust/target/release/hara-bytecode-benchmark" \
+  execute-only arithmetic-trace-ir "$HEX" 12497500 12 200

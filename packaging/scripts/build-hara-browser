@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+PACKAGE="$ROOT/core/rust/web/packages/browser"
+GENERATED="$PACKAGE/src/wasm"
+VARIANT=${1:-all}
+
+build_variant() {
+  name=$1
+  features=$2
+  target_dir="$ROOT/core/target/browser-$name"
+  wasm="$target_dir/wasm32-unknown-unknown/browser-release/hara_wasm.wasm"
+
+  CARGO_TARGET_DIR="$target_dir" "$ROOT/packaging/scripts/cargo-wasm-build" \
+    --manifest-path "$ROOT/core/rust/Cargo.toml" \
+    --target wasm32-unknown-unknown \
+    --profile browser-release --lib --features "$features"
+
+  rm -rf "$GENERATED"
+  mkdir -p "$GENERATED"
+  wasm-bindgen --target web --out-dir "$GENERATED" "$wasm"
+
+  cd "$ROOT/core/rust/web"
+  HARA_BROWSER_VARIANT="$name" npm run build:browser
+  if [ "$name" = "hara-wasm-vm" ]; then
+    cp "$PACKAGE/src/hara-vm.d.ts" "$PACKAGE/dist/$name/hara.d.ts"
+  else
+    cp "$PACKAGE/src/hara.d.ts" "$PACKAGE/dist/$name/hara.d.ts"
+  fi
+  wc -c "$wasm" "$PACKAGE/dist/$name/hara.mjs"
+}
+
+case "$VARIANT" in
+  vm|hara-wasm-vm) build_variant hara-wasm-vm bytecode-vm ;;
+  full|hara-wasm-full) build_variant hara-wasm-full whole-wasm ;;
+  all)
+    build_variant hara-wasm-vm bytecode-vm
+    build_variant hara-wasm-full whole-wasm
+    ;;
+  *) echo "usage: $0 [vm|full|hara-wasm-vm|hara-wasm-full|all]" >&2; exit 2 ;;
+esac

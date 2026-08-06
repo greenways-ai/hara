@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Generate the deterministic Rust-WASM/Truffle parity corpus."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / "../hara-specs/00-unsorted/platform-language/draft/conformance/parity/wasm-truffle.edn"
+SEED = 20260723
+CASES: list[tuple[str, str, str, int | str, bool]] = []
+
+
+def add_value(case_id: str, group: str, source: str, expected: int, curated: bool = True) -> None:
+    CASES.append((case_id, group, source, expected, curated))
+
+
+def add_error(case_id: str, group: str, source: str, expected: str, curated: bool = True) -> None:
+    CASES.append((case_id, group, source, expected, curated))
+
+
+# Curated boundary and semantic cases (256 total).
+for i, (a, b, c) in enumerate([(0, 0, 0), (1, 2, 3), (-1, 1, 0), (19, 23, 42)] * 6):
+    add_value(f"arithmetic/curated-{i:03d}", "arithmetic", f"(+ {a} {b} {c})", a + b + c)
+for i, value in enumerate([-(2**63), -(2**31), -1, 0, 1, 2**31 - 1, 2**63 - 1] * 2):
+    add_value(f"extremes/literal-{i:03d}", "extremes", f"(if (= {value} {value}) 1 0)", 1)
+for i, distance in enumerate([0, 1, 2, 7, 15, 30, 31] * 2):
+    add_value(f"extremes/shift-{i:03d}", "extremes", f"(bit-shift-left 1 {distance})", 1 << distance if distance < 31 else -(2**31))
+for i, n in enumerate(range(1, 17)):
+    add_value(f"control/if-{i:03d}", "control", f"(if (< {n} {n + 1}) 42 0)", 42)
+for i, n in enumerate(range(0, 16)):
+    add_value(f"control/let-{i:03d}", "control", f"(let [a {n} b {42 - n}] (+ a b))", 42)
+for i, n in enumerate(range(0, 16)):
+    add_value(f"functions/fixed-{i:03d}", "functions", f"((fn [x] (+ x {42 - n})) {n})", 42)
+for i, n in enumerate(range(0, 16)):
+    add_value(f"functions/variadic-{i:03d}", "functions", f"((fn [x & xs] (+ x (count xs))) {42 - n} {' '.join(str(j) for j in range(n % 4))})", 42 if n % 4 == n else 42 - n + n % 4)
+for i, n in enumerate(range(1, 17)):
+    add_value(f"loops/recur-{i:03d}", "loops", f"(loop [x 0 acc 0] (if (< x {n}) (recur (+ x 1) (+ acc x)) acc))", n * (n - 1) // 2)
+for i, n in enumerate(range(1, 17)):
+    add_value(f"loops/nested-{i:03d}", "loops", f"(loop [x 0 acc 0] (if (< x {n}) (recur (+ x 1) (+ acc {n})) acc))", n * n)
+add_value("collections/sequential-equality-000", "collections", "(if (= [1 2] '(1 2)) 1 0)", 1)
+for i, n in enumerate(range(1, 24)):
+    add_value(f"collections/count-{i:03d}", "collections", f"(count [{ ' '.join(str(j) for j in range(n % 7)) }])", n % 7)
+for i, n in enumerate(range(0, 20)):
+    add_value(f"collections/nth-{i:03d}", "collections", f"(nth [{n} 42 {n + 1}] 1)", 42)
+for i, n in enumerate(range(0, 20)):
+    add_value(f"collections/assoc-{i:03d}", "collections", f"(get (assoc {{:answer {n}}} :answer 42) :answer)", 42)
+for i, n in enumerate(range(0, 16)):
+    add_value(f"iterators/map-{i:03d}", "iterators", f"(iter-next (Iter/iter-map (fn [x] (+ x 1)) [{n}]))", n + 1)
+for i, n in enumerate(range(1, 13)):
+    add_value(f"iterators/filter-{i:03d}", "iterators", f"(iter-next (Iter/iter-filter (fn [x] (= x {n})) [0 {n}]))", n)
+for i, n in enumerate(range(1, 5)):
+    add_value(f"errors/divide-zero-{i:03d}", "errors", f"(/ {n} 0)", "arithmetic/divide-by-zero")
+for i in range(4):
+    add_error(f"errors/unbound-{i:03d}", "errors", f"missing-parity-symbol-{i}", "unbound-symbol")
+for i in range(2):
+    add_error(f"errors/arity-{i:03d}", "errors", "((fn [x] x))", "arity")
+for i in range(2):
+    add_error(f"errors/type-{i:03d}", "errors", "(+ 1 true)", "type")
+for i in range(2):
+    add_error(f"errors/index-{i:03d}", "errors", "(nth [1] 4)", "index")
+for i in range(2):
+    add_error(f"errors/parse-{i:03d}", "errors", ")", "parse")
+
+# Deterministic generated families (768 total).
+for i in range(96):
+    a, b, c = ((i * 37) % 101 - 50, (i * 19) % 97 - 48, (i * 11) % 43)
+    add_value(f"generated/arithmetic-{i:03d}", "generated-arithmetic", f"(+ (* {a} {b}) (- 0 {c}))", a * b - c, False)
+for i in range(96):
+    n = i % 32
+    source = f"(if (>= (+ {n} 1) {n}) (+ {n} {42 - n}) 0)"
+    add_value(f"generated/control-{i:03d}", "generated-control", source, 42, False)
+for i in range(96):
+    n = i % 42
+    source = f"((fn [x y] (+ x y)) {n} {42 - n})"
+    add_value(f"generated/functions-{i:03d}", "generated-functions", source, 42, False)
+for i in range(96):
+    n = (i % 24) + 1
+    source = f"(loop [x 0 acc 0] (if (< x {n}) (recur (+ x 1) (+ acc 1)) acc))"
+    add_value(f"generated/loops-{i:03d}", "generated-loops", source, n, False)
+for i in range(96):
+    n = i % 10
+    source = f"(get (assoc {{:a {n} :b {42 - n}}} :a 42) :a)"
+    add_value(f"generated/collections-{i:03d}", "generated-collections", source, 42, False)
+for i in range(96):
+    n = i % 41
+    source = f"(iter-next (Iter/iter-map (fn [x] (* x 2)) [{n}]))"
+    add_value(f"generated/iterators-{i:03d}", "generated-iterators", source, n * 2, False)
+for i in range(96):
+    n = (i % 31) + 1
+    source = f"(bit-xor (bit-or {n} 42) (bit-and {n} 42))"
+    expected = (n | 42) ^ (n & 42)
+    add_value(f"generated/bitops-{i:03d}", "generated-bitops", source, expected, False)
+for i in range(96):
+    kind = i % 4
+    if kind == 0:
+        source, expected = "(/ 1 0)", "arithmetic/divide-by-zero"
+    elif kind == 1:
+        source, expected = f"missing-generated-symbol-{i}", "unbound-symbol"
+    elif kind == 2:
+        source, expected = "(+ 1 true)", "type"
+    else:
+        source, expected = "((fn [x] x))", "arity"
+    add_error(f"generated/errors-{i:03d}", "generated-errors", source, expected, False)
+
+assert len(CASES) == 1024, len(CASES)
+assert sum(case[4] for case in CASES) == 256
+assert len({case[0] for case in CASES}) == len(CASES)
+
+lines = [
+    '{:spec/version "0.2"',
+    ' :language "hara-l0"',
+    f' :seed {SEED}',
+    ' :curated 256',
+    ' :generated 768',
+    ' :engines [:rust-wasm :truffle]',
+    ' :cases',
+    ' ['
+]
+for case_id, group, source, expected, curated in CASES:
+    source_text = json.dumps(source, ensure_ascii=False)
+    if isinstance(expected, int):
+        expect = f'{{:value {expected} :type :integer}}'
+    else:
+        expect = f'{{:error :{expected}}}'
+    lines.append(f'  {{:id :{case_id} :group :{group} :origin :{"curated" if curated else "generated"} :source {source_text} :expect {expect}}}')
+lines.append(' ]}')
+OUT.write_text("\n".join(lines) + "\n")
+print(f"generated {len(CASES)} cases ({sum(case[4] for case in CASES)} curated, {sum(not case[4] for case in CASES)} generated) -> {OUT}")

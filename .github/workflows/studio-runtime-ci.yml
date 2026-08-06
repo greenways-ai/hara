@@ -8,29 +8,29 @@ on:
       - .github/workflows/publish-rust-crates.yml
       - .github/workflows/publish-studio-runtime.yml
       - .github/workflows/studio-runtime-ci.yml
-      - scripts/build-studio-runtime
-      - scripts/build-hara-wasm-raw
-      - scripts/build-www
-      - scripts/check-release-version.mjs
-      - scripts/verify-studio-runtime.mjs
-      - scripts/write-kernel-manifest.mjs
-      - rust/Cargo.toml
-      - rust/Cargo.lock
-      - rust/compiler/Cargo.toml
-      - rust/raw/**
-      - rust/src/**
-      - rust/vm-runtime/Cargo.toml
-      - rust/web/hta.js
-      - rust/web/hta-worker.js
-      - rust/web/hta-shared-worker.js
-      - rust/web/packages/hta/**
-      - rust/web/host/**
-      - rust/web/studio/**
-      - rust/web/ui/**
+      - packaging/scripts/build-studio-runtime
+      - packaging/scripts/build-hara-wasm-raw
+      - packaging/scripts/build-www
+      - packaging/scripts/check-release-version.mjs
+      - packaging/scripts/verify-studio-runtime.mjs
+      - packaging/scripts/write-kernel-manifest.mjs
+      - core/rust/Cargo.toml
+      - core/rust/Cargo.lock
+      - core/rust/compiler/Cargo.toml
+      - core/rust/raw/**
+      - core/rust/src/**
+      - core/rust/vm-runtime/Cargo.toml
+      - core/rust/web/hta.js
+      - core/rust/web/hta-worker.js
+      - core/rust/web/hta-shared-worker.js
+      - core/rust/web/packages/hta/**
+      - core/rust/web/host/**
+      - core/rust/web/studio/**
+      - core/rust/web/ui/**
       - contrib/greenways/supersonic/**
-      - lib/src/std/foundation.hal
-      - lib/src/std/lib/substrate.hal
-      - lib/src/std/lib/substrate/**
+      - core/lib/src/std/foundation.hal
+      - core/lib/src/std/lib/substrate.hal
+      - core/lib/src/std/lib/substrate/**
       - website/examples/**
       - website/hara-amp.html
       - website/hara-amp.css
@@ -45,29 +45,29 @@ on:
       - .github/workflows/publish-rust-crates.yml
       - .github/workflows/publish-studio-runtime.yml
       - .github/workflows/studio-runtime-ci.yml
-      - scripts/build-studio-runtime
-      - scripts/build-hara-wasm-raw
-      - scripts/build-www
-      - scripts/check-release-version.mjs
-      - scripts/verify-studio-runtime.mjs
-      - scripts/write-kernel-manifest.mjs
-      - rust/Cargo.toml
-      - rust/Cargo.lock
-      - rust/compiler/Cargo.toml
-      - rust/raw/**
-      - rust/src/**
-      - rust/vm-runtime/Cargo.toml
-      - rust/web/hta.js
-      - rust/web/hta-worker.js
-      - rust/web/hta-shared-worker.js
-      - rust/web/packages/hta/**
-      - rust/web/host/**
-      - rust/web/studio/**
-      - rust/web/ui/**
+      - packaging/scripts/build-studio-runtime
+      - packaging/scripts/build-hara-wasm-raw
+      - packaging/scripts/build-www
+      - packaging/scripts/check-release-version.mjs
+      - packaging/scripts/verify-studio-runtime.mjs
+      - packaging/scripts/write-kernel-manifest.mjs
+      - core/rust/Cargo.toml
+      - core/rust/Cargo.lock
+      - core/rust/compiler/Cargo.toml
+      - core/rust/raw/**
+      - core/rust/src/**
+      - core/rust/vm-runtime/Cargo.toml
+      - core/rust/web/hta.js
+      - core/rust/web/hta-worker.js
+      - core/rust/web/hta-shared-worker.js
+      - core/rust/web/packages/hta/**
+      - core/rust/web/host/**
+      - core/rust/web/studio/**
+      - core/rust/web/ui/**
       - contrib/greenways/supersonic/**
-      - lib/src/std/foundation.hal
-      - lib/src/std/lib/substrate.hal
-      - lib/src/std/lib/substrate/**
+      - core/lib/src/std/foundation.hal
+      - core/lib/src/std/lib/substrate.hal
+      - core/lib/src/std/lib/substrate/**
       - website/examples/**
       - website/hara-amp.html
       - website/hara-amp.css
@@ -104,23 +104,23 @@ jobs:
 
       - name: Check packaging script syntax
         run: |
-          bash -n scripts/build-studio-runtime scripts/build-www
-          node --check scripts/check-release-version.mjs
-          node --check scripts/write-kernel-manifest.mjs
+          bash -n packaging/scripts/build-studio-runtime packaging/scripts/build-www
+          node --check packaging/scripts/check-release-version.mjs
+          node --check packaging/scripts/write-kernel-manifest.mjs
 
       - name: Verify release version surfaces
         shell: bash
         run: |
-          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -n 1)
-          node scripts/check-release-version.mjs "$VERSION"
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' core/rust/Cargo.toml | head -n 1)
+          node packaging/scripts/check-release-version.mjs "$VERSION"
 
       - name: Build and verify Studio runtime archive
-        run: scripts/build-studio-runtime ci
+        run: packaging/scripts/build-studio-runtime ci
 
       - name: Verify archive checksum and browser payload
         shell: bash
         run: |
-          ARCHIVE="$GITHUB_WORKSPACE/target/studio-runtime/hara-studio-runtime-ci.tar.gz"
+          ARCHIVE="$GITHUB_WORKSPACE/core/target/studio-runtime/hara-studio-runtime-ci.tar.gz"
           CHECKSUM="$ARCHIVE.sha256"
           RAW_LISTING="$RUNNER_TEMP/hara-studio-runtime-files.raw"
           LISTING="$RUNNER_TEMP/hara-studio-runtime-files.txt"
@@ -129,11 +129,11 @@ jobs:
           sha256sum -c "$CHECKSUM"
           tar -tzf "$ARCHIVE" > "$RAW_LISTING"
           sed 's#^\./##' "$RAW_LISTING" > "$LISTING"
-          grep -Fxq 'rust/packages/hta/index.js' "$LISTING"
-          grep -Fxq 'rust/packages/hta/worker.js' "$LISTING"
-          grep -Fxq 'rust/packages/hta/shared-worker.js' "$LISTING"
-          grep -Fxq 'rust/studio/supersonic.js' "$LISTING"
-          grep -Fxq 'rust/studio/hal/supersonic.hal' "$LISTING"
+          grep -Fxq 'core/rust/packages/hta/index.js' "$LISTING"
+          grep -Fxq 'core/rust/packages/hta/worker.js' "$LISTING"
+          grep -Fxq 'core/rust/packages/hta/shared-worker.js' "$LISTING"
+          grep -Fxq 'core/rust/studio/supersonic.js' "$LISTING"
+          grep -Fxq 'core/rust/studio/hal/supersonic.hal' "$LISTING"
           grep -Fxq 'examples/music/runtime/packages/hta/index.js' "$LISTING"
           grep -Fxq 'examples/music/runtime/packages/hta/worker.js' "$LISTING"
           grep -Fxq 'examples/music/runtime/packages/hta/shared-worker.js' "$LISTING"
@@ -144,6 +144,6 @@ jobs:
         with:
           name: hara-studio-runtime-${{ github.sha }}
           path: |
-            target/studio-runtime/hara-studio-runtime-ci.tar.gz
-            target/studio-runtime/hara-studio-runtime-ci.tar.gz.sha256
+            core/target/studio-runtime/hara-studio-runtime-ci.tar.gz
+            core/target/studio-runtime/hara-studio-runtime-ci.tar.gz.sha256
           retention-days: 7

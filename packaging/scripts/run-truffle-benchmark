@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+cd "$ROOT"
+
+mvn -B -f "$ROOT/core/java/pom.xml" -Ptruffle -DskipTests test-compile dependency:copy-dependencies \
+  -DincludeScope=runtime \
+  -DoutputDirectory="$ROOT/core/java/target/truffle-dependencies"
+
+exec java \
+  -cp "$ROOT/core/java/target/test-classes:$ROOT/core/java/target/classes:$ROOT/core/java/target/truffle-dependencies/*" \
+  hara.truffle.ProtocolDispatchBenchmark "$@"

@@ -22,8 +22,7 @@
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 
-/target/
-java/target/
+/core/target/
 **/target/
 test-results/
 /log
@@ -66,9 +65,8 @@ parse_jacoco.py
 # generated wasm-bindgen runtime for the site (scripts/build-hara-wasm-web;
 # the deployed site gets a fresh copy from pages.yml)
 website/docs/rust/pkg/
-apps/hara-world/runtime/
-/.venv-docs
+extensions/hara-world/runtime/
 site-build/
-rust/target/debug
-rust/web/dist/
-lib/bench
+core/rust/target/debug
+core/rust/web/dist/
+core/lib/bench

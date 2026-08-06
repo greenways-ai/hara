@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+MANIFEST="$ROOT/core/rust/extensions/demo-fft/Cargo.toml"
+OUT_DIR="$ROOT/../../website/hara-www/assets/wasm"
+
+"$ROOT/packaging/scripts/cargo-wasm-build" \
+  --manifest-path "$MANIFEST" --target wasm32-unknown-unknown --release
+
+mkdir -p "$OUT_DIR"
+cp "$ROOT/core/rust/extensions/demo-fft/target/wasm32-unknown-unknown/release/hara_demo_fft.wasm" \
+   "$OUT_DIR/demo-fft.wasm"
+echo "Built $OUT_DIR/demo-fft.wasm"

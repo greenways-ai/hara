@@ -3,16 +3,16 @@ name: HAL source mirror
 on:
   push:
     paths:
-      - 'lib/src/**/*.hal'
-      - 'rust/hal-src/**/*.hal'
-      - 'scripts/sync-rust-hal-src'
+      - 'core/lib/src/**/*.hal'
+      - 'core/rust/hal-src/**/*.hal'
+      - 'packaging/scripts/sync-rust-hal-src'
       - '.github/workflows/hal-source-mirror.yml'
   pull_request:
     branches: [main]
     paths:
-      - 'lib/src/**/*.hal'
-      - 'rust/hal-src/**/*.hal'
-      - 'scripts/sync-rust-hal-src'
+      - 'core/lib/src/**/*.hal'
+      - 'core/rust/hal-src/**/*.hal'
+      - 'packaging/scripts/sync-rust-hal-src'
       - '.github/workflows/hal-source-mirror.yml'
   workflow_dispatch:
 
@@ -28,5 +28,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify rust/hal-src matches canonical lib/src
-        run: python3 scripts/sync-rust-hal-src --check
+      - name: Verify core/rust/hal-src matches canonical core/lib/src
+        run: python3 packaging/scripts/sync-rust-hal-src --check

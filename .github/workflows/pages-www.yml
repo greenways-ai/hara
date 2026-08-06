@@ -6,12 +6,12 @@ on:
     paths:
       - 'website/**'
       - 'benchmarks/**'
-      - 'rust/**'
-      - 'lib/**'
-      - 'scripts/build-www'
-      - 'scripts/install-benchmark-site'
-      - 'scripts/write-kernel-manifest.mjs'
-      - 'scripts/sync-hara-ui.mjs'
+      - 'core/rust/**'
+      - 'core/lib/**'
+      - 'packaging/scripts/build-www'
+      - 'packaging/scripts/install-benchmark-site'
+      - 'packaging/scripts/write-kernel-manifest.mjs'
+      - 'packaging/scripts/sync-hara-ui.mjs'
       - '.github/scripts/verify-benchmark-observatory.sh'
       - '.github/workflows/pages-www.yml'
   workflow_dispatch:
@@ -41,8 +41,8 @@ jobs:
           fetch-depth: 1
       - name: Verify synchronized Hara UI assets
         run: |
-          node scripts/sync-hara-ui.mjs
-          node scripts/sync-hara-ui.mjs --check
+          node packaging/scripts/sync-hara-ui.mjs
+          node packaging/scripts/sync-hara-ui.mjs --check
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -57,25 +57,25 @@ jobs:
           HARA_GITHUB_OAUTH_CLIENT_ID: ${{ vars.HARA_GITHUB_OAUTH_CLIENT_ID }}
         run: |
           rustup target add wasm32-unknown-unknown
-          bash scripts/install-benchmark-site prepare
-          bash scripts/build-www
-          bash scripts/install-benchmark-site publish
+          bash packaging/scripts/install-benchmark-site prepare
+          bash packaging/scripts/build-www
+          bash packaging/scripts/install-benchmark-site publish
       - name: Test website scene and Astro benchmark contracts
         run: |
           npm test --prefix website
           node --test website/scene.test.mjs website/editor.test.mjs website/creative.test.mjs
-          test -s target/www/og-hara.jpg
-          test -s target/www/benchmarks/index.html
-          test -s target/www/benchmarks/data/catalog.json
-          test -s target/www/benchmarks/data/runs.json
-          grep -F '<title>Hara Benchmarks</title>' target/www/benchmarks/index.html
-          grep -F 'id="class-comparison"' target/www/benchmarks/index.html
-          grep -F 'id="language-shootout"' target/www/benchmarks/index.html
-          grep -F 'rust-prepared' target/www/benchmarks/index.html
-          grep -F '"rust"' target/www/benchmarks/data/catalog.json
-          grep -F '"runtime":"rust-prepared"' target/www/benchmarks/data/runs.json
+          test -s core/target/www/og-hara.jpg
+          test -s core/target/www/benchmarks/index.html
+          test -s core/target/www/benchmarks/data/catalog.json
+          test -s core/target/www/benchmarks/data/runs.json
+          grep -F '<title>Hara Benchmarks</title>' core/target/www/benchmarks/index.html
+          grep -F 'id="class-comparison"' core/target/www/benchmarks/index.html
+          grep -F 'id="language-shootout"' core/target/www/benchmarks/index.html
+          grep -F 'rust-prepared' core/target/www/benchmarks/index.html
+          grep -F '"rust"' core/target/www/benchmarks/data/catalog.json
+          grep -F '"runtime":"rust-prepared"' core/target/www/benchmarks/data/runs.json
       - name: Deploy candidate to www.testing.hara-lang.org
-        run: npx --yes netlify-cli deploy --prod --dir target/www --message "${GITHUB_REF_NAME} ${GITHUB_SHA}"
+        run: npx --yes netlify-cli deploy --prod --dir core/target/www --message "${GITHUB_REF_NAME} ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_TESTING_SITE_ID }}
@@ -83,7 +83,7 @@ jobs:
         run: bash .github/scripts/verify-benchmark-observatory.sh https://www.testing.hara-lang.org/benchmarks/
       - name: Deploy prod to www.hara-lang.org
         if: github.ref_name == 'prod'
-        run: npx --yes netlify-cli deploy --prod --dir target/www --message "prod ${GITHUB_SHA}"
+        run: npx --yes netlify-cli deploy --prod --dir core/target/www --message "prod ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_PRODUCTION_SITE_ID }}

@@ -21,8 +21,8 @@ jobs:
         targets: wasm32-unknown-unknown
     - name: Build WASM test fixtures
       run: |
-        ./scripts/build-hara-wasm-raw
-        ./scripts/build-crypto-hash-sha256-wasm
+        ./packaging/scripts/build-hara-wasm-raw
+        ./packaging/scripts/build-crypto-hash-sha256-wasm
     - uses: actions/setup-java@v4
       with:
         distribution: temurin
@@ -33,13 +33,13 @@ jobs:
         server-password: CENTRAL_PASSWORD
     - name: Verify snapshot version
       run: |
-        VERSION=$(mvn -q -f java/pom.xml help:evaluate -Dexpression=project.version -DforceStdout)
+        VERSION=$(mvn -q -f core/java/pom.xml help:evaluate -Dexpression=project.version -DforceStdout)
         case "$VERSION" in
           *-SNAPSHOT) ;;
           *) echo "Refusing to publish non-snapshot version: $VERSION" >&2; exit 1 ;;
         esac
     - name: Test and publish snapshot
-      run: mvn -B -f java/pom.xml deploy
+      run: mvn -B -f core/java/pom.xml deploy
       env:
         CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
         CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}

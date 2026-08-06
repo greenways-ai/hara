@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OUT="$ROOT/core/target/www"
+RAW_DIR="$ROOT/core/rust/raw/target/wasm32-unknown-unknown/browser-release"
+HALC_OUT="$ROOT/core/target/www-halc"
+HARA_COMPILER="$ROOT/core/rust/target/debug/hara"
+RUNTIME_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/core/rust/Cargo.toml" | head -n 1)
+if [ -z "$RUNTIME_VERSION" ]; then
+  echo "unable to read the Hara runtime version from core/rust/Cargo.toml" >&2
+  exit 1
+fi
+
+npm run build --prefix "$ROOT/../../website/hara-www"
+HARA_BENCHMARK_BASE=/benchmarks npm run build --prefix "$ROOT/benchmarks"
+bash "$ROOT/packaging/scripts/build-hara-wasm-raw" all
+cargo build --manifest-path "$ROOT/core/rust/Cargo.toml" --features hir-encoder --bin hara
+rm -rf "$HALC_OUT"
+mkdir -p "$HALC_OUT"
+"$HARA_COMPILER" compile-halc "$ROOT/core/lib/src/std/lib/substrate/protocol.hal" --output "$HALC_OUT/substrate-protocol.halc"
+"$HARA_COMPILER" compile-halc "$ROOT/core/lib/src/std/lib/substrate/frame.hal" --output "$HALC_OUT/substrate-frame.halc"
+"$HARA_COMPILER" compile-halc "$ROOT/core/lib/src/std/lib/substrate.hal" --output "$HALC_OUT/substrate.halc"
+"$HARA_COMPILER" compile-halc "$ROOT/core/rust/web/studio/hal/store.hal" --output "$HALC_OUT/studio-store.halc"
+"$HARA_COMPILER" compile-halc "$ROOT/core/rust/web/studio/hal/boot.hal" --output "$HALC_OUT/studio-boot.halc"
+"$HARA_COMPILER" compile-halc "$ROOT/core/rust/web/studio/hal/node.hal" --output "$HALC_OUT/studio-node.halc"
+"$HARA_COMPILER" compile-halc "$ROOT/core/rust/web/studio/hal/draw.hal" --output "$HALC_OUT/studio-draw.halc"
+"$HARA_COMPILER" compile-halc "$ROOT/core/rust/web/studio/hal/program.hal" --output "$HALC_OUT/studio-program.halc"
+"$HARA_COMPILER" compile-halc "$ROOT/core/rust/web/studio/hal/graph.hal" --output "$HALC_OUT/studio-graph.halc"
+"$HARA_COMPILER" compile-halc "$ROOT/core/rust/web/studio/hal/session.hal" --output "$HALC_OUT/studio-session.halc"
+"$HARA_COMPILER" compile-halc "$ROOT/contrib/greenways/supersonic/src/hal/gw/audio/supersonic.hal" --output "$HALC_OUT/supersonic.halc"
+
+rm -rf "$OUT"
+mkdir -p "$OUT/runtime/host" "$OUT/runtime/packages/hta" "$OUT/runtime/studio/hal" "$OUT/runtime/std/lib/substrate"
+cp -R "$ROOT/core/target/www-astro/." "$OUT/"
+mkdir -p "$OUT/benchmarks"
+cp -R "$ROOT/core/target/benchmarks/." "$OUT/benchmarks/"
+mkdir -p "$OUT/runtime/studio/capabilities"
+mkdir -p "$OUT/assets/wasm" "$OUT/assets/hara-amp" "$OUT/examples/hara-amp/src" "$OUT/examples/hara-animation/src"
+mkdir -p "$OUT/sources"
+mkdir -p "$OUT/vendor"
+
+cp "$ROOT/../../website/hara-www/app.css" \
+   "$ROOT/../../website/hara-www/app.js" \
+   "$ROOT/../../website/hara-www/story.css" \
+   "$ROOT/../../website/hara-www/story.js" \
+   "$ROOT/../../website/hara-www/workspaces.js" \
+   "$ROOT/../../website/hara-www/publishing.js" \
+   "$ROOT/../../website/hara-www/github-auth.js" \
+   "$ROOT/../../website/hara-www/ai-adapters.js" \
+   "$ROOT/../../website/hara-www/creative.js" \
+   "$ROOT/../../website/hara-www/editor.js" \
+   "$ROOT/../../website/hara-www/hara-amp.html" \
+   "$ROOT/../../website/hara-www/hara-amp.css" \
+   "$ROOT/../../website/hara-www/hara-amp.js" \
+   "$ROOT/../../website/hara-www/amp-runtime.js" \
+   "$ROOT/../../website/hara-www/amp-node-graph.js" \
+   "$ROOT/../../website/hara-www/amp-source-model.js" \
+   "$ROOT/../../website/hara-www/amp-workspace.js" \
+   "$ROOT/../../website/hara-www/hara-animation.html" \
+   "$ROOT/../../website/hara-www/hara-animation.css" \
+   "$ROOT/../../website/hara-www/hara-animation.js" \
+   "$ROOT/../../website/hara-www/animation-runtime.js" \
+   "$ROOT/../../website/hara-www/animation-source-model.js" \
+   "$ROOT/../../website/hara-www/og.png" \
+   "$ROOT/../../website/hara-www/scene.js" \
+   "$OUT/"
+mkdir -p "$OUT/v1"
+cp "$ROOT/../../website/hara-www/v1.html" "$OUT/v1/index.html"
+node -e 'process.stdout.write(`globalThis.HARA_GITHUB_OAUTH_CLIENT_ID = ${JSON.stringify(process.env.HARA_GITHUB_OAUTH_CLIENT_ID || "Iv23lixQbnKYwkRBihCQ")};\n`)' \
+  > "$OUT/github-auth-config.js"
+cp "$ROOT/packaging/scripts/install.sh" "$OUT/install.sh"
+chmod 755 "$OUT/install.sh"
+cp "$RAW_DIR/hara-wasm-core.wasm" "$OUT/runtime/hara.wasm"
+cp "$RAW_DIR/hara-wasm-core.wasm" "$OUT/runtime/hara-wasm-core-$RUNTIME_VERSION.wasm"
+cp "$RAW_DIR/hara-wasm-vm.wasm" "$OUT/runtime/hara-wasm-vm-$RUNTIME_VERSION.wasm"
+cp "$RAW_DIR/hara-wasm-trace.wasm" "$OUT/runtime/hara-wasm-trace-$RUNTIME_VERSION.wasm"
+node "$ROOT/packaging/scripts/write-kernel-manifest.mjs" "$OUT/runtime" "$RUNTIME_VERSION"
+cp "$ROOT/core/rust/web/hta.js" \
+   "$ROOT/core/rust/web/hta-worker.js" \
+   "$ROOT/core/rust/web/hta-shared-worker.js" \
+   "$ROOT/core/rust/web/package-cache.js" \
+   "$OUT/runtime/"
+cp "$ROOT/core/rust/web/packages/hta/"*.js "$OUT/runtime/packages/hta/"
+node "$ROOT/packaging/scripts/build-www-harp.mjs" "$OUT/runtime/kernel.harp" \
+  "std.lib.substrate.protocol=$HALC_OUT/substrate-protocol.halc" \
+  "std.lib.substrate.frame=$HALC_OUT/substrate-frame.halc" \
+  "std.lib.substrate=$HALC_OUT/substrate.halc" \
+  "studio.store=$HALC_OUT/studio-store.halc" \
+  "studio.boot=$HALC_OUT/studio-boot.halc" \
+  "studio.node=$HALC_OUT/studio-node.halc" \
+  "studio.draw=$HALC_OUT/studio-draw.halc" \
+  "studio.program=$HALC_OUT/studio-program.halc" \
+  "studio.graph=$HALC_OUT/studio-graph.halc" \
+  "studio.session=$HALC_OUT/studio-session.halc" \
+  "gw.audio.supersonic=$HALC_OUT/supersonic.halc"
+cp "$ROOT/core/rust/web/host/"*.js "$OUT/runtime/host/"
+cp "$ROOT/core/rust/web/studio/boot.js" \
+   "$ROOT/core/rust/web/studio/broker.js" \
+   "$ROOT/core/rust/web/studio/document-runtime.js" \
+   "$ROOT/core/rust/web/studio/editor-state.js" \
+   "$ROOT/core/rust/web/studio/host-services.js" \
+   "$ROOT/core/rust/web/studio/canvas-runtime.js" \
+   "$ROOT/core/rust/web/studio/capability-registry.js" \
+   "$ROOT/core/rust/web/studio/graph-host.js" \
+   "$ROOT/core/rust/web/studio/module-codec.js" \
+   "$ROOT/core/rust/web/studio/node-runtime.js" \
+   "$ROOT/core/rust/web/studio/program-host.js" \
+   "$ROOT/core/rust/web/studio/program-worker.js" \
+   "$ROOT/core/rust/web/studio/session-router.js" \
+   "$ROOT/contrib/greenways/supersonic/src/js/supersonic.js" \
+   "$ROOT/core/rust/web/studio/workspace.js" \
+   "$OUT/runtime/studio/"
+cp "$ROOT/core/rust/web/studio/hal/"*.hal "$OUT/runtime/studio/hal/"
+cp "$ROOT/contrib/greenways/supersonic/src/hal/gw/audio/supersonic.hal" \
+   "$OUT/runtime/studio/hal/supersonic.hal"
+cp "$ROOT/core/rust/web/studio/capabilities/"*.js "$OUT/runtime/studio/capabilities/"
+cp "$ROOT/core/lib/src/std/lib/substrate.hal" "$OUT/runtime/std/lib/substrate.hal"
+cp "$ROOT/core/lib/src/std/lib/substrate/protocol.hal" \
+   "$ROOT/core/lib/src/std/lib/substrate/frame.hal" \
+   "$OUT/runtime/std/lib/substrate/"
+cp "$ROOT/../../website/hara-www/assets/hara-amp/"* "$OUT/assets/hara-amp/"
+cp "$ROOT/../../website/hara-www/assets/favicon-48.svg" \
+   "$ROOT/../../website/hara-www/assets/favicon-128.svg" \
+   "$ROOT/../../website/hara-www/assets/favicon-256.svg" \
+   "$ROOT/../../website/hara-www/assets/logo.svg" \
+   "$ROOT/../../website/hara-www/assets/hara-mark.svg" \
+   "$ROOT/../../website/hara-www/assets/logo-white.svg" \
+   "$OUT/assets/"
+cp "$ROOT/../../website/hara-www/og-hara-ribbon.png" \
+   "$ROOT/../../website/hara-www/og-hara-ribbon.jpg" \
+   "$OUT/"
+cp "$ROOT/../../website/hara-www/examples/hara-amp/project.edn" \
+   "$ROOT/../../website/hara-www/examples/hara-amp/workspace.edn" \
+   "$OUT/examples/hara-amp/"
+cp "$ROOT/../../website/hara-www/examples/hara-amp/src/amp.hal" "$OUT/examples/hara-amp/src/"
+cp "$ROOT/../../website/hara-www/examples/hara-animation/project.edn" \
+   "$ROOT/../../website/hara-www/examples/hara-animation/workspace.edn" \
+   "$OUT/examples/hara-animation/"
+cp "$ROOT/../../website/hara-www/examples/hara-animation/src/animation.hal" "$OUT/examples/hara-animation/"
+mkdir -p "$OUT/examples/studio-backgrounds"
+cp "$ROOT/../../website/hara-www/examples/studio-backgrounds/project.edn" \
+   "$ROOT/../../website/hara-www/examples/studio-backgrounds/workspace.edn" \
+   "$OUT/examples/studio-backgrounds/"
+cp "$ROOT/../../website/hara-www/sources/"*.hal "$OUT/sources/"
+cp -R "$ROOT/../../website/hara-www/vendor/hara-ui" "$OUT/vendor/"
+
+# Documentation stays owned by the pinned docs submodule. Astro renders the
+# Markdown collection; copy its runtime/static files alongside those pages.
+rsync -a --exclude '*.md' --exclude '*.mdx' "$ROOT/docs/docs/" "$OUT/docs/"
+
+bash "$ROOT/packaging/scripts/build-demo-synth-wasm"
+bash "$ROOT/packaging/scripts/build-demo-fft-wasm"
+cp "$ROOT/../../website/hara-www/assets/wasm/"*.wasm "$OUT/assets/wasm/"
+
+printf 'Built %s\n' "$OUT"

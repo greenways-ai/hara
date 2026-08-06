@@ -4,19 +4,19 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "lib/src/std/db.hal"
-      - "lib/src/std/db/**"
-      - "lib/test/std/db/**"
-      - "java/src/test/java/hara/truffle/HaraDbRuntimeTest.java"
-      - "java/src/test/java/hara/truffle/HaraSqliteProcessExtensionTest.java"
-      - "rust/extensions/std-db-sqlite/**"
-      - "rust/web/entries/sqlite-*.mjs"
-      - "rust/web/packages/db-sqlite/**"
-      - "rust/web/sqlite-provider.test.mjs"
-      - "rust/web/vite.sqlite-*.config.js"
-      - "rust/web/package-db-provider.mjs"
-      - "rust/web/package-sqlite-extension.mjs"
-      - "scripts/build-db-sqlite-extension"
+      - "core/lib/src/std/db.hal"
+      - "core/lib/src/std/db/**"
+      - "core/lib/test/std/db/**"
+      - "core/java/src/test/java/hara/truffle/HaraDbRuntimeTest.java"
+      - "core/java/src/test/java/hara/truffle/HaraSqliteProcessExtensionTest.java"
+      - "core/rust/extensions/std-db-sqlite/**"
+      - "core/rust/web/entries/sqlite-*.mjs"
+      - "core/rust/web/packages/db-sqlite/**"
+      - "core/rust/web/sqlite-provider.test.mjs"
+      - "core/rust/web/vite.sqlite-*.config.js"
+      - "core/rust/web/package-db-provider.mjs"
+      - "core/rust/web/package-sqlite-extension.mjs"
+      - "packaging/scripts/build-db-sqlite-extension"
       - ".github/workflows/std-db-sqlite.yml"
   workflow_dispatch:
 
@@ -34,29 +34,29 @@ jobs:
         with:
           node-version: 18
           cache: npm
-          cache-dependency-path: rust/web/package-lock.json
+          cache-dependency-path: core/rust/web/package-lock.json
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
           cache: maven
       - name: Install Hara web build dependencies
-        working-directory: rust/web
+        working-directory: core/rust/web
         run: npm ci
       - name: Install pinned SQLite WASM provider
-        working-directory: rust/extensions/std-db-sqlite
+        working-directory: core/rust/extensions/std-db-sqlite
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Build Node provider
-        working-directory: rust/web
+        working-directory: core/rust/web
         run: ./node_modules/.bin/vite build --config vite.sqlite-node.config.js
       - name: Build browser provider
-        working-directory: rust/web
+        working-directory: core/rust/web
         run: ./node_modules/.bin/vite build --config vite.sqlite-browser.config.js
       - name: Execute real SQLite WASM provider test
-        working-directory: rust/web
+        working-directory: core/rust/web
         run: node --test sqlite-provider.test.mjs
       - name: Assemble extension package
-        working-directory: rust/web
+        working-directory: core/rust/web
         run: node package-sqlite-extension.mjs
       - name: Execute SQLite and database runtimes through Hara
-        run: mvn -f java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraDbRuntimeTest,hara.truffle.HaraSqliteProcessExtensionTest test
+        run: mvn -f core/java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraDbRuntimeTest,hara.truffle.HaraSqliteProcessExtensionTest test

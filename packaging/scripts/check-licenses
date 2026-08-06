@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Verify the repository's declared first-party licensing policy.
+# This is intentionally metadata-focused: it never rewrites source headers or
+# third-party notices, which require provenance and copyright review.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+status=0
+
+fail() {
+  printf 'license check: %s\n' "$*" >&2
+  status=1
+}
+
+require_text() {
+  local file=$1 pattern=$2
+  if [[ ! -f "$file" ]]; then
+    fail "missing $file"
+  elif ! grep -Fq -- "$pattern" "$file"; then
+    fail "$file must declare $pattern"
+  fi
+}
+
+require_text LICENSE 'Apache License'
+require_text LICENSES/README.md 'License inventory'
+require_text ../../website/hara-www/vendor/hara-ui/LICENSE 'MIT License'
+require_text ../../website/hara-code/vendor/hara-ui/LICENSE 'MIT License'
+require_text ../hara-specs/vendor/hara-ui/LICENSE 'MIT License'
+require_text ../../extensions/greenways-os/ui/hara-ui/LICENSE 'MIT License'
+
+while IFS= read -r -d '' manifest; do
+  require_text "$manifest" 'license = "Apache-2.0"'
+done < <(find rust -path '*/target' -prune -o -name Cargo.toml -print0)
+
+# Skip build output (rust/target staging) and the synced MIT hara-ui snapshot;
+# both are validated through their own tracked sources.
+while IFS= read -r -d '' manifest; do
+  require_text "$manifest" '"license": "Apache-2.0"'
+done < <(find rust \
+  -path '*/target' -prune -o \
+  -path '*/node_modules' -prune -o \
+  -path '*/ui/hara-ui' -prune -o \
+  -name package.json -print0)
+
+require_text core/java/pom.xml '<name>Apache License 2.0</name>'
+require_text core/java/pom.xml '<url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>'
+
+if (( status != 0 )); then
+  exit "$status"
+fi
+
+printf 'license check: OK (Apache-2.0 policy and documented exceptions)\n'

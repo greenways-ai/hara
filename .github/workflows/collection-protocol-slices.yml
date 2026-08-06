@@ -4,15 +4,15 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'java/src/main/java/hara/lang/data/**'
-      - 'java/src/main/java/hara/lang/protocol/**'
-      - 'java/src/main/java/hara/kernel/builtin/**'
-      - 'java/src/main/java/hara/truffle/**'
-      - 'java/src/test/java/hara/lang/data/**'
-      - 'java/src/test/java/hara/lang/protocol/**'
-      - 'java/src/test/java/hara/kernel/builtin/**'
-      - 'java/src/test/java/hara/truffle/**'
-      - 'java/pom.xml'
+      - 'core/java/src/main/java/hara/lang/data/**'
+      - 'core/java/src/main/java/hara/lang/protocol/**'
+      - 'core/java/src/main/java/hara/kernel/builtin/**'
+      - 'core/java/src/main/java/hara/truffle/**'
+      - 'core/java/src/test/java/hara/lang/data/**'
+      - 'core/java/src/test/java/hara/lang/protocol/**'
+      - 'core/java/src/test/java/hara/kernel/builtin/**'
+      - 'core/java/src/test/java/hara/truffle/**'
+      - 'core/java/pom.xml'
       - '.github/workflows/collection-protocol-slices.yml'
   workflow_dispatch:
 
@@ -62,15 +62,15 @@ jobs:
           java-version: '21'
           distribution: temurin
           cache: maven
-          cache-dependency-path: java/pom.xml
+          cache-dependency-path: core/java/pom.xml
 
       - name: Run test slice
-        run: mvn -B -f java/pom.xml -Ptruffle -DfailIfNoTests=true -Dtest="${{ matrix.tests }}" test
+        run: mvn -B -f core/java/pom.xml -Ptruffle -DfailIfNoTests=true -Dtest="${{ matrix.tests }}" test
 
       - name: Upload Surefire reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: surefire-${{ matrix.id }}
-          path: java/target/surefire-reports/
+          path: core/java/target/surefire-reports/
           if-no-files-found: ignore

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEPENDENCIES="$ROOT/core/java/target/truffle-dependencies"
+
+cd "$ROOT"
+mkdir -p "$ROOT/core/target"
+
+mvn -f "$ROOT/core/java/pom.xml" -Ptruffle -DskipTests clean compile dependency:copy-dependencies \
+  -DincludeScope=runtime \
+  -DoutputDirectory="$DEPENDENCIES"
+
+NATIVE_IMAGE_OPTIONS=(--no-fallback)
+OUTPUT="${HARA_NATIVE_OUTPUT:-$ROOT/core/target/hara-truffle}"
+if native-image --help 2>&1 | grep -q -- '--emit'; then
+  NATIVE_IMAGE_OPTIONS+=(--emit=build-report)
+fi
+if [[ "${HARA_NATIVE_ANALYSIS_ONLY:-false}" == "true" ]]; then
+  NATIVE_IMAGE_OPTIONS+=(-H:+ExitAfterAnalysis)
+fi
+if [[ "${HARA_NATIVE_USE_FALLBACK_RUNTIME:-false}" == "true" ]]; then
+  NATIVE_IMAGE_OPTIONS+=(-Dtruffle.UseFallbackRuntime=true)
+else
+  # Oracle Native Image's string-builder outlining can synthesize helpers that
+  # its Truffle runtime-compilation blocklist then rejects as compiler roots.
+  NATIVE_IMAGE_OPTIONS+=(
+    -H:-OutlineIndyStringConcatenations
+    -H:-OutlineStringBuilderAppends
+    -H:-OutlineStringBufferAppends
+    -H:-OutlineSBMaterializations)
+fi
+
+# Keep every runtime dependency on the native-image classpath. In particular,
+# wasm-language contributes the native-image configuration that registers the
+# WASM guest language used by packaged extensions.
+NATIVE_IMAGE_CP="$ROOT/core/java/target/classes"
+for jar in "$DEPENDENCIES"/*.jar; do
+  NATIVE_IMAGE_CP="$NATIVE_IMAGE_CP:$jar"
+done
+
+# Generated Truffle interop exports have nested cached and uncached classes.
+# Initializing the package keeps all of those image-heap objects consistent.
+# Keyword instances and their interning cache are embedded by that runtime.
+native-image \
+  "${NATIVE_IMAGE_OPTIONS[@]}" \
+  -cp "$NATIVE_IMAGE_CP" \
+  -H:Class=hara.truffle.Main \
+  --initialize-at-build-time=hara.truffle \
+  --initialize-at-build-time=hara.lang.data.Keyword \
+  --initialize-at-build-time=hara.lang.base.primitive.RefCache \
+  -o "$OUTPUT"
+
+if [[ "${HARA_NATIVE_ANALYSIS_ONLY:-false}" == "true" ]]; then
+  echo "Native Image analysis completed for $OUTPUT"
+else
+  echo "Built $OUTPUT"
+fi

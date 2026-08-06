@@ -15,15 +15,15 @@ python3 -m venv .venv
 .venv/bin/python -m pip install --disable-pip-version-check \
   -r docs/requirements-docs.txt
 
-npm --prefix rust/web ci
+npm --prefix core/rust/web ci
 
 cat <<'EOF'
 
 Hara cloud environment is ready.
 
-  Java:  mvn -f java/pom.xml -Ptruffle package
-  Rust:  cargo test --manifest-path rust/Cargo.toml
-  Web:   npm --prefix rust/web run test:studio
+  Java:  mvn -f core/java/pom.xml -Ptruffle package
+  Rust:  cargo test --manifest-path core/rust/Cargo.toml
+  Web:   npm --prefix core/rust/web run test:studio
   Docs:  .venv/bin/mkdocs serve -f docs/mkdocs.yml -a 0.0.0.0:8000
 
 EOF

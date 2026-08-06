@@ -4,13 +4,13 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "lib/src/std/db.hal"
-      - "lib/src/std/db/protocol.hal"
-      - "lib/src/std/db/node/**"
-      - "lib/test/std/db/node/**"
-      - "java/src/test/java/hara/truffle/HaraDbRuntimeTest.java"
-      - "rust/web/db-runtime-endpoint.mjs"
-      - "rust/web/db-runtime-endpoint.test.mjs"
+      - "core/lib/src/std/db.hal"
+      - "core/lib/src/std/db/protocol.hal"
+      - "core/lib/src/std/db/node/**"
+      - "core/lib/test/std/db/node/**"
+      - "core/java/src/test/java/hara/truffle/HaraDbRuntimeTest.java"
+      - "core/rust/web/db-runtime-endpoint.mjs"
+      - "core/rust/web/db-runtime-endpoint.test.mjs"
       - ".github/workflows/std-db-runtime.yml"
   workflow_dispatch:
 
@@ -33,7 +33,7 @@ jobs:
           java-version: 21
           cache: maven
       - name: Test browser and Node worker endpoint wrappers
-        working-directory: rust/web
+        working-directory: core/rust/web
         run: node --test db-runtime-endpoint.test.mjs
       - name: Test database kernel, proxy, services and message transport through Hara
-        run: mvn -f java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraDbRuntimeTest test
+        run: mvn -f core/java/pom.xml -Ptruffle -Dtest=hara.truffle.HaraDbRuntimeTest test

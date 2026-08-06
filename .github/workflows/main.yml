@@ -23,72 +23,72 @@ jobs:
       run: "! rg --glob '*.hal' 'greenways\\.' ."
     - name: Verify synchronized Hara UI assets
       run: |
-        node scripts/sync-hara-ui.mjs
-        node scripts/sync-hara-ui.mjs --check
+        node packaging/scripts/sync-hara-ui.mjs
+        node packaging/scripts/sync-hara-ui.mjs --check
     - name: Set up Rust WASM toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
         targets: wasm32-unknown-unknown,wasm32-wasip1
         components: clippy
     - name: Check Rust module layout
-      run: bash rust/scripts/check-layout.sh
+      run: bash core/rust/scripts/check-layout.sh
     - name: Run Rust Clippy
       # too_many_lines stays warn-only until the oversized hara-wasm CLI
       # functions are split; the stable toolchain floats, and lint drift
       # under -D was blocking the whole workflow (#221).
-      run: cargo clippy --manifest-path rust/Cargo.toml --all-targets
+      run: cargo clippy --manifest-path core/rust/Cargo.toml --all-targets
     - name: Run Rust native tests
-      run: cargo test --manifest-path rust/Cargo.toml
+      run: cargo test --manifest-path core/rust/Cargo.toml
     - name: Run raw runtime tests
-      run: cargo test --manifest-path rust/raw/Cargo.toml
+      run: cargo test --manifest-path core/rust/raw/Cargo.toml
     - name: Run raw HTA VM integration tests
-      run: cargo test --manifest-path rust/raw/Cargo.toml --features bytecode-vm
+      run: cargo test --manifest-path core/rust/raw/Cargo.toml --features bytecode-vm
     - name: Run bytecode VM tests
-      run: "cargo test --manifest-path rust/Cargo.toml --features bytecode-vm vm:: --lib"
+      run: "cargo test --manifest-path core/rust/Cargo.toml --features bytecode-vm vm:: --lib"
     - name: Run checked tracing JIT tests
-      run: "cargo test --manifest-path rust/Cargo.toml --features tracing-jit jit:: --lib"
+      run: "cargo test --manifest-path core/rust/Cargo.toml --features tracing-jit jit:: --lib"
     - name: Run native tracing JIT tests
-      run: "cargo test --manifest-path rust/Cargo.toml --features native-jit jit:: --lib"
+      run: "cargo test --manifest-path core/rust/Cargo.toml --features native-jit jit:: --lib"
     - name: Verify generated parity corpus
-      run: ./scripts/generate-wasm-truffle-parity && git diff --exit-code -- specs/00-unsorted/platform-language/draft/conformance/parity/wasm-truffle.edn
+      run: ./packaging/scripts/generate-wasm-truffle-parity && git diff --exit-code -- ../hara-specs/00-unsorted/platform-language/draft/conformance/parity/wasm-truffle.edn
     - name: Build raw Rust WASM extension artifact
-      run: ./scripts/build-hara-wasm-raw
+      run: ./packaging/scripts/build-hara-wasm-raw
     - name: Build browser and WASI Rust runtime artifacts
       run: |
-        cargo build --manifest-path rust/Cargo.toml --release --target wasm32-unknown-unknown --lib
-        cargo build --manifest-path rust/Cargo.toml --release --target wasm32-wasip1 --lib
+        cargo build --manifest-path core/rust/Cargo.toml --release --target wasm32-unknown-unknown --lib
+        cargo build --manifest-path core/rust/Cargo.toml --release --target wasm32-wasip1 --lib
     - name: Record Rust runtime artifact sizes
       run: |
-        mkdir -p target
+        mkdir -p core/target
         {
-          stat -c "browser_wasm_bytes=%s" rust/target/wasm32-unknown-unknown/release/hara_wasm.wasm
-          stat -c "wasi_wasm_bytes=%s" rust/target/wasm32-wasip1/release/hara_wasm.wasm
-          stat -c "raw_extension_wasm_bytes=%s" rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm
-        } | tee target/rust-wasm-artifact-sizes.txt
+          stat -c "browser_wasm_bytes=%s" core/rust/target/wasm32-unknown-unknown/release/hara_wasm.wasm
+          stat -c "wasi_wasm_bytes=%s" core/rust/target/wasm32-wasip1/release/hara_wasm.wasm
+          stat -c "raw_extension_wasm_bytes=%s" core/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm
+        } | tee core/target/rust-wasm-artifact-sizes.txt
     - name: Upload Rust runtime artifact sizes
       uses: actions/upload-artifact@v4
       with:
         name: rust-wasm-artifact-sizes
-        path: target/rust-wasm-artifact-sizes.txt
+        path: core/target/rust-wasm-artifact-sizes.txt
     - name: Build SHA-256 HTA extension artifact
-      run: ./scripts/build-crypto-hash-sha256-wasm
+      run: ./packaging/scripts/build-crypto-hash-sha256-wasm
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '22'
         cache: npm
-        cache-dependency-path: rust/web/package-lock.json
+        cache-dependency-path: core/rust/web/package-lock.json
     - name: Install browser test dependencies
-      working-directory: rust/web
+      working-directory: core/rust/web
       run: |
         npm ci
         npx playwright install --with-deps chromium
     - name: Run HTA Node and real-browser conformance
-      working-directory: rust/web
+      working-directory: core/rust/web
       run: |
         npm run test:hta
         npm run test:noir
-        ../../scripts/build-www
+        ../../../packaging/scripts/build-www
         npm run test:browser
     - name: Set up JDK 21
       uses: actions/setup-java@v4
@@ -96,49 +96,49 @@ jobs:
         java-version: '21'
         distribution: 'temurin'
         cache: maven
-        cache-dependency-path: java/pom.xml
+        cache-dependency-path: core/java/pom.xml
     - name: Build and test with Maven
-      run: mvn -B -Ptruffle package --file java/pom.xml
+      run: mvn -B -Ptruffle package --file core/java/pom.xml
 
     - name: Verify Truffle HIR loads in Rust
       run: |
-        ARTIFACT="$PWD/java/target/classes/std/foundation.hir"
+        ARTIFACT="$PWD/core/java/target/classes/std/foundation.hir"
         test -f "$ARTIFACT"
-        test "$(cargo run --quiet --manifest-path rust/Cargo.toml --bin hara -- run "$ARTIFACT")" = "<fn>"
-        HARA_TRUFFLE_FOUNDATION_HIR="$ARTIFACT" cargo test --manifest-path rust/Cargo.toml truffle_compiled_foundation_hir_loads_with_foundation_semantics -- --ignored
+        test "$(cargo run --quiet --manifest-path core/rust/Cargo.toml --bin hara -- run "$ARTIFACT")" = "<fn>"
+        HARA_TRUFFLE_FOUNDATION_HIR="$ARTIFACT" cargo test --manifest-path core/rust/Cargo.toml truffle_compiled_foundation_hir_loads_with_foundation_semantics -- --ignored
 
     - name: Run library .hal tests
-      run: ./scripts/run-lib-tests
+      run: ./packaging/scripts/run-lib-tests
 
     - name: Run JVM L0 conformance corpus
-      run: mvn -B -Ptruffle -Dtest=hara.truffle.HaraL0ConformanceTest test --file java/pom.xml
+      run: mvn -B -Ptruffle -Dtest=hara.truffle.HaraL0ConformanceTest test --file core/java/pom.xml
 
     - name: Run Rust WASM and Truffle parity corpus
-      run: mvn -B -Ptruffle -Dtest=hara.truffle.HaraWasmTruffleParityTest test --file java/pom.xml
+      run: mvn -B -Ptruffle -Dtest=hara.truffle.HaraWasmTruffleParityTest test --file core/java/pom.xml
 
     - name: Run JVM L0 benchmark matrix
-      run: ./scripts/run-truffle-benchmark 2 1000 | tee target/l0-benchmark.txt
+      run: ./packaging/scripts/run-truffle-benchmark 2 1000 | tee core/target/l0-benchmark.txt
 
     - name: Upload JVM L0 benchmark evidence
       uses: actions/upload-artifact@v4
       with:
         name: l0-benchmark
-        path: target/l0-benchmark.txt
+        path: core/target/l0-benchmark.txt
 
     - name: Run runtime corpus benchmark (interpreter-only JVM)
-      run: ./scripts/run-runtime-corpus-benchmark jvm interpreter-temurin target/runtime-corpus-interpreter.csv 40 10
+      run: ./packaging/scripts/run-runtime-corpus-benchmark jvm interpreter-temurin core/target/runtime-corpus-interpreter.csv 40 10
 
     - name: Upload runtime corpus benchmark evidence (interpreter-only JVM)
       uses: actions/upload-artifact@v4
       with:
         name: runtime-corpus-interpreter
-        path: target/runtime-corpus-interpreter.csv
+        path: core/target/runtime-corpus-interpreter.csv
 
     - name: Upload Coverage Report
       uses: actions/upload-artifact@v4
       with:
         name: jacoco-report
-        path: java/target/site/jacoco/
+        path: core/java/target/site/jacoco/
 
   parity-benchmark-slice:
     # The full parity benchmark (1024 cases x cold+warm timings) took ~4.3 h
@@ -158,21 +158,21 @@ jobs:
       with:
         targets: wasm32-unknown-unknown
     - name: Build raw Rust WASM extension artifact
-      run: ./scripts/build-hara-wasm-raw
+      run: ./packaging/scripts/build-hara-wasm-raw
     - name: Set up JDK 21
       uses: actions/setup-java@v4
       with:
         java-version: '21'
         distribution: 'temurin'
         cache: maven
-        cache-dependency-path: java/pom.xml
+        cache-dependency-path: core/java/pom.xml
     - name: Run parity benchmark slice
-      run: ./scripts/run-wasm-truffle-parity-benchmark 3 100 1000 target/wasm-truffle-parity-speed-${{ matrix.slice }}.csv ${{ matrix.slice }} 8
+      run: ./packaging/scripts/run-wasm-truffle-parity-benchmark 3 100 1000 core/target/wasm-truffle-parity-speed-${{ matrix.slice }}.csv ${{ matrix.slice }} 8
     - name: Upload parity benchmark slice
       uses: actions/upload-artifact@v4
       with:
         name: wasm-truffle-parity-speed-${{ matrix.slice }}
-        path: target/wasm-truffle-parity-speed-${{ matrix.slice }}.csv
+        path: core/target/wasm-truffle-parity-speed-${{ matrix.slice }}.csv
 
   parity-benchmark-merge:
     runs-on: ubuntu-latest
@@ -187,17 +187,17 @@ jobs:
         merge-multiple: true
     - name: Merge parity benchmark CSV
       run: |
-        mkdir -p target
+        mkdir -p core/target
         {
           head -n 1 "$(ls slices/wasm-truffle-parity-speed-*.csv | head -n 1)"
           tail -qn +2 slices/wasm-truffle-parity-speed-*.csv | sort
-        } > target/wasm-truffle-parity-speed.csv
-        wc -l target/wasm-truffle-parity-speed.csv
+        } > core/target/wasm-truffle-parity-speed.csv
+        wc -l core/target/wasm-truffle-parity-speed.csv
     - name: Upload merged parity speed report
       uses: actions/upload-artifact@v4
       with:
         name: wasm-truffle-parity-speed
-        path: target/wasm-truffle-parity-speed.csv
+        path: core/target/wasm-truffle-parity-speed.csv
 
   native-image-smoke:
     runs-on: ubuntu-latest
@@ -213,17 +213,17 @@ jobs:
       with:
         targets: wasm32-unknown-unknown
     - name: Build raw Rust WASM extension artifact
-      run: ./scripts/build-hara-wasm-raw
+      run: ./packaging/scripts/build-hara-wasm-raw
     - name: Build SHA-256 HTA extension artifact
-      run: ./scripts/build-crypto-hash-sha256-wasm
+      run: ./packaging/scripts/build-crypto-hash-sha256-wasm
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '22'
         cache: npm
-        cache-dependency-path: rust/web/package-lock.json
+        cache-dependency-path: core/rust/web/package-lock.json
     - name: Build packaged Noir extension
-      working-directory: rust/web
+      working-directory: core/rust/web
       run: |
         npm ci
         npm run build:package:noir
@@ -236,69 +236,69 @@ jobs:
     - name: Build the Truffle Native Image
       env:
         HARA_NATIVE_USE_FALLBACK_RUNTIME: 'true'
-      run: ./scripts/build-truffle-native
+      run: ./packaging/scripts/build-truffle-native
     - name: Record Native Image build and startup metrics
       run: |
         {
           echo "native_image_version=$(native-image --version)"
           echo "native_runtime_mode=fallback"
-          echo "binary_bytes=$(stat -c '%s' target/hara-truffle)"
-          /usr/bin/time -f 'startup_seconds=%e' target/hara-truffle eval 'nil' >/dev/null
-          echo "reachability_manifest=$(find java/target/classes/META-INF/native-image -type f -print | sort | tr '\n' ',')"
-        } 2>&1 | tee target/native-image-metrics.txt
+          echo "binary_bytes=$(stat -c '%s' core/target/hara-truffle)"
+          /usr/bin/time -f 'startup_seconds=%e' core/target/hara-truffle eval 'nil' >/dev/null
+          echo "reachability_manifest=$(find core/java/target/classes/META-INF/native-image -type f -print | sort | tr '\n' ',')"
+        } 2>&1 | tee core/target/native-image-metrics.txt
     - name: Run a Native Image smoke test
       run: |
-        mkdir -p target/native-extensions/demo/000-answer-42
-        cp rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm \
-          target/native-extensions/demo/000-answer-42/answer-42.wasm
-        cp lib/examples/extensions/demo/000-answer-42/hara.extension.edn \
-          target/native-extensions/demo/000-answer-42/hara.extension.edn
-        mkdir -p target/native-extensions/hara/runtime/wasm
-        cp rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm \
-          target/native-extensions/hara/runtime/wasm/hara.wasm
-        cp lib/examples/extensions/hara/runtime/wasm/hara.extension.edn \
-          target/native-extensions/hara/runtime/wasm/hara.extension.edn
-        mkdir -p target/native-extensions/crypto/hash/sha256
-        cp rust/extensions/crypto-hash-sha256/target/wasm32-unknown-unknown/release/hara_crypto_hash_sha256.wasm \
-          target/native-extensions/crypto/hash/sha256/sha256.wasm
-        cp lib/examples/extensions/crypto/hash/sha256/hara.extension.edn \
-          target/native-extensions/crypto/hash/sha256/hara.extension.edn
-        test "$(target/hara-truffle conformance)" = "L0 conformance passed: 117 cases"
-        test "$(HARA_EXTENSION_PATH="$PWD/target/native-extensions" target/hara-truffle eval '(ns app (:require [demo.000-answer-42 :as answer])) (answer/add 20 22)')" = "42"
-        test "$(HARA_EXTENSION_PATH="$PWD/rust/extensions/ledger-noir/target/package" target/hara-truffle --allow-process eval '(ns app (:require [ledger.noir :as noir])) (= "hara/ledger.noir/v1" (get (deref (noir/compile {:name "native_smoke" :source "fn main(x: pub Field) { assert(x == 42); }"})) :format))')" = "true"
-        test "$(HARA_EXTENSION_PATH="$PWD/target/native-extensions" target/hara-truffle eval '(ns app (:require [hara.runtime.wasm :as runtime])) (deref (runtime/eval "(+ 10 (count (deref (std.native.Host/call \"crypto.hash.sha256\" \"digest\" [(bytes 97 98 99)]))))"))')" = "42"
-        test "$(target/hara-truffle eval '(+ 19 23)')" = "42"
-        test "$(target/hara-truffle eval '(bytes/u8 -1)')" = "255"
-        test "$(target/hara-truffle eval '(ICount/count (bytes 1 2 3))')" = "3"
-        test "$(target/hara-truffle eval '(let [a (array 1 2)] (do (. a (set 1 7)) (. a (get 1))))')" = "7"
-        test "$(target/hara-truffle eval '(defstruct Person [name]) (ILookup/lookup (IObjType/meta (IObjType/with-meta (Person "Ada") {:doc :person})) :doc)')" = ":person"
-        test "$(target/hara-truffle eval '(= -0.0 0.0)')" = "true"
-        test "$(target/hara-truffle eval '(= 1.0 1.00)')" = "true"
-        test "$(target/hara-truffle eval '(def ^:dynamic *answer* 1) (binding [*answer* 42] *answer*)')" = "42"
-        test "$(target/hara-truffle eval '(def answer 1) (set! answer 42) answer')" = "42"
-        test "$(target/hara-truffle eval '(let [it (concat [1] [2])] (iter-next it) (iter-next it))')" = "2"
-        test "$(target/hara-truffle eval '(def answer 1) (defn add [x y] (+ x y)) (alter-var-root (var answer) add 41) answer')" = "42"
-        test "$(target/hara-truffle eval '(defn sum3 [a b c] (+ a b c)) (apply sum3 1 [2 3])')" = "6"
-        test "$(target/hara-truffle eval '(defstruct Problem [value]) (try (throw (Problem 7)) (catch Other error 0) (catch Problem error (field error :value)))')" = "7"
-        test "$(target/hara-truffle eval '(ns source) (def answer 1) (ns user) (refer "source") (in-ns (quote source)) (set! answer 2) (in-ns (quote user)) answer')" = "2"
-        test "$(target/hara-truffle eval '(load-resource "hara/l0-resource.hal")')" = "42"
-        test "$(target/hara-truffle eval '(load-resource "std/foundation.hal") ((comp inc inc inc inc) 38)')" = "42"
-        test "$(target/hara-truffle eval '(require "std/foundation.hal") ((comp inc inc inc inc) 38)')" = "42"
-        test "$(target/hara-truffle eval '(defmulti kind (fn [x] (if (= x 1) :one :other))) (defmethod kind :one [x] :one) (defmethod kind :default [x] :other) (kind 2)')" = ":other"
-        test "$(target/hara-truffle eval '(do (defmacro unless [test body] `(if ~test nil ~body)) (unless false 42))')" = "42"
-        test "$(target/hara-truffle eval '(do (declare answer) (def answer 42) (defn- read-answer [] answer) (read-answer))')" = "42"
+        mkdir -p core/target/native-extensions/demo/000-answer-42
+        cp core/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm \
+          core/target/native-extensions/demo/000-answer-42/answer-42.wasm
+        cp core/lib/examples/extensions/demo/000-answer-42/hara.extension.edn \
+          core/target/native-extensions/demo/000-answer-42/hara.extension.edn
+        mkdir -p core/target/native-extensions/hara/runtime/wasm
+        cp core/rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm \
+          core/target/native-extensions/hara/runtime/wasm/hara.wasm
+        cp core/lib/examples/extensions/hara/runtime/wasm/hara.extension.edn \
+          core/target/native-extensions/hara/runtime/wasm/hara.extension.edn
+        mkdir -p core/target/native-extensions/crypto/hash/sha256
+        cp core/rust/extensions/crypto-hash-sha256/target/wasm32-unknown-unknown/release/hara_crypto_hash_sha256.wasm \
+          core/target/native-extensions/crypto/hash/sha256/sha256.wasm
+        cp core/lib/examples/extensions/crypto/hash/sha256/hara.extension.edn \
+          core/target/native-extensions/crypto/hash/sha256/hara.extension.edn
+        test "$(core/target/hara-truffle conformance)" = "L0 conformance passed: 117 cases"
+        test "$(HARA_EXTENSION_PATH="$PWD/core/target/native-extensions" core/target/hara-truffle eval '(ns app (:require [demo.000-answer-42 :as answer])) (answer/add 20 22)')" = "42"
+        test "$(HARA_EXTENSION_PATH="$PWD/core/rust/extensions/ledger-noir/target/package" core/target/hara-truffle --allow-process eval '(ns app (:require [ledger.noir :as noir])) (= "hara/ledger.noir/v1" (get (deref (noir/compile {:name "native_smoke" :source "fn main(x: pub Field) { assert(x == 42); }"})) :format))')" = "true"
+        test "$(HARA_EXTENSION_PATH="$PWD/core/target/native-extensions" core/target/hara-truffle eval '(ns app (:require [hara.runtime.wasm :as runtime])) (deref (runtime/eval "(+ 10 (count (deref (std.native.Host/call \"crypto.hash.sha256\" \"digest\" [(bytes 97 98 99)]))))"))')" = "42"
+        test "$(core/target/hara-truffle eval '(+ 19 23)')" = "42"
+        test "$(core/target/hara-truffle eval '(bytes/u8 -1)')" = "255"
+        test "$(core/target/hara-truffle eval '(ICount/count (bytes 1 2 3))')" = "3"
+        test "$(core/target/hara-truffle eval '(let [a (array 1 2)] (do (. a (set 1 7)) (. a (get 1))))')" = "7"
+        test "$(core/target/hara-truffle eval '(defstruct Person [name]) (ILookup/lookup (IObjType/meta (IObjType/with-meta (Person "Ada") {:doc :person})) :doc)')" = ":person"
+        test "$(core/target/hara-truffle eval '(= -0.0 0.0)')" = "true"
+        test "$(core/target/hara-truffle eval '(= 1.0 1.00)')" = "true"
+        test "$(core/target/hara-truffle eval '(def ^:dynamic *answer* 1) (binding [*answer* 42] *answer*)')" = "42"
+        test "$(core/target/hara-truffle eval '(def answer 1) (set! answer 42) answer')" = "42"
+        test "$(core/target/hara-truffle eval '(let [it (concat [1] [2])] (iter-next it) (iter-next it))')" = "2"
+        test "$(core/target/hara-truffle eval '(def answer 1) (defn add [x y] (+ x y)) (alter-var-root (var answer) add 41) answer')" = "42"
+        test "$(core/target/hara-truffle eval '(defn sum3 [a b c] (+ a b c)) (apply sum3 1 [2 3])')" = "6"
+        test "$(core/target/hara-truffle eval '(defstruct Problem [value]) (try (throw (Problem 7)) (catch Other error 0) (catch Problem error (field error :value)))')" = "7"
+        test "$(core/target/hara-truffle eval '(ns source) (def answer 1) (ns user) (refer "source") (in-ns (quote source)) (set! answer 2) (in-ns (quote user)) answer')" = "2"
+        test "$(core/target/hara-truffle eval '(load-resource "hara/l0-resource.hal")')" = "42"
+        test "$(core/target/hara-truffle eval '(load-resource "std/foundation.hal") ((comp inc inc inc inc) 38)')" = "42"
+        test "$(core/target/hara-truffle eval '(require "std/foundation.hal") ((comp inc inc inc inc) 38)')" = "42"
+        test "$(core/target/hara-truffle eval '(defmulti kind (fn [x] (if (= x 1) :one :other))) (defmethod kind :one [x] :one) (defmethod kind :default [x] :other) (kind 2)')" = ":other"
+        test "$(core/target/hara-truffle eval '(do (defmacro unless [test body] `(if ~test nil ~body)) (unless false 42))')" = "42"
+        test "$(core/target/hara-truffle eval '(do (declare answer) (def answer 42) (defn- read-answer [] answer) (read-answer))')" = "42"
     - name: Run runtime corpus benchmark (GraalVM JVMCI)
-      run: ./scripts/run-runtime-corpus-benchmark jvm jvmci-graalvm target/runtime-corpus-jvmci.csv 40 10
+      run: ./packaging/scripts/run-runtime-corpus-benchmark jvm jvmci-graalvm core/target/runtime-corpus-jvmci.csv 40 10
     - name: Run runtime corpus benchmark (Native Image fallback)
-      run: ./scripts/run-runtime-corpus-benchmark bin native-fallback target/runtime-corpus-native.csv 40 10 target/hara-truffle fallback
+      run: ./packaging/scripts/run-runtime-corpus-benchmark bin native-fallback core/target/runtime-corpus-native.csv 40 10 core/target/hara-truffle fallback
     - name: Upload Native Image evidence
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: native-image-evidence
         path: |
-          target/native-image-metrics.txt
-          target/hara-truffle
-          target/*build_report*
-          target/runtime-corpus-jvmci.csv
-          target/runtime-corpus-native.csv
+          core/target/native-image-metrics.txt
+          core/target/hara-truffle
+          core/target/*build_report*
+          core/target/runtime-corpus-jvmci.csv
+          core/target/runtime-corpus-native.csv

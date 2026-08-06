@@ -1,13 +1,12 @@
 plugins = []
 headers = []
-redirects = []
 
 [functions]
 
 [functions."*"]
 
 [build]
-publish = "/Users/zcaudate/Development/greenways/hara.lang"
+publish = "/Users/zcaudate/Development/greenways/workspace/technology/hara"
 publishOrigin = "default"
 
 [build.environment]
@@ -23,3 +22,15 @@ publishOrigin = "default"
 [build.processing.js]
 
 [build.services]
+
+[[redirects]]
+from = "https://docs.hara-lang.org/*"
+to = "https://www.hara-lang.org/docs/:splat"
+status = 301.0
+force = true
+
+[redirects.query]
+
+[redirects.conditions]
+
+[redirects.headers]
