@@ -22,7 +22,7 @@ jobs:
           cache: maven
           cache-dependency-path: java/pom.xml
       - name: Verify canonical and Rust HAL mirrors
-        run: bash scripts/sync-rust-hal-src --check
+        run: python3 scripts/sync-rust-hal-src --check
       - name: Run focused self-hosted target suite
         run: >-
           mvn -B -Ptruffle
