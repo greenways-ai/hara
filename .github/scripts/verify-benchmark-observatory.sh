@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+base="${1:?usage: verify-benchmark-observatory.sh URL}"
+base="${base%/}"
+page="$(mktemp)"
+catalog="$(mktemp)"
+runs="$(mktemp)"
+trap 'rm -f "$page" "$catalog" "$runs"' EXIT
+
+healthy=false
+for attempt in {1..20}; do
+  if curl --fail --silent --show-error --location --max-time 20 \
+      -H 'Cache-Control: no-cache' "$base/" >"$page" \
+    && curl --fail --silent --show-error --location --max-time 20 \
+      -H 'Cache-Control: no-cache' "$base/data/catalog.json" >"$catalog" \
+    && curl --fail --silent --show-error --location --max-time 20 \
+      -H 'Cache-Control: no-cache' "$base/data/runs.json" >"$runs" \
+    && grep -Fq '<title>Hara Performance Observatory</title>' "$page" \
+    && grep -Fq 'Language shootout' "$page" \
+    && grep -Fq '"rust"' "$catalog" \
+    && grep -Fq '"runtime":"rust-prepared"' "$runs"; then
+    healthy=true
+    echo "Verified the benchmark observatory, Rust catalog and published run data at ${base}/."
+    break
+  fi
+  if [[ "$attempt" -lt 20 ]]; then
+    echo "Waiting for the benchmark observatory at ${base}/."
+    sleep 15
+  fi
+done
+
+if [[ "$healthy" != true ]]; then
+  echo "${base}/ did not expose the published benchmark observatory and Rust evidence." >&2
+  exit 1
+fi
