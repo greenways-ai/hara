@@ -11,29 +11,29 @@ import {
 } from "../lib/benchmark-data";
 const baselineLabel = httpBaseline;
 ---
-<section class="tab-panel" role="tabpanel" id="http-results" aria-labelledby="tab-http" hidden>
+<section class="tab-panel http-panel" role="tabpanel" id="http-results" aria-labelledby="tab-http" hidden>
   <header><p class="hara-kicker">Loopback HTTP/1.1 · keep-alive</p><h2>HTTP frameworks</h2><p>Hoplite’s raw exchange, native request, and request+HTA boundaries are measured separately against OpenResty and the comparison servers.</p></header>
   {hasHttpEvidence ? <section class="comparison-results" aria-labelledby="http-matrix-title">
     <header class="section-heading">
       <div><p class="hara-kicker">Benchmark results</p><h3 id="http-matrix-title">HTTP exchange matrix</h3><p>Each cell states the {baselineLabel} advantage or deficit in requests per second. Select a cell to inspect latency.</p></div>
       <div class="matrix-legend" aria-label="Matrix legend"><span class="legend-ahead">Hara ahead</span><span class="legend-behind">Hara behind</span></div>
     </header>
-    <div class="matrix-stage">
-      <div class="matrix-scroll" tabindex="0" aria-label="Scrollable HTTP server comparison matrix">
-        <table class="comparison-matrix">
+    <div class="matrix-stage http-matrix-stage">
+      <div class="matrix-scroll http-matrix-scroll" tabindex="0" aria-label="HTTP server comparison matrix">
+        <table class="comparison-matrix http-comparison-matrix">
           <thead><tr><th scope="col">Server</th>{httpRoutes.map((route) => <th scope="col">{route}</th>)}</tr></thead>
           <tbody>
-            <tr class="hara-baseline"><th scope="row"><strong>{baselineLabel}</strong><code>baseline</code></th>{httpRoutes.map(() => <td><span class="baseline-cell"><strong>1.00×</strong><span>baseline</span></span></td>)}</tr>
+            <tr class="hara-baseline"><th scope="row"><strong>{baselineLabel}</strong><code>baseline</code></th>{httpRoutes.map((route) => <td data-route-label={route}><span class="http-route-label">{route}</span><span class="baseline-cell"><strong>1.00×</strong><span>baseline</span></span></td>)}</tr>
             {httpServers.filter((server) => server !== httpBaseline).map((server) => <tr>
               <th scope="row"><strong>{server}</strong><code>{server.startsWith("hoplite") ? "hara" : "external"}</code></th>
               {httpRoutes.map((route) => {
                 const row = httpIndex.get(`${server}/${route}`);
                 if (!row || row.status !== "ok") {
-                  return <td><span class="baseline-cell"><strong>—</strong><span>{row?.reason ?? "pending"}</span></span></td>;
+                  return <td data-route-label={route}><span class="http-route-label">{route}</span><span class="baseline-cell"><strong>—</strong><span>{row?.reason ?? "pending"}</span></span></td>;
                 }
                 const baseline = httpIndex.get(`${httpBaseline}/${route}`);
                 const result = comparisonResult(httpRatioFor(server, route));
-                return <td><button class:list={["matrix-cell", result.status]} type="button" data-comparison-cell data-kind="http" data-runtime-label={server} data-workload-label={route} data-ratio={httpRatioFor(server, route)} data-result={result.text} data-rps={formatRps(row.requests_per_second)} data-baseline-rps={formatRps(baseline?.requests_per_second)} data-mean-ms={row.mean_ms!.toFixed(3)} data-p95-ms={row.p95_ms!.toFixed(1)} aria-pressed="false"><strong>{result.value}</strong><span>{result.label}</span></button></td>;
+                return <td data-route-label={route}><span class="http-route-label">{route}</span><button class:list={["matrix-cell", result.status]} type="button" data-comparison-cell data-kind="http" data-runtime-label={server} data-workload-label={route} data-ratio={httpRatioFor(server, route)} data-result={result.text} data-rps={formatRps(row.requests_per_second)} data-baseline-rps={formatRps(baseline?.requests_per_second)} data-mean-ms={row.mean_ms!.toFixed(3)} data-p95-ms={row.p95_ms!.toFixed(1)} aria-label={`${server}, ${route}: ${result.text}`} aria-pressed="false"><strong>{result.value}</strong><span>{result.label}</span></button></td>;
               })}
             </tr>)}
           </tbody>
