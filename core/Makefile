@@ -16,7 +16,7 @@ RUST_DEBUG := rust/target/debug/hara
 RUST_RELEASE := rust/target/release/hara
 WASM_RAW := rust/raw/target/wasm32-unknown-unknown/release/hara_wasm_raw.wasm
 WEB_DIR := rust/web
-CHROME_DIR := ../../extensions/greenways-os
+CHROME_DIR := ../../application/greenways-os/extension/hara-chrome
 DOCS_CONFIG := docs/mkdocs.yml
 
 .PHONY: help all build-all check-all test-all clean \
