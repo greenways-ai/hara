@@ -7,7 +7,10 @@ on:
       - "benchmarks/**"
       - "lib/bench/**"
       - "packages/visual-language/**"
+      - "scripts/install-benchmark-site"
+      - ".github/scripts/verify-benchmark-observatory.sh"
       - ".github/workflows/site-ci.yml"
+      - ".github/workflows/pages-www.yml"
 
 permissions:
   contents: read
@@ -23,6 +26,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
+      - name: Checkout validated benchmark evidence
+        uses: actions/checkout@v4
+        with:
+          repository: hara-lang/hara-benchmarks
+          ref: benchmark-site
+          path: .benchmark-site
+          fetch-depth: 1
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -34,10 +44,17 @@ jobs:
         run: |
           npm ci --prefix website
           npm ci --prefix benchmarks
+      - name: Prepare canonical evidence for Astro
+        run: bash scripts/install-benchmark-site prepare
       - name: Validate benchmark publication
         run: |
           npm test --prefix benchmarks
           npm run build --prefix benchmarks
+          test -s target/benchmarks/index.html
+          grep -F '<title>Hara Benchmarks</title>' target/benchmarks/index.html
+          grep -F 'id="class-comparison"' target/benchmarks/index.html
+          grep -F 'id="language-shootout"' target/benchmarks/index.html
+          grep -F 'rust-prepared' target/benchmarks/index.html
       - name: Validate main Hara site
         run: |
           npm test --prefix website
