@@ -13,6 +13,11 @@
                                 "print(42)"
                                 {:executable "python-test"})
                ["python-test" "-c" "print(42)"])
+   (test/check "Lua command construction uses language :lua"
+               (runtime/command :lua
+                                "print(42)"
+                                {:executable "lua-test"})
+               ["lua-test" "-e" "print(42)"])
    (test/check "Tahto can override program arguments without replacing host execution"
                [(runtime/command :js
                                  "console.log(42)"
@@ -21,17 +26,26 @@
                 (runtime/command :python
                                  "print(42)"
                                  {:executable "python-test"
-                                  :arguments ["-c"]})]
+                                  :arguments ["-c"]})
+                (runtime/command :lua
+                                 "print(42)"
+                                 {:executable "lua-test"
+                                  :arguments ["-e"]})]
                [["node-test" "-e" "console.log(42)"]
-                ["python-test" "-c" "print(42)"]])
+                ["python-test" "-c" "print(42)"]
+                ["lua-test" "-e" "print(42)"]])
    (test/check "runtime descriptors preserve Foundation language/tag identity"
                [(select-keys (runtime/runtime :js)
                              [:runtime/language :runtime/tag])
                 (select-keys (runtime/runtime :python)
+                             [:runtime/language :runtime/tag])
+                (select-keys (runtime/runtime :lua)
                              [:runtime/language :runtime/tag])]
                [{:runtime/language :js
                  :runtime/tag :js}
                 {:runtime/language :python
-                 :runtime/tag :py}])])
+                 :runtime/tag :py}
+                {:runtime/language :lua
+                 :runtime/tag :lua}])])
 
 (test/print-results results)

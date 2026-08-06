@@ -2,17 +2,20 @@
   (:require [tahto.core.runtime :as runtime]
             [tahto.runtime.basic.type-basic :as basic]
             [tahto.runtime.basic.type-common :as common]
-            [tahto.runtime.basic.type-oneshot :as oneshot]))
+            [tahto.runtime.basic.type-oneshot :as oneshot]
+            [tahto.runtime.basic.type-verify :as verify]))
 
 (def +python-init+
   (common/put-program-options
    :python
    {:default {:oneshot :cpython
+              :verify :cpython
               :basic :cpython}
     :env {:cpython
           {:exec "python3"
            :extension "py"
            :flags {:oneshot ["-c"]
+                   :verify ["-c" "import sys; compile(sys.stdin.read(), '<hara>', 'exec')"]
                    :basic ["-c"]}}}}))
 
 (def +python-oneshot-config+
@@ -21,6 +24,14 @@
    {:main {}
     :emit {}
     :json :full}))
+
+(def +python-verify-config+
+  (common/set-context-options
+   [:python :verify :default]
+   {:main {}
+    :emit {}
+    :json false
+    :transport :process-stdin}))
 
 (def +python-basic-config+
   (common/set-context-options
@@ -38,6 +49,13 @@
     :instance {:create oneshot/rt-oneshot:create
                :raw-eval oneshot/raw-eval-oneshot}}))
 
+(def +python-verify+
+  (runtime/install-type!
+   :python :verify
+   {:type :tahto/rt.verify
+    :instance {:create oneshot/rt-oneshot:create
+               :raw-eval verify/raw-eval-verify}}))
+
 (def +python-basic+
   (runtime/install-type!
    :python :basic
@@ -52,4 +70,5 @@
   {:lang :python
    :program +python-init+
    :oneshot +python-oneshot+
+   :verify +python-verify+
    :basic +python-basic+})

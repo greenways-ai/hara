@@ -1,6 +1,18 @@
 (ns tahto.runtime.basic
-  (:require [tahto.runtime.basic.type-basic :as basic]
-            [tahto.runtime.basic.type-oneshot :as oneshot]))
+  (:require [tahto.core.registry :as registry]
+            [tahto.runtime.basic.type-basic :as basic]
+            [tahto.runtime.basic.type-oneshot :as oneshot]
+            [tahto.runtime.basic.type-verify :as verify]))
+
+;; Verification is implemented by the same process modules as oneshot/basic.
+;; Register the additional coordinates without eagerly loading target modules.
+(def +verify-registry+
+  [(registry/registry-add! :js :verify
+                           'tahto.runtime.basic.impl.process-js)
+   (registry/registry-add! :python :verify
+                           'tahto.runtime.basic.impl.process-python)
+   (registry/registry-add! :lua :verify
+                           'tahto.runtime.basic.impl.process-lua)])
 
 (def rt-basic basic/rt-basic)
 (def rt-basic:create basic/rt-basic:create)
@@ -13,3 +25,8 @@
 (def rt-oneshot oneshot/rt-oneshot)
 (def rt-oneshot:create oneshot/rt-oneshot:create)
 (def raw-eval-oneshot oneshot/raw-eval-oneshot)
+
+(def verify-execute verify/verify-execute)
+(def verify-result verify/verify-result)
+(def verify-source verify/verify-source)
+(def raw-eval-verify verify/raw-eval-verify)

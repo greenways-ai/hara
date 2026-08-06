@@ -19,7 +19,14 @@
             :runtime/name "Python"
             :runtime/environment "HARA_PYTHON"
             :runtime/executable "python3"
-            :runtime/arguments ["-c"]}})
+            :runtime/arguments ["-c"]}
+   :lua {:runtime/id :lua
+         :runtime/language :lua
+         :runtime/tag :lua
+         :runtime/name "Lua"
+         :runtime/environment "HARA_LUA"
+         :runtime/executable "lua"
+         :runtime/arguments ["-e"]}})
 
 (defn runtime
   "Returns the immutable descriptor for a supported target language."
@@ -28,7 +35,7 @@
       (throw
        (ex-info "Unknown Hara target language"
                 {:runtime/language language
-                 :runtime/supported [:js :python]}))))
+                 :runtime/supported [:js :python :lua]}))))
 
 (defn executable
   "Resolves a runtime executable from options, environment, or its default."
@@ -41,8 +48,8 @@
   "Builds argv for one target-language source evaluation.
 
    :arguments may override the descriptor arguments. Tahto uses this to select
-   Foundation programs such as Node :nodejs or Python :cpython without
-   duplicating process execution."
+   Foundation programs such as Node :nodejs, Python :cpython, or Lua :lua
+   without duplicating process execution."
   ([language source]
    (command language source {}))
   ([language source options]
@@ -82,11 +89,11 @@
    :stderr (string/decode-utf8 (nth values 1))})
 
 (defn execute
-  "Executes JavaScript or Python source once and returns a promise of its result.
+  "Executes JavaScript, Python, or Lua source once and returns a promise of its result.
 
-   Runtime selection uses the Foundation language names :js and :python. The
-   corresponding grammar tags are :js and :py. Process launch requires the
-   host :process capability."
+   Runtime selection uses the Foundation language names :js, :python, and
+   :lua. Their grammar tags are :js, :py, and :lua. Process launch requires
+   the host :process capability."
   ([language source]
    (execute language source {}))
   ([language source options]

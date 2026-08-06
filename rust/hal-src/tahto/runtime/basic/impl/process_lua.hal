@@ -2,20 +2,33 @@
   (:require [tahto.core.runtime :as runtime]
             [tahto.runtime.basic.type-basic :as basic]
             [tahto.runtime.basic.type-common :as common]
-            [tahto.runtime.basic.type-oneshot :as oneshot]))
+            [tahto.runtime.basic.type-oneshot :as oneshot]
+            [tahto.runtime.basic.type-verify :as verify]))
 
 (def +lua-init+
   (common/put-program-options
    :lua
-   {:default {:oneshot :lua :basic :lua}
+   {:default {:oneshot :lua
+              :verify :lua
+              :basic :lua}
     :env {:lua {:exec "lua"
                 :extension "lua"
-                :flags {:oneshot ["-e"] :basic ["-e"]}}}}))
+                :flags {:oneshot ["-e"]
+                        :verify ["-e" "local loader=loadstring or load; assert(loader(io.read('*a'), '@<hara>'))"]
+                        :basic ["-e"]}}}}))
 
 (def +lua-oneshot-config+
   (common/set-context-options
    [:lua :oneshot :default]
    {:main {} :emit {} :json :full}))
+
+(def +lua-verify-config+
+  (common/set-context-options
+   [:lua :verify :default]
+   {:main {}
+    :emit {}
+    :json false
+    :transport :process-stdin}))
 
 (def +lua-basic-config+
   (common/set-context-options
@@ -30,6 +43,13 @@
     :instance {:create oneshot/rt-oneshot:create
                :raw-eval oneshot/raw-eval-oneshot}}))
 
+(def +lua-verify+
+  (runtime/install-type!
+   :lua :verify
+   {:type :tahto/rt.verify
+    :instance {:create oneshot/rt-oneshot:create
+               :raw-eval verify/raw-eval-verify}}))
+
 (def +lua-basic+
   (runtime/install-type!
    :lua :basic
@@ -42,4 +62,6 @@
 
 (def +init+
   {:lang :lua :program +lua-init+
-   :oneshot +lua-oneshot+ :basic +lua-basic+})
+   :oneshot +lua-oneshot+
+   :verify +lua-verify+
+   :basic +lua-basic+})
