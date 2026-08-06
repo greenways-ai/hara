@@ -9,15 +9,15 @@
   :root "lib/src/tahto"}
  :portable-imports
  [{:source "src-lang/xt/lang/spec_base.clj"
-   :target "lib/src/xt/lang/spec_base.hal"
+   :target "lib/src-lang/xt/lang/spec_base.hal"
    :content :identical
    :change :extension-only}
   {:source "src-lang/xt/lang/common_math.clj"
-   :target "lib/src/xt/lang/common_math.hal"
+   :target "lib/src-lang/xt/lang/common_math.hal"
    :content :identical
    :change :extension-only}
   {:source "test-lang/xt/lang/common_math_test.clj"
-   :target "lib/test/xt/lang/common_math_test.hal"
+   :target "lib/test-lang/xt/lang/common_math_test.hal"
    :content :identical
    :change :extension-only
    :facts 29
@@ -176,7 +176,7 @@
                           [:python :basic]
                           [:lua :basic]]
   :portable-suite
-  {:path "lib/test/xt/lang/common_math_test.hal"
+  {:path "lib/test-lang/xt/lang/common_math_test.hal"
    :hosts [:rust :jvm]
    :targets [:js :lua :python]
    :facts 29
