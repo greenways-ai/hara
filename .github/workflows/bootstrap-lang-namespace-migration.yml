@@ -5,6 +5,7 @@ name: Bootstrap lang namespace migration
 # Active-workflow push marker: generate the review branch now.
 # Fixed-cleanup pull-request marker: generate the review branch now.
 # Synchronize marker: execute the fixed generator from this bounded PR.
+# Ready-state synchronize marker: schedule the fixed generator now.
 # The pull_request event below is restricted to disposable trigger branches.
 on:
   push:
