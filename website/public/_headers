@@ -1,0 +1,5 @@
+/benchmarks
+  Cache-Control: no-store, max-age=0, must-revalidate
+
+/benchmarks/*
+  Cache-Control: no-store, max-age=0, must-revalidate
