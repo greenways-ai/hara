@@ -38,7 +38,10 @@ These formerly in-tree components now live in their own repos (tracked under
 the `greenways-ai/workspace` super-repo):
 
 - website — `hara-lang/hara-www` (Astro site for www.hara-lang.org, with the
-  `vendor/hara-ui` submodule)
+  `vendor/hara-ui` submodule). Linked back into this repo as the `website/`
+  submodule: `scripts/build-studio-runtime` packages website content
+  (examples, sources, hara-ui assets) into the release studio runtime, so
+  release checkouts need `submodules: recursive`.
 - specs — `hara-lang/hara-specs` (normative specifications and conformance
   corpora)
 - docs — `hara-lang/hara-docs`

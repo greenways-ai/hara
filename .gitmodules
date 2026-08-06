@@ -4,3 +4,6 @@
 [submodule "extensions"]
 	path = extensions
 	url = git@github.com:hara-lang/hara-extensions.git
+[submodule "website"]
+	path = website
+	url = git@github.com:hara-lang/hara-www.git
